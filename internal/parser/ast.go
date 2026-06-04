@@ -242,7 +242,8 @@ const (
 	OpAdd BinaryOp = iota
 	OpSub
 	OpMul
-	OpDiv
+	OpDiv      // `/` - always returns float
+	OpFloorDiv // `div` - floor division (int//int -> int; involves float -> float floor)
 	OpMod
 	OpLt
 	OpGt
@@ -263,6 +264,8 @@ func (o BinaryOp) String() string {
 		return "*"
 	case OpDiv:
 		return "/"
+	case OpFloorDiv:
+		return "div"
 	case OpMod:
 		return "%"
 	case OpLt:

@@ -38,6 +38,7 @@ const (
 	TOKEN_AND
 	TOKEN_OR
 	TOKEN_NOT
+	TOKEN_DIV // `div` keyword: floor (integer) division; `/` is true division
 	TOKEN_INT_TYPE    // the word "int" used as a type
 	TOKEN_FLOAT_TYPE  // the word "float" used as a type
 	TOKEN_STRING_TYPE // the word "string" used as a type
@@ -95,6 +96,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_AND:         "AND",
 	TOKEN_OR:          "OR",
 	TOKEN_NOT:         "NOT",
+	TOKEN_DIV:         "DIV",
 	TOKEN_INT_TYPE:    "INT_TYPE",
 	TOKEN_FLOAT_TYPE:  "FLOAT_TYPE",
 	TOKEN_STRING_TYPE: "STRING_TYPE",
@@ -166,6 +168,7 @@ var keywords = map[string]TokenType{
 	"and":    TOKEN_AND,
 	"or":     TOKEN_OR,
 	"not":    TOKEN_NOT,
+	"div":    TOKEN_DIV,
 	"int":    TOKEN_INT_TYPE,
 	"float":  TOKEN_FLOAT_TYPE,
 	"string": TOKEN_STRING_TYPE,

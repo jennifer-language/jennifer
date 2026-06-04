@@ -12,9 +12,10 @@ import (
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/lexer"
+	"github.com/mplx/jennifer-lang/internal/lib/convert"
+	"github.com/mplx/jennifer-lang/internal/lib/io"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
-	"github.com/mplx/jennifer-lang/internal/lib/io"
 )
 
 // TestExamples runs every *.j file under ../../examples/ and asserts its stdout
@@ -65,6 +66,7 @@ func TestExamples(t *testing.T) {
 			var buf bytes.Buffer
 			in.Out = &buf
 			iolib.Install(in)
+			convert.Install(in)
 			if err := in.Run(prog); err != nil {
 				t.Fatalf("run %s: %v", name, err)
 			}

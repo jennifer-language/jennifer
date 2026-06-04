@@ -106,7 +106,7 @@ func formatString(fmtStr string, args []interpreter.Value) (string, error) {
 			if v.Kind != interpreter.KindFloat {
 				return "", fmt.Errorf("`%%f` requires float, got %s", v.Kind)
 			}
-			b.WriteString(strconv.FormatFloat(v.Float, 'g', -1, 64))
+			b.WriteString(interpreter.DisplayFloat(v.Float))
 		case 's':
 			if v.Kind != interpreter.KindString {
 				return "", fmt.Errorf("`%%s` requires string, got %s", v.Kind)

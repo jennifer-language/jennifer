@@ -484,7 +484,9 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 	if op == parser.OpAdd && lv.Kind == KindString && rv.Kind == KindString {
 		return StringVal(lv.Str + rv.Str), nil
 	}
-	// Pure-int fast path keeps int results exact
+	// Pure-int fast path keeps int results exact for +, -, *, div, %.
+	// `/` is NOT in the int fast path: per Python 3 semantics it always
+	// returns float (see the mixed/float section below).
 	if lv.Kind == KindInt && rv.Kind == KindInt {
 		switch op {
 		case parser.OpAdd:
@@ -493,11 +495,17 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 			return IntVal(lv.Int - rv.Int), nil
 		case parser.OpMul:
 			return IntVal(lv.Int * rv.Int), nil
-		case parser.OpDiv:
+		case parser.OpFloorDiv:
 			if rv.Int == 0 {
 				return Value{}, &runtimeError{Msg: "integer division by zero", Line: line, Col: col}
 			}
-			return IntVal(lv.Int / rv.Int), nil
+			// Go's `/` on ints is truncate-toward-zero. Python-style `div`
+			// (floor) only differs when signs differ; align with Python here.
+			q := lv.Int / rv.Int
+			if (lv.Int%rv.Int != 0) && ((lv.Int < 0) != (rv.Int < 0)) {
+				q--
+			}
+			return IntVal(q), nil
 		case parser.OpMod:
 			if rv.Int == 0 {
 				return Value{}, &runtimeError{Msg: "integer modulo by zero", Line: line, Col: col}
@@ -505,7 +513,8 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 			return IntVal(lv.Int % rv.Int), nil
 		}
 	}
-	// Mixed or float operands: promote both to float (modulo is rejected for floats).
+	// Mixed or float operands: promote both to float (modulo is rejected for
+	// floats; `div` returns a float that is the floor of the true quotient).
 	a, aok := lv.AsFloat()
 	b, bok := rv.AsFloat()
 	if !aok || !bok {
@@ -520,13 +529,30 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 		return FloatVal(a * b), nil
 	case parser.OpDiv:
 		if b == 0 {
-			return Value{}, &runtimeError{Msg: "float division by zero", Line: line, Col: col}
+			return Value{}, &runtimeError{Msg: "division by zero", Line: line, Col: col}
 		}
 		return FloatVal(a / b), nil
+	case parser.OpFloorDiv:
+		if b == 0 {
+			return Value{}, &runtimeError{Msg: "division by zero", Line: line, Col: col}
+		}
+		return FloatVal(floorDiv(a, b)), nil
 	case parser.OpMod:
 		return Value{}, &runtimeError{Msg: "operator % requires int operands, got float", Line: line, Col: col}
 	}
 	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown binary operator %s", op), Line: line, Col: col}
+}
+
+// floorDiv computes math.Floor(a/b) without importing math (TinyGo size).
+// Equivalent to math.Floor(a / b) for finite, non-zero b.
+func floorDiv(a, b float64) float64 {
+	q := a / b
+	// Round toward negative infinity. The intrinsic `math.Floor` is fine but
+	// we avoid the import for TinyGo binary size.
+	if q < 0 && q != float64(int64(q)) {
+		return float64(int64(q) - 1)
+	}
+	return float64(int64(q))
 }
 
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {

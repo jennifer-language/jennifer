@@ -128,24 +128,27 @@ of topic-based libraries. `printf`/`sprintf` moved to a new `io` library
 
 **done**
 
-- **Logical operators (done):** `and`, `or`, `not` (word-based) with standard 
+- **Logical operators:** `and`, `or`, `not` (word-based) with standard
   precedence and short-circuit `and`/`or`.
-- **Unary Minus**
+- **Unary minus.**
+- **Python 3 division:** `/` always returns `float`; new `div` keyword for
+  floor division (Pascal-style because `//` collides with line comments).
+- **Float display fix:** floats always print with a decimal (`5.0`, not `5`)
+  so the type stays visible.
+- **`convert` library:** `int(v)`, `float(v)`, `string(v)`, `bool(v)`,
+  `typeof(v)`. Type-name calls (`int(...)` etc.) work in expression position
+  because the parser allows TYPE tokens before `(`. Strict conversion
+  semantics - `int("abc")` and `bool("maybe")` both error.
 
 **open**
 
-- **Better errors:** line/column on every error, source snippet with caret
+- **Better errors:** cross-file error sources (snippet from the right file
+  when an imported `.j` triggers the error)
 - **REPL:** `jennifer repl` reusing the existing lexer/parser/interpreter
 - **Formatter:** `jennifer fmt` - re-emit the AST as canonical source
-- **Type-conversion functions:** new `convert` library with `string(v)`,
-  `int(v)`, `float(v)`, `bool(v)`. (Originally planned under `stdlib`, but
-  that omnibus library was retired in favor of topic-based libraries.)
-  Explicit casts only - no implicit coercion in `+` or comparisons. Each errors on
-  impossible conversions (e.g. `int("abc")`). Roughly:
-  - `string(any)` -> `string` (uses `Value.Display()`)
-  - `int(int|float|string|bool)` -> `int` (truncate float; parse string; true=1/false=0)
-  - `float(int|float|string)` -> `float`
-  - `bool(bool|int)` -> `bool` (nonzero int is true) - or restrict to bool to stay strict
+- **`math` library:** `abs`, `min`, `max`, `sqrt`, `pow`, `ceil`, `floor`,
+  constants `PI`, `E`.
+- **`strings` library:** `len`, `upper`, `lower`, `contains`, `split`, `trim`.
 
 ---
 

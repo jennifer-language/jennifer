@@ -641,6 +641,8 @@ func (p *parser) parseMul() (Expr, error) {
 			op = OpMul
 		case lexer.TOKEN_SLASH:
 			op = OpDiv
+		case lexer.TOKEN_DIV:
+			op = OpFloorDiv
 		case lexer.TOKEN_PERCENT:
 			op = OpMod
 		default:
@@ -654,6 +656,30 @@ func (p *parser) parseMul() (Expr, error) {
 		l, c := left.Pos()
 		left = &BinaryExpr{pos: pos{Line: l, Col: c}, Op: op, Left: left, Right: right}
 	}
+}
+
+// parseCallTail parses the `(args...)` portion of a call expression. The
+// callee token (already consumed) is passed in so we can attach the right
+// position and callee lexeme.
+func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
+	p.advance() // consume LPAREN
+	var args []Expr
+	if !p.check(lexer.TOKEN_RPAREN) {
+		for {
+			arg, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+			if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
+				break
+			}
+		}
+	}
+	if _, err := p.expect(lexer.TOKEN_RPAREN, "to close call argument list"); err != nil {
+		return nil, err
+	}
+	return &CallExpr{pos: pos{Line: callee.Line, Col: callee.Col}, Callee: callee.Lexeme, Args: args}, nil
 }
 
 // parseUnaryMinus handles the `-EXPR` prefix form. It sits between
@@ -710,24 +736,20 @@ func (p *parser) parsePrimary() (Expr, error) {
 		if !p.check(lexer.TOKEN_LPAREN) {
 			return &ConstRefExpr{pos: pos{Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
 		}
-		p.advance() // consume the LPAREN
-		var args []Expr
-		if !p.check(lexer.TOKEN_RPAREN) {
-			for {
-				arg, err := p.parseExpr()
-				if err != nil {
-					return nil, err
-				}
-				args = append(args, arg)
-				if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
-					break
-				}
+		return p.parseCallTail(t)
+	case lexer.TOKEN_INT_TYPE, lexer.TOKEN_FLOAT_TYPE, lexer.TOKEN_STRING_TYPE, lexer.TOKEN_BOOL_TYPE:
+		// Type-name-as-function: `int(v)`, `float(v)`, `string(v)`, `bool(v)`.
+		// These are calls to the `convert` library. Only valid here if
+		// immediately followed by `(` - bare type keywords are still type
+		// references handled by parseType.
+		if p.peekN(1).Type != lexer.TOKEN_LPAREN {
+			return nil, &ParseError{
+				Msg:  fmt.Sprintf("type name %q can only appear in expression position when called as a conversion: %s(...)", t.Lexeme, t.Lexeme),
+				Line: t.Line, Col: t.Col,
 			}
 		}
-		if _, err := p.expect(lexer.TOKEN_RPAREN, "to close call argument list"); err != nil {
-			return nil, err
-		}
-		return &CallExpr{pos: pos{Line: t.Line, Col: t.Col}, Callee: t.Lexeme, Args: args}, nil
+		p.advance() // consume the type keyword
+		return p.parseCallTail(t)
 	case lexer.TOKEN_LPAREN:
 		p.advance()
 		e, err := p.parseExpr()

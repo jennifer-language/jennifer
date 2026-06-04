@@ -5,9 +5,23 @@ package interpreter
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
+
+// DisplayFloat formats a float64 for human output. Unlike `strconv.FormatFloat`
+// with verb 'g', it guarantees the result is recognisable as a float: if the
+// shortest round-trip representation has no `.`, `e`, or `E`, we append `.0`.
+// So `5.0` prints as "5.0", not "5" - the value's *type* stays visible even
+// when its value happens to be a whole number.
+func DisplayFloat(f float64) string {
+	s := strconv.FormatFloat(f, 'g', -1, 64)
+	if !strings.ContainsAny(s, ".eE") {
+		s += ".0"
+	}
+	return s
+}
 
 // ValueKind tags a runtime value's type.
 type ValueKind int
@@ -79,7 +93,7 @@ func (v Value) Display() string {
 	case KindInt:
 		return strconv.FormatInt(v.Int, 10)
 	case KindFloat:
-		return strconv.FormatFloat(v.Float, 'g', -1, 64)
+		return DisplayFloat(v.Float)
 	case KindString:
 		return v.Str
 	case KindBool:

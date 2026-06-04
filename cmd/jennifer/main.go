@@ -12,9 +12,10 @@ import (
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/lexer"
+	"github.com/mplx/jennifer-lang/internal/lib/convert"
+	"github.com/mplx/jennifer-lang/internal/lib/io"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
-	"github.com/mplx/jennifer-lang/internal/lib/io"
 )
 
 func main() {
@@ -118,6 +119,7 @@ func runFile(path string) int {
 	}
 	in := interpreter.New()
 	iolib.Install(in)
+	convert.Install(in)
 	if err := in.Run(prog); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
 		printErrorContext(src, err)

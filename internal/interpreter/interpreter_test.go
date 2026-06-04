@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
-	"github.com/mplx/jennifer-lang/internal/parser"
+	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	"github.com/mplx/jennifer-lang/internal/lib/io"
+	"github.com/mplx/jennifer-lang/internal/parser"
 )
 
 // run lexes/parses/installs the io library/runs a program and returns captured stdout.
@@ -32,6 +33,7 @@ func run(t *testing.T, src string) (string, error) {
 	var buf bytes.Buffer
 	in.Out = &buf
 	iolib.Install(in)
+	convert.Install(in)
 	if err := in.Run(prog); err != nil {
 		return buf.String(), err
 	}
@@ -86,17 +88,20 @@ func TestDivisionAndModulo(t *testing.T) {
 	out, err := run(t, `
 use io;
 func app() {
-    def a as int init 17 / 5;
+    def a as int init 17 div 5;
     def b as int init 17 % 5;
+    def c as float init 17 / 5;
     printf($a);
     printf(" ");
     printf($b);
+    printf(" ");
+    printf($c);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if out != "3 2" {
-		t.Errorf("got %q, want %q", out, "3 2")
+	if out != "3 2 3.4" {
+		t.Errorf("got %q, want %q", out, "3 2 3.4")
 	}
 }
 
@@ -227,7 +232,7 @@ func TestUnknownLibraryErrors(t *testing.T) {
 
 func TestUnknownLibraryErrorListsAvailable(t *testing.T) {
 	_, err := run(t, `use blub; func app() {}`)
-	if err == nil || !strings.Contains(err.Error(), "available: io") {
+	if err == nil || !strings.Contains(err.Error(), "available: convert, io") {
 		t.Errorf("expected error to list available libraries, got %v", err)
 	}
 }
@@ -459,8 +464,8 @@ func app() {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if out != "4" {
-		t.Errorf("got %q, want %q", out, "4")
+	if out != "4.0" {
+		t.Errorf("got %q, want %q", out, "4.0")
 	}
 }
 
@@ -549,8 +554,8 @@ func app() {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if out != "0 0  false" {
-		t.Errorf("got %q, want %q", out, "0 0  false")
+	if out != "0 0.0  false" {
+		t.Errorf("got %q, want %q", out, "0 0.0  false")
 	}
 }
 
@@ -703,6 +708,319 @@ def r as int init -$s;
 `)
 	if err == nil || !strings.Contains(err.Error(), "`-` requires int or float") {
 		t.Errorf("got %v, want type-error mentioning unary -", err)
+	}
+}
+
+// ---- M4 division semantics ----
+
+func TestSlashAlwaysReturnsFloat(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{"5 / 2", "2.5"},
+		{"5.0 / 2.0", "2.5"},
+		{"5 / 2.0", "2.5"},
+		{"4 / 2", "2.0"}, // even result still prints as float
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+def r as float init `+c.expr+`;
+printf("%f", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestSlashIntoIntErrors(t *testing.T) {
+	_, err := run(t, `
+use io;
+def x as int init 5 / 2;
+`)
+	if err == nil || !strings.Contains(err.Error(), "cannot initialize int") {
+		t.Errorf("expected type-mismatch, got %v", err)
+	}
+}
+
+func TestDivKeyword(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{"5 div 2", "2"},
+		{"6 div 2", "3"},
+		// Python-style floor division: -5 div 2 = -3 (toward -inf)
+		// We don't have unary minus on literals via prefix in numeric ctx
+		// without space, but `0 - 5` works.
+		{"(0 - 5) div 2", "-3"},
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+def r as int init `+c.expr+`;
+printf("%d", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestDivOnFloatsReturnsFloatFloor(t *testing.T) {
+	out, err := run(t, `
+use io;
+def r as float init 5.7 div 2.0;
+printf("%f", $r);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "2.0" {
+		t.Errorf("got %q, want %q", out, "2.0")
+	}
+}
+
+// ---- M4 float display ----
+
+func TestFloatDisplayAlwaysHasDot(t *testing.T) {
+	// 5.0 should print as "5.0", not "5".
+	out, err := run(t, `
+use io;
+def x as float init 5.0;
+printf("%f", $x);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "5.0" {
+		t.Errorf("got %q, want %q", out, "5.0")
+	}
+}
+
+// ---- M4 convert library ----
+
+func TestConvertInt(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{`int("42")`, "42"},
+		{`int(3.7)`, "3"}, // truncate
+		{`int(true)`, "1"},
+		{`int(false)`, "0"},
+		{`int(99)`, "99"}, // identity
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+use convert;
+def r as int init `+c.expr+`;
+printf("%d", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestConvertIntErrors(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{`int("abc")`, "not a valid integer"},
+		{`int(null)`, "cannot convert null"},
+	}
+	for _, c := range cases {
+		_, err := run(t, `
+use io;
+use convert;
+def r as int init `+c.expr+`;
+`)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want substring %q", c.expr, err, c.want)
+		}
+	}
+}
+
+func TestConvertFloat(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{`float(5)`, "5.0"},
+		{`float("3.14")`, "3.14"},
+		{`float(true)`, "1.0"},
+		{`float(false)`, "0.0"},
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+use convert;
+def r as float init `+c.expr+`;
+printf("%f", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestConvertString(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{`string(42)`, "42"},
+		{`string(3.14)`, "3.14"},
+		{`string(true)`, "true"},
+		{`string(null)`, "null"},
+		{`string("hi")`, "hi"},
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+use convert;
+def r as string init `+c.expr+`;
+printf("%s", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestConvertBool(t *testing.T) {
+	// Canonical-only: 0/1 for int, 0.0/1.0 for float, "true"/"false" for string.
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{`bool("true")`, "true"},
+		{`bool("false")`, "false"},
+		{`bool(0)`, "false"},
+		{`bool(1)`, "true"},
+		{`bool(0.0)`, "false"},
+		{`bool(1.0)`, "true"},
+		{`bool(true)`, "true"},   // identity
+		{`bool(false)`, "false"}, // identity
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+use convert;
+def r as bool init `+c.expr+`;
+printf("%t", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestConvertBoolErrors(t *testing.T) {
+	// Non-canonical values for each kind should error, not silently coerce.
+	cases := []struct {
+		expr string
+		want string // substring of error
+	}{
+		{`bool("maybe")`, `only "true" or "false"`},
+		{`bool(5)`, "only 0 and 1"},
+		{`bool(0 - 1)`, "only 0 and 1"}, // -1 must error too
+		{`bool(123)`, "only 0 and 1"},
+		{`bool(1.5)`, "only 0.0 and 1.0"},
+		{`bool(2.0)`, "only 0.0 and 1.0"},
+		{`bool(null)`, "cannot convert null"},
+	}
+	for _, c := range cases {
+		_, err := run(t, `
+use io;
+use convert;
+def r as bool init `+c.expr+`;
+`)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want substring %q", c.expr, err, c.want)
+		}
+	}
+}
+
+func TestTypeof(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{`typeof(5)`, "int"},
+		{`typeof(3.14)`, "float"},
+		{`typeof("hi")`, "string"},
+		{`typeof(true)`, "bool"},
+		{`typeof(null)`, "null"},
+		{`typeof(5 / 2)`, "float"},
+		{`typeof(5 div 2)`, "int"},
+		{`typeof(2.5 * 2)`, "float"},
+	}
+	for _, c := range cases {
+		out, err := run(t, `
+use io;
+use convert;
+def r as string init `+c.expr+`;
+printf("%s", $r);
+`)
+		if err != nil {
+			t.Errorf("%s: err %v", c.expr, err)
+			continue
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.expr, out, c.want)
+		}
+	}
+}
+
+func TestConvertRequiresUse(t *testing.T) {
+	_, err := run(t, `
+use io;
+def r as int init int("42");
+`)
+	if err == nil || !strings.Contains(err.Error(), "use convert") {
+		t.Errorf("expected use-convert hint, got %v", err)
+	}
+}
+
+func TestTypeNameAsBareReferenceErrors(t *testing.T) {
+	// `int` alone (not followed by `(`) in expression position should error.
+	_, err := run(t, `
+use io;
+use convert;
+def r as int init int;
+`)
+	if err == nil || !strings.Contains(err.Error(), "called as a conversion") {
+		t.Errorf("expected hint, got %v", err)
 	}
 }
 

@@ -61,6 +61,7 @@ ILLEGAL   FLOAT        FUNC          RBRACE  MINUS   GT
                        AND
                        OR
                        NOT
+                       DIV
                        INT_TYPE
                        FLOAT_TYPE
                        STRING_TYPE
@@ -88,7 +89,7 @@ Every token records `Line` and `Col` (both 1-based). The `advance()` helper bump
 ### Keywords
 
 The lexer's keyword map covers: `def func as init const import use return if
-elseif else while for true false null and or not int float string bool`.
+elseif else while for true false null and or not div int float string bool`.
 Anything else lexed as a word stays a `TOKEN_IDENT`. `define` is **not** a
 keyword and lexes as a plain identifier.
 
@@ -161,11 +162,15 @@ andExpr     = notExpr { "and" notExpr } ;
 notExpr     = "not" notExpr | compExpr ;
 compExpr    = addExpr { ("<" | ">" | "<=" | ">=" | "==") addExpr } ;
 addExpr     = mulExpr { ("+" | "-") mulExpr } ;
-mulExpr     = unaryExpr { ("*" | "/" | "%") unaryExpr } ;
+mulExpr     = unaryExpr { ("*" | "/" | "div" | "%") unaryExpr } ;
 unaryExpr   = "-" unaryExpr | primary ;
 primary     = INT | FLOAT | STRING | "true" | "false" | "null"
-            | VARREF | call | constRef | "(" expr ")" ;
+            | VARREF | call | typeCall | constRef | "(" expr ")" ;
 call        = IDENT "(" [ expr { "," expr } ] ")" ;
+typeCall    = ("int" | "float" | "string" | "bool") "(" [ expr { "," expr } ] ")" ;
+                                       (* type keywords usable as calls only when
+                                          immediately followed by `(`; resolved as
+                                          convert-library builtins at runtime *)
 constRef    = IDENT ;                  (* bare-IDENT: constant reference; the
                                           parser disambiguates `call` vs
                                           `constRef` by peeking for "(". *)
@@ -190,6 +195,11 @@ constRef    = IDENT ;                  (* bare-IDENT: constant reference; the
   be `bool` (no implicit truthiness).
 - Mixed `int`/`float` arithmetic promotes `int` to `float`; the result is
   `float`. `%` requires int operands. `+` on two `string` values concatenates.
+- **`/` (true division) always returns `float`** (Python 3 semantics). For
+  integer-result division use the `div` keyword: `5 / 2 = 2.5`, `5 div 2 = 2`.
+  `div` on float operands returns the floor as a float (`5.7 div 2.0 = 2.0`).
+- Floats always display with a `.` so the type stays visible: `5.0` prints as
+  `"5.0"`, not `"5"`. See `interpreter.DisplayFloat`.
 - Methods may only be defined at the top level. Variable definitions, assignments,
   control flow, and expression statements may appear at the top level or inside
   a block.
@@ -389,6 +399,27 @@ library name `io`. Both share a `formatArgs` helper with three shapes:
 `printf` writes to the interpreter's `Out`; `sprintf` returns a `KindString`
 value and ignores the writer.
 
+**`internal/lib/convert`** registers `int`, `float`, `string`, `bool`, and
+`typeof` under the Jennifer library name `convert`. Each takes exactly one
+argument:
+
+- `int(v)`: int identity; float truncates toward zero; string parses (errors
+  on bad input); bool → 1/0; null errors.
+- `float(v)`: int→float; float identity; string parses; bool → 1.0/0.0;
+  null errors.
+- `string(v)`: always succeeds; returns `Display()`.
+- `bool(v)`: bool identity; canonical-only otherwise - `0`/`1` (int), `0.0`/`1.0`
+  (float), `"true"`/`"false"` (string). Non-canonical values like `-1`, `123`,
+  `0.5`, `"x"`, and `null` all error. For "nonzero is true" semantics write
+  the comparison explicitly (`$x != 0`).
+- `typeof(v)`: returns the kind name (`"int"`/`"float"`/`"string"`/`"bool"`/`"null"`)
+  as a string. Useful when the result of an arithmetic expression isn't
+  obviously typed.
+
+The parser allows `int(...)`, `float(...)`, `string(...)`, `bool(...)` even
+though those tokens are type keywords - see the `typeCall` production. `typeof`
+is a normal IDENT call.
+
 ### Runtime errors
 
 `*runtimeError` carries optional `Line`/`Col`. Errors render as
@@ -443,6 +474,7 @@ internal/interpreter/interpreter.go   Tree-walking evaluator
 internal/interpreter/interpreter_test.go End-to-end interpreter tests
 internal/lib/io/iolib.go          `io` library: printf, sprintf
 internal/lib/io/iolib_test.go     io library unit tests
+internal/lib/convert/convert.go   `convert` library: int, float, string, bool, typeof
 examples/*.j                     Example programs
 examples/expected/*.txt          Expected stdout per example
 examples/with_import/            Subdirectory demonstrating file imports

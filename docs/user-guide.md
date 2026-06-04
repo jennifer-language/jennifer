@@ -284,7 +284,9 @@ Notes:
 | Operator             | Meaning                                                  |
 |----------------------|----------------------------------------------------------|
 | `+`                  | addition (`int`/`float`); also concatenation on `string` |
-| `-`, `*`, `/`        | subtraction, multiplication, division (`int`/`float`)    |
+| `-`, `*`            | subtraction, multiplication (`int`/`float`)               |
+| `/`                  | **true division - always returns `float`**               |
+| `div`                | floor (integer) division; `int div int → int`            |
 | `%`                  | modulo (`int` only)                                      |
 | unary `-`            | numeric negation (`int`/`float`)                         |
 | `<`, `>`, `<=`, `>=` | numeric comparison; result is `bool`                     |
@@ -292,8 +294,25 @@ Notes:
 | `and`, `or`          | logical; both operands `bool`; short-circuit             |
 | `not`                | unary logical negation; operand `bool`                   |
 
+**Division has two operators.** `/` always returns a `float` (Python 3
+style). `div` returns the floor, keeping the type when both operands are
+ints:
+
+```jennifer
+5 / 2          // 2.5 (float)
+5 div 2        // 2   (int)
+5.0 / 2.0      // 2.5 (float)
+5.7 div 2.0    // 2.0 (float - floor of a float division)
+```
+
+So `def x as int init 5 / 2;` is rejected (right side is float). Use
+`5 div 2` for an int result, or `def x as float init 5 / 2;`.
+
+(`//` would have been the Python 3 spelling, but `//` is line-comment syntax
+in Jennifer. The Pascal-style `div` keyword fills the same role.)
+
 Precedence (low to high): `or`, `and`, `not`, comparison, additive (`+`, `-`),
-multiplicative (`*`, `/`, `%`), unary `-`. Use parentheses to override:
+multiplicative (`*`, `/`, `div`, `%`), unary `-`. Use parentheses to override:
 `(1 + 2) * 3`. Examples that follow the rules:
 
 ```jennifer
@@ -340,7 +359,17 @@ for (def i as int init 0; $i < 10; $i = $i + 1) {
 Conditions in `if`, `elseif`, `while`, and `for` **must be `bool`** - there
 is no implicit truthiness. Use a comparison (`$x == 0`) to get a bool.
 
-### Standard library
+### Libraries
+
+Standard functions live in topic-based libraries enabled with `use`. Nothing
+is auto-loaded.
+
+| Library    | Enable with  | Functions                                    |
+|------------|--------------|----------------------------------------------|
+| `io`       | `use io;`    | `printf`, `sprintf`                          |
+| `convert`  | `use convert;` | `int`, `float`, `string`, `bool`, `typeof` |
+
+#### `io` library
 
 `printf` and `sprintf` share a Go-style format-string mini-language.
 
@@ -373,6 +402,58 @@ Format verbs:
 Mismatches (wrong verb for the value kind, too few or too many args, dangling
 `%`, unknown verb) all produce runtime errors. A literal `%` in any string
 passed to `printf`/`sprintf` must be doubled to `%%`.
+
+Floats always display with a decimal point so the value's type stays visible:
+`5.0` prints as `"5.0"`, not `"5"`. That's particularly important after the
+Python 3 division change - `4 / 2` is the float `2.0`, and you can tell at
+a glance.
+
+#### `convert` library
+
+Explicit value-kind conversion. Each function takes one argument and either
+returns the converted value or errors at runtime.
+
+```jennifer
+use io;
+use convert;
+
+def n as int init int("42");       // parse string -> 42
+def f as float init float(5);      // int -> 5.0
+def s as string init string(3.14); // any -> "3.14"
+def b as bool init bool(0);        // 0 -> false, nonzero -> true
+
+printf("%s\n", typeof(5 / 2));     // "float" (after Python 3 / change)
+printf("%s\n", typeof(5 div 2));   // "int"
+```
+
+| Call          | Source kinds                       | Behavior                                                |
+|---------------|------------------------------------|---------------------------------------------------------|
+| `int(v)`      | int / float / string / bool        | identity / truncate / parse / `true`=1, `false`=0       |
+| `float(v)`    | int / float / string / bool        | convert / identity / parse / `true`=1.0, `false`=0.0    |
+| `string(v)`   | any                                | always succeeds; uses the value's display form          |
+| `bool(v)`     | bool / int / float / string        | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`) |
+| `typeof(v)`   | any                                | returns kind as string: `"int"`, `"float"`, etc.        |
+
+Errors:
+- `int("abc")` - parse failure
+- `int(null)` - no conversion defined
+- `bool("maybe")` - strings: only `"true"` and `"false"` accepted
+- `bool(123)`, `bool(-1)` - ints: only `0` and `1` accepted
+- `bool(1.5)` - floats: only `0.0` and `1.0` accepted
+- arity errors (too many/few arguments)
+
+For "any nonzero counts as true" semantics, write the comparison explicitly:
+
+```jennifer
+def b as bool init $count != 0;     // not bool($count)
+```
+
+This matches the strict-conditions rule everywhere else in Jennifer - if
+you want to project an arbitrary value into a bool, you state the criterion.
+
+The type-name calls (`int`, `float`, `string`, `bool`) only work in expression
+position when immediately followed by `(`. Writing `def x as int init int;`
+errors with a hint to either use it as a conversion call or use a value.
 
 ---
 
