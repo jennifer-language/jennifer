@@ -218,6 +218,206 @@ printf();
 	}
 }
 
+func TestReturnValue(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+func answer() { return 42; }
+printf(answer());
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "42" {
+		t.Errorf("got %q, want %q", out, "42")
+	}
+}
+
+func TestReturnBare(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+func nothing() { return; }
+printf(nothing());
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "null" {
+		t.Errorf("got %q, want %q", out, "null")
+	}
+}
+
+func TestReturnEndsMethodEarly(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+func early() {
+    printf("a");
+    return 1;
+    printf("b");
+}
+printf(early());
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "a1" {
+		t.Errorf("got %q, want %q", out, "a1")
+	}
+}
+
+func TestReturnInsideNestedBlock(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+func find() {
+    for (def i as int init 0; $i < 10; $i = $i + 1) {
+        if ($i == 3) {
+            return $i;
+        }
+    }
+    return 99;
+}
+printf(find());
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "3" {
+		t.Errorf("got %q, want %q", out, "3")
+	}
+}
+
+// ---- M3 parameters ----
+
+func TestParamsAddTwoInts(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+func add(a as int, b as int) { return $a + $b; }
+printf(add(3, 4));
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "7" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestParamTypeMismatch(t *testing.T) {
+	_, err := run(t, `
+use stdlib;
+func add(a as int, b as int) { return $a + $b; }
+add(3, "four");
+`)
+	if err == nil || !strings.Contains(err.Error(), "argument 2") {
+		t.Errorf("expected per-arg type error, got %v", err)
+	}
+}
+
+func TestParamArityMismatch(t *testing.T) {
+	_, err := run(t, `
+use stdlib;
+func add(a as int, b as int) { return $a + $b; }
+add(3);
+`)
+	if err == nil || !strings.Contains(err.Error(), "takes 2") {
+		t.Errorf("expected arity error, got %v", err)
+	}
+}
+
+func TestRecursionFactorial(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+func fact(n as int) {
+    if ($n == 0) { return 1; }
+    return $n * fact($n - 1);
+}
+printf(fact(7));
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "5040" {
+		t.Errorf("got %q, want 5040", out)
+	}
+}
+
+func TestParamSeesGlobalsThroughChain(t *testing.T) {
+	// Params bind in the call frame; globals visible via the parent chain.
+	out, err := run(t, `
+use stdlib;
+def greeting as string init "hi ";
+func greet(name as string) {
+    printf($greeting + $name);
+}
+greet("Jennifer");
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "hi Jennifer" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestConstReferenceBare(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+def const MAX as int init 100;
+printf("%d", MAX);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "100" {
+		t.Errorf("got %q, want %q", out, "100")
+	}
+}
+
+func TestConstInExpression(t *testing.T) {
+	out, err := run(t, `
+use stdlib;
+def const MAX as int init 10;
+def y as int init MAX + 5;
+printf("%d", $y);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "15" {
+		t.Errorf("got %q, want %q", out, "15")
+	}
+}
+
+func TestBareVariableRefErrorsHelpfully(t *testing.T) {
+	_, err := run(t, `
+use stdlib;
+def x as int init 5;
+printf("%d", x);
+`)
+	if err == nil || !strings.Contains(err.Error(), "use `$x`") {
+		t.Errorf("expected $-prefix hint, got %v", err)
+	}
+}
+
+func TestBareUndefinedNameError(t *testing.T) {
+	_, err := run(t, `
+use stdlib;
+printf("%d", NOPE);
+`)
+	if err == nil || !strings.Contains(err.Error(), "undefined name") {
+		t.Errorf("expected undefined-name error, got %v", err)
+	}
+}
+
+func TestParamRejectsDollarAtDefSite(t *testing.T) {
+	_, err := run(t, `
+use stdlib;
+func bad($x as int) { return $x; }
+`)
+	if err == nil || !strings.Contains(err.Error(), "no `$`") {
+		t.Errorf("expected $-at-param error, got %v", err)
+	}
+}
+
 func TestUserMethodCanReuseBuiltinNameWithoutStdlib(t *testing.T) {
 	// Without `use stdlib;`, the name is free - the user's printf is the only one.
 	out, err := run(t, `

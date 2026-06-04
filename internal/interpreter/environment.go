@@ -74,6 +74,17 @@ func (e *Environment) Get(name string) (Value, error) {
 	return Value{}, fmt.Errorf("undefined variable %q", name)
 }
 
+// GetBinding looks up a binding (value + metadata) by name, walking outward.
+// Used by callers that need to distinguish constants from variables.
+func (e *Environment) GetBinding(name string) (Binding, error) {
+	for cur := e; cur != nil; cur = cur.parent {
+		if b, ok := cur.vars[name]; ok {
+			return b, nil
+		}
+	}
+	return Binding{}, fmt.Errorf("undefined %q", name)
+}
+
 func (e *Environment) existsInChain(name string) bool {
 	for cur := e; cur != nil; cur = cur.parent {
 		if _, ok := cur.vars[name]; ok {

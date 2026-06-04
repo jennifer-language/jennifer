@@ -128,6 +128,15 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 		return i.execWhile(st, env)
 	case *parser.ForStmt:
 		return i.execFor(st, env)
+	case *parser.ReturnStmt:
+		if st.Value == nil {
+			return blockResult{hasReturn: true, value: Null()}, nil
+		}
+		v, err := i.evalExpr(st.Value, env)
+		if err != nil {
+			return blockResult{}, err
+		}
+		return blockResult{hasReturn: true, value: v}, nil
 	case *parser.ExprStmt:
 		if _, err := i.evalExpr(st.Expr, env); err != nil {
 			return blockResult{}, err
@@ -292,6 +301,20 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 			return Value{}, &runtimeError{Msg: err.Error(), Line: line, Col: col}
 		}
 		return v, nil
+	case *parser.ConstRefExpr:
+		b, err := env.GetBinding(ex.Name)
+		if err != nil {
+			line, col := ex.Pos()
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("undefined name %q", ex.Name), Line: line, Col: col}
+		}
+		if !b.IsConst {
+			line, col := ex.Pos()
+			return Value{}, &runtimeError{
+				Msg:  fmt.Sprintf("%q is a variable; use `$%s` to reference it", ex.Name, ex.Name),
+				Line: line, Col: col,
+			}
+		}
+		return b.Value, nil
 	case *parser.BinaryExpr:
 		return i.evalBinary(ex, env)
 	case *parser.CallExpr:
@@ -395,15 +418,37 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {
 	// User method?
 	if m, ok := i.methods[c.Callee]; ok {
-		if len(c.Args) != 0 {
+		if len(c.Args) != len(m.Params) {
 			line, col := c.Pos()
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("method %q takes 0 arguments (M1), got %d", c.Callee, len(c.Args)), Line: line, Col: col}
+			return Value{}, &runtimeError{
+				Msg:  fmt.Sprintf("method %q takes %d argument(s), got %d", c.Callee, len(m.Params), len(c.Args)),
+				Line: line, Col: col,
+			}
 		}
-		// Methods open their own call frame that inherits from globals,
-		// so top-level vars are visible inside method bodies. The no-shadowing
-		// rule still applies: a method can't `define` a name that's already a
-		// global.
+		// Evaluate args in the caller's env, then bind them in a fresh
+		// call frame that inherits from globals. Each arg is type-checked
+		// against the parameter's declared type.
+		args := make([]Value, len(c.Args))
+		for idx, a := range c.Args {
+			v, err := i.evalExpr(a, env)
+			if err != nil {
+				return Value{}, err
+			}
+			if !v.MatchesDeclared(m.Params[idx].Type) {
+				line, col := a.Pos()
+				return Value{}, &runtimeError{
+					Msg:  fmt.Sprintf("argument %d to %q must be %s, got %s", idx+1, c.Callee, m.Params[idx].Type, v.Kind),
+					Line: line, Col: col,
+				}
+			}
+			args[idx] = v
+		}
 		callFrame := NewEnvironment(i.global)
+		for idx, p := range m.Params {
+			if err := callFrame.Define(p.Name, args[idx], p.Type, false); err != nil {
+				return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
+			}
+		}
 		res, err := i.execBlock(m.Body, callFrame)
 		if err != nil {
 			return Value{}, err

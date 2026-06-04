@@ -103,20 +103,17 @@ cannot be reassigned), full arithmetic/comparison matrices, programs like
 
 ## M3 - Methods with parameters and return values
 
-**Status:** not started.
+**Status:** done.
 
-
-- `def name(a as int, b as string) { ... }` - parameter parsing
-- Argument passing - by value for scalars
+- `func name(a as int, b as string) { ... }` - parameter parsing
+- Argument passing - by value (parameters bind in a fresh call frame whose
+  parent is the global env)
 - `return;` and `return EXPR;`
-- Type-checking at the call site: argument count and declared type must match
+- Type-checking at the call site: argument count and declared type both checked
 - Method calls inside expressions, recursion (free once methods call methods)
-- `sprintf(...)` - returns a formatted string instead of printing
-- `printf` / `sprintf` with multiple arguments - format style: Go-like
-  `%d %f %s` (familiar; easy to implement)
-
-**New tests:** recursion (`fib`, `fact`), wrong-arity and wrong-type call
-errors, `sprintf` output.
+- `sprintf(...)` returns a formatted string instead of writing
+- `printf` / `sprintf` accept Go-style format strings with verbs `%d %f %s %t %v %%`
+- `examples/factorial.j` added as a recursion smoke test with golden output
 
 ---
 

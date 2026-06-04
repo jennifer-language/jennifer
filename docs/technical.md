@@ -101,7 +101,7 @@ Per the spec, names use `[A-Za-z]` only. Digits and underscores are explicitly
 
 ---
 
-## Grammar (M2) - EBNF
+## Grammar (M3) - EBNF
 
 The authoritative grammar for what the parser accepts. This grammar describes
 the token stream **after** preprocessing - file imports (`import STRING ;`)
@@ -115,15 +115,20 @@ lexeme.
 ```ebnf
 program     = { useStmt | methodDef | statement } EOF ;
 useStmt     = "use" IDENT ";" ;                     (* library import *)
-methodDef   = "func" IDENT "(" ")" block ;
+methodDef   = "func" IDENT "(" [ paramList ] ")" block ;
+paramList   = param { "," param } ;
+param       = IDENT "as" type ;
 block       = "{" { statement } "}" ;
 
 statement   = defineStmt
             | assignStmt
+            | returnStmt
             | ifStmt
             | whileStmt
             | forStmt
             | exprStmt ;
+
+returnStmt  = "return" [ expr ] ";" ;
 
 defineStmt  = "def" [ "const" ] IDENT "as" type [ "init" expr ] ";" ;
                                        (* constants require "init" and an UPPERCASE name;
@@ -152,8 +157,11 @@ compExpr    = addExpr { ("<" | ">" | "<=" | ">=" | "==") addExpr } ;
 addExpr     = mulExpr { ("+" | "-") mulExpr } ;
 mulExpr     = primary { ("*" | "/" | "%") primary } ;
 primary     = INT | FLOAT | STRING | "true" | "false" | "null"
-            | VARREF | call | "(" expr ")" ;
+            | VARREF | call | constRef | "(" expr ")" ;
 call        = IDENT "(" [ expr { "," expr } ] ")" ;
+constRef    = IDENT ;                  (* bare-IDENT: constant reference; the
+                                          parser disambiguates `call` vs
+                                          `constRef` by peeking for "(". *)
 ```
 
 **Semantic notes that aren't expressed in the grammar:**
@@ -184,25 +192,38 @@ call        = IDENT "(" [ expr { "," expr } ] ")" ;
 - Method bodies inherit the global scope as their outer scope, so top-level
   variables are visible inside methods (subject to the no-shadowing rule).
 - Unary minus is not yet in the grammar - negative literals require a
-  workaround until M3+.
+  workaround (e.g. `0 - 5`).
+- Method parameters use bare `IDENT` (no `$`), same as variable definitions.
+  Writing `func f($x as int)` errors with "parameter name has no `$`".
+- Call sites type-check arguments against the declared parameter types at
+  runtime; both arity and per-argument kind are checked.
+- Method return values are dynamically typed - methods don't declare a
+  return type, and callers receive whatever value the body returns (or
+  `null` for a bare `return;` or a body that falls off the end).
+- A bare `IDENT` in expression position is parsed as a `CallExpr` if
+  immediately followed by `(`, otherwise as a `ConstRefExpr`. At runtime
+  the latter must resolve to a constant in scope; a name that resolves to
+  a variable produces a helpful error ("use `$name`").
 
 ---
 
 ## Parser (`internal/parser`)
 
 Recursive descent with precedence climbing for binary operators. The grammar
-the parser implements is the one in [Grammar (M2)](#grammar-m2---ebnf) above.
+the parser implements is the one in [Grammar (M3)](#grammar-m3---ebnf) above.
 
-### AST nodes (M2)
+### AST nodes (M3)
 
 | Node          | Kind  | Fields                                       |
 |---------------|-------|----------------------------------------------|
-| `Program`     | root  | `Imports []*ImportStmt`, `Methods []*MethodDef` |
+| `Program`     | root  | `Imports []*ImportStmt`, `Methods []*MethodDef`, `TopLevel []Stmt` |
 | `ImportStmt`  | stmt  | `Name`                                       |
-| `MethodDef`   | stmt  | `Name`, `Body *Block`                        |
+| `MethodDef`   | stmt  | `Name`, `Params []Param`, `Body *Block`      |
+| `Param`       | -     | `Name`, `Type`                               |
 | `Block`       | stmt  | `Stmts []Stmt`                               |
 | `DefineStmt`  | stmt  | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit) |
 | `AssignStmt`  | stmt  | `VarName`, `Value Expr`                      |
+| `ReturnStmt`  | stmt  | `Value Expr` (nil for bare `return;`)        |
 | `IfStmt`      | stmt  | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block` |
 | `WhileStmt`   | stmt  | `Cond`, `Body *Block`                        |
 | `ForStmt`     | stmt  | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil) |
@@ -212,7 +233,8 @@ the parser implements is the one in [Grammar (M2)](#grammar-m2---ebnf) above.
 | `StringLit`   | expr  | `Value string`                               |
 | `BoolLit`     | expr  | `Value bool`                                 |
 | `NullLit`     | expr  | -                                            |
-| `VarExpr`     | expr  | `Name` (no `$`)                              |
+| `VarExpr`     | expr  | `Name` (no `$`) - mutable-variable reference  |
+| `ConstRefExpr`| expr  | `Name` - bare-IDENT reference; interpreter expects it to resolve to a constant |
 | `CallExpr`    | expr  | `Callee`, `Args []Expr`                      |
 | `BinaryExpr`  | expr  | `Op BinaryOp`, `Left`, `Right` (comparison ops return bool) |
 
@@ -333,8 +355,18 @@ A call to `foo(...)` resolves in this order:
 2. Builtin `foo` - **but only if the library that registered it was imported**.
    All builtins gate on `use stdlib;`.
 
-`stdlib.Install(in)` registers `printf`. M1 `printf` takes exactly one argument
-and writes its `Display()` form to the interpreter's writer.
+`stdlib.Install(in)` registers `printf` and `sprintf`. Both share a
+`formatArgs` helper with three shapes:
+- 0 args -> error.
+- First arg is a string -> treat as a Go-style format string and substitute
+  the remaining args. Verbs: `%d` (int), `%f` (float), `%s` (string),
+  `%t` (bool), `%v` (any/display), `%%` (literal `%`). Mismatches between
+  verb and arg kind produce a runtime error.
+- Exactly 1 non-string arg -> write its `Display()` form (preserves the M2
+  ergonomics of `printf($int)`).
+
+`printf` writes to the interpreter's `Out`; `sprintf` returns a `KindString`
+value and ignores the writer.
 
 ### Runtime errors
 

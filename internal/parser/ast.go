@@ -77,10 +77,19 @@ type ImportStmt struct {
 
 func (*ImportStmt) stmtNode() {}
 
+// Param is one formal parameter of a method.
+type Param struct {
+	Name string
+	Type Type
+	Line int
+	Col  int
+}
+
 type MethodDef struct {
 	pos
-	Name string
-	Body *Block
+	Name   string
+	Params []Param
+	Body   *Block
 }
 
 func (*MethodDef) stmtNode() {}
@@ -149,6 +158,14 @@ type ForStmt struct {
 
 func (*ForStmt) stmtNode() {}
 
+// ReturnStmt: `return;` (returns null) or `return EXPR;`.
+type ReturnStmt struct {
+	pos
+	Value Expr // nil for bare `return;`
+}
+
+func (*ReturnStmt) stmtNode() {}
+
 // ExprStmt: a bare expression terminated by `;` (used for calls like `printf(...)`).
 type ExprStmt struct {
 	pos
@@ -199,6 +216,17 @@ type VarExpr struct {
 }
 
 func (*VarExpr) exprNode() {}
+
+// ConstRefExpr is a bare-identifier reference in an expression context
+// (e.g. `printf(MAX)`). The interpreter resolves it to a constant in scope.
+// A bare-identifier reference to a variable is rejected at runtime with a hint
+// to use the `$` sigil.
+type ConstRefExpr struct {
+	pos
+	Name string
+}
+
+func (*ConstRefExpr) exprNode() {}
 
 type CallExpr struct {
 	pos
@@ -285,7 +313,14 @@ func Sprint(n Node) string {
 	case *ImportStmt:
 		return fmt.Sprintf("Import(%s)", v.Name)
 	case *MethodDef:
-		return fmt.Sprintf("Method(%s, %s)", v.Name, Sprint(v.Body))
+		params := ""
+		for i, p := range v.Params {
+			if i > 0 {
+				params += ", "
+			}
+			params += fmt.Sprintf("%s as %s", p.Name, p.Type)
+		}
+		return fmt.Sprintf("Method(%s(%s), %s)", v.Name, params, Sprint(v.Body))
 	case *Block:
 		s := "Block["
 		for i, st := range v.Stmts {
@@ -335,6 +370,11 @@ func Sprint(n Node) string {
 			stepS = Sprint(v.Step)
 		}
 		return fmt.Sprintf("For(%s; %s; %s, %s)", initS, condS, stepS, Sprint(v.Body))
+	case *ReturnStmt:
+		if v.Value == nil {
+			return "Return"
+		}
+		return fmt.Sprintf("Return(%s)", Sprint(v.Value))
 	case *ExprStmt:
 		return fmt.Sprintf("ExprStmt(%s)", Sprint(v.Expr))
 	case *IntLit:
@@ -349,6 +389,8 @@ func Sprint(n Node) string {
 		return "Null"
 	case *VarExpr:
 		return fmt.Sprintf("Var($%s)", v.Name)
+	case *ConstRefExpr:
+		return fmt.Sprintf("Const(%s)", v.Name)
 	case *CallExpr:
 		s := fmt.Sprintf("Call(%s", v.Callee)
 		for _, a := range v.Args {

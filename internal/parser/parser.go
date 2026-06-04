@@ -147,15 +147,41 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 	if _, err := p.expect(lexer.TOKEN_LPAREN, "after method name"); err != nil {
 		return nil, err
 	}
-	// M1: no parameters yet
-	if _, err := p.expect(lexer.TOKEN_RPAREN, "(M1 only supports zero-arg methods)"); err != nil {
+	var params []Param
+	if !p.check(lexer.TOKEN_RPAREN) {
+		for {
+			// `name as TYPE`
+			if v := p.peek(); v.Type == lexer.TOKEN_VARREF {
+				return nil, &ParseError{
+					Msg:  fmt.Sprintf("parameter name has no `$`: write `%s as TYPE`", v.Lexeme),
+					Line: v.Line, Col: v.Col,
+				}
+			}
+			pname, err := p.expect(lexer.TOKEN_IDENT, "for parameter name")
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(lexer.TOKEN_AS, "after parameter name"); err != nil {
+				return nil, err
+			}
+			ptype, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			params = append(params, Param{Name: pname.Lexeme, Type: ptype, Line: pname.Line, Col: pname.Col})
+			if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
+				break
+			}
+		}
+	}
+	if _, err := p.expect(lexer.TOKEN_RPAREN, "to close parameter list"); err != nil {
 		return nil, err
 	}
 	body, err := p.parseBlock()
 	if err != nil {
 		return nil, err
 	}
-	return &MethodDef{pos: pos{Line: def.Line, Col: def.Col}, Name: name.Lexeme, Body: body}, nil
+	return &MethodDef{pos: pos{Line: def.Line, Col: def.Col}, Name: name.Lexeme, Params: params, Body: body}, nil
 }
 
 func (p *parser) parseBlock() (*Block, error) {
@@ -190,6 +216,8 @@ func (p *parser) parseStatement() (Stmt, error) {
 		return p.parseWhile()
 	case lexer.TOKEN_FOR:
 		return p.parseFor()
+	case lexer.TOKEN_RETURN:
+		return p.parseReturn()
 	case lexer.TOKEN_VARREF:
 		// `$x = expr ;` is an assignment; anything else starting with $x
 		// is an expression statement (rare, but possible if VARREF is used
@@ -292,6 +320,23 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 		VarType:  tt,
 		InitExpr: initExpr,
 	}, nil
+}
+
+// parseReturn parses `return;` or `return EXPR;`.
+func (p *parser) parseReturn() (Stmt, error) {
+	ret, _ := p.match(lexer.TOKEN_RETURN)
+	stmt := &ReturnStmt{pos: pos{Line: ret.Line, Col: ret.Col}}
+	if !p.check(lexer.TOKEN_SEMI) {
+		expr, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Value = expr
+	}
+	if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate return"); err != nil {
+		return nil, err
+	}
+	return stmt, nil
 }
 
 // parseAssign parses `$x = expr;`. If consumeSemi is false (e.g. inside a
@@ -594,11 +639,14 @@ func (p *parser) parsePrimary() (Expr, error) {
 		p.advance()
 		return &VarExpr{pos: pos{Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
 	case lexer.TOKEN_IDENT:
-		// function call: ident "(" args ")"
+		// A bare IDENT in expression context is either a function call
+		// (`name(...)`) or a constant reference (`MAX`). Look at the next
+		// token to decide.
 		p.advance()
-		if _, err := p.expect(lexer.TOKEN_LPAREN, "after function name"); err != nil {
-			return nil, err
+		if !p.check(lexer.TOKEN_LPAREN) {
+			return &ConstRefExpr{pos: pos{Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
 		}
+		p.advance() // consume the LPAREN
 		var args []Expr
 		if !p.check(lexer.TOKEN_RPAREN) {
 			for {

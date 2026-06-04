@@ -1,7 +1,7 @@
 # Jennifer - User Guide
 
 Jennifer is a small, experimental, interpreted programming language. This guide
-covers everything you can do in Jennifer today ([Milestone 2](milestones.md)).
+covers everything you can do in Jennifer today ([Milestone 3](milestones.md)).
 
 ---
 
@@ -75,7 +75,7 @@ explicitly.
 
 ---
 
-## Language reference (M2)
+## Language reference (M3)
 
 ### Tokens and whitespace
 
@@ -175,17 +175,40 @@ $x = "string";    // error: cannot assign string to int variable
 ### Methods
 
 ```jennifer
-func greet() {
-    printf("hello\n");
+func greet(name as string) {
+    printf("hello, %s\n", $name);
 }
 
-greet();   // call it from top level
+greet("Jennifer");   // call it from top level
 ```
 
 Two keywords, two jobs:
 
 - `def [const] NAME ...` introduces a **binding** (variable or constant).
-- `func NAME() { ... }` introduces a **method**.
+- `func NAME(p as TYPE, q as TYPE) { ... }` introduces a **method**.
+
+**Parameters** use bare identifiers (same rule as `def`) and each has a
+declared type. Inside the body, parameters are referenced as `$p` like any
+other variable. At the call site, the interpreter checks the number of
+arguments and the kind of each one - mismatches produce a positioned error.
+
+**Return values** use `return EXPR;` to return a value or `return;` to return
+`null`. A body that runs to the end without `return` also yields `null`.
+Methods don't declare a return type; the caller's type check (e.g.
+`def x as int init mymethod();`) is what enforces the value's kind at the
+use site.
+
+**Recursion** works out of the box - methods are hoisted, so any method can
+call any other (or itself) by name.
+
+```jennifer
+func fact(n as int) {
+    if ($n == 0) { return 1; }
+    return $n * fact($n - 1);
+}
+
+printf("%d\n", fact(5));    // 120
+```
 
 Methods are **hoisted**: all `func NAME() { ... }` declarations are collected
 before any top-level statement runs, so a method can be called from anywhere
@@ -194,8 +217,7 @@ point - top-level statements execute in source order.
 
 Methods can only be defined at the top level (not inside another method's
 body). Method bodies inherit the global scope, so top-level variables are
-visible inside methods (subject to the no-shadowing rule). Parameters,
-return values, and recursion arrive in M3.
+visible inside methods (subject to the no-shadowing rule).
 
 **Methods cannot shadow imported builtins.** If you write `use stdlib;` and
 then `func printf() { ... }`, the program is rejected:
@@ -299,10 +321,37 @@ is no implicit truthiness. Use a comparison (`$x == 0`) to get a bool.
 
 ### Standard library
 
-`printf(value)` writes `value` to standard output without a trailing newline.
-In M1 it accepts exactly one argument. Use multiple `printf` calls (or `"\n"`)
-to format multi-line output. Format specifiers (`%d`, `%s`, `%f`) come in M3
-alongside multi-argument calls.
+`printf` and `sprintf` share a Go-style format-string mini-language.
+
+```jennifer
+printf("hi\n");                              // literal string
+printf($x);                                  // single value, displayed
+printf("you are %d years old!\n", $age);     // format + arguments
+printf("%s = %d, ok=%t\n", "answer", 42, true);
+```
+
+`sprintf` takes the same arguments and **returns** the formatted string instead
+of writing to stdout:
+
+```jennifer
+def msg as string init sprintf("%d + %d = %d", 1, 2, 3);
+printf("%s\n", $msg);   // "1 + 2 = 3"
+```
+
+Format verbs:
+
+| Verb | Required kind  | Notes                                  |
+|------|----------------|----------------------------------------|
+| `%d` | `int`          | decimal                                |
+| `%f` | `float`        | shortest round-trip                    |
+| `%s` | `string`       | raw                                    |
+| `%t` | `bool`         | `true` / `false`                       |
+| `%v` | any            | uses the value's display form          |
+| `%%` | -              | literal `%`                            |
+
+Mismatches (wrong verb for the value kind, too few or too many args, dangling
+`%`, unknown verb) all produce runtime errors. A literal `%` in any string
+passed to `printf`/`sprintf` must be doubled to `%%`.
 
 ---
 
@@ -336,8 +385,23 @@ for (def i as int init 1; $i <= 15; $i = $i + 1) {
     } elseif ($i % 5 == 0) {
         printf("Buzz\n");
     } else {
-        printf($i);
-        printf("\n");
+        printf("%d\n", $i);
     }
+}
+```
+
+## Example: Factorial (recursion + parameters)
+
+```jennifer
+// factorial.j
+use stdlib;
+
+func fact(n as int) {
+    if ($n == 0) { return 1; }
+    return $n * fact($n - 1);
+}
+
+for (def i as int init 0; $i <= 8; $i = $i + 1) {
+    printf("%d! = %d\n", $i, fact($i));
 }
 ```
