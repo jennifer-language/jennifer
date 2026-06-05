@@ -15,9 +15,11 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	"github.com/mplx/jennifer-lang/internal/lib/io"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
+	"github.com/mplx/jennifer-lang/internal/lib/meta"
 	"github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
+	"github.com/mplx/jennifer-lang/internal/version"
 )
 
 func main() {
@@ -38,6 +40,9 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(runRepl())
+	case "version", "--version", "-v":
+		fmt.Println(version.Version)
+		os.Exit(0)
 	case "-h", "--help", "help":
 		usage()
 		os.Exit(0)
@@ -60,11 +65,13 @@ func usage() {
 	fmt.Fprintln(os.Stderr, description)
 	fmt.Fprintln(os.Stderr, copyright)
 	fmt.Fprintln(os.Stderr, "License: "+licenseID)
+	fmt.Fprintln(os.Stderr, "Version: "+version.Version)
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  jennifer run <file.j>    run a Jennifer program")
 	fmt.Fprintln(os.Stderr, "  jennifer run -           read source from stdin")
 	fmt.Fprintln(os.Stderr, "  jennifer repl            interactive REPL")
+	fmt.Fprintln(os.Stderr, "  jennifer version         print the version and exit")
 	fmt.Fprintln(os.Stderr, "  jennifer help            show this message")
 }
 
@@ -132,6 +139,7 @@ func runFile(path string) int {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	metalib.Install(in)
 	if err := in.Run(prog); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
 		printErrorContext(src, absPath, err)

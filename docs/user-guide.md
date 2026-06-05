@@ -11,12 +11,23 @@ You need a working [TinyGo](https://tinygo.org/) toolchain (or regular Go for
 development). From the repository root:
 
 ```sh
-# Build the interpreter
-tinygo build -o jennifer ./cmd/jennifer
+# Build the interpreter (TinyGo - the shipping toolchain)
+make build
+
+# Or build with Go (faster, for development)
+make build-go
 
 # Run a Jennifer source file (must have .j extension)
 ./jennifer run examples/hello.j
+
+# Print the build version
+./jennifer version
 ```
+
+The `make` targets regenerate `internal/version/version_gen.go` from git
+state before invoking the toolchain, so `./jennifer version` always
+reflects the current commit. See [lib_meta.md](lib_meta.md) for the
+`VERSION` string format and how programs can read it via `use meta;`.
 
 You can also pipe source in on stdin by passing `-` as the filename:
 
@@ -409,6 +420,7 @@ index.
 | `convert` | `use convert;` | `int`, `float`, `string`, `bool`, `typeOf` - explicit casts     | [lib_convert.md](lib_convert.md) |
 | `math`    | `use math;`    | `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`; constants `PI`, `E` | [lib_math.md](lib_math.md)     |
 | `strings` | `use strings;` | `len`, `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring` | [lib_strings.md](lib_strings.md) |
+| `meta`    | `use meta;`    | `VERSION` - the interpreter's build version string             | [lib_meta.md](lib_meta.md)     |
 
 Quick orientation - if you're reading top to bottom and just want a flavor:
 

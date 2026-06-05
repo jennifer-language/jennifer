@@ -167,6 +167,14 @@ of topic-based libraries. `printf`/`sprintf` moved to a new `io` library
   method definitions and blocks work transparently. Methods can be
   redefined freely from one input to the next (`Run` still rejects
   duplicates; the REPL uses a new `EvalInteractive` entry point).
+- **Build version + `meta` library** - done. The Makefile regenerates
+  `internal/version/version_gen.go` from `git describe --tags --long` before
+  every build, so `jennifer help` / `jennifer version` always report the
+  current commit. The new `meta` library exposes the same string to
+  Jennifer programs as the `VERSION` constant (`use meta;`). Format:
+  `"<tag>"` on a tag, `"<tag>-dev+<N>.<shortsha>"` past a tag, `"dev"`
+  outside git. Codegen is used instead of `-ldflags -X` because TinyGo
+  0.41 silently ignores `-X`; codegen works on both toolchains.
 - **Formatter:** `jennifer fmt` - re-emit the AST as canonical source
 
 ---

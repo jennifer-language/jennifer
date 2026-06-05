@@ -12,6 +12,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	"github.com/mplx/jennifer-lang/internal/lib/io"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
+	"github.com/mplx/jennifer-lang/internal/lib/meta"
 	"github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
@@ -38,6 +39,7 @@ func run(t *testing.T, src string) (string, error) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	metalib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return buf.String(), err
 	}
@@ -236,7 +238,7 @@ func TestUnknownLibraryErrors(t *testing.T) {
 
 func TestUnknownLibraryErrorListsAvailable(t *testing.T) {
 	_, err := run(t, `use blub; func app() {}`)
-	if err == nil || !strings.Contains(err.Error(), "available: convert, io, math, strings") {
+	if err == nil || !strings.Contains(err.Error(), "available: convert, io, math, meta, strings") {
 		t.Errorf("expected error to list available libraries, got %v", err)
 	}
 }

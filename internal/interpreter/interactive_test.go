@@ -11,6 +11,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
+	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
@@ -25,6 +26,7 @@ func newReplInterp() (*interpreter.Interpreter, *bytes.Buffer) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	metalib.Install(in)
 	return in, &buf
 }
 
