@@ -61,11 +61,11 @@ type Value struct {
 	Bool  bool
 }
 
-func Null() Value                 { return Value{Kind: KindNull} }
-func IntVal(n int64) Value        { return Value{Kind: KindInt, Int: n} }
-func FloatVal(f float64) Value    { return Value{Kind: KindFloat, Float: f} }
-func StringVal(s string) Value    { return Value{Kind: KindString, Str: s} }
-func BoolVal(b bool) Value        { return Value{Kind: KindBool, Bool: b} }
+func Null() Value              { return Value{Kind: KindNull} }
+func IntVal(n int64) Value     { return Value{Kind: KindInt, Int: n} }
+func FloatVal(f float64) Value { return Value{Kind: KindFloat, Float: f} }
+func StringVal(s string) Value { return Value{Kind: KindString, Str: s} }
+func BoolVal(b bool) Value     { return Value{Kind: KindBool, Bool: b} }
 
 // ZeroFor returns the zero value for a declared parser.Type. Used when a
 // variable is defined without an `init` clause.
@@ -163,4 +163,3 @@ func (v Value) Equal(o Value) bool {
 	}
 	return false
 }
-

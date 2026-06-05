@@ -34,12 +34,22 @@ func NewWithFile(source, file string) *Lexer {
 // LexError carries a source position so the parser/interpreter can surface useful messages.
 type LexError struct {
 	Msg  string
+	File string
 	Line int
 	Col  int
 }
 
 func (e *LexError) Error() string {
+	if e.File != "" {
+		return fmt.Sprintf("lex error at %s:%d:%d: %s", e.File, e.Line, e.Col, e.Msg)
+	}
 	return fmt.Sprintf("lex error at %d:%d: %s", e.Line, e.Col, e.Msg)
+}
+
+// Position implements the positioned-error interface used by the CLI to
+// extract a file/line/col without parsing the error string.
+func (e *LexError) Position() (file string, line, col int) {
+	return e.File, e.Line, e.Col
 }
 
 // Tokenize runs the lexer to completion and returns the full token list (terminated by TOKEN_EOF).
@@ -147,7 +157,7 @@ func (l *Lexer) Next() (Token, error) {
 		return l.readIdentifierOrKeyword(startLine, startCol)
 	}
 
-	return Token{}, &LexError{Msg: fmt.Sprintf("unexpected character %q", ch), Line: startLine, Col: startCol}
+	return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("unexpected character %q", ch), Line: startLine, Col: startCol}
 }
 
 func (l *Lexer) advance() {
@@ -192,7 +202,7 @@ func (l *Lexer) skipWhitespaceAndComments() error {
 				l.advance() // *
 				for {
 					if l.pos >= len(l.src) {
-						return &LexError{Msg: "unterminated block comment", Line: startLine, Col: startCol}
+						return &LexError{File: l.file, Msg: "unterminated block comment", Line: startLine, Col: startCol}
 					}
 					if l.src[l.pos] == '*' {
 						if next, ok := l.peek(1); ok && next == '/' {
@@ -216,7 +226,7 @@ func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 	var b strings.Builder
 	for {
 		if l.pos >= len(l.src) {
-			return Token{}, &LexError{Msg: "unterminated string literal", Line: startLine, Col: startCol}
+			return Token{}, &LexError{File: l.file, Msg: "unterminated string literal", Line: startLine, Col: startCol}
 		}
 		ch := l.src[l.pos]
 		if ch == quote {
@@ -226,7 +236,7 @@ func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 		if ch == '\\' {
 			l.advance()
 			if l.pos >= len(l.src) {
-				return Token{}, &LexError{Msg: "unterminated escape in string", Line: startLine, Col: startCol}
+				return Token{}, &LexError{File: l.file, Msg: "unterminated escape in string", Line: startLine, Col: startCol}
 			}
 			esc := l.src[l.pos]
 			switch esc {
@@ -245,7 +255,7 @@ func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 			case '0':
 				b.WriteRune(0)
 			default:
-				return Token{}, &LexError{Msg: fmt.Sprintf("unknown escape sequence \\%c", esc), Line: l.line, Col: l.col}
+				return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("unknown escape sequence \\%c", esc), Line: l.line, Col: l.col}
 			}
 			l.advance()
 			continue
@@ -258,7 +268,7 @@ func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 func (l *Lexer) readVarRef(startLine, startCol int) (Token, error) {
 	l.advance() // $
 	if l.pos >= len(l.src) || !isIdentStart(l.src[l.pos]) {
-		return Token{}, &LexError{Msg: "expected identifier after '$'", Line: startLine, Col: startCol}
+		return Token{}, &LexError{File: l.file, Msg: "expected identifier after '$'", Line: startLine, Col: startCol}
 	}
 	var b strings.Builder
 	for l.pos < len(l.src) && isIdentPart(l.src[l.pos]) {
@@ -267,7 +277,7 @@ func (l *Lexer) readVarRef(startLine, startCol int) (Token, error) {
 	}
 	name := b.String()
 	if len(name) > 64 {
-		return Token{}, &LexError{Msg: fmt.Sprintf("variable name %q exceeds 64 characters", name), Line: startLine, Col: startCol}
+		return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("variable name %q exceeds 64 characters", name), Line: startLine, Col: startCol}
 	}
 	return Token{Type: TOKEN_VARREF, Lexeme: name, Line: startLine, Col: startCol}, nil
 }
@@ -304,7 +314,7 @@ func (l *Lexer) readIdentifierOrKeyword(startLine, startCol int) (Token, error) 
 		return Token{Type: tt, Lexeme: name, Line: startLine, Col: startCol}, nil
 	}
 	if len(name) > 64 {
-		return Token{}, &LexError{Msg: fmt.Sprintf("identifier %q exceeds 64 characters", name), Line: startLine, Col: startCol}
+		return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("identifier %q exceeds 64 characters", name), Line: startLine, Col: startCol}
 	}
 	return Token{Type: TOKEN_IDENT, Lexeme: name, Line: startLine, Col: startCol}, nil
 }

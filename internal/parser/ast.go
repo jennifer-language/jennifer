@@ -5,9 +5,11 @@ package parser
 
 import "fmt"
 
-// Node is the root interface for all AST nodes. Pos returns the source line/col where the node starts.
+// Node is the root interface for all AST nodes. Pos returns the source line/col
+// where the node starts; Filename returns the source file (or "" if unknown).
 type Node interface {
 	Pos() (line, col int)
+	Filename() string
 	astNode()
 }
 
@@ -23,12 +25,14 @@ type Expr interface {
 
 // pos carries source position; embedded into every node.
 type pos struct {
+	File string
 	Line int
 	Col  int
 }
 
-func (p pos) Pos() (int, int) { return p.Line, p.Col }
-func (p pos) astNode()        {}
+func (p pos) Pos() (int, int)  { return p.Line, p.Col }
+func (p pos) Filename() string { return p.File }
+func (p pos) astNode()         {}
 
 // Type is the declared static type of a variable or constant.
 type Type int
@@ -81,6 +85,7 @@ func (*ImportStmt) stmtNode() {}
 type Param struct {
 	Name string
 	Type Type
+	File string
 	Line int
 	Col  int
 }
@@ -329,9 +334,9 @@ func (*UnaryExpr) exprNode() {}
 
 type BinaryExpr struct {
 	pos
-	Op       BinaryOp
-	Left     Expr
-	Right    Expr
+	Op    BinaryOp
+	Left  Expr
+	Right Expr
 }
 
 func (*BinaryExpr) exprNode() {}

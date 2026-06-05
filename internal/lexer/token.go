@@ -38,7 +38,7 @@ const (
 	TOKEN_AND
 	TOKEN_OR
 	TOKEN_NOT
-	TOKEN_DIV // `div` keyword: floor (integer) division; `/` is true division
+	TOKEN_DIV         // `div` keyword: floor (integer) division; `/` is true division
 	TOKEN_INT_TYPE    // the word "int" used as a type
 	TOKEN_FLOAT_TYPE  // the word "float" used as a type
 	TOKEN_STRING_TYPE // the word "string" used as a type
@@ -62,11 +62,11 @@ const (
 	TOKEN_PERCENT // %
 
 	// Comparison operators
-	TOKEN_LT  // <
-	TOKEN_GT  // >
-	TOKEN_LE  // <=
-	TOKEN_GE  // >=
-	TOKEN_EQ  // ==
+	TOKEN_LT // <
+	TOKEN_GT // >
+	TOKEN_LE // <=
+	TOKEN_GE // >=
+	TOKEN_EQ // ==
 )
 
 var tokenNames = map[TokenType]string{

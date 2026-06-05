@@ -119,10 +119,10 @@ func TestTokenizeRejectsUnterminatedString(t *testing.T) {
 
 func TestTokenizeFloatLiterals(t *testing.T) {
 	cases := []struct {
-		src     string
-		want    TokenType
-		lexeme  string
-		extra   []TokenType // extra tokens before EOF
+		src    string
+		want   TokenType
+		lexeme string
+		extra  []TokenType // extra tokens before EOF
 	}{
 		{"3.14", TOKEN_FLOAT, "3.14", nil},
 		{"0.5", TOKEN_FLOAT, "0.5", nil},

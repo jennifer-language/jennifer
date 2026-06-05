@@ -153,8 +153,12 @@ of topic-based libraries. `printf`/`sprintf` moved to a new `io` library
 
 ## M5 - Interpreter improvements
 
-- **Better errors:** cross-file error sources (snippet from the right file
-  when an imported `.j` triggers the error)
+- **Better errors:** cross-file error sources - done. Every error type
+  (`LexError`, `PreprocessError`, `ParseError`, `runtimeError`) carries the
+  originating file and implements a small `Position()` interface. The CLI
+  uses that interface to load the right file when printing the source
+  snippet, so an error raised inside an imported `.j` displays the line
+  from the imported file, not from the importing file.
 - **REPL:** `jennifer repl` reusing the existing lexer/parser/interpreter
 - **Formatter:** `jennifer fmt` - re-emit the AST as canonical source
 

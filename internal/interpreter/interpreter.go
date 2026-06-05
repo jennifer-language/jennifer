@@ -89,6 +89,7 @@ func (i *Interpreter) availableLibsString() string {
 
 type runtimeError struct {
 	Msg  string
+	File string
 	Line int
 	Col  int
 }
@@ -97,6 +98,9 @@ func (e *runtimeError) Error() string {
 	if e.Line == 0 && e.Col == 0 {
 		return "runtime error: " + e.Msg
 	}
+	if e.File != "" {
+		return fmt.Sprintf("runtime error at %s:%d:%d: %s", e.File, e.Line, e.Col, e.Msg)
+	}
 	return fmt.Sprintf("runtime error at %d:%d: %s", e.Line, e.Col, e.Msg)
 }
 
@@ -104,6 +108,19 @@ func (e *runtimeError) Error() string {
 func RuntimeError(err error) bool {
 	_, ok := err.(*runtimeError)
 	return ok
+}
+
+// Position implements the positioned-error interface used by the CLI.
+func (e *runtimeError) Position() (file string, line, col int) {
+	return e.File, e.Line, e.Col
+}
+
+// posFor extracts (file, line, col) from any AST node. Used to construct
+// positioned runtime errors that point at the right source file - important
+// when an error originates inside an imported `.j` file.
+func posFor(n parser.Node) (file string, line, col int) {
+	line, col = n.Pos()
+	return n.Filename(), line, col
 }
 
 // Run executes the program. It records imports, hoists method definitions so
@@ -120,10 +137,10 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// hide typos like `use stdio;` (instead of `io`).
 	for _, imp := range prog.Imports {
 		if !i.knownLibs[imp.Name] {
-			line, col := imp.Pos()
+			file, line, col := posFor(imp)
 			return &runtimeError{
 				Msg:  fmt.Sprintf("unknown library %q (available: %s)", imp.Name, i.availableLibsString()),
-				Line: line, Col: col,
+				File: file, Line: line, Col: col,
 			}
 		}
 		i.imported[imp.Name] = true
@@ -131,18 +148,18 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// Methods: collect first so call order doesn't matter
 	for _, m := range prog.Methods {
 		if _, exists := i.methods[m.Name]; exists {
-			line, col := m.Pos()
-			return &runtimeError{Msg: fmt.Sprintf("method %q is defined more than once", m.Name), Line: line, Col: col}
+			file, line, col := posFor(m)
+			return &runtimeError{Msg: fmt.Sprintf("method %q is defined more than once", m.Name), File: file, Line: line, Col: col}
 		}
 		// No-shadowing rule for methods: a user method may not share a name
 		// with a builtin from a library the program has `use`d. This mirrors
 		// the variable no-shadowing rule. Without the relevant `use`, the
 		// name is free for user code.
 		if b, isBuiltin := i.Builtins[m.Name]; isBuiltin && i.imported[b.Lib] {
-			line, col := m.Pos()
+			file, line, col := posFor(m)
 			return &runtimeError{
 				Msg:  fmt.Sprintf("method %q shadows a builtin from `%s`; rename it or remove `use %s;`", m.Name, b.Lib, b.Lib),
-				Line: line, Col: col,
+				File: file, Line: line, Col: col,
 			}
 		}
 		i.methods[m.Name] = m
@@ -205,8 +222,8 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 		}
 		return blockResult{}, nil
 	}
-	line, col := s.Pos()
-	return blockResult{}, &runtimeError{Msg: fmt.Sprintf("unsupported statement type %T", s), Line: line, Col: col}
+	file, line, col := posFor(s)
+	return blockResult{}, &runtimeError{Msg: fmt.Sprintf("unsupported statement type %T", s), File: file, Line: line, Col: col}
 }
 
 func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error {
@@ -217,12 +234,12 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 			return err
 		}
 		if !v.MatchesDeclared(st.VarType) {
-			line, col := st.Pos()
+			file, line, col := posFor(st)
 			noun := "variable"
 			if st.IsConst {
 				noun = "constant"
 			}
-			return &runtimeError{Msg: fmt.Sprintf("cannot initialize %s %s %q with value of type %s", st.VarType, noun, st.VarName, v.Kind), Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("cannot initialize %s %s %q with value of type %s", st.VarType, noun, st.VarName, v.Kind), File: file, Line: line, Col: col}
 		}
 		val = v
 	} else {
@@ -230,14 +247,14 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		// their declared type. Constants must always be initialized (the
 		// parser enforces this; the assertion below is defensive).
 		if st.IsConst {
-			line, col := st.Pos()
-			return &runtimeError{Msg: "internal: constant without init reached interpreter", Line: line, Col: col}
+			file, line, col := posFor(st)
+			return &runtimeError{Msg: "internal: constant without init reached interpreter", File: file, Line: line, Col: col}
 		}
 		val = ZeroFor(st.VarType)
 	}
 	if err := env.Define(st.VarName, val, st.VarType, st.IsConst); err != nil {
-		line, col := st.Pos()
-		return &runtimeError{Msg: err.Error(), Line: line, Col: col}
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 	}
 	return nil
 }
@@ -248,8 +265,8 @@ func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error 
 		return err
 	}
 	if err := env.Assign(st.VarName, val); err != nil {
-		line, col := st.Pos()
-		return &runtimeError{Msg: err.Error(), Line: line, Col: col}
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 	}
 	return nil
 }
@@ -338,8 +355,8 @@ func (i *Interpreter) evalBool(e parser.Expr, env *Environment, ctx string) (boo
 		return false, err
 	}
 	if v.Kind != KindBool {
-		line, col := e.Pos()
-		return false, &runtimeError{Msg: fmt.Sprintf("%s must be bool, got %s", ctx, v.Kind), Line: line, Col: col}
+		file, line, col := posFor(e)
+		return false, &runtimeError{Msg: fmt.Sprintf("%s must be bool, got %s", ctx, v.Kind), File: file, Line: line, Col: col}
 	}
 	return v.Bool, nil
 }
@@ -359,8 +376,8 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 	case *parser.VarExpr:
 		v, err := env.Get(ex.Name)
 		if err != nil {
-			line, col := ex.Pos()
-			return Value{}, &runtimeError{Msg: err.Error(), Line: line, Col: col}
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 		}
 		return v, nil
 	case *parser.ConstRefExpr:
@@ -368,10 +385,10 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		b, err := env.GetBinding(ex.Name)
 		if err == nil {
 			if !b.IsConst {
-				line, col := ex.Pos()
+				file, line, col := posFor(ex)
 				return Value{}, &runtimeError{
 					Msg:  fmt.Sprintf("%q is a variable; use `$%s` to reference it", ex.Name, ex.Name),
-					Line: line, Col: col,
+					File: file, Line: line, Col: col,
 				}
 			}
 			return b.Value, nil
@@ -380,13 +397,13 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		// owning library has been `use`d.
 		if c, ok := i.LibConstants[ex.Name]; ok {
 			if !i.imported[c.Lib] {
-				line, col := ex.Pos()
-				return Value{}, &runtimeError{Msg: fmt.Sprintf("`%s` requires `use %s;`", ex.Name, c.Lib), Line: line, Col: col}
+				file, line, col := posFor(ex)
+				return Value{}, &runtimeError{Msg: fmt.Sprintf("`%s` requires `use %s;`", ex.Name, c.Lib), File: file, Line: line, Col: col}
 			}
 			return c.Value, nil
 		}
-		line, col := ex.Pos()
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("undefined name %q", ex.Name), Line: line, Col: col}
+		file, line, col := posFor(ex)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("undefined name %q", ex.Name), File: file, Line: line, Col: col}
 	case *parser.BinaryExpr:
 		return i.evalBinary(ex, env)
 	case *parser.UnaryExpr:
@@ -394,8 +411,8 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 	case *parser.CallExpr:
 		return i.evalCall(ex, env)
 	}
-	line, col := e.Pos()
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("unsupported expression type %T", e), Line: line, Col: col}
+	file, line, col := posFor(e)
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("unsupported expression type %T", e), File: file, Line: line, Col: col}
 }
 
 func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value, error) {
@@ -412,11 +429,11 @@ func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value,
 	if err != nil {
 		return Value{}, err
 	}
-	line, col := b.Pos()
+	file, line, col := posFor(b)
 	if b.Op.IsComparison() {
-		return i.evalComparison(b.Op, lv, rv, line, col)
+		return i.evalComparison(b.Op, lv, rv, file, line, col)
 	}
-	return i.evalArithmetic(b.Op, lv, rv, line, col)
+	return i.evalArithmetic(b.Op, lv, rv, file, line, col)
 }
 
 // evalLogical implements short-circuit `and`/`or`. Both operands must be bool;
@@ -427,10 +444,10 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 		return Value{}, err
 	}
 	if lv.Kind != KindBool {
-		line, col := b.Left.Pos()
+		file, line, col := posFor(b.Left)
 		return Value{}, &runtimeError{
 			Msg:  fmt.Sprintf("left operand of `%s` must be bool, got %s", b.Op, lv.Kind),
-			Line: line, Col: col,
+			File: file, Line: line, Col: col,
 		}
 	}
 	// Short-circuit
@@ -445,10 +462,10 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 		return Value{}, err
 	}
 	if rv.Kind != KindBool {
-		line, col := b.Right.Pos()
+		file, line, col := posFor(b.Right)
 		return Value{}, &runtimeError{
 			Msg:  fmt.Sprintf("right operand of `%s` must be bool, got %s", b.Op, rv.Kind),
-			Line: line, Col: col,
+			File: file, Line: line, Col: col,
 		}
 	}
 	return BoolVal(rv.Bool), nil
@@ -459,7 +476,7 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 	if err != nil {
 		return Value{}, err
 	}
-	line, col := u.Pos()
+	file, line, col := posFor(u)
 	switch u.Op {
 	case parser.OpNeg:
 		switch v.Kind {
@@ -470,21 +487,21 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 		}
 		return Value{}, &runtimeError{
 			Msg:  fmt.Sprintf("unary `-` requires int or float, got %s", v.Kind),
-			Line: line, Col: col,
+			File: file, Line: line, Col: col,
 		}
 	case parser.OpNot:
 		if v.Kind != KindBool {
 			return Value{}, &runtimeError{
 				Msg:  fmt.Sprintf("unary `not` requires bool, got %s", v.Kind),
-				Line: line, Col: col,
+				File: file, Line: line, Col: col,
 			}
 		}
 		return BoolVal(!v.Bool), nil
 	}
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown unary operator %s", u.Op), Line: line, Col: col}
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown unary operator %s", u.Op), File: file, Line: line, Col: col}
 }
 
-func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, line, col int) (Value, error) {
+func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file string, line, col int) (Value, error) {
 	// `==` works for any same-kind comparison (and across int/float). Other
 	// comparisons require numeric operands.
 	if op == parser.OpEq {
@@ -493,7 +510,7 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, line, col
 	a, aok := lv.AsFloat()
 	b, bok := rv.AsFloat()
 	if !aok || !bok {
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s requires numeric operands, got %s and %s", op, lv.Kind, rv.Kind), Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s requires numeric operands, got %s and %s", op, lv.Kind, rv.Kind), File: file, Line: line, Col: col}
 	}
 	switch op {
 	case parser.OpLt:
@@ -505,10 +522,10 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, line, col
 	case parser.OpGe:
 		return BoolVal(a >= b), nil
 	}
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown comparison %s", op), Line: line, Col: col}
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown comparison %s", op), File: file, Line: line, Col: col}
 }
 
-func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col int) (Value, error) {
+func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, file string, line, col int) (Value, error) {
 	// String concatenation with `+`
 	if op == parser.OpAdd && lv.Kind == KindString && rv.Kind == KindString {
 		return StringVal(lv.Str + rv.Str), nil
@@ -526,7 +543,7 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 			return IntVal(lv.Int * rv.Int), nil
 		case parser.OpFloorDiv:
 			if rv.Int == 0 {
-				return Value{}, &runtimeError{Msg: "integer division by zero", Line: line, Col: col}
+				return Value{}, &runtimeError{Msg: "integer division by zero", File: file, Line: line, Col: col}
 			}
 			// Go's `/` on ints is truncate-toward-zero. Python-style `div`
 			// (floor) only differs when signs differ; align with Python here.
@@ -537,7 +554,7 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 			return IntVal(q), nil
 		case parser.OpMod:
 			if rv.Int == 0 {
-				return Value{}, &runtimeError{Msg: "integer modulo by zero", Line: line, Col: col}
+				return Value{}, &runtimeError{Msg: "integer modulo by zero", File: file, Line: line, Col: col}
 			}
 			return IntVal(lv.Int % rv.Int), nil
 		}
@@ -547,7 +564,7 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 	a, aok := lv.AsFloat()
 	b, bok := rv.AsFloat()
 	if !aok || !bok {
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s requires numeric operands, got %s and %s", op, lv.Kind, rv.Kind), Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s requires numeric operands, got %s and %s", op, lv.Kind, rv.Kind), File: file, Line: line, Col: col}
 	}
 	switch op {
 	case parser.OpAdd:
@@ -558,18 +575,18 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, line, col
 		return FloatVal(a * b), nil
 	case parser.OpDiv:
 		if b == 0 {
-			return Value{}, &runtimeError{Msg: "division by zero", Line: line, Col: col}
+			return Value{}, &runtimeError{Msg: "division by zero", File: file, Line: line, Col: col}
 		}
 		return FloatVal(a / b), nil
 	case parser.OpFloorDiv:
 		if b == 0 {
-			return Value{}, &runtimeError{Msg: "division by zero", Line: line, Col: col}
+			return Value{}, &runtimeError{Msg: "division by zero", File: file, Line: line, Col: col}
 		}
 		return FloatVal(floorDiv(a, b)), nil
 	case parser.OpMod:
-		return Value{}, &runtimeError{Msg: "operator % requires int operands, got float", Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: "operator % requires int operands, got float", File: file, Line: line, Col: col}
 	}
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown binary operator %s", op), Line: line, Col: col}
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown binary operator %s", op), File: file, Line: line, Col: col}
 }
 
 // floorDiv computes math.Floor(a/b) without importing math (TinyGo size).
@@ -588,10 +605,10 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 	// User method?
 	if m, ok := i.methods[c.Callee]; ok {
 		if len(c.Args) != len(m.Params) {
-			line, col := c.Pos()
+			file, line, col := posFor(c)
 			return Value{}, &runtimeError{
 				Msg:  fmt.Sprintf("method %q takes %d argument(s), got %d", c.Callee, len(m.Params), len(c.Args)),
-				Line: line, Col: col,
+				File: file, Line: line, Col: col,
 			}
 		}
 		// Evaluate args in the caller's env, then bind them in a fresh
@@ -604,10 +621,10 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				return Value{}, err
 			}
 			if !v.MatchesDeclared(m.Params[idx].Type) {
-				line, col := a.Pos()
+				file, line, col := posFor(a)
 				return Value{}, &runtimeError{
 					Msg:  fmt.Sprintf("argument %d to %q must be %s, got %s", idx+1, c.Callee, m.Params[idx].Type, v.Kind),
-					Line: line, Col: col,
+					File: file, Line: line, Col: col,
 				}
 			}
 			args[idx] = v
@@ -630,8 +647,8 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 	// Builtin? Only callable if the owning library was `use`d.
 	if b, ok := i.Builtins[c.Callee]; ok {
 		if !i.imported[b.Lib] {
-			line, col := c.Pos()
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("`%s` requires `use %s;`", c.Callee, b.Lib), Line: line, Col: col}
+			file, line, col := posFor(c)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("`%s` requires `use %s;`", c.Callee, b.Lib), File: file, Line: line, Col: col}
 		}
 		args := make([]Value, 0, len(c.Args))
 		for _, a := range c.Args {
@@ -643,11 +660,11 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 		v, err := b.Fn(i.Out, args)
 		if err != nil {
-			line, col := c.Pos()
-			return Value{}, &runtimeError{Msg: err.Error(), Line: line, Col: col}
+			file, line, col := posFor(c)
+			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 		}
 		return v, nil
 	}
-	line, col := c.Pos()
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown function %q", c.Callee), Line: line, Col: col}
+	file, line, col := posFor(c)
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown function %q", c.Callee), File: file, Line: line, Col: col}
 }

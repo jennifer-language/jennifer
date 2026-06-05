@@ -13,12 +13,21 @@ import (
 // ParseError carries source position so the caller can produce useful messages.
 type ParseError struct {
 	Msg  string
+	File string
 	Line int
 	Col  int
 }
 
 func (e *ParseError) Error() string {
+	if e.File != "" {
+		return fmt.Sprintf("parse error at %s:%d:%d: %s", e.File, e.Line, e.Col, e.Msg)
+	}
 	return fmt.Sprintf("parse error at %d:%d: %s", e.Line, e.Col, e.Msg)
+}
+
+// Position implements the positioned-error interface used by the CLI.
+func (e *ParseError) Position() (file string, line, col int) {
+	return e.File, e.Line, e.Col
 }
 
 // Parse tokenizes the source and returns a *Program AST.
@@ -42,8 +51,8 @@ type parser struct {
 	pos    int
 }
 
-func (p *parser) peek() lexer.Token         { return p.tokens[p.pos] }
-func (p *parser) peekN(n int) lexer.Token   { return p.tokens[p.pos+n] }
+func (p *parser) peek() lexer.Token       { return p.tokens[p.pos] }
+func (p *parser) peekN(n int) lexer.Token { return p.tokens[p.pos+n] }
 func (p *parser) advance() lexer.Token {
 	t := p.tokens[p.pos]
 	if t.Type != lexer.TOKEN_EOF {
@@ -66,7 +75,7 @@ func (p *parser) expect(tt lexer.TokenType, ctx string) (lexer.Token, error) {
 	if t.Type != tt {
 		return t, &ParseError{
 			Msg:  fmt.Sprintf("expected %s %s, got %s (%q)", tt, ctx, t.Type, t.Lexeme),
-			Line: t.Line, Col: t.Col,
+			File: t.File, Line: t.Line, Col: t.Col,
 		}
 	}
 	return p.advance(), nil
@@ -135,7 +144,7 @@ func (p *parser) parseImport() (*ImportStmt, error) {
 	if _, err := p.expect(lexer.TOKEN_SEMI, "after `use` statement"); err != nil {
 		return nil, err
 	}
-	return &ImportStmt{pos: pos{Line: use.Line, Col: use.Col}, Name: name.Lexeme}, nil
+	return &ImportStmt{pos: pos{File: use.File, Line: use.Line, Col: use.Col}, Name: name.Lexeme}, nil
 }
 
 func (p *parser) parseMethodDef() (*MethodDef, error) {
@@ -154,7 +163,7 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 			if v := p.peek(); v.Type == lexer.TOKEN_VARREF {
 				return nil, &ParseError{
 					Msg:  fmt.Sprintf("parameter name has no `$`: write `%s as TYPE`", v.Lexeme),
-					Line: v.Line, Col: v.Col,
+					File: v.File, Line: v.Line, Col: v.Col,
 				}
 			}
 			pname, err := p.expect(lexer.TOKEN_IDENT, "for parameter name")
@@ -168,7 +177,7 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 			if err != nil {
 				return nil, err
 			}
-			params = append(params, Param{Name: pname.Lexeme, Type: ptype, Line: pname.Line, Col: pname.Col})
+			params = append(params, Param{Name: pname.Lexeme, Type: ptype, File: pname.File, Line: pname.Line, Col: pname.Col})
 			if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
 				break
 			}
@@ -181,7 +190,7 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MethodDef{pos: pos{Line: def.Line, Col: def.Col}, Name: name.Lexeme, Params: params, Body: body}, nil
+	return &MethodDef{pos: pos{File: def.File, Line: def.Line, Col: def.Col}, Name: name.Lexeme, Params: params, Body: body}, nil
 }
 
 func (p *parser) parseBlock() (*Block, error) {
@@ -189,7 +198,7 @@ func (p *parser) parseBlock() (*Block, error) {
 	if err != nil {
 		return nil, err
 	}
-	block := &Block{pos: pos{Line: lb.Line, Col: lb.Col}}
+	block := &Block{pos: pos{File: lb.File, Line: lb.Line, Col: lb.Col}}
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		st, err := p.parseStatement()
 		if err != nil {
@@ -209,7 +218,7 @@ func (p *parser) parseStatement() (Stmt, error) {
 		return p.parseDefineLike()
 	case lexer.TOKEN_FUNC:
 		t := p.peek()
-		return nil, &ParseError{Msg: "methods can only be defined at the top level", Line: t.Line, Col: t.Col}
+		return nil, &ParseError{Msg: "methods can only be defined at the top level", File: t.File, Line: t.Line, Col: t.Col}
 	case lexer.TOKEN_IF:
 		return p.parseIf()
 	case lexer.TOKEN_WHILE:
@@ -235,13 +244,15 @@ func (p *parser) parseStatement() (Stmt, error) {
 	if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate statement"); err != nil {
 		return nil, err
 	}
-	return &ExprStmt{pos: pos{Line: start.Line, Col: start.Col}, Expr: expr}, nil
+	return &ExprStmt{pos: pos{File: start.File, Line: start.Line, Col: start.Col}, Expr: expr}, nil
 }
 
 // parseDefineLike handles `def` statements:
-//   def NAME as T;
-//   def NAME as T init EXPR;
-//   def const NAME as T init EXPR;
+//
+//	def NAME as T;
+//	def NAME as T init EXPR;
+//	def const NAME as T init EXPR;
+//
 // Methods use `func` and are handled by parseMethodDef.
 func (p *parser) parseDefineLike() (Stmt, error) {
 	def, _ := p.match(lexer.TOKEN_DEFINE)
@@ -255,7 +266,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 	if v := p.peek(); v.Type == lexer.TOKEN_VARREF {
 		return nil, &ParseError{
 			Msg:  fmt.Sprintf("drop the `$` here: write `def %s` (the `$` is only for use-site references)", v.Lexeme),
-			Line: v.Line, Col: v.Col,
+			File: v.File, Line: v.Line, Col: v.Col,
 		}
 	}
 	if isConst {
@@ -265,7 +276,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 			return nil, err
 		}
 		if !isUpperOnly(name.Lexeme) {
-			return nil, &ParseError{Msg: fmt.Sprintf("constant name %q must use [A-Z] only", name.Lexeme), Line: name.Line, Col: name.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("constant name %q must use [A-Z] only", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 		}
 		if _, err := p.expect(lexer.TOKEN_AS, "after constant name"); err != nil {
 			return nil, err
@@ -285,7 +296,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 			return nil, err
 		}
 		return &DefineStmt{
-			pos:      pos{Line: def.Line, Col: def.Col},
+			pos:      pos{File: def.File, Line: def.Line, Col: def.Col},
 			IsConst:  true,
 			VarName:  name.Lexeme,
 			VarType:  tt,
@@ -315,7 +326,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 		return nil, err
 	}
 	return &DefineStmt{
-		pos:      pos{Line: def.Line, Col: def.Col},
+		pos:      pos{File: def.File, Line: def.Line, Col: def.Col},
 		VarName:  name.Lexeme,
 		VarType:  tt,
 		InitExpr: initExpr,
@@ -325,7 +336,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 // parseReturn parses `return;` or `return EXPR;`.
 func (p *parser) parseReturn() (Stmt, error) {
 	ret, _ := p.match(lexer.TOKEN_RETURN)
-	stmt := &ReturnStmt{pos: pos{Line: ret.Line, Col: ret.Col}}
+	stmt := &ReturnStmt{pos: pos{File: ret.File, Line: ret.Line, Col: ret.Col}}
 	if !p.check(lexer.TOKEN_SEMI) {
 		expr, err := p.parseExpr()
 		if err != nil {
@@ -355,7 +366,7 @@ func (p *parser) parseAssign(consumeSemi bool) (Stmt, error) {
 			return nil, err
 		}
 	}
-	return &AssignStmt{pos: pos{Line: vref.Line, Col: vref.Col}, VarName: vref.Lexeme, Value: val}, nil
+	return &AssignStmt{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, VarName: vref.Lexeme, Value: val}, nil
 }
 
 func (p *parser) parseIf() (Stmt, error) {
@@ -368,7 +379,7 @@ func (p *parser) parseIf() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	stmt := &IfStmt{pos: pos{Line: ift.Line, Col: ift.Col}, Cond: cond, Then: body}
+	stmt := &IfStmt{pos: pos{File: ift.File, Line: ift.Line, Col: ift.Col}, Cond: cond, Then: body}
 	for p.check(lexer.TOKEN_ELSEIF) {
 		p.advance()
 		c, err := p.parseParenCond("elseif")
@@ -403,7 +414,7 @@ func (p *parser) parseWhile() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &WhileStmt{pos: pos{Line: wt.Line, Col: wt.Col}, Cond: cond, Body: body}, nil
+	return &WhileStmt{pos: pos{File: wt.File, Line: wt.Line, Col: wt.Col}, Cond: cond, Body: body}, nil
 }
 
 func (p *parser) parseFor() (Stmt, error) {
@@ -427,7 +438,7 @@ func (p *parser) parseFor() (Stmt, error) {
 		initStmt = s
 	} else if !p.check(lexer.TOKEN_SEMI) {
 		t := p.peek()
-		return nil, &ParseError{Msg: fmt.Sprintf("expected for-init (define or assignment), got %s (%q)", t.Type, t.Lexeme), Line: t.Line, Col: t.Col}
+		return nil, &ParseError{Msg: fmt.Sprintf("expected for-init (define or assignment), got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 	} else {
 		p.advance() // consume `;` for empty init
 	}
@@ -453,7 +464,7 @@ func (p *parser) parseFor() (Stmt, error) {
 		step = s
 	} else if !p.check(lexer.TOKEN_RPAREN) {
 		t := p.peek()
-		return nil, &ParseError{Msg: fmt.Sprintf("expected for-step (assignment) or `)`, got %s (%q)", t.Type, t.Lexeme), Line: t.Line, Col: t.Col}
+		return nil, &ParseError{Msg: fmt.Sprintf("expected for-step (assignment) or `)`, got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 	}
 	if _, err := p.expect(lexer.TOKEN_RPAREN, "to close for-header"); err != nil {
 		return nil, err
@@ -462,7 +473,7 @@ func (p *parser) parseFor() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ForStmt{pos: pos{Line: ft.Line, Col: ft.Col}, Init: initStmt, Cond: cond, Step: step, Body: body}, nil
+	return &ForStmt{pos: pos{File: ft.File, Line: ft.Line, Col: ft.Col}, Init: initStmt, Cond: cond, Step: step, Body: body}, nil
 }
 
 func (p *parser) parseParenCond(ctx string) (Expr, error) {
@@ -498,7 +509,7 @@ func (p *parser) parseType() (Type, error) {
 		p.advance()
 		return TypeNull, nil
 	}
-	return TypeInvalid, &ParseError{Msg: fmt.Sprintf("expected type, got %s (%q)", t.Type, t.Lexeme), Line: t.Line, Col: t.Col}
+	return TypeInvalid, &ParseError{Msg: fmt.Sprintf("expected type, got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 }
 
 func isUpperOnly(s string) bool {
@@ -534,7 +545,7 @@ func (p *parser) parseOr() (Expr, error) {
 			return nil, err
 		}
 		l, c := left.Pos()
-		left = &BinaryExpr{pos: pos{Line: l, Col: c}, Op: OpOr, Left: left, Right: right}
+		left = &BinaryExpr{pos: pos{File: left.Filename(), Line: l, Col: c}, Op: OpOr, Left: left, Right: right}
 	}
 	return left, nil
 }
@@ -551,7 +562,7 @@ func (p *parser) parseAnd() (Expr, error) {
 			return nil, err
 		}
 		l, c := left.Pos()
-		left = &BinaryExpr{pos: pos{Line: l, Col: c}, Op: OpAnd, Left: left, Right: right}
+		left = &BinaryExpr{pos: pos{File: left.Filename(), Line: l, Col: c}, Op: OpAnd, Left: left, Right: right}
 	}
 	return left, nil
 }
@@ -562,7 +573,7 @@ func (p *parser) parseNot() (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpr{pos: pos{Line: t.Line, Col: t.Col}, Op: OpNot, Operand: operand}, nil
+		return &UnaryExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Op: OpNot, Operand: operand}, nil
 	}
 	return p.parseComparison()
 }
@@ -598,7 +609,7 @@ func (p *parser) parseComparison() (Expr, error) {
 			return nil, err
 		}
 		l, c := left.Pos()
-		left = &BinaryExpr{pos: pos{Line: l, Col: c}, Op: op, Left: left, Right: right}
+		left = &BinaryExpr{pos: pos{File: left.Filename(), Line: l, Col: c}, Op: op, Left: left, Right: right}
 	}
 }
 
@@ -624,7 +635,7 @@ func (p *parser) parseAdd() (Expr, error) {
 			return nil, err
 		}
 		l, c := left.Pos()
-		left = &BinaryExpr{pos: pos{Line: l, Col: c}, Op: op, Left: left, Right: right}
+		left = &BinaryExpr{pos: pos{File: left.Filename(), Line: l, Col: c}, Op: op, Left: left, Right: right}
 	}
 }
 
@@ -654,7 +665,7 @@ func (p *parser) parseMul() (Expr, error) {
 			return nil, err
 		}
 		l, c := left.Pos()
-		left = &BinaryExpr{pos: pos{Line: l, Col: c}, Op: op, Left: left, Right: right}
+		left = &BinaryExpr{pos: pos{File: left.Filename(), Line: l, Col: c}, Op: op, Left: left, Right: right}
 	}
 }
 
@@ -679,7 +690,7 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 	if _, err := p.expect(lexer.TOKEN_RPAREN, "to close call argument list"); err != nil {
 		return nil, err
 	}
-	return &CallExpr{pos: pos{Line: callee.Line, Col: callee.Col}, Callee: callee.Lexeme, Args: args}, nil
+	return &CallExpr{pos: pos{File: callee.File, Line: callee.Line, Col: callee.Col}, Callee: callee.Lexeme, Args: args}, nil
 }
 
 // parseUnaryMinus handles the `-EXPR` prefix form. It sits between
@@ -691,7 +702,7 @@ func (p *parser) parseUnaryMinus() (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpr{pos: pos{Line: t.Line, Col: t.Col}, Op: OpNeg, Operand: operand}, nil
+		return &UnaryExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Op: OpNeg, Operand: operand}, nil
 	}
 	return p.parsePrimary()
 }
@@ -703,38 +714,38 @@ func (p *parser) parsePrimary() (Expr, error) {
 		p.advance()
 		n, err := strconv.ParseInt(t.Lexeme, 10, 64)
 		if err != nil {
-			return nil, &ParseError{Msg: fmt.Sprintf("invalid int literal %q: %v", t.Lexeme, err), Line: t.Line, Col: t.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("invalid int literal %q: %v", t.Lexeme, err), File: t.File, Line: t.Line, Col: t.Col}
 		}
-		return &IntLit{pos: pos{Line: t.Line, Col: t.Col}, Value: n}, nil
+		return &IntLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: n}, nil
 	case lexer.TOKEN_FLOAT:
 		p.advance()
 		f, err := strconv.ParseFloat(t.Lexeme, 64)
 		if err != nil {
-			return nil, &ParseError{Msg: fmt.Sprintf("invalid float literal %q: %v", t.Lexeme, err), Line: t.Line, Col: t.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("invalid float literal %q: %v", t.Lexeme, err), File: t.File, Line: t.Line, Col: t.Col}
 		}
-		return &FloatLit{pos: pos{Line: t.Line, Col: t.Col}, Value: f}, nil
+		return &FloatLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: f}, nil
 	case lexer.TOKEN_STRING:
 		p.advance()
-		return &StringLit{pos: pos{Line: t.Line, Col: t.Col}, Value: t.Lexeme}, nil
+		return &StringLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: t.Lexeme}, nil
 	case lexer.TOKEN_TRUE:
 		p.advance()
-		return &BoolLit{pos: pos{Line: t.Line, Col: t.Col}, Value: true}, nil
+		return &BoolLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: true}, nil
 	case lexer.TOKEN_FALSE:
 		p.advance()
-		return &BoolLit{pos: pos{Line: t.Line, Col: t.Col}, Value: false}, nil
+		return &BoolLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: false}, nil
 	case lexer.TOKEN_NULL:
 		p.advance()
-		return &NullLit{pos: pos{Line: t.Line, Col: t.Col}}, nil
+		return &NullLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}}, nil
 	case lexer.TOKEN_VARREF:
 		p.advance()
-		return &VarExpr{pos: pos{Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
+		return &VarExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
 	case lexer.TOKEN_IDENT:
 		// A bare IDENT in expression context is either a function call
 		// (`name(...)`) or a constant reference (`MAX`). Look at the next
 		// token to decide.
 		p.advance()
 		if !p.check(lexer.TOKEN_LPAREN) {
-			return &ConstRefExpr{pos: pos{Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
+			return &ConstRefExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
 		}
 		return p.parseCallTail(t)
 	case lexer.TOKEN_INT_TYPE, lexer.TOKEN_FLOAT_TYPE, lexer.TOKEN_STRING_TYPE, lexer.TOKEN_BOOL_TYPE:
@@ -745,7 +756,7 @@ func (p *parser) parsePrimary() (Expr, error) {
 		if p.peekN(1).Type != lexer.TOKEN_LPAREN {
 			return nil, &ParseError{
 				Msg:  fmt.Sprintf("type name %q can only appear in expression position when called as a conversion: %s(...)", t.Lexeme, t.Lexeme),
-				Line: t.Line, Col: t.Col,
+				File: t.File, Line: t.Line, Col: t.Col,
 			}
 		}
 		p.advance() // consume the type keyword
@@ -761,5 +772,5 @@ func (p *parser) parsePrimary() (Expr, error) {
 		}
 		return e, nil
 	}
-	return nil, &ParseError{Msg: fmt.Sprintf("unexpected token %s (%q) in expression", t.Type, t.Lexeme), Line: t.Line, Col: t.Col}
+	return nil, &ParseError{Msg: fmt.Sprintf("unexpected token %s (%q) in expression", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 }

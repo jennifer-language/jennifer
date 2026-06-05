@@ -83,8 +83,12 @@ surrounding quotes.
 
 ### Position tracking
 
-Every token records `Line` and `Col` (both 1-based). The `advance()` helper bumps
-`line` on `\n` and otherwise bumps `col`.
+Every token records `Line` and `Col` (both 1-based) and `File` (the absolute
+path supplied to `TokenizeWithFile`, or `""` for unattributed input). The
+`advance()` helper bumps `line` on `\n` and otherwise bumps `col`. `File`
+flows from the token to the AST node (every node embeds `pos{File, Line,
+Col}`), so errors raised inside an imported `.j` still point at the
+imported file - see "Errors and positions" below.
 
 ### Keywords
 
@@ -259,8 +263,9 @@ the parser implements is the one in [Grammar (M3)](#grammar-m3---ebnf) above.
 | `BinaryExpr`  | expr  | `Op BinaryOp`, `Left`, `Right` (comparison/logical ops return bool; `and`/`or` short-circuit at eval time) |
 | `UnaryExpr`   | expr  | `Op UnaryOp` (`OpNeg`/`OpNot`), `Operand` |
 
-Every node embeds a `pos{Line, Col}` for error reporting and exposes it via
-`Node.Pos()`.
+Every node embeds a `pos{File, Line, Col}` for error reporting and exposes it
+via `Node.Pos()` (line/col) and `Node.Filename()` (file path). The file is
+populated from the originating token so cross-file diagnostics work.
 
 `Sprint(node)` produces a stable textual representation used by tests.
 
@@ -436,9 +441,33 @@ with the standard `strings` package, which it depends on heavily.
 
 ### Runtime errors
 
-`*runtimeError` carries optional `Line`/`Col`. Errors render as
-`runtime error at L:C: <msg>` so the CLI's `extractPos` can find the position
-and print a caret under the offending source line.
+`*runtimeError` carries optional `File`/`Line`/`Col`. Errors render as
+`runtime error at FILE:L:C: <msg>` (or `runtime error at L:C: <msg>` when
+the file is unknown). All four Jennifer error types - `*lexer.LexError`,
+`*preproc.PreprocessError`, `*parser.ParseError`, and `*runtimeError` -
+implement a small `Position() (file string, line, col int)` interface. The
+CLI uses that interface (no string parsing) to look up the right file and
+print a caret under the offending source line.
+
+### Errors and positions (cross-file)
+
+The pipeline plumbs file information through three layers:
+
+1. The lexer attaches the source file path to every token (`Token.File`).
+   `TokenizeWithFile(source, file)` is the entry point; the no-arg
+   `Tokenize` leaves `File` blank for unattributed input.
+2. The preprocessor preserves each spliced token's `File` field when
+   resolving `import "path.j";`, so tokens from an imported file keep that
+   file's path, line, and column.
+3. The parser propagates `File` from tokens to every AST node (each
+   `pos` struct carries `File`, `Line`, `Col`). Synthesized nodes (e.g.
+   `BinaryExpr`) copy the file from the left operand.
+
+When the interpreter raises a `*runtimeError`, it pulls file/line/col from
+the offending node via a small `posFor(node)` helper. The CLI's
+`printErrorContext` type-asserts the `positioned` interface, and if the
+reported file differs from the program's main file it loads that file from
+disk before slicing out the snippet to display.
 
 ---
 

@@ -105,18 +105,19 @@ func runFile(path string) int {
 	tokens, err := lexer.TokenizeWithFile(src, absPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
-		printErrorContext(src, err)
+		printErrorContext(src, absPath, err)
 		return 1
 	}
 	tokens, err = preproc.Process(tokens, baseDir, absPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
+		printErrorContext(src, absPath, err)
 		return 1
 	}
 	prog, err := parser.ParseTokens(tokens)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
-		printErrorContext(src, err)
+		printErrorContext(src, absPath, err)
 		return 1
 	}
 	in := interpreter.New()
@@ -126,20 +127,45 @@ func runFile(path string) int {
 	stringslib.Install(in)
 	if err := in.Run(prog); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
-		printErrorContext(src, err)
+		printErrorContext(src, absPath, err)
 		return 1
 	}
 	return 0
 }
 
+// positioned is the interface every Jennifer error type implements. It lets
+// the CLI extract structured position info (file, line, col) without parsing
+// the error's string form.
+type positioned interface {
+	Position() (file string, line, col int)
+}
+
 // printErrorContext shows the offending source line with a caret when the error
-// carries a line:col. Best-effort: it tolerates errors without positions.
-func printErrorContext(src string, err error) {
-	line, col, ok := extractPos(err)
+// carries a position. If the error originates in a different file than `src`
+// (e.g. inside an imported `.j`), it loads that file and prints the snippet
+// from there. Best-effort: silently does nothing if the file can't be read.
+func printErrorContext(src, mainFile string, err error) {
+	p, ok := err.(positioned)
 	if !ok {
 		return
 	}
-	lines := strings.Split(src, "\n")
+	file, line, col := p.Position()
+	if line == 0 && col == 0 {
+		return
+	}
+
+	// If the error names a different file, load it. Otherwise use src.
+	source := src
+	if file != "" && file != mainFile && file != "<stdin>" {
+		bytes, ferr := os.ReadFile(file)
+		if ferr != nil {
+			// Can't load the imported file - skip the snippet.
+			return
+		}
+		source = string(bytes)
+	}
+
+	lines := strings.Split(source, "\n")
 	if line < 1 || line > len(lines) {
 		return
 	}
@@ -169,36 +195,4 @@ func caretIndent(srcLine string, col int) string {
 		i++
 	}
 	return b.String()
-}
-
-// extractPos parses our error messages of the form "... at LINE:COL: ..." back into ints.
-// Cheaper and simpler than threading a positioned-error interface through every layer for M1.
-func extractPos(err error) (int, int, bool) {
-	if err == nil {
-		return 0, 0, false
-	}
-	msg := err.Error()
-	i := strings.Index(msg, " at ")
-	if i < 0 {
-		return 0, 0, false
-	}
-	rest := msg[i+4:]
-	colonEnd := strings.Index(rest, ":")
-	if colonEnd < 0 {
-		return 0, 0, false
-	}
-	colonEnd2 := strings.Index(rest[colonEnd+1:], ":")
-	if colonEnd2 < 0 {
-		return 0, 0, false
-	}
-	lineStr := rest[:colonEnd]
-	colStr := rest[colonEnd+1 : colonEnd+1+colonEnd2]
-	var line, col int
-	if _, err := fmt.Sscanf(lineStr, "%d", &line); err != nil {
-		return 0, 0, false
-	}
-	if _, err := fmt.Sscanf(colStr, "%d", &col); err != nil {
-		return 0, 0, false
-	}
-	return line, col, true
 }

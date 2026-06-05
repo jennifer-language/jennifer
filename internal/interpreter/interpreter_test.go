@@ -1074,8 +1074,8 @@ func TestMathMinMax(t *testing.T) {
 		{"min(7, 3)", "3", "int"},
 		{"max(3, 7)", "7", "int"},
 		{"max(7, 3)", "7", "int"},
-		{"min(3, 2.5)", "2.5", "float"},     // mixed -> float
-		{"max(3, 2.5)", "3.0", "float"},     // mixed -> float (int promoted)
+		{"min(3, 2.5)", "2.5", "float"}, // mixed -> float
+		{"max(3, 2.5)", "3.0", "float"}, // mixed -> float (int promoted)
 		{"min(1.0, 2.0)", "1.0", "float"},
 	}
 	for _, c := range cases {
@@ -1401,7 +1401,7 @@ func TestStringsSubstring(t *testing.T) {
 		{`substring("hello", 0)`, "hello"},
 		{`substring("hello", 2)`, "llo"},
 		{`substring("hello", 5)`, ""},
-		{`substring("héllo", 2)`, "llo"},   // 2-arg form, rune-indexed
+		{`substring("héllo", 2)`, "llo"}, // 2-arg form, rune-indexed
 	}
 	for _, c := range cases {
 		out, err := run(t, `
@@ -1476,8 +1476,8 @@ func TestM2Comparisons(t *testing.T) {
 		{"3 >= 3", "true"},
 		{"3 == 3", "true"},
 		{"3 == 4", "false"},
-		{"1 == 1.0", "true"},      // int/float promotion in equality
-		{`"a" == "a"`, "true"},    // string equality
+		{"1 == 1.0", "true"},   // int/float promotion in equality
+		{`"a" == "a"`, "true"}, // string equality
 		{`"a" == "b"`, "false"},
 		{"true == true", "true"},
 	}

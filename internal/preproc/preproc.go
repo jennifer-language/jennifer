@@ -37,6 +37,11 @@ func (e *PreprocessError) Error() string {
 	return fmt.Sprintf("preprocess error at %s:%d:%d: %s", e.File, e.Line, e.Col, e.Msg)
 }
 
+// Position implements the positioned-error interface used by the CLI.
+func (e *PreprocessError) Position() (file string, line, col int) {
+	return e.File, e.Line, e.Col
+}
+
 // Process expands all file imports in `tokens`.
 // `baseDir` is the directory used to resolve relative `.j` filenames.
 // `selfPath`, if non-empty, is the absolute path of the file that produced
