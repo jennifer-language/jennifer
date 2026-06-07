@@ -113,7 +113,17 @@ func TestParseErrors(t *testing.T) {
 		// `42;` and `def x ...;` are now both valid at top level - no
 		// equivalent rejection test belongs here.
 		{"truly unknown type", `func app() { def x as widget init 1; }`, "expected type"},
-		{"const needs uppercase", `func app() { def const lower as int init 1; }`, "must use [A-Z]"},
+		{"const needs uppercase", `func app() { def const lower as int init 1; }`, "must be uppercase"},
+		{"const rejects trailing underscore", `func app() { def const MAX_ as int init 1; }`, "may not end with"},
+		{"const rejects double-underscore-then-trailing", `func app() { def const MAX__ as int init 1; }`, "may not end with"},
+		{"const rejects lowercase with underscore", `func app() { def const max_int as int init 1; }`, "must be uppercase"},
+		{"const rejects consecutive underscores", `func app() { def const MAX__INT as int init 1; }`, "consecutive"},
+		{"const rejects four-in-a-row underscores", `func app() { def const MAX____RETRIES as int init 1; }`, "consecutive"},
+		{"var rejects underscore", `func app() { def my_var as int init 1; }`, "may not contain"},
+		{"method name rejects underscore", `func my_method() {}`, "may not contain"},
+		{"param rejects underscore", `func f(my_arg as int) {}`, "may not contain"},
+		{"library name rejects underscore", `use my_lib;`, "may not contain"},
+		{"call site rejects underscore", `foo_bar();`, "may not contain"},
 		{"const needs init", `func app() { def const X as int; }`, "constants require"},
 	}
 	for _, c := range bad {
@@ -124,6 +134,25 @@ func TestParseErrors(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %q does not contain %q", c.name, err.Error(), c.want)
+		}
+	}
+}
+
+// TestConstNameAccepts exercises the constant naming rule's accepting side:
+// uppercase chunks separated by single `_` characters. The rule is
+// `[A-Z]+(_[A-Z]+)*`, so consecutive underscores like `MAX__INT` are
+// rejected (covered by TestParseErrors above).
+func TestConstNameAccepts(t *testing.T) {
+	good := []string{
+		`def const A as int init 1;`,
+		`def const MAX as int init 1;`,
+		`def const MAX_RETRIES as int init 1;`,
+		`def const HTTP_OK as int init 200;`,
+		`def const A_B_C_D as int init 1;`,
+	}
+	for _, src := range good {
+		if _, err := Parse(src); err != nil {
+			t.Errorf("%q: unexpected parse error: %v", src, err)
 		}
 	}
 }

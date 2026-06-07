@@ -397,6 +397,25 @@ printf("%d", MAX);
 	}
 }
 
+// TestConstNameWithUnderscore exercises the relaxed constant naming rule:
+// constants may carry interior `_` separators like MAX_RETRIES. The
+// lexer keeps the name as a single IDENT and the interpreter treats it
+// like any other constant.
+func TestConstNameWithUnderscore(t *testing.T) {
+	out, err := run(t, `
+use io;
+def const MAX_RETRIES as int init 3;
+def const HTTP_OK as int init 200;
+printf("%d %d", MAX_RETRIES, HTTP_OK);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "3 200" {
+		t.Errorf("got %q, want %q", out, "3 200")
+	}
+}
+
 func TestConstInExpression(t *testing.T) {
 	out, err := run(t, `
 use io;

@@ -117,6 +117,39 @@ func TestTokenizeRejectsUnterminatedString(t *testing.T) {
 	}
 }
 
+// TestTokenizeIdentifierUnderscores covers the constant-name relaxation:
+// the lexer accepts `_` inside IDENTs (so `MAX_RETRIES` is a single token),
+// but rejects identifiers that *end* with `_` since no name kind allows
+// that. A leading `_` is still rejected because `_` isn't an isIdentStart.
+//
+// The lexer deliberately permits consecutive `_` (e.g. `MAX__INT`); the
+// "no consecutive underscores" rule applies only to constant names and
+// is enforced by the parser, so the lexer can stay context-free.
+func TestTokenizeIdentifierUnderscores(t *testing.T) {
+	// Accepted by the lexer (parser may still reject for its own reasons).
+	for _, src := range []string{"MAX_RETRIES", "MAX__INT", "FOO_BAR_BAZ", "A_B"} {
+		toks, err := Tokenize(src)
+		if err != nil {
+			t.Errorf("%q: unexpected lex error: %v", src, err)
+			continue
+		}
+		if len(toks) < 1 || toks[0].Type != TOKEN_IDENT || toks[0].Lexeme != src {
+			t.Errorf("%q: expected single IDENT lexeme, got %+v", src, toks)
+		}
+	}
+	// Rejected: trailing `_`.
+	for _, src := range []string{"MAX_", "FOO__", "X_"} {
+		if _, err := Tokenize(src); err == nil {
+			t.Errorf("%q: expected lex error for trailing `_`", src)
+		}
+	}
+	// Rejected: leading `_` - the lexer never starts an identifier on `_`,
+	// so this falls through to "unexpected character".
+	if _, err := Tokenize("_MAX"); err == nil {
+		t.Error("expected lex error for leading `_`")
+	}
+}
+
 func TestTokenizeFloatLiterals(t *testing.T) {
 	cases := []struct {
 		src    string

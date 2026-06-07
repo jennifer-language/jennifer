@@ -305,7 +305,11 @@ func (l *Lexer) readNumber(startLine, startCol int) (Token, error) {
 
 func (l *Lexer) readIdentifierOrKeyword(startLine, startCol int) (Token, error) {
 	var b strings.Builder
-	for l.pos < len(l.src) && isIdentPart(l.src[l.pos]) {
+	// Bare IDENTs may include `_` in the middle to support constant names
+	// like MAX_RETRIES. The parser enforces per-context rules: constants
+	// accept `[A-Z][A-Z_]*[A-Z]` (or single [A-Z]); variables, methods and
+	// parameters reject `_` entirely.
+	for l.pos < len(l.src) && isIdentPartLoose(l.src[l.pos]) {
 		b.WriteRune(l.src[l.pos])
 		l.advance()
 	}
@@ -316,14 +320,32 @@ func (l *Lexer) readIdentifierOrKeyword(startLine, startCol int) (Token, error) 
 	if len(name) > 64 {
 		return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("identifier %q exceeds 64 characters", name), Line: startLine, Col: startCol}
 	}
+	// Trailing `_` is never legal in any identifier kind.
+	if name[len(name)-1] == '_' {
+		return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("identifier %q may not end with `_`", name), Line: startLine, Col: startCol}
+	}
 	return Token{Type: TOKEN_IDENT, Lexeme: name, Line: startLine, Col: startCol}, nil
 }
 
-// Spec: variable/constant/method names use [A-Za-z]. Digits and underscores are NOT allowed.
+// isIdentStart: identifiers (variable / method / constant / parameter
+// names, plus library names) must start with a letter. Digits and `_`
+// are explicitly rejected as the first character.
 func isIdentStart(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
+// isIdentPart: variable references (`$name`) and similar contexts where
+// the spec keeps names letters-only. Constant identifiers use the looser
+// rule below.
 func isIdentPart(r rune) bool {
 	return isIdentStart(r)
+}
+
+// isIdentPartLoose: bare-IDENT continuation. Accepts `_` so the lexer can
+// produce constant names like MAX_RETRIES as a single token. The trailing-
+// `_` and per-context rules (uppercase-only for constants, no `_` at all
+// for variables / methods / parameters) are enforced by the lexer's
+// trailing-character check and by the parser at the relevant def sites.
+func isIdentPartLoose(r rune) bool {
+	return isIdentStart(r) || r == '_'
 }

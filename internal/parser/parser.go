@@ -141,6 +141,9 @@ func (p *parser) parseImport() (*ImportStmt, error) {
 	if err != nil {
 		return nil, err
 	}
+	if containsUnderscore(name.Lexeme) {
+		return nil, &ParseError{Msg: fmt.Sprintf("library name %q may not contain `_`", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+	}
 	if _, err := p.expect(lexer.TOKEN_SEMI, "after `use` statement"); err != nil {
 		return nil, err
 	}
@@ -152,6 +155,9 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 	name, err := p.expect(lexer.TOKEN_IDENT, "after `func`")
 	if err != nil {
 		return nil, err
+	}
+	if containsUnderscore(name.Lexeme) {
+		return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase: `myMethod`)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 	}
 	if _, err := p.expect(lexer.TOKEN_LPAREN, "after method name"); err != nil {
 		return nil, err
@@ -169,6 +175,9 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 			pname, err := p.expect(lexer.TOKEN_IDENT, "for parameter name")
 			if err != nil {
 				return nil, err
+			}
+			if containsUnderscore(pname.Lexeme) {
+				return nil, &ParseError{Msg: fmt.Sprintf("parameter name %q may not contain `_` (use camelCase)", pname.Lexeme), File: pname.File, Line: pname.Line, Col: pname.Col}
 			}
 			if _, err := p.expect(lexer.TOKEN_AS, "after parameter name"); err != nil {
 				return nil, err
@@ -275,8 +284,8 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !isUpperOnly(name.Lexeme) {
-			return nil, &ParseError{Msg: fmt.Sprintf("constant name %q must use [A-Z] only", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+		if !isValidConstName(name.Lexeme) {
+			return nil, &ParseError{Msg: fmt.Sprintf("constant name %q must be uppercase [A-Z]+ with single `_` separators (no leading, trailing, or consecutive `_`)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 		}
 		if _, err := p.expect(lexer.TOKEN_AS, "after constant name"); err != nil {
 			return nil, err
@@ -307,6 +316,9 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 	name, err := p.expect(lexer.TOKEN_IDENT, "after `def`")
 	if err != nil {
 		return nil, err
+	}
+	if containsUnderscore(name.Lexeme) {
+		return nil, &ParseError{Msg: fmt.Sprintf("variable name %q may not contain `_` (use camelCase; `_` is only allowed in constant names)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 	}
 	if _, err := p.expect(lexer.TOKEN_AS, "after variable name"); err != nil {
 		return nil, err
@@ -512,16 +524,51 @@ func (p *parser) parseType() (Type, error) {
 	return TypeInvalid, &ParseError{Msg: fmt.Sprintf("expected type, got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 }
 
-func isUpperOnly(s string) bool {
+// isValidConstName reports whether s matches the constant naming rule:
+// `[A-Z]+(_[A-Z]+)*` - one or more uppercase chunks separated by single
+// `_` characters. Equivalently: every `_` must be immediately followed by
+// `[A-Z]`, never another `_` and never the end of the name. The lexer
+// already refuses identifiers that start with `_` or end with `_`; this
+// function additionally enforces the uppercase requirement and the
+// "no consecutive `_`" rule.
+//
+// Accepted:  A, MAX, MAX_RETRIES, HTTP_OK, A_B_C
+// Rejected:  _MAX, MAX_, max_int, MAX__INT, MAX___RETRIES
+func isValidConstName(s string) bool {
 	if s == "" {
 		return false
 	}
+	if s[0] == '_' || s[len(s)-1] == '_' {
+		return false
+	}
+	prevUnderscore := false
 	for _, r := range s {
+		if r == '_' {
+			if prevUnderscore {
+				return false
+			}
+			prevUnderscore = true
+			continue
+		}
 		if r < 'A' || r > 'Z' {
 			return false
 		}
+		prevUnderscore = false
 	}
 	return true
+}
+
+// containsUnderscore is used by variable / method / parameter validation:
+// those kinds keep the letters-only rule `[A-Za-z]{1,64}`, so any `_` is
+// a parse error. We check here rather than in the lexer because the lexer
+// accepts `_` in bare IDENTs to support constants.
+func containsUnderscore(s string) bool {
+	for _, r := range s {
+		if r == '_' {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *parser) parseExpr() (Expr, error) {
@@ -673,6 +720,13 @@ func (p *parser) parseMul() (Expr, error) {
 // callee token (already consumed) is passed in so we can attach the right
 // position and callee lexeme.
 func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
+	// Type-keyword callers (int(...), float(...), etc.) come through here too
+	// with TOKEN_INT_TYPE / TOKEN_FLOAT_TYPE / .. tokens - their lexemes are
+	// always `int`/`float`/`string`/`bool` and never contain `_`. The check
+	// is therefore only meaningful for actual IDENT callees.
+	if callee.Type == lexer.TOKEN_IDENT && containsUnderscore(callee.Lexeme) {
+		return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", callee.Lexeme), File: callee.File, Line: callee.Line, Col: callee.Col}
+	}
 	p.advance() // consume LPAREN
 	var args []Expr
 	if !p.check(lexer.TOKEN_RPAREN) {
