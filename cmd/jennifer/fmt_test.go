@@ -15,7 +15,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
-	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
+	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
@@ -136,7 +136,7 @@ func runProgramOutput(path, src string) (string, error) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
-	metalib.Install(in)
+	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return "", err
 	}

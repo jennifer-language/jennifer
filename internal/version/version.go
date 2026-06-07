@@ -15,6 +15,7 @@ package version
 //   - "dev"                         when built without the version ldflag
 //
 // The string is read in two places: the CLI's `help` output and the
-// `meta` library's `VERSION` constant (referenced from Jennifer code as
-// the bare identifier `VERSION` after `use meta;`).
+// `core` library's `JENNIFER_VERSION` constant (referenced from Jennifer
+// code as the bare identifier `JENNIFER_VERSION` - the `core` library
+// that owns it is auto-loaded so no `use` statement is needed).
 var Version = "dev"

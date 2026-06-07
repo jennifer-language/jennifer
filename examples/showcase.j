@@ -5,15 +5,15 @@
 // standard-library function that ships at M5. Used as a golden
 // integration test by cmd/jennifer/examples_test.go.
 //
-// VERSION (from `use meta;`) is intentionally NOT printed - its value
-// depends on git state and would make the golden file non-deterministic.
-// We exercise the constant via typeOf() instead.
+// JENNIFER_VERSION (from the auto-loaded `core` library) is
+// intentionally NOT printed - its value depends on git state and would
+// make the golden file non-deterministic. We exercise the constant via
+// typeOf() instead.
 
 use io;
 use convert;
 use math;
 use strings;
-use meta;
 import "showcase/helpers.j";
 
 // --- Constants: simple, underscored, library-provided ---
@@ -139,9 +139,9 @@ printf("repeat        = %s\n", repeat("ab", 3));
 printf("substring 0..5 = %s\n", substring($sample, 0, 5));
 printf("substring 7..  = %s\n", substring($sample, 7));
 
-// --- meta library: prove VERSION is wired without baking its value into the golden ---
-printf("=== meta ===\n");
-printf("typeOf(VERSION) = %s\n", typeOf(VERSION));
+// --- core (auto-loaded): prove JENNIFER_VERSION is wired without baking its value into the golden ---
+printf("=== core ===\n");
+printf("typeOf(JENNIFER_VERSION) = %s\n", typeOf(JENNIFER_VERSION));
 
 // --- Constants in expressions ---
 printf("=== constants ===\n");

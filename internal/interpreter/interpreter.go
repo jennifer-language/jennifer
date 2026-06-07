@@ -47,7 +47,7 @@ type Interpreter struct {
 }
 
 func New() *Interpreter {
-	return &Interpreter{
+	in := &Interpreter{
 		Out:          os.Stdout,
 		Builtins:     map[string]builtinEntry{},
 		LibConstants: map[string]libConstantEntry{},
@@ -55,7 +55,19 @@ func New() *Interpreter {
 		imported:     map[string]bool{},
 		methods:      map[string]*parser.MethodDef{},
 	}
+	// `core` is auto-loaded: its builtins and constants are visible without
+	// the user writing `use core;`. The library itself registers via
+	// corelib.Install (called by the CLI / tests, just like other libraries);
+	// the auto-import here is what makes its names resolve without ceremony.
+	// Explicit `use core;` in source is rejected at Run-time (see below).
+	in.imported[CoreLibraryName] = true
+	return in
 }
+
+// CoreLibraryName is the reserved name of the auto-loaded library. Lives
+// here (rather than in internal/lib/core) so the interpreter can reject
+// `use core;` without importing the library package and creating a cycle.
+const CoreLibraryName = "core"
 
 // Register attaches a builtin function under the given Jennifer library name.
 // Libraries call this at install time; programs make those builtins callable
@@ -74,14 +86,20 @@ func (i *Interpreter) RegisterConst(lib, name string, value Value) {
 }
 
 // availableLibsString returns a sorted, comma-separated list of registered
-// library names for use in error messages. "(none)" if nothing was installed.
+// library names for use in error messages. `core` is excluded because it's
+// auto-loaded - suggesting `use core;` to a user who typoed something would
+// just lead them to a second, different error. "(none)" if nothing else
+// was installed.
 func (i *Interpreter) availableLibsString() string {
-	if len(i.knownLibs) == 0 {
-		return "(none)"
-	}
 	names := make([]string, 0, len(i.knownLibs))
 	for n := range i.knownLibs {
+		if n == CoreLibraryName {
+			continue
+		}
 		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return "(none)"
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
@@ -134,8 +152,18 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	}
 	// Imports: every `use NAME;` must refer to a library that has at least
 	// one registered builtin. Silent acceptance of unknown libraries would
-	// hide typos like `use stdio;` (instead of `io`).
+	// hide typos like `use stdio;` (instead of `io`). The `core` library is
+	// a special case: it's auto-loaded by New(), so an explicit `use core;`
+	// is rejected to keep the source honest about which libraries are
+	// expressly invoked.
 	for _, imp := range prog.Imports {
+		if imp.Name == CoreLibraryName {
+			file, line, col := posFor(imp)
+			return &runtimeError{
+				Msg:  fmt.Sprintf("library %q is automatically available; remove this `use %s;` statement", imp.Name, imp.Name),
+				File: file, Line: line, Col: col,
+			}
+		}
 		if !i.knownLibs[imp.Name] {
 			file, line, col := posFor(imp)
 			return &runtimeError{
@@ -188,6 +216,13 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 		i.Out = os.Stdout
 	}
 	for _, imp := range prog.Imports {
+		if imp.Name == CoreLibraryName {
+			file, line, col := posFor(imp)
+			return Null(), &runtimeError{
+				Msg:  fmt.Sprintf("library %q is automatically available; remove this `use %s;` statement", imp.Name, imp.Name),
+				File: file, Line: line, Col: col,
+			}
+		}
 		if !i.knownLibs[imp.Name] {
 			file, line, col := posFor(imp)
 			return Null(), &runtimeError{

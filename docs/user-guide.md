@@ -26,9 +26,9 @@ make build-go
 
 The `make` targets regenerate `internal/version/version_gen.go` from git
 state before invoking the toolchain, so `./jennifer version` always
-reflects the current commit. See [libraries/meta.md](libraries/meta.md)
-for the `VERSION` string format and how programs can read it via
-`use meta;`.
+reflects the current commit. See [libraries/core.md](libraries/core.md)
+for the `JENNIFER_VERSION` string format. `JENNIFER_VERSION` is
+auto-loaded - it's in scope in every program without any `use` statement.
 
 You can also pipe source in on stdin by passing `-` as the filename:
 
@@ -451,7 +451,7 @@ index.
 | `convert` | `use convert;` | `int`, `float`, `string`, `bool`, `typeOf` - explicit casts     | [libraries/convert.md](libraries/convert.md)   |
 | `math`    | `use math;`    | `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`; constants `PI`, `E` | [libraries/math.md](libraries/math.md)         |
 | `strings` | `use strings;` | `len`, `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring` | [libraries/strings.md](libraries/strings.md)   |
-| `meta`    | `use meta;`    | `VERSION` - the interpreter's build version string             | [libraries/meta.md](libraries/meta.md)         |
+| `core`    | *(auto-loaded)* | `JENNIFER_VERSION` - the interpreter's build version string. No `use` needed; `use core;` is a runtime error. | [libraries/core.md](libraries/core.md)         |
 
 See [libraries/index.md](libraries/index.md) for a catalog with code
 samples and the library-organization principles.

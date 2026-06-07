@@ -74,8 +74,8 @@ replace       = Hello, Jennifer
 repeat        = ababab
 substring 0..5 = Hello
 substring 7..  = World
-=== meta ===
-typeOf(VERSION) = string
+=== core ===
+typeOf(JENNIFER_VERSION) = string
 === constants ===
 MAX=5 MAX_RETRIES=3 HTTP_OK=200 PI_APPROX=3.14
 === done ===

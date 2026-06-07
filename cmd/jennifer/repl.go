@@ -15,7 +15,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
-	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
+	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
@@ -38,7 +38,7 @@ func runRepl() int {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
-	metalib.Install(in)
+	corelib.Install(in)
 
 	cwd, err := os.Getwd()
 	if err != nil {

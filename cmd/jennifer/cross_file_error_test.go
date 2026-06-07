@@ -14,7 +14,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	"github.com/mplx/jennifer-lang/internal/lib/io"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
-	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
+	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
@@ -118,6 +118,6 @@ func runPipeline(mainPath, src string) error {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
-	metalib.Install(in)
+	corelib.Install(in)
 	return in.Run(prog)
 }

@@ -73,7 +73,7 @@ reference docs are split per library:
 - [libraries/convert.md](../libraries/convert.md) - `int`, `float`, `string`, `bool`, `typeOf`
 - [libraries/math.md](../libraries/math.md) - `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `PI`, `E`
 - [libraries/strings.md](../libraries/strings.md) - `len`, `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `repeat`, `substring`
-- [libraries/meta.md](../libraries/meta.md) - `VERSION` (interpreter build version)
+- [libraries/core.md](../libraries/core.md) - auto-loaded; `VERSION` (interpreter build version)
 - [libraries/index.md](../libraries/index.md) - catalog and organizing principles
 
 What follows is the implementation contract, not the user-facing API.

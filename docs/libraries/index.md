@@ -11,7 +11,7 @@ to the reference doc for each.
 | `convert` | `use convert;`  | `int`, `float`, `string`, `bool`, `typeOf` - explicit casts; canonical-only `bool` conversion                                              | [convert.md](convert.md)   |
 | `math`    | `use math;`     | `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`; constants `PI`, `E`                                                          | [math.md](math.md)         |
 | `strings` | `use strings;`  | `len`, `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring` | [strings.md](strings.md)   |
-| `meta`    | `use meta;`     | `VERSION` - the interpreter's build version string                                                                                         | [meta.md](meta.md)         |
+| `core`    | *(auto-loaded)* | `JENNIFER_VERSION` - the interpreter's build version string. Pre-imported; writing `use core;` is a runtime error.                          | [core.md](core.md)         |
 
 A quick taste:
 
@@ -19,9 +19,8 @@ A quick taste:
 use io;
 use math;
 use strings;
-use meta;
 
-printf("Jennifer %s\n", VERSION);
+printf("Jennifer %s\n", JENNIFER_VERSION);   // auto-loaded from core
 printf("pi is roughly %f\n", PI);
 printf("sqrt(2) = %f\n", sqrt(2));
 printf("upper: %s\n", upper("hello"));

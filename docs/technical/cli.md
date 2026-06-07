@@ -108,7 +108,7 @@ The default is `"dev"`; the `Makefile` runs `scripts/gen-version.sh` before
 each build, which writes `internal/version/version_gen.go` containing a
 small `init()` that overwrites `Version` with the output of
 `scripts/version.sh` (a `git describe --tags --long` derivative; see
-[../libraries/meta.md](../libraries/meta.md) for the format).
+[../libraries/core.md](../libraries/core.md) for the format).
 
 This codegen path replaces the more conventional `go build -ldflags
 "-X .Version=..."` because TinyGo 0.41 silently ignores the `-X`
@@ -119,10 +119,11 @@ Two consumers read `version.Version`:
 
 - `cmd/jennifer/main.go` prints it in the `help` banner and as the body
   of the `version` subcommand.
-- `internal/lib/meta/metalib.go` mirrors it into the interpreter as the
-  `VERSION` constant, so Jennifer programs can read it via
-  `use meta; printf("%s\n", VERSION);`.
+- `internal/lib/core/corelib.go` mirrors it into the interpreter as the
+  `JENNIFER_VERSION` constant. `core` is auto-loaded, so Jennifer
+  programs read it directly: `printf("%s\n", JENNIFER_VERSION);` (no
+  `use` statement).
 
-`go test ./...` skips codegen and uses the default `"dev"`. The meta-lib
+`go test ./...` skips codegen and uses the default `"dev"`. The core-lib
 test only checks that the constant matches `version.Version`, not a
 specific value, so it stays robust across builds.
