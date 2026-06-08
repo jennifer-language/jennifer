@@ -76,3 +76,23 @@ choice of rendering); a shared `null=empty|null|literal(STR)`. See
 Also deferred to a later milestone (not rejected, just out of M7
 scope): the `%a` aggregate verb for lists and maps and the
 `null=skip` mode that only makes sense with `%a`.
+
+## printf literal-pipe lookahead
+
+Considered during M7 as a way to soften the breaking change to pre-M7
+format strings: treat the `|` after a verb as a literal whenever the
+*next* byte isn't a lowercase letter, so `"%s|%s"` would keep working
+because `|%` isn't a key start.
+
+Rejected because the rule is context-sensitive in exactly the wrong
+direction. A user who writes `"%s|fill text"` (intending literal `|`)
+would suddenly hit a parse error because `fill` is a valid-looking
+key, while `"%s|9 lives"` would silently keep working because `9`
+isn't a letter. The footgun moves around with whatever word follows
+the verb.
+
+The chosen rule is the strict one: `|` immediately after a verb
+always starts a modifier list. To write a literal `|` in that
+position, double it (`||`), parallel to the `%%` escape for a
+literal `%`. The rule is uniform and easy to remember; the migration
+cost was small (five test strings in this repo).

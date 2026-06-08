@@ -148,121 +148,63 @@ implementation contract.
 
 ---
 
-## M7 - printf modifier
+## M7 - printf modifiers, stdin input, comment/division swap
 
-- **line comments + integer division** - done: line comments were moved to `#`
-  so the operator is unambiguous and a Jennifer file can begin with
-  `#!/usr/bin/env -S jennifer run`; integer division is now '//', div keyword
-  is removed (**BREAKING CHANGE**)
-- **(s)printf format-verb modifiers** - done: each format verb (except
-  `%v`) accepts a pipe-separated, key=value modifier list:
-  `%verb[|key=value]*`. Modifiers are flags (order-independent), parsed
-  at the verb position when the format string is consumed at runtime.
-  Unknown key, bad value, or key-on-wrong-verb is a positioned runtime
-  error keyed to the byte offset inside the format string.
+**Status:** done.
 
-  Per-verb modifier sets:
+A breaking syntax change to free up `//` for integer division and to
+allow shebangs, the long-promised format-verb modifier system, and
+the first stdin-reading builtins.
 
-  - **`%s`**: `pad=N`, `max=N`, `align=left|right` (default `left`),
-    `mode=raw|quote|escape` (default `raw`; `quote` wraps in `"..."`
-    and escapes interior `"`/`\`; `escape` renders unprintables as
-    `\n`/`\t`/etc. without quoting), `null=*`.
-  - **`%d`**: `pad=N`, `fill=0` (only `0` is legal; default fill is
-    space), `align=left|right` (default `right`), `base=2|8|10|16`
-    (default `10`), `sign=always|space|negative` (default `negative`;
-    works for any base), `group=N` + `sep=_|,|.|-|:` (either both or
-    neither - mentioning one without the other is an error; grouping
-    reads from the right), `null=*`.
-  - **`%f`**: `prec=N`, `trim=true|false` (default `false`; `true`
-    strips trailing fraction zeros and the `.` if all zero),
-    `sci=true|false` (default `false`; `true` forces scientific
-    notation with `prec` controlling mantissa fraction digits),
-    `pad=N`, `align=left|right` (default `right`), `sign=*`, `null=*`.
-  - **`%t`**: `case=lower|upper|title` (default `lower` →
-    `true`/`false`; `upper` → `TRUE`/`FALSE`; `title` → `True`/`False`),
-    `null=*`.
-  - **`%v`**: no modifiers (kept as the "I don't care" verb).
+- **Comments and integer division** (**BREAKING**). Line comments
+  moved from `//` to `#`, freeing `//` for floor division (Python 3
+  shape). `div` keyword removed. A Jennifer file can now begin with
+  `#!/usr/bin/env -S jennifer run`.
+- **`(s)printf` format-verb modifiers.** Each format verb except `%v`
+  accepts a pipe-separated, order-independent flag list:
+  `%verb[|key=value]*`. Modifiers shape *presentation* only - data
+  transformations (`case=upper` on strings, markdown rendering, etc.)
+  are explicitly out of scope; libraries do that work. Verbs gained:
+  `pad`/`max`/`align`/`mode` (`%s`); `pad`/`fill`/`align`/`base`/
+  `sign`/`group`/`sep` (`%d`); `prec`/`trim`/`sci`/`pad`/`align`/
+  `sign` (`%f`); `case` (`%t`); shared `null=empty|null|literal(...)`
+  across all four typed verbs. `%v` deliberately takes none.
+- **Format-string breaking change.** `|` immediately after a verb
+  now starts a modifier list. Pre-M7 strings with `|` as a literal
+  separator (`"%d|%d"`) need either a different separator or the
+  `||` escape (parallels `%%`).
+- **`io` stdin input.** New builtins `readLine()`,
+  `readLine(prompt)`, `eof()` - one-line-at-a-time reads with an
+  explicit EOF predicate (`while (not eof()) { ... }`). Refuses
+  inside the REPL since the line editor owns stdin.
+- **Internals.** Builtin signature changed from
+  `func(out io.Writer, args)` to `func(ctx BuiltinCtx, args)` so
+  stdin and the REPL flag are plumbed symmetrically with stdout.
+  Mechanical refactor across the ~30 existing builtins.
 
-  Shared `null=` option: `null=empty|null|literal(STR)`. `empty` → `""`,
-  `null` → `"null"`, `literal(STR)` → `STR` (escape sequences honored as
-  in normal Jennifer string literals). When the value is `null`, the
-  `null=` mode wins entirely - other modifiers (including
-  `mode=quote`) do not apply to the substituted text.
+See:
+- [libraries/io.md](libraries/io.md) - full modifier and input reference.
+- [technical/lexer.md](technical/lexer.md) and
+  [technical/grammar.md](technical/grammar.md) - the comment / division
+  syntax change.
+- [technical/rejected.md](technical/rejected.md) - what the modifier
+  system deliberately doesn't do (data transformations, `%a`
+  aggregate, `null=sql`/`null=skip`) and why the literal-pipe
+  lookahead alternative was turned down.
+- [technical/interpreter.md > Builtins and libraries](technical/interpreter.md#builtins-and-libraries) - the `BuiltinCtx` signature.
 
-  Evaluation order within one verb: null check first (returns the
-  `null=` output if the value is `null`), then verb-specific render
-  (`mode`, `base`, `prec`, `sci`, `sign`, `group`/`sep`, `case`), then
-  layout (`max` truncates, `pad`+`fill`+`align` extends).
+### Deferred from M7
 
-  Explicitly **not** in M7: data-transformation modifiers
-  (`case=upper|snake|camel|...` on strings, `slice=`, `md=*` on `%s`),
-  the `%a` aggregate verb, and `null=sql`/`null=skip`. See
-  [technical/rejected.md > printf data-transformation modifiers](technical/rejected.md#printf-data-transformation-modifiers).
-
-  **Breaking change inside the format string:** the `|` immediately
-  after a verb now starts a modifier list. Pre-M7 format strings that
-  used `|` as a literal separator between verbs (`"%d|%d"`,
-  `"%s|%s"`) must be rewritten - either with a different separator
-  (`"%d %d"`) or by doubling the pipe (`"%d||%d"`, which parallels the
-  `%%` escape for a literal `%`). The lookahead alternative (treat `|`
-  as literal when not followed by a key letter) was rejected for being
-  context-sensitive in a way that would surprise users when a literal
-  happened to look like a modifier name.
-- **user input (stdin)** - done: three new builtins in the `io`
-  library for reading from stdin one line at a time. Two functions of
-  the same name (arity-dispatched, like `printf`) plus a predicate:
-
-  - `readLine() -> string` - read one line from stdin. Trailing
-    `\r\n` / `\n` are stripped. Calling at end-of-input is a
-    positioned runtime error (`readLine: end of input`); callers must
-    check `eof()` first. A final line without a terminating newline
-    is returned normally; the subsequent call errors.
-  - `readLine(prompt) -> string` - write `prompt` to stdout, flush,
-    then read one line. Same EOF behavior. The prompt is written
-    unconditionally (even when stdin is piped) - explicit beats
-    "silently skip when not a TTY".
-  - `eof() -> bool` - true iff the next `readLine()` would error.
-    Implemented via a one-byte peek on a buffered stdin reader; the
-    true-state is cached.
-
-  Canonical loop idiom:
-
-  ```jennifer
-  use io;
-  while (not eof()) {
-      def line as string init readLine();
-      printf("%s\n", $line);
-  }
-  ```
-
-  **REPL refusal.** The REPL already owns stdin via its line editor,
-  so `readLine`/`eof` error inside the REPL with a clear message
-  (`stdin is owned by the editor`). A proper side-channel for REPL
-  input is a future milestone.
-
-  **Implementation note.** Builtin signature changes from
-  `func(out io.Writer, args []Value)` to
-  `func(ctx BuiltinCtx, args []Value)` where `BuiltinCtx` carries
-  `Out`, `In`, and `InREPL`. Mechanical refactor across the existing
-  ~30 builtins; most just rename `out` to `ctx.Out`.
-
-  **Deferred from M7.**
-
-  - **Byte reads from stdin (`readBytes(n)`).** Waits on `fs.read` -
-    "read N bytes" needs a binary representation Jennifer doesn't
-    have yet (`string` is UTF-8 / rune-counted, so raw bytes can't
-    live there cleanly). The two candidate shapes are (a) a new
-    `bytes` primitive type, or (b) `list of int` with each element
-    in `[0, 255]`. File I/O will hit the exact same question, so the
-    decision is better made once in that milestone than twice now.
-    The existing `eof()` is already byte-level (peeks one byte) and
-    will compose with whatever binary reader lands.
-  - **Reading characters / runes** (`readChars(n)`) - separate
-    design from byte reads; defer for the same reason.
-  - **`lines()` returning the whole stream as a list** - additive;
-    not required by the streaming `readLine()` + `eof()` idiom.
-  - **File handles and any non-stdin source.** Owned by a future
-    `fs` library.
+- **Byte reads from stdin** (`readBytes(n)`) - waits on `fs.read` to
+  settle the binary-data representation (new `bytes` primitive vs.
+  `list of int` with elements in `[0, 255]`). `eof()` is already
+  byte-level and will compose with whichever shape wins.
+- **`readChars(n)`** - separate design from byte reads; defer for
+  the same reason.
+- **`lines()` returning the whole stream as a list** - additive,
+  not required by the streaming `readLine()` + `eof()` idiom.
+- **File handles and non-stdin sources** - owned by a future `fs`
+  library.
 
 ---
 
