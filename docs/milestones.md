@@ -154,7 +154,50 @@ implementation contract.
   so the operator is unambiguous and a Jennifer file can begin with
   `#!/usr/bin/env -S jennifer run`; integer division is now '//', div keyword
   is removed (**BREAKING CHANGE**)
-- **(s)printf**: introduce format verb modifiers
+- **(s)printf format-verb modifiers** - extend each format verb with a
+  pipe-separated, key=value modifier list:
+  `%verb[|key=value]*`. Modifiers are flags (order-independent), parsed
+  at the verb position when the format string is consumed at runtime.
+  Unknown key, bad value, or key-on-wrong-verb is a positioned runtime
+  error keyed to the byte offset inside the format string.
+
+  Per-verb modifier sets:
+
+  - **`%s`**: `pad=N`, `max=N`, `align=left|right` (default `left`),
+    `mode=raw|quote|escape` (default `raw`; `quote` wraps in `"..."`
+    and escapes interior `"`/`\`; `escape` renders unprintables as
+    `\n`/`\t`/etc. without quoting), `null=*`.
+  - **`%d`**: `pad=N`, `fill=0` (only `0` is legal; default fill is
+    space), `align=left|right` (default `right`), `base=2|8|10|16`
+    (default `10`), `sign=always|space|negative` (default `negative`;
+    works for any base), `group=N` + `sep=_|,|.|-|:` (either both or
+    neither - mentioning one without the other is an error; grouping
+    reads from the right), `null=*`.
+  - **`%f`**: `prec=N`, `trim=true|false` (default `false`; `true`
+    strips trailing fraction zeros and the `.` if all zero),
+    `sci=true|false` (default `false`; `true` forces scientific
+    notation with `prec` controlling mantissa fraction digits),
+    `pad=N`, `align=left|right` (default `right`), `sign=*`, `null=*`.
+  - **`%t`**: `case=lower|upper|title` (default `lower` →
+    `true`/`false`; `upper` → `TRUE`/`FALSE`; `title` → `True`/`False`),
+    `null=*`.
+  - **`%v`**: no modifiers (kept as the "I don't care" verb).
+
+  Shared `null=` option: `null=empty|null|literal(STR)`. `empty` → `""`,
+  `null` → `"null"`, `literal(STR)` → `STR` (escape sequences honored as
+  in normal Jennifer string literals). When the value is `null`, the
+  `null=` mode wins entirely - other modifiers (including
+  `mode=quote`) do not apply to the substituted text.
+
+  Evaluation order within one verb: null check first (returns the
+  `null=` output if the value is `null`), then verb-specific render
+  (`mode`, `base`, `prec`, `sci`, `sign`, `group`/`sep`, `case`), then
+  layout (`max` truncates, `pad`+`fill`+`align` extends).
+
+  Explicitly **not** in M7: data-transformation modifiers
+  (`case=upper|snake|camel|...` on strings, `slice=`, `md=*` on `%s`),
+  the `%a` aggregate verb, and `null=sql`/`null=skip`. See
+  [technical/rejected.md > printf data-transformation modifiers](technical/rejected.md#printf-data-transformation-modifiers).
 - **user input**: user input like readLine(), readLine(prompt)
 
 ---

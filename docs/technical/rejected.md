@@ -28,3 +28,51 @@ Rejected because:
   Where does the family end?
 - Keeping a single assignment shape (`$x = EXPR;`) makes source code uniform
   and matches Jennifer's "one way to do each thing" stance.
+
+## printf data-transformation modifiers
+
+Considered during the M7 format-verb-modifier design: extending the
+modifier list with options that transform the *value* rather than its
+*visual representation*. Examples from the original draft:
+
+- `%s|case=upper|lower|title|snake|kebab|camel|pascal|leet`
+- `%s|slice=START:END`
+- `%s|md=italic|bold|code|strike|header1|header2|...|link(URL)|...`
+- `%s|md=table(...)` and the wider `%a|json=*`/`%a|xml=*`/`%a|yaml=*`
+  family (deferred along with the rest of `%a`)
+- `null=sql` (SQL-specific spelling of `NULL`)
+
+Rejected for the modifier system because:
+
+- **Mission creep.** The guiding rule for printf modifiers is "shape
+  the printed representation, not the value." `%d|base=2` is presentation
+  (the int 5 becomes the glyph sequence `101`). `%s|case=upper` is data
+  transformation (`"abc"` becomes `"ABC"` - a different string value).
+  Once one transform is in, every string/number/aggregate manipulation
+  becomes a candidate modifier and the format-string spec swallows the
+  rest of the standard library.
+- **Parallel API to the libraries.** `%s|case=upper` is already
+  `upper($s)`. Two ways to do the same thing breaks Jennifer's "one
+  way per thing" stance and means every future string helper has to
+  decide whether to ship as a function, a modifier, or both.
+- **Domain leakage.** `null=sql` picks one application domain to bake
+  into the formatter. `null=literal("NULL")` is already general -
+  letting the user spell their own NULL keeps SQL, CSV, JSON, and any
+  future format out of the printf spec.
+- **`md=*` is a separate library.** Markdown rendering belongs in a
+  future `markdown` library that returns strings, so the result
+  composes with `printf`, `sprintf`, string concat, file writing -
+  anywhere a string goes. Folding it into `%s` modifiers would lock
+  markdown output to print sites.
+
+What lives in M7 instead: presentation-only modifiers per verb -
+`pad`, `max`, `align`, `mode=raw|quote|escape` for `%s`; `pad`,
+`fill`, `base`, `sign`, `group`, `sep` for `%d`; `prec`, `trim`,
+`sci`, `sign`, `pad`, `align` for `%f`; `case=upper|lower|title` for
+`%t` (true/false isn't really a transformation - it's the verb's
+choice of rendering); a shared `null=empty|null|literal(STR)`. See
+[milestones.md > M7](../milestones.md#m7---printf-modifier).
+
+Also deferred to a later milestone (not rejected, just out of M7
+scope): the `%a` aggregate verb for lists and maps and the
+`null=skip` mode that only makes sense with `%a`.
