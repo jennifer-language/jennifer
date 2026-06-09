@@ -60,6 +60,38 @@ nothing here will surprise you.
   definitions, methods from top-level code, distinct steps within a long
   block. Never more than one consecutive blank line.
 
+## Loops
+
+- **Declare the iterator variable inside the `for` init**, not in the
+  surrounding scope. The variable's lifetime should match the loop's:
+
+  ```jennifer
+  for (def i as int init 0; $i < 10; $i = $i + 1) {   # preferred
+      printf("%d\n", $i);
+  }
+  ```
+
+  not
+
+  ```jennifer
+  def i as int;
+  for ($i = 0; $i < 10; $i = $i + 1) {                # avoid
+      printf("%d\n", $i);
+  }
+  ```
+
+  The loop-local form is self-contained (reading the `for` line tells
+  you everything about `i`), keeps the iterator out of the surrounding
+  scope, and matches the for-each shape (`for (def x in $coll)`) which
+  is *always* loop-local. The outer-scope form is only justified when
+  you genuinely need the iterator's value after the loop ends - for
+  example, to report which iteration triggered a break in a future
+  language version that adds `break`. Use it deliberately, not by
+  habit.
+- **One concern per loop.** If the body is more than a screen,
+  consider whether the work belongs in a helper method called from
+  inside the loop.
+
 ## Names
 
 - **Variables, methods, parameters**: lowercase or `camelCase` if the name

@@ -2,7 +2,7 @@
 
 Jennifer is a small, experimental, interpreted programming language. This
 guide covers everything you can do in Jennifer today
-([Milestone 6](../milestones.md)).
+([Milestone 7](../milestones.md)).
 
 ## Design stances
 

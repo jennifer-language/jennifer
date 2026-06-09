@@ -193,7 +193,7 @@ printf("hi, %s\n", $name);
 
 ### `eof() -> bool`
 
-True iff the next `readLine()` would error. Implemented by peeking one
+True if and only if the next `readLine()` would error. Implemented by peeking one
 byte through a buffered reader; the byte stays in the buffer for the
 next read. Once true, `eof()` stays true for the rest of the run.
 

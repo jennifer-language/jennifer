@@ -5,7 +5,7 @@ it when you know the *name* and want to know *which library* and *how to
 call it*; use each library's own page when you want to read about a
 topic.
 
-The table covers what ships with the interpreter today (M6). New
+The table covers what ships with the interpreter today (M7). New
 entries land here at the same time as the per-library doc - it's a
 flat lookup view, not authoritative.
 
@@ -19,7 +19,7 @@ flat lookup view, not authoritative.
 | `chars(s)`                    | [strings](strings.md)           | Split `s` into a `list of string`, one entry per Unicode code point.          |
 | `contains(s, sub)`            | [strings](strings.md)           | True if `s` contains the substring `sub`.                                     |
 | `endsWith(s, suffix)`         | [strings](strings.md)           | True if `s` ends with `suffix`.                                               |
-| `eof()`                       | [io](io.md)                     | True iff the next `readLine()` would error. Pair with `while (not eof()) {...}`. |
+| `eof()`                       | [io](io.md)                     | True if and only if the next `readLine()` would error. Pair with `while (not eof()) {...}`. |
 | `float(v)`                    | [convert](convert.md)           | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).   |
 | `floor(x)`                    | [math](math.md)                 | Largest int ≤ `x`. Accepts int (identity) or float.                           |
 | `has(m, key)`                 | [core](core.md) *(auto-loaded)* | True if map `m` contains `key`. The non-erroring companion to `$m[key]`.     |

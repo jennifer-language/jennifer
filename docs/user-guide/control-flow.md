@@ -92,3 +92,34 @@ Conditions in `if`, `elseif`, `while`, and `for` **must be `bool`** - there
 is no implicit truthiness. Use a comparison (`$x == 0`) to get a bool.
 For-each (`for (def x in $coll)`) doesn't take a condition - it walks
 the whole collection.
+
+### Loop variable scope
+
+C-style `for` opens its own scope. **Where you `def` the iterator
+variable decides whether you can still see it after the loop.**
+
+```jennifer
+# Loop-local: declare inside the for-init. The iterator lives only for
+# the duration of the loop.
+for (def i as int init 0; $i < 10; $i = $i + 1) {
+    printf("%d\n", $i);
+}
+printf("%d\n", $i);   # ERROR: `i` not in scope here
+```
+
+```jennifer
+# Outer-scope: declare in the surrounding scope, assign in the for-init.
+# The variable survives past the loop and holds the value that made the
+# condition false (10 here).
+def i as int;
+for ($i = 0; $i < 10; $i = $i + 1) {
+    printf("%d\n", $i);
+}
+printf("%d\n", $i);   # ok - prints 10
+```
+
+The loop-local form is the [recommended style](style-guide.md#loops);
+reach for the outer-scope form only when you actually need to inspect
+the iterator after the loop ends. For-each (`for (def x in $coll)`)
+is always loop-local - the iteration variable lives in a fresh scope
+each pass through the loop and is gone once the loop exits.

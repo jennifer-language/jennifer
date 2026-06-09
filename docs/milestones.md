@@ -193,22 +193,9 @@ See:
   lookahead alternative was turned down.
 - [technical/interpreter.md > Builtins and libraries](technical/interpreter.md#builtins-and-libraries) - the `BuiltinCtx` signature.
 
-### Deferred from M7
-
-- **Byte reads from stdin** (`readBytes(n)`) - waits on `fs.read` to
-  settle the binary-data representation (new `bytes` primitive vs.
-  `list of int` with elements in `[0, 255]`). `eof()` is already
-  byte-level and will compose with whichever shape wins.
-- **`readChars(n)`** - separate design from byte reads; defer for
-  the same reason.
-- **`lines()` returning the whole stream as a list** - additive,
-  not required by the streaming `readLine()` + `eof()` idiom.
-- **File handles and non-stdin sources** - owned by a future `fs`
-  library.
-
 ---
 
-## M8 - Library namespacing
+## M8 - System library namespacing
 
 The flat-namespace model is fine for the essential libraries today
 (`io`, `convert`, `math`, `strings`, plus the auto-loaded `core`) -
@@ -256,13 +243,23 @@ lets the user shorten a namespace.
   declared, not the library name necessarily (usually they'll match,
   but a library called `crypto_primitives` could expose itself as
   `crypto.` to be brief).
-- **Optional aliasing (defer to M8.1 if scope is tight):**
+- **Aliasing is a rename, not an addition.**
   ```jennifer
   use bio as b;
   printf("%d\n", b.translateLen($seq));
+  bio.translateLen($seq);   # error: unknown namespace `bio`
   ```
-  Adds an `AsName` to `ImportStmt`. Probably worth doing in the same
-  milestone so the convention lands complete.
+  After `use bio as b;`, only `b.` resolves. `bio.` errors with a
+  "did you mean `b`?" hint. Matches Python's `import foo as bar`
+  shadowing of `foo`; matches Jennifer's "one way per thing" stance.
+  Adds an `AsName` to `ImportStmt`.
+- **Namespace name as a reserved identifier.** A bare `use bio;`
+  reserves `bio` as a namespace-prefix identifier - `func bio() {}`
+  is then rejected with `shadows imported namespace 'bio'`. With
+  `use bio as b;`, only `b` is reserved, freeing `bio` as a regular
+  method name. Style guide will note "don't reuse a library's
+  canonical name even when aliased - it's confusing"; soft rule,
+  not enforced.
 - **Migration of existing libraries:** none. All five essentials stay
   flat. The change is additive; existing source keeps working
   unchanged.
@@ -271,6 +268,51 @@ lets the user shorten a namespace.
   with `bio.translate` only if it's referenced bare; it does not
   conflict with the qualified form. Document the resolution rule
   carefully in `docs/technical/interpreter.md`.
+
+### Deferred from M8
+
+- **File-import aliasing** (`import "templateengine.j" as jinja;`).
+  Today `import "file.j";` is a textual splice at the preprocessor
+  level - the imported file's defs/methods become globals, with no
+  module boundary. Adding `as jinja` implies namespaced user methods,
+  which Jennifer doesn't have any infrastructure for. Either
+  (a) prefix-splice (rewrite tokens so `render` becomes
+  `jinja.render`; fragile under cross-file references), or (b) real
+  modules with per-file environments and explicit exports - its own
+  milestone. M8's system-library namespacing works because builtins
+  are registered through a Go API that already has a `lib` tag;
+  file imports have no equivalent and would need to invent one. File
+  imports stay unnamespaced until a dedicated modules milestone.
+
+**Test strategy.** No real namespaced library is shipped in M8 (all
+five essentials stay flat), so tests register **synthetic** namespaced
+builtins inline through the public Go API
+(`in.RegisterNamespaced("bio", "translate", fn)`). The parser sees a
+qualified call as `bio.translate(...)` regardless of whether the
+namespace points at real code, so this covers the full pipeline
+without a stub package on disk. Concretely:
+
+- **Parser:** `QualifiedCallExpr` parses `IDENT.IDENT(...)`; table-driven
+  cases include qualified constant refs (`bio.STOPS`) and rejection of
+  qualified-assign (`bio.x = 1` is a parse error).
+- **Interpreter:** register synthetic namespaced builtins, then
+  exercise lookup hits, lookup misses, `use bio as b;` makes `b.`
+  resolve and `bio.` error with a "did you mean `b`?" hint, the
+  namespace-identifier reservation rule (`func bio() {}` errors after
+  bare `use bio;`, passes after aliased `use bio as b;`), `use`-gating
+  before any qualified call is allowed, and dot-separated constants.
+- **Formatter:** round-trip a program containing qualified calls;
+  verify no space around `.`.
+- **AST JSON dump:** emit `QualifiedCallExpr` for a synthetic source.
+- **REPL:** `EvalInteractive` path through a qualified call; multi-line
+  continuation crossing a `.` boundary.
+- **End-to-end:** one test in `cmd/jennifer/examples_test.go` (or a
+  new `namespace_test.go`) registers a test-only namespaced library
+  and runs a small source string; no `examples/*.j` golden file
+  required.
+- **Regression:** the five shipping essentials act as the "namespaces
+  don't break flat builtins" sanity suite - their existing tests
+  must keep passing unchanged.
 
 **Docs to write at end of M8:**
 
@@ -431,3 +473,16 @@ Not committed to a milestone yet, but the code should not foreclose them.
   design, versioning, and TinyGo-safe serialization are enough work to
   merit dedicated treatment. The text JSON form via `jennifer ast` is
   the placeholder until then.
+
+### Deferred from M7
+
+- **Byte reads from stdin** (`readBytes(n)`) - waits on `fs.read` to
+  settle the binary-data representation (new `bytes` primitive vs.
+  `list of int` with elements in `[0, 255]`). `eof()` is already
+  byte-level and will compose with whichever shape wins.
+- **`readChars(n)`** - separate design from byte reads; defer for
+  the same reason.
+- **`lines()` returning the whole stream as a list** - additive,
+  not required by the streaming `readLine()` + `eof()` idiom.
+- **File handles and non-stdin sources** - owned by a future `fs`
+  library.

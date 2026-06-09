@@ -2,15 +2,19 @@
 
 ## Types
 
-| Type     | Example literals                       | Notes                                     |
-|----------|----------------------------------------|-------------------------------------------|
-| `int`    | `0`, `42`, `9001`                      | 64-bit signed                             |
-| `float`  | `3.14`, `0.5`                          | 64-bit; promoted from int in mixed math   |
-| `string` | `"hello"`, `'single quotes'`           | Supports escape sequences                 |
-| `bool`   | `true`, `false`                        | Produced by comparison operators          |
-| `null`   | `null`                                 | A type with a single value (the unit)     |
-| `list of T`         | `[1, 2, 3]`                 | Ordered sequence; 0-indexed; mutable      |
-| `map of K to V`     | `{"a": 1, "b": 2}`          | Key→value; insertion-ordered; mutable     |
+| Type                | Example literals             | Default | Notes                                     |
+|---------------------|------------------------------|---------|-------------------------------------------|
+| `int`               | `0`, `42`, `9001`            | `0`     | 64-bit signed                             |
+| `float`             | `3.14`, `0.5`                | `0.0`   | 64-bit; promoted from int in mixed math   |
+| `string`            | `"hello"`, `'single quotes'` | `""`    | Supports escape sequences                 |
+| `bool`              | `true`, `false`              | `false` | Produced by comparison operators          |
+| `null`              | `null`                       | `null`  | A type with a single value (the unit)     |
+| `list of T`         | `[1, 2, 3]`                  | `[]`    | Ordered sequence; 0-indexed; mutable      |
+| `map of K to V`     | `{"a": 1, "b": 2}`           | `{}`    | Key→value; insertion-ordered; mutable     |
+
+The **Default** column is the value an uninitialized variable receives
+(`def x as int;` produces `0`). For compound types the default is an
+empty container of the declared element / key / value type, not `null`.
 
 Lists and maps are compound types - they hold other Jennifer values.
 Nesting works: `list of list of int`, `map of string to list of int`,
@@ -45,8 +49,22 @@ def count as int;                  # declare with the zero value of int (0)
 def const MAX as int init 100;     # constant: uppercase name, init required
 ```
 
-Uninitialized variables get the **zero value** of their declared type:
-`0`, `0.0`, `""`, `false`, or `null`.
+Uninitialized variables get the **default value** of their declared
+type (see the [Types](#types) table).
+
+**`init` accepts any expression of the declared type**, not just
+literals. Arithmetic, comparisons, function calls, and index reads all
+work as long as the result kind matches:
+
+```jennifer
+def half as float init 5 / 2;                # 2.5 (arithmetic)
+def isZero as bool init 1 == 0;              # false (comparison)
+def winner as string init decide($a, $b);    # whatever decide() returns
+def first as int init $xs[0];                # element read
+```
+
+The same goes for `def const NAME` - the `init` expression is evaluated
+once at declaration time and the result is frozen.
 
 **At the def site, names are bare identifiers (no `$`).** The `$` sigil is
 reserved for use-site references that read or assign a variable. So:
@@ -67,6 +85,15 @@ def const MAX as int init 100;
 printf(MAX);             # use site - bare name
 MAX = 200;               # ERROR: cannot assign to constant
 ```
+
+**Constant names must be UPPERCASE.** The full rule is
+`[A-Z]+(_[A-Z]+)*`: one or more uppercase chunks joined by single
+underscores. `MAX`, `MAX_RETRIES`, `HTTP_OK`, and `A_B_C` are all
+legal; `max`, `Max`, `_MAX`, `MAX_`, and `MAX__INT` are not. The
+uppercase-only rule is what tells the parser at use sites that a bare
+identifier is a constant reference, not a variable that forgot its
+`$`. Constants also **require an `init` expression** - there is no
+"declare-then-set" form (`def const X as int;` is rejected).
 
 Assignment uses `=`:
 
