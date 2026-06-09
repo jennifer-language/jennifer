@@ -158,11 +158,14 @@ func runRepl() int {
 
 		buf.WriteString(line)
 
-		// Try to lex what we have. A lex error is final - clear the buffer.
+		// Try to lex what we have. A lex error is final - clear the buffer,
+		// and record the attempt in history so the user can up-arrow to
+		// edit and retry.
 		tokens, lerr := lexer.TokenizeWithFile(buf.String(), replFileTag)
 		if lerr != nil {
 			fmt.Fprintf(stderrW, "%s\n", lerr.Error())
 			printErrorContextTo(stderrW, buf.String(), replFileTag, lerr)
+			history.Add(strings.TrimRight(buf.String(), "\n"))
 			buf.Reset()
 			continue
 		}
@@ -177,6 +180,13 @@ func runRepl() int {
 
 		src := buf.String()
 		buf.Reset()
+		// Record every complete submission in history before evaluation
+		// so a failing preproc/parse/runtime error still leaves the input
+		// recoverable via Up-arrow. Matches the convention used by Python,
+		// Node, bash, ghci, etc. Trimmed so blank edits at the end don't
+		// make every entry distinct; adjacent duplicates are collapsed by
+		// replHistory.Add.
+		history.Add(strings.TrimRight(src, "\n"))
 
 		tokens, perr := preproc.Process(tokens, cwd, replFileTag)
 		if perr != nil {
@@ -196,9 +206,6 @@ func runRepl() int {
 			printErrorContextTo(stderrW, src, replFileTag, rerr)
 			continue
 		}
-		// Submission succeeded - record it in history (trimmed so blank
-		// edits at the end don't make every entry distinct).
-		history.Add(strings.TrimRight(src, "\n"))
 		printReplValue(stdoutW, val)
 
 		if readErr == io.EOF {
