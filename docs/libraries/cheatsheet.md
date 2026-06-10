@@ -22,12 +22,27 @@ flat lookup view, not authoritative.
 | `eof()`                       | [io](io.md)                     | True if and only if the next `readLine()` would error. Pair with `while (not eof()) {...}`. |
 | `float(v)`                    | [convert](convert.md)           | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).   |
 | `floor(x)`                    | [math](math.md)                 | Largest int ≤ `x`. Accepts int (identity) or float.                           |
-| `has(m, key)`                 | [core](core.md) *(auto-loaded)* | True if map `m` contains `key`. The non-erroring companion to `$m[key]`.     |
 | `indexOf(s, sub)`             | [strings](strings.md)           | Rune index of first `sub` in `s`, or `-1` if absent.                          |
 | `int(v)`                      | [convert](convert.md)           | Convert to int (float truncates toward zero, string parses, bool→1/0).       |
 | `join(parts, sep)`            | [strings](strings.md)           | Concatenate `list of string` `parts` separated by `sep`. Inverse of `split`. |
 | `len(v)`                      | [core](core.md) *(auto-loaded)* | Structural length: rune count (string), element count (list), entry count (map). |
+| `lists.concat(a, b)`          | [lists](lists.md)               | New list with `a`'s elements followed by `b`'s.                               |
+| `lists.contains(xs, item)`    | [lists](lists.md)               | True if `item` appears in `xs` (haystack, needle).                            |
+| `lists.first(xs)`             | [lists](lists.md)               | Element at index 0. Empty input errors.                                       |
+| `lists.head(xs, n)`           | [lists](lists.md)               | New list of the first `n` elements.                                           |
+| `lists.last(xs)`              | [lists](lists.md)               | Element at the last index. Empty input errors.                                |
+| `lists.pop(xs)`               | [lists](lists.md)               | New list without the last element. Empty input errors.                        |
+| `lists.push(xs, item)`        | [lists](lists.md)               | New list with `item` appended.                                                |
+| `lists.reverse(xs)`           | [lists](lists.md)               | New list with elements reversed.                                              |
+| `lists.slice(xs, start[, end])` | [lists](lists.md)             | New sublist `[start, end)`; `end` defaults to `len(xs)`.                      |
+| `lists.sort(xs)`              | [lists](lists.md)               | New ascending-sorted list. Numeric / string / bool elements; mixed errors.    |
+| `lists.tail(xs, n)`           | [lists](lists.md)               | New list of the last `n` elements.                                            |
 | `lower(s)`                    | [strings](strings.md)           | Lowercase `s` (Unicode-aware).                                                |
+| `maps.delete(m, key)`         | [maps](maps.md)                 | New map without `key`. Missing key errors (strict at boundaries).             |
+| `maps.has(m, key)`            | [maps](maps.md)                 | True if map `m` contains `key`. The non-erroring companion to `$m[key]`.     |
+| `maps.keys(m)`                | [maps](maps.md)                 | List of keys in insertion order.                                              |
+| `maps.merge(a, b)`            | [maps](maps.md)                 | New map; `b`'s entries layered on top of `a`.                                 |
+| `maps.values(m)`              | [maps](maps.md)                 | List of values in insertion order.                                            |
 | `max(a, b)`                   | [math](math.md)                 | Larger of two numbers; mixed int/float promotes to float.                     |
 | `min(a, b)`                   | [math](math.md)                 | Smaller of two numbers; mixed int/float promotes to float.                    |
 | `os.getEnv(name)`             | [os](os.md)                     | Read environment variable `name`. Unset → empty string, no error.             |

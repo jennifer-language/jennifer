@@ -282,8 +282,9 @@ printf("%d\n", len($m));
 func TestHasMap(t *testing.T) {
 	out, err := run(t, `
 use io;
+use maps;
 def m as map of string to int init {"a": 1};
-printf("%t %t\n", has($m, "a"), has($m, "b"));
+printf("%t %t\n", maps.has($m, "a"), maps.has($m, "b"));
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)

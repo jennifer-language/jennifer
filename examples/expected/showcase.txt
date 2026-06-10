@@ -99,6 +99,20 @@ has alice = true, has dave = false
   alice=90
   bob=80
   carol=70
+=== lists ===
+after append: len=7 last=2
+1 1 2 3 4 5 9 
+first(reversed)=9 last(reversed)=1
+contains 4 = true, contains 99 = false
+1 2 3 
+concat len=4
+head=[1,1] tail=[5,9]
+after pop: len=6 last=9
+=== maps lib ===
+alice bob carol 
+90 80 70 
+after delete: len=2 has(bob)=false
+merged: alice=100 dave=60
 === value semantics ===
 src[0]=1 dst[0]=99
 === core ===

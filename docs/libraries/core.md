@@ -29,7 +29,6 @@ domain-library, not here.
 | Call              | Returns | Notes                                                       |
 |-------------------|---------|-------------------------------------------------------------|
 | `len(v)`          | int     | Structural length, polymorphic                              |
-| `has(m, key)`     | bool    | Map membership test                                         |
 
 ### `len`
 
@@ -50,23 +49,13 @@ printf("%d\n", len([1, 2, 3]));    # 3
 printf("%d\n", len({"a": 1, "b": 2})); # 2
 ```
 
-### `has`
+### `has` was here (M9: moved to `maps.has`)
 
-Reports whether a map contains a given key. The companion to the M6
-decision that *reads* of missing keys are runtime errors: when you
-need to test for a key without erroring, use `has`.
-
-```jennifer
-def m as map of string to int init {"a": 1};
-if (has($m, "a")) {
-    printf("%d\n", $m["a"]);    # safe to read; we just checked
-}
-```
-
-`has` only accepts maps. The string-side question "does this haystack
-contain this needle?" is `strings.contains`. A future list-side
-`contains` would slot under [strings](strings.md) or a new collections
-namespace.
+The map-membership test that used to live in core was relocated to
+the `maps` library in M9; call it as `maps.has($m, key)` after
+`use maps;`. The move keeps core focused on truly polymorphic
+primitives - `len` works across three kinds, `has` only ever
+worked on maps. See [maps.md](maps.md#maps-has).
 
 ## Constants
 

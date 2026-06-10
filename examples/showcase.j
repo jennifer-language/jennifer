@@ -14,6 +14,8 @@ use io;
 use convert;
 use math;
 use strings;
+use lists;
+use maps;
 use os;
 import "showcase/helpers.j";
 
@@ -180,12 +182,50 @@ def scores as map of string to int init {"alice": 90, "bob": 80};
 printf("alice=%d bob=%d\n", $scores["alice"], $scores["bob"]);
 printf("len(scores) = %d\n", len($scores));
 $scores["carol"] = 70;
-printf("has alice = %t, has dave = %t\n", has($scores, "alice"), has($scores, "dave"));
+printf("has alice = %t, has dave = %t\n", maps.has($scores, "alice"), maps.has($scores, "dave"));
 
 printf("=== for-each map (insertion order) ===\n");
 for (def who in $scores) {
     printf("  %s=%d\n", $who, $scores[$who]);
 }
+
+# --- M9: lists library + $xs[] append sugar ---
+printf("=== lists ===\n");
+def ns as list of int init [3, 1, 4, 1, 5];
+$ns[] = 9;
+$ns[] = 2;
+printf("after append: len=%d last=%d\n", len($ns), lists.last($ns));
+def sorted as list of int init lists.sort($ns);
+for (def v in $sorted) { printf("%d ", $v); }
+printf("\n");
+def reversed as list of int init lists.reverse($sorted);
+printf("first(reversed)=%d last(reversed)=%d\n", lists.first($reversed), lists.last($reversed));
+printf("contains 4 = %t, contains 99 = %t\n",
+    lists.contains($ns, 4), lists.contains($ns, 99));
+def slice as list of int init lists.slice($sorted, 1, 4);
+for (def v in $slice) { printf("%d ", $v); }
+printf("\n");
+def joined as list of int init lists.concat([1, 2], [3, 4]);
+printf("concat len=%d\n", len($joined));
+def front as list of int init lists.head($sorted, 2);
+def back as list of int init lists.tail($sorted, 2);
+printf("head=[%d,%d] tail=[%d,%d]\n", $front[0], $front[1], $back[0], $back[1]);
+$ns = lists.pop($ns);
+printf("after pop: len=%d last=%d\n", len($ns), lists.last($ns));
+
+# --- M9: maps library ---
+printf("=== maps lib ===\n");
+def points as map of string to int init {"alice": 90, "bob": 80, "carol": 70};
+def names as list of string init maps.keys($points);
+def vals as list of int init maps.values($points);
+for (def n in $names) { printf("%s ", $n); }
+printf("\n");
+for (def v in $vals) { printf("%d ", $v); }
+printf("\n");
+def smaller as map of string to int init maps.delete($points, "bob");
+printf("after delete: len=%d has(bob)=%t\n", len($smaller), maps.has($smaller, "bob"));
+def merged as map of string to int init maps.merge($points, {"dave": 60, "alice": 100});
+printf("merged: alice=%d dave=%d\n", $merged["alice"], $merged["dave"]);
 
 # --- value semantics + deep const ---
 printf("=== value semantics ===\n");

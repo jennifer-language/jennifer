@@ -14,6 +14,8 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lexer"
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
+	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
+	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
 	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
@@ -137,6 +139,8 @@ func runProgramOutput(path, src string) (string, error) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	listslib.Install(in)
+	mapslib.Install(in)
 	oslib.Install(in)
 	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
@@ -255,6 +259,11 @@ func TestFmtSpacingRules(t *testing.T) {
 			"use with alias",
 			`use bio   as   b ;`,
 			"use bio as b;\n",
+		},
+		{
+			"append form hugs $xs[]",
+			`$xs [ ] = 42 ;`,
+			"$xs[] = 42;\n",
 		},
 	}
 	for _, c := range cases {

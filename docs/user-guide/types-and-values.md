@@ -158,6 +158,36 @@ A few rules worth knowing up front:
   literals but the surrounding `def x as list of T` decides what they
   hold.
 
+### The `$xs[]` append sugar
+
+For the common "build a list by appending" pattern, the language
+ships a write-only target that means "the position just past the end
+of the list":
+
+```jennifer
+def xs as list of int init [];
+$xs[] = 10;
+$xs[] = 20;
+$xs[] = 30;
+# $xs is now [10, 20, 30]
+```
+
+Rules:
+
+- **Write-only.** `$xs[]` is only meaningful as a write target. Any
+  read context (`printf($xs[])`, `def y init $xs[] + 1`) is a parse
+  error.
+- **Lists only.** `$m[] = ...;` on a map errors at runtime - maps
+  have no "end-of" position.
+- **Type-checked.** The value is checked against the list's
+  declared element type, same as `$xs[i] = item;`.
+- **`const` is still deep.** `$NUMS[] = ...;` on a `def const`
+  list errors with the usual "cannot mutate contents of constant"
+  message.
+- **Equivalent to `$xs = lists.push($xs, item);`.** Same semantics,
+  shorter spelling. Use whichever reads better in context; the
+  formatter and style guide treat both as canonical.
+
 ### Nested lists and maps
 
 Compound types nest by repeating the keyword. `list of list of int` is a

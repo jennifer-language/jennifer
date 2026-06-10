@@ -11,6 +11,7 @@
 use io;
 use strings;
 use convert;
+use maps;
 
 # --- Split the input into a list of words ---
 def sentence as string init "the quick brown fox jumps over the lazy dog the quick fox";
@@ -22,11 +23,11 @@ printf("words:    %d\n", len($words));
 
 # --- Build a frequency map ---
 #
-# `has` is the test-for-presence companion to indexed-read; without it,
-# a `$counts[$w]` read on a missing key would error.
+# `maps.has` is the test-for-presence companion to indexed-read; without
+# it, a `$counts[$w]` read on a missing key would error.
 def counts as map of string to int init {};
 for (def w in $words) {
-    if (has($counts, $w)) {
+    if (maps.has($counts, $w)) {
         $counts[$w] = $counts[$w] + 1;
     } else {
         $counts[$w] = 1;
@@ -73,7 +74,7 @@ def totals as map of string to int init {};
 def raters as map of string to int init {};
 for (def review in $reviews) {
     for (def name in $review) {
-        if (has($totals, $name)) {
+        if (maps.has($totals, $name)) {
             $totals[$name] = $totals[$name] + $review[$name];
             $raters[$name] = $raters[$name] + 1;
         } else {

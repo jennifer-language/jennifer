@@ -11,6 +11,8 @@ import (
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
+	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
+	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
 	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
@@ -31,6 +33,8 @@ func newNSInterp() (*interpreter.Interpreter, *bytes.Buffer) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	listslib.Install(in)
+	mapslib.Install(in)
 	oslib.Install(in)
 	corelib.Install(in)
 	in.RegisterNamespaced("bio", "translate", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

@@ -251,82 +251,64 @@ See:
 
 ## M9 - Collection operations
 
+**Status:** done.
+
 The `list`/`map` types shipped in M6 with literals, indexing, and
-iteration but no manipulation helpers. M9 adds two opt-in libraries
-that cover the rest:
+iteration but no manipulation helpers. M9 adds two namespaced
+libraries plus a small piece of language sugar for the common
+append case.
 
-- **`lists` library** (`use lists;`): `push`, `pop`, `first`, `last`,
-  `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`.
-  All functions return a **new list** (no mutation through reference;
-  matches Jennifer's value semantics) - callers write
-  `$xs = push($xs, item);`. `sort` works on primitive element types;
-  comparator-based sort is deferred until methods are first-class
+- **`lists` library** (`use lists;`, namespaced). `lists.push`,
+  `lists.pop`, `lists.first`, `lists.last`, `lists.head`,
+  `lists.tail`, `lists.reverse`, `lists.sort`, `lists.contains`,
+  `lists.concat`, `lists.slice`. Every function returns a **new
+  list** - the input is never mutated, callers write
+  `$xs = lists.push($xs, item);`. `sort` accepts numeric, string, or
+  bool elements (mixed int/float promotes; other mixes error).
+  Comparator-based sort is deferred until methods are first-class
   values.
-- **`maps` library** (`use maps;`): `keys`, `values`, `delete`,
-  `merge`. Same pattern - functions return a new map, no in-place
-  mutation. `delete($m, key)` returns a shrunk map; `merge($a, $b)`
-  returns a new map with `$b` overlaying `$a`.
+- **`maps` library** (`use maps;`, namespaced). `maps.keys`,
+  `maps.values`, `maps.has`, `maps.delete`, `maps.merge`. Same
+  value-semantics shape. `maps.delete` of a missing key errors
+  (strict at boundaries, matching `$m[missing]`); `maps.merge`
+  layers the second arg over the first.
+- **BREAKING:** `has()` moved out of `core` and into `maps` as
+  `maps.has(m, key)`. Programs that called bare `has(...)` now
+  need `use maps;` and the qualified form. Rationale: `has` was
+  the only non-polymorphic name in core - it only ever worked on
+  maps - so it fits the M8 rule that domain-specific names live in
+  their domain library. `len` stays in core because it really is
+  polymorphic across string / list / map.
+- **Namespaced, not flat.** Both libraries collide with `strings`
+  (`contains`) and future libraries on common verbs (`parse`,
+  `delete`, ...). Per M8's library-author rule, domain libraries
+  with collision-prone names take a namespace; flat APIs stay
+  reserved for the five essentials.
+- **`core.has` stays map-only.** List membership goes through
+  `lists.contains($xs, item)`, haystack-first like
+  `strings.contains` - PHP's `in_array(needle, haystack)` order is
+  deliberately not adopted.
+- **Sugar: `$xs[] = item;`** - write-only target meaning "the
+  position just past the end of the list". Equivalent to
+  `$xs = lists.push($xs, item);` but cheaper to write. Reads of
+  `$xs[]` and chained forms like `$xs[0][]` are parse errors;
+  non-list targets error at runtime. New AST node `AppendStmt`;
+  fmt re-emits the form unchanged.
 
-**Sugar: `$xs[] = item;` syntax-level append.** For the 80% case of
-"build a list by appending", introduce a new write target where `[]`
-means "the position just past the end". Mechanically the same as
-`push($xs, item)` but cheaper to write. Reuses index-assign machinery
-(the binding gets rewritten to the extended list); no new keyword. The
-parser learns to accept `LBRACKET RBRACKET` as a special index in
-write position. Reads of `$xs[]` are not valid (no obvious meaning).
-
-**`core.has` stays map-only**, as already documented. List
-membership is `lists.contains($xs, item)` - matches the
-`strings.contains($s, $sub)` shape (haystack first, needle second; PHP's
-`in_array($needle, $haystack)` argument order is famously confusing
-and deliberately not adopted).
-
-**Naming convention** (resolved at start of M9): flat names within
-each library following the existing `strings.contains` /
-`strings.startsWith` style. No `array_*` PHP-style prefix. Once M8
-namespacing lands, qualified `lists.contains($xs, x)` form becomes
-available; until then, `use lists;` + bare `contains` works.
-
-**Why now rather than ship with M6**: M6 already pushed a lot of new
-machinery (parser, runtime, type stamping, formatter rules). Punting
-helpers gave us time to confirm the value-semantics + return-new-list
-shape against real example code (the showcase, wordcount). With that
-validated, M9 is mostly stdlib registration: each function is one Go
-helper. The `$xs[] = item;` sugar is the only language-level change.
-
-**Implementation notes:**
-
-- Each library function is a builtin: `Register("lists", "push", pushFn)`.
-- `pushFn` takes `(list, item) -> list of T` - copies the input list,
-  appends the item, returns it. The caller's assignment writes the
-  result back; the original input is untouched. Cost: O(n) per push,
-  acceptable at Jennifer's scale; copy-on-write is a future optimization.
-- The `$xs[] = item;` sugar parses as a new AST node `AppendStmt {
-  Target *VarExpr, Value Expr }`. Interpreter walks identically to
-  IndexAssignStmt but writes one slot past the end.
-- `sort` uses Go's `sort.Slice` with a kind-aware less function; mixed
-  types in one list error (kind already enforced at element-write
-  time, so this should never happen in practice).
-
-**Docs to update:**
-
-- `docs/libraries/lists.md` (new file) - covers every function with
-  signature, semantics, example, and the "returns new list" rule.
-- `docs/libraries/maps.md` (new file) - same pattern.
-- `docs/libraries/index.md` - add the two new entries to the catalog.
-- `docs/user-guide/imports.md` - mention `lists` / `maps` in the libraries
-  table; cover the `$xs[] = ...;` sugar in the Lists and maps section.
-- `docs/technical/grammar.md` - new EBNF for the append form and
-  new `AppendStmt` AST node.
-- `docs/user-guide/style-guide.md` - no whitespace inside `$xs[]` (consistent
-  with `$xs[0]`).
-- `examples/showcase.j` and/or `examples/wordcount.j` - exercise
-  push/pop/sort/contains so the goldens cover the new surface.
-
-**Exit criterion:** the showcase exercises `push`, `pop`, `sort`,
-`contains`, and the `$xs[]` sugar end-to-end; round-trips through
-`fmt` are stable; `lists` and `maps` libraries both show up in
-`jennifer help`'s "available libraries" error list.
+See:
+- [libraries/lists.md](libraries/lists.md) / [libraries/maps.md](libraries/maps.md) -
+  function-by-function reference.
+- [libraries/index.md](libraries/index.md) - catalog and the
+  flat-vs-namespaced rule the M9 design follows.
+- [user-guide/imports.md](user-guide/imports.md) and
+  [user-guide/types-and-values.md > The `$xs[]` append sugar](user-guide/types-and-values.md#the-xs-append-sugar) -
+  user-facing reference for `use lists;` / `use maps;` and the
+  append form.
+- [user-guide/style-guide.md](user-guide/style-guide.md) -
+  no-whitespace-inside-`[]` style rule applies to the append form
+  too.
+- [technical/grammar.md](technical/grammar.md) - EBNF for
+  `appendStmt`; AST table entry for `AppendStmt`.
 
 ---
 

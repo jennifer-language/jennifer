@@ -387,15 +387,49 @@ func (p *parser) parseReturn() (Stmt, error) {
 }
 
 // tryParseIndexAssign attempts to parse `$xs[i]...[j] = expr ;` as an
-// IndexAssignStmt. Returns (stmt, true, nil) on success. Returns (nil,
-// false, nil) when the lvalue chain parses but no `=` follows (meaning
-// the original token stream was an expression statement, not an
-// assignment) - in that case the parser position is restored to the
-// VARREF so the caller can re-parse it as an expression.
-// Errors during the lvalue chain itself are propagated.
+// IndexAssignStmt, or `$xs[] = expr ;` as an AppendStmt (M9).
+// Returns (stmt, true, nil) on success. Returns (nil, false, nil) when
+// the lvalue chain parses but no `=` follows (meaning the original
+// token stream was an expression statement, not an assignment) - in
+// that case the parser position is restored to the VARREF so the
+// caller can re-parse it as an expression. Errors during the lvalue
+// chain itself are propagated.
+//
+// The append form `$xs[] = expr ;` is detected first because it can't
+// be mistaken for anything else: an empty index between a bare VARREF
+// and `=` has no read meaning (you can't read past-the-end), so any
+// occurrence is an unambiguous append.
 func (p *parser) tryParseIndexAssign() (Stmt, bool, error) {
 	saved := p.pos
 	vref, _ := p.match(lexer.TOKEN_VARREF)
+	// Detect the M9 append form `$xs[] = expr ;` before walking any
+	// index chain - chained appends like `$xs[0][] = ...` aren't part
+	// of M9 and would just confuse the chain-parsing loop below.
+	if p.check(lexer.TOKEN_LBRACKET) && p.peekN(1).Type == lexer.TOKEN_RBRACKET {
+		p.advance() // [
+		p.advance() // ]
+		if _, ok := p.match(lexer.TOKEN_ASSIGN); !ok {
+			// `$xs[]` not followed by `=` is a parse error - reads of the
+			// append-slot have no meaning. Don't restore the position; this
+			// is a clean, actionable diagnostic.
+			return nil, false, &ParseError{
+				Msg:  fmt.Sprintf("`$%s[]` is write-only (append form); reads are not allowed", vref.Lexeme),
+				File: vref.File, Line: vref.Line, Col: vref.Col,
+			}
+		}
+		val, err := p.parseExpr()
+		if err != nil {
+			return nil, false, err
+		}
+		if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate append"); err != nil {
+			return nil, false, err
+		}
+		return &AppendStmt{
+			pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
+			Target: &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme},
+			Value:  val,
+		}, true, nil
+	}
 	var target Expr = &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme}
 	// Consume one or more `[expr]` suffixes.
 	for p.check(lexer.TOKEN_LBRACKET) {
@@ -990,6 +1024,15 @@ func (p *parser) parsePrimary() (Expr, error) {
 	}
 	for p.check(lexer.TOKEN_LBRACKET) {
 		bra := p.peek()
+		// Reject `e[]` reads early with a helpful message - the append form
+		// `$xs[] = item;` is statement-level only (see tryParseIndexAssign);
+		// any other `[]` is meaningless.
+		if p.peekN(1).Type == lexer.TOKEN_RBRACKET {
+			return nil, &ParseError{
+				Msg:  "`[]` is the M9 append form and only valid as a write target: `$xs[] = item;`",
+				File: bra.File, Line: bra.Line, Col: bra.Col,
+			}
+		}
 		p.advance() // consume [
 		idx, err := p.parseExpr()
 		if err != nil {

@@ -407,6 +407,8 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 		return blockResult{}, i.execAssign(st, env)
 	case *parser.IndexAssignStmt:
 		return blockResult{}, i.execIndexAssign(st, env)
+	case *parser.AppendStmt:
+		return blockResult{}, i.execAppend(st, env)
 	case *parser.IfStmt:
 		return i.execIf(st, env)
 	case *parser.WhileStmt:
@@ -587,6 +589,41 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 		return err
 	}
 	if err := env.Assign(rootVar.Name, rootCopy); err != nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+	}
+	return nil
+}
+
+// execAppend handles `$xs[] = expr;` (M9). Same shape as execIndexAssign
+// without an index chain: copy the target binding, append the new value,
+// commit it back. Element-type check, const-target rejection, and
+// non-list rejection all live here.
+func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error {
+	binding, err := env.GetBinding(st.Target.Name)
+	if err != nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", st.Target.Name), File: file, Line: line, Col: col}
+	}
+	if binding.IsConst {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: fmt.Sprintf("cannot mutate contents of constant %q (const is deep)", st.Target.Name), File: file, Line: line, Col: col}
+	}
+	if binding.Value.Kind != KindList {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: fmt.Sprintf("`$%s[] = ...` requires a list, got %s", st.Target.Name, binding.Value.Kind), File: file, Line: line, Col: col}
+	}
+	newVal, err := i.evalExpr(st.Value, env)
+	if err != nil {
+		return err
+	}
+	if binding.Value.ElemTyp != nil && !newVal.MatchesDeclared(*binding.Value.ElemTyp) {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: fmt.Sprintf("cannot append %s to list of declared element type %s", newVal.Kind, binding.Value.ElemTyp), File: file, Line: line, Col: col}
+	}
+	rootCopy := binding.Value.Copy()
+	rootCopy.List = append(rootCopy.List, newVal.Copy())
+	if err := env.Assign(st.Target.Name, rootCopy); err != nil {
 		file, line, col := posFor(st)
 		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 	}

@@ -27,6 +27,7 @@ block       = "{" { statement } "}" ;
 statement   = defineStmt
             | assignStmt
             | indexAssign
+            | appendStmt
             | returnStmt
             | ifStmt
             | whileStmt
@@ -52,6 +53,16 @@ assignStmt  = VARREF "=" expr ";" ;
 indexAssign = VARREF "[" expr "]" { "[" expr "]" } "=" expr ";" ;
                                        (* l-value chain: at least one
                                           [index] suffix; root is a VARREF *)
+
+appendStmt  = VARREF "[" "]" "=" expr ";" ;
+                                       (* append sugar: write-only
+                                          target meaning "the position
+                                          just past the end of the
+                                          list"; read use `e[]` is a
+                                          parse error. Only one bare
+                                          VARREF root - chained forms
+                                          like `$xs[0][]` are not supported
+                                          (yet). *)
 
 ifStmt      = "if" "(" expr ")" block
               { "elseif" "(" expr ")" block }
@@ -215,6 +226,7 @@ grammar the parser implements is the EBNF above.
 | `DefineStmt`  | stmt  | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit) |
 | `AssignStmt`  | stmt  | `VarName`, `Value Expr`                      |
 | `IndexAssignStmt` | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` |
+| `AppendStmt`  | stmt  | `Target *VarExpr`, `Value Expr` - `$xs[] = item;` (M9) |
 | `ReturnStmt`  | stmt  | `Value Expr` (nil for bare `return;`)        |
 | `IfStmt`      | stmt  | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block` |
 | `WhileStmt`   | stmt  | `Cond`, `Body *Block`                        |

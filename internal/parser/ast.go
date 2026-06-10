@@ -219,6 +219,21 @@ type IndexAssignStmt struct {
 
 func (*IndexAssignStmt) stmtNode() {}
 
+// AppendStmt: `$xs[] = <expr>;` - the M9 syntax-level append. The empty
+// brackets are a write-only target meaning "the position just past the
+// end of the list"; reading `$xs[]` is a parse error. Only valid on a
+// plain VARREF root (no chained `$xs[0][]` form in M9); the targeted
+// variable must be a list at runtime, value's type is checked against
+// the list's declared element type, and const targets are rejected as
+// usual.
+type AppendStmt struct {
+	pos
+	Target *VarExpr
+	Value  Expr
+}
+
+func (*AppendStmt) stmtNode() {}
+
 // IfStmt: `if (cond) { body } [elseif (cond) { body }]* [else { body }]?`
 // ElseIfs is parallel to ElseIfBodies. Else may be nil.
 type IfStmt struct {
@@ -645,6 +660,8 @@ func Sprint(n Node) string {
 		return fmt.Sprintf("Index(%s, %s)", Sprint(v.Target), Sprint(v.Index))
 	case *IndexAssignStmt:
 		return fmt.Sprintf("IndexAssign(%s = %s)", Sprint(v.Target), Sprint(v.Value))
+	case *AppendStmt:
+		return fmt.Sprintf("Append(%s = %s)", Sprint(v.Target), Sprint(v.Value))
 	case *ForEachStmt:
 		return fmt.Sprintf("ForEach($%s in %s, %s)", v.VarName, Sprint(v.Coll), Sprint(v.Body))
 	}

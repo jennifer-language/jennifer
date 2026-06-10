@@ -15,8 +15,10 @@ to the reference doc for each.
 | `convert` | `use convert;`  | `int`, `float`, `string`, `bool`, `typeOf` - explicit casts; canonical-only `bool` conversion                                              | [convert.md](convert.md)   |
 | `math`    | `use math;`     | `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`; constants `PI`, `E`                                                          | [math.md](math.md)         |
 | `strings` | `use strings;`  | `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join` (`len` lives in [`core`](core.md)) | [strings.md](strings.md)   |
+| `lists`   | `use lists;`    | **Namespaced** (`lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`). All return a new list.        | [lists.md](lists.md)       |
+| `maps`    | `use maps;`     | **Namespaced** (`maps.keys`, `values`, `has`, `delete`, `merge`). All return a new map / list / bool.                                                  | [maps.md](maps.md)         |
 | `os`      | `use os;`       | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`) | [os.md](os.md) |
-| `core`    | *(auto-loaded)* | `len` (polymorphic over string/list/map), `has(map, key)`, `JENNIFER_VERSION`. Pre-imported by the interpreter; writing `use core;` is a runtime error. | [core.md](core.md)         |
+| `core`    | *(auto-loaded)* | `len` (polymorphic over string/list/map), `JENNIFER_VERSION`. Pre-imported by the interpreter; writing `use core;` is a runtime error.                | [core.md](core.md)         |
 
 A quick taste:
 

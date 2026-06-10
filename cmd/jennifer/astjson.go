@@ -209,6 +209,13 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 		emitNodeField(b, "index", v.Index, indent+1)
 		endObj(b, indent)
 
+	case *parser.AppendStmt:
+		startObj(b, indent)
+		emitTypeAndPos(b, "AppendStmt", v, indent+1)
+		emitNodeField(b, "target", v.Target, indent+1)
+		emitNodeField(b, "value", v.Value, indent+1)
+		endObj(b, indent)
+
 	case *parser.IndexAssignStmt:
 		startObj(b, indent)
 		emitTypeAndPos(b, "IndexAssignStmt", v, indent+1)

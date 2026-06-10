@@ -16,6 +16,8 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
+	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
+	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
@@ -50,6 +52,8 @@ func runRepl() int {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	listslib.Install(in)
+	mapslib.Install(in)
 	oslib.Install(in)
 	corelib.Install(in)
 

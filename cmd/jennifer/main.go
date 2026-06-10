@@ -14,6 +14,8 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lexer"
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	"github.com/mplx/jennifer-lang/internal/lib/io"
+	"github.com/mplx/jennifer-lang/internal/lib/lists"
+	"github.com/mplx/jennifer-lang/internal/lib/maps"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
 	"github.com/mplx/jennifer-lang/internal/lib/core"
 	"github.com/mplx/jennifer-lang/internal/lib/os"
@@ -161,6 +163,8 @@ func runFile(path string) int {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	listslib.Install(in)
+	mapslib.Install(in)
 	oslib.Install(in)
 	corelib.Install(in)
 	if err := in.Run(prog); err != nil {

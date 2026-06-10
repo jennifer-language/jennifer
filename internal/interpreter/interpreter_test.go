@@ -11,6 +11,8 @@ import (
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
 	"github.com/mplx/jennifer-lang/internal/lib/io"
+	"github.com/mplx/jennifer-lang/internal/lib/lists"
+	"github.com/mplx/jennifer-lang/internal/lib/maps"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
 	"github.com/mplx/jennifer-lang/internal/lib/core"
 	"github.com/mplx/jennifer-lang/internal/lib/os"
@@ -40,6 +42,8 @@ func run(t *testing.T, src string) (string, error) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	listslib.Install(in)
+	mapslib.Install(in)
 	oslib.Install(in)
 	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
@@ -65,6 +69,8 @@ func runWithStdin(t *testing.T, src, stdin string) (string, error) {
 	convert.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
+	listslib.Install(in)
+	mapslib.Install(in)
 	oslib.Install(in)
 	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
@@ -295,7 +301,7 @@ func TestUnknownLibraryErrors(t *testing.T) {
 
 func TestUnknownLibraryErrorListsAvailable(t *testing.T) {
 	_, err := run(t, `use blub; func app() {}`)
-	if err == nil || !strings.Contains(err.Error(), "available: convert, io, math, os, strings") {
+	if err == nil || !strings.Contains(err.Error(), "available: convert, io, lists, maps, math, os, strings") {
 		t.Errorf("expected error to list available libraries, got %v", err)
 	}
 }

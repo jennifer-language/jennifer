@@ -18,6 +18,13 @@
 // Pass 2 (during the M5 cleanup that introduced this library) adds:
 //   - len(string | list | map) - polymorphic structural length.
 //
+// M9 cleanup: `has()` was removed from core and relocated to the
+// `maps` library as `maps.has(m, key)`. Map membership testing is
+// domain-specific (only meaningful on maps), so it didn't fit core's
+// "universally-needed structural primitives" charter - `len()` stays
+// because it is genuinely polymorphic across three kinds. Breaking
+// change; pre-1.0 budget covers it.
+//
 // Reserve this library carefully. It is the escape hatch from Jennifer's
 // "nothing for free" library discipline; it should hold a handful of
 // universally-needed structural primitives and nothing more. Anything that
@@ -49,7 +56,6 @@ const LibraryName = "core"
 func Install(in *interpreter.Interpreter) {
 	in.RegisterConst(LibraryName, "JENNIFER_VERSION", interpreter.StringVal(version.Version))
 	in.Register(LibraryName, "len", lenFn)
-	in.Register(LibraryName, "has", hasFn)
 }
 
 // lenFn returns the structural length of its argument. Polymorphic on
@@ -76,26 +82,3 @@ func lenFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	return interpreter.Null(), fmt.Errorf("len() expects a string, list or map, got %s", v.Kind)
 }
 
-// hasFn reports whether a map contains a given key. The companion to
-// the M6 decision that reads of missing keys are runtime errors: callers
-// who need a non-erroring "does it exist?" check use `has($m, key)`.
-//
-// Only maps are accepted - "does this list contain this value?" is a
-// different question (linear search; future strings library
-// `contains(haystack, needle)` is the analogous string-side operation).
-func hasFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("has() expects 2 arguments (map, key), got %d", len(args))
-	}
-	m := args[0]
-	if m.Kind != interpreter.KindMap {
-		return interpreter.Null(), fmt.Errorf("has() expects a map as the first argument, got %s", m.Kind)
-	}
-	key := args[1]
-	for _, e := range m.Map {
-		if e.Key.Equal(key) {
-			return interpreter.BoolVal(true), nil
-		}
-	}
-	return interpreter.BoolVal(false), nil
-}

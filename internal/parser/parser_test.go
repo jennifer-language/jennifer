@@ -343,3 +343,41 @@ func TestParseQualifiedErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAppendForm(t *testing.T) {
+	src := `$xs[] = 42;`
+	prog, err := Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(prog.TopLevel) != 1 {
+		t.Fatalf("expected one stmt, got %d", len(prog.TopLevel))
+	}
+	got := Sprint(prog.TopLevel[0])
+	want := "Append(Var($xs) = Int(42))"
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestParseAppendFormRejectsRead(t *testing.T) {
+	cases := []struct {
+		name, src, want string
+	}{
+		{"bare read", `printf($xs[]);`, "append form"},
+		{"read in expression", `def y as int init $xs[] + 1;`, "append form"},
+		{"$xs[] without =", `$xs[];`, "write-only"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse(c.src)
+			if err == nil {
+				t.Errorf("expected error, got nil")
+				return
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error %q does not contain %q", err.Error(), c.want)
+			}
+		})
+	}
+}

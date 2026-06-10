@@ -20,8 +20,10 @@ index.
 | `convert` | `use convert;`   | `int`, `float`, `string`, `bool`, `typeOf` - explicit casts                                               | [libraries/convert.md](../libraries/convert.md) |
 | `math`    | `use math;`      | `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`; constants `PI`, `E`                         | [libraries/math.md](../libraries/math.md)   |
 | `strings` | `use strings;`   | `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join` | [libraries/strings.md](../libraries/strings.md) |
+| `lists`   | `use lists;`     | **Namespaced**; non-mutating list helpers (`push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`) | [libraries/lists.md](../libraries/lists.md) |
+| `maps`    | `use maps;`      | **Namespaced**; non-mutating map helpers (`keys`, `values`, `delete`, `merge`)                                                              | [libraries/maps.md](../libraries/maps.md)   |
 | `os`      | `use os;`        | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS` | [libraries/os.md](../libraries/os.md)       |
-| `core`    | *(auto-loaded)*  | `len`, `has(map, key)`, `JENNIFER_VERSION`. No `use` needed; writing `use core;` is a runtime error.      | [libraries/core.md](../libraries/core.md)   |
+| `core`    | *(auto-loaded)*  | `len`, `JENNIFER_VERSION`. No `use` needed; writing `use core;` is a runtime error.                       | [libraries/core.md](../libraries/core.md)   |
 
 See [libraries/index.md](../libraries/index.md) for a fuller catalog and
 the library-organization principles, or
