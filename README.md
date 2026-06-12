@@ -1,6 +1,6 @@
 # Jennifer Programming Language
 
-**Milestone 11**
+**Milestone 12**
 
 Jennifer is a small, experimental, interpreted programming language. The
 interpreter is written in Go and the shipping binary is produced with

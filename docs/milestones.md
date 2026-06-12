@@ -312,11 +312,14 @@ that the rest of the standard library will be built on; Phase A
 stand on; M14 closes the lexer-side gap (`fmt` losing comments
 and shebangs) so the first wave of struct-using libraries can
 ship with doc-comments intact; Phase B (M15.x) ships the
-foundational libraries that every Jennifer program needs;
-Phase C (M16.x) ships I/O libraries; Phase D (M17-M20) ships the
-higher-level ecosystem (Jennifer-coded libraries, the module
-system that unblocks them, crypto, a server). Phase E (WASM and
-specialised domains) is the long horizon.
+foundational libraries that every Jennifer program needs,
+finishing with **M15.5 - the first public release** (CI, prebuilt
+binaries, .deb / pacman / AUR packaging); Phase C (M16.x) ships
+I/O libraries on top of the now-released foundation; Phase D
+(M17-M20) ships the higher-level ecosystem (Jennifer-coded
+libraries, the module system that unblocks them, crypto, a
+server). Phase E (WASM and specialised domains) is the long
+horizon.
 
 The library milestones use sub-numbering (M15.1, M15.2, ...) so
 each library ships and is reviewed independently. This is the
@@ -479,52 +482,42 @@ See:
 **Status:** done.
 
 Adds the buffer-shaped primitive and the bit-twiddling vocabulary
-the standard library will need for hashing, encoding, crypto, and
-network code in the upcoming M14.x / M18 milestones.
+the standard library needs for hashing, encoding, crypto, and
+network code in later milestones.
 
-- **New primitive type `bytes`** - mutable byte sequence, value
-  semantics on assignment / parameter binding (deep-copy, no
-  aliasing), deep-const, `len($b)` returns the byte count. Reads
+- **New primitive type `bytes`** - mutable byte sequence; value
+  semantics on assignment / parameter binding; deep-const. Reads
   yield `int` in `[0, 255]`; writes accept the same range and
   reject anything else. Append via the existing M9 `$b[] = byte;`
-  sugar. `convert.bytesFromString(s, "utf-8")` builds; otherwise
-  start from `def b as bytes;` and append.
+  sugar. `len($b)` returns the byte count.
 - **New `convert.bytesFromString(s, codec)` and
   `convert.stringFromBytes(b, codec)`** - bytes ↔ string codecs.
-  Two-argument shape matches `convert.toInt(v)` style; `codec`
-  selects encoding. Only `"utf-8"` is supported today; further
-  codecs ship in M15.4 `encoding`. Strict-at-boundaries: invalid
-  UTF-8 input to `stringFromBytes` is an error (no silent
-  replacement characters).
+  Only `"utf-8"` today (further codecs ship in M15.4 `encoding`).
+  Invalid UTF-8 input is an error - no silent replacement
+  characters.
 - **Bit operators on `int`**: `& | ^ ~ << >>`. Python-style
-  precedence between comparison and additive (comparison < `|`
-  < `^` < `&` < shifts < `+ -`), so `$x & 0xff == 0` parses as
-  `($x & 0xff) == 0` instead of the C footgun
-  `$x & (0xff == 0)`. `~` is bitwise NOT (`-x - 1`). Shifts are
-  arithmetic (sign-extending `>>`); negative count is rejected;
-  count >= 64 saturates to 0 / -1 the way hardware does. `^` ships
-  even though it's algebraically derivable - it's a CPU primitive
-  with unique algebraic properties (self-inverse, round-trip,
-  toggle-bits) and shipping it costs one operator; the analogy is
-  `-` not being banned for being composable from `+` and unary `-`.
-- **Non-decimal integer literals**: hex `0xff` / `0xDEAD_BEEF`,
-  octal `0o755`, binary `0b1010_0110`. All three lex as `int`
-  (same kind, same operators). `_` accepted as a digit separator
-  between digits but never adjacent to the prefix or another `_`;
-  decimal literals (`1_000_000`) and the mantissa side of floats
-  also accept it. Lexer-only change.
-- **Resolves the M7-deferred stdin builtins**:
+  precedence (comparison < `|` < `^` < `&` < shifts < `+ -`),
+  so `$x & 0xff == 0` parses as `($x & 0xff) == 0`. `~` is
+  bitwise NOT. Shifts are arithmetic; negative count rejected;
+  count >= 64 saturates to 0 / -1. `^` ships as a primitive
+  operator (CPU primitive with unique algebraic properties -
+  same justification `-` has against being composable from `+`
+  and unary `-`).
+- **Non-decimal integer literals**: hex `0xff`, octal `0o755`,
+  binary `0b1010_0110`. `_` accepted between digits in any base
+  (including decimal `1_000_000` and float mantissas). Never
+  adjacent to the prefix or another `_`. Lexer-only change.
+- **Resolves M7-deferred stdin builtins**:
   `io.readBytes(n) -> bytes` (exact n; partial at EOF then
   `io.eof()` becomes true) and `io.readChars(n) -> string`
-  (n runes, UTF-8 decoded). M7's `io.eof()` composes with both
+  (n runes, UTF-8 decoded). Both compose with M7's `io.eof()`
   unchanged.
 
 See:
 - [user-guide/types-and-values.md](user-guide/types-and-values.md) -
-  `bytes` in the types table, value semantics, append-sugar,
-  index-write rules.
-- [libraries/convert.md](libraries/convert.md) -
-  `bytesFromString` / `stringFromBytes` reference; UTF-8 strictness.
+  `bytes` type, value semantics, index-write rules.
+- [libraries/convert.md](libraries/convert.md) - codec functions,
+  UTF-8 strictness.
 - [libraries/io.md](libraries/io.md) - `io.readBytes`,
   `io.readChars`.
 - [user-guide/control-flow.md](user-guide/control-flow.md) -
@@ -532,16 +525,148 @@ See:
 - [user-guide/syntax.md](user-guide/syntax.md) - non-decimal
   literals + digit separator.
 
-## M13 - Structs / records
+## M13 - Structs and catchable errors
+
+The composite-data milestone, split into two sub-milestones
+because M13.2's error-handling design depends on M13.1's struct
+shape. Ships as a batch: structs are the foundation, errors are
+the first big consumer of that foundation.
+
+## M13.1 - Structs / records
 
 - New `def struct Name { field as type, ... };` syntax (working
-  name; revisited at start of M13).
+  name; revisited at start of M13.1).
 - Literals: `Name{ field: expr, ... }`. Field access: `$p.field`.
   Value semantics like lists/maps - `def q as Name init $p;`
   copies. `const` is deep.
 - Unblocks every library that wants to return composite data
   (file info, time values, network endpoints, http request /
   response).
+
+## M13.2 - `try` / `catch` / `throw`
+
+Catchable errors, both user-thrown and runtime. Ships as a
+sub-milestone of M13 because the canonical error value is a
+struct (M13.1) - waiting saves a string-to-struct migration that
+would otherwise hit every catch site.
+
+**New keywords**: `try`, `catch`, `throw`.
+
+**Syntax.**
+
+```jennifer
+try {
+    def n as int init convert.toInt($s);
+    use($n);
+} catch (err) {
+    io.printf("invalid input: %s\n", $err.message);
+}
+```
+
+`throw EXPR;` signals an error; `EXPR` evaluates to any value but
+the convention is a struct (see "Error shape" below). The
+matching `catch (NAME)` binds the thrown value to `$NAME` in a
+fresh per-block scope.
+
+**Error shape.** Every error - user-thrown or runtime-raised -
+is conventionally a struct with the M13.1 shape:
+
+```jennifer
+def struct Error {
+    kind    as string,    # short symbolic tag: "out_of_bounds", "type_mismatch", ...
+    message as string,    # human-readable
+    file    as string,    # source file the error originated in
+    line    as int,
+    col     as int,
+};
+```
+
+Library and runtime errors construct an `Error{}` with the right
+`kind`. User code is free to throw any value (a bare string still
+works), but the recommended shape is a struct that matches or
+extends `Error` so dispatch is uniform.
+
+**What's catchable.**
+
+- **Runtime errors**: out-of-bounds index reads/writes, missing
+  map keys, type mismatches, division by zero, undefined names,
+  bytes-element range violations, codec decode failures, and the
+  rest of today's positioned `runtimeError`. Each gets a `kind`
+  tag (see [technical/interpreter.md > Error kinds](technical/interpreter.md#error-kinds)
+  for the catalog at M13.2).
+- **User `throw EXPR;`** - whatever the user passed.
+
+**What's NOT catchable.**
+
+- **`exit` / `exit EXPR;`** - the program-level escape hatch
+  stays escape. Matches Python's `SystemExit` (uncatchable by
+  bare `except`), Java's `System.exit()`. `try { exit 1; } catch
+  (e) { }` lets the exit through.
+- **`return` / `break` / `continue`** - they're control flow,
+  not errors. `try { break; } catch (e) { ... }` breaks the
+  enclosing loop; the `catch` block isn't entered.
+- **Internal interpreter panics** - they shouldn't happen; if
+  one does it's a bug in the interpreter, not a recoverable
+  condition.
+
+**Semantics.**
+
+- `try` opens a new scope. Bindings inside the `try` body do not
+  survive a thrown error (matches every other block).
+- `catch (NAME)` opens its own scope. `NAME` is bound to the
+  thrown value for the duration of the catch block. The catch
+  block's own bindings don't leak past it.
+- An uncaught `throw` at the top level produces a positioned
+  runtime error (same shape today's uncaught runtime errors
+  produce, plus the `kind` tag).
+- `throw` inside a `catch` re-raises - propagates past the
+  current `try`/`catch` to the next enclosing `try`. Same value
+  unless replaced.
+- No `finally` clause in v1. Deferred until a real cleanup need
+  surfaces (probably with `fs` file handles in M16.1).
+- No typed catch in v1 (`catch (TypeError e)`). The user
+  dispatches on `$e.kind` inside the catch body. Keeps the
+  syntax minimal.
+
+**Internals.** Implemented as an `ErrorSignal` sentinel error
+(parallels the M11 `ExitSignal`), carrying the thrown `Value`.
+The interpreter unwinds frames until it hits an enclosing `try`
+that catches it; if none does, the signal turns back into a
+positioned runtime error at the program boundary. Existing
+`runtimeError`s are routed through the same channel - they
+construct an `Error{}` struct and become catchable
+automatically; no per-builtin change needed.
+
+**Examples.**
+
+```jennifer
+# Validate user input without dying on bad data.
+try {
+    def n as int init convert.toInt($input);
+    process($n);
+} catch (err) {
+    io.printf("not a number, ignoring: %s\n", $err.message);
+}
+
+# Library code signals expected failure modes.
+func parseConfig(src as string) {
+    if (not strings.contains($src, "=")) {
+        throw Error{kind: "parse_error", message: "missing `=`", file: "", line: 0, col: 0};
+    }
+    # ... normal parsing path ...
+}
+
+# Dispatch on `kind`.
+try {
+    parseConfig($cfg);
+} catch (err) {
+    if ($err.kind == "parse_error") {
+        io.printf("config invalid: %s\n", $err.message);
+    } else {
+        throw $err;   # not our concern; let it propagate
+    }
+}
+```
 
 ---
 
@@ -576,31 +701,91 @@ both.
 - **`jennifer ast`** gains optional `--with-comments` flag so
   the JSON dump includes the attachment slots; off by default
   to keep the existing test suite stable.
+- **Block comments nest** (small change but worth calling out -
+  same lexer touch is already opening the comment loop). The
+  current rule "`/* */` block comments do not nest" is dropped;
+  the scanner switches to a depth counter (increment on `/*`,
+  decrement on `*/`, exit when depth hits 0). Unterminated nested
+  comments still error positionally at the *outermost* `/*` so
+  the message points at where the user meant to start. Lets the
+  common "comment out a chunk of code that already contains a
+  block comment" case work without resorting to `#` rewrites.
 - **No language change.** Comments are still purely
-  informational; the runtime never sees them. This milestone is
-  pure pipeline plumbing.
+  informational; the runtime never sees them. Nesting is a
+  scanner detail. This milestone is pure pipeline plumbing.
 - **Style guide updates.** The two "Limitations" bullets in
   `style-guide.md` (comments dropped, blank lines not
-  preserved) are removed. The "Source file conventions" section
-  notes that shebang, header comments, and inline `# why` notes
-  all survive a `fmt` round-trip.
+  preserved) are removed. The "Block comments don't nest" line
+  in `style-guide.md` and the matching note in `CLAUDE.md` are
+  updated to "Block comments nest." The "Source file
+  conventions" section notes that shebang, header comments,
+  and inline `# why` notes all survive a `fmt` round-trip.
 
-Lands here, between M13 (structs) and the M15.x library batch,
+Lands here, between M13.1 (structs) and the M15.x library batch,
 so the first wave of struct-using libraries can ship with
 doc-comments that `fmt` will preserve.
 
 ---
 
 **Phase B: foundational libraries (M15.x).** Small, frequently-used
-libraries grouped under M15 with sub-numbering; each sub-milestone
-ships one library independently.
+libraries grouped under M15 with sub-numbering. Most M15.x slots
+ship a new library independently; the leading M15.0 slot is the
+"wrap-up of existing libraries" - small additions to the
+M8 / M9 / M10 libraries that depend on something the language
+gained in M10-M14 (random helpers, structs, bytes, etc.). Each
+extension picks the existing library that's already its natural
+home rather than getting a tiny library of its own.
+
+## M15.0 - existing-library extensions
+
+Small additions to the M8 / M9 / M10 libraries that depend on
+features the language picked up after those libraries shipped.
+
+- **`lists.shuffle(xs) -> list`** - Durstenfeld's variant of the
+  Fisher-Yates shuffle. Returns a new list with the elements in
+  a uniformly random order; non-mutating, matching
+  `lists.sort` / `lists.reverse` / every other helper in the
+  library. Algorithm walks the elements from index `n-1` down to
+  `1`; for each `i`, pick a random `j` in `[0, i]` and swap; the
+  walk is O(n) and the distribution is uniform across the `n!`
+  permutations. Empty and single-element inputs are returned
+  unchanged (still copied, per the non-mutating convention).
+  Determinism: respects `math.randSeed(n)` from M10 - calling
+  `math.randSeed(N); lists.shuffle($xs)` twice in the same run
+  yields the same permutation, useful for reproducibility in
+  tests and reruns. Dependency: `math.rand*` (M10, shipped).
+- **`lists.range(...) -> list of int`** - allocate a list of
+  consecutive integers. Arity-dispatched, same shape as
+  `lists.slice` which already overloads on arity:
+  - `lists.range(end)` → `[0, 1, ..., end-1]`
+  - `lists.range(start, end)` → `[start, start+1, ..., end-1]`
+  - `lists.range(start, end, step)` → walks by `step`; positive
+    `step` requires `start <= end` and stops at the largest
+    value `< end`; negative `step` requires `start >= end` and
+    stops at the smallest value `> end`.
+
+  **End is exclusive** to match `lists.slice` (M9) and
+  `strings.substring` (M9). `len(lists.range(a, b)) == b - a`
+  when `a <= b` and step is 1. Step must be non-zero (positional
+  error). An empty result is returned for ranges that would
+  produce no values rather than treated as an error
+  (`lists.range(5, 5)` → `[]`).
+
+  Ships as a library function rather than a `[1..n]` syntax
+  operator on Stance #1 grounds - see
+  [technical/rejected.md > Range literal syntax](../technical/rejected.md#range-literal-syntax-19).
+
+Further extensions can land here as the language gains features
+that unblock library additions (e.g. a `maps.invert` once it has
+a clear use case; a `strings.repeat` already exists so it stays
+put).
 
 ## M15.1 - `os`
 
 Expands the M8 demo slice (`os.platform()`, `os.getEnv(name)`,
 `os.JENNIFER_LF`, `os.JENNIFER_OS` already ship there). One large
 update covering process metadata, the `JENNIFER_*` constant set,
-and the external-program execution surface. Depends on M13
+and the external-program execution surface. Depends on M13.1
 (structs) for the result and handle types.
 
 **Process metadata.**
@@ -688,7 +873,7 @@ other wire format added in M15.2.2.
 - `def struct time.Time { ... };` - opaque struct representing
   an instant on the wall-clock timeline with nanosecond
   precision and zone awareness. Fields are private API; users
-  interact through the function set below. (Re-using the M13
+  interact through the function set below. (Re-using the M13.1
   struct machinery; `time.Time` is just a struct that the
   library happens to ship and on which the library defines
   operators.)
@@ -765,7 +950,7 @@ streams), one primitive per algorithm:
 
 - `hash.streamMd5() -> hash.Stream`, `hash.streamSha256()`,
   `crc.streamCrc32()`, ... - each returns an opaque stream
-  handle (struct from M13).
+  handle (struct from M13.1).
 - `hash.update($stream, $bytes)` feeds the next chunk.
 - `hash.finalize($stream) -> bytes` returns the final digest;
   the stream is consumed and further `update` calls error.
@@ -791,24 +976,407 @@ layout.
 
 ## M15.4 - `encoding`
 
-`encoding.isAscii`, `encoding.lenBytes`, `encoding.lenRunes`,
-hex / base64 helpers, and the lossless re-encoding codecs
-beyond UTF-8. Operates on the byte stream's shape (introspection
-and re-encoding); the cross-kind `bytes <-> string` codec pair
-itself lives in `convert` as `convert.bytesFromString` /
-`convert.stringFromBytes` (shipped with the `bytes` type in
-M12).
+Codec library: byte-stream introspection plus the lossless
+re-encoding codecs beyond UTF-8. The cross-kind `bytes <-> string`
+**single-codec** pair lives in `convert`
+(`convert.bytesFromString` / `convert.stringFromBytes`, UTF-8 only,
+shipped with the `bytes` type in M12). `encoding` is where the
+codec proliferation happens because that's where the table-based
+implementations belong.
+
+**Introspection helpers.**
+
+- `encoding.isAscii(b as bytes) -> bool` - every byte < 0x80.
+- `encoding.lenBytes(s as string) -> int` - byte length of `$s`'s
+  UTF-8 encoding (contrast with `len($s)`, which is the rune
+  count).
+- `encoding.lenRunes(b as bytes) -> int` - decoded rune count of
+  valid UTF-8 `bytes`; errors on invalid UTF-8.
+- `encoding.hex(b)` / `encoding.fromHex(s)` - lowercase hex
+  round-trip.
+- `encoding.base64(b)` / `encoding.fromBase64(s)` - standard
+  base64 (RFC 4648); url-safe variant via a modifier ships in
+  the same release.
+
+**Codec table API.** The shape mirrors convert's:
+
+- `encoding.encode(s as string, codec as string) -> bytes` -
+  encode a Jennifer string into the named codec.
+- `encoding.decode(b as bytes, codec as string) -> string` -
+  decode bytes from the named codec.
+
+Both error positionally on (a) unknown codec, (b) bytes that
+don't validly decode in the named codec, or (c) string runes
+that don't representably encode (e.g. a string containing
+`U+1F600` into Latin-1).
+
+**Codec set shipped in M15.4.** All single-byte (and ASCII), so
+each costs at most one 256-entry table:
+
+- **`"ascii"`** - 7-bit ASCII; rejects any byte >= 0x80 on decode
+  and any rune >= 0x80 on encode. Trivial; useful for strict
+  protocol validation.
+- **`"latin-1"` / `"iso-8859-1"`** - one-to-one mapping with
+  Unicode block U+0000-U+00FF. No table needed - it's the
+  identity in that range. Aliases resolve to the same codec.
+- **`"iso-8859-2"` through `"iso-8859-16"`** - Central/Eastern
+  European, Cyrillic, Arabic, Greek, Hebrew, Turkish, Nordic,
+  Celtic, South-Eastern European. One 256-entry table each;
+  encode is the inverse lookup. (Codec strings normalised so
+  `"iso-8859-2"`, `"iso88592"`, `"latin-2"` all resolve to the
+  same codec.)
+- **`"windows-1250"` through `"windows-1258"`** - Microsoft's
+  Western, Central, Cyrillic, Greek, Turkish, Hebrew, Arabic,
+  Baltic, and Vietnamese code pages. Same shape as the ISO-8859
+  family; one table each. **Windows-1252** is the highest-priority
+  member - it's the de-facto encoding of "Latin-1 with smart
+  quotes" found in countless real-world Windows files mislabeled
+  as Latin-1.
+- **`"ebcdic"`** - IBM mainframe code page (specifically
+  IBM-1047, the modern Latin-1 EBCDIC variant). One table.
+  Narrow relevance but free to ship now that the table loader
+  is in place; lets Jennifer talk to mainframe data without a
+  separate library.
+
+**Codec name normalisation.** Codec strings are case-insensitive
+and ignore `-` / `_` / spaces, so `"ISO-8859-1"`, `"iso88591"`,
+`"latin_1"` all resolve to the same codec. The canonical form
+returned by `encoding.codecs() -> list of string` is lowercase
+with the hyphen form. Common aliases (`"latin-1"` for
+`"iso-8859-1"`, `"cp1252"` for `"windows-1252"`) are accepted on
+input.
+
+**What stays out of M15.4 (deferred to later milestones).**
+
+- Variable-width Asian encodings: `Shift-JIS`, `Big5`, `GB2312`,
+  `GBK`, `GB18030`, `EUC-JP`, `EUC-KR`. Each is a state-machine
+  implementation with multiple variants and ambiguity edge cases;
+  one or two of these is a whole milestone of work, not a row in
+  a table.
+- `UTF-16` / `UTF-16LE` / `UTF-16BE` and `UTF-32` - byte-order
+  marks, surrogate pair handling, endianness. Real but separate
+  work.
+- `UTF-7`, `quoted-printable`, mail-transport hacks - belong
+  with `mail` / `mime` library work, not core encoding.
+
+These ship in their own sub-milestone once a real Jennifer
+program needs them - currently no roadmap item depends on them.
+
+## M15.5 - distribution + first public release
+
+The last step before Phase C. Phase B finishes the foundational
+library batch; M15.5 makes that batch a thing people can actually
+install and run before Phase C starts adding I/O on top. The
+items below have been on the parallel "Path to 1.0.0
+distribution" track for a while; promoting them to a real
+milestone means they get tested, polished, and released as a
+unit instead of trickled in piecemeal.
+
+This is a packaging / CI / release-engineering milestone, not a
+language change. Nothing new ships in the `.j` source language.
+
+**Two binaries per release (both supported).**
+
+Benchmarks on the dev machine showed Go-compiled Jennifer is
+~3-4x faster than TinyGo-compiled Jennifer for CPU-bound code
+(loops, recursion, arithmetic), while TinyGo wins by ~1.7x on
+allocation-heavy patterns where its lighter GC pays off. The
+size delta is small (TinyGo ~2.4 MB vs Go ~3.9 MB on the dev
+machine; bare-metal numbers will differ from a VM). Both
+binaries ship per platform:
+
+- `jennifer` - **TinyGo build, canonical**. The design-target
+  binary: McFly OS embedding, wasm, embedded contexts all want
+  this one. Default download path in the README and docs.
+- `jennifer-go` - **Go build, performance variant**. For users
+  running compute-bound Jennifer where the 3-4x speedup matters
+  more than the size or embedding story. Same source, same
+  language; only the compiler differs.
+
+The release README ships with the benchmark numbers re-run on
+the release CI so users can pick informed. The "which binary?"
+guidance lives in `docs/user-guide/installing.md` so the
+decision is documented in one place.
+
+**GitHub Actions.**
+
+- **`test.yml`** - runs `go test ./...` and `make build`
+  (TinyGo) on every push and PR. Caches the Go and TinyGo
+  module caches so PR runs stay fast. Currently we run tests
+  locally only; this puts a green-checkmark gate on every PR
+  and stops broken-build PRs from landing.
+- **`release.yml`** - triggered on git tag matching `v*.*.*`.
+  Builds both `jennifer` (TinyGo) and `jennifer-go` (Go)
+  binaries for the supported platforms (linux/amd64 + arm64
+  initially; macOS + Windows once cross-platform support
+  lands in a follow-on sub-milestone), runs the benchmark
+  suite on the release runner, produces a release notes
+  template with the benchmark table filled in, and publishes
+  to GitHub Releases.
+
+**Packaging.**
+
+- **Debian** (`.deb`). Built from the release artifact. Ships
+  `/usr/bin/jennifer` (TinyGo) and `/usr/bin/jennifer-go` (Go
+  variant) plus man-page stubs and `.j` extension MIME
+  registration. The package is hosted as a GitHub Release
+  artifact initially; a real apt repository follows if/when
+  there's user demand.
+- **Arch** (`PKGBUILD`). Two AUR packages: `jennifer-bin`
+  (downloads the prebuilt artifact, fast install) and
+  `jennifer-git` (builds from source, tracks master). Both
+  install the TinyGo + Go binaries side by side.
+- **pacman** (`.pacman` package format). Pre-built for users
+  who want the binary form without going through AUR's
+  source-package workflow.
+
+**Documentation site.**
+
+GitHub Pages driven from `docs/` (mdBook is the leading
+candidate; needs a design pass for the navigation/landing
+shape). The site goes live with M15.5 so the release
+announcement has somewhere to link to that isn't a GitHub
+file tree. Versioned per release tag.
+
+**What stays on the "Path to 1.0.0 distribution" parallel
+track** (post-M15.5 polish, not gated on this milestone):
+
+- Homebrew tap for macOS users
+- Snap package
+- Nix flake / Nix package
+- Cross-build for macOS (waits on platform-portability work
+  first)
+- Cross-build for Windows (same)
+
+These are post-1.0 polish that the parallel track keeps tracking;
+they ship when they ship and don't block M16.0.
 
 ---
 
 **Phase C: I/O libraries (M16.x).** System libraries that touch the
-OS or do significant compute.
+OS or do significant compute. Phase C opens with a language
+addition (M16.0 - concurrency primitives) because every I/O library
+in the phase wants to know whether spawned work and async waits
+are available; the I/O libraries themselves (M16.1+) ship in the
+same phase atop that foundation.
+
+## M16.0 - Lightweight concurrency
+
+Adds `spawn { ... }` and a `task of T` value type so I/O can
+proceed without blocking the whole program. Lands as a
+prerequisite of M16.1-M16.3 (any of which can use it for
+non-blocking calls) and a hard requirement for M20 `httpd` (a
+single-connection web server isn't a server). The decision to
+ship goroutine-style concurrency rather than `async`/`await` or
+raw OS threads is recorded with the reasoning at
+[technical/rejected.md > async/await coloring](technical/rejected.md#asyncawait-function-coloring)
+once the milestone work begins; the short version is "Jennifer's
+value semantics already provide the isolation that
+async-await / borrow-checking exist to enforce."
+
+**Why now.** Jennifer's value-semantics decision (M6 lists/maps,
+M12 bytes, M13.1 structs - all copied on assignment and
+parameter binding) means a spawned block cannot accidentally
+share mutable state with the parent. Every captured variable is
+deep-copied at spawn time, identical to a function call. The
+hardest problem in shared-memory concurrency - data races on
+mutable state - cannot happen by construction. We get that
+property for free from a decision we made for unrelated reasons,
+which is what makes "ship concurrency" a smaller surface than it
+would be in a reference-semantics language.
+
+**Syntax.**
+
+```jennifer
+# spawn { ... } runs the body in a separate goroutine. Variables
+# captured from the enclosing scope are deep-copied at spawn time,
+# same semantics as a method call. The block's `return EXPR;`
+# becomes the task's result; bare `return;` produces null.
+def t as task of int init spawn {
+    return computeStuff();
+};
+
+# task.wait blocks until the spawned block finishes and returns the
+# value. If the block threw an error, task.wait re-throws it in the
+# waiter's frame.
+def result as int init task.wait($t);
+```
+
+**New type kind: `task of T`.** A compound type that wraps a
+pending or completed computation. Constructed only by `spawn`;
+read only via the `task` library. Value semantics: a
+`task of T` value is small (essentially a handle), and copying
+it shares the same underlying task (single result, multiple
+waiters get the same value or the same re-thrown error - "the
+task" exists once even if the handle moves). This is the **one
+exception** to Jennifer's "no shared references" rule, and it's
+necessary - a task by definition represents a single underlying
+operation. The exception is contained: `task of T` values can
+only be acted on through the `task.*` API, which itself is
+side-effect-careful.
+
+**New keyword: `spawn`.** Statement-position only - same shape
+as `if`/`while`/`for`/`repeat`. The spawn block is a fresh
+scope; the spawn body runs concurrently with the rest of the
+program.
+
+**Value-semantics capture.** Variables referenced inside
+`spawn { ... }` from the enclosing scope are deep-copied into
+the spawned frame at the moment of spawn, same as how a method
+call deep-copies its arguments. The spawned block sees its own
+copy; mutations don't propagate back; the parent's bindings are
+untouched:
+
+```jennifer
+def xs as list of int init [1, 2, 3];
+def t as task of null init spawn {
+    $xs[0] = 999;       # mutates the spawned frame's copy
+    return null;
+};
+task.wait($t);
+# $xs in the parent is still [1, 2, 3].
+```
+
+**Error propagation.** Errors thrown inside a `spawn` block are
+captured by the task. Calling `task.wait` re-throws them in the
+waiter's frame, where ordinary `try`/`catch` (M13.2) handles
+them:
+
+```jennifer
+def t as task of int init spawn {
+    throw Error{kind: "boom", message: "...", file: "", line: 0, col: 0};
+};
+try {
+    def n as int init task.wait($t);
+} catch (err) {
+    io.printf("caught: %s\n", $err.message);
+}
+```
+
+A task whose error was never waited on **silently drops** the
+error when GC'd. (Jennifer has no finalizers; surfacing dropped
+errors would require one.) Users who care about every error
+should always `wait` or `discard`. Recommended idiom for
+fire-and-forget: explicit `task.discard($t);` so the intent is
+visible at the call site.
+
+**`task` library (built-in, shipped with M16.0).**
+
+| Function | Effect |
+|----------|--------|
+| `task.wait(t) -> T` | Block until `t` completes; return its value or re-throw its error. |
+| `task.poll(t) -> bool` | Non-blocking check: true if `t` has completed (value or error available). |
+| `task.discard(t)` | Mark `t` as fire-and-forget; suppresses dropped-error logging if it's ever added. |
+| `task.waitAll(ts) -> list of T` | Wait for every task in `$ts`; return their results in order. Re-throws the first error encountered (others discarded). |
+| `task.waitAny(ts) -> int` | Wait until any task in `$ts` completes; return its index. Caller then `task.wait`s that one. |
+
+`waitAll` / `waitAny` cover the most common patterns (parallel
+map-fold and "first to respond wins"). Anything more complex
+(timeouts, racing N tasks with cancellation of losers, etc.)
+ships in a `task.x` sub-milestone if a real use case forces it.
+
+**What's NOT in v1 (deliberate; defer until a forcing function appears).**
+
+- **Channels** (`chan of T`, `chan.send`, `chan.recv`). Tasks
+  cover the futures use case; channels cover pipelines /
+  fan-in / fan-out. The pipeline patterns can be expressed with
+  lists of tasks and `waitAll` until that proves clumsy. Add
+  channels in a follow-on sub-milestone if/when real programs
+  need them.
+- **Mutexes / locks.** Value-semantics capture removes the
+  shared-mutable-state-needs-locking case. If users want a
+  shared counter, they spawn a goroutine that owns it and
+  communicate via tasks (actor-style).
+- **Cancellation.** Famously hard to do right (Go added
+  `context.Context` years after goroutines). Spawned blocks
+  cannot be killed; they run to completion. Tasks that take a
+  long time and may need stopping should check a flag the
+  parent sets via shared state - but since Jennifer has no
+  shared state, the pattern is "use a quick task plus a
+  user-managed sentinel value." Concrete API ships when a real
+  use case surfaces.
+- **Timeouts.** Same family as cancellation. Workaround:
+  `task.waitAny([$work, $timer])` where `$timer` is a task
+  that spawns and sleeps. Wait for whichever returns first.
+- **Go-style `select`.** Multi-channel select belongs with
+  channels.
+- **`context.Context` propagation.** Belongs with cancellation.
+
+**Interaction with existing language features.**
+
+- **`exit` inside a spawn**: terminates the whole program (same
+  as outside spawn). The spawn keyword does not create a frame
+  that catches `exit`; it's still the global escape hatch.
+- **`return` inside a spawn**: returns from the spawn block,
+  producing the task's value. Does not return from the
+  enclosing method. (Symmetric with how `return` inside a method
+  body returns from the method, not from the enclosing
+  top-level.)
+- **`break` / `continue` inside a spawn**: error at parse time
+  - they make no sense without an enclosing loop, and the
+    spawn's lexical block does not transparently see loops in
+    the parent.
+- **`throw` inside a spawn**: captured by the task and re-thrown
+  on `wait`, as documented above.
+- **try/catch crossing a spawn boundary**: a `try` in the
+  parent does **not** catch errors raised inside an
+  unwaited-on `spawn`. The `task.wait($t)` site is where errors
+  enter the catchable channel.
+
+**REPL interaction.** A `spawn` from a REPL input runs
+concurrently; subsequent inputs can `task.wait` on it. The line
+editor owns stdin (same M5 rule as `io.readLine`), so spawned
+blocks must not read from stdin while the REPL is interactive.
+
+**Internals.**
+
+- `spawn { body }` lowers to a Go goroutine that runs the body
+  with a deep-copied frame. The goroutine sends `{value, error}`
+  to a one-shot Go channel; the `task of T` value wraps that
+  channel.
+- `task.wait` blocks on the channel; on receive, returns the
+  value or wraps the error and routes it through the same
+  `ErrorSignal` machinery M13.2 introduces. The waiter's frame
+  position is what `catch` blocks see.
+- TinyGo's goroutine implementation depends on the target;
+  Linux native (the shipping target today) uses preemptive
+  scheduling on top of OS threads, so `spawn` can give real
+  parallelism on multi-core systems. WASM targets use
+  cooperative scheduling. The McFly OS embedding inherits
+  whatever scheduling its TinyGo build configures.
+- Tests: a synthetic interpreter helper installs a "spawn that
+  runs the body inline" mode so deterministic tests don't
+  depend on goroutine scheduling.
+
+**Library impact.**
+
+- **M16.1 `fs`** can ship blocking read/write that callers wrap
+  in `spawn` for non-blocking. No `fs.readAsync(...)`
+  duplication API needed - the user composes with `spawn`.
+- **M16.2 `net`** likewise. Accept-loop / per-connection servers
+  spawn a task per connection.
+- **M19 `crypto`** doesn't need concurrency directly but the
+  M19 hash/crypto helpers can be composed under `spawn` for
+  parallel hashing of large inputs.
+- **M20 `httpd`** is the headline consumer. The accept loop
+  becomes `while (true) { def conn init net.accept($listener); spawn { handle($conn); } }`.
+
+See:
+- [user-guide/concurrency.md](user-guide/concurrency.md) (new
+  doc at M16.0 implementation time) - the user-facing tour with
+  worked examples (parallel fetch, request handler, fire-and-forget
+  logging).
+- [libraries/task.md](libraries/task.md) (new) - the `task.*`
+  function reference.
+- [technical/interpreter.md > Concurrency](technical/interpreter.md#concurrency) (new
+  subsection) - goroutine mapping, frame copying, error
+  routing, test-only inline mode.
 
 ## M16.1 - `fs`
 
 File I/O. `fs.read`, `fs.write` for `string` and `bytes`,
 `fs.stat` returning a struct, directory walk. Requires M11
-(bytes) and M13 (structs). Brings the M7-deferred file handles
+(bytes) and M13.1 (structs). Brings the M7-deferred file handles
 and any non-stdin input source (`fs.open(path) -> handle`,
 `handle.readLine()`, etc.) under one library.
 
@@ -816,7 +1384,9 @@ and any non-stdin input source (`fs.open(path) -> handle`,
 
 Sockets. Plain TCP and UDP first; TLS deferred to its own
 sub-milestone. The first place a real `bytes` round-trip
-matters.
+matters. Ships blocking calls; non-blocking use composes through
+M16.0 `spawn` rather than duplicating each call as
+`net.acceptAsync`, `net.readAsync`, etc.
 
 ## M16.3 - `regex`
 
@@ -889,7 +1459,9 @@ only. Hashes already shipped in M15.3.
 Pure-Jennifer HTTP server atop `net`. Ships as a module under
 `modules/httpd.j` (same packaging shape as the M18 modules), not
 baked into the interpreter. The point where Jennifer becomes
-useful for serving content.
+useful for serving content. Depends on **M16.0 concurrency**
+(per-connection handlers run in `spawn` blocks) and M16.2 `net`
+(the underlying TCP listener).
 
 ---
 
@@ -923,23 +1495,25 @@ some of this space first.
 
 ## Path to 1.0.0 distribution (parallel track)
 
-Not milestone-gated; items can be picked up between language
-milestones. The earlier this track makes Jennifer visible, the
-sooner breaking changes feed into a real audience before 1.0.0
-locks the API.
+The core CI + release + packaging items that used to live here
+were promoted into M15.5 (the last step before Phase C). What
+stays on this parallel track is the post-M15.5 polish - items
+that can land any time and don't block any milestone:
 
-- **CI.** GitHub Actions running `go test ./...` and
-  `tinygo build` on every push and PR.
-- **Tagged releases.** Prebuilt binaries on GitHub releases.
-  Linux/amd64 first, then arm64; macOS and Windows after
-  cross-platform support lands.
-- **Debian package** (`.deb`). Hosted from a GitHub release
-  artifact initially.
-- **Arch.** AUR `jennifer-bin` (prebuilt) and `jennifer-git`
-  (source) packages.
-- **Documentation site.** GitHub Pages driven from `docs/`
-  (mdBook or similar; needs a design pass).
-- **Optional later:** Homebrew tap, Snap, Nix package.
+- **Homebrew tap** for macOS users.
+- **Snap** package.
+- **Nix flake** / Nix package.
+- **Cross-build for macOS / Windows.** Waits on the
+  platform-portability work in the Long-horizon list; ships as
+  soon as that lands.
+- **Real apt repository** (replacing the "GitHub Release
+  artifact" install of the M15.5 `.deb`) if user demand
+  warrants the maintenance.
+- **Snap / Flatpak**, **AppImage**, or any other Linux
+  distribution format Jennifer users actually ask for.
+
+Each of these ships when there's user demand and a maintainer
+willing to keep it green; they're not blocking anything.
 
 ---
 

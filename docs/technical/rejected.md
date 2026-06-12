@@ -29,6 +29,110 @@ Rejected because:
 - Keeping a single assignment shape (`$x = EXPR;`) makes source code uniform
   and matches Jennifer's "one way to do each thing" stance.
 
+## Ternary operator (`cond ? a : b`)
+
+Considered as a way to write expression-position conditional
+selection without bouncing through an intermediate variable:
+
+```jennifer
+# verbose - status quo
+def grade as string;
+if ($score >= 90) { $grade = "A"; } else { $grade = "B"; }
+
+# what a ternary would let us write
+def grade as string init $score >= 90 ? "A" : "B";
+```
+
+Python's `a if c else b` and the C-family `c ? a : b` cover the
+same need.
+
+Rejected because:
+
+- **Parallel API to `if`/`else`.** Stance #1 is strict in Jennifer
+  (`++` was rejected even though it's syntactically distinct from
+  `$i = $i + 1`). "Pick value A or B based on a condition" is one
+  operation; `if`/`else` is the canonical spelling. Adding a second
+  syntax form would be the same kind of parallel API that `++` and
+  `+=` were rejected for.
+- **Closest stance neighbor agrees.** Go is the only mainstream
+  language built on a "small, explicit" stance comparable to
+  Jennifer's, and Go's designers rejected ternary explicitly: "The
+  reason `?:` is absent from Go is that the language's designers
+  had seen the operation used too often to create impenetrably
+  complex expressions. The if-else form, although longer, is
+  unquestionably clearer." Real Go code lives without it; Jennifer
+  programs will too.
+- **Nesting is the footgun.** `a ? b : c ? d : e ? f : g` is
+  parseable but unreadable. Once shipped, the ternary will end up
+  in code like this and there's no way to take it back. Rejecting
+  upfront saves us the migration.
+- **Verbose form has search/step affordances.** A multi-line
+  `if`/`else` is grep-friendly, debuggable, and editable line by
+  line. The condensed expression form is none of these. For one
+  saved line of source across the whole program, the cost is too
+  high.
+- **Escape hatch already exists.** A user who really wants
+  ternary-shaped code can write a one-line helper
+  `func pick(c as bool, a as int, b as int) { if ($c) { return $a; } return $b; }`.
+  Both arguments evaluate eagerly (no short-circuit), but for the
+  cases where ternary is genuinely better this is fine.
+
+The "make `if` itself an expression" alternative (Rust-style:
+`def x init if (c) { 1 } else { 2 };`) was also considered and
+deferred indefinitely. It's the cleaner long-term answer if
+expression-position conditionals ever become genuinely needed -
+it extends an existing construct rather than introducing a new
+operator - but it's a much larger change (blocks have to evaluate
+to their last expression; type-checking gets harder; `if` without
+`else` and `if` containing `return`/`exit` need defined semantics).
+We don't owe ourselves that complexity for "save one line of
+source" ergonomics.
+
+## Range literal syntax (`[1..9]`)
+
+Considered as a shorthand for constructing a `list of int`
+sequence:
+
+```jennifer
+# what range literal would let us write
+def xs as list of int init [1..9];
+for (def i in [1..len($items)]) { ... }
+```
+
+Borrowed from Haskell / Kotlin / Ruby's syntactic form.
+
+Rejected because:
+
+- **Parallel API to the `[1, 2, 3]` list literal.** Two syntaxes
+  for "construct a `list of int`" - same family as `++`, `+=`,
+  and ternary. Stance #1 has rejected every previous instance.
+- **Hides materialization cost (stance #2).** `[1..big_number]`
+  silently allocates a million-element list. The explicit
+  `for (def i init 1; $i <= n; ...)` loop iterates without
+  materializing, and the cost shows up at the call site instead
+  of being buried in a two-character `..` operator. A library
+  function call (`lists.range(...)`) makes the allocation
+  visible too; the literal form does not.
+- **New single-purpose operator.** Jennifer hasn't introduced an
+  operator that works in exactly one context before; every other
+  operator (`+ - * / // % & | ^ ~ << >> < > <= >= == and or not`)
+  works across multiple types or contexts. `..` only does
+  integer ranges. Once it ships we'd have to defend "why doesn't
+  `[1.0..9.0]` work? why not `["a".."z"]`?" - each extension
+  another design discussion.
+- **Pattern set elsewhere.** Jennifer ships `lists.head` /
+  `lists.tail` instead of Python `xs[:n]` / `xs[n:]` slicing
+  syntax; `strings.substring` instead of `s[i:j]`; index-write
+  `$xs[i] = v;` instead of pythonic `$xs[i:i+1] = [v]`. Library
+  functions over syntax for collection operations is the
+  established Jennifer pattern.
+
+The chosen rule: ship `lists.range(start, end)` (M15.0) as the
+canonical way to allocate an integer sequence. Use site reads as
+"this allocates a list" instead of hiding behind two characters
+of punctuation. See
+[milestones.md > M15.0](../milestones.md#m150---existing-library-extensions).
+
 ## printf data-transformation modifiers
 
 Considered during the M7 format-verb-modifier design: extending the
