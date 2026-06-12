@@ -11,13 +11,17 @@ binary small and predictable under TinyGo.
 ```go
 type Value struct {
     Kind    ValueKind  # KindNull | KindInt | KindFloat | KindString |
-                       #  KindBool | KindList | KindMap
+                       #  KindBool | KindList | KindMap | KindBytes |
+                       #  KindStruct (M13.1)
     Int     int64
     Float   float64
     Str     string
     Bool    bool
-    List    []Value      # KindList: element data
-    Map     []MapEntry   # KindMap:  insertion-ordered entries
+    List    []Value      # KindList:   element data
+    Map     []MapEntry   # KindMap:    insertion-ordered entries
+    Bytes   []byte       # KindBytes:  raw bytes
+    Fields  []StructField # KindStruct: ordered (Name, Value) per definition
+    StructName string    # KindStruct: matches the StructDef name
     ElemTyp *parser.Type # KindList: declared element type (stamped)
     KeyTyp  *parser.Type # KindMap:  declared key type   (stamped)
     ValTyp  *parser.Type # KindMap:  declared value type (stamped)
@@ -70,12 +74,41 @@ deep type tracking is preserved for nested `$xs[i][j] = ...` writes.
   keys are positioned runtime errors. Reads return the slot value by
   copy via Go's struct semantics, but the inner slice headers still
   alias - which is fine because reads can't mutate anything.
-- **Writes** (`execIndexAssign`): walk the chain on a fresh copy of
-  the root binding, apply via `applyIndexAssign` /
-  `writeIndexedSlot`, then commit back through `env.Assign`. Const
-  enforcement fires once against the root binding (deep constness).
-  Map writes to a missing key extend the map (insertion order
-  preserved); writes to an existing key update in place.
+- **Writes** (`execIndexAssign` / `execFieldAssign`, M13.1): both
+  route through the unified `collectLvalueSteps` +
+  `applyLvalueWrite` walker. The walker descends through the
+  chain (any mix of `[index]` and `.field` nodes) on a fresh copy
+  of the root binding, writes via `writeIndexedSlot` (index leaf)
+  or the per-struct-field type check (field leaf), then commits
+  back through `env.Assign`. Const enforcement fires once against
+  the root binding (deep constness). Map writes to a missing key
+  extend the map (insertion order preserved); writes to an
+  existing key update in place. Struct field writes are
+  type-checked against the declared field type stored in the
+  `StructDef`.
+
+### Structs (M13.1)
+
+User-defined struct types live in `Interpreter.structs`
+(`map[string]*parser.StructDef`), populated at `Run` time by hoisting
+every top-level `def struct` before any other statement executes.
+This mirrors the method-hoisting pass, and the same duplicate-name
+check applies (`Run` rejects two structs with the same name; the
+REPL silently redefines).
+
+Per-instance values use `KindStruct` and carry the struct name plus
+a `[]StructField` (each entry is `{Name, Value}`). The field slice is
+stored in declaration order so `%v` rendering and `Equal` checks are
+deterministic. `Copy()` deep-copies every field so value semantics
+hold; `MatchesDeclared` matches by name (`p` typed `Point` matches
+`Point`-typed declarations only).
+
+The `def x as Name;` no-init path is handled by `zeroStructFor`,
+which recurses through nested struct-typed fields so every leaf
+field gets its declared zero. Unknown struct names are rejected here
+and at `execDefine` time before the init expression is evaluated, so
+the user sees `"unknown struct type"` rather than a misleading
+type-mismatch error.
 
 ### Iteration
 

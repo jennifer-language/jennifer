@@ -169,4 +169,10 @@ msg[0]         = 72 (H)
 display        = bytes[48 69 21]
 after mutation = bytes[68 69 21 0a]
 round-trip     = hi!
+=== M13.1 structs ===
+p              = Point{x: 3, y: 4}
+p.x p.y        = 3 4
+after $p.x=30  = Point{x: 30, y: 4}
+copied + edited = p=Point{x: 30, y: 4} q=Point{x: 30, y: 99}
+nested write   = Line{from: Point{x: 5, y: 0}, to: Point{x: 10, y: 20}}
 === done ===

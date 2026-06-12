@@ -56,7 +56,8 @@ const (
 	TOKEN_MAP  // the word "map" used as a type
 	TOKEN_OF   // "of" - element-type separator: `list of int`, `map of K to V`
 	TOKEN_TO   // "to" - K/V separator inside `map of K to V`
-	TOKEN_IN   // "in" - for-each iterator: `for (def x in $coll)`
+	TOKEN_IN     // "in" - for-each iterator: `for (def x in $coll)`
+	TOKEN_STRUCT // M13.1: `def struct Name { field as type, ... };`
 
 	// Punctuation
 	TOKEN_LBRACE   // {
@@ -138,6 +139,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_OF:          "OF",
 	TOKEN_TO:          "TO",
 	TOKEN_IN:          "IN",
+	TOKEN_STRUCT:      "STRUCT",
 	TOKEN_LBRACE:      "LBRACE",
 	TOKEN_RBRACE:      "RBRACE",
 	TOKEN_LPAREN:      "LPAREN",
@@ -230,6 +232,7 @@ var keywords = map[string]TokenType{
 	"of":     TOKEN_OF,
 	"to":     TOKEN_TO,
 	"in":     TOKEN_IN,
+	"struct": TOKEN_STRUCT,
 }
 
 func lookupKeyword(ident string) (TokenType, bool) {

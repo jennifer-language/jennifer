@@ -34,5 +34,5 @@ io.printf("  o.JENNIFER_OS       = %s\n", o.JENNIFER_OS);
 use convert as realConvert;
 use os as convert;
 io.printf("aliased prefix (`use os as convert;`):\n");
-io.printf("  o.platform()        = %s\n", convert.platform());
-io.printf("  o.JENNIFER_OS       = %s\n", convert.JENNIFER_OS);
+io.printf("  convert.platform()        = %s\n", convert.platform());
+io.printf("  convert.JENNIFER_OS       = %s\n", convert.JENNIFER_OS);

@@ -534,14 +534,45 @@ the first big consumer of that foundation.
 
 ## M13.1 - Structs / records
 
-- New `def struct Name { field as type, ... };` syntax (working
-  name; revisited at start of M13.1).
-- Literals: `Name{ field: expr, ... }`. Field access: `$p.field`.
-  Value semantics like lists/maps - `def q as Name init $p;`
-  copies. `const` is deep.
+**Status:** done.
+
+- New `def struct Name { field as type, ... };` syntax,
+  top-level only. Hoisted before the first top-level statement
+  runs (parallel to method hoisting); duplicate names are
+  positioned errors in `Run`, silently redefined in the REPL.
+- Literals: `Name{ field: expr, ... }`. Every field is required
+  at the literal (no defaults at literal level); the
+  no-init form `def x as Name;` gives every field its declared
+  zero, recursing through nested struct-typed fields.
+- Field access `$p.field` and write `$p.field = ...;`. Lvalue
+  chains mix `[index]` and `.field` freely
+  (`$L.from.x = 5;`, `$bag.items[0] = 99;`); both
+  `IndexAssignStmt` and `FieldAssignStmt` route through a
+  unified walker.
+- Value semantics like lists/maps - `def q as Name init $p;`
+  copies; function-parameter binding copies; `const` is deep
+  (rejects both binding-rewrite and content mutation at any
+  depth).
+- Strict at boundaries: unknown struct type at declaration,
+  missing or unknown field at literal, field-type mismatch on
+  write, and field access on a non-struct value are all
+  positioned runtime errors.
 - Unblocks every library that wants to return composite data
   (file info, time values, network endpoints, http request /
-  response).
+  response) and is the foundation for the M13.2 error struct.
+
+See:
+- [user-guide/types-and-values.md](user-guide/types-and-values.md#structs-m131) -
+  language angle: declaration, construction, value semantics,
+  nested / chained access.
+- [technical/interpreter.md](technical/interpreter.md#structs-m131) -
+  runtime details: `KindStruct`, hoisting, unified lvalue walker.
+- [technical/grammar.md](technical/grammar.md) - `structDef`,
+  `structLit`, `fieldAssign`, mixed-tail lvalues.
+- `examples/structs.j` - standalone walkthrough; the
+  `=== M13.1 structs ===` section of `examples/showcase.j`
+  exercises the same surface alongside everything else that
+  ships through M13.1.
 
 ## M13.2 - `try` / `catch` / `throw`
 

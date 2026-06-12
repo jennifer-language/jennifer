@@ -347,4 +347,27 @@ io.printf("after mutation = %v\n", $msg);
 def roundTripped as string init convert.stringFromBytes($msg, "utf-8");
 io.printf("round-trip     = %s", $roundTripped);
 
+# --- M13.1: structs (records) ---
+#
+# A struct names a fixed set of typed fields. Literals construct
+# (every field required), `.field` reads, `.field = ...;` writes.
+# Value semantics: assignment copies. Nested structs work and the
+# lvalue chain reaches through them. A dedicated walkthrough lives
+# in examples/structs.j.
+def struct Point { x as int, y as int };
+def struct Line { from as Point, to as Point };
+
+io.printf("=== M13.1 structs ===\n");
+def p as Point init Point{ x: 3, y: 4 };
+io.printf("p              = %v\n", $p);
+io.printf("p.x p.y        = %d %d\n", $p.x, $p.y);
+$p.x = 30;
+io.printf("after $p.x=30  = %v\n", $p);
+def q as Point init $p;
+$q.y = 99;
+io.printf("copied + edited = p=%v q=%v\n", $p, $q);
+def L as Line init Line{ from: Point{ x: 0, y: 0 }, to: Point{ x: 10, y: 20 } };
+$L.from.x = 5;
+io.printf("nested write   = %v\n", $L);
+
 io.printf("=== done ===\n");

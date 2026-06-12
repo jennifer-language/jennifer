@@ -112,7 +112,9 @@ func TestParseErrors(t *testing.T) {
 		{"missing semi", `use stdlib func app() {}`, "expected SEMI"},
 		// `42;` and `def x ...;` are now both valid at top level - no
 		// equivalent rejection test belongs here.
-		{"truly unknown type", `func app() { def x as widget init 1; }`, "expected type"},
+		// Since M13.1 (structs), the parser accepts any IDENT as a type
+		// name; unknown struct types are surfaced at runtime by the
+		// interpreter ("unknown struct type"), not by the parser.
 		{"const needs uppercase", `func app() { def const lower as int init 1; }`, "must be uppercase"},
 		{"const rejects trailing underscore", `func app() { def const MAX_ as int init 1; }`, "may not end with"},
 		{"const rejects double-underscore-then-trailing", `func app() { def const MAX__ as int init 1; }`, "may not end with"},

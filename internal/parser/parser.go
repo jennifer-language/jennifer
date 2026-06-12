@@ -123,6 +123,19 @@ func (p *parser) parseProgram() (*Program, error) {
 				return nil, err
 			}
 			prog.Methods = append(prog.Methods, m)
+		case lexer.TOKEN_DEFINE:
+			// `def struct Name { ... };` is top-level only and hoisted
+			// alongside methods. Plain `def NAME as T ...;` falls through
+			// to parseStatement. Two-token lookahead distinguishes them.
+			if p.peekN(1).Type == lexer.TOKEN_STRUCT {
+				sd, err := p.parseStructDef()
+				if err != nil {
+					return nil, err
+				}
+				prog.Structs = append(prog.Structs, sd)
+				continue
+			}
+			fallthrough
 		default:
 			// Any other top-level statement: def / assign / if / while / for / expr.
 			st, err := p.parseStatement()
@@ -219,6 +232,73 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 	return &MethodDef{pos: pos{File: def.File, Line: def.Line, Col: def.Col}, Name: name.Lexeme, Params: params, Body: body}, nil
 }
 
+// parseStructDef parses `def struct Name { field as type, ... };`
+// (M13.1). The leading `def` and `struct` tokens are at the head of
+// the program token stream; we consume both, then the name, then a
+// brace-delimited comma-separated field list, then the closing `;`.
+// Top-level only - parseProgram does the dispatch.
+func (p *parser) parseStructDef() (*StructDef, error) {
+	def, _ := p.match(lexer.TOKEN_DEFINE)
+	if _, err := p.expect(lexer.TOKEN_STRUCT, "after `def`"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(lexer.TOKEN_IDENT, "for struct name")
+	if err != nil {
+		return nil, err
+	}
+	if containsUnderscore(name.Lexeme) {
+		return nil, &ParseError{Msg: fmt.Sprintf("struct name %q may not contain `_` (use PascalCase or camelCase)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+	}
+	if _, err := p.expect(lexer.TOKEN_LBRACE, "after struct name"); err != nil {
+		return nil, err
+	}
+	var fields []StructField
+	seen := map[string]bool{}
+	if !p.check(lexer.TOKEN_RBRACE) {
+		for {
+			if v := p.peek(); v.Type == lexer.TOKEN_VARREF {
+				return nil, &ParseError{
+					Msg:  fmt.Sprintf("field name has no `$`: write `%s as TYPE`", v.Lexeme),
+					File: v.File, Line: v.Line, Col: v.Col,
+				}
+			}
+			fname, err := p.expectFieldName("for struct field name")
+			if err != nil {
+				return nil, err
+			}
+			if containsUnderscore(fname.Lexeme) {
+				return nil, &ParseError{Msg: fmt.Sprintf("struct field name %q may not contain `_` (use camelCase)", fname.Lexeme), File: fname.File, Line: fname.Line, Col: fname.Col}
+			}
+			if seen[fname.Lexeme] {
+				return nil, &ParseError{Msg: fmt.Sprintf("struct field %q declared twice", fname.Lexeme), File: fname.File, Line: fname.Line, Col: fname.Col}
+			}
+			seen[fname.Lexeme] = true
+			if _, err := p.expect(lexer.TOKEN_AS, "after struct field name"); err != nil {
+				return nil, err
+			}
+			ftype, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, StructField{Name: fname.Lexeme, Type: ftype, File: fname.File, Line: fname.Line, Col: fname.Col})
+			if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
+				break
+			}
+			// Trailing comma before `}` is allowed.
+			if p.check(lexer.TOKEN_RBRACE) {
+				break
+			}
+		}
+	}
+	if _, err := p.expect(lexer.TOKEN_RBRACE, "to close struct field list"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate struct definition"); err != nil {
+		return nil, err
+	}
+	return &StructDef{pos: pos{File: def.File, Line: def.Line, Col: def.Col}, Name: name.Lexeme, Fields: fields}, nil
+}
+
 func (p *parser) parseBlock() (*Block, error) {
 	lb, err := p.expect(lexer.TOKEN_LBRACE, "to begin block")
 	if err != nil {
@@ -267,11 +347,11 @@ func (p *parser) parseStatement() (Stmt, error) {
 			return p.parseAssign(true)
 		}
 		// `$xs[...] = expr ;` (or chained `$xs[i][j] = ...`) is an
-		// index-assignment. We can't decide until we see the `=` after
-		// the lvalue chain, so we save the parser position, attempt the
-		// chain, and either commit (if `=` follows) or restore and fall
-		// through to the expression-statement path below.
-		if p.peekN(1).Type == lexer.TOKEN_LBRACKET {
+		// index-assignment. `$p.field = expr;` (or chained) is a
+		// field-assignment (M13.1). Both share the same lvalue-chain
+		// shape (VARREF followed by some mix of `[]` and `.field`),
+		// so we use one tryParse for either.
+		if p.peekN(1).Type == lexer.TOKEN_LBRACKET || p.peekN(1).Type == lexer.TOKEN_DOT {
 			if stmt, ok, err := p.tryParseIndexAssign(); ok || err != nil {
 				return stmt, err
 			}
@@ -512,22 +592,40 @@ func (p *parser) tryParseIndexAssign() (Stmt, bool, error) {
 		}, true, nil
 	}
 	var target Expr = &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme}
-	// Consume one or more `[expr]` suffixes.
-	for p.check(lexer.TOKEN_LBRACKET) {
-		bra := p.peek()
-		p.advance()
-		idx, err := p.parseExpr()
-		if err != nil {
-			return nil, false, err
+	// Consume any mix of `[expr]` and `.field` suffixes (M13.1).
+	for {
+		switch p.peek().Type {
+		case lexer.TOKEN_LBRACKET:
+			bra := p.peek()
+			p.advance()
+			idx, err := p.parseExpr()
+			if err != nil {
+				return nil, false, err
+			}
+			if _, err := p.expect(lexer.TOKEN_RBRACKET, "to close index expression"); err != nil {
+				return nil, false, err
+			}
+			target = &IndexExpr{
+				pos:    pos{File: bra.File, Line: bra.Line, Col: bra.Col},
+				Target: target,
+				Index:  idx,
+			}
+			continue
+		case lexer.TOKEN_DOT:
+			dot := p.peek()
+			p.advance()
+			name, err := p.expectFieldName("after `.` for field name")
+			if err != nil {
+				return nil, false, err
+			}
+			target = &FieldAccessExpr{
+				pos:    pos{File: dot.File, Line: dot.Line, Col: dot.Col},
+				Target: target,
+				Field:  name.Lexeme,
+			}
+			continue
 		}
-		if _, err := p.expect(lexer.TOKEN_RBRACKET, "to close index expression"); err != nil {
-			return nil, false, err
-		}
-		target = &IndexExpr{
-			pos:    pos{File: bra.File, Line: bra.Line, Col: bra.Col},
-			Target: target,
-			Index:  idx,
-		}
+		break
 	}
 	if _, ok := p.match(lexer.TOKEN_ASSIGN); !ok {
 		// Not an assignment; let the expression-statement path try again.
@@ -541,17 +639,22 @@ func (p *parser) tryParseIndexAssign() (Stmt, bool, error) {
 	if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate assignment"); err != nil {
 		return nil, false, err
 	}
-	idx, ok := target.(*IndexExpr)
-	if !ok {
-		// Defensive: tryParseIndexAssign is only entered when LBRACKET
-		// follows the VARREF, so target should always end up an IndexExpr.
-		return nil, false, &ParseError{Msg: "expected index expression on left of `=`", File: vref.File, Line: vref.Line, Col: vref.Col}
+	// Pick the right stmt kind based on the leaf node we landed on.
+	switch leaf := target.(type) {
+	case *IndexExpr:
+		return &IndexAssignStmt{
+			pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
+			Target: leaf,
+			Value:  val,
+		}, true, nil
+	case *FieldAccessExpr:
+		return &FieldAssignStmt{
+			pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
+			Target: leaf,
+			Value:  val,
+		}, true, nil
 	}
-	return &IndexAssignStmt{
-		pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
-		Target: idx,
-		Value:  val,
-	}, true, nil
+	return nil, false, &ParseError{Msg: "expected index or field expression on left of `=`", File: vref.File, Line: vref.Line, Col: vref.Col}
 }
 
 // parseAssign parses `$x = expr;`. If consumeSemi is false (e.g. inside a
@@ -801,6 +904,14 @@ func (p *parser) parseType() (Type, error) {
 			return Type{}, err
 		}
 		return MapType(keyT, valT), nil
+	case lexer.TOKEN_IDENT:
+		// Struct type reference - the IDENT must name a top-level
+		// `def struct Name { ... };`. We accept it here at parse time;
+		// the interpreter resolves the name against the program's
+		// hoisted struct table at run time, producing a positioned
+		// error if it isn't a known struct.
+		p.advance()
+		return StructType(t.Lexeme), nil
 	}
 	return Type{}, &ParseError{Msg: fmt.Sprintf("expected type, got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 }
@@ -858,6 +969,11 @@ func containsUnderscore(s string) bool {
 // unambiguously a name there - `strings.repeat`, `strings.split`,
 // `lists.for` (if anyone wrote that) all read fine. Lets reserved
 // words coexist with library names that happen to spell the same way.
+//
+// M13.1 reuses the same rule for struct field names: `def struct Line {
+// from as Point, to as Point };` works even though `to` is a keyword
+// (the `to` in `map of K to V`), because the field-name position is
+// unambiguous between the surrounding `{` / `,` / `as` / `}` tokens.
 func isPostDotName(t lexer.Token) bool {
 	if t.Type == lexer.TOKEN_IDENT {
 		return true
@@ -872,6 +988,19 @@ func isPostDotName(t lexer.Token) bool {
 	}
 	c := t.Lexeme[0]
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// expectFieldName consumes an identifier-shaped token for a struct
+// field name (M13.1). Accepts IDENT plus any keyword whose lexeme
+// looks like an identifier - the field-name position is contextually
+// unambiguous so reserved-word collisions don't apply.
+func (p *parser) expectFieldName(ctx string) (lexer.Token, error) {
+	t := p.peek()
+	if isPostDotName(t) {
+		p.advance()
+		return t, nil
+	}
+	return lexer.Token{}, &ParseError{Msg: fmt.Sprintf("expected identifier %s, got %s (%q)", ctx, t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 }
 
 func (p *parser) parseExpr() (Expr, error) {
@@ -1141,6 +1270,50 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 	return &CallExpr{pos: pos{File: callee.File, Line: callee.Line, Col: callee.Col}, Callee: callee.Lexeme, Args: args}, nil
 }
 
+// parseStructLitTail parses the `{ field: expr, ... }` portion of a
+// struct literal expression, having already consumed the struct name
+// IDENT (passed as `name`). The interpreter resolves the name against
+// the program's struct table and enforces "every declared field must
+// appear exactly once" plus the per-field type check. Trailing comma
+// before `}` is allowed; empty `Name{}` is allowed and means
+// "zero-initialised", which the interpreter accepts only when the
+// struct has no fields - otherwise every field is required.
+func (p *parser) parseStructLitTail(name lexer.Token) (Expr, error) {
+	p.advance() // consume LBRACE
+	var fields []StructLitField
+	seen := map[string]bool{}
+	if !p.check(lexer.TOKEN_RBRACE) {
+		for {
+			fname, err := p.expectFieldName("for struct field name in literal")
+			if err != nil {
+				return nil, err
+			}
+			if seen[fname.Lexeme] {
+				return nil, &ParseError{Msg: fmt.Sprintf("field %q assigned twice in struct literal", fname.Lexeme), File: fname.File, Line: fname.Line, Col: fname.Col}
+			}
+			seen[fname.Lexeme] = true
+			if _, err := p.expect(lexer.TOKEN_COLON, "after struct field name"); err != nil {
+				return nil, err
+			}
+			val, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, StructLitField{Name: fname.Lexeme, Expr: val, File: fname.File, Line: fname.Line, Col: fname.Col})
+			if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
+				break
+			}
+			if p.check(lexer.TOKEN_RBRACE) {
+				break
+			}
+		}
+	}
+	if _, err := p.expect(lexer.TOKEN_RBRACE, "to close struct literal"); err != nil {
+		return nil, err
+	}
+	return &StructLit{pos: pos{File: name.File, Line: name.Line, Col: name.Col}, Name: name.Lexeme, Fields: fields}, nil
+}
+
 // parseQualifiedTail parses the `. IDENT (args)?` portion of a qualified
 // reference, having already consumed the prefix IDENT (passed as
 // `prefix`). When followed by `(`, returns a QualifiedCallExpr;
@@ -1233,41 +1406,61 @@ func (p *parser) parseUnaryMinus() (Expr, error) {
 }
 
 // parsePrimary parses an atom (literal, var ref, call, grouped expr,
-// list/map literal) and then chains any number of `[index]` suffixes
-// onto it. Returning the chained form from `primary` lets every level
-// above (unary, mul, add, ...) treat `$xs[0]` exactly like any other
-// expression without special-casing.
+// list/map/struct literal) and then chains any number of `[index]` /
+// `.field` suffixes onto it. Returning the chained form from `primary`
+// lets every level above (unary, mul, add, ...) treat `$xs[0]` and
+// `$p.field` exactly like any other expression without special-casing.
 func (p *parser) parsePrimary() (Expr, error) {
 	e, err := p.parsePrimaryAtom()
 	if err != nil {
 		return nil, err
 	}
-	for p.check(lexer.TOKEN_LBRACKET) {
-		bra := p.peek()
-		// Reject `e[]` reads early with a helpful message - the append form
-		// `$xs[] = item;` is statement-level only (see tryParseIndexAssign);
-		// any other `[]` is meaningless.
-		if p.peekN(1).Type == lexer.TOKEN_RBRACKET {
-			return nil, &ParseError{
-				Msg:  "`[]` is the M9 append form and only valid as a write target: `$xs[] = item;`",
-				File: bra.File, Line: bra.Line, Col: bra.Col,
+	for {
+		switch p.peek().Type {
+		case lexer.TOKEN_LBRACKET:
+			bra := p.peek()
+			// Reject `e[]` reads early with a helpful message - the
+			// append form `$xs[] = item;` is statement-level only (see
+			// tryParseIndexAssign); any other `[]` is meaningless.
+			if p.peekN(1).Type == lexer.TOKEN_RBRACKET {
+				return nil, &ParseError{
+					Msg:  "`[]` is the M9 append form and only valid as a write target: `$xs[] = item;`",
+					File: bra.File, Line: bra.Line, Col: bra.Col,
+				}
 			}
-		}
-		p.advance() // consume [
-		idx, err := p.parseExpr()
-		if err != nil {
-			return nil, err
-		}
-		if _, err := p.expect(lexer.TOKEN_RBRACKET, "to close index expression"); err != nil {
-			return nil, err
-		}
-		e = &IndexExpr{
-			pos:    pos{File: bra.File, Line: bra.Line, Col: bra.Col},
-			Target: e,
-			Index:  idx,
+			p.advance() // consume [
+			idx, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(lexer.TOKEN_RBRACKET, "to close index expression"); err != nil {
+				return nil, err
+			}
+			e = &IndexExpr{
+				pos:    pos{File: bra.File, Line: bra.Line, Col: bra.Col},
+				Target: e,
+				Index:  idx,
+			}
+		case lexer.TOKEN_DOT:
+			// M13.1 struct field access `e.field`. The qualified-call
+			// path that takes IDENT.IDENT is handled in parsePrimaryAtom
+			// before we get here; this branch only fires after a
+			// non-IDENT atom or further down a chain like `$p.q.r`.
+			dot := p.peek()
+			p.advance() // consume .
+			name, err := p.expectFieldName("after `.` for field name")
+			if err != nil {
+				return nil, err
+			}
+			e = &FieldAccessExpr{
+				pos:    pos{File: dot.File, Line: dot.Line, Col: dot.Col},
+				Target: e,
+				Field:  name.Lexeme,
+			}
+		default:
+			return e, nil
 		}
 	}
-	return e, nil
 }
 
 func (p *parser) parsePrimaryAtom() (Expr, error) {
@@ -1315,11 +1508,15 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		// A bare IDENT in expression context is either:
 		//   - a qualified call/constant `prefix.name(...)` / `prefix.NAME`,
 		//   - a function call `name(...)`,
+		//   - a struct literal `Name{ field: expr, ... }` (M13.1),
 		//   - or a constant reference `MAX`.
 		// The token immediately after the IDENT decides.
 		p.advance()
 		if p.check(lexer.TOKEN_DOT) {
 			return p.parseQualifiedTail(t)
+		}
+		if p.check(lexer.TOKEN_LBRACE) {
+			return p.parseStructLitTail(t)
 		}
 		if !p.check(lexer.TOKEN_LPAREN) {
 			return &ConstRefExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil

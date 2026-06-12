@@ -14,7 +14,7 @@ Terminals in CAPITALS are token classes from the lexer (see
 punctuation that match the corresponding token's lexeme.
 
 ```ebnf
-program     = { useStmt | methodDef | statement } EOF ;
+program     = { useStmt | methodDef | structDef | statement } EOF ;
 useStmt     = "use" IDENT [ "as" IDENT ] ";" ;      (* library import; the
                                                        optional "as ALIAS"
                                                        renames the namespace
@@ -24,9 +24,18 @@ paramList   = param { "," param } ;
 param       = IDENT "as" type ;
 block       = "{" { statement } "}" ;
 
+structDef   = "def" "struct" IDENT "{" structField { "," structField } [ "," ] "}" ";" ;
+                                       (* M13.1: top-level only;
+                                          IDENT names the struct type;
+                                          field names follow the IDENT
+                                          rule too. Hoisted before the
+                                          first top-level statement runs. *)
+structField = IDENT "as" type ;
+
 statement   = defineStmt
             | assignStmt
             | indexAssign
+            | fieldAssign
             | appendStmt
             | returnStmt
             | ifStmt
@@ -50,9 +59,18 @@ defineStmt  = "def" [ "const" ] IDENT "as" type [ "init" expr ] ";" ;
 
 assignStmt  = VARREF "=" expr ";" ;
 
-indexAssign = VARREF "[" expr "]" { "[" expr "]" } "=" expr ";" ;
-                                       (* l-value chain: at least one
-                                          [index] suffix; root is a VARREF *)
+indexAssign = VARREF lvalueTail { lvalueTail } "[" expr "]" "=" expr ";" ;
+                                       (* l-value chain ending in `[index]`;
+                                          root is a VARREF. M13.1: tail
+                                          steps may freely mix `[index]`
+                                          and `.field`. *)
+
+fieldAssign = VARREF lvalueTail { lvalueTail } "." IDENT "=" expr ";" ;
+                                       (* l-value chain ending in `.field`
+                                          (M13.1). Root is a VARREF; tail
+                                          may mix `[index]` and `.field`. *)
+
+lvalueTail  = "[" expr "]" | "." IDENT ;
 
 appendStmt  = VARREF "[" "]" "=" expr ";" ;
                                        (* append sugar: write-only
@@ -84,14 +102,18 @@ forEachStmt = "for" "(" "def" IDENT "in" expr ")" block ;
 
 exprStmt    = expr ";" ;
 
-type        = primType | listType | mapType ;
-primType    = "int" | "float" | "string" | "bool" | "null" ;
+type        = primType | listType | mapType | structType ;
+primType    = "int" | "float" | "string" | "bool" | "null" | "bytes" ;
 listType    = "list" "of" type ;
 mapType     = "map" "of" type "to" type ;
                                        (* recursive; nesting like
                                           `list of list of int` and
                                           `map of string to list of int`
                                           falls out naturally *)
+structType  = IDENT ;                  (* M13.1: user-defined struct type;
+                                          resolved at runtime against the
+                                          hoisted struct table - unknown
+                                          names are positioned errors *)
 
 expr        = orExpr ;
 orExpr      = andExpr { "or" andExpr } ;
@@ -103,9 +125,21 @@ mulExpr     = unaryExpr { ("*" | "/" | "//" | "%") unaryExpr } ;
 unaryExpr   = "-" unaryExpr | primary ;
 primary     = ( INT | FLOAT | STRING | "true" | "false" | "null"
               | VARREF | qualifiedCall | qualifiedConstRef
-              | call | typeCall | constRef | "(" expr ")"
+              | call | typeCall | structLit | constRef | "(" expr ")"
               | listLit | mapLit )
-              { "[" expr "]" } ;       (* any primary can be index-chained *)
+              { "[" expr "]" | "." IDENT } ;
+                                       (* any primary can be index- or
+                                          field-chained; M13.1 adds the
+                                          `.field` form *)
+structLit   = IDENT "{" structLitField { "," structLitField } [ "," ] "}" ;
+                                       (* M13.1: struct literal -
+                                          IDENT must be a defined struct.
+                                          The `{` after IDENT in
+                                          expression position is the
+                                          tie-breaker against `constRef`;
+                                          empty struct literals are
+                                          rejected (every field required). *)
+structLitField = IDENT ":" expr ;
 call        = IDENT "(" [ expr { "," expr } ] ")" ;
 qualifiedCall      = IDENT "." IDENT "(" [ expr { "," expr } ] ")" ;
 qualifiedConstRef  = IDENT "." IDENT ;
@@ -218,14 +252,17 @@ grammar the parser implements is the EBNF above.
 
 | Node          | Kind  | Fields                                       |
 |---------------|-------|----------------------------------------------|
-| `Program`     | root  | `Imports []*ImportStmt`, `Methods []*MethodDef`, `TopLevel []Stmt` |
+| `Program`     | root  | `Imports []*ImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `TopLevel []Stmt` |
 | `ImportStmt`  | stmt  | `Name`, `AsName` (empty unless `use NAME as ALIAS;`) |
 | `MethodDef`   | stmt  | `Name`, `Params []Param`, `Body *Block`      |
 | `Param`       | -     | `Name`, `Type`                               |
+| `StructDef`   | stmt  | `Name`, `Fields []StructField` (M13.1; top-level only, hoisted before execution) |
+| `StructField` | -     | `Name`, `Type` (each field of a struct definition)        |
 | `Block`       | stmt  | `Stmts []Stmt`                               |
 | `DefineStmt`  | stmt  | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit) |
 | `AssignStmt`  | stmt  | `VarName`, `Value Expr`                      |
-| `IndexAssignStmt` | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` |
+| `IndexAssignStmt` | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` (M13.1: chain may include `FieldAccessExpr` nodes) |
+| `FieldAssignStmt` | stmt | `Target *FieldAccessExpr`, `Value Expr` - `$p.field = ...` (M13.1) |
 | `AppendStmt`  | stmt  | `Target *VarExpr`, `Value Expr` - `$xs[] = item;` (M9) |
 | `ReturnStmt`  | stmt  | `Value Expr` (nil for bare `return;`)        |
 | `IfStmt`      | stmt  | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block` |
@@ -248,6 +285,9 @@ grammar the parser implements is the EBNF above.
 | `ListLit`     | expr  | `Elements []Expr` - `[1, 2, 3]`               |
 | `MapLit`      | expr  | `Keys []Expr`, `Values []Expr` (parallel) - `{"a": 1}` |
 | `IndexExpr`   | expr  | `Target Expr`, `Index Expr` - `$xs[i]`, chained |
+| `StructLit`   | expr  | `Name`, `Fields []StructLitField` - `Point{x: 1, y: 2}` (M13.1) |
+| `StructLitField` | - | `Name`, `Expr` (one named field in a struct literal) |
+| `FieldAccessExpr` | expr | `Target Expr`, `Field` - `$p.field`, chainable with `IndexExpr` (M13.1) |
 
 Every node embeds a `pos{File, Line, Col}` for error reporting and exposes
 it via `Node.Pos()` (line/col) and `Node.Filename()` (file path). The file

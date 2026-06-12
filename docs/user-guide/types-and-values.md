@@ -12,6 +12,7 @@
 | `bytes` (M12+)      | *(no literal)*                                | empty   | Mutable byte sequence; element = `int` in `[0, 255]`; built via `convert.bytesFromString` or grown with `$b[] = byte;` |
 | `list of T`         | `[1, 2, 3]`                                   | `[]`    | Ordered sequence; 0-indexed; mutable      |
 | `map of K to V`     | `{"a": 1, "b": 2}`                            | `{}`    | Key→value; insertion-ordered; mutable     |
+| user struct (M13.1+) | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs-m131) |
 
 The **Default** column is the value an uninitialized variable receives
 (`def x as int;` produces `0`). For compound types the default is an
@@ -319,8 +320,9 @@ Three problems:
 3. **Inflexible.** Adding a fifth dimension (per save slot, per timestamp,
    ...) means rewriting every access site in the program.
 
-The standard fix is a struct or named record, which Jennifer doesn't have
-yet (planned post-M11). Until then, options for the meantime:
+The standard fix is a struct or named record (see
+[Structs](#structs-m131) below; M13.1+). Other options that work without
+introducing a new type:
 
 - **Wrap access in methods**: `getItem(save, player, character, slot)`
   reads better than four bare brackets and gives you one place to fix a
@@ -423,3 +425,97 @@ the sugar for lists applies here.
   `io.readChars(n) -> string` reads `n` Unicode code points (1-4
   bytes each, decoded from UTF-8). See
   [libraries/io.md](../libraries/io.md) for details.
+
+## Structs (M13.1+)
+
+A **struct** names a fixed set of typed fields. Use a struct whenever a
+multi-value bundle would otherwise be a map keyed by string literals -
+the fields are checked at construction time, the field names are part
+of the type, and reading `$p.x` is faster and clearer than indexing a
+map by `"x"`.
+
+A struct is defined once at the top level and reused everywhere:
+
+```jennifer
+def struct Point { x as int, y as int };
+def struct Line { from as Point, to as Point };
+```
+
+The shape is `def struct Name { field as type, field as type, ... };`.
+The struct name follows the identifier rule (letters only, up to 64
+characters); field names follow the same rule. The trailing `;` is
+required (every statement ends in one).
+
+### Constructing, reading, writing
+
+```jennifer
+# Construct - every field must be named at the literal.
+def p as Point init Point{ x: 3, y: 4 };
+
+# Read.
+io.printf("%d %d\n", $p.x, $p.y);    # 3 4
+
+# Write.
+$p.x = 30;
+```
+
+The struct literal `Point{ x: 3, y: 4 }` requires **every** field; a
+missing field is a positioned error, and so is an unknown one (`z: 5`
+on a `Point`). Field order in the literal is free - the runtime stores
+each field at its declaration position regardless.
+
+`def p as Point;` (no `init`) gives every field its declared zero,
+recursing through nested struct fields. So `def L as Line;` produces
+`Line{from: Point{x: 0, y: 0}, to: Point{x: 0, y: 0}}` without any
+extra ceremony.
+
+### Nested structs and chained access
+
+A struct's field can itself be a struct, a list, a map, or any
+combination. Reads and writes chain through `.field` and `[index]` in
+whatever order makes sense:
+
+```jennifer
+def L as Line init Line{ from: Point{ x: 0, y: 0 }, to: Point{ x: 10, y: 20 } };
+
+io.printf("%d\n", $L.to.x);    # 10  - field after field
+
+$L.from.x = 5;                  # write through the chain
+```
+
+A struct field that's a list works the same way: `$bag.items[0] = 99;`
+descends through the `.items` field and writes into the list at index 0.
+
+### Value semantics
+
+Like lists, maps, and bytes, structs are **value-typed**:
+
+```jennifer
+def p as Point init Point{ x: 1, y: 2 };
+def q as Point init $p;     # independent copy
+$q.y = 99;
+# $p is still Point{x: 1, y: 2}; $q is Point{x: 1, y: 99}.
+```
+
+Function parameter binding copies too, so `func translate(pt as Point, dx as int)`
+that writes into `$pt` doesn't leak back to the caller.
+
+### `const` is deep
+
+`def const ORIGIN as Point init Point{ x: 0, y: 0 };` rejects both
+`$ORIGIN = ...` (rebinding) and `$ORIGIN.x = ...` (content mutation),
+including writes that descend through nested struct fields. Same rule
+as lists and maps - the value behind a `const` is frozen at every
+depth.
+
+### Strict at boundaries
+
+- **Unknown struct type at declaration**: `def x as Widget;` when no
+  `def struct Widget` exists is a positioned runtime error
+  ("unknown struct type").
+- **Missing or unknown field at the literal**: positioned errors that
+  point at the offending position.
+- **Field type mismatch on write**: `$p.x = "hi";` on `x as int`
+  errors with the declared type and the actual value's kind.
+- **Field access on a non-struct value**: `$xs.foo` where `$xs` is a
+  list errors with "field access `.foo` requires a struct, got list".

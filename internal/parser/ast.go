@@ -47,9 +47,10 @@ const (
 	TypeString
 	TypeBool
 	TypeNull
-	TypeBytes // M12: mutable byte sequence; elements are int in [0, 255]
+	TypeBytes  // M12: mutable byte sequence; elements are int in [0, 255]
 	TypeList
 	TypeMap
+	TypeStruct // M13.1: user-defined record; carries the struct's name in Type.StructName
 )
 
 func (k TypeKind) String() string {
@@ -70,6 +71,8 @@ func (k TypeKind) String() string {
 		return "list"
 	case TypeMap:
 		return "map"
+	case TypeStruct:
+		return "struct"
 	default:
 		return "<invalid>"
 	}
@@ -81,10 +84,11 @@ func (k TypeKind) String() string {
 // which is how `list of list of int` and `map of string to list of int`
 // fall out without special casing.
 type Type struct {
-	Kind    TypeKind
-	Element *Type // TypeList: element type
-	KeyType *Type // TypeMap:  key type
-	ValType *Type // TypeMap:  value type
+	Kind       TypeKind
+	Element    *Type  // TypeList: element type
+	KeyType    *Type  // TypeMap:  key type
+	ValType    *Type  // TypeMap:  value type
+	StructName string // TypeStruct: name of the struct definition (M13.1)
 }
 
 func (t Type) String() string {
@@ -99,6 +103,11 @@ func (t Type) String() string {
 			return "map of <?> to <?>"
 		}
 		return "map of " + t.KeyType.String() + " to " + t.ValType.String()
+	case TypeStruct:
+		if t.StructName == "" {
+			return "struct"
+		}
+		return t.StructName
 	}
 	return t.Kind.String()
 }
@@ -127,6 +136,8 @@ func (t Type) Equal(o Type) bool {
 			return true
 		}
 		return t.KeyType.Equal(*o.KeyType) && t.ValType.Equal(*o.ValType)
+	case TypeStruct:
+		return t.StructName == o.StructName
 	}
 	return true
 }
@@ -137,6 +148,7 @@ func (t Type) Equal(o Type) bool {
 func PrimitiveType(k TypeKind) Type { return Type{Kind: k} }
 func ListType(elem Type) Type       { return Type{Kind: TypeList, Element: &elem} }
 func MapType(k, v Type) Type        { return Type{Kind: TypeMap, KeyType: &k, ValType: &v} }
+func StructType(name string) Type   { return Type{Kind: TypeStruct, StructName: name} }
 
 // ---- Top-level program ----
 
@@ -144,7 +156,8 @@ type Program struct {
 	pos
 	Imports  []*ImportStmt
 	Methods  []*MethodDef
-	TopLevel []Stmt // top-level statements executed in source order after method hoisting
+	Structs  []*StructDef // M13.1: top-level `def struct Name { ... };` declarations
+	TopLevel []Stmt       // top-level statements executed in source order after method hoisting
 }
 
 // ---- Statements ----
@@ -169,6 +182,27 @@ type Param struct {
 	Line int
 	Col  int
 }
+
+// StructField is one declared field of a struct definition (M13.1).
+// Mirrors Param but is owned by StructDef rather than MethodDef.
+type StructField struct {
+	Name string
+	Type Type
+	File string
+	Line int
+	Col  int
+}
+
+// StructDef is a top-level `def struct Name { field as type, ... };`
+// declaration (M13.1). Hoisted at Run() time alongside method
+// definitions so order of declaration doesn't matter.
+type StructDef struct {
+	pos
+	Name   string
+	Fields []StructField
+}
+
+func (*StructDef) stmtNode() {}
 
 type MethodDef struct {
 	pos
@@ -236,6 +270,19 @@ type AppendStmt struct {
 }
 
 func (*AppendStmt) stmtNode() {}
+
+// FieldAssignStmt: `$p.field = <expr>;` (M13.1). Same shape as
+// IndexAssignStmt: the target chain is rooted on a VarExpr so the
+// const-target rejection and write-back-to-binding bookkeeping live
+// here. Only valid on a struct value; the assigned value's type is
+// checked against the struct definition's declared field type.
+type FieldAssignStmt struct {
+	pos
+	Target *FieldAccessExpr
+	Value  Expr
+}
+
+func (*FieldAssignStmt) stmtNode() {}
 
 // IfStmt: `if (cond) { body } [elseif (cond) { body }]* [else { body }]?`
 // ElseIfs is parallel to ElseIfBodies. Else may be nil.
@@ -416,6 +463,40 @@ type IndexExpr struct {
 }
 
 func (*IndexExpr) exprNode() {}
+
+// StructLit is `Name{ field: expr, ... }` (M13.1). The struct's name
+// must reference a top-level `def struct` declaration; the field
+// expressions are evaluated in source order. The interpreter
+// type-checks each field's value against the struct definition's
+// declared type.
+type StructLit struct {
+	pos
+	Name   string
+	Fields []StructLitField
+}
+
+// StructLitField is one `field: expr` entry in a struct literal.
+type StructLitField struct {
+	Name string
+	Expr Expr
+	File string
+	Line int
+	Col  int
+}
+
+func (*StructLit) exprNode() {}
+
+// FieldAccessExpr is `$p.field` (M13.1). The parser produces this
+// when it sees `.` after a value expression (after the existing
+// qualified-call special case rules out namespace-prefix usage).
+// Used as both r-value (read) and l-value (assignment target).
+type FieldAccessExpr struct {
+	pos
+	Target Expr
+	Field  string
+}
+
+func (*FieldAccessExpr) exprNode() {}
 
 type VarExpr struct {
 	pos
@@ -738,6 +819,28 @@ func Sprint(n Node) string {
 		return fmt.Sprintf("IndexAssign(%s = %s)", Sprint(v.Target), Sprint(v.Value))
 	case *AppendStmt:
 		return fmt.Sprintf("Append(%s = %s)", Sprint(v.Target), Sprint(v.Value))
+	case *StructLit:
+		s := v.Name + "{"
+		for i, f := range v.Fields {
+			if i > 0 {
+				s += ", "
+			}
+			s += f.Name + ": " + Sprint(f.Expr)
+		}
+		return s + "}"
+	case *FieldAccessExpr:
+		return fmt.Sprintf("Field(%s.%s)", Sprint(v.Target), v.Field)
+	case *FieldAssignStmt:
+		return fmt.Sprintf("FieldAssign(%s = %s)", Sprint(v.Target), Sprint(v.Value))
+	case *StructDef:
+		s := "Struct(" + v.Name + "{"
+		for i, f := range v.Fields {
+			if i > 0 {
+				s += ", "
+			}
+			s += f.Name + " as " + f.Type.String()
+		}
+		return s + "})"
 	case *ForEachStmt:
 		return fmt.Sprintf("ForEach($%s in %s, %s)", v.VarName, Sprint(v.Coll), Sprint(v.Body))
 	}

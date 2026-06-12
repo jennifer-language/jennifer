@@ -32,9 +32,10 @@ const (
 	KindFloat
 	KindString
 	KindBool
-	KindBytes // M12: mutable byte sequence; elements are int in [0, 255]
-	KindList  // M6: ordered, mutable sequence (Go slice underneath)
-	KindMap   // M6: ordered key-value map; iteration is insertion order
+	KindBytes  // M12: mutable byte sequence; elements are int in [0, 255]
+	KindList   // M6: ordered, mutable sequence (Go slice underneath)
+	KindMap    // M6: ordered key-value map; iteration is insertion order
+	KindStruct // M13.1: user-defined record; fields are an ordered list of (name, value)
 )
 
 func (k ValueKind) String() string {
@@ -55,6 +56,8 @@ func (k ValueKind) String() string {
 		return "list"
 	case KindMap:
 		return "map"
+	case KindStruct:
+		return "struct"
 	}
 	return "?"
 }
@@ -64,6 +67,14 @@ func (k ValueKind) String() string {
 // parallel slice rather than a Go map[string]Value or similar.
 type MapEntry struct {
 	Key, Value Value
+}
+
+// StructField is one field in a Value of kind KindStruct (M13.1).
+// Fields are kept in declaration order (matching the StructDef's field
+// ordering) so display output and assertions are deterministic.
+type StructField struct {
+	Name  string
+	Value Value
 }
 
 // Value is a tagged union for all Jennifer runtime values.
@@ -82,17 +93,19 @@ type MapEntry struct {
 // `$ys = $xs;` and parameter binding both copy the whole structure;
 // aliasing is impossible.
 type Value struct {
-	Kind    ValueKind
-	Int     int64
-	Float   float64
-	Str     string
-	Bool    bool
-	List    []Value      // KindList: element data
-	Map     []MapEntry   // KindMap:  insertion-ordered entries
-	Bytes   []byte       // KindBytes (M12): byte data
-	ElemTyp *parser.Type // KindList: element type
-	KeyTyp  *parser.Type // KindMap:  key type
-	ValTyp  *parser.Type // KindMap:  value type
+	Kind       ValueKind
+	Int        int64
+	Float      float64
+	Str        string
+	Bool       bool
+	List       []Value       // KindList: element data
+	Map        []MapEntry    // KindMap:  insertion-ordered entries
+	Bytes      []byte        // KindBytes (M12): byte data
+	Fields     []StructField // KindStruct (M13.1): declaration-ordered field values
+	StructName string        // KindStruct: name of the struct definition this value belongs to
+	ElemTyp    *parser.Type  // KindList: element type
+	KeyTyp     *parser.Type  // KindMap:  key type
+	ValTyp     *parser.Type  // KindMap:  value type
 }
 
 func Null() Value              { return Value{Kind: KindNull} }
@@ -105,6 +118,14 @@ func BoolVal(b bool) Value     { return Value{Kind: KindBool, Bool: b} }
 // taken by reference; callers needing value-semantics guarantees
 // (assignment, parameter binding) must call Value.Copy. M12.
 func BytesVal(data []byte) Value { return Value{Kind: KindBytes, Bytes: data} }
+
+// StructVal constructs a struct value belonging to `name` with the
+// given fields in declaration order. The fields slice is taken by
+// reference; callers needing value-semantics guarantees must call
+// Value.Copy. M13.1.
+func StructVal(name string, fields []StructField) Value {
+	return Value{Kind: KindStruct, StructName: name, Fields: fields}
+}
 
 // ListVal constructs a list value with the given element type and data.
 // The data slice is taken by reference; callers that need value-semantics
@@ -148,6 +169,14 @@ func (v Value) Copy() Value {
 		out := make([]byte, len(v.Bytes))
 		copy(out, v.Bytes)
 		return Value{Kind: KindBytes, Bytes: out}
+	case KindStruct:
+		// M13.1: deep copy fields so a struct passed into a method or
+		// returned from it can't surprise its caller.
+		out := make([]StructField, len(v.Fields))
+		for i, f := range v.Fields {
+			out[i] = StructField{Name: f.Name, Value: f.Value.Copy()}
+		}
+		return Value{Kind: KindStruct, StructName: v.StructName, Fields: out}
 	}
 	return v
 }
@@ -171,6 +200,14 @@ func ZeroFor(t parser.Type) Value {
 		return Null()
 	case parser.TypeBytes:
 		return BytesVal([]byte{})
+	case parser.TypeStruct:
+		// M13.1: a zero struct is constructed by the interpreter when it
+		// has access to the StructDef registry. ZeroFor only sees the
+		// type name (Type.StructName), not the field list, so it returns
+		// a struct with empty Fields here; execDefine routes uninitialised
+		// struct declarations through a dedicated path that consults the
+		// interpreter's struct table.
+		return StructVal(t.StructName, nil)
 	case parser.TypeList:
 		var et parser.Type
 		if t.Element != nil {
@@ -247,6 +284,24 @@ func (v Value) Display() string {
 		}
 		b.WriteByte(']')
 		return b.String()
+	case KindStruct:
+		// M13.1: struct display reuses the literal-shaped form so a
+		// printed value reads as the source code the user would write
+		// to reproduce it. `Name{field: value, ...}` for non-empty
+		// fields; `Name{}` for empty.
+		var b strings.Builder
+		b.WriteString(v.StructName)
+		b.WriteByte('{')
+		for i, f := range v.Fields {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(f.Name)
+			b.WriteString(": ")
+			b.WriteString(displayElement(f.Value))
+		}
+		b.WriteByte('}')
+		return b.String()
 	}
 	return "<unknown>"
 }
@@ -280,6 +335,12 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 		return v.Kind == KindNull
 	case parser.TypeBytes:
 		return v.Kind == KindBytes
+	case parser.TypeStruct:
+		// M13.1: struct types match by name. A struct value with empty
+		// fields and matching StructName matches the declared type;
+		// that's how ZeroFor's placeholder gets accepted before the
+		// interpreter materialises the real field set in execDefine.
+		return v.Kind == KindStruct && v.StructName == t.StructName
 	case parser.TypeList:
 		if v.Kind != KindList {
 			return false
@@ -336,6 +397,24 @@ func (v Value) Equal(o Value) bool {
 			}
 			for i := range v.Bytes {
 				if v.Bytes[i] != o.Bytes[i] {
+					return false
+				}
+			}
+			return true
+		case KindStruct:
+			// M13.1: structs compare equal if they have the same name
+			// and every field's value matches in declaration order.
+			if v.StructName != o.StructName {
+				return false
+			}
+			if len(v.Fields) != len(o.Fields) {
+				return false
+			}
+			for i := range v.Fields {
+				if v.Fields[i].Name != o.Fields[i].Name {
+					return false
+				}
+				if !v.Fields[i].Value.Equal(o.Fields[i].Value) {
 					return false
 				}
 			}

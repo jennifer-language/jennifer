@@ -1,0 +1,9 @@
+origin = Point{x: 0, y: 0}
+p = Point{x: 3, y: 4}
+p.x = 3, p.y = 4
+after $p.x = 30: Point{x: 30, y: 4}
+p = Point{x: 30, y: 4}, q = Point{x: 30, y: 99}
+zero = Point{x: 0, y: 0}
+L = Line{from: Point{x: 0, y: 0}, to: Point{x: 10, y: 20}}
+L.to.x = 10
+after $L.from.x = 5: Line{from: Point{x: 5, y: 0}, to: Point{x: 10, y: 20}}

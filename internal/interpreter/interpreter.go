@@ -82,7 +82,8 @@ type Interpreter struct {
 	nsPrefixes      map[string]string           // active call-site prefix -> canonical namespace (after aliasing)
 	nsAliasedAway   map[string]string           // canonical namespace -> alias chosen by `use NAME as ALIAS;`
 	methods         map[string]*parser.MethodDef
-	global          *Environment // global scope where top-level statements live
+	structs         map[string]*parser.StructDef // M13.1: top-level struct definitions hoisted at Run() time
+	global          *Environment                 // global scope where top-level statements live
 }
 
 func New() *Interpreter {
@@ -102,6 +103,7 @@ func New() *Interpreter {
 		nsPrefixes:      map[string]string{},
 		nsAliasedAway:   map[string]string{},
 		methods:         map[string]*parser.MethodDef{},
+		structs:         map[string]*parser.StructDef{},
 	}
 	// `core` is auto-loaded: its builtins and constants are visible without
 	// the user writing `use core;`. The library itself registers via
@@ -291,6 +293,15 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	}
 	if err := i.processImports(prog, false); err != nil {
 		return err
+	}
+	// Structs: hoist before methods so a method body can reference a
+	// struct type declared later in source order.
+	for _, s := range prog.Structs {
+		if _, exists := i.structs[s.Name]; exists {
+			file, line, col := posFor(s)
+			return &runtimeError{Msg: fmt.Sprintf("struct %q is defined more than once", s.Name), File: file, Line: line, Col: col}
+		}
+		i.structs[s.Name] = s
 	}
 	// Methods: collect first so call order doesn't matter
 	for _, m := range prog.Methods {
@@ -529,6 +540,10 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 	if err := i.processImports(prog, true); err != nil {
 		return Null(), err
 	}
+	for _, s := range prog.Structs {
+		// REPL: silently re-define so a snippet can redeclare a struct.
+		i.structs[s.Name] = s
+	}
 	for _, m := range prog.Methods {
 		if err := i.checkMethodNoShadow(m); err != nil {
 			return Null(), err
@@ -621,6 +636,8 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 		return blockResult{}, i.execIndexAssign(st, env)
 	case *parser.AppendStmt:
 		return blockResult{}, i.execAppend(st, env)
+	case *parser.FieldAssignStmt:
+		return blockResult{}, i.execFieldAssign(st, env)
 	case *parser.IfStmt:
 		return i.execIf(st, env)
 	case *parser.WhileStmt:
@@ -659,6 +676,15 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 }
 
 func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error {
+	// M13.1: if the declared type names a struct, verify the struct
+	// exists before any other check so an unknown name surfaces as
+	// "unknown struct type" rather than a misleading type-mismatch.
+	if st.VarType.Kind == parser.TypeStruct {
+		if _, ok := i.structs[st.VarType.StructName]; !ok {
+			file, line, col := posFor(st)
+			return &runtimeError{Msg: fmt.Sprintf("unknown struct type %q", st.VarType.StructName), File: file, Line: line, Col: col}
+		}
+	}
 	var val Value
 	if st.InitExpr != nil {
 		v, err := i.evalExpr(st.InitExpr, env)
@@ -687,7 +713,19 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 			file, line, col := posFor(st)
 			return &runtimeError{Msg: "internal: constant without init reached interpreter", File: file, Line: line, Col: col}
 		}
-		val = stampDeclaredType(ZeroFor(st.VarType), st.VarType)
+		// M13.1: structs need access to the interpreter's struct table to
+		// populate every field's zero value. Route through a dedicated
+		// helper that materialises the full field list (and validates
+		// that the named struct actually exists).
+		if st.VarType.Kind == parser.TypeStruct {
+			zero, err := i.zeroStructFor(st.VarType.StructName, st)
+			if err != nil {
+				return err
+			}
+			val = zero
+		} else {
+			val = stampDeclaredType(ZeroFor(st.VarType), st.VarType)
+		}
 	}
 	if err := env.Define(st.VarName, val, st.VarType, st.IsConst); err != nil {
 		file, line, col := posFor(st)
@@ -787,27 +825,17 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 		return err
 	}
 
-	// Evaluate indices outermost-first into a slice the chain walker can
-	// consume. For `$xs[i][j]` the AST nests j on the outside and i on the
-	// inside, so we collect inner-to-outer and reverse.
-	var indices []Value
-	for cur := st.Target; cur != nil; {
-		v, err := i.evalExpr(cur.Index, env)
-		if err != nil {
-			return err
-		}
-		indices = append([]Value{v}, indices...)
-		if next, ok := cur.Target.(*parser.IndexExpr); ok {
-			cur = next
-		} else {
-			break
-		}
+	// Route through the unified lvalue walker so mixed chains like
+	// `$p.field[0] = ...` work alongside the original `$xs[i][j]` form
+	// (M13.1). The walker handles both IndexExpr and FieldAccessExpr
+	// nodes; index-only chains still resolve through the same
+	// indexInto / writeIndexedSlot helpers as before.
+	steps, err := i.collectLvalueSteps(st.Target, env, st)
+	if err != nil {
+		return err
 	}
-
-	// Work on a fresh copy of the root so writes don't accidentally
-	// alias other live values; commit it back to the binding at the end.
 	rootCopy := binding.Value.Copy()
-	if err := applyIndexAssign(&rootCopy, indices, newVal, st); err != nil {
+	if err := i.applyLvalueWrite(&rootCopy, steps, newVal, st); err != nil {
 		return err
 	}
 	if err := env.Assign(rootVar.Name, rootCopy); err != nil {
@@ -868,16 +896,229 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	return nil
 }
 
+// execFieldAssign handles `$p.field = expr;` and chained lvalues that
+// end at a field (M13.1). The lvalue chain is rooted on a VarExpr,
+// just like an IndexAssign, so the same "copy the binding, walk down,
+// write at the leaf, reassign" pattern works. We also enforce the
+// struct definition's declared type at the leaf write.
+func (i *Interpreter) execFieldAssign(st *parser.FieldAssignStmt, env *Environment) error {
+	rootVar := findFieldRoot(st.Target)
+	if rootVar == nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: "internal: field-assign target has no root variable", File: file, Line: line, Col: col}
+	}
+	binding, err := env.GetBinding(rootVar.Name)
+	if err != nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+	}
+	if binding.IsConst {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: fmt.Sprintf("cannot mutate contents of constant %q (const is deep)", rootVar.Name), File: file, Line: line, Col: col}
+	}
+	newVal, err := i.evalExpr(st.Value, env)
+	if err != nil {
+		return err
+	}
+	// Build the lvalue step list outside-to-leaf - the AST nests with
+	// the leaf-most step on the outside (e.g. `$p.a.b.c = ...` has
+	// FieldAccess(c, FieldAccess(b, FieldAccess(a, VarExpr(p)))) so we
+	// collect from the outside in and reverse.
+	steps, err := i.collectLvalueSteps(st.Target, env, st)
+	if err != nil {
+		return err
+	}
+	rootCopy := binding.Value.Copy()
+	if err := i.applyLvalueWrite(&rootCopy, steps, newVal, st); err != nil {
+		return err
+	}
+	if err := env.Assign(rootVar.Name, rootCopy); err != nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+	}
+	return nil
+}
+
+// lvalueStep is one operation in a chained lvalue: either an index
+// (for `[i]`) or a field name (for `.field`). Index values are
+// pre-evaluated so the walker doesn't need an environment.
+type lvalueStep struct {
+	isField bool
+	field   string
+	index   Value
+	// Position info for any error raised at this step.
+	file string
+	line int
+	col  int
+}
+
+// collectLvalueSteps walks a chained lvalue from its outside in,
+// evaluating each `[i]` index, then reverses so the caller gets steps
+// in root-to-leaf order.
+func (i *Interpreter) collectLvalueSteps(leaf parser.Expr, env *Environment, st parser.Node) ([]lvalueStep, error) {
+	var steps []lvalueStep
+	for cur := leaf; cur != nil; {
+		switch n := cur.(type) {
+		case *parser.FieldAccessExpr:
+			fl, ln, cl := posFor(n)
+			steps = append(steps, lvalueStep{isField: true, field: n.Field, file: fl, line: ln, col: cl})
+			cur = n.Target
+		case *parser.IndexExpr:
+			fl, ln, cl := posFor(n)
+			idx, err := i.evalExpr(n.Index, env)
+			if err != nil {
+				return nil, err
+			}
+			steps = append(steps, lvalueStep{index: idx, file: fl, line: ln, col: cl})
+			cur = n.Target
+		case *parser.VarExpr:
+			cur = nil
+		default:
+			file, line, col := posFor(st)
+			return nil, &runtimeError{Msg: fmt.Sprintf("internal: unexpected lvalue node %T", n), File: file, Line: line, Col: col}
+		}
+	}
+	// Reverse: AST is leaf-on-outside, we want root-on-outside.
+	for l, r := 0, len(steps)-1; l < r; l, r = l+1, r-1 {
+		steps[l], steps[r] = steps[r], steps[l]
+	}
+	return steps, nil
+}
+
+// applyLvalueWrite walks a copied root through the step list, descending
+// into the structure at each non-leaf step, then writing newVal at the
+// leaf. Leaf step semantics match writeIndexedSlot for `[i]` and the
+// per-struct-field type check for `.field`.
+func (i *Interpreter) applyLvalueWrite(rootCopy *Value, steps []lvalueStep, newVal Value, st parser.Node) error {
+	if len(steps) == 0 {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: "internal: lvalue write with no steps", File: file, Line: line, Col: col}
+	}
+	cur := rootCopy
+	for k := 0; k < len(steps)-1; k++ {
+		next, err := i.lvalueStepInto(cur, steps[k])
+		if err != nil {
+			return err
+		}
+		cur = next
+	}
+	return i.lvalueWriteLeaf(cur, steps[len(steps)-1], newVal, st)
+}
+
+// lvalueStepInto descends one level into a struct field or container
+// element, returning a *Value pointing into the structure so the next
+// step writes through.
+func (i *Interpreter) lvalueStepInto(parent *Value, step lvalueStep) (*Value, error) {
+	if step.isField {
+		if parent.Kind != KindStruct {
+			return nil, &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", step.field, parent.Kind), File: step.file, Line: step.line, Col: step.col}
+		}
+		for k := range parent.Fields {
+			if parent.Fields[k].Name == step.field {
+				return &parent.Fields[k].Value, nil
+			}
+		}
+		return nil, &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, step.field), File: step.file, Line: step.line, Col: step.col}
+	}
+	// Fake a parser.Node for the indexInto call site - it only reads
+	// position info from the node.
+	return indexInto(parent, step.index, posNode{file: step.file, line: step.line, col: step.col})
+}
+
+// lvalueWriteLeaf writes newVal at the leaf step. Field writes consult
+// the struct definition for the declared field type so the value can be
+// type-checked. Index writes route through writeIndexedSlot which
+// already enforces declared element / value types.
+func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Value, st parser.Node) error {
+	if step.isField {
+		if parent.Kind != KindStruct {
+			return &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", step.field, parent.Kind), File: step.file, Line: step.line, Col: step.col}
+		}
+		def, ok := i.structs[parent.StructName]
+		if !ok {
+			return &runtimeError{Msg: fmt.Sprintf("internal: struct %q definition missing at assignment", parent.StructName), File: step.file, Line: step.line, Col: step.col}
+		}
+		for _, decl := range def.Fields {
+			if decl.Name != step.field {
+				continue
+			}
+			if !newVal.MatchesDeclared(decl.Type) {
+				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName, decl.Type, newVal.Kind), File: step.file, Line: step.line, Col: step.col}
+			}
+			for k := range parent.Fields {
+				if parent.Fields[k].Name == decl.Name {
+					parent.Fields[k].Value = stampDeclaredType(newVal.Copy(), decl.Type)
+					return nil
+				}
+			}
+			// Defensive: the field is declared but the runtime value is missing.
+			parent.Fields = append(parent.Fields, StructField{Name: decl.Name, Value: stampDeclaredType(newVal.Copy(), decl.Type)})
+			return nil
+		}
+		return &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, step.field), File: step.file, Line: step.line, Col: step.col}
+	}
+	// Index write at the leaf - reuse the existing writer with a
+	// synthetic position node so error messages point at the index
+	// operation rather than the outer statement.
+	return writeIndexedSlot(parent, step.index, newVal, posNode{file: step.file, line: step.line, col: step.col})
+}
+
+// posNode lets us synthesise a parser.Node carrying just position info
+// for helpers (indexInto, writeIndexedSlot) that expect one.
+type posNode struct {
+	file string
+	line int
+	col  int
+}
+
+func (p posNode) Pos() (int, int)  { return p.line, p.col }
+func (p posNode) Filename() string { return p.file }
+func (p posNode) astNode()         {}
+
+// zeroStructFor builds a zero-initialised struct value for the named
+// struct. Each field gets its type's zero value, recursing through
+// nested struct fields so a `def p as Point;` for
+// `def struct Point { name as string, inner as Other };` produces a
+// fully-populated value (no nil fields slot through to runtime
+// surprises later). M13.1.
+func (i *Interpreter) zeroStructFor(name string, st parser.Node) (Value, error) {
+	def, ok := i.structs[name]
+	if !ok {
+		file, line, col := posFor(st)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", name), File: file, Line: line, Col: col}
+	}
+	fields := make([]StructField, len(def.Fields))
+	for k, decl := range def.Fields {
+		var fv Value
+		if decl.Type.Kind == parser.TypeStruct {
+			sub, err := i.zeroStructFor(decl.Type.StructName, st)
+			if err != nil {
+				return Value{}, err
+			}
+			fv = sub
+		} else {
+			fv = stampDeclaredType(ZeroFor(decl.Type), decl.Type)
+		}
+		fields[k] = StructField{Name: decl.Name, Value: fv}
+	}
+	return StructVal(name, fields), nil
+}
+
 // findIndexRoot walks an IndexExpr chain back to the underlying VarExpr.
 // The parser guarantees that an IndexAssignStmt's Target is rooted on a
 // VarExpr (the chain bottom), but production code shouldn't trust that
 // invariant blindly: nil indicates "no usable root" and the caller
 // surfaces an internal error.
+//
+// M13.1: the chain may also include FieldAccessExpr nodes (mixed
+// `$p.list[0].field` lvalues), so the walker handles both.
 func findIndexRoot(ix *parser.IndexExpr) *parser.VarExpr {
 	var cur parser.Expr = ix
 	for {
 		switch n := cur.(type) {
 		case *parser.IndexExpr:
+			cur = n.Target
+		case *parser.FieldAccessExpr:
 			cur = n.Target
 		case *parser.VarExpr:
 			return n
@@ -887,41 +1128,57 @@ func findIndexRoot(ix *parser.IndexExpr) *parser.VarExpr {
 	}
 }
 
-// applyIndexAssign walks the evaluated index path through a (mutable)
-// root copy and writes newVal at the leaf. Intermediate steps go through
-// indexInto, which returns a *Value pointing into the structure - so the
-// final writeIndexedSlot writes through the chain without explicit
-// writeback bookkeeping.
-func applyIndexAssign(rootCopy *Value, indices []Value, newVal Value, st *parser.IndexAssignStmt) error {
-	if len(indices) == 0 {
-		file, line, col := posFor(st)
-		return &runtimeError{Msg: "internal: index-assign with no indices", File: file, Line: line, Col: col}
-	}
-	cur := rootCopy
-	for k := 0; k < len(indices)-1; k++ {
-		next, err := indexInto(cur, indices[k], st)
-		if err != nil {
-			return err
+// findFieldRoot is findIndexRoot's twin for FieldAssignStmt - both
+// chains share the same shape (a mix of `.field` and `[i]` ops rooted
+// on a VarExpr).
+func findFieldRoot(fa *parser.FieldAccessExpr) *parser.VarExpr {
+	var cur parser.Expr = fa
+	for {
+		switch n := cur.(type) {
+		case *parser.IndexExpr:
+			cur = n.Target
+		case *parser.FieldAccessExpr:
+			cur = n.Target
+		case *parser.VarExpr:
+			return n
+		default:
+			return nil
 		}
-		cur = next
 	}
-	return writeIndexedSlot(cur, indices[len(indices)-1], newVal, st)
 }
 
 // indexInto returns a *Value pointing at the slot designated by idx
 // within parent. Used by both reads (in evalExpr's IndexExpr case) and
 // intermediate steps of index-assign chains. Out-of-bounds list indices
 // and missing map keys both error positionally.
-func indexInto(parent *Value, idx Value, st parser.Node) (*Value, error) {
+// positioned is the minimal interface indexInto / writeIndexedSlot
+// need from their statement parameter: just enough to produce
+// positioned error messages. parser.Node satisfies it; the M13.1
+// synthetic posNode does too without having to implement the rest of
+// the unexported-method `Node` interface.
+type positioned interface {
+	Pos() (line, col int)
+	Filename() string
+}
+
+// posOf extracts (file, line, col) from any positioned value -
+// parser.Node or our synthetic posNode. Use this in helpers that take
+// the positioned interface so the same code path serves both.
+func posOf(p positioned) (file string, line, col int) {
+	line, col = p.Pos()
+	return p.Filename(), line, col
+}
+
+func indexInto(parent *Value, idx Value, st positioned) (*Value, error) {
 	switch parent.Kind {
 	case KindList:
 		if idx.Kind != KindInt {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return nil, &runtimeError{Msg: fmt.Sprintf("list index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
 		n := int(idx.Int)
 		if n < 0 || n >= len(parent.List) {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return nil, &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", n, len(parent.List)), File: file, Line: line, Col: col}
 		}
 		return &parent.List[n], nil
@@ -931,41 +1188,41 @@ func indexInto(parent *Value, idx Value, st parser.Node) (*Value, error) {
 				return &parent.Map[k].Value, nil
 			}
 		}
-		file, line, col := posFor(st)
+		file, line, col := posOf(st)
 		return nil, &runtimeError{Msg: fmt.Sprintf("map has no entry for key %s", idx.Display()), File: file, Line: line, Col: col}
 	}
-	file, line, col := posFor(st)
+	file, line, col := posOf(st)
 	return nil, &runtimeError{Msg: fmt.Sprintf("cannot index into %s", parent.Kind), File: file, Line: line, Col: col}
 }
 
 // writeIndexedSlot sets parent[idx] = newVal. Lists: in-bounds only.
 // Maps: existing key updates in place, missing key extends the map
 // (insertion order is preserved). Element/value-type mismatches error.
-func writeIndexedSlot(parent *Value, idx Value, newVal Value, st *parser.IndexAssignStmt) error {
+func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) error {
 	switch parent.Kind {
 	case KindList:
 		if idx.Kind != KindInt {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("list index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
 		n := int(idx.Int)
 		if n < 0 || n >= len(parent.List) {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", n, len(parent.List)), File: file, Line: line, Col: col}
 		}
 		if parent.ElemTyp != nil && !newVal.MatchesDeclared(*parent.ElemTyp) {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to list element of declared type %s", newVal.Kind, parent.ElemTyp), File: file, Line: line, Col: col}
 		}
 		parent.List[n] = newVal.Copy()
 		return nil
 	case KindMap:
 		if parent.KeyTyp != nil && !idx.MatchesDeclared(*parent.KeyTyp) {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("map key must be %s, got %s", parent.KeyTyp, idx.Kind), File: file, Line: line, Col: col}
 		}
 		if parent.ValTyp != nil && !newVal.MatchesDeclared(*parent.ValTyp) {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to map value of declared type %s", newVal.Kind, parent.ValTyp), File: file, Line: line, Col: col}
 		}
 		for k := range parent.Map {
@@ -982,26 +1239,26 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st *parser.IndexAs
 		// writes are positioned runtime errors (same shape as list
 		// out-of-bounds), and a non-int RHS is rejected as a type error.
 		if idx.Kind != KindInt {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
 		n := int(idx.Int)
 		if n < 0 || n >= len(parent.Bytes) {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", n, len(parent.Bytes)), File: file, Line: line, Col: col}
 		}
 		if newVal.Kind != KindInt {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element must be int in [0, 255], got %s", newVal.Kind), File: file, Line: line, Col: col}
 		}
 		if newVal.Int < 0 || newVal.Int > 255 {
-			file, line, col := posFor(st)
+			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element value %d out of range [0, 255]", newVal.Int), File: file, Line: line, Col: col}
 		}
 		parent.Bytes[n] = byte(newVal.Int)
 		return nil
 	}
-	file, line, col := posFor(st)
+	file, line, col := posOf(st)
 	return &runtimeError{Msg: fmt.Sprintf("cannot index-assign into %s", parent.Kind), File: file, Line: line, Col: col}
 }
 
@@ -1278,6 +1535,10 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		return i.evalMapLit(ex, env)
 	case *parser.IndexExpr:
 		return i.evalIndex(ex, env)
+	case *parser.StructLit:
+		return i.evalStructLit(ex, env)
+	case *parser.FieldAccessExpr:
+		return i.evalFieldAccess(ex, env)
 	}
 	file, line, col := posFor(e)
 	return Value{}, &runtimeError{Msg: fmt.Sprintf("unsupported expression type %T", e), File: file, Line: line, Col: col}
@@ -1322,6 +1583,78 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 		entries = append(entries, MapEntry{Key: key.Copy(), Value: val.Copy()})
 	}
 	return Value{Kind: KindMap, Map: entries}, nil
+}
+
+// evalStructLit constructs a struct value from a literal (M13.1). The
+// literal's name must match a hoisted top-level `def struct`; every
+// declared field of the struct must appear exactly once in the literal
+// (no defaults at the literal level - users who want a zero-initialised
+// struct write `def p as Point;` without `init`); each value's runtime
+// type is checked against the declared field type. Fields are emitted
+// in *declaration* order regardless of the literal's source order so
+// the resulting Value is canonical.
+func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Value, error) {
+	def, ok := i.structs[ex.Name]
+	if !ok {
+		file, line, col := posFor(ex)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", ex.Name), File: file, Line: line, Col: col}
+	}
+	// Index the literal's fields by name for the cross-check.
+	provided := make(map[string]*parser.StructLitField, len(ex.Fields))
+	for k := range ex.Fields {
+		provided[ex.Fields[k].Name] = &ex.Fields[k]
+	}
+	// Reject unknown fields up-front so the user gets one clear error
+	// instead of "missing field X" followed by "stray field Y".
+	declared := make(map[string]bool, len(def.Fields))
+	for _, f := range def.Fields {
+		declared[f.Name] = true
+	}
+	for _, f := range ex.Fields {
+		if !declared[f.Name] {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown field %q in struct %q", f.Name, ex.Name), File: f.File, Line: f.Line, Col: f.Col}
+		}
+	}
+	out := make([]StructField, 0, len(def.Fields))
+	for _, decl := range def.Fields {
+		lit, ok := provided[decl.Name]
+		if !ok {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("missing field %q in struct %q literal", decl.Name, ex.Name), File: file, Line: line, Col: col}
+		}
+		v, err := i.evalExpr(lit.Expr, env)
+		if err != nil {
+			return Value{}, err
+		}
+		if !v.MatchesDeclared(decl.Type) {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, decl.Type, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
+		}
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), decl.Type)})
+	}
+	return StructVal(ex.Name, out), nil
+}
+
+// evalFieldAccess reads a struct field. Errors on a non-struct target
+// (with a positioned message naming the field that was requested) and
+// on an unknown field name (which can happen if the user mistypes a
+// field in a getter chain - the struct value carries the field list
+// so we can spot it here).
+func (i *Interpreter) evalFieldAccess(ex *parser.FieldAccessExpr, env *Environment) (Value, error) {
+	parent, err := i.evalExpr(ex.Target, env)
+	if err != nil {
+		return Value{}, err
+	}
+	if parent.Kind != KindStruct {
+		file, line, col := posFor(ex)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", ex.Field, parent.Kind), File: file, Line: line, Col: col}
+	}
+	for _, f := range parent.Fields {
+		if f.Name == ex.Field {
+			return f.Value, nil
+		}
+	}
+	file, line, col := posFor(ex)
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, ex.Field), File: file, Line: line, Col: col}
 }
 
 // evalIndex implements read access for `$xs[i]`, `$m["k"]`, or arbitrary
