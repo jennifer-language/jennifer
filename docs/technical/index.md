@@ -55,6 +55,9 @@ reasons trace back to one of the seven below. The same list appears in
   repository.
 - [Rejected features](rejected.md) - proposals that were turned down,
   with the reasoning so they don't come back.
+- [Design decisions](design-decisions.md) - features that ship despite
+  looking like a stance violation at first glance; the reasoning that
+  shows they aren't one.
 - [TinyGo notes](tinygo.md) - the constraints TinyGo imposes and how the
   codebase respects them.
 - [Glossary](../glossary.md) - canonical project terminology

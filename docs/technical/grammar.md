@@ -263,46 +263,46 @@ grammar the parser implements is the EBNF above.
 
 ### AST nodes
 
-| Node          | Kind  | Fields                                       |
-|---------------|-------|----------------------------------------------|
-| `Program`     | root  | `Imports []*ImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `TopLevel []Stmt` |
-| `ImportStmt`  | stmt  | `Name`, `AsName` (empty unless `use NAME as ALIAS;`) |
-| `MethodDef`   | stmt  | `Name`, `Params []Param`, `Body *Block`      |
-| `Param`       | -     | `Name`, `Type`                               |
-| `StructDef`   | stmt  | `Name`, `Fields []StructField` (M13.1; top-level only, hoisted before execution) |
-| `StructField` | -     | `Name`, `Type` (each field of a struct definition)        |
-| `Block`       | stmt  | `Stmts []Stmt`                               |
-| `DefineStmt`  | stmt  | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit) |
-| `AssignStmt`  | stmt  | `VarName`, `Value Expr`                      |
-| `IndexAssignStmt` | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` (M13.1: chain may include `FieldAccessExpr` nodes) |
-| `FieldAssignStmt` | stmt | `Target *FieldAccessExpr`, `Value Expr` - `$p.field = ...` (M13.1) |
-| `TryStmt`     | stmt  | `Body *Block`, `CatchName`, `CatchBody *Block` - `try { ... } catch (NAME) { ... }` (M13.2) |
-| `ThrowStmt`   | stmt  | `Value Expr` - `throw EXPR;` (M13.2) |
-| `AppendStmt`  | stmt  | `Target *VarExpr`, `Value Expr` - `$xs[] = item;` (M9) |
-| `ReturnStmt`  | stmt  | `Value Expr` (nil for bare `return;`)        |
-| `IfStmt`      | stmt  | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block` |
-| `WhileStmt`   | stmt  | `Cond`, `Body *Block`                        |
-| `ForStmt`     | stmt  | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil) |
-| `ForEachStmt` | stmt  | `VarName`, `Coll Expr`, `Body *Block`        |
-| `ExprStmt`    | stmt  | `Expr`                                       |
-| `IntLit`      | expr  | `Value int64`                                |
-| `FloatLit`    | expr  | `Value float64`                              |
-| `StringLit`   | expr  | `Value string`                               |
-| `BoolLit`     | expr  | `Value bool`                                 |
-| `NullLit`     | expr  | -                                            |
-| `VarExpr`     | expr  | `Name` (no `$`) - mutable-variable reference  |
-| `ConstRefExpr`| expr  | `Name` - bare-IDENT reference; interpreter expects it to resolve to a constant |
-| `CallExpr`    | expr  | `Callee`, `Args []Expr`                      |
-| `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr` |
-| `QualifiedConstRefExpr` | expr | `Prefix`, `Name` |
-| `BinaryExpr`  | expr  | `Op BinaryOp`, `Left`, `Right` (comparison/logical ops return bool; `and`/`or` short-circuit at eval time) |
-| `UnaryExpr`   | expr  | `Op UnaryOp` (`OpNeg`/`OpNot`), `Operand` |
-| `ListLit`     | expr  | `Elements []Expr` - `[1, 2, 3]`               |
-| `MapLit`      | expr  | `Keys []Expr`, `Values []Expr` (parallel) - `{"a": 1}` |
-| `IndexExpr`   | expr  | `Target Expr`, `Index Expr` - `$xs[i]`, chained |
-| `StructLit`   | expr  | `Name`, `Fields []StructLitField` - `Point{x: 1, y: 2}` (M13.1) |
-| `StructLitField` | - | `Name`, `Expr` (one named field in a struct literal) |
-| `FieldAccessExpr` | expr | `Target Expr`, `Field` - `$p.field`, chainable with `IndexExpr` (M13.1) |
+| Node                    | Kind | Fields                                                                                                     |
+| ----------------------- | ---- | ---------------------------------------------------------------------------------------------------------- |
+| `Program`               | root | `Imports []*ImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `TopLevel []Stmt`                 |
+| `ImportStmt`            | stmt | `Name`, `AsName` (empty unless `use NAME as ALIAS;`)                                                       |
+| `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`                                                                    |
+| `Param`                 | -    | `Name`, `Type`                                                                                             |
+| `StructDef`             | stmt | `Name`, `Fields []StructField` (M13.1; top-level only, hoisted before execution)                           |
+| `StructField`           | -    | `Name`, `Type` (each field of a struct definition)                                                         |
+| `Block`                 | stmt | `Stmts []Stmt`                                                                                             |
+| `DefineStmt`            | stmt | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit)                                       |
+| `AssignStmt`            | stmt | `VarName`, `Value Expr`                                                                                    |
+| `IndexAssignStmt`       | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` (M13.1: chain may include `FieldAccessExpr` nodes)   |
+| `FieldAssignStmt`       | stmt | `Target *FieldAccessExpr`, `Value Expr` - `$p.field = ...` (M13.1)                                         |
+| `TryStmt`               | stmt | `Body *Block`, `CatchName`, `CatchBody *Block` - `try { ... } catch (NAME) { ... }` (M13.2)                |
+| `ThrowStmt`             | stmt | `Value Expr` - `throw EXPR;` (M13.2)                                                                       |
+| `AppendStmt`            | stmt | `Target *VarExpr`, `Value Expr` - `$xs[] = item;` (M9)                                                     |
+| `ReturnStmt`            | stmt | `Value Expr` (nil for bare `return;`)                                                                      |
+| `IfStmt`                | stmt | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block`                            |
+| `WhileStmt`             | stmt | `Cond`, `Body *Block`                                                                                      |
+| `ForStmt`               | stmt | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil)                                      |
+| `ForEachStmt`           | stmt | `VarName`, `Coll Expr`, `Body *Block`                                                                      |
+| `ExprStmt`              | stmt | `Expr`                                                                                                     |
+| `IntLit`                | expr | `Value int64`                                                                                              |
+| `FloatLit`              | expr | `Value float64`                                                                                            |
+| `StringLit`             | expr | `Value string`                                                                                             |
+| `BoolLit`               | expr | `Value bool`                                                                                               |
+| `NullLit`               | expr | -                                                                                                          |
+| `VarExpr`               | expr | `Name` (no `$`) - mutable-variable reference                                                               |
+| `ConstRefExpr`          | expr | `Name` - bare-IDENT reference; interpreter expects it to resolve to a constant                             |
+| `CallExpr`              | expr | `Callee`, `Args []Expr`                                                                                    |
+| `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr`                                                                          |
+| `QualifiedConstRefExpr` | expr | `Prefix`, `Name`                                                                                           |
+| `BinaryExpr`            | expr | `Op BinaryOp`, `Left`, `Right` (comparison/logical ops return bool; `and`/`or` short-circuit at eval time) |
+| `UnaryExpr`             | expr | `Op UnaryOp` (`OpNeg`/`OpNot`), `Operand`                                                                  |
+| `ListLit`               | expr | `Elements []Expr` - `[1, 2, 3]`                                                                            |
+| `MapLit`                | expr | `Keys []Expr`, `Values []Expr` (parallel) - `{"a": 1}`                                                     |
+| `IndexExpr`             | expr | `Target Expr`, `Index Expr` - `$xs[i]`, chained                                                            |
+| `StructLit`             | expr | `Name`, `Fields []StructLitField` - `Point{x: 1, y: 2}` (M13.1)                                            |
+| `StructLitField`        | -    | `Name`, `Expr` (one named field in a struct literal)                                                       |
+| `FieldAccessExpr`       | expr | `Target Expr`, `Field` - `$p.field`, chainable with `IndexExpr` (M13.1)                                    |
 
 Every node embeds a `pos{File, Line, Col}` for error reporting and exposes
 it via `Node.Pos()` (line/col) and `Node.Filename()` (file path). The file

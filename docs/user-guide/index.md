@@ -1,8 +1,9 @@
 # Jennifer - User Guide
 
 Jennifer is a small, experimental, interpreted programming language. This
-guide covers everything you can do in Jennifer today
-([Milestone 7](../milestones.md)).
+guide covers everything you can do in Jennifer today. Run
+`jennifer version` to see which build you're on; the language history
+lives in [docs/milestones.md](../milestones.md).
 
 ## Design stances
 
@@ -58,6 +59,9 @@ same list appears in [README.md](../../README.md) and
 - [Style guide](style-guide.md) - the canonical source style that
   `jennifer fmt` produces; the spacing/indentation rules, the names
   convention, the `[]` and `{}` literal layout.
+- [Best practices](best-practices.md) - stylistic guidance and
+  code-smell heuristics for writing Jennifer that ages well. Not
+  enforced by the language; click through if you want the "why".
 
 ## Related
 

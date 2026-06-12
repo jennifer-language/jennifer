@@ -108,12 +108,12 @@ Decimal:
 
 ```jennifer
 42
-1_000_000           # `_` is a visual digit separator (M12+)
+1_000_000           # `_` is a visual digit separator
 3.14
 1_000.000_5         # the mantissa side of a float accepts `_` too
 ```
 
-Non-decimal integer prefixes (M12+):
+Non-decimal integer prefixes:
 
 ```jennifer
 0xff                # hex

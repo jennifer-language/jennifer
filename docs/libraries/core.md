@@ -26,9 +26,9 @@ domain-library, not here.
 
 ## Functions
 
-| Call              | Returns | Notes                                                       |
-|-------------------|---------|-------------------------------------------------------------|
-| `len(v)`          | int     | Structural length, polymorphic                              |
+| Call     | Returns | Notes                          |
+| -------- | ------- | ------------------------------ |
+| `len(v)` | int     | Structural length, polymorphic |
 
 ### `len`
 
@@ -59,9 +59,9 @@ worked on maps. See [maps.md](maps.md#maps-has).
 
 ## Constants
 
-| Name               | Kind     | Value                                                  |
-|--------------------|----------|--------------------------------------------------------|
-| `JENNIFER_VERSION` | string   | The interpreter's build version (see format below).    |
+| Name               | Kind   | Value                                               |
+| ------------------ | ------ | --------------------------------------------------- |
+| `JENNIFER_VERSION` | string | The interpreter's build version (see format below). |
 
 The `JENNIFER_` prefix follows the precedent set by `PHP_VERSION` and
 `RUBY_VERSION` (and similar from other languages). It also leaves the
@@ -73,12 +73,12 @@ unprefixed namespace clean for host/environment constants
 The build pipeline derives `JENNIFER_VERSION` from
 `git describe --tags --long`:
 
-| Repository state                          | `JENNIFER_VERSION` value              |
-|-------------------------------------------|---------------------------------------|
-| HEAD is exactly on a semver tag           | `"0.4.0"`                             |
-| HEAD is N commits past the most recent tag | `"0.4.0-dev+2.1023204"`              |
-| No tags exist yet                         | `"0.0.0-dev+<N>.<shortsha>"`          |
-| Built without git (or outside a repo)     | `"dev"`                               |
+| Repository state                           | `JENNIFER_VERSION` value     |
+| ------------------------------------------ | ---------------------------- |
+| HEAD is exactly on a semver tag            | `"0.4.0"`                    |
+| HEAD is N commits past the most recent tag | `"0.4.0-dev+2.1023204"`      |
+| No tags exist yet                          | `"0.0.0-dev+<N>.<shortsha>"` |
+| Built without git (or outside a repo)      | `"dev"`                      |
 
 The `dev+` prefix is intentional: any non-tagged build is a development
 build, and the `N.shortsha` suffix lets you trace which commit produced it.

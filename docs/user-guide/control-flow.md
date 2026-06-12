@@ -3,7 +3,7 @@
 ## Operators
 
 | Operator             | Meaning                                                  |
-|----------------------|----------------------------------------------------------|
+| -------------------- | -------------------------------------------------------- |
 | `+`                  | addition (`int`/`float`); also concatenation on `string` |
 | `-`, `*`             | subtraction, multiplication (`int`/`float`)              |
 | `/`                  | **true division - always returns `float`**               |
@@ -14,9 +14,9 @@
 | `==`                 | equality; same-kind plus `int`/`float` promotion; `bool` |
 | `and`, `or`          | logical; both operands `bool`; short-circuit             |
 | `not`                | unary logical negation; operand `bool`                   |
-| `&`, `|`, `^` (M12+) | bitwise AND / OR / XOR on `int`                          |
-| `<<`, `>>` (M12+)    | left / arithmetic right shift on `int`                   |
-| unary `~` (M12+)     | bitwise NOT on `int` (`~x == -x - 1`)                    |
+| `&`, `|`, `^`        | bitwise AND / OR / XOR on `int`                          |
+| `<<`, `>>`           | left / arithmetic right shift on `int`                   |
+| unary `~`            | bitwise NOT on `int` (`~x == -x - 1`)                    |
 
 **Division has two operators.** `/` always returns a `float` (Python 3
 style). `//` returns the floor, keeping the type when both operands are
@@ -39,7 +39,7 @@ operator. The `#` choice also lets Jennifer files start with a shebang:
 Precedence (low to high): `or`, `and`, `not`, comparison, bitwise `|`,
 bitwise `^`, bitwise `&`, shifts `<< >>`, additive (`+`, `-`),
 multiplicative (`*`, `/`, `//`, `%`), unary `-` / `~`. Use parentheses
-to override: `(1 + 2) * 3`. The bit-op rungs (M12+) sit between
+to override: `(1 + 2) * 3`. The bit-op rungs sit between
 comparison and additive following Python's precedence, so
 `$x & 0xff == 0` parses as `($x & 0xff) == 0` (the intuitive
 interpretation), not the C/Go shape `$x & (0xff == 0)`. Examples that
@@ -68,7 +68,7 @@ int operands (`5 / 2` is `2.5`, not `2`). Use `//` when you want an
 integer quotient: `5 // 2` is `2`. This is Python-3 division, not C/Java
 division.
 
-### Bitwise operators (M12+)
+### Bitwise operators
 
 The bit operators take `int` operands only - float is rejected with a
 positioned error. The shifts are arithmetic (sign-extending `>>`); a
@@ -85,13 +85,6 @@ io.printf("low byte:  %d|base=16\n", $x & $mask);   # ef
 io.printf("flip last: %d|base=16\n", $x ^ 1);       # dead_beee
 io.printf("shift 4:   %d|base=16\n", $x >> 4);      # dead_beef >> 4
 ```
-
-The XOR operator (`^`) ships even though it's algebraically derivable
-from `& | ~` because it's a CPU primitive with unique algebraic
-properties (self-inverse: `$a ^ $a == 0`; round-trip:
-`($a ^ $b) ^ $b == $a`; bit-toggle: `$flags ^ $mask`). Forcing every
-XOR use site to write the composition would be the
-`a - b` ≡ `a + (-b)` argument: we still ship `-`.
 
 ## Conditionals and loops
 
@@ -248,7 +241,7 @@ method's body and yields a value to the caller; `exit` ends the
 program. Use `return` when a method has done its job; use `exit` when
 the whole run is over.
 
-## `try`, `catch`, `throw` (M13.2+)
+## `try`, `catch`, `throw`
 
 Catchable errors. `throw EXPR;` signals an error from any reachable
 point; `try { body } catch (NAME) { handler }` runs the body and, if
@@ -344,6 +337,6 @@ unless replaced.
 
 Jennifer does not have a `finally` clause yet. The pattern is
 "do the cleanup explicitly in both branches" until a real cleanup
-need surfaces (probably with file handles in the M16.1 `fs`
+need surfaces (probably with file handles in a future `fs`
 library).
 

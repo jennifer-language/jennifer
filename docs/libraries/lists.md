@@ -23,20 +23,20 @@ shorthand for `$xs = lists.push($xs, item);`.
 
 ## Functions
 
-| Call                            | Returns       | Notes                                                                 |
-|---------------------------------|---------------|-----------------------------------------------------------------------|
-| `lists.push(xs, item)`          | list          | New list with `item` appended.                                        |
-| `lists.pop(xs)`                 | list          | New list without the last element. Empty input errors.                |
-| `lists.first(xs)`               | element kind  | Element at index `0`. Empty input errors.                             |
-| `lists.last(xs)`                | element kind  | Element at the last index. Empty input errors.                        |
-| `lists.head(xs, n)`             | list          | New list of the first `n` elements. `n` must be in `[0, len(xs)]`.    |
-| `lists.tail(xs, n)`             | list          | New list of the last `n` elements. Same range constraint.             |
-| `lists.reverse(xs)`             | list          | New list, elements in reverse order.                                  |
-| `lists.sort(xs)`                | list          | New list sorted ascending. See "Sort" below.                          |
-| `lists.contains(xs, item)`      | bool          | True iff `item` appears in `xs` under structural equality.            |
-| `lists.concat(a, b)`            | list          | `a`'s elements followed by `b`'s.                                     |
-| `lists.slice(xs, start)`        | list          | Elements from `start` to end (exclusive `end` = `len(xs)`).           |
-| `lists.slice(xs, start, end)`   | list          | Elements `[start, end)`. Out-of-range bounds error.                   |
+| Call                          | Returns      | Notes                                                              |
+| ----------------------------- | ------------ | ------------------------------------------------------------------ |
+| `lists.push(xs, item)`        | list         | New list with `item` appended.                                     |
+| `lists.pop(xs)`               | list         | New list without the last element. Empty input errors.             |
+| `lists.first(xs)`             | element kind | Element at index `0`. Empty input errors.                          |
+| `lists.last(xs)`              | element kind | Element at the last index. Empty input errors.                     |
+| `lists.head(xs, n)`           | list         | New list of the first `n` elements. `n` must be in `[0, len(xs)]`. |
+| `lists.tail(xs, n)`           | list         | New list of the last `n` elements. Same range constraint.          |
+| `lists.reverse(xs)`           | list         | New list, elements in reverse order.                               |
+| `lists.sort(xs)`              | list         | New list sorted ascending. See "Sort" below.                       |
+| `lists.contains(xs, item)`    | bool         | True iff `item` appears in `xs` under structural equality.         |
+| `lists.concat(a, b)`          | list         | `a`'s elements followed by `b`'s.                                  |
+| `lists.slice(xs, start)`      | list         | Elements from `start` to end (exclusive `end` = `len(xs)`).        |
+| `lists.slice(xs, start, end)` | list         | Elements `[start, end)`. Out-of-range bounds error.                |
 
 ### Sort
 

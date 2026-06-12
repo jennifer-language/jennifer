@@ -26,14 +26,14 @@ io.printf("%s\n", $msg);   # "1 + 2 = 3"
 
 ## Format verbs
 
-| Verb | Required kind  | Notes                          |
-|------|----------------|--------------------------------|
-| `%d` | `int`          | decimal                        |
-| `%f` | `float`        | shortest round-trip            |
-| `%s` | `string`       | raw                            |
-| `%t` | `bool`         | `true` / `false`               |
-| `%v` | any            | uses the value's display form  |
-| `%%` | -              | literal `%`                    |
+| Verb | Required kind | Notes                         |
+| ---- | ------------- | ----------------------------- |
+| `%d` | `int`         | decimal                       |
+| `%f` | `float`       | shortest round-trip           |
+| `%s` | `string`      | raw                           |
+| `%t` | `bool`        | `true` / `false`              |
+| `%v` | any           | uses the value's display form |
+| `%%` | -             | literal `%`                   |
 
 Mismatches (wrong verb for the value kind, too few or too many args, dangling
 `%`, unknown verb) all produce runtime errors.
@@ -81,7 +81,7 @@ Evaluation order within one verb:
 ### `null=` (shared by `%s`, `%d`, `%f`, `%t`)
 
 | Form                | Output when value is `null`                                |
-|---------------------|------------------------------------------------------------|
+| ------------------- | ---------------------------------------------------------- |
 | `null=empty`        | `""`                                                       |
 | `null=null`         | `"null"`                                                   |
 | `null=literal("X")` | `X` - the quoted text, with Jennifer string escapes parsed |
@@ -93,13 +93,13 @@ its verb: `%s|mode=quote|null=literal("X")` on a null prints `X`, not
 
 ### `%s` modifiers
 
-| Key      | Values                            | Default | Effect                                        |
-|----------|-----------------------------------|---------|-----------------------------------------------|
-| `pad`    | non-negative integer              | -       | minimum rune width                            |
-| `max`    | non-negative integer              | -       | truncate to N runes                           |
-| `align`  | `left`, `right`, `center` (M11+)  | `left`  | which side gets the pad spaces; `center` splits the pad evenly (odd leftover goes right) |
-| `mode`   | `raw`, `quote`, `escape`          | `raw`   | wrap in `"..."` (`quote`) / show escapes (`escape`) |
-| `null`   | see above                         | -       | substitute when value is `null`               |
+| Key     | Values                           | Default | Effect                                                                                   |
+| ------- | -------------------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `pad`   | non-negative integer             | -       | minimum rune width                                                                       |
+| `max`   | non-negative integer             | -       | truncate to N runes                                                                      |
+| `align` | `left`, `right`, `center` (M11+) | `left`  | which side gets the pad spaces; `center` splits the pad evenly (odd leftover goes right) |
+| `mode`  | `raw`, `quote`, `escape`         | `raw`   | wrap in `"..."` (`quote`) / show escapes (`escape`)                                      |
+| `null`  | see above                        | -       | substitute when value is `null`                                                          |
 
 `mode=quote` wraps the string in double quotes and escapes interior
 `\`, `"`, and control bytes. `mode=escape` does the same escaping
@@ -114,16 +114,16 @@ io.printf("%s|mode=quote\n", "a\nb");               # "a\nb"
 
 ### `%d` modifiers
 
-| Key      | Values                            | Default    | Effect                                              |
-|----------|-----------------------------------|------------|-----------------------------------------------------|
-| `pad`    | non-negative integer              | -          | minimum width                                       |
-| `fill`   | `0`                               | space      | zero-pad between sign and digits; requires `align=right` (the default) |
-| `align`  | `left`, `right`                   | `right`    | which side gets the pad                             |
-| `base`   | `2`, `8`, `10`, `16`              | `10`       | digit base; hex uses lowercase                      |
-| `sign`   | `negative`, `always`, `space`     | `negative` | sign for non-negative values                        |
-| `group`  | positive integer                  | -          | digit-group size, reading right-to-left             |
-| `sep`    | one of `_`, `,`, `.`, `-`, `:`    | -          | group separator; required with `group=` and vice versa |
-| `null`   | see above                         | -          | substitute when value is `null`                     |
+| Key     | Values                         | Default    | Effect                                                                 |
+| ------- | ------------------------------ | ---------- | ---------------------------------------------------------------------- |
+| `pad`   | non-negative integer           | -          | minimum width                                                          |
+| `fill`  | `0`                            | space      | zero-pad between sign and digits; requires `align=right` (the default) |
+| `align` | `left`, `right`                | `right`    | which side gets the pad                                                |
+| `base`  | `2`, `8`, `10`, `16`           | `10`       | digit base; hex uses lowercase                                         |
+| `sign`  | `negative`, `always`, `space`  | `negative` | sign for non-negative values                                           |
+| `group` | positive integer               | -          | digit-group size, reading right-to-left                                |
+| `sep`   | one of `_`, `,`, `.`, `-`, `:` | -          | group separator; required with `group=` and vice versa                 |
+| `null`  | see above                      | -          | substitute when value is `null`                                        |
 
 ```jennifer
 io.printf("%d|base=2\n", 5);                                # 101
@@ -133,15 +133,15 @@ io.printf("%d|pad=5|fill=0|sign=always\n", 42);             # +0042
 
 ### `%f` modifiers
 
-| Key      | Values                        | Default    | Effect                                                       |
-|----------|-------------------------------|------------|--------------------------------------------------------------|
-| `prec`   | non-negative integer          | shortest   | fraction digits (or mantissa fraction digits when `sci=true`) |
-| `trim`   | `true`, `false`               | `false`    | strip trailing fraction zeros and the `.` if all zero        |
-| `sci`    | `true`, `false`               | `false`    | force scientific notation (`1.23e+03`)                       |
-| `pad`    | non-negative integer          | -          | minimum width                                                |
-| `align`  | `left`, `right`               | `right`    | which side gets the pad                                      |
-| `sign`   | `negative`, `always`, `space` | `negative` | sign for non-negative values                                 |
-| `null`   | see above                     | -          | substitute when value is `null`                              |
+| Key     | Values                        | Default    | Effect                                                        |
+| ------- | ----------------------------- | ---------- | ------------------------------------------------------------- |
+| `prec`  | non-negative integer          | shortest   | fraction digits (or mantissa fraction digits when `sci=true`) |
+| `trim`  | `true`, `false`               | `false`    | strip trailing fraction zeros and the `.` if all zero         |
+| `sci`   | `true`, `false`               | `false`    | force scientific notation (`1.23e+03`)                        |
+| `pad`   | non-negative integer          | -          | minimum width                                                 |
+| `align` | `left`, `right`               | `right`    | which side gets the pad                                       |
+| `sign`  | `negative`, `always`, `space` | `negative` | sign for non-negative values                                  |
+| `null`  | see above                     | -          | substitute when value is `null`                               |
 
 ```jennifer
 io.printf("%f|prec=2\n", 3.14159);              # 3.14
@@ -151,10 +151,10 @@ io.printf("%f|sci=true|prec=2\n", 0.00123);     # 1.23e-03
 
 ### `%t` modifiers
 
-| Key      | Values                       | Default | Effect                                  |
-|----------|------------------------------|---------|-----------------------------------------|
-| `case`   | `lower`, `upper`, `title`    | `lower` | `true`/`false`, `TRUE`/`FALSE`, `True`/`False` |
-| `null`   | see above                    | -       | substitute when value is `null`         |
+| Key    | Values                    | Default | Effect                                         |
+| ------ | ------------------------- | ------- | ---------------------------------------------- |
+| `case` | `lower`, `upper`, `title` | `lower` | `true`/`false`, `TRUE`/`FALSE`, `True`/`False` |
+| `null` | see above                 | -       | substitute when value is `null`                |
 
 ### `%v` modifiers
 
@@ -168,14 +168,14 @@ the output.
 shape, recursing into nested aggregates. Non-collection input is a
 runtime error.
 
-| Key       | Values                  | Default               | Effect                                                              |
-|-----------|-------------------------|-----------------------|---------------------------------------------------------------------|
-| `sep`     | quoted string           | `", "`                | element separator (between list items, between map entries)         |
-| `kv`      | quoted string           | `": "`                | key/value separator for map entries                                 |
-| `open`    | quoted string           | `[` (list) / `{` (map)| opening bracket                                                     |
-| `close`   | quoted string           | `]` (list) / `}` (map)| closing bracket                                                     |
-| `depth`   | non-negative integer    | unlimited             | max recursion depth; deeper levels collapse to `[...]` / `{...}` (`depth=0` collapses at the top) |
-| `null`    | `skip`                  | -                     | omit null list elements and null map values                         |
+| Key     | Values               | Default                | Effect                                                                                            |
+| ------- | -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `sep`   | quoted string        | `", "`                 | element separator (between list items, between map entries)                                       |
+| `kv`    | quoted string        | `": "`                 | key/value separator for map entries                                                               |
+| `open`  | quoted string        | `[` (list) / `{` (map) | opening bracket                                                                                   |
+| `close` | quoted string        | `]` (list) / `}` (map) | closing bracket                                                                                   |
+| `depth` | non-negative integer | unlimited              | max recursion depth; deeper levels collapse to `[...]` / `{...}` (`depth=0` collapses at the top) |
+| `null`  | `skip`               | -                      | omit null list elements and null map values                                                       |
 
 Modifier values can be **double-quoted** to include spaces, brackets,
 or other characters reserved by the modifier-list grammar. The escape

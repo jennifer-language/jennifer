@@ -26,7 +26,7 @@ nothing here will surprise you.
   literals are `[]` and `{}`. Same rule as `()`.
 - **No space before `[`**: `$xs[0]`, not `$xs [0]`. Index expressions
   hug their target.
-- **No space inside `[]` for the M9 append form**: `$xs[] = item;`,
+- **No space inside `[]` for the append form**: `$xs[] = item;`,
   never `$xs[ ] = item;` or `$xs [ ] = item;`. Same rule as `$xs[0]`
   hugs its target and its brackets.
 - **One space after `:`** in map literals, never before: `{"a": 1}`,

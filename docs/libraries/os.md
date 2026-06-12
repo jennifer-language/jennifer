@@ -24,16 +24,16 @@ aliasing end-to-end. The library expands in
 
 ## Functions
 
-| Call                | Returns | Notes                                                                |
-|---------------------|---------|----------------------------------------------------------------------|
-| `os.platform()`     | string  | Operating-system name as reported by the runtime (`"linux"` today).  |
-| `os.getEnv(name)`   | string  | Reads an environment variable. Unset variables return `""`, no error.|
+| Call              | Returns | Notes                                                                 |
+| ----------------- | ------- | --------------------------------------------------------------------- |
+| `os.platform()`   | string  | Operating-system name as reported by the runtime (`"linux"` today).   |
+| `os.getEnv(name)` | string  | Reads an environment variable. Unset variables return `""`, no error. |
 
 ## Constants
 
-| Name             | Kind   | Value                                                |
-|------------------|--------|------------------------------------------------------|
+| Name             | Kind   | Value                                                                                                   |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------- |
 | `os.JENNIFER_LF` | string | Platform line ending. `"\n"` on Linux today; future cross-platform builds may emit `"\r\n"` on Windows. |
-| `os.JENNIFER_OS` | string | OS tag; same value as `os.platform()`, available as a constant for compile-time-style branching. |
+| `os.JENNIFER_OS` | string | OS tag; same value as `os.platform()`, available as a constant for compile-time-style branching.        |
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../user-guide/imports.md](../user-guide/imports.md), [../user-guide/style-guide.md](../user-guide/style-guide.md), [index.md](index.md).

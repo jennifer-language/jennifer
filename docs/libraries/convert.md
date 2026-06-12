@@ -19,15 +19,15 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 
 ## Behavior summary
 
-| Call          | Source kinds                  | Behavior                                                             |
-|---------------|-------------------------------|----------------------------------------------------------------------|
-| `convert.toInt(v)`      | int / float / string / bool   | identity / truncate / parse / `true`=1, `false`=0                    |
-| `convert.toFloat(v)`    | int / float / string / bool   | convert / identity / parse / `true`=1.0, `false`=0.0                 |
-| `convert.toString(v)`   | any                           | always succeeds; uses the value's display form                       |
-| `convert.toBool(v)`     | bool / int / float / string   | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`) |
-| `convert.typeOf(v)`   | any                           | returns the kind as a string: `"int"`, `"float"`, etc.               |
-| `convert.bytesFromString(s, codec)` (M12+) | (string, string) | string → bytes; only `"utf-8"` codec today |
-| `convert.stringFromBytes(b, codec)` (M12+) | (bytes, string)  | bytes → string; only `"utf-8"` codec today; invalid UTF-8 is an error |
+| Call                                       | Source kinds                | Behavior                                                              |
+| ------------------------------------------ | --------------------------- | --------------------------------------------------------------------- |
+| `convert.toInt(v)`                         | int / float / string / bool | identity / truncate / parse / `true`=1, `false`=0                     |
+| `convert.toFloat(v)`                       | int / float / string / bool | convert / identity / parse / `true`=1.0, `false`=0.0                  |
+| `convert.toString(v)`                      | any                         | always succeeds; uses the value's display form                        |
+| `convert.toBool(v)`                        | bool / int / float / string | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`)  |
+| `convert.typeOf(v)`                        | any                         | returns the kind as a string: `"int"`, `"float"`, etc.                |
+| `convert.bytesFromString(s, codec)` (M12+) | (string, string)            | string → bytes; only `"utf-8"` codec today                            |
+| `convert.stringFromBytes(b, codec)` (M12+) | (bytes, string)             | bytes → string; only `"utf-8"` codec today; invalid UTF-8 is an error |
 
 ## Errors
 

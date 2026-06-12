@@ -7,28 +7,28 @@ use io;                   # library import - enables `io.printf`, `io.sprintf`, 
 include "helpers.j";      # textual file splice - pastes helpers.j here
 ```
 
-A third keyword, `import`, is **reserved** for the module system that
-lands in M17. Writing `import "x.j";` today produces a migration-hint
+A third keyword, `import`, is **reserved** for the planned module
+system. Writing `import "x.j";` today produces a migration-hint
 error pointing at `include`.
 
 ## Library imports
 
-`use NAME;` enables a built-in library. After M10 every library is
+`use NAME;` enables a built-in library. Every library is
 **namespaced** - every name lives behind the library's prefix
 (`io.printf`, `math.sqrt`, `convert.toInt`). The only library exposing
 bare-name globals is the auto-loaded `core` (which doesn't need `use`).
 Each library has its own reference doc; the table below is the index.
 
-| Library   | Enable with     | Contents                                                                                                                                                                                | Reference                                  |
-|-----------|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|
-| `io`      | `use io;`       | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, and the format-verb mini-language                                                                                                  | [libraries/io.md](../libraries/io.md)       |
-| `convert` | `use convert;`  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts                                                                          | [libraries/convert.md](../libraries/convert.md) |
-| `math`    | `use math;`     | `math.abs`, `math.min`, `math.max`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.round`, `math.rand`, `math.randInt`, `math.randSeed`; constants `math.PI`, `math.E`     | [libraries/math.md](../libraries/math.md)   |
-| `strings` | `use strings;`  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`                  | [libraries/strings.md](../libraries/strings.md) |
-| `lists`   | `use lists;`    | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice` - non-mutating helpers                                                          | [libraries/lists.md](../libraries/lists.md) |
-| `maps`    | `use maps;`     | `maps.keys`, `values`, `has`, `delete`, `merge` - non-mutating helpers                                                                                                                  | [libraries/maps.md](../libraries/maps.md)   |
-| `os`      | `use os;`       | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`                                                                                                                          | [libraries/os.md](../libraries/os.md)       |
-| `core`    | *(auto-loaded)* | `len`, `JENNIFER_VERSION`. Reachable as bare names only - no `core.len` / `core.JENNIFER_VERSION` form exists. The only library that exposes bare-name globals. Writing `use core;` is a runtime error. | [libraries/core.md](../libraries/core.md)   |
+| Library   | Enable with     | Contents                                                                                                                                                                                                | Reference                                       |
+| --------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `io`      | `use io;`       | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, and the format-verb mini-language                                                                                                                   | [libraries/io.md](../libraries/io.md)           |
+| `convert` | `use convert;`  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts                                                                                             | [libraries/convert.md](../libraries/convert.md) |
+| `math`    | `use math;`     | `math.abs`, `math.min`, `math.max`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.round`, `math.rand`, `math.randInt`, `math.randSeed`; constants `math.PI`, `math.E`                       | [libraries/math.md](../libraries/math.md)       |
+| `strings` | `use strings;`  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`                                  | [libraries/strings.md](../libraries/strings.md) |
+| `lists`   | `use lists;`    | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice` - non-mutating helpers                                                                           | [libraries/lists.md](../libraries/lists.md)     |
+| `maps`    | `use maps;`     | `maps.keys`, `values`, `has`, `delete`, `merge` - non-mutating helpers                                                                                                                                  | [libraries/maps.md](../libraries/maps.md)       |
+| `os`      | `use os;`       | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`                                                                                                                                          | [libraries/os.md](../libraries/os.md)           |
+| `core`    | *(auto-loaded)* | `len`, `JENNIFER_VERSION`. Reachable as bare names only - no `core.len` / `core.JENNIFER_VERSION` form exists. The only library that exposes bare-name globals. Writing `use core;` is a runtime error. | [libraries/core.md](../libraries/core.md)       |
 
 See [libraries/index.md](../libraries/index.md) for a fuller catalog
 and the library-organization principles, or
@@ -95,11 +95,7 @@ io.printf("Jennifer %s\n", JENNIFER_VERSION);
 ```
 
 There is **no** `core.len` / `core.JENNIFER_VERSION` qualified
-form - publishing the same name two ways would violate stance #1
-("one way per thing"). `core` is the only library where the
-exposure is asymmetric, and the asymmetry is the whole point:
-the auto-loaded library exists precisely so its names can stay
-short.
+form - `core` names are bare-only.
 
 ## File splices (`include`)
 
@@ -131,15 +127,15 @@ and rejected with an error.
 
 `include` does a textual splice with no module boundary - the spliced
 file's top-level names land directly in the enclosing program's scope.
-The `import` keyword is reserved for the M17 module system, which will
-add real modules with their own namespaces and explicit exports.
+The `import` keyword is reserved for the planned module system, which
+will add real modules with their own namespaces and explicit exports.
 Writing `import "foo.j";` today is rejected with a migration-hint
 pointing at `include`.
 
 ```
 import "x.j";   → error: use `include "x.j";` for textual file
                   splicing; the `import` keyword is reserved for
-                  the module system landing in M17
+                  the planned module system
 include io;     → error: `include` is for files; use `use io;` for
                   system libraries
 use foo.j;      → error: `use` is for system libraries; for files use

@@ -50,22 +50,22 @@ io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
 
 ## Functions
 
-| Call                                  | Returns | Notes                                                  |
-|---------------------------------------|---------|--------------------------------------------------------|
-| `strings.upper(s)`, `strings.lower(s)` | string | Case conversion (Unicode-aware)                        |
-| `strings.contains(s, sub)`            | bool    | Substring search                                       |
-| `strings.startsWith(s, prefix)`       | bool    |                                                        |
-| `strings.endsWith(s, suffix)`         | bool    |                                                        |
-| `strings.indexOf(s, sub)`             | int     | Rune index of first occurrence; `-1` if not found      |
-| `strings.trim(s)`                     | string  | Strip leading and trailing whitespace                  |
-| `strings.trimLeft(s)`, `strings.trimRight(s)` | string | One-sided trim                                  |
-| `strings.replace(s, old, new)`        | string  | Replace **all** occurrences of `old` with `new`        |
-| `strings.repeat(s, n)`                | string  | `n` copies concatenated; `n` must be non-negative      |
-| `strings.substring(s, start)`         | string  | Rune-indexed; from `start` to the end of the string    |
-| `strings.substring(s, start, end)`    | string  | Rune-indexed; **exclusive end**                        |
-| `strings.split(s, sep)`               | list of string | Split on a non-empty separator; preserves empty segments |
-| `strings.chars(s)`                    | list of string | One single-rune string per Unicode code point   |
-| `strings.join(parts, sep)`            | string  | Concatenate a `list of string` with `sep` between entries |
+| Call                                          | Returns        | Notes                                                     |
+| --------------------------------------------- | -------------- | --------------------------------------------------------- |
+| `strings.upper(s)`, `strings.lower(s)`        | string         | Case conversion (Unicode-aware)                           |
+| `strings.contains(s, sub)`                    | bool           | Substring search                                          |
+| `strings.startsWith(s, prefix)`               | bool           |                                                           |
+| `strings.endsWith(s, suffix)`                 | bool           |                                                           |
+| `strings.indexOf(s, sub)`                     | int            | Rune index of first occurrence; `-1` if not found         |
+| `strings.trim(s)`                             | string         | Strip leading and trailing whitespace                     |
+| `strings.trimLeft(s)`, `strings.trimRight(s)` | string         | One-sided trim                                            |
+| `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`           |
+| `strings.repeat(s, n)`                        | string         | `n` copies concatenated; `n` must be non-negative         |
+| `strings.substring(s, start)`                 | string         | Rune-indexed; from `start` to the end of the string       |
+| `strings.substring(s, start, end)`            | string         | Rune-indexed; **exclusive end**                           |
+| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments  |
+| `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point             |
+| `strings.join(parts, sep)`                    | string         | Concatenate a `list of string` with `sep` between entries |
 
 `strings.split` and `strings.chars` complement each other: use
 `strings.chars(s)` to break a string into runes (one entry per code

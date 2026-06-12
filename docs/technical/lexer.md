@@ -4,22 +4,22 @@ A hand-written, single-pass scanner.
 
 ## Token types
 
-| Group                     | Tokens                                                                                                  |
-|---------------------------|---------------------------------------------------------------------------------------------------------|
-| Markers                   | `EOF`, `ILLEGAL`                                                                                        |
-| Literal values            | `INT`, `FLOAT`, `STRING`, `TRUE`, `FALSE`, `NULL`                                                       |
-| Identifiers               | `IDENT`, `VARREF`                                                                                       |
-| Declaration keywords      | `DEFINE` (`def`), `FUNC`, `AS`, `INIT`, `CONST`, `RETURN`                                               |
-| Import keywords           | `USE`, `IMPORT`                                                                                         |
-| Control-flow keywords     | `IF`, `ELSEIF`, `ELSE`, `WHILE`, `FOR`                                                                  |
-| Type keywords             | `INT_TYPE`, `FLOAT_TYPE`, `STRING_TYPE`, `BOOL_TYPE`, `LIST`, `MAP`                                     |
-| Type structure keywords   | `OF`, `TO`                                                                                              |
-| Iteration keyword         | `IN`                                                                                                    |
-| Keyword operators         | `AND`, `OR`, `NOT`                                                                                      |
-| Arithmetic operators      | `PLUS` (`+`), `MINUS` (`-`), `STAR` (`*`), `SLASH` (`/`), `DIV` (`//`), `PERCENT` (`%`)                 |
-| Comparison operators      | `LT` (`<`), `GT` (`>`), `LE` (`<=`), `GE` (`>=`), `EQ` (`==`)                                           |
-| Assignment                | `ASSIGN` (`=`)                                                                                          |
-| Grouping and punctuation  | `LBRACE` (`{`), `RBRACE` (`}`), `LPAREN` (`(`), `RPAREN` (`)`), `LBRACKET` (`[`), `RBRACKET` (`]`), `SEMI` (`;`), `COMMA` (`,`), `COLON` (`:`), `DOT` (`.`) |
+| Group                    | Tokens                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Markers                  | `EOF`, `ILLEGAL`                                                                                                                                            |
+| Literal values           | `INT`, `FLOAT`, `STRING`, `TRUE`, `FALSE`, `NULL`                                                                                                           |
+| Identifiers              | `IDENT`, `VARREF`                                                                                                                                           |
+| Declaration keywords     | `DEFINE` (`def`), `FUNC`, `AS`, `INIT`, `CONST`, `RETURN`                                                                                                   |
+| Import keywords          | `USE`, `IMPORT`                                                                                                                                             |
+| Control-flow keywords    | `IF`, `ELSEIF`, `ELSE`, `WHILE`, `FOR`                                                                                                                      |
+| Type keywords            | `INT_TYPE`, `FLOAT_TYPE`, `STRING_TYPE`, `BOOL_TYPE`, `LIST`, `MAP`                                                                                         |
+| Type structure keywords  | `OF`, `TO`                                                                                                                                                  |
+| Iteration keyword        | `IN`                                                                                                                                                        |
+| Keyword operators        | `AND`, `OR`, `NOT`                                                                                                                                          |
+| Arithmetic operators     | `PLUS` (`+`), `MINUS` (`-`), `STAR` (`*`), `SLASH` (`/`), `DIV` (`//`), `PERCENT` (`%`)                                                                     |
+| Comparison operators     | `LT` (`<`), `GT` (`>`), `LE` (`<=`), `GE` (`>=`), `EQ` (`==`)                                                                                               |
+| Assignment               | `ASSIGN` (`=`)                                                                                                                                              |
+| Grouping and punctuation | `LBRACE` (`{`), `RBRACE` (`}`), `LPAREN` (`(`), `RPAREN` (`)`), `LBRACKET` (`[`), `RBRACKET` (`]`), `SEMI` (`;`), `COMMA` (`,`), `COLON` (`:`), `DOT` (`.`) |
 
 `def` introduces a variable or constant binding (TOKEN_DEFINE); `func`
 introduces a method (TOKEN_FUNC). `import` (TOKEN_IMPORT) is for **file

@@ -9,16 +9,16 @@ interpreter today and links to the reference doc for each.
 > [cheatsheet](cheatsheet.md) - alphabetical list of every builtin
 > with its library and a one-line description.
 
-| Library   | Enable with     | Contents                                                                                                                                                                                       | Reference                  |
-|-----------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------|
-| `io`      | `use io;`       | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, plus the format-verb mini-language                                                                                                        | [io.md](io.md)             |
-| `convert` | `use convert;`  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts; canonical-only `toBool` conversion                                                | [convert.md](convert.md)   |
-| `math`    | `use math;`     | `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`                                                                | [math.md](math.md)         |
-| `strings` | `use strings;`  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`. `len` lives in `core`. | [strings.md](strings.md)   |
-| `lists`   | `use lists;`    | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice` - all return a new list.                                                                | [lists.md](lists.md)       |
-| `maps`    | `use maps;`     | `maps.keys`, `values`, `has`, `delete`, `merge` - all return a new map / list / bool.                                                                                                          | [maps.md](maps.md)         |
-| `os`      | `use os;`       | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`                                                                                                                                  | [os.md](os.md)             |
-| `core`    | *(auto-loaded)* | `len` (polymorphic over string/list/map), `JENNIFER_VERSION`. The only library that ships bare-name globals; **no** namespaced form (`core.len`) is published, by design.                       | [core.md](core.md)         |
+| Library   | Enable with     | Contents                                                                                                                                                                                       | Reference                |
+| --------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `io`      | `use io;`       | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, plus the format-verb mini-language                                                                                                         | [io.md](io.md)           |
+| `convert` | `use convert;`  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts; canonical-only `toBool` conversion                                                | [convert.md](convert.md) |
+| `math`    | `use math;`     | `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`                                                                | [math.md](math.md)       |
+| `strings` | `use strings;`  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`. `len` lives in `core`. | [strings.md](strings.md) |
+| `lists`   | `use lists;`    | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice` - all return a new list.                                                                | [lists.md](lists.md)     |
+| `maps`    | `use maps;`     | `maps.keys`, `values`, `has`, `delete`, `merge` - all return a new map / list / bool.                                                                                                          | [maps.md](maps.md)       |
+| `os`      | `use os;`       | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`                                                                                                                                 | [os.md](os.md)           |
+| `core`    | *(auto-loaded)* | `len` (polymorphic over string/list/map), `JENNIFER_VERSION`. The only library that ships bare-name globals; **no** namespaced form (`core.len`) is published, by design.                      | [core.md](core.md)       |
 
 A quick taste:
 

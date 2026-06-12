@@ -76,17 +76,17 @@ A few notes:
 The prompt supports the standard line-editing keys you'd expect from
 a modern shell:
 
-| Key                          | Action                              |
-|------------------------------|-------------------------------------|
-| Left / Right                 | Move cursor                         |
-| Home / End                   | Jump to line start / end            |
-| Ctrl+A / Ctrl+E              | Same as Home / End                  |
-| Ctrl+Left / Ctrl+Right       | Move by word                        |
-| Backspace, Delete            | Delete character                    |
-| Ctrl+W, Ctrl+Backspace       | Delete word backward                |
-| Ctrl+U / Ctrl+K              | Kill to line start / end            |
-| Up / Down                    | Browse history                      |
-| Ctrl+C                       | Cancel the current line             |
+| Key                    | Action                   |
+| ---------------------- | ------------------------ |
+| Left / Right           | Move cursor              |
+| Home / End             | Jump to line start / end |
+| Ctrl+A / Ctrl+E        | Same as Home / End       |
+| Ctrl+Left / Ctrl+Right | Move by word             |
+| Backspace, Delete      | Delete character         |
+| Ctrl+W, Ctrl+Backspace | Delete word backward     |
+| Ctrl+U / Ctrl+K        | Kill to line start / end |
+| Up / Down              | Browse history           |
+| Ctrl+C                 | Cancel the current line  |
 
 History is in-memory only (no on-disk persistence yet) and holds up to
 100 entries. When stdin is piped (e.g. `echo ... | jennifer repl` in

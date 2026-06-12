@@ -555,7 +555,7 @@ a recoverable-error story.
   on a non-struct value are all positioned errors.
 
 See:
-- [user-guide/types-and-values.md](user-guide/types-and-values.md#structs-m131) -
+- [user-guide/types-and-values.md](user-guide/types-and-values.md#structs) -
   language angle.
 - [technical/interpreter.md](technical/interpreter.md#structs-m131) -
   runtime details (`KindStruct`, hoisting, unified lvalue walker).
@@ -591,7 +591,7 @@ on M13.1 because the canonical error value is a struct.
   may not redefine the auto-hoisted `Error` struct.
 
 See:
-- [user-guide/control-flow.md](user-guide/control-flow.md#try-catch-throw-m132) -
+- [user-guide/control-flow.md](user-guide/control-flow.md#try-catch-throw) -
   language angle.
 - [technical/interpreter.md](technical/interpreter.md#catchable-errors-m132) -
   runtime details (`ErrorSignal`, wrapping, flow passthrough).
@@ -1194,13 +1194,13 @@ visible at the call site.
 
 **`task` library (built-in, shipped with M16.0).**
 
-| Function | Effect |
-|----------|--------|
-| `task.wait(t) -> T` | Block until `t` completes; return its value or re-throw its error. |
-| `task.poll(t) -> bool` | Non-blocking check: true if `t` has completed (value or error available). |
-| `task.discard(t)` | Mark `t` as fire-and-forget; suppresses dropped-error logging if it's ever added. |
+| Function                        | Effect                                                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `task.wait(t) -> T`             | Block until `t` completes; return its value or re-throw its error.                                                     |
+| `task.poll(t) -> bool`          | Non-blocking check: true if `t` has completed (value or error available).                                              |
+| `task.discard(t)`               | Mark `t` as fire-and-forget; suppresses dropped-error logging if it's ever added.                                      |
 | `task.waitAll(ts) -> list of T` | Wait for every task in `$ts`; return their results in order. Re-throws the first error encountered (others discarded). |
-| `task.waitAny(ts) -> int` | Wait until any task in `$ts` completes; return its index. Caller then `task.wait`s that one. |
+| `task.waitAny(ts) -> int`       | Wait until any task in `$ts` completes; return its index. Caller then `task.wait`s that one.                           |
 
 `waitAll` / `waitAny` cover the most common patterns (parallel
 map-fold and "first to respond wins"). Anything more complex

@@ -2,17 +2,17 @@
 
 ## Types
 
-| Type                | Example literals                              | Default | Notes                                     |
-|---------------------|-----------------------------------------------|---------|-------------------------------------------|
-| `int`               | `42`, `0xff`, `0o755`, `0b1010_0110`, `1_000` | `0`     | 64-bit signed; M12+ for non-decimal forms and `_` separator |
-| `float`             | `3.14`, `0.5`, `1_000.000_5`                  | `0.0`   | 64-bit; promoted from int in mixed math   |
-| `string`            | `"hello"`, `'single quotes'`                  | `""`    | Supports escape sequences                 |
-| `bool`              | `true`, `false`                               | `false` | Produced by comparison operators          |
-| `null`              | `null`                                        | `null`  | A type with a single value (the unit)     |
-| `bytes` (M12+)      | *(no literal)*                                | empty   | Mutable byte sequence; element = `int` in `[0, 255]`; built via `convert.bytesFromString` or grown with `$b[] = byte;` |
-| `list of T`         | `[1, 2, 3]`                                   | `[]`    | Ordered sequence; 0-indexed; mutable      |
-| `map of K to V`     | `{"a": 1, "b": 2}`                            | `{}`    | Key→value; insertion-ordered; mutable     |
-| user struct (M13.1+) | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs-m131) |
+| Type            | Example literals                                    | Default          | Notes                                                                                                                  |
+| --------------- | --------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `int`           | `42`, `0xff`, `0o755`, `0b1010_0110`, `1_000`       | `0`              | 64-bit signed; `_` may separate digits                                                                                 |
+| `float`         | `3.14`, `0.5`, `1_000.000_5`                        | `0.0`            | 64-bit; promoted from int in mixed math                                                                                |
+| `string`        | `"hello"`, `'single quotes'`                        | `""`             | Supports escape sequences                                                                                              |
+| `bool`          | `true`, `false`                                     | `false`          | Produced by comparison operators                                                                                       |
+| `null`          | `null`                                              | `null`           | A type with a single value (the unit)                                                                                  |
+| `bytes`         | *(no literal)*                                      | empty            | Mutable byte sequence; element = `int` in `[0, 255]`; built via `convert.bytesFromString` or grown with `$b[] = byte;` |
+| `list of T`     | `[1, 2, 3]`                                         | `[]`             | Ordered sequence; 0-indexed; mutable                                                                                   |
+| `map of K to V` | `{"a": 1, "b": 2}`                                  | `{}`             | Key→value; insertion-ordered; mutable                                                                                  |
+| user struct     | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs)                                                               |
 
 The **Default** column is the value an uninitialized variable receives
 (`def x as int;` produces `0`). For compound types the default is an
@@ -33,15 +33,15 @@ underneath), not a Lisp linked list. You get O(1) random access via
 Both `"..."` and `'...'` are valid string delimiters. The following escapes
 are recognized:
 
-| Escape | Meaning            |
-|--------|--------------------|
-| `\n`   | newline            |
-| `\r`   | carriage return    |
-| `\t`   | tab                |
-| `\\`   | backslash          |
-| `\"`   | double quote       |
-| `\'`   | single quote       |
-| `\0`   | null character     |
+| Escape | Meaning         |
+| ------ | --------------- |
+| `\n`   | newline         |
+| `\r`   | carriage return |
+| `\t`   | tab             |
+| `\\`   | backslash       |
+| `\"`   | double quote    |
+| `\'`   | single quote    |
+| `\0`   | null character  |
 
 ## Variables and constants
 
@@ -155,65 +155,16 @@ A few rules worth knowing up front:
 - **Nesting works**: `list of list of int`,
   `map of string to list of int`, and so on. See
   [Nested lists and maps](#nested-lists-and-maps) below for the
-  shape rules and when nesting gets too deep.
+  shape rules; [best practices](best-practices.md#why-4-levels-of-nesting-is-a-code-smell)
+  has guidance on when nesting gets too deep.
 - **Empty literals require a declared type**: `[]` and `{}` are valid
   literals but the surrounding `def x as list of T` decides what they
   hold.
 
 ### The `$xs[]` append sugar
 
-For the common "build a list by appending" pattern, the language
-ships a write-only target that means "the position just past the end
-of the list":
-
-> **Deliberate exception to "one way per thing".** Jennifer's design
-> stance #1 normally rejects sugar that creates a parallel API, and
-> `$xs[] = item;` and `$xs = lists.push($xs, item);` *do* compile to
-> the same operation. The reasoning that puts the bracket form in
-> the language anyway - and that distinguishes it from rejected
-> sugar like `$i++` (see
-> [docs/technical/rejected.md](../technical/rejected.md)):
->
-> 1. **`$xs[]` re-uses an existing operator slot; it is not a new
->    operator.** `$xs[i] = item;` already targets a list position
->    via the `[...]` index-write syntax. `$xs[] = item;` extends
->    that same operator to one position the existing syntax didn't
->    cover - "just past the end" - by passing an empty index. No
->    new token is introduced. Compare `$i++`: that proposed a
->    *new* operator (`++`) competing with the canonical
->    `$i = $i + 1;`. The bracket form has no new token to learn,
->    no precedence to memorize, and no parse rule that wouldn't
->    exist anyway.
-> 2. **Index-write semantics, not function-call semantics.**
->    `$xs[i] = item;` mutates the binding's list in place.
->    `$xs[] = item;` extends that in-place behaviour to the
->    append position, where the function-call form
->    (`$xs = lists.push($xs, item);`) needs an explicit
->    reassignment to commit the new list back into the binding.
->    So the bracket form isn't a "shortcut for `lists.push`" so
->    much as the index-write syntax growing one more legal
->    position. The two forms have genuinely different shapes:
->    one is a write statement that mutates a binding, the other
->    is an expression that returns a new list.
-> 3. **Write-only; no expression-context footgun.** `$xs[]`
->    cannot appear on the right-hand side of any expression -
->    reading "the element just past the end" has no meaning and
->    is rejected at parse time. `$i++`'s real problem was that
->    pre/post forms differ only in expression context, which is
->    where the bugs hid. `$xs[]` has no expression context to
->    hide in, so the analogous footgun cannot exist.
->
-> What this means for `lists.push`: it stays in the language and
-> is canonical for any context that needs the post-append list as
-> an expression value (passing it into another call, chaining
-> transformations). The two spellings are not parallel APIs that
-> do the same thing in the same context; they fit different
-> syntactic positions - the bracket form for the in-place write
-> statement, the function form for the expression value. That's
-> also why the same argument doesn't license a `bytes.push`
-> removal once `$b[] = byte;` ships: any future code that needs
-> "a new bytes value with this byte appended" as an expression
-> still wants the function form.
+For the common "build a list by appending" pattern, `$xs[] = item;`
+writes to the position just past the end of the list:
 
 ```jennifer
 def xs as list of int init [];
@@ -223,21 +174,20 @@ $xs[] = 30;
 # $xs is now [10, 20, 30]
 ```
 
+It's equivalent to `$xs = lists.push($xs, item);`; use whichever
+reads better in context.
+
 Rules:
 
 - **Write-only.** `$xs[]` is only meaningful as a write target. Any
-  read context (`io.printf($xs[])`, `def y init $xs[] + 1`) is a parse
-  error.
-- **Lists only.** `$m[] = ...;` on a map errors at runtime - maps
-  have no "end-of" position.
-- **Type-checked.** The value is checked against the list's
-  declared element type, same as `$xs[i] = item;`.
-- **`const` is still deep.** `$NUMS[] = ...;` on a `def const`
-  list errors with the usual "cannot mutate contents of constant"
-  message.
-- **Equivalent to `$xs = lists.push($xs, item);`.** Same semantics,
-  shorter spelling. Use whichever reads better in context; the
-  formatter and style guide treat both as canonical.
+  read context (`io.printf($xs[])`, `def y init $xs[] + 1`) is a
+  parse error.
+- **Lists and bytes only.** `$m[] = ...;` on a map errors at runtime;
+  maps have no "end-of" position.
+- **Type-checked.** The value is checked against the list's declared
+  element type, same as `$xs[i] = item;`.
+- **`const` is still deep.** `$NUMS[] = ...;` on a `def const` list
+  errors with the usual "cannot mutate contents of constant" message.
 
 ### Nested lists and maps
 
@@ -292,52 +242,12 @@ func makeGrid(size as int) {
 }
 ```
 
-#### Why 4+ levels of nesting is a code smell
+When nesting gets deep enough that you're counting brackets, it's
+usually time to reach for a struct or another abstraction - see
+[best practices](best-practices.md#why-4-levels-of-nesting-is-a-code-smell)
+for the heuristics.
 
-The same flexibility that lets `list of list of int` hold any shape gets
-unreadable fast as you nest deeper. Here's a four-level type holding
-"per game, per player, per character, per inventory slot, the item
-name":
-
-```jennifer
-def saves as list of list of list of list of string init [
-    [[["sword", "shield"], ["bow"]], [["dagger"]]],
-    [[["staff", "amulet"]], [[], ["potion", "rope", "torch"]]]
-];
-
-# What does this even mean?
-$saves[0][1][0][0] = "axe";
-```
-
-Three problems:
-
-1. **No semantic names for the dimensions.** Is index 2 "the character"
-   or "the inventory slot"? You can't tell without going back to read
-   the declaration and counting brackets.
-2. **Bug-prone access.** `$saves[0][1][0][0]` is four indices that all
-   look the same. Off-by-one or off-by-level errors are silent until
-   the program either panics or, worse, modifies the wrong slot.
-3. **Inflexible.** Adding a fifth dimension (per save slot, per timestamp,
-   ...) means rewriting every access site in the program.
-
-The standard fix is a struct or named record (see
-[Structs](#structs-m131) below; M13.1+). Other options that work without
-introducing a new type:
-
-- **Wrap access in methods**: `getItem(save, player, character, slot)`
-  reads better than four bare brackets and gives you one place to fix a
-  bug. Internally the function still walks the nested lists, but call
-  sites are self-documenting.
-- **Flatten with composite keys**: `map of string to string` keyed on
-  `"save:0/player:1/char:0/slot:0"` trades index speed for name clarity.
-  Better when the structure is sparse anyway.
-- **Decompose into parallel simpler structures**: one list of save
-  metadata, one map from save-id to inventory, etc.
-
-As a rule of thumb: **one level is normal, two is fine, three is
-uncommon, four is almost always a sign there's a missing abstraction.**
-
-## Bytes (M12+)
+## Bytes
 
 `bytes` is a **mutable byte sequence**. It looks and acts a lot like a
 `list of int`, with two important specialisations:
@@ -398,7 +308,7 @@ deep: `def const B as bytes init ...;` rejects both `$B = ...` and
 
 ### The `$b[] = byte;` append form
 
-Bytes share the M9 append sugar with lists:
+Bytes share the append sugar with lists:
 
 ```jennifer
 def buf as bytes;
@@ -407,15 +317,13 @@ $buf[] = 0x69;
 # buf is now bytes[48 69]
 ```
 
-The byte you append must be an `int` in `[0, 255]`; the same
-[deliberate-exception reasoning](#the-xs-append-sugar) that justifies
-the sugar for lists applies here.
+The byte you append must be an `int` in `[0, 255]`.
 
 ### Codecs and rune vs byte counts
 
 - `convert.bytesFromString(s, codec)` and
   `convert.stringFromBytes(b, codec)` are the canonical bridges.
-  Only `"utf-8"` is supported today; the M15.4 `encoding` library
+  Only `"utf-8"` is supported today; a future `encoding` library
   will add the rest.
 - `stringFromBytes` is **strict at boundaries**: invalid UTF-8 input
   is a runtime error, not a silent replacement character.
@@ -426,7 +334,7 @@ the sugar for lists applies here.
   bytes each, decoded from UTF-8). See
   [libraries/io.md](../libraries/io.md) for details.
 
-## Structs (M13.1+)
+## Structs
 
 A **struct** names a fixed set of typed fields. Use a struct whenever a
 multi-value bundle would otherwise be a map keyed by string literals -

@@ -54,23 +54,23 @@ index; each keystroke updates the state and triggers a `redraw()`.
 
 Supported input:
 
-| Key                          | Action                              |
-|------------------------------|-------------------------------------|
-| Printable rune               | Insert at cursor                    |
-| Backspace, Ctrl+H            | Delete char before cursor           |
-| Delete (CSI `3~`)            | Delete char at cursor               |
-| Left / Right (CSI `D` / `C`) | Move cursor by one char             |
-| Home / End (CSI `H` / `F`)   | Jump to line start / end            |
-| Ctrl+A / Ctrl+E              | Same as Home / End                  |
-| Ctrl+Left / Ctrl+Right       | Move by word                        |
+| Key                          | Action                                                                       |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| Printable rune               | Insert at cursor                                                             |
+| Backspace, Ctrl+H            | Delete char before cursor                                                    |
+| Delete (CSI `3~`)            | Delete char at cursor                                                        |
+| Left / Right (CSI `D` / `C`) | Move cursor by one char                                                      |
+| Home / End (CSI `H` / `F`)   | Jump to line start / end                                                     |
+| Ctrl+A / Ctrl+E              | Same as Home / End                                                           |
+| Ctrl+Left / Ctrl+Right       | Move by word                                                                 |
 | Alt+B / Alt+F                | Same as Ctrl+Left / Ctrl+Right (macOS terminals send these for option-arrow) |
-| Ctrl+W, Ctrl+Backspace       | Delete word backward                |
-| Ctrl+U                       | Kill from line start to cursor      |
-| Ctrl+K                       | Kill from cursor to line end        |
-| Up / Down                    | History navigation                  |
-| Ctrl+C                       | Cancel current line (fresh prompt)  |
-| Ctrl+D on empty buffer       | EOF (exits the REPL)                |
-| Ctrl+D on non-empty buffer   | Forward-delete                      |
+| Ctrl+W, Ctrl+Backspace       | Delete word backward                                                         |
+| Ctrl+U                       | Kill from line start to cursor                                               |
+| Ctrl+K                       | Kill from cursor to line end                                                 |
+| Up / Down                    | History navigation                                                           |
+| Ctrl+C                       | Cancel current line (fresh prompt)                                           |
+| Ctrl+D on empty buffer       | EOF (exits the REPL)                                                         |
+| Ctrl+D on non-empty buffer   | Forward-delete                                                               |
 
 Word boundaries use a small punctuation + whitespace ruleset that's
 predictable for source-code editing without needing a full Unicode

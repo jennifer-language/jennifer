@@ -17,13 +17,13 @@ def with_dave as map of string to int init maps.merge($scores, {"dave": 75});
 
 ## Functions
 
-| Call                       | Returns                | Notes                                                                  |
-|----------------------------|------------------------|------------------------------------------------------------------------|
-| `maps.keys(m)`             | `list of <key type>`   | The map's keys, in insertion order.                                    |
-| `maps.values(m)`           | `list of <value type>` | The map's values, in insertion order.                                  |
-| `maps.has(m, key)`         | bool                   | Key membership test. The non-erroring companion to `$m[key]`.          |
-| `maps.delete(m, key)`      | map                    | New map without `key`. Missing key is an error - see below.            |
-| `maps.merge(a, b)`         | map                    | New map: `a`'s entries with `b`'s layered on top (`b` wins on collision). |
+| Call                  | Returns                | Notes                                                                     |
+| --------------------- | ---------------------- | ------------------------------------------------------------------------- |
+| `maps.keys(m)`        | `list of <key type>`   | The map's keys, in insertion order.                                       |
+| `maps.values(m)`      | `list of <value type>` | The map's values, in insertion order.                                     |
+| `maps.has(m, key)`    | bool                   | Key membership test. The non-erroring companion to `$m[key]`.             |
+| `maps.delete(m, key)` | map                    | New map without `key`. Missing key is an error - see below.               |
+| `maps.merge(a, b)`    | map                    | New map: `a`'s entries with `b`'s layered on top (`b` wins on collision). |
 
 ### `maps.has`
 
