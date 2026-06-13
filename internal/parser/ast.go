@@ -89,6 +89,9 @@ type Type struct {
 	KeyType    *Type  // TypeMap:  key type
 	ValType    *Type  // TypeMap:  value type
 	StructName string // TypeStruct: name of the struct definition (M13.1)
+	StructNS   string // TypeStruct: optional library namespace prefix (M15.2).
+	//                  Empty for user-defined structs (`def struct Name`);
+	//                  set for library-registered structs (`os.Result`).
 }
 
 func (t Type) String() string {
@@ -106,6 +109,9 @@ func (t Type) String() string {
 	case TypeStruct:
 		if t.StructName == "" {
 			return "struct"
+		}
+		if t.StructNS != "" {
+			return t.StructNS + "." + t.StructName
 		}
 		return t.StructName
 	}
@@ -137,7 +143,7 @@ func (t Type) Equal(o Type) bool {
 		}
 		return t.KeyType.Equal(*o.KeyType) && t.ValType.Equal(*o.ValType)
 	case TypeStruct:
-		return t.StructName == o.StructName
+		return t.StructName == o.StructName && t.StructNS == o.StructNS
 	}
 	return true
 }
@@ -149,6 +155,15 @@ func PrimitiveType(k TypeKind) Type { return Type{Kind: k} }
 func ListType(elem Type) Type       { return Type{Kind: TypeList, Element: &elem} }
 func MapType(k, v Type) Type        { return Type{Kind: TypeMap, KeyType: &k, ValType: &v} }
 func StructType(name string) Type   { return Type{Kind: TypeStruct, StructName: name} }
+
+// NamespacedStructType is the M15.2 form: a struct type registered by a
+// library and reachable behind that library's namespace prefix
+// (`os.Result`). `ns` is the library prefix at the use site; the
+// interpreter resolves aliases (`use os as o;` -> `o.Result`) when
+// looking the type up.
+func NamespacedStructType(ns, name string) Type {
+	return Type{Kind: TypeStruct, StructNS: ns, StructName: name}
+}
 
 // ---- Top-level program ----
 
@@ -490,13 +505,16 @@ type IndexExpr struct {
 
 func (*IndexExpr) exprNode() {}
 
-// StructLit is `Name{ field: expr, ... }` (M13.1). The struct's name
-// must reference a top-level `def struct` declaration; the field
-// expressions are evaluated in source order. The interpreter
-// type-checks each field's value against the struct definition's
-// declared type.
+// StructLit is `Name{ field: expr, ... }` (M13.1) or
+// `lib.Name{ field: expr, ... }` (M15.2). The struct's name must
+// reference a top-level `def struct` declaration (bare form) or a
+// library-registered namespaced struct (qualified form). Field
+// expressions are evaluated in source order; the interpreter
+// type-checks each value against the struct definition's declared
+// type.
 type StructLit struct {
 	pos
+	NS     string // optional library prefix at the use site (M15.2); empty for user-defined structs
 	Name   string
 	Fields []StructLitField
 }

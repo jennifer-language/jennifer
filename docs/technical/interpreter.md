@@ -110,6 +110,30 @@ and at `execDefine` time before the init expression is evaluated, so
 the user sees `"unknown struct type"` rather than a misleading
 type-mismatch error.
 
+### Library-provided namespaced structs (M15.2)
+
+Libraries register their own struct types via
+`Interpreter.RegisterNamespacedStruct(libName, structName, fields)`.
+The definition lands in `i.NSStructs` keyed by `nsKey{NS, Name}`,
+parallel to `NSBuiltins` and `NSConstants`. Users write
+`def x as os.Result;` for the type and `os.Result{ ... }` for the
+literal; both forms resolve at use time via `resolveNamespacePrefix`
+so aliases (`use os as o; def x as o.Result;`) work the same way as
+they do for namespaced function calls and constants.
+
+At runtime the value carries both `StructName` and an optional
+`StructNS` tag. `MatchesDeclared` and `Equal` compare on the
+`(NS, Name)` pair so a library `os.Result` is a distinct type from a
+user-defined `Result`; `Display` prefixes the namespace
+(`os.Result{exitCode: 0, ...}`). Field access, chained lvalues
+(`$r.exitCode`, `$line.from.x = 5;`), value semantics, and deep
+`const` all reuse the M13.1 user-struct machinery - only the
+type-resolution path differs.
+
+User code may not register namespaced structs; the API is Go-side
+only. Programs that want to declare their own structs keep using
+the M13.1 `def struct Name { ... };` bare form.
+
 ### Iteration
 
 `execForEach` opens a fresh per-iteration scope so the loop variable

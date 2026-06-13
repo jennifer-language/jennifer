@@ -64,8 +64,9 @@ type Interpreter struct {
 	InREPL          bool      // set by the REPL so stdin-consuming builtins refuse
 	Builtins        map[string]builtinEntry
 	LibConstants    map[string]libConstantEntry // library-provided constants (math.PI, ...)
-	NSBuiltins      map[nsKey]Builtin           // namespaced builtins: os.platform, bio.translate, ...
-	NSConstants     map[nsKey]Value             // namespaced constants: os.JENNIFER_LF, ...
+	NSBuiltins      map[nsKey]Builtin           // namespaced builtins: os.getEnv, bio.translate, ...
+	NSConstants     map[nsKey]Value             // namespaced constants: os.PLATFORM, ...
+	NSStructs       map[nsKey]*parser.StructDef // M15.2: namespaced struct definitions (os.Result, time.Time)
 	knownLibs       map[string]bool             // libraries with at least one registered builtin OR constant
 	knownNamespaces map[string]bool             // libraries that registered through the namespaced API
 	libsWithGlobals map[string]bool             // libraries that registered any RegisterGlobal name (M10+)
@@ -94,6 +95,7 @@ func New() *Interpreter {
 		LibConstants:    map[string]libConstantEntry{},
 		NSBuiltins:      map[nsKey]Builtin{},
 		NSConstants:     map[nsKey]Value{},
+		NSStructs:       map[nsKey]*parser.StructDef{},
 		knownLibs:         map[string]bool{},
 		knownNamespaces:   map[string]bool{},
 		libsWithGlobals:   map[string]bool{},
@@ -181,6 +183,22 @@ func (i *Interpreter) RegisterNamespaced(lib, name string, fn Builtin) {
 // `<lib>.NAME` and only after `use <lib>;`.
 func (i *Interpreter) RegisterNamespacedConst(lib, name string, value Value) {
 	i.NSConstants[nsKey{NS: lib, Name: name}] = value
+	i.knownLibs[lib] = true
+	i.knownNamespaces[lib] = true
+}
+
+// RegisterNamespacedStruct attaches a library-provided struct
+// definition behind `<lib>.` (M15.2). User code then writes
+// `def x as <lib>.<name>;` to declare a variable of that type and
+// `<lib>.<name>{ field: expr, ... }` to construct one. Field access,
+// chained lvalues, value semantics, and deep-const all reuse the
+// M13.1 user-struct machinery; the difference is only the lookup
+// path. Same gating model as the other Register* methods: active
+// only after `use <lib>;`. Field shape is fixed at registration
+// time; the library can't add fields later.
+func (i *Interpreter) RegisterNamespacedStruct(lib, name string, fields []parser.StructField) {
+	def := &parser.StructDef{Name: name, Fields: fields}
+	i.NSStructs[nsKey{NS: lib, Name: name}] = def
 	i.knownLibs[lib] = true
 	i.knownNamespaces[lib] = true
 }
@@ -774,13 +792,33 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 }
 
 func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error {
-	// M13.1: if the declared type names a struct, verify the struct
-	// exists before any other check so an unknown name surfaces as
-	// "unknown struct type" rather than a misleading type-mismatch.
+	// M13.1 / M15.2: if the declared type names a struct, verify the
+	// struct exists before any other check so an unknown name surfaces
+	// as "unknown struct type" rather than a misleading type-mismatch.
+	// Bare names look up in i.structs (user-defined); namespaced names
+	// resolve the alias prefix first, then look up in i.NSStructs.
 	if st.VarType.Kind == parser.TypeStruct {
-		if _, ok := i.structs[st.VarType.StructName]; !ok {
-			file, line, col := posFor(st)
-			return &runtimeError{Msg: fmt.Sprintf("unknown struct type %q", st.VarType.StructName), File: file, Line: line, Col: col}
+		if st.VarType.StructNS != "" {
+			canonical, err := i.resolveNamespacePrefix(st.VarType.StructNS)
+			if err != nil {
+				file, line, col := posFor(st)
+				return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+			}
+			if _, ok := i.NSStructs[nsKey{NS: canonical, Name: st.VarType.StructName}]; !ok {
+				file, line, col := posFor(st)
+				return &runtimeError{Msg: fmt.Sprintf("unknown struct type %s.%s", st.VarType.StructNS, st.VarType.StructName), File: file, Line: line, Col: col}
+			}
+			// Stamp the canonical namespace onto the type so subsequent
+			// MatchesDeclared / Equal checks compare against the resolved
+			// form. Without this, `use os as o; def x as o.Result;` would
+			// produce a value tagged ns=os but a declared type tagged
+			// ns=o, and they'd mismatch.
+			st.VarType.StructNS = canonical
+		} else {
+			if _, ok := i.structs[st.VarType.StructName]; !ok {
+				file, line, col := posFor(st)
+				return &runtimeError{Msg: fmt.Sprintf("unknown struct type %q", st.VarType.StructName), File: file, Line: line, Col: col}
+			}
 		}
 	}
 	var val Value
@@ -816,7 +854,7 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		// helper that materialises the full field list (and validates
 		// that the named struct actually exists).
 		if st.VarType.Kind == parser.TypeStruct {
-			zero, err := i.zeroStructFor(st.VarType.StructName, st)
+			zero, err := i.zeroStructFor(st.VarType.StructNS, st.VarType.StructName, st)
 			if err != nil {
 				return err
 			}
@@ -1132,7 +1170,7 @@ func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Val
 		if parent.Kind != KindStruct {
 			return &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", step.field, parent.Kind), File: step.file, Line: step.line, Col: step.col}
 		}
-		def, ok := i.structs[parent.StructName]
+		def, ok := i.lookupStructDef(parent.StructNS, parent.StructName)
 		if !ok {
 			return &runtimeError{Msg: fmt.Sprintf("internal: struct %q definition missing at assignment", parent.StructName), File: step.file, Line: step.line, Col: step.col}
 		}
@@ -1178,18 +1216,33 @@ func (p posNode) astNode()         {}
 // nested struct fields so a `def p as Point;` for
 // `def struct Point { name as string, inner as Other };` produces a
 // fully-populated value (no nil fields slot through to runtime
-// surprises later). M13.1.
-func (i *Interpreter) zeroStructFor(name string, st parser.Node) (Value, error) {
-	def, ok := i.structs[name]
+// surprises later). M13.1 / M15.2: `ns` is empty for user-defined
+// structs and set for library-provided namespaced ones.
+func (i *Interpreter) zeroStructFor(ns, name string, st parser.Node) (Value, error) {
+	def, ok := i.lookupStructDef(ns, name)
 	if !ok {
 		file, line, col := posFor(st)
+		if ns != "" {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %s.%s", ns, name), File: file, Line: line, Col: col}
+		}
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", name), File: file, Line: line, Col: col}
 	}
 	fields := make([]StructField, len(def.Fields))
 	for k, decl := range def.Fields {
 		var fv Value
 		if decl.Type.Kind == parser.TypeStruct {
-			sub, err := i.zeroStructFor(decl.Type.StructName, st)
+			subNS := decl.Type.StructNS
+			if subNS != "" {
+				// Field types resolved at registration may carry a
+				// call-site alias; canonicalise here. Errors here are
+				// non-fatal at this layer: if the prefix can't be
+				// resolved we fall through to the bare lookup, which
+				// surfaces a clean "unknown struct" error below.
+				if canonical, err := i.resolveNamespacePrefix(subNS); err == nil {
+					subNS = canonical
+				}
+			}
+			sub, err := i.zeroStructFor(subNS, decl.Type.StructName, st)
 			if err != nil {
 				return Value{}, err
 			}
@@ -1199,7 +1252,22 @@ func (i *Interpreter) zeroStructFor(name string, st parser.Node) (Value, error) 
 		}
 		fields[k] = StructField{Name: decl.Name, Value: fv}
 	}
+	if ns != "" {
+		return NamespacedStructVal(ns, name, fields), nil
+	}
 	return StructVal(name, fields), nil
+}
+
+// lookupStructDef finds a struct definition by (namespace, name). Bare
+// names hit the user-defined table; namespaced names hit the
+// M15.2 library-registered table.
+func (i *Interpreter) lookupStructDef(ns, name string) (*parser.StructDef, bool) {
+	if ns != "" {
+		def, ok := i.NSStructs[nsKey{NS: ns, Name: name}]
+		return def, ok
+	}
+	def, ok := i.structs[name]
+	return def, ok
 }
 
 // findIndexRoot walks an IndexExpr chain back to the underlying VarExpr.
@@ -1751,10 +1819,31 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 // in *declaration* order regardless of the literal's source order so
 // the resulting Value is canonical.
 func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Value, error) {
-	def, ok := i.structs[ex.Name]
-	if !ok {
-		file, line, col := posFor(ex)
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", ex.Name), File: file, Line: line, Col: col}
+	// M15.2: namespaced literals (`os.Result{ ... }`) resolve via the
+	// alias prefix then the NSStructs table; bare literals use the
+	// user-defined struct table as before.
+	var def *parser.StructDef
+	var resolvedNS string
+	if ex.NS != "" {
+		canonical, err := i.resolveNamespacePrefix(ex.NS)
+		if err != nil {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+		}
+		d, ok := i.NSStructs[nsKey{NS: canonical, Name: ex.Name}]
+		if !ok {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %s.%s", ex.NS, ex.Name), File: file, Line: line, Col: col}
+		}
+		def = d
+		resolvedNS = canonical
+	} else {
+		d, ok := i.structs[ex.Name]
+		if !ok {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", ex.Name), File: file, Line: line, Col: col}
+		}
+		def = d
 	}
 	// Index the literal's fields by name for the cross-check.
 	provided := make(map[string]*parser.StructLitField, len(ex.Fields))
@@ -1787,6 +1876,9 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, decl.Type, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), decl.Type)})
+	}
+	if resolvedNS != "" {
+		return NamespacedStructVal(resolvedNS, ex.Name, out), nil
 	}
 	return StructVal(ex.Name, out), nil
 }

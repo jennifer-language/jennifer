@@ -991,12 +991,17 @@ func (p *parser) parseType() (Type, error) {
 		}
 		return MapType(keyT, valT), nil
 	case lexer.TOKEN_IDENT:
-		// Struct type reference - the IDENT must name a top-level
-		// `def struct Name { ... };`. We accept it here at parse time;
-		// the interpreter resolves the name against the program's
-		// hoisted struct table at run time, producing a positioned
-		// error if it isn't a known struct.
+		// Struct type reference. Bare IDENT (`def x as Name;`) names a
+		// top-level user struct; `IDENT.IDENT` (`def x as os.Result;`)
+		// names a library-registered namespaced struct (M15.2). Both
+		// resolve at run time against their respective hoisted tables,
+		// producing a positioned error if the name isn't known.
 		p.advance()
+		if p.check(lexer.TOKEN_DOT) && p.peekN(1).Type == lexer.TOKEN_IDENT {
+			p.advance() // .
+			name := p.advance()
+			return NamespacedStructType(t.Lexeme, name.Lexeme), nil
+		}
 		return StructType(t.Lexeme), nil
 	}
 	return Type{}, &ParseError{Msg: fmt.Sprintf("expected type, got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
@@ -1456,6 +1461,19 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 			Callee: name.Lexeme,
 			Args:   args,
 		}, nil
+	}
+	// Namespaced struct literal: prefix.Name { field: expr, ... } (M15.2).
+	// Checked before the qualified-const path so a struct's
+	// PascalCase / camelCase name doesn't trip the constant-name rule.
+	if p.check(lexer.TOKEN_LBRACE) {
+		lit, err := p.parseStructLitTail(name)
+		if err != nil {
+			return nil, err
+		}
+		sl := lit.(*StructLit)
+		sl.NS = prefix.Lexeme
+		sl.pos = pos{File: prefix.File, Line: prefix.Line, Col: prefix.Col}
+		return sl, nil
 	}
 	// Qualified constant reference: prefix.NAME. Same constant-name rule
 	// as bare constants - uppercase chunks separated by single `_`.

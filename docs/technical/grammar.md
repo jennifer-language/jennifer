@@ -123,10 +123,15 @@ mapType     = "map" "of" type "to" type ;
                                           `list of list of int` and
                                           `map of string to list of int`
                                           falls out naturally *)
-structType  = IDENT ;                  (* M13.1: user-defined struct type;
-                                          resolved at runtime against the
-                                          hoisted struct table - unknown
-                                          names are positioned errors *)
+structType  = IDENT [ "." IDENT ] ;    (* User-defined struct type (bare
+                                          IDENT, M13.1) or library-provided
+                                          namespaced struct type
+                                          (`IDENT.IDENT`, M15.2). Resolved
+                                          at runtime against the
+                                          user-struct table or the
+                                          NSStructs table respectively;
+                                          unknown names are positioned
+                                          errors. *)
 
 expr        = orExpr ;
 orExpr      = andExpr { "or" andExpr } ;
@@ -144,9 +149,16 @@ primary     = ( INT | FLOAT | STRING | "true" | "false" | "null"
                                        (* any primary can be index- or
                                           field-chained; M13.1 adds the
                                           `.field` form *)
-structLit   = IDENT "{" structLitField { "," structLitField } [ "," ] "}" ;
-                                       (* M13.1: struct literal -
-                                          IDENT must be a defined struct.
+structLit   = IDENT [ "." IDENT ] "{" structLitField { "," structLitField } [ "," ] "}" ;
+                                       (* M13.1 / M15.2: struct literal.
+                                          Bare IDENT names a user-defined
+                                          struct; `IDENT.IDENT` names a
+                                          library-provided namespaced
+                                          struct. The recogniser must
+                                          decide before the constant-name
+                                          check because struct names are
+                                          PascalCase / camelCase, not
+                                          uppercase.
                                           The `{` after IDENT in
                                           expression position is the
                                           tie-breaker against `constRef`;
@@ -300,7 +312,7 @@ grammar the parser implements is the EBNF above.
 | `ListLit`               | expr | `Elements []Expr` - `[1, 2, 3]`                                                                            |
 | `MapLit`                | expr | `Keys []Expr`, `Values []Expr` (parallel) - `{"a": 1}`                                                     |
 | `IndexExpr`             | expr | `Target Expr`, `Index Expr` - `$xs[i]`, chained                                                            |
-| `StructLit`             | expr | `Name`, `Fields []StructLitField` - `Point{x: 1, y: 2}` (M13.1)                                            |
+| `StructLit`             | expr | `NS`, `Name`, `Fields []StructLitField` - `Point{...}` bare (M13.1) or `lib.Point{...}` namespaced (M15.2) |
 | `StructLitField`        | -    | `Name`, `Expr` (one named field in a struct literal)                                                       |
 | `FieldAccessExpr`       | expr | `Target Expr`, `Field` - `$p.field`, chainable with `IndexExpr` (M13.1)                                    |
 

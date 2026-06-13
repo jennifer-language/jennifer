@@ -681,88 +681,48 @@ See:
 ## M15.1 - `os` + `meta` (process metadata)
 
 **Status:** done (metadata piece). External-program execution
-moved to M15.3, after the language milestone (M15.2) that
-unblocks library-provided namespaced struct types.
+moved to M15.3, after the M15.2 language work that unblocks
+library-provided namespaced struct types.
 
-Expands the host-environment surface and introduces a new
-`meta` library for interpreter-self-identity facts. The library
-split that ships now:
+Reshapes the M8-era `os` surface around one rule (**immutable
+per-run host facts are uppercase constants; operations that take
+arguments are functions**), drops the `JENNIFER_` prefix which
+only made sense for bare-global use, and introduces a new
+`meta` library for interpreter-self-identity facts so `core`
+can return to its strict polymorphic-primitives charter.
 
-- **`os`** gains constants (immutable per-run host facts;
-  uppercase) and renames the M8 demo slice into the new
-  convention:
-  - **Constants**: `os.PLATFORM` (was `os.JENNIFER_OS`),
-    `os.ARCH` (new), `os.EOL` (was `os.JENNIFER_LF`),
-    `os.DIRSEP` (new, path-component separator),
-    `os.PATHSEP` (new, PATH-list separator between $PATH
-    entries), `os.ARGS` (was `os.args()` function -
-    immutable per-run, so a constant fits better).
-  - **Functions**: `os.getEnv(name)` (unchanged),
-    `os.hasFlag(name) -> bool`, `os.flag(name) -> string` -
-    exact-match flag inspection on `os.ARGS`. Deliberately
-    minimal; real CLI parsing (`--foo=bar`, combined short
-    flags, repeated flags) belongs to a future `cli`
-    library.
-  - **Removed**: `os.platform()` (duplicate of `os.PLATFORM`).
-  - The CLI's `jennifer run <file.j> [user args...]` now
-    forwards everything past the file path to the user
-    program as `os.ARGS`, matching Python `sys.argv` /
-    Go `os.Args` convention (index 0 is the script path).
-- **`meta`** is new. Holds `meta.VERSION` (was bare
-  `JENNIFER_VERSION` in `core`) and `meta.BUILD` (new,
-  reports which Go variant compiled the interpreter:
-  `"go"` / `"tinygo"`). `core` returns to its strict
-  charter of polymorphic structural primitives.
-
-**Naming rule** applied across both libraries:
-**immutable per-run facts are uppercase constants; operations
-that take arguments are functions.** The `JENNIFER_` prefix is
-dropped because it only made sense for the bare-global case in
-`core`; inside a namespace it's redundant.
+- `os` constants: `PLATFORM`, `ARCH`, `EOL`, `DIRSEP`, `PATHSEP`,
+  `ARGS`. Functions: `getEnv`, `hasFlag`, `flag` (exact-match
+  flag inspection on `ARGS`; real CLI parsing belongs to a
+  future `cli` library).
+- `meta` constants: `VERSION`, `BUILD` (which Go variant compiled
+  the interpreter). Bends the 5+-name rule because
+  interpreter-self-identity has no other natural home.
+- CLI: `jennifer run <file.j> [user args...]` forwards trailing
+  args to the user program as `os.ARGS` (Python `sys.argv` /
+  Go `os.Args` convention; index 0 is the script path).
 
 ### Breaking changes
 
-M15.1 renames and reshapes the M8-era `os` surface and moves
-`JENNIFER_VERSION` out of `core`. Pre-1.0 covers the break, but
-every program that touches these names needs a mechanical
-update.
+| Pre-M15.1                  | M15.1                    | Migration                                |
+| -------------------------- | ------------------------ | ---------------------------------------- |
+| `JENNIFER_VERSION` (bare)  | `meta.VERSION`           | Add `use meta;`; rewrite all references. |
+| `os.platform()` (function) | `os.PLATFORM` (constant) | Drop the parens.                         |
+| `os.JENNIFER_OS`           | `os.PLATFORM`            | Same OS tag, new name.                   |
+| `os.JENNIFER_LF`           | `os.EOL`                 | Same line ending, new name.              |
 
-| Pre-M15.1                  | M15.1                       | Migration                                        |
-| -------------------------- | --------------------------- | ------------------------------------------------ |
-| `JENNIFER_VERSION` (bare)  | `meta.VERSION`              | Add `use meta;`; rewrite all references.         |
-| `os.platform()` (function) | `os.PLATFORM` (constant)    | Drop the parens.                                 |
-| `os.JENNIFER_OS`           | `os.PLATFORM`               | Same OS tag, new name.                           |
-| `os.JENNIFER_LF`           | `os.EOL`                    | Same line ending, new name.                      |
-
-`os.platform()` and the `JENNIFER_*`-prefixed constants are
-gone - calling or referencing them is now a plain "undefined
-name" runtime error. No rename-hint diagnostic ships in M15.1;
-the rename table above and `jennifer fmt`'s round-trip discipline
-are the migration aids.
-
-The `meta` library bends the "5+ names for a new library" rule
-because (a) interpreter-self-identity doesn't fit any existing
-home cleanly and (b) future runtime introspection (build time,
-git SHA, GC stats, scheduler info) has a natural home here once
-it lands.
-
-Process exit stays on the language statement `exit EXPR;` (M11),
-not in `os` - see
-[rejected.md > `os.exit(n)`](technical/rejected.md#osexitn).
+The old names now error as plain "undefined name"; no
+rename-hint diagnostic ships in M15.1.
 
 See:
-- [libraries/os.md](libraries/os.md) - full host-environment
-  surface (constants, functions, flag-inspection semantics).
-- [libraries/meta.md](libraries/meta.md) - interpreter-self-
-  identity constants.
-- [libraries/core.md](libraries/core.md) - now strictly
-  polymorphic primitives (`len` only); historical
-  `JENNIFER_VERSION` moved out.
-
-External-program execution (`os.run`, `os.spawn`, etc.) is
-deferred to M15.3 once the M15.2 language work lands.
+- [libraries/os.md](libraries/os.md), [libraries/meta.md](libraries/meta.md), [libraries/core.md](libraries/core.md) -
+  shipped surface, charter, and breaking-change rationale.
+- `examples/osinfo.j` and the `=== os ===` / `=== meta ===`
+  sections of `examples/showcase.j` exercise the renamed surface.
 
 ## M15.2 - Language: library-provided namespaced struct types
+
+**Status:** done.
 
 A language milestone slotted inside Phase B because the next wave
 of libraries (M15.3 os execution, M15.4 time, M15.5 hash

@@ -103,6 +103,7 @@ type Value struct {
 	Bytes      []byte        // KindBytes (M12): byte data
 	Fields     []StructField // KindStruct (M13.1): declaration-ordered field values
 	StructName string        // KindStruct: name of the struct definition this value belongs to
+	StructNS   string        // KindStruct (M15.2): library namespace prefix; empty for user-defined structs
 	ElemTyp    *parser.Type  // KindList: element type
 	KeyTyp     *parser.Type  // KindMap:  key type
 	ValTyp     *parser.Type  // KindMap:  value type
@@ -119,12 +120,17 @@ func BoolVal(b bool) Value     { return Value{Kind: KindBool, Bool: b} }
 // (assignment, parameter binding) must call Value.Copy. M12.
 func BytesVal(data []byte) Value { return Value{Kind: KindBytes, Bytes: data} }
 
-// StructVal constructs a struct value belonging to `name` with the
-// given fields in declaration order. The fields slice is taken by
-// reference; callers needing value-semantics guarantees must call
-// Value.Copy. M13.1.
+// StructVal constructs a user-defined struct value (M13.1).
 func StructVal(name string, fields []StructField) Value {
 	return Value{Kind: KindStruct, StructName: name, Fields: fields}
+}
+
+// NamespacedStructVal constructs a library-provided struct value
+// behind the `<ns>.` prefix (M15.2). The runtime distinguishes
+// `os.Result` from a user-defined `Result` via the namespace tag, so
+// type matching at variable bindings keeps the two apart.
+func NamespacedStructVal(ns, name string, fields []StructField) Value {
+	return Value{Kind: KindStruct, StructNS: ns, StructName: name, Fields: fields}
 }
 
 // ListVal constructs a list value with the given element type and data.
@@ -176,7 +182,7 @@ func (v Value) Copy() Value {
 		for i, f := range v.Fields {
 			out[i] = StructField{Name: f.Name, Value: f.Value.Copy()}
 		}
-		return Value{Kind: KindStruct, StructName: v.StructName, Fields: out}
+		return Value{Kind: KindStruct, StructNS: v.StructNS, StructName: v.StructName, Fields: out}
 	}
 	return v
 }
@@ -290,6 +296,10 @@ func (v Value) Display() string {
 		// to reproduce it. `Name{field: value, ...}` for non-empty
 		// fields; `Name{}` for empty.
 		var b strings.Builder
+		if v.StructNS != "" {
+			b.WriteString(v.StructNS)
+			b.WriteByte('.')
+		}
 		b.WriteString(v.StructName)
 		b.WriteByte('{')
 		for i, f := range v.Fields {
@@ -336,11 +346,12 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 	case parser.TypeBytes:
 		return v.Kind == KindBytes
 	case parser.TypeStruct:
-		// M13.1: struct types match by name. A struct value with empty
-		// fields and matching StructName matches the declared type;
-		// that's how ZeroFor's placeholder gets accepted before the
-		// interpreter materialises the real field set in execDefine.
-		return v.Kind == KindStruct && v.StructName == t.StructName
+		// M13.1 / M15.2: struct types match by (namespace, name). A
+		// struct value with empty fields and matching name+ns matches
+		// the declared type; that's how ZeroFor's placeholder gets
+		// accepted before the interpreter materialises the real field
+		// set in execDefine.
+		return v.Kind == KindStruct && v.StructName == t.StructName && v.StructNS == t.StructNS
 	case parser.TypeList:
 		if v.Kind != KindList {
 			return false
@@ -402,9 +413,11 @@ func (v Value) Equal(o Value) bool {
 			}
 			return true
 		case KindStruct:
-			// M13.1: structs compare equal if they have the same name
-			// and every field's value matches in declaration order.
-			if v.StructName != o.StructName {
+			// M13.1 / M15.2: structs compare equal if they have the
+			// same (namespace, name) and every field's value matches in
+			// declaration order. The namespace tag keeps a library
+			// `os.Result` distinct from a user-defined `Result`.
+			if v.StructName != o.StructName || v.StructNS != o.StructNS {
 				return false
 			}
 			if len(v.Fields) != len(o.Fields) {
