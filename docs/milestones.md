@@ -647,6 +647,8 @@ home rather than getting a tiny library of its own.
 
 ## M15.0 - existing-library extensions
 
+**Status:** done.
+
 Small additions to the M8 / M9 / M10 libraries that depend on
 features the language picked up after those libraries shipped.
 
@@ -664,25 +666,38 @@ features the language picked up after those libraries shipped.
   yields the same permutation, useful for reproducibility in
   tests and reruns. Dependency: `math.rand*` (M10, shipped).
 - **`lists.range(...) -> list of int`** - allocate a list of
-  consecutive integers. Arity-dispatched, same shape as
-  `lists.slice` which already overloads on arity:
-  - `lists.range(end)` → `[0, 1, ..., end-1]`
+  consecutive integers. Two arities:
   - `lists.range(start, end)` → `[start, start+1, ..., end-1]`
-  - `lists.range(start, end, step)` → walks by `step`; positive
-    `step` requires `start <= end` and stops at the largest
-    value `< end`; negative `step` requires `start >= end` and
-    stops at the smallest value `> end`.
+  - `lists.range(start, end, step)` → walks from `start` by
+    `step`, emitting every value strictly before `end`. Positive
+    `step` requires `start <= end` and emits while
+    `current < end`; negative `step` requires `start >= end` and
+    emits while `current > end`.
 
-  **End is exclusive** to match `lists.slice` (M9) and
-  `strings.substring` (M9). `len(lists.range(a, b)) == b - a`
-  when `a <= b` and step is 1. Step must be non-zero (positional
-  error). An empty result is returned for ranges that would
-  produce no values rather than treated as an error
-  (`lists.range(5, 5)` → `[]`).
+  **End is exclusive** (half-open range). Same shape as
+  `lists.slice` and `strings.substring`, and the standard half-open
+  form across the wider ecosystem (Python `range`, Go slice
+  indexing, Rust `..`). Two practical properties follow:
+  index alignment (`lists.range(0, len($xs))` is exactly the
+  valid 0-based indices) and composability
+  (`lists.concat(lists.range(a, b), lists.range(b, c))` equals
+  `lists.range(a, c)`).
+
+  A single-arg form is deliberately not provided so the caller
+  always spells out both ends (stance #2: explicit over implicit).
+  For the "count 1 to N inclusive" idiom, write
+  `lists.range(1, N + 1)`.
+
+  Step must be non-zero (positional error). An empty result is
+  returned when `start == end`; `lists.range(5, 5)` → `[]`.
 
   Ships as a library function rather than a `[1..n]` syntax
   operator on Stance #1 grounds - see
   [technical/rejected.md > Range literal syntax](../technical/rejected.md#range-literal-syntax-19).
+  The half-open design rationale (why we deviated from the
+  English-reading stance here, when that stance is the right
+  tie-breaker and when it isn't) is in
+  [technical/design-decisions.md > Half-open ranges](../technical/design-decisions.md#half-open-ranges).
 
 Further extensions can land here as the language gains features
 that unblock library additions (e.g. a `maps.invert` once it has

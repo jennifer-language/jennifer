@@ -33,7 +33,9 @@ flat lookup view, not authoritative.
 | `lists.last(xs)`                   | [lists](lists.md)               | Element at the last index. Empty input errors.                                                                                      |
 | `lists.pop(xs)`                    | [lists](lists.md)               | New list without the last element. Empty input errors.                                                                              |
 | `lists.push(xs, item)`             | [lists](lists.md)               | New list with `item` appended.                                                                                                      |
+| `lists.range(start, end[, step])`  | [lists](lists.md)               | Half-open list of consecutive ints; `end` excluded; `step` must match direction.                                                    |
 | `lists.reverse(xs)`                | [lists](lists.md)               | New list with elements reversed.                                                                                                    |
+| `lists.shuffle(xs)`                | [lists](lists.md)               | Fisher-Yates; respects `math.randSeed`. Non-mutating.                                                                               |
 | `lists.slice(xs, start[, end])`    | [lists](lists.md)               | New sublist `[start, end)`; `end` defaults to `len(xs)`.                                                                            |
 | `lists.sort(xs)`                   | [lists](lists.md)               | New ascending-sorted list. Numeric / string / bool elements; mixed errors.                                                          |
 | `lists.tail(xs, n)`                | [lists](lists.md)               | New list of the last `n` elements.                                                                                                  |

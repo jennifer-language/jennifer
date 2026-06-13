@@ -213,6 +213,33 @@ io.printf("head=[%d,%d] tail=[%d,%d]\n", $front[0], $front[1], $back[0], $back[1
 $ns = lists.pop($ns);
 io.printf("after pop: len=%d last=%d\n", len($ns), lists.last($ns));
 
+# lists.range: half-open. End is exclusive so `range(0, n)`
+# matches the valid 0-based indices into an n-element list,
+# `concat(range(a, b), range(b, c))` composes cleanly into
+# `range(a, c)`, and stepping always "stops before end" without
+# the user having to reason about exact divisibility. For a
+# closed counting range write `lists.range(1, N + 1)`.
+io.printf("range(0,5)     = %a\n", lists.range(0, 5));
+io.printf("range(1,5)     = %a\n", lists.range(1, 5));
+io.printf("range(0,9,3)   = %a\n", lists.range(0, 9, 3));
+io.printf("range(1,9,3)   = %a\n", lists.range(1, 9, 3));
+io.printf("range(5,5)     = %a\n", lists.range(5, 5));
+io.printf("range(10,1,-3) = %a\n", lists.range(10, 1, -3));
+
+# Composability: partitioning a range at any midpoint reassembles
+# byte-for-byte. concat(range(2, 7), range(7, 12)) == range(2, 12).
+def left as list of int init lists.range(2, 7);
+def right as list of int init lists.range(7, 12);
+def joinedRange as list of int init lists.concat($left, $right);
+def whole as list of int init lists.range(2, 12);
+io.printf("partitioned    = %a\n", $joinedRange);
+io.printf("whole          = %a\n", $whole);
+
+# lists.shuffle: non-mutating Fisher-Yates. randSeed makes runs
+# deterministic so this output is stable.
+math.randSeed(1);
+io.printf("shuffle = %a\n", lists.shuffle([1, 2, 3, 4, 5]));
+
 # --- M9: maps library ---
 io.printf("=== maps lib ===\n");
 def points as map of string to int init {"alice": 90, "bob": 80, "carol": 70};

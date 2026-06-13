@@ -260,3 +260,18 @@ func randSeedFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	randSrc = mathrand.New(mathrand.NewSource(args[0].Int))
 	return interpreter.Null(), nil
 }
+
+// SharedIntN returns a uniformly-distributed int64 in [0, n) using the
+// shared random source. n must be positive. Exposed so sibling
+// libraries (e.g. lists.shuffle) can draw from the same `math.randSeed`
+// stream as `math.rand` / `math.randInt`. Goroutine-safe via the same
+// mutex as the M10 random functions.
+//
+// Library-implementation detail: a user program does NOT need
+// `use math;` for the function to work - the dependency is at the Go
+// level, not the Jennifer level.
+func SharedIntN(n int64) int64 {
+	randMu.Lock()
+	defer randMu.Unlock()
+	return randSrc.Int63n(n)
+}

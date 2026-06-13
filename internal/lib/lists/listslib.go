@@ -19,6 +19,8 @@ import (
 	"sort"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
+	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
+	"github.com/mplx/jennifer-lang/internal/parser"
 )
 
 // LibraryName is the Jennifer name programs `use` to enable these
@@ -38,6 +40,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
+	in.RegisterNamespaced(LibraryName, "shuffle", shuffleFn)
+	in.RegisterNamespaced(LibraryName, "range", rangeFn)
 }
 
 func requireList(name string, v interpreter.Value, argpos string) error {
@@ -320,4 +324,80 @@ func sliceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		out.List[i-start] = args[0].List[i].Copy()
 	}
 	return out, nil
+}
+
+// shuffleFn returns a uniformly-random permutation of the input via
+// Durstenfeld's variant of the Fisher-Yates shuffle. Non-mutating
+// (matches every other helper in this library); the random source is
+// the shared one in `math`, so `math.randSeed(n)` makes shuffles
+// deterministic across runs.
+func shuffleFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("lists.shuffle expects 1 argument, got %d", len(args))
+	}
+	if err := requireList("shuffle", args[0], "argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	out := args[0].Copy()
+	n := len(out.List)
+	// Durstenfeld in-place on the copy: walk from n-1 down to 1, swap
+	// element i with a random j in [0, i].
+	for i := n - 1; i > 0; i-- {
+		j := int(mathlib.SharedIntN(int64(i) + 1))
+		out.List[i], out.List[j] = out.List[j], out.List[i]
+	}
+	return out, nil
+}
+
+// rangeFn returns a half-open list of consecutive integers: end is
+// exclusive. Two arities: range(start, end) defaults step to 1 or -1
+// depending on direction; range(start, end, step) requires step to
+// match the direction (positive step requires start <= end and vice
+// versa). range(5, 5) returns [] - half-open with coincident bounds
+// is empty. The half-open form matches lists.slice / strings.substring
+// and composes cleanly: concat(range(a, b), range(b, c)) == range(a, c).
+// See docs/technical/design-decisions.md "Half-open ranges" for the
+// rationale on why we deviated from Jennifer's English-reading
+// default here.
+func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 && len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("lists.range expects 2 or 3 arguments (start, end[, step]), got %d", len(args))
+	}
+	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("lists.range: start and end must be int, got %s and %s", args[0].Kind, args[1].Kind)
+	}
+	start, end := args[0].Int, args[1].Int
+	var step int64
+	if len(args) == 3 {
+		if args[2].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("lists.range: step must be int, got %s", args[2].Kind)
+		}
+		step = args[2].Int
+		if step == 0 {
+			return interpreter.Null(), fmt.Errorf("lists.range: step must be non-zero")
+		}
+		if start <= end && step < 0 {
+			return interpreter.Null(), fmt.Errorf("lists.range: ascending range (start=%d, end=%d) requires positive step, got %d", start, end, step)
+		}
+		if start > end && step > 0 {
+			return interpreter.Null(), fmt.Errorf("lists.range: descending range (start=%d, end=%d) requires negative step, got %d", start, end, step)
+		}
+	} else {
+		if start <= end {
+			step = 1
+		} else {
+			step = -1
+		}
+	}
+	var data []interpreter.Value
+	if step > 0 {
+		for v := start; v < end; v += step {
+			data = append(data, interpreter.IntVal(v))
+		}
+	} else {
+		for v := start; v > end; v += step {
+			data = append(data, interpreter.IntVal(v))
+		}
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), data), nil
 }
