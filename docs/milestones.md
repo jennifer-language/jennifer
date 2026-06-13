@@ -606,55 +606,33 @@ See:
 
 **Status:** done.
 
-A side-channel for comments and blank lines so `jennifer fmt`
-stops dropping the file's documentation. Closes the two
-M5-deferred items (`fmt drops comments`, `fmt drops blank
-lines`) together because the same machinery covers both. No
-language change - the runtime still never sees comments.
+Closes the two M5-deferred items (`fmt drops comments`, `fmt
+drops blank lines`). No language change - the runtime still
+never sees comments.
 
-- **Lexer emits trivia tokens** (`TOKEN_COMMENT_LINE`,
+- Lexer emits trivia tokens (`TOKEN_COMMENT_LINE`,
   `TOKEN_COMMENT_BLOCK`, `TOKEN_COMMENT_SHEBANG`,
-  `TOKEN_BLANK_LINE`). The shebang `#!` on line 1 col 1 is its
-  own kind so the formatter can re-emit it verbatim at the file
-  head. Runs of blank lines collapse to one token (matches the
-  style rule "never more than one consecutive blank line").
-- **Preprocessor and parser strip trivia at entry** so include /
-  use / import recognition and grammar productions are
-  unaffected.
-- **`jennifer fmt` walks the raw lexer stream** and emits trivia
-  inline via a dedicated `emitTrivia` path that doesn't touch
-  the surrounding state machine (unary-vs-binary tracking, brace
-  classification, etc. continue to see the most recent regular
-  token). Leading comments land on their own line at the
-  current indent; trailing same-line comments stay on the same
-  line; blank lines re-emit between blocks. Comments inside an
-  expression (`printf(/* note */ $x)`) are preserved by-position
-  rather than attached to any particular subexpression.
-- **Block comments nest** via a depth counter (increment on
-  `/*`, decrement on `*/`, exit at depth 0). Unterminated nested
-  comments still error at the outermost `/*` so the message
-  points at where the user meant to start. Lets the common
-  "comment out a chunk of code that already contains a block
-  comment" case work without `#` rewrites.
-- **Token-level over AST-level.** The original spec proposed
+  `TOKEN_BLANK_LINE`). Shebang on line 1 col 1 is its own kind;
+  runs of blank lines collapse to one.
+- Preprocessor and parser strip trivia at entry; `jennifer fmt`
+  walks the raw lexer stream and re-emits trivia via a dedicated
+  `emitTrivia` path that doesn't disturb the surrounding state
+  machine.
+- Block comments nest via depth counter; unterminated comments
+  error at the outermost `/*`.
+- Token-level over AST-level: the original spec proposed
   AST-attached `LeadingComments` / `TrailingComment` slots and a
-  `jennifer ast --with-comments` flag. The implementation chose
-  the token-level path instead - simpler, consistent with the
-  existing `fmt` architecture, and sufficient for the goal. The
-  AST-attachment slots and the `--with-comments` flag were
-  dropped from scope; if a future use case needs structured
-  per-statement comment attachment (e.g. a doc generator), it
-  can land then.
-- **Style guide updates.** The two "Limitations" bullets in
-  `style-guide.md` (comments dropped, blank lines not
-  preserved) are removed. The "Block comments don't nest" line
-  is updated to "Block comments nest." The "Source file
-  conventions" section notes that shebang, header comments,
-  and inline `# why` notes all survive a `fmt` round-trip.
+  `jennifer ast --with-comments` flag - dropped in favour of the
+  simpler token-level path. Add them back if a future doc
+  generator needs structured per-statement attachment.
 
-Landed between M13.2 (try/catch) and the M15.x library batch so
-the first wave of struct-using libraries can ship with
-doc-comments that `fmt` preserves.
+See:
+- [user-guide/style-guide.md](user-guide/style-guide.md#comments) -
+  Comments section (block comments nest; inline-comment spacing
+  exception).
+- [technical/lexer.md](technical/lexer.md#comments) - trivia
+  emission, shebang detection, nesting depth counter.
+- [technical/cli.md](technical/cli.md) - `fmt`'s trivia re-emission.
 
 ---
 
