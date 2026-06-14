@@ -33,3 +33,26 @@ make build
 ./jennifer run examples/hello.j     # TinyGo binary
 ./jennifer-go run examples/hello.j  # Go binary (full host features)
 ```
+
+## TinyGo restrictions
+
+A few standard-library features depend on TinyGo runtime support
+that isn't there yet. When called from the `jennifer` (TinyGo)
+binary they error with a friendly Jennifer-level message pointing
+the user at `jennifer-go`. The standard-Go binary always supports
+the full surface.
+
+| Library | Affected names                                        | What happens on TinyGo                                                                       |
+| ------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `os`    | `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill` | Runtime error pointing at `jennifer-go`. TinyGo's `os/exec` syscalls aren't implemented yet. |
+
+The constants and the env / argv / flag helpers in `os`
+(`os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`,
+`os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) all work fully on
+both binaries. Every other shipped library (`io`, `convert`, `math`,
+`strings`, `lists`, `maps`, `meta`, `core`) has full TinyGo
+support.
+
+Future library work in `fs` (M16.1) and `net` (M16.2) will hit the
+same boundary and will land with the same friendly-message pattern.
+The table will grow as those ship.

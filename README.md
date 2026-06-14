@@ -2,9 +2,14 @@
 
 **Milestone 14**
 
-Jennifer is a small, experimental, interpreted programming language. The
-interpreter is written in Go and the shipping binary is produced with
-[TinyGo](https://tinygo.org/). Source files use the `.j` extension.
+Jennifer is a small, experimental, interpreted programming language.
+The interpreter is written in Go and ships as two binaries:
+**`jennifer`** (built with [TinyGo](https://tinygo.org/), small and
+embeddable; some host features like `os/exec` aren't implemented by
+the TinyGo runtime yet) and **`jennifer-go`** (built with the
+standard Go toolchain, full host-feature surface; what you reach for
+during development). `make build` produces both side by side. Source
+files use the `.j` extension.
 
 This project exists primarily as a learning exercise: how to design a
 language and build an interpreter end-to-end (lexer → preprocessor → parser →
@@ -28,45 +33,25 @@ version bump, additive features on minor, fixes on patch.
 
 ## Design stances
 
-The decisions below shape every feature in Jennifer. They are
+Seven design stances shape every feature in Jennifer. They are
 deliberately uncompromising - "convenience" is rejected when it
 creates parallel ways to do the same thing or hides what the code
-does. The same list appears in [docs/user-guide/](docs/user-guide/index.md)
-and [docs/technical/](docs/technical/index.md).
-
-1. **One way per thing.** Reject sugar that creates parallel APIs (no
-   `++`/`--`, no `+=`, no two `printf` flavors for the same job). One
-   canonical form is easier to read than three convenient ones.
-2. **Explicit over implicit.** Sigils mark use-site references (`$x`),
-   `def` carries the type, libraries are imported per topic
-   (`use io;`; nothing auto-loads except `core`), conditions must be
-   `bool` (no truthiness), conversions are spelled out
-   (`convert.toInt(v)`, `convert.toFloat(v)`). Nothing important hides.
-3. **Presentation, not transformation, in format strings.** `printf`
-   verb modifiers shape how a value is rendered (`%d|base=2`,
-   `%f|prec=4`). Transforming the value itself (`upper`, `substring`,
-   markdown rendering) is a library call. Keeps `printf` small and
-   orthogonal to the rest of the standard library.
-4. **Strict at boundaries.** Undefined math, missing map keys,
-   out-of-bounds reads, and type mismatches are positioned runtime
-   errors. No NaN, no silent garbage.
-5. **Value semantics for collections.** Lists and maps copy on
-   assignment and on parameter binding - no aliasing. `const` is deep:
-   it rejects both rebinding and content mutation at any depth.
-6. **No shadowing.** A name binds once in any visible scope. Inner
-   scopes inherit outer bindings but cannot redeclare them.
-7. **Topic-based, opt-in libraries.** The standard library is split by
-   topic, never bundled. Every library except the small auto-loaded
-   `core` is enabled explicitly with `use NAME;`.
+does. See [docs/design-stances.md](docs/design-stances.md) for the
+full table and rationale; the same canonical list is referenced from
+the user-guide, the technical docs, and `CLAUDE.md`.
 
 ## Quick start
 
 ```sh
-# Build
-tinygo build -o jennifer ./cmd/jennifer
+# Build both binaries (`jennifer` TinyGo + `jennifer-go` standard Go).
+# `make build-tinygo` and `make build-go` each produce one alone.
+make build
 
-# Run a program
-./jennifer run examples/hello.j     # prints "42"
+# Run a program on the shipping binary
+./jennifer run examples/hello.j        # prints "42"
+
+# Or on the dev binary (full host features - e.g. os.run / os.spawn)
+./jennifer-go run examples/hello.j     # prints "42"
 ```
 
 A first program:
@@ -95,8 +80,12 @@ printf($x + $x);
 go test ./...
 ```
 
-Development tests run under regular Go because TinyGo's test runner is
-limited; the shipping binary is built with TinyGo.
+Tests run under the standard Go toolchain because TinyGo's `testing`
+support is partial. After non-trivial changes, smoke-test both
+binaries (`make build` produces them) since a few standard-library
+features behave differently under the TinyGo runtime - see
+[docs/technical/tinygo.md](docs/technical/tinygo.md) for the
+current restriction list.
 
 ## License
 

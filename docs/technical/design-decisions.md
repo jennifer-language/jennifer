@@ -80,23 +80,27 @@ applies here.
 
 ## `core` exposes its names as bare globals only
 
-`core` is the only library whose names (`len`, `JENNIFER_VERSION`)
-are reachable bare; there is no `core.len` / `core.JENNIFER_VERSION`
-qualified form. Stance #1 ("one way per thing") would normally argue
-that "the same name shouldn't have two spellings", and at first glance
-the bare-name exposure looks like the second spelling. The
-configuration that ships is one-way-per-thing: only the bare form
-exists.
+`core` is the only library whose name (`len`) is reachable bare;
+there is no `core.len` qualified form. Stance #1 ("one way per
+thing") would normally argue that "the same name shouldn't have two
+spellings", and at first glance the bare-name exposure looks like
+the second spelling. The configuration that ships is
+one-way-per-thing: only the bare form exists.
 
-The asymmetry is deliberate. `core` exists precisely so its names can
-stay short - the polymorphic structural primitive (`len`) and the
-build identity constant (`JENNIFER_VERSION`) are needed by almost
-every program, so writing `core.len(...)` everywhere would be pure
-ceremony for no clarity gain. Limiting the bare exposure to `core`
-keeps the rule simple: bare names mean `core`, everything else lives
-behind a `lib.` prefix. No future library should publish bare globals
-unless it clears the same "polymorphic structural primitive that
-spans types" bar - the bar is intentionally high.
+The asymmetry is deliberate. `len` is genuinely polymorphic across
+string / list / map / bytes - a structural primitive every program
+needs without ceremony, so writing `core.len(...)` everywhere would
+be pure ceremony for no clarity gain. Limiting the bare exposure
+to `core` keeps the rule simple: bare names mean `core`, everything
+else lives behind a `lib.` prefix.
+
+(Pre-M15.1 `core` also exposed `JENNIFER_VERSION` as a bare global
+under the same exception. M15.1 moved it to `meta.VERSION` because
+"interpreter-self-identity constant" isn't actually a polymorphic
+structural primitive - it was only ever in `core` for lack of a
+better home. Returning `core` to a single member tightens the
+charter: future libraries clear the "polymorphic structural
+primitive that spans types" bar or they don't ship globals at all.)
 
 ## Half-open ranges
 

@@ -859,6 +859,49 @@ other wire format added in M15.4.2.
   `time.seconds($d)`, `time.milliseconds($d)`,
   `time.minutes($d)`, `time.hours($d)`.
 
+### M15.4.x - `examples/benchmark.j`
+
+Ships with M15.4.1 (it needs `time.now` / `time.sub` for wall-clock
+measurement). Two purposes:
+
+1. **Demonstrate the `time` library**: `time.now()`,
+   `time.sub($end, $start)`, `time.milliseconds($d)`,
+   `time.fromUnix`. The script is the user-facing example of
+   "how do I measure how long my code took?"
+2. **Side-by-side workload for `jennifer` vs `jennifer-go`**:
+   a small, deterministic suite covering several load shapes so
+   programmers (and macflyos-embedding evaluators) can see where
+   the two binaries diverge on the same machine.
+
+Suggested workload shape (settle exact numbers at the start of
+M15.4.x so they finish in O(seconds), not minutes, on a modern
+laptop):
+
+- **CPU-bound integer math.** Fibonacci recursion, primality
+  sieve, integer factorisation. Mostly stresses the evaluator
+  dispatch loop.
+- **Float-heavy.** Newton's iteration / Monte-Carlo pi estimate.
+  Same shape but with `KindFloat` arithmetic.
+- **Value-copy stress.** Big-list `lists.sort` + `lists.reverse`
+  + `lists.slice` chain - every operation is non-mutating and
+  deep-copies its input, so the per-binding `Value.Copy` cost
+  dominates.
+- **Struct copying.** Build a list of structs (e.g. `Point{x, y}`
+  via M13.1 user-defined struct) and transform / filter; exercises
+  the struct deep-copy path that lists / maps share.
+- **String building.** `lists.range(0, N)` + `convert.toString`
+  + `strings.join` to produce a single big string; stresses the
+  Unicode-aware string operations and allocator.
+- **Map churn.** Grow a `map of string to int` by N entries and
+  read each back; insertion-order preserved.
+
+Each block runs in isolation, prints its wall-clock time and
+roughly the number of operations it performed. Final output is a
+small table the user can copy into a bug report or commit message.
+Not part of the golden test suite (output is timing-dependent);
+the same skip-if-no-expected-file rule that covers `exec.j`
+applies here.
+
 ### M15.4.2 - formatting, parsing, timezones
 
 - `time.format($t, layout as string) -> string` - layout

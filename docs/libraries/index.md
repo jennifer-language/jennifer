@@ -9,17 +9,22 @@ interpreter today and links to the reference doc for each.
 > [cheatsheet](cheatsheet.md) - alphabetical list of every builtin
 > with its library and a one-line description.
 
-| Library   | Enable with     | Contents                                                                                                                                                                                       | Reference                |
-| --------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `io`      | `use io;`       | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, plus the format-verb mini-language                                                                                                         | [io.md](io.md)           |
-| `convert` | `use convert;`  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts; canonical-only `toBool` conversion                                                | [convert.md](convert.md) |
-| `math`    | `use math;`     | `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`                                                                | [math.md](math.md)       |
-| `strings` | `use strings;`  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`. `len` lives in `core`. | [strings.md](strings.md) |
-| `lists`   | `use lists;`    | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice` - all return a new list.                                                                | [lists.md](lists.md)     |
-| `maps`    | `use maps;`     | `maps.keys`, `values`, `has`, `delete`, `merge` - all return a new map / list / bool.                                                                                                          | [maps.md](maps.md)       |
-| `os`      | `use os;`       | `os.getEnv`, `os.hasFlag`, `os.flag`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`                                                                       | [os.md](os.md)           |
-| `meta`    | `use meta;`     | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                                             | [meta.md](meta.md)       |
-| `core`    | *(auto-loaded)* | `len` (polymorphic over string/list/map/bytes). The only library that ships bare-name globals; **no** namespaced form (`core.len`) is published, by design.                                   | [core.md](core.md)       |
+The **TinyGo** column reports whether the library runs in full on
+the shipping `jennifer` binary (TinyGo-built). A `partial` entry
+links to [../technical/tinygo.md](../technical/tinygo.md) for the
+restriction list; `jennifer-go` always supports the full surface.
+
+| Library   | Enable with     | TinyGo                                                | Contents                                                                                                                                                                                       | Reference                |
+| --------- | --------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `io`      | `use io;`       | full                                                  | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, plus the format-verb mini-language                                                                                                         | [io.md](io.md)           |
+| `convert` | `use convert;`  | full                                                  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts; canonical-only `toBool` conversion                                                | [convert.md](convert.md) |
+| `math`    | `use math;`     | full                                                  | `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`                                                                | [math.md](math.md)       |
+| `strings` | `use strings;`  | full                                                  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`. `len` lives in `core`. | [strings.md](strings.md) |
+| `lists`   | `use lists;`    | full                                                  | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`, `shuffle`, `range` - all return a new list.                                            | [lists.md](lists.md)     |
+| `maps`    | `use maps;`     | full                                                  | `maps.keys`, `values`, `has`, `delete`, `merge` - all return a new map / list / bool.                                                                                                          | [maps.md](maps.md)       |
+| `os`      | `use os;`       | [partial](../technical/tinygo.md#tinygo-restrictions) | `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`                | [os.md](os.md)           |
+| `meta`    | `use meta;`     | full                                                  | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                                             | [meta.md](meta.md)       |
+| `core`    | *(auto-loaded)* | full                                                  | `len` (polymorphic over string/list/map/bytes). The only library that ships bare-name globals; **no** namespaced form (`core.len`) is published, by design.                                    | [core.md](core.md)       |
 
 A quick taste:
 
