@@ -1605,6 +1605,23 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 	case lexer.TOKEN_NULL:
 		p.advance()
 		return &NullLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}}, nil
+	case lexer.TOKEN_LEN:
+		// M15.4: `len(EXPR)` is a language built-in primary, not a
+		// library function. Parses as a fixed shape with exactly one
+		// argument; any other arity is a parse-time error rather than
+		// the historical runtime arity check.
+		p.advance()
+		if _, err := p.expect(lexer.TOKEN_LPAREN, "after `len`"); err != nil {
+			return nil, err
+		}
+		operand, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(lexer.TOKEN_RPAREN, "to close `len` argument"); err != nil {
+			return nil, err
+		}
+		return &LenExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Operand: operand}, nil
 	case lexer.TOKEN_VARREF:
 		p.advance()
 		return &VarExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil

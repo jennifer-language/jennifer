@@ -568,6 +568,19 @@ type CallExpr struct {
 
 func (*CallExpr) exprNode() {}
 
+// LenExpr is the `len(EXPR)` language built-in (M15.4). Polymorphic
+// over string (rune count), list (element count), map (entry count),
+// and bytes (byte count); any other kind is a positioned runtime
+// error. `len` is a reserved keyword in expression position, not a
+// library function - removing the M5-era `core` library dropped the
+// last name registered via the global-builtin path.
+type LenExpr struct {
+	pos
+	Operand Expr
+}
+
+func (*LenExpr) exprNode() {}
+
 // QualifiedCallExpr is a namespaced call: `IDENT . IDENT ( args )`. The
 // Prefix is the use-site identifier (the library's namespace or its
 // alias if `use lib as alias;` was set). The interpreter looks up
@@ -831,6 +844,8 @@ func Sprint(n Node) string {
 			s += ", " + Sprint(a)
 		}
 		return s + ")"
+	case *LenExpr:
+		return fmt.Sprintf("Len(%s)", Sprint(v.Operand))
 	case *QualifiedCallExpr:
 		s := fmt.Sprintf("QCall(%s.%s", v.Prefix, v.Callee)
 		for _, a := range v.Args {

@@ -14,7 +14,6 @@ import (
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/lexer"
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
-	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
 	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
 	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
@@ -57,7 +56,6 @@ func runRepl() int {
 	mapslib.Install(in)
 	oslib.Install(in)
 	metalib.Install(in)
-	corelib.Install(in)
 
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -61,6 +61,7 @@ const (
 	TOKEN_TO   // "to" - K/V separator inside `map of K to V`
 	TOKEN_IN     // "in" - for-each iterator: `for (def x in $coll)`
 	TOKEN_STRUCT // M13.1: `def struct Name { field as type, ... };`
+	TOKEN_LEN    // M15.4: `len(EXPR)` polymorphic structural-length built-in
 
 	// Punctuation
 	TOKEN_LBRACE   // {
@@ -158,6 +159,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_TO:          "TO",
 	TOKEN_IN:          "IN",
 	TOKEN_STRUCT:      "STRUCT",
+	TOKEN_LEN:         "LEN",
 	TOKEN_LBRACE:      "LBRACE",
 	TOKEN_RBRACE:      "RBRACE",
 	TOKEN_LPAREN:      "LPAREN",
@@ -259,6 +261,7 @@ var keywords = map[string]TokenType{
 	"to":     TOKEN_TO,
 	"in":     TOKEN_IN,
 	"struct": TOKEN_STRUCT,
+	"len":    TOKEN_LEN,
 }
 
 func lookupKeyword(ident string) (TokenType, bool) {

@@ -13,7 +13,6 @@ import (
 	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
 	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
-	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -32,7 +31,6 @@ func newReplInterp() (*interpreter.Interpreter, *bytes.Buffer) {
 	listslib.Install(in)
 	mapslib.Install(in)
 	oslib.Install(in)
-	corelib.Install(in)
 	return in, &buf
 }
 
@@ -110,15 +108,13 @@ func TestEvalInteractiveImportPersists(t *testing.T) {
 }
 
 func TestEvalInteractiveBuiltinShadowStillRejected(t *testing.T) {
-	// `core` is auto-loaded and exposes `len` as a global, so defining
-	// `func len()` in the REPL shadows a live builtin and is rejected.
-	in, _ := newReplInterp()
-	prog, err := parser.Parse("func len() { return 1; }")
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if _, err := in.EvalInteractive(prog); err == nil {
-		t.Fatal("expected builtin-shadow error, got nil")
+	// `len` is a language keyword (M15.4 promoted it from a `core`
+	// global to a language built-in primary), so `func len()` is a
+	// parse-time rejection rather than the M5-era "shadows builtin"
+	// runtime check.
+	_, err := parser.Parse("func len() { return 1; }")
+	if err == nil {
+		t.Fatal("expected parse error rejecting `func len`, got nil")
 	}
 }
 

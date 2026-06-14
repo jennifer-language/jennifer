@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
@@ -107,19 +108,13 @@ func New() *Interpreter {
 		methods:         map[string]*parser.MethodDef{},
 		structs:         map[string]*parser.StructDef{},
 	}
-	// `core` is auto-loaded: its builtins and constants are visible without
-	// the user writing `use core;`. The library itself registers via
-	// corelib.Install (called by the CLI / tests, just like other libraries);
-	// the auto-import here is what makes its names resolve without ceremony.
-	// Explicit `use core;` in source is rejected at Run-time (see below).
-	in.imported[CoreLibraryName] = true
 	return in
 }
 
-// CoreLibraryName is the reserved name of the auto-loaded library. Lives
-// here (rather than in internal/lib/core) so the interpreter can reject
-// `use core;` without importing the library package and creating a cycle.
-const CoreLibraryName = "core"
+// removedCoreLibraryName is the name of the M15.4-removed library.
+// Kept as a constant so `use core;` produces a friendly migration
+// error rather than the generic "unknown library" message.
+const removedCoreLibraryName = "core"
 
 // RegisterGlobal attaches a builtin function under the given Jennifer
 // library name AND exposes it as a bare-name global. After M10 this is
@@ -212,16 +207,11 @@ func (i *Interpreter) LookupNamespacedBuiltin(ns, name string) Builtin {
 }
 
 // availableLibsString returns a sorted, comma-separated list of registered
-// library names for use in error messages. `core` is excluded because it's
-// auto-loaded - suggesting `use core;` to a user who typoed something would
-// just lead them to a second, different error. "(none)" if nothing else
-// was installed.
+// library names for use in error messages. "(none)" if nothing was
+// installed.
 func (i *Interpreter) availableLibsString() string {
 	names := make([]string, 0, len(i.knownLibs))
 	for n := range i.knownLibs {
-		if n == CoreLibraryName {
-			continue
-		}
 		names = append(names, n)
 	}
 	if len(names) == 0 {
@@ -448,7 +438,9 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 //     `os.foo()` is rejected with a "did you mean `o`?" hint.
 //   - The prefix has to be unique among active namespaces; two libs
 //     fighting for the same prefix is a positioned error.
-//   - `core` is always auto-loaded; explicit `use core;` is rejected.
+//   - `use core;` is rejected with a migration hint (M15.4 removed
+//     the library; `len` is now a built-in, version constants moved
+//     to `meta`).
 func (i *Interpreter) processImports(prog *parser.Program, repl bool) error {
 	// alreadyImported snapshots `imported` at entry. In batch mode it's empty;
 	// in REPL it's whatever earlier inputs already activated. The
@@ -461,10 +453,10 @@ func (i *Interpreter) processImports(prog *parser.Program, repl bool) error {
 	}
 	seenThisRun := map[string]bool{}
 	for _, imp := range prog.Imports {
-		if imp.Name == CoreLibraryName {
+		if imp.Name == removedCoreLibraryName {
 			file, line, col := posFor(imp)
 			return &runtimeError{
-				Msg:  fmt.Sprintf("library %q is automatically available; remove this `use %s;` statement", imp.Name, imp.Name),
+				Msg:  "the `core` library was removed in M15.4; `len` is now a language built-in (no import needed) and the version / build constants moved to `meta` (`use meta;` then `meta.VERSION` / `meta.BUILD`)",
 				File: file, Line: line, Col: col,
 			}
 		}
@@ -1750,6 +1742,8 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		return i.evalUnary(ex, env)
 	case *parser.CallExpr:
 		return i.evalCall(ex, env)
+	case *parser.LenExpr:
+		return i.evalLen(ex, env)
 	case *parser.QualifiedCallExpr:
 		return i.evalQualifiedCall(ex, env)
 	case *parser.QualifiedConstRefExpr:
@@ -2202,6 +2196,32 @@ func floorDiv(a, b float64) float64 {
 		return float64(int64(q) - 1)
 	}
 	return float64(int64(q))
+}
+
+// evalLen is the runtime side of the M15.4 `len(EXPR)` language
+// built-in. Polymorphic across the four kinds where "structural
+// length" is well-defined; any other kind is a positioned runtime
+// error. The shape mirrors what the old core.lenFn did, but the
+// invocation is a parser-level primary expression rather than a
+// library function call.
+func (i *Interpreter) evalLen(ex *parser.LenExpr, env *Environment) (Value, error) {
+	v, err := i.evalExpr(ex.Operand, env)
+	if err != nil {
+		return Value{}, err
+	}
+	switch v.Kind {
+	case KindString:
+		// Rune count (Unicode code points), not byte count.
+		return IntVal(int64(utf8.RuneCountInString(v.Str))), nil
+	case KindList:
+		return IntVal(int64(len(v.List))), nil
+	case KindMap:
+		return IntVal(int64(len(v.Map))), nil
+	case KindBytes:
+		return IntVal(int64(len(v.Bytes))), nil
+	}
+	file, line, col := posFor(ex)
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("len() expects a string, list, map or bytes, got %s", v.Kind), File: file, Line: line, Col: col}
 }
 
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {

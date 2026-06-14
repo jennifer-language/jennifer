@@ -1,30 +1,33 @@
 # Jennifer libraries
 
 Jennifer's standard library is split into topic-based libraries. Each
-is enabled explicitly with `use NAME;`; nothing is auto-loaded except
-`core`. This page catalogs every library that ships with the
-interpreter today and links to the reference doc for each.
+is enabled explicitly with `use NAME;`; nothing is auto-loaded. This
+page catalogs every library that ships with the interpreter today and
+links to the reference doc for each.
 
 > **Looking for one specific function?** See the
 > [cheatsheet](cheatsheet.md) - alphabetical list of every builtin
 > with its library and a one-line description.
+
+> **`len`** is a language built-in primary (M15.4+), not a library
+> function. Use it from any program with no `use` statement; it's
+> polymorphic over string / list / map / bytes.
 
 The **TinyGo** column reports whether the library runs in full on
 the shipping `jennifer` binary (TinyGo-built). A `partial` entry
 links to [../technical/tinygo.md](../technical/tinygo.md) for the
 restriction list; `jennifer-go` always supports the full surface.
 
-| Library   | Enable with     | TinyGo                                                | Contents                                                                                                                                                                                       | Reference                |
-| --------- | --------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `io`      | `use io;`       | full                                                  | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, plus the format-verb mini-language                                                                                                         | [io.md](io.md)           |
-| `convert` | `use convert;`  | full                                                  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts; canonical-only `toBool` conversion                                                | [convert.md](convert.md) |
-| `math`    | `use math;`     | full                                                  | `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`                                                                | [math.md](math.md)       |
-| `strings` | `use strings;`  | full                                                  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`. `len` lives in `core`. | [strings.md](strings.md) |
-| `lists`   | `use lists;`    | full                                                  | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`, `shuffle`, `range` - all return a new list.                                            | [lists.md](lists.md)     |
-| `maps`    | `use maps;`     | full                                                  | `maps.keys`, `values`, `has`, `delete`, `merge` - all return a new map / list / bool.                                                                                                          | [maps.md](maps.md)       |
-| `os`      | `use os;`       | [partial](../technical/tinygo.md#tinygo-restrictions) | `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`                | [os.md](os.md)           |
-| `meta`    | `use meta;`     | full                                                  | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                                             | [meta.md](meta.md)       |
-| `core`    | *(auto-loaded)* | full                                                  | `len` (polymorphic over string/list/map/bytes). The only library that ships bare-name globals; **no** namespaced form (`core.len`) is published, by design.                                    | [core.md](core.md)       |
+| Library   | Enable with    | TinyGo                                                | Contents                                                                                                                                                                       | Reference                |
+| --------- | -------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `io`      | `use io;`      | full                                                  | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, plus the format-verb mini-language                                                                                         | [io.md](io.md)           |
+| `convert` | `use convert;` | full                                                  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts; canonical-only `toBool` conversion                                | [convert.md](convert.md) |
+| `math`    | `use math;`    | full                                                  | `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`                                                | [math.md](math.md)       |
+| `strings` | `use strings;` | full                                                  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`         | [strings.md](strings.md) |
+| `lists`   | `use lists;`   | full                                                  | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`, `shuffle`, `range` - all return a new list                             | [lists.md](lists.md)     |
+| `maps`    | `use maps;`    | full                                                  | `maps.keys`, `values`, `has`, `delete`, `merge` - all return a new map / list / bool                                                                                           | [maps.md](maps.md)       |
+| `os`      | `use os;`      | [partial](../technical/tinygo.md#tinygo-restrictions) | `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS` | [os.md](os.md)           |
+| `meta`    | `use meta;`    | full                                                  | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                             | [meta.md](meta.md)       |
 
 A quick taste:
 
@@ -38,39 +41,28 @@ io.printf("Jennifer %s\n", meta.VERSION);
 io.printf("pi is roughly %f\n", math.PI);
 io.printf("math.sqrt(2) = %f\n", math.sqrt(2));
 io.printf("upper: %s\n", strings.upper("hello"));
-io.printf("len: %d\n", len("hello"));           # auto-loaded from core
+io.printf("len: %d\n", len("hello"));           # language built-in, no import
 ```
 
 ## Namespace-first registration
 
-After M10 every library is **namespaced**: each name is reachable as
+Every library is **namespaced**: each name is reachable as
 `lib.name(...)` (call) or `lib.NAME` (constant). The library's name
-doubles as the namespace prefix at the use site. There is no longer
-a separate "flat library" category.
-
-The only library that publishes bare-name **globals** is
-auto-loaded `core`. Its one global - `len(...)` - is a polymorphic
-structural primitive that earns the exemption from the "every call
-carries its library name" rule. There is **no** `core.len` qualified
-form: shipping the same name two ways would violate stance #1 ("one
-way per thing"). `core` is the only library where the exposure is
-asymmetric, and its asymmetry is the whole point - the auto-loaded
-library exists precisely so its sole name can stay short.
-
-**Rule for library authors:** new libraries always use
-`RegisterNamespaced` / `RegisterNamespacedConst`. The
-`RegisterGlobal` / `RegisterGlobalConst` family is reserved for
-polymorphic structural primitives that genuinely span types; the bar
-is intentionally high.
+doubles as the namespace prefix at the use site.
 
 Aliasing (`use lib as alias;`) is a **rename**, not an addition:
 after the alias the canonical name no longer resolves at call sites
 (it errors with a "did you mean *alias*?" hint). The canonical name
 is also freed for use as an ordinary identifier, just like Python's
-`import foo as bar`. A library that exposes any global (today: only
-`core`) cannot be `use`d twice in the same batch program; that's the
-M10 alias-with-globals rule, in practice inert because `core` is
-auto-loaded.
+`import foo as bar`.
+
+(Pre-M15.4 `core` was auto-loaded and exposed `len` /
+`JENNIFER_VERSION` as bare globals via `RegisterGlobal` /
+`RegisterGlobalConst`. M15.4 promoted `len` to a language built-in
+keyword, moved version constants to `meta` (M15.1 already had),
+and deleted `core`. The `RegisterGlobal*` API surface remains on
+`Interpreter` but is unused by any shipping library; it gets removed
+in a later cleanup pass.)
 
 ## How libraries are organized
 
@@ -87,18 +79,16 @@ large ones. The organizing principle, captured for future extensions:
 - Operating-system glue (env, args, host info) -> `os`.
 - Interpreter-self-identity constants (version, build, future
   build-time / git-sha / GC stats) -> `meta`.
-- Polymorphic structural primitives spanning types (`len`) ->
-  auto-loaded `core` with `RegisterGlobal`. Reserve carefully; this
-  is the only escape hatch from the "every call carries its library
-  name" rule.
 - A genuinely new topic with **five or more** functions / constants
   -> a new library. Fewer than five names fold into the most-related
-  existing library (M10 raised the threshold from "3+"; the
-  non-crypto random helpers were the first case the new rule
-  caught - they live under `math.rand*` rather than getting their
-  own library).
+  existing library (the non-crypto random helpers were the first
+  case the rule caught - they live under `math.rand*` rather than
+  getting their own library).
 - A single function with no clear topic -> the most-related existing
   library.
+- Genuinely polymorphic structural primitives that every program
+  needs (`len`) -> language built-in keyword, not a library. The
+  bar is intentionally high; `len` is the only one today.
 
 ## Naming convention
 
@@ -108,7 +98,7 @@ Library names look mixed at first glance - `strings` is plural but
 - **Plural for count nouns**: when the library operates on instances of
   something you can have multiples of. `strings`, `lists`, `maps`,
   `bytes`, `files`.
-- **Singular for mass nouns and conceptual wholes**: `math`, `core`,
+- **Singular for mass nouns and conceptual wholes**: `math`, `meta`,
   `time` (planned), `regex` (planned).
 - **Bare verb when the library is named for what it does**, not what
   it touches: `convert`.
@@ -129,8 +119,7 @@ Three practical constraints reinforce the count/mass rule:
    (`PI`, `E`, `VERSION`, `PLATFORM`).
 
 For implementation notes on how libraries register themselves with the
-interpreter (`RegisterNamespaced`, `RegisterGlobal`, the `use`-gated
-lookup), see
+interpreter (`RegisterNamespaced`, the `use`-gated lookup), see
 [../technical/interpreter.md > Builtins and libraries](../technical/interpreter.md#builtins-and-libraries).
 
 For canonical terminology (library vs module, function vs method,

@@ -173,4 +173,5 @@ def ys as list of int init lists.push($xs, 4);
 This matches the rest of Jennifer's value-semantics design - the same
 rule that makes `$dst = $src;` a copy, not an alias.
 
-See also: [maps.md](maps.md), [core.md](core.md) (`len`), [index.md](index.md).
+See also: [maps.md](maps.md), [index.md](index.md). `len(xs)` is a
+language built-in (no import needed).

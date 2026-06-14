@@ -25,7 +25,7 @@ flat lookup view, not authoritative.
 | `strings.indexOf(s, sub)`          | [strings](strings.md)           | Rune index of first `sub` in `s`, or `-1` if absent.                                                                                |
 | `convert.toInt(v)`                 | [convert](convert.md)           | Convert to int (float truncates toward zero, string parses, bool→1/0).                                                              |
 | `strings.join(parts, sep)`         | [strings](strings.md)           | Concatenate `list of string` `parts` separated by `sep`. Inverse of `strings.split`.                                                |
-| `len(v)`                           | [core](core.md) *(auto-loaded)* | Structural length: rune count (string), element count (list), entry count (map).                                                    |
+| `len(v)`                           | *(language built-in)*           | Structural length: rune count (string), element count (list), entry count (map), byte count (bytes).                                |
 | `lists.concat(a, b)`               | [lists](lists.md)               | New list with `a`'s elements followed by `b`'s.                                                                                     |
 | `lists.contains(xs, item)`         | [lists](lists.md)               | True if `item` appears in `xs` (haystack, needle).                                                                                  |
 | `lists.first(xs)`                  | [lists](lists.md)               | Element at index 0. Empty input errors.                                                                                             |
@@ -106,6 +106,7 @@ detail.
 - [index.md](index.md) - library catalog with code samples and the
   organizing principles.
 - Per-library reference pages: [io.md](io.md), [convert.md](convert.md),
-  [math.md](math.md), [strings.md](strings.md), [core.md](core.md).
+  [math.md](math.md), [strings.md](strings.md), [lists.md](lists.md),
+  [maps.md](maps.md), [os.md](os.md), [meta.md](meta.md).
 - [../user-guide/imports.md](../user-guide/imports.md) - how to import a
   library in a Jennifer source file.

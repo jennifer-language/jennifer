@@ -144,11 +144,18 @@ unaryExpr   = "-" unaryExpr | primary ;
 primary     = ( INT | FLOAT | STRING | "true" | "false" | "null"
               | VARREF | qualifiedCall | qualifiedConstRef
               | call | typeCall | structLit | constRef | "(" expr ")"
-              | listLit | mapLit )
+              | listLit | mapLit | lenExpr )
               { "[" expr "]" | "." IDENT } ;
                                        (* any primary can be index- or
                                           field-chained; M13.1 adds the
                                           `.field` form *)
+lenExpr     = "len" "(" expr ")" ;     (* M15.4: polymorphic
+                                          structural-length built-in
+                                          (string / list / map /
+                                          bytes). Reserved keyword,
+                                          not a library function;
+                                          M15.4 deleted the `core`
+                                          library that hosted it. *)
 structLit   = IDENT [ "." IDENT ] "{" structLitField { "," structLitField } [ "," ] "}" ;
                                        (* M13.1 / M15.2: struct literal.
                                           Bare IDENT names a user-defined
@@ -305,6 +312,7 @@ grammar the parser implements is the EBNF above.
 | `VarExpr`               | expr | `Name` (no `$`) - mutable-variable reference                                                               |
 | `ConstRefExpr`          | expr | `Name` - bare-IDENT reference; interpreter expects it to resolve to a constant                             |
 | `CallExpr`              | expr | `Callee`, `Args []Expr`                                                                                    |
+| `LenExpr`               | expr | `Operand Expr` - `len(EXPR)` language built-in (M15.4)                                                     |
 | `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr`                                                                          |
 | `QualifiedConstRefExpr` | expr | `Prefix`, `Name`                                                                                           |
 | `BinaryExpr`            | expr | `Op BinaryOp`, `Left`, `Right` (comparison/logical ops return bool; `and`/`or` short-circuit at eval time) |

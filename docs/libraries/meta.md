@@ -89,4 +89,4 @@ string), REPL-vs-script mode, runtime GC stats, scheduler diagnostics.
 The library exists in part to give those a natural home when they
 land.
 
-See also: [core.md](core.md), [os.md](os.md), [index.md](index.md).
+See also: [os.md](os.md), [index.md](index.md).

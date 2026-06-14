@@ -14,7 +14,6 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/lists"
 	"github.com/mplx/jennifer-lang/internal/lib/maps"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
-	"github.com/mplx/jennifer-lang/internal/lib/core"
 	"github.com/mplx/jennifer-lang/internal/lib/os"
 	"github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -45,7 +44,6 @@ func run(t *testing.T, src string) (string, error) {
 	listslib.Install(in)
 	mapslib.Install(in)
 	oslib.Install(in)
-	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return buf.String(), err
 	}
@@ -72,7 +70,6 @@ func runWithStdin(t *testing.T, src, stdin string) (string, error) {
 	listslib.Install(in)
 	mapslib.Install(in)
 	oslib.Install(in)
-	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return buf.String(), err
 	}
@@ -280,18 +277,16 @@ func app() {}`)
 	}
 }
 
-func TestUserMethodCannotShadowCoreGlobal(t *testing.T) {
-	// `core` is auto-loaded and exposes `len` as a global; defining
-	// `func len()` therefore shadows a live builtin and errors.
-	// (Pre-M10 the same rule applied to `printf` from `io`; M10 moved
-	// every domain library behind a namespace prefix, so the only
-	// remaining globals are `core`'s structural primitives.)
+func TestLenIsKeyword(t *testing.T) {
+	// M15.4 promoted `len` from a `core` global to a language built-in
+	// primary, so `func len()` is a parse-time rejection rather than
+	// the M5-era "shadows builtin" runtime check.
 	_, err := run(t, `
 func len() {}
 len();
 `)
-	if err == nil || !strings.Contains(err.Error(), "shadows a builtin from `core`") {
-		t.Errorf("expected shadowing error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "expected IDENT") {
+		t.Errorf("expected parse error rejecting `func len`, got %v", err)
 	}
 }
 

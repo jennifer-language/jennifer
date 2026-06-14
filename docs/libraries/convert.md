@@ -40,7 +40,7 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
   UTF-8 - strict at boundaries; no silent replacement characters.
 - `convert.bytesFromString(s, "latin-1")` or any non-`"utf-8"`
   codec name - rejected as unsupported (further codecs ship in
-  the M15.6 `encoding` library).
+  the M15.7 `encoding` library).
 - Arity errors (too many or too few arguments).
 
 For "any nonzero counts as true" semantics, write the comparison explicitly:

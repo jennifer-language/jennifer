@@ -92,8 +92,10 @@ Rounds out the "ordinary" feature set:
   startup; writing `use core;` is a runtime error. Contents:
   `JENNIFER_VERSION` (a `git describe`-derived build-version constant)
   and `len` (polymorphic over strings now; lists/maps in M6). `len`
-  moved here from `strings`. See [libraries/core.md](libraries/core.md)
-  and [technical/cli.md > Version injection](technical/cli.md#version-injection).
+  moved here from `strings`. (M15.4 later promoted `len` to a
+  language built-in and deleted `core`; see M15.4 for the
+  migration.) Version injection details at
+  [technical/cli.md](technical/cli.md#version-injection).
 - **Formatter** - `jennifer fmt` re-emits canonical source per
   [user-guide/style-guide.md](user-guide/style-guide.md). Token-level walker so file imports and
   user-written parentheses survive. See
@@ -313,7 +315,7 @@ stand on; M14 closes the lexer-side gap (`fmt` losing comments
 and shebangs) so the first wave of struct-using libraries can
 ship with doc-comments intact; Phase B (M15.x) ships the
 foundational libraries that every Jennifer program needs,
-finishing with **M15.7 - the first public release** (CI, prebuilt
+finishing with **M15.8 - the first public release** (CI, prebuilt
 binaries, .deb / pacman / AUR packaging); Phase C (M16.x) ships
 I/O libraries on top of the now-released foundation; Phase D
 (M17-M20) ships the higher-level ecosystem (Jennifer-coded
@@ -405,8 +407,7 @@ shape; pre-1.0 is the window for this kind of change.
 See:
 - [libraries/io.md](libraries/io.md),
   [libraries/math.md](libraries/math.md),
-  [libraries/convert.md](libraries/convert.md),
-  [libraries/core.md](libraries/core.md) - migrated library
+  [libraries/convert.md](libraries/convert.md) - migrated library
   references.
 - [libraries/index.md](libraries/index.md) - retired
   flat-vs-namespaced framing; new library-author policy and
@@ -492,7 +493,7 @@ network code in later milestones.
   sugar. `len($b)` returns the byte count.
 - **New `convert.bytesFromString(s, codec)` and
   `convert.stringFromBytes(b, codec)`** - bytes ↔ string codecs.
-  Only `"utf-8"` today (further codecs ship in M15.6 `encoding`).
+  Only `"utf-8"` today (further codecs ship in M15.7 `encoding`).
   Invalid UTF-8 input is an error - no silent replacement
   characters.
 - **Bit operators on `int`**: `& | ^ ~ << >>`. Python-style
@@ -715,7 +716,7 @@ The old names now error as plain "undefined name"; no
 rename-hint diagnostic ships in M15.1.
 
 See:
-- [libraries/os.md](libraries/os.md), [libraries/meta.md](libraries/meta.md), [libraries/core.md](libraries/core.md) -
+- [libraries/os.md](libraries/os.md), [libraries/meta.md](libraries/meta.md) -
   shipped surface, charter, and breaking-change rationale.
 - `examples/osinfo.j` and the `=== os ===` / `=== meta ===`
   sections of `examples/showcase.j` exercise the renamed surface.
@@ -725,7 +726,7 @@ See:
 **Status:** done.
 
 A language milestone slotted inside Phase B because the next
-wave of libraries (M15.3 os execution, M15.4 time, M15.5 hash
+wave of libraries (M15.3 os execution, M15.5 time, M15.6 hash
 streaming, M16.1 fs, M16.2 net, M16.3 regex) all need their own
 struct types and the M13.1 mechanism only handles bare-IDENT
 names.
@@ -794,7 +795,56 @@ See:
 - `examples/exec.j` - walkthrough of all five functions
   (not part of the golden test suite; deterministic output).
 
-## M15.4 - `time`
+## M15.4 - Language: `len` built-in, `core` removed
+
+**Status:** done.
+
+Drops the last implicit thing in the language. `core` was the one
+auto-loaded library; every other name required `use NAME;`. M15.4
+promotes `core`'s single polymorphic primitive (`len`) to a
+language built-in keyword and deletes the `core` library entirely.
+Stance #2 ("explicit over implicit") now applies uniformly: a `.j`
+file that uses `printf`, `len`, and `meta.VERSION` opens with the
+same `use` block shape as every other library.
+
+- `len(EXPR)` is now a reserved keyword + language primary
+  expression, not a library function. Same polymorphic behavior
+  (string / list / map / bytes); any other kind is a positioned
+  runtime error. `func len() {}` is now a parse-time rejection
+  (the M5-era "shadows builtin" runtime check is gone with
+  `core`).
+- `internal/lib/core/` is deleted. The auto-load logic in
+  `Interpreter.New()` and the `use core;` rejection are both
+  gone; `use core;` now triggers a friendly migration error
+  ("the `core` library was removed in M15.4; `len` is a built-in;
+  version constants moved to `meta`").
+- `JENNIFER_VERSION` had already moved to `meta.VERSION` in M15.1;
+  that migration is unchanged. `core` had carried nothing else
+  since.
+- `RegisterGlobal` / `RegisterGlobalConst` and the per-library
+  globals tables stay in the interpreter as exported API surface,
+  unused by any shipping library. They get removed in a later
+  cleanup pass once the M10 collision-rule tests are migrated.
+- The library charter simplifies: every library is namespaced,
+  every name lives behind a prefix, every program states its
+  imports.
+
+### Breaking changes
+
+| Pre-M15.4                         | M15.4                                  | Migration                                            |
+| --------------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| `len($v)` (bare, auto-loaded)     | `len($v)` (language built-in keyword)  | No source change. Same syntax, different mechanism.  |
+| `use core;`                       | (rejected with migration error)        | Remove the line - `len` no longer needs an import.   |
+| `func len() { ... }`              | parse error                            | Rename the method (`len` is now a reserved keyword). |
+
+See:
+- [technical/grammar.md](technical/grammar.md) - `lenExpr` primary
+  + AST table entry.
+- [technical/design-decisions.md](technical/design-decisions.md) -
+  rationale for promoting `len` to a built-in rather than keeping
+  it as the lone `core` global.
+
+## M15.5 - `time`
 
 One library covering both date and time concerns through a single
 zone-aware instant type, plus a separate span type for differences.
@@ -815,9 +865,9 @@ of the value's type.
 Unix timestamps are **not** a separate type; they're a
 constructor (`time.fromUnix(n)`) and accessor
 (`$t.unix() -> int`). Same shape for ISO 8601 strings and any
-other wire format added in M15.4.2.
+other wire format added in M15.5.2.
 
-### M15.4.1 - core type, arithmetic, Unix
+### M15.5.1 - core type, arithmetic, Unix
 
 - `def struct time.Time { ... };` - opaque struct representing
   an instant on the wall-clock timeline with nanosecond
@@ -859,10 +909,28 @@ other wire format added in M15.4.2.
   `time.seconds($d)`, `time.milliseconds($d)`,
   `time.minutes($d)`, `time.hours($d)`.
 
-### M15.4.x - `examples/benchmark.j`
+### M15.5.2 - formatting, parsing, timezones
 
-Ships with M15.4.1 (it needs `time.now` / `time.sub` for wall-clock
-measurement). Two purposes:
+- `time.format($t, layout as string) -> string` - layout
+  language settled at the start of M15.5.2 (`strftime`-style
+  vs Go's reference-time style; the former wins on
+  familiarity, the latter on copy-paste reliability).
+- `time.parse(s as string, layout as string) -> time.Time` -
+  strict parse, positioned error on mismatch.
+- `time.iso(t)` / `time.fromIso(s)` - ISO 8601 round-trip;
+  the common case shouldn't need a format string.
+- Timezone handling:
+  `time.zone(name as string) -> time.Zone`,
+  `time.inZone($t, $z) -> time.Time`. Zone name uses the
+  IANA database (`"Europe/Vienna"`, `"America/Los_Angeles"`).
+  TinyGo footprint of the tz database evaluated honestly
+  before commitment; if too heavy, ship only fixed offsets
+  in M15.5.2 and defer IANA loading until embedding decisions
+  settle.
+
+### M15.5.3 - `examples/benchmark.j`
+
+Two purposes:
 
 1. **Demonstrate the `time` library**: `time.now()`,
    `time.sub($end, $start)`, `time.milliseconds($d)`,
@@ -874,7 +942,7 @@ measurement). Two purposes:
    the two binaries diverge on the same machine.
 
 Suggested workload shape (settle exact numbers at the start of
-M15.4.x so they finish in O(seconds), not minutes, on a modern
+M15.5.3 so they finish in O(seconds), not minutes, on a modern
 laptop):
 
 - **CPU-bound integer math.** Fibonacci recursion, primality
@@ -902,26 +970,7 @@ Not part of the golden test suite (output is timing-dependent);
 the same skip-if-no-expected-file rule that covers `exec.j`
 applies here.
 
-### M15.4.2 - formatting, parsing, timezones
-
-- `time.format($t, layout as string) -> string` - layout
-  language settled at the start of M15.4.2 (`strftime`-style
-  vs Go's reference-time style; the former wins on
-  familiarity, the latter on copy-paste reliability).
-- `time.parse(s as string, layout as string) -> time.Time` -
-  strict parse, positioned error on mismatch.
-- `time.iso(t)` / `time.fromIso(s)` - ISO 8601 round-trip;
-  the common case shouldn't need a format string.
-- Timezone handling:
-  `time.zone(name as string) -> time.Zone`,
-  `time.inZone($t, $z) -> time.Time`. Zone name uses the
-  IANA database (`"Europe/Vienna"`, `"America/Los_Angeles"`).
-  TinyGo footprint of the tz database evaluated honestly
-  before commitment; if too heavy, ship only fixed offsets
-  in M15.4.2 and defer IANA loading until embedding decisions
-  settle.
-
-## M15.5 - `hash` and `crc`
+## M15.6 - `hash` and `crc`
 
 Common digests over `bytes` (MD5, SHA-1, SHA-256, CRC32, CRC64).
 Pure compute, no external dependencies. Crypto-relevant primitives
@@ -966,7 +1015,7 @@ relevant library (`json`, `csv`, future `cbor`) and hash the
 resulting bytes; the `hash` library has no opinion on struct
 layout.
 
-## M15.6 - `encoding`
+## M15.7 - `encoding`
 
 Codec library: byte-stream introspection plus the lossless
 re-encoding codecs beyond UTF-8. The cross-kind `bytes <-> string`
@@ -1002,7 +1051,7 @@ don't validly decode in the named codec, or (c) string runes
 that don't representably encode (e.g. a string containing
 `U+1F600` into Latin-1).
 
-**Codec set shipped in M15.6.** All single-byte (and ASCII), so
+**Codec set shipped in M15.7.** All single-byte (and ASCII), so
 each costs at most one 256-entry table:
 
 - **`"ascii"`** - 7-bit ASCII; rejects any byte >= 0x80 on decode
@@ -1038,7 +1087,7 @@ with the hyphen form. Common aliases (`"latin-1"` for
 `"iso-8859-1"`, `"cp1252"` for `"windows-1252"`) are accepted on
 input.
 
-**What stays out of M15.6 (deferred to later milestones).**
+**What stays out of M15.7 (deferred to later milestones).**
 
 - Variable-width Asian encodings: `Shift-JIS`, `Big5`, `GB2312`,
   `GBK`, `GB18030`, `EUC-JP`, `EUC-KR`. Each is a state-machine
@@ -1054,10 +1103,10 @@ input.
 These ship in their own sub-milestone once a real Jennifer
 program needs them - currently no roadmap item depends on them.
 
-## M15.7 - distribution + first public release
+## M15.8 - distribution + first public release
 
 The last step before Phase C. Phase B finishes the foundational
-library batch; M15.7 makes that batch a thing people can actually
+library batch; M15.8 makes that batch a thing people can actually
 install and run before Phase C starts adding I/O on top. The
 items below have been on the parallel "Path to 1.0.0
 distribution" track for a while; promoting them to a real
@@ -1126,12 +1175,12 @@ decision is documented in one place.
 
 GitHub Pages driven from `docs/` (mdBook is the leading
 candidate; needs a design pass for the navigation/landing
-shape). The site goes live with M15.7 so the release
+shape). The site goes live with M15.8 so the release
 announcement has somewhere to link to that isn't a GitHub
 file tree. Versioned per release tag.
 
 **What stays on the "Path to 1.0.0 distribution" parallel
-track** (post-M15.7 polish, not gated on this milestone):
+track** (post-M15.8 polish, not gated on this milestone):
 
 - Homebrew tap for macOS users
 - Snap package
@@ -1535,7 +1584,7 @@ Sub-milestones in priority order:
 
 Symmetric and asymmetric primitives, key derivation,
 crypto-grade random. System library; TinyGo-safe primitives
-only. Hashes already shipped in M15.5.
+only. Hashes already shipped in M15.6.
 
 ## M20 - `httpd`
 
@@ -1579,8 +1628,8 @@ some of this space first.
 ## Path to 1.0.0 distribution (parallel track)
 
 The core CI + release + packaging items that used to live here
-were promoted into M15.7 (the last step before Phase C). What
-stays on this parallel track is the post-M15.7 polish - items
+were promoted into M15.8 (the last step before Phase C). What
+stays on this parallel track is the post-M15.8 polish - items
 that can land any time and don't block any milestone:
 
 - **Homebrew tap** for macOS users.
@@ -1590,7 +1639,7 @@ that can land any time and don't block any milestone:
   platform-portability work in the Long-horizon list; ships as
   soon as that lands.
 - **Real apt repository** (replacing the "GitHub Release
-  artifact" install of the M15.7 `.deb`) if user demand
+  artifact" install of the M15.8 `.deb`) if user demand
   warrants the maintenance.
 - **Snap / Flatpak**, **AppImage**, or any other Linux
   distribution format Jennifer users actually ask for.

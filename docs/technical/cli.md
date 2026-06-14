@@ -161,7 +161,7 @@ The default is `"dev"`; the `Makefile` runs `scripts/gen-version.sh` before
 each build, which writes `internal/version/version_gen.go` containing a
 small `init()` that overwrites `Version` with the output of
 `scripts/version.sh` (a `git describe --tags --long` derivative; see
-[../libraries/core.md](../libraries/core.md) for the format).
+[../libraries/meta.md](../libraries/meta.md) for the format).
 
 This codegen path replaces the more conventional `go build -ldflags
 "-X .Version=..."` because TinyGo 0.41 silently ignores the `-X`

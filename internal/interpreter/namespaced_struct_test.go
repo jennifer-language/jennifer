@@ -10,7 +10,6 @@ import (
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
-	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
 
@@ -24,7 +23,6 @@ func newWidgetInterp() (*interpreter.Interpreter, *bytes.Buffer) {
 	var buf bytes.Buffer
 	in.Out = &buf
 	iolib.Install(in)
-	corelib.Install(in)
 	in.RegisterNamespacedStruct("widgets", "Point", []parser.StructField{
 		{Name: "x", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "y", Type: parser.PrimitiveType(parser.TypeInt)},

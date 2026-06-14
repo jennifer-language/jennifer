@@ -14,7 +14,6 @@ import (
 	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
 	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
-	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -36,7 +35,6 @@ func newNSInterp() (*interpreter.Interpreter, *bytes.Buffer) {
 	listslib.Install(in)
 	mapslib.Install(in)
 	oslib.Install(in)
-	corelib.Install(in)
 	in.RegisterNamespaced("bio", "translate", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 || args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), nil

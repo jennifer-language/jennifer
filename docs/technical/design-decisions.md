@@ -78,29 +78,68 @@ would be the `a - b` ≡ `a + (-b)` argument: we still ship `-` because
 the composed form obscures the intent at every call site. Same logic
 applies here.
 
-## `core` exposes its names as bare globals only
+## `len` is a language built-in, not a library
 
-`core` is the only library whose name (`len`) is reachable bare;
-there is no `core.len` qualified form. Stance #1 ("one way per
-thing") would normally argue that "the same name shouldn't have two
-spellings", and at first glance the bare-name exposure looks like
-the second spelling. The configuration that ships is
-one-way-per-thing: only the bare form exists.
+`len(EXPR)` is a reserved keyword and a primary expression in the
+grammar, not a function in any library. Stance #2 ("explicit over
+implicit") would normally argue that every name should be
+explicitly imported - which is exactly what every library obeys
+(`use io;`, `use math;`, etc.). The pre-M15.4 design had the
+`core` library auto-loaded as the one exception to this rule, so
+that `len` could be called without ceremony. M15.4 chose a
+different answer: promote `len` to a language built-in so the
+exception disappears, instead of preserving the auto-loaded
+library.
 
-The asymmetry is deliberate. `len` is genuinely polymorphic across
-string / list / map / bytes - a structural primitive every program
-needs without ceremony, so writing `core.len(...)` everywhere would
-be pure ceremony for no clarity gain. Limiting the bare exposure
-to `core` keeps the rule simple: bare names mean `core`, everything
-else lives behind a `lib.` prefix.
+The case for keeping `core` auto-loaded (the path we didn't take):
 
-(Pre-M15.1 `core` also exposed `JENNIFER_VERSION` as a bare global
-under the same exception. M15.1 moved it to `meta.VERSION` because
-"interpreter-self-identity constant" isn't actually a polymorphic
-structural primitive - it was only ever in `core` for lack of a
-better home. Returning `core` to a single member tightens the
-charter: future libraries clear the "polymorphic structural
-primitive that spans types" bar or they don't ship globals at all.)
+- Minimal language surface area (one stronger reserved word avoided).
+- The auto-loaded library was already justified once; doubling down
+  is cheaper than redesigning.
+- A future library that wants the same exception ("polymorphic
+  structural primitive every program needs") could be added the
+  same way.
+
+The case for the built-in (what we ship):
+
+- **Stance #2 alignment is now uniform.** Every name a Jennifer
+  program reaches for either lives in the language (operators,
+  keywords, `len`) or behind an explicit `use lib;`. There is no
+  third category. A reader can audit a `.j` file's imports and
+  know every external name in scope.
+- **No special-case library machinery.** `RegisterGlobal`,
+  `globalFnsByLib`, the alias-meaningless-for-globals-only-lib
+  rule, the "library 'core' is automatically available" rejection,
+  the "skip core from the available-libs error message" filter -
+  all of that infrastructure existed to support one auto-loaded
+  library. With `len` promoted to a built-in, none of it is
+  required.
+- **Future polymorphic primitives have a clear home.** If `len`-like
+  behaviour ever needs a sibling (e.g. a future `empty(v)`), the
+  decision is the same: language built-in or topic library, not
+  "expand the auto-loaded list."
+- **No `core` to keep tightening.** M15.1 moved `JENNIFER_VERSION`
+  out of `core` into `meta`; the charter discussion ("what
+  qualifies for `core`?") had already started chipping at the
+  exception. Removing `core` entirely closes the question instead
+  of arguing it indefinitely.
+
+Tradeoffs accepted:
+
+- **Another reserved word.** `len` is now a keyword - users can't
+  define `func len() {}`. The same restriction existed under the
+  old model (the M5-era "shadows builtin" runtime check), just
+  enforced one phase later.
+- **Migration churn for any out-of-tree code.** Source that wrote
+  `use core;` errors with a friendly migration hint; sources that
+  defined `func len()` get a parse error pointing at the keyword
+  rename. Pre-1.0 covers both.
+
+`RegisterGlobal` / `RegisterGlobalConst` remain on the interpreter
+as exported API for compatibility, but no shipping library calls
+them; the in-tree consumer is gone. A later cleanup pass removes
+the infrastructure once the M10 collision-rule tests that exercise
+it migrate.
 
 ## Half-open ranges
 

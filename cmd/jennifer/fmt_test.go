@@ -17,7 +17,6 @@ import (
 	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
 	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
-	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
@@ -144,7 +143,6 @@ func runProgramOutput(path, src string) (string, error) {
 	mapslib.Install(in)
 	oslib.Install(in)
 	metalib.Install(in)
-	corelib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return "", err
 	}

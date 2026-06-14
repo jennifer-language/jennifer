@@ -15,20 +15,23 @@ error pointing at `include`.
 
 `use NAME;` enables a built-in library. Every library is
 **namespaced** - every name lives behind the library's prefix
-(`io.printf`, `math.sqrt`, `convert.toInt`). The only library exposing
-bare-name globals is the auto-loaded `core` (which doesn't need `use`).
-Each library has its own reference doc; the table below is the index.
+(`io.printf`, `math.sqrt`, `convert.toInt`). Nothing auto-loads;
+every program states its imports. Each library has its own
+reference doc; the table below is the index.
 
-| Library   | Enable with     | Contents                                                                                                                                                                                                | Reference                                       |
-| --------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `io`      | `use io;`       | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, and the format-verb mini-language                                                                                                                   | [libraries/io.md](../libraries/io.md)           |
-| `convert` | `use convert;`  | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts                                                                                             | [libraries/convert.md](../libraries/convert.md) |
-| `math`    | `use math;`     | `math.abs`, `math.min`, `math.max`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.round`, `math.rand`, `math.randInt`, `math.randSeed`; constants `math.PI`, `math.E`                       | [libraries/math.md](../libraries/math.md)       |
-| `strings` | `use strings;`  | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`                                  | [libraries/strings.md](../libraries/strings.md) |
-| `lists`   | `use lists;`    | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice` - non-mutating helpers                                                                           | [libraries/lists.md](../libraries/lists.md)     |
-| `maps`    | `use maps;`     | `maps.keys`, `values`, `has`, `delete`, `merge` - non-mutating helpers                                                                                                                                  | [libraries/maps.md](../libraries/maps.md)       |
-| `os`      | `use os;`       | `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`                                                                                                                                          | [libraries/os.md](../libraries/os.md)           |
-| `core`    | *(auto-loaded)* | `len`, `JENNIFER_VERSION`. Reachable as bare names only - no `core.len` / `core.JENNIFER_VERSION` form exists. The only library that exposes bare-name globals. Writing `use core;` is a runtime error. | [libraries/core.md](../libraries/core.md)       |
+`len(EXPR)` is a language built-in (not a library) - polymorphic
+over string / list / map / bytes; no import needed.
+
+| Library   | Enable with    | Contents                                                                                                                                                                          | Reference                                       |
+| --------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `io`      | `use io;`      | `io.printf`, `io.sprintf`, `io.readLine`, `io.eof`, and the format-verb mini-language                                                                                             | [libraries/io.md](../libraries/io.md)           |
+| `convert` | `use convert;` | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts                                                                       | [libraries/convert.md](../libraries/convert.md) |
+| `math`    | `use math;`    | `math.abs`, `math.min`, `math.max`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.round`, `math.rand`, `math.randInt`, `math.randSeed`; constants `math.PI`, `math.E` | [libraries/math.md](../libraries/math.md)       |
+| `strings` | `use strings;` | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`            | [libraries/strings.md](../libraries/strings.md) |
+| `lists`   | `use lists;`   | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `concat`, `slice`, `shuffle`, `range` - non-mutating helpers                                 | [libraries/lists.md](../libraries/lists.md)     |
+| `maps`    | `use maps;`    | `maps.keys`, `values`, `has`, `delete`, `merge` - non-mutating helpers                                                                                                            | [libraries/maps.md](../libraries/maps.md)       |
+| `os`      | `use os;`      | `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`/`spawn`/`wait`/`poll`/`kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`                    | [libraries/os.md](../libraries/os.md)           |
+| `meta`    | `use meta;`    | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                                | [libraries/meta.md](../libraries/meta.md)       |
 
 See [libraries/index.md](../libraries/index.md) for a fuller catalog
 and the library-organization principles, or
@@ -78,24 +81,24 @@ io.printf("pi=%f\n", m.PI);               # aliased prefix
   reserves `os` as a namespace prefix for the rest of the program;
   `func os() {}` then errors with `shadows imported namespace 'os'`.
 - **Repeating a `use` is a silent no-op in the REPL.** In a batch
-  program a duplicate `use` is also accepted as a no-op unless the
-  library exposes any global (only `core` does today); for a library
-  with globals, a second `use NAME [as ALIAS];` errors with
-  `library 'X' already in scope`. Pick one form per program.
+  program a duplicate `use` is accepted as a no-op too. Pick one
+  form per program.
 
-#### `core` and global names
+#### `len` is a language built-in
 
-`core` is auto-loaded and is the only library that exposes its names
-as bare globals. `len(...)` and `JENNIFER_VERSION` are reachable
-without any prefix:
+`len(EXPR)` is not a library function - it's a reserved keyword
+and a language primary expression. Polymorphic over string / list /
+map / bytes; no `use` statement needed:
 
 ```jennifer
-def n as int init len("hello");        # 5
-io.printf("Jennifer %s\n", JENNIFER_VERSION);
+def n as int init len("hello");        # 5 (rune count)
+def m as int init len([1, 2, 3]);      # 3 (element count)
 ```
 
-There is **no** `core.len` / `core.JENNIFER_VERSION` qualified
-form - `core` names are bare-only.
+Pre-M15.4 `len` lived in an auto-loaded `core` library;
+`use core;` now errors with a migration hint. Build-version
+constants moved from `core` to `meta` in M15.1
+(`use meta;` then `meta.VERSION`, `meta.BUILD`).
 
 ## File splices (`include`)
 

@@ -191,10 +191,11 @@ reference docs are split per library:
 - [libraries/io.md](../libraries/io.md) - `printf`, `sprintf`, format verbs
 - [libraries/convert.md](../libraries/convert.md) - `int`, `float`, `string`, `bool`, `typeOf`
 - [libraries/math.md](../libraries/math.md) - `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `PI`, `E`
-- [libraries/strings.md](../libraries/strings.md) - `len`, `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `repeat`, `substring`
-- [libraries/os.md](../libraries/os.md) - **namespaced**; `os.platform`, `os.getEnv`, `os.JENNIFER_LF`, `os.JENNIFER_OS`
-- [libraries/core.md](../libraries/core.md) - auto-loaded; `VERSION` (interpreter build version)
+- [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`
+- [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`
+- [libraries/meta.md](../libraries/meta.md) - `meta.VERSION` (build version), `meta.BUILD` (toolchain)
 - [libraries/index.md](../libraries/index.md) - catalog and organizing principles
+- `len(EXPR)` is a language built-in primary (M15.4+), not a library function. See [grammar.md](grammar.md).
 
 What follows is the implementation contract, not the user-facing API.
 

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
-	corelib "github.com/mplx/jennifer-lang/internal/lib/core"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
 	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -24,7 +23,6 @@ func runOne(t *testing.T, src string) string {
 	in.Out = &buf
 	iolib.Install(in)
 	metalib.Install(in)
-	corelib.Install(in)
 	prog, err := parser.Parse(src)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -68,7 +66,6 @@ func TestBareVersionNoLongerAvailable(t *testing.T) {
 	in := interpreter.New()
 	iolib.Install(in)
 	metalib.Install(in)
-	corelib.Install(in)
 	src := `use io; io.printf("%s", JENNIFER_VERSION);`
 	prog, err := parser.Parse(src)
 	if err != nil {

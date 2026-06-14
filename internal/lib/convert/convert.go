@@ -32,7 +32,7 @@ func Install(in *interpreter.Interpreter) {
 	// M12: bytes <-> string codecs. Two-argument shape (value, codec)
 	// follows the `toInt(v)` / `toFloat(v)` style; codec selects the
 	// encoding (only "utf-8" today). Further codecs ship with the
-	// `encoding` library in M15.6.
+	// `encoding` library in M15.7.
 	in.RegisterNamespaced(LibraryName, "bytesFromString", bytesFromStringFn)
 	in.RegisterNamespaced(LibraryName, "stringFromBytes", stringFromBytesFn)
 }

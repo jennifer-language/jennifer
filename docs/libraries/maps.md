@@ -77,4 +77,5 @@ The library never modifies its inputs. `maps.delete` and `maps.merge`
 both copy, so the source maps stay intact for further use; the new
 map is independent of either.
 
-See also: [lists.md](lists.md), [core.md](core.md) (`len`), [index.md](index.md).
+See also: [lists.md](lists.md), [index.md](index.md). `len(m)` is a
+language built-in (no import needed).

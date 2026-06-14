@@ -195,7 +195,7 @@ cost was small (five test strings in this repo).
 
 ## Methods on structs
 
-Considered during M15.4 (`time` library) planning: let structs
+Considered during M15.5 (`time` library) planning: let structs
 declare methods that receive `self` implicitly, so accessors and
 small operations on a struct value read as `$t.year()` instead of
 `time.year($t)`. The trigger was the time library's many calendar
