@@ -902,55 +902,34 @@ the reference.
 
 ## M15.7 - `encoding`
 
-**Status:** done. Codec library covering three concerns:
-introspection (`isAscii`, `lenBytes`, `lenRunes`), binary-to-text
-(`toText` / `fromText` for `"hex"` / `"base64"` / `"base64-url"`),
-and character codecs (`encode` / `decode`). The cross-kind UTF-8
-codec stays in `convert` (M12) where it shipped with the `bytes`
-type; `encoding` is where the table-based codec proliferation
-lives.
+**Status:** done. Three-part surface: introspection
+(`isAscii`/`lenBytes`/`lenRunes`), binary-to-text
+(`toText`/`fromText` for `"hex"`/`"base64"`/`"base64-url"`), and
+character codecs (`encode`/`decode`/`codecs`). The cross-kind
+UTF-8 pair stays in `convert` (M12); `encoding` owns the
+table-based codec proliferation. Four codecs ship: `"ascii"`,
+`"latin-1"` (alias `"iso-8859-1"`), `"windows-1252"` (alias
+`"cp1252"`), `"ebcdic"` (alias `"ibm-1047"`, IBM Code Page 1047).
 
-**API consolidation.** The original spec had four separate
-binary-to-text verbs (`encoding.hex`, `encoding.fromHex`,
-`encoding.base64`, `encoding.fromBase64`) plus a "url-safe variant
-via a modifier" hint. Jennifer's letters-only identifier rule
-rejects digits in method names (same blocker M15.6 hit with
-`hash.md5`), so the shipped API consolidates to one verb pair:
+The spec's per-format verbs (`encoding.hex`, `encoding.base64`,
+...) hit the same letters-only identifier blocker M15.6 saw with
+`hash.md5`; the shipped API consolidates them into a single
+codec-table pair `toText($bytes, format)` /
+`fromText($string, format)`. Stance #1 also gets to apply: one
+verb pair instead of four. Codec names normalise
+case-insensitively and strip `-`/`_`/spaces (`"ISO-8859-1"` =
+`"iso88591"` = `"latin_1"` = `"latin-1"`); binary-to-text format
+strings stay case-sensitive (smaller set, no need to normalise).
 
-- `encoding.toText($bytes, format) -> string`
-- `encoding.fromText($string, format) -> bytes`
-- `format`: `"hex"` (lowercase emit, case-insensitive parse),
-  `"base64"` (RFC 4648 §4 standard), `"base64-url"` (RFC 4648 §5
-  URL-safe).
+Windows-1252 has five canonically-undefined positions (0x81,
+0x8D, 0x8F, 0x90, 0x9D) the table stores as `utf8.RuneError` so
+encode and decode both reject them symmetrically.
 
-Character-codec surface is the codec-table shape the spec
-described:
-
-- `encoding.encode($string, codec) -> bytes`
-- `encoding.decode($bytes, codec) -> string`
-- `encoding.codecs() -> list of string` (canonical names in
-  registration order)
-
-**Codec set shipped in M15.7.** The four highest-value entries:
-
-- `"ascii"` - 7-bit; rejects bytes >= 0x80 on decode and runes
-  >= 0x80 on encode.
-- `"latin-1"` (alias `"iso-8859-1"`) - identity for
-  U+0000..U+00FF.
-- `"windows-1252"` (alias `"cp1252"`) - Latin-1 plus the
-  printable C1 range (EURO SIGN at 0x80, smart quotes, etc.).
-  The de-facto encoding of "Latin-1 with smart quotes" in
-  real-world Windows files. Five canonically-undefined
-  positions (0x81, 0x8D, 0x8F, 0x90, 0x9D) error on encode and
-  decode.
-- `"ebcdic"` (alias `"ibm-1047"`) - IBM Code Page 1047, the
-  modern Latin-1 EBCDIC variant. Narrow relevance but the
-  table loader's already in place.
-
-Codec name normalisation is case-insensitive and strips `-`,
-`_`, and spaces, so `"ISO-8859-1"`, `"iso88591"`, `"latin_1"`
-all resolve to `"latin-1"`. Format strings for `toText`/
-`fromText` stay case-sensitive (smaller set, no need).
+The long-tail single-byte codecs from the original spec
+(ISO-8859-{2..16}, Windows-{1250,1251,1253..1258}) are parked in
+[M24+](#m24---encoding-long-tail-codecs); the codec-table
+infrastructure handles them as table-plus-aliases rows when
+demand surfaces.
 
 See [libraries/encoding.md](libraries/encoding.md) for the
 reference and `examples/encoding.j` for a golden walkthrough.
@@ -1317,6 +1296,75 @@ M16.0 `spawn` rather than duplicating each call as
 Regular expressions over `string`. Large standalone milestone;
 pure string processing, no other dependencies.
 
+## M16.4 - `testing` (system-library primitives)
+
+Irreducible system-side surface a Jennifer-coded test framework
+needs: a run-by-name primitive, a per-process result
+accumulator, and a format dispatcher for human-readable / TAP /
+JUnit-XML output. The `.j` half (assertion vocabulary, suite
+organisation, CLI filtering) ships in M18.x as a separate
+sub-milestone built on top of these primitives - this layer is
+the minimum that has to live in the interpreter.
+
+**Why a system library at all.** A pure `.j` test runner would
+have to take "the test body" as a value and call it. Jennifer
+has no function references / first-class methods today, so a
+`.j` runner can't say `testing.run("myTest", myTest)`. The
+interpreter already does method-name lookup at call sites for
+`prefix.fn()`; this milestone exposes that lookup as one
+builtin so a Jennifer-coded module can dispatch user methods by
+name without each runner reinventing the indirection.
+
+**Surface.**
+
+- `def struct testing.Result { name as string, ms as int,
+  passed as bool, errorKind as string, errorMessage as string,
+  file as string, line as int, col as int };` - one entry
+  per test run. An empty `errorKind` denotes a pass; on
+  failure the fields mirror the auto-hoisted `Error` struct
+  (M13.2) so the failure positions are usable.
+- `testing.run(name as string) -> testing.Result` - looks up
+  the named top-level method, calls it inside an implicit
+  `try { ... } catch (e) { ... }`. Times the run via the
+  `time` library (M15.5). If the call throws an `Error` the
+  result carries its fields. An `exit` inside the test is
+  also captured here - this is the one place in the language
+  where `exit` is interceptable, the test-runner exception
+  (cleanly scoped: the runner sees it as a special failure,
+  but it does not propagate to the surrounding program).
+  Appended to the per-process accumulator.
+- `testing.results() -> list of testing.Result` - read the
+  accumulator (returns a copy).
+- `testing.reset() -> null` - clear the accumulator between
+  independent runs.
+- `testing.report(results, format as string) -> string` -
+  codec-table dispatch matching the
+  [`encoding.toText`](#m157---encoding) shape:
+  - `"text"` - human terminal output: pass / fail per test,
+    failure context, totals, timings.
+  - `"tap"` - Test Anything Protocol v14, machine-readable,
+    works with `prove` and most CI harnesses.
+  - `"junit"` - JUnit XML, the ubiquitous CI input format.
+
+  Format strings stay case-sensitive (small set), matching
+  the M15.7 precedent.
+
+**Subprocess isolation deferred.** A runaway `exit` or
+infinite loop in one test would in principle kill the in-process
+runner; in practice the `exit` capture above plus a future
+`--isolated` flag (re-invoking `jennifer run testfile.j
+--testing-single name` per test via M15.3 `os.spawn`)
+gives complete isolation when the user opts in. The building
+blocks ship already; the runner CLI wiring lives with the
+`.j` module's CLI surface in M18.x.
+
+**Dependencies:** M13.2 (`try`/`catch`/`throw` + Error struct),
+M15.5 (`time` for run duration), M13.1 structs, M15.2
+library-provided namespaced struct types.
+
+**See also:** the M18.5 `testing` module (Jennifer-coded
+assertions and suite driver built on these primitives).
+
 ---
 
 **Phase D: higher-level and Jennifer-coded libraries (M17-M20).**
@@ -1438,7 +1486,25 @@ Sub-milestones in priority order:
 - **M18.2 - `http`** (client) - atop `net`.
 - **M18.3 - `json`** - data interchange ubiquity.
 - **M18.4 - `csv`** - simple, useful early.
-- **M18.5 - `yaml`, `xml`, `markdown`, `pretty`** - one or more
+- **M18.5 - `testing`** - the Jennifer-coded half of the test
+  framework, on top of the M16.4 primitives. Assertion
+  vocabulary built on `throw` so each mismatch produces an
+  `Error` the M16.4 runner catches uniformly:
+  `assertEqual`, `assertNotEqual`, `assertTrue` / `assertFalse`,
+  `assertContains` (substring, list element, map key), and
+  `assertThrows(name, kind)` that runs another method by name
+  and asserts it throws an Error of the given kind. Suite
+  driver: pass a list of test-method names, the module calls
+  `testing.run` for each, looks up `setUp` / `tearDown` by
+  convention if present, and finishes by calling
+  `testing.report` against the chosen format. CLI surface:
+  `--filter pattern` to run a subset, `--format text|tap|junit`
+  for the report shape, `--isolated` to opt into the
+  per-test-subprocess mode (M15.3 `os.spawn` + the M16.4
+  `--testing-single` flag). The cycle is closed: programs
+  written against `testing.j` can be tested in turn by the
+  same framework.
+- **M18.6 - `yaml`, `xml`, `markdown`, `pretty`** - one or more
   sub-milestones depending on scope when planned.
 
 ## M19 - `crypto`
