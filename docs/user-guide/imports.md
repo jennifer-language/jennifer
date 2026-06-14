@@ -33,6 +33,8 @@ over string / list / map / bytes; no import needed.
 | `os`      | `use os;`      | `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`/`spawn`/`wait`/`poll`/`kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`                    | [libraries/os.md](../libraries/os.md)           |
 | `meta`    | `use meta;`    | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                                | [libraries/meta.md](../libraries/meta.md)       |
 | `time`    | `use time;`    | M15.5.1+.2: instants, durations, calendar accessors, fixed-offset zones, strftime format/parse, ISO; structs `time.Time`, `time.Duration`, `time.Zone`; constant `time.UTC`                                                       | [libraries/time.md](../libraries/time.md)       |
+| `hash`    | `use hash;`    | M15.6: `hash.compute(b, algo)` for `"md5"`/`"sha1"`/`"sha256"`; streaming via `hash.stream`/`update`/`finalize`; struct `hash.Stream`                                                                                              | [libraries/hash.md](../libraries/hash.md)       |
+| `crc`     | `use crc;`     | M15.6: `crc.compute(b, algo)` for `"crc32"`/`"crc64"` (big-endian bytes); streaming via `crc.stream`/`update`/`finalize`; struct `crc.Stream`                                                                                     | [libraries/crc.md](../libraries/crc.md)         |
 
 See [libraries/index.md](../libraries/index.md) for a fuller catalog
 and the library-organization principles, or

@@ -29,6 +29,8 @@ restriction list; `jennifer-go` always supports the full surface.
 | `os`      | `use os;`      | [partial](../technical/tinygo.md#tinygo-restrictions) | `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS` | [os.md](os.md)           |
 | `meta`    | `use meta;`    | full                                                  | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                             | [meta.md](meta.md)       |
 | `time`    | `use time;`    | full                                                  | M15.5.1+.2: instant/duration arithmetic, calendar + Unix accessors, fixed-offset zones (`time.zone`, `time.inZone`, `time.UTC`, `time.local`), strftime format/parse, ISO round-trip; structs `time.Time`, `time.Duration`, `time.Zone` | [time.md](time.md)       |
+| `hash`    | `use hash;`    | full                                                  | M15.6: `hash.compute(b, algo)` + streaming (`hash.stream`/`update`/`finalize`) for `"md5"`, `"sha1"`, `"sha256"`; struct `hash.Stream`                                                                                              | [hash.md](hash.md)       |
+| `crc`     | `use crc;`     | full                                                  | M15.6: `crc.compute(b, algo)` + streaming (`crc.stream`/`update`/`finalize`) for `"crc32"`, `"crc64"`; output is big-endian bytes; struct `crc.Stream`                                                                              | [crc.md](crc.md)         |
 
 A quick taste:
 
@@ -82,6 +84,10 @@ large ones. The organizing principle, captured for future extensions:
   build-time / git-sha / GC stats) -> `meta`.
 - Time / instants / durations -> `time` (M15.5+; formatting,
   parsing, and fixed-offset zones land in M15.5.2).
+- Cryptographic-style digests (MD5, SHA-1, SHA-256) -> `hash`
+  (M15.6). Non-cryptographic checksums (CRC-32, CRC-64) -> `crc`
+  (M15.6). The split keeps "transport integrity" and "content
+  addressing" visible at the import line.
 - A genuinely new topic with **five or more** functions / constants
   -> a new library. Fewer than five names fold into the most-related
   existing library (the non-crypto random helpers were the first

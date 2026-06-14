@@ -13,6 +13,8 @@ import (
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/lexer"
 	"github.com/mplx/jennifer-lang/internal/lib/convert"
+	crclib "github.com/mplx/jennifer-lang/internal/lib/crc"
+	hashlib "github.com/mplx/jennifer-lang/internal/lib/hash"
 	iolib "github.com/mplx/jennifer-lang/internal/lib/io"
 	listslib "github.com/mplx/jennifer-lang/internal/lib/lists"
 	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
@@ -153,6 +155,8 @@ func runProgramOutput(path, src string) (string, error) {
 	oslib.Install(in)
 	metalib.Install(in)
 	timelib.Install(in)
+	hashlib.Install(in)
+	crclib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return "", err
 	}

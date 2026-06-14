@@ -861,41 +861,45 @@ binary comparison.
 
 ## M15.6 - `hash` and `crc`
 
-Common digests over `bytes` (MD5, SHA-1, SHA-256, CRC32, CRC64).
-Pure compute, no external dependencies. Crypto-relevant primitives
-that don't require key material live here; key-based crypto goes
-in M19.
+**Status:** done. Shipped two opt-in libraries: `hash` for
+cryptographic-style digests (MD5, SHA-1, SHA-256) and `crc` for
+non-cryptographic checksums (CRC-32 IEEE, CRC-64 with Go's
+`crc64.ECMA` polynomial). Output is raw `bytes` (4 / 8 bytes for
+CRC in big-endian; natural width for hash digests). Users
+hex/base64-encode through `encoding` (M15.7) when they need a
+string representation. The library split keeps "transport
+integrity" (CRC) vs "content addressing" (cryptographic hash)
+visible at the import line and matches Go's `crypto/*` vs
+`hash/crc*` arrangement.
 
-**One-shot API.** Whole-input digests for the common case where
-the data fits in memory:
+**Codec-table shape.** The original spec called for one verb per
+algorithm (`hash.md5`, `hash.sha256`, `crc.crc32`, ...). That
+conflicts with Jennifer's letters-only identifier rule (digits
+aren't allowed in method names), so each library ships one verb
+per category with the algorithm passed as a string. The shape
+mirrors `convert.bytesFromString(s, "utf-8")` and the planned
+`encoding.encode(s, codec)`:
 
-- `hash.md5($bytes) -> bytes`, `hash.sha1($bytes) -> bytes`,
-  `hash.sha256($bytes) -> bytes`, `crc.crc32($bytes) -> bytes`,
-  `crc.crc64($bytes) -> bytes`. Output is the raw digest as
-  `bytes` - users hex/base64-encode it through `encoding` when
-  they need a string representation.
-
-**Streaming API.** For inputs larger than memory (files,
-streams), one primitive per algorithm:
-
-- `hash.streamMd5() -> hash.Stream`, `hash.streamSha256()`,
-  `crc.streamCrc32()`, ... - each returns an opaque stream
-  handle (struct from M13.1).
-- `hash.update($stream, $bytes)` feeds the next chunk.
-- `hash.finalize($stream) -> bytes` returns the final digest;
-  the stream is consumed and further `update` calls error.
-- File hashing is the documented three-line idiom: open the
-  file via `fs`, read chunks, feed to a stream, finalize. The
-  `hash` library does *not* ship a `hash.md5File(path)`
-  convenience - that would pull `fs` into the dependency
-  graph and create a parallel API for what the streaming
-  primitive already does.
+- `hash.compute($bytes, algo) -> bytes` for `"md5"` / `"sha1"`
+  / `"sha256"`.
+- `crc.compute($bytes, algo) -> bytes` for `"crc32"` / `"crc64"`.
+- `hash.stream(algo) -> hash.Stream`, `hash.update($s, $bytes)`,
+  `hash.finalize($s) -> bytes`. Same shape for `crc.*`.
+- Streaming uses the integer-handle pattern from M15.3
+  (`oslib.Process`): Jennifer sees an opaque struct with one
+  `id as int` field; the live Go `hash.Hash` state lives in a
+  package-scope map and is removed on `finalize`. Re-using a
+  finalized handle is a positioned runtime error.
+- Unknown algorithm names error positionally with the supported
+  set listed.
 
 **No convenience wrappers** (`hash.md5String($s)`,
-`hash.md5Hex($bytes)`, ...). Stance #1 "one way per thing":
-strings go through `convert.bytesFromString` first, hex
-encoding goes through `encoding.hex` afterwards. The composition
-reads at the call site instead of multiplying out the verb names.
+`hash.computeHex($bytes, algo)`, ...). Stance #1 "one way per
+thing": strings go through `convert.bytesFromString` first, hex
+encoding goes through `encoding.hex` (M15.7) afterwards. Until
+that lands, the example
+[`examples/hash.j`](../examples/hash.j) carries a tiny inline
+`bytesToHex` helper for printable golden output.
 
 **Struct hashing is deferred.** Hashing a struct requires a
 stable byte serialization (field order, padding, null handling)
