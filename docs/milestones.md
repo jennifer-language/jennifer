@@ -637,374 +637,222 @@ See:
 
 ---
 
-**Phase B: foundational libraries (M15.x).** Small, frequently-used
-libraries grouped under M15 with sub-numbering. Most M15.x slots
-ship a new library independently; the leading M15.0 slot is the
-"wrap-up of existing libraries" - small additions to the
-M8 / M9 / M10 libraries that depend on something the language
-gained in M10-M14 (random helpers, structs, bytes, etc.). Each
-extension picks the existing library that's already its natural
-home rather than getting a tiny library of its own.
+**Phase B: foundational libraries (M15.x).** Small,
+frequently-used libraries grouped under M15 with sub-numbering.
+The leading M15.0 slot is the "wrap-up of existing libraries"
+(extensions to M8 / M9 / M10 libraries that depend on language
+features added since); later slots ship a new library each.
+M15.8 closes the phase by making the result installable before
+Phase C starts adding I/O on top.
 
-## M15.0 - existing-library extensions
+## M15 - foundational libraries + first public release
 
-**Status:** done.
+**Status:** done. All nine sub-milestones shipped. Three are
+language work (M15.2, M15.4), the rest are library / tooling /
+release work. Two recurring patterns surfaced in the shipped
+APIs and are worth remembering:
+- **Codec-table shape** (algorithm/format/codec passed as a
+  string argument). Used by `hash.compute(b, algo)`,
+  `crc.compute(b, algo)`, `encoding.encode(s, codec)`,
+  `encoding.toText(b, format)`. Originally adopted because
+  Jennifer's letters-only identifier rule rejects digits in
+  method names (so `hash.md5(...)` won't parse), but it also
+  honours stance #1 by collapsing parallel verbs into one.
+- **Integer-handle struct for opaque resources** (M15.2's
+  namespaced-struct mechanism + a single `id as int` field
+  indexing into a Go-side map). Used by `os.Process`,
+  `hash.Stream`, `crc.Stream`.
 
-Small additions to the M8 / M9 / M10 libraries that depend on
-features the language picked up after those libraries shipped.
+### M15.0 - existing-library extensions
 
-- `lists.shuffle(xs) -> list` - Durstenfeld Fisher-Yates;
-  non-mutating; respects `math.randSeed` for deterministic
-  reruns. No `use math;` needed in the calling program (Go-side
-  dependency only).
-- `lists.range(start, end[, step]) -> list of int` - half-open
-  (end exclusive). Same shape as `lists.slice` /
-  `strings.substring`; gives index alignment with `$xs[i]` and
-  clean composability. Step must match direction; single-arg
-  form deliberately omitted (stance #2).
+**Done.** Two extensions to the M9 `lists` library that needed
+post-M14 language features: `lists.shuffle(xs)` (Fisher-Yates,
+respects `math.randSeed`) and `lists.range(start, end[, step])`
+(half-open, deliberate single-arg omission per stance #2). See
+[libraries/lists.md](libraries/lists.md#shuffle) and
+[technical/design-decisions.md > Half-open ranges](technical/design-decisions.md#half-open-ranges)
+for the half-vs-closed-range rationale.
 
-Further extensions can land here as the language gains features
-that unblock library additions.
+### M15.1 - `os` + `meta` (process metadata)
 
-See:
-- [libraries/lists.md](libraries/lists.md) - Shuffle and Range
-  sections (worked examples, index-alignment and composability
-  properties).
-- [technical/design-decisions.md](technical/design-decisions.md#half-open-ranges) -
-  why `lists.range` is half-open even though Jennifer's
-  English-reading stance would argue for closed; the meta-rule
-  for future tie-breakers between prose-friendly and
-  operation-friendly forms.
-- `examples/showcase.j` `=== lists ===` section exercises both
-  builtins, including the partition-and-reassemble
-  composability demo.
+**Done.** Reshapes the M8-era `os` surface around one rule:
+immutable per-run host facts are uppercase constants
+(`PLATFORM`, `ARCH`, `EOL`, `DIRSEP`, `PATHSEP`, `ARGS`),
+operations are functions (`getEnv`, `hasFlag`, `flag`). Drops
+the `JENNIFER_` prefix that only made sense for bare-global use,
+and introduces a new `meta` library for interpreter-self-identity
+constants (`VERSION`, `BUILD`). CLI forwards trailing args to
+`os.ARGS` (script path at index 0). Breaking renames
+(`JENNIFER_VERSION` -> `meta.VERSION`, `os.platform()` ->
+`os.PLATFORM`, `os.JENNIFER_OS` -> `os.PLATFORM`,
+`os.JENNIFER_LF` -> `os.EOL`); old names now produce plain
+"undefined" errors with no rename-hint. See
+[libraries/os.md](libraries/os.md) and
+[libraries/meta.md](libraries/meta.md).
 
-## M15.1 - `os` + `meta` (process metadata)
+### M15.2 - Language: library-provided namespaced struct types
 
-**Status:** done (metadata piece). External-program execution
-moved to M15.3, after the M15.2 language work that unblocks
-library-provided namespaced struct types.
+**Done.** Language work slotted inside Phase B because the next
+wave of libraries (M15.3 `os.{Result,Process}`, M15.5 `time.*`,
+M15.6 `hash.Stream`/`crc.Stream`, future M16.1 `fs`, M16.2 `net`)
+all need their own struct types and M13.1 only handled bare-IDENT
+names. Adds `def x as lib.Name;` type syntax,
+`lib.Name{field: ...}` literals, and the Go-side
+`Interpreter.RegisterNamespacedStruct` API. Reuses M13.1's value
+semantics, deep-`const`, and strict-boundary machinery; only the
+resolution path differs. User code can't register structs (Go-side
+only); methods on structs and inheritance stay out of scope. See
+[technical/interpreter.md > Library-provided namespaced structs](technical/interpreter.md#library-provided-namespaced-structs-m152).
 
-Reshapes the M8-era `os` surface around one rule (**immutable
-per-run host facts are uppercase constants; operations that take
-arguments are functions**), drops the `JENNIFER_` prefix which
-only made sense for bare-global use, and introduces a new
-`meta` library for interpreter-self-identity facts so `core`
-can return to its strict polymorphic-primitives charter.
+### M15.3 - `os` external-program execution
 
-- `os` constants: `PLATFORM`, `ARCH`, `EOL`, `DIRSEP`, `PATHSEP`,
-  `ARGS`. Functions: `getEnv`, `hasFlag`, `flag` (exact-match
-  flag inspection on `ARGS`; real CLI parsing belongs to a
-  future `cli` library).
-- `meta` constants: `VERSION`, `BUILD` (which Go variant compiled
-  the interpreter). Bends the 5+-name rule because
-  interpreter-self-identity has no other natural home.
-- CLI: `jennifer run <file.j> [user args...]` forwards trailing
-  args to the user program as `os.ARGS` (Python `sys.argv` /
-  Go `os.Args` convention; index 0 is the script path).
+**Done.** First library to consume the M15.2
+namespaced-struct mechanism. Surface: `os.Result {exitCode,
+stdout, stderr}` + `os.Process {pid}` as the public types;
+`os.run(argv) -> Result` blocking, `os.spawn(argv) -> Process`
+non-blocking, `os.wait/poll/kill(p)` for handle ops. `argv` is
+always `list of string` (no shell parsing; explicit
+`["sh", "-c", $cmd]` for that hop). Non-zero exit codes are
+values, not errors. **TinyGo limitation**: TinyGo's runtime
+doesn't implement `os/exec`, so the shipping `jennifer` binary
+returns a friendly "rebuild with `jennifer-go`" error instead of
+panicking - first place the two-binary story becomes
+user-visible. See
+[libraries/os.md > External programs](libraries/os.md#external-programs)
+and `examples/exec.j`.
 
-### Breaking changes
+### M15.4 - Language: `len` built-in, `core` removed
 
-| Pre-M15.1                  | M15.1                    | Migration                                |
-| -------------------------- | ------------------------ | ---------------------------------------- |
-| `JENNIFER_VERSION` (bare)  | `meta.VERSION`           | Add `use meta;`; rewrite all references. |
-| `os.platform()` (function) | `os.PLATFORM` (constant) | Drop the parens.                         |
-| `os.JENNIFER_OS`           | `os.PLATFORM`            | Same OS tag, new name.                   |
-| `os.JENNIFER_LF`           | `os.EOL`                 | Same line ending, new name.              |
+**Done.** Promoted `len(EXPR)` from the auto-loaded `core` library
+to a reserved keyword + language primary expression (polymorphic
+over string / list / map / bytes). Deleted `internal/lib/core/`
+entirely; `use core;` now returns a friendly migration error
+pointing at the built-in and at `meta.VERSION` / `meta.BUILD`.
+Stance #2 ("explicit over implicit") now applies uniformly: every
+library name lives behind a `use NAME;` prefix, no exceptions. See
+[technical/design-decisions.md > len is a language built-in](technical/design-decisions.md#len-is-a-language-built-in-not-a-library).
 
-The old names now error as plain "undefined name"; no
-rename-hint diagnostic ships in M15.1.
+### M15.5 - `time`
 
-See:
-- [libraries/os.md](libraries/os.md), [libraries/meta.md](libraries/meta.md) -
-  shipped surface, charter, and breaking-change rationale.
-- `examples/osinfo.j` and the `=== os ===` / `=== meta ===`
-  sections of `examples/showcase.j` exercise the renamed surface.
-
-## M15.2 - Language: library-provided namespaced struct types
-
-**Status:** done.
-
-A language milestone slotted inside Phase B because the next
-wave of libraries (M15.3 os execution, M15.5 time, M15.6 hash
-streaming, M16.1 fs, M16.2 net, M16.3 regex) all need their own
-struct types and the M13.1 mechanism only handles bare-IDENT
-names.
-
-- Type grammar extension: `def x as lib.Name;` parses; resolves
-  against the namespaced struct table at runtime.
-- Struct-literal extension: `lib.Name{ field: expr, ... }`
-  works in expression position with the same shape as the M13.1
-  bare form.
-- New Go-side API `Interpreter.RegisterNamespacedStruct(libName,
-  structName, fields)` parallel to `RegisterNamespaced` /
-  `RegisterNamespacedConst`. Active only after `use lib;`.
-- Aliasing (`use lib as l;`) works in both type and literal
-  position; values canonicalise to the underlying namespace so
-  equality stays consistent.
-- Field access, chained lvalues, value semantics, deep `const`,
-  strict-at-boundaries checks all reuse the M13.1 machinery -
-  only the type-resolution path differs.
-- User code may not register namespaced structs; the API is
-  Go-side only. Methods on structs and inheritance remain out
-  of scope.
-
-See:
-- [technical/grammar.md](technical/grammar.md) - extended
-  `structType` and `structLit` EBNF.
-- [technical/interpreter.md](technical/interpreter.md#library-provided-namespaced-structs-m152) -
-  `NSStructs` table, resolution path, alias canonicalisation.
-- `internal/interpreter/namespaced_struct_test.go` exercises
-  the surface via a synthetic `widgets` namespace.
-
-## M15.3 - `os` external-program execution
-
-**Status:** done.
-
-Lands after M15.2 so result and handle types ship as `os.Result`
-and `os.Process` cleanly. First library to use the M15.2
-namespaced-struct mechanism.
-
-- `os.Result {exitCode, stdout, stderr}` - what a command produced.
-- `os.Process {pid}` - opaque handle for an async child (other
-  fields are Go-side implementation detail).
-- `os.run(argv) -> os.Result` - blocking, captures streams.
-- `os.spawn(argv) -> os.Process` - non-blocking; background goroutine
-  records the result.
-- `os.wait(p) -> os.Result` - blocks until exit; idempotent.
-- `os.poll(p) -> bool` - non-blocking; true once `wait` would return
-  immediately.
-- `os.kill(p)` - sends SIGTERM. Signal variants out of scope.
-- `argv` is always a `list of string` (no shell parsing - explicit
-  `["sh", "-c", $cmd]` for the shell hop).
-- Non-zero exit codes are values, not errors. Only boundary
-  failures (program not found, fork/exec failure) raise positioned
-  runtime errors.
-- **TinyGo limitation.** TinyGo's runtime doesn't implement
-  `os/exec`; the shipping binary surfaces a friendly
-  "rebuild with the Go toolchain" error rather than the cryptic
-  TinyGo panic. First place Jennifer's two-binary story becomes
-  user-visible; future I/O work in `fs` / `net` will hit the same
-  boundary.
-
-See:
-- [libraries/os.md](libraries/os.md) - "External programs"
-  section: full surface, idempotency, no-shell-parsing rule,
-  non-zero-exit-is-a-value rule, stream-buffering caveat,
-  TinyGo limitation.
-- `examples/exec.j` - walkthrough of all five functions
-  (not part of the golden test suite; deterministic output).
-
-## M15.4 - Language: `len` built-in, `core` removed
-
-**Status:** done. Promoted `len(EXPR)` from the auto-loaded `core`
-library to a reserved keyword + language primary expression
-(polymorphic over string / list / map / bytes). Deleted
-`internal/lib/core/` entirely; `use core;` now returns a friendly
-migration error pointing at the built-in and at `meta.VERSION` /
-`meta.BUILD`. Stance #2 ("explicit over implicit") now applies
-uniformly: every library name lives behind a `use NAME;` prefix,
-no exceptions. `RegisterGlobal` / `RegisterGlobalConst` stay as
-exported API with no in-tree callers (cleanup deferred). See
-[technical/design-decisions.md](technical/design-decisions.md#len-is-a-language-built-in-not-a-library)
-for the rationale and
-[technical/grammar.md](technical/grammar.md) for the `lenExpr`
-primary.
-
-## M15.5 - `time`
-
-**Status:** done. One opt-in library covering instants, durations,
+**Done.** One opt-in library spanning instants, durations,
 fixed-offset zones, strftime format/parse, and ISO 8601
-round-trip. Three namespaced structs anchor the surface -
-`time.Time {nanos, offset}`, `time.Duration {nanos}`, and
-`time.Zone {offset, name}` - with `time.Time` fields documented as
-private API and `time.Zone` fields public so the M18.4
-`timezones.j` companion can construct them. Granularity (date-only
-vs time-of-day-only) is a property of formatting, not of the value
-type. Unix timestamps are a constructor / accessor pair, not a
-separate type. IANA names and DST stay out of the core library
-(deferred to M18.4).
+round-trip. Three namespaced structs: `time.Time {nanos, offset}`
+(fields private API), `time.Duration {nanos}`, and
+`time.Zone {offset, name}` (fields public, so the M18.4
+`timezones.j` companion can build them). Granularity (date-only
+vs time-of-day-only) is a property of formatting, not the value
+type. Unix timestamps are constructor / accessor pairs, not a
+separate type. IANA names and DST are deferred to M18.4. Three
+sub-milestones: **M15.5.1** core type + Unix + calendar + 1-based
+ISO weekday + arithmetic / comparison; **M15.5.2** strftime
+format/parse (chosen over Go's reference-time style for
+familiarity; v1 verbs `%Y %m %d %H %M %S %z %a %A %b %B %j %u
+%%`) + `time.zone(offset, name)` + `time.inZone` + the `time.UTC`
+constant coexisting with the `time.utc()` function via
+case-sensitive lookup + `time.iso` / `time.fromIso` RFC 3339
+round-trip; **M15.5.3** the `examples/benchmark.j` side-by-side
+TinyGo-vs-Go workload suite (eight workloads; the original spec's
+"Sieve of Eratosthenes" became trial-division because Jennifer's
+value-semantic list mutation turns the sieve into O(N^2)). See
+[libraries/time.md](libraries/time.md),
+`examples/time{,-format,benchmark}.j`.
 
-- **M15.5.1 - core type, arithmetic, Unix.** Constructors
-  (`now`/`utc`/`fromUnix{,Millis,Nanos}`/`from{Seconds,...}`),
-  Unix + calendar accessors (ISO 8601 weekday Monday=1 ...
-  Sunday=7), duration accessors, arithmetic (`add`/`sub`),
-  comparison on the underlying UTC instant
-  (`before`/`after`/`equal`). Tests run against a Go-level
-  `nowFunc` package var; user-level clock override deferred.
-- **M15.5.2 - formatting, parsing, fixed-offset zones.**
-  `time.zone(offset, name)` (|offset| capped at +/- 26h),
-  `time.inZone($t, $z)` preserves the UTC instant,
-  `time.local()` and the `time.UTC` constant (coexists with the
-  M15.5.1 `time.utc()` function thanks to case-sensitive
-  namespace lookup). `time.format` / `time.parse` use a
-  strftime layout (chosen over Go's reference-time style for
-  familiarity); v1 verbs `%Y %m %d %H %M %S %z %a %A %b %B %j
-  %u %%`, with `%j`/`%u` format-only and English-only
-  month/weekday names. `time.iso` / `time.fromIso` round-trip
-  RFC 3339 with optional fractional seconds.
-- **M15.5.3 - `examples/benchmark.j`.** Eight-workload
-  side-by-side suite (fib, trial-division primes, Newton's
-  iteration, Monte-Carlo pi, list copy chain, struct list,
-  `strings.join`, map churn) for comparing `jennifer` (TinyGo)
-  vs `jennifer-go` (Go). Timing-dependent so it's not
-  golden-tested; `TestFmtPreservesRuntimeBehavior` has an
-  explicit skip entry. The original spec said "Sieve of
-  Eratosthenes" but value-semantic list mutation makes the
-  sieve's write loop O(N^2); trial division stays on scalars
-  and still stresses the dispatch loop.
+### M15.6 - `hash` and `crc`
 
-See [libraries/time.md](libraries/time.md) for the reference,
-`examples/time.j` and `examples/time-format.j` for golden
-walkthroughs, and `examples/benchmark.j` for the side-by-side
-binary comparison.
-
-## M15.6 - `hash` and `crc`
-
-**Status:** done. Two opt-in libraries with parallel surfaces:
-`hash` for cryptographic-style digests (`"md5"`, `"sha1"`,
-`"sha256"`) and `crc` for non-cryptographic checksums (`"crc32"`
-IEEE, `"crc64"` with Go's `crc64.ECMA` polynomial). Output is
-raw `bytes` (big-endian and 4 / 8 bytes for CRC, natural width
-for hash digests). The library split makes "transport integrity"
-vs "content addressing" visible at the import line and matches
-Go's `crypto/*` vs `hash/crc*` arrangement. No convenience
-wrappers (`hash.md5String`, `hash.computeHex`, ...); strings go
-through `convert.bytesFromString` first, hex encoding through
-`encoding.hex` (M15.7).
-
-Both libraries ship the same codec-table shape - chosen over
-the spec's `hash.md5(...)` / `crc.crc32(...)` per-algorithm
-naming because Jennifer's letters-only identifier rule rejects
-digits in method names:
-
-- `hash.compute($bytes, algo) -> bytes`,
-  `crc.compute($bytes, algo) -> bytes`.
-- Streaming: `hash.stream(algo) / crc.stream(algo) -> ...Stream`,
-  then `update($s, $bytes)` and `finalize($s) -> bytes`.
-  `finalize` consumes the handle.
-
-Streaming reuses the integer-handle pattern from
-[`oslib.Process`](#m153---os-external-program-execution):
-Jennifer sees an opaque struct with one `id as int` field; the
-live Go `hash.Hash` state lives in a package-scope map and
-gets removed on `finalize`. Reusing a finalized handle is a
-positioned runtime error.
-
-Struct hashing is deferred - it needs a stable byte serializer
-(field order, padding, null handling) which is its own design
-problem. Users serialize via the relevant library (`json`,
-`csv`, future `cbor`) and hash the bytes; `hash` has no
-opinion on struct layout. See
+**Done.** Two opt-in libraries with parallel surfaces: `hash`
+for cryptographic-style digests (`"md5"`, `"sha1"`, `"sha256"`),
+`crc` for non-cryptographic checksums (`"crc32"` IEEE, `"crc64"`
+with Go's `crc64.ECMA` polynomial). Output is raw `bytes`
+(big-endian 4 / 8 bytes for CRC, natural width for hash). The
+split keeps "transport integrity" vs "content addressing"
+visible at the import line and matches Go's `crypto/*` vs
+`hash/crc*` arrangement. Both libraries ship the codec-table
+shape: `compute(b, algo)` one-shot, `stream(algo)` +
+`update($s, $b)` + `finalize($s) -> bytes` for chunked input.
+Streaming reuses the
+[integer-handle pattern from `os.Process`](#m153---os-external-program-execution).
+No convenience wrappers like `hash.md5String` or `hash.computeHex`
+(stance #1; users compose `convert.bytesFromString` and
+`encoding.toText`). Struct hashing deferred (needs stable byte
+serialization, its own design problem). See
 [libraries/hash.md](libraries/hash.md),
-[libraries/crc.md](libraries/crc.md), and `examples/hash.j` for
-the reference.
+[libraries/crc.md](libraries/crc.md), `examples/hash.j`.
 
-## M15.7 - `encoding`
+### M15.7 - `encoding`
 
-**Status:** done. Three-part surface: introspection
+**Done.** Three-part surface: introspection
 (`isAscii`/`lenBytes`/`lenRunes`), binary-to-text
 (`toText`/`fromText` for `"hex"`/`"base64"`/`"base64-url"`), and
 character codecs (`encode`/`decode`/`codecs`). The cross-kind
 UTF-8 pair stays in `convert` (M12); `encoding` owns the
 table-based codec proliferation. Four codecs ship: `"ascii"`,
 `"latin-1"` (alias `"iso-8859-1"`), `"windows-1252"` (alias
-`"cp1252"`), `"ebcdic"` (alias `"ibm-1047"`, IBM Code Page 1047).
+`"cp1252"`), `"ebcdic"` (alias `"ibm-1047"`). The spec's per-format
+verbs (`encoding.hex`, `encoding.base64`, ...) consolidated into
+the codec-table pair to dodge the same digit-in-identifier rule
+M15.6 hit. Codec names normalise case-insensitively (strip
+`-`/`_`/spaces); format strings stay case-sensitive (smaller set).
+Windows-1252's five canonically-undefined positions (0x81, 0x8D,
+0x8F, 0x90, 0x9D) reject symmetrically on encode and decode.
+Long-tail single-byte codecs (ISO-8859-{2..16},
+Windows-{1250,1251,1253..1258}) parked in
+[M24+](#m24---encoding-long-tail-codecs). See
+[libraries/encoding.md](libraries/encoding.md),
+`examples/encoding.j`.
 
-The spec's per-format verbs (`encoding.hex`, `encoding.base64`,
-...) hit the same letters-only identifier blocker M15.6 saw with
-`hash.md5`; the shipped API consolidates them into a single
-codec-table pair `toText($bytes, format)` /
-`fromText($string, format)`. Stance #1 also gets to apply: one
-verb pair instead of four. Codec names normalise
-case-insensitively and strip `-`/`_`/spaces (`"ISO-8859-1"` =
-`"iso88591"` = `"latin_1"` = `"latin-1"`); binary-to-text format
-strings stay case-sensitive (smaller set, no need to normalise).
+### M15.8 - distribution + first public release
 
-Windows-1252 has five canonically-undefined positions (0x81,
-0x8D, 0x8F, 0x90, 0x9D) the table stores as `utf8.RuneError` so
-encode and decode both reject them symmetrically.
+**Done.** Packaging / CI / release-engineering only; no
+`.j`-source language change. Four sub-phases:
 
-The long-tail single-byte codecs from the original spec
-(ISO-8859-{2..16}, Windows-{1250,1251,1253..1258}) are parked in
-[M24+](#m24---encoding-long-tail-codecs); the codec-table
-infrastructure handles them as table-plus-aliases rows when
-demand surfaces.
-
-See [libraries/encoding.md](libraries/encoding.md) for the
-reference and `examples/encoding.j` for a golden walkthrough.
-
-## M15.8 - distribution + first public release
-
-**Status:** done. Packaging / CI / release-engineering milestone -
-no `.j`-source language change. Phase B's library batch becomes
-something users can actually install before Phase C starts adding
-I/O on top. Shipped in four phases:
-
-- **CI** (`.github/workflows/test.yml`, `release.yml`). `test.yml`
-  gates every PR with `go vet` + `gofmt` + `go test ./...` +
-  `make build` + a per-binary smoke run + a repository-wide
-  em-dash scan. `release.yml` triggers on bare-semver tags
-  matching `[0-9]*.[0-9]*.[0-9]*` (project convention: no `v`
-  prefix), cross-compiles both binaries for `linux/{amd64,arm64}`
-  from a single `ubuntu-latest` runner, smoke-tests non-native
-  artefacts via QEMU user-mode, runs `examples/benchmark.j` on
-  the native entry so the release notes carry fresh numbers, and
-  publishes a draft GitHub Release with every artefact attached.
-- **Packaging** under `packaging/{debian,arch,mime,man}/`. `.deb`
-  via `scripts/build-deb.sh` (assembles the FHS-correct tree from
-  already-built binaries: `/usr/bin/jennifer{,-go}`, gzipped man
-  pages, the shared `text/x-jennifer` MIME definition,
-  `update-mime-database` postinst/postrm hook); AUR
-  `PKGBUILD-bin` (downloads the release tarball) and
-  `PKGBUILD-git` (clones + `make build` + `go test ./...` on each
-  install); a shared `jennifer.install` hook for MIME refresh on
-  Arch. The `pacman` standalone artefact from the original spec
-  was dropped - `PKGBUILD-bin` + `makepkg` covers the same need
-  without a separate format. `release.yml` builds the per-arch
-  `.deb` and generates a pre-filled `PKGBUILD-bin` (real `pkgver`
-  + real `sha256sums_*` from the just-built sidecar `.sha256`
-  files) as a release asset so the AUR maintainer publishes via
-  `curl` + `git push` without hand-editing.
-- **Docs site** via mdBook (`book.toml` at repo root, `src =
-  "docs"`, navy theme, search enabled, Rust-playground hooks
-  disabled). `docs/SUMMARY.md` maps the existing tree into 5
-  parts (Intro / Getting started / Language reference /
-  Libraries / Technical reference / Project) covering 39 chapter
-  references; `docs/introduction.md` is the docs-site landing
-  page (separate from README which stays GitHub-repo-focused).
-  `.github/workflows/docs.yml` builds with a pinned mdBook 0.5.3
-  via direct download from `rust-lang/mdBook` releases (no
-  third-party action) and publishes to GitHub Pages on every
-  push to `main`.
+- **CI** (`.github/workflows/test.yml`, `release.yml`). PR gate
+  runs `go vet` + `gofmt` + `go test ./...` + `make build` +
+  per-binary smoke run + repo-wide em-dash scan. Release
+  triggers on bare-semver tags (`[0-9]*.[0-9]*.[0-9]*`, no `v`
+  prefix per project convention), cross-compiles both binaries
+  for `linux/{amd64,arm64}` from one runner, QEMU-smoke-tests
+  the non-native arch, runs the benchmark on amd64 so release
+  notes carry fresh numbers, publishes a draft Release.
+- **Packaging** under `packaging/{debian,arch,mime,man}/`.
+  `scripts/build-deb.sh` produces the `.deb` (binaries +
+  gzipped man pages + shared `text/x-jennifer` MIME definition
+  + `update-mime-database` hooks). AUR ships `PKGBUILD-bin`
+  (release tarball) and `PKGBUILD-git` (source-tracking) with
+  a shared `.install` hook. Release pipeline auto-fills
+  `PKGBUILD-bin` (real `pkgver` + real `sha256sums_*`) as a
+  release asset so the AUR push is a one-step `curl`. The
+  `.pacman` standalone artefact from the original spec was
+  dropped - `PKGBUILD-bin` + `makepkg` covers the same need.
+- **Docs site** via mdBook 0.5.3 (pinned, fetched via direct
+  curl from `rust-lang/mdBook` releases - no third-party
+  action). `book.toml` at repo root, `src = "docs"`,
+  `docs/SUMMARY.md` maps the existing tree into five parts,
+  `docs/introduction.md` is the docs-site landing
+  (README stays GitHub-repo-focused). `.github/workflows/docs.yml`
+  publishes to GitHub Pages on every push to `main`.
 - **User-facing install docs**. README gained "Which binary?" +
-  "Install" sections with one canonical command per path
-  (`dpkg -i` / `yay -S jennifer-bin` / `yay -S jennifer-git` /
-  tarball / `make build`) and a link to the docs site.
-  `docs/user-guide/installing.md` restructured to put package
-  paths first with full checksumming + FHS layout details, with
-  build-from-source positioned as the developer path.
-  `RELEASE.md` at the repo root documents the steps CI genuinely
-  can't do (AUR SSH push, draft-to-published transition,
-  pre-tag readiness checks).
+  "Install" sections with one command per path. `installing.md`
+  restructured to put package paths first; build-from-source
+  positioned as the developer path. `RELEASE.md` at the repo
+  root documents the steps CI can't do (AUR SSH push,
+  draft-publish review, pre-tag readiness checks).
 
-**Project convention decisions worth keeping**:
-- **Bare semver tags** (`0.14.1`, no `v` prefix). All packaging
-  pipelines pass the tag straight through.
-- **No `LICENSE` file at repo root** in v1 - the LGPL-3.0 text
-  ships inline in `packaging/debian/copyright` (the form
-  distros actually consume) and the README points at
-  gnu.org's canonical URL. Adding a top-level `LICENSE` is a
-  one-line decision the maintainer can take any time.
+**Conventions established (worth keeping)**:
+
+- Bare semver tags (`0.14.1`, no `v` prefix); all pipelines pass
+  the tag straight through.
+- No top-level `LICENSE` file in v1 - the LGPL-3.0 text ships
+  inline in `packaging/debian/copyright` (the form distros
+  actually consume) + README links to gnu.org's canonical URL.
+
+**One-time manual setup** before the first push to `main`: in
+GitHub repo Settings -> Pages, set "Source" to "GitHub Actions"
+so `docs.yml` can deploy.
 
 **Stayed on the "Path to 1.0.0 distribution" parallel track**
 (post-M15.8 polish, not gated on this milestone): Homebrew tap,
-Snap, Nix flake, real apt repository, cross-build for
-macOS / Windows (waits on platform-portability work).
-
-**One-time manual setup** required before the first run: in repo
-Settings -> Pages, set "Source" to "GitHub Actions" so `docs.yml`
-can deploy.
+Snap, Nix flake, real apt repository, cross-build for macOS /
+Windows (waits on platform-portability work first).
 
 ---
 
