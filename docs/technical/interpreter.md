@@ -190,7 +190,7 @@ reference docs are split per library:
 
 - [libraries/io.md](../libraries/io.md) - `printf`, `sprintf`, format verbs
 - [libraries/convert.md](../libraries/convert.md) - `int`, `float`, `string`, `bool`, `typeOf`
-- [libraries/math.md](../libraries/math.md) - `abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `PI`, `E`
+- [libraries/math.md](../libraries/math.md) - `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`
 - [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`
 - [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`
 - [libraries/meta.md](../libraries/meta.md) - `meta.VERSION` (build version), `meta.BUILD` (toolchain)
@@ -234,10 +234,20 @@ racing the line editor for input.
 The no-shadowing check at hoist time uses the same lookup: a user method
 that collides with an imported library's builtin is rejected.
 
-Library-provided **constants** (like `math.PI`) are registered via
-`Interpreter.RegisterConst(lib, name, value)`. Lookup happens in
-`evalExpr`'s `ConstRefExpr` case: user env first, then library constants
-gated on the same `use`-check.
+User-defined **constants** (via `def const NAME as TYPE init EXPR;`)
+live in the same Environment as variables and resolve through
+`evalExpr`'s `ConstRefExpr` case (bare-identifier lookup). They
+participate in the no-shadowing rule like everything else.
+
+Library-provided constants (`math.PI`, `math.E`, `time.UTC`,
+`time.PROGRAM_START`, `os.PLATFORM`, ...) are namespaced and
+registered through `RegisterNamespacedConst`. They resolve
+through `QualifiedConstRefExpr` - see the "Namespaced libraries"
+subsection below. The pre-M10 `RegisterConst` flat-namespace
+constant API and the bare-IDENT `ConstRefExpr` fallback for
+library constants are no longer used by any shipping library; the
+fallback path remains in the interpreter as exported API surface
+pending a final cleanup pass.
 
 ### Namespaced libraries
 
@@ -306,9 +316,10 @@ the writer.
 
 **`internal/lib/math`**: `floor`/`ceil`/`round` accept int (identity) or
 float and return `int`. `round` uses Go's `math.Round` (half away from
-zero). `PI` and `E` are registered via `RegisterConst`; the `ConstRefExpr`
-lookup falls back to library constants when the user env doesn't have the
-name, gated on the owning library being `use`d.
+zero). `math.PI` and `math.E` are registered via
+`RegisterNamespacedConst` and resolved through `QualifiedConstRefExpr`
+like every other namespaced constant (M10+); the namespace prefix is
+reserved for the rest of the program once `use math;` runs.
 
 **`internal/lib/convert`**: parser side - the `typeCall` production lets
 `int(...)`, `float(...)`, `string(...)`, `bool(...)` parse despite their

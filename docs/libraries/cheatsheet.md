@@ -132,20 +132,20 @@ flat lookup view, not authoritative.
 
 ## Constants
 
-| Name           | Library         | Type           | Value                                                             |
-| -------------- | --------------- | -------------- | ----------------------------------------------------------------- |
-| `E`            | [math](math.md) | `float`        | Euler's number, 2.718281828459045.                                |
-| `meta.BUILD`   | [meta](meta.md) | `string`       | Which Go toolchain compiled the interpreter: `"go"` / `"tinygo"`. |
-| `meta.VERSION` | [meta](meta.md) | `string`       | The interpreter's build version (e.g. `"0.14.0"`).                |
-| `os.ARCH`      | [os](os.md)     | `string`       | CPU architecture: `"amd64"`, `"arm64"`, `"wasm"`, ...             |
-| `os.ARGS`      | [os](os.md)     | list of string | Argv. Index 0 is the script path, the rest are user args.         |
-| `os.DIRSEP`    | [os](os.md)     | `string`       | Path-component separator: `"/"` Unix, `"\\"` Windows.             |
-| `os.EOL`       | [os](os.md)     | `string`       | Platform line ending. `"\n"` Unix-likes, `"\r\n"` Windows.        |
-| `os.PATHSEP`   | [os](os.md)     | `string`       | PATH-list separator: `":"` Unix, `";"` Windows.                   |
-| `os.PLATFORM`  | [os](os.md)     | `string`       | OS tag: `"linux"`, `"darwin"`, `"windows"`, ...                   |
-| `PI`           | [math](math.md) | `float`        | π, 3.141592653589793.                                             |
-| `time.PROGRAM_START` | [time](time.md) | `time.Time` | Captured the moment the time library installed; "since program launched" anchor. |
-| `time.UTC`     | [time](time.md) | `time.Zone`    | Canonical UTC: `Zone{offset: 0, name: "UTC"}`.                    |
+| Name                 | Library         | Type           | Value                                                                                            |
+| -------------------- | --------------- | -------------- | ------------------------------------------------------------------------------------------------ |
+| `math.E`             | [math](math.md) | `float`        | Euler's number, 2.718281828459045.                                                               |
+| `math.PI`            | [math](math.md) | `float`        | π, 3.141592653589793.                                                                            |
+| `meta.BUILD`         | [meta](meta.md) | `string`       | Which Go toolchain compiled the interpreter: `"go"` / `"tinygo"`.                                |
+| `meta.VERSION`       | [meta](meta.md) | `string`       | The interpreter's build version (e.g. `"0.14.0"`).                                               |
+| `os.ARCH`            | [os](os.md)     | `string`       | CPU architecture: `"amd64"`, `"arm64"`, `"wasm"`, ...                                            |
+| `os.ARGS`            | [os](os.md)     | list of string | Argv. Index 0 is the script path, the rest are user args.                                        |
+| `os.DIRSEP`          | [os](os.md)     | `string`       | Path-component separator: `"/"` Unix, `"\\"` Windows.                                            |
+| `os.EOL`             | [os](os.md)     | `string`       | Platform line ending. `"\n"` Unix-likes, `"\r\n"` Windows.                                       |
+| `os.PATHSEP`         | [os](os.md)     | `string`       | PATH-list separator: `":"` Unix, `";"` Windows.                                                  |
+| `os.PLATFORM`        | [os](os.md)     | `string`       | OS tag: `"linux"`, `"darwin"`, `"windows"`, ...                                                  |
+| `time.PROGRAM_START` | [time](time.md) | `time.Time`    | Captured the moment the time library installed; "since program launched" anchor.                 |
+| `time.UTC`           | [time](time.md) | `time.Zone`    | Canonical UTC: `Zone{offset: 0, name: "UTC"}`.                                                   |
 
 ## Type-conversion calls
 

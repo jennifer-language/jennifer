@@ -1,15 +1,15 @@
 # `math` - numeric functions and constants
 
 Enable with `use math;`. A small set of frequently-needed numeric functions
-plus the constants `PI` and `E`. The library is strict on undefined inputs -
-anything that would produce `NaN` or `Infinity` in IEEE arithmetic instead
-produces a positioned runtime error.
+plus the constants `math.PI` and `math.E`. The library is strict on undefined
+inputs - anything that would produce `NaN` or `Infinity` in IEEE arithmetic
+instead produces a positioned runtime error.
 
 ```jennifer
 use io;
 use math;
 
-io.printf("%f\n", PI);                    # 3.141592653589793
+io.printf("%f\n", math.PI);                    # 3.141592653589793
 io.printf("%d\n", math.abs(0 - 42));           # 42
 io.printf("%d\n", math.min(3, 7));             # 3
 io.printf("%f\n", math.sqrt(2));               # 1.4142135623730951
@@ -37,13 +37,15 @@ arguments return that type; any `float` involved produces a `float`.
 
 ## Constants
 
-| Name | Kind  | Value                |
-| ---- | ----- | -------------------- |
-| `PI` | float | 3.141592653589793... |
-| `E`  | float | 2.718281828459045... |
+| Name      | Kind  | Value                |
+| --------- | ----- | -------------------- |
+| `math.PI` | float | 3.141592653589793... |
+| `math.E`  | float | 2.718281828459045... |
 
-Constants are referenced as bare identifiers, like `def const` constants.
-They participate in the normal constant-lookup rules.
+Constants are referenced through the `math.` namespace prefix like
+every other library name (M10+); the bare identifiers `PI` and `E`
+are not in scope. With `use math as m;` the alias takes over
+(`m.PI`, `m.E`).
 
 ## Strictness
 

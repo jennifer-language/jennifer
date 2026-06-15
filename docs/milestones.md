@@ -1264,6 +1264,20 @@ blocks must not read from stdin while the REPL is interactive.
 - **M20 `httpd`** is the headline consumer. The accept loop
   becomes `while (true) { def conn init net.accept($listener); spawn { handle($conn); } }`.
 
+**Benchmark suite extension.** `examples/benchmark.j` is
+currently single-core only - `time` of the user/real columns
+under `tinygo` build sits within a few percent of each other
+(see [technical/tinygo.md > Single-binary benchmark
+results](technical/tinygo.md#single-binary-benchmark-results)).
+M16.0 ships with the suite extended so each existing workload
+has a multi-core counterpart that fans the same work across N
+`spawn`'d tasks and joins. The driver runs both single-core and
+multi-core variants side by side and shows the speedup ratio,
+so reviewers can see at a glance how much parallelism actually
+materialises for each workload shape (CPU-bound, allocation-
+heavy, IO-bound). This is the headline programmer-facing
+artifact for the milestone.
+
 See:
 - [user-guide/concurrency.md](user-guide/concurrency.md) (new
   doc at M16.0 implementation time) - the user-facing tour with
@@ -1364,6 +1378,172 @@ library-provided namespaced struct types.
 
 **See also:** the M18.5 `testing` module (Jennifer-coded
 assertions and suite driver built on these primitives).
+
+## M16.5 - Interpreter performance pass
+
+Closes the largest gaps the benchmark suite exposes
+(see [technical/tinygo.md > Single-binary benchmark
+results](technical/tinygo.md#single-binary-benchmark-results))
+before Phase D's Jennifer-coded libraries (json, csv, http,
+testing.j, ...) land on top. Those libraries are mostly tight
+parsing loops and recursive descent; landing M16.5 first means
+they ship at native-feeling speed instead of needing apology
+paragraphs in the per-library docs.
+
+**Where the cycles go today.** The numbers from
+`examples/benchmark.j` point at three distinct bottlenecks, each
+fixable independently:
+
+1. **Value-semantic copy-on-write on every compound write.**
+   `$xs[] = item`, `$xs[i] = v`, `$m[k] = v`, `$p.field = v` all
+   deep-copy the root binding before mutating. For a sequence of
+   N appends that's O(N^2) - the standout cost in
+   `struct list build+read` (10.7 s), `map insert+read` (9.8 s),
+   and `string join` (4.2 s) on TinyGo. CLAUDE.md note #10
+   already calls this out as the right cleanup.
+2. **Name-based variable resolution at every reference.** Each
+   `$n` reference walks the Environment chain by name; in a tight
+   loop touching `$n`, `$d`, `$count` the resolver re-traverses
+   the same chain on every iteration. Big tax on `primes up to
+   LIMIT` (44.9 s) and the rest of the compute-bound block.
+3. **Method-call frame churn.** Every call allocates a fresh
+   `Environment`, binds parameters one by one through map
+   operations, and pays the method-table lookup at the call
+   site. `fib(23)` shows up at 5.2x the standard-Go cost - the
+   recursion depth is small (~28 K calls), the body is trivial,
+   the gap is dispatch overhead.
+
+The user-visible behaviour stays unchanged. Value semantics still
+hold, just implemented without the literal whole-tree copy on
+every write. Lexical scoping still holds, just resolved at parse
+time. Methods still bind by name at the source level; the
+lookup is just done once.
+
+### M16.5.1 - Refcount-based copy-on-mutation for `Value`
+
+The biggest single win. Add a refcount to compound `Value`
+payloads (or to a shared wrapper around the underlying slice /
+map / struct-fields backing store). On assignment / parameter
+binding, bump the refcount instead of deep-copying. On mutation
+(`$xs[] = `, `$xs[i] = `, `$m[k] = `, `$p.field = `), check
+the refcount: refcount == 1 means no aliases exist, mutate in
+place; refcount > 1 means split (deep-copy this binding) before
+mutating.
+
+The refactor touches:
+
+- `internal/interpreter/value.go` - refcount field on the
+  compound payloads (KindList, KindMap, KindStruct, KindBytes).
+  Currently `Value.Copy()` is the single deep-copy entry point;
+  it becomes "bump refcount" with the deep-copy reserved for
+  the mutation-site split.
+- `internal/interpreter/interpreter.go` - `execAppend`,
+  `execIndexAssign`, `execFieldAssign` all rewritten to use
+  the split protocol. Parameter binding (`evalCall`), assignment
+  (`Assign`), and for-each iteration variables also need their
+  Copy()-sites reviewed.
+- Test strategy: a dedicated `value_alias_test.go` that
+  constructs aliased compound `Value` graphs and asserts each
+  mutation site preserves the no-aliasing invariant
+  (mutating through one binding doesn't visibly affect another).
+  Run as part of `go test ./...`. Stress-cover the corner cases
+  (lists inside maps, structs containing lists, nested struct
+  fields, bytes inside structs) before considering the milestone
+  done.
+
+Expected impact (from the M16.5 planning analysis):
+- `struct list build+read`: ~10752 ms → ~1500-2000 ms (5-7x)
+- `map insert+read`: ~9768 ms → ~1500-2500 ms (4-6x)
+- `string join`: ~4189 ms → ~600-900 ms (5-7x)
+- `list sort/reverse/slice`: smaller direct effect (sort /
+  reverse / slice return fresh lists anyway).
+
+Highest-risk sub-milestone too: aliasing bugs are the
+classic mode-of-failure for refcounted COW. The alias-stress
+test harness is non-negotiable - lands as part of M16.5.1.
+
+### M16.5.2 - Lexical slot resolution at parse time
+
+Resolve every variable / constant reference to a
+`(frame-depth, slot-index)` pair at parse time rather than a
+name-based lookup at run time. Inside any block, slot indices
+are dense and stable; the runtime lookup becomes an array
+index instead of a map walk.
+
+The refactor touches:
+
+- `internal/parser/parser.go` - add a scope analyser pass that
+  numbers definitions and annotates references with their slot.
+  New AST fields on `VarExpr` / `ConstRefExpr` etc. (or new
+  resolved-variant AST nodes).
+- `internal/interpreter/interpreter.go` - `Environment`
+  storage becomes a per-frame slice indexed by slot rather
+  than a map keyed by name; `evalExpr`'s var-ref case becomes
+  `frames[depth].slots[idx]`.
+- A small grammar / scope-analysis test suite covering
+  shadowing rejection, scope-chain walk for for-each iteration
+  variables, and method-body-sees-globals semantics. The
+  user-visible behaviour stays the same; the scope analyser
+  just catches "undefined variable" at parse time instead of
+  runtime.
+
+Side benefit beyond performance: undefined-variable errors
+surface at parse time rather than first-execution, which is
+strictly better for the developer experience.
+
+Expected impact:
+- `primes up to LIMIT`: ~44876 ms → ~15-20 s (2-3x)
+- `newton`, `monte carlo`: similar 2x range
+- `fib`: contributes to the M16.5.3 win below
+
+### M16.5.3 - Method call frame optimization
+
+Three independent moves that compound:
+
+- **Pool environments.** Currently every call allocates a fresh
+  `Environment`; under recursive workloads this churns the
+  allocator hard. A free-list of recycled environments,
+  cleared on push and pushed back on pop, eliminates the
+  allocation.
+- **Pre-resolve callees at parse time.** Method calls today
+  look up the callee name in `i.methods` on every call. With
+  M16.5.2 in place we can resolve method references at parse
+  time too (top-level methods form a fixed set after hoisting),
+  so the runtime call goes straight to the resolved function
+  pointer.
+- **Slot-based parameter binding.** Under M16.5.2 parameters
+  are slots; binding becomes an array write per parameter,
+  not a map operation.
+
+All three depend on M16.5.2 (slot resolution), so they ship
+together at the end of the performance pass.
+
+Expected impact:
+- `fib(23)`: drops to ~80-150 ms (3-5x), in striking distance
+  of `jennifer-go`'s 84 ms.
+
+### Combined target
+
+Re-running `examples/benchmark.j` against the M16.5-final
+TinyGo binary should yield a total time in the 25-30 s range
+(down from ~75 s) and put TinyGo within ~1.5x of `jennifer-go`
+on every workload shape - that's the floor set by the
+TinyGo-vs-stdlib runtime gap and the right target to aim for.
+Update `technical/tinygo.md`'s tables with the post-M16.5
+numbers as the closing deliverable.
+
+**Stance check.** None of these changes alter user-visible
+semantics:
+- Value semantics still hold (the user can't observe aliasing;
+  mutations through one binding never affect another).
+- Lexical scoping still holds (`def` still introduces a fresh
+  binding; redeclaration still rejects).
+- Method calls still resolve by name at the source level; the
+  pre-resolution just caches the resolved target.
+
+So the optimisation pass is invisible to existing Jennifer
+programs and to the docs - it changes performance, not
+behaviour. Existing tests and examples should pass unchanged.
 
 ---
 

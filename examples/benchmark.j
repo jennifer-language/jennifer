@@ -25,16 +25,17 @@ use meta;
 
 # --- Tunables ------------------------------------------------------
 # Bump these if the suite runs too fast to see meaningful numbers, or
-# trim them if a slow machine sits on a block for too long.
-def const FIB_N as int init 22;
-def const PRIME_LIMIT as int init 10000;
-def const NEWTON_ITERS as int init 1000;
-def const MONTECARLO_THROWS as int init 50000;
-def const LIST_COPY_REPS as int init 50;
-def const LIST_SIZE as int init 1000;
-def const STRUCT_LIST_SIZE as int init 1000;
-def const STRING_JOIN_SIZE as int init 1000;
-def const MAP_CHURN_SIZE as int init 1000;
+# trim them if a slow machine sits on a block for too long. The
+# `base` column in the output shows the value used.
+def const FIB_N as int init 23;
+def const PRIME_LIMIT as int init 100000;
+def const NEWTON_ITERS as int init 10000;
+def const MONTECARLO_THROWS as int init 500000;
+def const LIST_COPY_REPS as int init 500;
+def const LIST_SIZE as int init 10000;
+def const STRUCT_LIST_SIZE as int init 10000;
+def const STRING_JOIN_SIZE as int init 10000;
+def const MAP_CHURN_SIZE as int init 10000;
 
 # --- Helpers -------------------------------------------------------
 
@@ -46,14 +47,17 @@ func fib(n as int) {
 }
 
 # printRow renders one column-aligned timing row. The pad/align
-# modifiers come from io's M7 format-verb mini-language.
-func printRow(name as string, iters as int, ms as int) {
-    io.printf("%s|pad=30|align=left %d|pad=10|align=right %d|pad=12|align=right\n",
-        $name, $iters, $ms);
+# modifiers come from io's M7 format-verb mini-language. `base` is
+# the per-workload size constant (FIB_N, PRIME_LIMIT, ...); `iters`
+# is the outer-loop iteration count (often 1 for "single sweep"
+# workloads).
+func printRow(name as string, base as int, iters as int, ms as int) {
+    io.printf("%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %d|pad=12|align=right\n",
+        $name, $base, $iters, $ms);
 }
 
 func printDivider() {
-    io.printf("%s\n", strings.repeat("-", 54));
+    io.printf("%s\n", strings.repeat("-", 70));
 }
 
 # --- Workloads -----------------------------------------------------
@@ -215,44 +219,44 @@ io.printf("version: %s\n", meta.VERSION);
 io.printf("\n");
 
 printDivider();
-io.printf("%s|pad=30|align=left %s|pad=10|align=right %s|pad=12|align=right\n",
-    "Workload", "iters", "time_ms");
+io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",
+    "Workload", "base", "iters", "time_ms");
 printDivider();
 
 def total as int init 0;
 
 def msFib as int init benchFib();
-printRow("fib(N) recursive", 1, $msFib);
+printRow("fib(N) recursive", FIB_N, 1, $msFib);
 $total = $total + $msFib;
 
 def msPrimes as int init benchPrimes();
-printRow("primes up to LIMIT", 1, $msPrimes);
+printRow("primes up to LIMIT", PRIME_LIMIT, 1, $msPrimes);
 $total = $total + $msPrimes;
 
 def msNewton as int init benchNewton();
-printRow("newton sqrt batch", NEWTON_ITERS, $msNewton);
+printRow("newton sqrt batch", NEWTON_ITERS, NEWTON_ITERS, $msNewton);
 $total = $total + $msNewton;
 
 def msMonteCarlo as int init benchMonteCarlo();
-printRow("monte carlo pi", MONTECARLO_THROWS, $msMonteCarlo);
+printRow("monte carlo pi", MONTECARLO_THROWS, MONTECARLO_THROWS, $msMonteCarlo);
 $total = $total + $msMonteCarlo;
 
 def msListCopy as int init benchListCopy();
-printRow("list sort/reverse/slice", LIST_COPY_REPS, $msListCopy);
+printRow("list sort/reverse/slice", LIST_SIZE, LIST_COPY_REPS, $msListCopy);
 $total = $total + $msListCopy;
 
 def msStructList as int init benchStructList();
-printRow("struct list build+read", STRUCT_LIST_SIZE, $msStructList);
+printRow("struct list build+read", STRUCT_LIST_SIZE, STRUCT_LIST_SIZE, $msStructList);
 $total = $total + $msStructList;
 
 def msStringJoin as int init benchStringJoin();
-printRow("string join", STRING_JOIN_SIZE, $msStringJoin);
+printRow("string join", STRING_JOIN_SIZE, STRING_JOIN_SIZE, $msStringJoin);
 $total = $total + $msStringJoin;
 
 def msMapChurn as int init benchMapChurn();
-printRow("map insert+read", MAP_CHURN_SIZE, $msMapChurn);
+printRow("map insert+read", MAP_CHURN_SIZE, MAP_CHURN_SIZE, $msMapChurn);
 $total = $total + $msMapChurn;
 
 printDivider();
-io.printf("%s|pad=30|align=left %s|pad=10|align=right %d|pad=12|align=right\n",
-    "total", "", $total);
+io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %d|pad=12|align=right\n",
+    "total", "", "", $total);
