@@ -24,6 +24,7 @@ import (
 	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
+	tasklib "github.com/mplx/jennifer-lang/internal/lib/task"
 	timelib "github.com/mplx/jennifer-lang/internal/lib/time"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
@@ -64,6 +65,7 @@ func runRepl() int {
 	hashlib.Install(in)
 	crclib.Install(in)
 	encodinglib.Install(in)
+	tasklib.Install(in)
 
 	cwd, err := os.Getwd()
 	if err != nil {

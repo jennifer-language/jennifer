@@ -29,8 +29,16 @@
 build: build-tinygo build-go
 
 # TinyGo shipping binary. Embeddable; the smaller of the two.
+#
+# -stack-size=1mb: TinyGo's default goroutine stack (~8KB) overflows on
+# Jennifer's tree-walking recursive evaluator. Each Jennifer-level call
+# adds many Go-stack frames (execBlock + evalCall + evalExpr + ...), so
+# a depth-24 fib spawn already needs hundreds of KB. 1MB matches Go's
+# initial-stack ballpark and runs the full example suite (including the
+# parallel fib block in examples/benchmark.j) without segfaulting; bump
+# it if a future workload needs deeper recursion.
 build-tinygo: gen-version
-	tinygo build -o jennifer ./cmd/jennifer
+	tinygo build -o jennifer -stack-size=1mb ./cmd/jennifer
 
 # Standard Go toolchain binary. Fast iteration, full host-feature support.
 # Named with a `-go` suffix so `jennifer` always refers to the shipping

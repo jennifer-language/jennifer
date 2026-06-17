@@ -865,260 +865,84 @@ same phase atop that foundation.
 
 ## M16.0 - Lightweight concurrency
 
-Adds `spawn { ... }` and a `task of T` value type so I/O can
-proceed without blocking the whole program. Lands as a
-prerequisite of M16.1-M16.3 (any of which can use it for
-non-blocking calls) and a hard requirement for M20 `httpd` (a
-single-connection web server isn't a server). The decision to
-ship goroutine-style concurrency rather than `async`/`await` or
-raw OS threads is recorded with the reasoning at
-[technical/rejected.md > async/await coloring](technical/rejected.md#asyncawait-function-coloring)
-once the milestone work begins; the short version is "Jennifer's
-value semantics already provide the isolation that
-async-await / borrow-checking exist to enforce."
+**Status:** done.
 
-**Why now.** Jennifer's value-semantics decision (M6 lists/maps,
-M12 bytes, M13.1 structs - all copied on assignment and
-parameter binding) means a spawned block cannot accidentally
-share mutable state with the parent. Every captured variable is
-deep-copied at spawn time, identical to a function call. The
-hardest problem in shared-memory concurrency - data races on
-mutable state - cannot happen by construction. We get that
-property for free from a decision we made for unrelated reasons,
-which is what makes "ship concurrency" a smaller surface than it
-would be in a reference-semantics language.
+Ships `spawn { ... }` (block primary expression), `task of T`
+(new compound type kind), and the `task` library (`wait`, `poll`,
+`discard`, `waitAll`, `waitAny`). Goroutine-backed concurrency on
+top of Jennifer's value-semantics-capture, which makes data
+races impossible by construction.
 
-**Syntax.**
-
-```jennifer
-# spawn { ... } runs the body in a separate goroutine. Variables
-# captured from the enclosing scope are deep-copied at spawn time,
-# same semantics as a method call. The block's `return EXPR;`
-# becomes the task's result; bare `return;` produces null.
-def t as task of int init spawn {
-    return computeStuff();
-};
-
-# task.wait blocks until the spawned block finishes and returns the
-# value. If the block threw an error, task.wait re-throws it in the
-# waiter's frame.
-def result as int init task.wait($t);
-```
-
-**New type kind: `task of T`.** A compound type that wraps a
-pending or completed computation. Constructed only by `spawn`;
-read only via the `task` library. Value semantics: a
-`task of T` value is small (essentially a handle), and copying
-it shares the same underlying task (single result, multiple
-waiters get the same value or the same re-thrown error - "the
-task" exists once even if the handle moves). This is the **one
-exception** to Jennifer's "no shared references" rule, and it's
-necessary - a task by definition represents a single underlying
-operation. The exception is contained: `task of T` values can
-only be acted on through the `task.*` API, which itself is
-side-effect-careful.
-
-**New keyword: `spawn`.** Statement-position only - same shape
-as `if`/`while`/`for`/`repeat`. The spawn block is a fresh
-scope; the spawn body runs concurrently with the rest of the
-program.
-
-**Value-semantics capture.** Variables referenced inside
-`spawn { ... }` from the enclosing scope are deep-copied into
-the spawned frame at the moment of spawn, same as how a method
-call deep-copies its arguments. The spawned block sees its own
-copy; mutations don't propagate back; the parent's bindings are
-untouched:
-
-```jennifer
-def xs as list of int init [1, 2, 3];
-def t as task of null init spawn {
-    $xs[0] = 999;       # mutates the spawned frame's copy
-    return null;
-};
-task.wait($t);
-# $xs in the parent is still [1, 2, 3].
-```
-
-**Error propagation.** Errors thrown inside a `spawn` block are
-captured by the task. Calling `task.wait` re-throws them in the
-waiter's frame, where ordinary `try`/`catch` (M13.2) handles
-them:
-
-```jennifer
-def t as task of int init spawn {
-    throw Error{kind: "boom", message: "...", file: "", line: 0, col: 0};
-};
-try {
-    def n as int init task.wait($t);
-} catch (err) {
-    io.printf("caught: %s\n", $err.message);
-}
-```
-
-A task whose error was never waited on **silently drops** the
-error when GC'd. (Jennifer has no finalizers; surfacing dropped
-errors would require one.) Users who care about every error
-should always `wait` or `discard`. Recommended idiom for
-fire-and-forget: explicit `task.discard($t);` so the intent is
-visible at the call site.
-
-**`task` library (built-in, shipped with M16.0).**
-
-| Function                        | Effect                                                                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `task.wait(t) -> T`             | Block until `t` completes; return its value or re-throw its error.                                                     |
-| `task.poll(t) -> bool`          | Non-blocking check: true if `t` has completed (value or error available).                                              |
-| `task.discard(t)`               | Mark `t` as fire-and-forget; suppresses dropped-error logging if it's ever added.                                      |
-| `task.waitAll(ts) -> list of T` | Wait for every task in `$ts`; return their results in order. Re-throws the first error encountered (others discarded). |
-| `task.waitAny(ts) -> int`       | Wait until any task in `$ts` completes; return its index. Caller then `task.wait`s that one.                           |
-
-`waitAll` / `waitAny` cover the most common patterns (parallel
-map-fold and "first to respond wins"). Anything more complex
-(timeouts, racing N tasks with cancellation of losers, etc.)
-ships in a `task.x` sub-milestone if a real use case forces it.
-
-**Multi-core / parallelism.** Spawn blocks compile to goroutines
-and Go's scheduler runs them across every available core by
-default - so on hosted builds (Linux / macOS / Windows desktop)
-M16.0 *is* multi-core parallelism, not just concurrency.
-Data-race-freedom holds by construction because value-semantics
-capture deep-copies every variable at spawn time; the data races
-that drive most parallel-programming bugs cannot happen.
-
-Two target classes need an explicit fallback:
-
-- **Single-threaded TinyGo targets** (WASI, baremetal embedded)
-  and **macflyos** have no OS threads to schedule across. The
-  interpreter ships a **`--cooperative` mode** for these builds
-  in which `spawn` blocks run on a single OS thread with a
-  cooperative scheduler; the same source program runs without
-  modification, just sequentially. Semantics remain identical -
-  the only observable difference is wall-clock behavior.
-- **Per-goroutine interpreter state stays single-threaded.**
-  Each `spawn` walks the AST sequentially in its own goroutine;
-  making the tree-walker itself internally parallel
-  (lock-free environments, concurrent scope chains) is a
-  different and much harder project with near-zero payoff for
-  the workloads Jennifer targets and is deliberately out of
-  scope.
-
-Finer-grained scheduling control (CPU affinity, work-stealing
-pools, NUMA awareness, `GOMAXPROCS`-equivalent tuning) is
-recorded in the Long horizon list - those are advanced-runtime
-knobs, not language features, and the same "ships when a real
-use case forces it" rule applies.
-
-**What's NOT in v1 (deliberate; defer until a forcing function appears).**
-
-- **Channels** (`chan of T`, `chan.send`, `chan.recv`). Tasks
-  cover the futures use case; channels cover pipelines /
-  fan-in / fan-out. The pipeline patterns can be expressed with
-  lists of tasks and `waitAll` until that proves clumsy. Add
-  channels in a follow-on sub-milestone if/when real programs
-  need them.
-- **Mutexes / locks.** Value-semantics capture removes the
-  shared-mutable-state-needs-locking case. If users want a
-  shared counter, they spawn a goroutine that owns it and
-  communicate via tasks (actor-style).
-- **Cancellation.** Famously hard to do right (Go added
-  `context.Context` years after goroutines). Spawned blocks
-  cannot be killed; they run to completion. Tasks that take a
-  long time and may need stopping should check a flag the
-  parent sets via shared state - but since Jennifer has no
-  shared state, the pattern is "use a quick task plus a
-  user-managed sentinel value." Concrete API ships when a real
-  use case surfaces.
-- **Timeouts.** Same family as cancellation. Workaround:
-  `task.waitAny([$work, $timer])` where `$timer` is a task
-  that spawns and sleeps. Wait for whichever returns first.
-- **Go-style `select`.** Multi-channel select belongs with
-  channels.
-- **`context.Context` propagation.** Belongs with cancellation.
-
-**Interaction with existing language features.**
-
-- **`exit` inside a spawn**: terminates the whole program (same
-  as outside spawn). The spawn keyword does not create a frame
-  that catches `exit`; it's still the global escape hatch.
-- **`return` inside a spawn**: returns from the spawn block,
-  producing the task's value. Does not return from the
-  enclosing method. (Symmetric with how `return` inside a method
-  body returns from the method, not from the enclosing
-  top-level.)
-- **`break` / `continue` inside a spawn**: error at parse time
-  - they make no sense without an enclosing loop, and the
-    spawn's lexical block does not transparently see loops in
-    the parent.
-- **`throw` inside a spawn**: captured by the task and re-thrown
-  on `wait`, as documented above.
-- **try/catch crossing a spawn boundary**: a `try` in the
-  parent does **not** catch errors raised inside an
-  unwaited-on `spawn`. The `task.wait($t)` site is where errors
-  enter the catchable channel.
-
-**REPL interaction.** A `spawn` from a REPL input runs
-concurrently; subsequent inputs can `task.wait` on it. The line
-editor owns stdin (same M5 rule as `io.readLine`), so spawned
-blocks must not read from stdin while the REPL is interactive.
-
-**Internals.**
-
-- `spawn { body }` lowers to a Go goroutine that runs the body
-  with a deep-copied frame. The goroutine sends `{value, error}`
-  to a one-shot Go channel; the `task of T` value wraps that
-  channel.
-- `task.wait` blocks on the channel; on receive, returns the
-  value or wraps the error and routes it through the same
-  `ErrorSignal` machinery M13.2 introduces. The waiter's frame
-  position is what `catch` blocks see.
-- TinyGo's goroutine implementation depends on the target;
-  Linux native (the shipping target today) uses preemptive
-  scheduling on top of OS threads, so `spawn` can give real
-  parallelism on multi-core systems. WASM targets use
-  cooperative scheduling. The McFly OS embedding inherits
-  whatever scheduling its TinyGo build configures.
-- Tests: a synthetic interpreter helper installs a "spawn that
-  runs the body inline" mode so deterministic tests don't
-  depend on goroutine scheduling.
-
-**Library impact.**
-
-- **M16.1 `fs`** can ship blocking read/write that callers wrap
-  in `spawn` for non-blocking. No `fs.readAsync(...)`
-  duplication API needed - the user composes with `spawn`.
-- **M16.2 `net`** likewise. Accept-loop / per-connection servers
-  spawn a task per connection.
-- **M19 `crypto`** doesn't need concurrency directly but the
-  M19 hash/crypto helpers can be composed under `spawn` for
-  parallel hashing of large inputs.
-- **M20 `httpd`** is the headline consumer. The accept loop
-  becomes `while (true) { def conn init net.accept($listener); spawn { handle($conn); } }`.
-
-**Benchmark suite extension.** `examples/benchmark.j` is
-currently single-core only - `time` of the user/real columns
-under `tinygo` build sits within a few percent of each other
-(see [technical/tinygo.md > Single-binary benchmark
-results](technical/tinygo.md#single-binary-benchmark-results)).
-M16.0 ships with the suite extended so each existing workload
-has a multi-core counterpart that fans the same work across N
-`spawn`'d tasks and joins. The driver runs both single-core and
-multi-core variants side by side and shows the speedup ratio,
-so reviewers can see at a glance how much parallelism actually
-materialises for each workload shape (CPU-bound, allocation-
-heavy, IO-bound). This is the headline programmer-facing
-artifact for the milestone.
+- **`spawn { ... }` runs concurrently; `task of T` wraps the
+  result.** Body's `return EXPR;` becomes the task's value; bare
+  `return;` yields null. A task carries either a value or an
+  error after its body finishes.
+- **Value-semantics capture.** `snapshotForSpawn` builds a
+  two-frame snapshot at launch: a globals frame (deep copy of
+  `i.global`) and a locals frame (deep copy of every non-global
+  binding visible at the spawn site) chained on top. The body
+  runs against the locals frame; user-method calls inside the
+  spawn parent through `effectiveGlobal(env)` and land on the
+  globals frame, so the no-shadowing rule treats spawn-local
+  scoping the same as serial scoping. Tasks are the **one
+  exception** to value semantics: copying a `task of T` shares
+  the underlying `TaskState` pointer (multiple handles must
+  observe one in-flight goroutine, not clone it).
+- **Loud-fail at exit.** Per-run task registry on the
+  interpreter; `spawn` appends, `wait` (success or rethrow) /
+  `discard` / `waitAll` flip the observed bit. CLI walks the
+  slice after `Run` returns and prints each unobserved error
+  to stderr, bumping the exit code. The scan blocks on each
+  unobserved task's `Done` channel - a non-terminating
+  `spawn { while (true) { ... } }` without `task.discard` hangs
+  at exit (documented footgun, trade-off for "no silent
+  drops").
+- **Errors compose with M13.2 try/catch.** `task.wait` re-raises
+  a body error as a positioned runtime error at the wait site;
+  enclosing `try/catch` catches it normally. `exit EXPR;` inside
+  a spawn still exits the whole program (uncatchable, same as
+  outside spawn). `break`/`continue` outside an enclosing loop
+  inside the body surface as positioned runtime errors via
+  `unhandledLoopFlowError` - loop flow doesn't cross the spawn
+  boundary.
+- **`waitAny` uses `reflect.Select`** over a
+  `[]reflect.SelectCase` built from the task list - the only
+  reflect call in the runtime; verified under both compilers.
+- **TinyGo trade-offs.**
+  - `tinygo build -stack-size=1mb` is now in the Makefile.
+    Jennifer's tree-walking evaluator wraps each Jennifer-level
+    call in many Go-stack frames; the TinyGo default (~8KB) is
+    far too small for any recursive spawn body.
+  - TinyGo's runtime is cooperative single-threaded as of 0.41,
+    so parallel speedups under TinyGo will be close to 1.0;
+    `jennifer-go` (standard Go) reaches real multi-core speedup
+    on the parallel benchmark.
+- **What was deferred** (none of these blocked M16.0 ship;
+  picked up later if a forcing function appears): channels,
+  mutexes, cancellation, timeouts, `select`,
+  `context.Context`, structured-concurrency blocks. Each is
+  documented inline in user-guide/concurrency.md so the
+  decisions stay visible.
+- **`examples/benchmark.j` parallel section.** Multi-core
+  variants for primes, newton, monte-carlo, and a
+  PARALLEL_WORKERS-fanout of `fib(N)`. Driver prints
+  `serial_ms / par_ms / speedup` per workload, plus the
+  scheduler name in the header so the numbers can be read in
+  context (TinyGo's cooperative scheduler gives sub-1.0
+  speedups; Go gives >1.0).
 
 See:
-- [user-guide/concurrency.md](user-guide/concurrency.md) (new
-  doc at M16.0 implementation time) - the user-facing tour with
-  worked examples (parallel fetch, request handler, fire-and-forget
-  logging).
-- [libraries/task.md](libraries/task.md) (new) - the `task.*`
-  function reference.
-- [technical/interpreter.md > Concurrency](technical/interpreter.md#concurrency) (new
-  subsection) - goroutine mapping, frame copying, error
-  routing, test-only inline mode.
+- [user-guide/concurrency.md](user-guide/concurrency.md) -
+  user-facing tour: model, value-semantics capture, patterns,
+  loud-fail contract, what's deferred.
+- [libraries/task.md](libraries/task.md) - reference for the
+  five `task.*` builtins, error propagation, worked examples.
+- [technical/interpreter.md > Concurrency](technical/interpreter.md#concurrency-m160) -
+  goroutine mapping, two-frame snapshot, `effectiveGlobal`,
+  task registry, CLI integration.
+- [technical/tinygo.md > TinyGo restrictions](technical/tinygo.md#tinygo-restrictions) -
+  the `-stack-size=1mb` Makefile flag and the TinyGo scheduler
+  note.
 
 ## M16.1 - `fs`
 

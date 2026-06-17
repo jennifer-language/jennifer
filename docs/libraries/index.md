@@ -32,6 +32,7 @@ restriction list; `jennifer-go` always supports the full surface.
 | [`hash`](hash.md)        | `use hash;`     | full                                                  | M15.6: `hash.compute(b, algo)` + streaming (`hash.stream`/`update`/`finalize`) for `"md5"`, `"sha1"`, `"sha256"`; struct `hash.Stream`                                                                                              |
 | [`crc`](crc.md)          | `use crc;`      | full                                                  | M15.6: `crc.compute(b, algo)` + streaming (`crc.stream`/`update`/`finalize`) for `"crc32"`, `"crc64"`; output is big-endian bytes; struct `crc.Stream`                                                                              |
 | [`encoding`](encoding.md) | `use encoding;` | full                                                  | M15.7: introspection (`isAscii`, `lenBytes`, `lenRunes`); binary-to-text `toText`/`fromText` for `"hex"`, `"base64"`, `"base64-url"`; character codecs `encode`/`decode` for `"ascii"`, `"latin-1"`, `"windows-1252"`, `"ebcdic"`     |
+| [`task`](task.md)        | `use task;`     | full                                                  | M16.0: observe and join `task of T` handles produced by `spawn { ... }`. `task.wait`, `task.poll`, `task.discard`, `task.waitAll`, `task.waitAny`; pairs with the [user-guide concurrency tour](../user-guide/concurrency.md)        |
 
 A quick taste:
 
@@ -92,6 +93,10 @@ large ones. The organizing principle, captured for future extensions:
 - Byte / string introspection and character-set codecs (ASCII,
   Latin-1, Windows-1252, EBCDIC IBM-1047) plus hex / base64
   binary-to-text -> `encoding` (M15.7; long-tail codecs parked in M24+).
+- Observing / joining background computations launched with `spawn`
+  -> `task` (M16.0). Concurrency itself is a language feature
+  (the `spawn` keyword + `task of T` type); the library is just the
+  observation surface.
 - A genuinely new topic with **five or more** functions / constants
   -> a new library. Fewer than five names fold into the most-related
   existing library (the non-crypto random helpers were the first

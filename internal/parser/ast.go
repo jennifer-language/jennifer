@@ -51,6 +51,7 @@ const (
 	TypeList
 	TypeMap
 	TypeStruct // M13.1: user-defined record; carries the struct's name in Type.StructName
+	TypeTask   // M16.0: `task of T` - a pending or completed spawned computation
 )
 
 func (k TypeKind) String() string {
@@ -73,6 +74,8 @@ func (k TypeKind) String() string {
 		return "map"
 	case TypeStruct:
 		return "struct"
+	case TypeTask:
+		return "task"
 	default:
 		return "<invalid>"
 	}
@@ -114,6 +117,11 @@ func (t Type) String() string {
 			return t.StructNS + "." + t.StructName
 		}
 		return t.StructName
+	case TypeTask:
+		if t.Element == nil {
+			return "task of <?>"
+		}
+		return "task of " + t.Element.String()
 	}
 	return t.Kind.String()
 }
@@ -144,6 +152,14 @@ func (t Type) Equal(o Type) bool {
 		return t.KeyType.Equal(*o.KeyType) && t.ValType.Equal(*o.ValType)
 	case TypeStruct:
 		return t.StructName == o.StructName && t.StructNS == o.StructNS
+	case TypeTask:
+		if (t.Element == nil) != (o.Element == nil) {
+			return false
+		}
+		if t.Element == nil {
+			return true
+		}
+		return t.Element.Equal(*o.Element)
 	}
 	return true
 }
@@ -155,6 +171,7 @@ func PrimitiveType(k TypeKind) Type { return Type{Kind: k} }
 func ListType(elem Type) Type       { return Type{Kind: TypeList, Element: &elem} }
 func MapType(k, v Type) Type        { return Type{Kind: TypeMap, KeyType: &k, ValType: &v} }
 func StructType(name string) Type   { return Type{Kind: TypeStruct, StructName: name} }
+func TaskType(elem Type) Type       { return Type{Kind: TypeTask, Element: &elem} }
 
 // NamespacedStructType is the M15.2 form: a struct type registered by a
 // library and reachable behind that library's namespace prefix
@@ -581,6 +598,20 @@ type LenExpr struct {
 
 func (*LenExpr) exprNode() {}
 
+// SpawnExpr is the M16.0 `spawn { ... }` block primary expression. The
+// body is a statement list run in a separate goroutine (Phase 2); the
+// expression's value is a `task of T` where `T` is the body's return
+// type. Variables referenced from the enclosing scope are deep-copied
+// into the spawned frame at spawn time, matching the value-semantics
+// capture of a method call. `return EXPR;` inside the body produces
+// the task's value; bare `return;` produces null.
+type SpawnExpr struct {
+	pos
+	Body []Stmt
+}
+
+func (*SpawnExpr) exprNode() {}
+
 // QualifiedCallExpr is a namespaced call: `IDENT . IDENT ( args )`. The
 // Prefix is the use-site identifier (the library's namespace or its
 // alias if `use lib as alias;` was set). The interpreter looks up
@@ -846,6 +877,15 @@ func Sprint(n Node) string {
 		return s + ")"
 	case *LenExpr:
 		return fmt.Sprintf("Len(%s)", Sprint(v.Operand))
+	case *SpawnExpr:
+		s := "Spawn{"
+		for i, st := range v.Body {
+			if i > 0 {
+				s += "; "
+			}
+			s += Sprint(st)
+		}
+		return s + "}"
 	case *QualifiedCallExpr:
 		s := fmt.Sprintf("QCall(%s.%s", v.Prefix, v.Callee)
 		for _, a := range v.Args {

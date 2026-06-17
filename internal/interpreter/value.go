@@ -36,6 +36,7 @@ const (
 	KindList   // M6: ordered, mutable sequence (Go slice underneath)
 	KindMap    // M6: ordered key-value map; iteration is insertion order
 	KindStruct // M13.1: user-defined record; fields are an ordered list of (name, value)
+	KindTask   // M16.0: a pending or completed `spawn { ... }` computation
 )
 
 func (k ValueKind) String() string {
@@ -58,6 +59,8 @@ func (k ValueKind) String() string {
 		return "map"
 	case KindStruct:
 		return "struct"
+	case KindTask:
+		return "task"
 	}
 	return "?"
 }
@@ -75,6 +78,50 @@ type MapEntry struct {
 type StructField struct {
 	Name  string
 	Value Value
+}
+
+// TaskState is the payload of a Value of kind KindTask (M16.0). It holds
+// the eventual result of a `spawn { ... }` block plus bookkeeping for the
+// exit-time unwaited-error scan. The pointer is shared by every Value
+// that points at the same logical task - copying a `task of T` Value
+// copies the pointer, not the underlying state. This is the one
+// exception to Jennifer's value-semantics rule: a task by definition
+// represents a single underlying operation, and `task.wait` /
+// `task.discard` need to see the same handle the spawn produced.
+//
+// Concurrency contract (M16.0 Phase 2):
+//   - The spawning goroutine writes Result, Err, and Done exactly once,
+//     in that order, before closing the Done channel. No further writes
+//     to those fields occur after Done is closed.
+//   - Other goroutines read Result / Err / Done only after observing
+//     Done is closed (via channel receive or close-check). The channel
+//     close establishes the happens-before edge that makes those reads
+//     safe without an explicit mutex.
+//   - Observed is read/written under the assumption Phase 2 has no
+//     `task.wait` yet, so only the main goroutine flips it at exit.
+//     Phase 3 ships task.wait/discard; if those run from background
+//     goroutines, we promote Observed to an atomic.
+type TaskState struct {
+	Result   Value         // the body's return value when Err is nil; null otherwise
+	Err      error         // any error thrown / surfaced by the body
+	Done     chan struct{} // closed by the spawned goroutine after Result / Err are written
+	Observed bool          // flipped by task.wait (success or rethrow) and task.discard; the registry scan at program exit reports tasks where Done && Err != nil && !Observed
+	ElemTyp  *parser.Type  // the task's declared element type T (in `task of T`); used by Value.MatchesDeclared
+}
+
+// IsDone reports whether the spawned body has finished (Result / Err
+// are safe to read). Non-blocking; used by the registry scan at exit
+// to skip tasks that are still running.
+func (s *TaskState) IsDone() bool {
+	if s == nil || s.Done == nil {
+		return false
+	}
+	select {
+	case <-s.Done:
+		return true
+	default:
+		return false
+	}
 }
 
 // Value is a tagged union for all Jennifer runtime values.
@@ -107,6 +154,7 @@ type Value struct {
 	ElemTyp    *parser.Type  // KindList: element type
 	KeyTyp     *parser.Type  // KindMap:  key type
 	ValTyp     *parser.Type  // KindMap:  value type
+	Task       *TaskState    // KindTask (M16.0): shared handle - copying a task copies the pointer
 }
 
 func Null() Value              { return Value{Kind: KindNull} }
@@ -139,6 +187,15 @@ func NamespacedStructVal(ns, name string, fields []StructField) Value {
 func ListVal(elemT parser.Type, data []Value) Value {
 	t := elemT
 	return Value{Kind: KindList, List: data, ElemTyp: &t}
+}
+
+// TaskVal wraps an existing TaskState in a Value of kind KindTask. The
+// state pointer is shared - subsequent copies of this Value reference
+// the same underlying task (M16.0; see TaskState).
+func TaskVal(elemT parser.Type, state *TaskState) Value {
+	t := elemT
+	state.ElemTyp = &t
+	return Value{Kind: KindTask, Task: state}
 }
 
 // MapVal constructs a map value with the given key + value types and
@@ -175,6 +232,13 @@ func (v Value) Copy() Value {
 		out := make([]byte, len(v.Bytes))
 		copy(out, v.Bytes)
 		return Value{Kind: KindBytes, Bytes: out}
+	case KindTask:
+		// M16.0: tasks are the one exception to value-semantics. A task
+		// represents a single underlying operation; copies of a `task
+		// of T` Value share the same TaskState pointer so multiple
+		// waiters see the same result and the observed bit is global to
+		// the handle.
+		return Value{Kind: KindTask, Task: v.Task}
 	case KindStruct:
 		// M13.1: deep copy fields so a struct passed into a method or
 		// returned from it can't surprise its caller.
@@ -312,6 +376,21 @@ func (v Value) Display() string {
 		}
 		b.WriteByte('}')
 		return b.String()
+	case KindTask:
+		// M16.0: tasks are opaque handles - the display form just
+		// labels the task as pending or done, without exposing the
+		// captured frame or the result (which printf already covers
+		// via task.wait + a primitive print).
+		if v.Task == nil {
+			return "task<?>"
+		}
+		if !v.Task.IsDone() {
+			return "task<pending>"
+		}
+		if v.Task.Err != nil {
+			return "task<error>"
+		}
+		return "task<done>"
 	}
 	return "<unknown>"
 }
@@ -370,6 +449,18 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 			return true
 		}
 		return t.KeyType.Equal(*v.KeyTyp) && t.ValType.Equal(*v.ValTyp)
+	case parser.TypeTask:
+		// M16.0: `task of T` matches a Value of KindTask whose recorded
+		// element type equals T. A task value without a recorded element
+		// type (shouldn't happen post-construction, but defensive) is
+		// considered compatible with any task type.
+		if v.Kind != KindTask {
+			return false
+		}
+		if t.Element == nil || v.Task == nil || v.Task.ElemTyp == nil {
+			return true
+		}
+		return t.Element.Equal(*v.Task.ElemTyp)
 	}
 	return false
 }

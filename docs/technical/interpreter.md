@@ -403,3 +403,222 @@ the offending node via a small `posFor(node)` helper. The CLI's
 `printErrorContext` type-asserts the `positioned` interface, and if the
 reported file differs from the program's main file it loads that file from
 disk before slicing out the snippet to display.
+
+## Concurrency (M16.0)
+
+M16.0 ships the `spawn` keyword, the `task of T` type kind, and
+the `task` library. Together they form Jennifer's first
+concurrency surface. The user-facing model is
+[docs/user-guide/concurrency.md](../user-guide/concurrency.md);
+this section describes the runtime side.
+
+### Goroutine mapping
+
+`spawn { ... }` is a primary expression: `parser.SpawnExpr`
+carries the body as `[]Stmt`. The interpreter handles it through
+`evalSpawn`:
+
+1. Build a fresh capture environment with `snapshotForSpawn(env)`.
+2. Allocate a `TaskState` with a freshly made `Done chan struct{}`.
+3. Register the state in the interpreter's per-run task registry.
+4. `go i.runSpawn(state, ex, spawnEnv)`.
+5. Return a `Value` of kind `KindTask` wrapping the state pointer.
+
+`runSpawn` closes `state.Done` from a `defer` so all observers
+(`task.wait`, `task.waitAll`, `task.waitAny`, the exit-time scan)
+see the close as a happens-before edge before reading `state.Result`
+or `state.Err`. The goroutine itself executes the body via the
+existing `execBlock` over the captured env; this is the same path
+top-level statements take, so the spawn body sees the full
+interpreter (libraries, structs, method definitions, namespacing).
+
+`return EXPR;` in the body becomes `state.Result`. A `blockResult`
+with `hasReturn=false` but no error means an implicit `null` return
+(matches method-call semantics). `break` or `continue` that
+escapes its loop inside the body becomes a positioned error
+("`break` outside a loop" / "`continue` outside a loop") via
+`unhandledLoopFlowError`; loop-flow can't cross the spawn
+boundary, mirroring how it can't cross a method-call boundary.
+
+### Value-semantics capture
+
+`snapshotForSpawn(env)` is the data-race story. It builds a
+two-frame chain: a "globals" frame holding deep copies of every
+`i.global` binding, and a "locals" frame chained on top holding
+deep copies of every non-global binding visible at the spawn
+site. The spawn body runs against the locals frame; user-method
+call frames inside the spawn parent through `effectiveGlobal` and
+land on the globals frame.
+
+```go
+func (i *Interpreter) snapshotForSpawn(env *Environment) *Environment {
+    globalSnap := NewEnvironment(nil)
+    for name, b := range i.global.vars {
+        globalSnap.vars[name] = b.deepCopy() // globals -> own frame
+    }
+    localSnap := NewEnvironment(globalSnap)
+    for cur := env; cur != nil && cur != i.global; cur = cur.parent {
+        for name, b := range cur.vars {
+            if _, seen := localSnap.vars[name]; seen { continue }
+            localSnap.vars[name] = b.deepCopy()
+        }
+    }
+    return localSnap
+}
+```
+
+The two-frame shape is what lets user-function calls inside the
+spawn keep their normal scoping. A user method's call frame
+inherits from the *global* surface only - never from the
+caller's locals (Jennifer's "no inheriting caller scope" model).
+Inside a spawn, the call frame's parent comes from
+`effectiveGlobal(env)`:
+
+```go
+func effectiveGlobal(env *Environment) *Environment {
+    cur := env
+    for cur != nil && cur.parent != nil {
+        cur = cur.parent
+    }
+    return cur
+}
+```
+
+In serial code `env` chains to `i.global`, so `effectiveGlobal`
+returns `i.global`. In a spawn body `env` chains to the snapshot's
+globals frame, so `effectiveGlobal` returns that frame. Both paths
+honour the no-shadowing rule the same way (parameters never
+collide with captured locals, only with true globals), and the
+spawn body's user-method calls are race-free because they never
+touch the live `i.global` the parent goroutine may be writing.
+
+Deep-copy reuses the same `Value.Copy()` path as `$ys = $xs;` and
+function-parameter binding, so lists, maps, bytes, and structs
+copy at any depth.
+
+The one exception is `KindTask` itself. A `task of T` value
+deliberately copies the *pointer* to the underlying `TaskState`,
+not the state - multiple variables pointing at "the same spawn"
+must observe it together. Without this, `def u as task of T init $t;`
+would clone the in-flight goroutine handle and break observation
+counting.
+
+### Task registry and loud-fail
+
+The interpreter carries
+
+```go
+type Interpreter struct {
+    // ...
+    tasksMu sync.Mutex
+    tasks   []*TaskState
+}
+```
+
+`evalSpawn` calls `registerTask(state)`. Each `TaskState` carries
+an `Observed bool` flag that any of the three "I saw this"
+operations flips: `task.wait` (both on success return and on
+rethrow), `task.discard`, and `task.waitAll` (drains every
+survivor before re-raising).
+
+`Interpreter.UnwaitedTaskErrors()` runs at the end of CLI
+execution:
+
+```go
+func (i *Interpreter) UnwaitedTaskErrors() []error {
+    i.tasksMu.Lock()
+    snapshot := append([]*TaskState(nil), i.tasks...)
+    i.tasksMu.Unlock()
+    var errs []error
+    for _, t := range snapshot {
+        if t == nil || t.Observed { continue }
+        <-t.Done                       // happens-before edge
+        if t.Err != nil { errs = append(errs, t.Err) }
+    }
+    return errs
+}
+```
+
+It deliberately blocks on `<-t.Done` for every unobserved task.
+The "no footguns" rationale: a non-blocking scan could miss a
+late-arriving error and silently exit cleanly. Blocking buys the
+loud-fail guarantee at the cost of hanging the program when an
+unobserved goroutine never finishes (a `spawn { while (true) {} }`
+without `task.discard`). The user-guide flags this as a footgun
+of its own; the runtime trade-off favours soundness.
+
+`cmd/jennifer/main.go` consumes the slice: after `Run(prog)`
+returns, it walks `UnwaitedTaskErrors()`, prints each one to
+stderr in `spawn error (unwaited): MSG` form, and bumps the
+process exit code if any were present. `ExitSignal` from a body
+is special-cased in the loud-fail surface (treat as a normal
+program-level exit, not a "task error") so user-explicit
+shutdowns don't print spurious "unwaited" lines.
+
+### task library Go layer
+
+`internal/lib/task` registers five namespaced builtins through
+the standard `RegisterNamespaced` path:
+
+| Builtin            | Path                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `task.wait`        | block on `<-state.Done`; `MarkObserved`; return `Result` or wrap `Err` as runtimeError        |
+| `task.poll`        | `BoolVal(state.IsDone())` via the non-blocking select on `state.Done`                         |
+| `task.discard`     | `MarkObserved`; return `Null()` immediately (does not block)                                  |
+| `task.waitAll`     | iterate list, wait each, mark all observed; return list-of-results or first error in order    |
+| `task.waitAny`     | `[]reflect.SelectCase` over the list, `reflect.Select`, return chosen index                   |
+
+`reflect.Select` is the one place the runtime drops into reflect;
+acceptable because the list length is dynamic and `select { ... }`
+on a variable arm count has no other Go-level construction. The
+TinyGo target supports it for chan-receive cases; verified by the
+package tests passing under both compilers.
+
+`MarkObserved` is a thin wrapper around setting the flag under
+the registry mutex (no atomics - the field is read only by the
+exit-time scan, which already takes the mutex). The pattern is
+"observation = explicit consent that this task's outcome is
+yours"; the loud-fail path is the only place reads happen
+outside the consenting frame.
+
+### Type stamping for `task of T`
+
+`parser.TypeTask` joins `TypeList` / `TypeMap` / `TypeBytes` /
+`TypeStruct` in the `Type.Kind` enum. `Type.Element` holds the
+`T` for `task of T`; `Type.String` and `Type.Equal` handle
+recursion the same way as `list of T`. `MatchesDeclared` rejects
+non-task values and (when the declared element type is concrete)
+walks the wrapped task's `ElemTyp` to enforce element-type
+compatibility - so `def t as task of int init spawn { return "x"; };`
+fails at the use site, not deep inside the spawn body.
+
+### CLI integration
+
+`main.go` (batch path), `repl.go` (interactive path),
+`fmt_test.go::runProgramOutput` (golden-test harness), and
+`examples_test.go` all `tasklib.Install(in)` alongside the other
+libraries. The REPL path also calls `UnwaitedTaskErrors()` between
+inputs - a spawn that errored in line N surfaces before the prompt
+for line N+1, so the REPL session can't accumulate silent failures.
+
+### What's deferred
+
+The runtime side has more breathing room than the user-facing
+surface. The deferred pieces:
+
+- **Channels.** No `chan T` type, no `send`/`recv` builtins. The
+  spawn/task pair handles the common cases; a channel primitive
+  would add real bookkeeping and is a later M16.x candidate.
+- **Cancellation.** No way for an outsider to stop a running
+  spawn body. Open design question (cooperative vs hard abort vs
+  structured-concurrency tree).
+- **Structured concurrency.** No automatic scope-bounded
+  termination. The loud-fail registry is the lighter-weight answer.
+- **Timeouts.** Compose with a `time.sleep` sentinel + `task.waitAny`;
+  a higher-level helper may ship later.
+- **Refcounted copy-on-write for `Value`.** The O(N) deep-copy
+  cost of spawning over a large captured collection is a known
+  cost of the value-semantics model and the same cost that hits
+  `$ys = $xs;` in serial code. A refcounted copy-on-mutation
+  optimisation in the `Value` runtime would help both paths; not
+  scheduled.

@@ -177,6 +177,28 @@ func (p *parser) parseProgram() (*Program, error) {
 // any other Jennifer name (letters only, no `_`).
 func (p *parser) parseImport() (*ImportStmt, error) {
 	use, _ := p.match(lexer.TOKEN_USE)
+	// M16.0: `use task;` activates the task library. `task` is a type
+	// keyword so it doesn't land in the IDENT bucket; accept it here
+	// as a one-off so the library name matches the namespace prefix
+	// (`task.wait` at call sites).
+	if t, ok := p.match(lexer.TOKEN_TASK); ok {
+		imp := &ImportStmt{pos: pos{File: use.File, Line: use.Line, Col: use.Col}, Name: "task"}
+		if _, ok := p.match(lexer.TOKEN_AS); ok {
+			alias, err := p.expect(lexer.TOKEN_IDENT, "after `as` in `use`")
+			if err != nil {
+				return nil, err
+			}
+			if containsUnderscore(alias.Lexeme) {
+				return nil, &ParseError{Msg: fmt.Sprintf("library alias %q may not contain `_`", alias.Lexeme), File: alias.File, Line: alias.Line, Col: alias.Col}
+			}
+			imp.AsName = alias.Lexeme
+		}
+		if _, err := p.expect(lexer.TOKEN_SEMI, "after `use` statement"); err != nil {
+			return nil, err
+		}
+		_ = t
+		return imp, nil
+	}
 	name, err := p.expect(lexer.TOKEN_IDENT, "after `use`")
 	if err != nil {
 		return nil, err
@@ -990,6 +1012,16 @@ func (p *parser) parseType() (Type, error) {
 			return Type{}, err
 		}
 		return MapType(keyT, valT), nil
+	case lexer.TOKEN_TASK:
+		p.advance()
+		if _, err := p.expect(lexer.TOKEN_OF, "after `task`"); err != nil {
+			return Type{}, err
+		}
+		elem, err := p.parseType()
+		if err != nil {
+			return Type{}, err
+		}
+		return TaskType(elem), nil
 	case lexer.TOKEN_IDENT:
 		// Struct type reference. Bare IDENT (`def x as Name;`) names a
 		// top-level user struct; `IDENT.IDENT` (`def x as os.Result;`)
@@ -1622,6 +1654,37 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 			return nil, err
 		}
 		return &LenExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Operand: operand}, nil
+	case lexer.TOKEN_SPAWN:
+		// M16.0: `spawn { body }` is a block primary expression that
+		// returns a `task of T`. The body is a statement list - same
+		// shape as a method body or a `try` block. Phase 1 runs the
+		// body inline; Phase 2 lowers it to a goroutine.
+		p.advance()
+		body, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		return &SpawnExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Body: body.Stmts}, nil
+	case lexer.TOKEN_TASK:
+		// M16.0: `task` is primarily a type keyword (`task of T`),
+		// but the `task.wait` / `task.poll` / ... library exposes
+		// builtins behind the `task.` namespace prefix at call sites.
+		// In expression position, `task.IDENT` parses as a qualified
+		// call or constant reference with prefix `"task"`. Anything
+		// else after `task` in expression position is a syntax error
+		// pointing the user at the two valid uses.
+		p.advance()
+		if !p.check(lexer.TOKEN_DOT) {
+			return nil, &ParseError{
+				Msg:  "`task` in expression position must be followed by `.method(...)` (the `task` library); for the type, write `task of T` in a declaration",
+				File: t.File, Line: t.Line, Col: t.Col,
+			}
+		}
+		// Manufacture a synthetic IDENT token for the qualified-tail
+		// parser; its Lexeme is what becomes the QualifiedCall's
+		// Prefix string.
+		ident := lexer.Token{Type: lexer.TOKEN_IDENT, Lexeme: "task", File: t.File, Line: t.Line, Col: t.Col}
+		return p.parseQualifiedTail(ident)
 	case lexer.TOKEN_VARREF:
 		p.advance()
 		return &VarExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil

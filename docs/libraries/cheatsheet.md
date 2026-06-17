@@ -92,6 +92,11 @@ flat lookup view, not authoritative.
 | [`strings`](strings.md)`.trimLeft(s)`                 | Strip leading whitespace.                                                                                                           |
 | [`strings`](strings.md)`.trimRight(s)`                | Strip trailing whitespace.                                                                                                          |
 | [`strings`](strings.md)`.upper(s)`                    | Uppercase `s` (Unicode-aware).                                                                                                      |
+| [`task`](task.md)`.discard($t)`                       | Mark a `task of T` fire-and-forget; suppresses exit-time loud-fail. Returns null.                                                   |
+| [`task`](task.md)`.poll($t)`                          | True if `$t` has finished (non-blocking).                                                                                           |
+| [`task`](task.md)`.wait($t)`                          | Block until `$t` finishes; return its value or re-raise its error.                                                                  |
+| [`task`](task.md)`.waitAll($ts)`                      | Block for all tasks in `$ts`; results in list order; re-raises the first error if any.                                              |
+| [`task`](task.md)`.waitAny($ts)`                      | Block until any task in `$ts` is done; return its index.                                                                            |
 | [`time`](time.md)`.add($t, $d)`                       | `time.Time` shifted by duration `$d`.                                                                                               |
 | [`time`](time.md)`.after($a, $b)`                     | True if `$a` is strictly later than `$b`.                                                                                           |
 | [`time`](time.md)`.before($a, $b)`                    | True if `$a` is strictly earlier than `$b`.                                                                                         |
@@ -164,6 +169,6 @@ detail.
   [math.md](math.md), [strings.md](strings.md), [lists.md](lists.md),
   [maps.md](maps.md), [os.md](os.md), [meta.md](meta.md),
   [time.md](time.md), [hash.md](hash.md), [crc.md](crc.md),
-  [encoding.md](encoding.md).
+  [encoding.md](encoding.md), [task.md](task.md).
 - [../user-guide/imports.md](../user-guide/imports.md) - how to import a
   library in a Jennifer source file.

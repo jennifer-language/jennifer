@@ -23,6 +23,7 @@ import (
 	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
+	tasklib "github.com/mplx/jennifer-lang/internal/lib/task"
 	timelib "github.com/mplx/jennifer-lang/internal/lib/time"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
@@ -159,6 +160,7 @@ func runProgramOutput(path, src string) (string, error) {
 	hashlib.Install(in)
 	crclib.Install(in)
 	encodinglib.Install(in)
+	tasklib.Install(in)
 	if err := in.Run(prog); err != nil {
 		return "", err
 	}

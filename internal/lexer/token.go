@@ -62,6 +62,8 @@ const (
 	TOKEN_IN     // "in" - for-each iterator: `for (def x in $coll)`
 	TOKEN_STRUCT // M13.1: `def struct Name { field as type, ... };`
 	TOKEN_LEN    // M15.4: `len(EXPR)` polymorphic structural-length built-in
+	TOKEN_TASK   // M16.0: the word "task" used as a type: `task of T`
+	TOKEN_SPAWN  // M16.0: `spawn { ... }` block primary expression producing a `task of T`
 
 	// Punctuation
 	TOKEN_LBRACE   // {
@@ -160,6 +162,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_IN:          "IN",
 	TOKEN_STRUCT:      "STRUCT",
 	TOKEN_LEN:         "LEN",
+	TOKEN_TASK:        "TASK",
+	TOKEN_SPAWN:       "SPAWN",
 	TOKEN_LBRACE:      "LBRACE",
 	TOKEN_RBRACE:      "RBRACE",
 	TOKEN_LPAREN:      "LPAREN",
@@ -262,6 +266,8 @@ var keywords = map[string]TokenType{
 	"in":       TOKEN_IN,
 	"struct":   TOKEN_STRUCT,
 	"len":      TOKEN_LEN,
+	"task":     TOKEN_TASK,
+	"spawn":    TOKEN_SPAWN,
 }
 
 func lookupKeyword(ident string) (TokenType, bool) {

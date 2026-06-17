@@ -23,6 +23,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/meta"
 	"github.com/mplx/jennifer-lang/internal/lib/os"
 	"github.com/mplx/jennifer-lang/internal/lib/strings"
+	"github.com/mplx/jennifer-lang/internal/lib/task"
 	"github.com/mplx/jennifer-lang/internal/lib/time"
 	"github.com/mplx/jennifer-lang/internal/parser"
 	"github.com/mplx/jennifer-lang/internal/preproc"
@@ -181,15 +182,47 @@ func runFile(path string) int {
 	hashlib.Install(in)
 	crclib.Install(in)
 	encodinglib.Install(in)
-	if err := in.Run(prog); err != nil {
-		// `exit;` / `exit EXPR;` (M11) - user-requested clean termination.
-		// Propagate the requested exit code without printing a runtime
-		// error trace.
-		if ex, ok := err.(*interpreter.ExitSignal); ok {
+	tasklib.Install(in)
+	runErr := in.Run(prog)
+
+	// M16.0: the exit-time loud-fail. Even when Run returned cleanly,
+	// any spawned task that ended with an error and was never
+	// task.wait'd / task.discard'd has its error printed to stderr
+	// and bumps the exit code. Tasks that are still in flight at exit
+	// have not been observed either, so the scan blocks on each
+	// until it finishes (the goroutine has nowhere to go if we don't
+	// drain it; the alternative is silently dropping its outcome).
+	unwaited := in.UnwaitedTaskErrors()
+	var unwaitedExit *interpreter.ExitSignal
+	for _, e := range unwaited {
+		if ex, ok := e.(*interpreter.ExitSignal); ok {
+			// An unwaited spawn invoked `exit EXPR;` - that exit code
+			// becomes the program's exit code, dominating any other
+			// unwaited error.
+			if unwaitedExit == nil {
+				unwaitedExit = ex
+			}
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "%s: unwaited spawn error: %s\n", label, e.Error())
+		printErrorContext(src, absPath, e)
+	}
+
+	if runErr != nil {
+		// `exit;` / `exit EXPR;` (M11) - user-requested clean
+		// termination from the main flow. Propagate the requested exit
+		// code without printing a runtime error trace.
+		if ex, ok := runErr.(*interpreter.ExitSignal); ok {
 			return ex.Code
 		}
-		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
-		printErrorContext(src, absPath, err)
+		fmt.Fprintf(os.Stderr, "%s: %s\n", label, runErr.Error())
+		printErrorContext(src, absPath, runErr)
+		return 1
+	}
+	if unwaitedExit != nil {
+		return unwaitedExit.Code
+	}
+	if len(unwaited) > 0 {
 		return 1
 	}
 	return 0

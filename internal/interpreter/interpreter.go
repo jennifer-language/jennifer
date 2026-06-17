@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -86,6 +87,14 @@ type Interpreter struct {
 	methods           map[string]*parser.MethodDef
 	structs           map[string]*parser.StructDef // M13.1: top-level struct definitions hoisted at Run() time
 	global            *Environment                 // global scope where top-level statements live
+
+	// M16.0: spawned task registry. Every `spawn { ... }` appends its
+	// TaskState here; the CLI scans the slice on shutdown to surface
+	// unobserved error tasks (the "loud-fail" stance). The mutex
+	// protects the slice itself, not the individual TaskStates (those
+	// coordinate via their own `done` channels).
+	tasksMu sync.Mutex
+	tasks   []*TaskState
 }
 
 func New() *Interpreter {
@@ -373,6 +382,63 @@ func posFor(n parser.Node) (file string, line, col int) {
 // statements in source order in a global environment. Methods see this
 // global env as their outer scope (so top-level vars are visible inside
 // methods, subject to the no-shadowing rule).
+// UnwaitedTaskErrors implements the M16.0 exit-time loud-fail.
+// Walks the per-run task registry, waits for each unobserved task to
+// finish, and returns the errors held by tasks that ended in failure
+// without ever being task.wait'd or task.discard'd. Tasks marked
+// observed (Phase 3: task.wait on success or rethrow, or
+// task.discard) are skipped without waiting - "discard" is the
+// fire-and-forget escape hatch the spec promises.
+//
+// Phase 2 doesn't ship task.wait / discard yet, so every spawn is
+// considered unobserved at exit. The CLI prints each returned error
+// to stderr and bumps the exit code to 1; if any returned error is
+// an *ExitSignal (exit invoked inside the spawn body), the CLI uses
+// that ExitSignal's code instead. Unbounded tasks (e.g. a spawn with
+// a `while (true)` loop) will hang the program at exit since the
+// scan waits for each unobserved task to finish; users opt out by
+// calling task.discard once Phase 3 ships, or by ensuring the body
+// terminates.
+func (i *Interpreter) UnwaitedTaskErrors() []error {
+	i.tasksMu.Lock()
+	snapshot := append([]*TaskState(nil), i.tasks...)
+	i.tasksMu.Unlock()
+
+	var errs []error
+	for _, t := range snapshot {
+		if t == nil || t.Observed {
+			continue
+		}
+		// Block until the task finishes. Tasks that were already done
+		// before the scan reached them receive on a closed channel
+		// immediately, so this is no slower than an IsDone check in
+		// the common case.
+		<-t.Done
+		if t.Err != nil {
+			errs = append(errs, t.Err)
+		}
+	}
+	return errs
+}
+
+// MarkObserved flips the Observed flag on a task so the exit-time
+// loud-fail skips it. Used by task.wait (success or rethrow) and
+// task.discard once those ship in Phase 3. Exposed here so the
+// `task` library can flip the flag without exporting the field
+// directly.
+func (i *Interpreter) MarkObserved(t *TaskState) {
+	if t != nil {
+		t.Observed = true
+	}
+}
+
+// RegisterTaskForTest is the registry-side hook tests use to inject
+// a pre-constructed TaskState (already Done, holding a synthetic
+// error) so the registry-scan path can be exercised without going
+// through evalSpawn. Production code uses registerTask via
+// evalSpawn.
+func (i *Interpreter) RegisterTaskForTest(t *TaskState) { i.registerTask(t) }
+
 func (i *Interpreter) Run(prog *parser.Program) error {
 	if i.Out == nil {
 		i.Out = os.Stdout
@@ -900,6 +966,18 @@ func stampDeclaredType(v Value, declType parser.Type) Value {
 					v.Map[k].Value = stampDeclaredType(v.Map[k].Value, *vt)
 				}
 			}
+		}
+	case parser.TypeTask:
+		// M16.0: stamp the declared element type onto the task's
+		// shared state if it doesn't already have one. The shared
+		// pointer means every Value referring to the same task sees
+		// the same element type from now on.
+		if v.Kind != KindTask || v.Task == nil {
+			return v
+		}
+		if v.Task.ElemTyp == nil && declType.Element != nil {
+			et := *declType.Element
+			v.Task.ElemTyp = &et
 		}
 	}
 	return v
@@ -1745,6 +1823,8 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		return i.evalCall(ex, env)
 	case *parser.LenExpr:
 		return i.evalLen(ex, env)
+	case *parser.SpawnExpr:
+		return i.evalSpawn(ex, env)
 	case *parser.QualifiedCallExpr:
 		return i.evalQualifiedCall(ex, env)
 	case *parser.QualifiedConstRefExpr:
@@ -2225,6 +2305,149 @@ func (i *Interpreter) evalLen(ex *parser.LenExpr, env *Environment) (Value, erro
 	return Value{}, &runtimeError{Msg: fmt.Sprintf("len() expects a string, list, map or bytes, got %s", v.Kind), File: file, Line: line, Col: col}
 }
 
+// evalSpawn implements `spawn { ... }` (M16.0). Phase 2 launches a
+// goroutine that runs the body and signals completion via the
+// TaskState's done channel; evalSpawn itself returns immediately with
+// a wrapping Value whose Task field points at the same shared state.
+// The spawn frame receives a deep-copy snapshot of every binding
+// visible in the caller's scope chain (see snapshotForSpawn), so the
+// goroutine never touches caller-owned data after spawn returns -
+// value-semantics capture is what keeps the model data-race-free by
+// construction.
+//
+// Three signals that don't fit the "task captures the body's result"
+// model get special handling:
+//
+//   - `exit EXPR;` inside the spawn terminates the whole program. The
+//     ExitSignal travels up through the goroutine boundary on the
+//     panic / synchronous-return path (it's recorded as the task's
+//     `Err`, and the registry scan at exit re-raises it so the CLI
+//     observes the requested exit code). Spec: exit is not a task
+//     error to be recovered via task.wait.
+//   - `break` / `continue` inside the body with no enclosing loop
+//     surface as the same misuse-of-loop-flow error a method body
+//     would produce. They live on the task's Err field; the body
+//     "completed" with an error.
+//   - `throw` / runtime errors become the task's Err normally.
+//
+// The task's declared element type is left for the caller (Define /
+// Assign) to enforce via MatchesDeclared; this function just records
+// the body's return value when the goroutine finishes. Phase 3
+// surfaces the result via task.wait.
+func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, error) {
+	spawnEnv := i.snapshotForSpawn(env)
+	state := &TaskState{Done: make(chan struct{})}
+	i.registerTask(state)
+
+	go i.runSpawn(state, ex, spawnEnv)
+	return wrapTask(state), nil
+}
+
+// runSpawn is the goroutine body for a spawned block. It executes the
+// body, classifies the result into Result / Err, and closes Done so
+// every observer (task.wait future-phase, the registry scan, the
+// display form) sees the same final state. Writes to state happen
+// before the close; readers must observe close before reading.
+func (i *Interpreter) runSpawn(state *TaskState, ex *parser.SpawnExpr, spawnEnv *Environment) {
+	defer close(state.Done)
+
+	res, err := i.execBlock(&parser.Block{Stmts: ex.Body}, spawnEnv)
+	if err != nil {
+		state.Err = err
+		return
+	}
+	if res.hasBreak || res.hasContinue {
+		state.Err = unhandledLoopFlowError(res)
+		return
+	}
+	if res.hasReturn {
+		state.Result = res.value
+	} else {
+		state.Result = Null()
+	}
+}
+
+// registerTask appends a freshly-spawned task to the per-run registry.
+// The registry feeds the exit-time loud-fail scan (UnwaitedTaskErrors).
+func (i *Interpreter) registerTask(state *TaskState) {
+	i.tasksMu.Lock()
+	i.tasks = append(i.tasks, state)
+	i.tasksMu.Unlock()
+}
+
+// effectiveGlobal returns the env that should serve as the "global"
+// parent for a fresh user-method call frame. In ordinary (single
+// goroutine) execution this is i.global. Inside a spawned goroutine
+// the caller's env chain terminates at the spawn snapshot (parent=nil
+// by construction in snapshotForSpawn), so the outermost ancestor is
+// the snapshot itself. Routing method-call frames through that
+// snapshot - instead of the live i.global the parent goroutine is
+// still mutating - is what makes spawn bodies that call user
+// functions data-race-free.
+func effectiveGlobal(env *Environment) *Environment {
+	cur := env
+	for cur != nil && cur.parent != nil {
+		cur = cur.parent
+	}
+	return cur
+}
+
+// snapshotForSpawn flattens every binding visible in the caller's
+// scope chain - including top-level definitions in the global frame -
+// into a fresh environment with no parent. Deep-copying every value
+// means the spawned body can mutate its own copies without affecting
+// the caller. Detaching the parent means name lookups stop at the
+// snapshot frame, so writes to names that originally lived in an
+// outer scope (including the global) don't propagate back. Methods,
+// libraries, and namespaced constants live on the Interpreter struct
+// (`i.methods`, `i.Builtins`, `i.NSBuiltins`, ...), not the env
+// chain, so the detached frame still resolves them through the
+// regular evalCall / evalQualified* paths. The no-shadowing rule
+// prevents collisions; we keep the innermost binding (most-specific
+// wins) if a name somehow appears twice.
+func (i *Interpreter) snapshotForSpawn(env *Environment) *Environment {
+	// Two-frame snapshot:
+	//   1. globals - copies of i.global's bindings only. effectiveGlobal
+	//      walks here, so user-method calls inside the spawn see exactly
+	//      the same global surface they would in serial code (the
+	//      no-shadowing rule doesn't trip on captured locals).
+	//   2. locals  - copies of every non-global binding visible at the
+	//      spawn site, chained on top of (1).
+	// Both frames hold copies, so any post-spawn parent-goroutine writes
+	// to i.global or to the caller frame don't reach the spawn body.
+	globalSnap := NewEnvironment(nil)
+	if i.global != nil {
+		for name, b := range i.global.vars {
+			globalSnap.vars[name] = Binding{
+				Value:    b.Value.Copy(),
+				DeclType: b.DeclType,
+				IsConst:  b.IsConst,
+			}
+		}
+	}
+	localSnap := NewEnvironment(globalSnap)
+	for cur := env; cur != nil && cur != i.global; cur = cur.parent {
+		for name, b := range cur.vars {
+			if _, exists := localSnap.vars[name]; exists {
+				continue
+			}
+			localSnap.vars[name] = Binding{
+				Value:    b.Value.Copy(),
+				DeclType: b.DeclType,
+				IsConst:  b.IsConst,
+			}
+		}
+	}
+	return localSnap
+}
+
+// wrapTask builds the KindTask Value from a completed (or pending,
+// post-Phase 2) TaskState. The element type is unknown at this point;
+// the caller's Define / Assign check enforces it via MatchesDeclared.
+func wrapTask(state *TaskState) Value {
+	return Value{Kind: KindTask, Task: state}
+}
+
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {
 	// User method?
 	if m, ok := i.methods[c.Callee]; ok {
@@ -2253,7 +2476,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			}
 			args[idx] = v
 		}
-		callFrame := NewEnvironment(i.global)
+		callFrame := NewEnvironment(effectiveGlobal(env))
 		for idx, p := range m.Params {
 			// Value semantics: arguments copy into the call frame, so
 			// callee mutations don't leak back to the caller. Stamp the

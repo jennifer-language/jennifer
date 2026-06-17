@@ -182,6 +182,12 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 		emitNodeListField(b, "args", asNodes(v.Args), indent+1)
 		endObj(b, indent)
 
+	case *parser.SpawnExpr:
+		startObj(b, indent)
+		emitTypeAndPos(b, "SpawnExpr", v, indent+1)
+		emitNodeListField(b, "body", asNodes(v.Body), indent+1)
+		endObj(b, indent)
+
 	case *parser.QualifiedCallExpr:
 		startObj(b, indent)
 		emitTypeAndPos(b, "QualifiedCallExpr", v, indent+1)

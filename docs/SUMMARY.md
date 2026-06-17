@@ -14,6 +14,7 @@
 - [Types and values](user-guide/types-and-values.md)
 - [Methods](user-guide/methods.md)
 - [Control flow](user-guide/control-flow.md)
+- [Concurrency](user-guide/concurrency.md)
 - [Imports](user-guide/imports.md)
 - [Style guide](user-guide/style-guide.md)
 - [Best practices](user-guide/best-practices.md)
@@ -35,6 +36,7 @@
 - [`hash`](libraries/hash.md)
 - [`crc`](libraries/crc.md)
 - [`encoding`](libraries/encoding.md)
+- [`task`](libraries/task.md)
 
 # Technical reference
 

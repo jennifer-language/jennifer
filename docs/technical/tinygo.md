@@ -51,7 +51,27 @@ The constants and the env / argv / flag helpers in `os`
 `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) all work fully on
 both binaries. Every other shipped library (`io`, `convert`,
 `math`, `strings`, `lists`, `maps`, `meta`, `time`, `hash`,
-`crc`, `encoding`) has full TinyGo support.
+`crc`, `encoding`, `task`) has full TinyGo support.
+
+**M16.0 / TinyGo goroutine stack**. Jennifer's tree-walking
+evaluator wraps each Jennifer-level call in many Go-stack frames
+(`execBlock` + `evalCall` + `evalExpr` + ...), so even a
+modest-depth recursion (fib 23) easily exceeds TinyGo's default
+goroutine stack of ~8KB and segfaults. The Makefile passes
+`-stack-size=1mb` to `tinygo build` for `jennifer` so the shipping
+binary can run recursive `spawn` bodies (and the parallel section
+of `examples/benchmark.j`). `jennifer-go` doesn't need this -
+Go's goroutine stacks grow automatically.
+
+**M16.0 / TinyGo scheduler**. TinyGo's runtime scheduler is
+cooperative and (as of 0.41) does not exploit multi-core
+hardware: every goroutine runs on the same OS thread.
+`spawn` works correctly under TinyGo - the semantics, the
+loud-fail, the registry - but **parallel speedups will be close
+to 1.0**. The standard-Go binary `jennifer-go` uses Go's regular
+scheduler and does benefit from multiple cores. The benchmark
+output reports the scheduler name in the parallel-section header
+so the speedup numbers can be read in context.
 
 Future library work in `fs` (M16.1) and `net` (M16.2) will hit the
 same boundary and will land with the same friendly-message pattern.
