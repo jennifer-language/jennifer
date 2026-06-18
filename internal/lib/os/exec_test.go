@@ -190,7 +190,7 @@ func TestPollBeforeAndAfterExit(t *testing.T) {
 func TestKillTerminatesProcess(t *testing.T) {
 	skipIfNotLinux(t)
 	p, err := spawnFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		stringList("/bin/sh", "-c", "sleep 30"),
+		stringList("/bin/sleep", "30"),
 	})
 	if err != nil {
 		t.Fatalf("spawn err: %v", err)

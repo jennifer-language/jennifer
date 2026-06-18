@@ -44,24 +44,24 @@ jobs:
             tinygo_target: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up TinyGo
-        uses: acifani/setup-tinygo@v2
+        uses: acifani/setup-tinygo@v3
         with:
           tinygo-version: '0.41.1'
 
       - name: Set up QEMU (for non-native arch smoke tests)
         if: matrix.arch != 'amd64'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Regenerate version stamp
         run: ./scripts/gen-version.sh
@@ -129,7 +129,7 @@ jobs:
           ./scripts/build-deb.sh "$DEB_VERSION" "$DEB_ARCH" dist
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jennifer-${{ matrix.os }}-${{ matrix.arch }}
           path: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload benchmark output
         if: matrix.arch == 'amd64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmarks
           path: bench-out/
@@ -152,10 +152,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
 
@@ -231,7 +231,7 @@ jobs:
           cat release_notes.md
 
       - name: Create GitHub Release (draft)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: false
