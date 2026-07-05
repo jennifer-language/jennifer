@@ -38,10 +38,8 @@ jobs:
         include:
           - os: linux
             arch: amd64
-            tinygo_target: linux/amd64
           - os: linux
             arch: arm64
-            tinygo_target: linux/arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -68,9 +66,19 @@ jobs:
 
       - name: Build TinyGo binary (jennifer)
         env:
-          TINYGO_TARGET: ${{ matrix.tinygo_target }}
+          # TinyGo's `-target=` flag names board / arch presets
+          # (`wasi`, `microbit`, ...); it does *not* accept `os/arch`
+          # pairs like `linux/amd64`. For plain OS/arch cross-compile
+          # TinyGo reads GOOS/GOARCH like the standard toolchain does.
+          # `-stack-size=1mb` mirrors the Makefile: Jennifer's tree-
+          # walking evaluator wraps each Jennifer-level call in many
+          # Go-stack frames, so TinyGo's default ~8KB goroutine stack
+          # overflows on recursive `spawn` bodies. See M16.0 notes in
+          # docs/technical/tinygo.md.
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
         run: |
-          tinygo build -target="$TINYGO_TARGET" -o jennifer ./cmd/jennifer
+          tinygo build -stack-size=1mb -o jennifer ./cmd/jennifer
 
       - name: Build Go binary (jennifer-go)
         env:
