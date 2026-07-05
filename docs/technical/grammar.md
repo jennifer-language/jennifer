@@ -115,10 +115,15 @@ forEachStmt = "for" "(" "def" IDENT "in" expr ")" block ;
 
 exprStmt    = expr ";" ;
 
-type        = primType | listType | mapType | structType ;
+type        = primType | listType | mapType | taskType | structType ;
 primType    = "int" | "float" | "string" | "bool" | "null" | "bytes" ;
 listType    = "list" "of" type ;
 mapType     = "map" "of" type "to" type ;
+taskType    = "task" "of" type ;       (* M16.0: `task of T` - handle to
+                                          a `spawn`ed computation. Same
+                                          shape as `list of T`; recurses
+                                          the same way (`task of list of
+                                          int` is legal). *)
                                        (* recursive; nesting like
                                           `list of list of int` and
                                           `map of string to list of int`
@@ -144,11 +149,22 @@ unaryExpr   = "-" unaryExpr | primary ;
 primary     = ( INT | FLOAT | STRING | "true" | "false" | "null"
               | VARREF | qualifiedCall | qualifiedConstRef
               | call | typeCall | structLit | constRef | "(" expr ")"
-              | listLit | mapLit | lenExpr )
+              | listLit | mapLit | lenExpr | spawnExpr )
               { "[" expr "]" | "." IDENT } ;
                                        (* any primary can be index- or
                                           field-chained; M13.1 adds the
                                           `.field` form *)
+spawnExpr   = "spawn" block ;          (* M16.0: launches the block as a
+                                          goroutine and evaluates
+                                          immediately to a `task of T`
+                                          where T is the body's return
+                                          type at the use site. Bare
+                                          `return;` produces `task of
+                                          null`. Value-semantics
+                                          capture: every binding visible
+                                          at the spawn site is
+                                          deep-copied into a fresh frame
+                                          at launch. *)
 lenExpr     = "len" "(" expr ")" ;     (* M15.4: polymorphic
                                           structural-length built-in
                                           (string / list / map /

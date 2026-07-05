@@ -82,10 +82,13 @@ The table will grow as those ship.
 Reference numbers from `examples/benchmark.j` run as a single
 process on an **AMD Ryzen 5 7600X3D** (6 cores, 12 threads;
 Linux + KDE Plasma desktop active during the run, total CPU load
-low). The script is single-threaded by design (M16.0 will add
-multi-core counterparts to each workload); the only place a
-second CPU enters the picture is Go's concurrent garbage
-collector, which the table below illustrates.
+low). The serial section of the script is single-threaded; the
+only place a second CPU enters the picture is Go's concurrent
+garbage collector, which the table below illustrates. The
+parallel section (added M16.0) fans out to `PARALLEL_WORKERS`
+spawn tasks per workload and prints serial-vs-parallel speedups
+in a separate table; see the driver output for those numbers.
+The reference dump below captures only the serial section.
 
 ### `jennifer` (TinyGo binary)
 

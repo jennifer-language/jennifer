@@ -13,6 +13,7 @@
 | `list of T`     | `[1, 2, 3]`                                         | `[]`             | Ordered sequence; 0-indexed; mutable                                                                                   |
 | `map of K to V` | `{"a": 1, "b": 2}`                                  | `{}`             | Key→value; insertion-ordered; mutable                                                                                  |
 | user struct     | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs)                                                               |
+| `task of T`     | *(no literal - produced by `spawn { ... }`)*         | *(cannot be defaulted; must be initialised)* | Handle to a concurrent computation; observed via the [`task`](../libraries/task.md) library. See [Concurrency](concurrency.md)     |
 
 The **Default** column is the value an uninitialized variable receives
 (`def x as int;` produces `0`). For compound types the default is an

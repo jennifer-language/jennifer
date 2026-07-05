@@ -23,7 +23,7 @@ io.printf("sha256 digest is %d bytes\n", len($digest));
 
 The library uses the codec-table shape - one verb per category,
 with the algorithm passed as a string. The shape mirrors
-`convert.bytesFromString(s, "utf-8")` and the upcoming
+`convert.bytesFromString(s, "utf-8")` and
 `encoding.encode(s, codec)`. Algorithm names are lowercase.
 
 | Algo string | Output width | Notes                                                            |

@@ -1,6 +1,6 @@
 # Jennifer Programming Language
 
-**Milestone 15**
+**Milestone 16.0 - Lightweight concurrency**
 
 Jennifer is a small, experimental, interpreted programming language.
 The interpreter is written in Go and ships as two binaries:
