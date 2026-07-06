@@ -23,6 +23,7 @@ import (
 	mapslib "github.com/mplx/jennifer-lang/internal/lib/maps"
 	mathlib "github.com/mplx/jennifer-lang/internal/lib/math"
 	metalib "github.com/mplx/jennifer-lang/internal/lib/meta"
+	netlib "github.com/mplx/jennifer-lang/internal/lib/net"
 	oslib "github.com/mplx/jennifer-lang/internal/lib/os"
 	stringslib "github.com/mplx/jennifer-lang/internal/lib/strings"
 	tasklib "github.com/mplx/jennifer-lang/internal/lib/task"
@@ -68,6 +69,7 @@ func runRepl() int {
 	encodinglib.Install(in)
 	tasklib.Install(in)
 	fslib.Install(in)
+	netlib.Install(in)
 
 	cwd, err := os.Getwd()
 	if err != nil {

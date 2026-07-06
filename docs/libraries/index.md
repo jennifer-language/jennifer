@@ -34,6 +34,7 @@ restriction list; `jennifer-go` always supports the full surface.
 | [`encoding`](encoding.md) | `use encoding;` | full                                                  | M15.7: introspection (`isAscii`, `lenBytes`, `lenRunes`); binary-to-text `toText`/`fromText` for `"hex"`, `"base64"`, `"base64-url"`; character codecs `encode`/`decode` for `"ascii"`, `"latin-1"`, `"windows-1252"`, `"ebcdic"`     |
 | [`task`](task.md)        | `use task;`     | full                                                  | M16.0: observe and join `task of T` handles produced by `spawn { ... }`. `task.wait`, `task.poll`, `task.discard`, `task.waitAll`, `task.waitAny`; pairs with the [user-guide concurrency tour](../user-guide/concurrency.md)        |
 | [`fs`](fs.md)            | `use fs;`       | full                                                  | M16.1: filesystem I/O. Whole-file `readString`/`readBytes`/`writeString`/`writeBytes`/`appendString`/`appendBytes`; metadata `exists`/`isFile`/`isDir`/`stat`; dir ops `mkdir`/`mkdirAll`/`remove`/`removeAll`/`rename`/`list`/`walk`; handles `open`/`readLine`/`readChars`/`readBytes`/`writeString`/`writeBytes`/`eof`/`close`; structs `fs.Stat`, `fs.File` |
+| [`net`](net.md)          | `use net;`      | [stubs only](../technical/tinygo.md#tinygo-restrictions) | M16.2: TCP `connect`/`listen`/`accept`/`readBytes`/`writeBytes`/`eof`/`address`, UDP `listenUDP`/`sendTo`/`recvFrom`, DNS `lookup`/`reverseLookup`, polymorphic `close`/`address`; structs `net.Conn`, `net.Listener`, `net.UDPSocket`, `net.Datagram`. TinyGo `jennifer` returns friendly errors; use `jennifer-go` for real net I/O. |
 
 A quick taste:
 
@@ -101,6 +102,10 @@ large ones. The organizing principle, captured for future extensions:
 - Filesystem I/O (whole-file reads/writes, metadata, directory
   operations, buffered file handles) -> `fs` (M16.1). Blocking on
   purpose; non-blocking use composes with `spawn` from M16.0.
+- Network I/O (TCP + UDP sockets, DNS lookups) -> `net` (M16.2).
+  Blocking calls, same spawn-composition story as `fs`. The
+  TinyGo `jennifer` binary returns friendly "use jennifer-go"
+  errors; the network stack lives only in the standard-Go binary.
 - A genuinely new topic with **five or more** functions / constants
   -> a new library. Fewer than five names fold into the most-related
   existing library (the non-crypto random helpers were the first

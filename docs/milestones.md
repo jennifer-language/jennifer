@@ -1008,11 +1008,73 @@ See:
 
 ## M16.2 - `net`
 
-Sockets. Plain TCP and UDP first; TLS deferred to its own
-sub-milestone. The first place a real `bytes` round-trip
-matters. Ships blocking calls; non-blocking use composes through
-M16.0 `spawn` rather than duplicating each call as
-`net.acceptAsync`, `net.readAsync`, etc.
+**Status:** done.
+
+Ships TCP + UDP sockets and DNS lookups on top of M16.0's
+`spawn` composition model. `jennifer-go` (standard Go) carries
+the full surface; `jennifer` (TinyGo) ships friendly-error
+stubs at every entry point via build-tag split.
+
+- **TCP.** `net.connect(address) -> net.Conn`,
+  `net.listen(address) -> net.Listener`,
+  `net.accept($listener) -> net.Conn`,
+  `net.readBytes($conn, n)` (blocks for at least one byte;
+  returns up to n whatever's available; sticky EOF on close),
+  `net.writeBytes($conn, b)`, `net.eof($conn)`,
+  `net.address($conn)` peer, `net.address($listener)` local
+  bound address.
+- **UDP.** `net.listenUDP(address) -> net.UDPSocket`,
+  `net.sendTo($sock, peer, bytes)`,
+  `net.recvFrom($sock, n) -> net.Datagram{data, peer}`.
+  Unconnected only - the same socket doubles as client and
+  server via bind-to-`:0`.
+- **DNS.** `net.lookup(host) -> list of string` (forward,
+  Go's `LookupHost`), `net.reverseLookup(ip) -> list of string`
+  (reverse, `LookupAddr`).
+- **Polymorphic verbs.** `net.close($h)` and `net.address($h)`
+  dispatch on the struct tag over Conn / Listener /
+  UDPSocket. Boundary errors when passed the wrong shape.
+- **Structs.** `net.Conn{id}`, `net.Listener{id}`,
+  `net.UDPSocket{id}`, `net.Datagram{data, peer}`. Handle
+  registries use the M15.6 integer-id pattern; three separate
+  registries so wrong-type calls surface at the boundary.
+- **Naming.** `net.connect`, not `net.dial` - plain-English
+  verbs over Go idioms.
+- **Value-semantics carve-out.** `net.Conn` / `net.Listener` /
+  `net.UDPSocket` handles share underlying state between
+  copies via the integer id. Same discipline as M16.0
+  `task of T` and M16.1 `fs.File`.
+- **Concurrency composition.** Blocking calls compose with
+  `spawn` for non-blocking use; the accept-loop-with-
+  spawn-per-connection pattern in the docs is the workhorse
+  case.
+- **TinyGo build-tag split.** `netlib_std.go` (`!tinygo`)
+  implements the full surface via Go's `net` package;
+  `netlib_tinygo.go` (`tinygo`) returns a friendly runtime
+  error at every entry point. TinyGo 0.41 requires a netdev
+  driver at runtime (Jennifer doesn't register one) and
+  lacks `net.ListenPacket` for UDP; the stubs make the
+  limitation visible at the call site rather than surfacing
+  cryptic runtime errors. Same pattern as M15.3 `os.run` on
+  TinyGo.
+- **`examples/net.j`.** A tiny in-process TCP echo: spawn
+  server, main-flow client, round-trip a payload. Uses `:0`
+  + `net.address($listener)` to discover the bound port.
+- **What's deferred** (recorded so the design stays visible):
+  TLS, Unix domain sockets, socket options (SO_REUSEADDR /
+  KEEPALIVE / NODELAY), timeouts / deadlines, DNS record-type
+  helpers (`lookupMX`, `lookupTXT`, `lookupSRV`), explicit
+  IPv6 control.
+
+See:
+- [libraries/net.md](libraries/net.md) - reference doc with
+  TCP + UDP + DNS surface, address helpers, error surface,
+  and the TinyGo note.
+- [user-guide/imports.md](user-guide/imports.md) - `net` row.
+- [technical/tinygo.md](technical/tinygo.md) - the netdev row
+  in the restrictions table.
+- [user-guide/concurrency.md](user-guide/concurrency.md) - the
+  `spawn`-and-compose story `net` builds on.
 
 ## M16.3 - `regex`
 

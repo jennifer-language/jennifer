@@ -38,6 +38,7 @@
 - [`encoding`](libraries/encoding.md)
 - [`task`](libraries/task.md)
 - [`fs`](libraries/fs.md)
+- [`net`](libraries/net.md)
 
 # Technical reference
 

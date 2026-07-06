@@ -45,13 +45,14 @@ the full surface.
 | Library | Affected names                                        | What happens on TinyGo                                                                       |
 | ------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `os`    | `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill` | Runtime error pointing at `jennifer-go`. TinyGo's `os/exec` syscalls aren't implemented yet. |
+| `net`   | Every entry point (TCP, UDP, DNS)                     | Runtime error pointing at `jennifer-go`. TinyGo 0.41 needs a netdev driver at runtime (not registered) and has no `net.ListenPacket` for UDP. Build-tag split: `netlib_tinygo.go` returns friendly errors. |
 
 The constants and the env / argv / flag helpers in `os`
 (`os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`,
 `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) all work fully on
 both binaries. Every other shipped library (`io`, `convert`,
 `math`, `strings`, `lists`, `maps`, `meta`, `time`, `hash`,
-`crc`, `encoding`, `task`) has full TinyGo support.
+`crc`, `encoding`, `task`, `fs`) has full TinyGo support.
 
 **M16.0 / TinyGo goroutine stack**. Jennifer's tree-walking
 evaluator wraps each Jennifer-level call in many Go-stack frames

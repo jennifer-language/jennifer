@@ -22,6 +22,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/maps"
 	"github.com/mplx/jennifer-lang/internal/lib/math"
 	"github.com/mplx/jennifer-lang/internal/lib/meta"
+	"github.com/mplx/jennifer-lang/internal/lib/net"
 	"github.com/mplx/jennifer-lang/internal/lib/os"
 	"github.com/mplx/jennifer-lang/internal/lib/strings"
 	"github.com/mplx/jennifer-lang/internal/lib/task"
@@ -185,6 +186,7 @@ func runFile(path string) int {
 	encodinglib.Install(in)
 	tasklib.Install(in)
 	fslib.Install(in)
+	netlib.Install(in)
 	runErr := in.Run(prog)
 
 	// M16.0: the exit-time loud-fail. Even when Run returned cleanly,
