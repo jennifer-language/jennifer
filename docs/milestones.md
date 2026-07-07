@@ -1292,39 +1292,77 @@ See:
 
 ### M16.5.2 - Lexical slot resolution at parse time
 
-Resolve every variable / constant reference to a
-`(frame-depth, slot-index)` pair at parse time rather than a
-name-based lookup at run time. Inside any block, slot indices
-are dense and stable; the runtime lookup becomes an array
-index instead of a map walk.
+**Status:** shipped (with a scoped spawn-body carve-out).
 
-The refactor touches:
+Every variable / constant reference resolves to a
+`(Depth, Slot)` coordinate at parse time; the runtime lookup
+becomes a slice index instead of a map walk. Undefined-variable
+and shadowing errors also promote from first-execution to
+parse-time diagnostics.
 
-- `internal/parser/parser.go` - add a scope analyser pass that
-  numbers definitions and annotates references with their slot.
-  New AST fields on `VarExpr` / `ConstRefExpr` etc. (or new
-  resolved-variant AST nodes).
-- `internal/interpreter/interpreter.go` - `Environment`
-  storage becomes a per-frame slice indexed by slot rather
-  than a map keyed by name; `evalExpr`'s var-ref case becomes
-  `frames[depth].slots[idx]`.
-- A small grammar / scope-analysis test suite covering
-  shadowing rejection, scope-chain walk for for-each iteration
-  variables, and method-body-sees-globals semantics. The
-  user-visible behaviour stays the same; the scope analyser
-  just catches "undefined variable" at parse time instead of
-  runtime.
+**What landed:**
 
-Side benefit beyond performance: undefined-variable errors
-surface at parse time rather than first-execution, which is
-strictly better for the developer experience.
+- `internal/parser/resolver.go` - new scope analyser pass that
+  runs from inside `Interpreter.Run` (idempotent; the REPL
+  path skips it and falls back to name-based lookup). Walks
+  the AST, tracks per-scope slot allocators, assigns slots to
+  each `def` and each reference. Positioned errors surface
+  through the existing `ParseError` shape.
+- AST additions on `VarExpr`, `ConstRefExpr`, `DefineStmt`,
+  `AssignStmt`, `ForEachStmt`, `TryStmt`, `Block`, `Program`.
+  Each carries `-1` sentinels when unresolved so ad-hoc AST
+  fragments in unit tests keep working without wiring up scope
+  context.
+- `Environment` gains a `slots []Binding` slice alongside the
+  existing `vars` map. `DefineAt` / `GetAt` / `GetBindingAt` /
+  `AssignAt` are the fast paths; name-based `Define` /
+  `Assign` mirror into slots when the binding was originally
+  slot-installed (via the new `Binding.Slot` field), keeping
+  the two views in sync so `execAppend` / `execIndexAssign` /
+  `execFieldAssign` (which reach for the binding by name)
+  don't skip past slot updates.
+- `NewEnvironmentSized(parent, numSlots)` pre-sizes the slot
+  slice from the resolver's `Block.NumSlots` hint so
+  `DefineAt` avoids a grow-on-every-write inside hot loops.
 
-Expected impact (baseline: M16.5.1 numbers in
-[technical/tinygo.md](technical/tinygo.md#per-workload-comparison-serial-section)):
+**Deliberate carve-outs:**
+
+- **Spawn bodies fall back to name-based lookup.** The
+  runtime's `snapshotForSpawn` produces a two-frame duplex
+  (globals-snap + locals-snap) that doesn't align with the
+  resolver's single-frame view of "the enclosing scope."
+  Rather than invent brittle depth arithmetic, the resolver
+  skips the spawn body entirely and the interpreter's
+  fallback path picks it up. Spawn bodies aren't hot loops -
+  concurrency dispatch is coarse-grained by design - so the
+  perf regression is bounded.
+- **Try-body runs in the enclosing env** (execTry calls
+  `execStmts(body.Stmts, env)` rather than `execBlock`); the
+  resolver walks its stmts inline in the current scope to
+  match. Catch-handler runs in a fresh `catchEnv` and gets a
+  proper scope push.
+- **For-header init lives in `forEnv`, not the body block.**
+  execFor creates one env for the header and execBlock nests
+  another for the body; the resolver tracks them separately.
+
+**Side benefit beyond performance:** undefined-variable and
+shadowing errors surface at parse time now, which is strictly
+better for the developer experience and closes the loop with
+M17.5.1's `L001 unused-local` design (the resolver's scope
+pass is the analysis the linter reuses).
+
+**Expected impact (to be measured on the reference
+machine).** Baseline: M16.5.1 numbers in
+[technical/tinygo.md](technical/tinygo.md#per-workload-comparison-serial-section).
+Not yet re-run; the working machine differs from the
+reference Ryzen 5 7600X3D so cross-host comparison is
+meaningless. When the benchmark is re-run:
 - `primes up to LIMIT`: 42.4 s -> ~15-20 s (2-3x) on tiny;
   21.1 s -> ~7-10 s on the default `jennifer` binary.
 - `newton`, `monte carlo`: similar 2x range on both binaries.
 - `fib`: contributes to the M16.5.3 win below.
+- Update `technical/tinygo.md`'s tables with the post-M16.5.2
+  numbers when the reference measurements come back.
 
 ### M16.5.3 - Method call frame optimization
 

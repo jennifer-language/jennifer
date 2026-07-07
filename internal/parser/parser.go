@@ -31,7 +31,11 @@ func (e *ParseError) Position() (file string, line, col int) {
 	return e.File, e.Line, e.Col
 }
 
-// Parse tokenizes the source and returns a *Program AST.
+// Parse tokenizes the source and returns a *Program AST. Does NOT
+// run the M16.5.2 scope-analysis pass; call Resolve(prog) separately
+// when preparing a program for execution. Splitting the two lets
+// grammar-level tests focus on parse trees without wiring up scope
+// context for every fragment.
 func Parse(source string) (*Program, error) {
 	toks, err := lexer.Tokenize(source)
 	if err != nil {
@@ -44,7 +48,8 @@ func Parse(source string) (*Program, error) {
 // ParseTokens parses an already-lexed token stream. M14: trivia
 // tokens (comments, blank lines) are stripped before parsing - they
 // pass through the formatter on the raw lexer stream and don't reach
-// here.
+// here. Same scope-analysis contract as Parse: run Resolve(prog)
+// yourself before execution.
 func ParseTokens(toks []lexer.Token) (*Program, error) {
 	p := &parser{tokens: stripTrivia(toks)}
 	return p.parseProgram()
@@ -470,6 +475,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 			VarName:  name.Lexeme,
 			VarType:  tt,
 			InitExpr: initExpr,
+			Slot:     -1,
 		}, nil
 	}
 	// variable - name is a bare IDENT
@@ -502,6 +508,7 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 		VarName:  name.Lexeme,
 		VarType:  tt,
 		InitExpr: initExpr,
+		Slot:     -1,
 	}, nil
 }
 
@@ -635,6 +642,7 @@ func (p *parser) parseTry() (Stmt, error) {
 		CatchFile: catchTok.File,
 		CatchLine: catchTok.Line,
 		CatchCol:  catchTok.Col,
+		CatchSlot: -1,
 	}, nil
 }
 
@@ -695,11 +703,11 @@ func (p *parser) tryParseIndexAssign() (Stmt, bool, error) {
 		}
 		return &AppendStmt{
 			pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
-			Target: &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme},
+			Target: &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme, Depth: -1, Slot: -1},
 			Value:  val,
 		}, true, nil
 	}
-	var target Expr = &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme}
+	var target Expr = &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme, Depth: -1, Slot: -1}
 	// Consume any mix of `[expr]` and `.field` suffixes (M13.1).
 	for {
 		switch p.peek().Type {
@@ -781,7 +789,7 @@ func (p *parser) parseAssign(consumeSemi bool) (Stmt, error) {
 			return nil, err
 		}
 	}
-	return &AssignStmt{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, VarName: vref.Lexeme, Value: val}, nil
+	return &AssignStmt{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, VarName: vref.Lexeme, Value: val, Depth: -1, Slot: -1}, nil
 }
 
 func (p *parser) parseIf() (Stmt, error) {
@@ -934,10 +942,11 @@ func (p *parser) parseForEachTail(ft lexer.Token) (Stmt, error) {
 		return nil, err
 	}
 	return &ForEachStmt{
-		pos:     pos{File: ft.File, Line: ft.Line, Col: ft.Col},
-		VarName: name.Lexeme,
-		Coll:    coll,
-		Body:    body,
+		pos:      pos{File: ft.File, Line: ft.Line, Col: ft.Col},
+		VarName:  name.Lexeme,
+		Coll:     coll,
+		Body:     body,
+		IterSlot: -1,
 	}, nil
 }
 
@@ -1687,7 +1696,7 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		return p.parseQualifiedTail(ident)
 	case lexer.TOKEN_VARREF:
 		p.advance()
-		return &VarExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
+		return &VarExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme, Depth: -1, Slot: -1}, nil
 	case lexer.TOKEN_IDENT:
 		// A bare IDENT in expression context is either:
 		//   - a qualified call/constant `prefix.name(...)` / `prefix.NAME`,
@@ -1703,7 +1712,7 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 			return p.parseStructLitTail(t)
 		}
 		if !p.check(lexer.TOKEN_LPAREN) {
-			return &ConstRefExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme}, nil
+			return &ConstRefExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Name: t.Lexeme, Depth: -1, Slot: -1}, nil
 		}
 		return p.parseCallTail(t)
 	case lexer.TOKEN_INT_TYPE, lexer.TOKEN_FLOAT_TYPE, lexer.TOKEN_STRING_TYPE, lexer.TOKEN_BOOL_TYPE, lexer.TOKEN_BYTES_TYPE:

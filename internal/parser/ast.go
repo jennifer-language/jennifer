@@ -190,6 +190,12 @@ type Program struct {
 	Methods  []*MethodDef
 	Structs  []*StructDef // M13.1: top-level `def struct Name { ... };` declarations
 	TopLevel []Stmt       // top-level statements executed in source order after method hoisting
+	// M16.5.2: number of slots the global frame needs. Populated by
+	// Resolve() during parse. Zero when Resolve() hasn't run - the
+	// interpreter falls back to name-based lookup in that case, which
+	// keeps unit tests that hand-build AST fragments working without
+	// running the resolver.
+	NumGlobals int
 }
 
 // ---- Statements ----
@@ -248,6 +254,11 @@ func (*MethodDef) stmtNode() {}
 type Block struct {
 	pos
 	Stmts []Stmt
+	// M16.5.2: number of slots this block's fresh frame needs.
+	// Populated by Resolve() during parse. Zero when Resolve() hasn't
+	// run - the interpreter's fallback path grows the slot slice on
+	// demand in that case.
+	NumSlots int
 }
 
 func (*Block) stmtNode() {}
@@ -261,6 +272,9 @@ type DefineStmt struct {
 	VarName  string // for variables: the $-name; for constants: the UPPERCASE name
 	VarType  Type
 	InitExpr Expr // may be nil for uninitialized variables; never nil for constants
+	// M16.5.2: slot the binding will occupy in its enclosing frame.
+	// Populated by Resolve(); default -1 means "not resolved".
+	Slot int
 }
 
 func (*DefineStmt) stmtNode() {}
@@ -270,6 +284,9 @@ type AssignStmt struct {
 	pos
 	VarName string
 	Value   Expr
+	// M16.5.2: (Depth, Slot) address the binding to update. Default -1.
+	Depth int
+	Slot  int
 }
 
 func (*AssignStmt) stmtNode() {}
@@ -362,6 +379,11 @@ type ForEachStmt struct {
 	VarName string
 	Coll    Expr
 	Body    *Block
+	// M16.5.2: slot the iterator variable takes in the per-iteration
+	// frame. Default -1 = not resolved. The iterator lives in a fresh
+	// frame chained on top of the enclosing scope; the body's own
+	// defs get slots after IterSlot in the same frame (via Body.NumSlots).
+	IterSlot int
 }
 
 func (*ForEachStmt) stmtNode() {}
@@ -420,6 +442,10 @@ func (*ExitStmt) stmtNode() {}
 // block. The body runs first; if any `throw` (user-issued or runtime)
 // reaches this `try`, the handler runs with `NAME` bound to the
 // thrown value in a fresh per-handler scope. M13.2.
+// TryStmt: `try { body } catch (name) { handler };` (M13.2). CatchName
+// is the identifier the handler binds. CatchSlot is the slot the caught
+// value takes in the handler's fresh frame (M16.5.2). Default -1 = not
+// resolved.
 type TryStmt struct {
 	pos
 	Body      *Block
@@ -428,6 +454,7 @@ type TryStmt struct {
 	CatchFile string // position of the `catch (NAME)` introducer for diagnostics
 	CatchLine int
 	CatchCol  int
+	CatchSlot int // M16.5.2: slot for CatchName in the handler frame; -1 = unresolved
 }
 
 func (*TryStmt) stmtNode() {}
@@ -562,6 +589,14 @@ func (*FieldAccessExpr) exprNode() {}
 type VarExpr struct {
 	pos
 	Name string // without the leading $
+	// M16.5.2: (Depth, Slot) locate the binding in the runtime scope
+	// chain. Depth is how many parent pointers to walk from the
+	// current environment; Slot is the slot index in that frame.
+	// Both default to -1, meaning "not resolved" - the interpreter
+	// falls back to name-based lookup so ad-hoc AST fragments in
+	// tests keep working. Populated by Resolve() during parse.
+	Depth int
+	Slot  int
 }
 
 func (*VarExpr) exprNode() {}
@@ -573,6 +608,9 @@ func (*VarExpr) exprNode() {}
 type ConstRefExpr struct {
 	pos
 	Name string
+	// M16.5.2: same shape as VarExpr - see the comment there.
+	Depth int
+	Slot  int
 }
 
 func (*ConstRefExpr) exprNode() {}

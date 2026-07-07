@@ -570,6 +570,14 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	if i.In == nil {
 		i.In = os.Stdin
 	}
+	// M16.5.2: the scope-analysis pass runs here so callers that
+	// obtained a *Program via parser.Parse (which itself no longer
+	// resolves) still get slot annotations before execution.
+	// Idempotent - re-resolving an already-resolved program produces
+	// the same annotations.
+	if err := parser.Resolve(prog); err != nil {
+		return err
+	}
 	if err := i.processImports(prog, false); err != nil {
 		return err
 	}
@@ -902,9 +910,11 @@ func (r blockResult) flowsOut() bool {
 
 // execBlock runs every statement of a block in a *new* child env so that
 // vars declared inside the block don't leak out. The caller passes the
-// enclosing env; nested blocks inherit through the parent chain.
+// enclosing env; nested blocks inherit through the parent chain. M16.5.2:
+// the resolver's NumSlots hint pre-sizes the slot slice so DefineAt
+// avoids a grow on every write.
 func (i *Interpreter) execBlock(b *parser.Block, parent *Environment) (blockResult, error) {
-	env := NewEnvironment(parent)
+	env := NewEnvironmentSized(parent, b.NumSlots)
 	return i.execStmts(b.Stmts, env)
 }
 
@@ -1046,9 +1056,19 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 			val = stampDeclaredType(ZeroFor(st.VarType), st.VarType)
 		}
 	}
-	if err := env.Define(st.VarName, val, st.VarType, st.IsConst); err != nil {
-		file, line, col := posFor(st)
-		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+	// M16.5.2: prefer the slot-based DefineAt when the resolver
+	// already assigned this def a slot. Falls back to name-based
+	// Define for REPL / ad-hoc AST paths.
+	if st.Slot >= 0 {
+		if err := env.DefineAt(st.Slot, st.VarName, val, st.VarType, st.IsConst); err != nil {
+			file, line, col := posFor(st)
+			return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+		}
+	} else {
+		if err := env.Define(st.VarName, val, st.VarType, st.IsConst); err != nil {
+			file, line, col := posFor(st)
+			return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+		}
 	}
 	return nil
 }
@@ -1116,15 +1136,29 @@ func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error 
 	// destination's declared type tells us the inner shape; we re-stamp
 	// because the right-hand-side may be a literal that's not yet
 	// stamped. Primitives skip the stamp branch entirely.
-	b, err := env.GetBinding(st.VarName)
+	//
+	// M16.5.2: prefer the slot path when the resolver populated it.
+	var b Binding
+	if st.Slot >= 0 {
+		b, err = env.GetBindingAt(st.Depth, st.Slot, st.VarName)
+	} else {
+		b, err = env.GetBinding(st.VarName)
+	}
 	if err != nil {
 		file, line, col := posFor(st)
 		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 	}
 	val = stampDeclaredType(val.Copy(), b.DeclType)
-	if err := env.Assign(st.VarName, val); err != nil {
-		file, line, col := posFor(st)
-		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+	if st.Slot >= 0 {
+		if err := env.AssignAt(st.Depth, st.Slot, st.VarName, val); err != nil {
+			file, line, col := posFor(st)
+			return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+		}
+	} else {
+		if err := env.Assign(st.VarName, val); err != nil {
+			file, line, col := posFor(st)
+			return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+		}
 	}
 	return nil
 }
@@ -1909,7 +1943,16 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 	case *parser.NullLit:
 		return Null(), nil
 	case *parser.VarExpr:
-		v, err := env.Get(ex.Name)
+		// M16.5.2: prefer the O(1) slot path when the resolver
+		// annotated this reference. Falls back to the O(depth) name
+		// walk otherwise (REPL, hand-built AST fragments).
+		var v Value
+		var err error
+		if ex.Slot >= 0 {
+			v, err = env.GetAt(ex.Depth, ex.Slot, ex.Name)
+		} else {
+			v, err = env.Get(ex.Name)
+		}
 		if err != nil {
 			file, line, col := posFor(ex)
 			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
