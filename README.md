@@ -1,6 +1,6 @@
 # Jennifer Programming Language
 
-**Milestone 16.0 - Lightweight concurrency**
+**Milestone 16.5.1**
 
 Jennifer is a small, experimental, interpreted programming language.
 The interpreter is written in Go and ships as two binaries:
@@ -26,11 +26,12 @@ Same source, same language; pick by use case:
   `os.run` / `os.spawn` / the whole `net` library. This is what
   you want unless you have a specific reason to use the constrained
   variant.
-- **`jennifer-tiny`** (TinyGo): smaller binary, embeddable; the
-  variant we target for embedding (e.g. into the macflyos kernel).
-  Trade-off: no `os/exec` (TinyGo runtime gap) and no network stack
-  (no netdev driver registered). Calls into those surfaces return
-  a friendly runtime error pointing back at `jennifer`.
+- **`jennifer-tiny`** (TinyGo): smaller binary, embeddable in
+  minimal-footprint deployments (embedded systems, minimal
+  containers, small-footprint scripting hosts). Trade-off: no
+  `os/exec` (TinyGo runtime gap) and no network stack (no netdev
+  driver registered). Calls into those surfaces return a friendly
+  runtime error pointing back at `jennifer`.
 
 Both binaries install side by side. Benchmarks comparing the two on
 the same workload set live in

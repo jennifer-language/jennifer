@@ -2,12 +2,15 @@
 # Copyright (C) 2026 <developer@mplx.eu>
 #
 # showcase.j - exercises every Jennifer language feature and every
-# standard-library function that ships through M8. Used as a golden
-# integration test by cmd/jennifer/examples_test.go.
+# standard-library surface that ships through M16.5.1. Used as a
+# golden integration test by cmd/jennifer/examples_test.go.
 #
 # meta.VERSION is intentionally NOT printed - its value depends on
-# git state and would make the golden file non-deterministic. We
-# exercise the constant via convert.typeOf() instead.
+# git state and would make the golden file non-deterministic. Same
+# for time.now() (wall clock), fs paths that depend on cwd, and
+# net addresses that depend on the kernel's ephemeral-port pick.
+# Everything printed below is deliberately deterministic across
+# runs and hosts.
 
 use io;
 use convert;
@@ -430,5 +433,176 @@ try {
 } catch (err) {
     io.printf("runtime err  = kind=%s\n", $err.kind);
 }
+
+# --- M15.5: time (instants, durations, zones, strftime) ---
+#
+# time.now() is wall-clock and would drift the golden; we exercise
+# the deterministic surface (fromUnix + accessors + arithmetic +
+# format + iso) and type-check the moving parts.
+use time;
+
+io.printf("=== M15.5 time ===\n");
+def epoch as time.Time init time.fromUnix(0);
+io.printf("epoch UTC       = %s\n", time.format($epoch, "%Y-%m-%d %H:%M:%S"));
+io.printf("epoch year      = %d\n", time.year($epoch));
+io.printf("epoch weekday   = %d\n", time.weekday($epoch));
+def hourSpan as time.Duration init time.fromMinutes(60);
+def afterEpoch as time.Time init time.add($epoch, $hourSpan);
+io.printf("epoch+1h iso    = %s\n", time.iso($afterEpoch));
+def gap as time.Duration init time.sub($afterEpoch, $epoch);
+io.printf("gap minutes     = %d\n", time.minutes($gap));
+io.printf("epoch<after     = %t\n", time.before($epoch, $afterEpoch));
+io.printf("typeOf now()    = %s\n", convert.typeOf(time.now()));
+io.printf("typeOf UTC      = %s\n", convert.typeOf(time.UTC));
+
+# --- M15.6: hash + crc, rendered through M15.7 encoding ---
+#
+# hash.compute + crc.compute return raw bytes; encoding.toText(_,"hex")
+# turns them into printable digests. This chains three libraries in
+# one line and gives a stable golden.
+use hash;
+use crc;
+use encoding;
+
+io.printf("=== M15.6 hash / crc ===\n");
+def digestIn as bytes init convert.bytesFromString("abc", "utf-8");
+io.printf("md5(abc)     = %s\n", encoding.toText(hash.compute($digestIn, "md5"), "hex"));
+io.printf("sha1(abc)    = %s\n", encoding.toText(hash.compute($digestIn, "sha1"), "hex"));
+io.printf("sha256(abc)  = %s\n", encoding.toText(hash.compute($digestIn, "sha256"), "hex"));
+io.printf("crc32(abc)   = %s\n", encoding.toText(crc.compute($digestIn, "crc32"), "hex"));
+io.printf("crc64(abc)   = %s\n", encoding.toText(crc.compute($digestIn, "crc64"), "hex"));
+
+# Streamed digest matches the one-shot form.
+def sha as hash.Stream init hash.stream("sha256");
+hash.update($sha, convert.bytesFromString("a", "utf-8"));
+hash.update($sha, convert.bytesFromString("bc", "utf-8"));
+io.printf("sha256 stream = %s\n", encoding.toText(hash.finalize($sha), "hex"));
+
+# --- M15.7: encoding introspection + binary-to-text + codecs ---
+io.printf("=== M15.7 encoding ===\n");
+io.printf("base64(abc)  = %s\n", encoding.toText($digestIn, "base64"));
+io.printf("hex round    = %s\n", convert.stringFromBytes(encoding.fromText("616263", "hex"), "utf-8"));
+io.printf("isAscii(abc) = %t\n", encoding.isAscii($digestIn));
+io.printf("lenRunes     = %d\n", encoding.lenRunes(convert.bytesFromString("café", "utf-8")));
+def latin as bytes init encoding.encode("café", "latin-1");
+io.printf("latin-1 hex  = %s\n", encoding.toText($latin, "hex"));
+io.printf("latin-1 back = %s\n", encoding.decode($latin, "latin-1"));
+
+# --- M16.0: task (spawn a computation, wait for the value) ---
+#
+# spawn { ... } evaluates immediately to a `task of T` handle; the
+# body runs concurrently. task.wait re-raises the body's error as
+# a positioned runtime error if it failed. task.waitAll collects
+# a list of results in list order.
+use task;
+
+io.printf("=== M16.0 task ===\n");
+def one as task of int init spawn { return 21 + 21; };
+io.printf("wait single  = %d\n", task.wait($one));
+def many as list of task of int init [
+    spawn { return 1; },
+    spawn { return 2; },
+    spawn { return 3; }
+];
+io.printf("waitAll      = %a\n", task.waitAll($many));
+
+# --- M16.1: fs (whole-file round-trip in a scratch subdir) ---
+#
+# Uses a fresh subdirectory in the current working directory so
+# the demo cleans up after itself and produces the same output
+# regardless of where the interpreter was launched.
+use fs;
+
+def const SHOWCASE_DIR as string init "showcase-fs-tmp";
+if (fs.exists(SHOWCASE_DIR)) {
+    fs.removeAll(SHOWCASE_DIR);
+}
+fs.mkdirAll(SHOWCASE_DIR);
+fs.writeString(SHOWCASE_DIR + "/hi.txt", "hello, fs\n");
+io.printf("=== M16.1 fs ===\n");
+io.printf("read back    = %s", fs.readString(SHOWCASE_DIR + "/hi.txt"));
+io.printf("isFile       = %t\n", fs.isFile(SHOWCASE_DIR + "/hi.txt"));
+io.printf("isDir        = %t\n", fs.isDir(SHOWCASE_DIR));
+def stat as fs.Stat init fs.stat(SHOWCASE_DIR + "/hi.txt");
+io.printf("stat size    = %d\n", $stat.size);
+fs.removeAll(SHOWCASE_DIR);
+io.printf("cleanup      = %t\n", not fs.exists(SHOWCASE_DIR));
+
+# --- M16.2: net (in-process TCP echo) ---
+#
+# The default `jennifer` binary has full networking; `jennifer-tiny`
+# has no netdev driver and every net.* call surfaces a friendly
+# error. try/catch keeps the demo cross-binary; the golden captures
+# the standard-Go success path (which is what `go test` uses).
+use net;
+
+io.printf("=== M16.2 net ===\n");
+try {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        def raw as bytes init net.readBytes($conn, 8);
+        net.writeBytes($conn, $raw);
+        net.close($conn);
+        return null;
+    };
+    def client as net.Conn init net.connect($addr);
+    net.writeBytes($client, convert.bytesFromString("net-demo", "utf-8"));
+    def echoed as bytes init net.readBytes($client, 8);
+    net.close($client);
+    task.wait($server);
+    net.close($listener);
+    io.printf("echo replied = %s\n", convert.stringFromBytes($echoed, "utf-8"));
+} catch (err) {
+    io.printf("net unavailable (%s)\n", $err.kind);
+}
+
+# --- M16.3: regex (matches, find + groups, replace, split) ---
+use regex;
+
+io.printf("=== M16.3 regex ===\n");
+io.printf("matches      = %t\n", regex.matches("^\\d+$", "42"));
+def hit as regex.Match init regex.find("(\\w+):(\\d+)", "port:8080");
+io.printf("find         = %s (%s / %s)\n", $hit.text, $hit.groups[0], $hit.groups[1]);
+def named as regex.Match init regex.find("(?P<key>\\w+)=(?P<val>\\d+)", "n=7");
+io.printf("named group  = key=%s val=%s\n",
+    $named.groupsNamed["key"], $named.groupsNamed["val"]);
+io.printf("replace      = %s\n", regex.replace("\\d+", "port 8080 host 22", "###"));
+io.printf("split        = %a\n", regex.split("\\s+", "a  b  c"));
+io.printf("escape       = %s\n", regex.escape("1+2=(3)"));
+
+# --- M16.4: testing (name-based dispatch, per-process accumulator) ---
+#
+# testing.run invokes a zero-arg method by name, catches user throws
+# and runtime errors (including exit), and appends a testing.Result
+# to a process-wide accumulator. We define one passing and one
+# failing test, run both, and count outcomes. testing.report renders
+# text / TAP / JUnit XML - see examples/testing.j for those.
+use testing;
+
+func showcasePasses() {
+    return;
+}
+
+func showcaseFails() {
+    throw Error{kind: "assertion", message: "demo", file: "", line: 0, col: 0};
+}
+
+testing.reset();
+testing.run("showcasePasses");
+testing.run("showcaseFails");
+def outcomes as list of testing.Result init testing.results();
+def pass as int init 0;
+def fail as int init 0;
+for (def r in $outcomes) {
+    if ($r.passed) {
+        $pass = $pass + 1;
+    } else {
+        $fail = $fail + 1;
+    }
+}
+io.printf("=== M16.4 testing ===\n");
+io.printf("ran=%d passed=%d failed=%d\n", len($outcomes), $pass, $fail);
 
 io.printf("=== done ===\n");

@@ -243,10 +243,11 @@ Considered during the M11 / M15.1 planning: ship process exit as
 both the language statement `exit EXPR;` (M11) and as a library
 function `os.exit(n)` (planned for M15.1). The argument for keeping
 both was that the language statement might be redefined under a
-future embedding (McFly OS, a WASM sandbox) to mean "return from the
-interpreter," while `os.exit(n)` would always mean "kill the host
-process" with no possibility of redefinition. Same argument as C's
-`exit()` vs `_exit()`.
+future embedding (a WASM sandbox, a host application driving the
+interpreter) to mean "return from the interpreter," while
+`os.exit(n)` would always mean "kill the host process" with no
+possibility of redefinition. Same argument as C's `exit()` vs
+`_exit()`.
 
 Rejected because:
 
@@ -255,12 +256,12 @@ Rejected because:
   stdout flush, same termination. Two spellings for one behaviour
   violates Jennifer's "one way per thing" stance immediately, in
   exchange for a divergence that hasn't been needed yet.
-- **The embedding case is hypothetical.** McFly OS embedding and a
-  WASM-sandbox build are long-horizon items; designing the public
-  API for them now locks in a duplicate that the actual embeddings
-  may not even want (an embedded host might redefine `exit EXPR;`
-  *and* `os.exit(n)` the same way, leaving the distinction useless
-  but still in the language).
+- **The embedding case is hypothetical.** A WASM-sandbox build and
+  a host-driven embedding are long-horizon items; designing the
+  public API for them now locks in a duplicate that the actual
+  embeddings may not even want (an embedded host might redefine
+  `exit EXPR;` *and* `os.exit(n)` the same way, leaving the
+  distinction useless but still in the language).
 - **The statement form is the right home.** Process exit is
   control-flow, parallel to `return;`: terminating execution from
   any reachable point. Wrapping the same primitive in a library
@@ -330,10 +331,11 @@ and the third doesn't fit:
   not inventing an FFI keyword.
 - **"Reuse existing ecosystems / call C libraries" lands through
   WASM (M19), not cgo.** TinyGo's cgo support is partial on
-  hosted targets and absent on WASI / baremetal; macflyos has no
-  userspace libc to link against. The WASM runtime milestone
-  already plans sandboxed module loading, which sidesteps the
-  ABI / marshalling / ownership fight entirely.
+  hosted targets and absent on WASI / baremetal; small-footprint
+  embedding targets typically lack a userspace libc to link
+  against at all. The WASM runtime milestone already plans
+  sandboxed module loading, which sidesteps the ABI /
+  marshalling / ownership fight entirely.
 - **"Embed Jennifer in host applications" is a real gap - but
   it's a Go-side polish job, not a language feature.** It gets
   its own placeholder in the Long horizon list under

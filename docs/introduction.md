@@ -10,7 +10,8 @@ and ships as two binaries:
   Missing `os/exec` and the network stack (TinyGo runtime gaps);
   calls into those surfaces return a friendly runtime error
   pointing back at `jennifer`. Use this variant when binary size
-  or embeddability matters (e.g. the macflyos kernel target).
+  or embeddability matters (embedded systems, minimal containers,
+  small-footprint scripting hosts).
 
 Source files use the `.j` extension. Whitespace is not significant
 anywhere; statements end with `;`.
