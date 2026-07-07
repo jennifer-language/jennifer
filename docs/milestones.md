@@ -1189,298 +1189,70 @@ See:
 
 ## M16.5 - Interpreter performance pass
 
-Closes the largest gaps the benchmark suite exposes
-(see [technical/tinygo.md > Single-binary benchmark
-results](technical/tinygo.md#single-binary-benchmark-results))
-before Phase D's Jennifer-coded libraries (json, csv, http,
-testing.j, ...) land on top. Those libraries are mostly tight
-parsing loops and recursive descent; landing M16.5 first means
-they ship at native-feeling speed instead of needing apology
-paragraphs in the per-library docs.
+**Status:** shipped as four sub-milestones (M16.5.1 through M16.5.4).
 
-**Where the cycles go.** The pre-M16.5 numbers from
-`examples/benchmark.j` pointed at three distinct bottlenecks,
-each fixable independently. The first is now closed by M16.5.1;
-the other two remain as separate sub-milestones. Pre-M16.5
-timings quoted below are from the historical run captured in
+Closed the largest gaps `examples/benchmark.j` exposed before Phase D
+(json, csv, http, testing.j, ...) lands on top, so those Jennifer-coded
+libraries ship at native-feeling speed instead of needing apology
+paragraphs in the per-library docs. User-visible behaviour is unchanged
+- value semantics, lexical scoping, and by-name method resolution all
+still hold; the implementation just avoids the whole-tree copy, the
+name-map walk, and the per-call frame allocation. Pre-M16.5 baseline
+numbers in
 [technical/tinygo.md](technical/tinygo.md#per-workload-comparison-serial-section)
 under "Pre-M16.5.1 comparison, same workloads."
 
-1. **Value-semantic copy-on-write on every compound write.**
-   **Closed by M16.5.1.** `$xs[] = item`, `$xs[i] = v`,
-   `$m[k] = v`, `$p.field = v` used to deep-copy the root
-   binding before mutating - O(N^2) for a sequence of N
-   appends. Was the standout cost in `struct list build+read`
-   (pre-M16.5: 10.7 s -> post: 0.06 s), `map insert+read`
-   (9.8 s -> 1.7 s), and `string join` (4.2 s -> 0.02 s) on
-   TinyGo. See M16.5.1 below.
-2. **Name-based variable resolution at every reference.** Each
-   `$n` reference walks the Environment chain by name; in a tight
-   loop touching `$n`, `$d`, `$count` the resolver re-traverses
-   the same chain on every iteration. Now the standout tax on
-   `primes up to LIMIT` (42.4 s) and the rest of the
-   compute-bound block. Addressed by M16.5.2.
-3. **Method-call frame churn.** Every call allocates a fresh
-   `Environment`, binds parameters one by one through map
-   operations, and pays the method-table lookup at the call
-   site. `fib(23)` runs at 4.7x the standard-Go cost - the
-   recursion depth is small (~28 K calls), the body is trivial,
-   the gap is dispatch overhead. Addressed by M16.5.3.
+**What shipped:**
 
-The user-visible behaviour stays unchanged. Value semantics still
-hold, just implemented without the literal whole-tree copy on
-every write. Lexical scoping still holds, just resolved at parse
-time. Methods still bind by name at the source level; the
-lookup is just done once.
-
-### M16.5.1 - Refcount-based copy-on-mutation for `Value`
-
-**Status:** done (shared-marker COW variant).
-
-Ships the shared-marker copy-on-write protocol on compound
-`Value`s. Cheaper than full refcount, correct where it matters,
-and removes the O(N^2) tax on the "grow a list one item at a
-time" pattern.
-
-- **`Value.shared *bool` marker.** nil for freshly-constructed
-  compounds and scalars. `Share()` sets it to a `*bool = true`
-  when `evalExpr` returns a variable reference. Any downstream
-  storage (Define, Assign, param binding, list/map element,
-  struct field) sees the value as potentially aliased.
-- **`Ensure()` at mutation sites.** `execAppend`,
-  `execIndexAssign`, `execFieldAssign` all call
-  `binding.Value.Ensure()` before mutating. If shared, Ensure
-  DeepCopies to a private backing. Otherwise (append hot loop,
-  where the binding is the only reference), Ensure returns v
-  as-is and the mutation happens in place - no allocation.
-- **`Copy()` stays as the public deep-copy** for libraries
-  whose pattern is "Copy then mutate freely" (`lists.shuffle`,
-  `lists.reverse`). Historical name preserved so no library
-  needed changes. `snapshotForSpawn` calls `DeepCopy()`
-  explicitly for value-semantics capture across goroutine
-  boundaries.
-- **Impact.** The append-in-a-loop pattern (`$xs[] = i` inside
-  a while) dropped from ~35 s on 10K items (pre-M16.5.1) to
-  ~40 ms on `jennifer-tiny` (TinyGo) - roughly 1000x. In the
-  full benchmark suite (`examples/benchmark.j`), the three
-  workloads dominated by the compound-COW pattern collapsed
-  correspondingly: `struct list build+read` 10.7 s -> 0.06 s,
-  `string join` 4.2 s -> 0.02 s, `map insert+read` 9.8 s ->
-  1.7 s (all on `jennifer-tiny`). Serial total: 74.5 s ->
-  48.9 s on tiny, 45.5 s -> 25.2 s on the default `jennifer`
-  binary. The M15.5.3 benchmark note about swapping a Sieve
-  of Eratosthenes for trial division no longer applies; the
-  write pattern is now cheap enough.
-- **Alias correctness.** The plan-required alias-stress suite
-  is `internal/interpreter/value_alias_test.go` - 15 tests
-  covering direct list aliasing, map aliasing, struct
-  aliasing, structs containing lists, lists of structs, nested
-  compounds, chained field writes, bytes append, function-arg
-  mutation, and the hot-loop append pattern. Anyone touching
-  mutation code must add coverage there.
-- **Trade-off recorded**: the marker is one-directional (once
-  true, never flips back). Pessimistic - a Value that was ever
-  aliased detaches on next mutation even after the alias goes
-  out of scope. A full refcounted COW would fix that; not
-  scheduled.
-
-See:
-- [technical/interpreter.md > Value semantics](technical/interpreter.md#value-semantics) -
-  the shared-marker + Share/Ensure/DeepCopy protocol in full.
-- `internal/interpreter/value_alias_test.go` - the alias
-  correctness suite.
-
-### M16.5.2 - Lexical slot resolution at parse time
-
-**Status:** shipped (with a scoped spawn-body carve-out).
-
-Every variable / constant reference resolves to a
-`(Depth, Slot)` coordinate at parse time; the runtime lookup
-becomes a slice index instead of a map walk. Undefined-variable
-and shadowing errors also promote from first-execution to
-parse-time diagnostics.
-
-**What landed:**
-
-- `internal/parser/resolver.go` - new scope analyser pass that
-  runs from inside `Interpreter.Run` (idempotent; the REPL
-  path skips it and falls back to name-based lookup). Walks
-  the AST, tracks per-scope slot allocators, assigns slots to
-  each `def` and each reference. Positioned errors surface
-  through the existing `ParseError` shape.
-- AST additions on `VarExpr`, `ConstRefExpr`, `DefineStmt`,
-  `AssignStmt`, `ForEachStmt`, `TryStmt`, `Block`, `Program`.
-  Each carries `-1` sentinels when unresolved so ad-hoc AST
-  fragments in unit tests keep working without wiring up scope
-  context.
-- `Environment` gains a `slots []Binding` slice alongside the
-  existing `vars` map. `DefineAt` / `GetAt` / `GetBindingAt` /
-  `AssignAt` are the fast paths; name-based `Define` /
-  `Assign` mirror into slots when the binding was originally
-  slot-installed (via the new `Binding.Slot` field), keeping
-  the two views in sync so `execAppend` / `execIndexAssign` /
-  `execFieldAssign` (which reach for the binding by name)
-  don't skip past slot updates.
-- `NewEnvironmentSized(parent, numSlots)` pre-sizes the slot
-  slice from the resolver's `Block.NumSlots` hint so
-  `DefineAt` avoids a grow-on-every-write inside hot loops.
-
-**Deliberate carve-outs:**
-
-- **Spawn bodies fall back to name-based lookup.** The
-  runtime's `snapshotForSpawn` produces a two-frame duplex
-  (globals-snap + locals-snap) that doesn't align with the
-  resolver's single-frame view of "the enclosing scope."
-  Rather than invent brittle depth arithmetic, the resolver
-  skips the spawn body entirely and the interpreter's
-  fallback path picks it up. Spawn bodies aren't hot loops -
-  concurrency dispatch is coarse-grained by design - so the
-  perf regression is bounded.
-- **Try-body runs in the enclosing env** (execTry calls
-  `execStmts(body.Stmts, env)` rather than `execBlock`); the
-  resolver walks its stmts inline in the current scope to
-  match. Catch-handler runs in a fresh `catchEnv` and gets a
-  proper scope push.
-- **For-header init lives in `forEnv`, not the body block.**
-  execFor creates one env for the header and execBlock nests
-  another for the body; the resolver tracks them separately.
-
-**Side benefit beyond performance:** undefined-variable and
-shadowing errors surface at parse time now, which is strictly
-better for the developer experience and closes the loop with
-M17.5.1's `L001 unused-local` design (the resolver's scope
-pass is the analysis the linter reuses).
-
-**Expected impact (to be measured on the reference
-machine).** Baseline: M16.5.1 numbers in
-[technical/tinygo.md](technical/tinygo.md#per-workload-comparison-serial-section).
-Not yet re-run; the working machine differs from the
-reference Ryzen 5 7600X3D so cross-host comparison is
-meaningless. When the benchmark is re-run:
-- `primes up to LIMIT`: 42.4 s -> ~15-20 s (2-3x) on tiny;
-  21.1 s -> ~7-10 s on the default `jennifer` binary.
-- `newton`, `monte carlo`: similar 2x range on both binaries.
-- `fib`: contributes to the M16.5.3 win below.
-- Update `technical/tinygo.md`'s tables with the post-M16.5.2
-  numbers when the reference measurements come back.
-
-### M16.5.3 - Method call frame optimization
-
-**Status:** shipped
-
-Three independent moves that compound:
-
-- **Pool environments.** Every method call and block used to
-  allocate a fresh `Environment` (struct + `map[string]Binding`
-  + slot slice); under recursive workloads this churned the
-  allocator hard. `internal/interpreter/environment.go` now
-  exports `borrowBlockEnv` / `releaseBlockEnv` on top of a
-  package-level `sync.Pool`. `execBlock`, `evalCall`, and
-  `CallByName` borrow on entry and release on the way out.
-  Release zeros both the `vars` map (delete-in-place, no
-  reallocation) and every used slot entry, so pooled envs
-  don't hold compound-value backings live between uses.
-  Jennifer's no-closures rule guarantees no code retains a
-  frame pointer past the block's dynamic extent, so the
-  pool is safe by construction.
-- **Pre-resolve callees at parse time.** `CallExpr` grew a
-  `Method *MethodDef` field (`internal/parser/ast.go`);
-  `resolver.methods` promoted from `map[string]struct{}` to
-  `map[string]*MethodDef` so it can hand the pointer out.
-  During `Resolve`, when a `CallExpr`'s callee names a hoisted
-  top-level method, the resolver stamps the pointer directly
-  on the AST node. `evalCall` consults the pointer first and
-  falls back to `i.methods` only for resolver-less paths
-  (REPL turns, hand-built ASTs). The hot recursion path
-  (`fib`, tree walks) skips one hash lookup per call.
-- **Slot-based parameter binding.** The resolver's
-  `resolveMethod` already puts parameters at slots
-  `0..N-1` of the call frame; `evalCall` now creates that
-  frame via `borrowBlockEnv(effectiveGlobal(env), len(m.Params))`
-  and binds parameters through `DefineAt(idx, ...)` instead
-  of `Define(name, ...)`. Parameter binding becomes an array
-  write per parameter with no map hashing.
-
-All three depend on M16.5.2 (slot resolution), so they shipped
-together at the end of the performance pass.
-
-Expected impact (baseline M16.5.1: `fib(23)` = 415 ms tiny /
-89 ms go):
-- `fib(23)` on `jennifer-tiny`: 415 ms -> target ~80-150 ms
+- **M16.5.1 - Shared-marker copy-on-write on compound `Value`s.**
+  `Value.shared *bool` marker + `Share()` at read sites +
+  `Ensure()` at mutation sites; deep-copy only when the flag is
+  set. Killed the O(N^2) tax on `$xs[] = item` in a loop -
+  append-in-a-loop dropped from ~35 s on 10K items to ~40 ms on
+  `jennifer-tiny`. Alias correctness pinned by
+  `internal/interpreter/value_alias_test.go` (15 tests). See
+  [technical/interpreter.md > Value semantics](technical/interpreter.md#value-semantics).
+- **M16.5.2 - Lexical slot resolution at parse time.** Every
+  variable / constant reference gets a `(Depth, Slot)`
+  coordinate from `internal/parser/resolver.go` (runs from
+  `Interpreter.Run`, idempotent, REPL bypasses). `Environment`
+  gains a `slots []Binding` slice alongside the name map;
+  `DefineAt` / `GetAt` / `AssignAt` are the fast paths and
+  `Binding.Slot` keeps the two views in sync. Undefined-variable
+  and shadowing errors promote to parse-time diagnostics.
+  Deliberate carve-outs: spawn body unresolved (two-frame
+  snapshot doesn't align), try body inline (execTry uses
+  execStmts), for-header separate from body.
+- **M16.5.3 - Method call frame optimization.** Package-level
+  `sync.Pool` behind `borrowBlockEnv` / `releaseBlockEnv`
+  recycles frames across every `execBlock` and `evalCall`.
+  `CallExpr.Method *MethodDef` is pre-filled by the resolver so
+  the runtime skips a hash lookup per user-method call.
+  Parameters bind through `DefineAt` into pre-sized slots.
+  Target: `fib(23)` on `jennifer-tiny` 415 ms -> ~80-150 ms
   (3-5x), in striking distance of the default `jennifer`
   binary's 89 ms.
-- `jennifer` `fib(23)` similarly shrinks; the ratio narrows
-  to near-1x on both binaries.
+- **M16.5.4 - Namespaced-call + micro fast paths.**
+  `QualifiedCallExpr.Fn` / `QualifiedConstRefExpr.Const`
+  pre-filled by `Interpreter.resolveQualifiedRefs` (a second
+  pass after `processImports`); three map hits per namespaced
+  call collapse to one type assertion. `evalComparison` grew
+  int-int / float-float fast paths mirroring `evalArithmetic`.
+  `bindParamValue` skips `Copy` + stamp for scalar-Kind args.
+  `effectiveGlobal` becomes an O(1) read via `Environment.root`.
 
-Not yet re-run against the reference Ryzen 5 7600X3D; the
-working machine differs so cross-host numbers would be
-meaningless. Correctness is validated via the full test suite
-+ `-race` clean pass + hand-checked recursive fib output on
-both binaries.
-
-### M16.5.4 - Namespaced-call fast paths + micro fast paths
-
-**Status:** shipped.
-
-Four moves trim per-call overhead on the paths M16.5.3 didn't touch;
-each sits behind a fallback so the REPL and hand-built ASTs keep
-working:
-
-- **Pre-resolved `QualifiedCallExpr.Fn` / `QualifiedConstRefExpr.Const`.**
-  `Interpreter.resolveQualifiedRefs` runs from `Run` right after
-  `processImports` (the namespace tables finally exist there) and
-  stamps the exact `Builtin` / `Value` per node. Three map hits per
-  namespaced call collapse to one type assertion.
-- **Int-int / float-float fast paths in `evalComparison`.** Mirrors
-  the int-int block that already lived in `evalArithmetic`. Numeric
-  `for` loops skip two `AsFloat` conversions per compare.
-- **Immutable-Value copy elision in arg binding.** `evalCall`'s arg
-  loop routes through `bindParamValue(v, declType)`, which returns
-  scalar-Kind args unchanged (both `Value.Copy` and
-  `stampDeclaredType` were no-ops for those Kinds).
-- **`effectiveGlobal` cache on `Environment.root`.** Field set at
-  construction (both `NewEnvironment*` and `borrowBlockEnv` via
-  `rootFor(parent, self)`); parent-chain walk becomes an O(1) field
-  read.
-
-Expected impact (targets, to be measured on the reference
-Ryzen 5 7600X3D): ~20-40% on library-heavy workloads, ~10-20% on
-numeric loops, small cut on recursive workloads. Correctness
-validated via full test suite + `-race` clean + `fib(20) = 6765`
-on both binaries + `examples/showcase.j` and `examples/osinfo.j`
-byte-for-byte golden match. Implementation details:
-[CLAUDE.md note 15](../CLAUDE.md);
-[technical/interpreter.md > Namespaced-call fast paths (M16.5.4)](technical/interpreter.md#namespaced-call-fast-paths-m1654).
-
-### Combined target
-
-Re-running `examples/benchmark.j` against the M16.5-final
-`jennifer-tiny` binary should yield a serial total in the
-15-25 s range (down from 48.9 s post-M16.5.1, and 74.5 s
-pre-M16.5) and put TinyGo within ~1.5x of the default
-`jennifer` binary on every workload shape - that's the floor
-set by the TinyGo-vs-stdlib runtime gap and the right target
-to aim for. The parallel section is a separate story and
-belongs to a possible future "TinyGo parallel scheduler"
-sub-milestone; the current runtime turns 4-way fan-out into
-a *slowdown* (see
+**Combined target.** Re-running `examples/benchmark.j` against the
+M16.5-final `jennifer-tiny` binary should yield a serial total in the
+15-25 s range (down from 48.9 s post-M16.5.1, and 74.5 s pre-M16.5)
+and put TinyGo within ~1.5x of the default `jennifer` binary on every
+workload shape - the floor set by the TinyGo-vs-stdlib runtime gap.
+The parallel section is a separate story and belongs to a possible
+future "TinyGo parallel scheduler" sub-milestone; the current runtime
+turns 4-way fan-out into a *slowdown* (see
 [technical/tinygo.md > Parallel section](technical/tinygo.md#parallel-section)),
-which no M16.5.x work touches. Update
-`technical/tinygo.md`'s tables with the post-M16.5 numbers
-as the closing deliverable.
-
-**Stance check.** None of these changes alter user-visible
-semantics:
-- Value semantics still hold (the user can't observe aliasing;
-  mutations through one binding never affect another).
-- Lexical scoping still holds (`def` still introduces a fresh
-  binding; redeclaration still rejects).
-- Method calls still resolve by name at the source level; the
-  pre-resolution just caches the resolved target.
-
-So the optimisation pass is invisible to existing Jennifer
-programs and to the docs - it changes performance, not
-behaviour. Existing tests and examples should pass unchanged.
+which no M16.5.x work touches. Update `technical/tinygo.md`'s tables
+with the post-M16.5 numbers as the closing deliverable, measured on
+the reference Ryzen 5 7600X3D.
 
 ---
 
@@ -1522,10 +1294,9 @@ The system module directory is baked into the interpreter at
 build time via `-DJENNIFER_SYSMODDIR=/usr/share/jennifer/modules`
 (propagated through the Makefile's codegen path in the same
 shape as `internal/version/version_gen.go`, since TinyGo's
-0.41 `-ldflags -X` is a no-op - see implementation-note 7 in
-`CLAUDE.md`). Two runtime overrides let non-standard installs
-(NixOS store paths, Homebrew cellars, local development
-builds) point elsewhere without rebuilding:
+0.41 `-ldflags -X` is a no-op. Two runtime overrides let
+non-standard installs (NixOS store paths, Homebrew cellars,
+local development builds) point elsewhere without rebuilding:
 
 - **Environment variable `JENNIFER_SYSMODDIR`** - checked
   first so distro packages that bake in a path can still be
@@ -2014,8 +1785,7 @@ instead of subtle misbehaviour:
 - Semver freezing the public API. Jennifer stays pre-1.0
   through the M17.x series; M17.6 documents what's exported
   and how libraries plug in, but breaking changes to that
-  surface remain allowed until 1.0.0 (per the stability
-  section in `README.md` and `CLAUDE.md`).
+  surface remain allowed until 1.0.0.
 
 **Motivation.** Third-party embedding has multiple concrete
 consumers already imagined: scripting-language slot in a Go
