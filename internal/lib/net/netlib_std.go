@@ -41,9 +41,9 @@ type udpState struct {
 }
 
 var (
-	connsMu     sync.Mutex
-	conns       = map[int64]*connState{}
-	nextConnID  int64
+	connsMu    sync.Mutex
+	conns      = map[int64]*connState{}
+	nextConnID int64
 
 	listenersMu    sync.Mutex
 	listeners      = map[int64]*listenerState{}

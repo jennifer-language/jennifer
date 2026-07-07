@@ -21,11 +21,11 @@ import (
 // the open mode so read ops on a write-mode handle (and vice versa)
 // error at the boundary rather than crashing at the syscall.
 type handleState struct {
-	f       *os.File
-	reader  *bufio.Reader // populated for read/append; nil for write-only
-	mode    string        // "read" | "write" | "append"
-	sticky  bool          // sticky EOF flag; matches io.eof semantics
-	path    string        // for error messages
+	f      *os.File
+	reader *bufio.Reader // populated for read/append; nil for write-only
+	mode   string        // "read" | "write" | "append"
+	sticky bool          // sticky EOF flag; matches io.eof semantics
+	path   string        // for error messages
 }
 
 // The registry: integer id -> live state. Guarded by handlesMu so

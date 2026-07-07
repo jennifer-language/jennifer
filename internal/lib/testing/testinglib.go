@@ -306,11 +306,11 @@ func renderTAP(recs []resultRec) string {
 // junitTestSuite is the minimal JUnit-XML shape most CI systems
 // consume. One suite; one testcase per result.
 type junitTestSuite struct {
-	XMLName xml.Name        `xml:"testsuite"`
-	Name    string          `xml:"name,attr"`
-	Tests   int             `xml:"tests,attr"`
-	Failures int            `xml:"failures,attr"`
-	Cases   []junitTestCase `xml:"testcase"`
+	XMLName  xml.Name        `xml:"testsuite"`
+	Name     string          `xml:"name,attr"`
+	Tests    int             `xml:"tests,attr"`
+	Failures int             `xml:"failures,attr"`
+	Cases    []junitTestCase `xml:"testcase"`
 }
 
 type junitTestCase struct {
