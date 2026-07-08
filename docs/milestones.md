@@ -1525,10 +1525,12 @@ family (`isAscii`, `isFile`, `isDir`).
   `"stdout"` / `"stderr"` / `"stdin"` (a string argument, like the rest
   of `os`). True only when that stream is an interactive terminal, not a
   pipe / file / CI.
-- **Implementation.** `golang.org/x/term`'s `IsTerminal` on the stream's
-  fd (already a CLI dependency for the REPL's raw mode). Default binary;
-  on `jennifer-tiny` it reports `false` conservatively (no terminal
-  introspection in the minimal runtime).
+- **Implementation.** The character-device mode bit (`os.File.Stat` +
+  `os.ModeCharDevice`) - pure stdlib, so the library stays dependency-free
+  (`golang.org/x/term` stays CLI-scoped) and TinyGo-clean. A pipe or a
+  file redirect reports `false`, a terminal `true`; a stream that can't be
+  stat'd reports `false`. Both binaries (on `jennifer-tiny`, an
+  unstattable stream just falls through to the conservative `false`).
 - **Acceptance.** `true` on an interactive TTY, `false` under a pipe /
   redirect; both toolchains build.
 

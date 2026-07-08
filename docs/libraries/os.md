@@ -35,6 +35,27 @@ function - see
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent.       |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
 | `os.kill(p)`       | null         | Send SIGTERM to `$p`.                                                               |
+| `os.isTerminal(stream)` | bool    | Is `stream` (`"stdout"` / `"stderr"` / `"stdin"`) an interactive terminal? See "Terminal detection". |
+
+### Terminal detection
+
+`os.isTerminal(stream)` answers "is this standard stream an interactive
+terminal?" - the usual gate for deciding whether to emit ANSI colour or a
+progress spinner. `stream` is `"stdout"`, `"stderr"`, or `"stdin"`; any
+other string, or a non-string, is an error.
+
+```jennifer
+use os;
+def coloured as bool init os.isTerminal("stdout");   # false when piped or redirected
+```
+
+It reports `true` for a terminal and `false` for a pipe or a file
+redirect. Detection uses the character-device mode bit (no external
+dependency), so `/dev/null` - also a character device - reads `true`;
+that is harmless, since escapes written there are discarded. A stream
+that can't be inspected reports `false` (the conservative answer: when in
+doubt, don't emit escapes). On `jennifer-tiny` the minimal runtime may
+not introspect terminals, in which case it reports `false`.
 
 ### Flag inspection
 

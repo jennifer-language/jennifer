@@ -59,6 +59,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "wait", waitFn)
 	in.RegisterNamespaced(LibraryName, "poll", pollFn)
 	in.RegisterNamespaced(LibraryName, "kill", killFn)
+	in.RegisterNamespaced(LibraryName, "isTerminal", isTerminalFn)
 
 	in.RegisterNamespacedConst(LibraryName, "PLATFORM", interpreter.StringVal(runtime.GOOS))
 	in.RegisterNamespacedConst(LibraryName, "ARCH", interpreter.StringVal(runtime.GOARCH))
@@ -127,6 +128,47 @@ func hasFlagFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		}
 	}
 	return interpreter.BoolVal(false), nil
+}
+
+// isTerminalFn implements `os.isTerminal(stream) -> bool`: is the named
+// standard stream ("stdout" / "stderr" / "stdin") an interactive terminal?
+// Detected via the character-device mode bit (pure stdlib - no x/term
+// dependency, which stays CLI-scoped - and TinyGo-clean). A stream that can't
+// be stat'd (closed, or a runtime without terminal introspection like
+// jennifer-tiny) conservatively reports false, since the point of the check is
+// to suppress terminal escapes on anything that isn't an interactive terminal.
+func isTerminalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("os.isTerminal expects 1 argument (stream), got %d", len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("os.isTerminal: stream must be string, got %s", args[0].Kind)
+	}
+	var f *stdos.File
+	switch args[0].Str {
+	case "stdout":
+		f = stdos.Stdout
+	case "stderr":
+		f = stdos.Stderr
+	case "stdin":
+		f = stdos.Stdin
+	default:
+		return interpreter.Null(), fmt.Errorf("os.isTerminal: unknown stream %q; known: \"stdout\", \"stderr\", \"stdin\"", args[0].Str)
+	}
+	return interpreter.BoolVal(isCharDevice(f)), nil
+}
+
+// isCharDevice reports whether f is a character device - the terminal
+// heuristic. A pipe or a regular-file redirect is not (reports false); a
+// terminal is. /dev/null is also a character device and reads true, which is
+// harmless for the color-gating use case (escapes written there are
+// discarded). A stat error reports false.
+func isCharDevice(f *stdos.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&stdos.ModeCharDevice != 0
 }
 
 // flagFn returns the argument that immediately follows `name` in

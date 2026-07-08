@@ -129,3 +129,40 @@ func TestFlagAtEndReturnsEmpty(t *testing.T) {
 		t.Errorf("got %q, want empty (no value follows)", v.Str)
 	}
 }
+
+func TestIsTerminalRegularFileIsNotTerminal(t *testing.T) {
+	f, err := stdos.CreateTemp(t.TempDir(), "tty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isCharDevice(f) {
+		t.Error("a regular file reported as a terminal")
+	}
+}
+
+func TestIsTerminalReturnsBoolForStandardStreams(t *testing.T) {
+	for _, stream := range []string{"stdout", "stderr", "stdin"} {
+		v, err := isTerminalFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(stream)})
+		if err != nil {
+			t.Fatalf("%s: %v", stream, err)
+		}
+		if v.Kind != interpreter.KindBool {
+			t.Errorf("%s: got %s, want bool", stream, v.Kind)
+		}
+	}
+}
+
+func TestIsTerminalRejectsBadArgs(t *testing.T) {
+	cases := [][]interpreter.Value{
+		{interpreter.StringVal("foo")}, // unknown stream
+		{interpreter.Null()},           // wrong type
+		{},                             // wrong arity
+		{interpreter.StringVal("stdout"), interpreter.StringVal("extra")}, // wrong arity
+	}
+	for i, args := range cases {
+		if _, err := isTerminalFn(interpreter.BuiltinCtx{}, args); err == nil {
+			t.Errorf("case %d: expected an error", i)
+		}
+	}
+}

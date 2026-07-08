@@ -122,6 +122,7 @@ flat lookup view, not authoritative.
 | [`os`](os.md)`.flag(name)`                            | Value following `name` in `os.ARGS`, or `""` if absent / at end. Exact-match (no `--foo=bar` parsing).                              |
 | [`os`](os.md)`.getEnv(name)`                          | Read environment variable `name`. Unset → empty string, no error.                                                                   |
 | [`os`](os.md)`.hasFlag(name)`                         | True if `name` appears as an exact element of `os.ARGS`.                                                                            |
+| [`os`](os.md)`.isTerminal(stream)`                    | Is `stream` (`"stdout"`/`"stderr"`/`"stdin"`) an interactive terminal? Pipe/file -> false.                                         |
 | [`os`](os.md)`.kill(p)`                               | Send SIGTERM to spawned process `$p`.                                                                                               |
 | [`os`](os.md)`.poll(p)`                               | True if spawned process `$p` has exited (a following `os.wait` returns immediately).                                                |
 | [`os`](os.md)`.run(argv)`                             | Blocking: run `argv` to completion, return `os.Result{exitCode, stdout, stderr}`.                                                   |
