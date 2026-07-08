@@ -1441,7 +1441,7 @@ the reason `astjson.go` is already hand-rolled).
   element type at the binding boundary (the same check a fresh literal
   gets): a homogeneous JSON collection binds to the matching typed
   target, a heterogeneous one matches no homogeneous type and is rejected
-  - storing heterogeneous JSON awaits the planned `any` type.
+  - storing heterogeneous JSON is the job of M16.16's `json.Value` tree.
 - **Acceptance.** Round-trips every Value kind with a JSON image;
   malformed input yields a positioned error; both toolchains build.
 
@@ -1578,130 +1578,121 @@ the topical sibling of the base64 / hex already there. Needed by M18.6
   soft-wrap is applied on encode and unwound on decode; both toolchains
   build.
 
-## M16.16 - `any` type
+## M16.16 - `json.Value`
 
-The honest home for heterogeneous data. Jennifer's collections are
-homogeneous (`list of T`, `map of K to V`) and every binding boundary is
-strict (M16.9 closed the last hole - a generic literal / `json.decode`
-result is now validated entry by entry, so a heterogeneous collection
-matches no homogeneous type and can't be stored). That leaves genuine
-"mixed shape" data - a JSON object with string, number, and array values;
-a list of unrelated things - with nowhere to live. `any` is that place:
-a type that every value matches.
+The strict home for heterogeneous JSON - without a language-level top
+type. Jennifer stays fully typed: there is **no `any` keyword**, and
+JSON's dynamism is confined to a single opaque library type,
+`json.Value`, that you destructure with explicit accessors. A program can
+never "opt out of types"; the most it can declare is "this is a JSON
+tree," which is an honest, concrete type. This supersedes the earlier
+`any`-type plan and reworks M16.9's decode: `json.decode` no longer
+yields a generic collection that has to match some homogeneous type
+(which left genuinely mixed JSON with nowhere to go) - it yields a
+`json.Value` you walk explicitly.
 
-- **Surface.** `any` is a type keyword, usable anywhere a type is:
-  `def x as any;`, `def xs as list of any;`, `def m as map of string to
-  any;`, a struct field (`def struct Row { cells as list of any };`),
-  a parameter (`func f(v as any) {...}`). The zero value of `any` is
-  `null`. Map *keys* stay concrete (they must be comparable and
-  printable); `any` is a value-position type.
-- **Semantics.** `any` matches every kind in `MatchesDeclared`, so any
-  value binds to an `any` target and any value is a legal element of a
-  `list of any` / `map of ... to any`. Flowing back *out* into a concrete
-  slot is a **runtime-checked extraction**: an `any` slot stores the value
-  at its real kind, so binding it to a concrete-typed target runs the
-  normal `MatchesDeclared` check - it succeeds when the runtime kind
-  matches (`def y as int init $x;` when `$x` holds an int is an identity
-  extraction, no conversion) and raises a positioned, catchable error when
-  it does not (the same `$x` bound to a `string` target). A `list of any`
-  extracts into a `list of int` only if every element is an int (the
-  entry-by-entry check from M16.9). Guard with `convert.typeOf` to make an
-  extraction safe. This is Go's `interface{}` / type-assertion model:
-  dynamic on the way in, checked on the way out. No truthiness, no
-  auto-coercion - reading an `any` gives a value of its real runtime kind;
-  `convert.*` stays a separate, deliberate *conversion* (parse /
-  reinterpret), distinct from this identity extraction.
-- **Type-system impact.** A `TypeAny` kind in `parser.Type`; the lexer /
-  parser accept the `any` keyword in type position; `MatchesDeclared`
-  gains a `TypeAny` arm returning true for every value (the flow *into*
-  `any`; the flow *out* - an `any` value into a concrete target - reuses
-  the existing per-kind / per-element checks unchanged, since an `any`
-  slot already stores concrete-kind values); `ZeroFor(any)` is
-  `null`; `stampDeclaredType` treats an `any` inner type as "leave the
-  element's own type untouched" (an `any` collection records `any` as its
-  element type and never rewrites element tags); `convert.typeOf` reports
-  the value's actual kind, not `"any"`. Display and the AST-JSON emitter
-  get the new kind.
-- **`json` payoff.** `def m as map of string to any init json.decode(s);`
-  becomes the honest way to hold an arbitrary decoded object;
-  `$m["k"]` returns the real kind, narrowed with `typeOf`. The M16.9
-  rebuild-into-a-struct idiom stays the way to get *static* types back.
-- **Stance: explicit over implicit (#2).** `any` *appears* to violate the
-  stance, but it serves it. The status quo it replaces is the *implicit*
-  version - a `map of string to string` silently holding an `int`, type
-  hidden. `any` makes the dynamism a written, greppable decision: you
-  type `any` to say "the kind is decided at runtime," and you must narrow
-  with `typeOf` before use - nothing important hides, and no value is
-  silently coerced. It is the explicit escape hatch, not an implicit
-  loosening, and it stays strict at boundaries (#4): `any`-into-concrete
-  is a runtime-checked extraction that errors on a kind mismatch, never a
-  silent coercion. A `design-decisions.md` reasoning record lands when it ships.
-- **Rejected alternatives.** Implicit dynamic typing (a value with no
-  declared type) - no; `any` must be written. Truthiness / auto-coercion
-  of `any` at use sites - no; narrow explicitly. (Both already precluded
-  by stances #2 and #4.)
-- **Acceptance.** `def m as map of string to any init json.decode(s);`
-  holds a heterogeneous object; each `$m[k]` reports its real kind via
-  `typeOf`; an `any` value bound to a concrete-typed target succeeds when
-  its runtime kind matches and raises a catchable error when it does not;
-  `def x as any;` zero-values to `null`; both toolchains build.
+- **The core kind: `KindObject`.** Rather than a bespoke `KindJSON` (and
+  later `KindSqlRow`, `KindRedisReply`, ... - a kind per library, bloating
+  every `Kind` switch), the interpreter gains **one** new opaque kind,
+  `KindObject`, discriminated by its owning library. It is the *opaque
+  sibling of `KindStruct`*: `KindStruct` is "one kind, discriminated by
+  `(namespace, name)`" but transparent (visible `.field`s); `KindObject`
+  is the same, opaque - no operators, no `[index]`, no `.field`; only the
+  owning library's accessors reach inside. Every future opaque type is
+  then a library registration plus accessors, with zero further core
+  change. **Invariant: an object is always library-backed** - there is no
+  object literal, so a `KindObject` value can only be minted and
+  interpreted by a library. `json.Value` is `KindObject`'s first provider.
+- **Two type queries, two levels.**
+  - `convert.typeOf($x) -> "object"` for any `KindObject` - the generic
+    language kind, sitting alongside `"struct"` / `"map"` / `"task"`
+    (which `convert.typeOf` already reports generically, never the
+    specific name). `"object"` reads as "special, library-backed, no
+    further top-level meaning."
+  - `convert.objectType($x) -> "json.Value"` - the new companion naming
+    the specific type when needed (strict: a positioned error on a
+    non-object). Rarely reached - a programmer knows what they decoded -
+    but there for introspection.
+- **The type.** `json.Value` is an **opaque** parsed JSON node, exactly
+  one of: null, bool, int, float, string, array, object. Value-semantic
+  at the Jennifer boundary (assignment copies; a decoded tree is
+  read-only), holding the decoded node inline - no handle into a package
+  registry, so it is GC'd normally with no leak (the deliberate difference
+  from the `hash.Stream` / `compress.Stream` handles).
+  `def r as json.Value init json.decode(s);` holds an arbitrary decoded
+  document.
+- **Navigation returns `json.Value`, uniformly.** `json.get(v, key)`
+  (objects) and `json.at(v, i)` (arrays) always return a `json.Value` -
+  never a native scalar - because a member could be a string, a number, a
+  nested object, or an array, and that heterogeneous return type is
+  exactly what would need `any`. Every extracted node stays wrapped until
+  you unwrap a leaf. Also `json.has(v, key) -> bool`, `json.keys(v) ->
+  list of string` (insertion order), and `json.length(v) -> int` (array
+  length or object field count).
+- **`json.typeOf` - the internal-shape reader, two arg forms.** Because
+  every node is a `KindObject`, `convert.typeOf` says `"object"` for all
+  of them; `json.typeOf` recovers the real JSON shape (`"null"` /
+  `"bool"` / `"int"` / `"float"` / `"string"` / `"array"` / `"object"`),
+  so it is genuinely additive over `convert.typeOf` (which flattens array
+  and every scalar to `"object"`):
+  - `json.typeOf(v) -> string` - the node's own JSON type; needed for the
+    root (`json.decode` hands you a node with no key yet) and any node you
+    hold.
+  - `json.typeOf(v, key)` / `json.typeOf(v, index) -> string` - the JSON
+    type of the value *at* that object key or array index: the everyday
+    "peek before you extract" form, so you seldom call it on a bare
+    object.
+- **Leaf extraction (checked).** `json.asInt(v)` / `asFloat(v)` /
+  `asString(v)` / `asBool(v)` return the scalar at its Jennifer type - a
+  **checked extraction** raising a positioned, catchable error when the
+  node is a different kind - plus `json.isNull(v) -> bool`.
+- **Encode is unchanged and round-trips.** `json.encode` / `encodePretty`
+  still take ordinary typed values (structs, maps, lists, scalars,
+  bytes), and *also* accept a `json.Value`, so `encode(decode(s))`
+  round-trips. Nothing on the encode path needs the new type.
+- **Getting static types back.** Walk the tree, dispatching on
+  `json.typeOf`, and pull leaves at their kind:
 
-## M16.17 - explicit map-to-struct conversion
+      def r as json.Value init json.decode(s);
+      def name as string init json.asString(json.get($r, "name"));
+      def age as int init json.asInt(json.get($r, "age"));
 
-An explicit, validating way to turn a map - typically a `json.decode`
-result held as `map of string to any` (M16.16) - into a typed struct. The
-*implicit* form (`def p as Point init json.decode(s);` coercing at the
-binding) is rejected; see
-[technical/rejected.md](technical/rejected.md). This is the spelled-out
-counterpart, so the conversion is visible at the call site. Depends on
-M16.16 `any`, which is what lets an arbitrary decoded object be held
-before conversion.
-
-**Two candidate forms - not decided here; the choice hinges on the
-consistency axis below.**
-
-- **Library call - `convert.toStruct($map, "Point")`.** Routes into the
-  existing `convert` type-conversion family; general (any map, not only
-  decoded ones); the builtin looks the struct up in the registry and
-  recurses into nested structs / lists.
-- **Struct-literal spread - `Point{ ..$map }`.** Construction syntax that
-  fills a `Point`'s fields from a map; the struct name is checked
-  statically in literal position.
-
-**The consistency question (decisive, not brevity).** The `convert.toX`
-family is uniform: `convert.toInt(v)` / `toFloat(v)` / `toString(v)` /
-`toBool(v)` each take a single value, name their target *in the function
-name*, and return a self-contained, assignable value. `convert.toStruct`
-cannot join that family cleanly:
-
-- to stay self-contained (freely assignable, like the rest of `convert`)
-  it needs the target as a **second, stringly-typed argument** (`"Point"`)
-  - a two-arg outlier in a one-arg family, with the struct name unchecked
-  until runtime; or
-- to drop that argument it would have to read the **binding's declared
-  type**, so `convert.toStruct($map)` would not be a self-contained
-  expression (it wouldn't work outside a typed `def` / assignment) -
-  unlike every other `convert.toX`, which *is* assignable anywhere.
-
-The struct-literal spread sidesteps both problems (it isn't a `convert`
-function and names its type statically), at the cost of new literal
-syntax. We do **not** want a set of look-alike calls with divergent shapes
-and arg orders - the trap PHP's array functions fell into - so this
-uniformity axis is what decides the form.
-
-- **Semantics (either form).** Strict, like every boundary: each declared
-  field must be present in the map with a matching type; a missing field
-  or a type mismatch is a positioned error. Recurses into nested structs,
-  lists, and maps. Value semantics - the result is an independent struct;
-  no partial fills, no defaults.
-- **Open sub-questions (settle at implementation).** Whether an unexpected
-  map key is an error or ignored; whether a partial spread
-  (`Point{ x: 1, ..$map }`) is allowed; how an `any`-typed field is
-  handled.
-- **Acceptance.** A map / decoded object materializes a typed struct with
-  full field validation; missing / mismatched fields (and, per the
-  decision above, extra keys) error with a position; nested structs
-  round-trip; both toolchains build.
+  For a known object shape, an explicit map-to-struct conversion
+  (deferred to Long horizon) could offer a one-call form over this.
+- **Type-system / implementation.** No `TypeAny`, no `any` keyword. One
+  new `KindObject` arm across the `Kind` switches (display, copy,
+  `MatchesDeclared`, AST-JSON), delegating specifics to the owning
+  library - *not* a namespaced struct (a fixed-field record neither models
+  a 7-way variant node nor enforces opacity). A `json.Value` wraps the
+  existing decoded `Value` tree, tagged `KindObject` so operators / index
+  / field access reject it. The declared type `json.Value` registers
+  through the library type-name machinery (so `def r as json.Value` parses
+  like `def r as hash.Stream`); `MatchesDeclared` bridges the declared
+  name to `KindObject` values. `json.decode`'s return type changes from a
+  generic collection to `json.Value` (a pre-1.0 break, called out here).
+  Still TinyGo-clean (no reflect - just a bigger tagged union).
+- **Stance: strict + teachable (the point of the whole change).** The
+  language keeps its promise that you always declare what you store.
+  There is no `any`, so a beginner cannot declare everything dynamic and
+  sail past the type system - the one dynamic thing in the language is a
+  JSON tree you must *visibly* unpack, one checked accessor at a time. The
+  teachable story stays clean ("JSON is dynamic, so you unpack it
+  explicitly"), never "types are optional now." Each future source of
+  heterogeneous data earns its own labelled, opaque type (a `sql.Row`,
+  say), not a shared escape hatch.
+- **Rejected alternative: a language `any` / top type.** A general `any`
+  would be a language-wide type-system opt-out (usable at every operator,
+  so `def x as any init 5; $x + $y;` just works) - dropped in favour of
+  this confined `json.Value`. Full reasoning in
+  [technical/rejected.md](technical/rejected.md).
+- **Acceptance.** `def r as json.Value init json.decode(s);` holds a
+  mixed object; `convert.typeOf($r)` is `"object"` and
+  `convert.objectType($r)` is `"json.Value"`; `json.typeOf($r)` is
+  `"object"` while `json.typeOf($r, "tags")` is `"array"`;
+  `json.asInt(json.get($r, "a"))` reads a number; a wrong-kind accessor
+  (`json.asString` on a number node) raises a catchable error;
+  `json.Value` rejects `+`, `[i]`, and `.field`;
+  `json.encode(json.decode(s))` round-trips; both toolchains build.
 
 ---
 
@@ -2053,8 +2044,9 @@ Sub-milestones in priority order:
   ([M16.14](#m1614---net-tls)). `AUTH [user] password` is a plain
   command, so no `crypto` dependency. Typed per-command helpers
   (`get -> string`, `incr -> int`, `lrange -> list`) keep the common
-  path off `any`; a generic `command(...)` returning the raw reply is
-  where `any` ([M16.16](#m1616---any-type)) helps. No hard prerequisites
+  path fully typed; a generic `command(...)` returning the raw reply would
+  use an opaque `redis.Reply` walked with accessors, the same pattern as
+  `json.Value` ([M16.16](#m1616---jsonvalue)). No hard prerequisites
   (just `net`), so it can land ahead of `mail`.
 - **M18.8 - `memcache`** - a client for the `memcached` server's text
   protocol (`set` / `get` / `delete` / `incr` / `decr`; replies
@@ -2384,7 +2376,7 @@ willing to keep it green; they're not blocking anything.
   profiles (default / minimal), not 2^N. Complementary to, not a
   substitute for, the M17 module system: `.j`-level extensibility
   (community / uncommon libraries writable in Jennifer) is M17's job with
-  zero binary cost; build-time selection is only for the curated
+  zero binary cost; build-time selection is only for the curated Go-level core.
 - **Relational databases (`sql`).** Postponed to M20+, pending a design
   discussion. A system library - a storage engine and SQL planner can't
   be interpreted, and wire-protocol auth needs crypto - driver-agnostic
@@ -2395,12 +2387,26 @@ willing to keep it green; they're not blocking anything.
   whether to accept the first heavyweight dependency in the library
   layer (a break from "libraries stay dependency-free") and, if so, gate
   it as a build-tag opt-in (per the note above); and the result-row
-  shape - `map of string to any` (a concrete motivator for `any`,
-  M16.16) vs a typed struct via map-to-struct (M16.17). Values bind only
+  shape - an opaque `sql.Row` accessor type mirroring `json.Value`
+  (M16.16) vs a typed struct via the deferred map-to-struct conversion.
+  Values bind only
   through `?` placeholders (injection safety). Contrast the
   text-protocol stores redis / memcache (M18.7 / M18.8), which are pure
   Jennifer over `net` and need none of this.
-  Go-level core.
+- **Explicit map-to-struct conversion.** A spelled-out, validating way to
+  turn a `json.Value` object (or a homogeneous `map of string to T`) into
+  a typed struct - the sanctioned counterpart to the *rejected* implicit
+  coercion (see [technical/rejected.md](technical/rejected.md)). Deferred
+  from the M16.x line: once JSON is destructured through `json.Value`
+  accessors, the by-hand rebuild covers the need, so a one-call form is a
+  convenience, not a blocker. Two candidate shapes, decided on consistency
+  not brevity - a `convert.toStruct($map, "Point")` library call (a
+  two-arg, stringly-typed outlier in the otherwise one-arg `convert.toX`
+  family, or else not self-contained if it reads the binding's declared
+  type) versus a `Point{ ..$map }` struct-literal spread (names its type
+  statically, at the cost of new literal syntax). Either way strict: every
+  declared field present with a matching type, recursing into nested
+  structs / lists / maps, value-semantic, no partial fills or defaults.
 - **`io.lines() -> list of string`.** Slurp the whole stdin into a
   list. Additive on top of the streaming `readLine()` + `eof()`
   idiom; nice-to-have for tiny scripts, not blocking. Deferred from

@@ -24,12 +24,15 @@
 
 - [Catalog](libraries/index.md)
 - [Cheatsheet](libraries/cheatsheet.md)
+- [`archive`](libraries/archive.md)
+- [`compress`](libraries/compress.md)
 - [`convert`](libraries/convert.md)
 - [`crc`](libraries/crc.md)
 - [`encoding`](libraries/encoding.md)
 - [`fs`](libraries/fs.md)
 - [`hash`](libraries/hash.md)
 - [`io`](libraries/io.md)
+- [`json`](libraries/json.md)
 - [`lists`](libraries/lists.md)
 - [`maps`](libraries/maps.md)
 - [`math`](libraries/math.md)
@@ -41,6 +44,7 @@
 - [`task`](libraries/task.md)
 - [`testing`](libraries/testing.md)
 - [`time`](libraries/time.md)
+- [`uuid`](libraries/uuid.md)
 
 # Technical reference
 

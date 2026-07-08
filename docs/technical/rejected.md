@@ -524,7 +524,7 @@ missing / unknown / wrong-type fields. It was the original M16.9 shape for
 typed JSON decode. **Only the implicit form is rejected here** - an
 *explicit* map-to-struct conversion (a spelled-out call or a struct-literal
 spread, where the reader sees the conversion at the call site) is the
-sanctioned path, specced as M16.17.
+sanctioned path, deferred to Long horizon in milestones.md.
 
 Rejected because:
 
@@ -545,6 +545,39 @@ Rejected because:
 
 So `json.decode` returns generic Values (objects to `map of string to
 V`); typed targets are rebuilt by hand, or - once specced - through the
-*explicit* map-to-struct conversion (M16.17). See M16.9 in
+*explicit* map-to-struct conversion (deferred; Long horizon). See M16.9 in
 [milestones.md](../milestones.md) and
 [libraries/json.md](../libraries/json.md).
+
+
+## A language `any` / top type (M16.16 `json.Value`)
+
+Considered: a general `any` type keyword - a top type every value matches -
+as the home for heterogeneous data, its concrete driver being mixed-shape
+JSON (`def x as any;`, `list of any`, `map of string to any`, with a
+runtime-checked extraction back into concrete slots). **Rejected in favour
+of confining the dynamism to an opaque, destructure-only `json.Value` tree**
+(M16.16).
+
+Rejected because:
+
+- **It is a language-wide type-system opt-out.** An `any` value is usable
+  at every expression site - operators dispatch on the runtime kind, so
+  `def x as any init 5; def y as any init 3; $x + $y;` just works. A
+  beginner can declare everything `any` and sail past the type system
+  entirely; the strict, teachable identity ("you always declare what you
+  store") is gutted to serve one library's need.
+- **The friction fixes are worse than the disease.** Making `any` opaque
+  (rejecting it at every operator so each use demands an explicit narrow)
+  claws the strictness back, but only by bolting a whole second set of
+  narrowing rules onto the type system - heavy machinery for what is
+  really a per-source problem.
+- **The dynamism is per-source, not universal.** Heterogeneous data comes
+  from specific boundaries (a decoded JSON document; later, a DB row).
+  Each earns its own labelled, opaque, destructure-only type -
+  `json.Value`, a future `sql.Row` - so the escape hatch stays visible and
+  local, never a shared language feature.
+
+So there is no `any` keyword; heterogeneous JSON lives in `json.Value`,
+walked with explicit accessors. See M16.16 in
+[milestones.md](../milestones.md).
