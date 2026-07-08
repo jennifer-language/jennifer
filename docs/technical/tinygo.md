@@ -125,9 +125,13 @@ ratio is the stable part.
 third smaller). Most of that gap is TinyGo's smaller runtime versus
 the standard Go runtime; the run-only trim (excluding the
 `tokens` / `ast` / `fmt` / `lint` / `profile` development subcommands) shaves an
-incremental slice on top. Neither binary is stripped - `-ldflags
-"-s -w"` would shrink the default `jennifer` further if size ever
-matters there.
+incremental slice on top.
+
+These are unstripped `make build` (dev) sizes. Release builds strip:
+the Go binary adds `-trimpath -ldflags "-s -w"` (down to ~5.0 MB, a
+third smaller) and the TinyGo binary adds `-no-debug` (down to
+~1.8 MB, a ~60% cut). Shipped artifacts are therefore well under the
+dev numbers above; dev builds keep symbols for debugging.
 
 ## Single-binary benchmark results
 

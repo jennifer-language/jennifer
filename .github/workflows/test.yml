@@ -88,8 +88,8 @@ jobs:
           if grep -rPn '\xe2\x80\x94|\xe2\x80\x93' \
               --include='*.md' --include='*.go' --include='*.j' \
               --include='*.yml' --include='*.yaml' --include='*.toml' \
-              --include='*.sh' --include='*.1' --include='PKGBUILD*' \
-              --include='Makefile' \
+              --include='*.sh' --include='*.bash' --include='*.1' \
+              --include='PKGBUILD*' --include='Makefile' \
               --exclude-dir=.git --exclude-dir=book-output \
               .; then
             echo "em-dash or en-dash found - use plain ASCII '-' instead"

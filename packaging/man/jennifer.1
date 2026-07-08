@@ -22,7 +22,7 @@ that build lacks
 and the network stack. Use
 .B jennifer-tiny
 only when binary size matters (embedded devices, minimal
-container images, the macflyos target).
+container images, small-footprint scripting hosts).
 .PP
 Jennifer is a small, experimental, interpreted programming language.
 Source files use the
@@ -51,6 +51,38 @@ Print the parsed abstract syntax tree as JSON.
 Format the source file per the project style guide and print to
 standard output. (No in-place rewrite.)
 .TP
+.BR lint " " \fIfile.j\fR...
+Report patterns that are compile-legal but stylistically or
+semantically suspect (checks L001 through L010: unused locals, dead
+code, empty catches, non-Error throws, over-long or over-nested
+methods, constant conditions, removed APIs, over-long lines).
+.B \-\-checks=\fIIDS\fR
+selects checks (a leading
+.B !
+excludes);
+.B \-\-format=\fIhuman|json|github\fR
+selects the output shape. Exit status is 0 when clean, 1 when there
+are findings at or above the warning floor, 2 on linter failure.
+Suppress in source with a
+.B # lint\-disable:\fIID\fR
+comment.
+.TP
+.BR profile " " \fIfile.j\fR
+Run the program with the evaluator instrumented and write a profile
+to standard output; the program's own output is redirected to
+standard error.
+.B \-\-allocs
+profiles value-semantics copies (eager copies, COW detachments,
+spawn-frame copies) instead of statement wall-clock time.
+.B \-\-format=\fItable|pprof|trace\fR
+selects the output shape;
+.B pprof
+and
+.B trace
+are read by
+.B go tool pprof
+and speedscope.app.
+.TP
 .BR version
 Print the build version.
 .SH FILES
@@ -60,6 +92,11 @@ Shared MIME information that registers the
 .B .j
 extension as
 .BR text/x-jennifer .
+.TP
+.I /usr/share/bash-completion/completions/jennifer
+Bash completion for the subcommands, their options, and
+.B .j
+file arguments.
 .SH "SEE ALSO"
 .BR jennifer-tiny (1),
 .UR https://github.com/mplx/jennifer-lang

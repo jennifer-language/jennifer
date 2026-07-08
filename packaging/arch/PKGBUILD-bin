@@ -65,4 +65,9 @@ package() {
     # XDG MIME info for the .j extension.
     install -Dm644 share/mime/packages/jennifer.xml \
         "$pkgdir/usr/share/mime/packages/jennifer.xml"
+
+    # Bash completion (jennifer-tiny symlinks to it).
+    install -Dm644 share/bash-completion/completions/jennifer \
+        "$pkgdir/usr/share/bash-completion/completions/jennifer"
+    ln -sf jennifer "$pkgdir/usr/share/bash-completion/completions/jennifer-tiny"
 }

@@ -33,10 +33,22 @@ package requires a netdev driver that
 doesn't register. Use
 .B jennifer-tiny
 when binary size or embeddability matters more than these features
-(embedded devices, minimal container images, the macflyos target).
+(embedded devices, minimal container images, small-footprint
+scripting hosts).
 .PP
-The language surface and the subcommand set are identical to
-.BR jennifer (1) "; see that page for the full reference."
+.B jennifer-tiny
+is a run-only interpreter: it supports
+.B run
+and
+.BR repl ,
+but omits the development subcommands
+.RB ( tokens ", " ast ", " fmt ", " lint ", " profile ),
+which live only in the default
+.BR jennifer (1)
+binary and return a friendly error here. The language surface is
+otherwise identical to
+.BR jennifer (1) ";"
+see that page for the full reference.
 .SH "SEE ALSO"
 .BR jennifer (1),
 .UR https://github.com/mplx/jennifer-lang

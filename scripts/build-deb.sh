@@ -85,6 +85,14 @@ gzip -9n -c "$PKG_DIR/man/jennifer-tiny.1" > "$STAGE/usr/share/man/man1/jennifer
 # Shared MIME definition.
 install -m 0644 "$PKG_DIR/mime/jennifer.xml" "$STAGE/usr/share/mime/packages/jennifer.xml"
 
+# Bash completion, at the Debian-policy location (file named after the
+# command). jennifer-tiny symlinks to it so bash-completion lazy-loads
+# the same script for both binaries.
+mkdir -p "$STAGE/usr/share/bash-completion/completions"
+install -m 0644 "$PKG_DIR/completions/jennifer.bash" \
+    "$STAGE/usr/share/bash-completion/completions/jennifer"
+ln -sf jennifer "$STAGE/usr/share/bash-completion/completions/jennifer-tiny"
+
 # Documentation: copyright (required) + changelog (Debian compresses
 # the upstream changelog with gzip).
 install -m 0644 "$PKG_DIR/debian/copyright" "$STAGE/usr/share/doc/jennifer/copyright"

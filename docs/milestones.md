@@ -1265,221 +1265,82 @@ the reference Ryzen 5 7600X3D.
 
 ## M16.6 - Developer tooling: linting
 
-A `jennifer lint <prog.j>` subcommand that reports patterns
-which are compile-legal but stylistically or semantically
-suspect. Distinct from `jennifer fmt` (which normalises
-lexical shape) and from the parser (which rejects the
-outright illegal): the linter's slot is "the code parses, it
-runs, and something about it is still worth flagging."
+`jennifer lint <prog.j>...` reports patterns that are compile-legal but
+stylistically or semantically suspect - the slot between `jennifer fmt`
+(lexical shape) and the parser (the outright illegal). Internals:
+[technical/cli.md](technical/cli.md).
 
-Sits at the tail of the M16.x range as developer tooling.
-Ships before M16.7's profiler because the linter is smaller
-in scope (no evaluator instrumentation, no runtime cost),
-reuses M16.5.2's scope pass off the shelf, and validates the
-`jennifer <tool>` subcommand + `--format=…` output-shape
-pattern that M16.7 then reuses. Both land before M18.x so
-Jennifer-coded module authors have the tools in hand from
-day one.
+**Checks** (stable IDs so suppression and CI config stay portable):
 
-**Why bother when the parser already catches so much.**
-Undefined variables, wrong types at declared sites, arity
-mismatches, const reassignment, no-shadowing, const-name
-rule violations, and (after M16.5.2) unused locals are all
-parse-time or first-execution errors. A linter that only
-duplicated those wouldn't earn its keep. What's left:
-dead-code detection past a `return` / `throw` / `exit` /
-`break` / `continue`, empty catch blocks that swallow
-errors, `try` bodies that can't throw, `throw` sites that
-don't carry an `Error` struct (convention violation),
-methods whose block-nesting depth or statement count
-exceeds a threshold, always-true / always-false
-comparisons a reader can spot statically, and (over time)
-deprecation warnings as language features change.
+- `L001 unused-local` - a local `def` binding never read. Skips
+  declarations inside a `spawn` body (inherits M16.5.2's resolver
+  carve-out); reads inside a spawn still count.
+- `L002 dead-code-after-terminator` - a statement after
+  `return`/`throw`/`exit`/`break`/`continue`.
+- `L003 empty-catch` - a `catch` with no body.
+- `L004 throw-non-error` - a `throw` not statically an `Error` (an
+  `Error{...}` literal or a `$var` declared `Error` pass; any other
+  shape is flagged).
+- `L005 method-too-long` - body over a statement threshold (default 60).
+- `L006 nesting-too-deep` - block nesting over a depth threshold (default 4).
+- `L007 constant-condition` - `if (true)`/`if (false)`, `while (true)`
+  with no break/return/throw/exit escape, `if ($x == $x)`.
+- `L008 deprecation` - reserved family, empty until an API is deprecated.
+- `L009 removed-api` - use of a removed API (e.g. `use core;`).
+- `L010 line-too-long` - a source line over the column limit (default 100).
 
-**Check set for v1** (each check gets a stable ID so
-suppression comments and CI configuration are portable):
+**Suppression.** `# lint-disable: IDS` (trailing) silences on that line;
+`# lint-disable-file: IDS` silences file-wide. No blanket disable-all -
+directives name IDs. Read off the trivia token stream, since the parser
+strips comments.
 
-- `L001 unused-local` - a `def NAME as T init ...;` whose
-  binding is never referenced. Parse-time analysis on top
-  of M16.5.2's scope pass; runs cheap. **Skips spawn body
-  contents** - M16.5.2's spawn carve-out means the resolver
-  doesn't descend into spawn bodies, so the linter inherits
-  the same blind spot. A local declared inside a
-  `spawn { ... }` block will not be flagged even if unused.
-  Documented as a known limitation; the fix ships when
-  M16.5.2's spawn carve-out does.
-- `L002 dead-code-after-terminator` - statements
-  syntactically unreachable because a preceding sibling
-  is `return;` / `throw ...;` / `exit ...;` /
-  `break;` / `continue;`.
-- `L003 empty-catch` - `catch (e) { }` with no body. The
-  handler receives the error and discards it silently -
-  almost always a mistake; if it's deliberate, the
-  suppression comment makes the intent explicit.
-- `L004 throw-non-error` - a `throw` whose expression
-  isn't statically an `Error` value. The check fires only
-  on shapes the linter can decide without type inference:
-  a `throw` of an `Error{...}` struct literal passes; a
-  `throw` of a `$var` whose declared type is `Error` (or
-  `Error?` when nullability lands) passes; every other
-  shape (bare int / string / null / a variable of type
-  `int`, a call whose return type isn't statically knowable)
-  is flagged. The convention (documented in M13.2 and
-  `docs/user-guide/control-flow.md`) is that user code
-  throws `Error`; catches downstream assume the field shape.
-  Bare-value throws break that contract. `throw makeErr(...)`
-  where `makeErr` returns `Error` at runtime but has no
-  declared return type is deliberately flagged - the fix is
-  to bind the result to a `def e as Error init makeErr(...);`
-  first, which then throws cleanly.
-- `L005 method-too-long` - method body exceeds a
-  configurable statement count (default 60). Same
-  "one concern per method" rationale as
-  [style-guide.md > Loops](../user-guide/style-guide.md#loops)
-  applies to methods.
-- `L006 nesting-too-deep` - block-nesting exceeds a
-  configurable depth (default 4). Same shape as
-  `list of list of list of list of ...` being flagged
-  as a smell in the style guide.
-- `L007 constant-condition` - `if (true)`, `if (false)`,
-  `while (true)` (unless followed by `break` inside),
-  `if ($x == $x)`. Runtime consequences vary; the
-  static pattern is almost always a bug or leftover
-  scaffold.
-- `L008 deprecation` - a family, not a single rule.
-  Populated by future milestones when they retire an
-  API surface. Empty on M16.6 landing; grows over
-  time. Each entry names the successor. When a
-  milestone retires a name, it lands the corresponding
-  `L008` sub-rule in the same release the old form
-  still runs, so the deprecation warning is available
-  the moment the replacement ships.
+**Config.** `--checks=IDS` (per run) or a `.jennifer-lint` file (per
+project), one direction: all includes ("only these") or all `!excludes`
+("everything except"); mixing errors. Unknown IDs are always an error,
+everywhere.
 
-**Suppression.** A `# lint-disable: L003` line-trailing
-comment suppresses the specified check on that statement.
-A `# lint-disable-file: L005, L006` at file head
-suppresses across the whole file. No blanket "disable
-all" - suppression names IDs, so a review can grep for
-what was silenced. The lexer already carries trivia
-tokens (M14), so the linter reads suppressions off the
-same token stream it walks for checks.
+**Output.** `--format=human` (source-context carets, default),
+`--format=json` (a JSON array of `{id,file,line,col,message,severity}`,
+`[]` when empty), `--format=github` (Actions annotations). Exit `0`
+clean / `1` findings at or above the warning floor / `2` linter failure -
+the `gofmt -l` / `shellcheck` shape. CI lints `examples/*.j` as a gate.
 
-**Output shapes** (one measurement, multiple consumption
-targets - the same pattern M16.7's profiler reuses for its
-`--format` flag):
+**TinyGo.** Behind a build tag; the run-only `jennifer-tiny` omits it
+(along with `tokens` / `ast` / `fmt` / `profile`).
 
-- Human-readable default (positioned diagnostics with
-  source-context carets, matching the existing
-  parse-error and runtime-error rendering in
-  `cmd/jennifer/main.go`).
-- `--format=json` machine-readable JSON array of findings
-  for editor integration (LSPs, CI annotations), each
-  `{id, file, line, col, message, severity}` (valid JSON,
-  `[]` when empty).
-- `--format=github` GitHub Actions annotations
-  (`::error file=…,line=…,col=…::message`). Cheap to
-  add; matches `go test`'s convention.
-
-**Exit code semantics.** `0` = clean (no findings above
-the configured severity floor). `1` = findings at or
-above the floor. `2` = the linter itself failed
-(parse error, IO failure). Same triaging shape as
-`gofmt -l` and `shellcheck`.
-
-**Configuration.** A single `--checks=IDS` flag on the
-CLI covers per-run tuning; a leading `!` on an entry means
-"exclude" (`--checks=!L005,!L006` runs everything except
-those two; `--checks=L001,L002` runs only those two).
-One flag, one direction - stance 1 rules out shipping
-`--check` and `--exclude` as inverted sugar for the same
-job. A `.jennifer-lint` file at the source-tree root
-(optional) covers per-project defaults using the same
-`IDS` / `!IDS` format, one entry per line, comments
-start with `#`. No YAML, no TOML - matches the
-small-tooling philosophy of the rest of the CLI.
-
-**Unknown check IDs are always errors** - in
-`--checks`, in `.jennifer-lint`, and in
-`# lint-disable:` suppression comments. Silently
-ignoring a typo would defeat the auditability the ID
-scheme buys. A retired ID that used to exist errors with
-a positioned message naming the successor when the
-retirement landed an `L008` sub-rule, or just naming
-the removal when it didn't.
-
-**TinyGo-friendliness.** Same story M16.7's profiler
-adopts: lint checks live behind the `lint` subcommand and
-a build tag so they don't bloat the shipping
-`jennifer-tiny` binary. Minimal-footprint embedding builds
-get the lint-free variant; desktop / dev builds get both.
-Shares the scope-analysis pass with M16.5.2 where the
-checks overlap (`L001 unused-local`), so the linter
-doesn't duplicate the analyser it needs.
-
-**Out of scope for v1.** Auto-fixing (the linter reports;
-the human decides), whole-project / cross-module
-analysis (per-file for v1; module-graph analysis after
-M17 modules land), and any check that would need type
-inference beyond what `def NAME as TYPE` already gives.
+**Out of scope for v1.** Auto-fixing, cross-module analysis (per-file;
+revisited after M17), and checks needing type inference beyond
+`def NAME as TYPE`.
 
 ## M16.7 - Developer tooling: profiling
 
-A `jennifer profile <prog.j>` subcommand that instruments the
-evaluator to attribute work back to Jennifer source positions -
-the gap left by `go tool pprof`, which profiles the interpreter
-binary, not the .j program running inside it. Ships at the tail
-of the M16.x range so library authors have both linting (M16.6)
-and profiling in hand before writing Jennifer-coded modules in
-M18.x. Ships after M16.6 because it's the bigger of the two -
-evaluator instrumentation touches every statement / expression
-eval site, whereas the linter is a pure static-analysis pass.
+`jennifer profile <prog.j>` runs the program with the evaluator
+instrumented and attributes work back to Jennifer source positions - the
+gap `go tool pprof` leaves (it profiles the interpreter binary, not the
+.j program inside it). Program output goes to stderr so the profile owns
+stdout. Internals: [technical/cli.md](technical/cli.md).
 
-- **Statement / call profile.** The default mode. Per source
-  position (file:line:col) record hit count and cumulative
-  wall-clock time spent in that statement / expression.
-  Output formats: a flat human-readable table by default,
-  pprof-compatible binary via `--format=pprof`, Chrome-trace
-  JSON via `--format=trace`. Existing flamegraph tooling
-  (`go tool pprof`, https://www.speedscope.app/) consumes
-  both forms so we don't ship a renderer. Unknown
-  `--format` values are rejected at argv parse (positioned
-  error naming the valid choices), not deferred to output
-  time.
-- **Allocation tracking.** Optional second mode
-  (`--allocs`) that surfaces the M16.5.1 shared-marker COW
-  hot spots: `Ensure()` calls that actually detached a
-  shared backing (the site where value semantics turned a
-  logical mutation into a real copy) and `DeepCopy()`
-  invocations from `snapshotForSpawn` (the frame captured
-  when a `spawn` block launches). Jennifer's value
-  semantics make every detachment load-bearing; surfacing
-  "this struct's Ensure detaches on 40 frames per call" is
-  exactly the kind of insight that compiled-language
-  allocation profilers give. Same output formats as the
-  statement profile. `--allocs` is a mode switch, not a
-  layer over the statement profile. `--allocs --format=pprof`
-  is fine and expected: pprof's format handles allocation
-  samples natively via its `sample_type` field, and
-  `go tool pprof --alloc_objects` reads exactly that.
-  `--allocs --format=trace` is rejected at argv parse
-  because Chrome-trace has no sensible representation for
-  allocation events without a timeline they hang off; the
-  ambiguity outweighs the ergonomic hit of "do it in two
-  runs." If a future workload needs a timeline-plus-allocs
-  mixed stream, a separate `--allocs=timeline` or
-  `--profile-and-allocs` shape lands then.
-- **TinyGo-friendliness.** Profiling code lives behind the
-  `profile` subcommand and a build tag so it doesn't bloat
-  the shipping `jennifer` binary. Minimal-footprint embedding
-  builds get the profiler-free variant; desktop / dev builds
-  get both.
-- **Out of scope for v1.** No source-step debugger (its
-  own milestone if/when it lands).
-- **May absorb future developer-tooling work.** Source-level
-  debugger hooks, runtime introspection, and any other
-  `jennifer <tool>` subcommand that instruments the
-  evaluator can ship as sub-milestones under M16.7.x rather
-  than getting their own top-level slots.
+- **Statement profile** (default). Per source position: hit count and
+  self / cumulative wall-clock time. Instruments statements and method
+  calls, not every expression - a `time.Now()` around each literal read
+  would swamp the profile.
+- **Allocation profile** (`--allocs`). Value-semantics copies per
+  position: eager copies (def / assignment / parameter binding of a
+  compound value - where the real cost is), COW `Ensure()` detachments
+  (kept for correctness but at or near zero for `.j` code, since every
+  store copies eagerly and the append/index hot loop stays unshared), and
+  `snapshotForSpawn` deep copies. A mode switch, not a layer on the
+  statement profile. `examples/profile.j` exercises all three.
+- **Formats.** `--format=table` (default), `--format=pprof` (gzipped
+  protobuf, hand-encoded for zero deps; `go tool pprof` and
+  speedscope.app read it), `--format=trace` (Chrome-trace of the call
+  timeline). Unknown `--format` and `--allocs --format=trace`
+  (allocation events have no timeline) are rejected at argv parse.
+- **TinyGo.** Behind the `profile` subcommand + build tag; the run-only
+  `jennifer-tiny` omits it.
+- **Out of scope for v1.** A source-step debugger (its own milestone if
+  it lands). Future evaluator-instrumenting tools can land as M16.7.x
+  sub-milestones.
 
 ## M16.8 - Testing framework consolidation
 

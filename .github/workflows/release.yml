@@ -71,7 +71,13 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: '0'
         run: |
-          go build -o jennifer ./cmd/jennifer
+          # Release flags: -trimpath drops local build paths for a
+          # reproducible binary; -ldflags "-s -w" strips DWARF and the
+          # symbol table (~30% smaller). Go keeps its own pclntab, so
+          # panic stack traces stay symbolized, and the version comes
+          # from the codegen stamp above (not -ldflags -X), so stripping
+          # is safe. Dev builds (make build) keep symbols for debugging.
+          go build -trimpath -ldflags="-s -w" -o jennifer ./cmd/jennifer
 
       - name: Build TinyGo binary (jennifer-tiny)
         env:
@@ -79,15 +85,19 @@ jobs:
           # (`wasi`, `microbit`, ...); it does *not* accept `os/arch`
           # pairs like `linux/amd64`. For plain OS/arch cross-compile
           # TinyGo reads GOOS/GOARCH like the standard toolchain does.
-          # `-stack-size=1mb` mirrors the Makefile: Jennifer's tree-
-          # walking evaluator wraps each Jennifer-level call in many
-          # Go-stack frames, so TinyGo's default ~8KB goroutine stack
-          # overflows on recursive `spawn` bodies. See M16.0 notes in
+          # Flags mirror the Makefile so release and dev builds match:
+          # `-scheduler=tasks` pins the cooperative single-thread
+          # scheduler (the threads-capable default segfaults on recursive
+          # `spawn` bodies, since -stack-size doesn't govern OS-thread
+          # stacks); `-stack-size=1mb` covers the deep Go-stack frames
+          # Jennifer's tree-walking evaluator wraps each call in (TinyGo's
+          # ~8KB default overflows on recursive `spawn`). `-no-debug`
+          # strips DWARF for a smaller release binary. See
           # docs/technical/tinygo.md.
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          tinygo build -stack-size=1mb -o jennifer-tiny ./cmd/jennifer
+          tinygo build -scheduler=tasks -stack-size=1mb -no-debug -o jennifer-tiny ./cmd/jennifer
 
       - name: Smoke-test the binaries
         run: |
@@ -116,11 +126,14 @@ jobs:
           # Naming: jennifer-${TAG}-${OS}-${ARCH}.tar.gz
           TAG="${GITHUB_REF_NAME}"
           STAGE="jennifer-${TAG}-${{ matrix.os }}-${{ matrix.arch }}"
-          mkdir -p "$STAGE/share/man/man1" "$STAGE/share/mime/packages"
+          mkdir -p "$STAGE/share/man/man1" "$STAGE/share/mime/packages" \
+                   "$STAGE/share/bash-completion/completions"
           cp jennifer jennifer-tiny "$STAGE/"
           cp packaging/man/jennifer.1      "$STAGE/share/man/man1/"
           cp packaging/man/jennifer-tiny.1 "$STAGE/share/man/man1/"
           cp packaging/mime/jennifer.xml "$STAGE/share/mime/packages/"
+          cp packaging/completions/jennifer.bash "$STAGE/share/bash-completion/completions/jennifer"
+          ln -sf jennifer "$STAGE/share/bash-completion/completions/jennifer-tiny"
           cp README.md "$STAGE/" 2>/dev/null || true
           tar -czf "dist/${STAGE}.tar.gz" "$STAGE"
           (cd dist && sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256")
