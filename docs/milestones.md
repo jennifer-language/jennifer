@@ -796,7 +796,7 @@ Windows-1252's five canonically-undefined positions (0x81, 0x8D,
 0x8F, 0x90, 0x9D) reject symmetrically on encode and decode.
 Long-tail single-byte codecs (ISO-8859-{2..16},
 Windows-{1250,1251,1253..1258}) parked in
-[M24+](#m24---encoding-long-tail-codecs). See
+[M25+](#m25---encoding-long-tail-codecs). See
 [libraries/encoding.md](libraries/encoding.md),
 `examples/encoding.j`.
 
@@ -1171,12 +1171,12 @@ in M18.x on top of these primitives.
   race. Suites that share a process (or the fmt round-trip test
   path) should `testing.reset()` at the top of the run.
 - **What's deferred** (recorded so the design stays visible):
-  subprocess isolation for divergent tests (a future
-  `--isolated` flag on the M18.x harness re-invokes
+  subprocess isolation for divergent tests (the `--isolated`
+  flag on the M16.8 `jennifer test` subcommand re-invokes
   `jennifer run testfile.j --testing-single name` per test
   via `os.spawn`), setup / teardown / fixtures, skip / xfail,
   parameterised tests, test discovery by prefix (primitive is
-  there via `MethodNames`; policy lives in M18.x).
+  there via `MethodNames`; policy lives in M16.8).
 
 See:
 - [libraries/testing.md](libraries/testing.md) - reference doc
@@ -1184,8 +1184,8 @@ See:
   walkthrough.
 - [user-guide/imports.md](user-guide/imports.md) - `testing`
   row.
-- The M18.5 `testing` module (Jennifer-coded assertions and
-  suite driver built on these primitives).
+- M16.8 (assertion vocabulary + `jennifer test` subcommand +
+  `--testing-single` flag built on these primitives).
 
 ## M16.5 - Interpreter performance pass
 
@@ -1263,311 +1263,7 @@ which no M16.5.x work touches. Update `technical/tinygo.md`'s tables
 with the post-M16.5 numbers as the closing deliverable, measured on
 the reference Ryzen 5 7600X3D.
 
----
-
-**Phase D: higher-level and Jennifer-coded libraries (M17-M20).**
-
-## M17 - Module system for Jennifer-coded libraries
-
-Real modules so Jennifer-coded libraries get namespaces, scope,
-and explicit exports. Adopts "**module**" as the canonical
-wording for a distributable `.j` library (matches Python, ES2015,
-Rust); "bundle" deliberately not used because it overloads the
-JS build-output term. The `include "x.j";` keyword (renamed in
-M10) stays as the textual-splice form for inline composition
-inside one source tree; library distribution moves to modules
-via `import`.
-
-Split into four sub-milestones so each piece ships standalone
-and lands in dependency order: source-tree layout first, then
-the import syntax, then resolution, then exports. M18.x cannot
-start until all four ship.
-
-## M17.1 - Source tree separation
-
-A new top-level `modules/` directory holds Jennifer-coded
-modules; system (Go-built) libraries stay in `internal/lib/*/`.
-The split is load-bearing for distro packaging: system
-libraries are baked into the interpreter binary, so a Debian
-package only ships `/usr/bin/jennifer`; modules are data files
-that ship to the system module directory
-(`/usr/share/jennifer/modules/`) and are loadable without
-recompilation. The path follows the FHS: `/usr/share` is for
-architecture-independent, read-only data, which is exactly
-what shipped `.j` modules are. `/var/lib` would be wrong -
-FHS reserves it for *variable* state that the running system
-modifies. The directory exists from M17.1; the modules shipped
-in M18.x land directly in it.
-
-The system module directory is baked into the interpreter at
-build time via `-DJENNIFER_SYSMODDIR=/usr/share/jennifer/modules`
-(propagated through the Makefile's codegen path in the same
-shape as `internal/version/version_gen.go`, since TinyGo's
-0.41 `-ldflags -X` is a no-op. Two runtime overrides let
-non-standard installs (NixOS store paths, Homebrew cellars,
-local development builds) point elsewhere without rebuilding:
-
-- **Environment variable `JENNIFER_SYSMODDIR`** - checked
-  first so distro packages that bake in a path can still be
-  redirected by a shell wrapper without touching the binary.
-- **CLI flag `--sysmoddir=PATH`** - overrides both the
-  environment and the compile-time default; applies only to
-  the current invocation. Useful for `jennifer run` inside a
-  Nix shell or a per-project scratch tree.
-
-Resolution precedence: `--sysmoddir` > `JENNIFER_SYSMODDIR` >
-compile-time default. The chosen path is stored on
-`Interpreter` at construction so M17.3 module resolution can
-consult it without re-parsing argv. Validation is
-asymmetric: `--sysmoddir` and `JENNIFER_SYSMODDIR` are
-checked at `Run()` entry (the user named a specific path;
-silently ignoring it would be the wrong default) and refuse
-to start on a missing or non-directory target. The
-compile-time default is best-effort - it stays uncomplaining
-until a module import actually needs it, so
-`jennifer run myscript.j` still works from a fresh developer
-checkout where `/usr/share/jennifer/modules/` isn't
-installed yet. See [M17.3](#m173---module-resolution) for
-the resolution-time behaviour that ties this together.
-
-**The effective sysmoddir is inspectable at two surfaces**
-so a debugger, a bug report, or a Jennifer program can see
-which of the three layers won:
-
-- `meta.SYSMODDIR` - a string constant on the `meta`
-  namespace (M15.1) alongside `meta.VERSION` and
-  `meta.BUILD`. Programs can read it, print it, or gate
-  behaviour on it; matches the interpreter-self-identity
-  role `meta` already owns.
-- `jennifer version -v` - the CLI's extended version output
-  prints `VERSION`, `BUILD`, and `SYSMODDIR`, each tagged
-  with the layer that supplied it (`cli`, `env`, or
-  `compile`). Aimed at humans and bug reports.
-
-Both shapes point at the same resolved path; the CLI form
-is the one printed inside the "please file a bug" prompt so
-non-standard installs never have to guess.
-
-## M17.2 - `import "foo.j" as foo;` syntax
-
-The real module boundary. The imported file's exported
-top-level names live behind the `foo.` prefix at the call
-site, the same shape as a namespaced system library.
-Aliasing rules match `use NAME as ALIAS;` (alias replaces
-the canonical name; bare form reserves the file-stem as the
-prefix). Reuses the namespacing machinery shipped in M10 so
-call-site resolution is already settled.
-
-**Collisions rejected at `Run()` entry.** Two imports
-aliased to the same prefix fail with a duplicate-alias
-error, mirroring M10's rejection of a duplicate `use NAME;`.
-A module prefix that would shadow (or be shadowed by) an
-already-imported system library's prefix also fails - the
-second import is the one flagged, whichever shape it takes.
-
-**Parse errors in an imported file surface as positioned
-errors** rooted in the imported file (path + line + col),
-consistent with the existing file-import preprocessor's
-error propagation.
-
-## M17.3 - Module resolution
-
-Two disjoint import shapes, distinguished at the character
-level so a reader can tell "local file" apart from "system
-module" without leaving the source line:
-
-- `import "./foo.j" as foo;` (or `../`) is a **local path
-  import**. Always resolves relative to the importing file's
-  directory. No search path is consulted. This is the only
-  way to import a file from the current tree.
-- `import "/opt/mymods/foo.j" as foo;` (leading `/`) is an
-  **absolute path import**. Lands at exactly the named file
-  and bypasses every search path, including the system
-  module directory. Rare in practice - reserved for the
-  cases where the user really does want to name a specific
-  file on disk without indirection.
-- `import "foo.j" as foo;` (no `./`, no `../`, no leading `/`)
-  is a **module import**. The search path is walked in order:
-  first the system module directory
-  ([M17.1](#m171---source-tree-separation);
-  `--sysmoddir` > `JENNIFER_SYSMODDIR` > compile-time default),
-  then any `-I DIR` command-line directories in the order
-  given. The current source file's directory is NEVER
-  consulted for a module import. If nothing matches, the
-  import errors with the ordered list of paths that were
-  searched.
-
-**Why the two shapes are disjoint.** A single "find this file
-somewhere" syntax that searches the working directory first is
-a supply-chain attack vector - the Jennifer equivalent of DLL
-hijacking or `PYTHONPATH`-style import shadowing. An attacker
-who can drop a file into the working directory of the target
-program can silently replace what looks like a system module
-reference (`import "sample.j" as s;`) with their own code, and
-the source of that program tells the reader nothing about
-which of the two just happened. Mandating `./` for local files
-makes intent visible: `"./sample.j"` is always the file next
-to the importing source, `"sample.j"` is always a module the
-distro (or `-I`) has vetted. The two forms can never collide
-because the `./` prefix is a lexical marker at the string
-level.
-
-**Precedence within the module search path**
-(system > `-I`, not the other way around) prevents a stale or
-malicious `-I` entry from shadowing a distro-shipped module
-that a program depends on. `-I` still works for local
-development (drop a module tree under `~/proj/modules/`, pass
-`-I ~/proj/modules`), and for testing patched modules against
-a distro binary, but it can only add names, not override
-existing ones. If a program *needs* to override a system
-module (rare - usually the right answer is to patch and
-rebuild the interpreter or use `--sysmoddir` to point at a
-whole alternate tree), the escape hatch is
-`--sysmoddir=~/proj/modules` for that invocation, which is a
-noisy, deliberate choice.
-
-**Duplicate module names across `-I` directories are a hard
-error.** If the user passes `-I a -I b` and both directories
-contain `foo.j`, the first `import "foo.j" as foo;` fails at
-`Run()` entry with both matching paths named. This mirrors
-the batch-mode rejection of a duplicate `use NAME;` and rules
-out silent first-match-wins shadowing between two entries the
-user themselves added. Duplicates between the system directory
-and an `-I` entry are also errors under the same rule (system
-still wins if the user forces resolution via
-`--sysmoddir`, but a stray `-I` overlay is loud, not silent).
-
-**Missing paths are strict only when the user names them.**
-`--sysmoddir` and `JENNIFER_SYSMODDIR` are validated at `Run()`
-entry: if either points at a nonexistent or non-directory
-target, the program refuses to start (the user asked for a
-specific location, so silently ignoring it would be the wrong
-default). The compile-time default is treated as
-best-effort: if `/usr/share/jennifer/modules/` doesn't exist
-(developer machine, `go build` without `make install`), that
-is fine until the first module import actually looks in it,
-at which point the resolution error names the same missing
-path in its ordered list. This keeps `jennifer run
-myscript.j` working from a fresh checkout even when the
-distro tree isn't installed - the failure only fires when a
-module import genuinely needs the system dir.
-
-No implicit fallback to system libraries in either shape - a
-`use NAME;` always means a Go-built system library,
-`import "..." as ...;` always means a Jennifer-coded module
-file. Matches the explicit-prefix rule recorded in
-[rejected.md > Implicit `use NAME;` fallback chain](technical/rejected.md#implicit-use-name-fallback-chain-m8).
-
-## M17.4 - Module-level exports
-
-Top-level `def`, `def const`, `def struct`, and `func` are
-**private by default**; a leading `export` marker publishes
-the name into the module's public namespace. One marker,
-one direction - no `public`/`private` dual sugar. Follows
-the lineage of Rust `pub`, TypeScript `export`, and Java's
-package-private + `public` split.
-
-Rationale (stance 2: explicit over implicit). The public
-API surface of a module has to be visible in the module's
-source without knowing a default rule. A leading `export`
-answers "what does this module expose?" by grep. A helper
-accidentally left unmarked stays internal rather than
-silently leaking into the public surface - the same
-supply-chain hygiene argument that motivates M17.3's
-mandatory `./` prefix for local file imports. Cost: every
-intended-public name carries one extra token; worth paying
-for the stance-2 alignment.
-
-Accessing a private name from outside the module is a
-positioned error at the call site
-(`foo.helper: 'helper' is not exported from module 'foo'`).
-Struct exports carry the whole struct type, including its
-fields - there is no field-level visibility knob.
-
-**Visibility is a module concept, not a script concept.**
-Scripts (`.j` files run directly via `jennifer run`) carry
-no `export` markers, and the absence isn't an inconsistency
-with the module rule - it's the same rule applied to a
-structurally different situation. Visibility only becomes
-meaningful when a file has an external caller: a script has
-no importer, so its "public API" is the empty set by
-construction, and a marker would be noise. A module has
-importers by definition, so the marker declares which names
-cross the boundary. Same pattern every language that takes
-visibility seriously ships (Rust `pub`, TypeScript `export`,
-Java's package-private + `public`, Go's capitalization);
-none considers the asymmetry with unimported entry points
-an inconsistency.
-
-A useful side effect: a script promoted to a module needs
-`export` markers added deliberately. That is the "I now
-commit to a public API" moment, and forcing it to be a
-deliberate edit prevents a helper that happened to live in
-the file from silently leaking into the module's API
-surface when the file is first imported. Same supply-chain
-hygiene reasoning as M17.3's mandatory `./` prefix.
-
-No `private` marker and no `public` synonym for `export` -
-"no marker" already means private, and stance 1 rules out
-two spellings for the same thing.
-
-Ships last because it's the only piece that touches parser
-grammar - M17.1 through M17.3 are tooling and resolution.
-
-## M17.5 - Developer tooling: profiling
-
-A `jennifer profile <prog.j>` subcommand that instruments the
-evaluator to attribute work back to Jennifer source positions -
-the gap left by `go tool pprof`, which profiles the interpreter
-binary, not the .j program running inside it. Lands between M17
-(modules) and M18.x (Jennifer-coded libraries) so library
-authors can profile their code from the moment they start
-writing it; deliberately not under M16.x because it isn't an
-I/O library and doesn't fit the phase grouping.
-
-- **Statement / call profile.** The default mode. Per source
-  position (file:line:col) record hit count and cumulative
-  wall-clock time spent in that statement / expression.
-  Output formats: a flat human-readable table by default,
-  pprof-compatible binary via `--format=pprof`, Chrome-trace
-  JSON via `--format=trace`. Existing flamegraph tooling
-  (`go tool pprof`, https://www.speedscope.app/) consumes
-  both forms so we don't ship a renderer. Unknown
-  `--format` values are rejected at argv parse (positioned
-  error naming the valid choices), not deferred to output
-  time.
-- **Allocation tracking.** Optional second mode
-  (`--allocs`) that surfaces the M16.5.1 shared-marker COW
-  hot spots: `Ensure()` calls that actually detached a
-  shared backing (the site where value semantics turned a
-  logical mutation into a real copy) and `DeepCopy()`
-  invocations from `snapshotForSpawn` (the frame captured
-  when a `spawn` block launches). Jennifer's value
-  semantics make every detachment load-bearing; surfacing
-  "this struct's Ensure detaches on 40 frames per call" is
-  exactly the kind of insight that compiled-language
-  allocation profilers give. Same output formats as the
-  statement profile. `--allocs` is a mode switch, not a
-  layer over the statement profile: `--allocs` alongside
-  `--format=trace` is rejected at argv parse rather than
-  producing an ambiguous mixed stream. If a future
-  workload needs both, a separate `--allocs=both` or a
-  side-by-side `--profile-and-allocs` shape lands then.
-- **TinyGo-friendliness.** Profiling code lives behind the
-  `profile` subcommand and a build tag so it doesn't bloat
-  the shipping `jennifer` binary. Minimal-footprint embedding
-  builds get the profiler-free variant; desktop / dev builds
-  get both.
-- **Out of scope for v1.** No source-step debugger (its
-  own milestone if/when it lands).
-- **May absorb future developer-tooling work.** Source-level
-  debugger hooks, runtime introspection, and any other
-  `jennifer <tool>` subcommand that instruments the
-  evaluator can ship as sub-milestones under M17.5.x rather
-  than getting their own top-level slots. M17.5.1 (linting)
-  is the first such sub-milestone.
-
-### M17.5.1 - `jennifer lint`
+## M16.6 - Developer tooling: linting
 
 A `jennifer lint <prog.j>` subcommand that reports patterns
 which are compile-legal but stylistically or semantically
@@ -1575,6 +1271,15 @@ suspect. Distinct from `jennifer fmt` (which normalises
 lexical shape) and from the parser (which rejects the
 outright illegal): the linter's slot is "the code parses, it
 runs, and something about it is still worth flagging."
+
+Sits at the tail of the M16.x range as developer tooling.
+Ships before M16.7's profiler because the linter is smaller
+in scope (no evaluator instrumentation, no runtime cost),
+reuses M16.5.2's scope pass off the shelf, and validates the
+`jennifer <tool>` subcommand + `--format=…` output-shape
+pattern that M16.7 then reuses. Both land before M18.x so
+Jennifer-coded module authors have the tools in hand from
+day one.
 
 **Why bother when the parser already catches so much.**
 Undefined variables, wrong types at declared sites, arity
@@ -1596,7 +1301,13 @@ suppression comments and CI configuration are portable):
 
 - `L001 unused-local` - a `def NAME as T init ...;` whose
   binding is never referenced. Parse-time analysis on top
-  of M16.5.2's scope pass; runs cheap.
+  of M16.5.2's scope pass; runs cheap. **Skips spawn body
+  contents** - M16.5.2's spawn carve-out means the resolver
+  doesn't descend into spawn bodies, so the linter inherits
+  the same blind spot. A local declared inside a
+  `spawn { ... }` block will not be flagged even if unused.
+  Documented as a known limitation; the fix ships when
+  M16.5.2's spawn carve-out does.
 - `L002 dead-code-after-terminator` - statements
   syntactically unreachable because a preceding sibling
   is `return;` / `throw ...;` / `exit ...;` /
@@ -1606,11 +1317,21 @@ suppression comments and CI configuration are portable):
   almost always a mistake; if it's deliberate, the
   suppression comment makes the intent explicit.
 - `L004 throw-non-error` - a `throw` whose expression
-  isn't an `Error{...}` struct literal or a variable of
-  type `Error`. The convention (documented in M13.2 and
+  isn't statically an `Error` value. The check fires only
+  on shapes the linter can decide without type inference:
+  a `throw` of an `Error{...}` struct literal passes; a
+  `throw` of a `$var` whose declared type is `Error` (or
+  `Error?` when nullability lands) passes; every other
+  shape (bare int / string / null / a variable of type
+  `int`, a call whose return type isn't statically knowable)
+  is flagged. The convention (documented in M13.2 and
   `docs/user-guide/control-flow.md`) is that user code
-  throws `Error`; catches downstream assume the field
-  shape. Bare-value throws break that contract.
+  throws `Error`; catches downstream assume the field shape.
+  Bare-value throws break that contract. `throw makeErr(...)`
+  where `makeErr` returns `Error` at runtime but has no
+  declared return type is deliberately flagged - the fix is
+  to bind the result to a `def e as Error init makeErr(...);`
+  first, which then throws cleanly.
 - `L005 method-too-long` - method body exceeds a
   configurable statement count (default 60). Same
   "one concern per method" rationale as
@@ -1627,7 +1348,7 @@ suppression comments and CI configuration are portable):
   scaffold.
 - `L008 deprecation` - a family, not a single rule.
   Populated by future milestones when they retire an
-  API surface. Empty on M17.5.1 landing; grows over
+  API surface. Empty on M16.6 landing; grows over
   time. Each entry names the successor. When a
   milestone retires a name, it lands the corresponding
   `L008` sub-rule in the same release the old form
@@ -1643,9 +1364,9 @@ what was silenced. The lexer already carries trivia
 tokens (M14), so the linter reads suppressions off the
 same token stream it walks for checks.
 
-**Output shapes** (same rationale as M17.5's profile
-`--format` flag - one measurement, multiple consumption
-targets):
+**Output shapes** (one measurement, multiple consumption
+targets - the same pattern M16.7's profiler reuses for its
+`--format` flag):
 
 - Human-readable default (positioned diagnostics with
   source-context carets, matching the existing
@@ -1685,14 +1406,14 @@ a positioned message naming the successor when the
 retirement landed an `L008` sub-rule, or just naming
 the removal when it didn't.
 
-**TinyGo-friendliness.** Same story as the profiler:
-lint checks live behind the `lint` subcommand and a
-build tag so they don't bloat the shipping
-`jennifer-tiny` binary. Minimal-footprint embedding
-builds get the lint-free variant; desktop / dev builds
-get both. Shares the scope-analysis pass with M16.5.2
-where the checks overlap (`L001 unused-local`), so the
-linter doesn't duplicate the analyser it needs.
+**TinyGo-friendliness.** Same story M16.7's profiler
+adopts: lint checks live behind the `lint` subcommand and
+a build tag so they don't bloat the shipping
+`jennifer-tiny` binary. Minimal-footprint embedding builds
+get the lint-free variant; desktop / dev builds get both.
+Shares the scope-analysis pass with M16.5.2 where the
+checks overlap (`L001 unused-local`), so the linter
+doesn't duplicate the analyser it needs.
 
 **Out of scope for v1.** Auto-fixing (the linter reports;
 the human decides), whole-project / cross-module
@@ -1700,7 +1421,550 @@ analysis (per-file for v1; module-graph analysis after
 M17 modules land), and any check that would need type
 inference beyond what `def NAME as TYPE` already gives.
 
-## M17.6 - Public interpreter API for third-party embedding
+## M16.7 - Developer tooling: profiling
+
+A `jennifer profile <prog.j>` subcommand that instruments the
+evaluator to attribute work back to Jennifer source positions -
+the gap left by `go tool pprof`, which profiles the interpreter
+binary, not the .j program running inside it. Ships at the tail
+of the M16.x range so library authors have both linting (M16.6)
+and profiling in hand before writing Jennifer-coded modules in
+M18.x. Ships after M16.6 because it's the bigger of the two -
+evaluator instrumentation touches every statement / expression
+eval site, whereas the linter is a pure static-analysis pass.
+
+- **Statement / call profile.** The default mode. Per source
+  position (file:line:col) record hit count and cumulative
+  wall-clock time spent in that statement / expression.
+  Output formats: a flat human-readable table by default,
+  pprof-compatible binary via `--format=pprof`, Chrome-trace
+  JSON via `--format=trace`. Existing flamegraph tooling
+  (`go tool pprof`, https://www.speedscope.app/) consumes
+  both forms so we don't ship a renderer. Unknown
+  `--format` values are rejected at argv parse (positioned
+  error naming the valid choices), not deferred to output
+  time.
+- **Allocation tracking.** Optional second mode
+  (`--allocs`) that surfaces the M16.5.1 shared-marker COW
+  hot spots: `Ensure()` calls that actually detached a
+  shared backing (the site where value semantics turned a
+  logical mutation into a real copy) and `DeepCopy()`
+  invocations from `snapshotForSpawn` (the frame captured
+  when a `spawn` block launches). Jennifer's value
+  semantics make every detachment load-bearing; surfacing
+  "this struct's Ensure detaches on 40 frames per call" is
+  exactly the kind of insight that compiled-language
+  allocation profilers give. Same output formats as the
+  statement profile. `--allocs` is a mode switch, not a
+  layer over the statement profile. `--allocs --format=pprof`
+  is fine and expected: pprof's format handles allocation
+  samples natively via its `sample_type` field, and
+  `go tool pprof --alloc_objects` reads exactly that.
+  `--allocs --format=trace` is rejected at argv parse
+  because Chrome-trace has no sensible representation for
+  allocation events without a timeline they hang off; the
+  ambiguity outweighs the ergonomic hit of "do it in two
+  runs." If a future workload needs a timeline-plus-allocs
+  mixed stream, a separate `--allocs=timeline` or
+  `--profile-and-allocs` shape lands then.
+- **TinyGo-friendliness.** Profiling code lives behind the
+  `profile` subcommand and a build tag so it doesn't bloat
+  the shipping `jennifer` binary. Minimal-footprint embedding
+  builds get the profiler-free variant; desktop / dev builds
+  get both.
+- **Out of scope for v1.** No source-step debugger (its
+  own milestone if/when it lands).
+- **May absorb future developer-tooling work.** Source-level
+  debugger hooks, runtime introspection, and any other
+  `jennifer <tool>` subcommand that instruments the
+  evaluator can ship as sub-milestones under M16.7.x rather
+  than getting their own top-level slots.
+
+## M16.8 - Testing framework consolidation
+
+Consolidates what was originally planned as a Jennifer-coded
+testing module (the old M18.5 slot) into the system library
+and the CLI,
+following the same "primitives in Go, orchestration as
+subcommand" pattern already used by `jennifer fmt`,
+`jennifer lint` (M16.6), and `jennifer profile` (M16.7).
+M16.4 shipped just the dispatch primitives (`CallByName`,
+`testing.run`, `testing.results`, `testing.report`); M16.8
+lands the assertion vocabulary and CLI orchestration around
+them so a Jennifer-coded module doesn't need to duplicate
+either.
+
+**Four additions:**
+
+- **Assertion vocabulary in the `testing` library.** Six
+  namespaced builtins that reduce to `Value.Equal` +
+  Kind-dispatch at the Go level; all throw a canonical
+  `Error` struct on failure with the assertion site's
+  position, which the runner catches through the same
+  path M16.4 already handles:
+  - `testing.assertEqual(actual, expected)` and
+    `testing.assertNotEqual(actual, expected)` - deep
+    equality via `Value.Equal`, so lists / maps / structs
+    compare structurally.
+  - `testing.assertTrue(cond)` / `testing.assertFalse(cond)` -
+    require bool; throw on the wrong polarity.
+  - `testing.assertContains(haystack, needle)` -
+    dispatches on haystack Kind: substring for string,
+    element for list, key for map. Anything else errors as
+    a runtime type mismatch.
+  - `testing.assertThrows(name, kind)` - calls the named
+    zero-arg method via `CallByName` and asserts it throws
+    an `Error` whose `kind` field matches. Wraps
+    `testing.run`'s existing try/catch shape rather than
+    duplicating it.
+  Native performance - assertions in a hot test loop no
+  longer pay per-call interpreter overhead for what
+  reduces to `Value.Equal` in Go.
+
+- **`CallByName` extension for arg-taking methods.**
+  M16.4's `Interpreter.CallByName(name string) (Value,
+  error)` invoked zero-arg methods only; M16.8 grows a
+  variadic sibling `CallByNameWith(name string, args
+  ...Value) (Value, error)` that binds the passed values
+  to the method's parameters in order (arity + declared-
+  type checks match the normal call path). Zero-arg
+  `CallByName` stays as the compat entrypoint. On the
+  Jennifer side, `testing.runWith(name, argsList)` mirrors
+  `testing.run` for methods that take arguments. Unblocks
+  parameterised-test dispatchers (`testing.runWith(row.testName,
+  [row.input])` inside a table-driven driver method) and any
+  future framework layer that wants to invoke user methods
+  with runtime-computed argument lists. Test-method entry
+  points themselves stay zero-arg by convention (see
+  "Testing conventions" below) - the arg-taking path is
+  for framework code and helper dispatchers, not for the
+  test methods `jennifer test` discovers directly.
+
+- **`--testing-single METHOD` CLI flag.** New on the
+  interpreter binary. Parses + resolves the source file the
+  usual way, then invokes exactly one method by name (via
+  `CallByName`), records its result, prints one line in the
+  chosen `--format`, exits with 0 on pass or 1 on fail.
+  Sole purpose: serve as the per-test subprocess that
+  `jennifer test --isolated` fires via `os.spawn` (M15.3).
+  Rejects unknown method names at argv parse with a
+  positioned error; refuses inside the REPL the same way
+  `readLine` does.
+
+- **`jennifer test FILE.j` subcommand.** The orchestration
+  layer:
+  - Discovery via `Interpreter.MethodNames()`, filtered to
+    the naming convention (default: `test*` prefix,
+    overridable with `--filter=REGEX` using M16.3
+    patterns).
+  - Per-test flow: call `setUp` if present, run the test
+    through `testing.run`, call `tearDown` if present.
+    Both hooks are looked up by name at the module scope
+    and are absent by default.
+  - `--format=text|tap|junit` routes through
+    `testing.report`; default `text`.
+  - `--isolated` opts into per-test subprocess mode: for
+    each test, `os.spawn` the current interpreter binary
+    with `--testing-single METHOD`, record the child's
+    exit code and one-line output. Slower (each subprocess
+    pays interpreter startup + full module init; the
+    M17.2 first-import cost is paid N times under
+    `--isolated`), but each test gets a clean interpreter
+    state.
+  - Exit code: 0 = all pass, 1 = one or more failed, 2 =
+    the runner itself failed (parse / IO). Same shape as
+    `jennifer lint`.
+
+**Testing conventions.**
+
+- **Test-method entry points are zero-arg.** `jennifer test`
+  discovers zero-arg methods matching the `test*` naming
+  convention; each runs uniformly through `testing.run` (the
+  zero-arg `CallByName` path). The *subject* function under
+  test can take any signature - the test body invokes it
+  with concrete values via the normal call syntax
+  (`testing.assertEqual(add(1, 2), 3)`). The arg-taking
+  `CallByNameWith` + `testing.runWith` are for framework and
+  dispatcher code that reaches methods by string name at
+  runtime, not for the tests the runner discovers.
+- **Table-driven tests via body loops.** The simplest shape
+  is `for (def c in $cases) { testing.assertEqual(...); }`
+  inside a single test method. First failing row throws,
+  aborting the method - so the test reports "row 3 failed"
+  via the assertion's source position rather than "rows 3
+  and 5 both failed" independently. Fail-fast is the
+  trade-off for zero framework support. Users who want
+  independent per-row pass / fail wire it via
+  `CallByNameWith`: a driver method walks the case list,
+  calls a parameterised sub-method with each row's args,
+  and records each result through `testing.results()`.
+  First-class subtest primitives (e.g. `testing.subtest(name)`)
+  are deferred - the pattern above covers the observed
+  use cases without new language surface.
+- **Testing Jennifer-coded modules.** Once M17.2 ships
+  `import "foo.j" as foo;`, `jennifer test FILE.j` works
+  unchanged on a test file that imports modules - module
+  resolution happens at parse time via M17.3, independent
+  of the runner. **White-box access to a module's private
+  names lives in M17.4** as the "Testing overlays"
+  amendment: a `MODULE_test.j` file next to `MODULE.j` in
+  the same directory gets private-name visibility into the
+  module by convention. `jennifer test MODULE.j` discovers
+  and runs the overlay; `jennifer test MODULE_test.j`
+  works too. Black-box (public-API-only) tests live in
+  a differently-named file (`MODULE_public_test.j`,
+  `test_MODULE_api.j`, or wherever the user puts them) and
+  see only exports. See
+  [M17.4 > Testing overlays](#m174---module-level-exports)
+  for the visibility rule and the parse-time splicing that
+  implements it.
+
+**TinyGo-friendliness.** The assertion vocabulary is
+lightweight (six functions reducing to existing
+`Value.Equal` / Kind dispatch) and lands in the
+always-built `testing` library, so TinyGo suites can call
+`testing.assertEqual` and friends directly. The
+`jennifer test` subcommand and `--testing-single` flag
+live in `cmd/jennifer/` next to the other dev-tool
+subcommands, behind the same build tag that keeps `fmt` /
+`lint` / `profile` out of `jennifer-tiny`. TinyGo test
+suites lose the convenient `jennifer test` orchestration
+but keep the assertion + runner primitives - they invoke
+`testing.run` explicitly from a hand-written driver.
+
+---
+
+**Phase D: higher-level and Jennifer-coded libraries (M17-M20).**
+
+## M17 - Module system for Jennifer-coded libraries
+
+Real modules so Jennifer-coded libraries get namespaces, scope, and
+explicit exports. "Module" is the canonical term for a distributable
+`.j` library (matching Python, ES2015, Rust). `include "x.j";` stays the
+textual-splice form for composing one module out of several files;
+`import "x.j" as x;` is the new cross-module boundary. Ships as four
+dependency-ordered submilestones (M17.1 source tree and resolution,
+M17.2 import statement and loader, M17.3 module scope and namespacing,
+M17.4 exports and visibility); M18.x cannot start until all four land.
+
+```jennifer
+# points.j - a module
+export def struct Point { x as int, y as int };
+
+export func mid(a as Point, b as Point) {
+    return Point{ x: ($a.x + $b.x) // 2, y: ($a.y + $b.y) // 2 };
+}
+
+func doubleCoord(v as int) { return $v * 2; }   # private: no export marker
+```
+
+```jennifer
+# consumer.j
+use io;
+import "./points.j" as points;
+
+def p as points.Point init points.Point{ x: 0, y: 10 };
+io.printf("mid = %v\n", points.mid($p, points.Point{ x: 4, y: 6 }));
+```
+
+**Design basis** (the settled decisions the submilestones inherit;
+turned-down alternatives live in
+[rejected.md](technical/rejected.md)):
+
+- `import` is a parser + interpreter feature, not a preprocessor splice
+  like `include` (M17.2).
+- Each module is its own resolution context: own `use` set, own
+  namespace tables, own export table (M17.3).
+- Modules are declarations-only, no mutable top-level state; `spawn`
+  capture is unaffected because there is nothing mutable to capture
+  (M17.3).
+- One global `Error` (M13.2 stands); modules add distinctly-named error
+  structs, never redefine `Error` (M17.3).
+- Private by default; a leading `export` publishes a name. No
+  `public`/`private` keyword (M17.4).
+- Multi-file modules assemble via `include` behind one entry file; no
+  directory-as-module, no cross-file re-export (M17.1).
+- Modules need a filesystem; `jennifer-tiny` loads them where one
+  exists, else fails with the normal search-path error (M17.1).
+
+## M17.1 - Source tree and resolution
+
+**Scope.** Where modules live on disk and how an import string resolves
+to a file.
+
+**Ships.**
+
+- A top-level `modules/` directory for Jennifer-coded modules; system
+  (Go-built) libraries stay in `internal/lib/*/`. Distro packaging ships
+  modules to `/usr/share/jennifer/modules/` (FHS: read-only,
+  arch-independent data), loadable without recompiling the interpreter.
+- Three import shapes, classified by the *leading* token of the string:
+  - `import "./f.j"` / `"../f.j"` - **local**: relative to the importing
+    file's directory; no search path consulted.
+  - `import "/abs/f.j"` - **absolute**: exactly that file; no search
+    path.
+  - `import "f.j"` - **module**: walk the search path (system module
+    dir, then each `-I DIR` in order). The importing file's directory is
+    never consulted.
+- Subdirectories: a `/` anywhere but the leading position is an ordinary
+  path component, so all three shapes accept `sub/f.j`.
+- Multi-file modules: one entry file (`modules/bigmod/bigmod.j`)
+  `include`s its parts (subdirs allowed); the splice is one module scope
+  and one export surface; the consumer imports only the entry file.
+- sysmoddir resolution: `--sysmoddir` > `JENNIFER_SYSMODDIR` >
+  compile-time default (baked via the Makefile codegen path, since
+  TinyGo ignores `-ldflags -X`). Inspectable through `meta.SYSMODDIR`
+  (resolved after argv/env, not a static Install-time const) and
+  `jennifer version -v` (each layer tagged `cli`/`env`/`compile`).
+
+**Decisions.**
+
+- Path shapes are disjoint at the character level so a reader tells
+  "local file" from "vetted module" without leaving the line;
+  working-directory-first search is a supply-chain footgun (rejected.md,
+  implicit fallback chain). System modules win over `-I`; `-I` adds
+  names, never overrides.
+- Duplicate module names across `-I` dirs (or `-I` vs system) are a hard
+  error at load, naming both paths.
+- `--sysmoddir` / `JENNIFER_SYSMODDIR` are validated at Run() (missing
+  or non-dir refuses to start); the compile-time default is best-effort,
+  so a fresh checkout with no installed tree still runs scripts that
+  import nothing.
+- Bare form (`import "sub/bigmod.j";`, no `as`) reserves the file stem
+  (`bigmod`) as the prefix.
+- `../` in a local import is allowed - the supply-chain rule targets the
+  consumer's working directory, not navigation within an
+  author-controlled tree.
+- No directory-as-module and no cross-file re-export (rejected.md); no
+  package versioning / upgrade / signing (explicit non-goal: the distro
+  or `-I` places module versions, the interpreter picks what it finds).
+- TinyGo: resolution needs `fs` (present under TinyGo). Hosted
+  `jennifer-tiny` loads modules; an FS-less host fails with the ordinary
+  ordered-search-path error. A build-time `embed.FS` bundle is a
+  deferred future option, not M17.
+
+**Acceptance.** A module in `modules/bigmod/bigmod.j` that `include`s
+`sub/extra.j` imports and runs under both `jennifer` and `jennifer-tiny`
+on a hosted target via each of the three path shapes; `--sysmoddir`,
+`JENNIFER_SYSMODDIR`, and the compile-time default resolve in that
+precedence and surface identically through `meta.SYSMODDIR` and
+`jennifer version -v`; duplicate `-I` names and a missing named
+sysmoddir both error at Run().
+
+## M17.2 - Import statement and loader
+
+**Scope.** The `import "..." as NAME;` statement end to end: pipeline
+placement, one-time init, ordering, cycles, error surfacing.
+
+**Ships.**
+
+- Preprocessor stops rejecting `import` and passes its tokens through
+  (as it already does for `use`); `include` stays a preprocessor splice.
+  The two keywords diverge cleanly by pipeline stage.
+- Parser gains a `ModuleImportStmt` node (path + optional alias),
+  distinct from the `use`-backed `ImportStmt`.
+- Interpreter gains a module loader + cache. Loading a module lexes,
+  preprocesses, parses, resolves, and executes it once against a fresh
+  module scope, keyed by resolved absolute path.
+
+**Decisions.**
+
+- **Run-once.** A module inits exactly once per program run; later
+  imports (any importer, any point) reuse the cached resolved AST and
+  initialised namespace. Two aliases of one file share an instance; the
+  same relative name from two directories are two modules (abspath key).
+- **Init order is depth-first post-order.** A module fully inits before
+  any module that imports it. Script imports A, A imports B, B imports C
+  -> C, then B, then A, then the script body; each module's struct
+  hoisting and `def const` initializers run once, on first reach.
+- **Cycles are rejected; a module in a cycle never inits.** The loader
+  tracks in-progress modules on the load stack; reaching an `import` of
+  an in-progress module errors at load, before any initializer in the
+  cycle runs, with `module cycle: A -> B -> C -> A` naming each edge. No
+  Python-style partial init. Fix: factor a shared third module (Go's
+  model). Mirrors the M10 include-cycle rejection.
+- **Load-time errors are not catchable.** A `def const` initializer that
+  throws during load fails the program at load, before the importer's
+  body; `import` is a top-level declaration, not an expression, so
+  `try`/`catch` cannot wrap it. Parse errors surface positioned in the
+  imported file (path + line + col).
+- `jennifer fmt` / `ast` / `tokens` preserve `import "..." as x;`
+  textually, same as `include`.
+
+**Acceptance.** A three-module chain inits in post-order exactly once
+each (observable via a load-time `io.printf` in each `def const`
+initializer); a re-import returns the cached instance without re-running
+init; an A->B->C->A cycle errors at Run() naming every edge; a throwing
+initializer fails at load and is not caught by a `try` around the
+`import`; `jennifer fmt` round-trips an `import` line unchanged.
+
+## M17.3 - Module scope and namespacing
+
+**Scope.** What a module's top level may contain, how its names resolve,
+and how it reaches other libraries and modules.
+
+**Ships.**
+
+- Per-module resolution context: each loaded module carries its own
+  `nsPrefixes`, namespace tables, and private + export symbol tables in
+  the module cache entry.
+- Declarations-only top level. Exactly these forms; the three
+  declaration forms take an optional leading `export`, the two import
+  forms do not:
+  - `def const NAME as TYPE init EXPR;` (export-able)
+  - `def struct Name { ... };` (export-able)
+  - `func name(...) { ... }` (export-able)
+  - `use LIB [as ALIAS];`
+  - `import "..." as NAME;`
+- Consumer-side qualified resolution (`points.mid(...)`, `points.Point`)
+  reuses the M10 namespacing machinery through the consumer's
+  module-import table into the module's export table.
+
+**Decisions.**
+
+- **No mutable module state.** A mutable `def VAR ...;` at module top
+  level errors, as does any free-standing top-level statement (bare
+  expression, assignment, `if`/`while`/`for`/`repeat`). A `def const`
+  initializer still runs once at load; "declarations-only" bounds
+  statement forms, not initializer evaluation. Value-producing init is
+  `export def const T init buildTable();` calling a private `func`.
+- **`spawn` is unaffected.** With no mutable module state there is
+  nothing new to capture; `snapshotForSpawn`'s two-frame model is
+  unchanged and module constants (deep-immutable) are safe to reference.
+- **`use` is not transitive.** A module's `use net;` gives the module
+  `net.*`; the importer needs its own `use net;`. Prevents a module's
+  implementation choices leaking into a consumer's namespace.
+- **Bare type names resolve in the module's own type table.** Inside
+  `points.j`, `func mid(a as Point, ...)` checks a value of identity
+  `(points, Point)` against the module-local `Point`. A module names
+  another module's type only through that module's prefix. Struct
+  identity stays a `(namespace, name)` pair (M15.2).
+- **One global `Error`.** M13.2's reserved `Error` is canonical across
+  every module; user code never redefines it. Richer payloads are
+  distinctly-named structs (`export def struct ParseError { ... };`);
+  cross-module identity makes `a.ParseError` and `b.ParseError` distinct
+  (rejected.md records the dropped per-module-`Error` idea).
+- Scripts (run via `jennifer run`) keep top-level mutable `def` and
+  free-standing statements - a script is a single execution context with
+  no importer.
+
+**Acceptance.** A mutable `def` or a free-standing statement at module
+top level is a positioned parse error; a `def const` initializer runs
+once at load; a module using `use net;` internally works while its
+importer without `use net;` cannot call `net.*`; a struct made in a
+module and passed back to a module `func` type-checks; a `spawn` body
+calling a module `func` behaves identically to the serial call under
+`-race`.
+
+## M17.4 - Exports and visibility
+
+**Scope.** Which top-level names cross the module boundary, and the
+script-vs-module and test-overlay rules that follow.
+
+**Ships.**
+
+- `export` marker on top-level `def const` / `def struct` / `func`
+  publishes the name; unmarked names are module-private. One marker, one
+  direction.
+- Referential-closure check: an exported struct field (or exported
+  `func` parameter / return) whose type is a private struct errors at
+  the export-annotation site.
+- Cross-module struct identity `(module-prefix, name)` (extends M15.2).
+- `MODULE_test.j` white-box test-overlay convention (pairs with M16.8
+  `jennifer test`).
+
+**Decisions.**
+
+- **Private by default** (stance 2): the public API is the `export`-ed
+  set, greppable in one pass; a forgotten marker stays internal (the
+  fail-safe direction). No mandatory `public`/`private` keyword and no
+  `public` synonym / standalone `private` marker (rejected.md).
+- **Accessing a private name** from outside errors positioned at the
+  call site (`foo.helper: 'helper' is not exported from module 'foo'`).
+  No field-level visibility; an exported struct exports its whole shape.
+- **Scripts vs modules by entry, not content.** `export` in a
+  `jennifer run` script is a parse error ("script has no importers"); a
+  module with zero exports loads fine and yields an empty namespace (any
+  `NAME.x` at the importer errors as undefined). Promoting a script to a
+  module is the deliberate "I now have a public API" moment.
+- **Test overlays.** A co-located `MODULE_test.j` is spliced into
+  `MODULE.j`'s scope *before* `parser.Resolve` runs over the combined
+  file, so slot numbering covers both and the overlay reads private
+  names by bare identifier. Black-box tests use `import "./MODULE.j";`
+  instead. One overlay per module (Go's convention). Splicing after
+  resolution would strand the overlay at `(-1, -1)` and force name-based
+  fallback, so fold it in pre-resolve.
+
+**Acceptance.** An unmarked helper is unreachable as `mod.helper` (with
+the positioned error) while an `export`-ed name resolves; an exported
+struct with a private-struct field errors at annotation; `export` in a
+run script is a parse error; a module with no exports imports but every
+`NAME.x` errors; a `MODULE_test.j` overlay reads `MODULE.j`'s private
+names and runs under `jennifer test`. This submilestone touches parser
+grammar (the `export` keyword), so it ships last; M17.1-M17.3 are
+tooling, loading, and resolution.
+
+## M18.x - Jennifer-coded modules
+
+Built atop the existing system libraries. Each one ships as a
+Jennifer **module** under `modules/` (the directory introduced in
+M17); none of them are compiled into the interpreter binary.
+Sub-milestones in priority order:
+
+- **M18.1 - `timezones`** - IANA-name + DST companion to the
+  fixed-offset core in M15.5.2. A pure-Jennifer map of zone
+  names to `time.Zone` values (with seasonal ranges where
+  applicable) and a small resolver helper
+  (`timezones.zoneFor(name, $t) -> time.Zone`) that picks the
+  right offset for a given instant. A build-time script
+  regenerates the map from the host's tzdata before shipping,
+  so the data is auditable as source. Keeps zone policy out
+  of the interpreter binary.
+- **M18.2 - `http`** (client) - atop `net`.
+- **M18.3 - `json`** - data interchange ubiquity.
+- **M18.4 - `csv`** - simple, useful early.
+- **M18.5 - `yaml`, `xml`, `markdown`, `pretty`** - one or more
+  sub-milestones depending on scope when planned.
+
+(A Jennifer-coded `testing` module used to sit here as M18.5
+- assertion vocabulary, `setUp` / `tearDown` orchestration,
+`--filter` / `--format` / `--isolated` CLI. All of that moved
+down into [M16.8](#m168---testing-framework-consolidation)
+because the split was primitives-in-Jennifer atop
+primitives-in-Go, spending implementation weight on
+abstraction rather than capability. What remained after M16.8
+- `assertApproxEqual($a, $b, $tol)`, `assertMatchesRegex`
+composing on M16.3, table-driven test helpers - was
+docs-section-sized rather than module-sized, so it lives as a
+usage-patterns section in
+[docs/libraries/testing.md](libraries/testing.md) instead of
+as a numbered milestone. M18.6 renumbered up to M18.5.)
+
+## M19 - `crypto`
+
+Symmetric and asymmetric primitives, key derivation,
+crypto-grade random. System library; TinyGo-safe primitives
+only. Hashes already shipped in M15.6.
+
+## M20 - `httpd`
+
+Pure-Jennifer HTTP server atop `net`. Ships as a module under
+`modules/httpd.j` (same packaging shape as the M18 modules), not
+baked into the interpreter. The point where Jennifer becomes
+useful for serving content. Depends on **M16.0 concurrency**
+(per-connection handlers run in `spawn` blocks) and M16.2 `net`
+(the underlying TCP listener).
+
+---
+
+**Phase E: embedding, WASM, and specialised domains (M21+).** Not
+committed to a timeline; recorded so the design doesn't foreclose
+them. Ordered by the size of the structural change each one is:
+M21's `internal/` -> `pkg/` restructure is a single-repo refactor;
+M22's WASM runtime brings in a whole new dependency; M23.x/M24+
+are indefinite-in-count library families.
+
+## M21 - Public interpreter API for third-party embedding
 
 Extract the interpreter core out from under `internal/` and
 expose a documented Go-side surface so external programs can
@@ -1712,8 +1976,16 @@ a compile-time barrier. No submodule / require / replace
 workaround exists; embedding is impossible without a
 restructure.
 
+Ships ahead of M22's WASM runtime because a Go-side embedding
+API is a strictly smaller change (repository restructure, no
+new external dependency), it unblocks the most immediate
+embedding scenarios (scripting slot in a Go host, LSP /
+formatter tooling, test harnesses), and it does not foreclose
+M22 - a WASM plugin surface can layer on the same `pkg/`
+facade once Wazero (or similar) is in play.
+
 **Concretely.** Add a `pkg/` top-level (working name; the
-final path settles at start of M17.6):
+final path settles at start of M21):
 
 - `pkg/interpreter` re-exports `Interpreter`, `Value`, error
   types, and the `Install(in *Interpreter)` registration API
@@ -1742,7 +2014,7 @@ final path settles at start of M17.6):
     `net` dependencies) or ships its own shims. A
     documented registration pattern is the deliverable;
     the shims themselves are per-host and out of scope
-    for M17.6.
+    for M21.
 
 **Stdlib-backed defaults.** Each pluggable interface
 carries a working default so `pkg/interpreter.New()`
@@ -1783,7 +2055,7 @@ instead of subtle misbehaviour:
   API boundary.
 
 **Non-goals.**
-- A hosted no-`os` build target. Even after M17.6, the
+- A hosted no-`os` build target. Even after M21, the
   shipping stdlib libraries lean on Go's `os` / `net` /
   `time` packages. A truly bare-metal or `no-os` embedding
   can only use the pure-value libraries (`convert`, `math`,
@@ -1792,8 +2064,8 @@ instead of subtle misbehaviour:
   wires up. That's a design constraint on the embedder, not
   a milestone on Jennifer's side.
 - Semver freezing the public API. Jennifer stays pre-1.0
-  through the M17.x series; M17.6 documents what's exported
-  and how libraries plug in, but breaking changes to that
+  through M21; the milestone documents what's exported and
+  how libraries plug in, but breaking changes to that
   surface remain allowed until 1.0.0.
 
 **Motivation.** Third-party embedding has multiple concrete
@@ -1810,78 +2082,18 @@ library is a `pkg.Install(in)` call. The missing piece is
 visibility, plus documented hooks for the pieces of host
 state currently exposed only as package-level test vars.
 
-## M18.x - Jennifer-coded modules
-
-Built atop the existing system libraries. Each one ships as a
-Jennifer **module** under `modules/` (the directory introduced in
-M17); none of them are compiled into the interpreter binary.
-Sub-milestones in priority order:
-
-- **M18.1 - `timezones`** - IANA-name + DST companion to the
-  fixed-offset core in M15.5.2. A pure-Jennifer map of zone
-  names to `time.Zone` values (with seasonal ranges where
-  applicable) and a small resolver helper
-  (`timezones.zoneFor(name, $t) -> time.Zone`) that picks the
-  right offset for a given instant. A build-time script
-  regenerates the map from the host's tzdata before shipping,
-  so the data is auditable as source. Keeps zone policy out
-  of the interpreter binary.
-- **M18.2 - `http`** (client) - atop `net`.
-- **M18.3 - `json`** - data interchange ubiquity.
-- **M18.4 - `csv`** - simple, useful early.
-- **M18.5 - `testing`** - the Jennifer-coded half of the test
-  framework, on top of the M16.4 primitives. Assertion
-  vocabulary built on `throw` so each mismatch produces an
-  `Error` the M16.4 runner catches uniformly:
-  `assertEqual`, `assertNotEqual`, `assertTrue` / `assertFalse`,
-  `assertContains` (substring, list element, map key), and
-  `assertThrows(name, kind)` that runs another method by name
-  and asserts it throws an Error of the given kind. Suite
-  driver: pass a list of test-method names, the module calls
-  `testing.run` for each, looks up `setUp` / `tearDown` by
-  convention if present, and finishes by calling
-  `testing.report` against the chosen format. CLI surface:
-  `--filter pattern` to run a subset, `--format text|tap|junit`
-  for the report shape, `--isolated` to opt into the
-  per-test-subprocess mode (M15.3 `os.spawn` + the M16.4
-  `--testing-single` flag). The cycle is closed: programs
-  written against `testing.j` can be tested in turn by the
-  same framework.
-- **M18.6 - `yaml`, `xml`, `markdown`, `pretty`** - one or more
-  sub-milestones depending on scope when planned.
-
-## M19 - `crypto`
-
-Symmetric and asymmetric primitives, key derivation,
-crypto-grade random. System library; TinyGo-safe primitives
-only. Hashes already shipped in M15.6.
-
-## M20 - `httpd`
-
-Pure-Jennifer HTTP server atop `net`. Ships as a module under
-`modules/httpd.j` (same packaging shape as the M18 modules), not
-baked into the interpreter. The point where Jennifer becomes
-useful for serving content. Depends on **M16.0 concurrency**
-(per-connection handlers run in `spawn` blocks) and M16.2 `net`
-(the underlying TCP listener).
-
----
-
-**Phase E: WASM and specialised domains (M21+).** Not committed to a
-timeline; recorded so the design doesn't foreclose them.
-
-## M21 - WASM runtime embedding
+## M22 - WASM runtime embedding
 
 Wazero or similar inside the interpreter binary. TinyGo-size
-cost evaluated honestly before commitment. Without M21, no WASM
+cost evaluated honestly before commitment. Without M22, no WASM
 libraries.
 
-## M22.x - WASM libraries
+## M23.x - WASM libraries
 
-If M21 ships, sandboxed plugins via `use wasm:libname;`. Each
+If M22 ships, sandboxed plugins via `use wasm:libname;`. Each
 library a sub-milestone.
 
-## M23+ - Specialised domains
+## M24+ - Specialised domains
 
 Each domain its own milestone with sub-milestones as needed:
 
@@ -1890,10 +2102,10 @@ Each domain its own milestone with sub-milestones as needed:
   Needleman-Wunsch), FASTA/FASTQ parsers, molecule structures.
 - **Sandbox.** Restricted-capability execution.
 
-Ordered when demand surfaces. WASM libraries (M22.x) may cover
+Ordered when demand surfaces. WASM libraries (M23.x) may cover
 some of this space first.
 
-## M24+ - encoding long-tail codecs
+## M25+ - encoding long-tail codecs
 
 The remaining single-byte codecs the original M15.7 spec
 listed, parked here so they're picked up only when a real
@@ -1972,7 +2184,7 @@ willing to keep it green; they're not blocking anything.
   (likely an optional library shipped after the M19 WASM runtime
   so locale tables aren't baked into every build).
 - **Host-embedding API.** *Promoted to a numbered milestone -
-  see [M17.6](#m176---public-interpreter-api-for-third-party-embedding).*
+  see [M21](#m21---public-interpreter-api-for-third-party-embedding).*
 - **Advanced scheduling knobs.** CPU affinity, work-stealing
   pool sizing, NUMA awareness, `GOMAXPROCS`-equivalent runtime
   tuning. Runtime-config surface for the M16.0 spawn scheduler,
@@ -1989,5 +2201,5 @@ willing to keep it green; they're not blocking anything.
   change. Stance-breaking variants (mutable references,
   interior mutability, shared mutable state) are turned down in
   [technical/rejected.md](technical/rejected.md#references-interior-mutability-shared-mutable-state).
-  Best landed post-M21 once the language is settled and the
+  Best landed post-M22 once the language is settled and the
   interpreter doesn't churn under it.
