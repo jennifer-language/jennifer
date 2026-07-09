@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: LGPL-3.0-only */
+/* Copyright (C) 2026 <developer@mplx.eu> */
+
+/*
+ * Jennifer docs theme tweaks, layered over the built-in mdBook Ayu theme
+ * via [output.html] additional-css in book.toml.
+ *
+ * Widen the content column. mdBook's default --content-max-width is 750px,
+ * which line-wraps the library reference tables and leaves most of a wide
+ * display empty. 1200px keeps prose at a readable measure while giving the
+ * wide tables (cheatsheet, per-library surfaces) room to lay out. Tune the
+ * one value below to taste.
+ */
+:root {
+    --content-max-width: 1200px;
+}
+
+/*
+ * Let an over-wide table scroll inside its own box rather than forcing the
+ * whole page wider than the viewport on a narrow screen.
+ */
+.content table {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
+}

@@ -326,8 +326,11 @@ you're writing network code, use the default `jennifer`. See
 Recorded so the design decisions stay visible; ships if a
 concrete workload forces it.
 
-- **TLS.** Sub-milestone of its own; brings in certificate
-  stores, ALPN, session tickets.
+- **TLS extras: ALPN and session tickets.** Core TLS shipped
+  (`net.connectTLS` / `net.startTLS` with certificate verification
+  and `net.TLSOptions` - see the [TLS section](#tls) above). ALPN
+  protocol negotiation and session-ticket resumption are the remaining
+  pieces, deferred until a workload needs them.
 - **Unix domain sockets.**
 - **Timeouts / deadlines.** Compose with `time.sleep`,
   `spawn`, `task.waitAny` for a first cut. A proper

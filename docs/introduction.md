@@ -25,10 +25,23 @@ def gap as time.Duration init time.sub(time.now(), $start);
 io.printf("ran for %d ms\n", time.milliseconds($gap));
 ```
 
+## Write Jennifer with your editor and an AI assistant
+
+Syntax highlighting ships in
+[editors/](https://github.com/mplx/jennifer-lang/tree/main/editors) (a
+Vim / Neovim drop-in, a TextMate grammar for VS Code / Sublime / Zed, a
+highlight.js definition). And because Jennifer is new, we ship
+[`JENNIFER.md`](https://github.com/mplx/jennifer-lang/blob/main/JENNIFER.md):
+drop it into your project and point an AI coding assistant at it ("we
+code in Jennifer, see JENNIFER.md, let's go") so it writes correct `.j`
+from the start. See [Editor & AI support](user-guide/tooling.md).
+
 ## What's in this site
 
 - **[Getting started](user-guide/installing.md)** - install the
   interpreter and run your first program.
+- **[Editor & AI support](user-guide/tooling.md)** - highlighting and
+  the drop-in `JENNIFER.md` for AI-assisted coding.
 - **[Language reference](user-guide/index.md)** - syntax, types,
   methods, control flow, imports, style.
 - **[Libraries](libraries/index.md)** - per-library reference plus

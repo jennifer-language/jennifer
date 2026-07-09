@@ -72,6 +72,8 @@ mkdir -p "$STAGE/usr/bin"
 mkdir -p "$STAGE/usr/share/man/man1"
 mkdir -p "$STAGE/usr/share/mime/packages"
 mkdir -p "$STAGE/usr/share/doc/jennifer"
+mkdir -p "$STAGE/usr/share/vim/vimfiles/syntax"
+mkdir -p "$STAGE/usr/share/vim/vimfiles/ftdetect"
 mkdir -p "$STAGE/DEBIAN"
 
 # Binaries.
@@ -92,6 +94,16 @@ mkdir -p "$STAGE/usr/share/bash-completion/completions"
 install -m 0644 "$PKG_DIR/completions/jennifer.bash" \
     "$STAGE/usr/share/bash-completion/completions/jennifer"
 ln -sf jennifer "$STAGE/usr/share/bash-completion/completions/jennifer-tiny"
+
+# Vim / Neovim syntax highlighting. /usr/share/vim/vimfiles is on Vim's
+# default runtimepath, so `.j` files highlight with no user setup.
+install -m 0644 "$REPO_ROOT/editors/vim/syntax/jennifer.vim" \
+    "$STAGE/usr/share/vim/vimfiles/syntax/jennifer.vim"
+install -m 0644 "$REPO_ROOT/editors/vim/ftdetect/jennifer.vim" \
+    "$STAGE/usr/share/vim/vimfiles/ftdetect/jennifer.vim"
+
+# Language reference for coding assistants (also a human quick-reference).
+install -m 0644 "$REPO_ROOT/JENNIFER.md" "$STAGE/usr/share/doc/jennifer/JENNIFER.md"
 
 # Documentation: copyright (required) + changelog (Debian compresses
 # the upstream changelog with gzip).

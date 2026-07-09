@@ -1,0 +1,123 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Jennifer",
+  "scopeName": "source.jennifer",
+  "fileTypes": ["j"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#language-constants" },
+    { "include": "#user-constants" },
+    { "include": "#variables" },
+    { "include": "#namespace-call" },
+    { "include": "#call" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.jennifer",
+          "match": "#.*$"
+        },
+        {
+          "name": "comment.block.jennifer",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.jennifer",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.jennifer",
+              "match": "\\\\[nrt\\\\\"'0]"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.jennifer",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.jennifer",
+              "match": "\\\\[nrt\\\\\"'0]"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.jennifer", "match": "\\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\\b" },
+        { "name": "constant.numeric.octal.jennifer", "match": "\\b0[oO][0-7][0-7_]*\\b" },
+        { "name": "constant.numeric.binary.jennifer", "match": "\\b0[bB][01][01_]*\\b" },
+        { "name": "constant.numeric.float.jennifer", "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b" },
+        { "name": "constant.numeric.integer.jennifer", "match": "\\b[0-9][0-9_]*\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.jennifer",
+          "match": "\\b(if|elseif|else|while|for|in|repeat|until|break|continue|return|exit|try|catch|throw|spawn)\\b"
+        },
+        {
+          "name": "keyword.declaration.jennifer",
+          "match": "\\b(def|const|func|struct|use|include|import|as|of|to|init)\\b"
+        },
+        {
+          "name": "keyword.operator.word.jennifer",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "support.function.builtin.jennifer",
+          "match": "\\blen\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "storage.type.jennifer",
+      "match": "\\b(int|float|string|bool|bytes|list|map|task|null)\\b"
+    },
+    "language-constants": {
+      "name": "constant.language.jennifer",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "user-constants": {
+      "name": "variable.other.constant.jennifer",
+      "match": "\\b[A-Z]+(_[A-Z]+)*\\b"
+    },
+    "variables": {
+      "name": "variable.other.jennifer",
+      "match": "\\$[A-Za-z]+"
+    },
+    "namespace-call": {
+      "match": "\\b([A-Za-z]+)(\\.)([A-Za-z]+)\\b",
+      "captures": {
+        "1": { "name": "entity.name.namespace.jennifer" },
+        "2": { "name": "punctuation.accessor.jennifer" },
+        "3": { "name": "entity.name.function.jennifer" }
+      }
+    },
+    "call": {
+      "match": "\\b([A-Za-z]+)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.jennifer" }
+      }
+    },
+    "operators": {
+      "name": "keyword.operator.jennifer",
+      "match": "(//|<<|>>|<=|>=|==|[-+*/%&|\\^~<>=])"
+    }
+  }
+}

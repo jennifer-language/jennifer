@@ -17,6 +17,13 @@ packaging/
                             with jennifer-tiny symlinked to it
 ```
 
+Two more assets ship in the packages but live outside `packaging/`
+(they are also used standalone): the Vim/Neovim syntax from
+`editors/vim/` installs to `usr/share/vim/vimfiles/{syntax,ftdetect}/`
+(on Vim's default runtimepath, so `.j` highlights with no setup), and
+the root `JENNIFER.md` language reference installs to
+`usr/share/doc/jennifer/`.
+
 The actual `.deb` is built by `scripts/build-deb.sh` (invoked
 by `.github/workflows/release.yml`) and attached to the GitHub
 Release. AUR packages are published manually after each tagged

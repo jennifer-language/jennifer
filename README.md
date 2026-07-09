@@ -59,6 +59,20 @@ See [docs/user-guide/installing.md](docs/user-guide/installing.md)
 for verified checksums, the full FHS layout, system-wide install
 commands from a tarball, and platform-specific notes.
 
+## Editor support & coding with an AI assistant
+
+Syntax highlighting for your editor lives in [editors/](editors/): a
+true drop-in for Vim / Neovim, a TextMate grammar for VS Code /
+Sublime / Zed, and a highlight.js definition for static sites.
+
+And because Jennifer is new enough that an AI assistant has no built-in
+knowledge of it, we ship [JENNIFER.md](JENNIFER.md) - a single,
+self-contained language reference. Drop it into your project and point
+your assistant at it ("we code in Jennifer, see JENNIFER.md, let's go")
+and it writes correct `.j` from the start instead of guessing
+Python-with-dollar-signs. Details in
+[docs/user-guide/tooling.md](docs/user-guide/tooling.md).
+
 ## Stability
 
 Jennifer is **pre-1.0**. While the major version stays at `0.x.y`,

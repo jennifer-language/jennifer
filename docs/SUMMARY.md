@@ -6,6 +6,7 @@
 
 - [Installing](user-guide/installing.md)
 - [First program](user-guide/first-program.md)
+- [Editor & AI support](user-guide/tooling.md)
 
 # Language reference
 

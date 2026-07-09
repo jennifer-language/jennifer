@@ -129,14 +129,18 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           STAGE="jennifer-${TAG}-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p "$STAGE/share/man/man1" "$STAGE/share/mime/packages" \
-                   "$STAGE/share/bash-completion/completions"
+                   "$STAGE/share/bash-completion/completions" \
+                   "$STAGE/share/vim/vimfiles/syntax" "$STAGE/share/vim/vimfiles/ftdetect"
           cp jennifer jennifer-tiny "$STAGE/"
           cp packaging/man/jennifer.1      "$STAGE/share/man/man1/"
           cp packaging/man/jennifer-tiny.1 "$STAGE/share/man/man1/"
           cp packaging/mime/jennifer.xml "$STAGE/share/mime/packages/"
           cp packaging/completions/jennifer.bash "$STAGE/share/bash-completion/completions/jennifer"
           ln -sf jennifer "$STAGE/share/bash-completion/completions/jennifer-tiny"
+          cp editors/vim/syntax/jennifer.vim   "$STAGE/share/vim/vimfiles/syntax/"
+          cp editors/vim/ftdetect/jennifer.vim "$STAGE/share/vim/vimfiles/ftdetect/"
           cp README.md "$STAGE/" 2>/dev/null || true
+          cp JENNIFER.md "$STAGE/" 2>/dev/null || true
           tar -czf "dist/${STAGE}.tar.gz" "$STAGE"
           (cd dist && sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256")
 

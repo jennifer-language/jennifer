@@ -20,6 +20,8 @@ create-missing = false
 [output.html]
 default-theme = "ayu"
 preferred-dark-theme = "ayu"
+# Widen the content column past mdBook's 750px default (see theme/custom.css).
+additional-css = ["theme/custom.css"]
 git-repository-url = "https://github.com/mplx/jennifer-lang"
 edit-url-template = "https://github.com/mplx/jennifer-lang/edit/main/{path}"
 # Land users on a single-file table of contents; the section index

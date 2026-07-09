@@ -20,6 +20,8 @@ seven-stance table.
   program, the interactive REPL, the inspection and formatting commands.
 - [Your first program](first-program.md) - a one-screen `hello.j` and a
   walkthrough of what each line does.
+- [Editor & AI support](tooling.md) - syntax highlighting for your editor,
+  and the drop-in `JENNIFER.md` that lets an AI assistant write Jennifer.
 - [Syntax](syntax.md) - tokens, comments, identifier rules.
 - [Types and values](types-and-values.md) - the primitive types,
   variables and constants, scoping rules, and the compound types

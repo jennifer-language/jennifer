@@ -21,6 +21,7 @@ conflicts=('jennifer' 'jennifer-bin')
 makedepends=('git' 'go' 'tinygo')
 optdepends=(
     'shared-mime-info: registers the .j file extension with file managers'
+    'vim: syntax highlighting for .j files'
 )
 install='jennifer.install'
 source=("$_realname::git+$url.git")
@@ -68,4 +69,14 @@ package() {
     install -Dm644 packaging/completions/jennifer.bash \
         "$pkgdir/usr/share/bash-completion/completions/jennifer"
     ln -sf jennifer "$pkgdir/usr/share/bash-completion/completions/jennifer-tiny"
+
+    # Vim / Neovim syntax highlighting. /usr/share/vim/vimfiles is on Vim's
+    # default runtimepath, so `.j` files highlight with no user setup.
+    install -Dm644 editors/vim/syntax/jennifer.vim \
+        "$pkgdir/usr/share/vim/vimfiles/syntax/jennifer.vim"
+    install -Dm644 editors/vim/ftdetect/jennifer.vim \
+        "$pkgdir/usr/share/vim/vimfiles/ftdetect/jennifer.vim"
+
+    # Language reference for coding assistants (also a human quick-reference).
+    install -Dm644 JENNIFER.md "$pkgdir/usr/share/doc/jennifer/JENNIFER.md"
 }
