@@ -54,9 +54,18 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "data", Type: parser.PrimitiveType(parser.TypeBytes)},
 		{Name: "peer", Type: parser.PrimitiveType(parser.TypeString)},
 	})
+	// TLS handshake options; the zero value verifies against the system
+	// roots. `skipVerify: true` accepts any certificate (insecure); a
+	// non-empty `caCert` (PEM) trusts a specific / self-signed certificate.
+	in.RegisterNamespacedStruct(LibraryName, "TLSOptions", []parser.StructField{
+		{Name: "skipVerify", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "caCert", Type: parser.PrimitiveType(parser.TypeBytes)},
+	})
 
 	// TCP.
 	in.RegisterNamespaced(LibraryName, "connect", connectFn)
+	in.RegisterNamespaced(LibraryName, "connectTLS", connectTLSFn)
+	in.RegisterNamespaced(LibraryName, "startTLS", startTLSFn)
 	in.RegisterNamespaced(LibraryName, "listen", listenFn)
 	in.RegisterNamespaced(LibraryName, "accept", acceptFn)
 	in.RegisterNamespaced(LibraryName, "readBytes", readBytesFn)

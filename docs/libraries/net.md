@@ -89,6 +89,65 @@ the server compiles but every net call surfaces the "not
 available" message - see
 [TinyGo compatibility](#tinygo-compatibility) below.
 
+## TLS
+
+Encrypted transport. Both entry points yield the **same `net.Conn`
+handle** as plaintext TCP, so `readBytes` / `writeBytes` / `close` /
+`address` work unchanged and callers stay transport-agnostic.
+
+| Call                            | Returns    | Notes                                                                                          |
+| ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| `net.connectTLS(address)`       | `net.Conn` | Dial `address` (`"host:port"`, same as `net.connect`) and complete a TLS handshake (implicit TLS: 465 / 993 / 995, HTTPS). |
+| `net.startTLS($conn)`           | `net.Conn` | Upgrade an open plaintext connection to TLS in place (STARTTLS: 587 / 143 / 110); same handle. |
+
+Both take an optional trailing `net.TLSOptions` argument. The certificate
+is verified against the connection's host: for `connectTLS`, the host in
+`address` (a missing port errors); for `startTLS`, the host the
+connection was originally opened with via `net.connect` - so you don't
+repeat it. TLS is built only into the default `jennifer` binary;
+`jennifer-tiny` returns the friendly no-network stub error.
+
+### `net.TLSOptions`
+
+`net.TLSOptions { skipVerify as bool, caCert as bytes }`. Certificate
+verification is **on by default** - the zero value verifies against the
+system roots.
+
+- **`caCert`** - a PEM certificate to trust, for a private CA or a
+  self-signed server the system doesn't know. This is the **secure** way
+  to reach such a server. An invalid PEM is a positioned error.
+- **`skipVerify: true`** - accept *any* certificate (self-signed,
+  expired, wrong-host). Development and testing only; a deliberate,
+  greppable opt-out, never a default.
+
+A struct literal names every field, so set both - or default-construct
+and assign only what you need (the zero value is the secure default):
+
+```jennifer
+use net;
+use fs;
+
+# secure: trust a self-signed / private-CA certificate
+def o as net.TLSOptions;                       # skipVerify false, caCert empty
+$o.caCert = fs.readBytes("server-ca.pem");
+def c as net.Conn init net.connectTLS("localhost:8443", $o);
+
+# insecure (dev / testing): skip verification entirely
+def x as net.TLSOptions;
+$x.skipVerify = true;
+def d as net.Conn init net.connectTLS("localhost:8443", $x);
+```
+
+### STARTTLS example
+
+```jennifer
+use net;
+def c as net.Conn init net.connect("smtp.example.com:587");   # plaintext
+# ... read the greeting, send EHLO, send STARTTLS, read the "220 ready" line ...
+$c = net.startTLS($c);                                        # upgraded in place, same handle
+# ... continue the session, now encrypted (host reused from connect) ...
+```
+
 ## UDP
 
 UDP is datagram-oriented: each `sendTo` / `recvFrom` is one

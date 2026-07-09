@@ -94,9 +94,10 @@ internal/lib/fs/fslib.go                   `fs` library: one-shot ops (read/writ
 internal/lib/fs/handles.go                 `fs` library: fs.File handle registry, open/close/readLine/readChars/readBytes/writeString/writeBytes/eof
 internal/lib/fs/fslib_test.go              fs library unit tests (t.TempDir()-based; one-shot ops, metadata, dir ops, handles, spawn+fs composition)
 internal/lib/net/netlib.go                 `net` library: shared - Install, struct registration, polymorphic close/address dispatch, arg-boundary helpers
-internal/lib/net/netlib_std.go             `net` library: !tinygo build - full TCP/UDP/DNS implementation
+internal/lib/net/netlib_std.go             `net` library: !tinygo build - full TCP/TLS/UDP/DNS implementation
 internal/lib/net/netlib_tinygo.go          `net` library: tinygo build - friendly-error stubs pointing at the default `jennifer` binary
 internal/lib/net/netlib_test.go            net library unit tests (!tinygo; loopback with :0 ephemeral ports; TCP round-trip, UDP round-trip, DNS, polymorphic close, use-after-close)
+internal/lib/net/netlib_tls_test.go        net TLS tests (!tinygo; loopback self-signed cert; connectTLS round-trip, bad-cert reject, skipVerify, startTLS upgrade)
 internal/lib/regex/regexlib.go             `regex` library: matches/find/findAll/replace/split/escape + regex.Match struct + 128-entry LRU pattern cache
 internal/lib/regex/regexlib_test.go        regex library unit tests (predicate, positional + named groups, rune-index offsets, LRU behaviour under load, invalid pattern boundary)
 internal/lib/testing/testinglib.go         `testing` library: run/runWith/results/reset/report + testing.Result struct + three renderers (text / TAP / JUnit XML) + exit interception

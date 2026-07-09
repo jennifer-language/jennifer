@@ -97,6 +97,8 @@ flat lookup view, not authoritative.
 | [`net`](net.md)`.address($h)`                         | Polymorphic. Conn -> peer address; Listener / UDPSocket -> local bound address.                                                     |
 | [`net`](net.md)`.close($h)`                           | Polymorphic. Closes a `net.Conn`, `net.Listener`, or `net.UDPSocket`.                                                               |
 | [`net`](net.md)`.connect(address)`                    | TCP client: dial `"host:port"` and return a `net.Conn`.                                                                             |
+| [`net`](net.md)`.connectTLS(address)`                | TLS client: dial `"host:port"` + handshake, verifying the cert against the host. `net.TLSOptions` for caCert / skipVerify.                                     |
+| [`net`](net.md)`.startTLS($conn)`                    | Upgrade an open plaintext `net.Conn` to TLS in place (STARTTLS); host reused from connect; same handle.                                                      |
 | [`net`](net.md)`.eof($conn)`                          | True iff the next read on `$conn` would return partial or fail. Sticky.                                                             |
 | [`net`](net.md)`.listen(address)`                     | Bind TCP `"host:port"` (use `":0"` for ephemeral). Returns a `net.Listener`.                                                        |
 | [`net`](net.md)`.listenUDP(address)`                  | Bind a UDP socket. Returns a `net.UDPSocket`; usable as both client and server.                                                     |

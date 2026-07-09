@@ -37,6 +37,12 @@ func ResetForTest() {}
 func connectFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.connect")
 }
+func connectTLSFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.connectTLS")
+}
+func startTLSFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.startTLS")
+}
 func listenFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.listen")
 }

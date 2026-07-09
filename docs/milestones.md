@@ -1541,23 +1541,36 @@ Encrypted transport for `net`, so TLS-only protocols work (mail on
 Jennifer, so it lives in the system library - as a transport variant of
 the existing socket, not a separate library.
 
-- **Surface.** `net.connectTLS(host, port)` (implicit TLS, handshake on
-  connect) and `net.startTLS(conn, host)` (upgrade a plaintext
-  connection in place, for STARTTLS on 587 / 143 / 110). Both yield the
-  same connection handle as `net.connect`, so `net.readBytes` /
+- **Surface.** `net.connectTLS(address)` (implicit TLS; `address` is
+  `host:port`, same as `net.connect`) and `net.startTLS(conn)` (upgrade a
+  plaintext connection in place, for STARTTLS on 587 / 143 / 110). Both
+  yield the same connection handle as `net.connect`, so `net.readBytes` /
   `writeBytes` / `close` / `address` work unchanged and callers stay
-  transport-agnostic. `host` drives certificate / SNI verification.
+  transport-agnostic. The certificate is verified against the address's
+  host for `connectTLS` (a missing port errors) and against the host the
+  connection was opened with for `startTLS` (reused, not repeated). Both
+  take an optional trailing `net.TLSOptions` argument.
+- **Certificate verification.** On by default. The knobs live in an
+  explicit, greppable struct - never a bare flag or default:
+  `net.TLSOptions { skipVerify as bool, caCert as bytes }`, zero value
+  verifies against the system roots. `caCert` (a PEM certificate) trusts a
+  specific / self-signed cert - the secure path; `skipVerify: true`
+  accepts any certificate (dev / testing). Struct is the right vehicle
+  because a heterogeneous options bag (bool + bytes, later a serverName
+  string / client cert) can't be a `map` without `any`, which was dropped;
+  further fields (mTLS client cert, `minVersion`) join it without changing
+  the default.
 - **Implementation.** Standard-Go `crypto/tls` over the existing TCP
   dial; part of `net`'s `!tinygo` build (`netlib_std.go`), stubbed on
   `jennifer-tiny` with the same friendly-error pattern as the rest of
-  `net` (TinyGo 0.41 has no usable `crypto/tls` + netdev). Certificate
-  verification is on by default; any skip-verify is a deliberate,
-  explicitly-named argument, never the default.
+  `net` (TinyGo 0.41 has no usable `crypto/tls` + netdev). `startTLS`
+  wraps the connection's buffered reader so no read-ahead plaintext is
+  lost across the upgrade, then swaps the registry entry to the TLS conn.
 - **Prerequisite for.** M18.2 `http` (HTTPS) and M18.6 `mail`.
 - **Acceptance.** A handshake against a known-good endpoint round-trips
   bytes; `startTLS` upgrades an open connection; a bad certificate errors
-  (positioned); the default binary builds and `jennifer-tiny` returns the
-  friendly stub error.
+  (positioned) unless `skipVerify` is set; the default binary builds and
+  `jennifer-tiny` returns the friendly stub error.
 
 ## M16.15 - `encoding` quoted-printable
 

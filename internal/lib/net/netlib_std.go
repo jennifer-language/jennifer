@@ -12,6 +12,8 @@ package netlib
 
 import (
 	"bufio"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +32,7 @@ type connState struct {
 	c      stdnet.Conn
 	r      *bufio.Reader
 	sticky bool
+	host   string // bare hostname dialled (for a later startTLS); empty for accepted conns
 }
 
 type listenerState struct {
@@ -132,10 +135,151 @@ func connectFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if dialErr != nil {
 		return interpreter.Null(), fmt.Errorf("net.connect: %s: %v", addr, dialErr)
 	}
+	host, _, _ := stdnet.SplitHostPort(addr) // recorded so a later startTLS can reuse it
 	connsMu.Lock()
 	nextConnID++
 	id := nextConnID
-	conns[id] = &connState{c: c, r: bufio.NewReader(c)}
+	conns[id] = &connState{c: c, r: bufio.NewReader(c), host: host}
+	connsMu.Unlock()
+	return makeConn(id), nil
+}
+
+// -------- TLS --------
+
+// testRootCAs, when non-nil, is added to the client config's trusted
+// roots so tests can trust a self-signed local server. Nil in production.
+var testRootCAs *x509.CertPool
+
+// clientTLSConfig builds the client config for host (used for SNI and
+// certificate-hostname checks). Verification is on unless the caller's
+// net.TLSOptions set skipVerify; a non-empty caCert (PEM) is trusted in
+// place of the system roots.
+func clientTLSConfig(fnName, host string, skipVerify bool, caCert []byte) (*tls.Config, error) {
+	cfg := &tls.Config{ServerName: host, InsecureSkipVerify: skipVerify}
+	switch {
+	case len(caCert) > 0:
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("%s: caCert is not a valid PEM certificate", fnName)
+		}
+		cfg.RootCAs = pool
+	case testRootCAs != nil:
+		cfg.RootCAs = testRootCAs
+	}
+	return cfg, nil
+}
+
+// tlsOptions reads the optional net.TLSOptions argument at args[idx]:
+// skipVerify (opt out of verification) and caCert (a PEM certificate to
+// trust). Absent -> verify against the system roots.
+func tlsOptions(fnName string, args []Value, idx int) (skipVerify bool, caCert []byte, err error) {
+	if len(args) <= idx {
+		return false, nil, nil
+	}
+	v := args[idx]
+	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "TLSOptions" {
+		return false, nil, fmt.Errorf("%s: options must be a net.TLSOptions, got %s", fnName, v.Kind)
+	}
+	for _, f := range v.Fields {
+		switch f.Name {
+		case "skipVerify":
+			if f.Value.Kind != interpreter.KindBool {
+				return false, nil, fmt.Errorf("%s: net.TLSOptions.skipVerify must be bool, got %s", fnName, f.Value.Kind)
+			}
+			skipVerify = f.Value.Bool
+		case "caCert":
+			if f.Value.Kind != interpreter.KindBytes {
+				return false, nil, fmt.Errorf("%s: net.TLSOptions.caCert must be bytes, got %s", fnName, f.Value.Kind)
+			}
+			caCert = f.Value.Bytes
+		}
+	}
+	return skipVerify, caCert, nil
+}
+
+// bufferedConn presents a bufio.Reader's already-buffered bytes (then the
+// raw connection) as a net.Conn, so a TLS handshake begun mid-stream
+// (startTLS) never drops plaintext the reader read ahead.
+type bufferedConn struct {
+	r *bufio.Reader
+	stdnet.Conn
+}
+
+func (b *bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
+
+// connectTLSFn implements `net.connectTLS(address [, net.TLSOptions]) ->
+// net.Conn`: dial `address` (host:port, same as net.connect) and complete
+// a TLS handshake, verifying the server certificate against the address's
+// host.
+func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return interpreter.Null(), fmt.Errorf("net.connectTLS expects 1 or 2 arguments (address[, net.TLSOptions]), got %d", len(args))
+	}
+	addr, err := takeStringArg("net.connectTLS", args, 0, "address")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	skip, caCert, err := tlsOptions("net.connectTLS", args, 1)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	host, _, splitErr := stdnet.SplitHostPort(addr)
+	if splitErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.connectTLS: address must be host:port: %v", splitErr)
+	}
+	cfg, err := clientTLSConfig("net.connectTLS", host, skip, caCert)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	c, dialErr := tls.Dial("tcp", addr, cfg)
+	if dialErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.connectTLS: %s: %v", addr, dialErr)
+	}
+	connsMu.Lock()
+	nextConnID++
+	id := nextConnID
+	conns[id] = &connState{c: c, r: bufio.NewReader(c), host: host}
+	connsMu.Unlock()
+	return makeConn(id), nil
+}
+
+// startTLSFn implements `net.startTLS(conn [, net.TLSOptions]) ->
+// net.Conn`: upgrade an open plaintext connection to TLS in place (for
+// STARTTLS). The server certificate is verified against the hostname the
+// connection was opened with (net.connect); returns the same handle.
+func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return interpreter.Null(), fmt.Errorf("net.startTLS expects 1 or 2 arguments (net.Conn[, net.TLSOptions]), got %d", len(args))
+	}
+	id, err := extractID("net.startTLS", "Conn", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	skip, caCert, err := tlsOptions("net.startTLS", args, 1)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	s, err := resolveConn("net.startTLS", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if s.host == "" {
+		return interpreter.Null(), fmt.Errorf("net.startTLS: this connection has no recorded hostname to verify against; startTLS upgrades a connection opened with net.connect")
+	}
+	cfg, err := clientTLSConfig("net.startTLS", s.host, skip, caCert)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	// Hand the handshake the buffered reader + raw conn so no read-ahead
+	// plaintext is lost, then swap the registry entry to the TLS conn.
+	tlsConn := tls.Client(&bufferedConn{r: s.r, Conn: s.c}, cfg)
+	if hErr := tlsConn.Handshake(); hErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.startTLS: %v", hErr)
+	}
+	connsMu.Lock()
+	s.c = tlsConn
+	s.r = bufio.NewReader(tlsConn)
+	s.sticky = false
 	connsMu.Unlock()
 	return makeConn(id), nil
 }

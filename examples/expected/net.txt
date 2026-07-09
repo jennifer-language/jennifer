@@ -1,2 +1,4 @@
 client received: hello, net
 server received: hello, net
+connectTLS rejects a missing port
+connectTLS rejects an invalid caCert PEM
