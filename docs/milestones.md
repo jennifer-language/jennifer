@@ -1455,6 +1455,18 @@ one mistakes it for OLTP.
   transactional engine. Real databases are a different milestone track -
   *clients* over `net` (`redis` M18.4; `postgres` / `mysql` would be wire
   protocols, no CGo), never a homegrown ACID engine.
+- **First use case: a benchmark database.** `examples/benchmark.j
+  --format json` emits one self-describing JSON record per run (schema,
+  `build` / `version`, `cpu` / `ncpu` / `platform` / `arch`, and the serial
+  + parallel timings). Feeding that into a `flatdb` store - append a record
+  per run, keyed on `(cpu, platform, arch, build)` - turns the ad-hoc
+  reference numbers (today pinned by hand in `technical/tinygo.md`) into a
+  queryable performance history across machines, OSes, and interpreter
+  builds. It is the natural first real workload for `flatdb`: small,
+  append-mostly, human-readable, and exactly the shape a JSON store serves
+  well. The `--format json` producer already ships; the ingest side (a
+  small `flatdb.append`-style helper, or a `bench-collect.j`) lands with the
+  module.
 
 **Naming.** `flatdb` (flat-file DB) over the earlier working name `store`
 and over `simpledb`: it names the shape (one flat JSON file) rather than

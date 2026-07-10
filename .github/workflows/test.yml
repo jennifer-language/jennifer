@@ -103,6 +103,26 @@ jobs:
           echo "ran $tested module test overlay(s)"
           exit $rc
 
+      - name: Smoke-run the module example programs
+        # The golden walker only covers top-level examples/*.j; the module /
+        # include demos live in subdirs and aren't golden-checked. Smoke-run
+        # each entry program (main.j / *_demo.j) so an API change that breaks
+        # a demo fails the build. Only entry points run: module and included
+        # files (config.j, db.j, greetinglib.j) are not standalone programs
+        # (running one directly is a deliberate error), so the glob excludes
+        # them, as it does the *_test.j overlays.
+        run: |
+          shopt -s nullglob
+          rc=0
+          ran=0
+          for ex in examples/*/main.j examples/*/*_demo.j; do
+            echo "== $ex =="
+            ./jennifer run "$ex" || rc=1
+            ran=$((ran + 1))
+          done
+          echo "smoke-ran $ran example program(s)"
+          exit $rc
+
       - name: Run the benchmark suite (regression check)
         # Only on the main target, linux/amd64. This job runs on a single
         # ubuntu-latest (x64) runner today, so the guard is belt-and-braces:

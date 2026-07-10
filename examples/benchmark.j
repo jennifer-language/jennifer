@@ -7,12 +7,20 @@
 #      `time.sub(end, start)`, `time.milliseconds(d)`.
 #   2. Provide a side-by-side workload between the default `jennifer`
 #      (standard Go) and the constrained `jennifer-tiny` (TinyGo) so
-#      programmers (and macflyos-embedding evaluators) can see where
-#      the two binaries diverge on the same machine.
+#      programmers (and embedding evaluators) can see where the two
+#      binaries diverge on the same machine.
+#
+# `--format text` (default) prints the human table; `--format json`
+# emits one JSON object (for a performance database, e.g. the `flatdb`
+# module).
 #
 # Not part of the golden-file test suite (output is timing-dependent
 # and host-dependent). Tune the workload sizes at the top so each
 # block finishes in O(seconds), not minutes, on a modern laptop.
+#
+# The report and data-row lines are intentionally wide (aligned output
+# and struct literals), so line-length is silenced file-wide.
+# lint-disable-file: L203
 
 use io;
 use time;
@@ -25,6 +33,7 @@ use meta;
 use task;
 use os;
 use fs;
+use json;
 
 # --- Tunables ------------------------------------------------------
 # Bump these if the suite runs too fast to see meaningful numbers, or
@@ -391,83 +400,142 @@ func cpuModel() {
     return "unknown";
 }
 
+# --- Report model + output formats --------------------------------
+# The run is captured in structs so it can be emitted either as the
+# human table (--format text, the default) or as one JSON object
+# (--format json) - the latter is what a future `flatdb` performance
+# database would ingest, keyed on cpu / platform / arch / build.
+
+def struct Bench { name as string, base as int, iters as int, timeMs as int };
+def struct Par { name as string, serialMs as int, parMs as int, speedup as float };
+def struct Report {
+    schema as string,
+    build as string,
+    version as string,
+    cpu as string,
+    ncpu as int,
+    platform as string,
+    arch as string,
+    workers as int,
+    totalMs as int,
+    workloads as list of Bench,
+    parallel as list of Par
+};
+
+# speedup is serial/parallel wall-clock, 0.0 when the parallel run was
+# unmeasurably fast (avoids a divide-by-zero).
+func speedup(serialMs as int, parMs as int) {
+    if ($parMs > 0) {
+        return convert.toFloat($serialMs) / convert.toFloat($parMs);
+    }
+    return 0.0;
+}
+
+func emitText(r as Report) {
+    io.printf("=== Jennifer benchmark suite ===\n");
+    io.printf("build:    %s\n", $r.build);
+    io.printf("version:  %s\n", $r.version);
+    io.printf("cpu:      %s (%d cores)\n", $r.cpu, $r.ncpu);
+    io.printf("platform: %s/%s\n", $r.platform, $r.arch);
+    io.printf("\n");
+
+    printDivider();
+    io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",   # lint-disable: L203
+        "Workload", "base", "iters", "time_ms");
+    printDivider();
+    for (def w in $r.workloads) {
+        printRow($w.name, $w.base, $w.iters, $w.timeMs);
+    }
+    printDivider();
+    io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %d|pad=12|align=right\n",   # lint-disable: L203
+        "total", "", "", $r.totalMs);
+
+    io.printf("\n");
+    printDivider();
+    io.printf("Parallel comparison (workers = %d, scheduler = %s)\n", $r.workers, $r.build);
+    printDivider();
+    io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",   # lint-disable: L203
+        "Workload", "serial_ms", "par_ms", "speedup");
+    printDivider();
+    for (def p in $r.parallel) {
+        io.printf("%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n",   # lint-disable: L203
+            $p.name, $p.serialMs, $p.parMs, $p.speedup);
+    }
+    printDivider();
+    return;
+}
+
+func emitJson(r as Report) {
+    io.printf("%s\n", json.encode($r));
+    return;
+}
+
 # --- Driver --------------------------------------------------------
 
-io.printf("=== Jennifer benchmark suite ===\n");
-io.printf("build:   %s\n", meta.BUILD);
-io.printf("version: %s\n", meta.VERSION);
-io.printf("cpu:     %s (%d cores)\n", cpuModel(), os.NCPU);
-io.printf("\n");
+# Serial section: run every workload, collecting its time.
+def msFib as int init benchFib();
+def msPrimes as int init benchPrimes();
+def msNewton as int init benchNewton();
+def msMonteCarlo as int init benchMonteCarlo();
+def msListCopy as int init benchListCopy();
+def msStructList as int init benchStructList();
+def msStringJoin as int init benchStringJoin();
+def msMapChurn as int init benchMapChurn();
 
-printDivider();
-io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",   # lint-disable: L203
-    "Workload", "base", "iters", "time_ms");
-printDivider();
+def workloads as list of Bench init [];
+$workloads[] = Bench{name: "fib(N) recursive", base: FIB_N, iters: 1, timeMs: $msFib};
+$workloads[] = Bench{name: "primes up to LIMIT", base: PRIME_LIMIT, iters: 1, timeMs: $msPrimes};
+$workloads[] = Bench{name: "newton sqrt batch", base: NEWTON_ITERS, iters: NEWTON_ITERS, timeMs: $msNewton};
+$workloads[] = Bench{name: "monte carlo pi", base: MONTECARLO_THROWS, iters: MONTECARLO_THROWS, timeMs: $msMonteCarlo};
+$workloads[] = Bench{name: "list sort/reverse/slice", base: LIST_SIZE, iters: LIST_COPY_REPS, timeMs: $msListCopy};
+$workloads[] = Bench{name: "struct list build+read", base: STRUCT_LIST_SIZE, iters: STRUCT_LIST_SIZE, timeMs: $msStructList};
+$workloads[] = Bench{name: "string join", base: STRING_JOIN_SIZE, iters: STRING_JOIN_SIZE, timeMs: $msStringJoin};
+$workloads[] = Bench{name: "map insert+read", base: MAP_CHURN_SIZE, iters: MAP_CHURN_SIZE, timeMs: $msMapChurn};
 
 def total as int init 0;
+for (def w in $workloads) {
+    $total = $total + $w.timeMs;
+}
 
-def msFib as int init benchFib();
-printRow("fib(N) recursive", FIB_N, 1, $msFib);
-$total = $total + $msFib;
-
-def msPrimes as int init benchPrimes();
-printRow("primes up to LIMIT", PRIME_LIMIT, 1, $msPrimes);
-$total = $total + $msPrimes;
-
-def msNewton as int init benchNewton();
-printRow("newton sqrt batch", NEWTON_ITERS, NEWTON_ITERS, $msNewton);
-$total = $total + $msNewton;
-
-def msMonteCarlo as int init benchMonteCarlo();
-printRow("monte carlo pi", MONTECARLO_THROWS, MONTECARLO_THROWS, $msMonteCarlo);
-$total = $total + $msMonteCarlo;
-
-def msListCopy as int init benchListCopy();
-printRow("list sort/reverse/slice", LIST_SIZE, LIST_COPY_REPS, $msListCopy);
-$total = $total + $msListCopy;
-
-def msStructList as int init benchStructList();
-printRow("struct list build+read", STRUCT_LIST_SIZE, STRUCT_LIST_SIZE, $msStructList);
-$total = $total + $msStructList;
-
-def msStringJoin as int init benchStringJoin();
-printRow("string join", STRING_JOIN_SIZE, STRING_JOIN_SIZE, $msStringJoin);
-$total = $total + $msStringJoin;
-
-def msMapChurn as int init benchMapChurn();
-printRow("map insert+read", MAP_CHURN_SIZE, MAP_CHURN_SIZE, $msMapChurn);
-$total = $total + $msMapChurn;
-
-printDivider();
-io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %d|pad=12|align=right\n",   # lint-disable: L203
-    "total", "", "", $total);
-
-# --- Parallel comparison ------------------------------------------
-# Re-run the workloads that fan out naturally with PARALLEL_WORKERS
-# spawn tasks, and print the speedup over the serial baseline above.
-
-io.printf("\n");
-printDivider();
-io.printf("Parallel comparison (workers = %d, scheduler = %s)\n", PARALLEL_WORKERS, meta.BUILD);
-printDivider();
-io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",   # lint-disable: L203
-    "Workload", "serial_ms", "par_ms", "speedup");
-printDivider();
-
+# Parallel section: re-run the workloads that fan out over PARALLEL_WORKERS
+# spawn tasks, measured against the serial baselines above. For fib the
+# fan-out runs PARALLEL_WORKERS copies, so its serial reference is the serial
+# time times the worker count (perfect scaling would give PARALLEL_WORKERS).
 def msPrimesPar as int init benchPrimesParallel();
-printSpeedupRow("primes up to LIMIT", $msPrimes, $msPrimesPar);
-
 def msNewtonPar as int init benchNewtonParallel();
-printSpeedupRow("newton sqrt batch", $msNewton, $msNewtonPar);
-
 def msMonteCarloPar as int init benchMonteCarloParallel();
-printSpeedupRow("monte carlo pi", $msMonteCarlo, $msMonteCarloPar);
-
-# For fib we built a parallel-only fan-out (PARALLEL_WORKERS copies),
-# so the "serial" reference is the serial fib time multiplied by the
-# worker count - if the runtime parallelised perfectly the speedup
-# would be PARALLEL_WORKERS.
 def msFibPar as int init benchFibParallel();
-printSpeedupRow("fib(N) x workers", $msFib * PARALLEL_WORKERS, $msFibPar);
+def fibSerial as int init $msFib * PARALLEL_WORKERS;
 
-printDivider();
+def spPrimes as float init speedup($msPrimes, $msPrimesPar);
+def spNewton as float init speedup($msNewton, $msNewtonPar);
+def spMonte as float init speedup($msMonteCarlo, $msMonteCarloPar);
+def spFib as float init speedup($fibSerial, $msFibPar);
+
+def parallel as list of Par init [];
+$parallel[] = Par{name: "primes up to LIMIT", serialMs: $msPrimes, parMs: $msPrimesPar, speedup: $spPrimes};
+$parallel[] = Par{name: "newton sqrt batch", serialMs: $msNewton, parMs: $msNewtonPar, speedup: $spNewton};
+$parallel[] = Par{name: "monte carlo pi", serialMs: $msMonteCarlo, parMs: $msMonteCarloPar, speedup: $spMonte};
+$parallel[] = Par{name: "fib(N) x workers", serialMs: $fibSerial, parMs: $msFibPar, speedup: $spFib};
+
+def report as Report init Report{
+    schema: "jennifer-benchmark/1",
+    build: meta.BUILD,
+    version: meta.VERSION,
+    cpu: cpuModel(),
+    ncpu: os.NCPU,
+    platform: os.PLATFORM,
+    arch: os.ARCH,
+    workers: PARALLEL_WORKERS,
+    totalMs: $total,
+    workloads: $workloads,
+    parallel: $parallel
+};
+
+# --format json emits one JSON object (for a perf database); anything else
+# (or absent) prints the human table.
+if (os.flag("--format") == "json") {
+    emitJson($report);
+} else {
+    emitText($report);
+}
