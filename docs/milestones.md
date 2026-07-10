@@ -1641,6 +1641,102 @@ strings, inline tables, arrays of tables. (`.ini` is a deferred tiny
 cousin only if demand surfaces - no real standard, ambiguous quoting /
 typing.)
 
+### M18.9 - `flatdb` (module)
+
+A file-backed JSON document store as a `.j` module - the "embed a small
+store" need, built from parts that already exist: `json`
+([M16.9](#m169---json)) for the data and `fs` for the file. Load once,
+query and mutate in memory, write back atomically. It is deliberately *not*
+a database engine; the honest description is "a small JSON store with
+crash-atomic whole-file replace," and that framing goes in the docs so no
+one mistakes it for OLTP.
+
+- **Handle-as-value, not a connection.** A module holds no mutable state
+  and `spawn` deep-copies scope, so the store cannot be a shared open
+  connection. It is a value the caller holds: `export def struct DB { path
+  as string, data as json.Value };` (a library type in an exported field is
+  fine - the referential-closure check concerns only *module* structs).
+  `flatdb.open(path) -> DB` loads the file (empty doc if absent); mutating
+  verbs return a fresh `DB` (`flatdb.set(db, pointer, value)`,
+  `flatdb.remove(db, pointer)`); readers do not (`flatdb.get(db, pointer)`,
+  `flatdb.has(db, pointer)`); `flatdb.save(db)` writes it back. Addressing
+  reuses `json`'s JSON-Pointer model, so `flatdb` is a thin file-lifecycle +
+  ergonomics layer over the `json` write surface, not a re-implementation.
+- **Atomic replace.** `save` writes to a sibling temp file and `fs.rename`s
+  it over the target, so a reader ever sees the whole old file or the whole
+  new one, never a torn write. Single-writer by construction (whole-file).
+- **What it is and isn't (ACID, honestly).** *Atomicity*: whole-file, via
+  temp + rename. *Consistency*: application-level. *Isolation*: none - one
+  process, reload-the-whole-file, no concurrent transactions. *Durability*:
+  the rename is atomic, but flush-to-disk is OS-buffered unless `fs` later
+  grows an `fsync` verb. So: crash-atomic snapshotting of small data, not a
+  transactional engine. Real databases are a different milestone track -
+  *clients* over `net` (`redis` M18.4; `postgres` / `mysql` would be wire
+  protocols, no CGo), never a homegrown ACID engine.
+
+**Naming.** `flatdb` (flat-file DB) over the earlier working name `store`
+and over `simpledb`: it names the shape (one flat JSON file) rather than
+overselling "database."
+
+**Acceptance.** `open` of a missing path yields an empty store; `set` /
+`get` / `remove` round-trip through a JSON Pointer; `save` then a fresh
+`open` returns the same data; an interrupted `save` (temp file present, no
+rename) leaves the original intact; the docs state plainly it is not
+transactional.
+
+### M18.10 - `gpio` (module)
+
+Raspberry-Pi (and any Linux SBC) GPIO as a **pure `.j` module** over
+sysfs - the physical-computing / IoT-teaching use case, with no core
+changes, no system library, and no platform build-tag. `/sys/class/gpio`
+is plain files, so `fs` is the whole backend: export a pin, set its
+direction, read / write its value. "Blink an LED from a five-line script"
+is the headline, and it competes with `RPi.GPIO` / `gpiozero` on the
+simplicity of the language itself.
+
+- **Why a module, not a system library.** Imports are static (`use` /
+  `import` resolve before execution, uncatchable, block-illegal), so there
+  is no "check then conditionally import." The portability seam is instead
+  *which module file is on the search path* (Go uses build tags; Jennifer
+  uses the module file). A program writes one uniform line - `import
+  "gpio.j" as gpio;` - and the deployment supplies the right `gpio.j`: the
+  real sysfs module on a Pi, an emulator (blink a console cell) elsewhere.
+  A capability like this being *absent* off-Linux (rather than a stubbed
+  system library that errors mid-call) is the right call for a
+  *platform*-bound feature: stub when the same source must load in both
+  binaries (why `net` stubs on `jennifer-tiny` - a *toolchain* axis); be
+  absent when the capability is genuinely platform-bound (a *platform*
+  axis), so `use`-ing it fails at the top with a clear message rather than
+  three calls deep. Neither `try`/`catch` nor an `isDefined()` reflection
+  primitive is needed or wanted here; both fight the static-import model.
+- **Surface (pin-keyed, stateless).** sysfs derives every path from the pin
+  number, so no handle is needed: `gpio.setup(pin as int, direction as
+  string)` exports the pin and sets `"in"` / `"out"`; `gpio.write(pin as
+  int, value as int)`; `gpio.read(pin as int) -> int`; `gpio.release(pin as
+  int)` unexports. A missing `/sys/class/gpio` (not a Pi, sysfs disabled)
+  is a clear positioned error, not a crash - `fs.exists` gate, the same
+  fail-soft as `os.isTerminal`.
+- **Testability.** Real sysfs needs root and hardware, so the module reads
+  its base directory from a constant (default `/sys/class/gpio`) that tests
+  point at a temp-dir mock; the round-trip is verified against the mock in
+  CI, real pins manually on a Pi.
+
+**sysfs default, chardev as the escape valve.** sysfs GPIO is deprecated
+(the kernel prefers the `/dev/gpiochip` character device and can compile
+sysfs out). The bet is that sysfs stays available on the hobbyist Pi
+kernels this targets; the module keeps its API stable so that **if sysfs is
+removed - or `fs` is ever dropped from `jennifer-tiny` - the backend can be
+swapped for a `/dev/gpiochip` ioctl system library (Linux build-tag,
+`syscall` or an `x/sys/unix` carve-out) with no change to `.j` scripts.**
+The pure-module form is the default because it costs the language nothing;
+the system library is the future-proofing, taken only when forced.
+
+**Acceptance.** Against a mock sysfs tree: `setup` writes `export` and
+`direction`; `write` / `read` round-trip a pin's `value`; `release` writes
+`unexport`; a missing base directory errors positionally. On a real Pi, a
+`gpio.setup(17, "out")` + `gpio.write(17, 1)` script lights an LED, and the
+same script with an emulator `gpio.j` on the search path runs on a laptop.
+
 ## M19 - reserved
 
 A reserved slot.
