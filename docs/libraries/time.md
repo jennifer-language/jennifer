@@ -7,9 +7,11 @@ accessors, and arithmetic / comparison helpers.
 
 This page covers the `time` library surface. A benchmark
 example uses `time.now()` to measure elapsed time.
-IANA zone names and daylight-saving transitions are
-deliberately *not* part of the core library - see the
-`timezones.j` module for that.
+IANA zone names and daylight-saving transitions are not part
+of the library yet - it ships fixed-offset zones only. IANA /
+DST support is planned as a Go-backed extension to this
+library (delegating to the host tz database), not a
+hand-maintained data map.
 
 ```jennifer
 use io;
@@ -219,10 +221,12 @@ def tv as time.Time init time.inZone($t, $vienna);
 | `time.local()`             | `time.Zone`   | Host's current zone. Reads `time.Now().Zone()` once.                     |
 | `time.UTC` (constant)      | `time.Zone`   | `Zone{offset: 0, name: "UTC"}`. Canonical UTC.                           |
 
-DST-aware and IANA-named zones come from the
-[`timezones.j`](https://github.com/mplx/jennifer-lang) library,
-which builds a name-to-`time.Zone` map at build time from
-the host's tzdata. The core library deliberately stays small.
+DST-aware and IANA-named zones (`"Europe/Vienna"`) are not
+resolved today. They are planned as a **Go-backed extension** to
+this library - delegating to the host tz database
+(`time.LoadLocation`) for historically correct DST - rather than
+a hand-maintained data map. Until then, build a fixed-offset
+`Zone` for the offset you need.
 
 ## Formatting and parsing
 
@@ -299,7 +303,7 @@ All errors are positioned at the call site.
 ## See also
 
 - [milestones.md](../milestones.md) - formatting, parsing,
-  fixed-offset zones, `examples/benchmark.j`, and the
-  `timezones.j` Jennifer-coded library.
+  fixed-offset zones, `examples/benchmark.j`, and the planned
+  Go-backed IANA / DST extension.
 - [imports.md](../user-guide/imports.md) - the library catalog.
 - [io.md](io.md) - `io.printf` for displaying results.

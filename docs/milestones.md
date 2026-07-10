@@ -373,7 +373,7 @@ shape; pre-1.0 is the window for this kind of change.
   Three functions don't justify their own library under the
   new threshold (next bullet); pseudo-random fits `math`'s
   pure-numeric charter. The crypto-grade variant still ships
-  in M19 `crypto`. The originally planned M14.2 `random`
+  in M20.1 `crypto`. The originally planned M14.2 `random`
   library is removed.
 - **`core` is the only library publishing bare-name globals.**
   `len` and `JENNIFER_VERSION` only - no `core.len` /
@@ -738,11 +738,13 @@ library name lives behind a `use NAME;` prefix, no exceptions. See
 fixed-offset zones, strftime format/parse, and ISO 8601
 round-trip. Three namespaced structs: `time.Time {nanos, offset}`
 (fields private API), `time.Duration {nanos}`, and
-`time.Zone {offset, name}` (fields public, so the M18.4
-`timezones.j` companion can build them). Granularity (date-only
+`time.Zone {offset, name}` (fields public, so an IANA / DST
+companion can build them). Granularity (date-only
 vs time-of-day-only) is a property of formatting, not the value
 type. Unix timestamps are constructor / accessor pairs, not a
-separate type. IANA names and DST are deferred to M18.4. Three
+separate type. IANA names and DST are out of the fixed-offset
+core - a Go-backed `time`-library extension, not a `.j` data map
+(see the Long-horizon "`time`: IANA / DST zones" entry). Three
 sub-milestones: **M15.5.1** core type + Unix + calendar + 1-based
 ISO weekday + arithmetic / comparison; **M15.5.2** strftime
 format/parse (chosen over Go's reference-time style for
@@ -976,7 +978,7 @@ Decode's return shape was later superseded by
 (time-ordered), the version tag a string argument (identifiers are
 letters-only), plus `parse`/`isValid`/`version` and constant `NIL`.
 Randomness draws from `math`'s shared seedable RNG (documented
-non-crypto; swaps when M19 `crypto` lands). See [uuid.md](libraries/uuid.md).
+non-crypto; swaps when M20.1 `crypto` lands). See [uuid.md](libraries/uuid.md).
 
 ### M16.11 - `compress`
 
@@ -1353,100 +1355,160 @@ pure string work, so no Go is needed.
 
 ## M18.x - Jennifer-coded modules
 
-Built atop the existing system libraries. Each one ships as a
-Jennifer **module** under `modules/` (the directory introduced in
-M17); none of them are compiled into the interpreter binary.
-Sub-milestones in priority order:
+Built atop the existing system libraries. Each one ships as a Jennifer
+**module** under `modules/` (the directory introduced in M17); none of
+them are compiled into the interpreter binary. Sub-milestones in priority
+order.
 
-- **M18.1 - `timezones`** - IANA-name + DST companion to the
-  fixed-offset core in M15.5.2. A pure-Jennifer map of zone
-  names to `time.Zone` values (with seasonal ranges where
-  applicable) and a small resolver helper
-  (`timezones.zoneFor(name, $t) -> time.Zone`) that picks the
-  right offset for a given instant. A build-time script
-  regenerates the map from the host's tzdata before shipping,
-  so the data is auditable as source. Keeps zone policy out
-  of the interpreter binary.
-- **M18.2 - `http`** (client) - atop `net`. HTTPS needs net TLS
-  ([M16.14](#m1614---net-tls)).
-- **M18.3 -** (`json` promoted to a Go system library, **M16.9** -
-  foundational and performance-sensitive enough to earn native speed.)
-- **M18.4 - `csv`** - simple, useful early.
-- **M18.5 - `yaml`, `toml`, `xml`, `markdown`, `pretty`** - one or more
-  sub-milestones depending on scope when planned. `toml` maps tables to
-  `map`, arrays to `list`, and datetimes to `time.Time`; `.ini` is
-  deferred as an optional tiny module only if demand surfaces (no real
-  standard, ambiguous quoting / typing).
-- **M18.6 - `mail`** - SMTP / IMAP / POP3 clients plus MIME (RFC 5322
-  headers, multipart, 7bit / 8bit / quoted-printable / base64 transfer
-  encodings). **Pure Jennifer**: the protocols are line-oriented
-  command/response state machines and MIME is header + boundary
-  structure - exactly the text orchestration a `.j` module does well -
-  with the heavy lifting delegated to system libraries. Two system
-  prerequisites, because neither can be pure Jennifer:
-  - **net TLS ([M16.14](#m1614---net-tls), system).** Mail is almost
-    always encrypted (implicit TLS on 465 / 993 / 995, STARTTLS on
-    587 / 143 / 110), and TLS is cryptographic - it must be the host's
-    (`net.connectTLS` / `net.startTLS`), never interpreted `.j`.
-  - **quoted-printable in `encoding`
-    ([M16.15](#m1615---encoding-completion), system).** The MIME
-    transfer codec, alongside the base64 the module also leans on.
-  With those in place the `mail` module stays pure Jennifer: connection
-  dialogue, header parse/build, MIME-tree assembly and walk, and
-  address / date formatting.
-- **M18.7 - `redis`** - a Redis client over `net`. RESP2 framing
-  (`+OK`, `$len`, `*count`, `:int`, `-ERR`) parses cleanly in `.j`;
-  commands go out as RESP arrays. Plaintext first (trusted network /
-  localhost); `rediss://` TLS is a later add via net TLS
-  ([M16.14](#m1614---net-tls)). `AUTH [user] password` is a plain
-  command, so no `crypto` dependency. Typed per-command helpers
-  (`get -> string`, `incr -> int`, `lrange -> list`) keep the common
-  path fully typed; a generic `command(...)` returning the raw reply would
-  use an opaque `redis.Reply` walked with accessors, the same pattern as
-  `json.Value` ([M16.16](#m1616---jsonvalue)). No hard prerequisites
-  (just `net`), so it can land ahead of `mail`.
-- **M18.8 - `memcache`** - a client for the `memcached` server's text
-  protocol (`set` / `get` / `delete` / `incr` / `decr`; replies
-  `STORED` / `VALUE ... END`) over `net`. Pure Jennifer, plaintext
-  (memcached rarely uses TLS); values are `bytes` / `string`. Named
-  `memcache` for the client / protocol; it talks to a `memcached`
-  daemon.
+### M18.1 - `csv`
 
-(A Jennifer-coded `testing` module used to sit here as M18.5
-- assertion vocabulary, `setUp` / `tearDown` orchestration,
-`--filter` / `--format` / `--isolated` CLI. All of that moved
-down into [M16.8](#m168---testing-framework-consolidation)
-because the split was primitives-in-Jennifer atop
-primitives-in-Go, spending implementation weight on
-abstraction rather than capability. What remained after M16.8
-- `assertApproxEqual($a, $b, $tol)`, `assertMatchesRegex`
-composing on M16.3, table-driven test helpers - was
-docs-section-sized rather than module-sized, so it lives as a
-usage-patterns section in
-[docs/libraries/testing.md](libraries/testing.md) instead of
-as a numbered milestone. M18.6 renumbered up to M18.5.)
+Simple, useful early.
 
-## M19 - `crypto`
+### M18.2 - `markdown`
 
-Symmetric and asymmetric primitives, key derivation,
-crypto-grade random. System library; TinyGo-safe primitives
-only. Hashes already shipped in M15.6.
+A lightweight `.j` renderer: Markdown to HTML, and to ANSI for terminal
+output (reusing the `ansi` module from M17.5). Line-oriented text
+orchestration - the shape a `.j` module does well - starting with a small
+CommonMark subset (headings, emphasis, links, lists, code spans / blocks)
+rather than the full spec. Documents are small, so per-line interpreter
+overhead is a non-issue.
 
-- **Swap `uuid`'s random source.** `uuid` (M16.10) draws its v4 /
-  v7 randomness from `math`'s shared non-crypto RNG (seedable,
-  predictable - documented). When crypto-grade random lands here,
-  repoint `uuidlib.randByte` at it so `uuid.v4` is unguessable; the
-  change is one function, no surface change. Until then `uuid` must
-  not be used for security tokens.
+### M18.3 - `mail`
 
-## M20 - `httpd`
+SMTP / IMAP / POP3 clients plus MIME (RFC 5322 headers, multipart, 7bit /
+8bit / quoted-printable / base64 transfer encodings). **Pure Jennifer**:
+the protocols are line-oriented command/response state machines and MIME
+is header + boundary structure - exactly the text orchestration a `.j`
+module does well - with the heavy lifting delegated to system libraries.
+Two system prerequisites, because neither can be pure Jennifer:
 
-Pure-Jennifer HTTP server atop `net`. Ships as a module under
-`modules/httpd.j` (same packaging shape as the M18 modules), not
-baked into the interpreter. The point where Jennifer becomes
-useful for serving content. Depends on **M16.0 concurrency**
-(per-connection handlers run in `spawn` blocks) and M16.2 `net`
-(the underlying TCP listener).
+- **net TLS ([M16.14](#m1614---net-tls), system).** Mail is almost always
+  encrypted (implicit TLS on 465 / 993 / 995, STARTTLS on 587 / 143 /
+  110), and TLS is cryptographic - it must be the host's
+  (`net.connectTLS` / `net.startTLS`), never interpreted `.j`.
+- **quoted-printable in `encoding`
+  ([M16.15](#m1615---encoding-completion), system).** The MIME transfer
+  codec, alongside the base64 the module also leans on.
+
+With those in place the `mail` module stays pure Jennifer: connection
+dialogue, header parse/build, MIME-tree assembly and walk, and address /
+date formatting.
+
+- **SASL auth, ordering-aware.** SMTP AUTH / IMAP / POP3 login is SASL,
+  which is pure message orchestration (a good `.j` fit, not a crypto
+  primitive). The crypto-free mechanisms - `PLAIN`, `LOGIN`, `XOAUTH2`
+  (base64 only, already in `encoding`) - ship here and cover most
+  real-world mail. The challenge-response mechanisms (`SCRAM-SHA-256`,
+  `CRAM-MD5`) need HMAC / PBKDF2 from **M20.1 `crypto`**, so they land with
+  / after M20.1, factored into a small shared `sasl` `.j` module a later
+  LDAP client (M24+) reuses. SASL / SCRAM is a *consumer* of crypto
+  primitives, never part of M20.1 itself.
+
+### M18.4 - `redis`
+
+A Redis client over `net`. RESP2 framing (`+OK`, `$len`, `*count`,
+`:int`, `-ERR`) parses cleanly in `.j`; commands go out as RESP arrays.
+Plaintext first (trusted network / localhost); `rediss://` TLS is a later
+add via net TLS ([M16.14](#m1614---net-tls)). `AUTH [user] password` is a
+plain command, so no `crypto` dependency. Typed per-command helpers
+(`get -> string`, `incr -> int`, `lrange -> list`) keep the common path
+fully typed; a generic `command(...)` returning the raw reply would use
+an opaque `redis.Reply` walked with accessors, the same pattern as
+`json.Value` ([M16.16](#m1616---jsonvalue)). No hard prerequisites (just
+`net`), so it can land ahead of `mail`.
+
+### M18.5 - `memcache`
+
+A client for the `memcached` server's text protocol (`set` / `get` /
+`delete` / `incr` / `decr`; replies `STORED` / `VALUE ... END`) over
+`net`. Pure Jennifer, plaintext (memcached rarely uses TLS); values are
+`bytes` / `string`. Named `memcache` for the client / protocol; it talks
+to a `memcached` daemon.
+
+### M18.6 - `http` (client)
+
+A client over `net`. HTTPS needs net TLS ([M16.14](#m1614---net-tls)).
+Groups with the `httpd` server below; the two can share HTTP request /
+response parsing.
+
+### M18.7 - `httpd` (server)
+
+A pure-Jennifer HTTP server atop `net`, shipped as a module (same shape
+as the other M18 modules), not baked into the interpreter - the point
+where Jennifer becomes useful for serving content. Per-connection
+handlers run in `spawn` blocks (depends on **M16.0** concurrency) over the
+`net` TCP listener (**M16.2**); it can share HTTP request / response
+parsing with the M18.6 client. (Formerly the standalone M20.)
+
+### M18.8 - `toml`
+
+A `.j` module: TOML's regular, line / section-oriented grammar
+(`[table]`, `key = value`) maps cleanly to `map` / `list` / `time.Time` -
+the `.j`-friendliest of the config formats (unlike `yaml` / `xml`, which
+go to M20 as system libraries). Covers the grammar corners: multiline
+strings, inline tables, arrays of tables. (`.ini` is a deferred tiny
+cousin only if demand surfaces - no real standard, ambiguous quoting /
+typing.)
+
+## M19 - reserved
+
+A reserved slot.
+M19 is kept as a placeholder for a future milestone.
+
+## M20 - system libraries
+
+Go **system libraries**: cryptographic primitives, plus formats too heavy
+or too reflect-bound for a Jennifer-coded `.j` module (the `json` pattern,
+[M16.9](#m169---json)). Members below; more land as M20.x as needs arise.
+
+### M20.1 - `crypto`
+
+Symmetric and asymmetric primitives, key derivation, crypto-grade random.
+System library; TinyGo-safe primitives only. Hashes already shipped in
+M15.6.
+
+- **Swap `uuid`'s random source.** `uuid` (M16.10) draws its v4 / v7
+  randomness from `math`'s shared non-crypto RNG (seedable, predictable -
+  documented). When crypto-grade random lands here, repoint
+  `uuidlib.randByte` at it so `uuid.v4` is unguessable; the change is one
+  function, no surface change. Until then `uuid` must not be used for
+  security tokens.
+- **Message authentication (HMAC).** `crypto.hmac(key, data, algo) ->
+  bytes` over the `hash` algorithms, plus a constant-time
+  `crypto.hmacEqual` for verification. Go standard library
+  (`crypto/hmac`), no dependency, TinyGo-clean - and the shared
+  foundation the KDFs below build on (PBKDF2 is iterated HMAC; HKDF and
+  SASL SCRAM are HMAC-based). Needed directly all the time too: request
+  signing, webhook verification, JWT HS256, TOTP.
+- **Key derivation (stdlib, no dependency).** `HKDF` - derive keys from a
+  high-entropy secret - and `PBKDF2-HMAC-SHA256` - derive a key from a
+  password (salt + iteration count). Both come from the Go standard
+  library (`crypto/hkdf`, `crypto/pbkdf2`, stdlib since Go 1.24), so they
+  add no dependency and stay TinyGo-clean. Shape: `crypto.hkdf(...)` /
+  `crypto.pbkdf2(password, salt, iterations, keyLen) -> bytes`.
+- **Password hashing is out of scope here.** Argon2id (and bcrypt /
+  scrypt) moved to the Long-horizon list: they need the `x/crypto`
+  dependency and their own `hashPassword` / `verifyPassword` surface.
+
+### M20.2 - `xml`
+
+Hand-rolled like `json` (Go's `encoding/xml` is reflect-heavy, so
+TinyGo-hostile). A genuinely complex tree - attributes + ordered,
+possibly-duplicated children + mixed text + namespaces + entities - whose
+byte-level parsing is too slow in `.j`. Also the natural mirror target for
+the `json.Value` read / write vocabulary
+([M16.16](#m1616---jsonvalue)): the same opaque-handle plus path-addressed
+accessor shape (an XPath-style path dialect in place of JSON Pointer).
+
+### M20.3 - `yaml`
+
+A system library because full YAML - anchors / aliases, flow *and* block
+styles, implicit typing, multi-document streams - is impractical in `.j`
+and has no Go stdlib. Unlike `xml`, that means a **Go dependency** (e.g.
+`gopkg.in/yaml.v3`): the one place a config parser earns one, since a
+hand-rolled full YAML is a project of its own. Verify TinyGo-cleanliness
+of the dependency, and fall back to a documented subset if it won't build
+there.
 
 ---
 
@@ -1606,6 +1668,26 @@ Each domain its own milestone with sub-milestones as needed:
     surfaces.
 - **Bioinformatics.** Sequence alignment (Smith-Waterman,
   Needleman-Wunsch), FASTA/FASTQ parsers, molecule structures.
+- **Encoding / binary protocols.**
+  - **`asn1`** - ASN.1 BER/DER encode/decode, as a **Go system
+    library**. Byte-level binary parsing belongs in Go, not `.j` (the
+    `json` lesson: a char-by-char parser in the interpreter pays
+    overhead per byte). This is the *enabler* for a family of binary
+    protocols and PKI formats - LDAP, SNMP, X.509, PKCS. Go's stdlib
+    `encoding/asn1` is DER-only, so the full BER that LDAP / SNMP use
+    (indefinite lengths, alternative encodings) needs either a BER
+    dependency (e.g. `go-asn1-ber`) or a hand-rolled BER codec in Go.
+  - **`ldap` / `snmp` (layered on `asn1` + `net`).** With `asn1` doing
+    the byte crunching in Go and `net` providing TCP/UDP + TLS
+    (`connectTLS` / `startTLS` already cover LDAPS / StartTLS), the
+    protocol orchestration (bind, build request, iterate results) is
+    not per-byte hot and can live in a `.j` module or a thin Go library.
+    SNMP is the natural first client (simpler PDUs, UDP, no SASL); LDAP
+    adds controls + SASL (SCRAM builds on M20.1 `crypto`). A pure-`.j`
+    implementation of the BER layer itself is explicitly *not* the plan.
+    Existing pure implementations (e.g. PHP FreeDSx) are a protocol
+    reference, not a port target - their heavy OO shape does not map to
+    Jennifer's value-semantic structs.
 - **Sandbox.** Restricted-capability execution.
 
 Ordered when demand surfaces. WASM libraries (M23.x) may cover
@@ -1644,6 +1726,32 @@ willing to keep it green; they're not blocking anything.
   line endings, or process behavior, prefer portable stdlib
   helpers (`path/filepath`, not hardcoded `/`); avoid Linux-only
   assumptions.
+- **`time`: IANA / DST zones.** Real zone names (`Europe/Berlin`) with
+  historically-correct daylight-saving resolution, added to the `time`
+  **system library** - not a hand-maintained `.j` data map. A `.j` map is
+  the wrong shape: abbreviations (`CST` is US Central *and* China Standard
+  *and* Cuba Standard) don't identify a zone, and the real model is
+  offset-per-(zone, instant) over a transition history that ships several
+  updates a year. Back it with Go's `time.LoadLocation` + the embeddable
+  `time/tzdata` (or the host's `/usr/share/zoneinfo`), so the database is
+  the toolchain's problem and resolution is correct at any instant.
+  Standard-`jennifer` only: TinyGo's `time` can't load zones, so
+  `jennifer-tiny` stays fixed-offset (a build-tag split like `net`).
+  Level 1 first - an offset-at-instant resolver
+  (`time.offsetAt(name, $t)` / `time.zoneFor(name, $t) -> time.Zone`) that
+  leaves the `time.Time {nanos, offset}` model untouched (the snapshot is
+  fixed, so DST-crossing arithmetic must re-resolve); Level 2 - a
+  zone-carrying `time.Time` with DST-correct arithmetic - is a larger,
+  optional follow-up needing a Go-backed zone handle.
+- **Password hashing (Argon2id / bcrypt / scrypt).** The modern default
+  for password *storage*, deferred out of M20.1 `crypto` because it lives in
+  `golang.org/x/crypto` (a dependency, unlike the stdlib KDFs M20.1 ships)
+  and wants its own surface distinct from the KDFs: a self-describing
+  `crypto.hashPassword(pw) -> string` (`$argon2id$...`) plus a
+  constant-time `crypto.verifyPassword(pw, hash) -> bool`. Added when
+  password storage is a concrete need, taking the `x/crypto` dependency
+  then - crypto is the one place the dependency-free stance bends, since
+  you never hand-roll it.
 - **`encoding` - the harder codecs.** The single-byte character codecs and
   binary-to-text formats all shipped (M16.15); the deferred remainder,
   picked up only when a real program needs one: variable-width Asian
@@ -1719,7 +1827,7 @@ willing to keep it green; they're not blocking anything.
   (M16.16) vs a typed struct via the deferred map-to-struct conversion.
   Values bind only
   through `?` placeholders (injection safety). Contrast the
-  text-protocol stores redis / memcache (M18.7 / M18.8), which are pure
+  text-protocol stores redis / memcache (M18.4 / M18.5), which are pure
   Jennifer over `net` and need none of this.
 - **Explicit map-to-struct conversion.** A spelled-out, validating way to
   turn a `json.Value` object (or a homogeneous `map of string to T`) into
@@ -1741,7 +1849,7 @@ willing to keep it green; they're not blocking anything.
   M7.
 - **i18n.** Locale-aware case folding, collation, number / date
   formatting, BiDi. Gated on the CLDR-data binary-size question
-  (likely an optional library shipped after the M19 WASM runtime
+  (likely an optional library shipped after the M22 WASM runtime
   so locale tables aren't baked into every build).
 - **Host-embedding API.** *Promoted to a numbered milestone -
   see [M21](#m21---public-interpreter-api-for-third-party-embedding).*

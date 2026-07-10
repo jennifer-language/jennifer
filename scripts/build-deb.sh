@@ -123,21 +123,32 @@ jennifer ($VERSION) unstable; urgency=low
 EOF
 gzip -9n "$CHANGELOG"
 
-# DEBIAN/control: substitute the version + arch placeholders and
-# emit the resolved file. Source control file uses placeholders so
-# both arches can build from the same metadata.
-sed \
-    -e "s/^Architecture: amd64 arm64$/Architecture: $ARCH/" \
-    "$PKG_DIR/debian/control" \
-    | awk '
-        # Drop the Source/VCS/Standards lines that only apply at
-        # build-from-source level; the binary control file is a
-        # subset.
-        /^Source:|^Vcs-|^Standards-Version:/ { next }
-        # Insert the Version field right after Package.
-        /^Package: / { print; print "Version: '"$VERSION"'"; next }
-        { print }
-    ' > "$STAGE/DEBIAN/control"
+# DEBIAN/control: a single-paragraph *binary* control, Package first. The
+# source control (packaging/debian/control) is source-style - a Source
+# paragraph, a blank line, then the binary Package paragraph - so a plain
+# field filter would leave two paragraphs and the first (Section / Priority
+# / Maintainer / Homepage) would have no Package field, which dpkg-deb
+# rejects. Reduce it to the binary form: emit Package / Version /
+# Architecture at the top, then pass the remaining fields through, dropping
+# the source-only fields (Source / Vcs-* / Standards-Version), the original
+# Package / Architecture lines, and every blank line (so it stays one
+# paragraph). Description continuation lines (leading space, or " .") are
+# not blank, so they survive.
+awk -v ver="$VERSION" -v arch="$ARCH" '
+    BEGIN {
+        print "Package: jennifer"
+        print "Version: " ver
+        print "Architecture: " arch
+    }
+    /^Source:|^Vcs-|^Standards-Version:|^Package:|^Architecture:/ { next }
+    # debhelper substitution variables (e.g. `Depends: ${misc:Depends}`)
+    # are expanded by dpkg-buildpackage, not this direct dpkg-deb build, so
+    # drop any line still carrying one. The binaries are static (CGO off),
+    # so there are no shared-library dependencies to declare anyway.
+    /\$\{/ { next }
+    /^[[:space:]]*$/ { next }
+    { print }
+' "$PKG_DIR/debian/control" > "$STAGE/DEBIAN/control"
 
 # Hook scripts, made executable per Debian requirements.
 install -m 0755 "$PKG_DIR/debian/postinst" "$STAGE/DEBIAN/postinst"
