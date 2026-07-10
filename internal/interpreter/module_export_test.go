@@ -100,6 +100,29 @@ io.printf("%d %d %d\n", $p.x, points.getX($p), points.getX($q));`,
 	}
 }
 
+func TestModuleListOfStructCrossesBoundary(t *testing.T) {
+	// A consumer-typed `list of points.Point` handed back into a module
+	// function must satisfy the module's bare `list of Point` parameter: the
+	// boundary retag has to fix the list's element-type tag, not only the
+	// struct element values.
+	out, err := runScopedModuleMain(t, map[string]string{
+		"points.j": pointsModule,
+		"main.j": `use io;
+import "./points.j" as points;
+def ps as list of points.Point init [];
+$ps[] = points.make(3, 4);
+$ps[] = points.make(10, 20);
+$ps[] = points.Point{x: 100, y: 0};
+io.printf("%d\n", points.totalX($ps));`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "113" {
+		t.Errorf("output = %q, want 113", got)
+	}
+}
+
 func TestModuleStructIdentitiesAreDistinct(t *testing.T) {
 	// A struct from module `a` must not satisfy module `b`'s same-named type.
 	_, err := runScopedModuleMain(t, map[string]string{

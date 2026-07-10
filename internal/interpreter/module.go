@@ -70,6 +70,7 @@ func retagStructs(v Value, from, to string, isOwn func(string) bool) Value {
 		for i := range v.List {
 			nv.List[i] = retagStructs(v.List[i], from, to, isOwn)
 		}
+		nv.ElemTyp = retagType(v.ElemTyp, from, to, isOwn)
 		nv.shared = nil
 		return nv
 	case KindMap:
@@ -78,11 +79,33 @@ func retagStructs(v Value, from, to string, isOwn func(string) bool) Value {
 		for i := range v.Map {
 			nv.Map[i] = MapEntry{Key: v.Map[i].Key, Value: retagStructs(v.Map[i].Value, from, to, isOwn)}
 		}
+		nv.KeyTyp = retagType(v.KeyTyp, from, to, isOwn)
+		nv.ValTyp = retagType(v.ValTyp, from, to, isOwn)
 		nv.shared = nil
 		return nv
 	default:
 		return v
 	}
+}
+
+// retagType returns a copy of a declared type with every struct type whose
+// namespace is `from` and whose name is one of the module's own structs
+// re-tagged to `to`, recursing through list / map element types. It mirrors
+// retagStructs for the *type* metadata a list or map carries alongside its
+// elements, so a `list of mod.Struct` handed back into the module reads as
+// `list of Struct` (and vice versa) rather than failing the param-type check.
+func retagType(t *parser.Type, from, to string, isOwn func(string) bool) *parser.Type {
+	if t == nil {
+		return nil
+	}
+	nt := *t
+	if t.Kind == parser.TypeStruct && t.StructNS == from && isOwn(t.StructName) {
+		nt.StructNS = to
+	}
+	nt.Element = retagType(t.Element, from, to, isOwn)
+	nt.KeyType = retagType(t.KeyType, from, to, isOwn)
+	nt.ValType = retagType(t.ValType, from, to, isOwn)
+	return &nt
 }
 
 // collectExports gathers the names a module publishes: every `export`-marked

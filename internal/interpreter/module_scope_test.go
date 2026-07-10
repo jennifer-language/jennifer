@@ -53,6 +53,11 @@ export def const DIM as int init 2;
 export func make(x as int, y as int) { return Point{x: $x, y: $y}; }
 export func getX(p as Point) { return $p.x; }
 export func sumXY(p as Point) { return $p.x + $p.y; }
+export func totalX(ps as list of Point) {
+	def sum as int init 0;
+	for (def p in $ps) { $sum = $sum + $p.x; }
+	return $sum;
+}
 `
 
 func TestModuleQualifiedCallAndConst(t *testing.T) {
