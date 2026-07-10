@@ -1224,6 +1224,8 @@ cycle, positioned parse error, load-time throw, imports-without-enable).
 
 ### M17.3 - Module scope and namespacing
 
+**Status:** done.
+
 What a module's top level may contain, how its names resolve, and how it
 reaches other libraries and modules.
 
@@ -1271,6 +1273,37 @@ load; a module using `use net;` internally works while its importer
 without `use net;` cannot call `net.*`; a struct made in a module and
 passed back to a module `func` type-checks; a `spawn` body calling a
 module `func` behaves identically to the serial call under `-race`.
+
+**As built.** The declarations-only check runs in `loadModule`
+(`checkModuleDeclarationsOnly`): a module's `TopLevel` may hold only
+`def const` (structs / methods / imports live in their own `Program`
+slices), so a mutable `def` or free-standing statement is a positioned
+load-time error; scripts run through the CLI never reach the check.
+`loadModuleImports` binds each import's alias (the `as NAME` clause, or the
+file stem) into `Interpreter.moduleAliases`, collision-checked against
+library prefixes and other module aliases. Consumer-side resolution is at
+the eval layer (the resolver and `resolveQualifiedRefs` already defer
+unknown prefixes to runtime): `evalQualifiedCall` / `evalQualifiedConst`
+check `moduleAliases` first and dispatch `alias.fn(args)` into the module's
+own interpreter via `CallByNameWith` (arguments evaluated in the consumer,
+body run against the module's globals + methods) and read `alias.CONST`
+from the module's global scope. `use` non-transitivity, run-once sharing,
+and `-race` safety all fall out of the fresh-sub-interpreter-per-module
+model - a module's interpreter holds only immutable constants and read-only
+methods. `throw` / `exit` from a module `func` propagate unchanged (caught
+by a `try` around the call, or setting the exit code). Runnable demo:
+`examples/modules/` (qualified calls, a qualified constant, a
+module-to-module call). Coverage: `internal/interpreter/module_scope_test.go`.
+
+**Deferred to M17.4.** A struct *value* built by a module and passed back
+through module calls type-checks today (it never leaves the module's
+identity space), but a consumer *naming* a module struct type
+(`def p as points.Point;`, `points.Point{...}`) needs the cross-module
+struct identity `(module-prefix, name)` that M17.4 owns; until then that
+form is a positioned "module struct types are not available yet" error
+pointing the caller at a function that returns the value. The `export`
+visibility filter is also M17.4 - in M17.3 every top-level module name is
+reachable behind the alias.
 
 ### M17.4 - Exports and visibility
 

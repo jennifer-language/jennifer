@@ -102,6 +102,11 @@ type Interpreter struct {
 	// registry means module imports are not available here.
 	modReg  *moduleReg
 	baseDir string
+	// moduleAliases maps an importer's `import "..." as NAME;` alias (or the
+	// file stem) to the loaded module, so `NAME.member` resolves into that
+	// module's own interpreter. Populated by loadModuleImports; nil until a
+	// program imports a module.
+	moduleAliases map[string]*loadedModule
 
 	// spawned task registry. Every `spawn { ... }` appends its
 	// TaskState here; the CLI scans the slice on shutdown to surface
@@ -3030,6 +3035,14 @@ func (i *Interpreter) resolveNamespacePrefix(prefix string) (string, error) {
 	if i.knownNamespaces[prefix] {
 		return "", fmt.Errorf("namespace %q requires `use %s;`", prefix, prefix)
 	}
+	if _, isModule := i.moduleAliases[prefix]; isModule {
+		// The prefix names an imported module. Module functions and
+		// constants (`prefix.fn(...)`, `prefix.CONST`) resolve elsewhere;
+		// reaching here means it was used as a struct-type prefix
+		// (`prefix.Type` / `prefix.Type{...}`), which is not yet available -
+		// call a module function that returns the value instead.
+		return "", fmt.Errorf("module %q struct types are not available yet; call a `%s.` function that returns the value", prefix, prefix)
+	}
 	return "", fmt.Errorf("unknown namespace %q", prefix)
 }
 
@@ -3037,6 +3050,12 @@ func (i *Interpreter) resolveNamespacePrefix(prefix string) (string, error) {
 // resolved to a namespace (alias-aware), then the (namespace, callee)
 // pair is looked up in the namespaced-builtin registry.
 func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Environment) (Value, error) {
+	// A module alias resolves into a loaded module's own interpreter, not a
+	// library namespace. Aliases are collision-checked against library
+	// prefixes at bind time, so a prefix is one or the other, never both.
+	if m, ok := i.moduleAliases[c.Prefix]; ok {
+		return i.callModuleMethod(m, c, env)
+	}
 	// prefer the pre-resolved Builtin pointer stamped by
 	// resolveQualifiedRefs. Falls back to the resolveNamespacePrefix
 	// + NSBuiltins path for resolver-less callers (REPL, hand-built
@@ -3093,6 +3112,10 @@ func builtinError(err error, file string, line, col int) error {
 // evalQualifiedConst handles `prefix.NAME`. Resolution mirrors
 // evalQualifiedCall; the result is the constant's value.
 func (i *Interpreter) evalQualifiedConst(c *parser.QualifiedConstRefExpr) (Value, error) {
+	// A module alias reads a constant from the loaded module's own scope.
+	if m, ok := i.moduleAliases[c.Prefix]; ok {
+		return i.moduleConst(m, c)
+	}
 	// prefer the pre-resolved Value stamped by
 	// resolveQualifiedRefs. Same fallback structure as
 	// evalQualifiedCall.

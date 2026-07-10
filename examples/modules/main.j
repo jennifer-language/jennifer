@@ -2,22 +2,25 @@
 # Copyright (C) 2026 <developer@mplx.eu>
 #
 # main.j - the entry program. It imports db (which imports config) and also
-# imports config directly. Run it with:
+# imports config directly, then reaches each module's surface with the
+# `alias.member` syntax. Run it with:
 #
 #     jennifer run examples/modules/main.j
 #
-# Expected output shows the post-order init and the run-once guarantee:
+# Expected output:
 #
-#     config: initialised     <- config initialises first (deepest dependency)
-#     db: initialised         <- then db, which imported config
-#     app: running            <- finally main's body
+#     db up, jennifer-db (max 16 connections)
+#     config: jennifer-db (max 16 connections)
+#     max connections: 16
 #
-# config appears exactly once even though both db and main import it.
-#
-# (Addressing a module's exported members as `alias.member` arrives in a
-# later milestone; today an import runs a module for its initialisation.)
+# `db.status()` and `config.describe()` are qualified calls into the loaded
+# modules; `config.MAXCONN` is a qualified constant. config is loaded once
+# even though both main and db import it (run-once cache), so both see the
+# same values.
 use io;
-import "./db.j";
-import "./config.j";
+import "./db.j" as db;
+import "./config.j" as config;
 
-io.printf("app: running\n");
+io.printf("%s\n", db.status());
+io.printf("config: %s\n", config.describe());
+io.printf("max connections: %d\n", config.MAXCONN);

@@ -201,14 +201,23 @@ its enclosing scope at launch, so there are no shared-memory data races.
 use io;                 # enable a system library, addressed io.printf(...)
 use strings as s;       # alias: only s.upper(...) works after this
 include "helpers.j";    # textual splice of another .j file (preprocessor)
+import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 ```
 
 - `use NAME [as ALIAS];` - system library. Nothing auto-loads; every program
   states its imports. Aliasing is a rename (the canonical prefix stops working).
 - `include "path.j";` - textual file splice (path is a string literal ending in
   `.j`, resolved relative to the including file).
-- `import "x.j" as x;` - the module system, **designed but not yet
-  implemented** (errors today with a hint).
+- `import "PATH.j" [as NAME];` - **module** import (a real boundary, not a
+  splice). Path forms: `./x.j` / `../x.j` local, `/x.j` absolute, bare `x.j`
+  from the module search path. Loads once (run-once, cached), depth-first
+  post-order; cycles error. Reach the module's surface as `NAME.fn(args)` and
+  `NAME.CONST` (`NAME` is the `as` alias, else the file stem). A **module top
+  level is declarations-only**: `def const`, `def struct`, `func`, `use`,
+  `import` - no mutable `def`, no free-standing statements. `use` is not
+  transitive across the boundary. Naming a module's struct *type* at the
+  consumer (`x.Point`) is not available yet - call a module function that
+  returns the value.
 
 ## Standard library (all namespaced, all opt-in via `use`)
 

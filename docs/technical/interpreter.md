@@ -460,9 +460,44 @@ propagate out of `Run` as ordinary errors and fail the program; they are
 expression, so it cannot sit inside a `try`/`catch` (the parser rejects
 `import` in a block).
 
-Addressing a module's `export`ed members as `NAME.member` is a later
-milestone; `AsName` is parsed and carried on the node but not yet bound.
-Today an `import` runs a module for its initialisation side effects.
+### Module scope and namespacing
+
+A module's top level is **declarations-only**:
+`checkModuleDeclarationsOnly` (run in `loadModule` after parse) allows only
+`def const` in `TopLevel` - structs, methods, and imports live in their own
+`Program` slices - so a mutable `def` or a free-standing statement is a
+positioned load-time error. Scripts run through the CLI never reach this
+check, so a `jennifer run` program keeps mutable top-level `def` and
+free-standing statements.
+
+`loadModuleImports` binds each import's alias (the `as NAME` clause, or the
+file stem via `moduleStem`) into the importer's `moduleAliases`
+(`map[string]*loadedModule`), collision-checked against library prefixes
+(`nsPrefixes`) and other module aliases. Consumer-side resolution rides the
+existing qualified-reference eval layer, since the parser resolver and
+`resolveQualifiedRefs` already defer unknown prefixes to runtime:
+
+- `evalQualifiedCall` checks `moduleAliases` before the library path and,
+  on a hit, dispatches `alias.fn(args)` through `callModuleMethod` -
+  arguments evaluated in the consumer's env, then `m.interp.CallByNameWith`
+  runs the body against the **module's** globals and methods. Arity / type
+  mismatches reposition at the consumer's call site; a `runtime error`,
+  `throw`, or `exit` from the module body propagates unchanged.
+- `evalQualifiedConst` reads `alias.CONST` from the module's global scope
+  (`m.interp.global.GetBinding`).
+
+`use` non-transitivity, run-once sharing, and `-race` safety all fall out
+of the fresh-sub-interpreter-per-module model: a module's interpreter holds
+only immutable constants and read-only methods, so concurrent calls from
+parallel `spawn` bodies share no mutable state.
+
+Naming a module's struct *type* at the consumer (`def p as points.Point;`,
+`points.Point{...}`) needs cross-module struct identity `(module-prefix,
+name)`, deferred to M17.4 with the `export` visibility filter; until then
+`resolveNamespacePrefix` returns a positioned "module struct types are not
+available yet" error for a module-alias type prefix. A struct *value* built
+by a module and passed back through module calls already type-checks - it
+never leaves the module's identity space.
 
 ## Builtins and libraries
 

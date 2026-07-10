@@ -4,6 +4,7 @@
 package interpreter
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -64,12 +65,110 @@ func (i *Interpreter) loadModuleImports(prog *parser.Program) error {
 		return &runtimeError{Msg: "module imports are not enabled in this context (run a program file)", File: file, Line: line, Col: col}
 	}
 	for _, mi := range prog.ModuleImports {
-		if _, err := i.loadModule(mi.Path, mi); err != nil {
+		m, err := i.loadModule(mi.Path, mi)
+		if err != nil {
 			return err
 		}
-		// Binding mi.AsName (or the file stem) to the loaded module's
-		// namespace, so `NAME.member` resolves at the importer, comes with
-		// the scope / namespacing layer.
+		// Bind the alias (the `as NAME` clause, or the file stem) so
+		// `NAME.member` resolves into the loaded module at this importer.
+		alias := mi.AsName
+		if alias == "" {
+			alias = moduleStem(mi.Path)
+		}
+		if err := i.bindModuleAlias(alias, m, mi); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// moduleStem is the alias a module import binds to with no `as NAME` clause:
+// the file stem of the import path (basename without the `.j` suffix).
+func moduleStem(importPath string) string {
+	return strings.TrimSuffix(filepath.Base(importPath), ".j")
+}
+
+// bindModuleAlias makes `alias.member` at this importer resolve into the
+// loaded module. The alias must not collide with an active library prefix
+// (`use io;` reserves `io`) or a module alias already bound in this program.
+func (i *Interpreter) bindModuleAlias(alias string, m *loadedModule, at parser.Node) error {
+	if _, taken := i.nsPrefixes[alias]; taken {
+		file, line, col := posFor(at)
+		return &runtimeError{Msg: fmt.Sprintf("module alias %q collides with an imported library namespace; import the module `as` a different name", alias), File: file, Line: line, Col: col}
+	}
+	if i.moduleAliases == nil {
+		i.moduleAliases = map[string]*loadedModule{}
+	}
+	if _, dup := i.moduleAliases[alias]; dup {
+		file, line, col := posFor(at)
+		return &runtimeError{Msg: fmt.Sprintf("module alias %q is already bound; import the module `as` a different name", alias), File: file, Line: line, Col: col}
+	}
+	i.moduleAliases[alias] = m
+	return nil
+}
+
+// callModuleMethod dispatches `alias.method(args)` into the loaded module's
+// own interpreter: arguments are evaluated in the consumer's environment, and
+// the method body runs against the module's globals and methods (via
+// CallByNameWith). Arity / type mismatches are repositioned at the consumer's
+// call site; a runtime error, `throw`, or `exit` from the module body
+// propagates unchanged so `try`/`catch` and exit codes keep working.
+func (i *Interpreter) callModuleMethod(m *loadedModule, c *parser.QualifiedCallExpr, env *Environment) (Value, error) {
+	file, line, col := posFor(c)
+	if _, ok := m.interp.methods[c.Callee]; !ok {
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("module %q has no method %q", c.Prefix, c.Callee), File: file, Line: line, Col: col}
+	}
+	args := make([]Value, len(c.Args))
+	for idx, a := range c.Args {
+		v, err := i.evalExpr(a, env)
+		if err != nil {
+			return Value{}, err
+		}
+		args[idx] = v
+	}
+	v, err := m.interp.CallByNameWith(c.Callee, args...)
+	if err != nil {
+		switch err.(type) {
+		case *runtimeError, *ExitSignal, *ErrorSignal:
+			return Value{}, err // positioned / control-flow: propagate as-is
+		default:
+			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+		}
+	}
+	return v, nil
+}
+
+// moduleConst reads `alias.NAME`, a constant declared at the module's top
+// level, from the loaded module's global scope.
+func (i *Interpreter) moduleConst(m *loadedModule, c *parser.QualifiedConstRefExpr) (Value, error) {
+	b, err := m.interp.global.GetBinding(c.Name)
+	if err != nil || !b.IsConst {
+		file, line, col := posFor(c)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("module %q has no constant %q", c.Prefix, c.Name), File: file, Line: line, Col: col}
+	}
+	return b.Value, nil
+}
+
+// checkModuleDeclarationsOnly enforces the module top-level grammar: a module
+// may contain only declarations - `def const`, `def struct`, `func`, `use`,
+// and `import`. Structs, methods, and imports are collected into their own
+// Program slices, so `TopLevel` must contain nothing but `def const`
+// statements. A mutable `def` or a free-standing statement (assignment, bare
+// expression, `if` / `while` / `for` / `repeat`) is a positioned load-time
+// error: modules hold no mutable state and have no init body beyond their
+// constant initializers. Scripts run through the CLI never reach here, so they
+// keep top-level mutable `def` and free-standing statements.
+func checkModuleDeclarationsOnly(prog *parser.Program) error {
+	for _, s := range prog.TopLevel {
+		if d, ok := s.(*parser.DefineStmt); ok && d.IsConst {
+			continue // `def const NAME ...;` is the one allowed top-level statement
+		}
+		file, line, col := posFor(s)
+		msg := "a module's top level allows only declarations (`def const`, `def struct`, `func`, `use`, `import`); free-standing statements are not allowed"
+		if d, ok := s.(*parser.DefineStmt); ok && !d.IsConst {
+			msg = "mutable `def` is not allowed at a module's top level (a module holds no mutable state); use `def const` for a module constant"
+		}
+		return &runtimeError{Msg: msg, File: file, Line: line, Col: col}
 	}
 	return nil
 }
@@ -103,6 +202,9 @@ func (i *Interpreter) loadModule(importPath string, at parser.Node) (*loadedModu
 	// Parse the module file (errors are positioned in that file).
 	modProg, err := reg.load(canonical)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkModuleDeclarationsOnly(modProg); err != nil {
 		return nil, err
 	}
 

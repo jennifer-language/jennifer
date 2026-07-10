@@ -186,10 +186,31 @@ Guarantees:
   declaration, not an expression, so it cannot appear inside a
   `try`/`catch` - wrapping one is itself a parse error.
 
-Addressing a module's exported members as `NAME.member` (with `export`
-marking the public surface) arrives in a later milestone; today an
-`import` runs a module for its top-level initialisation and its
-side effects. See the runnable [`examples/modules/`](https://github.com/mplx/jennifer-lang/tree/main/examples/modules)
+Reaching a module's surface:
+
+- **`alias.fn(args)`** calls a module function - the arguments are
+  evaluated in your code, but the body runs in the module's own scope
+  (its constants and other functions, plus whatever *it* imported - `use`
+  is not transitive, so the module's `use net;` does not give you `net.*`).
+- **`alias.CONST`** reads a module constant.
+- A module top level is **declarations-only**: `def const`, `def struct`,
+  `func`, `use`, `import` - no mutable `def` and no free-standing
+  statements (a module holds no mutable state). A `def const` initializer
+  may still call a private `func`, so value-producing setup works.
+
+```jennifer
+use io;
+import "./config.j" as config;
+
+io.printf("%s\n", config.describe());   # calls config's function
+io.printf("%d\n", config.MAXCONN);      # reads config's constant
+```
+
+Naming a module's *struct type* at the consumer (`def p as config.Entry;`,
+`config.Entry{...}`) is not available yet - build such a value by calling a
+module function that returns it. The `export` keyword that marks a module's
+public surface (today every top-level name is reachable) also lands with
+that work. See the runnable [`examples/modules/`](https://github.com/mplx/jennifer-lang/tree/main/examples/modules)
 chain.
 
 ### `include` vs `import`
