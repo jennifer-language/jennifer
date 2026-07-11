@@ -249,7 +249,7 @@ constraints.
     resolver over the `vendor/` search root
     (`import "mplx/supercms/main.j" as cms;`) needs no grammar change but
     loses the inline version selector and the visual distinctiveness.
-- **`deck.toml` is the manifest** (TOML - so it needs the `toml` module). It
+- **`deck.toml` is the manifest** (TOML - so it needs the `toml` library). It
   declares the app's required decks and version constraints
   (`bitcoin = ">=1.2.0"`), and `jvc` produces a lockfile -
   **`camcorder.lock`** - pinning the exact resolved versions (content hash
@@ -286,7 +286,7 @@ follows semver discipline after 1.0.0:
 The same path applies to any other bundled module that turns out to be
 deck-shaped rather than standard-library-shaped.
 
-A whole track of its own. **Requires:** the `toml` module (`M18.8`, for
+A whole track of its own. **Requires:** the `toml` library (`M18.8`, for
 `deck.toml`); builds on the shipped module system (the search-root
 mechanism), the `semver` module (constraint solving), and `http` / git
 (fetching decks). The public deck **registry** is separate infrastructure,
@@ -297,6 +297,14 @@ question to settle.
 
 A grab-bag, recorded when it comes up.
 
+- **Extra distribution packaging.** Beyond the Linux `.deb` (shipped in
+  M15.8) and the two distribution *requirements* for 1.0.0 stable
+  (cross-build for macOS / Windows, a real apt repository), the additional
+  package formats are nice-to-haves, each shipped only when a user asks and a
+  maintainer will keep it green: a **Homebrew tap** (macOS), a **Snap**
+  package, a **Nix flake** / Nix package, and **Flatpak** / **AppImage** or
+  any other Linux distribution format. None blocks a release; none is a 1.0.0
+  requirement.
 - **Cross-platform support.** Linux is the only *supported* platform, but
   best-effort **unsupported** macOS and Windows binaries (the standard-Go
   `jennifer`, via cross-compile) already ship with each release - so the work

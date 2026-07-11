@@ -249,6 +249,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `json.Value` walked by JSON Pointer accessors (`get`/`asInt`/`asString`/
   `typeOf`/`has`/`keys`/`length`/...) and edited by non-mutating writers
   (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`).
+- **`toml`** - RFC-conformant TOML 1.0 `encode`/`encodePretty`/`decode` with
+  the **same opaque-value, read / walk / write surface as `json`, name for
+  name** (JSON Pointer addressing), plus `asDatetime` (backed by `time.Time`)
+  for TOML's native date-times. The config format Jennifer ships (not INI).
 - **`time`**, **`fs`**, **`net`**, **`regex`**, **`hash`**, **`crc`**,
   **`compress`**, **`archive`**, **`encoding`**, **`uuid`**, **`meta`**,
   **`testing`** - clock, files, sockets, RE2 regex, digests, checksums,

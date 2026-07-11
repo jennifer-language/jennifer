@@ -218,6 +218,16 @@ flat lookup view, not authoritative.
 | [`time`](time.md)`.weekday($t)`                       | ISO 8601 weekday: Monday = 1 ... Sunday = 7.                                                                                        |
 | [`time`](time.md)`.year($t)`                          | Calendar year (int).                                                                                                                |
 | [`time`](time.md)`.zone(offset, name)`                | Build a `time.Zone` from an integer offset (seconds east of UTC) and a display name.                                                |
+| [`toml`](toml.md)`.decode(s)`                         | Parse TOML text into an opaque `toml.Value` handle (walk it with the accessors below).                                             |
+| [`toml`](toml.md)`.encode(v)` / `.encodePretty(v)`    | TOML string for a `toml.Value` (or native map / list / scalar); `encodePretty` blank-lines sections. Null value / non-table root errors. |
+| [`toml`](toml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map` `datetime`.                               |
+| [`toml`](toml.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `toml.Value` (walk stays opaque; no pointer = the node itself).                                    |
+| [`toml`](toml.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
+| [`toml`](toml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` table keys in document order / element count of a list or table.                                               |
+| [`toml`](toml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int).                                 |
+| [`toml`](toml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A date-time node as a `time.Time` (needs `use time;`) / whether the node is a date-time.                            |
+| [`toml`](toml.md)`.map()` / `.list()`                 | A fresh empty table / array `toml.Value` - the explicit start of a document (writes never auto-vivify).                            |
+| [`toml`](toml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `toml.Value` (strict / no missing intermediates). |
 | [`uuid`](uuid.md)`.generate(v)`                       | New UUID string; `v` is `"v4"` (random) or `"v7"` (time-ordered).                                                                   |
 | [`uuid`](uuid.md)`.isValid(s)`                        | Whether `s` is a well-formed UUID string.                                                                                           |
 | [`uuid`](uuid.md)`.parse(s)`                          | The 16 `bytes` of a UUID string; errors on malformed input.                                                                         |

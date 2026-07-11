@@ -33,6 +33,7 @@ import (
 	"github.com/mplx/jennifer-lang/internal/lib/task"
 	"github.com/mplx/jennifer-lang/internal/lib/testing"
 	"github.com/mplx/jennifer-lang/internal/lib/time"
+	"github.com/mplx/jennifer-lang/internal/lib/toml"
 	"github.com/mplx/jennifer-lang/internal/lib/uuid"
 )
 
@@ -55,6 +56,7 @@ func InstallAll(in *interpreter.Interpreter) {
 	archivelib.Install(in)
 	encodinglib.Install(in)
 	jsonlib.Install(in)
+	tomllib.Install(in)
 	tasklib.Install(in)
 	fslib.Install(in)
 	netlib.Install(in)

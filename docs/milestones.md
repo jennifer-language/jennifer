@@ -853,10 +853,11 @@ mapping files. See
 GitHub repo Settings -> Pages, set "Source" to "GitHub Actions"
 so `docs.yml` can deploy.
 
-**Stayed on the "Path to 1.0.0 distribution" parallel track**
-(post-M15.8 polish, not gated on this milestone): Homebrew tap,
-Snap, Nix flake, real apt repository, cross-build for macOS /
-Windows (waits on platform-portability work first).
+**Deferred out of this milestone** (not gated on it): the
+cross-build for macOS / Windows and a real apt repository stay in
+[Requirements for 1.0.0 stable](#requirements-for-100-stable);
+the extra distribution formats (Homebrew, Snap, Nix, Flatpak,
+AppImage) moved to the [horizon idea collection](horizon.md).
 
 ---
 
@@ -1564,7 +1565,7 @@ values are `bytes` / `string`. Named `memcache` for the client / protocol;
 it talks to a `memcached` daemon. Two reference modules build on it -
 [M18.6.1 `session`](#m1861---session-module-on-memcache) and
 [M18.6.2 `ratelimit`](#m1862---ratelimit-module-on-memcache) - and the
-`httpd` server ([M18.9](#m189---httpd-module)) uses both.
+`httpd` server ([M18.9](#m189---httpd)) uses both.
 
 #### M18.6.1 - `session` module (on `memcache`)
 
@@ -1660,7 +1661,7 @@ followed. Tested: URL parsing, request building, and response parsing including
 chunked decoding in the overlay (`modules/http_test.j`, 100%); the full GET /
 JSON / POST-with-body-and-headers / chunked / 404 path against a real in-process
 `net/http` server in the Go suite (`TestHttpClient`). Groups with the `httpd`
-server ([M18.9](#m189---httpd-module)), which can share this request / response
+server ([M18.9](#m189---httpd)), which can share this request / response
 parsing. Reference doc [docs/modules/http.md](modules/http.md); demo
 `examples/modules/http_demo.j`.
 
@@ -1826,49 +1827,154 @@ token drives `sasl.xoauth2` into a successful IMAP `AUTHENTICATE XOAUTH2`
 against a mock server; a token-endpoint error surfaces as a catchable
 `Error`, not a crash.
 
-### M18.8 - `toml` module
+### M18.8 - `toml` system library
 
-A `.j` module: TOML's regular, line / section-oriented grammar
-(`[table]`, `key = value`) maps cleanly to `map` / `list` / `time.Time` -
-the `.j`-friendliest of the config formats (unlike `yaml` / `xml`, which
-go to M20 as system libraries). Covers the grammar corners: multiline
-strings, inline tables, arrays of tables. Ordered **before** `httpd`
-([M18.9](#m189---httpd-module)) so the server can read its configuration
-from TOML.
+**Done.** A Go **system library** (not a `.j` module), **designed like `json`**
+([M16.9](#m169---json) + [M16.16](#m1616---jsonvalue)) end to end - the same
+opaque-`Value` model and the same **read / walk / write** surface, syntax
+name-for-name, so a program that reads, walks, and builds JSON does the same
+with TOML. Why a library, not a module: TOML is parsed **char by char**
+(belongs in Go - the `json` lesson, a per-byte parser in the interpreter is
+too slow), and its opaque handle is a `KindObject`, which **only a Go
+library can mint** (`interpreter.ObjectVal` / `RegisterNamespacedObject`),
+never a `.j` module.
 
-The reference doc (`docs/modules/toml.md`) must include a section
-**contrasting INI with TOML** and stating plainly why `.ini` is not a
-supported format: INI has **no real standard** (every parser disagrees on
-comments, quoting, nesting), is **flat** (only one level of `[section]`,
-no arrays of tables or nested tables), and is **untyped** (every value is a
-bare string - no clear `int` / `float` / `bool` / datetime, so the reader
-guesses). TOML was designed to fix exactly those (a formal spec, typed
-values, nested and array-of-table structure), so it is the one config
+Surface, mirroring `json`:
+
+- **`toml.decode(text) -> toml.Value`** - parse to an opaque `toml.Value`
+  (a `KindObject`, the sibling of `json.Value`; `convert.typeOf` ->
+  `"object"`, `convert.objectType` -> `"toml.Value"`).
+- **Walk** - `(node, pointer)` accessors reported in `list` / `map`
+  vocabulary, the **same names as `json`**: `toml.typeOf` / `get` / `has` /
+  `keys` / `length` / `asInt` / `asFloat` / `asString` / `asBool`, plus
+  **`toml.asDatetime`** (RFC 3339, backed by `time.Time`) for TOML's native
+  date-times - the one type JSON lacks. The **path** is **JSON Pointer**
+  (RFC 6901, `/server/ports/0`, `~0` / `~1` escaping): TOML has no
+  standardized document-pointer of its own, and a dotted path would be
+  ambiguous when a key itself contains a `.` (a quoted key `"a.b"`), so the
+  addressing reuses `json`'s - identical `/`-syntax, so a program that walks
+  JSON walks TOML unchanged.
+- **Write** - a non-mutating write surface, fresh handle per call (strict /
+  no-vivify, `-` end-marker), mirroring `json`'s: `toml.map` / `toml.list`
+  constructors + `toml.set` / `insert` / `append` / `remove` / `move`.
+- **`toml.encode(v)` / `toml.encodePretty(v) -> string`** - render a
+  `toml.Value` (or a native `map` / `list` / scalar) back to TOML text, so
+  encode / decode round-trips.
+
+TOML's typed, section-oriented grammar - `[table]`, `[[array of tables]]`,
+`key = value`, dotted keys, inline tables, multiline strings, date-times -
+maps onto this model; the typed numbers and date-times are exactly why TOML
+is the config format Jennifer ships (`yaml` / `xml` are the heavier M20
+siblings, [M20.2](#m202---xml) / [M20.3](#m203---yaml)). Installed through
+`internal/stdlib.InstallAll` like every library; TinyGo-clean (pure text,
+no `net` / `os`). Sequenced here, before `httpd`
+([M18.9](#m189---httpd)), because the server reads its configuration
+from TOML - it is the one Go **system library** in the otherwise
+Jennifer-coded M18 run, placed for that dependency (it also belongs to the
+M20 data-format library family).
+
+Discipline is the **library** shape, not the module shape:
+`internal/lib/toml/` (parser + encoder + `toml.Value` object registration
+via `RegisterNamespacedObject`), Go unit tests
+(`internal/lib/toml/toml_test.go`), a row in `docs/libraries/index.md` and a
+`docs/libraries/cheatsheet.md` row per builtin, and a reference doc
+`docs/libraries/toml.md`. That doc must include a section **contrasting INI
+with TOML** and stating plainly why `.ini` is not a supported format: INI
+has **no real standard** (parsers disagree on comments, quoting, nesting),
+is **flat** (one level of `[section]`, no arrays of tables or nested
+tables), and is **untyped** (every value a bare string - no clear `int` /
+`float` / `bool` / datetime). TOML fixes all three, so it is the one config
 format Jennifer ships; `.ini` stays out (documented, not silently missing),
 a deferred tiny cousin only if real demand surfaces.
 
-### M18.9 - `httpd` module
+### M18.9 - `httpd`
 
-A pure-Jennifer HTTP server atop `net`, shipped as a module (same shape
-as the other M18 modules), not baked into the interpreter - the point
-where Jennifer becomes useful for serving content. Per-connection
-handlers run in `spawn` blocks (depends on **M16.0** concurrency) over the
-`net` TCP listener (**M16.2**); it can share HTTP request / response
-parsing with the M18.7 client. (Formerly the standalone M20.)
+The point where Jennifer becomes useful for *serving* content. It splits
+into a Go **engine** and a Jennifer **framework**, mirroring the split we
+already run twice - `testing` system-primitive + `.j` test framework, and
+`net` system-primitive + the `http` / `smtp` / `imap` client modules. The
+engine is a system library because parsing HTTP per request in the
+tree-walker is the wrong place for the hot path; Go's `net/http` already
+handles keep-alive, chunked transfer, TLS / HTTP-2, timeouts, and graceful
+shutdown correctly and fast. (The *client* `http.j` stays a `.j` module
+over `net` - one response, low volume - for the same reason inverted: a
+server multiplexes many concurrent requests and wants the Go engine.)
+(Formerly the standalone M20.)
 
-It reads its **configuration from `toml`** ([M18.8](#m188---toml-module),
-ordered just before it): listen address, routes / static roots, and the
-session / rate-limit knobs below come from a TOML config file rather than
-hard-coded constants - the first real consumer of the `toml` module.
+#### M18.9.1 - `httpd` system library (engine)
 
-It also **uses both memcache-backed reference modules** to round out a real
-serving stack: [`session`](#m1861---session-module-on-memcache) for
-cookie-keyed server-side sessions (a `Set-Cookie` session ID whose data
-lives in `memcache`), and [`ratelimit`](#m1862---ratelimit-module-on-memcache)
-as request throttling (per-client-IP `allow` check, `429` on deny) - so the
-server demonstrates config, sessions, and rate limiting end to end rather
-than leaving them as unused library shelfware. Both are optional wiring the
-handler opts into, not a hard `httpd` dependency.
+A Go-backed HTTP/1.1 server library (`use httpd;`) wrapping `net/http`.
+Build-tag split like `net`: the full engine on the default `jennifer`, a
+friendly-error stub on `jennifer-tiny` (no netdev in TinyGo's runtime).
+HTTP/2 comes for free over TLS from `net/http`; plaintext stays HTTP/1.1.
+
+**Pull-loop request model.** Jennifer has no first-class functions, so a
+handler cannot be a callback handed to Go. Instead the engine accepts and
+parses concurrently on Go's side and hands the interpreter one request at
+a time to process:
+
+```jennifer
+use httpd;
+def srv init httpd.listen(":8080");
+while (true) {
+    def req init httpd.accept($srv);          # blocks for the next request
+    httpd.respond($req, 200, "hello\n");       # sends the response
+}
+```
+
+This keeps the two concurrency worlds cleanly separated: Go owns the I/O
+concurrency (accept, parse, keep-alive), and the `.j` side opts into
+parallelism with its *own* `spawn` value-semantics snapshot when it wants
+per-request concurrency - the interpreter is never re-entered from a Go
+handler goroutine, so none of the spawn-snapshot machinery is at risk. A
+callback / route-registration engine was **rejected** for exactly this
+reason (record it in `docs/technical/rejected.md`).
+
+Surface (indicative): `httpd.listen` / `httpd.listenTLS(addr, cert, key)`
+-> a `httpd.Server` handle; `httpd.accept($srv) -> httpd.Request`;
+`httpd.Request` accessors (method, path, query, headers, body `bytes`,
+remote address); `httpd.respond($req, status, body)` and a
+header/streaming form; `httpd.serveFile` / `httpd.serveDir` over `fs`;
+`httpd.shutdown($srv)` for graceful drain; read/idle/write timeout and
+max-body knobs. Handles use the integer-into-a-registry pattern (shared
+state across copies) like `fs` / `net` / `os.Process`.
+
+#### M18.9.2 - `web` framework module + `jennifer server`
+
+The ergonomic "fun-to-have" layer: a `.j` module (`import "web.j";`) built
+on the `httpd` engine, dogfooding the libraries we have shipped. Because it
+is Jennifer code it does its own **name-based handler dispatch** with
+`CallByNameWith` (the mechanism `testing.run` already uses), so the engine
+never calls back into the interpreter - the framework pulls a request with
+`httpd.accept`, matches it against registered routes, and invokes the named
+handler method itself.
+
+```jennifer
+import "web.j";
+def app init web.new();
+web.get($app, "/users/:id", "showUser");     # dispatch by method name
+web.use($app, "logRequests");                  # middleware by name
+web.run($app, ":8080");
+```
+
+Surface: routing with path params (`/users/:id`) and method dispatch,
+middleware chains, query / form / JSON body parsing (via `json` and
+`toml`), cookies, and static serving. It **reads its configuration from
+`toml`** ([M18.8](#m188---toml-system-library), ordered just before it) -
+listen address, routes / static roots, session / rate-limit knobs from a
+config file, the first real consumer of the `toml` library. And it **wires
+both memcache-backed reference modules**:
+[`session`](#m1861---session-module-on-memcache) for cookie-keyed
+server-side sessions (a `Set-Cookie` session ID whose data lives in
+`memcache`) and [`ratelimit`](#m1862---ratelimit-module-on-memcache) for
+per-client-IP throttling (`allow` check, `429` on deny) - so a real serving
+stack demonstrates config, sessions, and rate limiting end to end instead
+of leaving them as shelfware. Both are opt-in wiring, not hard dependencies.
+
+**`jennifer server app.j`** is the Hugo-style convenience: it boots a `web`
+app from a file (with reload), the closest analog to `hugo server`. It
+lives in the default binary alongside `run` (net-backed, so absent from
+`jennifer-tiny`), and is the CLI face of the framework module.
 
 ### M18.10 - `flatdb` module
 
@@ -2409,27 +2515,25 @@ entry, a `modules/README.md` entry, a `JENNIFER.md` bullet, and a runnable
 
 ---
 
-## Path to 1.0.0 distribution (parallel track)
+## Requirements for 1.0.0 stable
 
 The core CI + release + packaging items that used to live here
 were promoted into M15.8 (the last step before Phase C). What
-stays on this parallel track is the post-M15.8 polish - items
-that can land any time and don't block any milestone:
+stays here are the distribution requirements for a stable 1.0.0
+that aren't themselves milestones - they can land any time and
+don't block any feature milestone:
 
-- **Homebrew tap** for macOS users.
-- **Snap** package.
-- **Nix flake** / Nix package.
 - **Cross-build for macOS / Windows.** Waits on the
   platform-portability work in the [horizon ideas](horizon.md); ships as
   soon as that lands.
 - **Real apt repository** (replacing the "GitHub Release
   artifact" install of the M15.8 `.deb`) if user demand
   warrants the maintenance.
-- **Snap / Flatpak**, **AppImage**, or any other Linux
-  distribution format Jennifer users actually ask for.
 
-Each of these ships when there's user demand and a maintainer
-willing to keep it green; they're not blocking anything.
+The extra Linux / macOS distribution formats (Homebrew, Snap,
+Nix, Flatpak, AppImage, ...) are not requirements; they live in
+the [horizon idea collection](horizon.md) and ship when there's
+user demand and a maintainer willing to keep one green.
 
 ---
 
