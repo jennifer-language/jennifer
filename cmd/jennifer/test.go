@@ -130,6 +130,12 @@ func loadForTest(path string) (*interpreter.Interpreter, int) {
 	}
 	in := interpreter.New()
 	installLibraries(in)
+	// Enable `import "..."` so a module that itself imports sibling modules can
+	// be tested through its overlay: local imports resolve relative to the test
+	// file's directory (a shipped overlay's sibling module), bare names through
+	// the default system module dir. Harmless for a file with no imports.
+	sm, _ := setupSysmoddir("")
+	in.EnableModules(baseDir, []string{sm.Dir}, loadModuleProgram, installLibraries)
 	if moduleContext {
 		in.SetModuleContext(true)
 	}
