@@ -35,6 +35,15 @@ so `import "NAME.j";` resolves without a path. Local modules resolve with
   closing tag. A writer, not a parser; pure Jennifer over `strings` and
   `lists`. See
   [`examples/modules/htmlwriter_demo.j`](../examples/modules/htmlwriter_demo.j).
+- **`markdown.j`** - render a small CommonMark subset (headings, bold /
+  italic, inline code, links, fenced code blocks, ordered / unordered lists)
+  to HTML and to styled terminal text. `markdown.toHtml(md)` renders through
+  the `htmlwriter` module (so escaping is automatic); `markdown.toAnsi(md)`
+  renders through the `ansi` module. Also authors Markdown text with
+  `markdown.header` / `style` / `link` / `bullets` / `numbered` / `codeBlock`,
+  and `markdown.table(headings, aligns, rows)` for GFM tables.
+  Pure Jennifer; the first module that imports sibling modules. See
+  [`examples/modules/markdown_demo.j`](../examples/modules/markdown_demo.j).
 - **`semver.j`** - strict Semantic Versioning 2.0.0: parse, compare, sort,
   and increment version numbers. `semver.parse(s)` / `isValid(s)` /
   `toString(v)`, `compare(a, b)` / `lt` / `eq` / `gt`, `isStable(v)` /

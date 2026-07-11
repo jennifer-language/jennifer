@@ -53,6 +53,7 @@
 - [`ansi`](modules/ansi.md)
 - [`csv`](modules/csv.md)
 - [`htmlwriter`](modules/htmlwriter.md)
+- [`markdown`](modules/markdown.md)
 - [`semver`](modules/semver.md)
 
 # Technical reference

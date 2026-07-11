@@ -1229,12 +1229,26 @@ of o.Result`).
 
 ### M18.3 - `markdown` module
 
-A lightweight `.j` renderer: Markdown to HTML, and to ANSI for terminal
-output (reusing the `ansi` module from M17.5). Line-oriented text
-orchestration - the shape a `.j` module does well - starting with a small
-CommonMark subset (headings, emphasis, links, lists, code spans / blocks)
-rather than the full spec. Documents are small, so per-line interpreter
-overhead is a non-issue.
+**Done.** A lightweight Markdown renderer (`modules/markdown.j`) for a small
+CommonMark subset - ATX headings, bold / italic emphasis, inline code,
+links, fenced code blocks, and ordered / unordered lists - with two output
+targets: `toHtml` renders through the `htmlwriter` module (M18.2), so
+escaping is automatic and the markup can't be malformed, and `toAnsi`
+renders through the `ansi` module (self-suppressing off a TTY). The inverse
+authoring helpers (`header` / `style` / `link` / `bullets` / `numbered` /
+`codeBlock`, plus `table` for GFM tables) build Markdown text, so a program
+can assemble and round-trip a document. Line-oriented
+block parsing (a `lineType` classifier plus per-kind handlers) over a small
+non-nesting inline scanner; documents are small, so per-line interpreter
+overhead is a non-issue. It is the first module that imports sibling modules,
+which surfaced that `jennifer test` did not enable the module system - now it
+does (local imports resolve relative to the test file, bare names through the
+default system module dir), so a module that imports other modules is
+testable through its overlay. Deliberately not full CommonMark: inline spans
+do not nest, and blockquotes / thematic breaks / images / reference links /
+tables are out. Reference doc [docs/modules/markdown.md](modules/markdown.md);
+overlay `modules/markdown_test.j` (100%); demo
+`examples/modules/markdown_demo.j`.
 
 ### M18.4 - `mail` module
 
