@@ -1643,9 +1643,25 @@ catalog + `SUMMARY` + `README` + `JENNIFER.md` entries, and
 
 ### M18.7 - `http` module
 
-A client over `net`. HTTPS needs net TLS ([M16.14](#m1614---net-tls)).
-Groups with the `httpd` server below; the two can share HTTP request /
-response parsing.
+**Done.** An `http` module (`modules/http.j`): an HTTP/1.1 client over `net`.
+`request(method, url, headers, body)` - method-agnostic, plus `get` / `post` /
+`put` / `patch` / `delete` / `head` / `options` shortcuts and a
+case-insensitive `header` reader - returns a `Response`
+(`status`, `statusText`, lowercased `headers` map, `body`). `http://` connects
+in the clear, `https://` via `net.connectTLS` ([M16.14](#m1614---net-tls)). It
+sends `Connection: close` and reads the whole response, decoding **both**
+framings - Content-Length and Transfer-Encoding: chunked - at the byte level, so
+the body is byte-exact: the complete body bytes are de-chunked / length-trimmed
+and decoded as one UTF-8 unit (text bodies round-trip exactly; a binary body
+raises rather than corrupts - a `bytes` accessor is a follow-on). A non-2xx
+status is a normal `Response`, not an error; redirects are returned, not
+followed. Tested: URL parsing, request building, and response parsing including
+chunked decoding in the overlay (`modules/http_test.j`, 100%); the full GET /
+JSON / POST-with-body-and-headers / chunked / 404 path against a real in-process
+`net/http` server in the Go suite (`TestHttpClient`). Groups with the `httpd`
+server ([M18.9](#m189---httpd-module)), which can share this request / response
+parsing. Reference doc [docs/modules/http.md](modules/http.md); demo
+`examples/modules/http_demo.j`.
 
 ### M18.7.1 - `gotify` module on top of `http` module
 

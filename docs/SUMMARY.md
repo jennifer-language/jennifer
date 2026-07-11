@@ -53,6 +53,7 @@
 - [`ansi`](modules/ansi.md)
 - [`csv`](modules/csv.md)
 - [`htmlwriter`](modules/htmlwriter.md)
+- [`http`](modules/http.md)
 - [`idna`](modules/idna.md)
 - [`imap`](modules/imap.md)
 - [`markdown`](modules/markdown.md)

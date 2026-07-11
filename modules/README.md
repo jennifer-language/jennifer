@@ -35,6 +35,15 @@ so `import "NAME.j";` resolves without a path. Local modules resolve with
   closing tag. A writer, not a parser; pure Jennifer over `strings` and
   `lists`. See
   [`examples/modules/htmlwriter_demo.j`](../examples/modules/htmlwriter_demo.j).
+- **`http.j`** - an HTTP/1.1 client over `net` (`https://` via TLS):
+  `http.request(method, url, headers, body)` (method-agnostic) and the
+  `http.get` / `post` / `put` / `patch` / `delete` / `head` / `options`
+  shortcuts return a `Response` (`status`, `statusText`,
+  lowercased `headers`, `body`), with `http.header(resp, name)` for a
+  case-insensitive read. Handles Content-Length and chunked framing; text
+  (UTF-8) bodies. Redirects are returned (3xx), not followed. Uses `net`, so the
+  **default `jennifer` binary only**. See
+  [`examples/modules/http_demo.j`](../examples/modules/http_demo.j).
 - **`markdown.j`** - render a small CommonMark subset (headings, bold /
   italic, inline code, links, fenced code blocks, ordered / unordered lists)
   to HTML and to styled terminal text. `markdown.toHtml(md)` renders through

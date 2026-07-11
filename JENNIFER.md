@@ -280,6 +280,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`htmlwriter`** - build an HTML element tree and render escaped HTML5:
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
   constructors, `render` / `renderAll`, `escape`. A writer, not a parser.
+- **`http`** - an HTTP/1.1 client over `net` (`https://` via TLS):
+  `http.request(method, url, headers, body)` (method-agnostic) plus
+  `get(url, headers)` / `post(url, contentType, body, headers)` / `put` /
+  `patch` / `delete` / `head` / `options` return an
+  `http.Response` (`status` / `statusText` / lowercased `headers` / `body`);
+  `http.header(resp, name)` reads a response header case-insensitively. Handles
+  Content-Length and chunked framing; text (UTF-8) bodies. Redirects returned,
+  not followed. **Default `jennifer` binary only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
   lists, code, GFM tables) to HTML (`markdown.toHtml`, through `htmlwriter`) and
   styled terminal text (`toAnsi`, through `ansi`); author Markdown with
