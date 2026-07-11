@@ -295,6 +295,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`semver`** - strict SemVer 2.0.0 over a `Version` struct: `semver.parse(s)` /
   `isValid` / `toString`, `compare` / `lt` / `eq` / `gt`, `isStable` /
   `isPrerelease`, `incMajor` / `incMinor` / `incPatch`, `sort`.
+- **`imap`** - receive mail (IMAP4rev1, RFC 3501) over `net`, a reading subset:
+  `imap.connect(opts)` -> `imap.Session`, then `selectMailbox(session, name)`
+  (count), `search(session)` (sequence numbers), `fetch(session, n)` (a whole
+  message), `logout(session)`, plus `imap.fetchAll(opts, mailbox)`. Handles
+  tagged responses and `{N}` literals; messages are strings for `mime.parse`.
+  Throws `Error` (kind `"imap"`) on `NO` / `BAD`. **Default `jennifer` binary
+  only** (`net`).
 - **`pop`** - receive mail (POP3, RFC 1939) over `net`: `pop.connect(opts)` ->
   `pop.Session`, then `stat` / `count` / `sizes` / `retrieve(session, n)` /
   `deleteMessage(session, n)` / `quit`, plus `pop.fetchAll(opts)` (every

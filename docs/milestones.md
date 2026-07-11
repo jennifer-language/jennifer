@@ -1347,9 +1347,27 @@ to end against an in-process fake POP3 server in the Go suite
 
 ### M18.4.4 - `imap` (receive)
 
-Planned. IMAP client (`LOGIN` / `SELECT` / `FETCH` / `SEARCH`) over `net` +
-TLS - the largest of the three protocols; retrieved messages parsed with
-`mime`.
+**Done.** IMAP4rev1 receive client (`modules/imap.j`) over `net`, a useful
+reading subset: `imap.connect(opts)` (greeting, optional STARTTLS, `LOGIN`),
+then `selectMailbox(name)` (returns the `EXISTS` count), `search()`
+(`SEARCH ALL` sequence numbers), `fetch(n)` (`FETCH n BODY.PEEK[]`, the whole
+message), `logout`, with `fetchAll(opts, mailbox)` for the common case. The
+two IMAP mechanics are handled: tagged commands / untagged `*` responses (a
+single fixed tag, safe for a synchronous client; `NO` / `BAD` throws `Error`
+kind `"imap"`), and `{N}` **literals** read by byte count rather than by line,
+so a `FETCH` body is returned intact. Literals are read as 7-bit / ASCII
+(MIME keeps mail ASCII); raw 8-bit is not yet byte-exact. Retrieved messages
+are strings for `mime.parse`; default-binary-only, with the same IDN guard.
+Tested: pure parsers (tag detection, literal length / extraction, `EXISTS` /
+`SEARCH`, quoting, tagged `OK` / `NO`) in the overlay (`modules/imap_test.j`,
+100%); the full session with literals end to end against an in-process fake
+IMAP server in the Go suite (`TestImapReceive`). Out of scope: partial fetch,
+`STORE` / `COPY` / `APPEND` / `EXPUNGE`, mailbox management, `IDLE`, SASL
+`AUTHENTICATE`. Reference doc [docs/modules/imap.md](modules/imap.md); demo
+`examples/modules/imap_demo.j`.
+
+With this the mail suite's clients are complete (`mime` + `smtp` + `pop` +
+`imap`); only the shared `idna` piece (M18.4.5) remains.
 
 ### M18.4.5 - `idna` (internationalized domains)
 
@@ -1363,9 +1381,9 @@ address, but only when the server does **not** advertise `SMTPUTF8` (RFC
 non-ASCII **local part** without SMTPUTF8 stays a hard error (it cannot be
 represented). Enabler: a `convert.toCodepoint(char)` / `convert.fromCodepoint(n)`
 pair (rune to / from its integer code point), which Punycode's bootstring
-arithmetic needs and Jennifer does not yet expose. Until this ships, `smtp`
-and `pop` (and later `imap`) fail loudly on a non-ASCII host or address rather
-than misrouting. Reusable beyond mail: URL hosts, DNS tools, any IDN.
+arithmetic needs and Jennifer does not yet expose. Until this ships, `smtp`,
+`pop`, and `imap` fail loudly on a non-ASCII host or address rather than
+misrouting. Reusable beyond mail: URL hosts, DNS tools, any IDN.
 
 ### M18.5 - `redis` module
 

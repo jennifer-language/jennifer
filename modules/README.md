@@ -68,6 +68,14 @@ so `import "NAME.j";` resolves without a path. Local modules resolve with
   (`jennifer-tiny` has no network stack). See
   [`examples/modules/smtp_demo.j`](../examples/modules/smtp_demo.j).
 
+- **`imap.j`** - receive mail (IMAP4rev1, RFC 3501) over `net`, a reading
+  subset: `imap.connect(opts)` -> `Session`, then `selectMailbox(name)` (message
+  count), `search()` (sequence numbers), `fetch(n)` (a whole message), `logout`,
+  with `fetchAll(opts, mailbox)` for the common case. Handles tagged responses
+  and `{N}` literals; retrieved messages are strings for `mime.parse`. Throws
+  `Error` (kind `"imap"`) on `NO` / `BAD`. Uses `net`, so the **default
+  `jennifer` binary only**. See
+  [`examples/modules/imap_demo.j`](../examples/modules/imap_demo.j).
 - **`pop.j`** - receive mail (POP3, RFC 1939) over `net`: `pop.connect(opts)`
   opens a session, then `stat` / `count` / `sizes` / `retrieve(n)` /
   `deleteMessage(n)` / `quit`, with `fetchAll(opts)` for the common "get every
