@@ -96,6 +96,15 @@ so `import "NAME.j";` resolves without a path. Local modules resolve with
   (a namespace can't hold a digit); throws `Error` (kind `"pop3"`) on `-ERR`.
   Uses `net`, so the **default `jennifer` binary only**. See
   [`examples/modules/pop_demo.j`](../examples/modules/pop_demo.j).
+- **`redis.j`** - a Redis client speaking RESP2 over `net`: commands go out as
+  RESP arrays of bulk strings, replies (`+OK` / `-ERR` / `:int` / `$bulk` /
+  `*array`) parse into a `Reply`. Typed helpers `redis.get` / `set` / `del` /
+  `exists` / `incr` / `decr` / `keys` / `ping`, plus a generic
+  `redis.command(session, args)` returning the raw `Reply` (walked like a
+  `json.Value`) for anything without a helper. `connect` does optional `AUTH` /
+  `SELECT`; a `-ERR` reply throws `Error` (kind `"redis"`). Uses `net`, so the
+  **default `jennifer` binary only**. See
+  [`examples/modules/redis_demo.j`](../examples/modules/redis_demo.j).
 
 Reference docs for each module live under
 [`docs/modules/`](../docs/modules/index.md). A new module also earns a bullet

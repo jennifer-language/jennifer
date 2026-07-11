@@ -1414,6 +1414,25 @@ overlays. Reference doc [docs/modules/idna.md](modules/idna.md); demo
 
 ### M18.5 - `redis` module
 
+**Done.** A `redis` module (`modules/redis.j`): a RESP2 client over `net`.
+Commands go out as RESP arrays of bulk strings (byte-counted lengths); replies
+parse through a pure, buffer-driven decoder (`parseComplete`) that handles
+simple strings, errors, integers, bulk strings (nil `$-1`), and recursive
+arrays, reporting an incomplete buffer so `readReply` reads until a whole reply
+has arrived. Typed helpers (`get` / `set` / `del` / `exists` / `incr` / `decr`
+/ `keys` / `ping`) keep the common path fully typed; a generic
+`command(session, args)` returns the raw `Reply` (`kind` / `str` / `num` /
+`items`), walked with accessors the same way a `json.Value` is
+([M16.16](#m1616---jsonvalue)). `connect` does optional `AUTH [user] password`
+and `SELECT db`; a `-ERR` reply throws a catchable `Error` (kind `"redis"`).
+Plaintext and `"tls"` (rediss, via net TLS) transports. Bulk values are read as
+UTF-8 text (byte-exact for ASCII / UTF-8; binary values want base64 until a
+byte-native read lands). Tested: the RESP encoder / decoder in the overlay
+(`modules/redis_test.j`, 100%) and the full networked session against an
+in-process RESP server in the Go suite (`TestRedisCommands`), so CI needs no
+Redis install. Reference doc [docs/modules/redis.md](modules/redis.md); demo
+`examples/modules/redis_demo.j`.
+
 A Redis client over `net`. RESP2 framing (`+OK`, `$len`, `*count`,
 `:int`, `-ERR`) parses cleanly in `.j`; commands go out as RESP arrays.
 Plaintext first (trusted network / localhost); `rediss://` TLS is a later

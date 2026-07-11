@@ -58,6 +58,7 @@
 - [`markdown`](modules/markdown.md)
 - [`mime`](modules/mime.md)
 - [`pop`](modules/pop.md)
+- [`redis`](modules/redis.md)
 - [`sasl`](modules/sasl.md)
 - [`semver`](modules/semver.md)
 - [`smtp`](modules/smtp.md)

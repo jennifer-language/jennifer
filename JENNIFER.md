@@ -318,6 +318,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   message, no delete). Retrieved messages are strings for `mime.parse`. Named
   `pop` because a namespace is letters-only (no digit). **Default `jennifer`
   binary only** (`net`).
+- **`redis`** - a Redis client speaking RESP2 over `net`: `redis.connect(opts)`
+  -> `redis.Session`, then typed helpers `get` / `set(session, k, v)` /
+  `del` / `exists` / `incr` / `decr` / `keys(session, pattern)` / `ping`, plus
+  a generic `redis.command(session, args)` returning a raw `redis.Reply`
+  (`kind` / `str` / `num` / `items`, walked like a `json.Value`) for any other
+  command. `connect` does optional `AUTH` / `SELECT`; a `-ERR` reply throws
+  `Error` (kind `"redis"`). **Default `jennifer` binary only** (`net`).
 - **`smtp`** - send mail (SMTP client) over `net`: `smtp.send(opts, from,
   recipients, message)` runs the dialogue (EHLO, optional STARTTLS / implicit
   TLS via `smtp.Options.security`, `AUTH PLAIN`, `MAIL FROM` / `RCPT TO` /
