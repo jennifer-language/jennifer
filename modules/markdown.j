@@ -3,10 +3,11 @@
 #
 # markdown.j - a lightweight Markdown renderer for a small CommonMark subset:
 # ATX headings, bold / italic emphasis, inline code, links, fenced code
-# blocks, and unordered / ordered lists. Renders to HTML (through the
-# `htmlwriter` module, so escaping is handled for you) and to styled terminal
-# text (through the `ansi` module). Pure Jennifer; line-oriented block parsing
-# with a small inline scanner.
+# blocks, unordered / ordered lists, and GFM tables. Renders to HTML (through
+# the `htmlwriter` module, so escaping is handled for you) and to styled
+# terminal text (through the `ansi` module). It also authors Markdown text
+# (header / style / link / list / codeBlock / table). Pure Jennifer;
+# line-oriented block parsing with a small inline scanner.
 #
 #     import "markdown.j" as markdown;
 #     io.printf("%s\n", markdown.toHtml("# Hi\n\nA **bold** word."));
@@ -30,14 +31,18 @@ def struct Span {
     url as string
 };
 
-# A block: a heading (with `level`), a paragraph or code block (in `text`), or
-# a list (`ordered` plus `items`, each an inline-text string).
+# A block: a heading (with `level`), a paragraph or code block (in `text`), a
+# list (`ordered` plus `items`), or a table (`headings` + `aligns` + `rows`,
+# each cell an inline-text string).
 def struct Block {
     kind as string,
     level as int,
     text as string,
     ordered as bool,
-    items as list of string
+    items as list of string,
+    headings as list of string,
+    aligns as list of string,
+    rows as list of list of string
 };
 
 # A parsed fenced code block plus the line index to resume scanning at
@@ -45,6 +50,12 @@ def struct Block {
 # value semantics rule out appending into a caller's list).
 def struct Fence {
     code as string,
+    next as int
+};
+
+# A parsed table block plus the line index to resume scanning at.
+def struct TableScan {
+    block as Block,
     next as int
 };
 
@@ -56,11 +67,24 @@ func span(kind as string, text as string, url as string) {
 
 func paraBlock(lines as list of string) {
     def joined as string init strings.join($lines, " ");
-    return Block{kind: "paragraph", level: 0, text: $joined, ordered: false, items: []};
+    return Block{kind: "paragraph", level: 0, text: $joined, ordered: false,
+        items: [], headings: [], aligns: [], rows: []};
 }
 
 func listBlock(items as list of string, ordered as bool) {
-    return Block{kind: "list", level: 0, text: "", ordered: $ordered, items: $items};
+    return Block{kind: "list", level: 0, text: "", ordered: $ordered,
+        items: $items, headings: [], aligns: [], rows: []};
+}
+
+func tableBlock(headings as list of string, aligns as list of string,
+        rows as list of list of string) {
+    return Block{kind: "table", level: 0, text: "", ordered: false, items: [],
+        headings: $headings, aligns: $aligns, rows: $rows};
+}
+
+func codeBlockNode(text as string) {
+    return Block{kind: "code", level: 0, text: $text, ordered: false,
+        items: [], headings: [], aligns: [], rows: []};
 }
 
 # --- inline scanner (private) --------------------------------------
@@ -222,6 +246,114 @@ func lineType(trimmed as string, line as string) {
     return "plain";
 }
 
+# splitCells splits one table row into trimmed cell strings, dropping an
+# optional leading / trailing `|` and treating `\|` as a literal pipe.
+func splitCells(row as string) {
+    def cells as list of string init [];
+    def cs as list of string init strings.chars(strings.trim($row));
+    def n as int init len($cs);
+    def start as int init 0;
+    def end as int init $n;
+    if ($n > 0 and $cs[0] == "|") {
+        $start = 1;
+    }
+    if ($end > $start and $cs[$end - 1] == "|") {
+        $end = $end - 1;
+    }
+    def buf as string init "";
+    def i as int init $start;
+    while ($i < $end) {
+        def c as string init $cs[$i];
+        if ($c == "\\" and $i + 1 < $end and $cs[$i + 1] == "|") {
+            $buf = $buf + "|";
+            $i = $i + 2;
+            continue;
+        }
+        if ($c == "|") {
+            $cells[] = strings.trim($buf);
+            $buf = "";
+            $i = $i + 1;
+            continue;
+        }
+        $buf = $buf + $c;
+        $i = $i + 1;
+    }
+    $cells[] = strings.trim($buf);
+    return $cells;
+}
+
+# cellAlign reads a delimiter cell (`:---`, `---:`, `:---:`, `---`) as an
+# alignment name.
+func cellAlign(cell as string) {
+    def t as string init strings.trim($cell);
+    def left as bool init strings.startsWith($t, ":");
+    def right as bool init strings.endsWith($t, ":");
+    if ($left and $right) {
+        return "center";
+    }
+    if ($right) {
+        return "right";
+    }
+    if ($left) {
+        return "left";
+    }
+    return "none";
+}
+
+# parseAligns reads the per-column alignments from a delimiter row.
+func parseAligns(delim as string) {
+    def out as list of string init [];
+    for (def cell in splitCells($delim)) {
+        $out[] = cellAlign($cell);
+    }
+    return $out;
+}
+
+# isDelimiterRow reports whether a line is a table delimiter row: every cell is
+# an optional-colon run of dashes.
+func isDelimiterRow(s as string) {
+    def t as string init strings.trim($s);
+    if (not strings.contains($t, "-")) {
+        return false;
+    }
+    for (def cell in splitCells($t)) {
+        if (not regex.matches("^:?-+:?$", strings.trim($cell))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+# looksLikeTable reports whether lines[i] opens a table: a pipe-bearing header
+# row over a delimiter row of the same column count.
+func looksLikeTable(lines as list of string, i as int) {
+    if ($i + 1 >= len($lines)) {
+        return false;
+    }
+    if (not strings.contains($lines[$i], "|")) {
+        return false;
+    }
+    if (not isDelimiterRow($lines[$i + 1])) {
+        return false;
+    }
+    return len(splitCells($lines[$i])) == len(parseAligns($lines[$i + 1]));
+}
+
+# tableFrom parses the table opening at line `i` (header, delimiter, then data
+# rows until a blank or pipe-less line) into a block plus the resume index.
+func tableFrom(lines as list of string, i as int) {
+    def headings as list of string init splitCells($lines[$i]);
+    def aligns as list of string init parseAligns($lines[$i + 1]);
+    def rows as list of list of string init [];
+    def n as int init len($lines);
+    def j as int init $i + 2;
+    while ($j < $n and len(strings.trim($lines[$j])) > 0 and strings.contains($lines[$j], "|")) {
+        $rows[] = splitCells($lines[$j]);
+        $j = $j + 1;
+    }
+    return TableScan{block: tableBlock($headings, $aligns, $rows), next: $j};
+}
+
 # parseBlocks splits Markdown text into a list of blocks, line by line. The two
 # flush guards at the top close an open paragraph or list before a line that
 # does not continue it, so each block type's handler only appends.
@@ -237,8 +369,11 @@ func parseBlocks(md as string) {
     while ($i < $n) {
         def line as string init $lines[$i];
         def lt as string init lineType(strings.trim($line), $line);
-        # A paragraph continues only across a plain line.
-        if (not ($lt == "plain") and len($para) > 0) {
+        # A table opens on a pipe row over a delimiter row; it reads as "plain"
+        # but needs the two-line lookahead lineType cannot do.
+        def isTable as bool init ($lt == "plain") and looksLikeTable($lines, $i);
+        # A paragraph continues only across a plain, non-table line.
+        if ((not ($lt == "plain") or $isTable) and len($para) > 0) {
             $blocks[] = paraBlock($para);
             $para = [];
         }
@@ -255,7 +390,7 @@ func parseBlocks(md as string) {
         }
         if ($lt == "fence") {
             def f as Fence init collectFence($lines, $i);
-            $blocks[] = Block{kind: "code", level: 0, text: $f.code, ordered: false, items: []};
+            $blocks[] = codeBlockNode($f.code);
             $i = $f.next;
             continue;
         }
@@ -273,6 +408,12 @@ func parseBlocks(md as string) {
             $i = $i + 1;
             continue;
         }
+        if ($isTable) {
+            def ts as TableScan init tableFrom($lines, $i);
+            $blocks[] = $ts.block;
+            $i = $ts.next;
+            continue;
+        }
         $para[] = strings.trim($line);
         $i = $i + 1;
     }
@@ -286,7 +427,8 @@ func parseBlocks(md as string) {
 }
 
 func headingBlock(level as int, text as string) {
-    return Block{kind: "heading", level: $level, text: $text, ordered: false, items: []};
+    return Block{kind: "heading", level: $level, text: $text, ordered: false,
+        items: [], headings: [], aligns: [], rows: []};
 }
 
 # collectFence gathers the fenced code block opening at line `open` and returns
@@ -346,8 +488,61 @@ func linkNode(text as string, url as string) {
     return html.element("a", $attrs, $kids);
 }
 
+# alignOf returns the alignment for column `i`, or "none" past the list end.
+func alignOf(aligns as list of string, i as int) {
+    if ($i < len($aligns)) {
+        return $aligns[$i];
+    }
+    return "none";
+}
+
+# cellNode builds a `th` / `td` with inline-parsed content and an `align`
+# attribute (omitted for "none").
+func cellNode(tag as string, text as string, align as string) {
+    def attrs as list of html.Attr init [];
+    if (not ($align == "none")) {
+        $attrs[] = html.attr("align", $align);
+    }
+    return html.element($tag, $attrs, inlineToNodes(parseInline($text)));
+}
+
+# tableRowNode builds one `tr` of `tag` cells (`th` for the header, `td` for
+# data), exactly `cols` columns: a short row pads with empty cells, a long one
+# is truncated.
+func tableRowNode(tag as string, cells as list of string, aligns as list of string, cols as int) {
+    def tds as list of html.Node init [];
+    def i as int init 0;
+    while ($i < $cols) {
+        def text as string init "";
+        if ($i < len($cells)) {
+            $text = $cells[$i];
+        }
+        $tds[] = cellNode($tag, $text, alignOf($aligns, $i));
+        $i = $i + 1;
+    }
+    return html.element("tr", [], $tds);
+}
+
+# tableNode renders a table block as `<table><thead>...<tbody>...`.
+func tableNode(b as Block) {
+    def cols as int init len($b.headings);
+    def head as list of html.Node init [];
+    $head[] = tableRowNode("th", $b.headings, $b.aligns, $cols);
+    def body as list of html.Node init [];
+    for (def row in $b.rows) {
+        $body[] = tableRowNode("td", $row, $b.aligns, $cols);
+    }
+    def parts as list of html.Node init [];
+    $parts[] = html.element("thead", [], $head);
+    $parts[] = html.element("tbody", [], $body);
+    return html.element("table", [], $parts);
+}
+
 # blockToNode renders one block to an htmlwriter node.
 func blockToNode(b as Block) {
+    if ($b.kind == "table") {
+        return tableNode($b);
+    }
     if ($b.kind == "heading") {
         def tag as string init "h" + convert.toString($b.level);
         return html.element($tag, [], inlineToNodes(parseInline($b.text)));
@@ -418,8 +613,110 @@ func indentLines(s as string, prefix as string) {
     return $out;
 }
 
+# cellVisWidth is the visible width of a rendered cell (styling stripped, so
+# escape codes do not count).
+func cellVisWidth(text as string) {
+    return len(ansi.strip(inlineToAnsi(parseInline($text))));
+}
+
+# widenAt grows column `c`'s width to at least `w` (columns past the header
+# count are ignored).
+func widenAt(widths as list of int, c as int, w as int) {
+    if ($c < len($widths) and $w > $widths[$c]) {
+        $widths[$c] = $w;
+    }
+    return $widths;
+}
+
+# colWidths is the max visible width of each column over the header and rows.
+func colWidths(b as Block) {
+    def widths as list of int init [];
+    def i as int init 0;
+    while ($i < len($b.headings)) {
+        $widths[] = cellVisWidth($b.headings[$i]);
+        $i = $i + 1;
+    }
+    for (def row in $b.rows) {
+        def c as int init 0;
+        while ($c < len($row)) {
+            $widths = widenAt($widths, $c, cellVisWidth($row[$c]));
+            $c = $c + 1;
+        }
+    }
+    return $widths;
+}
+
+# padCell pads `styled` (whose visible width is `plain`) to `width` per
+# alignment.
+func padCell(styled as string, plain as int, width as int, align as string) {
+    def gap as int init $width - $plain;
+    if ($gap <= 0) {
+        return $styled;
+    }
+    if ($align == "right") {
+        return strings.repeat(" ", $gap) + $styled;
+    }
+    if ($align == "center") {
+        def left as int init $gap // 2;
+        return strings.repeat(" ", $left) + $styled + strings.repeat(" ", $gap - $left);
+    }
+    return $styled + strings.repeat(" ", $gap);
+}
+
+# ansiRow renders one ` | `-separated row padded to the column widths; the
+# header row is bold.
+func ansiRow(cells as list of string, aligns as list of string,
+        widths as list of int, bold as bool) {
+    def out as string init "";
+    def i as int init 0;
+    while ($i < len($widths)) {
+        if ($i > 0) {
+            $out = $out + " | ";
+        }
+        def text as string init "";
+        if ($i < len($cells)) {
+            $text = $cells[$i];
+        }
+        def styled as string init inlineToAnsi(parseInline($text));
+        if ($bold) {
+            $styled = ansi.bold($styled);
+        }
+        $out = $out + padCell($styled, cellVisWidth($text), $widths[$i], alignOf($aligns, $i));
+        $i = $i + 1;
+    }
+    return $out;
+}
+
+# ansiDivider renders the `---+---` rule under the header row.
+func ansiDivider(widths as list of int) {
+    def out as string init "";
+    def i as int init 0;
+    while ($i < len($widths)) {
+        if ($i > 0) {
+            $out = $out + "-+-";
+        }
+        $out = $out + strings.repeat("-", $widths[$i]);
+        $i = $i + 1;
+    }
+    return $out;
+}
+
+# tableToAnsi renders a table block as aligned terminal columns.
+func tableToAnsi(b as Block) {
+    def widths as list of int init colWidths($b);
+    def out as string init ansiRow($b.headings, $b.aligns, $widths, true);
+    $out = $out + "\n" + ansiDivider($widths);
+    for (def row in $b.rows) {
+        $out = $out + "\n" + ansiRow($row, $b.aligns, $widths, false);
+    }
+    return $out;
+}
+
 # blockToAnsi renders one block to terminal text.
 func blockToAnsi(b as Block) {
+    if ($b.kind == "table") {
+        return tableToAnsi($b);
+    }
     if ($b.kind == "heading") {
         return ansi.bold(inlineToAnsi(parseInline($b.text)));
     }

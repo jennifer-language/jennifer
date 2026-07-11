@@ -50,6 +50,7 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Unordered list       | `- x` / `* x` / `+ x`           | `<ul><li>`                  |
 | Ordered list         | `1. x`                          | `<ol><li>`                  |
 | Fenced code block    | ` ``` ` ... ` ``` `             | `<pre><code>`               |
+| Table (GFM)          | `\| a \| b \|` + `\| --- \| --- \|` row | `<table>` (aligned terminal columns in ANSI) |
 
 | Inline    | Syntax          | HTML                  | ANSI            |
 | --------- | --------------- | --------------------- | --------------- |
@@ -131,10 +132,12 @@ cells are dropped, so every row is the same width. A `|` in a cell is escaped
 to `\|` and a newline becomes a space, so cell content can't break the table.
 An `align` value outside the four names throws a catchable `value` error.
 
-Note the asymmetry: `table` emits GFM tables for other renderers (GitHub, a
-docs site), but tables are **not** in the subset this module *reads*, so
-`toHtml(markdown.table(...))` does not render them back to `<table>` - the
-other authoring helpers round-trip, `table` does not.
+The reader understands GFM tables too, so an authored table round-trips:
+`toHtml(markdown.table(...))` renders a `<table>` (with per-column `align`),
+and `toAnsi` renders aligned terminal columns. A parsed table needs a header
+row, a delimiter row (`| --- | :--: |`), and its data rows; cell content is
+inline-parsed (emphasis / code / links work in cells), and a table interrupts
+an open paragraph.
 
 ## Not supported
 
@@ -144,7 +147,7 @@ This is a subset, chosen to stay small and TinyGo-clean:
   link's text is taken as plain text, so `**a `b`**` does not render the
   inner code span.
 - No blockquotes, thematic breaks (`---`), images, reference links,
-  autolinks, HTML passthrough, tables, or setext (underlined) headings.
+  autolinks, HTML passthrough, or setext (underlined) headings.
 - No nested / indented lists; a list is a flat run of same-kind items.
 
 For anything beyond this subset, render with an external tool. The module is

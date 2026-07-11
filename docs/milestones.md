@@ -1231,8 +1231,10 @@ of o.Result`).
 
 **Done.** A lightweight Markdown renderer (`modules/markdown.j`) for a small
 CommonMark subset - ATX headings, bold / italic emphasis, inline code,
-links, fenced code blocks, and ordered / unordered lists - with two output
-targets: `toHtml` renders through the `htmlwriter` module (M18.2), so
+links, fenced code blocks, ordered / unordered lists, and GFM tables - with
+two output targets: `toHtml` renders through the `htmlwriter` module (M18.2)
+(tables to `<table>` with per-column alignment, ANSI tables as aligned
+terminal columns), so
 escaping is automatic and the markup can't be malformed, and `toAnsi`
 renders through the `ansi` module (self-suppressing off a TTY). The inverse
 authoring helpers (`header` / `style` / `link` / `bullets` / `numbered` /
@@ -1245,8 +1247,8 @@ which surfaced that `jennifer test` did not enable the module system - now it
 does (local imports resolve relative to the test file, bare names through the
 default system module dir), so a module that imports other modules is
 testable through its overlay. Deliberately not full CommonMark: inline spans
-do not nest, and blockquotes / thematic breaks / images / reference links /
-tables are out. Reference doc [docs/modules/markdown.md](modules/markdown.md);
+do not nest, and blockquotes / thematic breaks / images / reference links are
+out. Reference doc [docs/modules/markdown.md](modules/markdown.md);
 overlay `modules/markdown_test.j` (100%); demo
 `examples/modules/markdown_demo.j`.
 

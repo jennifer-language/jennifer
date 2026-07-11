@@ -233,3 +233,91 @@ func testPrivateAlignSep() {
     testing.assertEqual(alignSep(""), "---");
     testing.assertEqual(alignSep("none"), "---");
 }
+
+# --- table parsing (white-box + public) ---
+
+func testSplitCells() {
+    def c as list of string init splitCells("| a | b\\|c | d |");
+    testing.assertEqual(len($c), 3);
+    testing.assertEqual($c[0], "a");
+    testing.assertEqual($c[1], "b|c");   # escaped pipe is literal
+    testing.assertEqual($c[2], "d");
+}
+
+func testDelimiterRowDetection() {
+    testing.assertTrue(isDelimiterRow("| --- | :---: |"));
+    testing.assertTrue(isDelimiterRow("---"));
+    testing.assertFalse(isDelimiterRow("| a | b |"));
+    testing.assertFalse(isDelimiterRow(""));
+}
+
+func testParseAligns() {
+    def a as list of string init parseAligns("| :--- | ---: | :---: | --- |");
+    testing.assertEqual($a[0], "left");
+    testing.assertEqual($a[1], "right");
+    testing.assertEqual($a[2], "center");
+    testing.assertEqual($a[3], "none");
+}
+
+func testParseBlocksTable() {
+    def blocks as list of Block init parseBlocks("| A | B |\n| --- | ---: |\n| 1 | 2 |\n| 3 | 4 |");
+    testing.assertEqual(len($blocks), 1);
+    testing.assertEqual($blocks[0].kind, "table");
+    testing.assertEqual(len($blocks[0].headings), 2);
+    testing.assertEqual($blocks[0].aligns[1], "right");
+    testing.assertEqual(len($blocks[0].rows), 2);
+    testing.assertEqual($blocks[0].rows[0][1], "2");
+}
+
+func testTableInterruptsParagraph() {
+    def blocks as list of Block init parseBlocks("intro\n| a | b |\n| --- | --- |\n| 1 | 2 |");
+    testing.assertEqual(len($blocks), 2);
+    testing.assertEqual($blocks[0].kind, "paragraph");
+    testing.assertEqual($blocks[1].kind, "table");
+}
+
+# A pipe line with no delimiter row underneath is an ordinary paragraph.
+func testPipeLineWithoutDelimiterIsParagraph() {
+    def blocks as list of Block init parseBlocks("a | b | c");
+    testing.assertEqual(len($blocks), 1);
+    testing.assertEqual($blocks[0].kind, "paragraph");
+}
+
+func testHtmlTable() {
+    def src as string init "| N | S |\n| :--- | ---: |\n| Ada | 95 |";
+    testing.assertEqual(toHtml($src),
+        "<table><thead><tr><th align=\"left\">N</th><th align=\"right\">S</th></tr></thead>" +
+        "<tbody><tr><td align=\"left\">Ada</td><td align=\"right\">95</td></tr></tbody></table>");
+}
+
+func testHtmlTableCellsAreInline() {
+    def src as string init "| a |\n| --- |\n| **b** & `c<d>` |";
+    testing.assertEqual(toHtml($src),
+        "<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>" +
+        "<strong>b</strong> &amp; <code>c&lt;d&gt;</code>" +
+        "</td></tr></tbody></table>");
+}
+
+func testHtmlTableShortRowPads() {
+    def src as string init "| A | B | C |\n| --- | --- | --- |\n| only |";
+    testing.assertEqual(toHtml($src),
+        "<table><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead>" +
+        "<tbody><tr><td>only</td><td></td><td></td></tr></tbody></table>");
+}
+
+func testAnsiTableAligns() {
+    # Columns align to the widest cell; right column is right-padded, divider rules.
+    def src as string init "| step | ms |\n| :--- | ---: |\n| parse | 12 |\n| render | 8 |";
+    testing.assertEqual(ansi.strip(toAnsi($src)),
+        "step   | ms\n-------+---\nparse  | 12\nrender |  8");
+}
+
+# Authored tables round-trip through the reader now.
+func testTableRoundTripsToHtml() {
+    def rows as list of list of string init [];
+    $rows[] = ["1", "2"];
+    def src as string init table(["A", "B"], ["left", "right"], $rows);
+    testing.assertEqual(toHtml($src),
+        "<table><thead><tr><th align=\"left\">A</th><th align=\"right\">B</th></tr></thead>" +
+        "<tbody><tr><td align=\"left\">1</td><td align=\"right\">2</td></tr></tbody></table>");
+}

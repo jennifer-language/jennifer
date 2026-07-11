@@ -35,4 +35,9 @@ $rows[] = ["parse", "12", "fast"];
 $rows[] = ["render", "8", "faster"];
 def cols as list of string init ["step", "ms", "note"];
 def aligns as list of string init ["left", "right", "none"];
-io.printf("=== authored table ===\n%s\n", markdown.table($cols, $aligns, $rows));
+def tbl as string init markdown.table($cols, $aligns, $rows);
+io.printf("=== authored table ===\n%s\n\n", $tbl);
+
+# The reader round-trips a table: author it, then render both ways.
+io.printf("=== that table as HTML ===\n%s\n\n", markdown.toHtml($tbl));
+io.printf("=== that table as ANSI ===\n%s\n", markdown.toAnsi($tbl));
