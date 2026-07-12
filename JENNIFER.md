@@ -287,6 +287,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`csv`** - RFC 4180: `csv.parse(s)` / `format(rows)` (`parseWith` /
   `formatWith` for any single-character delimiter, e.g. TSV), plus `toRecords` /
   `fromRecords` for header-keyed `map of string to string`. Quoting-aware.
+- **`flatdb`** - a file-backed JSON store over `json` + `fs`. `flatdb.open(path)`
+  -> value-semantic `DB` (empty if the file is absent); query / edit by JSON
+  Pointer (`get` / `has` / `keys` / `length`; the fresh-`DB`-returning `set` /
+  `append` / `remove`); `flatdb.save(db)` writes back with a crash-atomic
+  temp+`rename`. Values are `json.Value`s (`json.decode` for scalars). Not a
+  database engine - crash-atomic snapshotting of small data. Both binaries.
 - **`htmlwriter`** - build an HTML element tree and render escaped HTML5:
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
   constructors, `render` / `renderAll`, `escape`. A writer, not a parser.

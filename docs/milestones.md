@@ -1889,7 +1889,8 @@ a deferred tiny cousin only if real demand surfaces.
 
 ### M18.9 - `httpd`
 
-The point where Jennifer becomes useful for *serving* content. It splits
+**Status:** done (both sub-milestones shipped). The point where Jennifer
+becomes useful for *serving* content. It splits
 into a Go **engine** and a Jennifer **framework**, mirroring the split we
 already run twice - `testing` system-primitive + `.j` test framework, and
 `net` system-primitive + the `http` / `smtp` / `imap` client modules. The
@@ -1986,7 +1987,7 @@ lives in the default binary alongside `run` (net-backed, so absent from
 
 ### M18.10 - `flatdb` module
 
-A file-backed JSON document store as a `.j` module - the "embed a small
+**Done.** A file-backed JSON document store as a `.j` module - the "embed a small
 store" need, built from parts that already exist: `json`
 ([M16.9](#m169---json)) for the data and `fs` for the file. Load once,
 query and mutate in memory, write back atomically. It is deliberately *not*
