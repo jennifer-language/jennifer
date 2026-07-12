@@ -60,6 +60,13 @@ so `import "NAME.j";` resolves without a path. Local modules resolve with
   those (never committed). Uses `net` (via `http`), so the **default `jennifer`
   binary only**. See
   [`examples/modules/gotify_demo.j`](../examples/modules/gotify_demo.j).
+- **`gpio.j`** - Raspberry-Pi (and any Linux SBC) GPIO over sysfs, with `fs` as
+  the whole backend. Stateless, pin-keyed: `gpio.setup(pin, "in"/"out")`,
+  `gpio.write(pin, 0/1)`, `gpio.read(pin)`, `gpio.release(pin)`. The sysfs root
+  is `/sys/class/gpio`, overridable with the `JENNIFER_GPIO_BASE` env var (for
+  a non-standard mount or a mock tree under test). Off a GPIO-capable host every
+  call throws a clear `Error{kind: "gpio"}` rather than crashing. Runs on both
+  binaries. See [`examples/modules/gpio_demo.j`](../examples/modules/gpio_demo.j).
 - **`rest.j`** - an ergonomic REST layer over `http` + `json`. A value-semantic
   `rest.Client` (base URL + default headers) and verbs `rest.get` / `post` /
   `put` / `patch` / `delete` returning a `rest.Response` (`status`, `headers`,

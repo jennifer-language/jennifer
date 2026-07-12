@@ -2042,7 +2042,7 @@ transactional.
 
 ### M18.11 - `gpio` module
 
-Raspberry-Pi (and any Linux SBC) GPIO as a **pure `.j` module** over
+**Done.** Raspberry-Pi (and any Linux SBC) GPIO as a **pure `.j` module** over
 sysfs - the physical-computing / IoT-teaching use case, with no core
 changes, no system library, and no platform build-tag. `/sys/class/gpio`
 is plain files, so `fs` is the whole backend: export a pin, set its

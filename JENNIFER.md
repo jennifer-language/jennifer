@@ -310,6 +310,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `http.Response` (a bad token is a `4xx` value, not a crash). Value-semantic
   `gotify.Config{url, token}`, caller-supplied. **Default `jennifer` binary
   only** (`net`).
+- **`gpio`** - Raspberry-Pi / Linux-SBC GPIO over sysfs (`fs` backend).
+  Stateless, pin-keyed: `gpio.setup(pin, "in"/"out")` / `write(pin, 0/1)` /
+  `read(pin)` / `release(pin)`. Root `/sys/class/gpio`, overridable via the
+  `JENNIFER_GPIO_BASE` env var (`os.setEnv`, e.g. for a mock). Off a
+  GPIO-capable host, calls throw `Error{kind: "gpio"}` clearly. Both binaries.
 - **`rest`** - an ergonomic REST layer over `http` + `json`: a value-semantic
   `rest.Client{baseUrl, headers}` and `rest.get(c, path, query)` / `post(c,
   path, contentType, body)` / `put` / `patch` / `delete` -> `rest.Response`

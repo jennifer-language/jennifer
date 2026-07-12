@@ -56,6 +56,7 @@
 - [`csv`](modules/csv.md)
 - [`flatdb`](modules/flatdb.md)
 - [`gotify`](modules/gotify.md)
+- [`gpio`](modules/gpio.md)
 - [`htmlwriter`](modules/htmlwriter.md)
 - [`http`](modules/http.md)
 - [`idna`](modules/idna.md)
