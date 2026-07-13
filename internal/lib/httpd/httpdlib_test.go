@@ -6,7 +6,9 @@
 package httpdlib
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -222,5 +224,43 @@ func TestShutdownUnblocksAccept(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Error("accept did not unblock on shutdown")
+	}
+}
+
+// TestUnixSocketListen serves over a Unix domain socket (httpd.listen("unix:..."))
+// and drives it with an http.Client that dials the socket - the nginx
+// reverse-proxy path.
+func TestUnixSocketListen(t *testing.T) {
+	ResetForTest()
+	sock := filepath.Join(t.TempDir(), "httpd.sock")
+	srv, err := listenFn(noCtx, []Value{interpreter.StringVal("unix:" + sock)})
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+
+	// The bound address is the socket path.
+	addrV, _ := addressFn(noCtx, []Value{srv})
+	if addrV.Str != sock {
+		t.Errorf("address = %q, want %q", addrV.Str, sock)
+	}
+
+	serveOnce(srv, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("over-unix")})
+	})
+
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+		},
+	}}
+	resp, err := client.Get("http://unix/whatever")
+	if err != nil {
+		t.Fatalf("GET over unix: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "over-unix" {
+		t.Errorf("body = %q", string(body))
 	}
 }

@@ -54,7 +54,7 @@ for (def i in lists.range(0, 4)) {
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `httpd.listen(addr)` | `httpd.Server` | Start listening (`"127.0.0.1:8080"`, `":0"` for an ephemeral port). |
+| `httpd.listen(addr)` | `httpd.Server` | Start listening. `"127.0.0.1:8080"` (TCP), `":0"` (ephemeral TCP port), or `"unix:/run/app.sock"` (a Unix domain socket). |
 | `httpd.listenTLS(addr, cert, key)` | `httpd.Server` | HTTPS; `cert` / `key` are PEM `bytes`. HTTP/2 negotiated automatically. |
 | `httpd.address(srv)` | `string` | The actual bound address (resolve `":0"` to the chosen port). |
 | `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Errors once the server is shut down. |
@@ -122,6 +122,57 @@ while (true) {
 `httpd.accept` (they get an error so their loops can exit), and lets in-flight
 requests finish before returning. A typical server installs a signal handler
 (via `os`) that calls `shutdown`, or shuts down after a sentinel request.
+
+## Behind a reverse proxy (nginx)
+
+In production an `httpd` / `web` app usually sits behind nginx, which
+terminates TLS, serves static assets, buffers slow clients, and can load
+balance. nginx speaks plain HTTP to the app over either a **TCP port** or a
+**Unix domain socket** - `httpd.listen` supports both.
+
+**TCP port.** The app listens on a local port; nginx proxies to it:
+
+```jennifer
+def srv as httpd.Server init httpd.listen("127.0.0.1:8080");
+```
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name app.example;
+    location /static/ { root /srv/app; }        # nginx serves assets directly
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
+```
+
+**Unix domain socket.** No TCP port; nginx proxies over a socket file (cleaner
+permissions, a touch less overhead). The `unix:` prefix selects it, and a
+graceful `httpd.shutdown` unlinks the socket on the way out:
+
+```jennifer
+def srv as httpd.Server init httpd.listen("unix:/run/app/app.sock");
+```
+
+```nginx
+upstream app { server unix:/run/app/app.sock; }
+
+server {
+    listen 443 ssl;
+    server_name app.example;
+    location / {
+        proxy_pass http://app;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+Each process handles one request at a time (the pull loop is serial per accept
+loop - see Scope and limits), so for concurrency and multi-core use run several
+app processes on distinct ports or sockets behind one nginx `upstream {}` block.
 
 ## Scope and limits
 

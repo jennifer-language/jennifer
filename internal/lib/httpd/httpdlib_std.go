@@ -24,13 +24,25 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 )
+
+// parseListenAddr splits a listen address into a net.Listen network + address.
+// A `unix:` prefix selects a Unix domain socket (`httpd.listen("unix:/run/app.sock")`),
+// which reverse proxies like nginx can `proxy_pass` to; anything else is TCP.
+func parseListenAddr(addr string) (string, string) {
+	if strings.HasPrefix(addr, "unix:") {
+		return "unix", strings.TrimPrefix(addr, "unix:")
+	}
+	return "tcp", addr
+}
 
 // maxBodyBytes caps how much request body the engine buffers per request. A
 // tunable knob is a planned follow-up; the default keeps a runaway upload from
@@ -209,7 +221,13 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ln, err := net.Listen("tcp", addr)
+	network, address := parseListenAddr(addr)
+	if network == "unix" {
+		// Clear a stale socket left by a prior crash; a graceful shutdown
+		// unlinks its own socket, so this only matters after an abnormal exit.
+		_ = os.Remove(address)
+	}
+	ln, err := net.Listen(network, address)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listen: %v", err)
 	}
