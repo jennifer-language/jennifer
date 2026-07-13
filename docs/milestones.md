@@ -2169,7 +2169,7 @@ orphaned rather than silently dropped; nested `/* */` inside a body and a
 
 ### M18.13 - `mqtt` module (+ `net.setDeadline`)
 
-An MQTT client (pub/sub messaging over TCP / TLS), as a `.j` module over
+**Done.** An MQTT client (pub/sub messaging over TCP / TLS), as a `.j` module over
 `net` - the same "protocol clients are modules, `net` is the transport"
 line the other network clients (`redis`, `smtp`, `imap`, `resque`) already
 follow. MQTT is the most **binary** and most **asynchronous** protocol
@@ -2316,13 +2316,12 @@ printable, saveable, and testable without a printer attached.
   converting millimetres to dots via the target dpi. From the public ZPL II
   reference.
 - **`"cab"` (cab JScript) - the second backend (M18.15.1).** The native
-  language of cab printers (cab is a German industrial-printer maker; the
-  user runs cab Squix). The dialect string is `"cab"`, not `"jscript"`
-  (which reads as JavaScript); it emits cab's JScript. From cab's *JScript
-  Programming Manual*: millimetre units, `J` new label, `S` size, `T` text,
-  `B` barcode, `G` graphics, `A` print (quantity). Lands as a second encoder
-  once the build API and dialect dispatch are proven on ZPL - no build-API
-  change.
+  language of cab printers (cab is a German industrial-printer maker).
+  The dialect string is `"cab"`, not `"jscript"` (which reads as JavaScript);
+  it emits cab's JScript. From cab's *JScript Programming Manual*:
+  millimetre units, `J` new label, `S` size, `T` text,  `B` barcode,
+  `G` graphics, `A` print (quantity). Lands as a second encoder once the
+  build API and dialect dispatch are proven on ZPL - no build-API change.
 
 Out of scope: Brother's ESC/P is raster / bitmap rather than a field
 command language, so it does not fit this vector-field model and is not a

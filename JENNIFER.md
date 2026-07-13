@@ -429,6 +429,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   TLS via `smtp.Options.security`, `AUTH PLAIN`, `MAIL FROM` / `RCPT TO` /
   `DATA`), with `message` built by `mime`. Throws `Error` (kind `"smtp"`) on
   rejection. Uses `net`, so **default `jennifer` binary only**.
+- **`mqtt`** - an MQTT 3.1.1 pub/sub client over `net` (`mqtts` via TLS):
+  `mqtt.connect(opts)` -> `mqtt.Client`, then `subscribe(client, topic)` /
+  `publish(client, topic, message)` / `publishBytes(client, topic, payload)` at
+  QoS 0, blocking `receive(client)` -> `mqtt.Message` (`topic` / `payload`) and
+  single-threaded `poll(client, timeoutMs)` -> `list of Message` (0 or 1, via
+  `net.setDeadline`), plus `ping` / `disconnect`. Binary packet framing (1-byte
+  header, remaining-length varint, length-prefixed payload) is built with the
+  bitwise operators and `bytes`; `connect` / `subscribe` throw `Error` (kind
+  `"mqtt"`) on refusal. Basics-first (QoS 0; no retained / will / QoS 1-2).
+  **Default `jennifer` binary only** (`net`).
 
 Full per-module reference: the hosted
 [module docs](https://mplx.github.io/jennifer-lang/modules/index.html).
