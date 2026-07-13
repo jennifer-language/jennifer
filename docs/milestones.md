@@ -2266,7 +2266,7 @@ for .1).
 
 ### M18.15 - `label` module (label printing)
 
-Print to industrial label printers. **One** module - one way to describe and
+**Done** (both dialects). Print to industrial label printers. **One** module - one way to describe and
 print a label (design stance 1) - with the printer **language as a
 selectable backend**, not a module per language. A device-independent
 `Label` is built once, then rendered / printed in a chosen dialect; adding a
@@ -2280,12 +2280,17 @@ plain value handed to the next, so any stage can be swapped independently:
 **Stage 1 - build (device-independent).** A `Label` is a physical
 description in **millimetres** (printer-independent), not device dots:
 `label.new(width, height)` then value-semantic field builders `text(label,
-x, y, opts, content)`, `barcode(label, x, y, type, data)` (Code 128 / EAN /
-QR / Interleaved 2 of 5 (ITF) - the main reason these printers exist), `box(label, x, y, w, h,
-thickness)`, and `quantity(label, n)`. ITF is numeric-only and even-length
-(the interleaving pairs digits), so the encoder pads / rejects odd input; it
-is the standard shipping-carton symbology (ITF-14). Each returns a new `Label`
-(value semantics, like the other builders).
+x, y, opts, content)`, `barcode(label, x, y, type, opts, data)` (linear: Code
+128 / EAN-13 / Interleaved 2 of 5 (ITF) / Code 39 / GS1-128; 2D: DataMatrix /
+QR - the main reason these printers exist; `BarcodeOptions` carries size /
+check-digit / 2D error-level / hide-text), `box(label, x, y, w, h, thickness)`,
+`image(label, x, y, name)` (a pre-stored logo, by reference), and
+`quantity(label, n)`. ITF is numeric-only and even-length (the interleaving
+pairs digits), so the encoder pads / rejects odd input; it is the standard
+shipping-carton symbology (ITF-14). GS1-128 (logistics / SSCC) takes the
+parenthesised Application-Identifier data. Each returns a new `Label`
+(value semantics, like the other builders). Embedding a bitmap image in the job
+(vs. referencing a stored one) is a documented follow-on - see `horizon.md`.
 
 **Stage 2 - render (to the target language).** `render(label, device) ->
 string` turns the label into the command stream for a chosen dialect,
@@ -2315,8 +2320,13 @@ printable, saveable, and testable without a printer attached.
   Interleaved 2 of 5 / ITF) barcodes, `^GB` box, `^PQ` quantity, `^XZ` end -
   converting millimetres to dots via the target dpi. From the public ZPL II
   reference.
-- **`"cab"` (cab JScript) - the second backend (M18.15.1).** The native
-  language of cab printers (cab is a German industrial-printer maker).
+- **`"cab"` (cab JScript) - the second backend (M18.15.1). Done:** encoded per
+  the cab JScript Programming Manual (edition 05/2025) and cross-checked against
+  a real cabLabel-generated job - `S`/`T`/`B`/`G`/`A` with millimetre units,
+  font 3 (Swiss 721), and per-type barcode sizes (Code 128 / EAN-13 `height,ne`;
+  Interleaved 2 of 5 `height,ne,ratio`; QR module size). The `S` line defaults to
+  gap 0; final verification on cab Apollo A4+ / Squix hardware is pending. The
+  native language of cab printers (cab is a German industrial-printer maker).
   The dialect string is `"cab"`, not `"jscript"` (which reads as JavaScript);
   it emits cab's JScript. From cab's *JScript Programming Manual*:
   millimetre units, `J` new label, `S` size, `T` text,  `B` barcode,
@@ -2414,7 +2424,9 @@ localized crash / correctness fixes (out-of-range `httpd.respond` status,
 truncated-toml-date-time panic, `io.sprintf("%d", MinInt64)`, `math.randInt`
 span overflow, `floorDiv` large-quotient garbage, the constant-folder's
 above-2^53 comparison divergence, the missing stream-registry mutexes, the
-`TaskState.Observed` atomic, the numeric-conversion and read-length caps)
+`TaskState.Observed` atomic, the numeric-conversion and read-length caps, the
+cross-module struct-definition lookup so `def x as alias.Struct;` zero-value
+construction and `$x.field = ...` writes resolve an imported module struct)
 land as they surface rather than waiting on a milestone; each ships with a
 regression test.
 

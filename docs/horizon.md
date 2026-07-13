@@ -297,6 +297,16 @@ question to settle.
 
 A grab-bag, recorded when it comes up.
 
+- **`label`: embed a bitmap image in the job.** Today `label.image` references
+  an image already stored on the printer (by name). The heavier alternative is
+  to embed the bitmap in the rendered job so a logo travels with the label and
+  needs no pre-loading: convert a source image (PNG / mono bitmap) to each
+  dialect's raster - cab embedded-ASCII image data, ZPL `^GF` graphic field -
+  which needs image decoding plus 1-bit dithering / thresholding. That is a real
+  raster-conversion capability (a Go-side helper or an `image` library), not the
+  pure-text `.j` the rest of the module is, so it is a separate piece of work
+  rather than another encoder branch. Until then, `label.image` (by reference)
+  covers the stored-logo case.
 - **Extra distribution packaging.** Beyond the Linux `.deb` (shipped in
   M15.8) and the two distribution *requirements* for 1.0.0 stable
   (cross-build for macOS / Windows, a real apt repository), the additional
