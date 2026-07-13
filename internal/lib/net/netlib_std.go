@@ -57,6 +57,11 @@ var (
 	nextUDPID int64
 )
 
+// maxReadBytes caps a single caller-requested read so a huge `n` cannot force a
+// multi-gigabyte up-front allocation (or a makeslice panic). Read in chunks for
+// more.
+const maxReadBytes = 256 << 20
+
 // ResetForTest wipes all three registries between runs. Exported
 // so the _test package can drive it.
 func ResetForTest() {
@@ -347,6 +352,9 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if n > maxReadBytes {
+		return interpreter.Null(), fmt.Errorf("net.readBytes: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
+	}
 	s, err := resolveConn("net.readBytes", id)
 	if err != nil {
 		return interpreter.Null(), err
@@ -553,6 +561,9 @@ func recvFromFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	n, err := takeIntArg("net.recvFrom", args, 1, "n")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if n > maxReadBytes {
+		return interpreter.Null(), fmt.Errorf("net.recvFrom: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
 	}
 	s, err := resolveUDP("net.recvFrom", id)
 	if err != nil {

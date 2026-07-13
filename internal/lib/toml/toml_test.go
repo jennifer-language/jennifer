@@ -299,3 +299,18 @@ func TestDecodeErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestDecodeTruncatedDatetimes verifies a short date-time token errors instead
+// of slicing past the buffer (a crash on untrusted input).
+func TestDecodeTruncatedDatetimes(t *testing.T) {
+	for _, src := range []string{
+		"k = 2020-",
+		"k = 12:3",
+		"k = 2020-01-01T00:00:00+",
+		"k = 2020-01-01T",
+	} {
+		if _, err := decodeToml(src); err == nil {
+			t.Errorf("expected error decoding %q, got nil", src)
+		}
+	}
+}

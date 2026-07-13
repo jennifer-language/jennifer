@@ -72,10 +72,9 @@ type callEvent struct {
 // gates each Record* call on a corresponding "want" flag, so an unused stream
 // costs nothing; the lock is taken only when a stream is actually recording.
 type Collector struct {
-	mu        sync.Mutex
-	mode      Mode
-	runStart  time.Time
-	haveStart bool
+	mu       sync.Mutex
+	mode     Mode
+	runStart time.Time
 
 	stmts   map[posKey]*stmtSample
 	detach  map[posKey]*eventSample
@@ -105,8 +104,9 @@ func (c *Collector) Mode() Mode { return c.mode }
 // Start marks the profile's zero time; call events are timestamped relative to
 // it. The interpreter calls this once before executing top-level statements.
 func (c *Collector) Start(t time.Time) {
+	c.mu.Lock()
 	c.runStart = t
-	c.haveStart = true
+	c.mu.Unlock()
 }
 
 // RecordStmt accumulates one statement execution's self and cumulative time.

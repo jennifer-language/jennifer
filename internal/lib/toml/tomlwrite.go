@@ -409,7 +409,7 @@ func writeArgs(fnName string, args []interpreter.Value) (interpreter.Value, []st
 
 func pointerArg(fnName string, arg interpreter.Value) ([]string, error) {
 	if arg.Kind != interpreter.KindString {
-		return nil, fmt.Errorf("%s: pointer must be string, got %s", fnName, arg.Str)
+		return nil, fmt.Errorf("%s: pointer must be string, got %s", fnName, arg.Kind)
 	}
 	return parsePointer(fnName, arg.Str)
 }

@@ -18,10 +18,28 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
+
+// maxDecompressed caps a decompressed stream so a small "zip bomb" input cannot
+// expand to gigabytes in memory. Fixed default (configurable later).
+const maxDecompressed = 256 << 20
+
+// readCapped reads r fully but errors past maxDecompressed rather than
+// allocating without bound.
+func readCapped(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxDecompressed+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxDecompressed {
+		return nil, fmt.Errorf("decompressed size exceeds the %d-byte limit", maxDecompressed)
+	}
+	return data, nil
+}
 
 // LibraryName is the namespace prefix (`compress.`) and the `use` name.
 const LibraryName = "compress"
@@ -41,11 +59,12 @@ type compStream struct {
 }
 
 // streams holds live streaming state keyed by integer handle; finalize removes
-// the entry so a later call errors. Mirrors hash's registry (single-goroutine
-// use by convention).
+// the entry so a later call errors. Mirrors hash's registry; a mutex guards it
+// so two spawned tasks opening streams don't corrupt the map.
 var (
-	streams = map[int64]*compStream{}
-	nextID  int64
+	streamsMu sync.Mutex
+	streams   = map[int64]*compStream{}
+	nextID    int64
 )
 
 // Install registers the compress surface.
@@ -151,7 +170,7 @@ func unpackFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
 	}
-	out, err := io.ReadAll(r)
+	out, err := readCapped(r)
 	r.Close()
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
@@ -198,9 +217,11 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.stream: %v", err)
 	}
+	streamsMu.Lock()
 	nextID++
 	id := nextID
 	streams[id] = &compStream{w: w, buf: &buf}
+	streamsMu.Unlock()
 	return makeStream(id), nil
 }
 
@@ -216,7 +237,9 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("compress.update: second argument must be bytes, got %s", args[1].Kind)
 	}
+	streamsMu.Lock()
 	st, ok := streams[id]
+	streamsMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("compress.update: stream %d has already been finalized or never existed", id)
 	}
@@ -236,15 +259,18 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	streamsMu.Lock()
 	st, ok := streams[id]
+	if ok {
+		delete(streams, id)
+	}
+	streamsMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("compress.finalize: stream %d has already been finalized or never existed", id)
 	}
 	if err := st.w.Close(); err != nil {
-		delete(streams, id)
 		return interpreter.Null(), fmt.Errorf("compress.finalize: %v", err)
 	}
 	out := st.buf.Bytes()
-	delete(streams, id)
 	return interpreter.BytesVal(out), nil
 }

@@ -730,11 +730,13 @@ func escapeString(s string) string {
 
 func renderInt(spec FormatSpec, n int64) string {
 	neg := n < 0
-	mag := n
+	// Take the magnitude in uint64: `-n` overflows for MinInt64 (staying
+	// negative), which would make FormatInt emit a second minus sign.
+	mag := uint64(n)
 	if neg {
-		mag = -n
+		mag = -mag
 	}
-	digits := strconv.FormatInt(mag, spec.Base)
+	digits := strconv.FormatUint(mag, spec.Base)
 	if spec.HasGrp {
 		digits = groupDigits(digits, spec.Group, spec.Sep)
 	}

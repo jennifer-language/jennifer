@@ -51,7 +51,13 @@ func Parse(source string) (*Program, error) {
 // here. Same scope-analysis contract as Parse: run Resolve(prog)
 // yourself before execution.
 func ParseTokens(toks []lexer.Token) (*Program, error) {
-	p := &parser{tokens: stripTrivia(toks)}
+	stripped := stripTrivia(toks)
+	// The parser indexes past the current token; a stream that is empty or does
+	// not end with EOF would panic, so reject it as a parse error instead.
+	if len(stripped) == 0 || stripped[len(stripped)-1].Type != lexer.TOKEN_EOF {
+		return nil, &ParseError{Msg: "token stream must be non-empty and end with EOF"}
+	}
+	p := &parser{tokens: stripped}
 	return p.parseProgram()
 }
 
@@ -59,7 +65,8 @@ func ParseTokens(toks []lexer.Token) (*Program, error) {
 // model comments; the formatter consumes them from the raw lexer
 // stream instead.
 func stripTrivia(toks []lexer.Token) []lexer.Token {
-	out := toks[:0]
+	// Fresh slice: `toks[:0]` would compact the caller's backing array in place.
+	out := make([]lexer.Token, 0, len(toks))
 	for _, t := range toks {
 		switch t.Type {
 		case lexer.TOKEN_COMMENT_LINE,

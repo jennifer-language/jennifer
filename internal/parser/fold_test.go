@@ -108,6 +108,22 @@ func TestFoldComparison(t *testing.T) {
 	}
 }
 
+// Two ints one apart, both above 2^53, are not equal. Folding them
+// through float64 would round both to the same double and wrongly yield
+// true; the fold path compares ints exactly, matching runtime semantics.
+func TestFoldLargeIntComparisonExact(t *testing.T) {
+	prog := mustResolve(t, `def r as bool init 9007199254740993 == 9007199254740992;`)
+	root := firstStmtExpr(t, prog)
+	bin := root.(*BinaryExpr)
+	if bin.Folded == nil {
+		t.Fatalf("expected Folded literal, got nil")
+	}
+	lit, ok := bin.Folded.(*BoolLit)
+	if !ok || lit.Value != false {
+		t.Errorf("Folded: got %+v, want BoolLit(false)", bin.Folded)
+	}
+}
+
 func TestFoldBitOps(t *testing.T) {
 	prog := mustResolve(t, `def r as int init 0xff & 0x0f;`)
 	root := firstStmtExpr(t, prog)

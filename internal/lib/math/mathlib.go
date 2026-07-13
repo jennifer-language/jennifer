@@ -244,7 +244,17 @@ func randIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	defer randMu.Unlock()
 	// Int63n needs span > 0; we add 1 because the range is inclusive.
 	span := hi - lo + 1
-	return interpreter.IntVal(lo + randSrc.Int63n(span)), nil
+	if span > 0 {
+		return interpreter.IntVal(lo + randSrc.Int63n(span)), nil
+	}
+	// span overflowed int64 (the range is wider than 2^63, e.g.
+	// randInt(0, MaxInt64)). Draw a full-width value and fold it into
+	// [lo, hi]. uspan is the true span mod 2^64; 0 means the whole int64 range.
+	uspan := uint64(hi) - uint64(lo) + 1
+	if uspan == 0 {
+		return interpreter.IntVal(int64(randSrc.Uint64())), nil
+	}
+	return interpreter.IntVal(lo + int64(randSrc.Uint64()%uspan)), nil
 }
 
 // randSeedFn sets the deterministic seed.

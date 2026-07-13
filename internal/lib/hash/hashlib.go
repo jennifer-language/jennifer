@@ -30,6 +30,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	gohash "hash"
+	"sync"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -53,8 +54,9 @@ const algoList = `"md5", "sha1", "sha256"`
 // streams holds live streaming hash state keyed by integer handle.
 // `hash.finalize` removes the entry so further calls error.
 var (
-	streams = map[int64]gohash.Hash{}
-	nextID  int64
+	streamsMu sync.Mutex // guards streams + nextID (spawned tasks share the registry)
+	streams   = map[int64]gohash.Hash{}
+	nextID    int64
 )
 
 // Install registers the hash surface.
@@ -125,9 +127,11 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("hash.stream: unknown digest algorithm %q; known: %s", args[0].Str, algoList)
 	}
+	streamsMu.Lock()
 	nextID++
 	id := nextID
 	streams[id] = ctor()
+	streamsMu.Unlock()
 	return makeStream(id), nil
 }
 
@@ -146,7 +150,9 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("hash.update: second argument must be bytes, got %s", args[1].Kind)
 	}
+	streamsMu.Lock()
 	h, ok := streams[id]
+	streamsMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("hash.update: stream %d has already been finalized or never existed", id)
 	}
@@ -164,18 +170,24 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	streamsMu.Lock()
 	h, ok := streams[id]
+	if ok {
+		delete(streams, id)
+	}
+	streamsMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("hash.finalize: stream %d has already been finalized or never existed", id)
 	}
 	digest := h.Sum(nil)
-	delete(streams, id)
 	return interpreter.BytesVal(digest), nil
 }
 
 // resetForTest clears the live-stream map and id counter so tests
 // run in isolation. Test-only.
 func resetForTest() {
+	streamsMu.Lock()
 	streams = map[int64]gohash.Hash{}
 	nextID = 0
+	streamsMu.Unlock()
 }

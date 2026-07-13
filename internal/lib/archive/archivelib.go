@@ -23,6 +23,23 @@ import (
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
 
+// maxDecompressed caps a decompressed stream so a small "zip bomb" input cannot
+// expand to gigabytes in memory. Fixed default (configurable later).
+const maxDecompressed = 256 << 20
+
+// readCapped reads r fully but errors past maxDecompressed rather than
+// allocating without bound.
+func readCapped(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxDecompressed+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxDecompressed {
+		return nil, fmt.Errorf("decompressed size exceeds the %d-byte limit", maxDecompressed)
+	}
+	return data, nil
+}
+
 // LibraryName is the namespace prefix (`archive.`) and the `use` name.
 const LibraryName = "archive"
 
@@ -219,7 +236,7 @@ func unpackTar(b []byte) ([]entry, error) {
 		if hdr.Typeflag != tar.TypeReg {
 			continue // only regular files map to an Entry
 		}
-		data, err := io.ReadAll(tr)
+		data, err := readCapped(tr)
 		if err != nil {
 			return nil, err
 		}
@@ -266,7 +283,7 @@ func unpackZip(b []byte) ([]entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		data, err := io.ReadAll(rc)
+		data, err := readCapped(rc)
 		rc.Close()
 		if err != nil {
 			return nil, err
@@ -300,7 +317,7 @@ func gunzipBytes(b []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := io.ReadAll(r)
+	out, err := readCapped(r)
 	r.Close()
 	if err != nil {
 		return nil, err

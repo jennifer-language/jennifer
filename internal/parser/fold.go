@@ -179,7 +179,24 @@ func tryFoldBinary(ex *BinaryExpr) Expr {
 		return nil
 	}
 
-	// Comparisons produce bool regardless of int/float.
+	// Comparisons produce bool regardless of int/float. When both sides are
+	// ints, compare the exact int64 values - promoting to float64 loses
+	// precision above 2^53 and would diverge from the runtime's exact int
+	// comparison (e.g. 9007199254740993 == 9007199254740992).
+	if lIsInt && rIsInt {
+		switch ex.Op {
+		case OpEq:
+			return &BoolLit{pos: ex.pos, Value: li == ri}
+		case OpLt:
+			return &BoolLit{pos: ex.pos, Value: li < ri}
+		case OpGt:
+			return &BoolLit{pos: ex.pos, Value: li > ri}
+		case OpLe:
+			return &BoolLit{pos: ex.pos, Value: li <= ri}
+		case OpGe:
+			return &BoolLit{pos: ex.pos, Value: li >= ri}
+		}
+	}
 	switch ex.Op {
 	case OpEq:
 		return &BoolLit{pos: ex.pos, Value: lf == rf}

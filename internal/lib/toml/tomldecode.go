@@ -738,10 +738,16 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 func (d *decoder) parseDatetime() (interpreter.Value, error) {
 	start := d.pos
 	if d.looksLikeTime() {
-		d.scanTime()
+		if err := d.scanTime(); err != nil {
+			return interpreter.Value{}, err
+		}
 		return datetimeVal(d.src[start:d.pos], formLocalTime), nil
 	}
-	// Date: YYYY-MM-DD
+	// Date: YYYY-MM-DD. Bounds-check before advancing by the fixed width so a
+	// truncated token (`2020-`) is a positioned error, not a slice-past-end panic.
+	if d.pos+10 > len(d.src) {
+		return interpreter.Value{}, d.errf("truncated date-time")
+	}
 	d.pos += 10
 	// A local date unless a time follows (separated by 'T', 't', or a space).
 	sep := d.peek()
@@ -756,7 +762,9 @@ func (d *decoder) parseDatetime() (interpreter.Value, error) {
 	if !hasTime {
 		return datetimeVal(d.src[start:d.pos], formLocalDate), nil
 	}
-	d.scanTime()
+	if err := d.scanTime(); err != nil {
+		return interpreter.Value{}, err
+	}
 	// Optional offset: Z, z, or ±HH:MM
 	off := d.peek()
 	if off == 'Z' || off == 'z' {
@@ -764,14 +772,22 @@ func (d *decoder) parseDatetime() (interpreter.Value, error) {
 		return datetimeVal(normalizeDatetime(d.src[start:d.pos]), formOffsetDatetime), nil
 	}
 	if off == '+' || off == '-' {
+		if d.pos+6 > len(d.src) {
+			return interpreter.Value{}, d.errf("truncated date-time offset")
+		}
 		d.pos += 6 // ±HH:MM
 		return datetimeVal(normalizeDatetime(d.src[start:d.pos]), formOffsetDatetime), nil
 	}
 	return datetimeVal(normalizeDatetime(d.src[start:d.pos]), formLocalDatetime), nil
 }
 
-// scanTime consumes HH:MM:SS with an optional fractional part.
-func (d *decoder) scanTime() {
+// scanTime consumes HH:MM:SS with an optional fractional part, erroring on a
+// token too short to hold the fixed HH:MM:SS width (rather than slicing past
+// the buffer).
+func (d *decoder) scanTime() error {
+	if d.pos+8 > len(d.src) {
+		return d.errf("truncated time")
+	}
 	d.pos += 8 // HH:MM:SS
 	if d.peek() == '.' {
 		d.pos++
@@ -779,6 +795,7 @@ func (d *decoder) scanTime() {
 			d.pos++
 		}
 	}
+	return nil
 }
 
 // normalizeDatetime canonicalises the date/time separator to 'T' and a trailing

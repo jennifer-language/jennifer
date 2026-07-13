@@ -16,6 +16,10 @@ import (
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 )
 
+// maxHandleRead caps a single caller-requested fs.readBytes so a huge `n` cannot
+// force a multi-gigabyte up-front allocation. Read in chunks for more.
+const maxHandleRead = 256 << 20
+
 // handleState holds one live file's read/write state. Line-oriented
 // reads go through a bufio.Reader; writes go direct. `mode` records
 // the open mode so read ops on a write-mode handle (and vice versa)
@@ -246,7 +250,7 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	var sb strings.Builder
 	for i := int64(0); i < n; i++ {
-		r, _, rerr := h.reader.ReadRune()
+		r, size, rerr := h.reader.ReadRune()
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
 				h.sticky = true
@@ -254,7 +258,9 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 			}
 			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: %v", h.path, rerr)
 		}
-		if r == utf8.RuneError {
+		// U+FFFD with size 1 is an invalid byte; a genuine U+FFFD in the file
+		// decodes with size 3 and is valid content.
+		if r == utf8.RuneError && size == 1 {
 			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: not valid UTF-8", h.path)
 		}
 		sb.WriteRune(r)
@@ -284,6 +290,9 @@ func readBytesDispatchFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error
 	n := args[1].Int
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("fs.readBytes: n must be non-negative, got %d", n)
+	}
+	if n > maxHandleRead {
+		return interpreter.Null(), fmt.Errorf("fs.readBytes: %d exceeds the %d-byte per-call limit", n, maxHandleRead)
 	}
 	h, err := resolveHandle("fs.readBytes", id)
 	if err != nil {

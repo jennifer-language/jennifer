@@ -2337,13 +2337,230 @@ send captured by an in-process fake printer in a Go test),
 Prereq: none for the module + ZPL dialect (pure `.j`; `print` uses `net`);
 the cab dialect (M18.15.1) is a follow-on encoder.
 
+### M18.16 - `web` framework enhancements: cookies and sessions
+
+`httpd` deliberately owns no routing, cookies, or sessions - those live in the
+`web` module above it. `web` already ships routing, `:param` capture, a
+middleware chain, a custom not-found handler, and a `web.Context`, but
+**cookies and sessions are not yet implemented** - this milestone closes that
+gap so the framework matches what the layer above the engine is described as
+providing. `web` stays **dependency-light** and keeps **one way to do each
+thing** with a **selectable backend** where a real choice exists (design
+stance 1).
+
+#### M18.16.1 - Cookies
+
+First-class cookie access on the `web.Context`, pure HTTP-header work over
+`httpd` (no new dependency):
+
+- `web.cookie(ctx, name) -> string` parses the request `Cookie` header and
+  returns the named value ("" if absent).
+- `web.setCookie(ctx, name, value, opts)` emits a `Set-Cookie` response header.
+  `opts` is a `web.CookieOptions` struct - `path`, `domain`, `maxAge` (int
+  seconds; `0` omits the attribute, a negative value expires the cookie now),
+  `httpOnly`, `secure`, `sameSite` (`"Lax"` / `"Strict"` / `"None"` / `""`). A
+  zero-value `CookieOptions` is the common case (a session cookie scoped to the
+  current path).
+
+Cookie parse / format are pure `.j` helpers (header splitting, attribute
+rendering, value quoting), unit-tested in the overlay without a live server.
+
+#### M18.16.2 - Sessions
+
+Cookie-keyed sessions built on M18.16.1. A module top level is
+declarations-only, so `web` cannot hold mutable session state itself: it
+manages the session-**id** cookie and reads / writes the data through a
+**store handle** the app supplies - the integer-handle-into-a-registry pattern,
+whose state is shared across value copies, carried on the `App`. The store is a
+**selectable backend**:
+
+- **`session` / `memcache`** (opt-in, the reference backend) - the existing
+  [`session`](#m1861---session-module-on-memcache) module, for multi-process
+  serving. Pulled in only when the app opts into sessions, so a `web` app that
+  never touches them keeps its dependency surface at `httpd` + `meta` + `json` +
+  the collection libraries.
+
+Surface:
+
+- `web.withSessions(app, store, cookieName) -> App` registers a store on the
+  App and names the id cookie (default `"sid"`).
+- `web.session(ctx) -> session handle` returns the current request's session -
+  minting a new id plus a `Set-Cookie` on first use, resolving the existing id
+  cookie otherwise - then the handler reads / writes through the `session`
+  module's own verbs. Calling it on an App with no store registered is a
+  positioned `web`-kind error with a "call web.withSessions first" hint.
+
+Stateless signed-cookie sessions (the data in the cookie, no server store) need
+real HMAC and so wait on the `crypto` library - parked in
+[horizon.md](horizon.md), not this milestone.
+
+Middleware already ships (`web.before` + the chain); this milestone leaves it
+as is. Discipline: extend `modules/web_test.j` (the cookie parse / format
+helpers and the session-id round trip against an in-process fake store),
+refresh `docs/modules/web.md` and `examples/modules/web_demo.j` (a
+login / counter-in-session demo), and update the `httpd.md` scope note and the
+`JENNIFER.md` `web` bullet. Prereq: M18.9.2 (`web`) and, for the memcache
+backend, M18.6.1 (`session`).
+
 ## M19 - cross-cutting tooling
 
 The catch-all bucket for milestones that improve the interpreter or its
 tooling but belong to neither the Jennifer-coded modules of M18 nor the Go
 system libraries of M20. Numbered sub-entries land here as needs arise.
+M19.1-M19.5 are a correctness / performance hardening pass over the
+interpreter core and libraries (races, dead code, algorithmic complexity,
+resource bounds, module identity); M19.6 is the coverage tool. None of the
+hardening work needs `reflect` or breaks TinyGo-cleanliness. The smallest,
+localized crash / correctness fixes (out-of-range `httpd.respond` status,
+truncated-toml-date-time panic, `io.sprintf("%d", MinInt64)`, `math.randInt`
+span overflow, `floorDiv` large-quotient garbage, the constant-folder's
+above-2^53 comparison divergence, the missing stream-registry mutexes, the
+`TaskState.Observed` atomic, the numeric-conversion and read-length caps)
+land as they surface rather than waiting on a milestone; each ships with a
+regression test.
 
-### M19.1 - `.j` code coverage
+### M19.1 - Interpreter concurrency-safety
+
+Two data races in the interpreter core that the race detector catches and that
+can crash a program using nested `spawn`. Both are small, localized fixes plus
+a `go test -race` nested-spawn stress test.
+
+- **Nested-spawn global snapshot race.** `snapshotForSpawn`
+  (`internal/interpreter/interpreter.go`) always iterates `i.global.vars` - the
+  live top-level frame - regardless of which goroutine launches the `spawn`. A
+  `spawn` nested inside a `spawn` body snapshots on a background goroutine while
+  the main goroutine keeps defining / assigning globals: Go's fatal "concurrent
+  map iteration and map write" (uncatchable, takes the interpreter down).
+  Snapshot from `effectiveGlobal(env)` (the launching goroutine's own root
+  frame - inside a task, the outer spawn's snapshot) instead of the live
+  `i.global`. This is also more correct: a nested spawn captures its enclosing
+  scope, not the main goroutine's live globals.
+- **Runtime AST mutation.** `resolveDeclaredStructNS`
+  (`internal/interpreter/module.go`) writes `t.StructNS = <canonical>` into the
+  shared AST node every time a `def x as alias.Struct;` statement executes (once
+  per loop iteration, say). The same `def` run concurrently from a spawn body
+  and the main goroutine is a write-write race on the AST node. Resolve declared
+  module-struct types once, at load / resolve time, not per execution.
+
+**Acceptance.** A nested-spawn stress program that mutates globals on the main
+goroutine while inner spawns launch runs clean under `go test -race`; a
+`def alias.Struct` in a loop body inside a spawn is race-free.
+
+### M19.2 - Value representation cleanup
+
+The copy-on-write marker protocol added for the append-in-a-loop optimization
+is **inert**: `Value.Share()` has a value receiver, and `Environment.Get` /
+`GetAt` return the binding's `Value` by value, so the `shared` flag is set on a
+throwaway copy and never reaches the stored binding. `Ensure()` / `ensureCOW`
+therefore never detach (the whole Share / Ensure machinery is dead code), and
+every read of a compound variable heap-allocates a fresh `*bool` that goes
+nowhere - pure overhead in hot loops. Correctness never depended on the
+protocol: it rests entirely on the eager deep copies at every binding site
+(`def` / assignment / parameter bind) and on builtins copying before they
+mutate.
+
+- **Delete the dead protocol.** Remove `Share()` / `Ensure()` / `ensureCOW`,
+  the `Value.shared` field, and the per-read `Share()` call, and document the
+  eager-copy invariant that actually provides value semantics. The write-through
+  alternative (store `*Binding` so the marker propagates and mutation sites
+  genuinely detach) was considered and rejected - aliasing-heavy code is rare
+  precisely because we eager-copy, so the complexity buys little; record it in
+  `docs/technical/rejected.md`.
+- **Stop double-copying literals.** `evalListLit` / `evalMapLit` `Copy()` every
+  element of a freshly-built literal, then `execDefine` / `execAssign` eager-copy
+  the whole result again. A fresh literal (or a call result) cannot alias a
+  binding - only Var / Index / Field reads can - so the binding site can skip the
+  copy for non-aliasing RHS shapes, removing two full deep copies per literal
+  binding.
+
+Shrinking `Value` itself (moving the compound payload behind one pointer so the
+scalar case stays small) is **deferred**: a large cross-cutting churn, and the
+map hash index (M19.3) is the bigger algorithmic win. Revisit only if benchmarks
+still show `Value` copying dominating after M19.3.
+
+**Acceptance.** The Share / Ensure machinery and the `shared` field are gone,
+the alias-stress tests (`value_alias_test.go`) still pass (value semantics
+intact), and a compound-var read in a hot loop no longer allocates; a literal
+`def` binding does one deep copy, not three.
+
+### M19.3 - Runtime performance: maps and the call / loop hot path
+
+The biggest algorithmic issue in the runtime plus the call- and loop-overhead
+batch. None need `reflect` or break TinyGo-cleanliness.
+
+- **Maps as association lists (biggest win).** `Value.Map` is a `[]MapEntry`;
+  index reads (`indexInto`) and writes (`writeIndexedSlot`) linear-scan with a
+  recursive `Value.Equal` per entry, and map equality is O(n*m) - building a map
+  with `$m[$k] = $v` in a loop is quadratic. Maintain a side hash index
+  (`map[string]int` over a canonical scalar-key encoding) alongside the ordered
+  slice (insertion order stays a language guarantee), falling back to the linear
+  scan for the rare non-hashable key.
+- **Call / loop hot path.** `execForEach` allocates a fresh `NewEnvironmentSized`
+  (new name map) per iteration and `execFor` an unpooled header env - both should
+  borrow from `envPool` like `execBlock`. `DefineAt` re-runs `existsInChain` and
+  mirrors every binding into `e.vars` on the resolver-verified slot fast path
+  (skip the chain walk when `slot >= 0`, defer the name-map mirror to rare name
+  lookups). `Run` builds `i.global` without pre-sizing from `prog.NumGlobals`,
+  growing the slot slice one-at-a-time (O(n^2) for n globals). `execIndexAssign` /
+  `execAppend` / `execFieldAssign` re-fetch the root binding by name though the
+  root `VarExpr` already carries `(Depth, Slot)`. `lists.reverse` / `head` /
+  `tail` / `slice` / `concat` deep-copy the whole argument then immediately
+  replace the copied slice - the first copy is pure waste.
+
+**Acceptance.** A map-heavy build (`$m[$k] = $v` over N keys) is near-linear, not
+quadratic; a call-heavy and a loop-heavy benchmark improve measurably on the
+reference machine; every existing test (incl. `value_alias_test.go` and the map
+ordering tests) still passes.
+
+### M19.4 - Resource lifecycle and numeric strictness
+
+- **`os.spawn` handle lifecycle.** `internal/lib/os/exec.go` keys process
+  handles by OS PID and never deletes them: every `processState` (with buffered
+  stdout / stderr) is retained for the interpreter's life, and after the reaper
+  `Wait()`s a process the freed PID can be reused, so a later `os.spawn`
+  overwrites the entry and `os.wait` / `poll` / `kill` on the old handle hits the
+  wrong process. Key handles by a monotonic internal id (like `net` / `fs` /
+  `httpd`) and delete on reap.
+- **Numeric strictness.** `convert.toInt` and `math.floor` / `ceil` / `round`
+  do an unchecked `int64(v.Float)`, platform-defined garbage for NaN, Inf, and
+  out-of-int64-range values - contradicting the `math` library's documented
+  strict stance (mathematically-undefined results error, never yield garbage).
+  Reject NaN / Inf / out-of-range with positioned errors; special-case
+  `math.abs(MinInt64)` (currently returns a negative). The toml decoder degrades
+  an integer literal past int64 to a lossy float - TOML 1.0 says integer overflow
+  is an error, so make it one (json keeps its deliberate lossy-float fallback).
+- **Most-negative int literal.** `-9223372036854775808` (and
+  `0x8000000000000000`) is a parse error because the magnitude is parsed with
+  `ParseInt` before the unary minus applies. Parse magnitudes with `ParseUint`
+  and range-check against 2^63 under a leading minus.
+
+The uncapped-allocation issues (caller-supplied `make([]byte, n)` in `net` /
+`fs` reads, and unbounded `io.ReadAll` of decompressed `compress` / `archive`
+streams - a zip-bomb sink) are fixed **immediately**, with fixed sensible
+defaults mirroring httpd's `maxBodyBytes`, ahead of this milestone.
+
+**Acceptance.** A recycled-PID scenario signals the right process (or errors)
+and the handle table does not grow without bound; `convert.toInt(NaN)` /
+`math.floor(1e300)` error; `math.abs(MinInt64)` errors; `-9223372036854775808`
+parses; a too-large toml integer is a decode error.
+
+### M19.5 - Module struct identity: reject stem collisions
+
+Module struct values are tagged by the imported file's **stem** (`moduleStem`),
+so two modules whose files share a stem
+(`import "a/util.j" as u1; import "b/util.j" as u2;`) produce values with
+identical `(namespace, name)` identity, and `moduleByNS` resolves a stem to
+whichever module Go's nondeterministic map iteration hits first - a same-named
+struct from an unrelated module passes the other's type check. **Detect stem
+collisions at import time and error** (the "fail loud" choice), rather than
+re-keying struct identity by canonical path (a larger change kept in reserve;
+record it in `docs/technical/rejected.md`).
+
+**Acceptance.** Importing two modules with the same file stem is a positioned
+error at load; single-stem programs are unaffected; the module test suite still
+passes.
+
+### M19.6 - `.j` code coverage
 
 Teach `jennifer test` to report which lines of the code under test actually
 ran. The profiler (`jennifer profile`) already records per-position hit

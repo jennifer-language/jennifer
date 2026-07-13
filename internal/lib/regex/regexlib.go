@@ -238,9 +238,26 @@ func findFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	submatch := re.FindStringSubmatch(s)
+	// One execution: the submatch strings are slices of s at the returned
+	// indices, so there is no need for a second FindStringSubmatch pass.
 	indices := re.FindStringSubmatchIndex(s)
-	return buildMatch(re, s, submatch, indices), nil
+	return buildMatch(re, s, submatchFromIndex(s, indices), indices), nil
+}
+
+// submatchFromIndex reconstructs the FindStringSubmatch string slice from a
+// FindStringSubmatchIndex result (a non-participating group, index -1, is "").
+func submatchFromIndex(s string, idx []int) []string {
+	if idx == nil {
+		return nil
+	}
+	out := make([]string, len(idx)/2)
+	for i := range out {
+		start, end := idx[2*i], idx[2*i+1]
+		if start >= 0 && end >= 0 {
+			out[i] = s[start:end]
+		}
+	}
+	return out
 }
 
 func findAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -259,11 +276,10 @@ func findAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	all := re.FindAllStringSubmatch(s, -1)
 	allIdx := re.FindAllStringSubmatchIndex(s, -1)
-	results := make([]Value, len(all))
-	for i := range all {
-		results[i] = buildMatch(re, s, all[i], allIdx[i])
+	results := make([]Value, len(allIdx))
+	for i := range allIdx {
+		results[i] = buildMatch(re, s, submatchFromIndex(s, allIdx[i]), allIdx[i])
 	}
 	return interpreter.ListVal(
 		parser.NamespacedStructType(LibraryName, "Match"),

@@ -264,3 +264,18 @@ func TestUnixSocketListen(t *testing.T) {
 		t.Errorf("body = %q", string(body))
 	}
 }
+
+// TestRespondRejectsBadStatus verifies an out-of-range status is a boundary
+// error, not a net/http WriteHeader panic.
+func TestRespondRejectsBadStatus(t *testing.T) {
+	rs := &reqState{done: make(chan struct{}), status: 200}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	req := makeRequest(id)
+	if _, err := respondFn(noCtx, []Value{req, interpreter.IntVal(0), interpreter.StringVal("x")}); err == nil {
+		t.Error("expected error for status 0")
+	}
+	if _, err := respondFn(noCtx, []Value{req, interpreter.IntVal(1000), interpreter.StringVal("x")}); err == nil {
+		t.Error("expected error for status 1000")
+	}
+}

@@ -22,6 +22,7 @@ import (
 	gohash "hash"
 	"hash/crc32"
 	"hash/crc64"
+	"sync"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 	"github.com/mplx/jennifer-lang/internal/parser"
@@ -54,8 +55,9 @@ const algoList = `"crc32", "crc64"`
 
 // Live streaming state. Cleared per-entry on `crc.finalize`.
 var (
-	streams = map[int64]streamEntry{}
-	nextID  int64
+	streamsMu sync.Mutex // guards streams + nextID (spawned tasks share the registry)
+	streams   = map[int64]streamEntry{}
+	nextID    int64
 )
 
 type streamEntry struct {
@@ -146,9 +148,11 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("crc.stream: unknown algorithm %q; known: %s", args[0].Str, algoList)
 	}
+	streamsMu.Lock()
 	nextID++
 	id := nextID
 	streams[id] = streamEntry{h: spec.newStream(), width: spec.width}
+	streamsMu.Unlock()
 	return makeStream(id), nil
 }
 
@@ -163,7 +167,9 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("crc.update: second argument must be bytes, got %s", args[1].Kind)
 	}
+	streamsMu.Lock()
 	entry, ok := streams[id]
+	streamsMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("crc.update: stream %d has already been finalized or never existed", id)
 	}
@@ -179,7 +185,12 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	streamsMu.Lock()
 	entry, ok := streams[id]
+	if ok {
+		delete(streams, id)
+	}
+	streamsMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("crc.finalize: stream %d has already been finalized or never existed", id)
 	}
@@ -187,12 +198,13 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if len(digest) != entry.width {
 		digest = padToWidth(digest, entry.width)
 	}
-	delete(streams, id)
 	return interpreter.BytesVal(digest), nil
 }
 
 // resetForTest clears the live-stream map and id counter. Test-only.
 func resetForTest() {
+	streamsMu.Lock()
 	streams = map[int64]streamEntry{}
 	nextID = 0
+	streamsMu.Unlock()
 }

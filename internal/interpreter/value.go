@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/mplx/jennifer-lang/internal/parser"
 )
@@ -18,6 +19,10 @@ import (
 // when its value happens to be a whole number.
 func DisplayFloat(f float64) string {
 	s := strconv.FormatFloat(f, 'g', -1, 64)
+	// +Inf / -Inf / NaN have no `.eE`, but a `.0` suffix on them is wrong.
+	if s == "+Inf" || s == "-Inf" || s == "NaN" {
+		return s
+	}
 	if !strings.ContainsAny(s, ".eE") {
 		s += ".0"
 	}
@@ -109,7 +114,7 @@ type TaskState struct {
 	Result   Value         // the body's return value when Err is nil; null otherwise
 	Err      error         // any error thrown / surfaced by the body
 	Done     chan struct{} // closed by the spawned goroutine after Result / Err are written
-	Observed bool          // flipped by task.wait (success or rethrow) and task.discard; the registry scan at program exit reports tasks where Done && Err != nil && !Observed
+	Observed atomic.Bool   // flipped by task.wait (success or rethrow) and task.discard from whatever goroutine runs them (incl. spawn bodies); the exit-time registry scan reads it, so it must be atomic. Set: Done && Err != nil && !Observed.Load() reports.
 	ElemTyp  *parser.Type  // the task's declared element type T (in `task of T`); used by Value.MatchesDeclared
 }
 

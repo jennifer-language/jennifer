@@ -580,7 +580,7 @@ func (i *Interpreter) UnwaitedTaskErrors() []error {
 
 	var errs []error
 	for _, t := range snapshot {
-		if t == nil || t.Observed {
+		if t == nil || t.Observed.Load() {
 			continue
 		}
 		// Block until the task finishes. Tasks that were already done
@@ -602,7 +602,7 @@ func (i *Interpreter) UnwaitedTaskErrors() []error {
 // directly.
 func (i *Interpreter) MarkObserved(t *TaskState) {
 	if t != nil {
-		t.Observed = true
+		t.Observed.Store(true)
 	}
 }
 
@@ -1059,6 +1059,13 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 	}
 	if err := i.processImports(prog, true); err != nil {
 		return Null(), err
+	}
+	// The REPL runs script-mode (not a module), so `export` is illegal here too
+	// - reject it as batch mode does rather than silently accepting it.
+	if !i.isModule {
+		if err := rejectExportInScript(prog); err != nil {
+			return Null(), err
+		}
 	}
 	if _, exists := i.structs[canonicalErrorStructName]; !exists {
 		i.structs[canonicalErrorStructName] = canonicalErrorStructDef()
@@ -2787,7 +2794,13 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, file stri
 func floorDiv(a, b float64) float64 {
 	q := a / b
 	// Round toward negative infinity. The intrinsic `math.Floor` is fine but
-	// we avoid the import for TinyGo binary size.
+	// we avoid the import for TinyGo binary size. A magnitude at or beyond 2^63
+	// (or NaN/Inf) has no fractional part and would overflow the int64
+	// conversion below to platform-defined garbage; it already equals its own
+	// floor, so return it directly.
+	if q != q || q >= 9223372036854775808.0 || q <= -9223372036854775808.0 {
+		return q
+	}
 	if q < 0 && q != float64(int64(q)) {
 		return float64(int64(q) - 1)
 	}

@@ -318,7 +318,14 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 	}
 
 	loc := stdtime.FixedZone("", offset)
-	return stdtime.Date(year, stdtime.Month(month), day, hour, minute, second, nano, loc), nil
+	t := stdtime.Date(year, stdtime.Month(month), day, hour, minute, second, nano, loc)
+	// time.Date silently normalizes an out-of-range day (Feb 31 -> Mar 3);
+	// reject a date whose Y/M/D changed so an impossible date is an error, not
+	// a silent shift.
+	if t.Year() != year || int(t.Month()) != month || t.Day() != day {
+		return stdtime.Time{}, fmt.Errorf("impossible date %04d-%02d-%02d", year, month, day)
+	}
+	return t, nil
 }
 
 // readFixedDigits consumes exactly `n` decimal digits from input

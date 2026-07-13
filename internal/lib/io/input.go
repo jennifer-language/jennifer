@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mplx/jennifer-lang/internal/interpreter"
 )
@@ -158,13 +159,19 @@ func readChars(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	}
 	var b strings.Builder
 	for i := int64(0); i < n; i++ {
-		ch, _, err := r.ReadRune()
+		ch, size, err := r.ReadRune()
 		if err == io.EOF {
 			eofState = true
 			break
 		}
 		if err != nil {
 			return interpreter.Null(), fmt.Errorf("readChars: %v", err)
+		}
+		// U+FFFD with size 1 is an invalid byte, not a genuine U+FFFD (size 3).
+		// readChars reads text; surface malformed input rather than silently
+		// substituting the replacement character.
+		if ch == utf8.RuneError && size == 1 {
+			return interpreter.Null(), fmt.Errorf("readChars: input is not valid UTF-8")
 		}
 		b.WriteRune(ch)
 	}

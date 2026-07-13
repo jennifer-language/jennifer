@@ -171,7 +171,13 @@ func resolveReq(fnName string, id int64) (*reqState, error) {
 // the response from this goroutine.
 func makeHandler(st *serverState) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+		body, rerr := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+		if rerr != nil {
+			// A mid-body client disconnect leaves a truncated body; answer 400
+			// here rather than hand the interpreter a silently-short request.
+			http.Error(w, "error reading request body", http.StatusBadRequest)
+			return
+		}
 		rs := &reqState{r: r, body: body, done: make(chan struct{}), status: 200, srv: st}
 		id := registerReq(rs)
 		defer unregisterReq(id)
@@ -469,6 +475,12 @@ func respondFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	status, err := takeIntArg("httpd.respond", args, 1, "status")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	// net/http's WriteHeader panics for a status outside [100, 999]; reject it
+	// at the boundary so a bad status is a catchable error, not an aborted
+	// connection with a logged panic.
+	if status < 100 || status > 999 {
+		return interpreter.Null(), fmt.Errorf("httpd.respond: status %d out of range [100, 999]", status)
 	}
 	body, err := takeBodyArg("httpd.respond", args[2])
 	if err != nil {
