@@ -154,6 +154,10 @@ func asciiEnvelope(addr as string) {
     return asciiOnly($local, "address local part") + "@" + idna.toAscii($domain);
 }
 
+# The per-read idle timeout (ms), so a hung server fails instead of blocking
+# forever. Re-armed before each read.
+def const TIMEOUT_MS as int init 30000;
+
 # readReply reads from the connection until a complete SMTP reply arrives.
 func readReply(conn as net.Conn) {
     def buf as string init "";
@@ -162,6 +166,7 @@ func readReply(conn as net.Conn) {
         if ($code >= 0) {
             return Reply{code: $code, text: $buf};
         }
+        net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return Reply{code: replyFinalCode($buf + "\n"), text: $buf};

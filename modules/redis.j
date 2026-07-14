@@ -40,12 +40,18 @@ export def struct Options {
     db as int
 };
 
+# The default per-read idle timeout (ms), so a hung server fails instead of
+# blocking forever. `connect` sets `Session.timeout`; override it or use 0 to disable.
+def const DEFAULT_TIMEOUT_MS as int init 30000;
+
 /**
  * An open Redis connection.
  * @field conn {net.Conn} the underlying socket
+ * @field timeout {int} per-read idle timeout in milliseconds (0 disables it)
  */
 export def struct Session {
-    conn as net.Conn
+    conn as net.Conn,
+    timeout as int
 };
 
 /**
@@ -175,12 +181,16 @@ func parseComplete(buf as string) {
 # --- net dialogue (private) ----------------------------------------
 
 # readReply reads bytes until a complete RESP reply has arrived, then returns it.
-func readReply(conn as net.Conn) {
+# `timeoutMs` re-arms a read deadline before each read (0 disables it).
+func readReply(conn as net.Conn, timeoutMs as int) {
     def buf as string init "";
     while (true) {
         def pr as ParseResult init parseComplete($buf);
         if ($pr.complete) {
             return $pr.reply;
+        }
+        if ($timeoutMs > 0) {
+            net.setDeadline($conn, $timeoutMs);
         }
         def chunk as bytes init net.readBytes($conn, 1024);
         if (len($chunk) == 0) {
@@ -210,7 +220,7 @@ func dial(opts as Options) {
  */
 export func command(session as Session, args as list of string) {
     net.writeBytes($session.conn, convert.bytesFromString(encodeCommand($args), "utf-8"));
-    def reply as Reply init readReply($session.conn);
+    def reply as Reply init readReply($session.conn, $session.timeout);
     if ($reply.kind == "error") {
         throw Error{kind: "redis", message: $reply.str, file: "", line: 0, col: 0};
     }
@@ -223,7 +233,7 @@ export func command(session as Session, args as list of string) {
  * @return {Session} the open session
  */
 export func connect(opts as Options) {
-    def session as Session init Session{conn: dial($opts)};
+    def session as Session init Session{conn: dial($opts), timeout: DEFAULT_TIMEOUT_MS};
     if (len($opts.password) > 0) {
         def auth as list of string init ["AUTH"];
         if (len($opts.user) > 0) {

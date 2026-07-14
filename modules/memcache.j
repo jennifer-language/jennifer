@@ -34,12 +34,18 @@ export def struct Options {
     port as int
 };
 
+# The default per-read idle timeout (ms), so a hung server fails instead of
+# blocking forever. `connect` sets `Session.timeout`; override it or use 0 to disable.
+def const DEFAULT_TIMEOUT_MS as int init 30000;
+
 /**
  * An open memcached connection.
  * @field conn {net.Conn} the underlying socket
+ * @field timeout {int} per-read idle timeout in milliseconds (0 disables it)
  */
 export def struct Session {
-    conn as net.Conn
+    conn as net.Conn,
+    timeout as int
 };
 
 # One CRLF-terminated protocol line plus the still-buffered remainder.
@@ -56,7 +62,7 @@ func writeCmd(session as Session, text as string) {
 
 # recvLine reads one CRLF-terminated line, returning it (without the CRLF) and
 # the buffer left over after it.
-func recvLine(conn as net.Conn, buf as string) {
+func recvLine(session as Session, buf as string) {
     def b as string init $buf;
     while (true) {
         def nl as int init strings.indexOf($b, "\r\n");
@@ -64,7 +70,10 @@ func recvLine(conn as net.Conn, buf as string) {
             return Line{text: strings.substring($b, 0, $nl),
                 rest: strings.substring($b, $nl + 2)};
         }
-        def chunk as bytes init net.readBytes($conn, 1024);
+        if ($session.timeout > 0) {
+            net.setDeadline($session.conn, $session.timeout);
+        }
+        def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
             return Line{text: $b, rest: ""};
         }
@@ -74,10 +83,13 @@ func recvLine(conn as net.Conn, buf as string) {
 }
 
 # fillBytes reads until the buffer holds at least `n` bytes.
-func fillBytes(conn as net.Conn, buf as string, n as int) {
+func fillBytes(session as Session, buf as string, n as int) {
     def b as string init $buf;
     while (len($b) < $n) {
-        def chunk as bytes init net.readBytes($conn, 1024);
+        if ($session.timeout > 0) {
+            net.setDeadline($session.conn, $session.timeout);
+        }
+        def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
             return $b;
         }
@@ -114,7 +126,7 @@ func storeHeader(verb as string, key as string, value as string, exptime as int)
 # store runs a storage command and returns its reply line.
 func store(session as Session, verb as string, key as string, value as string, exptime as int) {
     writeCmd($session, storeHeader($verb, $key, $value, $exptime) + "\r\n" + $value + "\r\n");
-    def resp as Line init recvLine($session.conn, "");
+    def resp as Line init recvLine($session, "");
     checkError($resp.text);
     return $resp.text;
 }
@@ -128,7 +140,7 @@ func store(session as Session, verb as string, key as string, value as string, e
  */
 export func connect(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
-    return Session{conn: net.connect($addr)};
+    return Session{conn: net.connect($addr), timeout: DEFAULT_TIMEOUT_MS};
 }
 
 /**
@@ -176,17 +188,17 @@ export func add(session as Session, key as string, value as string, exptime as i
  */
 export func get(session as Session, key as string) {
     writeCmd($session, "get " + $key + "\r\n");
-    def first as Line init recvLine($session.conn, "");
+    def first as Line init recvLine($session, "");
     checkError($first.text);
     if (strings.startsWith($first.text, "END")) {
         return "";
     }
     def parts as list of string init strings.split($first.text, " ");
     def nbytes as int init convert.toInt($parts[3]);
-    def data as string init fillBytes($session.conn, $first.rest, $nbytes + 2);
+    def data as string init fillBytes($session, $first.rest, $nbytes + 2);
     def value as string init strings.substring($data, 0, $nbytes);
     # consume the value's trailing CRLF and the END line
-    recvLine($session.conn, strings.substring($data, $nbytes + 2));
+    recvLine($session, strings.substring($data, $nbytes + 2));
     return $value;
 }
 
@@ -199,7 +211,7 @@ export func get(session as Session, key as string) {
  */
 export func delete(session as Session, key as string) {
     writeCmd($session, "delete " + $key + "\r\n");
-    def r as Line init recvLine($session.conn, "");
+    def r as Line init recvLine($session, "");
     checkError($r.text);
     if ($r.text == "DELETED") {
         return true;
@@ -220,7 +232,7 @@ export func delete(session as Session, key as string) {
  */
 export func touch(session as Session, key as string, exptime as int) {
     writeCmd($session, "touch " + $key + " " + convert.toString($exptime) + "\r\n");
-    def r as Line init recvLine($session.conn, "");
+    def r as Line init recvLine($session, "");
     checkError($r.text);
     if ($r.text == "TOUCHED") {
         return true;
@@ -235,7 +247,7 @@ export func touch(session as Session, key as string, exptime as int) {
 # absent (memcached will not create it).
 func counter(session as Session, verb as string, key as string, delta as int) {
     writeCmd($session, $verb + " " + $key + " " + convert.toString($delta) + "\r\n");
-    def r as Line init recvLine($session.conn, "");
+    def r as Line init recvLine($session, "");
     checkError($r.text);
     if ($r.text == "NOT_FOUND") {
         return -1;

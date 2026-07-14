@@ -122,6 +122,18 @@ in CI without a Redis install.
 - **No connection pool.** One `Session` is one connection.
 - **`rediss` TLS** rides `net`'s default certificate verification.
 
+## Timeouts
+
+Every read carries an idle timeout (default 30 s) so a hung server fails with a
+catchable error instead of blocking the caller forever. `connect` sets
+`Session.timeout` (milliseconds); lower it for a tighter bound, or set it to `0`
+to disable:
+
+```jennifer
+def s as redis.Session init redis.connect($opts);
+$s.timeout = 5000;   # fail a read that stalls for 5 s
+```
+
 ## See also
 
 - [json.md](../libraries/json.md) - the same accessor-walked-reply shape.

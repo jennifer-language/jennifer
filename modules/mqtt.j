@@ -245,6 +245,11 @@ func readPacketBody(conn as net.Conn, hb as int) {
     return Packet{ typ: $typ, flags: $flags, body: $body };
 }
 
+# The handshake read timeout (ms), so a broker that accepts but never sends the
+# CONNACK / SUBACK fails instead of blocking forever. Cleared after the ack so
+# `poll` / `receive` keep managing their own deadlines.
+def const HANDSHAKE_TIMEOUT_MS as int init 30000;
+
 # --- connection lifecycle (exported) ----------------------------------------
 
 /**
@@ -262,8 +267,10 @@ export func connect(opts as Options) {
         $conn = net.connect($addr);
     }
     net.writeBytes($conn, buildConnect($opts));
+    net.setDeadline($conn, HANDSHAKE_TIMEOUT_MS);
     def h as bytes init readN($conn, 1);
     def pkt as Packet init readPacketBody($conn, $h[0]);
+    net.setDeadline($conn, 0);
     if (not ($pkt.typ == 2)) {
         throw Error{ kind: "mqtt", message: "mqtt: expected CONNACK, got packet type " + convert.toString($pkt.typ), file: "", line: 0, col: 0 };
     }
@@ -311,8 +318,10 @@ export func subscribe(client as Client, topic as string) {
     $pl = putString($pl, $topic);
     $pl[] = 0x00;
     net.writeBytes($client.conn, frame(0x82, $vh, $pl));
+    net.setDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
     def h as bytes init readN($client.conn, 1);
     def pkt as Packet init readPacketBody($client.conn, $h[0]);
+    net.setDeadline($client.conn, 0);
     if (not ($pkt.typ == 9)) {
         throw Error{ kind: "mqtt", message: "mqtt: expected SUBACK, got packet type " + convert.toString($pkt.typ), file: "", line: 0, col: 0 };
     }

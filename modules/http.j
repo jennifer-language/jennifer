@@ -256,11 +256,20 @@ func isChunked(headers as map of string to string) {
 
 # --- net (private) -------------------------------------------------
 
+# The default per-read idle timeout: a read that stalls this long (a hung or
+# unreachable server) fails with a "read timed out" error instead of blocking
+# forever. Pass a different value via `requestWith`; 0 disables the timeout.
+def const DEFAULT_TIMEOUT_MS as int init 30000;
+
 # readToEOF reads the whole connection (the server closes after the response
-# because we send Connection: close).
-func readToEOF(conn as net.Conn) {
+# because we send Connection: close). `timeoutMs` re-arms a read deadline before
+# each read, so a stalled connection breaks the loop with an error; 0 clears it.
+func readToEOF(conn as net.Conn, timeoutMs as int) {
     def buf as bytes;
     while (true) {
+        if ($timeoutMs > 0) {
+            net.setDeadline($conn, $timeoutMs);
+        }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
             return $buf;
@@ -286,23 +295,43 @@ func dial(u as Url) {
 # --- API (exported) ------------------------------------------------
 
 /**
- * Send one HTTP request and return the response.
+ * Send one HTTP request with an explicit idle timeout, returning the response.
+ * `timeoutMs` bounds each read (a stalled server fails rather than hanging); 0
+ * disables it. `request` and the verb shortcuts use `DEFAULT_TIMEOUT_MS`.
+ * @param method {string} the HTTP method (e.g. "GET", "POST")
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for no body)
+ * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @return {Response} the parsed response
+ * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
+ */
+export func requestWith(method as string, url as string,
+    headers as map of string to string, body as string, timeoutMs as int) {
+    def u as Url init parseUrl($url);
+    def conn as net.Conn init dial($u);
+    if ($timeoutMs > 0) {
+        net.setDeadline($conn, $timeoutMs);   # covers the write and the first read
+    }
+    def wire as string init buildRequest($method, $u, $headers, $body);
+    net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
+    def resp as Response init parseResponse(readToEOF($conn, $timeoutMs));
+    net.close($conn);
+    return $resp;
+}
+
+/**
+ * Send one HTTP request and return the response (with the default idle timeout).
  * @param method {string} the HTTP method (e.g. "GET", "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response is malformed
+ * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
  */
 export func request(method as string, url as string,
     headers as map of string to string, body as string) {
-    def u as Url init parseUrl($url);
-    def conn as net.Conn init dial($u);
-    def wire as string init buildRequest($method, $u, $headers, $body);
-    net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
-    def resp as Response init parseResponse(readToEOF($conn));
-    net.close($conn);
-    return $resp;
+    return requestWith($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS);
 }
 
 /**

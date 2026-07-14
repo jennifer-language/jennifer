@@ -32,6 +32,16 @@ Runnable: [`examples/modules/bucket_demo.j`](https://github.com/mplx/jennifer-la
 no trailing slash); addressing is **path-style** (`{endpoint}/{bucket}/{key}`),
 which works uniformly across AWS and self-hosted stores.
 
+Every request carries a **timeout** so a hung S3 endpoint fails instead of
+blocking forever (the classic way a slow store exhausts a worker pool). `connect`
+defaults `Client.timeout` to 30 000 ms; set it to change the bound, or to `0` to
+disable it:
+
+```jennifer
+def c as bucket.Client init bucket.connect(endpoint, region, key, secret);
+$c.timeout = 5000;   # fail a request that stalls for 5 s
+```
+
 | Store | endpoint | region |
 | ----- | -------- | ------ |
 | AWS S3 | `https://s3.<region>.amazonaws.com` | your bucket's region |

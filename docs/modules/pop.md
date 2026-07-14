@@ -90,6 +90,11 @@ server.
 - An internationalized (IDN) host is IDNA-encoded to its `xn--` form
   automatically (via [`idna`](idna.md)).
 
+## Timeouts
+
+Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
+server fails with a catchable error instead of blocking the caller forever.
+
 ## See also
 
 - [mime.md](mime.md) - parse a retrieved message (`mime.parse`).

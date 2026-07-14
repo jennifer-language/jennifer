@@ -107,6 +107,11 @@ server); a live send against a real daemon is the demo's job.
   (before the `@`) still **throws** - it needs SMTPUTF8 (RFC 6531), a later
   step - rather than sending a misrouted address.
 
+## Timeouts
+
+Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
+server fails with a catchable error instead of blocking the caller forever.
+
 ## See also
 
 - [mime.md](mime.md) - build the `message` (headers, multipart, encodings).

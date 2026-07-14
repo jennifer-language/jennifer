@@ -90,6 +90,18 @@ the same limitation as [`redis`](redis.md).
 - **No binary protocol and no SASL auth.** Classic text protocol only.
 - **No connection pool.** One `Session` is one connection.
 
+## Timeouts
+
+Every read carries an idle timeout (default 30 s) so a hung server fails with a
+catchable error instead of blocking the caller forever. `connect` sets
+`Session.timeout` (milliseconds); lower it for a tighter bound, or set it to `0`
+to disable:
+
+```jennifer
+def s as memcache.Session init memcache.connect($opts);
+$s.timeout = 5000;   # fail a read that stalls for 5 s
+```
+
 ## See also
 
 - [net.md](../libraries/net.md) - the transport `memcache` builds on.

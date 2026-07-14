@@ -142,11 +142,16 @@ func expectOK(line as string, ctx as string) {
 
 # --- net dialogue (private) ----------------------------------------
 
+# The per-read idle timeout (ms), so a hung server fails instead of blocking
+# forever. Re-armed before each read.
+def const TIMEOUT_MS as int init 30000;
+
 # readLine reads one CRLF-terminated status line (single-line responses do not
 # over-read: the server sends the line and waits).
 func readLine(conn as net.Conn) {
     def buf as string init "";
     while (strings.indexOf($buf, "\n") < 0) {
+        net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return stripCR($buf);
@@ -169,6 +174,7 @@ func command(conn as net.Conn, line as string) {
 func readMultiline(conn as net.Conn, ctx as string) {
     def buf as string init "";
     while (strings.indexOf($buf, "\n") < 0) {
+        net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return "";
@@ -179,6 +185,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
     expectOK(stripCR(strings.substring($buf, 0, $nl)), $ctx);
     def rest as string init strings.substring($buf, $nl + 1);
     while (not dotTerminated($rest)) {
+        net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return parseDotBody($rest);

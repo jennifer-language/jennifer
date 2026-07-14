@@ -29,6 +29,9 @@ import "./http.j" as http;
 
 def const SERVICE as string init "s3";
 def const ALGORITHM as string init "AWS4-HMAC-SHA256";
+# The default per-request idle timeout, so a hung S3 endpoint fails instead of
+# blocking forever (set `Client.timeout` to override; 0 disables it).
+def const DEFAULT_TIMEOUT_MS as int init 30000;
 
 /**
  * A configured S3 client: the endpoint (scheme + host, no trailing slash), the
@@ -37,12 +40,14 @@ def const ALGORITHM as string init "AWS4-HMAC-SHA256";
  * @field region {string} the signing region, e.g. "us-east-1"
  * @field accessKey {string} the access key id
  * @field secretKey {string} the secret access key
+ * @field timeout {int} per-request idle timeout in milliseconds (0 disables it); `connect` defaults it to 30000
  */
 export def struct Client {
     endpoint as string,
     region as string,
     accessKey as string,
-    secretKey as string
+    secretKey as string,
+    timeout as int
 };
 
 /**
@@ -52,10 +57,10 @@ export def struct Client {
  * @param region {string} the signing region
  * @param accessKey {string} the access key id
  * @param secretKey {string} the secret access key
- * @return {Client} a configured client
+ * @return {Client} a configured client (30 s timeout; set `.timeout` to change it)
  */
 export func connect(endpoint as string, region as string, accessKey as string, secretKey as string) {
-    return Client{ endpoint: $endpoint, region: $region, accessKey: $accessKey, secretKey: $secretKey };
+    return Client{ endpoint: $endpoint, region: $region, accessKey: $accessKey, secretKey: $secretKey, timeout: DEFAULT_TIMEOUT_MS };
 }
 
 # --- low-level crypto helpers -----------------------------------------------
@@ -170,17 +175,14 @@ func doRequest(client as Client, method as string, canonicalUri as string, canon
     $headers["x-amz-date"] = $isoDate;
     $headers["x-amz-content-sha256"] = $payloadHash;
     $headers["Authorization"] = $auth;
+    if ($method == "PUT") {
+        $headers["Content-Type"] = "application/octet-stream";
+    }
     def url as string init $client.endpoint + $canonicalUri;
     if (not ($canonicalQuery == "")) {
         $url = $url + "?" + $canonicalQuery;
     }
-    if ($method == "GET") {
-        return http.get($url, $headers);
-    }
-    if ($method == "DELETE") {
-        return http.delete($url, $headers);
-    }
-    return http.put($url, "application/octet-stream", $body, $headers);
+    return http.requestWith($method, $url, $headers, $body, $client.timeout);
 }
 
 # objectPath is the canonical URI for an object: /{bucket}/{encoded key}.

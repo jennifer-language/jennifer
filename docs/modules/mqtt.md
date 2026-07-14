@@ -118,6 +118,13 @@ If full QoS 1/2 with high-throughput processing ever makes the tree-walker the
 bottleneck, a Go-backed engine (build-tag split like `net`) is the fallback -
 but the pub/sub basics belong in a module.
 
+## Timeouts
+
+The CONNECT and SUBSCRIBE handshakes carry a 30 s timeout, so a broker that
+accepts the connection but never acknowledges fails instead of hanging.
+`poll(client, ms)` already bounds how long it waits for a message; `receive`
+blocks until one arrives.
+
 ## See also
 
 - [net.md](../libraries/net.md) - the transport `mqtt` builds on, including

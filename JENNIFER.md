@@ -303,7 +303,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
   constructors, `render` / `renderAll`, `escape`. A writer, not a parser.
 - **`http`** - an HTTP/1.1 client over `net` (`https://` via TLS):
-  `http.request(method, url, headers, body)` (method-agnostic) plus
+  `http.request(method, url, headers, body)` (method-agnostic; or
+  `requestWith(..., timeoutMs)` for an explicit per-read idle timeout - `request`
+  and the shortcuts use a 30 s default so a hung server can't block forever,
+  `0` disables) plus
   `get(url, headers)` / `post(url, contentType, body, headers)` / `put` /
   `patch` / `delete` / `head` / `options` return an
   `http.Response` (`status` / `statusText` / lowercased `headers` / `body`);
@@ -475,8 +478,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   each return an `http.Response`; `bucket.objectKeys(xml)` pulls the keys out of a
   `listObjects` body. Path-style addressing, configurable endpoint (one module,
   every store). The list op is `listObjects` (not `list`, a reserved keyword).
-  Over `hash.hmac` + `hash.compute` + `encoding` + `time` + `http`; **default
-  `jennifer` binary only**.
+  `Client.timeout` (ms; `connect` defaults it to 30000, `0` disables) fails a
+  hung endpoint instead of blocking forever. Over `hash.hmac` + `hash.compute` +
+  `encoding` + `time` + `http`; **default `jennifer` binary only**.
 - **`label`** - industrial label printing in a build / render / emit pipeline.
   Build a device-independent `label.Label` in millimetres: `label.new(w, h)`
   then value-semantic `text(label, x, y, opts, content)` (`label.TextOptions`:

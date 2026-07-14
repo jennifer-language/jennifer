@@ -23,6 +23,12 @@ func testAuthorizationVector() {
         "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=df548e2ce037944d03f3e68682813b093763996d597cf890ca3d9037fd231eb4");
 }
 
+func testConnectDefaults() {
+    def c as Client init connect("https://s3.amazonaws.com", "us-east-1", "k", "s");
+    testing.assertEqual($c.timeout, 30000);   # a hung endpoint fails, not hangs
+    testing.assertEqual($c.region, "us-east-1");
+}
+
 func testHexDigestEmpty() {
     testing.assertEqual(hexDigest(""),
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");

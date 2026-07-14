@@ -32,7 +32,8 @@ string (`""` for none).
 | Call / type                                 | Notes                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------ |
 | `http.Response`                             | `status` (int), `statusText`, `headers` (lowercased keys), `body`. |
-| `http.request(method, url, headers, body)`  | The general request; returns a `Response`.                         |
+| `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
+| `http.requestWith(method, url, headers, body, timeoutMs)` | As `request`, with an explicit per-read idle timeout (`0` = none). |
 | `http.get(url, headers)`                    | GET.                                                               |
 | `http.post(url, contentType, body, headers)`| POST; sets `Content-Type`.                                         |
 | `http.put(url, contentType, body, headers)` | PUT; sets `Content-Type`.                                          |
@@ -74,13 +75,35 @@ exactly (the whole body is decoded as one unit, so it is byte-exact); a binary
 body (an image, a gzip stream) is not decodable to a string and raises an error
 - a `bytes` body accessor is a planned follow-on.
 
+## Timeouts
+
+Every request carries a **per-read idle timeout** (default 30 s): the deadline is
+re-armed before each read, so a server that accepts the connection and then
+stalls (or a hung endpoint) fails with a catchable `read timed out` error instead
+of blocking the caller forever. This is the difference between a slow dependency
+degrading one request and one exhausting your process on a pool of hung
+connections. Pass a different value (in milliseconds) with `http.requestWith`; a
+`0` disables the timeout for that request (e.g. a long streaming download):
+
+```jennifer
+try {
+    def r as http.Response init http.requestWith("GET", url, {}, "", 5000);   # 5 s
+} catch (e) {
+    io.printf("request timed out or failed\n");
+}
+```
+
+The timeout bounds each read, not the whole transfer, so a large but steady
+download is fine while a stalled one is cut off.
+
 ## Errors
 
 A malformed response, a body that is not valid UTF-8, or a network failure
 raises a positioned error (a `throw`n `Error` for a malformed response, kind
-`"http"`); wrap a request in `try` / `catch` to handle a down server. A non-2xx
-**status is not an error** - a 404 or 500 comes back as a normal `Response` with
-that `status`, for the caller to branch on.
+`"http"`; a `read timed out` error on an idle-timeout); wrap a request in `try` /
+`catch` to handle a down or slow server. A non-2xx **status is not an error** - a
+404 or 500 comes back as a normal `Response` with that `status`, for the caller
+to branch on.
 
 ## Out of scope
 

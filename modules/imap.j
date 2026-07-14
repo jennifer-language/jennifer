@@ -142,9 +142,14 @@ func expectTaggedOK(line as string, tag as string) {
 # --- net dialogue (private) ----------------------------------------
 
 # fillUntilCRLF reads from the connection until `buf` holds a CRLF (or EOF).
+# The per-read idle timeout (ms), so a hung server fails instead of blocking
+# forever. Re-armed before each read.
+def const TIMEOUT_MS as int init 30000;
+
 func fillUntilCRLF(conn as net.Conn, buf as string) {
     def b as string init $buf;
     while (strings.indexOf($b, "\r\n") < 0) {
+        net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return $b;
@@ -158,6 +163,7 @@ func fillUntilCRLF(conn as net.Conn, buf as string) {
 func fillToLength(conn as net.Conn, buf as string, n as int) {
     def b as string init $buf;
     while (len($b) < $n) {
+        net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return $b;
