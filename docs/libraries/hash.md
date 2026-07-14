@@ -31,10 +31,11 @@ with the algorithm passed as a string. The shape mirrors
 | `"md5"`     | 16 bytes     | Broken for collision resistance; useful for integrity / caching. |
 | `"sha1"`    | 20 bytes     | Broken for collision resistance; still common in legacy formats. |
 | `"sha256"`  | 32 bytes     | The default choice for new code.                                 |
+| `"sha512"`  | 64 bytes     | Wider SHA-2 digest; used by some HMAC / TOTP variants.           |
 
 Passing an unknown algorithm is a positioned runtime error that
 lists the supported set:
-`hash.compute: unknown digest algorithm "md4"; known: "md5", "sha1", "sha256"`.
+`hash.compute: unknown digest algorithm "md4"; known: "md5", "sha1", "sha256", "sha512"`.
 
 ## One-shot
 

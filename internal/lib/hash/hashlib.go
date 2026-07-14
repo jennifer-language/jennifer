@@ -2,8 +2,8 @@
 // Copyright (C) 2026 <developer@mplx.eu>
 
 // Package hashlib implements Jennifer's `hash` library: MD5, SHA-1,
-// and SHA-256 digests over `bytes`, plus a streaming API for inputs
-// that don't fit in memory. Output is raw `bytes` - hex / base64
+// SHA-256, and SHA-512 digests over `bytes`, plus a streaming API for
+// inputs that don't fit in memory. Output is raw `bytes` - hex / base64
 // encoding lives in the future `encoding` library so the
 // verb names don't multiply across libraries (stance #1).
 //
@@ -29,6 +29,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 	gohash "hash"
 	"sync"
@@ -46,11 +47,12 @@ var algoCtor = map[string]func() gohash.Hash{
 	"md5":    md5.New,
 	"sha1":   sha1.New,
 	"sha256": sha256.New,
+	"sha512": sha512.New,
 }
 
 // algoList is the rendered "known algorithms" string used in error
 // messages. Kept in a known order so the message stays stable.
-const algoList = `"md5", "sha1", "sha256"`
+const algoList = `"md5", "sha1", "sha256", "sha512"`
 
 // streams holds live streaming hash state keyed by integer handle.
 // `hash.finalize` removes the entry so further calls error.

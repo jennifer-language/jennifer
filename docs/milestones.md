@@ -2433,13 +2433,19 @@ M18.9.2 (`web`).
 
 ### M18.17 - `totp` module (one-time passwords)
 
-RFC 6238 TOTP over RFC 4226 HOTP: `totp.generate(secret, ...)` and
-`totp.verify(secret, code, ...)` for two-factor auth codes, plus `totp.uri(...)`
-building the `otpauth://` provisioning string a QR code encodes. Built on the
-`hash.hmac` primitive (HMAC-SHA1 by default; SHA-256 / SHA-512 optional),
-`encoding` (base32 secrets), `time` (the 30-second step), and bytes / bitwise
-(the dynamic-truncation step). `verify` accepts a small +/-1-step skew window.
-Pure `.j`, both binaries. Prereq: `hash.hmac` (shipped).
+**Done.** RFC 6238 TOTP over RFC 4226 HOTP: `totp.generate(secret, opts)` /
+`verify(secret, code, opts)` (clock-reading; `verify` allows a +/-1-step skew)
+and deterministic `generateAt` / `verifyAt` (explicit Unix time), plus
+`totp.uri(issuer, account, secret, opts)` building the `otpauth://` provisioning
+string a QR code encodes. A `totp.Options` carries digits / period / algorithm
+(zero-value = 6 / 30 s / SHA-1). Built on `hash.hmac` (HMAC-SHA1 default;
+SHA-256 / SHA-512), `encoding` (base32 secrets), `time` (the 30-second step),
+and bytes / bitwise (the dynamic-truncation step). Pinned against the RFC 6238
+Appendix B vectors for all three algorithms. Pure `.j`, both binaries.
+
+Enabling change: **`hash` gained `"sha512"`** (`crypto/sha512`) so the digest
+set is `md5` / `sha1` / `sha256` / `sha512` - TinyGo-clean, needed for TOTP's
+SHA-512 option.
 
 ### M18.18 - `webhook` module (signed webhooks)
 

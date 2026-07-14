@@ -79,6 +79,7 @@ build that includes a network stack" (the stock `jennifer` has one).
 | [`semver`](semver.md) | `import "semver.j";`   | full   | strict Semantic Versioning 2.0.0. `parse` / `isValid` / `toString`, `compare` / `lt` / `eq` / `gt`, `isStable` / `isPrerelease`, `inc*`, `sort`; struct `Version`. |
 | [`session`](session.md) | `import "session.j";` | no (net) | server-side sessions on `memcache`: a `map of string to string` under `sess:ID` with a sliding TTL. `create` / `load` / `save` / `touch` / `destroy`; UUID v4 IDs, base64-wrapped JSON values. Volatile (a cache, not a store of record). |
 | [`smtp`](smtp.md)     | `import "smtp.j";`     | no (net) | send mail (SMTP client) over `net`: plaintext / STARTTLS / implicit TLS, `AUTH PLAIN`, `MAIL FROM` / `RCPT TO` / `DATA`. `smtp.send(opts, from, recipients, message)`; message built by `mime`. |
+| [`totp`](totp.md)     | `import "totp.j";`     | full   | time-based one-time passwords (RFC 6238 / 4226): `generate` / `verify` (+/-1-step skew) and `generateAt` / `verifyAt` (explicit time), plus `uri` for the `otpauth://` provisioning string. base32 secrets; SHA-1 / SHA-256 / SHA-512. Over `hash.hmac` + `encoding` + `time`. |
 | [`web`](web.md)       | `import "web.j";`      | no (net) | a small HTTP framework over the `httpd` engine: register routes against handler methods by name (`web.get` / `post` / ...), `:param` capture, middleware, `web.Context` request / response helpers; `web.run` owns the accept loop. Dispatch by `meta.callMain`. Pairs with `jennifer serve`. |
 
 ## Writing your own

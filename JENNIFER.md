@@ -453,6 +453,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   TLS via `smtp.Options.security`, `AUTH PLAIN`, `MAIL FROM` / `RCPT TO` /
   `DATA`), with `message` built by `mime`. Throws `Error` (kind `"smtp"`) on
   rejection. Uses `net`, so **default `jennifer` binary only**.
+- **`totp`** - time-based one-time passwords (RFC 6238 over RFC 4226 HOTP), the
+  two-factor codes authenticator apps show. `totp.generate(secret, opts)` /
+  `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);
+  `generateAt` / `verifyAt` take an explicit Unix time (deterministic).
+  `totp.uri(issuer, account, secret, opts)` builds the `otpauth://` provisioning
+  string a QR code encodes. `secret` is base32; a zero-value `totp.Options` is 6
+  digits / 30 s / SHA-1, else set `digits` / `period` / `algorithm` (`"sha256"` /
+  `"sha512"`). Over `hash.hmac` + `encoding` + `time`; pure, both binaries.
 - **`label`** - industrial label printing in a build / render / emit pipeline.
   Build a device-independent `label.Label` in millimetres: `label.new(w, h)`
   then value-semantic `text(label, x, y, opts, content)` (`label.TextOptions`:
