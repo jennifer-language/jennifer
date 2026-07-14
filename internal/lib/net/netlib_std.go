@@ -390,23 +390,40 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // instead of dedicating a spawned reader / pinger.
 func setDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("net.setDeadline expects 2 arguments (net.Conn, ms), got %d", len(args))
-	}
-	id, err := extractID("net.setDeadline", "Conn", args[0])
-	if err != nil {
-		return interpreter.Null(), err
+		return interpreter.Null(), fmt.Errorf("net.setDeadline expects 2 arguments (net.Conn or net.UDPSocket, ms), got %d", len(args))
 	}
 	ms, err := takeIntArg("net.setDeadline", args, 1, "ms")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	s, err := resolveConn("net.setDeadline", id)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	var when time.Time // the zero Time clears any existing deadline
 	if ms > 0 {
 		when = time.Now().Add(time.Duration(ms) * time.Millisecond)
+	}
+	// Dispatch on the handle kind: a stream net.Conn or a datagram
+	// net.UDPSocket (its PacketConn also honours SetDeadline).
+	v := args[0]
+	if v.Kind == interpreter.KindStruct && v.StructNS == LibraryName && v.StructName == "UDPSocket" {
+		id, err := extractID("net.setDeadline", "UDPSocket", v)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		s, err := resolveUDP("net.setDeadline", id)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if derr := s.c.SetDeadline(when); derr != nil {
+			return interpreter.Null(), fmt.Errorf("net.setDeadline: %v", derr)
+		}
+		return interpreter.Null(), nil
+	}
+	id, err := extractID("net.setDeadline", "Conn", v)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	s, err := resolveConn("net.setDeadline", id)
+	if err != nil {
+		return interpreter.Null(), err
 	}
 	if derr := s.c.SetDeadline(when); derr != nil {
 		return interpreter.Null(), fmt.Errorf("net.setDeadline: %v", derr)
