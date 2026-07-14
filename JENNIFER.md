@@ -545,6 +545,19 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   bitwise operators and `bytes`; `connect` / `subscribe` throw `Error` (kind
   `"mqtt"`) on refusal. Basics-first (QoS 0; no retained / will / QoS 1-2).
   **Default `jennifer` binary only** (`net`).
+- **`log`** - leveled, structured logging. A `log.Logger` carries a minimum
+  level (`debug` < `info` < `warn` < `error`), a format (`text` / `logfmt` /
+  `json`), and a sink; build one with `log.new(level, format)` (stdout) /
+  `toStderr(level, format)` / `toFile(level, format, path)` /
+  `toSyslog(level, address, app)`. `log.debug(logger, message, fields)` /
+  `info` / `warn` / `error` (and `at(logger, level, message, fields)` for a
+  runtime level) render one record - RFC 3339 timestamp, level, message, and a
+  `map of string to string` of `fields` - and write it, dropping records below
+  the logger's level; values with a space / quote / `=` are quoted in the text /
+  logfmt forms. The syslog sink frames each record as an RFC 5424 datagram over
+  UDP (facility `user`); console and file sinks work on both binaries, the
+  **syslog sink needs the default `jennifer` binary** (`net`). Over `io` / `fs`
+  + `json` + `strings` + `time` + `os` (+ `net` for syslog).
 
 Full per-module reference: the hosted
 [module docs](https://mplx.github.io/jennifer-lang/modules/index.html).

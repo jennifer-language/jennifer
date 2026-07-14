@@ -66,6 +66,7 @@
 - [`idna`](modules/idna.md)
 - [`imap`](modules/imap.md)
 - [`label`](modules/label.md)
+- [`log`](modules/log.md)
 - [`markdown`](modules/markdown.md)
 - [`memcache`](modules/memcache.md)
 - [`mime`](modules/mime.md)

@@ -1279,14 +1279,25 @@ a pure calculator over `time`. Both binaries. No new prereq.
 
 ### M18.22 - `log` module (structured logging)
 
-Leveled, structured logging: a `log.Logger` carrying a level (debug / info /
-warn / error), an output format (text / logfmt / json), and a sink.
-`log.info(logger, message, fields)` (and the sibling levels) render a record
-with a timestamp and the caller's key/value fields. Sinks: stdout / stderr (both
-binaries) and an RFC 5424 **syslog** sink over `net` (default binary only), so
-the module is **partial** on `jennifer-tiny` - the console logging works, the
+**Done.** Leveled, structured logging: a value-semantic `log.Logger` carrying a
+minimum level (`debug` < `info` < `warn` < `error`), an output format (`text` /
+`logfmt` / `json`), and a sink. `log.debug` / `info` / `warn` / `error` (and
+`at(logger, level, message, fields)` for a runtime level) render one record - an
+RFC 3339 timestamp, the level, the message, and the caller's
+`map of string to string` `fields` - and write it, dropping records below the
+logger's level; a field value with a space / quote / `=` is quoted in the text /
+logfmt forms. Sinks are fixed by the constructor: `new` (stdout) / `toStderr` /
+`toFile` (append) work on both binaries; `toSyslog` frames each record as an RFC
+5424 datagram over UDP (facility `user`, PRI = `8 + severity`) via `net`, so the
+module is **partial** on `jennifer-tiny` - console and file logging work, the
 syslog sink returns the no-network error. Over `io` / `fs` + `json` + `strings`
-+ `time` (+ `net` for syslog). No new prereq.
++ `time` + `os` (+ `net` for syslog).
+
+The stderr sink needed an enabling library addition (like `hash.hmac` before
+it): **`io.eprintf(format, args...)`** - the stdout `printf` twin that writes to
+standard error - backed by a new `Interpreter.Err` / `BuiltinCtx.Err` writer
+(defaulting to `os.Stderr`), so the sink is capturable in tests. No other new
+prereq.
 
 ### M18.23 - `ical` module (iCalendar)
 
