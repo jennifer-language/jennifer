@@ -91,6 +91,12 @@ package() {
     install -Dm644 share/jennifer/syntaxes/jennifer.sublime-syntax \
         "$pkgdir/usr/share/jennifer/syntaxes/jennifer.sublime-syntax"
 
+    # Jennifer-coded library modules: bare `import "name.j";` resolves under the
+    # system module directory. The release tarball already excludes the
+    # *_test.j overlays, so a plain glob is safe.
+    install -dm755 "$pkgdir/usr/share/jennifer/modules"
+    install -m644 share/jennifer/modules/*.j "$pkgdir/usr/share/jennifer/modules/"
+
     # Language reference for coding assistants (also a human quick-reference).
     install -Dm644 JENNIFER.md "$pkgdir/usr/share/doc/jennifer/JENNIFER.md"
 }

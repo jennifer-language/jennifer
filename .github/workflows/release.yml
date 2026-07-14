@@ -160,6 +160,14 @@ jobs:
           cp editors/vim/ftdetect/jennifer.vim "$STAGE/share/nvim/site/ftdetect/"
           # Sublime Text / bat syntax (activated manually - see editors/README.md).
           cp editors/sublime/jennifer.sublime-syntax "$STAGE/share/jennifer/syntaxes/"
+          # Jennifer-coded library modules: the importable modules and their
+          # include-partials (bare `import "name.j";` resolves under the system
+          # module dir), minus the *_test.j overlays.
+          mkdir -p "$STAGE/share/jennifer/modules"
+          for m in modules/*.j; do
+            case "$m" in *_test.j) continue ;; esac
+            cp "$m" "$STAGE/share/jennifer/modules/"
+          done
           cp README.md "$STAGE/" 2>/dev/null || true
           cp JENNIFER.md "$STAGE/" 2>/dev/null || true
           tar -czf "dist/${STAGE}.tar.gz" "$STAGE"

@@ -117,6 +117,22 @@ selects the report shape;
 runs each test in a fresh interpreter subprocess. Exit status is 0
 when all pass, 1 on failures, 2 on a runner error.
 .TP
+.BR serve " " [\fIflags\fR] " " \fIfile.j\fR
+Run a Jennifer program, the same as
+.BR run
+(no required entry point); a program that calls
+.B web.run
+starts serving on the address it specifies. With
+.B \-\-watch
+the program runs in a child process that is restarted on any change to
+the entry file, making it a live reloader for a web app or an autorun
+loop for any script (Ctrl\-C stops the loop). Accepts the same
+.B \-I
+and
+.B \-\-sysmoddir
+flags as
+.BR run .
+.TP
 .BR version " " [\fB\-v\fR]
 Print the build version.
 .B \-v
@@ -125,6 +141,13 @@ Print the build version.
 also reports the resolved system module directory and the layers behind
 it (the compile-time default and
 .BR JENNIFER_SYSMODDIR ).
+.TP
+.BR help
+Print a usage summary and exit;
+.B \-h
+and
+.B \-\-help
+are equivalent.
 .SH ENVIRONMENT
 .TP
 .B JENNIFER_SYSMODDIR

@@ -145,6 +145,38 @@ jobs:
           echo "ran $tested module test overlay(s)"
           exit $rc
 
+      - name: Guard - every packaging path installs the shipped modules
+        # Bare `import "name.j";` resolves under the system module dir
+        # (/usr/share/jennifer/modules), so every packaging path must install the
+        # importable modules there. This shipped broken once (no path installed
+        # any of them). Guard that each packaging file installs them, that no
+        # *_test.j overlay leaks in, that the count matches, and that the staged
+        # set actually resolves as bare imports (ical also exercises an
+        # include-partial, ical_vcard_shared.j).
+        run: |
+          set -euo pipefail
+          for f in packaging/arch/PKGBUILD-bin packaging/arch/PKGBUILD-git \
+                   scripts/build-deb.sh .github/workflows/release.yml; do
+            grep -q 'share/jennifer/modules' "$f" \
+              || { echo "::error file=$f::does not install modules into share/jennifer/modules"; exit 1; }
+          done
+          stage="$(mktemp -d)/modules"
+          mkdir -p "$stage"
+          for m in modules/*.j; do
+            case "$m" in *_test.j) continue ;; esac
+            cp "$m" "$stage/"
+          done
+          if ls "$stage"/*_test.j >/dev/null 2>&1; then
+            echo "::error::a *_test.j overlay leaked into the installed modules"; exit 1
+          fi
+          expected=$(ls modules/*.j | grep -vc _test.j)
+          actual=$(ls "$stage"/*.j | wc -l)
+          [ "$expected" = "$actual" ] \
+            || { echo "::error::staged $actual modules, expected $expected"; exit 1; }
+          printf 'import "csv.j" as csv;\nimport "ical.j" as ical;\nuse time;\ndef n as int init len(csv.parse("a,b"));\ndef ev as ical.Event init ical.event("x", time.utc(), time.utc(), "ok");\n' \
+            | ./jennifer run --sysmoddir="$stage" -
+          echo "ok: $actual importable modules install and resolve as bare imports"
+
       - name: Smoke-run the module example programs
         # The golden walker only covers top-level examples/*.j; the module /
         # include demos live in subdirs and aren't golden-checked. Smoke-run

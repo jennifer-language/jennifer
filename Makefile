@@ -30,10 +30,16 @@
 # side by side for local A/B comparison.
 build: build-go build-tinygo
 
+# Extra `go build` flags. Empty by default so a dev `make build` keeps
+# symbols and paths for debugging; a packager passes `-trimpath` (and any
+# strip flags) to drop the local build path from the released binary, e.g.
+# `make build GOBUILDFLAGS=-trimpath` (the AUR -git PKGBUILD does this).
+GOBUILDFLAGS ?=
+
 # Standard Go toolchain binary - the default `jennifer`. Fast iteration,
 # full host-feature support.
 build-go: gen-version
-	go build -o jennifer ./cmd/jennifer
+	go build $(GOBUILDFLAGS) -o jennifer ./cmd/jennifer
 
 # TinyGo constrained binary. Embeddable; smaller; missing os/exec + net.
 #

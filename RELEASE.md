@@ -71,33 +71,64 @@ plus QEMU smoke tests).
    covers what you expect.
 2. **Publish the draft** (Edit -> uncheck "Save as draft" -> Publish
    release).
-3. **Update the AUR `jennifer-bin` package.** This is the one step
-   that genuinely can't run from GitHub Actions because AUR
-   publishes via SSH-key-authenticated git push to `aur.archlinux.org`,
-   and storing that key in CI secrets adds blast-radius for limited
-   benefit at our scale.
+3. **Publish the AUR packages** with the publish scripts. The canonical
+   copies live in this repo at `packaging/arch/publish-bin.sh` and
+   `packaging/arch/publish-git.sh`; each is copied into its AUR clone as
+   `publish.sh` and run there. This is the one step that genuinely can't
+   run from GitHub Actions: the AUR publishes via SSH-key-authenticated
+   `git push` to `aur.archlinux.org`, and storing that key in CI secrets
+   adds blast-radius for limited benefit at our scale.
 
-   ```sh
-   # First time only: clone the AUR repo.
-   git clone ssh://aur@aur.archlinux.org/jennifer-bin.git aur-jennifer-bin
+   The scripts expect the two AUR clones as siblings of this repo (they
+   sync `jennifer.install` from `../jennifer-lang/packaging/arch/`, and
+   refuse to run outside an AUR clone):
 
-   cd aur-jennifer-bin
-   # Replace PKGBUILD with the generated one from the GitHub Release.
-   curl -L -o PKGBUILD \
-       "https://github.com/mplx/jennifer-lang/releases/download/0.14.1/PKGBUILD-bin"
-   # Refresh .SRCINFO (AUR requires it stay in sync).
-   makepkg --printsrcinfo > .SRCINFO
-   # Smoke-test the package locally before publishing.
-   makepkg -si
-   # Commit and push.
-   git add PKGBUILD .SRCINFO
-   git commit -m "0.14.1"
-   git push
+   ```
+   <workdir>/
+     jennifer-lang/   # this repo
+     jennifer-bin/    # AUR clone; publish.sh copied from packaging/arch/
+     jennifer-git/    # AUR clone; publish.sh copied from packaging/arch/
    ```
 
-   `jennifer-git` does **not** need a per-release update -- its
-   `pkgver()` derives from `git describe`, so AUR users get the
-   new version automatically on their next rebuild.
+   First time only, from your `jennifer-lang` checkout: clone both AUR
+   repos as siblings and copy the publish scripts in.
+
+   ```sh
+   git clone ssh://aur@aur.archlinux.org/jennifer-bin.git ../jennifer-bin
+   git clone ssh://aur@aur.archlinux.org/jennifer-git.git ../jennifer-git
+   cp packaging/arch/publish-bin.sh ../jennifer-bin/publish.sh
+   cp packaging/arch/publish-git.sh ../jennifer-git/publish.sh
+   chmod +x ../jennifer-bin/publish.sh ../jennifer-git/publish.sh
+   ```
+
+   (Re-copy after either canonical script changes, to keep the clones
+   current.)
+
+   Each release, refresh `jennifer-bin`:
+
+   ```sh
+   ../jennifer-bin/publish.sh
+   ```
+
+   The script resolves the newest release from the GitHub API (the
+   `/releases/latest/` alias can't be used: every `0.x` tag is a
+   pre-release and that alias excludes pre-releases), downloads its
+   `PKGBUILD-bin`, syncs `jennifer.install`, regenerates `.SRCINFO`,
+   then commits and pushes to `master`. It is a clean no-op if the
+   release is unchanged. Re-run it after every release, because `-bin`
+   pins `pkgver` / `sha256sums` to the tarball. To smoke-test the
+   actual install first, run `makepkg -si` in the clone (the script
+   itself does not build).
+
+   `jennifer-git` does **not** need a per-release update: its
+   `pkgver()` derives from `git describe`, so AUR users get the new
+   version automatically on their next rebuild. Its `publish.sh` is
+   optional storefront polish, run only to refresh the version shown on
+   the AUR page:
+
+   ```sh
+   ../jennifer-git/publish.sh
+   ```
 
 ### Post-release
 

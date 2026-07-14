@@ -95,7 +95,7 @@ func main() {
 	case "serve":
 		os.Exit(runServe(os.Args[2:]))
 	case "version", "--version", "-v":
-		if len(os.Args) > 2 && (os.Args[2] == "-v" || os.Args[2] == "--verbose") {
+		if len(os.Args) > 2 && isVerboseFlag(os.Args[2]) {
 			printVersionVerbose()
 		} else {
 			fmt.Println(version.Version)
@@ -197,6 +197,25 @@ func printVersionVerbose() {
 	if env := os.Getenv(module.SysmoddirEnv); env != "" {
 		fmt.Printf("  env %s: %s\n", module.SysmoddirEnv, env)
 	}
+}
+
+// isVerboseFlag reports whether a `version` argument requests verbose output:
+// --verbose, or -v repeated (-v, -vv, -vvv, ...). Verbosity has a single level;
+// the repeats are accepted so `jennifer version -vvv` shows the verbose output
+// rather than silently downgrading to the plain version line.
+func isVerboseFlag(s string) bool {
+	if s == "--verbose" {
+		return true
+	}
+	if len(s) < 2 || s[0] != '-' {
+		return false
+	}
+	for _, c := range s[1:] {
+		if c != 'v' {
+			return false
+		}
+	}
+	return true
 }
 
 // loadModuleProgram is the interpreter's module loader: it reads, lexes,

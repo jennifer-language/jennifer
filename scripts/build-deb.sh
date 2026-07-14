@@ -120,6 +120,15 @@ mkdir -p "$STAGE/usr/share/jennifer/syntaxes"
 install -m 0644 "$REPO_ROOT/editors/sublime/jennifer.sublime-syntax" \
     "$STAGE/usr/share/jennifer/syntaxes/jennifer.sublime-syntax"
 
+# Jennifer-coded library modules: bare `import "name.j";` resolves under the
+# system module directory. Ship the modules and their include-partials, not
+# the *_test.j overlays (development-only).
+mkdir -p "$STAGE/usr/share/jennifer/modules"
+for m in "$REPO_ROOT"/modules/*.j; do
+    case "$m" in *_test.j) continue ;; esac
+    install -m 0644 "$m" "$STAGE/usr/share/jennifer/modules/"
+done
+
 # Language reference for coding assistants (also a human quick-reference).
 install -m 0644 "$REPO_ROOT/JENNIFER.md" "$STAGE/usr/share/doc/jennifer/JENNIFER.md"
 
