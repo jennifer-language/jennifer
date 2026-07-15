@@ -247,7 +247,7 @@ func parseUpdates(node as json.Value) {
         if ($hasMsg) {
             $msg = parseMessage($node, $base + "/message");
         }
-        $updates = lists.push($updates, Update{ updateId: $updateId, hasMessage: $hasMsg, message: $msg });
+        $updates[] = Update{ updateId: $updateId, hasMessage: $hasMsg, message: $msg };
         $i = $i + 1;
     }
     return $updates;

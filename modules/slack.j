@@ -119,10 +119,10 @@ export func divider(m as Message) {
 export func render(m as Message) {
     def parts as list of string init [];
     if (len($m.text) > 0) {
-        $parts = lists.push($parts, "\"text\":" + json.encode($m.text));
+        $parts[] = "\"text\":" + json.encode($m.text);
     }
     if (len($m.blocks) > 0) {
-        $parts = lists.push($parts, "\"blocks\":[" + strings.join($m.blocks, ",") + "]");
+        $parts[] = "\"blocks\":[" + strings.join($m.blocks, ",") + "]";
     }
     return "{" + strings.join($parts, ",") + "}";
 }

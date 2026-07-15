@@ -569,7 +569,7 @@ func evalFunc(name as string, toks as list of string, pos as int, node as json.V
         while ($p < len($toks) and not ($toks[$p] == ")")) {
             def a as Eval init evalExpr($toks, $p, $node, $root, $vars);
             $p = $a.pos;
-            $parts = lists.push($parts, $a.value);
+            $parts[] = $a.value;
         }
         if (len($parts) == 0) {
             return Eval{ value: strVal(""), pos: $p };
@@ -740,9 +740,9 @@ func applyPipe(seg as string, val as json.Value, node as json.Value, root as jso
         while ($p < len($toks)) {
             def a as Eval init evalExpr($toks, $p, $node, $root, $vars);
             $p = $a.pos;
-            $args = lists.push($args, $a.value);
+            $args[] = $a.value;
         }
-        $args = lists.push($args, $val);
+        $args[] = $val;
         return strVal(sprintfValues(nodeToString($fmtEval.value), $args));
     }
     throw Error{ kind: "tengine", message: "tengine: unknown pipe function: " + $name, file: "", line: 0, col: 0 };
@@ -927,7 +927,7 @@ func tailValues(vs as list of json.Value) {
     def out as list of json.Value init [];
     def i as int init 1;
     while ($i < len($vs)) {
-        $out = lists.push($out, $vs[$i]);
+        $out[] = $vs[$i];
         $i = $i + 1;
     }
     return $out;

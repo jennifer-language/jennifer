@@ -181,6 +181,13 @@ $p.x = 5;          # field write
 $grid[i][j] = v;   # chains nest and mix [index] and .field
 ```
 
+**Prefer `$xs[]` over `lists.push` in loops.** The `$xs[] = item;` append sugar
+(lists and bytes) mutates in place via copy-on-write - amortized O(N) to append
+N items. `$xs = lists.push($xs, item)` returns a *new* list each pass and copies
+the whole list, so the same loop is O(N^2). Use `$xs[]` to build a list element
+by element (a raster, a buffer, a big result set); use `lists.push` only when you
+want a fresh list and keep the original.
+
 `len(EXPR)` is a language built-in (not a library): rune count of a string,
 element count of a list, entry count of a map, byte count of bytes.
 

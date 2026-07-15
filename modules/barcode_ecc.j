@@ -22,13 +22,13 @@ func buildGF() {
     def log as list of int init [];
     def i as int init 0;
     while ($i < 256) {
-        $log = lists.push($log, 0);
+        $log[] = 0;
         $i = $i + 1;
     }
     def x as int init 1;
     $i = 0;
     while ($i < 255) {
-        $exp = lists.push($exp, $x);
+        $exp[] = $x;
         $log[$x] = $i;
         $x = $x << 1;
         if (($x & 0x100) > 0) {
@@ -57,7 +57,7 @@ func rsGenerator(gf as GF, degree as int) {
         def next as list of int init [];
         def k as int init 0;
         while ($k <= len($g)) {
-            $next = lists.push($next, 0);
+            $next[] = 0;
             $k = $k + 1;
         }
         def j as int init 0;
@@ -78,11 +78,11 @@ func rsEncode(gf as GF, data as list of int, ecCount as int) {
     def gen as list of int init rsGenerator($gf, $ecCount);
     def res as list of int init [];
     for (def d in $data) {
-        $res = lists.push($res, $d);
+        $res[] = $d;
     }
     def z as int init 0;
     while ($z < $ecCount) {
-        $res = lists.push($res, 0);
+        $res[] = 0;
         $z = $z + 1;
     }
     def i as int init 0;
@@ -100,7 +100,7 @@ func rsEncode(gf as GF, data as list of int, ecCount as int) {
     def ec as list of int init [];
     def m as int init len($data);
     while ($m < len($res)) {
-        $ec = lists.push($ec, $res[$m]);
+        $ec[] = $res[$m];
         $m = $m + 1;
     }
     return $ec;

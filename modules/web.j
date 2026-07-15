@@ -623,7 +623,7 @@ func splitPath(p as string) {
     def out as list of string init [];
     for (def seg in $raw) {
         if (not ($seg == "")) {
-            $out = lists.push($out, $seg);
+            $out[] = $seg;
         }
     }
     return $out;

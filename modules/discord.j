@@ -100,10 +100,10 @@ export func embed(m as Message, title as string, description as string, color as
 export func render(m as Message) {
     def parts as list of string init [];
     if (len($m.content) > 0) {
-        $parts = lists.push($parts, "\"content\":" + json.encode($m.content));
+        $parts[] = "\"content\":" + json.encode($m.content);
     }
     if (len($m.embeds) > 0) {
-        $parts = lists.push($parts, "\"embeds\":[" + strings.join($m.embeds, ",") + "]");
+        $parts[] = "\"embeds\":[" + strings.join($m.embeds, ",") + "]";
     }
     return "{" + strings.join($parts, ",") + "}";
 }

@@ -416,7 +416,7 @@ func parseSeries(node as json.Value, base as string) {
         def nc as int init json.length($node, $base + "/columns");
         def c as int init 0;
         while ($c < $nc) {
-            $columns = lists.push($columns, json.asString($node, $base + "/columns/" + convert.toString($c)));
+            $columns[] = json.asString($node, $base + "/columns/" + convert.toString($c));
             $c = $c + 1;
         }
     }
@@ -430,10 +430,10 @@ func parseSeries(node as json.Value, base as string) {
             def row as list of string init [];
             def cc as int init 0;
             while ($cc < $ncols) {
-                $row = lists.push($row, cellString($node, $rowptr + "/" + convert.toString($cc)));
+                $row[] = cellString($node, $rowptr + "/" + convert.toString($cc));
                 $cc = $cc + 1;
             }
-            $values = lists.push($values, $row);
+            $values[] = $row;
             $r = $r + 1;
         }
     }
@@ -458,7 +458,7 @@ func parseQuery(node as json.Value) {
             def nser as int init json.length($node, $rbase + "/series");
             def j as int init 0;
             while ($j < $nser) {
-                $series = lists.push($series, parseSeries($node, $rbase + "/series/" + convert.toString($j)));
+                $series[] = parseSeries($node, $rbase + "/series/" + convert.toString($j));
                 $j = $j + 1;
             }
         }

@@ -230,7 +230,7 @@ func readSentence(socket as net.Conn) {
         if (len($w) == 0) {
             $done = true;
         } else {
-            $words = lists.push($words, $w);
+            $words[] = $w;
         }
     } until ($done);
     return $words;
@@ -261,7 +261,7 @@ func parseFields(sentence as list of string) {
 func buildWords(command as string, attrs as map of string to string) {
     def words as list of string init [$command];
     for (def key in $attrs) {
-        $words = lists.push($words, "=" + $key + "=" + $attrs[$key]);
+        $words[] = "=" + $key + "=" + $attrs[$key];
     }
     return $words;
 }
@@ -283,7 +283,7 @@ func exchange(session as Session, command as string, attrs as map of string to s
             def reply as string init $sentence[0];
             def fields as map of string to string init parseFields($sentence);
             if ($reply == "!re") {
-                $rows = lists.push($rows, $fields);
+                $rows[] = $fields;
             } elseif ($reply == "!done") {
                 if (maps.has($fields, "ret")) {
                     $ret = $fields["ret"];

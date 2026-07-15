@@ -247,7 +247,7 @@ export func objectKeys(xml as string) {
     def keys as list of string init [];
     def matches as list of regex.Match init regex.findAll("<Key>([^<]*)</Key>", $xml);
     for (def m in $matches) {
-        $keys = lists.push($keys, $m.groups[0]);
+        $keys[] = $m.groups[0];
     }
     return $keys;
 }

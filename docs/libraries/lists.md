@@ -19,13 +19,19 @@ io.printf("first=%d last=%d\n", lists.first($xs), lists.last($xs));
 For the common "append to a list as you build it" pattern, the
 language ships the `$xs[] = item;` sugar (see
 [user-guide/types-and-values.md](../user-guide/types-and-values.md#the-xs-append-sugar)). It's
-shorthand for `$xs = lists.push($xs, item);`.
+shorthand for `$xs = lists.push($xs, item);` **and, in a loop, much
+faster**: `$xs[]` mutates in place through the copy-on-write protocol
+(amortized O(N) for N appends), whereas `$xs = lists.push($xs, item)`
+returns a new list each pass and copies the whole thing - O(N^2)
+overall. Prefer `$xs[]` when building a list element by element; use
+`lists.push` when you specifically want a fresh list and keep the
+original.
 
 ## Functions
 
 | Call                            | Returns      | Notes                                                              |
 | ------------------------------- | ------------ | ------------------------------------------------------------------ |
-| `lists.push(xs, item)`          | list         | New list with `item` appended.                                     |
+| `lists.push(xs, item)`          | list         | New list with `item` appended. In a build-a-list loop prefer the `$xs[]` sugar (O(N) vs this call's O(N^2)). |
 | `lists.pop(xs)`                 | list         | New list without the last element. Empty input errors.             |
 | `lists.first(xs)`               | element kind | Element at index `0`. Empty input errors.                          |
 | `lists.last(xs)`                | element kind | Element at the last index. Empty input errors.                     |

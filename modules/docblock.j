@@ -151,15 +151,15 @@ export func parse(source as string) {
             def sm as regex.Match init regex.find("^(export\\s+)?def\\s+struct\\s+([A-Za-z]+)\\s*\\{([^}]*)\\}", $tail);
             def cm as regex.Match init regex.find("^(export\\s+)?def\\s+const\\s+([A-Za-z][A-Za-z_]*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init", $tail);
             if (not ($fm.start == -1)) {
-                $funcs = lists.push($funcs, buildFunc($p, $fm.groups[1], not ($fm.groups[0] == "")));
+                $funcs[] = buildFunc($p, $fm.groups[1], not ($fm.groups[0] == ""));
                 $diags = lists.concat($diags, crossCheck("param", $fm.groups[1], $raw.line, $p.params, declNames($fm.groups[2])));
             } elseif (not ($sm.start == -1)) {
-                $structs = lists.push($structs, buildStruct($p, $sm.groups[1], not ($sm.groups[0] == "")));
+                $structs[] = buildStruct($p, $sm.groups[1], not ($sm.groups[0] == ""));
                 $diags = lists.concat($diags, crossCheck("field", $sm.groups[1], $raw.line, $p.params, declNames($sm.groups[2])));
             } elseif (not ($cm.start == -1)) {
-                $consts = lists.push($consts, buildConst($p, $cm.groups[1], not ($cm.groups[0] == ""), strings.trim($cm.groups[2])));
+                $consts[] = buildConst($p, $cm.groups[1], not ($cm.groups[0] == ""), strings.trim($cm.groups[2]));
             } else {
-                $diags = lists.push($diags, Diagnostic{ severity: "warning", line: $raw.line, message: "doc comment precedes no documentable construct (orphaned)" });
+                $diags[] = Diagnostic{ severity: "warning", line: $raw.line, message: "doc comment precedes no documentable construct (orphaned)" };
             }
         }
     }
@@ -229,7 +229,7 @@ func scanDocs(source as string) {
             def nl as int init countNewlines($span);
             if ($isDoc) {
                 def body as string init strings.substring($source, $i + $openLen, $afterEnd - 2);
-                $out = lists.push($out, RawDoc{ body: $body, after: $afterEnd, line: $line + $nl });
+                $out[] = RawDoc{ body: $body, after: $afterEnd, line: $line + $nl };
             }
             $line = $line + $nl;
             $i = $afterEnd;
@@ -276,7 +276,7 @@ func parseBody(body as string) {
     def rawLines as list of string init strings.split($norm, "\n");
     def lines as list of string init [];
     for (def ln in $rawLines) {
-        $lines = lists.push($lines, cleanLine($ln));
+        $lines[] = cleanLine($ln);
     }
 
     def summary as string init "";
@@ -304,7 +304,7 @@ func parseBody(body as string) {
         $i = $i + 1;
     }
     while ($i < $cnt and not isTag($lines[$i])) {
-        $descLines = lists.push($descLines, $lines[$i]);
+        $descLines[] = $lines[$i];
         $i = $i + 1;
     }
     while ($i < $cnt) {
@@ -319,26 +319,26 @@ func parseBody(body as string) {
                 def tag as string init $tm.groups[0];
                 def rest as string init $tm.groups[1];
                 if ($tag == "param" or $tag == "field") {
-                    $params = lists.push($params, parseParam($rest));
+                    $params[] = parseParam($rest);
                     $i = $i + 1;
                 } elseif ($tag == "return" or $tag == "returns") {
                     $returns = parseTyped($rest);
                     $i = $i + 1;
                 } elseif ($tag == "throws") {
                     def t as ReturnDoc init parseTyped($rest);
-                    $throws = lists.push($throws, ThrowDoc{ type: $t.type, description: $t.description });
+                    $throws[] = ThrowDoc{ type: $t.type, description: $t.description };
                     $i = $i + 1;
                 } elseif ($tag == "example") {
                     def exLines as list of string init [];
                     if (not ($rest == "")) {
-                        $exLines = lists.push($exLines, $rest);
+                        $exLines[] = $rest;
                     }
                     def j as int init $i + 1;
                     while ($j < $cnt and not isTag($lines[$j])) {
-                        $exLines = lists.push($exLines, $lines[$j]);
+                        $exLines[] = $lines[$j];
                         $j = $j + 1;
                     }
-                    $examples = lists.push($examples, strings.trimRight(strings.join($exLines, "\n")));
+                    $examples[] = strings.trimRight(strings.join($exLines, "\n"));
                     $i = $j;
                 } elseif ($tag == "since") {
                     $since = $rest;
@@ -350,7 +350,7 @@ func parseBody(body as string) {
                     }
                     $i = $i + 1;
                 } elseif ($tag == "see") {
-                    $see = lists.push($see, $rest);
+                    $see[] = $rest;
                     $i = $i + 1;
                 } elseif ($tag == "internal") {
                     $internal = true;
@@ -424,7 +424,7 @@ func declNames(sig as string) {
     for (def part in strings.split($trimmed, ",")) {
         def pt as string init strings.trim($part);
         if (not ($pt == "")) {
-            $out = lists.push($out, firstWord($pt));
+            $out[] = firstWord($pt);
         }
     }
     return $out;
@@ -437,16 +437,16 @@ func crossCheck(kind as string, cname as string, line as int, docParams as list 
     def diags as list of Diagnostic init [];
     def docNames as list of string init [];
     for (def d in $docParams) {
-        $docNames = lists.push($docNames, $d.name);
+        $docNames[] = $d.name;
     }
     for (def dn in $docNames) {
         if (not lists.contains($realNames, $dn)) {
-            $diags = lists.push($diags, Diagnostic{ severity: "warning", line: $line, message: "@" + $kind + " \"" + $dn + "\" is not a " + $kind + " of " + $cname });
+            $diags[] = Diagnostic{ severity: "warning", line: $line, message: "@" + $kind + " \"" + $dn + "\" is not a " + $kind + " of " + $cname };
         }
     }
     for (def rn in $realNames) {
         if (not lists.contains($docNames, $rn)) {
-            $diags = lists.push($diags, Diagnostic{ severity: "warning", line: $line, message: $kind + " \"" + $rn + "\" of " + $cname + " has no @" + $kind });
+            $diags[] = Diagnostic{ severity: "warning", line: $line, message: $kind + " \"" + $rn + "\" of " + $cname + " has no @" + $kind };
         }
     }
     return $diags;

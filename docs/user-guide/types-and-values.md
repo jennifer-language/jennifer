@@ -175,8 +175,10 @@ $xs[] = 30;
 # $xs is now [10, 20, 30]
 ```
 
-It's equivalent to `$xs = lists.push($xs, item);`; use whichever
-reads better in context.
+It's equivalent to `$xs = lists.push($xs, item);` and produces the same
+result, but the two are not the same performance-wise (see below); use
+`$xs[]` for building a list, `lists.push` when you want a fresh list and
+keep the original.
 
 Rules:
 
@@ -189,6 +191,14 @@ Rules:
   element type, same as `$xs[i] = item;`.
 - **`const` is still deep.** `$NUMS[] = ...;` on a `def const` list
   errors with the usual "cannot mutate contents of constant" message.
+- **Prefer it in hot loops.** `$xs[]` mutates the list in place through
+  the copy-on-write protocol, so appending N items is amortized O(N).
+  `lists.push` instead returns a *new* list (values are copy-on-assign),
+  so `$xs = lists.push($xs, item)` in a loop copies the whole list each
+  pass - O(N^2) overall. For a few appends the difference is invisible;
+  for a per-element build (a raster, a large buffer, a big result set),
+  reach for `$xs[]`. Reserve `lists.push` for the "give me a new list,
+  leave the original alone" case.
 
 ### Nested lists and maps
 

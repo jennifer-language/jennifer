@@ -248,7 +248,7 @@ func renderLabels(labels as map of string to string) {
     def keys as list of string init lists.sort(maps.keys($labels));
     def parts as list of string init [];
     for (def k in $keys) {
-        $parts = lists.push($parts, $k + "=\"" + escapeLabelValue($labels[$k]) + "\"");
+        $parts[] = $k + "=\"" + escapeLabelValue($labels[$k]) + "\"";
     }
     return "{" + strings.join($parts, ",") + "}";
 }
@@ -344,7 +344,7 @@ func parseResult(node as json.Value) {
         def pt as Point init parsePoint($node, "/data/result");
         def empty as map of string to string init {};
         def one as list of Point init [$pt];
-        $series = lists.push($series, Series{ metric: $empty, values: $one });
+        $series[] = Series{ metric: $empty, values: $one };
         return Result{ resultType: $rtype, series: $series };
     }
     def n as int init json.length($node, "/data/result");
@@ -354,16 +354,16 @@ func parseResult(node as json.Value) {
         def labels as map of string to string init parseLabels($node, $base + "/metric");
         def pts as list of Point init [];
         if ($rtype == "vector") {
-            $pts = lists.push($pts, parsePoint($node, $base + "/value"));
+            $pts[] = parsePoint($node, $base + "/value");
         } else {
             def m as int init json.length($node, $base + "/values");
             def j as int init 0;
             while ($j < $m) {
-                $pts = lists.push($pts, parsePoint($node, $base + "/values/" + convert.toString($j)));
+                $pts[] = parsePoint($node, $base + "/values/" + convert.toString($j));
                 $j = $j + 1;
             }
         }
-        $series = lists.push($series, Series{ metric: $labels, values: $pts });
+        $series[] = Series{ metric: $labels, values: $pts };
         $i = $i + 1;
     }
     return Result{ resultType: $rtype, series: $series };

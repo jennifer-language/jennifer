@@ -307,7 +307,7 @@ export func parse(contentType as string, body as bytes) {
             if ($nextPos < 0) {
                 $more = false;
             } else {
-                $parts = lists.push($parts, parsePart(sliceBytes($work, $partStart, $nextPos)));
+                $parts[] = parsePart(sliceBytes($work, $partStart, $nextPos));
                 $pos = $nextPos;
             }
         }

@@ -55,7 +55,7 @@ func positions(item as string, size as int, hashes as int) {
     def out as list of int init [];
     def i as int init 0;
     while ($i < $hashes) {
-        $out = lists.push($out, ($h + $i * $g) % $size);
+        $out[] = ($h + $i * $g) % $size;
         $i = $i + 1;
     }
     return $out;
