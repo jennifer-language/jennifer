@@ -1271,8 +1271,10 @@ tooling but belong to neither the Jennifer-coded modules of M18 nor the Go
 system libraries of M20. Numbered sub-entries land here as needs arise.
 M19.1-M19.5 are a correctness / performance hardening pass over the
 interpreter core and libraries (races, dead code, algorithmic complexity,
-resource bounds, module identity); M19.6 is the coverage tool. None of the
-hardening work needs `reflect` or breaks TinyGo-cleanliness. The smallest,
+resource bounds, module identity); M19.6 is the coverage tool; M19.7 lands the
+`@scope/package` vendored-module resolver; M19.8 is the one-time relocation to
+the `jennifer-lang` org and a host-independent vanity module path. None of this
+work needs `reflect` or breaks TinyGo-cleanliness. The smallest,
 localized crash / correctness fixes (out-of-range `httpd.respond` status,
 truncated-toml-date-time panic, `io.sprintf("%d", MinInt64)`, `math.randInt`
 span overflow, `floorDiv` large-quotient garbage, the constant-folder's
@@ -1452,6 +1454,107 @@ but not all of its methods shows below 100 percent and names the unexecuted
 positions; a suite that touches every position shows 100 percent; the
 machine-readable form parses; the plain `jennifer test` path (no
 `--coverage`) is byte-for-byte unchanged.
+
+### M19.7 - `@scope/package` module resolution (vendored packages)
+
+Today the module resolver keys on the import path's leading token: `./` (or
+`../`) is local (relative to the importing file), `/` is absolute, and a bare
+name resolves through the search path (system module dir, then each `-I DIR`).
+None of those reach a package installed **beside the app** rather than
+system-wide, and a bare `import "util.j";` deliberately never consults the
+importing file's own tree, so it cannot address a vendored package and would
+collide with a system module of the same stem. A package manager (the planned
+`jvc`, DRAFT#12 in [horizon.md](horizon.md)) installs packages into a
+project-local `vendor/SCOPE/PACKAGE/` tree; this milestone teaches the resolver
+to address that tree, so a vendored package imports unambiguously and
+independently of the system search path.
+
+- **A fourth leading-token kind: `@`.** `import "@scope/package/mod.j" as
+  alias;` resolves `scope/package/mod.j` under the **vendor root** - a form
+  distinct from the three existing ones and from the system search path. It
+  stays an ordinary string-literal path, so there is no new grammar (the inline
+  version selectors `@pkg=1.2.3` / `@pkg#commit` are `jvc`'s concern and keep
+  their own grammar in DRAFT#12); the resolver gains one branch on a leading
+  `@`.
+- **Vendor-root discovery.** Walk up from the entry program's directory to the
+  nearest `vendor/` (the `node_modules` / Composer convention), overridable with
+  `--vendor DIR` and `JENNIFER_VENDOR` - the same override layering as
+  `--sysmoddir` / `JENNIFER_SYSMODDIR`. A missing vendor root, or a missing
+  `@scope/package`, is a positioned error naming the resolved path and pointing
+  at the installer.
+- **Identity keyed by `@scope/package`.** A vendored module's struct identity is
+  tagged by its `@scope/package` prefix, not the bare file stem, so two decks
+  that share a stem (`@a/util`, `@b/util`) stay distinct - the vendored-tree
+  answer to the same stem-collision hazard [M19.5](#m195---module-struct-identity-reject-stem-collisions)
+  rejects at the system level.
+- **Path safety.** `@` is legal only as the very first character of the path; a
+  `..` segment may not escape the package root; the resolved path must stay
+  inside `vendor/scope/package/`.
+
+The full `jvc` package manager (registry, `deck.toml` manifest, lockfile,
+version constraint solving, fetching) stays a beyond-1.0.0 draft (DRAFT#12);
+this milestone lands only the interpreter-side resolution `jvc` builds on, so a
+vendored tree populated by hand (or by an early `jvc`) imports today.
+
+**Acceptance.** `import "@acme/widgets/mod.j" as w;` in an app with
+`vendor/acme/widgets/mod.j` resolves and runs; the vendor root is found by the
+upward walk and is overridable via flag / env; a missing package is a positioned
+error; `./`, `/`, and bare-name imports are byte-for-byte unchanged; a `@a/util`
+and a `@b/util` struct do not cross-satisfy each other's type checks; a
+`..`-escape path is rejected.
+
+### M19.8 - Relocation: `jennifer-lang` org + vanity module path
+
+A one-time project relocation, no language or interpreter behavior change. The
+repository moves from the personal `github.com/mplx/jennifer-lang` to a
+`jennifer-lang` GitHub org, and - separately - the Go module path moves **off**
+GitHub to a vanity import path (`jennifer-lang.dev/jennifer`) served by a
+`go-import` meta page, so the module identity no longer depends on where the
+code is hosted. Purely mechanical, but it touches nearly every file (112 `.go`
+imports, ~60 docs, CI, packaging), so it gets a milestone to keep the sweep
+complete and reviewable, and it lands **before the first post-org release** so
+downstream references (AUR, doc links) migrate exactly once. Two distinct
+targets - keep them separate:
+
+- **Go module path -> the vanity domain.** `go.mod` becomes `module
+  jennifer-lang.dev/jennifer`; every internal import
+  (`github.com/mplx/jennifer-lang/... -> jennifer-lang.dev/jennifer/...`, 112
+  `.go` files) is rewritten. A one-file `go-import` meta page at
+  `jennifer-lang.dev/jennifer` maps the vanity path to the org repo
+  (`<meta name="go-import" content="jennifer-lang.dev/jennifer git
+  https://github.com/jennifer-lang/jennifer">`, plus a `go-source` tag for
+  pkg.go.dev deep links), served from the same site that hosts the mdBook docs.
+  The path is now host-independent: a future repo move never touches `go.mod`
+  again.
+- **Human-facing URLs -> the org repo.** Clone URLs, issue links, and every
+  `github.com/mplx/jennifer-lang/blob/main/...` deep link move to
+  `github.com/jennifer-lang/jennifer` (flagship repo named `jennifer`, not
+  doubled - the `rust-lang/rust` shape). These point at GitHub, **not** the
+  vanity domain (the `.dev` host only serves the `go-import` page and the docs).
+  GitHub's transfer redirect keeps old links working, but every canonical URL
+  in-tree is updated rather than left to the redirect. Sibling repos (`jvc`, the
+  deck registry) are created empty under the org as their own milestones land,
+  not here.
+- **Metadata / CI / packaging sweep.** `README.md` badges and links, `docs/**`
+  (installing, tooling, user-guide, technical), `CLAUDE.md`, `JENNIFER.md`,
+  `modules/README.md`, `book.toml`, the one example that hardcodes the URL
+  (`examples/modules/barcode_demo.j`), the workflows
+  (`.github/workflows/{test,docs,release}.yml`), and the packaging manifests
+  (`packaging/arch/PKGBUILD-{bin,git}`, `packaging/arch/publish-{bin,git}.sh`,
+  `packaging/debian/copyright`, `scripts/build-deb.sh`) all move to the new
+  host. `grep -rn 'mplx/jennifer-lang'` comes back empty at the end.
+- **Jennifer deck scope.** The first-party package scope in docs / examples
+  flips from the placeholder `@mplx/...` to `@jennifer/...` (DRAFT#12 and the
+  [M19.7](#m197---scopepackage-module-resolution-vendored-packages) examples),
+  matching the org and the registry identity the vanity domain anchors.
+  Doc-only until `jvc` and the registry exist.
+
+**Acceptance.** `go get jennifer-lang.dev/jennifer/cmd/jennifer` resolves
+through the vanity meta page to the org repo; `go build ./...` and `go test
+./...` pass under the new module path; `make build` (both toolchains) still
+produces `jennifer` / `jennifer-tiny`; `grep -rn 'mplx/jennifer-lang'` is empty;
+the old GitHub URL redirects to the org; the AUR package builds from the new
+source; pkg.go.dev serves the module under `jennifer-lang.dev/jennifer`.
 
 ## M20 - system libraries
 

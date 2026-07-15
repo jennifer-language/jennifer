@@ -215,85 +215,54 @@ constraints.
   `.j` modules, published to a public **deck repository / registry**
   (provided later) that `jvc` resolves and fetches from - packagist-style; a
   deck can also come straight from a git URL.
-- **Installed under the app root.** `jvc` writes decks into a project-local
-  `vendor/` (working name; `deck/` is the alternative) directory, which
-  becomes one more **module search root** - the module resolver already walks
-  a search path (system dir, then `-I` dirs), so this is an added entry, not
-  a new resolution model. Nothing is global; each app owns its decks, checked
-  out beside it.
-- **Import syntax - the `@`-sigil (leading proposal).** A deck reference is
-  `@vendor/deck`, e.g. `import @mplx/supercms as cms;`. The `/` separates
-  vendor from deck (the npm / Composer / Go convention - reads as a
-  hierarchy, and unlike `_` or `=` collides with nothing; `_` is also a
-  non-starter since Jennifer names are letters-only). The **vendor
-  namespaces the registry** for global uniqueness; the **call-site namespace
-  is the deck name** (`supercms.`), with `as` to rename on collision - the
-  same shape as `use X as Y`.
-  - **Version is jvc's job by default.** Plain `import @mplx/supercms;` uses
-    the version jvc resolved (declared in `deck.toml`, pinned in
-    `camcorder.lock`); 99% of scripts write exactly that, version transparent.
-  - **A per-import selector is the opt-in for side-by-side versions.** Since
-    `deck.toml` can install several versions at once, a script may choose one
-    at the import - **resolved against the installed versions, never
-    triggering a fetch** (fetching is jvc's job): `@mplx/supercms=1.2.3`
-    (exact), `@mplx/supercms>=1.2.3` (and `~` / `^` / other `semver`
-    operators - a constraint over what's installed), or
-    `@mplx/supercms#cefa234` (a git commit). This lets one script in a repo
-    pin `=1.x` while another pins `=2.x`; two versions in the *same* file
-    just take distinct `as` aliases (both otherwise bind `supercms.`). An
-    unsatisfiable selector is a positioned error pointing at `jvc install`,
-    not a silent download.
-  - **Cost:** this is **new grammar** - the lexer must read an `@`-deck
-    reference (slash + `semver` operator + `#commit`) as one token up to `;`.
-    The lower-magic fallback stays on the table: the existing string-path
-    resolver over the `vendor/` search root
-    (`import "mplx/supercms/main.j" as cms;`) needs no grammar change but
-    loses the inline version selector and the visual distinctiveness.
-- **`deck.toml` is the manifest** (TOML - so it needs the `toml` library). It
-  declares the app's required decks and version constraints
-  (`bitcoin = ">=1.2.0"`), and `jvc` produces a lockfile -
-  **`camcorder.lock`** - pinning the exact resolved versions (content hash
-  per deck for integrity) so `git clone` + `jvc install` is reproducible.
-- **Environments.** `deck.toml` separates dependency sets by section - e.g.
-  `[prod]` and `[dev]` - so `jvc install --prod` (working spelling) installs
-  one set. Two modes to design: **taxative** (the section is the exact,
-  exclusive set for that environment) vs **additive** (a base set plus the
-  section's extra decks), the additive mode enabling optional / opt-in
-  dependencies loaded only in some environments.
+- **Installed into the `vendor/` tree M19.7 resolves.** `jvc` writes decks into
+  the project-local `vendor/` tree that the interpreter already addresses through
+  the `@scope/package` import form and vendor-root discovery shipped in
+  [M19.7](milestones.md) - so a hand-populated `vendor/` imports before `jvc`
+  exists, and `jvc` is just the manager layered over that resolver. Nothing is
+  global; each app owns its decks beside it.
+- **The one remaining language-surface question: inline version selectors.**
+  M19.7 resolves `import "@mplx/supercms/main.j" as cms;` against whatever is
+  installed. `jvc` supplies the *default* - plain `import @mplx/supercms;` takes
+  the version `jvc` resolved (declared in `deck.toml`, pinned in the lockfile),
+  version-transparent, which is what almost every script wants. The opt-in for
+  side-by-side versions is a **per-import selector** matched against the installed
+  set (never triggering a fetch): `@mplx/supercms=1.2.3` (exact), `>=1.2.3` / `~`
+  / `^` (a `semver` constraint over what is installed), or `#cefa234` (a git
+  commit); one script can pin `=1.x` while another pins `=2.x`, and two versions
+  in one file take distinct `as` aliases. An unsatisfiable selector errors
+  pointing at `jvc install`, not a silent download. **Cost:** the selector is
+  **new grammar** (the lexer reads `@vendor/deck` + `semver` op + `#commit` as one
+  token up to `;`); the plain M19.7 string-path form is the no-new-grammar
+  fallback that loses only the inline selector.
+- **`deck.toml` manifest + lockfile.** `deck.toml` (TOML, so it needs the `toml`
+  library) declares required decks and constraints (`bitcoin = ">=1.2.0"`), and
+  `jvc` produces a **`camcorder.lock`** pinning exact resolved versions (content
+  hash per deck) so `git clone` + `jvc install` is reproducible. Dependency sets
+  split by section (`[prod]` / `[dev]`, `jvc install --prod`), with a **taxative**
+  (the section is the exact set) vs **additive** (base plus the section's extras)
+  mode still to design.
 - **`jvc` owns the lifecycle:** dependency resolution (semver constraint
   solving across the graph), downloading, `jvc update` (advance to the
   newest constraint-satisfying versions, rewrite `camcorder.lock`), integrity
   pinning, and the publish flow to the registry.
 
-**Migrating bundled modules out to decks.** Once decks exist, some modules
-that ship bundled today should graduate *out* of the interpreter's module
-set into decks - the niche or product-specific ones, not the
-language-fundamental ones. `gotify` is the archetype: a single-product
-push-notification integration, tied to no language constraint and not
-broadly needed - a classic deck, not something every install should carry.
-Moving it changes how scripts import it, so it is a **breaking change** and
-follows semver discipline after 1.0.0:
+**Migrating bundled modules out to decks.** Once decks exist, niche or
+product-specific modules that ship bundled today should graduate *out* into
+decks (the archetype is `gotify` - a single-product push integration every
+install need not carry); language-fundamental modules stay bundled. Moving one
+changes its import, so it is a breaking change under semver: within 1.x ship it
+**both ways** (bundled + `@`-deck) with the bundled copy marked `@deprecated` so
+imports re-point at their own pace, let the two drift without breaking, and
+**remove the bundled copy in 2.0.0**.
 
-- **Within 1.x, ship it both ways** - the bundled `gotify.j` *and* a
-  `@gotify` deck - so nothing breaks. The bundled copy is marked
-  **deprecated** (a `@deprecated` docblock tag), and developers re-point
-  imports from `gotify.j` to the deck at their own pace.
-- The two copies may **drift** in features across 1.x, but neither ever
-  breaks; which one a script uses is the user's choice.
-- The bundled `gotify.j` is **removed in 2.0.0** - the major, breaking
-  release where such removals are allowed.
-
-The same path applies to any other bundled module that turns out to be
-deck-shaped rather than standard-library-shaped.
-
-A whole track of its own. **Requires:** the `toml` library (`M18.8`, for
-`deck.toml`); builds on the shipped module system (the search-root
-mechanism), the `semver` module (constraint solving - which now ships the
-range-matching surface `satisfies` / `maxSatisfying` / `minSatisfying` /
-`validRange`, so the resolver primitive is in place), and `http` / git
-(fetching decks). The public deck **registry** is separate infrastructure,
-provided later; the import convention above is the one language-surface
-question to settle.
+A whole track of its own. **Requires:** [M19.7](milestones.md) (the
+`@scope/package` resolver + vendor root the scheme rests on); the `toml` library
+(M18.8, for `deck.toml`); the shipped module system and the `semver` module
+(constraint solving - its `satisfies` / `maxSatisfying` / `minSatisfying` /
+`validRange` range surface is the resolver primitive); and `http` / git
+(fetching). The public deck **registry** is separate infrastructure, provided
+later.
 
 ### DRAFT#13 - Higher-level PDF: font metrics, layout, and Markdown -> PDF
 
@@ -339,6 +308,61 @@ Stays pure `.j` (static data + lookups + layout math), both binaries.
 **Requires:** none hard for Phase 1 (builds on the shipped `pdfwriter` module,
 M18.35); Phase 2 requires Phase 1; Phase 3 requires Phase 2 and the shipped
 `markdown` module (plus possibly a parse-tree surface on it).
+
+### DRAFT#14 - Project governance, licensing, and contribution policy
+
+The rules for *how the project is run and how outside contributions are taken* -
+organizational, not code. Untouched while the project is solo (one author,
+`Copyright (C) 2026 <developer@mplx.eu>`, `LGPL-3.0-only`, no outside PRs), but
+it must be settled **before the first external contribution is merged**: several
+of the choices are hard to reverse once other people's copyrightable work is in
+the tree. The open questions, roughly by urgency:
+
+- **Copyright-holder model.** Under distributed copyright (the default, no
+  paperwork) every non-trivial contributor automatically holds copyright in their
+  patch, so the tree becomes a mosaic of holders and any future relicensing needs
+  each one's agreement. The alternatives are a **CLA** (contributor grants the
+  project a broad license, keeps their own copyright) or an **assignment / CAA**
+  (contributor transfers copyright to a single holder) - both consolidate the
+  rights but add contributor friction, and assignment needs an entity to hold
+  them. This is the decision that is expensive to undo.
+- **The copyright *notice*.** Whether headers stay per-author (`(C) <name>`) or
+  move to a collective label (`(C) The Jennifer Authors`, defined by git
+  history). The trap to avoid: a two-file `AUTHORS` (holders) / `CONTRIBUTORS`
+  (credit) split only carries information when a **work-for-hire** contributor
+  exists (employer holds copyright, individual is merely credited); for an
+  all-volunteer project the two lists are identical, so the split is pointless.
+  Either keep no enumerated holder file (the collective label refers to git
+  history) or consolidate ownership via CLA / assignment.
+- **Relicensing headroom.** LGPL already lets anyone embed / link Jennifer
+  without permission, so ordinary use never needs a contributor's sign-off. The
+  only thing distributed copyright forecloses is issuing a *different* license -
+  e.g. a commercial embedding exception for a deep-embedded `jennifer-tiny`
+  target that cannot meet LGPL's static-relink terms. If keeping that option open
+  matters (embedding is a first-class goal), a CLA is the tool; if "LGPL-only
+  forever" is acceptable, distributed copyright is fine and the constraint never
+  bites.
+- **Contribution mechanics.** `CONTRIBUTING.md`, the sign-off mechanism (a
+  lightweight **DCO** `Signed-off-by` line, which asserts "I have the right to
+  submit this" without a license grant, vs a full CLA-bot, which also grants
+  one - the choice follows from the relicensing decision above), a code of
+  conduct, and the PR / review workflow.
+- **Project governance.** Who decides (BDFL vs a maintainer group), how commit
+  rights are granted (judgment and sustained involvement, never an LOC or
+  commit-count threshold - metrics are a bad proxy and get gamed), and a
+  `MAINTAINERS` file once more than one decision-maker exists. Being listed as a
+  contributor confers no authority; credit and governance are separate.
+- **Name / mark.** Whether the "Jennifer" / `jennifer-lang` identity needs any
+  trademark-style usage policy (forks, the deck registry) or stays informal.
+
+The license itself stays **`LGPL-3.0-only`** unless a deliberate relicensing
+decision above changes it; this draft is about the *process and ownership* around
+it, not a license change.
+
+**Requires:** none (organizational, independent of the codebase). Socially
+paired with the M19.8 org move and triggered by the first external contribution,
+but no code prerequisite. Not legal advice - the chosen model should get a real
+legal review before it is published.
 
 ## Loose ideas
 
