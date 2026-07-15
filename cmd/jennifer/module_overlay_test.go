@@ -453,6 +453,46 @@ func TestShippedMultipartOverlayPasses(t *testing.T) {
 	}
 }
 
+// The shipped bloom module's white-box overlay (modules/bloom_test.j over
+// modules/bloom.j) loads and its probabilistic-set tests pass - a guard against
+// bloom.j / bloom_test.j drifting. Pure hash + bytes; both binaries.
+func TestShippedBloomOverlayPasses(t *testing.T) {
+	overlay := filepath.Join("..", "..", "modules", "bloom_test.j")
+	in, code := loadForTest(overlay)
+	if in == nil || code != testExitPass {
+		t.Fatalf("loading the bloom overlay failed: code %d", code)
+	}
+	for _, name := range []string{"testNoFalseNegatives", "testAbsentReportFalse", "testAddIsValueSemantic", "testFilterShape", "testInvalidParamsThrow"} {
+		if !hasMethod(in, name) {
+			t.Errorf("test %q not found in the spliced program", name)
+			continue
+		}
+		if _, err := in.CallByName(name); err != nil {
+			t.Errorf("%s failed: %v", name, err)
+		}
+	}
+}
+
+// The shipped ringbuffer module's white-box overlay (modules/ringbuffer_test.j
+// over modules/ringbuffer.j) loads and its bounded-FIFO tests pass - a guard
+// against ringbuffer.j / ringbuffer_test.j drifting. Pure lists; both binaries.
+func TestShippedRingbufferOverlayPasses(t *testing.T) {
+	overlay := filepath.Join("..", "..", "modules", "ringbuffer_test.j")
+	in, code := loadForTest(overlay)
+	if in == nil || code != testExitPass {
+		t.Fatalf("loading the ringbuffer overlay failed: code %d", code)
+	}
+	for _, name := range []string{"testPushOverwritesOldest", "testPopFifo", "testEmptyOperationsThrow", "testPushIsValueSemantic", "testToListOrder"} {
+		if !hasMethod(in, name) {
+			t.Errorf("test %q not found in the spliced program", name)
+			continue
+		}
+		if _, err := in.CallByName(name); err != nil {
+			t.Errorf("%s failed: %v", name, err)
+		}
+	}
+}
+
 // A plain test file with no sibling module keeps working (no overlay spliced),
 // and its own `export` is still rejected (it is not a module).
 func TestNonOverlayTestFileUnaffected(t *testing.T) {

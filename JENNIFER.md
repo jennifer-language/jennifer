@@ -739,6 +739,21 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   decodes a field value, `isFile(part)` tests for a filename. Bodies are `bytes` and
   the boundary is matched at `CRLF--boundary`, so binary file content round-trips
   intact. Pure `.j` over `strings` + `bytes`; **both binaries**.
+- **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) -> Filter`;
+  `bloom.add(f, item)` / `bloom.addAll(f, items)` return a fresh filter (value-semantic,
+  so `$f = bloom.add($f, x)`); `bloom.mightContain(f, item) -> bool` has no false
+  negatives (a member always reports true) but possible false positives. Bits are
+  packed into `bytes`; the k positions per item come from double-hashing one SHA-256
+  digest (`pos_i = (h1 + i*h2) mod size`). Strings only. Over `hash` + `bytes`;
+  **both binaries**.
+- **`ringbuffer`** - a fixed-capacity ring buffer of strings (bounded FIFO,
+  overwrite-oldest when full). `ringbuffer.new(capacity) -> RingBuffer`;
+  `ringbuffer.push(rb, item)` appends (dropping the oldest at capacity),
+  `ringbuffer.pop(rb)` removes the oldest - both return a fresh buffer (value-semantic),
+  so read the oldest with `ringbuffer.first(rb)` before you `pop` it (a value-semantic
+  pop can't return both the item and the new buffer). Plus `last` / `size` / `capacity`
+  / `isEmpty` / `isFull` / `toList` (oldest-first). Strings only. Over `lists`;
+  **both binaries**.
 
 Full per-module reference: the hosted
 [module docs](https://mplx.github.io/jennifer-lang/modules/index.html).

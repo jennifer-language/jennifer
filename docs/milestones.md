@@ -1435,10 +1435,25 @@ The higher-level layer (font metrics, table / flow layout, Markdown -> PDF) is
 
 ### M18.36 - `bloom` + `ringbuffer` modules (data structures)
 
-Two pure data-structure utilities delivered together: a **Bloom filter**
-(`bloom.new(size, hashes)` / `add` / `mightContain`) over `hash` + `bytes`, and a
-fixed-capacity **ring buffer** (`ringbuffer.new(cap)` / `push` / `pop`,
-overwrite-oldest) over `list`. Value-semantic, both binaries. No new prereq.
+**Done.** Two pure data-structure utilities delivered together, both
+value-semantic and on both binaries:
+
+- **`bloom`** - a Bloom filter. `new(size, hashes)` / `add` / `addAll` /
+  `mightContain`, with no false negatives and possible false positives. The bit
+  array packs into `bytes`; the k positions per item come from double-hashing a
+  single SHA-256 digest (`pos_i = (h1 + i*h2) mod size`, `h1` / `h2` the first
+  two 32-bit words), so one hash yields all positions. `add` returns a fresh
+  filter (the bits are copied). Over `hash` + `bytes`.
+- **`ringbuffer`** - a fixed-capacity ring buffer of strings (bounded FIFO,
+  overwrite-oldest). `new(capacity)` / `push` (drops the oldest at capacity) /
+  `pop` (removes the oldest) / `first` / `last` peek / `size` / `capacity` /
+  `isEmpty` / `isFull` / `toList`. Because a value-semantic `pop` cannot return
+  both the item and the new buffer, the caller reads the oldest with `first`
+  before popping. Over `lists`.
+
+Each ships a 100%-passing overlay (`modules/bloom_test.j`,
+`modules/ringbuffer_test.j`) - pure modules, so no live server test - with a Go
+drift guard, docs, catalog, and a demo. No new prereq.
 
 Each of M18.17-M18.36 ships the usual module discipline: a 100%-passing
 `modules/X_test.j` overlay, a Go integration test where a network path exists,
