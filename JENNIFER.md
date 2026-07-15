@@ -690,6 +690,19 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   gives the JSON). All text is JSON-escaped for you. `send` / `sendMessage` return the
   `http.Response` (Discord answers 204). Over `http` + `json`.
   **Default `jennifer` binary only** (`net`).
+- **`telegram`** - a Telegram Bot API client over the `http` module + `json`.
+  `telegram.bot(token)` (or `botWith(token, baseUrl)` for a self-hosted API server)
+  gives a `Bot`. Send with `sendMessage(bot, chatId, text)` /
+  `sendMessageWith(bot, chatId, text, parseMode)` / `sendPhoto(bot, chatId, photo,
+  caption)` (photo by URL or file id) / `sendChatAction(bot, chatId, action)`, and
+  `getMe(bot) -> User` checks the token. Each returns a parsed struct (`Message` has
+  `messageId` / `chatId` / `text` / `date`); an API error `{"ok": false, ...}` throws
+  `Error{kind: "telegram"}`. Receive with `getUpdates(bot, offset, timeout) -> list
+  of Update` (long-poll `timeout` seconds); it is the stateful loop - advance `offset`
+  to the last `updateId + 1` each pass, and check `Update.hasMessage` before reading
+  `Update.message`. `chatId` is a 64-bit `int` (channel ids are large / negative).
+  Params are form-encoded to `baseUrl/bot<token>/<method>`. **Default `jennifer`
+  binary only** (`net`).
 
 Full per-module reference: the hosted
 [module docs](https://mplx.github.io/jennifer-lang/modules/index.html).

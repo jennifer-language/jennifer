@@ -1330,9 +1330,22 @@ server in `cmd/jennifer/chatnotify_test.go`. Need the default binary. Prereq:
 
 ### M18.31 - `telegram` module (bot API)
 
-A Telegram Bot API client over `http` + `json`: `sendMessage` and the common
-send verbs plus `getUpdates` (long-poll). Larger than the one-shot notifiers (a
-stateful update loop). Needs the default binary. Prereq: `http` (M18.7).
+**Done.** A Telegram Bot API client over the `http` module + `json`. `bot` /
+`botWith` open a `Bot` (token + API base URL, the base overridable for a
+self-hosted Bot API server or a test endpoint). Send verbs `sendMessage` /
+`sendMessageWith` (parse mode) / `sendPhoto` (by URL or file id) /
+`sendChatAction`, plus `getMe` for identity, each POST form-encoded params to
+`baseUrl/bot<token>/<method>`, verify the `{"ok": true}` envelope (an API error
+throws `Error{kind: "telegram"}` with the server description), and parse the
+`result` into a struct (`Message` / `User`). `getUpdates(bot, offset, timeout)`
+long-polls (HTTP read bounded a few seconds past `timeout`) and returns a `list
+of Update` - the stateful receive loop the one-shot notifiers lack: the caller
+advances `offset` past each `updateId` and checks `Update.hasMessage`. `chatId`
+is a 64-bit `int` (channel ids are large / negative). The pure form encoding and
+response parsing are unit-tested in the `modules/telegram_test.j` overlay; the
+live getMe / sendMessage / getUpdates and the error-throw path are verified
+against a fake Bot API server in `cmd/jennifer/telegram_test.go`. Needs the
+default binary. Prereq: `http` (M18.7).
 
 ### M18.32 - `websocket` module (WebSocket client)
 
