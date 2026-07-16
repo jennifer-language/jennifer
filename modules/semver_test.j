@@ -119,7 +119,12 @@ func testPrivateHelpers() {
 }
 
 func testParsesInterpreterVersion() {
-    testing.assertTrue(isValid(meta.VERSION));
+    # A real build stamps meta.VERSION with a semver ("0.17.0-dev+<n>.<sha>");
+    # a plain `go test` build (no version codegen) uses the placeholder "dev",
+    # which is correctly not semver. Assert validity only for a real version.
+    if (not (meta.VERSION == "dev")) {
+        testing.assertTrue(isValid(meta.VERSION));
+    }
 }
 
 # --- comparison helpers + diff + rsort ------------------------------
