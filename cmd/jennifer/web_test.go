@@ -258,10 +258,17 @@ testing.assertEqual($get.status, 200);
 testing.assertEqual($get.body, "ok");
 testing.assertEqual(http.header($get, "Access-Control-Allow-Origin"), "*");
 
-def pre as http.Response init http.request("OPTIONS", "http://" + $addr + "/", $h, "");
+# A genuine CORS preflight carries Origin + Access-Control-Request-Method.
+def ph as map of string to string init {"Origin": "http://example.com", "Access-Control-Request-Method": "POST"};
+def pre as http.Response init http.request("OPTIONS", "http://" + $addr + "/", $ph, "");
 testing.assertEqual($pre.status, 204);
 testing.assertEqual(http.header($pre, "Access-Control-Allow-Methods"), "GET, POST, OPTIONS");
 testing.assertEqual(http.header($pre, "Access-Control-Max-Age"), "600");
+
+# A plain OPTIONS (no preflight headers) is NOT hijacked as CORS: it routes
+# normally, so with no OPTIONS handler registered it 404s.
+def plain as http.Response init http.request("OPTIONS", "http://" + $addr + "/", $h, "");
+testing.assertEqual($plain.status, 404);
 
 httpd.shutdown($srv);
 task.wait($server);`, webMod, httpMod)

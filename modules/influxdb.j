@@ -275,6 +275,13 @@ export func line(p as Point) {
     if ($p.timed) {
         $out = $out + " " + convert.toString($p.timestamp);
     }
+    # A newline anywhere in the rendered point splits its line and corrupts the
+    # whole batch (the newline is the point separator, and line protocol has no
+    # escape for it). Reject the point so it fails alone instead of silently
+    # breaking every point in the write.
+    if (strings.contains($out, "\n") or strings.contains($out, "\r")) {
+        fail("point \"" + $p.measurement + "\" contains a newline in a measurement / tag / field value (not representable in line protocol)");
+    }
     return $out;
 }
 

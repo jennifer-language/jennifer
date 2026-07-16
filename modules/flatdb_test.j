@@ -55,6 +55,19 @@ func testSaveThenReopen() {
     fs.remove($path);
 }
 
+# A whitespace-only / zero-byte file (e.g. `touch state.json` before the first
+# save) opens like a missing file rather than throwing a JSON parse error.
+func testOpenEmptyFileIsEmpty() {
+    def path as string init tmpPath();
+    fs.writeString($path, "");
+    def db as DB init open($path);
+    testing.assertFalse(has($db, "/anything"));
+    fs.writeString($path, "  \n\t ");
+    def dbBlank as DB init open($path);
+    testing.assertFalse(has($dbBlank, "/anything"));
+    fs.remove($path);
+}
+
 func testWritersAreImmutable() {
     def db as DB init open("/no/such/flatdb/path/missing.json");
     def grown as DB init set($db, "/x", json.decode("1"));

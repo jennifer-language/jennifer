@@ -87,7 +87,8 @@ export def struct Options {
  */
 export def struct Conn {
     socket as net.Conn,
-    channel as int
+    channel as int,
+    frameMax as int
 };
 
 /**
@@ -395,6 +396,9 @@ func handshake(socket as net.Conn, opts as Options) {
     $cho = putShortStr($cho, "");
     writeMethod($socket, CHANNEL, CLS_CHANNEL, CH_OPEN, $cho);
     expectMethod($socket, CLS_CHANNEL, CH_OPENOK, "Channel.Open-Ok");
+    # Return the negotiated frame-max so publish can split large bodies (0 = no
+    # limit).
+    return $frameMax;
 }
 
 # --- API (exported) ---------------------------------------------------------
@@ -408,8 +412,8 @@ func handshake(socket as net.Conn, opts as Options) {
 export func connect(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
     def socket as net.Conn init net.connect($addr);
-    handshake($socket, $opts);
-    return Conn{ socket: $socket, channel: CHANNEL };
+    def frameMax as int init handshake($socket, $opts);
+    return Conn{ socket: $socket, channel: CHANNEL, frameMax: $frameMax };
 }
 
 /**
@@ -465,7 +469,30 @@ export func publish(c as Conn, exchange as string, routingKey as string, body as
     writeFrame($c.socket, FRAME_HEADER, $c.channel, $hdr);
 
     if (len($body) > 0) {
-        writeFrame($c.socket, FRAME_BODY, $c.channel, $body);
+        # Split the body into frames no larger than the negotiated frame-max: a
+        # single FRAME_BODY over the broker's limit (RabbitMQ default 131072)
+        # triggers a connection-level error and drops the connection. Each
+        # frame carries 8 octets of overhead (1 type + 2 channel + 4 size + 1
+        # end), so the payload budget is frameMax - 8. A frameMax of 0 means no
+        # limit.
+        def maxPayload as int init 0;
+        if ($c.frameMax > 8) {
+            $maxPayload = $c.frameMax - 8;
+        }
+        if ($maxPayload <= 0 or len($body) <= $maxPayload) {
+            writeFrame($c.socket, FRAME_BODY, $c.channel, $body);
+        } else {
+            def off as int init 0;
+            def total as int init len($body);
+            while ($off < $total) {
+                def stop as int init $off + $maxPayload;
+                if ($stop > $total) {
+                    $stop = $total;
+                }
+                writeFrame($c.socket, FRAME_BODY, $c.channel, sliceBytes($body, $off, $stop));
+                $off = $stop;
+            }
+        }
     }
 }
 

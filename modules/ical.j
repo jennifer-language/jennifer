@@ -22,6 +22,7 @@
 use strings;
 use lists;
 use time;
+use convert;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
 # name / value split, `emit`) is shared with vcard.j via this include.
@@ -156,19 +157,19 @@ export func encode(cal as Calendar) {
     def lines as list of string init [];
     $lines[] = "BEGIN:VCALENDAR";
     $lines[] = "VERSION:2.0";
-    $lines = emit($lines, "PRODID", escapeText($cal.prodid));
+    $lines[] = emitLine("PRODID", escapeText($cal.prodid));
     for (def ev in $cal.events) {
         $lines[] = "BEGIN:VEVENT";
-        $lines = emit($lines, "UID", escapeText($ev.uid));
-        $lines = emit($lines, "DTSTAMP", formatDateTime($ev.stamp));
-        $lines = emit($lines, "DTSTART", formatDateTime($ev.start));
-        $lines = emit($lines, "DTEND", formatDateTime($ev.end));
-        $lines = emit($lines, "SUMMARY", escapeText($ev.summary));
+        $lines[] = emitLine("UID", escapeText($ev.uid));
+        $lines[] = emitLine("DTSTAMP", formatDateTime($ev.stamp));
+        $lines[] = emitLine("DTSTART", formatDateTime($ev.start));
+        $lines[] = emitLine("DTEND", formatDateTime($ev.end));
+        $lines[] = emitLine("SUMMARY", escapeText($ev.summary));
         if (not ($ev.description == "")) {
-            $lines = emit($lines, "DESCRIPTION", escapeText($ev.description));
+            $lines[] = emitLine("DESCRIPTION", escapeText($ev.description));
         }
         if (not ($ev.location == "")) {
-            $lines = emit($lines, "LOCATION", escapeText($ev.location));
+            $lines[] = emitLine("LOCATION", escapeText($ev.location));
         }
         $lines[] = "END:VEVENT";
     }

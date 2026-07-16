@@ -222,7 +222,14 @@ export func patch(c as Client, path as string, contentType as string, body as st
  * @return {json.Value} the decoded response body
  */
 export func getJson(c as Client, path as string, query as map of string to string) {
-    return json.decode(get($c, $path, $query).body);
+    def r as Response init get($c, $path, $query);
+    # Check the status before decoding: a 4xx / 5xx often returns an HTML error
+    # page, which would otherwise throw a generic JSON-parse error and lose the
+    # status and body. Surface a typed rest error carrying both.
+    if ($r.status < 200 or $r.status >= 300) {
+        throw Error{kind: "rest", message: "rest.getJson: HTTP " + convert.toString($r.status) + ": " + $r.body, file: "", line: 0, col: 0};
+    }
+    return json.decode($r.body);
 }
 
 /**

@@ -48,7 +48,13 @@ func enabled() {
     if (len(os.getEnv("NO_COLOR")) > 0) {
         return false;
     }
-    if (len(os.getEnv("FORCE_COLOR")) > 0) {
+    def fc as string init os.getEnv("FORCE_COLOR");
+    if (len($fc) > 0) {
+        # Interpret the value, don't just test presence: FORCE_COLOR=0 (and
+        # "false") means force OFF, any other value forces ON.
+        if ($fc == "0" or $fc == "false") {
+            return false;
+        }
         return true;
     }
     return os.isTerminal("stdout");

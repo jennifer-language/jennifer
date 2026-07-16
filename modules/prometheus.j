@@ -231,6 +231,7 @@ export func observe(metric as Metric, labels as map of string to string, value a
         if (labelsEqual($out.samples[$i].labels, $labels)) {
             $out.samples[$i].value = $value;
             $replaced = true;
+            break;   # a label set appears once; stop scanning
         }
         $i = $i + 1;
     }
@@ -259,17 +260,22 @@ func renderLabels(labels as map of string to string) {
  * @return {string} the exposition text (one trailing newline per line)
  */
 export func render(metrics as list of Metric) {
-    def out as string init "";
+    # Collect lines and join once: an accumulating `+` over thousands of
+    # samples is O(N^2) in the output, and /metrics is scraped repeatedly.
+    def lines as list of string init [];
     for (def m in $metrics) {
         if (len($m.help) > 0) {
-            $out = $out + "# HELP " + $m.name + " " + escapeHelp($m.help) + "\n";
+            $lines[] = "# HELP " + $m.name + " " + escapeHelp($m.help);
         }
-        $out = $out + "# TYPE " + $m.name + " " + $m.type + "\n";
+        $lines[] = "# TYPE " + $m.name + " " + $m.type;
         for (def s in $m.samples) {
-            $out = $out + $m.name + renderLabels($s.labels) + " " + convert.toString($s.value) + "\n";
+            $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value);
         }
     }
-    return $out;
+    if (len($lines) == 0) {
+        return "";
+    }
+    return strings.join($lines, "\n") + "\n";
 }
 
 # --- retrieval (exported; needs the default binary via http) ----------------

@@ -207,8 +207,18 @@ func decodeStep(cs as list of string, ic as int, i as int, bias as int) {
     def acc as int init $i;
     def w as int init 1;
     def k as int init BASE;
+    def total as int init len($cs);
     while (true) {
+        # A malformed ACE label can run the cursor off the end or carry a
+        # character that is not a valid base-36 digit; reject both instead of
+        # indexing out of bounds or accumulating a -1 digit.
+        if ($cur >= $total) {
+            throw Error{kind: "idna", message: "idna: truncated punycode label", file: "", line: 0, col: 0};
+        }
         def digit as int init charToDigit($cs[$cur]);
+        if ($digit < 0) {
+            throw Error{kind: "idna", message: "idna: invalid punycode digit '" + $cs[$cur] + "'", file: "", line: 0, col: 0};
+        }
         $cur = $cur + 1;
         $acc = $acc + $digit * $w;
         def t as int init threshold($k, $bias);
@@ -251,6 +261,11 @@ func decodeLabel(ace as string) {
         def outLen as int init len($output) + 1;
         $bias = adapt($i - $oldi, $outLen, $oldi == 0);
         $n = $n + $i // $outLen;
+        # A hostile label can drive n past the Unicode range; reject it before
+        # it reaches fromCodepoint (a spoofing / garbage-output guard).
+        if ($n > 1114111) {
+            throw Error{kind: "idna", message: "idna: decoded code point out of range", file: "", line: 0, col: 0};
+        }
         $i = $i % $outLen;
         $output = insertAt($output, $i, $n);
         $i = $i + 1;

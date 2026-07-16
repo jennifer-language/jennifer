@@ -26,6 +26,7 @@ use fs;
 use os;
 use convert;
 use strings;
+use time;
 
 def const DEFAULT_BASE as string init "/sys/class/gpio";
 def const BASE_ENV as string init "JENNIFER_GPIO_BASE";
@@ -76,7 +77,23 @@ export func setup(pin as int, direction as string) {
     # The kernel creates gpioN on export; mkdirAll is a no-op when it already
     # exists (real sysfs) and creates it on a mock tree.
     fs.mkdirAll($pd);
-    fs.writeString($pd + "/direction", $direction);
+    # Retry the direction write briefly: after export, udev needs a moment to
+    # grant write permission on the new attribute files, so a non-root write
+    # can transiently fail with EACCES (the canonical sysfs-GPIO flake).
+    def attempt as int init 0;
+    def wrote as bool init false;
+    while (not $wrote) {
+        try {
+            fs.writeString($pd + "/direction", $direction);
+            $wrote = true;
+        } catch (err) {
+            $attempt = $attempt + 1;
+            if ($attempt >= 10) {
+                throw Error{ kind: "gpio", message: "gpio.setup: could not set direction after export (udev permission delay?): " + $err.message, file: "", line: 0, col: 0 };
+            }
+            time.sleep(time.fromMilliseconds(20));
+        }
+    }
 }
 
 /**

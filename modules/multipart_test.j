@@ -78,6 +78,31 @@ func testExtractHelpers() {
     testing.assertEqual(extractParam($h, "missing"), "");
 }
 
+# extractParam("name") must not match inside "filename" even when filename
+# comes first, and must honor \" escapes.
+func testExtractParamKeyBoundary() {
+    def h as string init "form-data; filename=\"a.png\"; name=\"real\"";
+    testing.assertEqual(extractParam($h, "name"), "real");
+    testing.assertEqual(extractParam($h, "filename"), "a.png");
+    # An escaped quote inside the value is unescaped, and a ';' inside quotes
+    # is not a separator.
+    def q as string init "form-data; name=\"a\\\"b;c\"";
+    testing.assertEqual(extractParam($q, "name"), "a\"b;c");
+}
+
+# buildWith must escape (and neutralize CRLF in) name / filename so a crafted
+# value cannot inject headers or a premature body separator; the escaped value
+# round-trips through extractParam.
+func testBuildEscapesParams() {
+    def parts as list of Part init [Part{name: "f", filename: "a\".txt", contentType: "", data: convert.bytesFromString("x", "utf-8")}];
+    def form as Built init buildWith($parts, "B");
+    def text as string init convert.stringFromBytes($form.body, "utf-8");
+    testing.assertContains($text, "filename=\"a\\\".txt\"");
+    testing.assertFalse(strings.contains($text, "a\".txt\""));   # not the raw unescaped form
+    def back as list of Part init parse($form.contentType, $form.body);
+    testing.assertEqual($back[0].filename, "a\".txt");
+}
+
 func testParseHandWritten() {
     def raw as string init "--B\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\nalice\r\n--B--\r\n";
     def back as list of Part init parse("multipart/form-data; boundary=B", convert.bytesFromString($raw, "utf-8"));

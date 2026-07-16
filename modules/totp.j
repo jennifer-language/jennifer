@@ -223,9 +223,17 @@ func urlEncode(s as string) {
  * @param opts {Options} digits / period / algorithm (zero-value = defaults)
  * @return {string} the otpauth provisioning URI
  */
+# normalizedSecret canonicalizes a secret for the otpauth URI: strip spaces,
+# upper-case, and drop `=` padding, so a secret an authenticator would accept
+# (via decodeSecret) produces a scannable, matching URI.
+func normalizedSecret(secret as string) {
+    def s as string init strings.upper(strings.replace($secret, " ", ""));
+    return strings.replace($s, "=", "");
+}
+
 export func uri(issuer as string, account as string, secret as string, opts as Options) {
     def label as string init urlEncode($issuer) + ":" + urlEncode($account);
-    def query as string init "secret=" + $secret +
+    def query as string init "secret=" + normalizedSecret($secret) +
         "&issuer=" + urlEncode($issuer) +
         "&algorithm=" + strings.upper(algorithmOf($opts)) +
         "&digits=" + convert.toString(digitsOf($opts)) +

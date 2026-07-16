@@ -427,15 +427,40 @@ func unquote(s as string) {
     return $s;
 }
 
-# encodeAddressHeader encodes a non-ASCII display name in `Name <addr>`, leaving
-# the address alone. A multi-address value (a comma) is left raw.
-func encodeAddressHeader(value as string) {
-    if (strings.contains($value, ",")) {
-        return $value;
+# splitTopLevelCommas splits an address-list value on commas that are outside a
+# quoted display name (a comma inside `"Last, First"` is not a separator).
+func splitTopLevelCommas(s as string) {
+    def out as list of string init [];
+    def cur as string init "";
+    def cs as list of string init strings.chars($s);
+    def i as int init 0;
+    def inQuote as bool init false;
+    while ($i < len($cs)) {
+        def c as string init $cs[$i];
+        if ($c == "\"") {
+            $inQuote = not $inQuote;
+            $cur = $cur + $c;
+        } elseif ($c == "," and not $inQuote) {
+            $out[] = $cur;
+            $cur = "";
+        } else {
+            $cur = $cur + $c;
+        }
+        $i = $i + 1;
     }
+    $out[] = $cur;
+    return $out;
+}
+
+# encodeOneAddress encodes a non-ASCII display name in a single `Name <addr>`
+# mailbox (or a bare non-ASCII phrase), leaving the address alone.
+func encodeOneAddress(value as string) {
     def lt as int init strings.indexOf($value, "<");
     if ($lt < 0) {
-        return $value;
+        if (isAsciiText($value)) {
+            return $value;
+        }
+        return encodeWord(unquote($value));
     }
     def phrase as string init strings.trim(strings.substring($value, 0, $lt));
     if (isAsciiText($phrase)) {
@@ -443,6 +468,18 @@ func encodeAddressHeader(value as string) {
     }
     def addr as string init strings.substring($value, $lt, len($value));
     return encodeWord(unquote($phrase)) + " " + $addr;
+}
+
+# encodeAddressHeader encodes each mailbox of an address-list header, so an
+# international display name survives even in a multi-address To / Cc / From
+# (splitting on top-level commas rather than bailing out on the first comma,
+# which used to serialize the whole value as raw 8-bit).
+func encodeAddressHeader(value as string) {
+    def encoded as list of string init [];
+    for (def part in splitTopLevelCommas($value)) {
+        $encoded[] = encodeOneAddress(strings.trim($part));
+    }
+    return strings.join($encoded, ", ");
 }
 
 # encodeHeaderValue applies encoded-word encoding to a non-ASCII header value

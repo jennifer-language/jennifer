@@ -22,6 +22,7 @@
 use strings;
 use convert;
 use json;
+use time;
 import "./redis.j" as redis;
 
 # The Redis key namespace (`resque` is the Resque default; both ends must agree).
@@ -45,13 +46,9 @@ def struct Payload {
     args as list of string
 };
 
-# A failure record pushed to the failed list.
-def struct Failure {
-    queue as string,
-    class as string,
-    args as list of string,
-    error as string
-};
+# The worker identity recorded on a failure. Resque uses "host:pid:queues";
+# without a pid / hostname surface here, a stable module identifier is used.
+def const WORKER as string init "jennifer-resque:1:*";
 
 # --- keys (private) ------------------------------------------------
 
@@ -148,8 +145,23 @@ export func reserve(session as redis.Session, queues as list of string) {
  * @param message {string} the failure message
  */
 export func fail(session as redis.Session, job as Job, message as string) {
-    def rec as Failure init Failure{queue: $job.queue, class: $job.class,
-        args: $job.args, error: $message};
+    # Emit the standard Resque failure record (nested `payload`, plus
+    # `failed_at` / `exception` / `error` / `backtrace` / `worker` / `queue`)
+    # so a Ruby / PHP Resque failure UI can parse it. Built with the json write
+    # API because the keys carry underscores, which struct fields cannot.
+    def rec as json.Value init json.map();
+    $rec = json.set($rec, "/failed_at", time.iso(time.utc()));
+    $rec = json.set($rec, "/payload", json.map());
+    $rec = json.set($rec, "/payload/class", $job.class);
+    $rec = json.set($rec, "/payload/args", json.list());
+    for (def a in $job.args) {
+        $rec = json.append($rec, "/payload/args", $a);
+    }
+    $rec = json.set($rec, "/exception", $job.class);
+    $rec = json.set($rec, "/error", $message);
+    $rec = json.set($rec, "/backtrace", json.list());
+    $rec = json.set($rec, "/worker", WORKER);
+    $rec = json.set($rec, "/queue", $job.queue);
     redis.command($session, ["RPUSH", failedKey(), json.encode($rec)]);
 }
 

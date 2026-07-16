@@ -67,3 +67,11 @@ func testObjectKeys() {
     testing.assertEqual($keys[1], "dir/b.txt");
     testing.assertEqual(len(objectKeys("<ListBucketResult></ListBucketResult>")), 0);
 }
+
+# XML-escaped keys are decoded so they round-trip back into get / delete.
+func testObjectKeysDecodesEntities() {
+    def xml as string init "<ListBucketResult><Contents><Key>reports&amp;data.txt</Key></Contents><Contents><Key>a&lt;b&gt;c.txt</Key></Contents></ListBucketResult>";
+    def keys as list of string init objectKeys($xml);
+    testing.assertEqual($keys[0], "reports&data.txt");
+    testing.assertEqual($keys[1], "a<b>c.txt");
+}

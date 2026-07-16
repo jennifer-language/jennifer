@@ -211,16 +211,18 @@ func exec(set as Set, src as string, node as json.Value, root as json.Value, var
     if ($depth > MAX_NESTING) {
         throw Error{ kind: "tengine", message: "tengine: nesting exceeds " + convert.toString(MAX_NESTING) + " levels (template include cycle?)", file: "", line: 0, col: 0 };
     }
-    def out as string init "";
+    # Collect output fragments and join once: an accumulating `+` over a large
+    # template (or a big rendered sub-block) is O(N^2) in the output size.
+    def parts as list of string init [];
     def rest as string init $src;
     def env as map of string to json.Value init $vars;
     while (true) {
         def i as int init strings.indexOf($rest, "{{");
         if ($i < 0) {
-            $out = $out + $rest;
+            $parts[] = $rest;
             break;
         }
-        $out = $out + strings.substring($rest, 0, $i);
+        $parts[] = strings.substring($rest, 0, $i);
         def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
         def j as int init closeActionIndex($afterOpen);
         if ($j < 0) {
@@ -231,7 +233,7 @@ func exec(set as Set, src as string, node as json.Value, root as json.Value, var
         def kind as string init actionKind($action);
         if ($kind == "if" or $kind == "range" or $kind == "with" or $kind == "block") {
             def bp as BlockParts init takeBlock($tail);
-            $out = $out + execControl($set, $kind, $action, $bp, $node, $root, $env, $depth);
+            $parts[] = execControl($set, $kind, $action, $bp, $node, $root, $env, $depth);
             $rest = $bp.remainder;
         } elseif ($kind == "assign") {
             $env = execAssign($action, $node, $root, $env);
@@ -247,16 +249,16 @@ func exec(set as Set, src as string, node as json.Value, root as json.Value, var
             if (not setHas($set, $na.name)) {
                 throw Error{ kind: "tengine", message: "tengine: no such template: " + $na.name, file: "", line: 0, col: 0 };
             }
-            $out = $out + exec($set, setGet($set, $na.name), $argNode, $argNode, emptyVars(), $depth + 1);
+            $parts[] = exec($set, setGet($set, $na.name), $argNode, $argNode, emptyVars(), $depth + 1);
             $rest = $tail;
         } elseif ($kind == "comment" or $kind == "end" or $kind == "else") {
             $rest = $tail;
         } else {
-            $out = $out + evalOutput($action, $node, $root, $env);
+            $parts[] = evalOutput($action, $node, $root, $env);
             $rest = $tail;
         }
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # execAssign handles `{{ $x := PIPELINE }}`, returning the updated environment.
@@ -307,7 +309,9 @@ func execControl(set as Set, kind as string, action as string, bp as BlockParts,
 # else part.
 func execRange(set as Set, val as json.Value, bp as BlockParts, node as json.Value, root as json.Value, vars as map of string to json.Value, rv as RangeVars, depth as int) {
     def t as string init json.typeOf($val);
-    def out as string init "";
+    # Collect per-iteration fragments and join once: an accumulating `+` over a
+    # large range is O(N^2) in the rendered output size.
+    def parts as list of string init [];
     if ($t == "list") {
         def n as int init json.length($val);
         if ($n == 0) {
@@ -317,10 +321,10 @@ func execRange(set as Set, val as json.Value, bp as BlockParts, node as json.Val
         while ($i < $n) {
             def elem as json.Value init json.get($val, "/" + convert.toString($i));
             def env as map of string to json.Value init bindLoop($vars, $rv, numVal($i), $elem);
-            $out = $out + exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1);
+            $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1);
             $i = $i + 1;
         }
-        return $out;
+        return strings.join($parts, "");
     }
     if ($t == "map") {
         def keys as list of string init json.keys($val);
@@ -330,9 +334,9 @@ func execRange(set as Set, val as json.Value, bp as BlockParts, node as json.Val
         for (def k in $keys) {
             def elem as json.Value init json.get($val, "/" + $k);
             def env as map of string to json.Value init bindLoop($vars, $rv, strVal($k), $elem);
-            $out = $out + exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1);
+            $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1);
         }
-        return $out;
+        return strings.join($parts, "");
     }
     return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1);
 }

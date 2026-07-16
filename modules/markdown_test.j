@@ -40,6 +40,19 @@ func testInlineEmphasis() {
     testing.assertEqual($spans[0].text, "it");
 }
 
+# Space-flanked `*` (multiplication / decoration) is not emphasis (CommonMark
+# flanking rules).
+func testInlineSpaceFlankedStarIsLiteral() {
+    def spans as list of Span init parseInline("compute 3 * 4 * 5 fast");
+    testing.assertEqual(len($spans), 1);
+    testing.assertEqual($spans[0].kind, "text");
+    testing.assertEqual($spans[0].text, "compute 3 * 4 * 5 fast");
+    # But a tight `*x*` still emphasizes.
+    def em as list of Span init parseInline("a *x* b");
+    testing.assertEqual($em[1].kind, "em");
+    testing.assertEqual($em[1].text, "x");
+}
+
 func testInlineUnterminatedIsText() {
     # A lone marker with no closer stays literal text.
     def spans as list of Span init parseInline("a * b ` c");
@@ -89,6 +102,15 @@ func testFenceContent() {
     testing.assertEqual(len($blocks), 1);
     testing.assertEqual($blocks[0].kind, "code");
     testing.assertEqual($blocks[0].text, "l1\nl2");
+}
+
+# A longer opening fence is not closed by a shorter inner backtick run: a
+# ````-fenced block may contain a ``` line.
+func testFenceLongerFenceContainsShorter() {
+    def blocks as list of Block init parseBlocks("````\ncode with ``` inside\n````");
+    testing.assertEqual(len($blocks), 1);
+    testing.assertEqual($blocks[0].kind, "code");
+    testing.assertEqual($blocks[0].text, "code with ``` inside");
 }
 
 # --- HTML rendering (public) ---

@@ -283,9 +283,20 @@ export func deviceStart(config as Config) {
 export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
     def interval as int init $deviceAuth.interval;
     while (true) {
+        # Stop polling once the device code has expired instead of looping
+        # forever against a lenient endpoint that keeps returning pending.
+        if ($deviceAuth.expiresAt > 0 and nowUnix() >= $deviceAuth.expiresAt) {
+            fail("device authorization expired before approval");
+        }
         def params as map of string to string init {
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             "device_code": $deviceAuth.deviceCode, "client_id": $config.clientId};
+        # Google's token endpoint requires the client secret in the device
+        # polling request; include it when configured (public clients leave it
+        # empty).
+        if (not ($config.clientSecret == "")) {
+            $params["client_secret"] = $config.clientSecret;
+        }
         def body as string init postForm($config.tokenUrl, $params).body;
         def state as string init pollState($body);
         if ($state == "success") {

@@ -125,6 +125,13 @@ export func decrement(c as Client, name as string) {
  * @param value {int} the gauge value
  */
 export func gauge(c as Client, name as string, value as int) {
+    # StatsD reads a value with a leading sign as a *delta*, so a bare
+    # "name:-5|g" would decrement the gauge by 5 rather than set it to -5. To
+    # set an absolute negative value, first set the gauge to 0, then apply the
+    # negative as a decrement.
+    if ($value < 0) {
+        emit($c, $name, "0", "g");
+    }
     emit($c, $name, convert.toString($value), "g");
 }
 

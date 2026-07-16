@@ -103,6 +103,28 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		return []lint.Diagnostic{sourceErrorDiag("L002", err, absPath)}, src, absPath, false
 	}
 
+	// A finding can anchor to an `include`d file (its path rides on the spliced
+	// tokens), but `# lint-disable` directives live in comments the preprocessor
+	// strips. Re-lex each distinct included file with trivia intact and append
+	// its raw tokens, so a directive in an include can suppress its own findings.
+	suppressTokens := rawTokens
+	seenFile := map[string]bool{absPath: true}
+	for _, t := range tokens {
+		if t.File == "" || seenFile[t.File] {
+			continue
+		}
+		seenFile[t.File] = true
+		incSrc, rerr := os.ReadFile(t.File)
+		if rerr != nil {
+			continue
+		}
+		incToks, lerr := lexer.TokenizeWithFile(string(incSrc), t.File)
+		if lerr != nil {
+			continue
+		}
+		suppressTokens = append(suppressTokens, incToks...)
+	}
+
 	dotfile, hasDotfile := findDotfile(baseDir)
 	enabled, err := lint.ResolveSelection(opts.checks, opts.hasChecks, dotfile, hasDotfile)
 	if err != nil {
@@ -112,7 +134,7 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		return nil, src, absPath, true
 	}
 
-	return lint.Check(prog, rawTokens, src, absPath, enabled, lint.DefaultConfig()), src, absPath, false
+	return lint.Check(prog, suppressTokens, src, absPath, enabled, lint.DefaultConfig()), src, absPath, false
 }
 
 // sourceErrorDiag turns a positioned lex / preprocess / parse error into an

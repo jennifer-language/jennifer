@@ -35,6 +35,16 @@ func testModulePreamble() {
     testing.assertEqual($doc.module.version, "2.0");
 }
 
+# A wrapped @param / @return description (continuation lines) is captured, not
+# truncated to its first line.
+func testParamContinuationLines() {
+    def doc as FileDoc init parse("/**\n * F.\n * @param name {string} who to greet,\n * spanning two lines\n * @return {string} the greeting\n * also wrapped\n */\nexport func f(name as string) { return \"x\"; }");
+    def fn as FuncDoc init $doc.funcs[0];
+    testing.assertEqual($fn.params[0].name, "name");
+    testing.assertContains($fn.params[0].description, "spanning two lines");
+    testing.assertContains($fn.returns.description, "also wrapped");
+}
+
 func testExportedFuncWithParams() {
     def doc as FileDoc init parse("/**\n * Greet.\n * @param name {string} who\n * @return {string} greeting\n */\nexport func greet(name as string) { return \"x\"; }");
     testing.assertEqual(len($doc.funcs), 1);

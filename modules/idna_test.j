@@ -72,3 +72,12 @@ func testEncodeLabelDirect() {
     testing.assertEqual(encodeLabel(codePoints("münchen")), "mnchen-3ya");
     testing.assertEqual(decodeLabel("mnchen-3ya"), "münchen");
 }
+
+# A malformed ACE label must throw a typed idna error rather than crash or
+# return garbage (a spoofing aid).
+func decodeInvalidDigit() { decodeLabel("mnchen-!ya"); }
+func decodeTruncated() { decodeLabel("mnchen-3y"); }   # drops the terminating digit
+func testDecodeLabelRejectsMalformed() {
+    testing.assertThrows("decodeInvalidDigit", "idna");
+    testing.assertThrows("decodeTruncated", "idna");
+}

@@ -208,6 +208,22 @@ func testAddressNameEncoded() {
     testing.assertEqual(headerValue($p, "From"), "Jörg Müller <j@x.de>");
 }
 
+# A multi-address To/Cc/From with non-ASCII display names encodes each mailbox
+# (rather than serializing the whole value as raw 8-bit).
+func testMultiAddressEachEncoded() {
+    def v as string init encodeAddressHeader("Jörg Müller <a@x.de>, José <b@y.es>");
+    testing.assertContains($v, "<a@x.de>");
+    testing.assertContains($v, "<b@y.es>");
+    testing.assertContains($v, "=?UTF-8?B?");
+    # No raw non-ASCII byte survives (both names were encoded).
+    testing.assertFalse(strings.contains($v, "Jörg"));
+    testing.assertFalse(strings.contains($v, "José"));
+    # A comma inside a quoted display name is not a mailbox separator.
+    def q as string init encodeAddressHeader("\"Müller, Jörg\" <a@x.de>");
+    testing.assertContains($q, "<a@x.de>");
+    testing.assertContains($q, "=?UTF-8?B?");
+}
+
 func testEncodeWordFoldsLong() {
     def long as string init strings.repeat("é", 60);   # 120 bytes -> multiple words
     def e as string init encodeWord($long);

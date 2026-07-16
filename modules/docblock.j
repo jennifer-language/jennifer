@@ -116,6 +116,30 @@ export def struct FileDoc { module as ModuleDoc, funcs as list of FuncDoc, struc
 # ===== private intermediates =====
 
 def struct RawDoc { body as string, after as int, line as int };
+
+# A tag's gathered body (inline text plus continuation lines) and the line
+# index just past it.
+def struct TagBody { text as string, next as int };
+
+# tagBody joins a tag's inline `rest` with any following non-tag continuation
+# lines (wrapped description prose), so a multi-line @param / @return / @throws
+# / @see description is not truncated to its first line. `start` is the line
+# after the tag line.
+func tagBody(lines as list of string, rest as string, start as int, cnt as int) {
+    def parts as list of string init [];
+    if (not ($rest == "")) {
+        $parts[] = $rest;
+    }
+    def j as int init $start;
+    while ($j < $cnt and not isTag($lines[$j])) {
+        def cont as string init strings.trim($lines[$j]);
+        if (not ($cont == "")) {
+            $parts[] = $cont;
+        }
+        $j = $j + 1;
+    }
+    return TagBody{ text: strings.join($parts, " "), next: $j };
+}
 def struct Parsed {
     summary as string, description as string,
     params as list of ParamDoc, returns as ReturnDoc, throws as list of ThrowDoc,
@@ -319,15 +343,18 @@ func parseBody(body as string) {
                 def tag as string init $tm.groups[0];
                 def rest as string init $tm.groups[1];
                 if ($tag == "param" or $tag == "field") {
-                    $params[] = parseParam($rest);
-                    $i = $i + 1;
+                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                    $params[] = parseParam($tb.text);
+                    $i = $tb.next;
                 } elseif ($tag == "return" or $tag == "returns") {
-                    $returns = parseTyped($rest);
-                    $i = $i + 1;
+                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                    $returns = parseTyped($tb.text);
+                    $i = $tb.next;
                 } elseif ($tag == "throws") {
-                    def t as ReturnDoc init parseTyped($rest);
+                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                    def t as ReturnDoc init parseTyped($tb.text);
                     $throws[] = ThrowDoc{ type: $t.type, description: $t.description };
-                    $i = $i + 1;
+                    $i = $tb.next;
                 } elseif ($tag == "example") {
                     def exLines as list of string init [];
                     if (not ($rest == "")) {
@@ -350,8 +377,9 @@ func parseBody(body as string) {
                     }
                     $i = $i + 1;
                 } elseif ($tag == "see") {
-                    $see[] = $rest;
-                    $i = $i + 1;
+                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                    $see[] = $tb.text;
+                    $i = $tb.next;
                 } elseif ($tag == "internal") {
                     $internal = true;
                     $i = $i + 1;

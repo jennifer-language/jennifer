@@ -17,6 +17,16 @@ func testLineBasic() {
     testing.assertEqual(line($p), "cpu value=0.5");
 }
 
+# A newline in a tag value (or any component) must be rejected: it would split
+# the point's line and corrupt the whole batch.
+func lineWithNewlineTag() {
+    def p as Point init field(tag(point("cpu"), "host", "a\nb"), "value", 1.0);
+    line($p);
+}
+func testLineRejectsNewline() {
+    testing.assertThrows("lineWithNewlineTag", "influxdb");
+}
+
 func testLineTagsSorted() {
     def p as Point init point("cpu");
     $p = tag($p, "host", "a");

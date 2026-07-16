@@ -58,7 +58,9 @@ func quoteField(f as string, delim as string) {
 export func parseWith(s as string, delim as string) {
     def rows as list of list of string init [];
     def row as list of string init [];
-    def field as string init "";
+    # Accumulate a field's characters in a list and join once at each flush: an
+    # accumulating `+` would be O(field_len^2) on a large quoted field.
+    def field as list of string init [];
     def inQuotes as bool init false;
     def fieldStarted as bool init false;
     def rowStarted as bool init false;
@@ -71,7 +73,7 @@ export func parseWith(s as string, delim as string) {
         # Inside a quoted field: a doubled quote is a literal, a lone quote
         # closes, anything else is content (delimiters and newlines included).
         if ($inQuotes and $c == '"' and $i + 1 < $n and $chars[$i + 1] == '"') {
-            $field = $field + '"';
+            $field[] = '"';
             $i = $i + 2;
             continue;
         }
@@ -81,7 +83,7 @@ export func parseWith(s as string, delim as string) {
             continue;
         }
         if ($inQuotes) {
-            $field = $field + $c;
+            $field[] = $c;
             $i = $i + 1;
             continue;
         }
@@ -94,17 +96,17 @@ export func parseWith(s as string, delim as string) {
             continue;
         }
         if ($c == $delim) {
-            $row[] = $field;
-            $field = "";
+            $row[] = strings.join($field, "");
+            $field = [];
             $fieldStarted = false;
             $rowStarted = true;
             $i = $i + 1;
             continue;
         }
         if ($c == "\n" or $c == "\r") {
-            $row[] = $field;
+            $row[] = strings.join($field, "");
             $rows[] = $row;
-            $field = "";
+            $field = [];
             $row = [];
             $fieldStarted = false;
             $rowStarted = false;
@@ -116,14 +118,14 @@ export func parseWith(s as string, delim as string) {
             }
             continue;
         }
-        $field = $field + $c;
+        $field[] = $c;
         $fieldStarted = true;
         $rowStarted = true;
         $i = $i + 1;
     }
     # Flush the final record unless the text ended exactly on a separator.
     if ($rowStarted or $fieldStarted) {
-        $row[] = $field;
+        $row[] = strings.join($field, "");
         $rows[] = $row;
     }
     return $rows;

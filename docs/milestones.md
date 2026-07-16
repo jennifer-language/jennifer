@@ -1858,6 +1858,29 @@ Shipped so far:
   - **Reading a constant with the `$` sigil is a parse error** (`$MAX`); the
     sigil is reserved for mutable variables. A `$CONST[...]` mutation attempt
     still reports the clearer "cannot mutate constant" error.
+- **Interpreter + library correctness / lifecycle / perf (mediums).** A broad
+  sweep: for-each now iterates a stable snapshot (independent of slice
+  capacity); a `try` body is its own block scope, so a `def` skipped by a
+  throw is an undefined-variable error rather than a silent null;
+  `convert.toFloat` rejects `NaN`/`Inf`; `task.waitAll` returns a generic list
+  (validated per-element) instead of relabeling as `list of int`; out-of-range
+  `time` instants are rejected and pre-epoch `time.unix` floors; map equality's
+  asymmetry is closed by the duplicate-key rejection. A consumer struct can no
+  longer impersonate a module struct across the call boundary, and a map of
+  module structs retags its keys on the way out; included files strip trivia;
+  module resolution dedupes and symlink-canonicalizes the search path.
+  Performance: `KindObject` shares its immutable payload instead of deep-copying
+  it; the slot-resolved write path no longer mirrors into the name map (name
+  readers consult the authoritative slot); the task registry prunes observed
+  tasks; module-boundary retag is copy-on-write; `maps.merge`/`has`/`delete`
+  are index-aware; `regex.findAll`'s byte->rune conversion is amortized;
+  `io.readBytes` reads in bounded chunks; `lists.range` detects int64 wrap.
+  Library lifecycle: `net.eof` no longer blocks on an open idle connection and
+  `net.Conn` fields are mutex-guarded; `httpd` applies handler headers before
+  `serveFile`, bounds concurrent body buffering (admission semaphore), and
+  answers 500 for an accepted-but-unanswered request instead of leaking the
+  goroutine; `os` gains **`os.release(p)`** to drop a finished process handle
+  (the registry no longer grows without bound for a per-job spawner).
 
 Remaining phases (tracked to completion under this milestone): the
 remaining module correctness and performance findings (mediums and lows),

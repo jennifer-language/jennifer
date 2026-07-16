@@ -52,10 +52,17 @@ func positions(item as string, size as int, hashes as int) {
     def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
     def h as int init readLong($digest, 0);
     def g as int init readLong($digest, 4);
+    # Guard the double-hash step: if g is 0 (mod size) every position collapses
+    # to the same bit, degrading the filter to a single hash. Force a non-zero
+    # step (Kirsch-Mitzenmacher).
+    def step as int init $g % $size;
+    if ($step == 0) {
+        $step = 1;
+    }
     def out as list of int init [];
     def i as int init 0;
     while ($i < $hashes) {
-        $out[] = ($h + $i * $g) % $size;
+        $out[] = ($h + $i * $step) % $size;
         $i = $i + 1;
     }
     return $out;
@@ -109,9 +116,17 @@ export func add(f as Filter, item as string) {
  * @return {Filter} a filter with all items recorded
  */
 export func addAll(f as Filter, items as list of string) {
+    # One copy of the filter, then set bits directly per item: calling `add`
+    # per item would deep-copy the whole bit array on every item (O(items x
+    # size)).
     def out as Filter init $f;
     for (def item in $items) {
-        $out = add($out, $item);
+        def ps as list of int init positions($item, $out.size, $out.hashes);
+        for (def pos in $ps) {
+            def bi as int init $pos // 8;
+            def bit as int init $pos % 8;
+            $out.bits[$bi] = $out.bits[$bi] | (1 << $bit);
+        }
     }
     return $out;
 }

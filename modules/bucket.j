@@ -247,7 +247,20 @@ export func objectKeys(xml as string) {
     def keys as list of string init [];
     def matches as list of regex.Match init regex.findAll("<Key>([^<]*)</Key>", $xml);
     for (def m in $matches) {
-        $keys[] = $m.groups[0];
+        # XML content escapes the five predefined entities; decode them so a key
+        # like "reports&amp;data.txt" round-trips back into bucket.get / delete.
+        $keys[] = unescapeXml($m.groups[0]);
     }
     return $keys;
+}
+
+# unescapeXml decodes the five predefined XML entities. `&amp;` is decoded last
+# so an already-decoded `&` in the source is not re-interpreted.
+func unescapeXml(s as string) {
+    def out as string init strings.replace($s, "&lt;", "<");
+    $out = strings.replace($out, "&gt;", ">");
+    $out = strings.replace($out, "&quot;", "\"");
+    $out = strings.replace($out, "&apos;", "'");
+    $out = strings.replace($out, "&amp;", "&");
+    return $out;
 }

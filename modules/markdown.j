@@ -96,6 +96,13 @@ func codeBlockNode(text as string) {
 # --- inline scanner (private) --------------------------------------
 
 # findChar returns the index of target in cs at or after `from`, or -1.
+# isFlankSpace reports whether c is whitespace, for CommonMark emphasis
+# flanking (a delimiter run flanked by whitespace on the inside does not open /
+# close emphasis).
+func isFlankSpace(c as string) {
+    return $c == " " or $c == "\t" or $c == "\n" or $c == "\r";
+}
+
 func findChar(cs as list of string, target as string, from as int) {
     def j as int init $from;
     while ($j < len($cs)) {
@@ -156,10 +163,14 @@ func parseInline(s as string) {
             $i = $bt + 1;
             continue;
         }
-        # strong: **text**
+        # strong: **text** (flanking: no whitespace just inside the markers, so
+        # a space-flanked `**` is literal, not a delimiter).
         def dbl as int init -1;
-        if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*") {
+        if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and not isFlankSpace($cs[$i + 2])) {
             $dbl = findDouble($cs, "*", $i + 2);
+            if ($dbl >= 0 and isFlankSpace($cs[$dbl - 1])) {
+                $dbl = -1;
+            }
         }
         if ($dbl >= 0) {
             if (len($buf) > 0) {
@@ -170,10 +181,15 @@ func parseInline(s as string) {
             $i = $dbl + 2;
             continue;
         }
-        # emphasis: *text*
+        # emphasis: *text* (flanking: the char right after the opening `*` and
+        # right before the closing `*` must be non-space, so "3 * 4 * 5" is not
+        # italicized).
         def em as int init -1;
-        if ($c == "*") {
+        if ($c == "*" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
             $em = findChar($cs, "*", $i + 1);
+            if ($em >= 0 and isFlankSpace($cs[$em - 1])) {
+                $em = -1;
+            }
         }
         if ($em >= 0) {
             if (len($buf) > 0) {
@@ -441,21 +457,38 @@ func headingBlock(level as int, text as string) {
 # its content plus the line index just past the closing fence.
 func collectFence(lines as list of string, open as int) {
     def n as int init len($lines);
-    def code as string init "";
-    def first as bool init true;
+    # Record the opening fence length; a shorter run of backticks inside the
+    # block is content, not a terminator (only a fence of equal-or-greater
+    # length closes it).
+    def openLen as int init fenceLen(strings.trim($lines[$open]));
+    def parts as list of string init [];
     def j as int init $open + 1;
-    while ($j < $n and not strings.startsWith(strings.trim($lines[$j]), "```")) {
-        if (not $first) {
-            $code = $code + "\n";
+    while ($j < $n) {
+        if (fenceLen(strings.trim($lines[$j])) >= $openLen) {
+            break;
         }
-        $first = false;
-        $code = $code + $lines[$j];
+        $parts[] = $lines[$j];
         $j = $j + 1;
     }
+    def code as string init strings.join($parts, "\n");
     if ($j < $n) {
         return Fence{code: $code, next: $j + 1};
     }
     return Fence{code: $code, next: $j};
+}
+
+# fenceLen returns the number of leading backticks in a trimmed line when it is
+# a code fence (3 or more), else 0.
+func fenceLen(trimmed as string) {
+    def cs as list of string init strings.chars($trimmed);
+    def k as int init 0;
+    while ($k < len($cs) and $cs[$k] == "`") {
+        $k = $k + 1;
+    }
+    if ($k >= 3) {
+        return $k;
+    }
+    return 0;
 }
 
 # --- HTML rendering, through htmlwriter (exported) -----------------

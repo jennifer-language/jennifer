@@ -96,7 +96,10 @@ func appendBytes(dst as bytes, src as bytes) {
     return $dst;
 }
 
-# readN reads exactly n bytes, looping over the "up to n" net.readBytes.
+# readN reads exactly n bytes, looping over the "up to n" net.readBytes. The
+# chunk is appended into the owning `out` in place (amortised O(1) per byte);
+# `$out = appendBytes($out, $chunk)` would copy the whole growing buffer on
+# every short read (gigabytes of memcpy for a large frame read in small chunks).
 func readN(socket as net.Conn, n as int) {
     def out as bytes;
     while (len($out) < $n) {
@@ -104,7 +107,11 @@ func readN(socket as net.Conn, n as int) {
         if (len($chunk) == 0) {
             fail("connection closed mid-frame");
         }
-        $out = appendBytes($out, $chunk);
+        def i as int init 0;
+        while ($i < len($chunk)) {
+            $out[] = $chunk[$i];
+            $i = $i + 1;
+        }
     }
     return $out;
 }
@@ -410,7 +417,13 @@ export func receive(c as Conn) {
             if (not ($f.opcode == OP_CONT)) {
                 $dataOpcode = $f.opcode;
             }
-            $acc = appendBytes($acc, $f.payload);
+            # Append fragment payload into `acc` in place (a by-value
+            # appendBytes copies the whole reassembly buffer per fragment).
+            def bi as int init 0;
+            while ($bi < len($f.payload)) {
+                $acc[] = $f.payload[$bi];
+                $bi = $bi + 1;
+            }
             if ($f.fin == 1) {
                 $done = true;
             }

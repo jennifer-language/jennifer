@@ -17,8 +17,11 @@ func b(s as string) {
     return convert.bytesFromString($s, "utf-8");
 }
 
-func reststr(pr as ParseResult) {
-    return convert.stringFromBytes($pr.rest, "utf-8");
+# reststr decodes the unconsumed remainder: the parser now returns a byte
+# cursor (`pos`), so slice the original input from there.
+func reststr(orig as string, pr as ParseResult) {
+    def buf as bytes init b($orig);
+    return convert.stringFromBytes(byteSlice($buf, $pr.pos, len($buf)), "utf-8");
 }
 
 func testEncodeCommand() {
@@ -32,7 +35,7 @@ func testParseSimpleString() {
     testing.assertTrue($pr.complete);
     testing.assertEqual($pr.reply.kind, "string");
     testing.assertEqual($pr.reply.str, "OK");
-    testing.assertEqual(reststr($pr), "");
+    testing.assertEqual(reststr("+OK\r\n", $pr), "");
 }
 
 func testParseError() {
@@ -51,7 +54,7 @@ func testParseBulkString() {
     def pr as ParseResult init parseComplete(b("$5\r\nhello\r\n"));
     testing.assertEqual($pr.reply.kind, "string");
     testing.assertEqual($pr.reply.str, "hello");
-    testing.assertEqual(reststr($pr), "");
+    testing.assertEqual(reststr("$5\r\nhello\r\n", $pr), "");
 }
 
 # A bulk string whose byte length exceeds its rune count ("café" is 5 bytes,
@@ -61,7 +64,7 @@ func testParseBulkMultibyte() {
     def pr as ParseResult init parseComplete(b("$5\r\ncafé\r\n"));
     testing.assertTrue($pr.complete);
     testing.assertEqual($pr.reply.str, "café");
-    testing.assertEqual(reststr($pr), "");
+    testing.assertEqual(reststr("$5\r\ncafé\r\n", $pr), "");
 }
 
 # A trailing reply after a multi-byte bulk still frames cleanly (the byte
@@ -69,7 +72,7 @@ func testParseBulkMultibyte() {
 func testParseBulkMultibyteLeavesRest() {
     def pr as ParseResult init parseComplete(b("$5\r\ncafé\r\n+NEXT\r\n"));
     testing.assertEqual($pr.reply.str, "café");
-    testing.assertEqual(reststr($pr), "+NEXT\r\n");
+    testing.assertEqual(reststr("$5\r\ncafé\r\n+NEXT\r\n", $pr), "+NEXT\r\n");
 }
 
 func testParseNilBulk() {
@@ -102,5 +105,5 @@ func testParseLeavesRest() {
     # A reply followed by the start of the next one leaves the remainder.
     def pr as ParseResult init parseComplete(b(":7\r\n+NEXT\r\n"));
     testing.assertEqual($pr.reply.num, 7);
-    testing.assertEqual(reststr($pr), "+NEXT\r\n");
+    testing.assertEqual(reststr(":7\r\n+NEXT\r\n", $pr), "+NEXT\r\n");
 }

@@ -342,33 +342,60 @@ export func incPatch(v as Version) {
 
 # --- sort (exported) -----------------------------------------------
 
-# insertSorted places v into an already-sorted list (ascending by compare).
-func insertSorted(sorted as list of Version, v as Version) {
-    def out as list of Version init [];
-    def placed as bool init false;
-    for (def w in $sorted) {
-        if (not $placed and compare($v, $w) < 0) {
-            $out[] = $v;
-            $placed = true;
-        }
-        $out[] = $w;
-    }
-    if (not $placed) {
-        $out[] = $v;
-    }
-    return $out;
-}
 
 /**
  * Return a new list ordered ascending by SemVer precedence. lists.sort is
- * scalar-only, so this is an insertion sort over compare().
+ * scalar-only, so this is a merge sort over compare() - O(n log n), where an
+ * insertion sort was O(n^2).
  * @param vs {list of Version} the versions to order
  * @return {list of Version} a new list sorted ascending
  */
 export func sort(vs as list of Version) {
+    return mergeSort($vs);
+}
+
+# mergeSort orders a list of Version ascending by compare(), stable and
+# O(n log n).
+func mergeSort(vs as list of Version) {
+    def n as int init len($vs);
+    if ($n <= 1) {
+        return $vs;
+    }
+    def mid as int init $n // 2;
+    def left as list of Version init [];
+    def right as list of Version init [];
+    def i as int init 0;
+    while ($i < $mid) {
+        $left[] = $vs[$i];
+        $i = $i + 1;
+    }
+    while ($i < $n) {
+        $right[] = $vs[$i];
+        $i = $i + 1;
+    }
+    return mergeVersions(mergeSort($left), mergeSort($right));
+}
+
+func mergeVersions(a as list of Version, b as list of Version) {
     def out as list of Version init [];
-    for (def v in $vs) {
-        $out = insertSorted($out, $v);
+    def i as int init 0;
+    def j as int init 0;
+    while ($i < len($a) and $j < len($b)) {
+        if (compare($a[$i], $b[$j]) <= 0) {
+            $out[] = $a[$i];
+            $i = $i + 1;
+        } else {
+            $out[] = $b[$j];
+            $j = $j + 1;
+        }
+    }
+    while ($i < len($a)) {
+        $out[] = $a[$i];
+        $i = $i + 1;
+    }
+    while ($j < len($b)) {
+        $out[] = $b[$j];
+        $j = $j + 1;
     }
     return $out;
 }
@@ -618,14 +645,35 @@ func preAtTuple(comparator as string, v as Version) {
     return len($t.prerelease) > 0 and $t.major == $v.major and $t.minor == $v.minor and $t.patch == $v.patch;
 }
 
-# tokenize splits a clause into comparators on whitespace or commas.
+# isBareOperator reports whether a token is a comparator operator with no
+# operand attached.
+func isBareOperator(t as string) {
+    return $t == ">=" or $t == "<=" or $t == ">" or $t == "<" or $t == "=" or $t == "^" or $t == "~";
+}
+
+# tokenize splits a clause into comparators on whitespace or commas, then
+# rejoins a bare operator with the operand that follows it: `>= 1.2.3` tokenizes
+# to `>=` + `1.2.3` but means `>=1.2.3`, not the wildcard operator plus an exact
+# `1.2.3`.
 func tokenize(clause as string) {
     def spaced as string init strings.replace($clause, ",", " ");
-    def out as list of string init [];
+    def raw as list of string init [];
     for (def tok in strings.split($spaced, " ")) {
         def t as string init strings.trim($tok);
         if (not ($t == "")) {
+            $raw[] = $t;
+        }
+    }
+    def out as list of string init [];
+    def i as int init 0;
+    while ($i < len($raw)) {
+        def t as string init $raw[$i];
+        if (isBareOperator($t) and $i + 1 < len($raw)) {
+            $out[] = $t + $raw[$i + 1];
+            $i = $i + 2;
+        } else {
             $out[] = $t;
+            $i = $i + 1;
         }
     }
     return $out;
@@ -1435,6 +1483,7 @@ export func simplifyRange(versions as list of string, range as string) {
     def sorted as list of Version init sort($all);
     def clauses as list of string init [];
     def matched as int init 0;
+    def anyPre as bool init false;
     def i as int init 0;
     def n as int init len($sorted);
     while ($i < $n) {
@@ -1442,10 +1491,16 @@ export func simplifyRange(versions as list of string, range as string) {
             def startS as string init toString($sorted[$i]);
             def endS as string init $startS;
             $matched = $matched + 1;
+            if (isPrerelease($sorted[$i])) {
+                $anyPre = true;
+            }
             while ($i + 1 < $n and satisfies(toString($sorted[$i + 1]), $range)) {
                 $i = $i + 1;
                 $endS = toString($sorted[$i]);
                 $matched = $matched + 1;
+                if (isPrerelease($sorted[$i])) {
+                    $anyPre = true;
+                }
             }
             if ($startS == $endS) {
                 $clauses[] = $startS;
@@ -1458,13 +1513,43 @@ export func simplifyRange(versions as list of string, range as string) {
     if ($matched == 0) {
         return "<0.0.0-0";
     }
-    if ($matched == $n and len($clauses) == 1) {
-        return "*";
+    # Pick a candidate simplification, but never take the "*" shortcut when a
+    # prerelease matched: "*" excludes prereleases, so it would drop them.
+    def candidate as string init "";
+    if ($matched == $n and len($clauses) == 1 and not $anyPre) {
+        $candidate = "*";
+    } else {
+        def joined as string init strings.join($clauses, " || ");
+        def orig as string init strings.trim($range);
+        if (len($orig) <= len($joined)) {
+            $candidate = $orig;
+        } else {
+            $candidate = $joined;
+        }
     }
-    def joined as string init strings.join($clauses, " || ");
-    def orig as string init strings.trim($range);
-    if (len($orig) <= len($joined)) {
-        return $orig;
+    # Verify the candidate selects exactly the versions the original range did;
+    # otherwise fall back to an explicit OR of the matched versions (which
+    # always reproduces the set exactly, prereleases included).
+    if (sameMatchSet($sorted, $candidate, $range)) {
+        return $candidate;
     }
-    return $joined;
+    def pins as list of string init [];
+    for (def v in $sorted) {
+        if (satisfies(toString($v), $range)) {
+            $pins[] = toString($v);
+        }
+    }
+    return strings.join($pins, " || ");
+}
+
+# sameMatchSet reports whether `candidate` and `orig` accept exactly the same
+# subset of `sorted`.
+func sameMatchSet(sorted as list of Version, candidate as string, orig as string) {
+    for (def v in $sorted) {
+        def s as string init toString($v);
+        if (not (satisfies($s, $candidate) == satisfies($s, $orig))) {
+            return false;
+        }
+    }
+    return true;
 }

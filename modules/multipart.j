@@ -173,23 +173,51 @@ func generateBoundary() {
  * @param boundary {string} the boundary token (must not occur in any part body)
  * @return {Built} the Content-Type and encoded body
  */
+# escapeParam makes a value safe inside a quoted Content-Disposition parameter:
+# strip CR / LF (they would inject headers or a premature body separator) and
+# backslash-escape `\` and `"` so a filename like `a".txt` cannot break out.
+func escapeParam(s as string) {
+    def clean as string init strings.replace(strings.replace($s, "\r", ""), "\n", "");
+    $clean = strings.replace($clean, "\\", "\\\\");
+    return strings.replace($clean, "\"", "\\\"");
+}
+
 export func buildWith(parts as list of Part, boundary as string) {
     def body as bytes;
     for (def p in $parts) {
-        $body = putStr($body, "--" + $boundary + "\r\n");
-        def cd as string init "Content-Disposition: form-data; name=\"" + $p.name + "\"";
+        def head as string init "--" + $boundary + "\r\n" +
+            "Content-Disposition: form-data; name=\"" + escapeParam($p.name) + "\"";
         if (len($p.filename) > 0) {
-            $cd = $cd + "; filename=\"" + $p.filename + "\"";
+            $head = $head + "; filename=\"" + escapeParam($p.filename) + "\"";
         }
-        $body = putStr($body, $cd + "\r\n");
+        $head = $head + "\r\n";
         if (len($p.contentType) > 0) {
-            $body = putStr($body, "Content-Type: " + $p.contentType + "\r\n");
+            $head = $head + "Content-Type: " + $p.contentType + "\r\n";
         }
-        $body = putStr($body, "\r\n");
-        $body = appendBytes($body, $p.data);
-        $body = putStr($body, "\r\n");
+        $head = $head + "\r\n";
+        # Append header bytes then data bytes into `body` in place: a by-value
+        # putStr / appendBytes copies the whole growing body on every call
+        # (O(parts^2 x size)); in-place append stays amortized O(total size).
+        def hb as bytes init convert.bytesFromString($head, "utf-8");
+        def hi as int init 0;
+        while ($hi < len($hb)) {
+            $body[] = $hb[$hi];
+            $hi = $hi + 1;
+        }
+        def di as int init 0;
+        while ($di < len($p.data)) {
+            $body[] = $p.data[$di];
+            $di = $di + 1;
+        }
+        $body[] = 13;
+        $body[] = 10;
     }
-    $body = putStr($body, "--" + $boundary + "--\r\n");
+    def tail as bytes init convert.bytesFromString("--" + $boundary + "--\r\n", "utf-8");
+    def ti as int init 0;
+    while ($ti < len($tail)) {
+        $body[] = $tail[$ti];
+        $ti = $ti + 1;
+    }
     return Built{ contentType: "multipart/form-data; boundary=" + $boundary, body: $body };
 }
 
@@ -228,20 +256,51 @@ func boundaryOf(contentType as string) {
     return strings.trim($rest);
 }
 
-# extractParam pulls a quoted `key="value"` parameter from a header string.
+# extractParam pulls a `key="value"` (or bare `key=value`) parameter from a
+# Content-Disposition header, matching the key only at a parameter boundary so
+# `name` does not match inside `filename`, honoring quotes (a `;` inside a
+# quoted value is not a separator) and `\"` / `\\` escapes.
 func extractParam(headers as string, key as string) {
-    def needle as string init $key + "=\"";
-    def idx as int init strings.indexOf(strings.lower($headers), $needle);
-    if ($idx < 0) {
-        return "";
+    def target as string init strings.lower($key);
+    def cs as list of string init strings.chars($headers);
+    def n as int init len($cs);
+    def i as int init 0;
+    while ($i < $n) {
+        while ($i < $n and ($cs[$i] == ";" or $cs[$i] == " " or $cs[$i] == "\t")) {
+            $i = $i + 1;
+        }
+        def k as string init "";
+        while ($i < $n and not ($cs[$i] == "=" or $cs[$i] == ";")) {
+            $k = $k + $cs[$i];
+            $i = $i + 1;
+        }
+        if ($i < $n and $cs[$i] == "=") {
+            $i = $i + 1;
+            def v as string init "";
+            if ($i < $n and $cs[$i] == "\"") {
+                $i = $i + 1;
+                while ($i < $n and not ($cs[$i] == "\"")) {
+                    if ($cs[$i] == "\\" and $i + 1 < $n) {
+                        $i = $i + 1;
+                    }
+                    $v = $v + $cs[$i];
+                    $i = $i + 1;
+                }
+                if ($i < $n) {
+                    $i = $i + 1;
+                }
+            } else {
+                while ($i < $n and not ($cs[$i] == ";")) {
+                    $v = $v + $cs[$i];
+                    $i = $i + 1;
+                }
+            }
+            if (strings.lower(strings.trim($k)) == $target) {
+                return strings.trim($v);
+            }
+        }
     }
-    def start as int init $idx + len($needle);
-    def rest as string init strings.substring($headers, $start, len($headers));
-    def q as int init strings.indexOf($rest, "\"");
-    if ($q < 0) {
-        return "";
-    }
-    return strings.substring($rest, 0, $q);
+    return "";
 }
 
 # extractHeader pulls a `Name: value` header line's value (case-insensitive name).

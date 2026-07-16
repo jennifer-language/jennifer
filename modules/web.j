@@ -970,8 +970,11 @@ func handleOne(app as App, req as httpd.Request) {
     if (corsEnabled($app)) {
         applyCors($ctx, $app.cors);
     }
-    if (corsEnabled($app) and $m == "OPTIONS") {
-        # Preflight: the CORS headers are set; answer without routing.
+    if (corsEnabled($app) and $m == "OPTIONS" and len(httpd.header($req, "Origin")) > 0 and len(httpd.header($req, "Access-Control-Request-Method")) > 0) {
+        # A genuine CORS preflight (carries Origin + Access-Control-Request-
+        # Method): the CORS headers are set, answer 204 without routing. A
+        # plain OPTIONS (no preflight headers) routes normally, so a registered
+        # OPTIONS handler stays reachable.
         httpd.respond($req, 204, "");
     } elseif ($matched.found) {
         dispatch($app, $matched.handler, $ctx, $req);

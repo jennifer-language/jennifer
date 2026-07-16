@@ -55,20 +55,33 @@ func unescapeText(v as string) {
 
 # --- line folding -----------------------------------------------------------
 
-# fold breaks a content line longer than 75 characters into CRLF + space
-# continuations (RFC 5545 3.1 / RFC 6350 3.2). Rune-boundary safe (a fold never
-# splits a multi-byte character).
+# fold breaks a content line longer than 75 OCTETS into CRLF + space
+# continuations (RFC 5545 3.1 / RFC 6350 3.2). The limit is bytes, not runes -
+# a rune-counted fold produces physical lines up to ~4x the octet limit that
+# strict validators reject - and folds only on rune boundaries so a multi-byte
+# character is never split. A continuation line's leading space counts toward
+# its 75 octets, so it carries 74 content octets.
 func fold(line as string) {
-    if (len($line) <= 75) {
+    if (len(convert.bytesFromString($line, "utf-8")) <= 75) {
         return $line;
     }
-    def out as string init strings.substring($line, 0, 75);
-    def rest as string init strings.substring($line, 75, len($line));
-    while (len($rest) > 74) {
-        $out = $out + "\r\n " + strings.substring($rest, 0, 74);
-        $rest = strings.substring($rest, 74, len($rest));
+    def parts as list of string init [];
+    def cur as string init "";
+    def curBytes as int init 0;
+    def limit as int init 75;
+    for (def ch in strings.chars($line)) {
+        def chBytes as int init len(convert.bytesFromString($ch, "utf-8"));
+        if ($curBytes + $chBytes > $limit) {
+            $parts[] = $cur;
+            $cur = "";
+            $curBytes = 0;
+            $limit = 74;   # continuation lines: 1 octet is the leading space
+        }
+        $cur = $cur + $ch;
+        $curBytes = $curBytes + $chBytes;
     }
-    return $out + "\r\n " + $rest;
+    $parts[] = $cur;
+    return strings.join($parts, "\r\n ");
 }
 
 # unfold removes line folds: a line break followed by a space or tab rejoins the
@@ -100,7 +113,10 @@ func propName(nameSection as string) {
     return strings.upper($nameSection);
 }
 
-# emit appends a folded `NAME:VALUE` content line to the accumulator.
-func emit(lines as list of string, name as string, value as string) {
-    return lists.push($lines, fold($name + ":" + $value));
+# emitLine returns a folded `NAME:VALUE` content line. Callers append it
+# directly (`$lines[] = emitLine(...)`), which mutates their own list in place -
+# `emit`'s `lists.push` copied the whole growing line list on every call
+# (O(L^2) over a large calendar / contact).
+func emitLine(name as string, value as string) {
+    return fold($name + ":" + $value);
 }

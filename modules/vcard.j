@@ -24,6 +24,7 @@
  */
 use strings;
 use lists;
+use convert;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
 # name / value split, `emit`) is shared with ical.j via this include.
@@ -237,30 +238,30 @@ func encodeLines(c as Card) {
     def lines as list of string init [];
     $lines[] = "BEGIN:VCARD";
     $lines[] = "VERSION:4.0";
-    $lines = emit($lines, "FN", escapeText($c.formattedName));
+    $lines[] = emitLine("FN", escapeText($c.formattedName));
     if (not ($c.family == "") or not ($c.given == "")) {
-        $lines = emit($lines, "N", escapeText($c.family) + ";" + escapeText($c.given) + ";;;");
+        $lines[] = emitLine("N", escapeText($c.family) + ";" + escapeText($c.given) + ";;;");
     }
     if (not ($c.organization == "")) {
-        $lines = emit($lines, "ORG", escapeText($c.organization));
+        $lines[] = emitLine("ORG", escapeText($c.organization));
     }
     if (not ($c.title == "")) {
-        $lines = emit($lines, "TITLE", escapeText($c.title));
+        $lines[] = emitLine("TITLE", escapeText($c.title));
     }
     for (def e in $c.emails) {
-        $lines = emit($lines, "EMAIL", escapeText($e));
+        $lines[] = emitLine("EMAIL", escapeText($e));
     }
     for (def p in $c.phones) {
-        $lines = emit($lines, "TEL", escapeText($p));
+        $lines[] = emitLine("TEL", escapeText($p));
     }
     for (def a in $c.addresses) {
-        $lines = emit($lines, "ADR", encodeAdr($a));
+        $lines[] = emitLine("ADR", encodeAdr($a));
     }
     if (not ($c.url == "")) {
-        $lines = emit($lines, "URL", escapeText($c.url));
+        $lines[] = emitLine("URL", escapeText($c.url));
     }
     if (not ($c.note == "")) {
-        $lines = emit($lines, "NOTE", escapeText($c.note));
+        $lines[] = emitLine("NOTE", escapeText($c.note));
     }
     $lines[] = "END:VCARD";
     return $lines;
