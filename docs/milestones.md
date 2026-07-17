@@ -1268,22 +1268,13 @@ under its library):
 
 The catch-all bucket for milestones that improve the interpreter or its
 tooling but belong to neither the Jennifer-coded modules of M18 nor the Go
-system libraries of M20. Numbered sub-entries land here as needs arise.
-M19.1-M19.5 are a correctness / performance hardening pass over the
-interpreter core and libraries (races, dead code, algorithmic complexity,
-resource bounds, module identity); M19.6 is the coverage tool; M19.7 lands the
-`@scope/package` vendored-module resolver; M19.8 is the one-time relocation to
-the `jennifer-language` org and a host-independent vanity module path. None of this
-work needs `reflect` or breaks TinyGo-cleanliness. The smallest,
-localized crash / correctness fixes (out-of-range `httpd.respond` status,
-truncated-toml-date-time panic, `io.sprintf("%d", MinInt64)`, `math.randInt`
-span overflow, `floorDiv` large-quotient garbage, the constant-folder's
-above-2^53 comparison divergence, the missing stream-registry mutexes, the
-`TaskState.Observed` atomic, the numeric-conversion and read-length caps, the
-cross-module struct-definition lookup so `def x as alias.Struct;` zero-value
-construction and `$x.field = ...` writes resolve an imported module struct)
-land as they surface rather than waiting on a milestone; each ships with a
-regression test.
+system libraries of M20. M19.1-M19.5 are a correctness / performance hardening
+pass over the interpreter core and libraries (races, dead code, algorithmic
+complexity, resource bounds, module identity); M19.6 is the coverage tool;
+M19.7 the `@scope/package` vendored-module resolver; M19.8 the one-time
+relocation to the `jennifer-language` org and a host-independent vanity module
+path; M19.9 the audit-driven correctness + hardening pass. None of this work
+needs `reflect` or breaks TinyGo-cleanliness.
 
 ### M19.1 - Interpreter concurrency-safety
 
@@ -1301,31 +1292,6 @@ stamp pass is best-effort; an unresolved type still errors at execution at its
 original position), and the marker also fixes a latent bug where an aliased
 library struct re-resolved in a loop hit the "canonical is aliased" rejection.
 
-Two data races in the interpreter core that the race detector catches and that
-can crash a program using nested `spawn`. Both are small, localized fixes plus
-a `go test -race` nested-spawn stress test.
-
-- **Nested-spawn global snapshot race.** `snapshotForSpawn`
-  (`internal/interpreter/interpreter.go`) always iterates `i.global.vars` - the
-  live top-level frame - regardless of which goroutine launches the `spawn`. A
-  `spawn` nested inside a `spawn` body snapshots on a background goroutine while
-  the main goroutine keeps defining / assigning globals: Go's fatal "concurrent
-  map iteration and map write" (uncatchable, takes the interpreter down).
-  Snapshot from `effectiveGlobal(env)` (the launching goroutine's own root
-  frame - inside a task, the outer spawn's snapshot) instead of the live
-  `i.global`. This is also more correct: a nested spawn captures its enclosing
-  scope, not the main goroutine's live globals.
-- **Runtime AST mutation.** `resolveDeclaredStructNS`
-  (`internal/interpreter/module.go`) writes `t.StructNS = <canonical>` into the
-  shared AST node every time a `def x as alias.Struct;` statement executes (once
-  per loop iteration, say). The same `def` run concurrently from a spawn body
-  and the main goroutine is a write-write race on the AST node. Resolve declared
-  module-struct types once, at load / resolve time, not per execution.
-
-**Acceptance.** A nested-spawn stress program that mutates globals on the main
-goroutine while inner spawns launch runs clean under `go test -race`; a
-`def alias.Struct` in a loop body inside a spawn is race-free.
-
 ### M19.2 - Value representation cleanup
 
 **Done.** The inert copy-on-write machinery is gone: `Value.shared`, `Share()`,
@@ -1342,41 +1308,6 @@ redundant whole-value copy (`rhsFreshLiteral`) - proven by a profiler-backed
 test (literal binding records zero eager copies; an aliasing `def b init $a`
 records one) alongside a value-independence test; `value_alias_test.go` and the
 full suite (incl. `-race`) stay green. `Value` shrinking stays deferred.
-
-The copy-on-write marker protocol added for the append-in-a-loop optimization
-is **inert**: `Value.Share()` has a value receiver, and `Environment.Get` /
-`GetAt` return the binding's `Value` by value, so the `shared` flag is set on a
-throwaway copy and never reaches the stored binding. `Ensure()` / `ensureCOW`
-therefore never detach (the whole Share / Ensure machinery is dead code), and
-every read of a compound variable heap-allocates a fresh `*bool` that goes
-nowhere - pure overhead in hot loops. Correctness never depended on the
-protocol: it rests entirely on the eager deep copies at every binding site
-(`def` / assignment / parameter bind) and on builtins copying before they
-mutate.
-
-- **Delete the dead protocol.** Remove `Share()` / `Ensure()` / `ensureCOW`,
-  the `Value.shared` field, and the per-read `Share()` call, and document the
-  eager-copy invariant that actually provides value semantics. The write-through
-  alternative (store `*Binding` so the marker propagates and mutation sites
-  genuinely detach) was considered and rejected - aliasing-heavy code is rare
-  precisely because we eager-copy, so the complexity buys little; record it in
-  `docs/technical/rejected.md`.
-- **Stop double-copying literals.** `evalListLit` / `evalMapLit` `Copy()` every
-  element of a freshly-built literal, then `execDefine` / `execAssign` eager-copy
-  the whole result again. A fresh literal (or a call result) cannot alias a
-  binding - only Var / Index / Field reads can - so the binding site can skip the
-  copy for non-aliasing RHS shapes, removing two full deep copies per literal
-  binding.
-
-Shrinking `Value` itself (moving the compound payload behind one pointer so the
-scalar case stays small) is **deferred**: a large cross-cutting churn, and the
-map hash index (M19.3) is the bigger algorithmic win. Revisit only if benchmarks
-still show `Value` copying dominating after M19.3.
-
-**Acceptance.** The Share / Ensure machinery and the `shared` field are gone,
-the alias-stress tests (`value_alias_test.go`) still pass (value semantics
-intact), and a compound-var read in a hot loop no longer allocates; a literal
-`def` binding does one deep copy, not three.
 
 ### M19.3 - Runtime performance: maps and the call / loop hot path
 
@@ -1399,33 +1330,6 @@ and write the root binding through `(Depth, Slot)` (`getBindingRoot` /
 instead of deep-copying the whole argument they immediately overwrite. Full suite
 (incl. `value_alias_test.go`, the map ordering tests, and `-race`) stays green on
 both toolchains.
-
-The biggest algorithmic issue in the runtime plus the call- and loop-overhead
-batch. None need `reflect` or break TinyGo-cleanliness.
-
-- **Maps as association lists (biggest win).** `Value.Map` is a `[]MapEntry`;
-  index reads (`indexInto`) and writes (`writeIndexedSlot`) linear-scan with a
-  recursive `Value.Equal` per entry, and map equality is O(n*m) - building a map
-  with `$m[$k] = $v` in a loop is quadratic. Maintain a side hash index
-  (`map[string]int` over a canonical scalar-key encoding) alongside the ordered
-  slice (insertion order stays a language guarantee), falling back to the linear
-  scan for the rare non-hashable key.
-- **Call / loop hot path.** `execForEach` allocates a fresh `NewEnvironmentSized`
-  (new name map) per iteration and `execFor` an unpooled header env - both should
-  borrow from `envPool` like `execBlock`. `DefineAt` re-runs `existsInChain` and
-  mirrors every binding into `e.vars` on the resolver-verified slot fast path
-  (skip the chain walk when `slot >= 0`, defer the name-map mirror to rare name
-  lookups). `Run` builds `i.global` without pre-sizing from `prog.NumGlobals`,
-  growing the slot slice one-at-a-time (O(n^2) for n globals). `execIndexAssign` /
-  `execAppend` / `execFieldAssign` re-fetch the root binding by name though the
-  root `VarExpr` already carries `(Depth, Slot)`. `lists.reverse` / `head` /
-  `tail` / `slice` / `concat` deep-copy the whole argument then immediately
-  replace the copied slice - the first copy is pure waste.
-
-**Acceptance.** A map-heavy build (`$m[$k] = $v` over N keys) is near-linear, not
-quadratic; a call-heavy and a loop-heavy benchmark improve measurably on the
-reference machine; every existing test (incl. `value_alias_test.go` and the map
-ordering tests) still passes.
 
 ### M19.4 - Resource lifecycle and numeric strictness
 
@@ -1450,70 +1354,22 @@ uncapped-allocation sinks were already capped ahead of this milestone
 `maxDecompressed`). All fixes carry regression tests; full suite green on both
 toolchains.
 
-- **`os.spawn` handle lifecycle.** `internal/lib/os/exec.go` keys process
-  handles by OS PID and never deletes them: every `processState` (with buffered
-  stdout / stderr) is retained for the interpreter's life, and after the reaper
-  `Wait()`s a process the freed PID can be reused, so a later `os.spawn`
-  overwrites the entry and `os.wait` / `poll` / `kill` on the old handle hits the
-  wrong process. Key handles by a monotonic internal id (like `net` / `fs` /
-  `httpd`) and delete on reap.
-- **Numeric strictness.** `convert.toInt` and `math.floor` / `ceil` / `round`
-  do an unchecked `int64(v.Float)`, platform-defined garbage for NaN, Inf, and
-  out-of-int64-range values - contradicting the `math` library's documented
-  strict stance (mathematically-undefined results error, never yield garbage).
-  Reject NaN / Inf / out-of-range with positioned errors; special-case
-  `math.abs(MinInt64)` (currently returns a negative). The toml decoder degrades
-  an integer literal past int64 to a lossy float - TOML 1.0 says integer overflow
-  is an error, so make it one (json keeps its deliberate lossy-float fallback).
-- **Most-negative int literal.** `-9223372036854775808` (and
-  `0x8000000000000000`) is a parse error because the magnitude is parsed with
-  `ParseInt` before the unary minus applies. Parse magnitudes with `ParseUint`
-  and range-check against 2^63 under a leading minus.
-
-The uncapped-allocation issues (caller-supplied `make([]byte, n)` in `net` /
-`fs` reads, and unbounded `io.ReadAll` of decompressed `compress` / `archive`
-streams - a zip-bomb sink) are fixed **immediately**, with fixed sensible
-defaults mirroring httpd's `maxBodyBytes`, ahead of this milestone.
-
-**Acceptance.** A recycled-PID scenario signals the right process (or errors)
-and the handle table does not grow without bound; `convert.toInt(NaN)` /
-`math.floor(1e300)` error; `math.abs(MinInt64)` errors; `-9223372036854775808`
-parses; a too-large toml integer is a decode error.
-
 ### M19.5 - Module struct identity: keyed by canonical path
 
 **Done.** Module struct values were tagged only by the imported file's **stem**
 (`moduleStem`), so two modules whose files share a basename
-(`import "a/util.j" as u1; import "b/util.j" as u2;`, or the M19.7-era
-`import "@mplx/benchmark/" / "@claude/benchmark/"`) produced values with an
-identical `(namespace, name)` identity, and `moduleByNS` resolved the stem
-nondeterministically - a same-named struct from an unrelated module passed the
-other's type check.
-
-The original plan here was to **fail loud** (reject a stem collision at import
-time), but that is far too restrictive for real projects (one import would claim
-a basename project-wide) and would make the `@scope/package` case impossible, so
-the design was changed to do it properly: **struct identity is keyed by the
-module's canonical (resolved) path, not the basename.** `Value` and
-`parser.Type` gained a `ModPath` field (the module's canonical path, empty for
-library / user structs) that `Value.Equal` and `MatchesDeclared` compare
-alongside `StructNS`; `StructNS` stays the file **stem** purely for display, so
-error messages and `%v` still read `benchmark.Point`. The boundary retag
-(`retagStructs` / `retagType`) threads the path so a foreign struct that merely
-shares a stem is never mis-tagged, and method **parameter** types are now
-stamped (`resolveDeclaredTypesOnce`) so a `func f(s as mod.Struct)` param carries
-the identity the passed value does. Two imports that resolve to the *same* file
-stay the same type (path-resolved before comparison, so `./x.j` and `../y/x.j`
-collapse); different files are different types. No import errors, no collision to
-reject. Pinned by a same-stem-modules-coexist test (each module's struct
-round-trips through its own methods; the two types do not cross-satisfy) plus
-distinct-stem / re-import tests; full suite, all 53 overlays, the `web`
-cross-boundary integration, and `-race` stay green on both toolchains.
-
-**Acceptance.** Two module files sharing a basename import cleanly under distinct
-aliases and are distinct types that never cross-satisfy; re-importing the same
-file is the same type; single-stem programs and the module test suite are
-unaffected.
+(`import "a/util.j" as u1; import "b/util.j" as u2;`, or two `@scope/package`
+decks) produced values with an identical `(namespace, name)` identity and a
+foreign struct passed the other's type check. Struct identity is now keyed by
+the module's canonical (resolved) **path**: `Value` and `parser.Type` gained a
+`ModPath` field that `Value.Equal` / `MatchesDeclared` compare alongside
+`StructNS` (which stays the file stem, for display only, so `%v` still reads
+`benchmark.Point`); the boundary retag threads the path, and method parameter
+types are stamped by `resolveDeclaredTypesOnce` so a `func f(s as mod.Struct)`
+param carries the passed value's identity. Two imports resolving to the same
+file stay one type; different files are different types - no import errors, no
+collision to reject. Pinned by same-stem-coexist / distinct-stem / re-import
+tests; full suite, all 53 overlays, and `-race` green on both toolchains.
 
 ### M19.6 - `.j` code coverage
 
@@ -1533,33 +1389,6 @@ parseable report that owns stdout (the human test report moves to stderr, the
 render-logic unit tests and end-to-end CLI tests (partial coverage names the
 uncovered lines; json parses on stdout; the plain run emits no coverage), and an
 HTML view is left as a later `htmlwriter` consumer.
-
-Teach `jennifer test` to report which lines of the code under test actually
-ran. The profiler (`jennifer profile`) already records per-position hit
-counts, so the raw signal exists; this milestone surfaces it as coverage: a
-per-file and total percentage, the list of never-executed positions, and a
-machine-readable form a CI job or an editor can consume. It reuses the
-profiler's instrumentation rather than adding a second counting path, and is
-independent of any renderer: a plain-text summary is the baseline output.
-Educationally it closes the loop the REPL / linter / profiler / test-runner
-set opened - a learner sees not just that tests pass but what the tests
-miss.
-
-- **Surface.** `jennifer test --coverage[=FORMAT]` runs the suite with the
-  profiler's counters live over the tested file(s) and emits a coverage
-  report next to the test report. Default `text` (per-file and total
-  percent); plus a machine-readable form for tooling.
-- **Reuse, do not duplicate.** Coverage is a second consumer of the
-  profiler's per-position hit data, not a new instrumentation pass.
-- **No renderer dependency.** Text is the baseline; an HTML coverage view
-  would be a later consumer built on `htmlwriter` (M18.2), not part of this
-  milestone.
-
-**Acceptance.** The coverage report over a file whose tests exercise some
-but not all of its methods shows below 100 percent and names the unexecuted
-positions; a suite that touches every position shows 100 percent; the
-machine-readable form parses; the plain `jennifer test` path (no
-`--coverage`) is byte-for-byte unchanged.
 
 ### M19.7 - `@scope/package` module resolution (vendored packages)
 
@@ -1584,71 +1413,6 @@ unit tests (expansion, error cases, vendor-root discovery) and end-to-end CLI
 tests (entry / explicit-file / default-alias imports, cross-deck type
 distinctness, missing-root error); full suite, all 53 overlays, and both
 toolchains stay green. The `jvc` manager layered over this stays DRAFT#12.
-
-Today the module resolver keys on the import path's leading token: `./` (or
-`../`) is local (relative to the importing file), `/` is absolute, and a bare
-name resolves through the search path (system module dir, then each `-I DIR`).
-None of those reach a package installed **beside the app** rather than
-system-wide, and a bare `import "util.j";` deliberately never consults the
-importing file's own tree, so it cannot address a vendored package and would
-collide with a system module of the same stem. A package manager (the planned
-`jvc`, DRAFT#12 in [horizon.md](horizon.md)) installs packages into a
-project-local `vendor/SCOPE/PACKAGE/` tree; this milestone teaches the resolver
-to address that tree, so a vendored package imports unambiguously and
-independently of the system search path.
-
-- **A fourth leading-token kind, expanded by one function.** `import
-  "@scope/package/" [as alias];` addresses a **deck** under the vendor root.
-  Both ends are pure path expansion, done once in `expandModule()`: a leading
-  `@` swaps in the vendor root (`@` is the `<vendorRoot>/` shortcut), and a
-  reference that does not end in `.j` gets the deck's entry file appended, so
-  `@claude/bitcoin`, `@claude/bitcoin/`, and an explicit
-  `@claude/bitcoin/utils.j` all reduce to a plain absolute path. After that
-  expansion every downstream step (resolution, run-once cache, M19.5 path
-  identity) is unchanged - it is just a path import, and the vendor variable
-  only affects this expansion. It stays an ordinary string-literal path, so
-  there is no new grammar (the inline version selectors `@pkg=1.2.3` /
-  `@pkg#commit` are `jvc`'s concern, DRAFT#12).
-- **Package-named entry, so the namespace is free.** A deck's entry file is
-  `<package>.j` (`vendor/claude/bitcoin/bitcoin.j`), named after the deck
-  directory. Because a module's display namespace and default alias both come
-  from `moduleStem` (the basename), that convention makes them fall out with
-  **zero special-casing**: `import "@claude/bitcoin/"` binds the `bitcoin.`
-  namespace and `def x as bitcoin.Wallet` type-checks, all from the existing
-  stem logic. Without an alias the default namespace is thus the package name
-  (never the useless `main` a fixed entry name would give); two decks with the
-  same package name (`@a/bitcoin`, `@b/bitcoin`) default to the same alias,
-  collide, and take an explicit `as` (the two-`util.j` rule) - typical use is
-  aliased anyway.
-- **Vendor-root discovery.** Walk up from the entry program's directory to the
-  nearest `vendor/` (the `node_modules` / Composer convention), overridable with
-  `--vendor DIR` and `JENNIFER_VENDOR` - the same override layering as
-  `--sysmoddir` / `JENNIFER_SYSMODDIR`. A missing vendor root, or a missing
-  `@scope/package`, is a positioned error naming the resolved path and pointing
-  at the installer.
-- **Identity already handled by M19.5.** Because struct identity is keyed by the
-  resolved canonical path
-  ([M19.5](#m195---module-struct-identity-keyed-by-canonical-path)), two decks
-  that share a stem (`@a/util`, `@b/util`) resolve to different vendor paths and
-  are already distinct types - this resolver just has to produce the right
-  canonical path per scope; no extra identity work.
-- **Path safety.** `@` is legal only as the very first character of the path; a
-  `..` segment may not escape the package root; the resolved path must stay
-  inside `vendor/scope/package/`.
-
-The full `jvc` package manager (registry, `deck.toml` manifest, lockfile,
-version constraint solving, fetching) stays a beyond-1.0.0 draft (DRAFT#12);
-this milestone lands only the interpreter-side resolution `jvc` builds on, so a
-vendored tree populated by hand (or by an early `jvc`) imports today.
-
-**Acceptance.** `import "@acme/widgets/" as w;` in an app with
-`vendor/acme/widgets/widgets.j` resolves and runs (the trailing `/` expands to
-the package-named entry); an explicit `@acme/widgets/util.j` also resolves;
-without an alias the namespace defaults to `widgets`; the vendor root is found by
-the upward walk and is overridable via flag / env; a missing package is a
-positioned error; `./`, `/`, and bare-name imports are byte-for-byte unchanged;
-`@a/bitcoin` and `@b/bitcoin` structs do not cross-satisfy each other's type
-checks; a `..`-escape path is rejected.
 
 ### M19.8 - Relocation: `jennifer-language` org + vanity module path
 
@@ -1718,229 +1482,58 @@ value-semantics / type-safety holes, then module correctness, performance
 lands with a regression test (Go test for interpreter code, `_test.j`
 overlay coverage for modules) and both-toolchain builds.
 
-Shipped so far:
+The sweep touched roughly 190 audit findings across the interpreter core and
+the module library. Highlights by theme:
 
-- **RNG entropy seeding.** The shared `math` random source was seeded with
-  a compile-time constant, so every fresh process produced the identical
-  "random" stream - the same `math.rand` sequence, `lists.shuffle`
-  permutation, `uuid.generate` UUIDs (and therefore predictable
-  session ids and generated passwords) on every run. The source is now
-  seeded from OS entropy at startup (CSPRNG bytes, wall-clock fallback);
-  `math.randSeed` remains the deterministic opt-in. The previously
-  undocumented `rand` / `randInt` / `randSeed` surface is now in
-  `docs/libraries/math.md` and the cheatsheet.
-- **`json.decode` / `toml.decode` nesting caps.** Both decoders recursed
-  without bound, so deeply-nested untrusted input (e.g. ten million `[`s
-  fed to a `web` service body) killed the whole process with an
-  uncatchable Go stack overflow. Container nesting (and TOML dotted-key
-  segment counts) past 1000 levels now raises a normal, catchable decode
-  error.
-- **Catch-variable binding.** The `try`/`catch` handler bound its catch
-  variable name-only into an unsized frame; the first `def` in the catch
-  body grew the slot slice over it, so every later read of the catch
-  variable returned `null` (and `.field` access on it errored) - the
-  error-handling construct corrupted its own binding. The catch variable
-  now binds at its resolved slot in a pre-sized pooled frame, the same
-  shape `for`-each uses for its iteration variable.
-- **`tengine` recursion guard.** A template that included itself (directly
-  or through a partner) recursed until the process died. Nesting is now
-  capped at 256 levels and past it the engine throws a catchable
-  `Error{kind: "tengine"}` - hostile author templates fail cleanly.
-- **Code 128 stop pattern.** `barcode.encode` emitted every Code 128
-  symbol with a doubled termination bar (15-module stop, final bar 4 wide
-  instead of 2), which no scanner reads. The pattern table now holds the
-  standard 11-module stop and the encoder appends the termination bar
-  once; a reference test pins the exact run widths of a known symbol.
-- **Lvalue writes commit the current root.** `$g[0] = f();`,
-  `$xs[] = f();`, and `$p.x = f();` fetched the root binding before
-  evaluating the right-hand side, so an RHS (or index expression) that
-  reassigned the same variable had that write silently overwritten by the
-  stale pre-evaluation copy. All three write paths re-fetch the binding
-  after evaluation, immediately before the commit.
-- **Nested stores keep their element types.** Values stored by
-  index-write or append were never stamped with the container's declared
-  element / value type, so a nested container stored that way carried no
-  inner type and later writes into it skipped the declared-type check -
-  `$grid[] = [9]; $grid[1][0] = "oops";` put a string inside a
-  `list of list of int`. Index / append stores now stamp like field
-  writes and `def` / assignment always did.
-- **REPL vs. spawn table race.** New methods, structs, or imports typed
-  at the prompt while a spawned task was still running mutated the
-  method / struct / namespace tables that task goroutines read by name -
-  a fatal "concurrent map read and map write". `EvalInteractive` now
-  rejects table-mutating input while any task is live (with a message
-  pointing at `task.wait` / `task.discard`); plain statements still
-  evaluate.
-- **Same-stem module structs.** With two imported modules sharing a file
-  stem (`a/util.j` + `b/util.j`), every struct field write and zero-init
-  on either module's structs failed: the runtime resolved struct
-  definitions by stem, which is ambiguous under a collision. Struct
-  lookups now resolve through the module's canonical path (the identity),
-  with the stem as fallback only when no path is available.
-- **`archive.unpack` aggregate cap.** The 256 MiB decompression cap was
-  per entry, so a small archive with many entries could still expand to
-  entries-times-cap and OOM. The cap now bounds the total across all
-  entries of one call (zip pre-checks declared sizes too) and the member
-  count is capped at 65536.
-- **`httpd` body handling.** `respond` stored the caller's `bytes`
-  backing and wrote it to the socket later from the handler goroutine, so
-  a post-respond mutation raced the write - the body is copied at the
-  boundary now. And a request body over the 10 MiB cap was silently
-  truncated and handed to the program looking complete (defeating
-  body-signature checks); the engine now rejects it with 413 before it
-  reaches the pull loop.
-- **Wire-protocol byte framing + quadratic buffering.** The `redis`,
-  `memcache`, `pop`, and `imap` clients counted / sliced their payloads by
-  rune where the protocol frames by byte (RESP bulk strings, memcache
-  values, POP bodies, IMAP `{N}` literals), corrupting any non-ASCII value
-  and desyncing the connection; the readers also grew a string buffer with
-  `+` and re-scanned it per chunk, which is O(N^2) in the message size.
-  All four now frame over a `bytes` buffer with a forward cursor and decode
-  to a string only once a payload is fully extracted - byte-exact and
-  linear.
-- **`http.j` request-splitting.** Caller-supplied header names / values and
-  the request path were concatenated raw onto the wire, so a CR / LF / NUL
-  injected extra headers or a smuggled second request. The request is now
-  built (and rejected on any control character) before a socket is opened;
-  the fix propagates to `rest` / `oauth` / `webhook` / `bucket`.
-- **`tengine` quote / comment scanning.** The action scanner cut on the
-  first `}}` and the pipeline split on the first `|`, ignoring quoted
-  strings, so `{{ if eq .a "}}" }}` and `{{ printf "%s|%s" ... }}` broke; a
-  comment's `}}`-in-body ended it early too. A quote-aware boundary scanner
-  and pipe splitter fix all three.
-- **`web` / `session` hardening.** A throwing middleware propagated to the
-  serve loop's catch-all, which read any error as a shutdown signal and
-  killed the whole server (a one-request DoS); middleware now runs under the
-  per-request try and only `httpd.accept` failing ends the loop. Session
-  ids (from client cookies) flowed unvalidated into memcache keys, allowing
-  protocol injection; they are now restricted to `[A-Za-z0-9-]`, 1-250 chars.
-- **O(N^2) accumulation.** `influxdb.write`, `csv.formatWith`, `jsonl.encode`,
-  `smtp` dot-stuffing, and `mime` base64 line-wrapping each built a large
-  output with `+` in a loop; all now collect into a `list of string` and
-  `strings.join` once.
-- **Assorted module correctness.** `websocket.receive` discarded a
-  half-reassembled fragmented message when a ping / pong interleaved (RFC
-  6455 allows control frames between fragments) - it now keeps reassembling.
-  `gpio.setup` re-exported an already-exported pin (EBUSY on real sysfs) -
-  it now guards on the pin directory. `log` text / logfmt quoting didn't
-  escape backslashes or newlines, allowing log injection - it now escapes
-  them (and neutralises newlines in the text message). `semver` caret /
-  tilde ranges with a prerelease operand (`^1.2.3-rc.1`) dropped the
-  prerelease lower bound - `satisfies` and `minVersion` now keep it.
-  `ical.parse` let a nested `VALARM`'s `SUMMARY` / `DESCRIPTION` clobber the
-  enclosing event's - sub-components are now skipped until their `END`.
+- **Crash / safety.** OS-entropy RNG seeding (predictable UUIDs / session ids /
+  passwords fixed; `math.randSeed` stays the deterministic opt-in); `json` /
+  `toml` decode nesting caps; a catchable-error `try` body that owns its scope
+  so a throw-skipped `def` reads as undefined, not null; recursion guards
+  (`tengine`); zip-slip and aggregate-decompression caps (`archive`); a
+  JSON-pointer index overflow guard; the two interpreter `-race` data races
+  (nested-spawn snapshot, runtime AST re-stamp) and REPL-vs-spawn table mutation.
+- **Correctness.** Lvalue writes re-fetch their root after evaluating the RHS;
+  index / append stores stamp the container's element type; module structs are
+  path-identity keyed; the Code 128 stop pattern, EAN check digit, Code 39 `*`,
+  and QR mask rule 3 in `barcode`; `pdfwriter` WinAnsi / Info encoding; a full
+  `toml` conformance pass (datetime / string / number grammar, `\u` surrogates,
+  the four table-redefinition MUST-errors); `http.j` header / chunked-body
+  hardening, `web` CSRF / cookie / CORS / ETag, quote-aware `vcard` / `ical`
+  parsing, and many module `Error`-kind / status-guard fixes.
+- **Performance.** The O(N^2) accumulation patterns retired across the board:
+  the map hash index, `json` object decode, wire-framing reads
+  (`redis` / `amqp` / `mqtt` / `mikrotik` / `imap` / `websocket`), and list-join
+  output builders (`csv` / `barcode` SVG / `influxdb` / `jsonl` / `statsd`);
+  plus the GF(256) inline in `barcode`, `KindObject` payload sharing, the
+  slot-authoritative write path, pooled loop frames, and index-aware `maps`.
+- **Lifecycle / diagnostics.** `os.release` and capped child output; `net.eof`
+  non-blocking + mutex-guarded `net.Conn`; `httpd` admission bounds, must-respond
+  timeout, TLS-1.2 floor, and safe unix-socket unlink; per-stream mutex + a
+  `discard` verb on hash / crc / compress streams; `lint` descending into
+  `spawn` / `repeat` and honouring included-file suppression; per-goroutine
+  profiler trace tracks.
 
-  **Break:** `jsonl.readRecord` now returns a `Record{value, done}` sentinel
-  instead of throwing at end-of-stream. A `hasMore`-guarded loop could not
-  see trailing blank lines (they leave the file un-exhausted yet carry no
-  record) and so threw; loop on `readRecord(...).done` instead. `hasMore`
-  remains as a coarse `not eof` check.
-- **Pre-1.0 strictness rulings (six coordinated breaks).** A batch of
-  semantics tightenings, each shipped with tests and the operator / scoping
-  docs updated:
-  - **`%` is now floored** (Python semantics), consistent with `//`, so the
-    div/mod identity holds for negative operands: `-7 % 3 == 2`,
-    `7 % -3 == -2` (was C/Go truncation: `-1` and `1`). Both the runtime and
-    constant folding changed together.
-  - **Integer arithmetic overflow is a positioned error**, not a silent
-    wrap: `9223372036854775807 + 1` (and `-`, `*`, `MinInt64 // -1`) errors.
-    Overflowing literal operations are left unfolded so the runtime raises at
-    the correct position.
-  - **A duplicate key in a map literal is an error** (`{"a":1,"a":2}`) rather
-    than a corrupt two-entry map where only the first was reachable.
-  - **Mixed `int`/`float` comparison is exact** (including `==`): the int is
-    no longer promoted to a lossy `float64`, so
-    `9007199254740993 == 9007199254740992.0` is `false` and the `>` /`<`
-    orderings are correct above 2^53.
-  - **A method may not share its name with a top-level variable or constant**
-    (`def foo ...; func foo() {}` is a parse error) - the no-shadowing rule
-    now applies both directions across the def/func namespace.
-  - **Reading a constant with the `$` sigil is a parse error** (`$MAX`); the
-    sigil is reserved for mutable variables. A `$CONST[...]` mutation attempt
-    still reports the clearer "cannot mutate constant" error.
-- **Interpreter + library correctness / lifecycle / perf (mediums).** A broad
-  sweep: for-each now iterates a stable snapshot (independent of slice
-  capacity); a `try` body is its own block scope, so a `def` skipped by a
-  throw is an undefined-variable error rather than a silent null;
-  `convert.toFloat` rejects `NaN`/`Inf`; `task.waitAll` returns a generic list
-  (validated per-element) instead of relabeling as `list of int`; out-of-range
-  `time` instants are rejected and pre-epoch `time.unix` floors; map equality's
-  asymmetry is closed by the duplicate-key rejection. A consumer struct can no
-  longer impersonate a module struct across the call boundary, and a map of
-  module structs retags its keys on the way out; included files strip trivia;
-  module resolution dedupes and symlink-canonicalizes the search path.
-  Performance: `KindObject` shares its immutable payload instead of deep-copying
-  it; the slot-resolved write path no longer mirrors into the name map (name
-  readers consult the authoritative slot); the task registry prunes observed
-  tasks; module-boundary retag is copy-on-write; `maps.merge`/`has`/`delete`
-  are index-aware; `regex.findAll`'s byte->rune conversion is amortized;
-  `io.readBytes` reads in bounded chunks; `lists.range` detects int64 wrap.
-  Library lifecycle: `net.eof` no longer blocks on an open idle connection and
-  `net.Conn` fields are mutex-guarded; `httpd` applies handler headers before
-  `serveFile`, bounds concurrent body buffering (admission semaphore), and
-  answers 500 for an accepted-but-unanswered request instead of leaking the
-  goroutine; `os` gains **`os.release(p)`** to drop a finished process handle
-  (the registry no longer grows without bound for a per-job spawner).
+**Break notes - six coordinated pre-1.0 strictness rulings** (each shipped with
+tests and the operator / scoping docs updated):
 
-- **Interpreter + library long-tail (lows).** The remaining interpreter and
-  standard-library findings. Lexer: number literals accept ASCII digits only
-  (a non-ASCII digit is a clean lex error), and a leading UTF-8 BOM is
-  stripped. `toml` gained a full conformance pass: date-times are validated
-  (out-of-range fields rejected, local-time `asDatetime` anchored to the epoch
-  so its nanos are representable), string content rejects control bytes / lone
-  CR / a third hugging quote, the number grammar rejects leading zeros / bad
-  underscores / bare-dot floats, `\u` escapes reject surrogates and
-  out-of-range code points, table redefinition follows TOML 1.0's four
-  MUST-error rules, and a wrapped array-of-tables encodes instead of being
-  dropped. `json`: a `-0` decodes as float (sign preserved), object decode is
-  O(1)-per-key (was O(N^2)), and a JSON-pointer index that would overflow `int`
-  is rejected instead of panicking. Library correctness: `math.randInt`
-  rejection-samples to remove modulo bias; `strings.repeat` / `lists` range-
-  check before narrowing and cap the result; `io.printf` zero-fill groups
-  columnar; `time`'s `%z` parse enforces the +/-26h cap; the `testing` TAP /
-  text renderers escape newlines and `#`; hash / crc / compress streams hold a
-  per-stream mutex and gained a `discard` verb (leak-free abort);
-  `fs.writeString` propagates its close error; `os.run` / `os.spawn` cap
-  captured output, `os.wait` surfaces a non-exit failure, `os.kill` falls back
-  to a hard kill on Windows; `httpd.listenTLS` floors at TLS 1.2 and the unix-
-  socket listener only clears a confirmed-stale socket; `archive.unpack`
-  rejects zip-slip entry names. Parser / resolver: `CONST.field` parses (no
-  parenthesis workaround), a `ConstRefExpr` uses its resolver slot, the
-  for-header frame is pre-sized (body frame no longer oversized per iteration),
-  and an lvalue-chain expression statement is parsed once. Diagnostics: `lint`
-  descends into `spawn` bodies (L202) and `repeat ... until` conditions (L105),
-  a `# lint-disable` in an included file is honoured, the profiler's Chrome
-  trace puts each goroutine on its own track, and module-resolution stat
-  errors distinguish EACCES from not-found.
-- **Module correctness / performance long-tail (lows).** The remaining
-  `modules/` findings. Wire framing: `amqp` / `mqtt` / `mikrotik` accumulate
-  reads in place (O(N)); `websocket` parses the handshake status code exactly
-  and de-O(N^2)s the response read; `imap` answers an unexpected `+`
-  continuation so a failed AUTHENTICATE fails fast. HTTP: `http.j` skips caller
-  framing headers, joins repeated response headers, and throws on a truncated
-  chunked body; `web` uses a constant-time CSRF compare, validates cookie
-  name/value, rejects wildcard-origin-with-credentials CORS (adds `Vary`), and
-  parses `If-None-Match` lists / weak ETags; `telegram` / `prometheus` /
-  `oauth` guard their JSON decode and rethrow their own error kind. Formats:
-  `pdfwriter` transcodes text to WinAnsi (octal-escaped) and encodes Info
-  metadata correctly (name-escaped keys, UTF-16BE values), and omits `/Encoding`
-  for Symbol / ZapfDingbats; `barcode` rejects `*` in Code 39, validates a full
-  EAN check digit, scores QR mask rule 3 in both directions, inlines the GF(256)
-  multiply, and builds SVG / terminal output with `strings.join`; `label_zpl`
-  honours module width / QR magnification, rotates counter-clockwise, and `^FH`-
-  escapes barcode data; `markdown` splits link titles out of the href and
-  measures East-Asian width for table alignment; `mime` keeps an unterminated
-  final part and quotes RFC 5322 specials; `csv` joins fields instead of `+`.
-  Data / misc: `ipnet` rejects leading-zero octets and misplaced embedded IPv4;
-  `cron` widens its search horizon past the 2100 leap gap, validates numeric
-  fields, and treats `*/n` as unrestricted; `semver` fixes `>*` / `<*`, empty
-  OR-clauses, prerelease-only interval intersects, and reuses parsed versions;
-  `bucket` gains ListObjectsV2 pagination; `flatdb` uniquifies its temp file;
-  `gpio` wraps sysfs I/O in its own error kind; `docblock` reports the
-  construct's line, keeps an unterminated comment's tail, and bounds its
-  per-block source scan; `vcard` / `ical` split the value colon quote-aware;
-  `ansi.rgb` clamps its channels; `smtp` splits the envelope at the last `@`;
-  `idna` length-checks A-labels and maps the Unicode dot variants.
+- **`%` is now floored** (Python semantics), consistent with `//`, so the
+  div/mod identity holds for negative operands: `-7 % 3 == 2`, `7 % -3 == -2`
+  (was C/Go truncation `-1` / `1`). Runtime and constant folding changed
+  together.
+- **Integer arithmetic overflow is a positioned error**, not a silent wrap:
+  `9223372036854775807 + 1` (and `-`, `*`, `MinInt64 // -1`) errors; overflowing
+  literal ops are left unfolded so the runtime raises at the right position.
+- **A duplicate key in a map literal is an error** (`{"a":1,"a":2}`), not a
+  corrupt two-entry map where only the first was reachable.
+- **Mixed `int`/`float` comparison is exact** (including `==`): the int is not
+  promoted to a lossy `float64`, so `9007199254740993 == 9007199254740992.0` is
+  `false` and orderings are correct above 2^53.
+- **A method may not share its name with a top-level variable or constant**
+  (`def foo ...; func foo() {}` is a parse error) - no-shadowing now applies both
+  directions across the def/func namespace.
+- **Reading a constant with the `$` sigil is a parse error** (`$MAX`); the sigil
+  is reserved for mutable variables (`$CONST[...]` still reports the clearer
+  "cannot mutate constant" error).
 
 ## M20 - system libraries
 
