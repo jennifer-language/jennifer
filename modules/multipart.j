@@ -98,20 +98,6 @@ export func isFile(p as Part) {
 
 # --- byte helpers (private) -------------------------------------------------
 
-func emptyBytes() {
-    def b as bytes;
-    return $b;
-}
-
-func appendBytes(dst as bytes, src as bytes) {
-    def i as int init 0;
-    while ($i < len($src)) {
-        $dst[] = $src[$i];
-        $i = $i + 1;
-    }
-    return $dst;
-}
-
 func sliceBytes(src as bytes, start as int, end as int) {
     def out as bytes;
     def i as int init $start;
@@ -120,11 +106,6 @@ func sliceBytes(src as bytes, start as int, end as int) {
         $i = $i + 1;
     }
     return $out;
-}
-
-# putStr appends a string's UTF-8 bytes to a buffer.
-func putStr(b as bytes, s as string) {
-    return appendBytes($b, convert.bytesFromString($s, "utf-8"));
 }
 
 # indexOfBytes finds needle in hay at or after `from`, or -1.
@@ -348,28 +329,61 @@ export func parse(contentType as string, body as bytes) {
         fail("no boundary in Content-Type");
     }
     # Normalise by prepending CRLF so every delimiter is "\r\n--boundary"
-    # (this avoids matching the token inside a part body).
-    def work as bytes init putStr(emptyBytes(), "\r\n");
-    $work = appendBytes($work, $body);
-    def delim as bytes init convert.bytesFromString("\r\n--" + $boundary, "utf-8");
+    # (this avoids matching the token inside a part body). Build the buffer by
+    # reading $body directly - passing the whole body into a helper would
+    # deep-copy it under Jennifer's value semantics.
+    def delimStr as string init "\r\n--" + $boundary;
+    def work as bytes init convert.bytesFromString("\r\n", "utf-8");
+    def bi as int init 0;
+    while ($bi < len($body)) {
+        $work[] = $body[$bi];
+        $bi = $bi + 1;
+    }
+    def delim as bytes init convert.bytesFromString($delimStr, "utf-8");
     def dlen as int init len($delim);
-    def parts as list of Part init [];
-    def pos as int init indexOfBytes($work, $delim, 0);
-    def more as bool init $pos >= 0;
-    while ($more) {
-        def after as int init $pos + $dlen;
-        if ($after + 2 <= len($work) and $work[$after] == 45 and $work[$after + 1] == 45) {
-            $more = false;   # closing "--boundary--"
-        } else {
-            def partStart as int init $after + 2;   # skip the CRLF after the delimiter
-            def nextPos as int init indexOfBytes($work, $delim, $partStart);
-            if ($nextPos < 0) {
-                $more = false;
-            } else {
-                $parts[] = parsePart(sliceBytes($work, $partStart, $nextPos));
-                $pos = $nextPos;
+    def wlen as int init len($work);
+
+    # Locate every delimiter in one left-to-right pass. Indexing $work directly
+    # (O(1) per read) instead of handing it to indexOfBytes/sliceBytes per part
+    # keeps this O(body) rather than O(parts * body) - the latter copied the
+    # whole buffer on every call, so many small parts were quadratic.
+    def bounds as list of int init [];
+    def s as int init 0;
+    while ($s + $dlen <= $wlen) {
+        def match as bool init true;
+        def j as int init 0;
+        while ($j < $dlen and $match) {
+            if (not ($work[$s + $j] == $delim[$j])) {
+                $match = false;
             }
+            $j = $j + 1;
         }
+        if ($match) {
+            $bounds[] = $s;
+            $s = $s + $dlen;   # delimiters can't overlap; skip past this one
+        } else {
+            $s = $s + 1;
+        }
+    }
+
+    def parts as list of Part init [];
+    def k as int init 0;
+    while ($k + 1 < len($bounds)) {
+        def after as int init $bounds[$k] + $dlen;
+        if ($after + 2 <= $wlen and $work[$after] == 45 and $work[$after + 1] == 45) {
+            $k = len($bounds);   # closing "--boundary--"; stop
+            continue;
+        }
+        def partStart as int init $after + 2;   # skip the CRLF after the delimiter
+        def partEnd as int init $bounds[$k + 1];
+        def pb as bytes;
+        def p as int init $partStart;
+        while ($p < $partEnd) {
+            $pb[] = $work[$p];
+            $p = $p + 1;
+        }
+        $parts[] = parsePart($pb);
+        $k = $k + 1;
     }
     return $parts;
 }

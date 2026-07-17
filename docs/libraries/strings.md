@@ -107,4 +107,83 @@ If you need to trim specific characters instead of whitespace, that's
 not in v1 - propose `strings.trimChars(s, chars)` as a follow-up if it
 comes up.
 
+## Performance
+
+Most `strings` calls are cheap, and for short, human-sized text - a
+title, a filename, a line of input - you never need to think about
+speed. Two everyday patterns can get slow when strings grow to
+thousands of characters and you touch them in a loop. Both come down to
+how much work gets *repeated*; the O(1) / O(n) / O(n²) shorthand below is
+explained in [Big O notation](https://en.wikipedia.org/wiki/Big_O_notation).
+The gist: **O(n)** means the work grows in step with the input, and
+**O(n²)** means it grows with the *square* of the input - ten times the
+text, a hundred times the work.
+
+### Build strings with `join`, not `+` in a loop
+
+Every `+` on strings makes a new string and copies both sides into it.
+Once is fine. In a loop, each step re-copies everything built so far, so
+the total work is O(n²):
+
+```jennifer
+# Slow: O(n^2). Each step recopies the whole result so far.
+def out as string init "";
+for (def piece in $pieces) {
+    $out = $out + $piece;
+}
+```
+
+Instead, collect the pieces in a list and join them in one pass.
+`strings.join` visits each piece exactly once, so the whole thing is
+O(n):
+
+```jennifer
+# Fast: O(n). Collect the parts, then join once.
+def parts as list of string init [];
+for (def piece in $pieces) {
+    $parts[] = $piece;
+}
+def out as string init strings.join($parts, "");
+```
+
+Same idea whenever you assemble something big from many small pieces -
+an HTML page, a CSV file, a log line built from several fields: gather
+the parts, then `strings.join` at the end.
+
+### Avoid re-copying a big value
+
+Two things in Jennifer quietly make a *whole copy* of a value, which
+costs O(n) in the size of that value:
+
+- **Passing a list or string to a function.** Jennifer uses value
+  semantics: a function gets its own copy of each argument, so it can
+  never change the caller's data by surprise. Convenient - but calling
+  `helper($bigList)` inside a loop copies the entire list *every time*,
+  turning an O(n) loop into O(n²).
+- **`strings.substring` counts from the start.** Because indices are
+  rune-based (see [Indexing rules](#indexing-rules)), `substring` walks
+  the string from the beginning to reach `start`. One call is fine;
+  slicing thousands of small pieces out of one long string adds up to
+  O(n²).
+
+The workaround for both is the same idea: don't hand the whole big value
+over and over. Convert the string to a rune list *once* with
+`strings.chars`, then read single positions with `$cs[i]` (that is O(1)
+each), and when you need a slice back as a string use `lists.slice` plus
+`strings.join` - which copies only the slice, not the whole string
+(needs `use lists;`):
+
+```jennifer
+# Slow: substring re-scans from the start on every call.
+def piece as string init strings.substring($big, $start, $end);
+
+# Fast: index into a rune list built once; copy only the slice.
+def cs as list of string init strings.chars($big);              # once
+# ...then, cheaply, as many times as you like:
+def piece as string init strings.join(lists.slice($cs, $start, $end), "");
+```
+
+Keeping the big value in one place and passing only small things into
+helpers - an index, a short piece - follows the same rule.
+
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).

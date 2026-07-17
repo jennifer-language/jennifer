@@ -365,6 +365,45 @@ paired with the M19.8 org move and triggered by the first external contribution,
 but no code prerequisite. Not legal advice - the chosen model should get a real
 legal review before it is published.
 
+### DRAFT#15 - Interpreter throughput ceiling
+
+The tree-walker's per-operation overhead is the current throughput ceiling.
+It shows up wherever a `.j` program touches data byte by byte: the `mime`
+module's part scanning runs on the order of **8 seconds per megabyte**, since
+every byte advances a cursor through several interpreted expression
+evaluations (index read, comparison, append, loop step), each paying the
+evaluator's dispatch and Value-copy costs. That is fine for kilobyte-scale
+config and headers, but it puts any megabyte-scale byte processing out of
+reach in pure Jennifer.
+
+The peephole passes already shipped (slot resolution, frame pooling,
+namespaced-call and comparison fast paths, constant folding, the map hash
+index) took the easy wins; the next real gain needs a structural step, not
+more micro-optimization. Two orthogonal directions, not mutually exclusive:
+
+- **Faster execution model.** Compile the AST to a linear bytecode (or a
+  register form) executed by a tight dispatch loop, instead of re-walking the
+  tree and re-resolving shapes on every pass through a hot loop. This is the
+  big lever and the big effort - a new pipeline stage between resolve and
+  run, held to the same TinyGo-clean, reflect-free discipline as the current
+  evaluator. Value semantics and the tagged-union `Value` stay; what changes
+  is how the operations are sequenced and dispatched.
+- **Push hot byte-crunching into Go.** The complement, and the cheaper win
+  per case: when a job is inherently per-byte (MIME/quoted-printable
+  scanning, base-N transcoding, binary framing), a Go library does the inner
+  loop at native speed and hands `.j` the structured result - the same
+  reasoning already applied to `json` / `toml` (a char parser belongs in Go)
+  and to `DRAFT#9` `asn1`. This narrows *which* workloads still need the
+  faster execution model rather than removing the ceiling.
+
+A prerequisite either way is an honest, repeatable throughput benchmark (the
+`mime`-part case is a natural fixture) so a change is measured, not guessed.
+
+**Requires:** none hard. The execution-model rewrite is independent but large;
+the push-to-Go direction composes with `DRAFT#9` and any future byte-oriented
+system library. Relates to `DRAFT#1` (a compiled core is easier to expose as a
+stable embedding surface than a tree-walker).
+
 ## Loose ideas
 
 A grab-bag, recorded when it comes up.

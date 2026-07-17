@@ -373,3 +373,43 @@ func testTablePrettyNoTableUnchanged() {
     def src as string init "just a paragraph\nwith two lines";
     testing.assertEqual(tablePretty($src), $src);
 }
+
+# --- link href sanitization (XSS) ---
+
+func testSafeHrefAllowsSafeSchemes() {
+    testing.assertEqual(safeHref("http://example.com"), "http://example.com");
+    testing.assertEqual(safeHref("https://example.com/p?q=1#x"), "https://example.com/p?q=1#x");
+    testing.assertEqual(safeHref("mailto:me@example.com"), "mailto:me@example.com");
+}
+
+func testSafeHrefAllowsRelative() {
+    testing.assertEqual(safeHref("/about"), "/about");
+    testing.assertEqual(safeHref("./page"), "./page");
+    testing.assertEqual(safeHref("../up"), "../up");
+    testing.assertEqual(safeHref("#section"), "#section");
+    testing.assertEqual(safeHref("page.html"), "page.html");
+    testing.assertEqual(safeHref(""), "");
+}
+
+func testSafeHrefBlocksScriptSchemes() {
+    testing.assertEqual(safeHref("javascript:alert(1)"), "#");
+    # Case-insensitive.
+    testing.assertEqual(safeHref("JavaScript:alert(1)"), "#");
+    # Leading whitespace is stripped before the scheme is read (browsers do too).
+    testing.assertEqual(safeHref("  javascript:alert(1)"), "#");
+    # An embedded control char inside the scheme does not smuggle it past.
+    testing.assertEqual(safeHref("java\tscript:alert(1)"), "#");
+    testing.assertEqual(safeHref("data:text/html,x"), "#");
+    testing.assertEqual(safeHref("vbscript:msgbox(1)"), "#");
+}
+
+func testToHtmlNeutralizesJavascriptLink() {
+    def out as string init toHtml("[click](javascript:alert(1))");
+    testing.assertContains($out, "href=\"#\"");
+    testing.assertFalse(strings.contains($out, "href=\"javascript"));
+}
+
+func testToHtmlKeepsSafeLink() {
+    def out as string init toHtml("[post](https://example.com/x)");
+    testing.assertContains($out, "href=\"https://example.com/x\"");
+}

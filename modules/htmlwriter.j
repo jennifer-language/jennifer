@@ -147,15 +147,19 @@ export func render(node as Node) {
     if ($node.kind == "raw") {
         return $node.text;
     }
-    def out as string init "<" + $node.tag + renderAttrs($node.attrs);
+    def open as string init "<" + $node.tag + renderAttrs($node.attrs);
     if (isVoid($node.tag)) {
-        return $out + ">";
+        return $open + ">";
     }
-    $out = $out + ">";
+    # Collect the pieces and join once. Growing a string with `+` per child is
+    # O(output^2), so a node with many children (a paragraph full of links)
+    # would otherwise be quadratic in its rendered size.
+    def parts as list of string init [$open + ">"];
     for (def child in $node.children) {
-        $out = $out + render($child);
+        $parts[] = render($child);
     }
-    return $out + "</" + $node.tag + ">";
+    $parts[] = "</" + $node.tag + ">";
+    return strings.join($parts, "");
 }
 
 /**
@@ -164,9 +168,9 @@ export func render(node as Node) {
  * @return {string} the rendered HTML fragment
  */
 export func renderAll(nodes as list of Node) {
-    def out as string init "";
+    def parts as list of string init [];
     for (def n in $nodes) {
-        $out = $out + render($n);
+        $parts[] = render($n);
     }
-    return $out;
+    return strings.join($parts, "");
 }

@@ -22,6 +22,7 @@ import "./ansi.j" as ansi;
 use strings;
 use regex;
 use convert;
+use lists;
 
 # An inline span: a run of "text", or an emphasised / code / link span. Link
 # spans carry the target in `url`; the others leave it "".
@@ -101,7 +102,6 @@ func codeBlockNode(text as string) {
 
 # --- inline scanner (private) --------------------------------------
 
-# findChar returns the index of target in cs at or after `from`, or -1.
 # isFlankSpace reports whether c is whitespace, for CommonMark emphasis
 # flanking (a delimiter run flanked by whitespace on the inside does not open /
 # close emphasis).
@@ -109,40 +109,57 @@ func isFlankSpace(c as string) {
     return $c == " " or $c == "\t" or $c == "\n" or $c == "\r";
 }
 
-func findChar(cs as list of string, target as string, from as int) {
-    def j as int init $from;
-    while ($j < len($cs)) {
+# nextIndexArray returns an int list `nxt` of length len(cs)+1 where nxt[j] is
+# the index of the first `target` at or after j, or len(cs) if there is none.
+# One backward pass, so the inline scanner can resolve "where does this marker
+# close?" in O(1) instead of re-scanning to the end at every position (which
+# made a run of unmatched markers O(N^2)).
+func nextIndexArray(cs as list of string, target as string) {
+    def n as int init len($cs);
+    def nxt as list of int init [];
+    def k as int init 0;
+    while ($k <= $n) {
+        $nxt[] = $n;
+        $k = $k + 1;
+    }
+    def j as int init $n - 1;
+    while ($j >= 0) {
         if ($cs[$j] == $target) {
-            return $j;
+            $nxt[$j] = $j;
+        } else {
+            $nxt[$j] = $nxt[$j + 1];
         }
-        $j = $j + 1;
+        $j = $j - 1;
     }
-    return -1;
+    return $nxt;
 }
 
-# findDouble returns the index of the first `target target` pair at or after
-# `from`, or -1.
-func findDouble(cs as list of string, target as string, from as int) {
-    def j as int init $from;
-    while ($j + 1 < len($cs)) {
+# nextPairArray is nextIndexArray for a doubled marker: nxt[j] is the first
+# index of a `target target` pair at or after j, or len(cs) if none.
+func nextPairArray(cs as list of string, target as string) {
+    def n as int init len($cs);
+    def nxt as list of int init [];
+    def k as int init 0;
+    while ($k <= $n) {
+        $nxt[] = $n;
+        $k = $k + 1;
+    }
+    def j as int init $n - 2;
+    while ($j >= 0) {
         if ($cs[$j] == $target and $cs[$j + 1] == $target) {
-            return $j;
+            $nxt[$j] = $j;
+        } else {
+            $nxt[$j] = $nxt[$j + 1];
         }
-        $j = $j + 1;
+        $j = $j - 1;
     }
-    return -1;
+    return $nxt;
 }
 
-# sliceStr concatenates cs[start:end] into a string.
-func sliceStr(cs as list of string, start as int, end as int) {
-    def out as string init "";
-    def j as int init $start;
-    while ($j < $end) {
-        $out = $out + $cs[$j];
-        $j = $j + 1;
-    }
-    return $out;
-}
+# NOTE: the precomputed next-index arrays are read by direct indexing
+# (`$arr[$from]`) at the marker sites below, never passed into a helper -
+# handing a list to a function deep-copies it under Jennifer's value semantics,
+# which would reintroduce the O(N^2) the arrays exist to remove.
 
 # parseInline scans a line of text into spans. Markers: `` ` `` for code,
 # `**` for strong, `*` for emphasis, and `[text](url)` for a link. Span
@@ -151,40 +168,54 @@ func parseInline(s as string) {
     def spans as list of Span init [];
     def cs as list of string init strings.chars($s);
     def n as int init len($cs);
+    # Precompute, in one pass each, where every marker next occurs, so a run of
+    # unmatched `[`, `*`, or `` ` `` costs O(N) total rather than O(N) per
+    # position (the old forward re-scan was O(N^2) on adversarial input).
+    def nBacktick as list of int init nextIndexArray($cs, "`");
+    def nStar as list of int init nextIndexArray($cs, "*");
+    def nDblStar as list of int init nextPairArray($cs, "*");
+    def nRbrack as list of int init nextIndexArray($cs, "]");
+    def nRparen as list of int init nextIndexArray($cs, ")");
     def i as int init 0;
-    def buf as string init "";
+    # The pending plain-text run is s[bufStart:i]; slicing it with substring
+    # (Go-side, linear) instead of accumulating rune-by-rune keeps a long text
+    # run from being O(N^2) to build.
+    def bufStart as int init 0;
     while ($i < $n) {
         def c as string init $cs[$i];
         # inline code: `code`
         def bt as int init -1;
         if ($c == "`") {
-            $bt = findChar($cs, "`", $i + 1);
+            def k as int init $nBacktick[$i + 1];
+            if ($k < $n) {
+                $bt = $k;
+            }
         }
         if ($bt >= 0) {
-            if (len($buf) > 0) {
-                $spans[] = span("text", $buf, "");
-                $buf = "";
+            if ($i > $bufStart) {
+                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = span("code", sliceStr($cs, $i + 1, $bt), "");
+            $spans[] = span("code", strings.join(lists.slice($cs, $i + 1, $bt), ""), "");
             $i = $bt + 1;
+            $bufStart = $i;
             continue;
         }
         # strong: **text** (flanking: no whitespace just inside the markers, so
         # a space-flanked `**` is literal, not a delimiter).
         def dbl as int init -1;
         if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and not isFlankSpace($cs[$i + 2])) {
-            $dbl = findDouble($cs, "*", $i + 2);
-            if ($dbl >= 0 and isFlankSpace($cs[$dbl - 1])) {
-                $dbl = -1;
+            def k as int init $nDblStar[$i + 2];
+            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+                $dbl = $k;
             }
         }
         if ($dbl >= 0) {
-            if (len($buf) > 0) {
-                $spans[] = span("text", $buf, "");
-                $buf = "";
+            if ($i > $bufStart) {
+                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = span("strong", sliceStr($cs, $i + 2, $dbl), "");
+            $spans[] = span("strong", strings.join(lists.slice($cs, $i + 2, $dbl), ""), "");
             $i = $dbl + 2;
+            $bufStart = $i;
             continue;
         }
         # emphasis: *text* (flanking: the char right after the opening `*` and
@@ -192,67 +223,65 @@ func parseInline(s as string) {
         # italicized).
         def em as int init -1;
         if ($c == "*" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
-            $em = findChar($cs, "*", $i + 1);
-            if ($em >= 0 and isFlankSpace($cs[$em - 1])) {
-                $em = -1;
+            def k as int init $nStar[$i + 1];
+            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+                $em = $k;
             }
         }
         if ($em >= 0) {
-            if (len($buf) > 0) {
-                $spans[] = span("text", $buf, "");
-                $buf = "";
+            if ($i > $bufStart) {
+                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = span("em", sliceStr($cs, $i + 1, $em), "");
+            $spans[] = span("em", strings.join(lists.slice($cs, $i + 1, $em), ""), "");
             $i = $em + 1;
+            $bufStart = $i;
             continue;
         }
-        # link: [text](url)
-        def linkEnd as int init linkAt($cs, $i);
-        if ($linkEnd >= 0) {
-            if (len($buf) > 0) {
-                $spans[] = span("text", $buf, "");
-                $buf = "";
+        # link: [text](url) - resolved via the precomputed `]` and `)` arrays.
+        def linkEnd as int init -1;
+        def rb as int init -1;
+        def rp as int init -1;
+        if ($c == "[") {
+            def kb as int init $nRbrack[$i + 1];
+            def kp as int init -1;
+            if ($kb < $n and $kb + 1 < $n and $cs[$kb + 1] == "(") {
+                $kp = $nRparen[$kb + 2];
             }
-            $spans[] = linkSpanAt($cs, $i);
+            if ($kp >= 0 and $kp < $n) {
+                $rb = $kb;
+                $rp = $kp;
+                $linkEnd = $kp + 1;
+            }
+        }
+        if ($linkEnd >= 0) {
+            if ($i > $bufStart) {
+                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+            }
+            # Slice the (short) text and destination here - lists.slice on the
+            # rune list is O(slice length) regardless of position, unlike
+            # strings.substring which walks from the string start (O(offset),
+            # so O(N^2) across many links).
+            def linkText as string init strings.join(lists.slice($cs, $i + 1, $rb), "");
+            def linkDest as string init strings.join(lists.slice($cs, $rb + 2, $rp), "");
+            $spans[] = linkSpanFrom($linkText, $linkDest);
             $i = $linkEnd;
+            $bufStart = $i;
             continue;
         }
-        $buf = $buf + $c;
         $i = $i + 1;
     }
-    if (len($buf) > 0) {
-        $spans[] = span("text", $buf, "");
+    if ($n > $bufStart) {
+        $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $n), ""), "");
     }
     return $spans;
 }
 
-# linkAt returns the index just past a `[text](url)` starting at `i`, or -1 if
-# there is no well-formed link there.
-func linkAt(cs as list of string, i as int) {
-    def n as int init len($cs);
-    if (not ($cs[$i] == "[")) {
-        return -1;
-    }
-    def rb as int init findChar($cs, "]", $i + 1);
-    if ($rb < 0 or $rb + 1 >= $n or not ($cs[$rb + 1] == "(")) {
-        return -1;
-    }
-    def rp as int init findChar($cs, ")", $rb + 2);
-    if ($rp < 0) {
-        return -1;
-    }
-    return $rp + 1;
-}
-
-# linkSpanAt builds the link span for a `[text](url)` known to start at `i`.
-# The destination is split into a URL and an optional quoted title on the first
-# space, so `[t](http://x "title")` yields a clean href plus a title attribute
-# rather than dumping the title into the URL.
-func linkSpanAt(cs as list of string, i as int) {
-    def rb as int init findChar($cs, "]", $i + 1);
-    def rp as int init findChar($cs, ")", $rb + 2);
-    def text as string init sliceStr($cs, $i + 1, $rb);
-    def dest as string init strings.trim(sliceStr($cs, $rb + 2, $rp));
+# linkSpanFrom builds the link span for a `[text](url)` from the already-sliced
+# (short) link text and destination. The destination is split into a URL and an
+# optional quoted title on the first space, so `[t](http://x "title")` yields a
+# clean href plus a title attribute rather than dumping the title into the URL.
+func linkSpanFrom(text as string, rawDest as string) {
+    def dest as string init strings.trim($rawDest);
     def sp as int init strings.indexOf($dest, " ");
     if ($sp < 0) {
         return linkSpan($text, $dest, "");
@@ -540,9 +569,58 @@ func wrapEl(tag as string, text as string) {
     return html.element($tag, [], $kids);
 }
 
+# safeHref returns url unchanged when it is safe to place in an href - an
+# http/https/mailto URL or a scheme-less relative reference - and "#"
+# otherwise. It neutralizes script-executing schemes (javascript:, data:,
+# vbscript:, ...) that untrusted markdown (a blog comment) could smuggle into a
+# link. Whitespace and control characters are stripped before the scheme is
+# read, because browsers ignore them inside a scheme (so "java\tscript:" and
+# "  javascript:" would otherwise execute).
+func safeHref(url as string) {
+    def cs as list of string init strings.chars($url);
+    def probe as string init "";
+    def i as int init 0;
+    while ($i < len($cs)) {
+        if (convert.toCodepoint($cs[$i]) > 32) {
+            $probe = $probe + $cs[$i];
+        }
+        $i = $i + 1;
+    }
+    if (len($probe) == 0) {
+        return $url;
+    }
+    # Read the scheme: the run before the first ':', but only if that ':'
+    # comes before any '/', '?', or '#' (otherwise there is no scheme and the
+    # reference is relative, hence safe).
+    def pcs as list of string init strings.chars($probe);
+    def scheme as string init "";
+    def hasScheme as bool init false;
+    def j as int init 0;
+    while ($j < len($pcs)) {
+        def ch as string init $pcs[$j];
+        if ($ch == ":") {
+            $hasScheme = true;
+            break;
+        }
+        if ($ch == "/" or $ch == "?" or $ch == "#") {
+            break;
+        }
+        $scheme = $scheme + $ch;
+        $j = $j + 1;
+    }
+    if (not $hasScheme) {
+        return $url;
+    }
+    def low as string init strings.lower($scheme);
+    if ($low == "http" or $low == "https" or $low == "mailto") {
+        return $url;
+    }
+    return "#";
+}
+
 func linkNode(text as string, url as string, title as string) {
     def attrs as list of html.Attr init [];
-    $attrs[] = html.attr("href", $url);
+    $attrs[] = html.attr("href", safeHref($url));
     if (not ($title == "")) {
         $attrs[] = html.attr("title", $title);
     }
