@@ -5,7 +5,8 @@
  * An AMQP 0-9-1 client over `net` for RabbitMQ and compatible brokers. `connect`
  * runs the connection + channel handshake (protocol header, `Connection.Start` /
  * `Start-Ok` with SASL PLAIN auth, `Tune` / `Tune-Ok`, `Open` / `Open-Ok`,
- * `Channel.Open`); `declareQueue` declares a queue; `publish` sends a message
+ * `Channel.Open`); `declareQueue` declares a classic queue and
+ * `declareQuorumQueue` a replicated quorum queue; `publish` sends a message
  * (method + content-header + body frames); `get` pulls the next message with
  * `Basic.Get` (a synchronous pull, no async delivery loop); `ack` acknowledges
  * it; `close` shuts the connection down cleanly.
@@ -246,6 +247,20 @@ func putEmptyTable(b as bytes) {
     return putLong($b, 0);
 }
 
+# putStringTable writes an AMQP field-table whose every value is a long-string
+# ('S' field-value type), preceded by the 4-byte table length. Used for queue
+# arguments such as {"x-queue-type": "quorum"}.
+func putStringTable(b as bytes, entries as map of string to string) {
+    def body as bytes;
+    for (def key in $entries) {
+        $body = putShortStr($body, $key);      # field name (shortstr)
+        $body = putOctet($body, 83);           # 'S' = long-string value type
+        $body = putLongStr($body, $entries[$key]);
+    }
+    def out as bytes init putLong($b, len($body));
+    return appendBytes($out, $body);
+}
+
 func readShort(buf as bytes, off as int) {
     return ($buf[$off] << 8) | $buf[$off + 1];
 }
@@ -432,15 +447,43 @@ export func connect(opts as Options) {
  * @throws {Error} kind "amqp" on failure
  */
 export func declareQueue(c as Conn, name as string, durable as bool) {
-    def args as bytes;
-    $args = putShort($args, 0);            # reserved
-    $args = putShortStr($args, $name);
     def flags as int init 0;
     if ($durable) {
         $flags = $flags | Q_DURABLE;
     }
+    def empty as bytes;
+    return declareQueueImpl($c, $name, $flags, putEmptyTable($empty));
+}
+
+/**
+ * Declare a quorum queue: a Raft-replicated queue type for high availability and
+ * data safety. Sets the `x-queue-type=quorum` argument. Quorum queues are always
+ * durable (there is no durable flag) and cannot be server-named, so `name` must
+ * be non-empty. Re-declaring must use the same type, so do not also declare the
+ * same name as a classic queue.
+ * @param c {Conn} the connection
+ * @param name {string} the queue name (non-empty)
+ * @return {QueueInfo} the queue name and message / consumer counts
+ * @throws {Error} kind "amqp" on an empty name or a declare failure
+ */
+export func declareQuorumQueue(c as Conn, name as string) {
+    if ($name == "") {
+        throw Error{ kind: "amqp", message: "declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)", file: "", line: 0, col: 0 };
+    }
+    def empty as bytes;
+    def table as bytes init putStringTable($empty, {"x-queue-type": "quorum"});
+    return declareQueueImpl($c, $name, Q_DURABLE, $table);
+}
+
+# declareQueueImpl issues Queue.Declare with pre-computed flags and a fully
+# encoded arguments field-table, then parses Declare-Ok into a QueueInfo. Shared
+# by declareQueue (empty arguments) and declareQuorumQueue (x-queue-type).
+func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
+    def args as bytes;
+    $args = putShort($args, 0);            # reserved
+    $args = putShortStr($args, $name);
     $args = putOctet($args, $flags);
-    $args = putEmptyTable($args);        # arguments
+    $args = appendBytes($args, $table);    # arguments field-table
     writeMethod($c.socket, $c.channel, CLS_QUEUE, Q_DECLARE, $args);
     def ok as Method init expectMethod($c.socket, CLS_QUEUE, Q_DECLAREOK, "Queue.Declare-Ok");
     def qname as string init readShortStr($ok.args, 0);

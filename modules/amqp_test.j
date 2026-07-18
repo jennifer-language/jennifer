@@ -43,6 +43,20 @@ func testPutStrings() {
     testing.assertEqual(hex(putEmptyTable($g)), "00000000");
 }
 
+# putStringTable encodes an AMQP field-table of long-string values - the wire
+# form behind a quorum queue's {"x-queue-type": "quorum"} argument.
+func testStringTable() {
+    def e as bytes;
+    def t as bytes init putStringTable($e, {"x-queue-type": "quorum"});
+    # length(24) | key "x-queue-type" (0c + 12 bytes) | 'S'(53) | longstr "quorum" (len 6 + 6 bytes)
+    testing.assertEqual(hex($t),
+        "000000180c782d71756575652d74797065530000000671756f72756d");
+    # An empty map encodes as an empty table.
+    def m as map of string to string init {};
+    def empty as bytes;
+    testing.assertEqual(hex(putStringTable($empty, $m)), "00000000");
+}
+
 func testShortStrTruncatedNul() {
     # SASL PLAIN response NUL user NUL pass -> 00 75 00 70
     def raw as bytes init convert.bytesFromString(saslPlain("u", "p"), "utf-8");
