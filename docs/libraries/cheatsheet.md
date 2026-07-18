@@ -268,6 +268,16 @@ flat lookup view, not authoritative.
 | [`xml`](xml.md)`.setAttr(node, name, value)`          | The element with the attribute added/updated (fresh handle).                                                                        |
 | [`xml`](xml.md)`.setText(node, s)`                    | The element with its children replaced by one text node (fresh handle).                                                            |
 | [`xml`](xml.md)`.append(parent, child)`               | The parent element with `child` appended (fresh handle).                                                                            |
+| [`yaml`](yaml.md)`.decode(s)` / `.decodeAll(s)`       | Parse one YAML document (multi-doc errors) / every document of a `---` stream (`list of yaml.Value`), into opaque handles.          |
+| [`yaml`](yaml.md)`.encode(v)` / `.encodePretty(v)`    | YAML string for a `yaml.Value` (or native map / list / scalar): flow (compact) vs block (readable) style.                           |
+| [`yaml`](yaml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `bytes` `list` `map` `datetime`.                        |
+| [`yaml`](yaml.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `yaml.Value` (walk stays opaque; no pointer = the node itself).                                    |
+| [`yaml`](yaml.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
+| [`yaml`](yaml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` map keys in document order / element count of a list or map.                                                    |
+| [`yaml`](yaml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` / `isNull` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int) / test for null.                    |
+| [`yaml`](yaml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A timestamp node as a `time.Time` (needs `use time;`) / whether the node is a timestamp.                            |
+| [`yaml`](yaml.md)`.map()` / `.list()`                 | A fresh empty mapping / sequence `yaml.Value` - the explicit start of a document (writes never auto-vivify).                        |
+| [`yaml`](yaml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `yaml.Value` (strict / no missing intermediates). |
 
 ## Constants
 

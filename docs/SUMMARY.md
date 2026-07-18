@@ -50,6 +50,7 @@
 - [`toml`](libraries/toml.md)
 - [`uuid`](libraries/uuid.md)
 - [`xml`](libraries/xml.md)
+- [`yaml`](libraries/yaml.md)
 
 # Modules
 

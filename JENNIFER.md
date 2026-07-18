@@ -272,6 +272,15 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `typeOf`; navigate with an XPath-style path (`name`, `name[k]` 1-based, `*`)
   via `get`/`findAll`/`has`; build with `element`/`setAttr`/`setText`/`append`.
   Entities + numeric refs decode; namespace prefixes kept verbatim.
+- **`yaml`** - YAML 1.2 `decode`/`decodeAll`/`encode`/`encodePretty` over an
+  opaque `yaml.Value`, the **same opaque-value read / walk / write surface as
+  `json`/`toml`, name for name** (JSON Pointer addressing), plus
+  `asDatetime`/`isDatetime` for timestamps and `isNull`. `decode` is one
+  document (a multi-doc stream errors); `decodeAll` returns a `list of
+  yaml.Value`. Anchors / aliases resolve by value and `<<` merge keys apply
+  (own key wins). `encode` is flow (compact `{a: 1}`); `encodePretty` is block
+  (readable). Backed by `gopkg.in/yaml.v3` (the one library with a Go
+  dependency; TinyGo-clean).
 - **`httpd`** - HTTP/1.1 server engine over `net/http`. Pull loop (no handler
   callbacks): `httpd.listen(addr)` -> `Server`, then loop
   `httpd.accept($srv)` -> `Request` and `httpd.respond($req, status, body)`;

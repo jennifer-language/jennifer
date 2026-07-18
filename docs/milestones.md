@@ -1544,37 +1544,23 @@ or too reflect-bound for a Jennifer-coded `.j` module (the `json` pattern,
 
 ### M20.1 - `crypto`
 
-**Done.** The security-primitives system library above the digests in
-`hash`. Go standard library only (`crypto/rand`, `crypto/subtle`,
-`crypto/hkdf`, `crypto/pbkdf2`), so it adds no dependency and builds on
-both binaries (TinyGo 0.41 carries the Go 1.24 KDF packages). Surface:
-
-- **Crypto-grade random.** `crypto.randBytes(n) -> bytes` and
-  `crypto.randInt(lo, hi) -> int` (inclusive, rejection-sampled so
-  exactly uniform, unseedable). The counterpart to `math`'s fast,
-  seedable, predictable `rand*`: the same shape, but for values that
-  guard something.
-- **Swapped `uuid`'s random source.** `uuidlib.randByte` now draws from
-  `crypto` (one function, no surface change), so `uuid.generate("v4")` is
-  unguessable. That secures the `session` module, `web.sessionId`, and
-  `web.csrfToken` (all mint ids from uuid v4) for free, and the
-  `password` module's generation was repointed here too (character choice
-  + a crypto-grade Fisher-Yates shuffle).
-- **Constant-time comparison.** `crypto.hmacEqual(a, b) -> bool` over two
-  `bytes` (Go `crypto/subtle`), for verifying a MAC without a
-  timing side channel. HMAC itself stays `hash.hmac` (a hash
-  construction).
-- **Key derivation.** `crypto.hkdf(secret, salt, info, length, algo) ->
-  bytes` (HKDF, RFC 5869) and `crypto.pbkdf(password, salt, iterations,
-  keyLen, algo) -> bytes` (PBKDF2, RFC 8018), `algo` one of `"sha1"` /
-  `"sha256"` / `"sha512"` (SCRAM-SHA-1 needs `"sha1"`). Registered as
-  `pbkdf` rather than `pbkdf2`: a Jennifer method name is letters-only,
-  so the digit can't appear - the same rule behind `uuid.generate("v4")`.
-- **Password hashing stays out of scope.** Argon2id (and bcrypt /
-  scrypt) remain on the Long-horizon list: they need the `x/crypto`
-  dependency and their own `hashPassword` / `verifyPassword` surface.
-  PBKDF2 here is for interoperable KDF needs (SASL SCRAM, key wrapping),
-  not a general password store.
+**Done.** The security-primitives system library above the digests in `hash`,
+Go stdlib only (`crypto/rand` / `subtle` / `hkdf` / `pbkdf2`, so no dependency;
+both binaries, TinyGo 0.41 carrying the Go 1.24 KDF packages). Crypto-grade
+random `crypto.randBytes(n)` / `randInt(lo, hi)` (inclusive, rejection-sampled
+so exactly uniform, unseedable - the counterpart to `math`'s fast, predictable
+`rand*`, for values that guard something); constant-time `crypto.hmacEqual(a,
+b)` (Go `crypto/subtle`; HMAC itself stays `hash.hmac`); key derivation
+`crypto.hkdf(secret, salt, info, length, algo)` (HKDF, RFC 5869) and
+`crypto.pbkdf(password, salt, iterations, keyLen, algo)` (PBKDF2, RFC 8018),
+`algo` one of `"sha1"` / `"sha256"` / `"sha512"` (SCRAM-SHA-1 needs `"sha1"`;
+registered `pbkdf` not `pbkdf2` for the letters-only name rule). `uuid`'s random
+source was repointed here (one function, no surface change), so
+`uuid.generate("v4")` is unguessable - securing the `session` module,
+`web.sessionId` / `csrfToken`, and the `password` module's generation for free.
+Password *hashing* (Argon2id / bcrypt / scrypt) stays out (needs `x/crypto`);
+PBKDF2 here is for interoperable KDF needs (SASL SCRAM, key wrapping), not a
+general password store.
 
 ### M20.2 - `xml`
 
@@ -1609,13 +1595,46 @@ accessor shape, with an XPath-style path dialect in place of JSON Pointer.
 
 ### M20.3 - `yaml`
 
-A system library because full YAML - anchors / aliases, flow *and* block
-styles, implicit typing, multi-document streams - is impractical in `.j`
-and has no Go stdlib. Unlike `xml`, that means a **Go dependency** (e.g.
-`gopkg.in/yaml.v3`): the one place a config parser earns one, since a
-hand-rolled full YAML is a project of its own. Verify TinyGo-cleanliness
-of the dependency, and fall back to a documented subset if it won't build
-there.
+**Done.** A system library because full YAML - anchors / aliases, flow *and*
+block styles, implicit typing, multi-document streams - is impractical in `.j`
+and has no Go stdlib. Unlike `xml`, that means a **Go dependency**
+(`gopkg.in/yaml.v3`): the one place a config parser earns one, since a
+hand-rolled full YAML is a project of its own. The dependency was verified
+TinyGo-clean (it builds *and* runs under TinyGo 0.41 / Go 1.26 on both binaries;
+the documented-subset fallback was not needed), and it is the project's first
+non-CLI-scoped external dependency.
+
+The design mirrors [`toml`](#m188---toml-system-library) exactly, which mirrors
+[`json`](#m1616---jsonvalue): an opaque `yaml.Value` (`KindObject`) walked by the
+same read accessors (`typeOf` / `get` / `has` / `keys` / `length` / `as*` /
+`isNull`, addressed by JSON Pointer) and edited by the same non-mutating write
+surface (`map` / `list` / `set` / `insert` / `append` / `remove` / `move`), plus
+`asDatetime` / `isDatetime` for the timestamp scalar (as `toml` surfaces its
+date-times).
+
+- **Decode.** `yaml.decode(s) -> yaml.Value` for one document (a multi-document
+  stream is an error pointing at `decodeAll`; an empty string is `null`) and
+  `yaml.decodeAll(s) -> list of yaml.Value` for a `---`-separated stream. The
+  yaml.v3 Node tree is walked into the interpreter Value tree, preserving
+  mapping order; scalars are typed by YAML's implicit resolution (int / float /
+  bool / null / timestamp / string), a `!!binary` scalar becomes `bytes`, and a
+  non-scalar mapping key is rejected. Anchors and aliases resolve **by value**
+  (each alias an independent copy, so no shared state), and `<<` **merge keys**
+  apply (an explicit key wins over a merged one, an earlier merge source over a
+  later one). Because yaml.v3 is a recursive-descent parser (a deeply-nested
+  document recurses per level on the calling goroutine's stack, which overflows
+  fatally on jennifer-tiny's fixed 2 MiB stack - measured at ~350 levels, well
+  under yaml.v3's own 10000 cap), a raw-text depth pre-scan rejects nesting past
+  128 levels *before* the parse runs; a five-million-node budget likewise stops
+  an alias bomb. Both are catchable errors rather than a stack or memory kill.
+- **Encode.** `yaml.encode` renders **flow style** (compact, `{a: 1, b: [x, y]}`)
+  and `yaml.encodePretty` **block style** (readable) - YAML's own analogue of
+  json's compact / pretty pair. A native `map` / `list` / struct / scalar
+  encodes directly; `bytes` becomes `!!binary`, a `time.Time` a timestamp. Block
+  style preserves a timestamp's type on round-trip; flow style quotes it.
+
+Deferred: emitting a multi-document stream (`encodeAll`) and per-node style
+control are future extensions if demand appears.
 
 ### M20.4 - `i18n`
 
@@ -1717,9 +1736,12 @@ crypto the driver's problem, not the language's, so this needs nothing from
 
 **The deliberate dependency break.** These are the **first heavyweight
 dependencies in the library layer** - a conscious exception to the
-dependency-free discipline `CLAUDE.md` states for the library layer (the
-only third-party dependency today is CLI-scoped `golang.org/x/term`). Both
-drivers are pure-Go, but they are real dependency trees. The exception gets a
+dependency-free discipline `CLAUDE.md` states for the library layer. The
+precedent is [M20.3 `yaml`](#m203---yaml), which took a single pure-Go
+dependency (`gopkg.in/yaml.v3`) for a parser too big to hand-roll; alongside
+CLI-scoped `golang.org/x/term`, those are the only third-party dependencies
+today. The sql drivers go further - both are pure-Go, but they are real
+dependency trees. The exception gets a
 reasoning record in [technical/design-decisions.md](technical/design-decisions.md)
 when it lands - the sanctioned home for a feature that ships despite appearing
 to cut against project doctrine - justified as above, not slid into.

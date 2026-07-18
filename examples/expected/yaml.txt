@@ -1,0 +1,11 @@
+retries: 3
+timeout: 60
+hosts: 2
+host[0]: a.example
+has hosts: true / has proxy: false
+flow: {name: demo, ports: [8080, 9090]}
+block:
+name: demo
+ports:
+    - 8080
+    - 9090
