@@ -62,6 +62,7 @@
 # Modules
 
 - [Catalog](modules/index.md)
+- [`acme`](modules/acme.md)
 - [`amqp`](modules/amqp.md)
 - [`ansi`](modules/ansi.md)
 - [`barcode`](modules/barcode.md)

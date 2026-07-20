@@ -1726,6 +1726,34 @@ rejection), docs, catalog, and demo.
 
 ### M21.4 - `acme` module (Let's Encrypt / ACME)
 
+**Done.** Shipped as `modules/acme.j`: a full ACME (RFC 8555) client over `http`
++ `json`. `connect` (fetch the directory) / `register` an account,
+`order(domains)`, `authorization` + `challenge`, the pure HTTP-01
+`keyAuthorization` / DNS-01 `dnsRecord` response computations, `accept` +
+`pollAuthorization`, `finalize` with a CSR, and `downloadCertificate` - both
+challenge types, as specified. Every request is a JWS signed by the account key
+(`RS256` for RSA, `ES256` for EC), with a fresh anti-replay nonce fetched per
+request; CA errors (RFC 7807 problem docs) surface as catchable
+`Error{kind: "acme"}`. Value-semantic `Client` / `Order` / `Authorization` /
+`Challenge` structs; the caller orchestrates (proving domain control is its job).
+
+**This needed a second `crypto` expansion** (beyond M21.3's sign / verify): the
+`crypto` library gained `rsaGenerateKey(bits)` / `ecGenerateKey(curve)` (mint a
+PEM key), `jwkPublic(privatePem)` (the RFC 7638 canonical public JWK - its
+SHA-256 is the thumbprint the key authorization uses), and `csr(privatePem,
+domains)` (a DER PKCS#10 request). Same build-tag split as the sign / verify
+surface (`cryptolib_acme_std.go` real / `cryptolib_acme_tiny.go` stub over
+`crypto/rsa` + `crypto/ecdsa` + `crypto/x509`), so `acme` is default-binary-only.
+x509 *certificate* handling stays out. Discipline: a 100%-passing `acme_test.j`
+overlay (8 tests: challenge selection, HTTP-01 / DNS-01 response math, order
+parsing, helpers), a `cmd/jennifer/acme_test.go` driving the **whole flow**
+(directory -> nonce -> account -> order -> authz -> accept -> finalize with a
+real CSR -> certificate) against an in-process ACME server, Go tests for the four
+new `crypto` functions (`cryptolib_acme_test.go`), docs (`acme.md` + the `crypto`
+key-generation section), catalog / cheatsheet / `JENNIFER.md` entries, and
+`examples/modules/acme_demo.j`. `jwt_auth`-style middleware is not needed here.
+Original spec below.
+
 An ACME (RFC 8555) client - obtain and renew TLS certificates from Let's Encrypt
 and compatible CAs: account registration, an order plus HTTP-01 / DNS-01
 challenge, CSR submission, and certificate download, over `http` + `json`. Parked

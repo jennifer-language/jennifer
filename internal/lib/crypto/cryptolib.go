@@ -85,6 +85,14 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "rsaVerify", rsaVerifyFn)
 	in.RegisterNamespaced(LibraryName, "ecdsaSign", ecdsaSignFn)
 	in.RegisterNamespaced(LibraryName, "ecdsaVerify", ecdsaVerifyFn)
+
+	// RSA / ECDSA key generation, CSR (PKCS#10), and canonical JWK - the
+	// asymmetric operations an ACME (RFC 8555) client needs. Same build-tag
+	// split (default-binary only; stubbed on jennifer-tiny).
+	in.RegisterNamespaced(LibraryName, "rsaGenerateKey", rsaGenerateKeyFn)
+	in.RegisterNamespaced(LibraryName, "ecGenerateKey", ecGenerateKeyFn)
+	in.RegisterNamespaced(LibraryName, "jwkPublic", jwkPublicFn)
+	in.RegisterNamespaced(LibraryName, "csr", csrFn)
 }
 
 // ----- authenticated symmetric encryption (AES-256-GCM) --------------------

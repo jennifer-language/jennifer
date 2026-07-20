@@ -360,9 +360,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   checksums, security primitives (crypto-grade random `crypto.randBytes`/
   `randInt`, constant-time `crypto.hmacEqual`, key derivation `crypto.hkdf`/
   `crypto.pbkdf`, AES-256-GCM `crypto.encrypt`/`decrypt`, Ed25519
-  `crypto.signKeypair`/`sign`/`verify`, and PEM-key RSA / ECDSA
-  `crypto.rsaSign`/`rsaVerify`/`ecdsaSign`/`ecdsaVerify` for JWT RS\* / ES\* -
-  default binary only), byte-stream + container compression, text/character codecs,
+  `crypto.signKeypair`/`sign`/`verify`, PEM-key RSA / ECDSA
+  `crypto.rsaSign`/`rsaVerify`/`ecdsaSign`/`ecdsaVerify` for JWT RS\* / ES\*, and
+  key generation / CSR / JWK `crypto.rsaGenerateKey`/`ecGenerateKey`/`jwkPublic`/
+  `csr` for ACME - the RSA / ECDSA parts default binary only), byte-stream + container compression, text/character codecs,
   UUIDs, interpreter identity, and test primitives.
 
 For the exact signature of any function, see the hosted library reference -
@@ -379,6 +380,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 `import "./NAME.j" as NAME;` for a local copy); addressed `NAME.fn(...)` /
 `NAME.Struct` like a library.
 
+- **`acme`** - ACME (RFC 8555) client: obtain / renew TLS certificates from
+  Let's Encrypt and compatible CAs. `acme.connect(directoryUrl, accountKey)` /
+  `register(client, email)` an account, `order(client, domains)`,
+  `authorization(client, authzUrl)` + `challenge(authz, kind)`, compute the
+  HTTP-01 `keyAuthorization(client, token)` or DNS-01 `dnsRecord(client, token)`
+  (both pure), `accept(client, challengeUrl)` + `pollAuthorization`, then
+  `finalize(client, order, csr, ...)` with a `crypto.csr` and
+  `downloadCertificate(client, order)`. Every request a JWS (`RS256` / `ES256`)
+  over `http` + `json`; keys / CSR / JWK from `crypto`. Test against a CA
+  **staging** endpoint first. Needs the default binary.
 - **`ansi`** - terminal styling as string wrappers: `ansi.color(s, name)` /
   `bgColor` / `style(s, name)` (bold / dim / italic / underline / reverse) /
   `rgb` / `strip`, plus per-colour and per-style shortcuts (`ansi.red(s)`,

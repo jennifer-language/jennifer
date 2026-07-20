@@ -40,6 +40,8 @@ flat lookup view, not authoritative.
 | [`crypto`](crypto.md)`.signKeypair()` / `.sign($priv, msg)` / `.verify($pub, msg, sig)` | Ed25519. `signKeypair` -> `crypto.Keypair{public, private}`; sign -> 64-byte signature; verify -> bool (error only on a wrong-length key/sig). |
 | [`crypto`](crypto.md)`.rsaSign($privPem, msg, algo)` / `.rsaVerify($pubPem, msg, sig, algo)` | RSASSA-PKCS#1 v1.5 over PEM keys (for JWT RS\*); `algo` `"sha256"`/`"sha384"`/`"sha512"`. **Default binary only.** |
 | [`crypto`](crypto.md)`.ecdsaSign($privPem, msg, algo)` / `.ecdsaVerify($pubPem, msg, sig, algo)` | ECDSA over PEM keys, JOSE R\|\|S signature (for JWT ES\*); curve from the key. **Default binary only.** |
+| [`crypto`](crypto.md)`.rsaGenerateKey(bits)` / `.ecGenerateKey(curve)` | Generate an RSA (2048/3072/4096) / EC (`"p256"`/`"p384"`/`"p521"`) private key as PEM. **Default binary only.** |
+| [`crypto`](crypto.md)`.jwkPublic($privPem)` / `.csr($privPem, domains)` | Canonical public JWK JSON (RFC 7638; SHA-256 it for the thumbprint); DER PKCS#10 CSR over a `list of string` of domains. For ACME. **Default binary only.** |
 | [`crypto`](crypto.md)`.pbkdf(password, salt, iterations, keyLen, algo)` | Stretch a password into a `keyLen`-byte key (PBKDF2, RFC 8018); `algo` `"sha1"`/`"sha256"`/`"sha512"`. Name drops the "2".      |
 | [`crypto`](crypto.md)`.randBytes(n)`                  | `n` crypto-grade random bytes (`n >= 0`).                                                                                           |
 | [`crypto`](crypto.md)`.randInt(lo, hi)`               | Uniform crypto-grade int in the inclusive range `[lo, hi]` (rejection-sampled, unbiased; unseedable).                               |

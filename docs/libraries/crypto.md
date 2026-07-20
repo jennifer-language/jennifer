@@ -227,6 +227,32 @@ These are the primitives the [`jwt`](../modules/jwt.md) module's `RS*` / `ES*`
 algorithms build on. Still out of scope: x509 *certificate* handling (chains,
 SANs, expiry) - key parsing is all that is exposed.
 
+## Key generation, CSR, and JWK
+
+The rest of the asymmetric surface - what an [ACME](../modules/acme.md) client
+needs to mint keys and request certificates. Same default-binary-only split.
+
+| Call | Returns | Notes |
+| ---- | ------- | ----- |
+| `crypto.rsaGenerateKey(bits)` | `bytes` | A fresh RSA private key as PKCS#8 PEM. `bits` is 2048, 3072, or 4096. |
+| `crypto.ecGenerateKey(curve)` | `bytes` | A fresh EC private key as SEC1 PEM. `curve` is `"p256"`, `"p384"`, or `"p521"`. |
+| `crypto.jwkPublic(privatePem)` | `string` | The **RFC 7638 canonical** public JWK JSON of the key (members sorted, no whitespace). |
+| `crypto.csr(privatePem, domains)` | `bytes` | A DER PKCS#10 certificate-signing request over a `list of string` of domains (subject-alt DNS names; the first is the common name), signed with the key. |
+
+`jwkPublic` is canonical, so its SHA-256 is the **JWK thumbprint** (RFC 7638) -
+the value ACME challenges are keyed on:
+
+```jennifer
+use crypto;
+use hash;
+use encoding;
+
+def key as bytes init crypto.ecGenerateKey("p256");
+def jwk as string init crypto.jwkPublic($key);                # {"crv":"P-256","kty":"EC",...}
+def thumbprint as bytes init hash.compute(convert.bytesFromString($jwk, "utf-8"), "sha256");
+def csr as bytes init crypto.csr($key, ["example.com", "www.example.com"]);
+```
+
 ## Errors
 
 Every function validates argument kinds and counts and raises a
