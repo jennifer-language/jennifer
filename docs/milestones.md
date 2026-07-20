@@ -1779,6 +1779,16 @@ verified end-to-end against a refusing fake server plus a negative control.
 
 ### M20.8 - device I/O (`serial` / `spi` / `iic` / `gpio`)
 
+**Done.** The I2C library shipped as `iic` (letters-only rule). All four are Go
+system libraries over `golang.org/x/sys/unix`, build-tag split `linux && !tinygo`
+(real) / else (friendly-error stub) - the default `jennifer` on Linux drives the
+hardware; every other build and `jennifer-tiny` point the user back at it. Shared
+handle / argument plumbing lives in `internal/lib/devio`. `serial` termios config
+is PTY-tested; the `spi` / `gpio` ioctl struct layouts are pinned to the kernel
+ABI by size assertions (`spi_ioc_transfer` 32 bytes; `gpio_v2_line_request` 592).
+`gpio` reuses the sysfs module's pin-keyed `setup`/`read`/`write`/`release` +
+`IN`/`OUT`, chip via `gpio.chip`. Original spec below.
+
 Device-I/O libraries for embedded / single-board-computer hosts, all reaching
 the Linux `/dev` + `ioctl` interface that `.j` and plain `fs` cannot: `serial` /
 `spi` / `iic` are the three buses, and `gpio` here is the character-device

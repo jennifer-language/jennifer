@@ -20,8 +20,10 @@ import (
 	cryptolib "jennifer-lang.dev/jennifer/internal/lib/crypto"
 	"jennifer-lang.dev/jennifer/internal/lib/encoding"
 	"jennifer-lang.dev/jennifer/internal/lib/fs"
+	gpiolib "jennifer-lang.dev/jennifer/internal/lib/gpio"
 	"jennifer-lang.dev/jennifer/internal/lib/hash"
 	"jennifer-lang.dev/jennifer/internal/lib/httpd"
+	iiclib "jennifer-lang.dev/jennifer/internal/lib/iic"
 	intllib "jennifer-lang.dev/jennifer/internal/lib/intl"
 	"jennifer-lang.dev/jennifer/internal/lib/io"
 	"jennifer-lang.dev/jennifer/internal/lib/json"
@@ -32,6 +34,8 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lib/net"
 	"jennifer-lang.dev/jennifer/internal/lib/os"
 	"jennifer-lang.dev/jennifer/internal/lib/regex"
+	seriallib "jennifer-lang.dev/jennifer/internal/lib/serial"
+	spilib "jennifer-lang.dev/jennifer/internal/lib/spi"
 	"jennifer-lang.dev/jennifer/internal/lib/strings"
 	"jennifer-lang.dev/jennifer/internal/lib/task"
 	termlib "jennifer-lang.dev/jennifer/internal/lib/term"
@@ -75,4 +79,8 @@ func InstallAll(in *interpreter.Interpreter) {
 	regexlib.Install(in)
 	testinglib.Install(in)
 	uuidlib.Install(in)
+	seriallib.Install(in)
+	spilib.Install(in)
+	iiclib.Install(in)
+	gpiolib.Install(in)
 }

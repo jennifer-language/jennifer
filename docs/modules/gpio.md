@@ -75,8 +75,17 @@ system library with **no change to `.j` scripts** - the pure-module form is the
 default because it costs the language nothing; the system library is
 future-proofing, taken only when forced.
 
+That system library now exists as the [`gpio` library](../libraries/gpio.md)
+(the `/dev/gpiochipN` GPIO v2 ioctls). It reuses this module's pin-keyed shape -
+`setup` / `read` / `write` / `release` plus the `IN` / `OUT` constants - so a
+script moves between the two unchanged; this sysfs module stays the portable
+default, and the library is the successor for targets that ship without sysfs
+GPIO.
+
 ## See also
 
+- [`gpio` library](../libraries/gpio.md) - the `/dev/gpiochip` character-device
+  successor with the same pin-keyed surface (default `jennifer` binary, Linux).
 - [`fs`](../libraries/fs.md) - the file I/O behind every call.
 - [`os`](../libraries/os.md) - `os.setEnv` to point `JENNIFER_GPIO_BASE` at a
   non-standard sysfs mount or a mock.

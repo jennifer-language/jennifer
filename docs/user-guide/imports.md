@@ -49,6 +49,10 @@ over string / list / map / bytes; no import needed.
 | `regex`   | `use regex;`   | regular expressions over `string` (RE2 syntax). `matches`/`find`/`findAll`/`replace`/`split`/`escape` + `regex.Match` with positional and named captures. Implicit LRU cache for compiled patterns; rune-index offsets in matches | [libraries/regex.md](../libraries/regex.md) |
 | `testing` | `use testing;` | test-runner primitives. `run`/`results`/`reset`/`report` + `testing.Result`. Catches runtime errors, throws, and `exit` inside test bodies. Three report formats: `"text"`, `"tap"`, `"junit"`. Foundation for the `.j`-side testing framework | [libraries/testing.md](../libraries/testing.md) |
 | `uuid`    | `use uuid;`    | RFC 9562 UUIDs. `uuid.generate("v4")` / `generate("v7")` + `parse`/`isValid`/`version` + constant `NIL`. Version tag is a string arg; RNG is `math`'s seedable source (not crypto-grade)                          | [libraries/uuid.md](../libraries/uuid.md)       |
+| `serial`  | `use serial;`  | serial-port I/O with termios config. `open(path, baud)` / `openWith(path, Options)` -> `serial.Port`, `read`/`write`/`flush`/`close`. Linux-only; `jennifer-tiny` and non-Linux return a friendly stub | [libraries/serial.md](../libraries/serial.md) |
+| `spi`     | `use spi;`     | SPI devices. `open(path)` -> `spi.Device`, `configure(dev, mode, speedHz)`, full-duplex `transfer(dev, bytes)`, `close`. Linux-only; stub elsewhere | [libraries/spi.md](../libraries/spi.md) |
+| `iic`     | `use iic;`     | the I2C bus (named `iic`, letters-only). `open(path, addr)` -> `iic.Bus`, `read`/`write`/`readReg`/`writeReg`/`close`. Linux-only; stub elsewhere | [libraries/iic.md](../libraries/iic.md) |
+| `gpio`    | `use gpio;`    | GPIO over `/dev/gpiochipN` (v2 ioctls). Pin-keyed `setup`/`read`/`write`/`release` + `IN`/`OUT`, chip via `gpio.chip`; mirrors the sysfs `gpio` module. Linux-only; stub elsewhere | [libraries/gpio.md](../libraries/gpio.md) |
 
 See [libraries/index.md](../libraries/index.md) for a fuller catalog
 and the library-organization principles, or

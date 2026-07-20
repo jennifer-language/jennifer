@@ -66,6 +66,10 @@ full surface.
 | `net`   | Every entry point (TCP, UDP, DNS)                     | Runtime error pointing at the default `jennifer` binary. Our stock `jennifer-tiny` registers no netdev driver, so `net` is stubbed. Build-tag split: `netlib_tinygo.go` returns friendly errors. Not a hard TinyGo limit - see the note below. |
 | `httpd` | Every entry point (`listen`, `accept`, `respond`, ...) | Runtime error pointing at the default `jennifer` binary. The HTTP/1.1 server engine is over Go `net/http`, so it is stubbed for the same reason as `net` (no netdev driver): `httpdlib_tinygo.go` returns friendly errors, and a rebuild with a network stack restores it. |
 | `term`  | Every entry point (`makeRaw`, `restore`, `size`, `readByte`) | Runtime error pointing at the default `jennifer` binary. Terminal control needs `golang.org/x/term` (which the tiny build excludes) *and* a controlling TTY (which a minimal / embedded target may not have). Build-tag split like `net`: `termlib_tinygo.go` returns friendly errors. |
+| `serial` | Every entry point (`open`, `read`, `write`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. Serial-port termios I/O is a Linux `/dev` + ioctl feature over `golang.org/x/sys/unix`, which the tiny build does not carry. Build-tag split `linux && !tinygo` (real) / else (stub). |
+| `spi`   | Every entry point (`open`, `configure`, `transfer`, `close`) | Runtime error pointing at the default `jennifer` binary on Linux. `SPI_IOC_MESSAGE` ioctl; same build-tag split as `serial`. |
+| `iic`   | Every entry point (`open`, `read`, `write`, `readReg`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. `I2C_SLAVE` ioctl; same build-tag split as `serial`. |
+| `gpio`  | Every entry point (`setup`, `read`, `write`, `release`, `chip`) | Runtime error pointing at the default `jennifer` binary on Linux. The `/dev/gpiochipN` GPIO v2 line ioctls; same build-tag split as `serial`. (The sysfs-backed `gpio` **module** is the portable default and runs on both binaries.) |
 
 ### `net` on TinyGo is a build choice, not a hard limit
 

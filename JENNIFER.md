@@ -339,6 +339,14 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   raw byte from stdin, `-1` at EOF; bytes, not decoded keys). Over
   `golang.org/x/term`; default binary only (`jennifer-tiny` stubs it). Refused in
   the REPL. Output-only TUIs need only `ansi` + `os.isTerminal`.
+- **Device I/O (Linux-only, default binary; stubs elsewhere and on
+  `jennifer-tiny`):** **`serial`** - serial ports (`serial.open(path, baud)` ->
+  `serial.Port`, `read`/`write`/`flush`/`close`, `openWith` for full termios
+  config). **`spi`** - `spi.open(path)` -> `spi.Device`, `configure(dev, mode,
+  speedHz)`, full-duplex `transfer(dev, bytes)`. **`iic`** - the I2C bus
+  (`iic.open(path, addr)` -> `iic.Bus`, `read`/`write`/`readReg`/`writeReg`).
+  **`gpio`** - `/dev/gpiochipN` lines, pin-keyed `setup`/`read`/`write`/`release`
+  + `gpio.IN`/`gpio.OUT` (mirrors the sysfs `gpio` module).
 - **`time`**, **`fs`**, **`net`**, **`regex`**, **`hash`**, **`crc`**,
   **`crypto`**, **`compress`**, **`archive`**, **`encoding`**, **`uuid`**,
   **`meta`**, **`testing`** - clock, files, sockets, RE2 regex, digests,

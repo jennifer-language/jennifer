@@ -72,6 +72,9 @@ flat lookup view, not authoritative.
 | [`fs`](fs.md)`.writeString(path, content)` / `.writeString($f, s)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                    |
 | [`fs`](fs.md)`.makeTempFile([dir[, prefix[, suffix]]])` | Create a unique empty file (atomic, `0600`); returns its path. `dir=""` = system temp; parent must exist. |
 | [`fs`](fs.md)`.makeTempDir([dir[, prefix]])`          | Create a unique directory (atomic, `0700`); returns its path. Only the leaf is created (not `mkdir -p`).                            |
+| [`gpio`](gpio.md)`.setup(pin, direction)`            | Request `pin` (0..63) with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |
+| [`gpio`](gpio.md)`.read(pin)` / `.write(pin, value)` | Read a line (0/1) / drive an output line (0 or 1). |
+| [`gpio`](gpio.md)`.release(pin)` / `.chip(path)`     | Free a requested line / select the gpiochip device (default `/dev/gpiochip0`). |
 | [`hash`](hash.md)`.compute(b, algo)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"`, `"sha256"`, or `"sha512"`. Returns raw bytes.                                         |
 | [`hash`](hash.md)`.hmac(key, message, algo)`          | Keyed-hash MAC (RFC 2104) over the same algorithms; raw bytes out. For JWT / TOTP / SigV4 / webhook signatures.                     |
 | [`hash`](hash.md)`.discard($s)`                       | Drop a `hash.Stream` without computing its digest; releases its state.                                                             |
@@ -84,6 +87,10 @@ flat lookup view, not authoritative.
 | [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `body` -> `bytes`). |
 | [`httpd`](httpd.md)`.setHeader($req, name, value)` / `.respond($req, status, body)` | Set a response header / send the response once (`body` is string or bytes). |
 | [`httpd`](httpd.md)`.serveFile($req, path)` / `.serveDir($req, root)` | Answer with a file / the file under `root` for the request path (`..` cannot escape `root`).                    |
+| [`iic`](iic.md)`.open(path, addr)`                   | Open an I2C bus and select 7-bit slave `addr` -> `iic.Bus`. Linux only. |
+| [`iic`](iic.md)`.read($bus, n)` / `.write($bus, data)` | Read `n` raw bytes / write raw bytes to the selected slave. |
+| [`iic`](iic.md)`.readReg($bus, reg, n)` / `.writeReg($bus, reg, data)` | Register read (set pointer, read back) / register write. |
+| [`iic`](iic.md)`.close($bus)`                        | Close the bus. |
 | [`intl`](intl.md)`.load(lang, catalog)`               | Merge a `map of string to string` into the catalog for `lang`; the first language loaded is the default.                            |
 | [`intl`](intl.md)`.setLocale(lang)` / `.locale()`     | Set / read the current locale (e.g. `"de-AT"`; `locale()` is `""` until set).                                                       |
 | [`intl`](intl.md)`.tr(key[, params])`                 | Translate `key` (fallback: locale -> base language -> default -> the key); `params` (a `map`) fills `{name}` placeholders (`{{`/`}}` escape). |
@@ -153,6 +160,11 @@ flat lookup view, not authoritative.
 | [`regex`](regex.md)`.matches(pattern, s)`             | True iff `pattern` matches somewhere in `s`.                                                                                        |
 | [`regex`](regex.md)`.replace(pattern, s, replacement)` | Replace every match. `$1`, `${name}` expand to captured groups; `$$` is a literal `$`.                                             |
 | [`regex`](regex.md)`.split(pattern, s)`               | Split `s` at every match; returns `list of string`.                                                                                 |
+| [`serial`](serial.md)`.open(path, baud)` / `.openWith(path, opts)` | Open a serial port (raw 8N1, or full `serial.Options`) -> `serial.Port`. Linux only. |
+| [`serial`](serial.md)`.read($port, n)` / `.write($port, data)` | Read up to `n` bytes (blocks for >=1) / write bytes (-> count). |
+| [`serial`](serial.md)`.flush($port)` / `.close($port)` | Discard buffered I/O / close the port. |
+| [`spi`](spi.md)`.open(path)` / `.configure($dev, mode, speedHz)` | Open an SPI device -> `spi.Device` / set clock mode (0..3) and speed. Linux only. |
+| [`spi`](spi.md)`.transfer($dev, data)` / `.close($dev)` | Full-duplex exchange (out and in together) / close the device. |
 | [`math`](math.md)`.ceil(x)`                           | Smallest int ≥ `x`. Accepts int (identity) or float.                                                                                |
 | [`math`](math.md)`.floor(x)`                          | Largest int ≤ `x`. Accepts int (identity) or float.                                                                                 |
 | [`math`](math.md)`.max(a, b)`                         | Larger of two numbers; mixed int/float promotes to float.                                                                           |
