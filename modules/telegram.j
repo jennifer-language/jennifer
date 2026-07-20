@@ -184,7 +184,7 @@ func checkResponse(node as json.Value) {
 func call(b as Bot, method as string, params as map of string to string, timeoutMs as int) {
     def url as string init $b.baseUrl + "/bot" + $b.token + "/" + $method;
     def headers as map of string to string init {"Content-Type": "application/x-www-form-urlencoded"};
-    def resp as http.Response init http.requestWith("POST", $url, $headers, formEncode($params), $timeoutMs);
+    def resp as http.Response init http.requestWith("POST", $url, $headers, formEncode($params), $timeoutMs, 0);
     # A proxy error page (502 HTML, auth portal) isn't JSON: decode under a
     # guard and rethrow as a telegram-kind error rather than a raw json one.
     def node as json.Value;

@@ -391,6 +391,17 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   and its parser. `docblock.parse(source)` -> a typed `FileDoc` tree (module
   preamble + per-construct docs + `Diagnostic`s for doc drift / orphans). Data,
   not rendering. Over `regex` + `strings`; both binaries.
+- **`feed`** - RSS 2.0 and Atom 1.0 web syndication in one module (build and
+  parse; format chosen on `build`, detected on `parse`). Value-semantic
+  `feed.Feed { title, link, updated, entries }` of
+  `feed.Entry { title, link, id, published, updated, summary, content }` with
+  builders `feed.feed(title, link)` / `entry(title, link)` / `add(f, e)` /
+  `feedUpdated(f, t)` / `entryId` / `entryPublished` / `entryUpdated` /
+  `entrySummary` / `entryContent`; `feed.build(f, "rss"|"atom")` /
+  `parse(text)` / `kind(text)`, and `feed.fetch(url)` over the `http` module.
+  Over `xml` + `time` (build / parse on both binaries; `fetch` needs the default
+  binary). Hardened for untrusted feeds (xml nesting cap, no billion-laughs,
+  lenient dates, a 64 MiB body cap).
 - **`flatdb`** - a file-backed JSON store over `json` + `fs`. `flatdb.open(path)`
   -> value-semantic `DB` (empty if the file is absent); query / edit by JSON
   Pointer (`get` / `has` / `keys` / `length`; the fresh-`DB`-returning `set` /

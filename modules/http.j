@@ -362,10 +362,24 @@ func isChunked(headers as map of string to string) {
 # forever. Pass a different value via `requestWith`; 0 disables the timeout.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 
+# MAX_BODY_BYTES is the default response-body cap. The per-read deadline bounds
+# a *stalled* peer, but a fast peer can stream unbounded data; without a size
+# limit a hostile server (e.g. behind an untrusted feed URL) could drive the
+# interpreter to OOM. 64 MiB is far past any API / feed / page response; a larger
+# body is a catchable error, not a crash. A caller that genuinely needs a bigger
+# (or unlimited) body passes an explicit `maxBytes` to `requestWith`.
+def const MAX_BODY_BYTES as int init 67108864;
+
 # readToEOF reads the whole connection (the server closes after the response
 # because we send Connection: close). `timeoutMs` re-arms a read deadline before
 # each read, so a stalled connection breaks the loop with an error; 0 clears it.
-func readToEOF(conn as net.Conn, timeoutMs as int) {
+# `maxBytes` caps the body: 0 uses the default (MAX_BODY_BYTES), a negative value
+# is unlimited, a positive value is that exact ceiling.
+func readToEOF(conn as net.Conn, timeoutMs as int, maxBytes as int) {
+    def limit as int init $maxBytes;
+    if ($limit == 0) {
+        $limit = MAX_BODY_BYTES;
+    }
     def buf as bytes;
     while (true) {
         if ($timeoutMs > 0) {
@@ -380,6 +394,9 @@ func readToEOF(conn as net.Conn, timeoutMs as int) {
         while ($i < $m) {
             $buf[] = $chunk[$i];
             $i = $i + 1;
+        }
+        if ($limit > 0 and len($buf) > $limit) {
+            throw Error{kind: "http", message: "http: response body exceeds " + convert.toString($limit) + " bytes", file: "", line: 0, col: 0};
         }
     }
     return $buf;
@@ -396,19 +413,24 @@ func dial(u as Url) {
 # --- API (exported) ------------------------------------------------
 
 /**
- * Send one HTTP request with an explicit idle timeout, returning the response.
- * `timeoutMs` bounds each read (a stalled server fails rather than hanging); 0
- * disables it. `request` and the verb shortcuts use `DEFAULT_TIMEOUT_MS`.
+ * Send one HTTP request with an explicit idle timeout and body cap, returning
+ * the response. `timeoutMs` bounds each read (a stalled server fails rather than
+ * hanging); 0 disables it. `maxBytes` caps the response body: 0 uses the 64 MiB
+ * default (`MAX_BODY_BYTES`, which protects against an untrusted server
+ * streaming to OOM), a negative value lifts the cap (for a trusted large
+ * download), and a positive value sets an exact ceiling. `request` and the verb
+ * shortcuts use `DEFAULT_TIMEOUT_MS` and the default cap.
  * @param method {string} the HTTP method (e.g. "GET", "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
  */
 export func requestWith(method as string, url as string,
-    headers as map of string to string, body as string, timeoutMs as int) {
+    headers as map of string to string, body as string, timeoutMs as int, maxBytes as int) {
     def u as Url init parseUrl($url);
     # Build (and validate) the request before opening a socket, so an injected
     # header / path throws without dialing and nothing malformed hits the wire.
@@ -422,7 +444,7 @@ export func requestWith(method as string, url as string,
         net.setDeadline($conn, $timeoutMs);   # covers the write and the first read
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
-    return parseResponse(readToEOF($conn, $timeoutMs));
+    return parseResponse(readToEOF($conn, $timeoutMs, $maxBytes));
 }
 
 /**
@@ -436,7 +458,7 @@ export func requestWith(method as string, url as string,
  */
 export func request(method as string, url as string,
     headers as map of string to string, body as string) {
-    return requestWith($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS);
+    return requestWith($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0);
 }
 
 /**

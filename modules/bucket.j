@@ -182,7 +182,9 @@ func doRequest(client as Client, method as string, canonicalUri as string, canon
     if (not ($canonicalQuery == "")) {
         $url = $url + "?" + $canonicalQuery;
     }
-    return http.requestWith($method, $url, $headers, $body, $client.timeout);
+    # -1 lifts http's default body cap: an object-storage GET may legitimately
+    # return an object larger than 64 MiB, and the bucket is the caller's own.
+    return http.requestWith($method, $url, $headers, $body, $client.timeout, -1);
 }
 
 # objectPath is the canonical URI for an object: /{bucket}/{encoded key}.

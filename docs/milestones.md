@@ -1632,6 +1632,28 @@ graduate into the M18 module track when built.
 
 ### M21.2 - `feed` module (RSS + Atom)
 
+**Done.** Shipped as `modules/feed.j`: build and parse RSS 2.0 and Atom 1.0
+through one module, the format chosen on `build` (`"rss"` / `"atom"`) and
+detected from the root element on `parse`. A value-semantic `Feed` of `Entry`
+with builders (`feed` / `entry` / `add` / `feedUpdated` / `entryId` /
+`entryPublished` / `entryUpdated` / `entrySummary` / `entryContent`), `build` /
+`parse` / `kind`, and a `fetch(url)` convenience over the `http` module. Rides
+the `xml` library for parse and build (escaped output) and `time` for RFC 822
+(RSS) / RFC 3339 (Atom) dates; an unset date is the epoch sentinel and is
+omitted. Build / parse run on both binaries; `fetch` needs the default binary.
+**Hardened for untrusted feeds** (the untrusted-input paths were validated and
+fixed): parsing rides `xml`'s shared nesting cap (deeply-nested feed = catchable
+error, not a stack overflow) and its no-custom-entity decode (no billion-laughs);
+date parsing is lenient (a malformed timestamp degrades to the epoch, a
+channel-less RSS document still reads); and `feed.fetch` is bounded by a new
+64 MiB response-body cap in `http`'s `readToEOF` (`MAX_BODY_BYTES`), closing an
+OOM vector where a hostile server could stream an unbounded body past the
+time-only deadline. Ships with the standard discipline: a 100%-passing
+`feed_test.j` overlay (19 tests: build / parse round-trips, escaping, format
+detection, lenient dates, private helpers), a `cmd/jennifer/feed_test.go`
+networked fetch-and-parse against an in-process server, this milestone's docs,
+and `examples/modules/feed_demo.j`. Original spec below.
+
 A `feed` module for web syndication feeds: **build and parse** both RSS 2.0
 and Atom 1.0. **One** module, format selected on build and detected on parse
 (design stance 1 - not separate `rss` / `atom` modules); a feed is a value-

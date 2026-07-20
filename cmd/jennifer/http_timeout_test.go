@@ -48,7 +48,7 @@ func TestHttpTimeout(t *testing.T) {
 import %q as http;
 def caught as bool init false;
 try {
-    def r as http.Response init http.requestWith("GET", %q, {}, "", 250);
+    def r as http.Response init http.requestWith("GET", %q, {}, "", 250, 0);
 } catch (e) {
     $caught = true;
 }

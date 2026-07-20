@@ -33,7 +33,7 @@ string (`""` for none).
 | ------------------------------------------- | ------------------------------------------------------------------ |
 | `http.Response`                             | `status` (int), `statusText`, `headers` (lowercased keys), `body`. |
 | `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
-| `http.requestWith(method, url, headers, body, timeoutMs)` | As `request`, with an explicit per-read idle timeout (`0` = none). |
+| `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit per-read idle timeout (`0` = none) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
 | `http.get(url, headers)`                    | GET.                                                               |
 | `http.post(url, contentType, body, headers)`| POST; sets `Content-Type`.                                         |
 | `http.put(url, contentType, body, headers)` | PUT; sets `Content-Type`.                                          |
@@ -42,6 +42,16 @@ string (`""` for none).
 | `http.head(url, headers)`                   | HEAD (status + headers, no body).                                  |
 | `http.options(url, headers)`                | OPTIONS (capability probe; read the `Allow` header).              |
 | `http.header(resp, name)`                   | Read a response header case-insensitively, or `""` if absent.      |
+
+The response body is bounded by default: `http` reads at most **64 MiB**
+(`MAX_BODY_BYTES`) and raises a catchable error beyond it. The per-read timeout
+only bounds a *stalled* server, so this size cap is what keeps a hostile server
+(e.g. behind an untrusted URL a feed reader follows) from streaming an unbounded
+body to OOM. A caller that needs a larger (or unbounded) body passes an explicit
+`maxBytes` to `http.requestWith` - `0` keeps the 64 MiB default, a negative value
+lifts the cap for a trusted large download, a positive value sets an exact
+ceiling. The `bucket` module (object storage) already lifts it; the verb
+shortcuts (`get` / `post` / ...) and `request` keep the default.
 
 The shortcuts are thin wrappers over `request`, which is **method-agnostic** -
 it sends whatever method string you pass. So a method without a shortcut still

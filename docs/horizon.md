@@ -376,6 +376,19 @@ evaluator's dispatch and Value-copy costs. That is fine for kilobyte-scale
 config and headers, but it puts any megabyte-scale byte processing out of
 reach in pure Jennifer.
 
+The same ceiling caps the `http` module: `readToEOF` assembles a response body
+by appending one byte at a time (`$buf[] = $chunk[$i]`), so reading is on the
+order of a minute per 64 MiB. That is invisible for the API / feed / page
+responses `http` is built for (its default body cap is 64 MiB), but it means a
+lifted cap (`http.requestWith(..., maxBytes)` negative, or `bucket.get` of a
+large object) is *correct but slow* - `http` is a small/medium-response client,
+not a bulk downloader. A cheap, targeted fix is a **bulk `bytes` primitive** - a
+whole-buffer append / concat (or a `net` read-all that returns one `bytes`) so
+the inner copy runs once in Go instead of once per byte - which is the
+"push byte-crunching into Go" direction below applied to body assembly. A
+streaming body API (hand `.j` chunks instead of one string) is the larger
+follow-on for genuinely large downloads.
+
 The peephole passes already shipped (slot resolution, frame pooling,
 namespaced-call and comparison fast paths, constant folding, the map hash
 index) took the easy wins; the next real gain needs a structural step, not
