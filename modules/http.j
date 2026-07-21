@@ -410,9 +410,9 @@ func readToEOF(conn as net.Conn, timeoutMs as int, maxBytes as int) {
 func dial(u as Url) {
     def addr as string init $u.host + ":" + convert.toString($u.port);
     if ($u.scheme == "https") {
-        return net.connectTLS($addr);
+        return net.connectTLS($addr, DEFAULT_TIMEOUT_MS);
     }
-    return net.connect($addr);
+    return net.connect($addr, DEFAULT_TIMEOUT_MS);
 }
 
 # --- API (exported) ------------------------------------------------

@@ -365,9 +365,9 @@ export func connectWith(url as string, timeoutMs as int) {
     def addr as string init $t.host + ":" + convert.toString($t.port);
     def socket as net.Conn;
     if ($t.secure) {
-        $socket = net.connectTLS($addr);
+        $socket = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS);
     } else {
-        $socket = net.connect($addr);
+        $socket = net.connect($addr, HANDSHAKE_TIMEOUT_MS);
     }
     # A failed HTTP upgrade must not leak the socket; on success the caller
     # owns the open connection.

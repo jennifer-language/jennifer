@@ -1934,64 +1934,99 @@ against an in-process server and asserts a catchable refusal, not an OOM.
 
 ### M21.8 - interpreter call-depth limit + profiler depth metric
 
-**Done.** Deep Jennifer recursion that used to overflow the Go stack fatally now
-raises a positioned, catchable runtime error, and call depth is a profiling
-metric. Both share the one `evalCall` call-depth counter.
-
-- **Catchable call-depth limit.** `evalCall` keeps a call-depth counter on the
-  per-goroutine root env (like the profiler's `profChild`, so parallel `spawn`
-  bodies each track their own depth without racing a shared field), bumping it on
-  method entry and dropping it on return. Above `limits.MaxCallDepth` it raises a
-  catchable runtime error ("call stack too deep: exceeded N nested method calls")
-  positioned at the offending call site - the analogue of Python's
-  `RecursionError`, and it counts across methods, so mutual recursion trips it
-  too. The cap is **build-tag split** in `internal/limits` beside the nesting cap:
-  10000 on the default binary (Go's growable stack crashes a minimal recursive
-  body near 100k, a heavy one near 50k), 48 on `jennifer-tiny` (its stack was
-  raised from 2 MiB to 4 MiB for this, on which a fib-shaped or heavy body
-  segfaults near depth 75, while the deepest a shipped example recurses -
-  `examples/benchmark.j`'s serial `fib(23)` - is depth 24) - deliberately lower
-  than `MaxNestingDepth` because a call frame costs far more Go stack than one
-  expression-nesting step. Applies to `spawn` bodies (guarded on their own
-  goroutine, re-raised at `task.wait`).
-- **Profiler max-call-depth metric.** `jennifer profile` (statement mode) tracks
-  the same depth and the statement table reports the deepest nested-call chain the
-  run reached - overall and per deepest call site (top 10). Additive to the
-  existing hit-count / wall-clock / `--allocs` collector: one `RecordCallDepth`
-  hook that only grows a running max.
-
-Tests: `internal/interpreter/call_depth_test.go` (over-limit raises a catchable
-error, catch recovers, the counter spans methods, recursion at the cap runs, a
-spawn body is guarded and re-raised at `wait`) and a `internal/profile` case for
-the metric; verified catchable on both binaries.
+**Done.** Deep Jennifer recursion that used to overflow the Go stack fatally
+(uncatchable crash / `jennifer-tiny` segfault) now raises a positioned,
+catchable "call stack too deep" runtime error - Python's `RecursionError`
+analogue. `evalCall` keeps the depth counter on the per-goroutine root env (like
+the profiler's `profChild`, so parallel `spawn` bodies don't race it), counts
+across methods (mutual recursion trips it), and guards `spawn` bodies (re-raised
+at `task.wait`). The cap is build-tag split in `internal/limits` beside the
+nesting cap - 10000 default, 48 on `jennifer-tiny` (whose stack was raised
+2 MiB -> 4 MiB for the headroom) - deliberately lower than `MaxNestingDepth`
+since a call frame costs far more Go stack than one nesting step. The same
+counter feeds a `jennifer profile` max-call-depth metric (deepest nested-call
+chain, overall + per call site). Pinned by
+`internal/interpreter/call_depth_test.go` and an `internal/profile` case;
+verified catchable on both binaries.
 
 ### M21.9 - defensive network + credential hardening
 
-The lower-severity, judgment-call hardening from the security review - each a
-sensible default or optional check, some behaviour-changing, so grouped and
-sequenced after M21.7 / M21.8. Per module:
+**Done.** The lower-severity, judgment-call hardening from the security review -
+sensible defaults / optional checks, some behaviour-changing, one regression
+test each. Two enabling Go primitives landed first: an optional trailing
+`timeoutMs` on `net.connect` / `connectTLS` / `startTLS` (a slow peer no longer
+blocks the dial or handshake forever; a bare int in the optional slot is the
+timeout, unambiguous since no module passes `net.TLSOptions`), and `fs.chmod` /
+`fs.chown` (the write verbs fix `0644`, so `chmod` tightens a secret store to
+`0600`; Unix/Linux). Per module: **`web`** marks the session-id and CSRF cookies
+`Secure` by default (`JENNIFER_WEB_INSECURE_COOKIES=1` opts out for plaintext
+dev); **`smtp`** refuses SASL auth over a cleartext connection unless
+`Options.allowInsecureAuth`, verifies the EHLO advertised STARTTLS before issuing
+it (anti-downgrade), and validates envelope addresses RFC 5321-style; **`oauth`**
+`save` chmods its token file to `0600`; **`jwt`** gained `verifyWith(token, key,
+alg, jwt.Policy{iss, aud})` for issuer / audience enforcement; the network
+clients (`http` / `websocket` / `redis` / `pop` / `imap` / `mqtt`) bound
+connection establishment with a timeout, and `redis` / `pop` / `imap` / `mqtt`
+gained a 64 MiB received-data cap (an attacker-declared length or unterminated
+stream fails catchably; `http` / `websocket` already had it); **`amqp`** gained
+`Options.security = "tls"` (AMQPS). Reviewed and **rejected**
+([rejected.md](technical/rejected.md)): dropping the TLS `skipVerify` opt-out, a
+`SecureString` type, and treating `fs` / `net` / `os` / `meta` host access as
+vulnerabilities.
 
-- **`web`:** default the session cookie's `Secure` flag on, with an opt-out for
-  plaintext-HTTP / behind-a-TLS-terminating-proxy dev.
-- **`smtp`:** verify the server's EHLO advertises `STARTTLS` before issuing it
-  (anti-downgrade); refuse SASL auth over a cleartext (`security: "none"`)
-  connection unless explicitly forced; add RFC 5321 envelope-address validation
-  (empty local part / domain, missing `@`, length) beyond the M21.7 CRLF fix.
-- **`oauth`:** write the on-disk token store with owner-only (`0600`) permissions
-  - file perms, not encryption, matching how `gh` / `aws` store tokens. Needs an
-  `fs` write that sets the mode (or a post-write `chmod`).
-- **`jwt`:** optional `iss` / `aud` claim-validation parameters on `verify` (the
-  library validates `exp` / `nbf` today; `iss` / `aud` are application policy).
-- **Network clients (`redis` / `websocket` / `http` / `smtp` / `pop` / `imap` /
-  `mqtt`):** a connection-establishment timeout (a slow / unreachable peer blocks
-  indefinitely today) and received-data size caps where a client reads unbounded
-  from the peer (the `http` body cap already exists; extend the pattern).
-- **`amqp`:** optional TLS transport (`net.connectTLS`) so credentials need not go
-  over cleartext.
+### M21.10 - interpreter throughput ceiling
 
-Reviewed and **rejected** (recorded in [rejected.md](technical/rejected.md)):
-removing the TLS `skipVerify` opt-out, a `SecureString` zeroable-secret type, and
-treating the stdlib's `fs` / `net` / `os` / `meta` host access as vulnerabilities.
+**Planned.** The tree-walker's per-operation overhead is the current throughput
+ceiling: it shows up wherever a `.j` program touches data byte by byte, because
+every byte advances a cursor through several interpreted expression evaluations
+(index read, compare, append, loop step), each paying the evaluator's dispatch
+and Value-copy cost. Measured on the reference machine: `mime` part scanning runs
+on the order of **8 s / MiB**, and `http`'s `readToEOF` (which appends one byte
+at a time) on the order of **a minute / 64 MiB**. That is invisible at the
+kilobyte-to-low-megabyte scale these modules target, but it puts megabyte-scale
+byte processing (a lifted `http` body cap, a `bucket.get` of a large object, bulk
+transcoding) out of reach in pure Jennifer. The peephole passes already shipped
+(slot resolution, frame pooling, namespaced-call / comparison fast paths,
+constant folding, the map hash index) took the easy wins; the next gain needs a
+structural step. Graduated from the horizon draft (throughput ceiling); scoped
+here into measured, cheap-wins-first sub-milestones, with the big execution-model
+rewrite gated behind the benchmark and allowed to defer past 1.0.0 if it does not
+fit.
+
+- **M21.10.1 - throughput benchmark harness (prerequisite).** A repeatable,
+  honest throughput benchmark so every later change is measured, not guessed: a
+  `mime`-part byte-scan fixture plus a raw byte-append microbench, with recorded
+  baseline numbers. Reference-machine only (per the benchmarking policy - no
+  cross-machine numbers). This lands first; nothing below ships without a
+  before/after delta against it.
+- **M21.10.2 - bulk `bytes` primitive.** The cheap, targeted fix for body
+  assembly: a whole-buffer append / concat (and a read-all on `net` / `fs` that
+  returns one `bytes`) so the inner copy runs once in Go instead of once per
+  interpreted byte. Rework `http.readToEOF` (and any other one-byte-at-a-time
+  accumulation surfaced by M21.10.1) onto it. TinyGo-clean, both binaries.
+  Deliverable: the primitive(s) + the reworked call sites + the benchmark delta.
+- **M21.10.3 - push one hot byte-crunching path into Go.** Move a workload that
+  is inherently per-byte (MIME / quoted-printable scanning, or base-N transcode)
+  into a Go system helper that does the inner loop at native speed and hands `.j`
+  the structured result - the same reasoning already applied to `json` / `toml`
+  (a char parser belongs in Go) and planned for `DRAFT#9` `asn1`. One concrete
+  path, chosen from M21.10.1's hot list, not a blanket rewrite; it narrows
+  *which* workloads still need the faster execution model.
+- **M21.10.4 - bytecode execution model (large; may defer past 1.0.0).** Compile
+  the resolved AST to a linear bytecode (or a register form) run by a tight
+  dispatch loop - a new pipeline stage between resolve and run - instead of
+  re-walking the tree and re-resolving shapes on every pass through a hot loop.
+  This is the big lever and the big effort. Held to the same TinyGo-clean,
+  reflect-free discipline as the current evaluator: value semantics and the
+  tagged-union `Value` stay; only how operations are sequenced and dispatched
+  changes. Justified only by an M21.10.1 measurement that shows the cheaper steps
+  did not close the gap for a real workload; if it cannot land cleanly before
+  1.0.0 it splits back out to `horizon.md` as its own draft. Relates to `DRAFT#1`
+  (a compiled core is an easier stable embedding surface than a tree-walker).
+
+Discipline: every step measured against M21.10.1's baseline on the reference
+machine; both toolchains stay green; a per-byte primitive that lands in Go keeps
+the language TinyGo-clean.
 
 ---
 

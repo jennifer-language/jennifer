@@ -26,7 +26,7 @@ arrived.
 
 | Call                             | Returns         | Notes                                                                                     |
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `net.connect(address)`           | `net.Conn`      | TCP client. `address` is `"host:port"` (Go's convention).                                 |
+| `net.connect(address[, timeoutMs])` | `net.Conn`   | TCP client. `address` is `"host:port"` (Go's convention). An optional `timeoutMs` bounds connection establishment (a slow / unreachable peer otherwise blocks the dial forever); `0` / omitted means no connect timeout. |
 | `net.listen(address)`            | `net.Listener`  | Bind and listen. `":0"` selects an ephemeral port.                                        |
 | `net.accept($listener)`          | `net.Conn`      | Blocking accept. Non-blocking use pairs with `spawn`.                                     |
 | `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Sticky-EOF on close. |
@@ -135,8 +135,8 @@ handle** as plaintext TCP, so `readBytes` / `writeBytes` / `close` /
 
 | Call                            | Returns    | Notes                                                                                          |
 | ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `net.connectTLS(address)`       | `net.Conn` | Dial `address` (`"host:port"`, same as `net.connect`) and complete a TLS handshake (implicit TLS: 465 / 993 / 995, HTTPS). |
-| `net.startTLS($conn)`           | `net.Conn` | Upgrade an open plaintext connection to TLS in place (STARTTLS: 587 / 143 / 110); same handle. |
+| `net.connectTLS(address[, net.TLSOptions][, timeoutMs])` | `net.Conn` | Dial `address` (`"host:port"`, same as `net.connect`) and complete a TLS handshake (implicit TLS: 465 / 993 / 995, HTTPS). Optional trailing `timeoutMs` bounds the dial + handshake. |
+| `net.startTLS($conn[, net.TLSOptions][, timeoutMs])` | `net.Conn` | Upgrade an open plaintext connection to TLS in place (STARTTLS: 587 / 143 / 110); same handle. Optional trailing `timeoutMs` bounds the handshake. |
 
 Both take an optional trailing `net.TLSOptions` argument. The certificate
 is verified against the connection's host: for `connectTLS`, the host in

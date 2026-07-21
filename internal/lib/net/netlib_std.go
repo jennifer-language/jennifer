@@ -151,14 +151,24 @@ func resolveUDP(fnName string, id int64) (*udpState, error) {
 // -------- TCP --------
 
 func connectFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("net.connect expects 1 argument (address), got %d", len(args))
+	if len(args) < 1 || len(args) > 2 {
+		return interpreter.Null(), fmt.Errorf("net.connect expects 1 or 2 arguments (address[, timeoutMs]), got %d", len(args))
 	}
 	addr, err := takeStringArg("net.connect", args, 0, "address")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	c, dialErr := stdnet.Dial("tcp", addr)
+	timeout, err := optTimeoutMs("net.connect", args, 1)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	var c stdnet.Conn
+	var dialErr error
+	if timeout > 0 {
+		c, dialErr = stdnet.DialTimeout("tcp", addr, timeout)
+	} else {
+		c, dialErr = stdnet.Dial("tcp", addr)
+	}
 	if dialErr != nil {
 		return interpreter.Null(), fmt.Errorf("net.connect: %s: %v", addr, dialErr)
 	}
@@ -224,6 +234,52 @@ func tlsOptions(fnName string, args []Value, idx int) (skipVerify bool, caCert [
 	return skipVerify, caCert, nil
 }
 
+// optTimeoutMs reads an optional connection/handshake timeout (milliseconds) at
+// args[idx]. Absent (idx past the end) -> 0, a blocking dial with no timeout; 0
+// passed explicitly means the same. A negative value is a positioned error. This
+// is the connect-establishment bound (a slow / unreachable peer otherwise blocks
+// forever); post-connect stream reads are bounded separately by net.setDeadline.
+func optTimeoutMs(fnName string, args []Value, idx int) (time.Duration, error) {
+	if len(args) <= idx {
+		return 0, nil
+	}
+	v := args[idx]
+	if v.Kind != interpreter.KindInt {
+		return 0, fmt.Errorf("%s: timeout must be int milliseconds, got %s", fnName, v.Kind)
+	}
+	if v.Int < 0 {
+		return 0, fmt.Errorf("%s: timeout must be >= 0 milliseconds, got %d", fnName, v.Int)
+	}
+	return time.Duration(v.Int) * time.Millisecond, nil
+}
+
+// tlsArgLayout classifies the optional trailing args of connectTLS / startTLS,
+// which share the shape `fn(head[, net.TLSOptions][, timeoutMs])` (head at
+// index 0). It returns the index of the TLSOptions argument and of the
+// timeoutMs argument, each set to len(args) (the "absent" sentinel that
+// tlsOptions / optTimeoutMs both read as not-present) when that argument is
+// omitted. A timeout is recognised by being an int, TLSOptions by being a
+// struct; when both are present the order is fixed (options, then timeout).
+func tlsArgLayout(fnName string, args []Value) (optsIdx, timeoutIdx int, err error) {
+	optsIdx, timeoutIdx = len(args), len(args)
+	switch len(args) {
+	case 1:
+		// head only
+	case 2:
+		if args[1].Kind == interpreter.KindInt {
+			timeoutIdx = 1
+		} else {
+			optsIdx = 1
+		}
+	case 3:
+		if args[1].Kind == interpreter.KindInt {
+			return 0, 0, fmt.Errorf("%s: with three arguments the order is (..., net.TLSOptions, timeoutMs)", fnName)
+		}
+		optsIdx, timeoutIdx = 1, 2
+	}
+	return optsIdx, timeoutIdx, nil
+}
+
 // bufferedConn presents a bufio.Reader's already-buffered bytes (then the
 // raw connection) as a net.Conn, so a TLS handshake begun mid-stream
 // (startTLS) never drops plaintext the reader read ahead.
@@ -239,14 +295,22 @@ func (b *bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 // a TLS handshake, verifying the server certificate against the address's
 // host.
 func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return interpreter.Null(), fmt.Errorf("net.connectTLS expects 1 or 2 arguments (address[, net.TLSOptions]), got %d", len(args))
+	if len(args) < 1 || len(args) > 3 {
+		return interpreter.Null(), fmt.Errorf("net.connectTLS expects 1 to 3 arguments (address[, net.TLSOptions][, timeoutMs]), got %d", len(args))
 	}
 	addr, err := takeStringArg("net.connectTLS", args, 0, "address")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	skip, caCert, err := tlsOptions("net.connectTLS", args, 1)
+	optsIdx, timeoutIdx, err := tlsArgLayout("net.connectTLS", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	skip, caCert, err := tlsOptions("net.connectTLS", args, optsIdx)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	timeout, err := optTimeoutMs("net.connectTLS", args, timeoutIdx)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -258,7 +322,13 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	c, dialErr := tls.Dial("tcp", addr, cfg)
+	var c stdnet.Conn
+	var dialErr error
+	if timeout > 0 {
+		c, dialErr = tls.DialWithDialer(&stdnet.Dialer{Timeout: timeout}, "tcp", addr, cfg)
+	} else {
+		c, dialErr = tls.Dial("tcp", addr, cfg)
+	}
 	if dialErr != nil {
 		return interpreter.Null(), fmt.Errorf("net.connectTLS: %s: %v", addr, dialErr)
 	}
@@ -275,14 +345,22 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // STARTTLS). The server certificate is verified against the hostname the
 // connection was opened with (net.connect); returns the same handle.
 func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return interpreter.Null(), fmt.Errorf("net.startTLS expects 1 or 2 arguments (net.Conn[, net.TLSOptions]), got %d", len(args))
+	if len(args) < 1 || len(args) > 3 {
+		return interpreter.Null(), fmt.Errorf("net.startTLS expects 1 to 3 arguments (net.Conn[, net.TLSOptions][, timeoutMs]), got %d", len(args))
 	}
 	id, err := extractID("net.startTLS", "Conn", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	skip, caCert, err := tlsOptions("net.startTLS", args, 1)
+	optsIdx, timeoutIdx, err := tlsArgLayout("net.startTLS", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	skip, caCert, err := tlsOptions("net.startTLS", args, optsIdx)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	timeout, err := optTimeoutMs("net.startTLS", args, timeoutIdx)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -298,9 +376,18 @@ func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	// Hand the handshake the buffered reader + raw conn so no read-ahead
-	// plaintext is lost, then swap the registry entry to the TLS conn.
+	// plaintext is lost, then swap the registry entry to the TLS conn. A
+	// timeout arms a handshake deadline on the underlying conn (a stalled peer
+	// otherwise hangs the upgrade), restored to the user's own deadline after.
 	tlsConn := tls.Client(&bufferedConn{r: s.r, Conn: s.c}, cfg)
-	if hErr := tlsConn.Handshake(); hErr != nil {
+	if timeout > 0 {
+		_ = s.c.SetDeadline(time.Now().Add(timeout))
+	}
+	hErr := tlsConn.Handshake()
+	if timeout > 0 {
+		_ = s.c.SetDeadline(s.deadline)
+	}
+	if hErr != nil {
 		return interpreter.Null(), fmt.Errorf("net.startTLS: %v", hErr)
 	}
 	s.mu.Lock()

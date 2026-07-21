@@ -294,7 +294,7 @@ func smtpServe(chosen chan<- string) func(*testing.T, net.Conn) {
 }
 
 const smtpAuthProg = `import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "user", pass: "pencil", auth: "MECHNAME"};
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "user", pass: "pencil", auth: "MECHNAME", allowInsecureAuth: true};
 smtp.send($o, "user@example.com", ["you@example.com"], "Subject: Hi\r\n\r\nbody");`
 
 func TestSmtpSaslMechanisms(t *testing.T) {

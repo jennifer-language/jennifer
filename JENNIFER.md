@@ -509,7 +509,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `web.cookie($ctx, name)` / `web.setCookie($ctx, name, value, opts)` with a
   `web.CookieOptions` (`path` / `domain` / `maxAge` / `httpOnly` / `secure` /
   `sameSite`). **Sessions:** `web.sessionId($ctx, cookieName)` resolves or mints
-  the session-id cookie (a new UUID + `HttpOnly` cookie on first use); `web`
+  the session-id cookie (a new UUID + `Secure`, `HttpOnly`, `SameSite=Lax` cookie
+  on first use; `Secure` is default-on, `JENNIFER_WEB_INSECURE_COOKIES=1` opts out
+  for local plaintext dev); `web`
   owns only that cookie, the session store stays the app's (e.g. `session` over
   `memcache`), so `web` forces no store dependency. **CORS:** `web.cors($app,
   opts)` with a `web.CorsOptions` (`allowOrigin` / `allowMethods` /
@@ -636,7 +638,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   TLS via `smtp.Options.security`, SASL auth per `Options.auth` - PLAIN / LOGIN /
   XOAUTH2 / CRAM-MD5 / SCRAM-SHA-1 / SCRAM-SHA-256, `MAIL FROM` / `RCPT TO` /
   `DATA`), with `message` built by `mime`. Throws `Error` (kind `"smtp"`) on
-  rejection. Uses `net`, so **default `jennifer` binary only**.
+  rejection. Hardened: SASL auth over a cleartext (`security: "none"`) connection
+  is refused unless `Options.allowInsecureAuth` is true; STARTTLS is only issued
+  if the server advertised it (anti-downgrade); envelope addresses are validated
+  (`local@domain`, RFC 5321). Uses `net`, so **default `jennifer` binary only**.
 - **`totp`** - time-based one-time passwords (RFC 6238 over RFC 4226 HOTP), the
   two-factor codes authenticator apps show. `totp.generate(secret, opts)` /
   `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);
@@ -746,7 +751,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `key` is always `bytes` (HMAC secret / PEM / Ed25519). `verify` pins the
   **expected** algorithm (rejecting algorithm-confusion), enforces `exp` / `nbf`,
   and compares HMACs in constant time; `decode` / `header` read without
-  verifying (never authorize on them). Over `crypto` + `hash` + `encoding` +
+  verifying (never authorize on them). `verifyWith(token, key, alg,
+  jwt.Policy{iss, aud})` additionally enforces the expected issuer / audience
+  (empty string skips a check). Over `crypto` + `hash` + `encoding` +
   `json` + `time`. HS\* / EdDSA on both binaries; RS\* / ES\* need the default
   binary. JWT auth is this module used as a `web.before` middleware, not a
   separate module.
@@ -903,8 +910,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   pulls the next message with a synchronous `Basic.Get` (loop until `empty`);
   `ack(c, deliveryTag)`; `close(c)`. All integer / short-string / long-string /
   field-table / frame encoding is hand-built from `bytes` and the bitwise operators.
-  Single channel, SASL PLAIN, no TLS, pull (not async delivery). A protocol error
-  throws `Error{kind: "amqp"}`. **Default `jennifer` binary only** (`net`).
+  Single channel, SASL PLAIN, optional TLS (`Options.security = "tls"` for
+  AMQPS), pull (not async delivery). A protocol error throws
+  `Error{kind: "amqp"}`. **Default `jennifer` binary only** (`net`).
 - **`multipart`** - build and parse `multipart/form-data` (RFC 7578), the file-upload
   counterpart to `mime`. `multipart.field(name, value)` and
   `multipart.file(name, filename, contentType, dataBytes)` build `Part{name,

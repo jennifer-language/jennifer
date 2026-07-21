@@ -30,13 +30,21 @@ Runnable: [`examples/modules/amqp_demo.j`](https://github.com/jennifer-language/
 `Open` / `Open-Ok`, then `Channel.Open` - and returns a `Conn` on a single
 channel.
 
+The dial is bounded by a connection-establishment timeout, so a slow or
+unreachable broker fails with a catchable error instead of blocking forever.
+
 ```jennifer
-def struct amqp.Options { host as string, port as int, user as string, password as string, vhost as string };
+def struct amqp.Options { host as string, port as int, user as string, password as string, vhost as string, security as string };
 ```
+
+`security` is `"none"` (plaintext AMQP, the default) or `"tls"` (AMQPS - TLS on
+connect, verifying the broker certificate). `amqp.options(...)` defaults it to
+`"none"`; set it to `"tls"` on the returned `Options` for a broker that requires
+TLS so credentials do not cross the wire in the clear.
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `amqp.options(host, user, password)` | `Options` | defaults: port 5672, vhost "/" |
+| `amqp.options(host, user, password)` | `Options` | defaults: port 5672, vhost "/", security "none" |
 | `amqp.withPort(o, port)` | `Options` | copy with a different port |
 | `amqp.withVhost(o, vhost)` | `Options` | copy with a different virtual host |
 | `amqp.connect(opts)` | `Conn` | connect and open a channel |
@@ -105,8 +113,8 @@ repeat {
 - **No message properties.** Publishes carry an empty property set (no
   content-type, headers, or persistence flag on the message itself - queue
   durability is set at `declareQueue`).
-- **SASL PLAIN only**, no TLS (`amqps`) in this version - use a trusted network
-  or a local broker.
+- **SASL PLAIN only.** TLS (`amqps`) is available via `Options.security =
+  "tls"`; without it, use a trusted network or a local broker.
 - **The largest protocol module.** If the tree-walker ever becomes the
   bottleneck for high-throughput messaging, this is a candidate to reimplement
   as a Go library.

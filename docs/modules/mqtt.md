@@ -118,12 +118,16 @@ If full QoS 1/2 with high-throughput processing ever makes the tree-walker the
 bottleneck, a Go-backed engine (build-tag split like `net`) is the fallback -
 but the pub/sub basics belong in a module.
 
-## Timeouts
+## Timeouts and limits
 
-The CONNECT and SUBSCRIBE handshakes carry a 30 s timeout, so a broker that
-accepts the connection but never acknowledges fails instead of hanging.
-`poll(client, ms)` already bounds how long it waits for a message; `receive`
-blocks until one arrives.
+The initial connect is bounded by a connection-establishment timeout, so a slow
+or unreachable broker fails the dial instead of blocking it forever, and the
+CONNECT and SUBSCRIBE handshakes carry a 30 s timeout, so a broker that accepts
+the connection but never acknowledges fails instead of hanging. `poll(client,
+ms)` already bounds how long it waits for a message; `receive` blocks until one
+arrives. A single control packet is capped at **64 MiB**: the remaining-length
+varint is attacker-declarable, so a broker declaring an enormous packet fails
+with a catchable error rather than an unbounded allocation.
 
 ## See also
 

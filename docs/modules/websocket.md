@@ -87,6 +87,11 @@ if ($m.kind == "close") {
   `Sec-WebSocket-Protocol` / `-Extensions` headers are not sent.
 - **`receive` blocks per message** up to `timeoutMs`; there is no non-blocking
   poll (drive one message at a time, or run `receive` in a `spawn`).
+- **Bounded connect and message size.** The opening handshake is bounded by a
+  connection-establishment timeout (a slow or unreachable server fails the dial),
+  and a received message is capped at 64 MiB - a peer that declares an oversized
+  frame or reassembled message is refused with a catchable error, not an
+  unbounded allocation.
 
 ## See also
 

@@ -34,7 +34,7 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 
 | Call / type                              | Notes                                                              |
 | ---------------------------------------- | ------------------------------------------------------------------ |
-| `smtp.Options`                           | `host`, `port`, `security`, `clientName`, `user`, `pass`.          |
+| `smtp.Options`                           | `host`, `port`, `security`, `clientName`, `user`, `pass`, `auth`, `allowInsecureAuth`. |
 | `smtp.send(opts, from, recipients, message)` | Deliver `message` to every recipient; throws on a server rejection. |
 
 `Options` fields:
@@ -48,15 +48,20 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 | `auth`       | SASL mechanism: `""` (none when `user` is empty, else PLAIN), `"auto"` (negotiate the strongest mechanism `EHLO` advertises, falling back to PLAIN), `"plain"`, `"login"`, `"xoauth2"`, `"cram"` (CRAM-MD5), `"scram-sha-1"`, or `"scram-sha-256"`. |
 | `user`       | SASL username; `""` with `auth: ""` skips authentication.              |
 | `pass`       | SASL password.                                                         |
+| `allowInsecureAuth` | Force SASL `AUTH` over an unencrypted (`security: "none"`) connection. Default `false`: credentials are **refused** over plaintext (use `"tls"` / `"starttls"`, or set this to force). |
 
 ## What `send` does
 
 One call runs the whole delivery, throwing a catchable `Error` (kind
 `"smtp"`) the moment the server rejects a step:
 
-1. Connect per `security` (`net.connect`, or `net.connectTLS` for `"tls"`).
+1. Connect per `security` (`net.connect`, or `net.connectTLS` for `"tls"`),
+   bounded by a connection-establishment timeout.
 2. Read the `220` greeting, send `EHLO`.
-3. For `"starttls"`: `STARTTLS`, then `net.startTLS` and a second `EHLO`.
+3. For `"starttls"`: confirm the `EHLO` response actually advertised `STARTTLS`
+   (an anti-downgrade check - a MITM that strips the capability to keep the
+   session in plaintext is refused), then `STARTTLS`, `net.startTLS`, and a
+   second `EHLO`.
 4. Authenticate per `auth` (via the [`sasl`](sasl.md) mechanisms): `AUTH PLAIN`,
    the `AUTH LOGIN` two-step, `AUTH XOAUTH2` (an OAuth2 bearer token in `pass` -
    how Google / Microsoft 365 authenticate), `AUTH CRAM-MD5`, or the SCRAM
@@ -67,7 +72,17 @@ One call runs the whole delivery, throwing a catchable `Error` (kind
 7. `QUIT` and close.
 
 The `from` / `recipients` are the **envelope** (who the server routes to),
-separate from the `From:` / `To:` header lines in the message - set both.
+separate from the `From:` / `To:` header lines in the message - set both. Each
+envelope address is validated before the connection opens: control characters
+and CRLF (command injection) are rejected, and the address must be a well-formed
+`local@domain` per RFC 5321 (a missing `@`, an empty local part or domain, or a
+length over 254 throws).
+
+When `auth` runs over an unencrypted (`security: "none"`) connection, `send`
+**refuses** to hand SASL credentials to the server unless
+`allowInsecureAuth: true` is set - so a password does not cross the wire in the
+clear by accident. `"tls"` and a completed `"starttls"` upgrade are encrypted
+and unaffected.
 
 Certificate verification for `"tls"` / `"starttls"` is the `net` default (on;
 see [net.md](../libraries/net.md) for the opt-out).
@@ -114,7 +129,10 @@ server); a live send against a real daemon is the demo's job.
 ## Timeouts
 
 Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
-server fails with a catchable error instead of blocking the caller forever.
+server fails with a catchable error instead of blocking the caller forever. The
+initial connect and the STARTTLS handshake are bounded by their own
+connection-establishment timeout, so a slow or unreachable server fails the dial
+rather than blocking it indefinitely.
 
 ## See also
 

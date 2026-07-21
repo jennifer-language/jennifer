@@ -87,10 +87,12 @@ body (an image, a gzip stream) is not decodable to a string and raises an error
 
 ## Timeouts
 
-Every request carries a **per-read idle timeout** (default 30 s): the deadline is
-re-armed before each read, so a server that accepts the connection and then
-stalls (or a hung endpoint) fails with a catchable `read timed out` error instead
-of blocking the caller forever. This is the difference between a slow dependency
+The initial connect (and, for `https`, the TLS handshake) is bounded by a
+connection-establishment timeout, so a slow or unreachable server fails the dial
+instead of blocking it forever. Every request then carries a **per-read idle
+timeout** (default 30 s): the deadline is re-armed before each read, so a server
+that accepts the connection and then stalls (or a hung endpoint) fails with a
+catchable `read timed out` error instead of blocking the caller forever. This is the difference between a slow dependency
 degrading one request and one exhausting your process on a pool of hung
 connections. Pass a different value (in milliseconds) with `http.requestWith`; a
 `0` disables the timeout for that request (e.g. a long streaming download):

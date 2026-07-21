@@ -62,10 +62,10 @@ func idnLocal() {
 
 func testClientNameDefault() {
     def bare as Options init Options{host: "h", port: 25, security: "none",
-        clientName: "", user: "", pass: "", auth: ""};
+        clientName: "", user: "", pass: "", auth: "", allowInsecureAuth: false};
     testing.assertEqual(clientName($bare), "localhost");
     def named as Options init Options{host: "h", port: 25, security: "none",
-        clientName: "me.example", user: "", pass: "", auth: ""};
+        clientName: "me.example", user: "", pass: "", auth: "", allowInsecureAuth: false};
     testing.assertEqual(clientName($named), "me.example");
 }
 
@@ -83,4 +83,64 @@ func testRejectControlHelper() {
 }
 func testCleanEnvelopeAccepted() {
     testing.assertEqual(asciiEnvelope("alice@example.com"), "alice@example.com");
+}
+
+# ---- M21.9 hardening: STARTTLS advertise, envelope validation, cleartext auth ----
+
+func testEhloAdvertisesStartTls() {
+    def caps as string init "250-mail.example.com\n250-STARTTLS\n250 AUTH PLAIN LOGIN";
+    testing.assertTrue(ehloAdvertises($caps, "STARTTLS"));
+    testing.assertTrue(ehloAdvertises($caps, "starttls"));
+    testing.assertTrue(ehloAdvertises($caps, "AUTH"));
+    testing.assertFalse(ehloAdvertises($caps, "PIPELINING"));
+}
+
+func testEhloStartTlsAbsent() {
+    def caps as string init "250-mail.example.com\n250 AUTH PLAIN";
+    testing.assertFalse(ehloAdvertises($caps, "STARTTLS"));
+}
+
+func testEnvelopeRejectsMissingAt() {
+    testing.assertThrows("envNoAt", "smtp");
+}
+func envNoAt() { asciiEnvelope("nobody"); }
+
+func testEnvelopeRejectsEmptyLocal() {
+    testing.assertThrows("envEmptyLocal", "smtp");
+}
+func envEmptyLocal() { asciiEnvelope("@example.com"); }
+
+func testEnvelopeRejectsEmptyDomain() {
+    testing.assertThrows("envEmptyDomain", "smtp");
+}
+func envEmptyDomain() { asciiEnvelope("alice@"); }
+
+func testAuthRefusedOverCleartext() {
+    testing.assertThrows("cleartextAuth", "smtp");
+}
+func cleartextAuth() {
+    def o as Options;
+    $o.security = "none";
+    $o.user = "me@example.com";
+    $o.pass = "secret";
+    $o.auth = "plain";
+    # allowInsecureAuth defaults false; the refusal must throw before any I/O.
+    authenticate(net.Conn{id: -1}, $o, "");
+}
+
+func testAuthForcedSkipsCleartextRefusal() {
+    def o as Options;
+    $o.security = "none";
+    $o.user = "me@example.com";
+    $o.pass = "secret";
+    $o.auth = "plain";
+    $o.allowInsecureAuth = true;
+    def refused as bool init false;
+    try {
+        authenticate(net.Conn{id: -1}, $o, "");
+    } catch (e) {
+        # Still fails on the invalid conn, but NOT with the cleartext refusal.
+        $refused = strings.contains($e.message, "refusing to send SASL");
+    }
+    testing.assertFalse($refused);
 }

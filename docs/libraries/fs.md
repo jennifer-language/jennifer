@@ -71,6 +71,27 @@ io.printf("modified: %s\n", time.iso($modified));
 `size` is `-1` for directories so callers don't accidentally
 interpret it as "empty directory."
 
+### Permissions
+
+The write verbs create files at a fixed `0644`; `fs.chmod` tightens (or
+loosens) a file after the fact - e.g. to `0600` for a secret / token store
+that must not be world-readable. `fs.chown` sets owner and group.
+
+| Call                     | Returns | Notes                                                                                         |
+| ------------------------ | ------- | --------------------------------------------------------------------------------------------- |
+| `fs.chmod(path, mode)`   | `null`  | Sets the permission bits; `mode` is the low 12 bits (e.g. `0o600`, `0o755`), rejected outside `[0, 0o7777]`. |
+| `fs.chown(path, uid, gid)` | `null` | Sets owner / group; `-1` leaves that id unchanged. Usually needs privilege.                   |
+
+```jennifer
+use fs;
+fs.writeString("token.json", $json);
+fs.chmod("token.json", 0o600);   # owner-only, like a gh / aws token store
+```
+
+Both are **Linux/Unix semantics** and match the platform target. On Windows
+`fs.chmod` honours only the read-only bit and `fs.chown` always fails; the
+error is catchable like any other `fs` failure.
+
 ## Directory operations
 
 The library ships **two verbs each** for create and delete

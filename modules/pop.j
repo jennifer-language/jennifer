@@ -145,6 +145,20 @@ func expectOK(line as string, ctx as string) {
 # forever. Re-armed before each read.
 def const TIMEOUT_MS as int init 30000;
 
+# MAX_RESPONSE_BYTES caps a single accumulated response (a status line or a
+# multiline body). A malicious / compromised server could stream a line or a
+# dot-body that never terminates, growing the buffer without bound; crossing the
+# limit fails the read with a catchable error instead.
+def const MAX_RESPONSE_BYTES as int init 67108864;
+
+# capResponse throws when an accumulated response has grown past the cap.
+func capResponse(n as int) {
+    if ($n > MAX_RESPONSE_BYTES) {
+        throw Error{kind: "pop", message: "pop: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+    }
+    return;
+}
+
 # --- byte-buffer helpers -------------------------------------------
 # POP3 message bodies carry arbitrary 8-bit / UTF-8 content framed by a "."
 # terminator line, so the readers accumulate raw bytes and decode to a string
@@ -200,6 +214,7 @@ func readLine(conn as net.Conn) {
             $buf[] = $chunk[$i];
             $i = $i + 1;
         }
+        capResponse(len($buf));
         $nl = lfIndex($buf, 0);
     }
     return stripCR(convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8"));
@@ -228,6 +243,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
             $buf[] = $chunk[$i];
             $i = $i + 1;
         }
+        capResponse(len($buf));
         $nl = lfIndex($buf, 0);
     }
     expectOK(stripCR(convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8")), $ctx);
@@ -266,6 +282,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
             $body[] = $chunk[$j];
             $j = $j + 1;
         }
+        capResponse(len($body));
         $scanFrom = prev - 4;
         if ($scanFrom < 0) {
             $scanFrom = 0;
@@ -277,9 +294,9 @@ func readMultiline(conn as net.Conn, ctx as string) {
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
     if ($opts.security == "tls") {
-        return net.connectTLS($addr);
+        return net.connectTLS($addr, TIMEOUT_MS);
     }
-    return net.connect($addr);
+    return net.connect($addr, TIMEOUT_MS);
 }
 
 # --- session (exported) --------------------------------------------
@@ -299,7 +316,7 @@ export func connect(opts as Options) {
     expectOK($greeting, "greeting");
     if ($opts.security == "starttls") {
         expectOK(command($conn, "STLS"), "STLS");
-        $conn = net.startTLS($conn);
+        $conn = net.startTLS($conn, TIMEOUT_MS);
     }
     authenticate($conn, $opts, $greeting);
     return Session{conn: $conn};

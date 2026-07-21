@@ -582,3 +582,86 @@ func TestEOFDoesNotDisturbConcurrentReader(t *testing.T) {
 		t.Errorf("got %q, want %q", out, "got=hello\n")
 	}
 }
+
+// TestConnectWithTimeoutSucceeds - a timeout argument does not break a normal,
+// reachable connect: the dial still completes and the round-trip works.
+func TestConnectWithTimeoutSucceeds(t *testing.T) {
+	addr := pickListenerAddr(t)
+	l, err := stdnet.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("stdnet.Listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		c, aErr := l.Accept()
+		if aErr != nil {
+			return
+		}
+		defer c.Close()
+		buf := make([]byte, 2)
+		if _, rErr := c.Read(buf); rErr != nil {
+			return
+		}
+		_, _ = c.Write(buf)
+	}()
+	out, runErr := runProg(t, fmt.Sprintf(`
+		use io;
+		use net;
+		use convert;
+		def c as net.Conn init net.connect(%q, 5000);
+		net.writeBytes($c, convert.bytesFromString("hi", "utf-8"));
+		def reply as bytes init net.readBytes($c, 2);
+		net.close($c);
+		io.printf("%%s", convert.stringFromBytes($reply, "utf-8"));
+	`, addr))
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != "hi" {
+		t.Errorf("got %q, want %q", out, "hi")
+	}
+}
+
+// TestConnectRejectsNegativeTimeout - a negative timeout is a catchable error,
+// not a silent block.
+func TestConnectRejectsNegativeTimeout(t *testing.T) {
+	_, err := runProg(t, `use net; def c as net.Conn init net.connect("127.0.0.1:1", -1);`)
+	if err == nil || !strings.Contains(err.Error(), "timeout must be >= 0") {
+		t.Fatalf("expected negative-timeout error, got %v", err)
+	}
+}
+
+// TestConnectTimeoutDoesNotBlockForever - dialing a non-routable address with a
+// short timeout must return promptly with an error rather than hanging until the
+// OS connect timeout (~minutes). 192.0.2.1 is TEST-NET-1 (RFC 5737, guaranteed
+// non-routable); some environments return "unreachable"/"refused" instantly,
+// which also satisfies the anti-hang property. Without the timeout a SYN-drop
+// would block far past this bound.
+func TestConnectTimeoutDoesNotBlockForever(t *testing.T) {
+	start := time.Now()
+	_, err := runProg(t, `use net; def c as net.Conn init net.connect("192.0.2.1:80", 400);`)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a dial error to a blackhole address")
+	}
+	if elapsed > 8*time.Second {
+		t.Fatalf("connect blocked %v despite a 400ms timeout", elapsed)
+	}
+}
+
+// TestConnectTLSTreatsIntAsTimeout - net.connectTLS(addr, timeoutMs) must read a
+// bare int second argument as the timeout, not misparse it as net.TLSOptions.
+// The dial fails (no TLS server), but the error must be a dial/connect failure,
+// proving the int reached the timeout slot rather than the options validator.
+func TestConnectTLSTreatsIntAsTimeout(t *testing.T) {
+	_, err := runProg(t, `use net; def c as net.Conn init net.connectTLS("127.0.0.1:1", 300);`)
+	if err == nil {
+		t.Fatal("expected a dial error (nothing is listening)")
+	}
+	if strings.Contains(err.Error(), "TLSOptions") {
+		t.Fatalf("int timeout arg was misparsed as options: %v", err)
+	}
+	if !strings.Contains(err.Error(), "connectTLS") {
+		t.Fatalf("expected a net.connectTLS error, got %v", err)
+	}
+}

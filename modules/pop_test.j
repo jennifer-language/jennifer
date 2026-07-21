@@ -62,3 +62,13 @@ func testApopDigest() {
     testing.assertEqual(apopDigest("<1896.697170952@dbc.mtview.ca.us>", "tanstaaf"),
         "c4c9334bac560ecc979e58001b3e22fb");
 }
+
+# ---- read cap (DoS from an unterminated / oversized response) ----
+func testResponseCapRejectsOversized() {
+    testing.assertThrows("overRespCap", "pop");
+}
+func overRespCap() { capResponse(MAX_RESPONSE_BYTES + 1); }
+func testResponseCapAllowsAtLimit() {
+    capResponse(MAX_RESPONSE_BYTES);
+    testing.assertTrue(true);
+}

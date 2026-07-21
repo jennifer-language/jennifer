@@ -37,6 +37,10 @@ def const FRAME_END as int init 206;   # 0xCE
 # The single channel this client uses.
 def const CHANNEL as int init 1;
 
+# The connection-establishment timeout (ms): a slow / unreachable broker fails
+# instead of blocking the dial forever.
+def const CONNECT_TIMEOUT_MS as int init 30000;
+
 # Class ids.
 def const CLS_CONNECTION as int init 10;
 def const CLS_CHANNEL as int init 20;
@@ -72,13 +76,15 @@ def const Q_DURABLE as int init 2;
  * @field user {string} the username
  * @field password {string} the password
  * @field vhost {string} the virtual host ("/" by default)
+ * @field security {string} "none" (plaintext AMQP, the default) or "tls" (AMQPS - TLS on connect, verifying the broker certificate)
  */
 export def struct Options {
     host as string,
     port as int,
     user as string,
     password as string,
-    vhost as string
+    vhost as string,
+    security as string
 };
 
 /**
@@ -154,7 +160,7 @@ func emptyBytes() {
  * @return {Options} the options
  */
 export func options(host as string, user as string, password as string) {
-    return Options{ host: $host, port: 5672, user: $user, password: $password, vhost: "/" };
+    return Options{ host: $host, port: 5672, user: $user, password: $password, vhost: "/", security: "none" };
 }
 
 /**
@@ -425,6 +431,16 @@ func handshake(socket as net.Conn, opts as Options) {
 
 # --- API (exported) ---------------------------------------------------------
 
+# dial opens the transport per opts.security: plaintext AMQP, or AMQPS (TLS on
+# connect, broker certificate verified). A connection timeout bounds the dial.
+func dial(opts as Options) {
+    def addr as string init $opts.host + ":" + convert.toString($opts.port);
+    if ($opts.security == "tls") {
+        return net.connectTLS($addr, CONNECT_TIMEOUT_MS);
+    }
+    return net.connect($addr, CONNECT_TIMEOUT_MS);
+}
+
 /**
  * Connect to a broker and open a channel.
  * @param opts {Options} the connection options
@@ -432,8 +448,7 @@ func handshake(socket as net.Conn, opts as Options) {
  * @throws {Error} kind "amqp" on a handshake failure
  */
 export func connect(opts as Options) {
-    def addr as string init $opts.host + ":" + convert.toString($opts.port);
-    def socket as net.Conn init net.connect($addr);
+    def socket as net.Conn init dial($opts);
     # A failed AMQP handshake must not leak the socket; on success the caller
     # owns the open connection.
     errdefer net.close($socket);

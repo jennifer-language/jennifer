@@ -106,7 +106,7 @@ func TestSmtpXoauth2(t *testing.T) {
 		}
 	}
 	prog := `import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2", allowInsecureAuth: true};
 smtp.send($o, "me@gmail.com", ["you@example.com"], "Subject: Hi\r\n\r\nbody");`
 	runXoauth2Test(t, "smtp.j", "AUTH XOAUTH2 ", prog, serve)
 }

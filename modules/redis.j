@@ -44,6 +44,20 @@ export def struct Options {
 # blocking forever. `connect` sets `Session.timeout`; override it or use 0 to disable.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 
+# MAX_REPLY_BYTES caps a single accumulated reply. A malicious / compromised
+# server can declare an enormous bulk-string length (or simply never terminate a
+# reply), which would grow the read buffer without bound; this fails the read
+# with a catchable error instead.
+def const MAX_REPLY_BYTES as int init 67108864;
+
+# capReply throws when an accumulated reply has grown past the cap.
+func capReply(n as int) {
+    if ($n > MAX_REPLY_BYTES) {
+        throw Error{kind: "redis", message: "redis: reply exceeds the " + convert.toString(MAX_REPLY_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+    }
+    return;
+}
+
 /**
  * An open Redis connection.
  * @field conn {net.Conn} the underlying socket
@@ -246,6 +260,7 @@ func readReply(conn as net.Conn, timeoutMs as int) {
             $buf[] = $chunk[$j];
             $j = $j + 1;
         }
+        capReply(len($buf));
     }
     return replyNil();
 }
@@ -253,9 +268,9 @@ func readReply(conn as net.Conn, timeoutMs as int) {
 func dial(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
     if ($opts.security == "tls") {
-        return net.connectTLS($addr);
+        return net.connectTLS($addr, DEFAULT_TIMEOUT_MS);
     }
-    return net.connect($addr);
+    return net.connect($addr, DEFAULT_TIMEOUT_MS);
 }
 
 # --- commands (exported) -------------------------------------------

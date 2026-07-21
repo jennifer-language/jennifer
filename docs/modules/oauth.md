@@ -41,7 +41,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.isExpired(token)`                      | Whether the token is past its expiry (30s skew buffer).          |
 | `oauth.google(clientId, clientSecret, scope)` | A `Config` with Google's endpoints.                              |
 | `oauth.microsoft(tenant, clientId, clientSecret, scope)` | A `Config` with a Microsoft 365 / Entra tenant's endpoints. |
-| `oauth.save(path, token)` / `oauth.load(path)` | Persist / reload a token as JSON (via `fs`).                    |
+| `oauth.save(path, token)` / `oauth.load(path)` | Persist / reload a token as JSON (via `fs`). `save` tightens the file to owner-only `0600`. |
 
 ## Flows
 
@@ -72,7 +72,10 @@ if (oauth.isExpired($tok)) {
 ```
 
 `oauth.save` / `oauth.load` persist a token to disk (JSON via `fs`) so a
-long-running or restarted program keeps its refresh token.
+long-running or restarted program keeps its refresh token. An access / refresh
+token is a bearer credential, so `save` tightens the file to owner-only `0600`
+after writing (via `fs.chmod`), the same file-permission model `gh` / `aws` use
+for their token stores.
 
 ## Feeding mail auth
 

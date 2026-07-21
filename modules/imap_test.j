@@ -59,3 +59,13 @@ func testExpectTaggedOKPasses() {
     testing.assertTrue(true);
 }
 
+
+# ---- read cap (DoS from an oversized literal / unterminated response) ----
+func testResponseCapRejectsOversized() {
+    testing.assertThrows("overRespCap", "imap");
+}
+func overRespCap() { capResponse(MAX_RESPONSE_BYTES + 1); }
+func testResponseCapAllowsAtLimit() {
+    capResponse(MAX_RESPONSE_BYTES);
+    testing.assertTrue(true);
+}

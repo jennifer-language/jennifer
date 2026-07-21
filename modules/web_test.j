@@ -265,3 +265,18 @@ func testCleanCookieAccepted() {
     def o as CookieOptions init CookieOptions{path: "/", domain: "example.com", maxAge: 0, httpOnly: true, secure: true, sameSite: "Lax"};
     testing.assertContains(formatSetCookie("sid", "abc", $o), "Path=/; Domain=example.com");
 }
+
+# ---- Secure cookie default (session / CSRF hardening) ----
+
+func testSecureCookiesDefaultOn() {
+    # No opt-out env var set: framework cookies are Secure by default.
+    testing.assertTrue(secureCookies());
+}
+
+func testSecureCookiesOptOut() {
+    os.setEnv("JENNIFER_WEB_INSECURE_COOKIES", "1");
+    testing.assertFalse(secureCookies());
+    # Restore (empty reads as unset, so Secure is back on).
+    os.setEnv("JENNIFER_WEB_INSECURE_COOKIES", "");
+    testing.assertTrue(secureCookies());
+}

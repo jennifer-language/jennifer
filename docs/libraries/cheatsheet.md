@@ -55,6 +55,8 @@ flat lookup view, not authoritative.
 | [`encoding`](encoding.md)`.toText(b, format)`         | Encode `bytes` as printable text. `format`: `"hex"`, `"base32"`, `"base32-hex"`, `"base64"`, `"base64-url"`, `"ascii85"`, `"z85"`, `"quoted-printable"`.                                                    |
 | [`fs`](fs.md)`.appendBytes(path, content)`            | Append `bytes` to `path`; creates the file if missing.                                                                              |
 | [`fs`](fs.md)`.appendString(path, content)`           | Append UTF-8 `string` to `path`; creates the file if missing.                                                                       |
+| [`fs`](fs.md)`.chmod(path, mode)`                     | Set permission bits (e.g. `0o600`); Unix/Linux. Rejected outside `[0, 0o7777]`.                                                     |
+| [`fs`](fs.md)`.chown(path, uid, gid)`                 | Set owner / group (`-1` leaves unchanged); Unix/Linux, usually needs privilege.                                                    |
 | [`fs`](fs.md)`.close($f)`                             | Close an `fs.File` handle; removes it from the registry.                                                                            |
 | [`fs`](fs.md)`.eof($f)`                               | True iff the next read on `$f` would error or return partial. Sticky.                                                               |
 | [`fs`](fs.md)`.exists(path)`                          | True if `path` resolves; permission errors still surface.                                                                           |
@@ -147,9 +149,9 @@ flat lookup view, not authoritative.
 | [`net`](net.md)`.accept($listener)`                   | Block until a client connects to `$listener`; return the new `net.Conn`.                                                            |
 | [`net`](net.md)`.address($h)`                         | Polymorphic. Conn -> peer address; Listener / UDPSocket -> local bound address.                                                     |
 | [`net`](net.md)`.close($h)`                           | Polymorphic. Closes a `net.Conn`, `net.Listener`, or `net.UDPSocket`.                                                               |
-| [`net`](net.md)`.connect(address)`                    | TCP client: dial `"host:port"` and return a `net.Conn`.                                                                             |
-| [`net`](net.md)`.connectTLS(address)`                | TLS client: dial `"host:port"` + handshake, verifying the cert against the host. `net.TLSOptions` for caCert / skipVerify.                                     |
-| [`net`](net.md)`.startTLS($conn)`                    | Upgrade an open plaintext `net.Conn` to TLS in place (STARTTLS); host reused from connect; same handle.                                                      |
+| [`net`](net.md)`.connect(address[, timeoutMs])`       | TCP client: dial `"host:port"` and return a `net.Conn`. Optional `timeoutMs` bounds connection establishment.                       |
+| [`net`](net.md)`.connectTLS(address[, net.TLSOptions][, timeoutMs])` | TLS client: dial `"host:port"` + handshake, verifying the cert against the host. `net.TLSOptions` for caCert / skipVerify; optional `timeoutMs` bounds the dial + handshake. |
+| [`net`](net.md)`.startTLS($conn[, net.TLSOptions][, timeoutMs])` | Upgrade an open plaintext `net.Conn` to TLS in place (STARTTLS); host reused from connect; same handle. Optional `timeoutMs` bounds the handshake. |
 | [`net`](net.md)`.eof($conn)`                          | True iff the next read on `$conn` would return partial or fail. Sticky.                                                             |
 | [`net`](net.md)`.listen(address)`                     | Bind TCP `"host:port"` (use `":0"` for ephemeral). Returns a `net.Listener`.                                                        |
 | [`net`](net.md)`.listenUDP(address)`                  | Bind a UDP socket. Returns a `net.UDPSocket`; usable as both client and server.                                                     |

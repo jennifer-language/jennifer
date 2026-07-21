@@ -147,6 +147,20 @@ func expectTaggedOK(line as string, tag as string) {
 # forever. Re-armed before each read.
 def const TIMEOUT_MS as int init 30000;
 
+# MAX_RESPONSE_BYTES caps a single accumulated response. A literal's `{N}` byte
+# count is attacker-declarable, and a malicious / compromised server could also
+# stream untagged lines that never reach the tagged completion; either grows the
+# read buffer without bound, so crossing the limit fails with a catchable error.
+def const MAX_RESPONSE_BYTES as int init 67108864;
+
+# capResponse throws when an accumulated response has grown past the cap.
+func capResponse(n as int) {
+    if ($n > MAX_RESPONSE_BYTES) {
+        throw Error{kind: "imap", message: "imap: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+    }
+    return;
+}
+
 # --- byte-buffer helpers -------------------------------------------
 # IMAP literals (`{N}`) carry N raw bytes of arbitrary message content, so the
 # reader frames over a byte buffer with a forward cursor: it never re-slices
@@ -208,6 +222,7 @@ func readResponse(conn as net.Conn, tag as string) {
                 $buf[] = $chunk[$k];
                 $k = $k + 1;
             }
+            capResponse(len($buf));
             $scanFrom = $blen - 1;   # overlap 1 byte for a straddling CRLF
             continue;
         }
@@ -235,6 +250,7 @@ func readResponse(conn as net.Conn, tag as string) {
                     $buf[] = $chunk[$k];
                     $k = $k + 1;
                 }
+                capResponse(len($buf));
             }
             $pos = $pos + $litlen;
             $scanFrom = $pos;
@@ -274,6 +290,7 @@ func readLine(conn as net.Conn) {
             $buf[] = $chunk[$k];
             $k = $k + 1;
         }
+        capResponse(len($buf));
         # Scan from the overlap point, indexing $buf in place (a helper taking
         # the whole buffer would deep-copy it each pass).
         def blen as int init len($buf);
@@ -304,9 +321,9 @@ func readGreeting(conn as net.Conn) {
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
     if ($opts.security == "tls") {
-        return net.connectTLS($addr);
+        return net.connectTLS($addr, TIMEOUT_MS);
     }
-    return net.connect($addr);
+    return net.connect($addr, TIMEOUT_MS);
 }
 
 # --- session (exported) --------------------------------------------
@@ -325,7 +342,7 @@ export func connect(opts as Options) {
     readGreeting($conn);
     if ($opts.security == "starttls") {
         command($conn, "STARTTLS");
-        $conn = net.startTLS($conn);
+        $conn = net.startTLS($conn, TIMEOUT_MS);
     }
     authenticate($conn, $opts);
     return Session{conn: $conn};

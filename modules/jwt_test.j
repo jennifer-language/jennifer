@@ -196,3 +196,46 @@ func verifyCritToken() {
 func testCritHeaderRejected() {
     testing.assertThrows("verifyCritToken", "value");
 }
+
+# ---- verifyWith: issuer / audience policy ----
+
+func claimsWithIss() {
+    return json.decode("{\"sub\":\"ada\",\"iss\":\"good-iss\",\"aud\":\"good-aud\"}");
+}
+func claimsWithAudList() {
+    return json.decode("{\"sub\":\"ada\",\"aud\":[\"x\",\"good-aud\"]}");
+}
+
+func testVerifyWithMatchingIssAndAud() {
+    def tok as string init sign(claimsWithIss(), secret(), "HS256");
+    def back as json.Value init verifyWith($tok, secret(), "HS256", Policy{iss: "good-iss", aud: "good-aud"});
+    testing.assertEqual(json.asString($back, "/sub"), "ada");
+}
+
+func testVerifyWithEmptyPolicyActsLikeVerify() {
+    def tok as string init sign(claimsWithIss(), secret(), "HS256");
+    def back as json.Value init verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: ""});
+    testing.assertEqual(json.asString($back, "/iss"), "good-iss");
+}
+
+func testVerifyWithAudienceArrayMatch() {
+    def tok as string init sign(claimsWithAudList(), secret(), "HS256");
+    def back as json.Value init verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "good-aud"});
+    testing.assertEqual(json.asString($back, "/sub"), "ada");
+}
+
+func testVerifyWithWrongIssuerRejected() {
+    testing.assertThrows("verifyBadIss", "value");
+}
+func verifyBadIss() {
+    def tok as string init sign(claimsWithIss(), secret(), "HS256");
+    verifyWith($tok, secret(), "HS256", Policy{iss: "wrong-iss", aud: ""});
+}
+
+func testVerifyWithWrongAudienceRejected() {
+    testing.assertThrows("verifyBadAud", "value");
+}
+func verifyBadAud() {
+    def tok as string init sign(claimsWithIss(), secret(), "HS256");
+    verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "wrong-aud"});
+}

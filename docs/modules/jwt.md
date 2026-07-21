@@ -35,6 +35,7 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
 | ----------------------------- | ------------ | --------------------------------------------------------------------- |
 | `jwt.sign(claims, key, alg)`  | `string`     | Sign `claims` (a `json.Value`) into a compact JWT.                     |
 | `jwt.verify(token, key, alg)` | `json.Value` | Verify the signature, the header algorithm, and `exp` / `nbf`; return the claims. Throws on any failure. |
+| `jwt.verifyWith(token, key, alg, policy)` | `json.Value` | Like `verify`, then additionally enforce the `jwt.Policy` claim checks (issuer / audience). Throws on any failure. |
 | `jwt.decode(token)`           | `json.Value` | The payload claims **without verifying** - for inspection only.        |
 | `jwt.header(token)`           | `json.Value` | The token header (its `alg` / `kid`), also without verifying.          |
 
@@ -61,6 +62,15 @@ one:
   a *second token string* that verifies as the same token, which breaks
   anything keyed on the token string (replay caches, denylists). Such spellings
   are rejected as malformed, matching strict JWS implementations.
+
+- **Issuer / audience are application policy.** `jwt.verify` checks the
+  signature, algorithm, and time claims; it does not check `iss` or `aud`,
+  because the expected values are the application's, not the library's. Use
+  `jwt.verifyWith($token, $key, $alg, jwt.Policy{iss: "https://issuer.example",
+  aud: "my-api"})` to additionally require them. An empty `iss` (or `aud`) skips
+  that check; a non-empty one must match. `aud` may be a JSON string or an array
+  of strings (RFC 7519), and the check passes when the expected audience is
+  present.
 
 `jwt.decode` and `jwt.header` do **not** verify anything - use them only to read
 a token you have not trusted yet (for example, to read `kid` before fetching the

@@ -122,7 +122,13 @@ in CI without a Redis install.
 - **No connection pool.** One `Session` is one connection.
 - **`rediss` TLS** rides `net`'s default certificate verification.
 
-## Timeouts
+## Timeouts and limits
+
+The initial connect is bounded by a connection-establishment timeout, so a slow
+or unreachable server fails the dial instead of blocking it forever. A single
+reply is also capped at **64 MiB**: a malicious or compromised server that
+declares an enormous bulk-string length (or never terminates a reply) fails with
+a catchable error rather than growing the read buffer without bound.
 
 Every read carries an idle timeout (default 30 s) so a hung server fails with a
 catchable error instead of blocking the caller forever. `connect` sets

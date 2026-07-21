@@ -84,7 +84,7 @@ func TestSmtpSendDialogue(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "", pass: "", auth: ""};
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "", pass: "", auth: "", allowInsecureAuth: true};
 def rcpts as list of string init ["to@example.com"];
 smtp.send($o, "from@example.com", $rcpts, "Subject: Hi\r\n\r\nthe body\r\n.hidden dotline");`, smtpMod, port)
 	progPath := filepath.Join(dir, "send.j")

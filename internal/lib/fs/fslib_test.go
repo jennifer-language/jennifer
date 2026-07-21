@@ -646,3 +646,59 @@ func TestHandleConcurrentAccessIsRaceFree(t *testing.T) {
 		t.Errorf("total lines read = %s, want 500", out)
 	}
 }
+
+// TestChmodTightensPermissions - fs.chmod changes a file's mode bits, the
+// piece the fixed-0644 write verbs can't express (the primitive oauth's 0600
+// token store leans on).
+func TestChmodTightensPermissions(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "secret.json")
+	src := fmt.Sprintf(`
+		use fs;
+		fs.writeString(%q, "token");
+		fs.chmod(%q, 0o600);
+	`, tmp, tmp)
+	if _, err := runProg(t, src); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	info, err := os.Stat(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("mode = %o, want 0600", got)
+	}
+}
+
+// TestChmodRejectsBadMode - a mode outside [0, 0o7777] is a catchable error,
+// not a silent no-op.
+func TestChmodRejectsBadMode(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runProg(t, fmt.Sprintf(`use fs; fs.chmod(%q, 12288);`, tmp)) // 0o30000 > 0o7777
+	if err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("expected out-of-range error, got %v", err)
+	}
+}
+
+// TestChownNoopSucceeds - fs.chown with (-1, -1) changes neither owner nor
+// group (chown(2) semantics), so it succeeds for any caller without privilege.
+// Owner/group semantics are Unix/Linux; the platform target is Linux.
+func TestChownNoopSucceeds(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(tmp, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runProg(t, fmt.Sprintf(`use fs; fs.chown(%q, -1, -1);`, tmp)); err != nil {
+		t.Fatalf("chown(-1,-1) should be a no-op success, got %v", err)
+	}
+}
+
+// TestChownRejectsBadArity - a wrong argument count is a catchable error.
+func TestChownRejectsBadArity(t *testing.T) {
+	_, err := runProg(t, `use fs; fs.chown("/tmp/x", 0);`)
+	if err == nil || !strings.Contains(err.Error(), "3 arguments") {
+		t.Fatalf("expected arity error, got %v", err)
+	}
+}

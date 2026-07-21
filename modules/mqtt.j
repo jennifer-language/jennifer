@@ -202,9 +202,24 @@ func parsePublish(pkt as Packet) {
 
 # --- socket reading ---------------------------------------------------------
 
+# MAX_PACKET_BYTES caps a single control packet's body. The remaining-length
+# varint is attacker-declarable (up to 256 MiB), so a malicious / compromised
+# broker could force an unbounded allocation; a larger declared length fails the
+# read with a catchable error instead.
+def const MAX_PACKET_BYTES as int init 67108864;
+
+# capPacket throws when a declared packet length is over the cap.
+func capPacket(n as int) {
+    if ($n > MAX_PACKET_BYTES) {
+        throw Error{ kind: "mqtt", message: "mqtt: packet declares " + convert.toString($n) + " bytes, over the " + convert.toString(MAX_PACKET_BYTES) + "-byte limit", file: "", line: 0, col: 0 };
+    }
+    return;
+}
+
 # readN reads exactly n bytes from conn, looping over the "up to n" net.readBytes
 # until the count is met. A closed connection mid-packet is a catchable error.
 func readN(conn as net.Conn, n as int) {
+    capPacket($n);
     def out as bytes;
     while (len($out) < $n) {
         def chunk as bytes init net.readBytes($conn, $n - len($out));
@@ -268,9 +283,9 @@ export func connect(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
     def conn as net.Conn;
     if ($opts.security == "tls") {
-        $conn = net.connectTLS($addr);
+        $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS);
     } else {
-        $conn = net.connect($addr);
+        $conn = net.connect($addr, HANDSHAKE_TIMEOUT_MS);
     }
     # A refused / malformed CONNACK must not leak the socket; on success the
     # caller owns the open client.

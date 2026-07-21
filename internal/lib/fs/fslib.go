@@ -70,6 +70,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "isFile", isFileFn)
 	in.RegisterNamespaced(LibraryName, "isDir", isDirFn)
 	in.RegisterNamespaced(LibraryName, "stat", statFn)
+	in.RegisterNamespaced(LibraryName, "chmod", chmodFn)
+	in.RegisterNamespaced(LibraryName, "chown", chownFn)
 
 	// Directory operations. Two verbs each for create + delete; the
 	// recursive form is the second name so a code review sees which
@@ -317,6 +319,57 @@ func statFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("fs.stat: %s: %v", path, statErr)
 	}
 	return makeStat(path, info), nil
+}
+
+// chmodFn sets a file's permission bits: fs.chmod(path, mode). mode is the
+// low 12 bits (rwx + setuid/setgid/sticky), e.g. 0o600 for an owner-only
+// secret file - the piece the write verbs (fixed 0o644) can't express, so a
+// token / key store can be tightened after writing. Rejects a mode outside
+// [0, 0o7777]; any OS failure is a catchable error. Unix/Linux semantics: on
+// Windows only the read-only bit is honoured (the platform target is Linux).
+func chmodFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("fs.chmod expects 2 arguments (path, mode), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.chmod", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("fs.chmod: mode must be int, got %s", args[1].Kind)
+	}
+	mode := args[1].Int
+	if mode < 0 || mode > 0o7777 {
+		return interpreter.Null(), fmt.Errorf("fs.chmod: mode %d out of range [0, 0o7777]", mode)
+	}
+	if cerr := os.Chmod(path, os.FileMode(mode)); cerr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.chmod: %s: %v", path, cerr)
+	}
+	return interpreter.Null(), nil
+}
+
+// chownFn sets a file's owner and group: fs.chown(path, uid, gid). A uid or gid
+// of -1 leaves that id unchanged (chown(2) semantics). Linux/Unix only - on
+// Windows os.Chown always fails (the platform target is Linux); typically needs
+// privilege. Any OS failure is a catchable error.
+func chownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("fs.chown expects 3 arguments (path, uid, gid), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.chown", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("fs.chown: uid must be int, got %s", args[1].Kind)
+	}
+	if args[2].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("fs.chown: gid must be int, got %s", args[2].Kind)
+	}
+	if cerr := os.Chown(path, int(args[1].Int), int(args[2].Int)); cerr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.chown: %s: %v", path, cerr)
+	}
+	return interpreter.Null(), nil
 }
 
 // -------- Directory operations --------

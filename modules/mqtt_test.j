@@ -83,3 +83,13 @@ func testParsePublishSkipsPacketIdAtQosOne() {
     testing.assertEqual($m.topic, "a");
     testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "hi");
 }
+
+# ---- read cap (DoS from an attacker-declared packet length) ----
+func testPacketCapRejectsOversized() {
+    testing.assertThrows("overPacketCap", "mqtt");
+}
+func overPacketCap() { capPacket(MAX_PACKET_BYTES + 1); }
+func testPacketCapAllowsAtLimit() {
+    capPacket(MAX_PACKET_BYTES);
+    testing.assertTrue(true);
+}

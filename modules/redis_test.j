@@ -107,3 +107,13 @@ func testParseLeavesRest() {
     testing.assertEqual($pr.reply.num, 7);
     testing.assertEqual(reststr(":7\r\n+NEXT\r\n", $pr), "+NEXT\r\n");
 }
+
+# ---- read cap (DoS from an oversized reply) ----
+func testReplyCapRejectsOversized() {
+    testing.assertThrows("overReplyCap", "redis");
+}
+func overReplyCap() { capReply(MAX_REPLY_BYTES + 1); }
+func testReplyCapAllowsAtLimit() {
+    capReply(MAX_REPLY_BYTES);
+    testing.assertTrue(true);
+}

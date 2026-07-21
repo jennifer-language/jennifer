@@ -31,6 +31,7 @@ use encoding;
 use hash;
 use crypto;
 use compress;
+use os;
 import "./multipart.j" as formdata;
 
 /**
@@ -557,6 +558,17 @@ func rejectCookieInjection(s as string, what as string) {
     }
 }
 
+# secureCookies reports whether the framework-minted session-id and CSRF
+# cookies carry the `Secure` attribute (never sent over plaintext HTTP). On by
+# default - a session / CSRF cookie leaking over HTTP is a real hijacking
+# vector, and the common TLS-terminating-proxy deployment sees the app on HTTP
+# while the client connection is HTTPS, so keying `Secure` off the app-side
+# scheme would wrongly drop it. Set JENNIFER_WEB_INSECURE_COOKIES=1 for local
+# plaintext-HTTP development only.
+func secureCookies() {
+    return os.getEnv("JENNIFER_WEB_INSECURE_COOKIES") == "";
+}
+
 func formatSetCookie(name as string, value as string, opts as CookieOptions) {
     rejectCookieInjection($name, "name");
     rejectCookieInjection($value, "value");
@@ -612,7 +624,9 @@ export func setCookie(ctx as Context, name as string, value as string, opts as C
  * Return the request's session id, minting a new one on first use. If the
  * `cookieName` cookie is present its value is returned; otherwise a fresh UUID
  * v4 (crypto-grade random, so unguessable as a session token) is generated and
- * set as a `HttpOnly`, `SameSite=Lax`, path-`/` cookie. `web`
+ * set as a `Secure`, `HttpOnly`, `SameSite=Lax`, path-`/` cookie (`Secure` is on
+ * by default; set `JENNIFER_WEB_INSECURE_COOKIES=1` for local plaintext-HTTP
+ * dev). `web`
  * manages only the id cookie - the session data itself lives in a store the app
  * owns (e.g. the `session` module over `memcache`), so `web` forces no store or
  * network dependency. Call once per request and capture the returned id.
@@ -630,6 +644,7 @@ export func sessionId(ctx as Context, cookieName as string) {
     $opts.path = "/";
     $opts.httpOnly = true;
     $opts.sameSite = "Lax";
+    $opts.secure = secureCookies();
     setCookie($ctx, $cookieName, $id, $opts);
     return $id;
 }
@@ -881,6 +896,7 @@ export func csrfToken(ctx as Context, secret as string) {
     $opts.path = "/";
     $opts.httpOnly = true;
     $opts.sameSite = "Lax";
+    $opts.secure = secureCookies();
     setCookie($ctx, "csrf", $token, $opts);
     return $token;
 }

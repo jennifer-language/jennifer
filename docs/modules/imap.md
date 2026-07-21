@@ -92,10 +92,16 @@ This is a reading subset, not full IMAP4rev1:
 - An internationalized (IDN) host is IDNA-encoded to its `xn--` form
   automatically (via [`idna`](idna.md)).
 
-## Timeouts
+## Timeouts and limits
 
 Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
-server fails with a catchable error instead of blocking the caller forever.
+server fails with a catchable error instead of blocking the caller forever. The
+initial connect (and a STARTTLS handshake) is bounded by its own
+connection-establishment timeout, so a slow or unreachable server fails the dial.
+A single accumulated response is capped at **64 MiB**: a literal's `{N}` byte
+count is attacker-declarable, and a server can also stream untagged lines that
+never reach the tagged completion, so either fails with a catchable error rather
+than an unbounded allocation.
 
 ## See also
 

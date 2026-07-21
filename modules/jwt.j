@@ -43,6 +43,14 @@ def const SUPPORTED as list of string init [
     "EdDSA"
 ];
 
+# Policy carries the application-level claim checks jwt.verifyWith enforces on
+# top of the cryptographic verification: the expected issuer (`iss`) and
+# audience (`aud`). An empty string means "do not check this claim".
+export def struct Policy {
+    iss as string,
+    aud as string
+};
+
 # ---- base64url (unpadded, as JWT requires) ----
 
 # encodeSegment encodes bytes as base64url with the trailing "=" padding removed.
@@ -202,6 +210,57 @@ export func verify(token as string, key as bytes, alg as string) {
     }
     if (json.has($claims, "/nbf") and $now < json.asInt($claims, "/nbf")) {
         throw Error{kind: "value", message: "jwt.verify: token is not yet valid", file: "", line: 0, col: 0};
+    }
+    return $claims;
+}
+
+# audienceMatches reports whether the token's `aud` claim admits `want`. Per RFC
+# 7519 4.1.3 `aud` is either a single string or an array of strings; a missing
+# claim never matches.
+func audienceMatches(claims as json.Value, want as string) {
+    if (not json.has($claims, "/aud")) {
+        return false;
+    }
+    def kind as string init json.typeOf($claims, "/aud");
+    if ($kind == "string") {
+        return json.asString($claims, "/aud") == $want;
+    }
+    if ($kind == "list") {
+        def n as int init json.length($claims, "/aud");
+        for (def i in lists.range(0, $n)) {
+            if (json.asString($claims, "/aud/" + convert.toString($i)) == $want) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Verify a JWT like `verify`, then additionally enforce the application-level
+ * claim policy: when `policy.iss` is non-empty the token's `iss` must equal it,
+ * and when `policy.aud` is non-empty the token's `aud` (a string or an array of
+ * strings) must include it. `exp` / `nbf` and the signature are checked exactly
+ * as in `verify`; issuer and audience are application policy the library cannot
+ * assume, hence the explicit opt-in.
+ * @param token {string} the compact JWT
+ * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
+ * @param policy {Policy} the expected issuer / audience (empty string skips a check)
+ * @return {json.Value} the verified claims
+ * @throws {Error} on any `verify` failure, or a mismatched issuer / audience
+ */
+export func verifyWith(token as string, key as bytes, alg as string, policy as Policy) {
+    def claims as json.Value init verify($token, $key, $alg);
+    if ($policy.iss != "") {
+        if (not json.has($claims, "/iss") or json.asString($claims, "/iss") != $policy.iss) {
+            throw Error{kind: "value", message: "jwt.verifyWith: issuer (iss) does not match the expected " + $policy.iss, file: "", line: 0, col: 0};
+        }
+    }
+    if ($policy.aud != "") {
+        if (not audienceMatches($claims, $policy.aud)) {
+            throw Error{kind: "value", message: "jwt.verifyWith: audience (aud) does not include the expected " + $policy.aud, file: "", line: 0, col: 0};
+        }
     }
     return $claims;
 }

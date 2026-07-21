@@ -365,57 +365,15 @@ paired with the M19.8 org move and triggered by the first external contribution,
 but no code prerequisite. Not legal advice - the chosen model should get a real
 legal review before it is published.
 
-### DRAFT#15 - Interpreter throughput ceiling
+### Interpreter throughput ceiling - graduated to M21.10
 
-The tree-walker's per-operation overhead is the current throughput ceiling.
-It shows up wherever a `.j` program touches data byte by byte: the `mime`
-module's part scanning runs on the order of **8 seconds per megabyte**, since
-every byte advances a cursor through several interpreted expression
-evaluations (index read, comparison, append, loop step), each paying the
-evaluator's dispatch and Value-copy costs. That is fine for kilobyte-scale
-config and headers, but it puts any megabyte-scale byte processing out of
-reach in pure Jennifer.
-
-The same ceiling caps the `http` module: `readToEOF` assembles a response body
-by appending one byte at a time (`$buf[] = $chunk[$i]`), so reading is on the
-order of a minute per 64 MiB. That is invisible for the API / feed / page
-responses `http` is built for (its default body cap is 64 MiB), but it means a
-lifted cap (`http.requestWith(..., maxBytes)` negative, or `bucket.get` of a
-large object) is *correct but slow* - `http` is a small/medium-response client,
-not a bulk downloader. A cheap, targeted fix is a **bulk `bytes` primitive** - a
-whole-buffer append / concat (or a `net` read-all that returns one `bytes`) so
-the inner copy runs once in Go instead of once per byte - which is the
-"push byte-crunching into Go" direction below applied to body assembly. A
-streaming body API (hand `.j` chunks instead of one string) is the larger
-follow-on for genuinely large downloads.
-
-The peephole passes already shipped (slot resolution, frame pooling,
-namespaced-call and comparison fast paths, constant folding, the map hash
-index) took the easy wins; the next real gain needs a structural step, not
-more micro-optimization. Two orthogonal directions, not mutually exclusive:
-
-- **Faster execution model.** Compile the AST to a linear bytecode (or a
-  register form) executed by a tight dispatch loop, instead of re-walking the
-  tree and re-resolving shapes on every pass through a hot loop. This is the
-  big lever and the big effort - a new pipeline stage between resolve and
-  run, held to the same TinyGo-clean, reflect-free discipline as the current
-  evaluator. Value semantics and the tagged-union `Value` stay; what changes
-  is how the operations are sequenced and dispatched.
-- **Push hot byte-crunching into Go.** The complement, and the cheaper win
-  per case: when a job is inherently per-byte (MIME/quoted-printable
-  scanning, base-N transcoding, binary framing), a Go library does the inner
-  loop at native speed and hands `.j` the structured result - the same
-  reasoning already applied to `json` / `toml` (a char parser belongs in Go)
-  and to `DRAFT#9` `asn1`. This narrows *which* workloads still need the
-  faster execution model rather than removing the ceiling.
-
-A prerequisite either way is an honest, repeatable throughput benchmark (the
-`mime`-part case is a natural fixture) so a change is measured, not guessed.
-
-**Requires:** none hard. The execution-model rewrite is independent but large;
-the push-to-Go direction composes with `DRAFT#9` and any future byte-oriented
-system library. Relates to `DRAFT#1` (a compiled core is easier to expose as a
-stable embedding surface than a tree-walker).
+The tree-walker's per-operation overhead (the throughput ceiling that caps
+byte-oriented `.j`: `mime` scanning ~8 s/MiB, `http.readToEOF` ~1 min/64 MiB)
+graduated to `milestones.md` **M21.10**, scoped into measured sub-milestones - a
+throughput benchmark harness, a bulk `bytes` primitive, pushing one hot
+byte-crunching path into Go, and (the large lever, allowed to defer past 1.0.0) a
+bytecode execution model. The push-to-Go direction composes with `DRAFT#9`
+`asn1`; the compiled core relates to `DRAFT#1` embedding.
 
 ## Loose ideas
 

@@ -68,3 +68,20 @@ func testTokenExpired() {
     testing.assertTrue(tokenExpired(1020, 1000));    # 1030 >= 1020 (within 30s skew)
     testing.assertTrue(tokenExpired(1000, 1000));    # already past
 }
+
+# ---- token store permissions (0600) ----
+
+func testSaveTightensPermissions() {
+    def dir as string init fs.makeTempDir();
+    # A fresh path so writeString creates it at the default 0644; save must
+    # then chmod it to owner-only 0600 (384).
+    def path as string init $dir + "/token.json";
+    def t as Token init Token{accessToken: "secret-access", tokenType: "Bearer", refreshToken: "r", scope: "", expiresAt: 0};
+    save($path, $t);
+    def st as fs.Stat init fs.stat($path);
+    testing.assertEqual($st.mode, 384);
+    # Round-trips.
+    def back as Token init load($path);
+    testing.assertEqual($back.accessToken, "secret-access");
+    fs.removeAll($dir);
+}

@@ -38,6 +38,7 @@ import "./idna.j" as idna;
  * @field user {string} the SASL username (empty means no auth)
  * @field pass {string} the SASL password, or the OAuth2 access token for xoauth2
  * @field auth {string} the SASL mechanism: "" (default - no auth when `user` is empty, else PLAIN), "auto" (negotiate the strongest mechanism the server's EHLO advertises, falling back to PLAIN), "plain", "login", "xoauth2", "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
+ * @field allowInsecureAuth {bool} force SASL auth over an unencrypted ("none") connection (default false - credentials are refused over plaintext)
  */
 export def struct Options {
     host as string,
@@ -46,7 +47,8 @@ export def struct Options {
     clientName as string,
     user as string,
     pass as string,
-    auth as string
+    auth as string,
+    allowInsecureAuth as bool
 };
 
 # One parsed SMTP reply: its (final) status code and the raw reply text.
@@ -158,6 +160,11 @@ func asciiOnly(s as string, what as string) {
 # to its `xn--` form, the local part must already be ASCII.
 func asciiEnvelope(addr as string) {
     rejectControl($addr, "envelope address");
+    # RFC 5321 4.5.3.1.3: the forward/reverse path is at most 256 octets
+    # including the angle brackets, so the bare address is <= 254.
+    if (len($addr) == 0 or len($addr) > 254) {
+        throw Error{kind: "smtp", message: "envelope address must be 1 to 254 characters (RFC 5321): " + $addr, file: "", line: 0, col: 0};
+    }
     # Split at the LAST '@': a quoted local part may itself contain '@', so
     # splitting at the first one would truncate the local part and mangle the
     # domain.
@@ -171,16 +178,26 @@ func asciiEnvelope(addr as string) {
         $ci = $ci + 1;
     }
     if ($at < 0) {
-        return asciiOnly($addr, "address");
+        throw Error{kind: "smtp", message: "envelope address is missing '@' (want local@domain, RFC 5321): " + $addr, file: "", line: 0, col: 0};
     }
     def local as string init strings.substring($addr, 0, $at);
     def domain as string init strings.substring($addr, $at + 1, len($addr));
+    if (len($local) == 0) {
+        throw Error{kind: "smtp", message: "envelope address has an empty local part (RFC 5321): " + $addr, file: "", line: 0, col: 0};
+    }
+    if (len($domain) == 0) {
+        throw Error{kind: "smtp", message: "envelope address has an empty domain (RFC 5321): " + $addr, file: "", line: 0, col: 0};
+    }
     return asciiOnly($local, "address local part") + "@" + idna.toAscii($domain);
 }
 
 # The per-read idle timeout (ms), so a hung server fails instead of blocking
 # forever. Re-armed before each read.
 def const TIMEOUT_MS as int init 30000;
+
+# The connection-establishment timeout (ms): a slow / unreachable server (and
+# the STARTTLS handshake) fails instead of blocking the dial forever.
+def const CONNECT_TIMEOUT_MS as int init 30000;
 
 # readReply reads from the connection until a complete SMTP reply arrives.
 func readReply(conn as net.Conn) {
@@ -243,6 +260,30 @@ func ehloMechs(text as string) {
     return $out;
 }
 
+# ehloAdvertises reports whether the EHLO reply lists `cap` as a capability (a
+# "250[- ]CAP..." line, matched case-insensitively on the first keyword). Used
+# to confirm the server actually offered STARTTLS before relying on it, so a
+# MITM that strips the capability to force plaintext is caught (anti-downgrade).
+func ehloAdvertises(text as string, cap as string) {
+    def want as string init strings.upper($cap);
+    for (def raw in strings.split($text, "\n")) {
+        def line as string init strings.trim($raw);
+        if (len($line) < 4) {
+            continue;
+        }
+        def rest as string init strings.upper(strings.substring($line, 4, len($line)));
+        def kw as string init $rest;
+        def sp as int init strings.indexOf($rest, " ");
+        if ($sp >= 0) {
+            $kw = strings.substring($rest, 0, $sp);
+        }
+        if ($kw == $want) {
+            return true;
+        }
+    }
+    return false;
+}
+
 # authenticate runs SASL per opts.auth: "" is PLAIN (when a user is set),
 # "auto" picks the strongest mechanism the server's EHLO advertised (caps, else
 # PLAIN), and an explicit token forces that mechanism.
@@ -261,6 +302,12 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
         if ($mech == "") {
             $mech = "plain";
         }
+    }
+    # A mechanism will run (the no-auth cases returned above). Refuse to hand
+    # SASL credentials to the server over an unencrypted connection - "tls" and
+    # a completed "starttls" upgrade are encrypted; "none" is plaintext.
+    if ($opts.security == "none" and not $opts.allowInsecureAuth) {
+        throw Error{kind: "smtp", message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force", file: "", line: 0, col: 0};
     }
     if ($mech == "plain") {
         def resp as string init "AUTH PLAIN " + sasl.plain($opts.user, $opts.pass);
@@ -335,9 +382,9 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
     if ($opts.security == "tls") {
-        return net.connectTLS($addr);
+        return net.connectTLS($addr, CONNECT_TIMEOUT_MS);
     }
-    return net.connect($addr);
+    return net.connect($addr, CONNECT_TIMEOUT_MS);
 }
 
 # --- send (exported) -----------------------------------------------
@@ -370,8 +417,14 @@ export func send(opts as Options, from as string, recipients as list of string,
     expect(readReply($conn), 220, 220, "greeting");
     def caps as Reply init greet($conn, $opts);
     if ($opts.security == "starttls") {
+        # Anti-downgrade: only issue STARTTLS if the server actually advertised
+        # it. A MITM stripping the capability to keep the session in plaintext
+        # is refused here rather than silently continuing unencrypted.
+        if (not ehloAdvertises($caps.text, "STARTTLS")) {
+            throw Error{kind: "smtp", message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)", file: "", line: 0, col: 0};
+        }
         expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
-        $conn = net.startTLS($conn);
+        $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);
         $caps = greet($conn, $opts);
     }
     authenticate($conn, $opts, $caps.text);

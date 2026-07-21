@@ -95,10 +95,15 @@ server.
 - An internationalized (IDN) host is IDNA-encoded to its `xn--` form
   automatically (via [`idna`](idna.md)).
 
-## Timeouts
+## Timeouts and limits
 
 Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
-server fails with a catchable error instead of blocking the caller forever.
+server fails with a catchable error instead of blocking the caller forever. The
+initial connect (and a STARTTLS handshake) is bounded by its own
+connection-establishment timeout, so a slow or unreachable server fails the dial.
+A single accumulated response is capped at **64 MiB**, so a server that streams a
+status line or a dot-terminated body that never ends fails with a catchable error
+rather than growing the buffer without bound.
 
 ## See also
 
