@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package devio holds the argument- and handle-plumbing shared by the
 // handle-based libraries - born with the four device-I/O libraries

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # mdBook configuration for the Jennifer documentation site. The
 # canonical Markdown sources live in docs/; mdBook builds the static
@@ -9,7 +9,7 @@
 [book]
 title = "Jennifer Programming Language"
 description = "Small, experimental, interpreted programming language built on a TinyGo interpreter."
-authors = ["developer@mplx.eu"]
+authors = ["mplx <jennifer@mplx.dev>"]
 language = "en"
 src = "docs"
 

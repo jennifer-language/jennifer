@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Regenerate the Jennifer wordmark lockups and the mdBook header injector - the
 # Jennifer port of scripts/genwordmark.py, dogfooding the `font` module in place
@@ -147,7 +147,7 @@ func charCode(ch as string) {
 func lockup(fill as string, note as string, totalW as float, dx as float, dy as float, glyphLines as string) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
         "<!-- SPDX-License-Identifier: LGPL-3.0-only -->\n" +
-        "<!-- Copyright (C) 2026 <developer@mplx.eu> -->\n" +
+        "<!-- Copyright (C) 2026 mplx <jennifer@mplx.dev> -->\n" +
         "<!-- Jennifer wordmark lockup: monogram + 'jennifer' (DejaVu Sans Mono Bold, outlined).\n" +
         "     " + $note + " The mark tile is self-contained; a <picture> element picks the variant. -->\n" +
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " + dpTwo($totalW) + " 100\" width=\"" + dpTwo($totalW) + "\" height=\"100\" role=\"img\" aria-label=\"Jennifer\">\n" +
@@ -221,7 +221,7 @@ def headerSvg as string init "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=
 # The SVG is embedded as a single-quoted JS string literal (it contains only
 # double quotes and no backslashes, so this matches Python's repr()).
 def logoJs as string init "// SPDX-License-Identifier: LGPL-3.0-only\n" +
-    "// Copyright (C) 2026 <developer@mplx.eu>\n" +
+    "// Copyright (C) 2026 mplx <jennifer@mplx.dev>\n" +
     "//\n" +
     "// Replaces the mdBook menu-bar title with the Jennifer wordmark lockup.\n" +
     "// The 'jennifer' text is currentColor, so it inherits the active mdBook\n" +

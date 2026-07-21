@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package jsonlib is the `json` library: RFC 8259 encode / decode. Hand-rolled
 // (no `encoding/json`, no `reflect`) to stay TinyGo-clean, the same reason the

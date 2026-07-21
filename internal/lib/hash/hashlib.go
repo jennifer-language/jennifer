@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package hashlib implements Jennifer's `hash` library: MD5, SHA-1,
 // SHA-256, and SHA-512 digests over `bytes`, plus a streaming API for

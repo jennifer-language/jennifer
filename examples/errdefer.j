@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # `errdefer` schedules a call to run only when the enclosing block exits with a
 # propagating error - the undo half of an acquire that must survive on success.

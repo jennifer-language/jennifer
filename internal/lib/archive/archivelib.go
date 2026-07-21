@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package archivelib is the `archive` library: tar / zip container read and
 // write over `bytes`, value-semantic (no `fs` dependency). It shares the

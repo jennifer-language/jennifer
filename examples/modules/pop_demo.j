@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * The pop module (modules/pop.j, POP3) with mime (modules/mime.j): fetch a mailbox and parse each message.

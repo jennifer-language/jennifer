@@ -61,7 +61,7 @@ hljs.registerLanguage("x86asm",function(){"use strict";return function(s){return
 ;
 /* ---- Jennifer language (from editors/highlightjs/jennifer.js) ---- */
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 //
 // highlight.js language definition for Jennifer (.j).
 // Written to the common highlight.js API (className + contains + hljs.COMMENT)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 package main
 
@@ -119,7 +119,7 @@ func main() {
 // Keep in sync with the SPDX headers at the top of each source file.
 const (
 	licenseID   = "LGPL-3.0-only"
-	copyright   = "Copyright (C) 2026 <developer@mplx.eu>"
+	copyright   = "Copyright (C) 2026 mplx <jennifer@mplx.dev>"
 	description = "jennifer - Jennifer programming language interpreter"
 )
 

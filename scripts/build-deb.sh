@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Assemble a `.deb` from already-built binaries. Run after
 # `make build` has produced ./jennifer and ./jennifer-tiny (or from
@@ -146,7 +146,7 @@ jennifer ($VERSION) unstable; urgency=low
   * Upstream release $VERSION. See
     https://github.com/jennifer-language/jennifer/releases for full notes.
 
- -- developer@mplx.eu <developer@mplx.eu>  $(date -R)
+ -- mplx <jennifer@mplx.dev>  $(date -R)
 EOF
 gzip -9n "$CHANGELOG"
 

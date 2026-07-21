@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * A POP3 receive client (RFC 1939): the line-oriented status dialogue ("+OK" /

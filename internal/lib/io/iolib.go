@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package iolib implements Jennifer's `io` library: printf, sprintf, and
 // (later) other I/O primitives. The Go package name is `iolib` to avoid

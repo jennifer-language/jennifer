@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package tomllib implements the `toml` system library: RFC-conformant TOML
 // 1.0.0 decode / encode onto the same opaque, library-owned Value that `json`

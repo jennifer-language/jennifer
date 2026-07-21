@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # orm_demo.j - the orm module's query builder and SQL generation, which are pure
 # (no database). The CRUD calls need a live connection, so `runCrud` is defined

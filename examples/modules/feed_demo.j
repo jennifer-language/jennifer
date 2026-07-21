@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # feed_demo.j - build a syndication feed once and emit it as both RSS 2.0 and
 # Atom 1.0, then parse each back to show the format is auto-detected and the

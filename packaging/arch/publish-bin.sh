@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # publish-bin.sh - publish jennifer-bin to the AUR from the latest GitHub
 # release. Copy this into your jennifer-bin AUR clone as `publish.sh` and run it

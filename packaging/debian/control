@@ -1,7 +1,7 @@
 Source: jennifer
 Section: devel
 Priority: optional
-Maintainer: developer@mplx.eu <developer@mplx.eu>
+Maintainer: mplx <jennifer@mplx.dev>
 Homepage: https://github.com/jennifer-language/jennifer
 Vcs-Browser: https://github.com/jennifer-language/jennifer
 Vcs-Git: https://github.com/jennifer-language/jennifer.git

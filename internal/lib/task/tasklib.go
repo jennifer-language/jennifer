@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package tasklib implements Jennifer's `task` library:
 // wait, poll, discard, waitAll, waitAny - the five user-facing

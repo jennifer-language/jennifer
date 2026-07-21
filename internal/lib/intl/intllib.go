@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package intllib implements the `intl` system library: message catalogs and
 // locale-aware translation. It is a system library rather than a `.j` module for

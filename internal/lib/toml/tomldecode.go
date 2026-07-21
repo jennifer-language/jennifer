@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // TOML 1.0.0 decoder. `toml.decode(text)` parses a TOML document into the same
 // generic Value tree json.decode produces - tables become KindMap (in document

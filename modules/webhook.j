@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * Sign and verify HMAC-signed webhooks - the GitHub-style `X-Hub-Signature-256`

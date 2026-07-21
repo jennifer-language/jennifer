@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # postrm: refresh the system MIME cache after removal so the now-gone
 # jennifer.xml entry stops being advertised. Only on `purge` and

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Temporary-file / temporary-directory creation. `fs.makeTempFile` and
 // `fs.makeTempDir` create a fresh, uniquely-named entry and return its path.

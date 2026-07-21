@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 SPDX-License-Identifier: LGPL-3.0-only
-Copyright (C) 2026 <developer@mplx.eu>
+Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 XDG shared-mime-info definition for Jennifer source files.
 Installed to /usr/share/mime/packages/jennifer.xml by both the

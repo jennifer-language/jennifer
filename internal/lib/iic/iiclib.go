@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package iiclib implements Jennifer's `iic` library: the I2C bus (`/dev/i2c-1`,
 // ...). Named `iic` (Inter-IC) because a library namespace is letters-only, so

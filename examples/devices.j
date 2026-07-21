@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # The device-I/O libraries: serial / spi / iic / gpio, all over the Linux
 # /dev + ioctl interface. Each block is guarded so this demo runs on any machine

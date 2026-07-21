@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package mapslib implements Jennifer's `maps` library: the
 // non-mutating manipulation helpers for `map of K to V` values.

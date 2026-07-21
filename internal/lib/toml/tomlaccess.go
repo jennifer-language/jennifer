@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // toml.Value read accessors. `toml.decode` returns an opaque toml.Value (a
 // KindObject wrapping the decoded tree); these functions are the only way to

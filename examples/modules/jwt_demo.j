@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # jwt_demo.j - sign and verify JSON Web Tokens. Shows the HMAC (HS256) and
 # Ed25519 (EdDSA) algorithms, which need no external keys, plus decode-without-

@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # docblock-check.sh - run the `docblock` parser over a .j file or a directory
 # tree and report each construct's doc coverage plus any diagnostics (a @param

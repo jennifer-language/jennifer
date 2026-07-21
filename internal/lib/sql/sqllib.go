@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package sqllib implements Jennifer's `sql` library: a relational-database
 // client over Go's `database/sql`, shipping the two client-server engines

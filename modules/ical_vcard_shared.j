@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # ical_vcard_shared.j - the shared "content line" codec for the text formats that
 # descend from the vCard / iCalendar line grammar (RFC 5545 iCalendar, RFC 6350

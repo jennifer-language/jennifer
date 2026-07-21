@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Bash completion for the Jennifer interpreter CLI. Packaging installs
 # this at /usr/share/bash-completion/completions/jennifer (and symlinks

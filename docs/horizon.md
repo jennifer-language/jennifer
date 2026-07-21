@@ -314,7 +314,7 @@ M18.35); Phase 2 requires Phase 1; Phase 3 requires Phase 2 and the shipped
 
 The rules for *how the project is run and how outside contributions are taken* -
 organizational, not code. Untouched while the project is solo (one author,
-`Copyright (C) 2026 <developer@mplx.eu>`, `LGPL-3.0-only`, no outside PRs), but
+`Copyright (C) 2026 mplx <jennifer@mplx.dev>`, `LGPL-3.0-only`, no outside PRs), but
 it must be settled **before the first external contribution is merged**: several
 of the choices are hard to reverse once other people's copyrightable work is in
 the tree. The open questions, roughly by urgency:

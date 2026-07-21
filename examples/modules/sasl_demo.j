@@ -1,6 +1,6 @@
 #!/usr/bin/env -S jennifer run
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * The SASL authentication mechanisms that the mail clients (smtp / pop / imap) use to send credentials: the one-step base64 encoders plus the challenge-response CRAM-MD5 and SCRAM.

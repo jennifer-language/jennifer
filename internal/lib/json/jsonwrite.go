@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // json.Value write surface. Every verb is **non-mutating**: it returns a fresh
 // json.Value with the edit applied, leaving the input untouched, so the idiom

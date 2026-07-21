@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // YAML encode: render an interpreter Value (or a yaml.Value handle) back to YAML
 // text. A yaml.Node tree is built from the value so key order is preserved and

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # barcode_ecc.j - Reed-Solomon error correction over GF(256), the field math
 # behind QR codes. Included (textual splice) into barcode.j; it declares no

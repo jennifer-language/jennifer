@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // json.Value accessors. `json.decode` returns an opaque `json.Value` (a
 // KindObject wrapping the decoded tree); the functions here are the only way

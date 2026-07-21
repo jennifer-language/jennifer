@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # font_demo.j - parse a TrueType font and render a word to an SVG document,
 # outlining each glyph and laying them out by advance width. Uses the committed

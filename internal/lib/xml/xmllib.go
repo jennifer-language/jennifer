@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package xmllib is the `xml` library: hand-rolled XML encode / decode over an
 // opaque `xml.Value`, designed like `json` and `toml`. `decode` parses a

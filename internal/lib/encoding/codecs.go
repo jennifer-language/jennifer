@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Codec definitions for the set: ascii, latin-1, windows-1252,
 // ebcdic (IBM-1047). The long-tail codecs (ISO-8859-{2..16},

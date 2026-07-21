@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Regenerate theme/highlight.js = mdBook's bundled highlight.js + the Jennifer
 # language definition (editors/highlightjs/jennifer.js), so the docs site

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package convert implements Jennifer's `convert` library: explicit value
 // conversions between the primitive kinds, plus `typeOf` for runtime kind

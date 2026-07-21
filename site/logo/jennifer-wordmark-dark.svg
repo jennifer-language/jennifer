@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: LGPL-3.0-only -->
-<!-- Copyright (C) 2026 <developer@mplx.eu> -->
+<!-- Copyright (C) 2026 mplx <jennifer@mplx.dev> -->
 <!-- Jennifer wordmark lockup: monogram + 'jennifer' (DejaVu Sans Mono Bold, outlined).
      Paper text, for dark backgrounds (the prefers-color-scheme:dark source). The mark tile is self-contained; a <picture> element picks the variant. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 433.81 100" width="433.81" height="100" role="img" aria-label="Jennifer">

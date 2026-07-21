@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # screen_demo.j - the output-only layer of the `screen` module: build a cell
 # buffer, draw a bordered panel with a title and a progress bar, and animate it

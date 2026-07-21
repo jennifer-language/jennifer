@@ -1,6 +1,6 @@
 #!/usr/bin/env -S jennifer run
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * Acquire an OAuth2 access token with the Device Authorization grant (the CLI-friendly flow), then show how it feeds SASL XOAUTH2 for mail.

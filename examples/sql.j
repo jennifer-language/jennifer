@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 # The `sql` library: a relational client over MySQL / MariaDB and PostgreSQL.
 # Guarded so this demo runs anywhere (it reports "no database" when no server is

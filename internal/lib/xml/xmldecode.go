@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // The hand-rolled XML parser (no `encoding/xml`, no `reflect`, so TinyGo-clean
 // - the same reason `json` and `toml` are hand-rolled). It reads a

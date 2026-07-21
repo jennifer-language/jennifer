@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 <developer@mplx.eu>
+# Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Generates modules/testdata/font_fixture.ttf: a tiny, fully-controlled TrueType
 # font used by the `font` module's tests. Exercises a simple glyph (straight

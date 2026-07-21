@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 <developer@mplx.eu>
+// Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package spilib implements Jennifer's `spi` library: SPI devices
 // (`/dev/spidev0.0`, ...). Open a device, set mode / speed, then `transfer`
