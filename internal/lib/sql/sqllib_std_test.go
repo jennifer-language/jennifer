@@ -218,10 +218,22 @@ func TestErrorsAndBinding(t *testing.T) {
 	if _, err := queryFn(ctx(), []Value{interpreter.IntVal(5), sv("SELECT 1")}); err == nil {
 		t.Error("query with a non-handle target should error")
 	}
-	// unsupported param type (a list cannot bind to a placeholder)
-	list := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), []Value{interpreter.IntVal(1)})
-	if _, err := execFn(ctx(), []Value{conn, sv("INSERT ?"), list}); err == nil || !strings.Contains(err.Error(), "placeholder") {
-		t.Errorf("expected a placeholder-binding error for a list param, got %v", err)
+	// A lone list argument is spread into the parameter sequence (what the orm
+	// module relies on): a list of scalars binds element by element.
+	list := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt),
+		[]Value{interpreter.IntVal(1), interpreter.IntVal(2)})
+	if _, err := execFn(ctx(), []Value{conn, sv("INSERT ? ?"), list}); err != nil {
+		t.Errorf("a lone list param should spread and bind, got %v", err)
+	}
+	// A list mixed with other params does NOT spread (only a lone list does), so
+	// the list is an unbindable parameter and errors.
+	if _, err := execFn(ctx(), []Value{conn, sv("INSERT ? ?"), interpreter.IntVal(9), list}); err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Errorf("a list among other params should not bind, got %v", err)
+	}
+	// A lone list whose element is itself non-scalar errors after the spread.
+	nested := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), []Value{list})
+	if _, err := execFn(ctx(), []Value{conn, sv("INSERT ?"), nested}); err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Errorf("a spread list of lists should error, got %v", err)
 	}
 	// every scalar kind binds fine (int/float/string/bool/bytes/null)
 	if _, err := execFn(ctx(), []Value{conn, sv("INSERT ?"),

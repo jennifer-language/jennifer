@@ -93,6 +93,14 @@ func handleID(fn string, v Value, name string) (int64, error) {
 // -------- param binding (placeholders only, never string interpolation) --------
 
 func toDriverArgs(fn string, params []Value) ([]interface{}, error) {
+	// A single list argument is spread into the parameter sequence: since a
+	// list cannot itself bind to a placeholder, `sql.exec(conn, sql, $list)` is
+	// unambiguous and lets a caller pass a dynamic-length parameter list (which
+	// the orm module needs) where the variadic call site has a fixed arity. The
+	// plain variadic form `sql.exec(conn, sql, a, b, c)` is unaffected.
+	if len(params) == 1 && params[0].Kind == interpreter.KindList {
+		params = params[0].List
+	}
 	out := make([]interface{}, len(params))
 	for i, p := range params {
 		switch p.Kind {

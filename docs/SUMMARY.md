@@ -96,6 +96,7 @@
 - [`multipart`](modules/multipart.md)
 - [`ntp`](modules/ntp.md)
 - [`oauth`](modules/oauth.md)
+- [`orm`](modules/orm.md)
 - [`password`](modules/password.md)
 - [`pdfwriter`](modules/pdfwriter.md)
 - [`pop`](modules/pop.md)

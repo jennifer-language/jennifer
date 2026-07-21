@@ -797,6 +797,17 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   a pull-based scrape - UDP means no reply and no error when no agent is listening
   (metrics, not data you must not lose). Integer counter / gauge values; no sample
   rates or Datadog tags in this version. **Default `jennifer` binary only** (`net`).
+- **`orm`** - a relational mapper over the `sql` library. **Data Mapper**, not
+  Active Record (structs have no methods): declare an `orm.Schema`
+  (`orm.schema(table, pk, dialect)` + `orm.column(s, name, kind)`, dialect
+  `"mysql"` / `"postgres"`), then repository CRUD `orm.insert(conn, schema,
+  record)` / `find(conn, schema, id)` / `update` / `delete`, and `orm.all(conn,
+  query)`. Records are `map of string to string`. Non-mutating **functional
+  query builder**: `orm.where(orm.from($schema), "age", ">", "18")` ->
+  `orm.orderBy` / `limit` / `offset` / `join` -> `orm.toSql($q)` ->
+  `Rendered{sql, params}`, placeholders per dialect (`?` / `$1`); values bind
+  only through placeholders. Plus `orm.createTable(schema)` DDL. Needs the
+  default binary.
 - **`password`** - generate, validate, and score passwords against a policy schema.
   `password.schema()` is a strong default (16 chars, all four classes, min 1 each);
   copy-on-write builders `withLength(s, lo, hi)` / `withClasses(s, lo, up, dig, sym)`

@@ -1765,6 +1765,37 @@ default binary. Discipline as usual.
 
 ### M21.5 - `orm` module
 
+**Done.** Shipped as `modules/orm.j`: a **Data Mapper** (not Active Record - the
+value-semantic, method-less struct model dictated it) over the `sql` library.
+Repository CRUD `insert` / `find` / `update` / `delete` + `all`, keyed off an
+explicit `orm.Schema` (no reflection) built with `schema` / `column`, which also
+carries the `"mysql"` / `"postgres"` **dialect** (a backend selector on one
+module). A non-mutating **functional query builder** (`from` / `where` /
+`orderBy` / `limit` / `offset` / `join` returning fresh `orm.Query`, rendered by
+`toSql` to `Rendered{sql, params}` with per-dialect placeholders) - values bind
+only through placeholders, so injection safety is inherited from `sql`. Records
+are `map of string to string` (the row form that needs no map-to-struct
+conversion; the typed-struct form still waits on that). Plus an `orm.createTable`
+DDL emitter. Relations beyond `join`, migrations, and the typed row form stay out
+of v1.
+
+**Enabling change to `sql`:** dogfooding surfaced that a module cannot pass a
+**dynamic-length parameter list** to the variadic `sql.query` / `exec` (Jennifer
+has no spread), which is essential for a parameterized ORM. So `sql`'s
+`toDriverArgs` now **spreads a single `list` argument** into the parameter
+sequence - `sql.exec($conn, $sql, $params)` binds each element - a small,
+backward-compatible change (a lone list could never bind anyway), also useful for
+any runtime-shaped query. The plain variadic form is unaffected.
+
+Discipline, split per the spec: a 100%-passing `orm_test.j` overlay covers the
+**entire query-builder-to-SQL surface** (both dialects, the CRUD statement
+builders, DDL) offline; live CRUD sits behind a **DB-service-gated**
+`cmd/jennifer/orm_test.go` (skips without `ORM_TEST_DRIVER` / `ORM_TEST_DSN`,
+verified here against a real PostgreSQL: create / insert / find / update /
+ordered + filtered `all` / delete). Docs (`orm.md` + the `sql` list-spread note),
+catalog / `JENNIFER.md` entries, and `examples/modules/orm_demo.j`. Original spec
+below.
+
 A relational mapper layered over the [M20.9 `sql`](#m20---system-libraries-compacted)
 library (its **hard prerequisite** - no `sql`, no `orm`), and a good stress-test
 of how far the module system stretches. Jennifer's semantics dictate the shape,

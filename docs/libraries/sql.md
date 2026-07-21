@@ -52,7 +52,15 @@ next, then the placeholder values.
 | `sql.exec(target, sql, params...)` | `sql.Result` | `sql.Result{affected, lastId}` - read the fields. A field the driver cannot report is `-1` (`lastId` on Postgres, e.g.; `affected` on the rare driver without row counts). |
 
 Parameters bind by type: `int` / `float` / `string` / `bool` / `bytes` / `null`.
-Any other kind (a list, a struct) is a positioned error - build the value first.
+A struct is a positioned error - build the value first.
+
+A **single `list` argument is spread** into the parameter sequence:
+`sql.exec($conn, $sql, $params)` binds each element of `$params` in turn, so a
+query whose parameter count is only known at runtime (the pattern the
+[`orm`](../modules/orm.md) module builds on) works without a fixed call-site
+arity. The plain variadic form (`sql.exec($conn, $sql, a, b, c)`) is unchanged;
+a list mixed with other arguments, or a list element that is itself a list, is
+still a placeholder-binding error.
 
 ## Reading rows
 
