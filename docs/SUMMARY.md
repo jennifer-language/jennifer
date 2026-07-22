@@ -142,6 +142,7 @@
 - [Testing](technical/testing.md)
 - [Filemap](technical/filemap.md)
 - [TinyGo notes](technical/tinygo.md)
+- [Benchmarks](technical/benchmark.md)
 - [Security model](technical/security-model.md)
 - [Design decisions](technical/design-decisions.md)
 - [Rejected features](technical/rejected.md)

@@ -70,7 +70,7 @@ Same source, same language; pick by use case:
 
 Both binaries install side by side. Benchmarks comparing the two on
 the same workload set live in
-[docs/technical/tinygo.md > Single-binary benchmark results](docs/technical/tinygo.md#single-binary-benchmark-results).
+[docs/technical/benchmark.md](docs/technical/benchmark.md).
 
 ## Install
 

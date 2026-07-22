@@ -40,6 +40,8 @@ table.
   shows they aren't one.
 - [TinyGo notes](tinygo.md) - the constraints TinyGo imposes and how the
   codebase respects them.
+- [Benchmarks](benchmark.md) - single-binary throughput (Go vs TinyGo),
+  parallelism, and the memory / page-fault trade, from the reference machine.
 - [Security model](security-model.md) - what a Jennifer script can do by
   design, what counts as a real vulnerability, and how to run untrusted code.
 - [Glossary](../glossary.md) - canonical project terminology
