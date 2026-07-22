@@ -58,6 +58,47 @@ io.printf("%d,%d/%d,%d", $p.x, $p.y, m.ORIGIN.x, m.ORIGIN.y);`,
 	}
 }
 
+// Compound (list / map) module consts through the stamped shared value: every
+// store path copies (def-init, index write, append, iteration), so no mutation
+// of a local copy may reach back into the stamped const. The struct test above
+// covers the retag path; these cover the container kinds, whose backing arrays
+// are the easiest thing to alias by accident.
+func TestModuleConstListIsValueSemantic(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"mod.j": `export def const XS as list of int init [1, 2, 3];`,
+		"main.j": `use io; import "./mod.j" as m;
+def xs as list of int init m.XS;
+$xs[0] = 99;
+$xs[] = 4;
+def total as int init 0;
+for (def v in m.XS) { $total = $total + $v; }
+io.printf("%d,%d,%d/%d/%d", m.XS[0], m.XS[1], m.XS[2], len(m.XS), $total);`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if want := "1,2,3/3/6"; out != want {
+		t.Fatalf("got %q, want %q (stamped list const must not alias a local copy)", out, want)
+	}
+}
+
+func TestModuleConstMapIsValueSemantic(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"mod.j": `export def const M as map of string to int init { "a": 1 };`,
+		"main.j": `use io; import "./mod.j" as m;
+def mm as map of string to int init m.M;
+$mm["a"] = 99;
+$mm["b"] = 2;
+io.printf("%d/%d", m.M["a"], len(m.M));`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if want := "1/1"; out != want {
+		t.Fatalf("got %q, want %q (stamped map const must not alias a local copy)", out, want)
+	}
+}
+
 func TestModuleConstUnexportedStillErrors(t *testing.T) {
 	_, err := runModuleMain(t, map[string]string{
 		"mod.j":  constModule,

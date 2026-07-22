@@ -85,8 +85,13 @@ def frame as bytes init net.readN($c, $n);
 reads a known count and treats an early close as an error rather than a short
 read. Both grow one Go slice, so a megabyte-scale transfer runs at native speed
 rather than a per-byte `net.readBytes` accumulation. To search or split the
-result once it is in hand, use [`binary`](binary.md) (`find` / `split` /
+result once it is in hand, use [`binary`](binary.md) (`indexOf` / `split` /
 `slice`).
+
+With `idleTimeoutMs > 0` both calls re-arm the connection's read deadline
+before each chunk, and restore the `net.setDeadline` state (no deadline when
+none was set) on return - the idle timeout never leaks into a later read on
+the same connection.
 
 ### Deadlines: single-threaded poll with timeout
 

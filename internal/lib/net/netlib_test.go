@@ -787,3 +787,82 @@ func TestReadNCapRejectsHugeN(t *testing.T) {
 		t.Fatalf("expected per-call-limit error, got %v", runErr)
 	}
 }
+
+// TestReadNRestoresDeadlineAfterIdle pins the deadline-restore contract for the
+// idle-timeout path: readN(conn, n, idleTimeoutMs) re-arms the conn's read
+// deadline per chunk, and MUST restore the net.setDeadline state (zero when
+// none was set) on return. Before the fix the last idle deadline stayed armed,
+// so the plain readBytes below - whose data arrives 400ms later, past the
+// stale 150ms deadline - spuriously failed with "read timed out".
+func TestReadNRestoresDeadlineAfterIdle(t *testing.T) {
+	addr := pickListenerAddr(t)
+	l, err := stdnet.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		c, aErr := l.Accept()
+		if aErr != nil {
+			return
+		}
+		_, _ = c.Write([]byte("AB"))
+		time.Sleep(400 * time.Millisecond)
+		_, _ = c.Write([]byte("Z"))
+		time.Sleep(200 * time.Millisecond)
+		c.Close()
+	}()
+	out, runErr := runProg(t, fmt.Sprintf(`
+		use io; use net; use convert;
+		def c as net.Conn init net.connect(%q);
+		def first as bytes init net.readN($c, 2, 150);
+		def second as bytes init net.readBytes($c, 1);
+		net.close($c);
+		io.printf("%%s%%s", convert.stringFromBytes($first, "utf-8"), convert.stringFromBytes($second, "utf-8"));
+	`, addr))
+	if runErr != nil {
+		t.Fatalf("run: %v (a stale idle deadline leaking out of readN shows up here as a spurious timeout)", runErr)
+	}
+	if out != "ABZ" {
+		t.Fatalf("got %q, want ABZ", out)
+	}
+}
+
+// TestReadAllIdleTimeoutRecoverable: readAll with an idle timeout on an open,
+// quiet connection raises the catchable timeout - and after catching it, the
+// connection must still be readable with no stale idle deadline armed (the
+// data arrives past the idle window; a leaked deadline would time out again).
+func TestReadAllIdleTimeoutRecoverable(t *testing.T) {
+	addr := pickListenerAddr(t)
+	l, err := stdnet.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		c, aErr := l.Accept()
+		if aErr != nil {
+			return
+		}
+		// Quiet past readAll's 100ms idle window, then send.
+		time.Sleep(400 * time.Millisecond)
+		_, _ = c.Write([]byte("Q"))
+		time.Sleep(200 * time.Millisecond)
+		c.Close()
+	}()
+	out, runErr := runProg(t, fmt.Sprintf(`
+		use io; use net; use convert;
+		def c as net.Conn init net.connect(%q);
+		def timedOut as bool init false;
+		try { net.readAll($c, 0, 100); } catch (e) { $timedOut = true; }
+		def late as bytes init net.readBytes($c, 1);
+		net.close($c);
+		io.printf("%%t/%%s", $timedOut, convert.stringFromBytes($late, "utf-8"));
+	`, addr))
+	if runErr != nil {
+		t.Fatalf("run: %v (a stale idle deadline leaking out of readAll shows up here as a spurious timeout)", runErr)
+	}
+	if out != "true/Q" {
+		t.Fatalf("got %q, want true/Q", out)
+	}
+}

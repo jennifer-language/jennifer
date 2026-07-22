@@ -389,6 +389,16 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	tmp := make([]byte, 32*1024)
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
+	if idle > 0 {
+		// The idle re-arm below overwrites the conn's read deadline; restore
+		// the one armed via net.setDeadline (zero when none) on every exit so a
+		// later plain read doesn't inherit a stale idle deadline and spuriously
+		// time out. Same restore contract as the eof probe.
+		s.mu.Lock()
+		userDeadline := s.deadline
+		s.mu.Unlock()
+		defer func() { _ = c.SetReadDeadline(userDeadline) }()
+	}
 	for {
 		if idle > 0 {
 			_ = c.SetReadDeadline(time.Now().Add(idle))
@@ -464,6 +474,15 @@ func readNFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	got := int64(0)
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
+	if idle > 0 {
+		// Restore the net.setDeadline deadline (zero when none) on every exit,
+		// as in readAll: the per-chunk idle re-arm must not leak into later
+		// reads on this conn.
+		s.mu.Lock()
+		userDeadline := s.deadline
+		s.mu.Unlock()
+		defer func() { _ = c.SetReadDeadline(userDeadline) }()
+	}
 	for got < n {
 		if idle > 0 {
 			_ = c.SetReadDeadline(time.Now().Add(idle))

@@ -1906,3 +1906,38 @@ func itoa(n int) string {
 	}
 	return string(digits)
 }
+
+// evalCall binds each argument into the borrowed call frame as it evaluates
+// (no intermediate []Value since the slot-backed-bindings work). These pin the
+// observable semantics that interleaving must preserve: strict left-to-right
+// argument evaluation with side effects visible to later args, and correct
+// binding under deep nested calls in argument position (frames borrowed from
+// the pool while the callee frame is held).
+func TestCallArgSideEffectOrdering(t *testing.T) {
+	out, err := run(t, `use io;
+def g as int init 0;
+func bump() { $g = $g + 10; return $g; }
+func pair(a as int, b as int) { io.printf("%d,%d,%d", $a, $b, $g); }
+pair(bump(), $g + bump());`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// bump() -> 10 (g=10); $g + bump() -> 10 + 20 = 30 (g=20); callee sees g=20.
+	if out != "10,30,20" {
+		t.Fatalf("got %q, want 10,30,20", out)
+	}
+}
+
+func TestCallNestedInArgPosition(t *testing.T) {
+	out, err := run(t, `use io;
+func fib(n as int) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); }
+func add(a as int, b as int, c as int) { return $a + $b + $c; }
+io.printf("%d", add(fib(10), fib(11), fib(12)));`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// 55 + 89 + 144 = 288
+	if out != "288" {
+		t.Fatalf("got %q, want 288", out)
+	}
+}

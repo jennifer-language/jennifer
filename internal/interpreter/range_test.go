@@ -214,3 +214,51 @@ func TestSliceUnsupportedKind(t *testing.T) {
 		t.Fatalf("expected cannot-slice error, got %v", err)
 	}
 }
+
+// A slice bound past int32 range must be an out-of-bounds error on every
+// target: sliceBounds checks in int64 before the int() cast, so a 32-bit build
+// (jennifer-tiny on embedded) cannot truncate 4294967296 to a small in-range
+// index and silently return the wrong slice.
+func TestSliceHugeBoundRejected(t *testing.T) {
+	_, err := run(t, `def xs as list of int init [1, 2, 3]; def y as list of int init $xs[0..4294967296];`)
+	if err == nil || !strings.Contains(err.Error(), "out of bounds") {
+		t.Fatalf("expected out-of-bounds error for a >int32 slice bound, got %v", err)
+	}
+	_, err = run(t, `def xs as list of int init [1, 2, 3]; def y as list of int init $xs[4294967296..];`)
+	if err == nil || !strings.Contains(err.Error(), "out of bounds") {
+		t.Fatalf("expected out-of-bounds error for a >int32 lower bound, got %v", err)
+	}
+}
+
+// defer inside a lazy range-loop body: execForEachRange must run the frame's
+// deferred calls at the end of EACH iteration (finishFrame on the borrowed
+// iterEnv), in LIFO order, including on the break exit.
+func TestForEachRangeDeferPerIteration(t *testing.T) {
+	out, err := run(t, `use io;
+for (def i in 0..3) {
+	defer io.printf("d%d ", $i);
+	if ($i == 2) { break; }
+	io.printf("b%d ", $i);
+}`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "b0 d0 b1 d1 d2 " {
+		t.Fatalf("got %q, want %q", out, "b0 d0 b1 d1 d2 ")
+	}
+}
+
+// Range expressions compose: materialised in argument position, and sliceable
+// as a value (`(0..10)[2..5]`).
+func TestRangeComposition(t *testing.T) {
+	out, err := run(t, `use io;
+func total(xs as list of int) { def s as int init 0; for (def v in $xs) { $s = $s + $v; } return $s; }
+io.printf("%d,%d", total(1..5), total((0..10)[2..5]));`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// 1+2+3+4 = 10; (0..10)[2..5] = [2,3,4] -> 9
+	if out != "10,9" {
+		t.Fatalf("got %q, want 10,9", out)
+	}
+}

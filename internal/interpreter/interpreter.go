@@ -3121,7 +3121,11 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 // ends default to 0 / n, both endpoints must be int, and 0 <= lo <= hi <= n
 // (strict, like an index read).
 func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment, node parser.Node) (int, int, error) {
-	lo, hi := 0, n
+	// Bounds-check in int64 BEFORE the int() cast: on a 32-bit target
+	// (jennifer-tiny on embedded) a value like 1<<32 would otherwise truncate
+	// to a small in-range int and silently return the wrong slice instead of
+	// the out-of-bounds error (the same trap the hkdf length guard closes).
+	lo, hi := int64(0), int64(n)
 	if loE != nil {
 		lv, err := i.evalExpr(loE, env)
 		if err != nil {
@@ -3131,7 +3135,7 @@ func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment,
 			file, line, col := posFor(node)
 			return 0, 0, &runtimeError{Msg: fmt.Sprintf("slice lower bound must be int, got %s", lv.Kind), File: file, Line: line, Col: col}
 		}
-		lo = int(lv.Int)
+		lo = lv.Int
 	}
 	if hiE != nil {
 		hv, err := i.evalExpr(hiE, env)
@@ -3142,13 +3146,13 @@ func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment,
 			file, line, col := posFor(node)
 			return 0, 0, &runtimeError{Msg: fmt.Sprintf("slice upper bound must be int, got %s", hv.Kind), File: file, Line: line, Col: col}
 		}
-		hi = int(hv.Int)
+		hi = hv.Int
 	}
-	if lo < 0 || hi > n || lo > hi {
+	if lo < 0 || hi > int64(n) || lo > hi {
 		file, line, col := posFor(node)
 		return 0, 0, &runtimeError{Msg: fmt.Sprintf("slice range [%d, %d) out of bounds for length %d", lo, hi, n), File: file, Line: line, Col: col}
 	}
-	return lo, hi, nil
+	return int(lo), int(hi), nil
 }
 
 func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value, error) {
