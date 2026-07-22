@@ -119,6 +119,67 @@ func TestECDSASignVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestECDSAAllCurves pins sign / verify across all three JOSE ES curves with
+// their spec-paired hashes (ES256/P-256/SHA-256, ES384/P-384/SHA-384,
+// ES512/P-521/SHA-512). The P-384 / P-521 paths carried zero coverage before,
+// yet they are exactly where a JWS alg-binding bug hides: a coordinate-width or
+// digest mismatch round-trips wrong. Signatures are the fixed-width JOSE R||S
+// form (2*ceil(bits/8)), and a wrong-hash verify must be a plain false, never a
+// panic.
+func TestECDSAAllCurves(t *testing.T) {
+	cases := []struct {
+		curve, algo string
+		sigLen      int
+	}{
+		{"p256", "sha256", 64},
+		{"p384", "sha384", 96},
+		{"p521", "sha512", 132},
+	}
+	msg := []byte("the quick brown fox")
+	for _, c := range cases {
+		kv, err := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal(c.curve)})
+		if err != nil {
+			t.Fatalf("%s: generate: %v", c.curve, err)
+		}
+		// Derive a PKIX public PEM from the generated SEC1 private PEM.
+		block, _ := pem.Decode(kv.Bytes)
+		ek, err := x509.ParseECPrivateKey(block.Bytes)
+		if err != nil {
+			t.Fatalf("%s: parse: %v", c.curve, err)
+		}
+		pubDER, _ := x509.MarshalPKIXPublicKey(&ek.PublicKey)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
+
+		sv, se := ecdsaSignFn(noCtx, []interpreter.Value{
+			bytesArg(kv.Bytes), bytesArg(msg), interpreter.StringVal(c.algo)})
+		sig := mustBytes(t, sv, se)
+		if len(sig) != c.sigLen {
+			t.Errorf("%s: signature length %d, want %d", c.curve, len(sig), c.sigLen)
+		}
+		v, err := ecdsaVerifyFn(noCtx, []interpreter.Value{
+			bytesArg(pubPEM), bytesArg(msg), bytesArg(sig), interpreter.StringVal(c.algo)})
+		if err != nil || !v.Bool {
+			t.Errorf("%s: verify genuine = %v (err %v)", c.curve, v.Bool, err)
+		}
+		// A tampered message must not verify.
+		bad, _ := ecdsaVerifyFn(noCtx, []interpreter.Value{
+			bytesArg(pubPEM), bytesArg([]byte("tampered")), bytesArg(sig), interpreter.StringVal(c.algo)})
+		if bad.Bool {
+			t.Errorf("%s: tampered message verified", c.curve)
+		}
+		// A verify under a different (non-paired) hash must be a clean false.
+		wrong := "sha256"
+		if c.algo == "sha256" {
+			wrong = "sha512"
+		}
+		mism, err := ecdsaVerifyFn(noCtx, []interpreter.Value{
+			bytesArg(pubPEM), bytesArg(msg), bytesArg(sig), interpreter.StringVal(wrong)})
+		if err != nil || mism.Bool {
+			t.Errorf("%s: verify under wrong hash %s = %v (err %v), want false", c.curve, wrong, mism.Bool, err)
+		}
+	}
+}
+
 func TestAsymRejectsBadInput(t *testing.T) {
 	priv, pub := rsaKeyPEMs(t)
 	msg := []byte("m")

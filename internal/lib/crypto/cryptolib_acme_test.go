@@ -7,6 +7,8 @@ package cryptolib
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
+	crand "crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -149,6 +151,22 @@ func TestJWKThumbprintStable(t *testing.T) {
 	sum := sha256.Sum256([]byte(a.Str))
 	if len(sum) != 32 {
 		t.Fatal("unexpected digest length")
+	}
+}
+
+// jwkPublic supports only the RSA and EC key types JOSE/ACME use here. An
+// Ed25519 (OKP) key must be a clean positioned error, never a panic from the
+// type switch's default arm - parseAnyPrivate accepts it (ed25519 is a
+// crypto.Signer) so the rejection has to happen in jwkPublic itself.
+func TestJWKRejectsEd25519(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, _ := x509.MarshalPKCS8PrivateKey(priv)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	if _, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(keyPEM)}); err == nil {
+		t.Error("jwkPublic accepted an Ed25519 key; want an unsupported-key-type error")
 	}
 }
 
