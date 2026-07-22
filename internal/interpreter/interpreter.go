@@ -807,12 +807,6 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	if err := i.processImports(prog, false); err != nil {
 		return err
 	}
-	// pre-resolve every QualifiedCallExpr / QualifiedConstRefExpr
-	// against the now-populated namespace / builtin / const tables so the
-	// runtime skips the resolveNamespacePrefix + map lookup on the hot
-	// path. Runs after processImports because the namespace tables are
-	// what dictate which prefixes are valid.
-	i.resolveQualifiedRefs(prog)
 	// Structs: hoist before methods so a method body can reference a
 	// struct type declared later in source order.
 	//
@@ -855,6 +849,13 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	if err := i.loadModuleImports(prog, false); err != nil {
 		return err
 	}
+	// Pre-resolve every QualifiedCallExpr / QualifiedConstRefExpr against the
+	// now-populated namespace / builtin / const tables and module-alias table so
+	// the runtime skips the per-access lookup on the hot path. Runs after
+	// processImports (library namespaces) AND loadModuleImports (module aliases +
+	// their loaded const values), since both dictate which prefixes are valid and
+	// module-const stamping needs the imported module's constants to exist.
+	i.resolveQualifiedRefs(prog)
 	// Stamp every declared struct type once, single-threaded, before any
 	// statement (and therefore any spawn) runs, so the per-execution
 	// re-resolve in execDefine is a guarded no-op and a shared type node
@@ -4064,17 +4065,20 @@ func builtinError(err error, file string, line, col int) error {
 // evalQualifiedConst handles `prefix.NAME`. Resolution mirrors
 // evalQualifiedCall; the result is the constant's value.
 func (i *Interpreter) evalQualifiedConst(c *parser.QualifiedConstRefExpr) (Value, error) {
-	// A module alias reads a constant from the loaded module's own scope.
-	if m, ok := i.moduleAliases[c.Prefix]; ok {
-		return i.moduleConst(m, c)
-	}
-	// prefer the pre-resolved Value stamped by
-	// resolveQualifiedRefs. Same fallback structure as
-	// evalQualifiedCall.
+	// Prefer the pre-resolved Value stamped by resolveQualifiedRefs - a library
+	// OR module-alias const. It is immutable / deep-const and store sites copy,
+	// so returning the shared value is safe. This is the O(1) hot path; both the
+	// library namespace lookup and the module GetBinding slot scan below are
+	// fallbacks reached only for an unstamped ref (REPL, or a missing / private
+	// name whose proper error the fallback still produces).
 	if c.Const != nil {
 		if v, ok := c.Const.(Value); ok {
 			return v, nil
 		}
+	}
+	// A module alias reads a constant from the loaded module's own scope.
+	if m, ok := i.moduleAliases[c.Prefix]; ok {
+		return i.moduleConst(m, c)
 	}
 	ns, err := i.resolveNamespacePrefix(c.Prefix)
 	if err != nil {
@@ -4197,6 +4201,18 @@ func (i *Interpreter) walkExprForQualifiedRefs(e parser.Expr) {
 		if ns, ok := i.nsPrefixes[ex.Prefix]; ok {
 			if v, hit := i.NSConstants[nsKey{NS: ns, Name: ex.Name}]; hit {
 				ex.Const = v
+			}
+		} else if m, ok := i.moduleAliases[ex.Prefix]; ok {
+			// Module-alias constant: stamp the exported const's
+			// boundary-retagged, deep-const value so evalQualifiedConst returns
+			// it directly, skipping the per-access GetBinding slot scan +
+			// export check + retag. Left unstamped (nil) when the name is
+			// missing or private, so the runtime path still raises the proper
+			// "no constant" / "not exported" error. Safe to cache: a module is
+			// run-once, its consts are deep-const, and retagStructs is a pure
+			// transform over stable module identity.
+			if b, err := m.interp.global.GetBinding(ex.Name); err == nil && b.IsConst && m.exports[ex.Name] {
+				ex.Const = retagStructs(b.Value, "", m.ns, "", m.path, m.isOwnStruct)
 			}
 		}
 	case *parser.CallExpr:

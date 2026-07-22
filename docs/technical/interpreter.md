@@ -420,13 +420,9 @@ Two moves close out the optimization pass:
    program produces the same annotations. Any undefined-variable or
    shadowing error surfaces here as a positioned parse-time
    diagnostic, not a runtime error.
-2. Records `Imports` into `i.imported`. Right after that,
-   `resolveQualifiedRefs(prog)` walks the AST once and pre-fills
-   every `QualifiedCallExpr.Fn` / `QualifiedConstRefExpr.Const`
-   against the now-populated namespace tables. This pass has to run
-   AFTER import processing (the tables didn't exist during Resolve)
-   and is skipped by the REPL, which builds its namespaces
-   incrementally.
+2. Records `Imports` into `i.imported`, activating library namespaces.
+   Module aliases are not loaded yet - that happens in step 4 - which
+   is why the qualified-ref pre-resolution is deferred until after it.
 3. Collects every `MethodDef` into `i.methods` (methods are hoisted: callable
    regardless of source order). During collection it enforces two rules:
    no duplicate method names, and no method name that collides with a
@@ -436,8 +432,16 @@ Two moves close out the optimization pass:
    body, `loadModuleImports(prog)` loads and initialises every
    `import "..."` module (see [Module loading](#module-loading)), so an
    imported module is fully initialised before the importer's body runs.
-   Then executes `prog.TopLevel` statements in source order in the global
-   scope.
+   Then `resolveQualifiedRefs(prog)` walks the AST once and pre-fills
+   every `QualifiedCallExpr.Fn` / `QualifiedConstRefExpr.Const` against
+   the now-populated namespace AND module-alias tables, so a library const
+   and a module-alias const (`m.CONST` - its boundary-retagged, deep-const
+   value cached on the node) both resolve to an O(1) return instead of a
+   per-access lookup (an unexported / missing name stays unstamped, so its
+   runtime error is unchanged). This pass runs after BOTH import
+   mechanisms (the tables didn't exist during Resolve) and is skipped by
+   the REPL, which builds its namespaces incrementally. Finally executes
+   `prog.TopLevel` statements in source order in the global scope.
 5. Method calls execute the body in a fresh call frame whose parent is
    `effectiveGlobal(env)` (an O(1) `env.root` field read; in
    serial code that's `i.global`, inside a `spawn` body it's the
