@@ -1984,11 +1984,39 @@ recursive data
 - Pinned by `TestStructSelfReferenceRejected` (direct, mutual, allowed
   list-recursion, allowed nesting).
 
-**Known adjacent gap (not this fix):** a **module** struct used as a *struct
-field type* (`def struct Line { from as geo.Point };`) currently fails type-check
-with "expects geo.Point, got struct" even though a module struct works fine as a
-*variable* type (`def p as geo.Point`). That is a separate cross-module
-field-identity bug, tracked for its own fix.
+**Adjacent gap (now fixed):** a **module** struct used as a *struct field type*
+was a separate cross-module field-identity bug, fixed in `M22.9` (below).
+
+### M22.9 - module structs as struct fields (cross-module field identity)
+
+**Done.** A module struct used as a **struct field type** now type-checks. It was
+previously rejected with "expects geo.Point, got struct" even though the same
+module struct works fine as a variable / parameter type (`def p as geo.Point`).
+Two related manifestations, both fixed:
+
+- **A main-program struct with a module-struct field**
+  (`def struct Line { from as geo.Point };`): `resolveDeclaredTypesOnce` (which
+  stamps the module's `(stem, path)` identity onto declared types after
+  `loadModuleImports`) never walked **struct field types** - only variable /
+  parameter types and `list` / `map` elements. So the field kept its unresolved
+  alias namespace while the field value carried the module identity, and the
+  check mismatched. Fix: also stamp each hoisted struct's field types in that
+  pass (recursing into `list` / `map` elements, so `pts as list of geo.Point`
+  resolves too). The `StructDef` pointers are shared with `i.structs`, so this
+  stamps the hoisted defs.
+- **A module struct whose own field references a sibling module struct**
+  (`Seg { a as Point }`), used across the import boundary: the module's field
+  types are bare (module-internal) but the boundary-crossed field values carry
+  the module's `(ns, path)` identity. Fix: retag the bare own-struct field types
+  to the module identity at the boundary check - at both struct-literal
+  construction and field assignment - via the existing `retagType` helper (which
+  already handles the same retag for `list` / `map` element types).
+
+Value semantics, chained lvalues into a nested module-struct field
+(`$L.from.x = 5`), and passing a nested field back into a module function all
+work; a wrong-typed field value is still rejected. Pinned by
+`TestModuleStructAsFieldTypeInMainStruct` and
+`TestModuleStructWithSiblingStructField`.
 
 ---
 

@@ -1909,17 +1909,29 @@ func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Val
 			if decl.Name != step.field {
 				continue
 			}
-			if !newVal.MatchesDeclared(decl.Type) {
-				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName, decl.Type, newVal.Kind), File: step.file, Line: step.line, Col: step.col}
+			declType := decl.Type
+			// A module struct's bare field types name sibling module structs by
+			// the module's internal identity; retag to the parent's (ns, path) so
+			// the assigned value (which carries that identity across the boundary)
+			// matches - the same boundary retag the module-struct literal path does.
+			if parent.StructNS != "" && parent.ModPath != "" {
+				ns, path := parent.StructNS, parent.ModPath
+				declType = *retagType(&decl.Type, "", ns, "", path, func(name string) bool {
+					_, ok := i.lookupStructDef(ns, name, path)
+					return ok
+				})
+			}
+			if !newVal.MatchesDeclared(declType) {
+				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName, declType, newVal.Kind), File: step.file, Line: step.line, Col: step.col}
 			}
 			for k := range parent.Fields {
 				if parent.Fields[k].Name == decl.Name {
-					parent.Fields[k].Value = stampDeclaredType(newVal.Copy(), decl.Type)
+					parent.Fields[k].Value = stampDeclaredType(newVal.Copy(), declType)
 					return nil
 				}
 			}
 			// Defensive: the field is declared but the runtime value is missing.
-			parent.Fields = append(parent.Fields, StructField{Name: decl.Name, Value: stampDeclaredType(newVal.Copy(), decl.Type)})
+			parent.Fields = append(parent.Fields, StructField{Name: decl.Name, Value: stampDeclaredType(newVal.Copy(), declType)})
 			return nil
 		}
 		return &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, step.field), File: step.file, Line: step.line, Col: step.col}
@@ -2908,6 +2920,13 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	var def *parser.StructDef
 	var resolvedNS string
 	var resolvedModPath string
+	// A module struct's field types name sibling module structs by the module's
+	// internal (bare) identity; the field *values* carry the module's (ns, path)
+	// identity once they cross the boundary. retagFieldType rewrites a module
+	// struct's own bare-struct field types to that (ns, path) identity so the
+	// field check matches. Identity for every other case (bare user struct,
+	// library struct, main-program struct with an already-stamped module field).
+	retagFieldType := func(t parser.Type) parser.Type { return t }
 	if mod, ok := i.moduleAliases[ex.NS]; ok {
 		// `alias.Struct{...}` - construct an importer-visible module struct.
 		d, exists := mod.interp.structs[ex.Name]
@@ -2922,6 +2941,13 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		def = d
 		resolvedNS = mod.ns
 		resolvedModPath = mod.path
+		modInterp, modNS, modPath := mod.interp, mod.ns, mod.path
+		retagFieldType = func(t parser.Type) parser.Type {
+			return *retagType(&t, "", modNS, "", modPath, func(name string) bool {
+				_, ok := modInterp.structs[name]
+				return ok
+			})
+		}
 	} else if ex.NS != "" {
 		canonical, err := i.resolveNamespacePrefix(ex.NS)
 		if err != nil {
@@ -2970,10 +2996,11 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		if err != nil {
 			return Value{}, err
 		}
-		if !v.MatchesDeclared(decl.Type) {
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, decl.Type, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
+		declType := retagFieldType(decl.Type)
+		if !v.MatchesDeclared(declType) {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, declType, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
-		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), decl.Type)})
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), declType)})
 	}
 	if resolvedNS != "" {
 		sv := NamespacedStructVal(resolvedNS, ex.Name, out)

@@ -100,6 +100,57 @@ io.printf("%d %d %d\n", $p.x, points.getX($p), points.getX($q));`,
 	}
 }
 
+func TestModuleStructAsFieldTypeInMainStruct(t *testing.T) {
+	// A module struct used as a *field type* in a main-program struct must
+	// type-check (regression: this used to fail "expects points.Point, got
+	// struct" even though the same struct works fine as a variable type). Covers
+	// construction, a chained lvalue into the nested module-struct field, value
+	// semantics, and passing the nested field back into a module function.
+	out, err := runScopedModuleMain(t, map[string]string{
+		"points.j": pointsModule,
+		"main.j": `use io;
+import "./points.j" as points;
+def struct Line { from as points.Point, to as points.Point };
+def L as Line init Line{ from: points.Point{x: 1, y: 2}, to: points.Point{x: 3, y: 4} };
+$L.from.x = 5;
+def M as Line init $L;
+$M.to.y = 99;
+io.printf("%d %d %d %d\n", $L.from.x, $L.to.y, $M.to.y, points.getX($L.from));`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "5 4 99 5" {
+		t.Errorf("output = %q, want '5 4 99 5'", got)
+	}
+}
+
+func TestModuleStructWithSiblingStructField(t *testing.T) {
+	// A module struct whose own field is another struct in the same module
+	// (`Seg { a as Point }`), constructed and mutated from the importer. The
+	// module's bare field type must retag to the module identity the field value
+	// carries across the boundary - at both construction and field assignment.
+	const segModule = `
+export def struct Point { x as int, y as int };
+export def struct Seg { a as Point, b as Point };
+`
+	out, err := runScopedModuleMain(t, map[string]string{
+		"seg.j": segModule,
+		"main.j": `use io;
+import "./seg.j" as geo;
+def s as geo.Seg init geo.Seg{ a: geo.Point{x: 1, y: 2}, b: geo.Point{x: 3, y: 4} };
+$s.a = geo.Point{x: 7, y: 8};
+$s.a.x = 100;
+io.printf("%d %d %d %d\n", $s.a.x, $s.a.y, $s.b.x, $s.b.y);`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "100 8 3 4" {
+		t.Errorf("output = %q, want '100 8 3 4'", got)
+	}
+}
+
 func TestModuleListOfStructCrossesBoundary(t *testing.T) {
 	// A consumer-typed `list of points.Point` handed back into a module
 	// function must satisfy the module's bare `list of Point` parameter: the

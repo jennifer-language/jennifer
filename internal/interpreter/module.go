@@ -508,6 +508,25 @@ func (i *Interpreter) resolveDeclaredTypesOnce(prog *parser.Program) {
 	if prog == nil {
 		return
 	}
+	// Stamp struct field types so a `def struct Line { from as mod.Point };`
+	// field carries the module's (stem, path) identity and matches the module
+	// struct value stored into it. Field checks (at literal construction and
+	// field assignment) are the only place a module-struct field type is
+	// compared, and without this the field keeps its bare / alias namespace and
+	// fails MatchesDeclared ("expects mod.Point, got struct") - even though the
+	// same module struct works fine as a variable / parameter type. The StructDef
+	// pointers are shared with i.structs, so this stamps the hoisted defs too;
+	// resolveDeclaredStructNS recurses into `list` / `map` element types, so a
+	// `list of mod.Point` field resolves as well. Best-effort like the rest: an
+	// unresolvable field type is left unstamped for the field check to error on.
+	for _, sd := range prog.Structs {
+		if sd == nil {
+			continue
+		}
+		for fi := range sd.Fields {
+			_ = i.resolveDeclaredStructNS(&sd.Fields[fi].Type, sd)
+		}
+	}
 	for _, s := range prog.TopLevel {
 		i.declTypesStmt(s)
 	}
