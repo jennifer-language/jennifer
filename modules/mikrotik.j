@@ -7,7 +7,8 @@
  * commands. The wire protocol is sentence-based: a sentence is a run of
  * length-prefixed words ending in a zero-length word; `talk` sends a command
  * sentence (`/interface/print`) with `=key=value` attribute words and folds
- * each `!re` reply sentence into a row map. `print` is read sugar, `run` is for
+ * each `!re` reply sentence into a row map. `talkQuery` / `printWhere` add `?...`
+ * query words to filter rows on the router. `print` is read sugar, `run` is for
  * mutating commands (returning the `!done`'s `=ret=`, e.g. a new item id).
  *
  * Login is plaintext (`=name=` / `=password=`, RouterOS 6.43+ and all v7), with
@@ -262,19 +263,29 @@ func parseFields(sentence as list of string) {
     return $fields;
 }
 
-# buildWords turns a command plus attributes into a word list.
-func buildWords(command as string, attrs as map of string to string) {
+# buildWords turns a command plus attribute and query words into a word list.
+# Attribute words are `=key=value`; query words are raw RouterOS query words -
+# each starts with `?` (e.g. `?type=ether`, `?>mtu=1000`, or a `?#&` / `?#|` /
+# `?#!` stack operator) - and are appended verbatim, so the full query grammar
+# stays reachable. A query word missing its leading `?` is a caller error.
+func buildWords(command as string, attrs as map of string to string, queries as list of string) {
     def words as list of string init [$command];
     for (def key in $attrs) {
         $words[] = "=" + $key + "=" + $attrs[$key];
+    }
+    for (def q in $queries) {
+        if (not strings.startsWith($q, "?")) {
+            fail("query word must start with '?': " + $q);
+        }
+        $words[] = $q;
     }
     return $words;
 }
 
 # exchange sends a command and reads reply sentences until `!done`, collecting
 # `!re` rows and the `!done` ret; a `!trap` / `!fatal` throws.
-func exchange(session as Session, command as string, attrs as map of string to string) {
-    writeSentence($session.socket, buildWords($command, $attrs));
+func exchange(session as Session, command as string, attrs as map of string to string, queries as list of string) {
+    writeSentence($session.socket, buildWords($command, $attrs, $queries));
     def rows as list of map of string to string init [];
     def ret as string init "";
     def trapMsg as string init "";
@@ -337,14 +348,14 @@ func login(session as Session, user as string, password as string) {
     def attrs as map of string to string init {};
     $attrs["name"] = $user;
     $attrs["password"] = $password;
-    def r as Reply init exchange($session, "/login", $attrs);
+    def r as Reply init exchange($session, "/login", $attrs, []);
     # An old (pre-6.43) router answers with a challenge in =ret= instead of
     # logging in; complete the MD5 challenge-response.
     if (len($r.ret) > 0) {
         def resp as map of string to string init {};
         $resp["name"] = $user;
         $resp["response"] = challengeResponse($password, $r.ret);
-        exchange($session, "/login", $resp);
+        exchange($session, "/login", $resp, []);
     }
 }
 
@@ -383,7 +394,25 @@ export func connect(opts as Options) {
  * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
  */
 export func talk(session as Session, command as string, attrs as map of string to string) {
-    return exchange($session, $command, $attrs).rows;
+    return exchange($session, $command, $attrs, []).rows;
+}
+
+/**
+ * Like `talk`, but also sends RouterOS **query words** to filter the reply on the
+ * router. Each query word is raw and starts with `?`: `?type=ether` (property
+ * equals), `?disabled` (property present), `?>mtu=1000` (greater), plus the stack
+ * operators `?#!` / `?#&` / `?#|` for compound queries. Attribute words still
+ * apply (e.g. `=.proplist=name,type` to trim the columns). The general filtered
+ * read the higher-level helpers build on.
+ * @param session {Session} the session
+ * @param command {string} the API command (e.g. "/interface/print")
+ * @param attrs {map of string to string} attribute words ({} for none)
+ * @param queries {list of string} raw query words, each starting with "?"
+ * @return {list of map of string to string} the matching reply rows
+ * @throws {Error} kind "mikrotik" on a bad query word or a !trap / !fatal reply
+ */
+export func talkQuery(session as Session, command as string, attrs as map of string to string, queries as list of string) {
+    return exchange($session, $command, $attrs, $queries).rows;
 }
 
 /**
@@ -395,7 +424,21 @@ export func talk(session as Session, command as string, attrs as map of string t
  */
 export func print(session as Session, path as string) {
     def none as map of string to string init {};
-    return exchange($session, $path + "/print", $none).rows;
+    return exchange($session, $path + "/print", $none, []).rows;
+}
+
+/**
+ * Read sugar: run `path + "/print"` filtered by query words (no attributes) -
+ * `printWhere($s, "/interface", ["?type=ether"])` returns only the ether ports.
+ * @param session {Session} the session
+ * @param path {string} the menu path (e.g. "/interface")
+ * @param queries {list of string} raw query words, each starting with "?"
+ * @return {list of map of string to string} the matching reply rows
+ * @throws {Error} kind "mikrotik" on a bad query word or a !trap / !fatal reply
+ */
+export func printWhere(session as Session, path as string, queries as list of string) {
+    def none as map of string to string init {};
+    return exchange($session, $path + "/print", $none, $queries).rows;
 }
 
 /**
@@ -408,7 +451,7 @@ export func print(session as Session, path as string) {
  * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
  */
 export func run(session as Session, command as string, attrs as map of string to string) {
-    return exchange($session, $command, $attrs).ret;
+    return exchange($session, $command, $attrs, []).ret;
 }
 
 /**

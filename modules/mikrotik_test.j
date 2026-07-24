@@ -63,15 +63,46 @@ func testParseFieldsValueWithEquals() {
 
 func testBuildWords() {
     def none as map of string to string init {};
-    def w as list of string init buildWords("/interface/print", $none);
+    def noq as list of string init [];
+    def w as list of string init buildWords("/interface/print", $none, $noq);
     testing.assertEqual(len($w), 1);
     testing.assertEqual($w[0], "/interface/print");
 
     def attrs as map of string to string init {};
     $attrs["address"] = "1.2.3.4/24";
-    def withAttr as list of string init buildWords("/ip/address/add", $attrs);
+    def withAttr as list of string init buildWords("/ip/address/add", $attrs, $noq);
     testing.assertEqual(len($withAttr), 2);
     testing.assertEqual($withAttr[1], "=address=1.2.3.4/24");
+}
+
+func testBuildWordsQueries() {
+    # Query words are appended verbatim, after the command (and after any attrs).
+    def none as map of string to string init {};
+    def q as list of string init ["?type=ether", "?disabled"];
+    def w as list of string init buildWords("/interface/print", $none, $q);
+    testing.assertEqual(len($w), 3);
+    testing.assertEqual($w[0], "/interface/print");
+    testing.assertEqual($w[1], "?type=ether");
+    testing.assertEqual($w[2], "?disabled");
+
+    # Attribute words come before query words.
+    def attrs as map of string to string init {};
+    $attrs["numbers"] = "0";
+    def wq as list of string init buildWords("/interface/print", $attrs, ["?type=ether"]);
+    testing.assertEqual(len($wq), 3);
+    testing.assertEqual($wq[1], "=numbers=0");
+    testing.assertEqual($wq[2], "?type=ether");
+}
+
+# badQueryWord feeds buildWords a query word without its leading "?" - it must throw.
+func badQueryWord() {
+    def none as map of string to string init {};
+    def bad as list of string init ["type=ether"];
+    buildWords("/interface/print", $none, $bad);
+}
+
+func testBuildWordsRejectsBadQuery() {
+    testing.assertThrows("badQueryWord", "mikrotik");
 }
 
 func testChallengeResponseShape() {

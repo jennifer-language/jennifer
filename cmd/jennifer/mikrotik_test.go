@@ -83,9 +83,19 @@ func rosWriteSentence(w io.Writer, words ...string) {
 	w.Write(rosEncodeLen(0))
 }
 
+// hasWord reports whether words contains an exact match for w.
+func hasWord(words []string, w string) bool {
+	for _, x := range words {
+		if x == w {
+			return true
+		}
+	}
+	return false
+}
+
 // serveMikrotik answers a plaintext login, then handles print / add / unknown
 // commands with canned reply sentences, exercising the client's login, talk,
-// run, and !trap paths.
+// run, !trap, and query-word (talkQuery / printWhere) paths.
 func serveMikrotik(ln net.Listener) {
 	conn, err := ln.Accept()
 	if err != nil {
@@ -110,8 +120,12 @@ func serveMikrotik(ln net.Listener) {
 		}
 		switch {
 		case strings.Contains(cmd[0], "print"):
+			// A query word filtering on running=true returns only the matching
+			// row - proving query words reach the server via talkQuery / printWhere.
 			rosWriteSentence(conn, "!re", "=name=ether1", "=type=ether", "=running=true")
-			rosWriteSentence(conn, "!re", "=name=ether2", "=type=ether", "=running=false")
+			if !hasWord(cmd, "?running=true") {
+				rosWriteSentence(conn, "!re", "=name=ether2", "=type=ether", "=running=false")
+			}
 			rosWriteSentence(conn, "!done")
 		case strings.HasPrefix(cmd[0], "/ip/address/add"):
 			rosWriteSentence(conn, "!done", "=ret=*5")
@@ -148,6 +162,10 @@ testing.assertEqual(len($rows), 2);
 testing.assertEqual($rows[0]["name"], "ether1");
 testing.assertEqual($rows[0]["running"], "true");
 testing.assertEqual($rows[1]["running"], "false");
+
+def filtered as list of map of string to string init mikrotik.printWhere($s, "/interface", ["?running=true"]);
+testing.assertEqual(len($filtered), 1);
+testing.assertEqual($filtered[0]["name"], "ether1");
 
 def attrs as map of string to string init {};
 $attrs["address"] = "10.0.0.1/24";

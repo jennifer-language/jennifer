@@ -55,7 +55,9 @@ row map.
 | Call | Returns | |
 | ---- | ------- | - |
 | `mikrotik.talk(s, command, attrs)` | `list of map of string to string` | the general call - the `!re` reply rows |
+| `mikrotik.talkQuery(s, command, attrs, queries)` | `list of map of string to string` | like `talk`, plus raw `?...` **query words** to filter rows on the router |
 | `mikrotik.print(s, path)` | `list of map of string to string` | read sugar for `path + "/print"` |
+| `mikrotik.printWhere(s, path, queries)` | `list of map of string to string` | read sugar: `path + "/print"` filtered by query words |
 | `mikrotik.run(s, command, attrs)` | `string` | for add / set / remove - returns the `!done` `=ret=` (e.g. a new item id) |
 
 ```jennifer
@@ -69,15 +71,31 @@ def attrs as map of string to string init {};
 $attrs["address"] = "10.0.0.1/24";
 $attrs["interface"] = "ether1";
 def newId as string init mikrotik.run($s, "/ip/address/add", $attrs);
+
+# filtered read: query words run on the router (each starts with "?")
+def ethers as list of map of string to string init
+    mikrotik.printWhere($s, "/interface", ["?type=ether", "?running=true"]);
+# talkQuery is the general form - attributes plus queries (e.g. trim the columns):
+def cols as map of string to string init {};
+$cols[".proplist"] = "name,type";
+def named as list of map of string to string init
+    mikrotik.talkQuery($s, "/interface/print", $cols, ["?type=ether"]);
 ```
+
+Query words filter server-side (the router returns only matching rows), so they
+are cheaper than fetching everything and filtering in Jennifer. Each is a raw
+RouterOS query word starting with `?`: `?type=ether` (equals), `?disabled`
+(property present), `?>mtu=1000` (greater), and the stack operators `?#!` / `?#&`
+/ `?#|` for compound queries. A query word missing its leading `?` throws
+`Error{kind: "mikrotik"}`.
 
 ## Scope
 
 - **Binary API, v6 and v7.** The v7 REST API (HTTP + JSON) is a different,
   stateless shape and a possible second backend later; v1 ships the binary API.
-- **Synchronous `talk`.** Query words (`?name=value`) and `.tag`-multiplexed
-  concurrent commands are follow-ons - each call runs to its `!done` before the
-  next.
+- **Synchronous `talk`.** `.tag`-multiplexed concurrent commands are a follow-on -
+  each call runs to its `!done` before the next. (Server-side **query words** are
+  supported, via `talkQuery` / `printWhere`.)
 - **`!trap` throws.** A command error surfaces as `Error{kind: "mikrotik"}`
   (the trailing `!done` is consumed first, so the session stays usable); a
   `!fatal` (connection closing) throws immediately.
