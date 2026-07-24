@@ -554,13 +554,14 @@ func (p *parser) parseDefineLike() (Stmt, error) {
 		}
 	}
 	if isConst {
-		// constant: name is an IDENT, must be uppercase [A-Z]+
+		// constant: name is an IDENT, must be uppercase (with digits) in
+		// `_`-separated chunks that each start with a letter
 		name, err := p.expect(lexer.TOKEN_IDENT, "after `const`")
 		if err != nil {
 			return nil, err
 		}
 		if !isValidConstName(name.Lexeme) {
-			return nil, &ParseError{Msg: fmt.Sprintf("constant name %q must be uppercase [A-Z]+ with single `_` separators (no leading, trailing, or consecutive `_`)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("constant name %q must be uppercase letters and digits in single-`_`-separated chunks, each chunk starting with a letter (e.g. MAX_RETRIES, SHA256); `_` must be followed by a letter, with no leading, trailing, or consecutive `_`", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 		}
 		if _, err := p.expect(lexer.TOKEN_AS, "after constant name"); err != nil {
 			return nil, err
@@ -1202,15 +1203,18 @@ func (p *parser) parseType() (Type, error) {
 }
 
 // isValidConstName reports whether s matches the constant naming rule:
-// `[A-Z]+(_[A-Z]+)*` - one or more uppercase chunks separated by single
-// `_` characters. Equivalently: every `_` must be immediately followed by
-// `[A-Z]`, never another `_` and never the end of the name. The lexer
-// already refuses identifiers that start with `_` or end with `_`; this
-// function additionally enforces the uppercase requirement and the
-// "no consecutive `_`" rule.
+// `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` - one or more chunks separated by single
+// `_` characters, where each chunk starts with an uppercase letter and then
+// runs of uppercase letters and digits. Equivalently: the first character and
+// the character after every `_` must be an uppercase letter (a chunk begins
+// with a letter, never a digit or `_`); other characters may be uppercase or a
+// digit; and every `_` must be immediately followed by that letter, never
+// another `_` and never the end of the name. The lexer already refuses
+// identifiers that start with `_` or end with `_`; this function additionally
+// enforces the uppercase-plus-digit requirement and the "no consecutive `_`".
 //
-// Accepted:  A, MAX, MAX_RETRIES, HTTP_OK, A_B_C
-// Rejected:  _MAX, MAX_, max_int, MAX__INT, MAX___RETRIES
+// Accepted:  A, MAX, MAX_RETRIES, HTTP_OK, SHA256, HTTP2, SCRAM_SHA256, A_B_C
+// Rejected:  _MAX, MAX_, max_int, MAX__INT, AES_256 (write AES256), 2X
 func isValidConstName(s string) bool {
 	if s == "" {
 		return false
@@ -1218,6 +1222,7 @@ func isValidConstName(s string) bool {
 	if s[0] == '_' || s[len(s)-1] == '_' {
 		return false
 	}
+	atChunkStart := true
 	prevUnderscore := false
 	for _, r := range s {
 		if r == '_' {
@@ -1225,12 +1230,22 @@ func isValidConstName(s string) bool {
 				return false
 			}
 			prevUnderscore = true
+			atChunkStart = true
 			continue
 		}
-		if r < 'A' || r > 'Z' {
+		prevUnderscore = false
+		if atChunkStart {
+			// A chunk must begin with an uppercase letter (not a digit).
+			if r < 'A' || r > 'Z' {
+				return false
+			}
+			atChunkStart = false
+			continue
+		}
+		// Interior of a chunk: uppercase letter or digit.
+		if !((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
 			return false
 		}
-		prevUnderscore = false
 	}
 	return true
 }
@@ -1773,7 +1788,7 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 				Field:  name.Lexeme,
 			}, nil
 		}
-		return nil, &ParseError{Msg: fmt.Sprintf("qualified constant name %q must be uppercase [A-Z]+ with single `_` separators", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+		return nil, &ParseError{Msg: fmt.Sprintf("qualified constant name %q must be uppercase letters and digits in single-`_`-separated chunks, each chunk starting with a letter (e.g. SHA256)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 	}
 	return &QualifiedConstRefExpr{
 		pos:    pos{File: prefix.File, Line: prefix.Line, Col: prefix.Col},

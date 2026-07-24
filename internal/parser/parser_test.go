@@ -189,6 +189,7 @@ func TestParseErrors(t *testing.T) {
 		{"const rejects lowercase with underscore", `func app() { def const max_int as int init 1; }`, "must be uppercase"},
 		{"const rejects consecutive underscores", `func app() { def const MAX__INT as int init 1; }`, "consecutive"},
 		{"const rejects four-in-a-row underscores", `func app() { def const MAX____RETRIES as int init 1; }`, "consecutive"},
+		{"const rejects underscore-then-digit chunk", `func app() { def const AES_256 as int init 1; }`, "chunk"},
 		{"var rejects underscore", `func app() { def my_var as int init 1; }`, "may not contain"},
 		{"method name rejects underscore", `func my_method() {}`, "may not contain"},
 		{"param rejects underscore", `func f(my_arg as int) {}`, "may not contain"},
@@ -219,11 +220,38 @@ func TestConstNameAccepts(t *testing.T) {
 		`def const MAX_RETRIES as int init 1;`,
 		`def const HTTP_OK as int init 200;`,
 		`def const A_B_C_D as int init 1;`,
+		// In-chunk digits: a chunk starts with a letter, then upper/digits.
+		`def const SHA256 as int init 1;`,
+		`def const HTTP2 as int init 2;`,
+		`def const RFC5322 as int init 1;`,
+		`def const SCRAM_SHA256 as int init 1;`,
+		`def const X509 as int init 1;`,
 	}
 	for _, src := range good {
 		if _, err := Parse(src); err != nil {
 			t.Errorf("%q: unexpected parse error: %v", src, err)
 		}
+	}
+}
+
+// TestParseDigitIdentifiers covers the identifier digit relaxation for the
+// letters-only kinds (variables, methods, parameters): interior / trailing
+// digits are allowed, `_` is still rejected.
+func TestParseDigitIdentifiers(t *testing.T) {
+	good := []string{
+		`def x2 as int init 5;`,
+		`def sha256 as int init 1;`,
+		`func md5(v2 as int) { return $v2; }`,
+		`func toUtf8(s as string) { return $s; }`,
+	}
+	for _, src := range good {
+		if _, err := Parse(src); err != nil {
+			t.Errorf("%q: unexpected parse error: %v", src, err)
+		}
+	}
+	// `_` stays constants-only, even alongside digits.
+	if _, err := Parse(`def x_2 as int init 1;`); err == nil {
+		t.Error("expected error: `_` is not allowed in a variable name")
 	}
 }
 

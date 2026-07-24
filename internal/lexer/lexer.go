@@ -572,23 +572,26 @@ func (l *Lexer) readIdentifierOrKeyword(startLine, startCol int) (Token, error) 
 
 // isIdentStart: identifiers (variable / method / constant / parameter
 // names, plus library names) must start with a letter. Digits and `_`
-// are explicitly rejected as the first character.
+// are explicitly rejected as the first character - a token that starts with
+// a digit is always a number, which keeps the lexer unambiguous.
 func isIdentStart(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
-// isIdentPart: variable references (`$name`) and similar contexts where
-// the spec keeps names letters-only. Constant identifiers use the looser
-// rule below.
+// isIdentPart: variable references (`$name`) and similar contexts. After the
+// leading letter, interior / trailing ASCII digits are allowed (so `$x2`,
+// `sha256`), but `_` is not - that stays a constant-only separator, enforced
+// by the looser rule below.
 func isIdentPart(r rune) bool {
-	return isIdentStart(r)
+	return isIdentStart(r) || isASCIIDigit(r)
 }
 
-// isIdentPartLoose: bare-IDENT continuation. Accepts `_` so the lexer can
-// produce constant names like MAX_RETRIES as a single token. The trailing-
-// `_` and per-context rules (uppercase-only for constants, no `_` at all
-// for variables / methods / parameters) are enforced by the lexer's
-// trailing-character check and by the parser at the relevant def sites.
+// isIdentPartLoose: bare-IDENT continuation. Accepts digits (interior /
+// trailing) and `_` so the lexer can produce both `sha256` and constant names
+// like MAX_RETRIES / SHA256 as a single token. The trailing-`_` and per-context
+// rules (uppercase-with-digits for constants, no `_` at all for variables /
+// methods / parameters) are enforced by the lexer's trailing-character check
+// and by the parser at the relevant def sites.
 func isIdentPartLoose(r rune) bool {
-	return isIdentStart(r) || r == '_'
+	return isIdentStart(r) || isASCIIDigit(r) || r == '_'
 }

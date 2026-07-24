@@ -1670,12 +1670,15 @@ separator splits and stops hardcoding `/`. `use path;` enables eight functions:
 
 ### M22.2 - digits in identifiers
 
-**Planned** (graduated from `DRAFT#20`). Relax the letters-only identifier rule
-to allow interior and trailing digits, keeping every identifier
-**letter-initial**. Today identifiers are `[A-Za-z]` only, which forces a running
-tax of euphemisms - `uuid.generate("v4")` because `v4()` is unspellable, the I2C
-library named `iic`, `pbkdf` dropping its "2", `binary` because `bytes` is
-reserved, the `hash` / `crc` dance. Each is a workaround for the same rule.
+**The rule change is Done; the enabled renames are the remaining follow-up**
+(graduated from `DRAFT#20`). Relaxes the letters-only identifier rule to allow
+interior and trailing digits, keeping every identifier **letter-initial**. The
+old `[A-Za-z]`-only rule forced a running tax of euphemisms - `uuid.generate("v4")`
+because `v4()` was unspellable, the I2C library named `iic`, `pbkdf` dropping its
+"2", the `hash` / `crc` dance. The lexer / constant / spec / grammar / highlighter
+/ test work below shipped as an **additive, non-breaking** change (every
+previously-valid identifier stays valid). The **batched renames** it enables are
+separately breaking and are tracked as their own milestone, `M22.3` (below).
 
 **The rule change, two identifier classes:**
 
@@ -1707,18 +1710,15 @@ strings, not identifiers, and already allow digits, so they are untouched. Roles
 stay unambiguous because the `$` / `.` / `(` markers still distinguish them:
 `$x2` (variable), `p.x2` (field), `f.v4()` (call), `SHA256` (constant).
 
-**Batched follow-on renames, all pre-1.0 breaking so they land together.** With
-the rule in place, drop the euphemisms it forced: `iic` -> `i2c`,
-`uuid.generate("v4")` -> `uuid.v4()` (the version becomes a method, not a string
-argument), `pbkdf` -> `pbkdf2`, and revisit the `hash` / `crc` / `binary` naming.
-Each rename is semver-breaking, which is exactly why the whole change must land
-**before 1.0.0**.
+**Batched follow-on renames.** The euphemism-dropping renames the rule enables
+(`iic` -> `i2c`, `uuid.v4()`, `pbkdf2`, ...) are all semver-breaking, so they are
+tracked and land together as **`M22.3`** (below), not inline here.
 
 **Cost.** Mechanically small: one character-class change in the lexer's
 identifier scanner plus the constant validator, and a re-verification that no
 number / identifier ambiguity opens. The weight is that it is a language-identity
-and breaking decision, so it also touches the spec (the Identifiers section of
-`CLAUDE.md`), `JENNIFER.md`, the grammar EBNF / PEG, the naming-convention
+and breaking decision, so it also touches the spec,
+`JENNIFER.md`, the grammar EBNF / PEG, the naming-convention
 guidance, and every editor highlighter (`editors/` Vim / TextMate / highlight.js
 and the regenerated docs bundle). The trade accepted: the uniform letters-only
 look (and its "is `sha256` a name or a typo?" tidiness) is given up to end the
@@ -1728,7 +1728,170 @@ euphemism tax.
 never take `_`) and constants stay **ALLCAPS** - the relaxation only adds digits,
 it does not change the two-class structure.
 
-### M22.3 - TLS options for `http` / `rest`
+### M22.3 - library renames enabled by digit identifiers
+
+**Planned** (the breaking follow-on to `M22.2`). With the identifier rule in
+place, drop the euphemisms the old letters-only rule forced. Each is a
+semver-breaking API change, so they are **batched to land together before
+1.0.0** rather than dribbled out one at a time. Requires `M22.2` (the rule).
+
+The breaking renames:
+
+| Was | Now | Why it was a euphemism |
+| --- | --- | ---------------------- |
+| `use iic;` (I2C bus) | `use i2c;` | `i2c` has a digit; `iic` was the letters-only spelling |
+| `uuid.generate("v4")` / `generate("v7")` | `uuid.v4()` / `uuid.v7()` | the version becomes a real method, not a string argument |
+| `crypto.pbkdf(...)` | `crypto.pbkdf2(...)` | PBKDF2 dropped its "2" |
+
+Additive companion (not breaking, may ship alongside): spellable
+algorithm-method names now that digits are allowed - `hash.md5(b)` / `sha1(b)` /
+`sha256(b)` and `crc.crc32(b)` / `crc64(b)` beside the stringly-typed
+`compute(b, algo)` form the euphemism forced (the `hash` / `crc` "dance"); the
+old `compute` can stay or be deprecated toward removal.
+
+**Not renamed.** `binary` is named around the reserved **`bytes` type keyword**,
+not a digit, so the rule change does not help it - it stays `binary`. `intl`
+stays `intl` (letters-only was only half the reason; the model is JS's `Intl`,
+not `i18n`) unless a later call decides otherwise.
+
+**Migration.** Pre-1.0, these break directly (no both-ways deprecation window).
+One batch updates each module / library, its `*_test.j` overlay and Go
+integration test, `docs/libraries/` + `docs/modules/` references, `JENNIFER.md`,
+the cheatsheet, and every example / module that calls an old name.
+
+### M22.4 - `match` statement (multi-way value dispatch)
+
+**Planned.** A multi-way branch so a chain of `if` / `elseif` comparing one
+subject reads as a single dispatch. Keywords **`match` / `when` / `else`**, chosen
+so the construct can *grow* into pattern matching later (see `M22.5`) rather
+than shipping a `switch` now and needing a second `match` construct - one
+branch-on-a-subject statement, not two.
+
+```jennifer
+match ($x) {
+    when 1 { io.printf("one\n"); }
+    when 2, 3, 4 { io.printf("a few\n"); }   # multiple values per arm
+    else { io.printf("many\n"); }             # optional
+}
+```
+
+**Semantics (v1: literal / value dispatch, no type-system work):**
+
+- **`match (EXPR) { ... }`** - parenthesized subject (like `if (cond)` /
+  `while (cond)`), evaluated **once**.
+- **`when V [, V ...] { block }`** - one or more values (any expressions, not just
+  literals: `when MAX`, `when $threshold`), compared to the subject by Jennifer's
+  strict `==` (same exact / type-strict rules as everywhere). First arm whose
+  value list contains a match runs; its `V`s are evaluated left-to-right only
+  until a match. Arms are checked top-to-bottom.
+- **No fall-through.** Each arm is an independent block; there is no `break` to
+  end an arm and no implicit fall to the next (the C footgun is unrepresentable).
+  A `match` is therefore **not** a `break` target: `break` / `continue` inside an
+  arm act on the enclosing loop, avoiding Go's "break breaks the switch" trap.
+- **`else { block }`** - optional default; reuses `else` rather than adding a
+  `default` keyword. **No matching arm and no `else` is a well-defined no-op**
+  (like Go), not an error.
+- **A statement, not an expression** - arms act / assign / `return`, consistent
+  with `if` (Jennifer rejected the ternary to avoid "blocks yield their last
+  expression"; a `match`-expression would reopen that and stays deferred).
+- Each arm's block is its own scope (per-branch, like `if` blocks), via the
+  resolver.
+- **Canonical layout is a multiline block** (a style rule, applied by `fmt`).
+  Whitespace is insignificant, so a whole `match` *may* be written on one line -
+  but the recommended and `jennifer fmt`-canonical form is the subject line
+  `match (EXPR) {`, then **one arm per line** indented one level
+  (`when ... { ... }`, with `else { ... }` last), then the closing `}` on its own
+  line - the same visual shape as an `if` / `elseif` / `else` chain. Prose
+  examples in the docs use this multiline form (not the compact single-line one),
+  and `fmt` reflows a single-line `match` into it.
+
+**Grows into `M22.5`.** This is the foundation the sum-types milestone extends:
+`when` gains guards (`when $x > 5`) and structural patterns (`when Some(v)`) with
+no new keyword. `M22.5` accordingly becomes "sum types, which extend this
+`match`," not a separate construct.
+
+**Implementation surface:** lexer keywords `match` / `when` (grep `modules/` +
+`examples/` for any identifier collisions first - reserving them is a small
+pre-1.0 break if used as a name); a `MatchStmt` AST node (subject + ordered arms,
+each arm a `[]Expr` value list + block, plus an optional else block); the parser
+(`match (` after the existing statement dispatch); the interpreter (eval subject
+once, `Value.Equal` against each arm's values, run the first match's block via
+`execBlock`); the resolver (per-arm block scopes); grammar EBNF / PEG; the spec
+(`CLAUDE.md` control-flow, `JENNIFER.md`); the four editor highlighters;
+**`jennifer fmt`** (the token-level formatter, `cmd/jennifer/fmt.go`, must
+recognize `match` / `when` / `else` and reflow a `match` to the canonical
+multiline block - one arm per line, indented - via its brace-classification
+walk); the **style guide** (`docs/user-guide/style-guide.md`, the design guide -
+document the multiline `match` layout as the recommended form, and add a
+`fmt`-round-trip example); the `control-flow` user-guide page; and lexer / parser
+/ interpreter tests (including a `fmt` idempotence / reflow test for `match`)
+plus a golden example. **Requires:** none hard (value dispatch needs no type
+system).
+
+### M22.5 - sum types (enums) + pattern `match`
+
+**Planned** (graduated from `DRAFT#19`; the payoff `M22.4`'s `match` was designed
+to grow into). Structs model a *record*; there is no way to model "one of N
+variants," and the interpreter's own `Value` is already a tagged union - this just
+exposes that shape to the language, with `match` as the way to consume it.
+
+**Declaration + construction:**
+
+```jennifer
+def enum Shape {
+    Circle { r as float },
+    Rect { w as float, h as float },
+    Empty
+};
+def s as Shape init Shape.Circle{ r: 2.0 };   # or Shape.Empty
+```
+
+- **`def enum Name { Variant [ { field as type, ... } ], ... };`** at top level,
+  hoisted before the first statement like `def struct`. Each variant is
+  payload-less or carries named fields (a mini-struct). Construction mirrors
+  struct literals: `Name.Variant{ ... }` / `Name.Variant` (payload-less).
+- Cross-module enum identity keyed by canonical path, exactly like module structs
+  (`ALIAS.Enum` / `ALIAS.Enum.Variant{...}`).
+
+**Consumption - extends `M22.4`'s `match` / `when` with variant patterns:**
+
+```jennifer
+match ($s) {
+    when Circle(c) { io.printf("area %f\n", math.PI * $c.r * $c.r); }
+    when Rect(rc)  { io.printf("area %f\n", $rc.w * $rc.h); }
+    when Empty     { io.printf("empty\n"); }
+}
+```
+
+- A pattern arm `when Variant(bind) { block }` binds the variant's payload into a
+  **fresh per-arm scope** (`$bind` is the mini-struct), reusing exactly the arm
+  scope machinery `M22.4` already builds - value arms and pattern arms coexist,
+  disambiguated at resolve time by whether the arm head is an enum variant.
+- **Exhaustiveness** for an enum subject is checked at **resolve time**: every
+  variant must be covered, or an `else` arm present, else a positioned parse
+  error. (Value-`match` over `int` / `string` stays non-exhaustive - there is no
+  finite variant set to check.) This is the strict, positioned-error stance
+  applied to control flow; a forgotten variant is a compile error, not a silent
+  no-op.
+
+**Implementation surface.** A new `Value` kind **`KindEnum`** mirroring
+`KindStruct` almost exactly - a `(namespace, name)` discriminant (which variant)
+plus a `Fields` payload - so it inherits value semantics, deep `const`,
+`Copy` / `DeepCopy`, and `MatchesDeclared` with little new machinery, and stays
+tagged-union / reflect-free (TinyGo-clean, no frame-pool concern). Parser: the
+`def enum` declaration and `Name.Variant{...}` construction, plus the pattern-arm
+grammar in `match` (payload slots resolved into the arm block scope via
+`borrowBlockEnv`). Resolver: the exhaustiveness check. Interpreter: `execMatch`
+extended to test the active variant and bind its payload. Plus grammar EBNF / PEG,
+the spec (`CLAUDE.md`, `JENNIFER.md`), the four editor highlighters, the
+`types-and-values` + `control-flow` user-guide pages, and lexer / parser /
+interpreter tests with a golden example.
+
+**Requires:** **`M22.4`** (the `match` / `when` construct pattern arms extend).
+Relates to `DRAFT#18` (first-class functions - a `match` result plus function
+values together give the functional-core idioms).
+
+### M22.6 - TLS options for `http` / `rest`
 
 **Planned.** Let the `http` client (and `rest` on top) reach an HTTPS server with
 a self-signed or private-CA certificate, by threading TLS options through to
@@ -1763,7 +1926,7 @@ concern. **Verification:** the overlays can spin a self-signed loopback with
 `httpd.listenTLS` and confirm `http` / `rest` reach it with `skipVerify` (and
 refuse it without) - a real end-to-end test, not just a shape check.
 
-### M22.4 - `graphql` (GraphQL client module)
+### M22.7 - `graphql` (GraphQL client module)
 
 **Planned.** A thin GraphQL client `.j` module: build a request against one
 endpoint, POST `{ "query": ..., "variables": ... }`, and read the JSON response.
@@ -1776,7 +1939,7 @@ the server's job) and the response is JSON the `json` library already handles, s
 there is no per-byte hot path.
 
 **Shape:** a `graphql.Client` layered on a `rest.Client` (endpoint URL + auth
-header, and - via `M22.3` - TLS options for a self-signed host), plus
+header, and - via `M22.6` - TLS options for a self-signed host), plus
 `graphql.query(client, query, variables) -> json.Value`. The one
 GraphQL-specific wrinkle to get right: **a GraphQL error is an HTTP 200 with an
 `errors` array in the body**, not a non-2xx status - so `query` must inspect the
@@ -1788,8 +1951,44 @@ messages, rather than trusting the status line. `variables` is a `json.Value` /
 **Files:** `modules/graphql.j` + `modules/graphql_test.j` (100%),
 `docs/modules/graphql.md`, a `JENNIFER.md` bullet, a demo. Default-binary-only
 (net-backed via `http` / `rest`). **Requires:** builds on `http` / `rest` +
-`json`; `M22.3` for self-signed endpoints (the homelab case). It is the GraphQL
+`json`; `M22.6` for self-signed endpoints (the homelab case). It is the GraphQL
 dependency the Unraid client in `DRAFT#24` consumes.
+
+### M22.8 - self-referential struct guard
+
+**Done.** A struct that contains itself **by value** - directly
+(`def struct Node { v as int, next as Node }`) or mutually (A holds a B that
+holds an A) - has no finite zero value under Jennifer's value semantics (there is
+no null / pointer struct field to terminate it). It used to be accepted at
+declaration and then **fatally stack-overflow** (an uncatchable Go crash, past
+the call-depth cap) the moment its zero value or a literal was built. This turns
+that into a **positioned, actionable error at hoist time**:
+
+```
+struct "Node" cannot contain itself by value (field "next" is "Node"); a by-value
+struct cycle has no finite zero value - use `list of Node` (or a `map`) for
+recursive data
+```
+
+- `Interpreter.checkStructCycles` runs once **after** all top-level structs are
+  hoisted (so mutual cycles across the whole set are visible), at both entry
+  points (`Run` and `EvalInteractive`); module structs are checked via their
+  sub-interpreter's `Run`. A DFS with gray/black colouring over each struct's
+  **direct** struct-typed fields finds a back-edge.
+- Only a **direct, local user-struct** field is a by-value edge. Recursion
+  *through* a `list` / `map` / `task` field is allowed (their zero is
+  empty / a handle - finite), and a module- or library-struct field can never
+  cycle back to a local struct. So `def struct Tree { v as int, kids as list of
+  Tree };` and ordinary nesting (`Line { from as Point, to as Point }`) stay
+  legal - the guard only rejects the genuinely-infinite shapes.
+- Pinned by `TestStructSelfReferenceRejected` (direct, mutual, allowed
+  list-recursion, allowed nesting).
+
+**Known adjacent gap (not this fix):** a **module** struct used as a *struct
+field type* (`def struct Line { from as geo.Point };`) currently fails type-check
+with "expects geo.Point, got struct" even though a module struct works fine as a
+*variable* type (`def p as geo.Point`). That is a separate cross-module
+field-identity bug, tracked for its own fix.
 
 ---
 

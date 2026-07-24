@@ -33,17 +33,17 @@ syn keyword jenniferType int float string bool bytes list map task
 syn keyword jenniferConstant true false null
 
 " User constants: UPPER_CASE names.
-syn match   jenniferUserConstant "\<[A-Z]\+\(_[A-Z]\+\)*\>"
+syn match   jenniferUserConstant "\<[A-Z][A-Z0-9]*\(_[A-Z][A-Z0-9]*\)*\>"
 
 " Variables: $ sigil.
-syn match   jenniferVariable "\$[A-Za-z]\+"
+syn match   jenniferVariable "\$[A-Za-z][A-Za-z0-9]*"
 
 " Namespaced call: prefix.name.
-syn match   jenniferNamespace "\<[A-Za-z]\+\ze\.[A-Za-z]"
-syn match   jenniferFunction  "\.\zs[A-Za-z]\+\ze\s*("
+syn match   jenniferNamespace "\<[A-Za-z][A-Za-z0-9]*\ze\.[A-Za-z]"
+syn match   jenniferFunction  "\.\zs[A-Za-z][A-Za-z0-9]*\ze\s*("
 
 " Bare method call.
-syn match   jenniferFunction  "\<[A-Za-z]\+\ze\s*("
+syn match   jenniferFunction  "\<[A-Za-z][A-Za-z0-9]*\ze\s*("
 
 hi def link jenniferComment       Comment
 hi def link jenniferBlockComment  Comment

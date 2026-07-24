@@ -41,8 +41,9 @@ an assistant usually guesses wrong:
    is **floored** to match `//` (`-7 % 3 == 2`, `7 % -3 == -2`). Integer
    arithmetic that overflows `int64` is a runtime error (no silent wrap),
    and a mixed `int`/`float` comparison is exact (no lossy promotion).
-5. **Identifiers are letters only, <= 64 chars.** No digits, no underscores in
-   variable/method/parameter/library names. `myVar`, not `my_var` or `var2`.
+5. **Identifiers are letter-initial, then letters + digits, <= 64 chars.** No
+   underscores in variable/method/parameter/library names. `myVar`, `var2`,
+   `sha256` are fine; `my_var` is not, and a name cannot start with a digit.
    (Constants are the *only* names that take `_`: `MAX_RETRIES`.)
 6. **Statements end with `;`.** Whitespace (including newlines) is
    insignificant everywhere.
@@ -58,11 +59,14 @@ an assistant usually guesses wrong:
 
 ## Lexical basics
 
-- **Identifiers** (variables, methods, parameters, library names): `[A-Za-z]`,
-  <= 64 chars. No digits, no underscores.
-- **Constant names**: uppercase chunks joined by single `_`:
-  `[A-Z]+(_[A-Z]+)*`. Legal: `MAX`, `MAX_RETRIES`, `HTTP_OK`. Illegal: `_MAX`,
-  `MAX_`, `MAX__INT`, `maxInt`.
+- **Identifiers** (variables, methods, parameters, library names):
+  `[A-Za-z][A-Za-z0-9]*`, <= 64 chars. Letter-initial (a digit-initial token is a
+  number), then letters and digits; no underscores. Legal: `myVar`, `sha256`,
+  `x2`, `toUtf8`.
+- **Constant names**: uppercase chunks joined by single `_`, with in-chunk
+  digits: `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (each chunk starts with a letter).
+  Legal: `MAX`, `MAX_RETRIES`, `HTTP_OK`, `SHA256`, `HTTP2`, `SCRAM_SHA256`.
+  Illegal: `_MAX`, `MAX_`, `MAX__INT`, `maxInt`, `AES_256` (write `AES256`).
 - **`.j` import paths** are strings and may contain digits, `_`, `/`.
 - A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`.
 

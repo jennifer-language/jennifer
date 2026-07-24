@@ -435,6 +435,65 @@ func canonicalErrorStructDef() *parser.StructDef {
 	}
 }
 
+// checkStructCycles rejects any struct that would contain itself by value -
+// directly (`def struct Node { next as Node }`) or mutually (A holds a B that
+// holds an A). Such a struct has no finite zero value under value semantics
+// (there is no null / pointer struct field to terminate it), so materializing it
+// would recurse forever and stack-overflow; this turns that fatal crash into a
+// positioned, actionable error. Recursion *through* a `list` / `map` / `task`
+// field is fine - those have a finite (empty / handle) zero - so only a direct
+// struct-typed field is a by-value edge, and a module- or library-struct field
+// (namespace / module path set) cannot cycle back to a local struct. Runs once
+// after all top-level structs are hoisted, so mutual cycles across the whole set
+// are visible.
+func (i *Interpreter) checkStructCycles() error {
+	const white, gray, black = 0, 1, 2
+	color := make(map[string]int, len(i.structs))
+	var visit func(name string) error
+	visit = func(name string) error {
+		def, ok := i.structs[name]
+		if !ok {
+			return nil // not a local struct; unknown-type errors surface elsewhere
+		}
+		color[name] = gray
+		for _, f := range def.Fields {
+			t := f.Type
+			// Only a direct, local user struct field forms a by-value edge.
+			if t.Kind != parser.TypeStruct || t.StructNS != "" || t.ModPath != "" {
+				continue
+			}
+			switch color[t.StructName] {
+			case gray:
+				return &runtimeError{
+					Msg: fmt.Sprintf("struct %q cannot contain itself by value (field %q is %q); a by-value struct cycle has no finite zero value - use `list of %s` (or a `map`) for recursive data",
+						name, f.Name, t.StructName, t.StructName),
+					File: f.File, Line: f.Line, Col: f.Col,
+				}
+			case white:
+				if err := visit(t.StructName); err != nil {
+					return err
+				}
+			}
+		}
+		color[name] = black
+		return nil
+	}
+	// Sorted so the reported cycle is stable across runs (map order is random).
+	names := make([]string, 0, len(i.structs))
+	for name := range i.structs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if color[name] == white {
+			if err := visit(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // ClassifyError extracts the (kind, message, file, line, col) tuple
 // from any interpreter error. Exported so libraries that intercept
 // errors at the Go level (`testing`) can populate their
@@ -835,6 +894,9 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 		}
 		i.structs[s.Name] = s
 	}
+	if err := i.checkStructCycles(); err != nil {
+		return err
+	}
 	// Methods: collect first so call order doesn't matter
 	for _, m := range prog.Methods {
 		if _, exists := i.methods[m.Name]; exists {
@@ -1133,6 +1195,9 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 	for _, s := range prog.Structs {
 		// REPL: silently re-define so a snippet can redeclare a struct.
 		i.structs[s.Name] = s
+	}
+	if err := i.checkStructCycles(); err != nil {
+		return Null(), err
 	}
 	for _, m := range prog.Methods {
 		if err := i.checkMethodNoShadow(m); err != nil {

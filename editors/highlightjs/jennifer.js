@@ -25,10 +25,13 @@
     literal: "true false null",
   };
 
-  var VARIABLE = { className: "variable", begin: /\$[A-Za-z]+/ };
+  var VARIABLE = { className: "variable", begin: /\$[A-Za-z][A-Za-z0-9]*/ };
 
   // UPPER_CASE constant names (MAX, MAX_RETRIES).
-  var CONSTANT = { className: "symbol", begin: /\b[A-Z]+(_[A-Z]+)*\b/ };
+  var CONSTANT = {
+    className: "symbol",
+    begin: /\b[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*\b/,
+  };
 
   var NUMBER = {
     className: "number",
@@ -51,10 +54,16 @@
   };
 
   // Namespace prefix in a qualified call: the `io` in `io.printf(...)`.
-  var NAMESPACE = { className: "built_in", begin: /\b[A-Za-z]+(?=\.[A-Za-z])/ };
+  var NAMESPACE = {
+    className: "built_in",
+    begin: /\b[A-Za-z][A-Za-z0-9]*(?=\.[A-Za-z])/,
+  };
 
   // A method name immediately before `(`.
-  var FUNCTION = { className: "title", begin: /\b[A-Za-z]+(?=\s*\()/ };
+  var FUNCTION = {
+    className: "title",
+    begin: /\b[A-Za-z][A-Za-z0-9]*(?=\s*\()/,
+  };
 
   // REPL transcript prompts (`>>> ` input, `... ` continuation) at line
   // start, so a pasted `jennifer repl` session highlights: the prompt shows

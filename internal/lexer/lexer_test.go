@@ -324,6 +324,31 @@ func TestTokenizeIdentifierUnderscores(t *testing.T) {
 	}
 }
 
+// TestTokenizeIdentifierDigits covers the digit relaxation: identifiers are
+// letter-initial and may carry interior / trailing digits (`sha256`, `x2`,
+// `HTTP2`, `SCRAM_SHA256`), while a token that starts with a digit is still a
+// number, so the lexer stays unambiguous.
+func TestTokenizeIdentifierDigits(t *testing.T) {
+	for _, src := range []string{"sha256", "x2", "SHA256", "HTTP2", "iPv4", "md5", "SCRAM_SHA256"} {
+		toks, err := Tokenize(src)
+		if err != nil {
+			t.Errorf("%q: unexpected lex error: %v", src, err)
+			continue
+		}
+		if len(toks) < 1 || toks[0].Type != TOKEN_IDENT || toks[0].Lexeme != src {
+			t.Errorf("%q: expected single IDENT lexeme, got %+v", src, toks)
+		}
+	}
+	// A digit-initial token is a number, not an identifier: `2x` is `2` then `x`.
+	toks, err := Tokenize("2x")
+	if err != nil {
+		t.Fatalf("2x: unexpected lex error: %v", err)
+	}
+	if len(toks) < 2 || toks[0].Type != TOKEN_INT || toks[1].Type != TOKEN_IDENT || toks[1].Lexeme != "x" {
+		t.Errorf("2x: expected [INT, IDENT x], got %+v", toks)
+	}
+}
+
 func TestTokenizeFloatLiterals(t *testing.T) {
 	cases := []struct {
 		src    string

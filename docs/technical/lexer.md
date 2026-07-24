@@ -106,17 +106,21 @@ lexes as `INT DOTDOT INT` (not `1.` `.5`) with no special-casing.
 
 ## Identifier rule
 
-Variable, method, parameter and library names use `[A-Za-z]{1,64}` only -
-no digits, no underscores. Constants use a looser form: uppercase chunks
-separated by single `_` characters - `[A-Z]+(_[A-Z]+)*`. Every `_` must
-be immediately followed by `[A-Z]`, so leading, trailing and consecutive
-underscores are all rejected.
+Every identifier is **letter-initial** (a token that starts with a digit is
+always a number, which keeps lexing unambiguous). Variable, method, parameter
+and library names are `[A-Za-z][A-Za-z0-9]{0,63}` - a letter, then letters and
+digits, no underscores. Constants use a looser form: uppercase chunks separated
+by single `_` characters, with in-chunk digits - `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*`.
+Each chunk starts with an uppercase letter (never a digit), and every `_` must be
+immediately followed by that letter, so leading, trailing, consecutive, and
+underscore-then-digit forms are all rejected (`SHA256` / `SCRAM_SHA256` are legal,
+`AES_256` is not - write `AES256`).
 
-The lexer reflects this by accepting `_` as a continuation character for
-bare IDENT tokens (so `MAX_RETRIES` is a single token) but rejecting any
-identifier that *ends* with `_`. The full per-kind rule is then enforced
-by the parser at each def / use site - variables, methods, parameters,
-library names and call callees may not contain `_`; constants may, with
-the leading-`_` case already excluded by `isIdentStart`. `$var` references
-go through a separate lexer path (`readVarRef`) that still uses the
-strict letters-only `isIdentPart`, so `$foo_bar` lex-errors directly.
+The lexer reflects this by accepting digits and `_` as continuation characters
+for bare IDENT tokens (so `sha256` and `MAX_RETRIES` are each a single token) but
+rejecting any identifier that *ends* with `_`. The full per-kind rule is then
+enforced by the parser at each def / use site - variables, methods, parameters,
+library names and call callees may not contain `_`; constants may, with the
+leading-`_` case already excluded by `isIdentStart`. `$var` references go through
+a separate lexer path (`readVarRef`) whose `isIdentPart` allows the leading
+letter plus digits but not `_`, so `$x2` lexes and `$foo_bar` lex-errors directly.

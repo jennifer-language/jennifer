@@ -98,18 +98,18 @@ contexts:
       scope: constant.language.jennifer
 
   user-constants:
-    # UPPER_CASE constant names: chunks of A-Z joined by single underscores.
-    - match: '\b[A-Z]+(_[A-Z]+)*\b'
+    # UPPER_CASE constant names: chunks of A-Z (and digits) joined by single underscores.
+    - match: '\b[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*\b'
       scope: variable.other.constant.jennifer
 
   variables:
     # Use-site variable references carry the `$` sigil.
-    - match: '\$[A-Za-z]+'
+    - match: '\$[A-Za-z][A-Za-z0-9]*'
       scope: variable.other.jennifer
 
   namespace-call:
     # `io.printf` - namespace prefix, accessor dot, function name.
-    - match: '\b([A-Za-z]+)(\.)([A-Za-z]+)\b'
+    - match: '\b([A-Za-z][A-Za-z0-9]*)(\.)([A-Za-z][A-Za-z0-9]*)\b'
       captures:
         1: entity.name.namespace.jennifer
         2: punctuation.accessor.jennifer
@@ -117,7 +117,7 @@ contexts:
 
   call:
     # Bare `name(` method calls.
-    - match: '\b([A-Za-z]+)\s*(?=\()'
+    - match: '\b([A-Za-z][A-Za-z0-9]*)\s*(?=\()'
       captures:
         1: entity.name.function.jennifer
 

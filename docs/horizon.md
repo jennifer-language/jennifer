@@ -49,35 +49,11 @@ the milestone. Handle retired.
 
 #### DRAFT#19 - Sum types (enums) + `match`
 
-Structs model a *record*; there is no way to model "one of N variants," and
-control flow is `if` / `elseif` chains with no multi-way dispatch. Ironically the
-interpreter's own `Value` is a tagged union - the language just does not expose
-that shape.
-
-- **`def enum` at top level**, hoisted like structs:
-  `def enum Shape { Circle { r as float }, Rect { w as float, h as float }, Empty };`
-  Each variant is payload-less or carries named fields (a mini-struct).
-  Construction mirrors struct literals: `Shape.Circle{ r: 2.0 }`, `Shape.Empty`.
-- **`match` / `case`** for exhaustive dispatch, binding a variant's payload into a
-  fresh per-arm scope:
-  `match ($s) { case Circle(c) { ...$c.r... } case Rect(rc) { ... } case Empty { ... } }`
-  Exhaustiveness is checked at **resolve time** (every variant covered, or an
-  `else` arm) - the strict, positioned-error stance applied to control flow, so a
-  forgotten variant is a parse error, not a silent fall-through.
-
-**Cost.** A new `Value` kind `KindEnum` that mirrors `KindStruct` almost exactly
-- `(namespace, name)` discriminant plus a `Fields` payload - so it inherits value
-semantics, deep `const`, `Copy` / `DeepCopy`, and `MatchesDeclared` with little
-new machinery. Parser: the `def enum` declaration, `Enum.Variant{...}`
-construction, and `match` / `case` grammar with payload binding (payload slots
-resolved into the arm's block scope, reusing `borrowBlockEnv`). Interpreter: an
-`execMatch` that finds the active variant and runs the arm. Grammar EBNF / PEG,
-spec, docs. No frame-pool or TinyGo concern - it is all tagged-union,
-reflect-free, exactly like structs. Well-contained and high-ergonomic for the
-value; a light scalar `switch` could follow as sugar over an `if`-chain.
-
-**Requires:** none. Pairs naturally with `DRAFT#18` (a `match` result and
-function values together give the functional-core idioms).
+**Graduated to `M22.5`** (`docs/milestones.md`). `def enum` variant types
+(payload-less or named-field variants, constructed `Name.Variant{...}`) plus
+pattern arms extending `M22.4`'s `match` / `when` - payload binding into a fresh
+arm scope, resolve-time exhaustiveness for enum subjects - backed by a new
+`KindEnum` Value mirroring `KindStruct`. Handle retired.
 
 #### DRAFT#18 - First-class functions
 
@@ -443,13 +419,13 @@ community-maintainable, so vendor API churn never touches the core). This list i
 demand-driven and open-ended, a collection not a commitment.
 
 Most are thin clients over `http` / `rest` + `json` (plus `xml` where a vendor
-returns XML, and the `M22.4` `graphql` module where the API is GraphQL). Each is a
+returns XML, and the `M22.7` `graphql` module where the API is GraphQL). Each is a
 login / token step, a generic `call(path, params) -> json.Value`, and a handful of
 conveniences; a fat typed wrapper is explicitly **not** the plan - these APIs are
 enormous and firmware-versioned, so a thin client ages far better.
 
 **Self-hosted infrastructure** (a LAN appliance, usually a **self-signed** cert,
-so these want the `M22.3` TLS options). Per-vendor maturity differs and should set
+so these want the `M22.6` TLS options). Per-vendor maturity differs and should set
 the order, not the vendor:
 
 - **`routeros`** - a *full* RouterOS abstraction layer (MikroTik), well beyond the
@@ -465,7 +441,7 @@ the order, not the vendor:
 - **`synology`** - DSM: the cleanest NAS API - a documented Web API
   (`SYNO.API.Auth` login -> session `sid`, JSON responses).
 - **`unraid`** - the newer official API is **GraphQL** over HTTP with an API key;
-  consumes the `M22.4` `graphql` module.
+  consumes the `M22.7` `graphql` module.
 - **`qnap`** - QTS: the messiest - much of the useful surface is undocumented,
   reverse-engineered CGI with XML responses and a legacy hashed-password auth;
   firmware-fragile and hard to keep green. Lowest priority, on real need only.
@@ -478,17 +454,17 @@ the order, not the vendor:
 - **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
   paired with its MQTT feed (the `mqtt` module).
 
-**Public / SaaS APIs** (valid certs, so no `M22.3` needed):
+**Public / SaaS APIs** (valid certs, so no `M22.6` needed):
 
 - **`gitlab`** / **`github`** - dev-platform clients; both expose REST **and**
-  GraphQL (the `M22.4` `graphql` module covers the GraphQL side), token auth.
+  GraphQL (the `M22.7` `graphql` module covers the GraphQL side), token auth.
 - **`steam`** - the Steam Web API (JSON, `?key=` auth); parts of the surface are
   community-reverse-engineered, which is exactly why it belongs in a deck, not core.
 - **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
 
 **Requires:** `DRAFT#12` (`jvc` / decks) for delivery; the self-hosted group pulls
-in `M22.3` (self-signed certs), and the GraphQL ones (`unraid`, `gitlab`,
-`github`) pull in `M22.4` (`graphql`). Demand-driven: build the deck for the
+in `M22.6` (self-signed certs), and the GraphQL ones (`unraid`, `gitlab`,
+`github`) pull in `M22.7` (`graphql`). Demand-driven: build the deck for the
 box / service you run, not all of them speculatively.
 
 ### Embedding, WASM, and sandboxing

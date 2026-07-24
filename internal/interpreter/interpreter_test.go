@@ -106,6 +106,44 @@ io.printf("hi, %s\n", $name);
 	}
 }
 
+func TestDigitIdentifiersEvaluate(t *testing.T) {
+	// Digit-bearing variables, methods, parameters, and constants all resolve
+	// and evaluate end to end.
+	out, err := run(t, `use io;
+def const SHA256 as int init 256;
+def x2 as int init 5;
+func sha256(v2 as int) { return $v2 * 2; }
+io.printf("%d %d %d", SHA256, $x2, sha256($x2));`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "256 5 10" {
+		t.Errorf("got %q, want %q", out, "256 5 10")
+	}
+}
+
+func TestStructSelfReferenceRejected(t *testing.T) {
+	// Direct self-reference has an infinite zero value under value semantics -
+	// must be a positioned error, not the fatal stack overflow it used to be.
+	if _, err := run(t, `def struct Node { v as int, next as Node };`); err == nil ||
+		!strings.Contains(err.Error(), "cannot contain itself by value") {
+		t.Fatalf("direct self-ref: got %v, want 'cannot contain itself by value'", err)
+	}
+	// Mutual recursion (A holds B holds A) is the same defect.
+	if _, err := run(t, `def struct A { b as B }; def struct B { a as A };`); err == nil ||
+		!strings.Contains(err.Error(), "cannot contain itself by value") {
+		t.Fatalf("mutual self-ref: got %v, want an error", err)
+	}
+	// Recursion THROUGH a list is fine - the empty-list zero is finite.
+	if _, err := run(t, `def struct Tree { v as int, kids as list of Tree }; def t as Tree;`); err != nil {
+		t.Errorf("list-recursion should be allowed: %v", err)
+	}
+	// A plain nested struct (distinct types) is fine.
+	if _, err := run(t, `def struct P { x as int }; def struct L { a as P, b as P }; def l as L;`); err != nil {
+		t.Errorf("nested struct should be allowed: %v", err)
+	}
+}
+
 func TestHelloProgramPrints42(t *testing.T) {
 	out, err := run(t, `
 use io;
