@@ -53,6 +53,34 @@ Rejected because:
 - Keeping a single assignment shape (`$x = EXPR;`) makes source code uniform
   and matches Jennifer's "one way to do each thing" stance.
 
+## Chained assignment (`$x = $y = 0;`)
+
+Considered as a shorthand for setting several existing variables to one value,
+alongside the other assignment sugar above.
+
+Rejected because:
+
+- **Same family, same verdict.** It is one more "assignment sugar" for marginal
+  payoff, so declining it keeps company with `++`/`--` and the `+=` family and
+  preserves the single assignment shape (`$x = EXPR;`).
+- **The common case is already covered.** Jennifer variables are born with a
+  value (`def x as int init 0;`), so initializing several to the same value is a
+  declaration concern, not an assignment one. Chaining would only help
+  *re-assigning* several already-declared variables at once - a narrow case that
+  `$x = 0; $y = 0;` handles in one extra line.
+- **Assignment is a statement, not an expression.** `$y = 0` has no value, so
+  `$x = $y = 0;` does not parse today; supporting it is a real grammar addition,
+  not free sugar. The two ways to add it both lose: the safe Python-style form
+  (special `lvalue (= lvalue)* = EXPR;` grammar, RHS evaluated once) is pure sugar
+  for the above non-need, and the C-style form (assignment-as-expression) is a
+  bigger semantic change that reopens the `if ($x = 0)` typo-for-`==` footgun
+  Jennifer avoids by having no assignment-expression at all.
+
+The chosen solution: **initialize at declaration (`def ... init`) or assign per
+line (`$x = 0; $y = 0;`).** (Note: had it existed, value semantics would give
+`$x = $y = $someList` independent copies, sidestepping Python's shared-alias
+surprise - a cleaner behavior, but still not enough to justify the sugar.)
+
 ## Ternary operator (`cond ? a : b`)
 
 Considered as a way to write expression-position conditional
@@ -786,3 +814,44 @@ parser belongs in Go"); a genuinely module-specific, irreducible, *measured* hot
 path folds into the nearest topic library or ships as a build-tag-split helper
 co-located with that concern - never a global grab-bag. Only routines that
 measure hot in M21.10.1 move.
+
+## Multiple returns / destructuring
+
+Considered as an ergonomic shorthand (it lived in the horizon idea collection):
+let a method return several values (`return $a, $b;`) and a `def` / assignment
+bind them positionally (`def q as int, r as int init divmod($a, $b);`,
+`$x, $y = $y, $x;`), optionally extended to struct / list destructuring.
+
+Rejected in favor of **structs** - which the language already has - because:
+
+- **Structs already cover it, and read better.** A `def struct` with named fields
+  is the sanctioned way to return several values, and the names are
+  self-documenting (`$d.quotient` / `$d.remainder`, not "the second one"). A
+  struct return also stays a single typed `Value`, so it composes everywhere -
+  stored, passed, nested, printed - whereas a multi-return only works at the bind
+  site. Adding multi-return would be a *second* way to do what structs already
+  do, which the "one obvious way" / minimalism stances push back on.
+- **The dominant motivation does not apply here.** Multiple returns earn their
+  keep in languages that return errors as a value (`(value, error)`). Jennifer
+  raises errors with `throw` and handles them with `try` / `catch`, so errors are
+  never returned - that removes the biggest use case and leaves only small
+  anonymous tuples (divmod, min / max), exactly what a two-field struct expresses.
+- **It is not free plumbing, and the cost is Jennifer-specific.** Methods declare
+  no return type or arity (a body may `return $a, $b;` on one path and
+  `return $c;` on another), so return arity would become a *runtime* contract: a
+  call site would newly have to care how many values came back, and a
+  single-vs-multi mismatch would be a positioned runtime error. Keeping the
+  tagged-union `Value` model clean would also force a statement-position-only
+  restriction (no `f(g())` nesting) plus a slice-carrying `ReturnSignal` and a
+  parallel call-eval path - real machinery for a narrow convenience structs
+  already serve.
+
+The chosen solution: **return a struct.**
+
+```jennifer
+def struct DivMod { quotient as int, remainder as int };
+func divmod(a as int, b as int) {
+    return DivMod{ quotient: $a // $b, remainder: $a % $b };
+}
+def d as DivMod init divmod(17, 5);   # $d.quotient == 3, $d.remainder == 2
+```

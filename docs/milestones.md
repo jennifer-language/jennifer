@@ -1631,7 +1631,15 @@ Cross-cutting threads:
 
 ---
 
-## M22
+## M22 - additional libraries and language refinements
+
+Post-backlog work that belongs to neither the M20 system-library set nor the M21
+backlog: focused standard-library and module additions or enhancements, and small
+language cleanups, each landing when the need is concrete. A new library entry
+ships the usual surface (a Go package under `internal/lib/`, a line in
+`internal/stdlib.InstallAll`, a `docs/libraries/` reference, cheatsheet rows, a
+`JENNIFER.md` bullet); a `.j` module change ships its `*_test.j` overlay, its
+`docs/modules/` doc, and a `JENNIFER.md` bullet.
 
 ### M22.1 - `path` (filesystem path manipulation)
 
@@ -1659,6 +1667,129 @@ separator splits and stops hardcoding `/`. `use path;` enables eight functions:
   not strip a `\` (a legal Unix filename byte); it is path logic, not a way to
   neutralize an untrusted filename. Callers sanitizing attacker-controlled names
   (e.g. an email attachment's filename) still strip both separators themselves.
+
+### M22.2 - digits in identifiers
+
+**Planned** (graduated from `DRAFT#20`). Relax the letters-only identifier rule
+to allow interior and trailing digits, keeping every identifier
+**letter-initial**. Today identifiers are `[A-Za-z]` only, which forces a running
+tax of euphemisms - `uuid.generate("v4")` because `v4()` is unspellable, the I2C
+library named `iic`, `pbkdf` dropping its "2", `binary` because `bytes` is
+reserved, the `hash` / `crc` dance. Each is a workaround for the same rule.
+
+**The rule change, two identifier classes:**
+
+- **Regular identifiers**: `[A-Za-z][A-Za-z0-9]*` (was `[A-Za-z]+`). Must start
+  with a letter, then any mix of letters and digits; still **no underscore**,
+  still <= 64 chars. Letter-initial is the invariant that keeps lexing trivial -
+  a token that starts with a digit is always a number, one that starts with a
+  letter is always an identifier - so `1..5`, the `0x` / `0o` / `0b` forms, float
+  mantissas, and `_` digit separators stay unambiguous.
+- **Constants**: `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (was `[A-Z]+(_[A-Z]+)*`).
+  Stay **ALLCAPS** and keep their underscore separators (underscores remain a
+  constants-only feature); digits are now allowed within a chunk, and every `_`
+  is still immediately followed by an uppercase letter. So `SHA256`, `HTTP2`,
+  `RFC5322`, `SCRAM_SHA256`, `MAX_RETRIES` are legal; `AES_256` stays illegal
+  (write `AES256`), as do `_MAX` / `MAX_` / `MAX__X`. This gives the constant
+  analogue of the same win - `SHA256` the constant beside `sha256` the method.
+
+**What is affected - all letter-initial identifiers move together.** The lexer
+emits one `IDENT` token for any letter-initial run and does not know the role
+(that is grammar position), so the character class necessarily applies uniformly:
+**digits cannot be scoped to just method names.** The categories that gain
+digits are variable names (and loop variables), parameter names, method /
+function names, struct type names, struct **field** names (the sleeper case:
+`x1 y1 x2 y2` rectangles, `line1` / `line2` address lines, `ipv4` / `ipv6`,
+`md5` / `sha256` result fields - all impossible today), library names and
+`use ... as` aliases, and `import ... as` module aliases. Constants are the one
+separately-lexed class (rule above). File / module **paths** and **map keys** are
+strings, not identifiers, and already allow digits, so they are untouched. Roles
+stay unambiguous because the `$` / `.` / `(` markers still distinguish them:
+`$x2` (variable), `p.x2` (field), `f.v4()` (call), `SHA256` (constant).
+
+**Batched follow-on renames, all pre-1.0 breaking so they land together.** With
+the rule in place, drop the euphemisms it forced: `iic` -> `i2c`,
+`uuid.generate("v4")` -> `uuid.v4()` (the version becomes a method, not a string
+argument), `pbkdf` -> `pbkdf2`, and revisit the `hash` / `crc` / `binary` naming.
+Each rename is semver-breaking, which is exactly why the whole change must land
+**before 1.0.0**.
+
+**Cost.** Mechanically small: one character-class change in the lexer's
+identifier scanner plus the constant validator, and a re-verification that no
+number / identifier ambiguity opens. The weight is that it is a language-identity
+and breaking decision, so it also touches the spec (the Identifiers section of
+`CLAUDE.md`), `JENNIFER.md`, the grammar EBNF / PEG, the naming-convention
+guidance, and every editor highlighter (`editors/` Vim / TextMate / highlight.js
+and the regenerated docs bundle). The trade accepted: the uniform letters-only
+look (and its "is `sha256` a name or a typo?" tidiness) is given up to end the
+euphemism tax.
+
+**Kept deliberately:** underscores stay **constants-only** (regular identifiers
+never take `_`) and constants stay **ALLCAPS** - the relaxation only adds digits,
+it does not change the two-class structure.
+
+### M22.3 - TLS options for `http` / `rest`
+
+**Planned.** Let the `http` client (and `rest` on top) reach an HTTPS server with
+a self-signed or private-CA certificate, by threading TLS options through to
+`net.connectTLS`. Today `http` always full-verifies - `modules/http.j` calls
+`net.connectTLS($addr, DEFAULT_TIMEOUT_MS)` with no options - so it cannot talk to
+the self-signed certs that LAN appliances (Proxmox, Synology, an internal service)
+ship by default. This is the shared enabler for that whole "manage my own
+infrastructure" family. It needs **no interpreter or system-library change**:
+`net.connectTLS` already accepts `net.TLSOptions{ skipVerify, caCert }` (`M16.14`),
+so the work is purely plumbing it through the two `.j` modules.
+
+**Shape:**
+
+- **`http`** carries TLS options on the request path: an `http.TlsOptions` struct
+  (`{ skipVerify as bool, caCert as bytes }`, mirroring `net.TLSOptions`) plus a
+  field on `http.Request`, reached either by building a `Request` or by
+  options-taking send variants. `https://` with no options behaves exactly as
+  today.
+- **`rest`** exposes it per-client (a `rest.Client` already bundles base URL +
+  default headers): a `tls` field plus builders mirroring `rest.bearer` /
+  `withHeader` - `rest.insecure(client)` (skip verification) and
+  `rest.withCA(client, pem)` (trust a PEM CA) - applied to every request.
+- **Secure by default.** Verification stays **on** unless explicitly relaxed;
+  `skipVerify` is opt-in with a MITM-risk note, `caCert` is the safer path (trust
+  the appliance's own CA). Matches `net.TLSOptions` semantics and the security
+  model (opt-in, documented, for a trusted-LAN endpoint - never a default).
+
+**Files:** `modules/http.j` + `modules/rest.j` (structs / builders / thread to
+`net.connectTLS`), their `*_test.j` overlays, `docs/modules/http.md` + `rest.md`,
+`JENNIFER.md` bullets, a demo. Default-binary-only (net-backed), so no TinyGo
+concern. **Verification:** the overlays can spin a self-signed loopback with
+`httpd.listenTLS` and confirm `http` / `rest` reach it with `skipVerify` (and
+refuse it without) - a real end-to-end test, not just a shape check.
+
+### M22.4 - `graphql` (GraphQL client module)
+
+**Planned.** A thin GraphQL client `.j` module: build a request against one
+endpoint, POST `{ "query": ..., "variables": ... }`, and read the JSON response.
+GraphQL is a stable, general protocol (GitHub, GitLab, Shopify, Hasura - and the
+immediate motivation, Unraid's official API - all speak it), so unlike a
+vendor-specific NAS client (`DRAFT#24`) it belongs in **core `modules/` as a peer
+to `http` / `rest`**, not a deck. It is a `.j` module, not a Go library: the query
+is an opaque string the caller supplies (no need to parse GraphQL syntax - that is
+the server's job) and the response is JSON the `json` library already handles, so
+there is no per-byte hot path.
+
+**Shape:** a `graphql.Client` layered on a `rest.Client` (endpoint URL + auth
+header, and - via `M22.3` - TLS options for a self-signed host), plus
+`graphql.query(client, query, variables) -> json.Value`. The one
+GraphQL-specific wrinkle to get right: **a GraphQL error is an HTTP 200 with an
+`errors` array in the body**, not a non-2xx status - so `query` must inspect the
+payload and raise a positioned `Error` (kind `"graphql"`) carrying the server's
+messages, rather than trusting the status line. `variables` is a `json.Value` /
+`map`; a mutation is just a query string, so no separate verb is required (a
+`mutation` alias can be added if it reads better).
+
+**Files:** `modules/graphql.j` + `modules/graphql_test.j` (100%),
+`docs/modules/graphql.md`, a `JENNIFER.md` bullet, a demo. Default-binary-only
+(net-backed via `http` / `rest`). **Requires:** builds on `http` / `rest` +
+`json`; `M22.3` for self-signed endpoints (the homelab case). It is the GraphQL
+dependency the Unraid client in `DRAFT#24` consumes.
 
 ---
 

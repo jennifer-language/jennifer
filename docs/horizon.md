@@ -40,36 +40,12 @@ before it is scheduled.
 
 #### DRAFT#20 - Relax the letters-only identifier rule
 
-Not a feature - revisiting a deliberate constraint that keeps costing.
-Identifiers are `[A-Za-z]` only (no digits), which forces recurring gymnastics:
-`uuid.generate("v4")` because `v4()` is unspellable, the I2C library named `iic`,
-`pbkdf` dropping its "2", `binary` because `bytes` is reserved, and the `hash` /
-`crc` naming dance. Each is a workaround for the same rule.
-
-**Changes:** Allow **interior / trailing digits**, keeping the
-letter-initial rule: `[A-Za-z][A-Za-z0-9]*` (still up to 64 chars; constants keep
-their interior `_`). Letter-initial preserves clean lexing - a token starting
-with a digit is always a number, one starting with a letter is always an
-identifier - so `1..5` (range), the `0x` / `0o` / `0b` literal forms, and float
-mantissas stay unambiguous. This makes `md5`, `sha256`, `v4`, `utf8`, `i2c`,
-`base64` real identifiers and lets the stdlib drop its euphemisms (`uuid.v4()`,
-`use i2c;`, ...).
-
-**Cost.** Mechanically **tiny** - one character class in the lexer's identifier
-scanner, plus a re-verification that no number / identifier ambiguity opens. The
-weight is entirely in it being a **language-identity decision** and a **pre-1.0
-breaking change**: the "letters-only" look is documented and intentional, so
-reversing it touches the spec, `JENNIFER.md`, the grammar EBNF / PEG, the
-naming-convention guidance, and every editor highlighter; and the follow-on
-renames (`iic` -> `i2c`, the `"v4"` string argument -> `v4()`, ...) are each
-semver-breaking, so they must be batched **before 1.0.0**. The honest
-counter-argument to weigh, not just the upside: letters-only gives a uniform look
-and sidesteps confusable / typo-vs-name questions (`sha256` - name or mistake?).
-This draft is as much "should we" as "how," and its value is that the call is
-cheap to make now and expensive to make after 1.0.
-
-**Requires:** none (mechanical), but best decided **early** - renames after 1.0.0
-need a major bump.
+**Graduated to `M22.2`** (`docs/milestones.md`). Regular identifiers become
+letter-initial `[A-Za-z][A-Za-z0-9]*` (interior / trailing digits, still no `_`);
+constants stay ALLCAPS with underscore separators and gain in-chunk digits
+(`SHA256`, `SCRAM_SHA256`). The batched pre-1.0 renames it enables (`iic` ->
+`i2c`, `uuid.generate("v4")` -> `uuid.v4()`, `pbkdf` -> `pbkdf2`, ...) live with
+the milestone. Handle retired.
 
 #### DRAFT#19 - Sum types (enums) + `match`
 
@@ -385,6 +361,23 @@ constraints.
   `.j` modules, published to a public **deck repository / registry**
   (provided later) that `jvc` resolves and fetches from - packagist-style; a
   deck can also come straight from a git URL.
+- **Naming conventions.** A deck has two separate identities. Its **canonical
+  name** is the `@vendor/deckname` scope in `deck.toml` (what imports and jvc key
+  on) - kept clean, with no "deck" word: an official deck is `@jennifer/routeros`,
+  imported `import "@jennifer/routeros/";` -> `routeros.*`. Its **GitHub repo
+  name** is cosmetic (jvc reads `deck.toml`, not the repo name), so the "deck"
+  marker lives there and only there:
+  - **Official** decks (in the `jennifer-language` org) use a **`deck-` prefix** -
+    `jennifer-language/deck-routeros`. The prefix is the "*not core, but official
+    deck*" statement: it clusters the decks and keeps the org's top level readable
+    (core `jennifer` / `homebrew-tap` vs `deck-*`). The org already supplies
+    "jennifer", so `deck-` is the useful signal (deck vs core).
+  - **Community** decks (any account) can be named anything - jvc only needs it
+    configured - but the **suggested** form is a **`jennifer-` prefix**,
+    `alice/jennifer-routeros`: on a personal account there is no Jennifer
+    namespace, so "which ecosystem" is the useful signal instead.
+  - **All** deck repos carry the GitHub **topic `jennifer-deck`** for discovery,
+    which works regardless of the repo name.
 - **Installed into the `vendor/` tree M19.7 resolves.** `jvc` writes decks into
   the project-local `vendor/` tree that the interpreter already addresses through
   the `@scope/package` import form and vendor-root discovery shipped in
@@ -425,7 +418,11 @@ install need not carry); language-fundamental modules stay bundled. Moving one
 changes its import, so it is a breaking change under semver: within 1.x ship it
 **both ways** (bundled + `@`-deck) with the bundled copy marked `@deprecated` so
 imports re-point at their own pace, let the two drift without breaking, and
-**remove the bundled copy in 2.0.0**.
+**remove the bundled copy in 2.0.0**. Conversely, *new* third-party service
+integrations ship **as decks from the start** rather than as core modules (core
+stays general primitives; specific-vendor clients live in the ecosystem) -
+`DRAFT#24` collects the candidate list (GitLab, GitHub, Steam, TheMovieDB,
+Jellyfin, Frigate, RouterOS, ...).
 
 A whole track of its own. **Requires:** [M19.7](milestones.md) (the
 `@scope/package` resolver + vendor root the scheme rests on); the `toml` library
@@ -434,6 +431,65 @@ A whole track of its own. **Requires:** [M19.7](milestones.md) (the
 `validRange` range surface is the resolver primitive); and `http` / git
 (fetching). The public deck **registry** is separate infrastructure, provided
 later.
+
+#### DRAFT#24 - Candidate decks (deck ecosystem)
+
+A running parking lot of deck ideas - third-party service and integration clients
+that, once `jvc` / decks (`DRAFT#12`) land, ship as **decks** rather than core
+`modules/`. The rule: core stays *general primitives* (protocols, formats,
+infrastructure - `http`, `graphql`, `csv`); a client for one *specific vendor or
+service* lives in the ecosystem as a deck (independently versioned,
+community-maintainable, so vendor API churn never touches the core). This list is
+demand-driven and open-ended, a collection not a commitment.
+
+Most are thin clients over `http` / `rest` + `json` (plus `xml` where a vendor
+returns XML, and the `M22.4` `graphql` module where the API is GraphQL). Each is a
+login / token step, a generic `call(path, params) -> json.Value`, and a handful of
+conveniences; a fat typed wrapper is explicitly **not** the plan - these APIs are
+enormous and firmware-versioned, so a thin client ages far better.
+
+**Self-hosted infrastructure** (a LAN appliance, usually a **self-signed** cert,
+so these want the `M22.3` TLS options). Per-vendor maturity differs and should set
+the order, not the vendor:
+
+- **`routeros`** - a *full* RouterOS abstraction layer (MikroTik), well beyond the
+  small bundled `mikrotik.j` API client. Already in progress; the likely **first
+  published deck**.
+- **`proxmox`** - Proxmox VE: documented REST / JSON, API-token header auth
+  (`PVEAPIToken=...`). Clean.
+- **`vmware`** - vCenter / vSphere (vCSA): the vSphere Automation **REST** API
+  (JSON, session auth), clean and tractable like Proxmox. A standalone **ESXi**
+  host is the messier case - historically only the SOAP / VMOMI Web Services API
+  (XML / SOAP, heavier), with just partial REST on 8.x - so vCenter is the target,
+  a bare ESXi host best-effort.
+- **`synology`** - DSM: the cleanest NAS API - a documented Web API
+  (`SYNO.API.Auth` login -> session `sid`, JSON responses).
+- **`unraid`** - the newer official API is **GraphQL** over HTTP with an API key;
+  consumes the `M22.4` `graphql` module.
+- **`qnap`** - QTS: the messiest - much of the useful surface is undocumented,
+  reverse-engineered CGI with XML responses and a legacy hashed-password auth;
+  firmware-fragile and hard to keep green. Lowest priority, on real need only.
+- **`ugreen`** - NASync / UGOS Pro: **no official API** - only the internal
+  token-based API the web GUI uses (log in for a token, then GET), reverse-
+  engineered by the community (a working Home Assistant integration exists). Same
+  keep-green risk as `qnap`; UGOS is new and evolving, so revisit if UGREEN ever
+  ships official docs.
+- **`jellyfin`** - the self-hosted media server's REST API (API-key / token auth).
+- **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
+  paired with its MQTT feed (the `mqtt` module).
+
+**Public / SaaS APIs** (valid certs, so no `M22.3` needed):
+
+- **`gitlab`** / **`github`** - dev-platform clients; both expose REST **and**
+  GraphQL (the `M22.4` `graphql` module covers the GraphQL side), token auth.
+- **`steam`** - the Steam Web API (JSON, `?key=` auth); parts of the surface are
+  community-reverse-engineered, which is exactly why it belongs in a deck, not core.
+- **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
+
+**Requires:** `DRAFT#12` (`jvc` / decks) for delivery; the self-hosted group pulls
+in `M22.3` (self-signed certs), and the GraphQL ones (`unraid`, `gitlab`,
+`github`) pull in `M22.4` (`graphql`). Demand-driven: build the deck for the
+box / service you run, not all of them speculatively.
 
 ### Embedding, WASM, and sandboxing
 
@@ -657,17 +713,20 @@ A grab-bag, loosely grouped and recorded when it comes up.
 
 ### Language sugar
 
-- **Multiple returns / destructuring.** Let a method return several values
-  (`return $a, $b;`) and a `def` bind them positionally
-  (`def x, y as int init swap($a, $b);`), extended to struct / list
-  destructuring. Cheapest as a parse-time desugaring to a hidden carrier (a small
-  internal tuple / multi-slot bind) since the interpreter already returns exactly
-  one `Value` - no new `Value` kind strictly required.
 - **String interpolation.** A `"...{expr}..."` interpolating string (with `{{` /
   `}}` escapes, reusing `intl.tr`'s existing `{name}` grammar) that lexes into
   literal chunks + embedded expressions, so `"hi {$name}, next is {$n + 1}"`
-  drops the `sprintf` ceremony. Pure lex / parse-time sugar over string
-  concatenation + `convert.toString`, no runtime or `Value` change.
+  drops the `sprintf` ceremony. Sugar over string concatenation +
+  `convert.toString` (though not "pure": string literals stop being atomic
+  tokens - the lexer must re-enter expression parsing mid-string and brace-count
+  nested `{}` from map literals). **Kept here, not rejected**, unlike the
+  assignment-sugar cuts: f-strings are a genuinely valued ergonomic and safety
+  win (the value sits beside its position - no arg counting, no verb / type
+  mismatch), so this is *deferred*, not *declined*. It just does not pay for
+  itself while `sprintf` owns formatting and minimalism is the guiding stance
+  (it would be a third string-building path). If ever pursued, keep it minimal -
+  `{$expr}` renders via `convert.toString` with **no in-brace format specs** - so
+  `sprintf` stays the single formatter rather than growing a second one.
 
 - **Explicit map-to-struct conversion.** A spelled-out, validating way to
   turn a `json.Value` object (or a homogeneous `map of string to T`) into a

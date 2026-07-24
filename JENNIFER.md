@@ -989,7 +989,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (`/interface/print`) with a `map of string to string` of `=key=value` attributes and
   folds each `!re` reply sentence into a row map; `print(s, path)` is read sugar
   (`path + "/print"`); `run(s, command, attrs) -> string` is for add / set / remove
-  and returns the `!done`'s `=ret=` (e.g. a new item id). The wire protocol is
+  and returns the `!done`'s `=ret=` (e.g. a new item id). `talkQuery(s, command,
+  attrs, queries)` / `printWhere(s, path, queries)` add raw `?...` **query words**
+  (each starting with `?`, e.g. `?type=ether`) to filter rows on the router. The wire protocol is
   sentence-based (length-prefixed words, zero-length terminator) with RouterOS's
   variable-length length codec, hand-built from `bytes` + the bitwise operators. A
   `!trap` / `!fatal` reply throws `Error{kind: "mikrotik"}`. Over `net` + `hash` (MD5
