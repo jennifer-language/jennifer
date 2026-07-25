@@ -56,8 +56,8 @@ func testByteModeCodewords() {
 }
 
 func testCodeThirtyNinePattern() {
-    testing.assertEqual(codeThirtyNineChar("*"), "100101101101");
-    testing.assertEqual(codeThirtyNineChar("0"), "101001101101");
+    testing.assertEqual(code39Char("*"), "100101101101");
+    testing.assertEqual(code39Char("0"), "101001101101");
 }
 
 func testQrStructure() {

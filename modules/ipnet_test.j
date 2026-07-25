@@ -6,7 +6,7 @@
 #     jennifer test modules/ipnet_test.j
 #
 # The overlay splices ipnet.j in front, so the tests reach its private helpers
-# (parseFour, parseSix, hexGroup, applyMask, bytesEqual) by bare identifier as
+# (parse4, parse6, hexGroup, applyMask, bytesEqual) by bare identifier as
 # well as the exported surface. ipnet.j already `use`s strings / convert, so the
 # overlay only adds testing.
 use testing;

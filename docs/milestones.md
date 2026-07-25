@@ -1641,129 +1641,27 @@ ships the usual surface (a Go package under `internal/lib/`, a line in
 `JENNIFER.md` bullet); a `.j` module change ships its `*_test.j` overlay, its
 `docs/modules/` doc, and a `JENNIFER.md` bullet.
 
-### M22.1 - `path` (filesystem path manipulation)
+### M22.1-M22.3 - `path` library, digit identifiers, library renames (compacted)
 
-**Done.** OS-aware path manipulation over Go's `path/filepath`, the pure-string
-counterpart to what `fs` does for I/O - so `.j` code stops hand-rolling
-separator splits and stops hardcoding `/`. `use path;` enables eight functions:
-`path.base` / `dir` / `ext` / `stem` / `join` (variadic) / `clean` / `isAbs` /
-`split` (`-> [dir, file]`).
+**All done.** The first three M22 items: one new library, one language-rule
+relaxation, and the breaking renames the relaxation unlocked. Per-item surface
+detail lives in `docs/libraries/`, `JENNIFER.md`, and (for the rejected shortcut)
+`docs/technical/rejected.md`; this table is the milestone index.
 
-- **Category, not `fs`.** Path manipulation is string work that never touches the
-  disk; folding a lone `basename` into `fs` (I/O) would be a category error, and
-  path manipulation has 5+ natural functions, so per the library-organization
-  principle it earns its own library. Mirrors Go's `path/filepath` vs `os`/`io`
-  split.
-- **Manipulation subset only** (`Base` / `Dir` / `Ext` / `Join` / `Clean` /
-  `IsAbs` / `Split`): the I/O-touching parts of `path/filepath` (`Abs`, `Glob`,
-  `Walk`, `EvalSymlinks`) are deliberately excluded - those need the disk and
-  belong with `fs`. Because the subset does no I/O, `path` needs **no build-tag
-  split** and is TinyGo-clean; it ships in both binaries (unlike `fs` / `net`).
-- **Portable by construction.** Uses the host separator (`/` on Linux, `\` on the
-  best-effort Windows build), so `path.join(a, b)` builds paths that are correct
-  on each platform - the `.j` analogue of the "use `path/filepath`, never
-  hardcode `/`" rule the Go side already follows. Pairs with `os.DIRSEP`.
-- **Explicitly not a sanitizer.** `path.base` is OS-aware, so on Linux it does
-  not strip a `\` (a legal Unix filename byte); it is path logic, not a way to
-  neutralize an untrusted filename. Callers sanitizing attacker-controlled names
-  (e.g. an email attachment's filename) still strip both separators themselves.
+| M#    | Topic | Summary |
+| ----- | ----- | ------- |
+| M22.1 | `path` library | OS-aware path manipulation over Go `path/filepath`, the pure-string counterpart to `fs`'s I/O (so `.j` stops hand-rolling separator splits / hardcoding `/`). `use path;` -> `base` / `dir` / `ext` / `stem` / `join` (variadic) / `clean` / `isAbs` / `split` (`-> [dir, file]`). Its own library, not a `basename` on `fs`: path logic is string work that never touches disk, and it has 5+ functions (mirrors Go's `path/filepath` vs `os`/`io`). Manipulation subset only - `Abs` / `Glob` / `Walk` / `EvalSymlinks` excluded (they need the disk, belong with `fs`), so **no build-tag split**, TinyGo-clean, both binaries. Uses the host separator (portable; pairs with `os.DIRSEP`). Explicitly **not** a filename sanitizer - OS-aware `base` won't strip a foreign `\` on Linux. |
+| M22.2 | digits in identifiers | Relaxed the letters-only rule to allow interior / trailing digits, keeping identifiers **letter-initial** (graduated `DRAFT#20`); **additive, non-breaking** (every prior identifier stays valid). Regular idents `[A-Za-z][A-Za-z0-9]*` (still no `_`, <= 64); constants `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (ALLCAPS, digits within a chunk, `_` still constants-only) - so `sha256` / `SHA256` / `HTTP2` / `SCRAM_SHA256` are legal, `AES_256` still illegal (write `AES256`). Applies **uniformly** to every letter-initial identifier (the lexer emits one `IDENT` and can't scope digits to method names): variables, params, methods, struct type **and field** names (`x1` / `ipv4` / `md5` fields), library / `use as` / `import as` aliases; constants are the one separately-lexed class; paths / map keys are strings and already had digits. Letter-initial keeps lexing unambiguous (digit-first is always a number). Touched the lexer + constant validator + spec + `JENNIFER.md` + grammar EBNF / PEG + naming guidance + every editor highlighter. Ends the euphemism tax; the breaking renames land as M22.3. |
+| M22.3 | library renames | The euphemism-dropping renames the digit rule unlocked, landed together pre-1.0 (each semver-breaking, no deprecation window): `use iic;` -> `use i2c;`; `uuid.generate("v4")` / `generate("v7")` -> `uuid.v4()` / `uuid.v7()` (the version is a real method; `generate` removed); `crypto.pbkdf(...)` -> `crypto.pbkdf2(...)`. **Not renamed:** `binary` (named for the reserved `bytes` keyword, not a digit) and `intl` (modeled on JS `Intl`, not `i18n`). One batch updated each library, its `*_test.j` overlay + Go integration test, `docs/`, `JENNIFER.md`, the cheatsheet, and every caller. |
 
-### M22.2 - digits in identifiers
-
-**The rule change is Done; the enabled renames are the remaining follow-up**
-(graduated from `DRAFT#20`). Relaxes the letters-only identifier rule to allow
-interior and trailing digits, keeping every identifier **letter-initial**. The
-old `[A-Za-z]`-only rule forced a running tax of euphemisms - `uuid.generate("v4")`
-because `v4()` was unspellable, the I2C library named `iic`, `pbkdf` dropping its
-"2", the `hash` / `crc` dance. The lexer / constant / spec / grammar / highlighter
-/ test work below shipped as an **additive, non-breaking** change (every
-previously-valid identifier stays valid). The **batched renames** it enables are
-separately breaking and are tracked as their own milestone, `M22.3` (below).
-
-**The rule change, two identifier classes:**
-
-- **Regular identifiers**: `[A-Za-z][A-Za-z0-9]*` (was `[A-Za-z]+`). Must start
-  with a letter, then any mix of letters and digits; still **no underscore**,
-  still <= 64 chars. Letter-initial is the invariant that keeps lexing trivial -
-  a token that starts with a digit is always a number, one that starts with a
-  letter is always an identifier - so `1..5`, the `0x` / `0o` / `0b` forms, float
-  mantissas, and `_` digit separators stay unambiguous.
-- **Constants**: `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (was `[A-Z]+(_[A-Z]+)*`).
-  Stay **ALLCAPS** and keep their underscore separators (underscores remain a
-  constants-only feature); digits are now allowed within a chunk, and every `_`
-  is still immediately followed by an uppercase letter. So `SHA256`, `HTTP2`,
-  `RFC5322`, `SCRAM_SHA256`, `MAX_RETRIES` are legal; `AES_256` stays illegal
-  (write `AES256`), as do `_MAX` / `MAX_` / `MAX__X`. This gives the constant
-  analogue of the same win - `SHA256` the constant beside `sha256` the method.
-
-**What is affected - all letter-initial identifiers move together.** The lexer
-emits one `IDENT` token for any letter-initial run and does not know the role
-(that is grammar position), so the character class necessarily applies uniformly:
-**digits cannot be scoped to just method names.** The categories that gain
-digits are variable names (and loop variables), parameter names, method /
-function names, struct type names, struct **field** names (the sleeper case:
-`x1 y1 x2 y2` rectangles, `line1` / `line2` address lines, `ipv4` / `ipv6`,
-`md5` / `sha256` result fields - all impossible today), library names and
-`use ... as` aliases, and `import ... as` module aliases. Constants are the one
-separately-lexed class (rule above). File / module **paths** and **map keys** are
-strings, not identifiers, and already allow digits, so they are untouched. Roles
-stay unambiguous because the `$` / `.` / `(` markers still distinguish them:
-`$x2` (variable), `p.x2` (field), `f.v4()` (call), `SHA256` (constant).
-
-**Batched follow-on renames.** The euphemism-dropping renames the rule enables
-(`iic` -> `i2c`, `uuid.v4()`, `pbkdf2`, ...) are all semver-breaking, so they are
-tracked and land together as **`M22.3`** (below), not inline here.
-
-**Cost.** Mechanically small: one character-class change in the lexer's
-identifier scanner plus the constant validator, and a re-verification that no
-number / identifier ambiguity opens. The weight is that it is a language-identity
-and breaking decision, so it also touches the spec,
-`JENNIFER.md`, the grammar EBNF / PEG, the naming-convention
-guidance, and every editor highlighter (`editors/` Vim / TextMate / highlight.js
-and the regenerated docs bundle). The trade accepted: the uniform letters-only
-look (and its "is `sha256` a name or a typo?" tidiness) is given up to end the
-euphemism tax.
-
-**Kept deliberately:** underscores stay **constants-only** (regular identifiers
-never take `_`) and constants stay **ALLCAPS** - the relaxation only adds digits,
-it does not change the two-class structure.
-
-### M22.3 - library renames enabled by digit identifiers
-
-**Done** (the breaking follow-on to `M22.2`). With the identifier rule in
-place, dropped the euphemisms the old letters-only rule forced. Each is a
-semver-breaking API change, so they **landed together before
-1.0.0** rather than dribbled out one at a time. Required `M22.2` (the rule).
-
-The breaking renames:
-
-| Was | Now | Why it was a euphemism |
-| --- | --- | ---------------------- |
-| `use iic;` (I2C bus) | `use i2c;` | `i2c` has a digit; `iic` was the letters-only spelling |
-| `uuid.generate("v4")` / `generate("v7")` | `uuid.v4()` / `uuid.v7()` | the version becomes a real method, not a string argument |
-| `crypto.pbkdf(...)` | `crypto.pbkdf2(...)` | PBKDF2 dropped its "2" |
-
-Per-algorithm digest shortcuts considered and **rejected.** Digits make
-`hash.sha256(b)` / `crc.crc32(b)` spellable, and they were briefly added beside
-`compute(b, algo)` - then removed on **stance #1** (one way per thing). The
-decisive point: the neighbours in the same family - `hash.hmac(_, _, algo)`,
-`crypto.pbkdf2(_, _, _, _, algo)`, `crypto.hkdf(_, _, _, _, algo)` - are
-irreducibly algorithm-as-value (SCRAM / JWT / TLS negotiate the hash at runtime,
-and `sasl.j` already threads a runtime `$s.algo` through all of them). Splitting
-only `compute` into `sha256()` would leave the family inconsistent (digest =
-method, MAC / KDF = string) and force a dispatch ladder at the one genuine
-runtime caller, so `compute(b, algo)` stays the single canonical form and the
-shortcuts are not added. Recorded in `docs/technical/rejected.md`.
-
-**Not renamed.** `binary` is named around the reserved **`bytes` type keyword**,
-not a digit, so the rule change does not help it - it stays `binary`. `intl`
-stays `intl` (letters-only was only half the reason; the model is JS's `Intl`,
-not `i18n`) unless a later call decides otherwise.
-
-**Migration.** Pre-1.0, these break directly (no both-ways deprecation window).
-One batch updates each module / library, its `*_test.j` overlay and Go
-integration test, `docs/libraries/` + `docs/modules/` references, `JENNIFER.md`,
-the cheatsheet, and every example / module that calls an old name.
+**Rejected in M22.3 (stance #1):** per-algorithm digest shortcuts
+(`hash.sha256(b)` / `crc.crc32(b)`) were briefly added beside `compute(b, algo)`,
+then removed - they are a parallel API for one job, and the family neighbours
+(`hash.hmac`, `crypto.pbkdf2` / `hkdf`) are irreducibly algorithm-as-value
+(SCRAM / JWT / TLS negotiate the hash; `sasl.j` threads a runtime `$s.algo`
+through all of them). So `compute(b, algo)` stays the single canonical form and
+the algorithm is always a value across the whole hash / crypto family. Full
+reasoning in `docs/technical/rejected.md`.
 
 ### M22.4 - `match` statement (multi-way value dispatch)
 

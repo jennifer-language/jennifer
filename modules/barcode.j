@@ -760,16 +760,16 @@ export func encode(data as string, symbology as string, opts as Options) {
         return Symbol{ kind: "matrix", size: len($m), matrix: $m, bars: $noBars, text: $data };
     }
     if ($symbology == "code128") {
-        return linearSymbol($data, codeOneTwentyEightBars($data));
+        return linearSymbol($data, code128Bars($data));
     }
     if ($symbology == "code39") {
-        return linearSymbol($data, codeThirtyNineBars($data));
+        return linearSymbol($data, code39Bars($data));
     }
     if ($symbology == "ean13") {
-        return linearSymbol($data, eanThirteenBars($data));
+        return linearSymbol($data, ean13Bars($data));
     }
     if ($symbology == "ean8") {
-        return linearSymbol($data, eanEightBars($data));
+        return linearSymbol($data, ean8Bars($data));
     }
     if ($symbology == "itf") {
         return linearSymbol($data, itfBars($data));
@@ -804,9 +804,9 @@ func bitsToBars(bitstr as string) {
     return $bars;
 }
 
-# codeOneTwentyEightBars encodes with Code 128 (code set B), auto start / checksum / stop.
-func codeOneTwentyEightBars(data as string) {
-    def patterns as list of string init codeOneTwentyEightPatterns();
+# code128Bars encodes with Code 128 (code set B), auto start / checksum / stop.
+func code128Bars(data as string) {
+    def patterns as list of string init code128Patterns();
     def cs as list of string init strings.chars($data);
     def values as list of int init [104];   # Start B
     def sum as int init 104;
@@ -839,9 +839,9 @@ func charToCode(ch as string) {
     return -1;
 }
 
-# codeThirtyNineBars encodes Code 39 (with start / stop `*`, no check digit).
-func codeThirtyNineBars(data as string) {
-    def bits as string init codeThirtyNineChar("*");
+# code39Bars encodes Code 39 (with start / stop `*`, no check digit).
+func code39Bars(data as string) {
+    def bits as string init code39Char("*");
     def cs as list of string init strings.chars(strings.upper($data));
     for (def ch in $cs) {
         # `*` is the Code 39 start/stop delimiter; in the payload it would encode
@@ -849,18 +849,18 @@ func codeThirtyNineBars(data as string) {
         if ($ch == "*") {
             fail("code39: '*' is the start/stop delimiter and cannot appear in the data");
         }
-        $bits = $bits + "0" + codeThirtyNineChar($ch);
+        $bits = $bits + "0" + code39Char($ch);
     }
-    $bits = $bits + "0" + codeThirtyNineChar("*");
+    $bits = $bits + "0" + code39Char("*");
     return bitsToBars($bits);
 }
 
-# eanThirteenBars / eanEightBars / itfBars.
-func eanThirteenBars(data as string) {
+# ean13Bars / ean8Bars / itfBars.
+func ean13Bars(data as string) {
     return eanBars($data, 13);
 }
 
-func eanEightBars(data as string) {
+func ean8Bars(data as string) {
     return eanBars($data, 8);
 }
 
@@ -884,9 +884,9 @@ func eanBars(data as string, digits as int) {
         fail("ean: expected " + convert.toString($digits) + " digits");
     }
     if ($digits == 13) {
-        return eanThirteenEncode($ds);
+        return ean13Encode($ds);
     }
-    return eanEightEncode($ds);
+    return ean8Encode($ds);
 }
 
 # digitList parses a string of digits into ints.
@@ -938,9 +938,9 @@ func eanR(d as int) {
     return $p[$d];
 }
 
-# eanThirteenEncode builds the module string for 13 digits (first digit sets the
+# ean13Encode builds the module string for 13 digits (first digit sets the
 # L/G parity pattern of the left group).
-func eanThirteenEncode(ds as list of int) {
+func ean13Encode(ds as list of int) {
     def parity as list of string init ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG",
         "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"];
     def pat as string init $parity[$ds[0]];
@@ -964,8 +964,8 @@ func eanThirteenEncode(ds as list of int) {
     return bitsToBars($bits);
 }
 
-# eanEightEncode builds the module string for 8 digits (L then R, no parity).
-func eanEightEncode(ds as list of int) {
+# ean8Encode builds the module string for 8 digits (L then R, no parity).
+func ean8Encode(ds as list of int) {
     def bits as string init "101";
     def i as int init 0;
     while ($i < 4) {
@@ -1017,8 +1017,8 @@ func itfWidth(nw as string) {
     return 1;
 }
 
-# codeThirtyNineChar returns the 9-element module string for one Code 39 character.
-func codeThirtyNineChar(ch as string) {
+# code39Char returns the 9-element module string for one Code 39 character.
+func code39Char(ch as string) {
     def keys as string init "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%*";
     def pats as list of string init [
         "101001101101", "110100101011", "101100101011", "110110010101", "101001101011",
@@ -1037,10 +1037,10 @@ func codeThirtyNineChar(ch as string) {
     return $pats[$idx];
 }
 
-# codeOneTwentyEightPatterns is the Code 128 module-pattern table (values
+# code128Patterns is the Code 128 module-pattern table (values
 # 0..106, 11 modules each; the encoder appends the 2-module termination bar
 # after the stop pattern, entry 106).
-func codeOneTwentyEightPatterns() {
+func code128Patterns() {
     return ["11011001100", "11001101100", "11001100110", "10010011000", "10010001100",
         "10001001100", "10011001000", "10011000100", "10001100100", "11001001000",
         "11001000100", "11000100100", "10110011100", "10011011100", "10011001110",

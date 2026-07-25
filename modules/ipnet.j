@@ -72,8 +72,8 @@ func parseDecimal(s as string) {
     return $v;
 }
 
-# parseFour parses dotted-quad IPv4 into 4 bytes.
-func parseFour(s as string) {
+# parse4 parses dotted-quad IPv4 into 4 bytes.
+func parse4(s as string) {
     def parts as list of string init strings.split($s, ".");
     if (not (len($parts) == 4)) {
         fail("IPv4 address needs 4 octets: " + $s);
@@ -117,7 +117,7 @@ func tokensToGroups(tokens as list of string) {
             if (not ($i == $n - 1)) {
                 fail("embedded IPv4 must be the last component");
             }
-            def quad as bytes init parseFour($t);
+            def quad as bytes init parse4($t);
             $groups[] = $quad[0] * 256 + $quad[1];
             $groups[] = $quad[2] * 256 + $quad[3];
         } else {
@@ -128,9 +128,9 @@ func tokensToGroups(tokens as list of string) {
     return $groups;
 }
 
-# parseSix parses an IPv6 address (with optional `::` compression and embedded
+# parse6 parses an IPv6 address (with optional `::` compression and embedded
 # IPv4) into 16 bytes.
-func parseSix(s as string) {
+func parse6(s as string) {
     def groups as list of int init [];
     def dbl as int init strings.indexOf($s, "::");
     if ($dbl >= 0) {
@@ -193,16 +193,16 @@ func parseSix(s as string) {
  */
 export func parseAddress(s as string) {
     if (strings.contains($s, ":")) {
-        return Address{ version: 6, octets: parseSix($s) };
+        return Address{ version: 6, octets: parse6($s) };
     }
     if (strings.contains($s, ".")) {
-        return Address{ version: 4, octets: parseFour($s) };
+        return Address{ version: 4, octets: parse4($s) };
     }
     fail("not an IP address: " + $s);
 }
 
-# formatFour renders 4 bytes as dotted-quad.
-func formatFour(octets as bytes) {
+# format4 renders 4 bytes as dotted-quad.
+func format4(octets as bytes) {
     return convert.toString($octets[0]) + "." + convert.toString($octets[1]) + "." +
         convert.toString($octets[2]) + "." + convert.toString($octets[3]);
 }
@@ -223,10 +223,10 @@ func hexGroup(g as int) {
     return $out;
 }
 
-# formatSix renders 16 bytes as canonical IPv6 (RFC 5952): lowercase, no leading
+# format6 renders 16 bytes as canonical IPv6 (RFC 5952): lowercase, no leading
 # zeros, and the longest run of >= 2 zero groups compressed to `::` (leftmost on
 # a tie).
-func formatSix(octets as bytes) {
+func format6(octets as bytes) {
     def groups as list of int init [];
     def i as int init 0;
     while ($i < 16) {
@@ -289,9 +289,9 @@ func formatSix(octets as bytes) {
  */
 export func toString(addr as Address) {
     if ($addr.version == 4) {
-        return formatFour($addr.octets);
+        return format4($addr.octets);
     }
-    return formatSix($addr.octets);
+    return format6($addr.octets);
 }
 
 # --- CIDR (exported) --------------------------------------------------------
