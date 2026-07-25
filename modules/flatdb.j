@@ -29,7 +29,7 @@ use uuid;
  * holds no mutable state and `spawn` deep-copies scope, so a store cannot be a
  * shared open connection - it is a value. Mutating verbs return a fresh DB;
  * `save` is the only side effect.
- * @field path {string} the backing file path
+ * @field path {string} the backing file path (empty for a read-only DB from openString)
  * @field data {json.Value} the decoded in-memory document
  */
 export def struct DB {
@@ -55,6 +55,26 @@ export func open(path as string) {
         }
     }
     return DB{ path: $path, data: $doc };
+}
+
+/**
+ * Load a DB from an in-memory JSON string instead of a file - for a database
+ * fetched over the network (`http.get(url, {}).body`), embedded in the program,
+ * or built elsewhere. The returned DB has **no backing path, so it is read-only**:
+ * every reader verb works and the mutating verbs still return a fresh in-memory
+ * DB, but `save` throws (there is nowhere to write). Whitespace-only text yields
+ * an empty document, matching `open` on a missing file. This keeps flatdb
+ * transport-agnostic: it never imports `http` / `net`, so it stays `fs`-only and
+ * builds on both binaries; the caller brings the bytes.
+ * @param text {string} the JSON document
+ * @return {DB} a read-only store
+ */
+export func openString(text as string) {
+    def doc as json.Value init json.map();
+    if (len(strings.trim($text)) > 0) {
+        $doc = json.decode($text);
+    }
+    return DB{ path: "", data: $doc };
 }
 
 # --- readers (do not change the DB) ----------------------------------------
@@ -143,20 +163,53 @@ export func remove(db as DB, pointer as string) {
 
 # --- persistence -----------------------------------------------------------
 
+# writeAtomic encodes `data` and replaces `path` crash-atomically: it writes a
+# sibling temp file and renames it over the target, so a reader ever sees the
+# whole old file or the whole new one, never a torn write; an interrupted write
+# leaves any existing target intact (only a stray temp file remains). The temp
+# name is uniquified - a fixed `.tmp` sibling would let two concurrent writes
+# share one path, so one could rename while the other is mid-write and publish a
+# torn file, defeating the guarantee.
+func writeAtomic(path as string, data as json.Value) {
+    def text as string init json.encode($data);
+    def tmp as string init $path + ".tmp." + uuid.v4();
+    fs.writeString($tmp, $text);
+    fs.rename($tmp, $path);
+}
+
 /**
- * Write the document back to its file with a crash-atomic replace: it writes a
- * sibling temp file and renames it over the target, so a reader ever sees the
- * whole old file or the whole new one, never a torn write. An interrupted save
- * leaves the original intact (only a stray temp file remains).
+ * Write the document back to its own backing file, crash-atomically (temp +
+ * rename). A read-only DB (from `openString`, no backing file) has nowhere to
+ * write - use `saveAs` to give it a path.
  * @param db {DB} the store to persist
- * @throws {Error} on a filesystem write or rename failure
+ * @throws {Error} kind "flatdb" if the DB is read-only (no backing file), or on a
+ *   filesystem write or rename failure
  */
 export func save(db as DB) {
-    def text as string init json.encode($db.data);
-    # Uniquify the temp name: a fixed `.tmp` sibling lets two concurrent saves
-    # share one path, so one could rename while the other is mid-write and
-    # publish a torn file - defeating the crash-atomic guarantee.
-    def tmp as string init $db.path + ".tmp." + uuid.v4();
-    fs.writeString($tmp, $text);
-    fs.rename($tmp, $db.path);
+    if (len($db.path) == 0) {
+        throw Error{kind: "flatdb", message: "flatdb.save: this DB is read-only (loaded with openString and has no backing file); use flatdb.saveAs(db, path)", file: "", line: 0, col: 0};
+    }
+    writeAtomic($db.path, $db.data);
+}
+
+/**
+ * Write the document to `path` (not necessarily its own) and return a **fresh DB
+ * bound to that path** - the passed-in `db` is unchanged (value semantics, like
+ * `set` / `append` / `remove`). Two uses: the first dump to disk of a read-only
+ * `openString` DB, and copying / forking an on-disk store to a new file (a
+ * snapshot or a new version). Which store is "current" for the next `save` is
+ * whichever handle you keep - reassign (`$db = flatdb.saveAs($db, path);`) to
+ * make the new file current, or hold both to keep the original too. Same
+ * crash-atomic temp+rename as `save`.
+ * @param db {DB} the store whose data to write
+ * @param path {string} the destination file path
+ * @return {DB} a new DB bound to `path` (its data equals `db`'s)
+ * @throws {Error} kind "flatdb" if `path` is empty, or on a filesystem failure
+ */
+export func saveAs(db as DB, path as string) {
+    if (len($path) == 0) {
+        throw Error{kind: "flatdb", message: "flatdb.saveAs: path must not be empty", file: "", line: 0, col: 0};
+    }
+    writeAtomic($path, $db.data);
+    return DB{ path: $path, data: $db.data };
 }

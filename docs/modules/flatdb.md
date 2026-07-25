@@ -42,6 +42,7 @@ only side effect.
 | Call | Returns | |
 | ---- | ------- | - |
 | `flatdb.open(path)` | `DB` | Load the file (an **empty** store if it's absent, so first run never fails). |
+| `flatdb.openString(text)` | `DB` | Load from an in-memory JSON string - a **read-only** DB with no backing file (`save` throws). For a store fetched over the network or embedded in the program. |
 | `flatdb.get(db, pointer)` | `json.Value` | The sub-document at a JSON Pointer (`""` = the whole document). |
 | `flatdb.has(db, pointer)` | `bool` | Whether the pointer resolves. |
 | `flatdb.keys(db, pointer)` | `list of string` | Keys of the object at the pointer, in document order. |
@@ -49,7 +50,8 @@ only side effect.
 | `flatdb.set(db, pointer, value)` | `DB` | Upsert an object key / replace a list index (strict: no auto-vivify). |
 | `flatdb.append(db, pointer, value)` | `DB` | Push onto the list at the pointer (create it first with `set`). |
 | `flatdb.remove(db, pointer)` | `DB` | Drop the key / element at the pointer. |
-| `flatdb.save(db)` | `null` | Write the document back, atomically (temp + rename). |
+| `flatdb.save(db)` | `null` | Write the document back to its own file, atomically (temp + rename). Throws for a read-only DB (no backing file). |
+| `flatdb.saveAs(db, path)` | `DB` | Write the document to `path` and return a **fresh DB bound to `path`** (`db` unchanged). First dump for an `openString` DB, or a copy / new version of an on-disk one. |
 
 `value` is any JSON value - a `json.Value`. Build objects and lists with
 `json.map()` / `json.list()` (then `json.set` / `json.append` into them), and
@@ -81,6 +83,51 @@ io.printf("%d runs; first on %s\n",
 ```
 
 A runnable version is [`examples/modules/flatdb_demo.j`](../../examples/modules/flatdb_demo.j).
+
+## Read-only from a URL or a string
+
+`flatdb.openString(text)` loads a store from an in-memory JSON string instead of
+a file. flatdb stays transport-agnostic - it never imports `http` / `net`, so it
+remains `fs`-only and builds on both binaries - and you bring the bytes. To read
+a database published at a URL:
+
+```jennifer
+use io;
+use json;
+import "http.j" as http;
+import "flatdb.j" as flatdb;
+
+def resp as http.Response init http.get("https://example.com/config.json", {});
+def db as flatdb.DB init flatdb.openString($resp.body);   # read-only
+io.printf("theme: %s\n", json.asString(flatdb.get($db, "/ui/theme"), ""));
+```
+
+The result has no backing path, so every reader works and the mutating verbs
+still return fresh in-memory copies, but `save` throws (`kind: "flatdb"`) - there
+is nowhere local to write. To **persist** it (or fork any store to a new file),
+use `saveAs`:
+
+```jennifer
+def db as flatdb.DB init flatdb.openString($resp.body);
+def edited as flatdb.DB init flatdb.set($db, "/ui/theme", json.decode("\"dark\""));
+def local as flatdb.DB init flatdb.saveAs($edited, "config.local.json");
+flatdb.save($local);   # now writable - $local is bound to config.local.json
+```
+
+`saveAs(db, path)` writes to `path` and returns a **fresh DB bound to that
+path**; the `db` you passed in is unchanged (value semantics, like `set` /
+`append` / `remove`). So after a `saveAs` you hold *both* - which one is "current"
+for the next `save` is simply the handle you keep: reassign
+(`$db = flatdb.saveAs($db, path);`) to make the new file current, or keep the old
+handle to keep writing the original file. There is no hidden "active file" state;
+a `DB` is a value.
+
+Decoding untrusted input is safe against a nesting bomb: `json.decode` caps
+container depth (a deeply-nested payload is a **catchable** error, not a fatal
+stack overflow), and JSON has no entity/alias expansion to amplify size - so a
+malicious URL can't crash or blow up the process. Bound the *download* itself with
+`http`'s body cap (64 MiB by default; pass an explicit `maxBytes` to
+`http.requestWith` for more or less).
 
 ## Atomic save, in detail
 

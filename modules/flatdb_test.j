@@ -74,3 +74,61 @@ func testWritersAreImmutable() {
     testing.assertFalse(has($db, "/x"));       # original untouched
     testing.assertTrue(has($grown, "/x"));
 }
+
+func testOpenStringReadsInMemory() {
+    def db as DB init openString("{\"count\": 2, \"users\": {\"1\": {\"name\": \"ada\"}}}");
+    testing.assertEqual(json.asInt(get($db, "/count")), 2);
+    testing.assertEqual(json.asString(get($db, "/users/1/name")), "ada");
+    testing.assertEqual(length($db, "/users"), 1);
+    # whitespace-only text is an empty document, like open() on a missing file
+    testing.assertEqual(length(openString("   "), ""), 0);
+}
+
+func testOpenStringIsValueSemantic() {
+    def db as DB init openString("{\"count\": 2}");
+    def db2 as DB init set($db, "/count", json.decode("5"));
+    testing.assertEqual(json.asInt(get($db2, "/count")), 5);
+    testing.assertEqual(json.asInt(get($db, "/count")), 2);   # original unchanged
+}
+
+# saveReadOnly is a helper for testReadOnlySaveThrows (not a test itself).
+func saveReadOnly() {
+    save(openString("{}"));
+}
+func testReadOnlySaveThrows() {
+    testing.assertThrows("saveReadOnly", "flatdb");
+}
+
+func testSaveAsPromotesReadOnlyToWritable() {
+    def p as string init os.tempDir() + "/flatdb_saveas_" + uuid.v4() + ".json";
+    def ro as DB init openString("{\"n\": 1}");
+    def w as DB init saveAs($ro, $p);
+    testing.assertTrue(fs.exists($p));
+    testing.assertEqual($w.path, $p);            # returned handle bound to the new path
+    testing.assertEqual(length($ro, ""), 1);     # original untouched (value semantics)
+    def w2 as DB init set($w, "/n", json.decode("2"));
+    save($w2);                                   # writable now (has a path)
+    testing.assertEqual(json.asInt(get(open($p), "/n")), 2);
+    fs.remove($p);
+}
+
+func testSaveAsForksIndependently() {
+    def pa as string init os.tempDir() + "/flatdb_a_" + uuid.v4() + ".json";
+    def pb as string init os.tempDir() + "/flatdb_b_" + uuid.v4() + ".json";
+    def a as DB init set(open($pa), "/who", json.decode("\"a\""));
+    save($a);
+    def b as DB init saveAs($a, $pb);            # copy to a new file
+    save(set($b, "/who", json.decode("\"b\"")));
+    testing.assertEqual(json.asString(get(open($pa), "/who")), "a");   # original file unchanged
+    testing.assertEqual(json.asString(get(open($pb), "/who")), "b");
+    fs.remove($pa);
+    fs.remove($pb);
+}
+
+# saveAsEmpty is a helper for testSaveAsEmptyPathThrows (not a test itself).
+func saveAsEmpty() {
+    def x as DB init saveAs(openString("{}"), "");
+}
+func testSaveAsEmptyPathThrows() {
+    testing.assertThrows("saveAsEmpty", "flatdb");
+}

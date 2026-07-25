@@ -475,11 +475,17 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   / `glyf` (simple **and** composite glyphs, quadratic curves) / `name`.
   TrueType `glyf` backend (CFF is a later second backend, one module).
 - **`flatdb`** - a file-backed JSON store over `json` + `fs`. `flatdb.open(path)`
-  -> value-semantic `DB` (empty if the file is absent); query / edit by JSON
-  Pointer (`get` / `has` / `keys` / `length`; the fresh-`DB`-returning `set` /
-  `append` / `remove`); `flatdb.save(db)` writes back with a crash-atomic
-  temp+`rename`. Values are `json.Value`s (`json.decode` for scalars). Not a
-  database engine - crash-atomic snapshotting of small data. Both binaries.
+  -> value-semantic `DB` (empty if the file is absent), or `flatdb.openString(text)`
+  for a **read-only** DB from an in-memory JSON string (a store fetched over the
+  network - `http.get(url, {}).body` - or embedded; `save` throws, no backing
+  file). Query / edit by JSON Pointer (`get` / `has` / `keys` / `length`; the
+  fresh-`DB`-returning `set` / `append` / `remove`); `flatdb.save(db)` writes back
+  with a crash-atomic temp+`rename`, and `flatdb.saveAs(db, path)` writes to a new
+  file and returns a fresh `DB` bound to it (`db` unchanged) - the first dump for
+  an `openString` DB, or a copy / new version of an on-disk one. Values are
+  `json.Value`s (`json.decode` for scalars). Transport-agnostic (never imports
+  `http`/`net`), so both binaries. Not a database engine - crash-atomic
+  snapshotting of small data.
 - **`dotenv`** - read `.env` config files. `dotenv.parse(text)` /
   `dotenv.read(path)` -> `map of string to string`; `dotenv.load(path)` also sets
   each variable via `os.setEnv` (returns the map). Handles `#` comments
