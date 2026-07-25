@@ -1941,6 +1941,58 @@ Verified end-to-end in `cmd/jennifer/http_bytes_test.go` (a gzip served over
 loopback downloads with matching sha256 and unpacks back, while the text `get`
 refuses the same body) plus a `parseRaw`-keeps-binary overlay test.
 
+### M22.11 - injection & output-encoding hardening
+
+**Planned.** The injection / XSS / encoding cluster - a value that reaches a wire
+or an HTML / SQL sink without the right escaping.
+
+| id | area | fix |
+| --- | --- | --- |
+| `OM-002` (HIGH) | `orm` | validate `col` / order column against `Schema.columns` (or an identifier regex), map `op` through an allowlist to a literal, quote table names per dialect; correct the module's "injection-safe" doc claim (true of values, false of identifiers) |
+| `OM-006` | `imap` / `pop` | add `rejectControl` (as `smtp` has) to user / pass / mailbox / `fields` - CR/LF in `quoteArg` and the unquoted `fields` inject commands |
+| `OM-007` | `statsd` | reject `:` `\|` `\n` `\r` in a value and any non-`[A-Za-z0-9._-]` in a name (as `prometheus` / `influxdb` already do) |
+| `OM-011` | `htmlwriter` | validate tag / attribute names against `^[A-Za-z][A-Za-z0-9-]*$`; promote `markdown`'s `safeHref` to an exported `safeUrl` |
+| `OM-012` | `tengine` | an auto-escape-by-default mode (`\| raw` opt-out), or a prominent "every user interpolation needs `\| html`" warning |
+| `OF-003` | `json` | HTML-escape `<` `>` `&` U+2028 U+2029 as `\u00xx` (Go's `encoding/json` default; output stays valid JSON, decodes identically), and/or ship a `strings.escapeHtml` - the stdlib has no HTML escaper today |
+| `OF-008` | `hash` | add `hash.equal(a, b)` delegating to `crypto/subtle.ConstantTimeCompare` (a `== on bytes` MAC compare is a timing oracle); label md5 / sha1 non-cryptographic |
+| `OM-020` | `http` | `parseUrl` must split `?` / `#` before locating the authority (a query-only URL folds `?q=` into the host) |
+| `OM-021` | `dotenv` | validate key names (`^[A-Za-z_][A-Za-z0-9_]*$`); doc that `load` mutates the process env inherited by `os.run` children |
+| `OM-010` | `ipnet` | fold `::ffff:a.b.c.d` to a v4 `Address` (or export `unmap`) so an SSRF deny-list is not bypassed by the mapped form |
+
+### M22.12 - network, resource & path robustness
+
+**Planned.** Timeouts, unbounded reads, handle leaks, a data race, and path safety.
+
+| id | area | fix |
+| --- | --- | --- |
+| `OM-004` | `memcache` / `mikrotik` / `amqp` | add the `MAX_*_BYTES` pre-check on a server-declared length (six sibling clients already do); a hostile peer declaring ~4 GiB is an uncatchable OOM |
+| `OM-005` | `mikrotik` | thread a connect timeout + per-read `setDeadline`; flag the plaintext default (it ships admin credentials in the clear) or make TLS the default |
+| `OM-017` | `memcache` / `label` | connect timeouts (every other client passes one) |
+| `OF-005` | `net` | default `readAll` to a finite cap (256 MiB, matching the siblings), explicit sentinel for unlimited; align the doc with the negative-value behaviour |
+| `OF-009` | `net` | `startTLS` must snapshot `r` / `c` / `deadline` under `s.mu` and hold `s.readMu` across the handshake (a race, and a parked reader that would consume raw TLS bytes as plaintext) |
+| `OF-007` | `sql` / `os` / `net` / `fs` / `compress` / `httpd` | bound each handle registry the way `term` does; `Query`/`ExecContext` with a deadline in `sql` (a leaked `*sql.Rows` pins a pool connection, then blocks forever); a teardown sweep at CLI exit |
+| `OF-013` | `archive` | compare each declared entry size against the remaining budget (summed `UncompressedSize64` can wrap past 2^64 and skip the cheap pre-check) |
+| `OF-004` | `httpd` | `serveDir`: reject a `\` in the request path and re-verify containment after the join (Windows-only traversal) |
+| `OF-011` | `httpd` | `chmod 0660` a `unix:` socket after listen (a permissive umask publishes it world-connectable) |
+| `OF-012` | `httpd` | document the symlink-follow in `serveFile` / `serveDir` (optionally close it via `os.Root`) |
+| `OF-010` | `sql` | redact the DSN password before wrapping `open` / `Ping` errors |
+| `OF-014` | `json` / `value` / toml / yaml / xml writers | thread `MaxNestingDepth` into the **outbound** paths (`encode` / `Display` / `==` / `DeepCopy`) - a `json.set`-grown tree is an uncatchable stack overflow; also the shared-subtree encode-size amplification |
+| `OM-014` | `flatdb` | `stat` the target and preserve its mode on `save` (don't silently widen to `0644`, default `0600` for a new file); clean up the temp file on a failed rename |
+
+### M22.13 - web framework hardening
+
+**Planned.** `web`-centric availability, session, and operability findings.
+
+| id | fix |
+| --- | --- |
+| `OM-003` (HIGH) | run each accepted request in a bounded `spawn` pool (`httpd`'s `maxInFlight` is the natural ceiling) - `web` is serial today, so one slow handler stalls every other request; state it loudly if serial is a deliberate v1 choice |
+| `OM-008` | validate the incoming session cookie against the minted UUID shape and re-mint on mismatch; add `web.renewSession` (session-fixation defence); this is the delivery vector for `OM-001` |
+| `OM-009` | an optional `web.onError(app, handlerName)`; when unset, write the swallowed handler error's kind / message / position to stderr rather than dropping it entirely |
+| `OM-013` | decode `web.form` / `percentDecode` leniently (a non-UTF-8 urlencoded body is legal and currently 500s); have `csrfCheck` skip the form fallback for a non-urlencoded content type |
+| `OM-019` | answer `HEAD` for a route registered with `web.get`, body suppressed (HTTP requires it; health checks / caches use it) |
+| `OF-006` | `meta.call` / `callMain` docs: an explicit "match against a program-defined allowlist first" warning + a registration-based dispatch surface so the safe path is the easy one |
+| `OF-017` | stop `httpd`'s two per-request timers (`NewTimer` + `defer Stop`, or one shared `context.WithTimeout`) - GC pressure at high rps |
+
 ---
 
 ## Requirements for 1.0.0 stable
