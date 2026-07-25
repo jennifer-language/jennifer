@@ -80,7 +80,7 @@ func TestRestCrud(t *testing.T) {
 use json;
 import %q as rest;
 import %q as http;
-def api as rest.Client init rest.Client{baseUrl: %q, headers: {"Authorization": rest.bearer("test-token")}};
+def api as rest.Client init rest.withHeader(rest.client(%q), "Authorization", rest.bearer("test-token"));
 def created as rest.Response init rest.postJson($api, "/users", json.decode("{\"name\":\"ada\"}"));
 testing.assertEqual($created.status, 201);
 testing.assertContains($created.body, "ada");
@@ -98,7 +98,7 @@ def gone as rest.Response init rest.get($api, "/users/1", {});
 testing.assertEqual($gone.status, 404);
 def found as json.Value init rest.getJson($api, "/search", {"q": "ada lovelace"});
 testing.assertEqual(json.asString($found, "/q"), "ada lovelace");
-def bad as rest.Client init rest.Client{baseUrl: %q, headers: {"Authorization": rest.bearer("wrong")}};
+def bad as rest.Client init rest.withHeader(rest.client(%q), "Authorization", rest.bearer("wrong"));
 def unauth as rest.Response init rest.get($bad, "/search", {});
 testing.assertEqual($unauth.status, 401);`, restMod, httpMod, srv.URL, srv.URL)
 	progPath := filepath.Join(dir, "crud.j")

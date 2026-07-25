@@ -3,16 +3,18 @@
 
 /**
  * An ergonomic REST layer over the `http` client and `json`. Hold a
- * value-semantic Client (base URL + default headers) and call JSON-aware verbs;
- * the module handles base-URL joining, query strings, `Content-Type`, and
- * Bearer / Basic auth headers. It is pure composition - no sockets, no TLS, no
- * parsing of its own - so all the transport lives in `http` (which uses `net`),
- * and this module needs the default `jennifer` binary. A 4xx / 5xx is a normal
- * Response (inspect `.status`), not a crash.
+ * value-semantic Client (base URL + default headers + TLS options) and call
+ * JSON-aware verbs; the module handles base-URL joining, query strings,
+ * `Content-Type`, and Bearer / Basic auth headers. It is pure composition - no
+ * sockets, no parsing of its own - so all the transport lives in `http` (which
+ * uses `net`), and this module needs the default `jennifer` binary. A 4xx / 5xx
+ * is a normal Response (inspect `.status`), not a crash. Build a client with
+ * `rest.client`; for a self-signed / private-CA host use `rest.withCA` (safer)
+ * or `rest.insecure` (opt out of verification).
  * @module rest
  * @example
- * def api as rest.Client init rest.Client{baseUrl: "https://api.example.com",
- *     headers: {"Authorization": rest.bearer("my-token")}};
+ * def api as rest.Client init rest.withHeader(rest.client("https://api.example.com"),
+ *     "Authorization", rest.bearer("my-token"));
  * def user as json.Value init rest.getJson($api, "/users/1", {});
  */
 use strings;
@@ -26,10 +28,12 @@ import "./http.j" as http;
  * with every request (auth lives here). Value-semantic; thread it per call.
  * @field baseUrl {string} the base URL every path joins onto
  * @field headers {map of string to string} default headers sent with every request
+ * @field tls {http.TlsOptions} TLS options applied to every `https://` request (zero value = full verification)
  */
 export def struct Client {
     baseUrl as string,
-    headers as map of string to string
+    headers as map of string to string,
+    tls as http.TlsOptions
 };
 
 /**
@@ -137,6 +141,46 @@ export func withHeader(c as Client, name as string, value as string) {
     return $nc;
 }
 
+/**
+ * Build a Client for a base URL, with no default headers and full TLS
+ * verification. Layer auth / headers on with `withHeader` and TLS relaxation
+ * with `withCA` / `insecure`.
+ * @param baseUrl {string} the base URL every path joins onto
+ * @return {Client} a new client
+ */
+export func client(baseUrl as string) {
+    def t as http.TlsOptions;   # zero value: verify the server certificate
+    return Client{baseUrl: $baseUrl, headers: {}, tls: $t};
+}
+
+/**
+ * Return a copy of the client that trusts a private-CA / self-signed PEM
+ * certificate (in addition to the system roots) for every `https://` request.
+ * The safer alternative to `insecure`: the server is still authenticated.
+ * @param c {Client} the client to copy
+ * @param pem {bytes} a PEM certificate to trust
+ * @return {Client} a new client pinned to the CA
+ */
+export func withCA(c as Client, pem as bytes) {
+    def nc as Client init $c;
+    $nc.tls.caCert = $pem;
+    return $nc;
+}
+
+/**
+ * Return a copy of the client that skips TLS certificate verification for every
+ * `https://` request. This disables server authentication and exposes the
+ * connection to a man-in-the-middle - use only for a trusted LAN endpoint you
+ * cannot give a proper CA; prefer `withCA`.
+ * @param c {Client} the client to copy
+ * @return {Client} a new client that accepts any certificate
+ */
+export func insecure(c as Client) {
+    def nc as Client init $c;
+    $nc.tls.skipVerify = true;
+    return $nc;
+}
+
 # --- request core (private) ----------------------------------------
 
 # send runs one request through `http`, joining the URL and merging the client's
@@ -148,7 +192,7 @@ func send(c as Client, method as string, path as string,
     if (len($contentType) > 0) {
         $headers["Content-Type"] = $contentType;
     }
-    def r as http.Response init http.request($method, $url, $headers, $body);
+    def r as http.Response init http.requestTls($method, $url, $headers, $body, $c.tls);
     return Response{status: $r.status, headers: $r.headers, body: $r.body};
 }
 

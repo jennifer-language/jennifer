@@ -172,3 +172,10 @@ func testCleanMethodAccepted() {
     def u as Url init parseUrl("http://example.com/");
     testing.assertContains(buildRequest("GET", $u, {}, ""), "GET / HTTP/1.1");
 }
+func testTlsOptionsZeroVerifies() {
+    # The zero TlsOptions (what a plain request uses) full-verifies: skipVerify
+    # off, no extra CA. The live skipVerify / caCert paths are in the Go suite.
+    def o as TlsOptions;
+    testing.assertEqual($o.skipVerify, false);
+    testing.assertEqual(len($o.caCert), 0);
+}

@@ -49,8 +49,32 @@ func testBasic() {
 }
 
 func testWithHeader() {
-    def client as Client init Client{baseUrl: "http://api", headers: {}};
-    def authed as Client init withHeader($client, "Authorization", bearer("x"));
+    def cli as Client init client("http://api");
+    def authed as Client init withHeader($cli, "Authorization", bearer("x"));
     testing.assertEqual($authed.headers["Authorization"], "Bearer x");
-    testing.assertEqual(len($client.headers), 0);      # original unchanged (value semantics)
+    testing.assertEqual(len($cli.headers), 0);      # original unchanged (value semantics)
+}
+
+func testClientDefaults() {
+    def cli as Client init client("http://api");
+    testing.assertEqual($cli.baseUrl, "http://api");
+    testing.assertEqual(len($cli.headers), 0);
+    testing.assertEqual($cli.tls.skipVerify, false);   # verify on by default
+    testing.assertEqual(len($cli.tls.caCert), 0);
+}
+
+func testInsecure() {
+    def cli as Client init client("https://appliance");
+    def open as Client init insecure($cli);
+    testing.assertEqual($open.tls.skipVerify, true);
+    testing.assertEqual($cli.tls.skipVerify, false);   # original unchanged (value semantics)
+}
+
+func testWithCA() {
+    def cli as Client init client("https://appliance");
+    def pem as bytes init convert.bytesFromString("-----BEGIN CERTIFICATE-----", "utf-8");
+    def pinned as Client init withCA($cli, $pem);
+    testing.assertEqual(len($pinned.tls.caCert), len($pem));
+    testing.assertEqual($pinned.tls.skipVerify, false);   # withCA still authenticates
+    testing.assertEqual(len($cli.tls.caCert), 0);         # original unchanged
 }

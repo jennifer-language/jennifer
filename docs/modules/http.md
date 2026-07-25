@@ -32,8 +32,11 @@ string (`""` for none).
 | Call / type                                 | Notes                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------ |
 | `http.Response`                             | `status` (int), `statusText`, `headers` (lowercased keys), `body`. |
+| `http.TlsOptions`                           | `skipVerify` (bool), `caCert` (`bytes`, PEM). Zero value = full verification (what `request` uses). |
 | `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
 | `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit per-read idle timeout (`0` = none) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
+| `http.requestTls(method, url, headers, body, tls)` | As `request`, with explicit `TlsOptions` for an `https://` server (self-signed / private CA). |
+| `http.requestWithTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestWith`, with explicit `TlsOptions`. |
 | `http.get(url, headers)`                    | GET.                                                               |
 | `http.post(url, contentType, body, headers)`| POST; sets `Content-Type`.                                         |
 | `http.put(url, contentType, body, headers)` | PUT; sets `Content-Type`.                                          |
@@ -107,6 +110,28 @@ try {
 
 The timeout bounds each read, not the whole transfer, so a large but steady
 download is fine while a stalled one is cut off.
+
+## TLS (self-signed / private CA)
+
+An `https://` request full-verifies the server certificate against the URL host
+by default. To reach a server with a self-signed or private-CA certificate (a
+LAN appliance, an internal service), pass `http.TlsOptions` through
+`http.requestTls` (or `requestWithTls` for explicit timeout / cap). The zero
+`TlsOptions` verifies, so `request` and the verb shortcuts are unchanged; `http://`
+ignores the options.
+
+```jennifer
+use fs;
+def opts as http.TlsOptions;
+$opts.caCert = fs.readBytes("appliance-ca.pem");   # trust this cert (preferred)
+def r as http.Response init http.requestTls("GET", "https://192.168.1.10/", {}, "", $opts);
+```
+
+- **`caCert`** (`bytes`, PEM) trusts a specific certificate in addition to the
+  system roots. Preferred: the server stays authenticated.
+- **`skipVerify` (`true`)** accepts *any* certificate. It disables authentication
+  and exposes the connection to a man-in-the-middle - use only for a trusted LAN
+  endpoint you cannot give a proper CA. Mirrors `net.TLSOptions`.
 
 ## Errors
 

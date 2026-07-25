@@ -1893,7 +1893,7 @@ values together give the functional-core idioms).
 
 ### M22.6 - TLS options for `http` / `rest`
 
-**Planned.** Let the `http` client (and `rest` on top) reach an HTTPS server with
+**Done.** Let the `http` client (and `rest` on top) reach an HTTPS server with
 a self-signed or private-CA certificate, by threading TLS options through to
 `net.connectTLS`. Today `http` always full-verifies - `modules/http.j` calls
 `net.connectTLS($addr, DEFAULT_TIMEOUT_MS)` with no options - so it cannot talk to
@@ -1906,25 +1906,35 @@ so the work is purely plumbing it through the two `.j` modules.
 **Shape:**
 
 - **`http`** carries TLS options on the request path: an `http.TlsOptions` struct
-  (`{ skipVerify as bool, caCert as bytes }`, mirroring `net.TLSOptions`) plus a
-  field on `http.Request`, reached either by building a `Request` or by
-  options-taking send variants. `https://` with no options behaves exactly as
-  today.
+  (`{ skipVerify as bool, caCert as bytes }`, mirroring `net.TLSOptions`) plus
+  options-taking send variants `http.requestTls(method, url, headers, body, tls)`
+  and `http.requestWithTls(..., timeoutMs, maxBytes, tls)` (`http` is
+  function-based, with no `Request` struct to hang a field on). `https://` with no
+  options - `request` and the verb shortcuts, which pass the zero `TlsOptions` -
+  behaves exactly as today.
 - **`rest`** exposes it per-client (a `rest.Client` already bundles base URL +
-  default headers): a `tls` field plus builders mirroring `rest.bearer` /
-  `withHeader` - `rest.insecure(client)` (skip verification) and
-  `rest.withCA(client, pem)` (trust a PEM CA) - applied to every request.
+  default headers): a `tls as http.TlsOptions` field, a `rest.client(baseUrl)`
+  constructor (needed since the added required field breaks the old bare
+  `Client{baseUrl, headers}` literal), and builders mirroring `rest.withHeader` -
+  `rest.insecure(client)` (skip verification) and `rest.withCA(client, pem)`
+  (trust a PEM CA) - applied to every request.
 - **Secure by default.** Verification stays **on** unless explicitly relaxed;
   `skipVerify` is opt-in with a MITM-risk note, `caCert` is the safer path (trust
   the appliance's own CA). Matches `net.TLSOptions` semantics and the security
   model (opt-in, documented, for a trusted-LAN endpoint - never a default).
 
-**Files:** `modules/http.j` + `modules/rest.j` (structs / builders / thread to
-`net.connectTLS`), their `*_test.j` overlays, `docs/modules/http.md` + `rest.md`,
-`JENNIFER.md` bullets, a demo. Default-binary-only (net-backed), so no TinyGo
-concern. **Verification:** the overlays can spin a self-signed loopback with
-`httpd.listenTLS` and confirm `http` / `rest` reach it with `skipVerify` (and
-refuse it without) - a real end-to-end test, not just a shape check.
+**Files:** `modules/http.j` + `modules/rest.j` (struct / builders / thread to
+`net.connectTLS`), their `*_test.j` overlays (TLS-builder shape tests),
+`docs/modules/http.md` + `rest.md`, `JENNIFER.md` bullets, the `rest_demo.j`
+constructor update. Default-binary-only (net-backed), so no TinyGo concern.
+**Verified:** Go integration tests (`cmd/jennifer/http_tls_test.go`) drive both
+surfaces against a self-signed loopback - the default request refuses the
+untrusted cert, `skipVerify` accepts it, and `withCA` trusts the server's own
+cert - plus a full Jennifer `httpd.listenTLS` round-trip. A real end-to-end
+test, not just a shape check.
+
+Dogfoods **M22.9**: `rest.Client.tls` is a module struct (`http.TlsOptions`) used
+as a struct field across the `main -> rest -> http` boundary.
 
 ### M22.7 - `graphql` (GraphQL client module)
 

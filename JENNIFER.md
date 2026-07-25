@@ -499,7 +499,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `http.Response` (`status` / `statusText` / lowercased `headers` / `body`);
   `http.header(resp, name)` reads a response header case-insensitively. Handles
   Content-Length and chunked framing; text (UTF-8) bodies. Redirects returned,
-  not followed. **Default `jennifer` binary only** (`net`).
+  not followed. For a self-signed / private-CA `https://` server pass
+  `http.TlsOptions{skipVerify, caCert}` through `http.requestTls(method, url,
+  headers, body, tls)` (or `requestWithTls(..., timeoutMs, maxBytes, tls)`); the
+  zero `TlsOptions` full-verifies, so `request` and the shortcuts are unchanged.
+  **Default `jennifer` binary only** (`net`).
 - **`gotify`** - push a notification to a [Gotify](https://gotify.net) server,
   on top of `http`: `gotify.push(cfg, title, message, priority)` POSTs the
   message form (`X-Gotify-Key` header) to `cfg.url + "/message"` and returns the
@@ -511,13 +515,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `read(pin)` / `release(pin)`. Root `/sys/class/gpio`, overridable via the
   `JENNIFER_GPIO_BASE` env var (`os.setEnv`, e.g. for a mock). Off a
   GPIO-capable host, calls throw `Error{kind: "gpio"}` clearly. Both binaries.
-- **`rest`** - an ergonomic REST layer over `http` + `json`: a value-semantic
-  `rest.Client{baseUrl, headers}` and `rest.get(c, path, query)` / `post(c,
-  path, contentType, body)` / `put` / `patch` / `delete` -> `rest.Response`
-  (`status` / `headers` / `body`), plus `getJson` (-> `json.Value`) / `postJson`
-  / `putJson` / `patchJson`. Base-URL joining, percent-encoded query strings,
-  `rest.bearer` / `rest.basic` / `rest.withHeader` for auth. A 4xx/5xx is a
-  `Response` value, not a crash. **Default `jennifer` binary only** (`net`).
+- **`rest`** - an ergonomic REST layer over `http` + `json`: build a
+  value-semantic client with `rest.client(baseUrl)` (`Client{baseUrl, headers,
+  tls}`), then `rest.get(c, path, query)` / `post(c, path, contentType, body)` /
+  `put` / `patch` / `delete` -> `rest.Response` (`status` / `headers` / `body`),
+  plus `getJson` (-> `json.Value`) / `postJson` / `putJson` / `patchJson`.
+  Base-URL joining, percent-encoded query strings, `rest.bearer` / `rest.basic` /
+  `rest.withHeader` for auth. For a self-signed / private-CA host: `rest.withCA(c,
+  pem)` (trust a PEM cert, preferred) or `rest.insecure(c)` (skip verification -
+  trusted-LAN only). A 4xx/5xx is a `Response` value, not a crash. **Default
+  `jennifer` binary only** (`net`).
 - **`oauth`** - a generic OAuth2 client (the *get-a-token* half; `sasl` is the
   *use-a-token* half) over `http` + `json`: `oauth.clientCredentials(cfg)` /
   `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` -> `deviceWait(cfg,

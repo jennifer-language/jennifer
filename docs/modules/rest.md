@@ -18,8 +18,8 @@ and auth headers are string / map work; the transport (verbs, TLS, framing) is
 import "rest.j" as rest;
 use json;
 
-def api as rest.Client init rest.Client{baseUrl: "https://api.example.com",
-    headers: {"Authorization": rest.bearer("my-token")}};
+def api as rest.Client init rest.withHeader(rest.client("https://api.example.com"),
+    "Authorization", rest.bearer("my-token"));
 
 def user as json.Value init rest.getJson($api, "/users/1", {});
 def created as rest.Response init rest.postJson($api, "/users",
@@ -37,8 +37,9 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 
 | Call / type                                   | Notes                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------- |
-| `rest.Client`                                 | `baseUrl` and default `headers` sent with every request.         |
+| `rest.Client`                                 | `baseUrl`, default `headers`, and `tls` options sent with every request. |
 | `rest.Response`                               | `status`, `headers`, `body`.                                     |
+| `rest.client(baseUrl)`                        | Build a client: no default headers, full TLS verification.       |
 | `rest.get(c, path, query)`                    | GET; `query` is a `map of string to string` ({} for none).       |
 | `rest.delete(c, path, query)`                 | DELETE.                                                          |
 | `rest.post(c, path, contentType, body)`       | POST with a raw body.                                            |
@@ -51,6 +52,8 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 | `rest.bearer(token)`                          | An `Authorization` value: `Bearer <token>`.                      |
 | `rest.basic(user, pass)`                      | An `Authorization` value: `Basic <base64(user:pass)>`.           |
 | `rest.withHeader(c, name, value)`             | A copy of the client with one default header set.                |
+| `rest.withCA(c, pem)`                         | A copy trusting a private-CA / self-signed PEM cert (`bytes`) for `https://`. The safer TLS opt-out: the server is still authenticated. |
+| `rest.insecure(c)`                            | A copy that skips TLS certificate verification (accepts any cert). Disables authentication - trusted-LAN endpoints only; prefer `withCA`. |
 
 ## URLs, queries, and auth
 
@@ -62,6 +65,28 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 - **Auth** is a header: set `Client.headers["Authorization"]` to `rest.bearer(token)`
   or `rest.basic(user, pass)` when building the client, or add it later with
   `rest.withHeader`. Basic base64-encodes `user:pass` through `encoding`.
+
+## TLS (self-signed / private CA)
+
+Every `https://` request full-verifies the server certificate by default. A LAN
+appliance (Proxmox, Synology, an internal service) usually ships a self-signed
+cert, which that default rejects. Two per-client opt-outs, both returning a copy
+(value semantics, like `withHeader`):
+
+- **`rest.withCA(client, pem)`** trusts a specific PEM certificate (`bytes`, e.g.
+  from `fs.readBytes`) in addition to the system roots. **Preferred** - the
+  server is still authenticated, just against the appliance's own CA.
+- **`rest.insecure(client)`** accepts *any* certificate. This disables server
+  authentication and exposes the connection to a man-in-the-middle; use it only
+  for a trusted LAN endpoint you cannot give a proper CA.
+
+```jennifer
+use fs;
+def ca as bytes init fs.readBytes("appliance-ca.pem");
+def api as rest.Client init rest.withCA(rest.client("https://192.168.1.10"), $ca);
+# or, last resort on a trusted LAN:
+def loose as rest.Client init rest.insecure(rest.client("https://192.168.1.10"));
+```
 
 ## Errors
 

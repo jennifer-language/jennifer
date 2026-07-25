@@ -48,6 +48,20 @@ export def struct Response {
     body as string
 };
 
+/**
+ * TLS options for an `https://` request, mirroring `net.TLSOptions`. The zero
+ * value (`skipVerify` false, empty `caCert`) full-verifies the server
+ * certificate against the URL host, which is what a plain `request` / verb
+ * shortcut uses - so an `https://` call with no options behaves exactly as
+ * before.
+ * @field skipVerify {bool} accept *any* certificate (self-signed, wrong host, expired). Opt-in; disables authentication and exposes the connection to a man-in-the-middle. Use only for a trusted LAN endpoint you cannot give a proper CA.
+ * @field caCert {bytes} a PEM certificate to trust in addition to the system roots, for a private CA or a pinned self-signed cert. The safer alternative to `skipVerify`: the server is still authenticated, just against this cert.
+ */
+export def struct TlsOptions {
+    skipVerify as bool,
+    caCert as bytes
+};
+
 # --- byte helpers (private) ----------------------------------------
 
 # sliceBytes copies buf[start:end] into a new bytes value.
@@ -402,10 +416,15 @@ func readToEOF(conn as net.Conn, timeoutMs as int, maxBytes as int) {
     }
 }
 
-func dial(u as Url) {
+func dial(u as Url, tls as TlsOptions) {
     def addr as string init $u.host + ":" + convert.toString($u.port);
     if ($u.scheme == "https") {
-        return net.connectTLS($addr, DEFAULT_TIMEOUT_MS);
+        # A zero TlsOptions maps to a zero net.TLSOptions (verify on, no extra
+        # CA), identical to the old no-options dial; skipVerify / caCert opt out.
+        def opts as net.TLSOptions;
+        $opts.skipVerify = $tls.skipVerify;
+        $opts.caCert = $tls.caCert;
+        return net.connectTLS($addr, $opts, DEFAULT_TIMEOUT_MS);
     }
     return net.connect($addr, DEFAULT_TIMEOUT_MS);
 }
@@ -431,11 +450,19 @@ func dial(u as Url) {
  */
 export func requestWith(method as string, url as string,
     headers as map of string to string, body as string, timeoutMs as int, maxBytes as int) {
+    def t as TlsOptions;   # zero value: full certificate verification (unchanged)
+    return sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t);
+}
+
+# sendCore is the single request implementation; the public variants differ only
+# in which TlsOptions they hand it. An `http://` URL ignores `tls`.
+func sendCore(method as string, url as string, headers as map of string to string,
+    body as string, timeoutMs as int, maxBytes as int, tls as TlsOptions) {
     def u as Url init parseUrl($url);
     # Build (and validate) the request before opening a socket, so an injected
     # header / path throws without dialing and nothing malformed hits the wire.
     def wire as string init buildRequest($method, $u, $headers, $body);
-    def conn as net.Conn init dial($u);
+    def conn as net.Conn init dial($u, $tls);
     # Close the socket exactly once whether the exchange succeeds or throws: a
     # read timeout or a parse error must not leak the connection (a poller
     # hitting timeouts would otherwise exhaust file descriptors).
@@ -445,6 +472,41 @@ export func requestWith(method as string, url as string,
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
     return parseResponse(readToEOF($conn, $timeoutMs, $maxBytes));
+}
+
+/**
+ * Like `requestWith`, but with explicit TLS options for an `https://` URL (a
+ * self-signed or private-CA server). For `http://` the options are ignored.
+ * @param method {string} the HTTP method (e.g. "GET", "POST")
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for no body)
+ * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
+ * @param tls {TlsOptions} certificate-verification options for the TLS handshake
+ * @return {Response} the parsed response
+ * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
+ */
+export func requestWithTls(method as string, url as string,
+    headers as map of string to string, body as string, timeoutMs as int,
+    maxBytes as int, tls as TlsOptions) {
+    return sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls);
+}
+
+/**
+ * Send one request with explicit TLS options (default idle timeout and body
+ * cap). The `https`-with-a-self-signed-cert shortcut over `requestWithTls`.
+ * @param method {string} the HTTP method (e.g. "GET", "POST")
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for no body)
+ * @param tls {TlsOptions} certificate-verification options for the TLS handshake
+ * @return {Response} the parsed response
+ * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
+ */
+export func requestTls(method as string, url as string,
+    headers as map of string to string, body as string, tls as TlsOptions) {
+    return requestWithTls($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0, $tls);
 }
 
 /**
