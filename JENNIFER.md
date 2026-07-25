@@ -374,8 +374,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `jennifer-tiny`):** **`serial`** - serial ports (`serial.open(path, baud)` ->
   `serial.Port`, `read`/`write`/`flush`/`close`, `openWith` for full termios
   config). **`spi`** - `spi.open(path)` -> `spi.Device`, `configure(dev, mode,
-  speedHz)`, full-duplex `transfer(dev, bytes)`. **`iic`** - the I2C bus
-  (`iic.open(path, addr)` -> `iic.Bus`, `read`/`write`/`readReg`/`writeReg`).
+  speedHz)`, full-duplex `transfer(dev, bytes)`. **`i2c`** - the I2C bus
+  (`i2c.open(path, addr)` -> `i2c.Bus`, `read`/`write`/`readReg`/`writeReg`).
   **`gpio`** - `/dev/gpiochipN` lines, pin-keyed `setup`/`read`/`write`/`release`
   + `gpio.IN`/`gpio.OUT` (mirrors the sysfs `gpio` module).
 - **`sql`** - relational-database client over `database/sql`: MySQL / MariaDB +
@@ -390,7 +390,7 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   **`meta`**, **`testing`** - clock, files, sockets, RE2 regex, digests,
   checksums, security primitives (crypto-grade random `crypto.randBytes`/
   `randInt`, constant-time `crypto.hmacEqual`, key derivation `crypto.hkdf`/
-  `crypto.pbkdf`, AES-256-GCM `crypto.encrypt`/`decrypt`, Ed25519
+  `crypto.pbkdf2`, AES-256-GCM `crypto.encrypt`/`decrypt`, Ed25519
   `crypto.signKeypair`/`sign`/`verify`, PEM-key RSA / ECDSA
   `crypto.rsaSign`/`rsaVerify`/`ecdsaSign`/`ecdsaVerify` for JWT RS\* / ES\*, and
   key generation / CSR / JWK `crypto.rsaGenerateKey`/`ecGenerateKey`/`jwkPublic`/

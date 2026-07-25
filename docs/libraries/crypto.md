@@ -52,7 +52,7 @@ def key as bytes init crypto.randBytes(16);          # a 128-bit key
 ```
 
 Since this library landed, [`uuid`](uuid.md) draws its v4 / v7
-randomness here, so `uuid.generate("v4")` is unguessable and safe to
+randomness here, so `uuid.v4()` is unguessable and safe to
 hand a client as a session id or bearer token.
 
 ## Constant-time comparison
@@ -85,7 +85,7 @@ Two functions turn a secret into keying material. Both output `bytes`.
 | Call                                          | Returns | Notes                                            |
 | --------------------------------------------- | ------- | ------------------------------------------------ |
 | `crypto.hkdf(secret, salt, info, length, algo)`     | `bytes` | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` / `info` may be empty bytes. |
-| `crypto.pbkdf(password, salt, iterations, keyLen, algo)` | `bytes` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
+| `crypto.pbkdf2(password, salt, iterations, keyLen, algo)` | `bytes` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
 
 `algo` names the PRF hash: `"sha1"`, `"sha256"`, or `"sha512"` (the
 `hash` library's names, minus `md5` - too weak to derive a key with). An
@@ -113,14 +113,9 @@ use encoding;
 
 def password as bytes init convert.bytesFromString("correct horse", "utf-8");
 def salt as bytes init crypto.randBytes(16);
-def derived as bytes init crypto.pbkdf($password, $salt, 600000, 32, "sha256");
+def derived as bytes init crypto.pbkdf2($password, $salt, 600000, 32, "sha256");
 io.printf("derived key: %s\n", encoding.toText($derived, "hex"));
 ```
-
-> **Why `pbkdf`, not `pbkdf2`?** A Jennifer method name is letters-only,
-> so the "2" cannot appear - the same rule that makes uuid's version a
-> string argument (`uuid.generate("v4")`). The scheme is still PBKDF2;
-> only the name drops the digit.
 
 ### Password *hashing* is not here
 
@@ -152,7 +147,7 @@ def back as bytes init crypto.decrypt($key, $box);   # throws if $box was tamper
 ```
 
 The key is caller-managed - store it, or derive it from a password with
-`crypto.pbkdf(..., 32, "sha256")`. Random 96-bit nonces can collide by the
+`crypto.pbkdf2(..., 32, "sha256")`. Random 96-bit nonces can collide by the
 birthday bound, so NIST's guidance (SP 800-38D) caps one key at **2^32
 messages** (~4 billion) to keep that chance below 2^-32 - rotate the key before
 then, which no ordinary workload approaches. Encrypting the same plaintext

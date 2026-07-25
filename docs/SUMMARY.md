@@ -52,7 +52,7 @@
 - [`testing`](libraries/testing.md)
 - [`serial`](libraries/serial.md)
 - [`spi`](libraries/spi.md)
-- [`iic`](libraries/iic.md)
+- [`i2c`](libraries/i2c.md)
 - [`gpio`](libraries/gpio.md)
 - [`sql`](libraries/sql.md)
 - [`time`](libraries/time.md)

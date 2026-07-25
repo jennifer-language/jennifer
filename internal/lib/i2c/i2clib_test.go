@@ -3,7 +3,7 @@
 
 //go:build linux && !tinygo
 
-package iiclib_test
+package i2clib_test
 
 import (
 	"bytes"
@@ -11,14 +11,14 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
-	iiclib "jennifer-lang.dev/jennifer/internal/lib/iic"
+	i2clib "jennifer-lang.dev/jennifer/internal/lib/i2c"
 	iolib "jennifer-lang.dev/jennifer/internal/lib/io"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 func run(t *testing.T, src string) error {
 	t.Helper()
-	iiclib.ResetForTest()
+	i2clib.ResetForTest()
 	prog, err := parser.Parse(src)
 	if err != nil {
 		return err
@@ -26,17 +26,17 @@ func run(t *testing.T, src string) error {
 	in := interpreter.New()
 	in.Out = &bytes.Buffer{}
 	iolib.Install(in)
-	iiclib.Install(in)
+	i2clib.Install(in)
 	return in.Run(prog)
 }
 
-func TestIicErrors(t *testing.T) {
+func TestI2cErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
-		{"missing device", `use iic; def b as iic.Bus init iic.open("/dev/i2c-does-not-exist", 80);`, ""},
-		{"addr out of range", `use iic; def b as iic.Bus init iic.open("/dev/i2c-1", 200);`, "7-bit"},
-		{"negative addr", `use iic; def b as iic.Bus init iic.open("/dev/i2c-1", 0 - 1);`, "7-bit"},
-		{"wrong handle arg", `use iic; def n as int init iic.read(5, 1);`, "iic.Bus"},
-		{"bad register", `use iic; def b as iic.Bus init iic.open("/dev/i2c-1", 80); def x as bytes init iic.readReg($b, 999, 1);`, ""},
+		{"missing device", `use i2c; def b as i2c.Bus init i2c.open("/dev/i2c-does-not-exist", 80);`, ""},
+		{"addr out of range", `use i2c; def b as i2c.Bus init i2c.open("/dev/i2c-1", 200);`, "7-bit"},
+		{"negative addr", `use i2c; def b as i2c.Bus init i2c.open("/dev/i2c-1", 0 - 1);`, "7-bit"},
+		{"wrong handle arg", `use i2c; def n as int init i2c.read(5, 1);`, "i2c.Bus"},
+		{"bad register", `use i2c; def b as i2c.Bus init i2c.open("/dev/i2c-1", 80); def x as bytes init i2c.readReg($b, 999, 1);`, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

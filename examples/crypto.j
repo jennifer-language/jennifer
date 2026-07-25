@@ -32,7 +32,7 @@ def password as bytes init convert.bytesFromString("password", "utf-8");
 def salt as bytes init convert.bytesFromString("salt", "utf-8");
 def empty as bytes;
 io.printf("pbkdf(password,salt,1,32) = %s\n",
-    encoding.toText(crypto.pbkdf($password, $salt, 1, 32, "sha256"), "hex"));
+    encoding.toText(crypto.pbkdf2($password, $salt, 1, 32, "sha256"), "hex"));
 io.printf("hkdf derived length = %d\n",
     len(crypto.hkdf($password, $salt, $empty, 42, "sha256")));
 

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
-// Package uuidlib is the `uuid` library: generate and parse RFC 9562 UUIDs
-// (v4 random, v7 time-ordered). Sixteen bytes, version / variant bits, and the
+// Package uuidlib is the `uuid` library: generate (`uuid.v4()` / `uuid.v7()`)
+// and parse RFC 9562 UUIDs (v4 random, v7 time-ordered). Sixteen bytes, version
+// / variant bits, and the
 // 8-4-4-4-12 hex form. Self-contained and TinyGo-clean: hex is hand-formatted,
 // randomness draws from the `crypto` library's crypto-grade source (so v4 / v7
 // are unguessable and safe for security tokens), and v7's timestamp is the
@@ -29,12 +30,12 @@ const hexDigits = "0123456789abcdef"
 // deterministic, monotonic values (mirrors timelib.nowFunc).
 var nowFunc = stdtime.Now
 
-// Install registers generate / parse / isValid / version and the NIL constant.
-// The version tag is a string argument ("v4" / "v7"), not a digit-bearing
-// method name - Jennifer identifiers are letters-only, so the variant lives in
-// an argument, mirroring hash.compute(b, "sha-256") and encoding.toText.
+// Install registers v4 / v7 / parse / isValid / version and the NIL constant.
+// The version is a real method (`uuid.v4()` / `uuid.v7()`) now that identifiers
+// admit interior digits, rather than a string argument to a `generate` verb.
 func Install(in *interpreter.Interpreter) {
-	in.RegisterNamespaced(LibraryName, "generate", generateFn)
+	in.RegisterNamespaced(LibraryName, "v4", v4Fn)
+	in.RegisterNamespaced(LibraryName, "v7", v7Fn)
 	in.RegisterNamespaced(LibraryName, "parse", parseFn)
 	in.RegisterNamespaced(LibraryName, "isValid", isValidFn)
 	in.RegisterNamespaced(LibraryName, "version", versionFn)
@@ -46,19 +47,26 @@ func Install(in *interpreter.Interpreter) {
 // usable as security tokens without needless lock contention.
 func randFill(b []byte) { cryptolib.RandFill(b) }
 
-func generateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	v, err := strArg("generate", args)
-	if err != nil {
+func v4Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if err := noArgs("v4", args); err != nil {
 		return interpreter.Null(), err
 	}
-	switch v {
-	case "v4":
-		return interpreter.StringVal(genV4()), nil
-	case "v7":
-		return interpreter.StringVal(genV7()), nil
-	default:
-		return interpreter.Null(), fmt.Errorf("uuid.generate: unknown version %q; known: \"v4\", \"v7\"", v)
+	return interpreter.StringVal(genV4()), nil
+}
+
+func v7Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if err := noArgs("v7", args); err != nil {
+		return interpreter.Null(), err
 	}
+	return interpreter.StringVal(genV7()), nil
+}
+
+// noArgs rejects any argument to a nullary generator.
+func noArgs(fn string, args []interpreter.Value) error {
+	if len(args) != 0 {
+		return fmt.Errorf("uuid.%s expects no arguments, got %d", fn, len(args))
+	}
+	return nil
 }
 
 // genV4 builds a random (version 4) UUID string.

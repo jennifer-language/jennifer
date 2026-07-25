@@ -60,11 +60,9 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "randInt", randIntFn)
 	in.RegisterNamespaced(LibraryName, "hmacEqual", hmacEqualFn)
 	in.RegisterNamespaced(LibraryName, "hkdf", hkdfFn)
-	// Registered as `pbkdf` (not `pbkdf2`): a Jennifer method name is
-	// letters-only, so the "2" can't appear - the same rule that makes uuid's
-	// version a string arg (`uuid.generate("v4")`). The scheme is still
-	// PBKDF2-HMAC-SHA256; the name just drops the digit.
-	in.RegisterNamespaced(LibraryName, "pbkdf", pbkdf2Fn)
+	// PBKDF2-HMAC. The name keeps its "2" (interior digits are legal in
+	// identifiers), so it reads exactly as the standard names it.
+	in.RegisterNamespaced(LibraryName, "pbkdf2", pbkdf2Fn)
 	// Authenticated symmetric encryption (AES-256-GCM). One algorithm, AEAD only:
 	// no raw-mode / nonce footguns are expressible.
 	in.RegisterNamespaced(LibraryName, "encrypt", encryptFn)
@@ -434,7 +432,7 @@ const (
 	maxPBKDFWork = 100_000_000 // blocks * iterations ceiling (~1e8)
 )
 
-// pbkdf2Fn implements `crypto.pbkdf(password, salt, iterations, keyLen, algo)
+// pbkdf2Fn implements `crypto.pbkdf2(password, salt, iterations, keyLen, algo)
 // -> bytes`: PBKDF2 (RFC 8018) deriving a `keyLen`-byte key from a low-entropy
 // `password` stretched by `iterations` rounds against `salt`, with `algo` the
 // HMAC hash ("sha1" / "sha256" / "sha512"). A higher iteration count is slower
@@ -442,43 +440,43 @@ const (
 // needs "sha1"; new password stores want "sha256" or better.)
 func pbkdf2Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 5 {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf expects 5 arguments (password, salt, iterations, keyLen, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2 expects 5 arguments (password, salt, iterations, keyLen, algo), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: password and salt must be bytes")
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: password and salt must be bytes")
 	}
 	if args[2].Kind != interpreter.KindInt || args[3].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: iterations and keyLen must be int")
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: iterations and keyLen must be int")
 	}
-	h, err := kdfHashOf("crypto.pbkdf", args[4])
+	h, err := kdfHashOf("crypto.pbkdf2", args[4])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	iterations, keyLen := args[2].Int, args[3].Int
 	if iterations <= 0 {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: iterations must be > 0, got %d", iterations)
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: iterations must be > 0, got %d", iterations)
 	}
 	if keyLen <= 0 {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: keyLen must be > 0, got %d", keyLen)
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: keyLen must be > 0, got %d", keyLen)
 	}
 	if keyLen > maxKeyLen {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: keyLen (%d) exceeds the %d-byte limit", keyLen, maxKeyLen)
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: keyLen (%d) exceeds the %d-byte limit", keyLen, maxKeyLen)
 	}
 	// Bound the total work (blocks * iterations). Divide rather than multiply so
 	// the check itself cannot overflow int64; blocks >= 1 since keyLen >= 1.
 	hashLen := int64(h().Size())
 	blocks := (keyLen + hashLen - 1) / hashLen
 	if iterations > maxPBKDFWork/blocks {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: work (%d blocks x %d iterations) exceeds the %d limit; lower keyLen or iterations", blocks, iterations, maxPBKDFWork)
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: work (%d blocks x %d iterations) exceeds the %d limit; lower keyLen or iterations", blocks, iterations, maxPBKDFWork)
 	}
 	key, kerr := pbkdf2.Key(h, string(args[0].Bytes), args[1].Bytes, int(iterations), int(keyLen))
 	if kerr != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf: %v", kerr)
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: %v", kerr)
 	}
 	return interpreter.BytesVal(key), nil
 }
 
-// kdfHashOf resolves the algo argument shared by hkdf and pbkdf.
+// kdfHashOf resolves the algo argument shared by hkdf and pbkdf2.
 func kdfHashOf(fn string, v interpreter.Value) (func() gohash.Hash, error) {
 	if v.Kind != interpreter.KindString {
 		return nil, fmt.Errorf("%s: algo must be string, got %s", fn, v.Kind)

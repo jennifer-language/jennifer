@@ -257,7 +257,7 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     }
     def salt as bytes init encoding.fromText(scramAttr($sf, "s"), "base64");
     def iters as int init convert.toInt(scramAttr($sf, "i"));
-    def salted as bytes init crypto.pbkdf(convert.bytesFromString($password, "utf-8"), $salt, $iters, hashLen($s.algo), $s.algo);
+    def salted as bytes init crypto.pbkdf2(convert.bytesFromString($password, "utf-8"), $salt, $iters, hashLen($s.algo), $s.algo);
     def clientKey as bytes init hmacStr($salted, "Client Key", $s.algo);
     def storedKey as bytes init hash.compute($clientKey, $s.algo);
     def finalNoProof as string init "c=biws,r=" + $rnonce;

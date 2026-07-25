@@ -24,7 +24,7 @@ import (
 	gpiolib "jennifer-lang.dev/jennifer/internal/lib/gpio"
 	"jennifer-lang.dev/jennifer/internal/lib/hash"
 	"jennifer-lang.dev/jennifer/internal/lib/httpd"
-	iiclib "jennifer-lang.dev/jennifer/internal/lib/iic"
+	i2clib "jennifer-lang.dev/jennifer/internal/lib/i2c"
 	intllib "jennifer-lang.dev/jennifer/internal/lib/intl"
 	"jennifer-lang.dev/jennifer/internal/lib/io"
 	"jennifer-lang.dev/jennifer/internal/lib/json"
@@ -86,7 +86,7 @@ func InstallAll(in *interpreter.Interpreter) {
 	uuidlib.Install(in)
 	seriallib.Install(in)
 	spilib.Install(in)
-	iiclib.Install(in)
+	i2clib.Install(in)
 	gpiolib.Install(in)
 	sqllib.Install(in)
 }

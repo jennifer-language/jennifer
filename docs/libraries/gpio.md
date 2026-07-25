@@ -35,4 +35,4 @@ without sysfs GPIO.
 
 ## See also
 
-[gpio module](../modules/gpio.md), [serial](serial.md), [spi](spi.md), [iic](iic.md).
+[gpio module](../modules/gpio.md), [serial](serial.md), [spi](spi.md), [i2c](i2c.md).

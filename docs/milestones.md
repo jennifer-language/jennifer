@@ -1730,10 +1730,10 @@ it does not change the two-class structure.
 
 ### M22.3 - library renames enabled by digit identifiers
 
-**Planned** (the breaking follow-on to `M22.2`). With the identifier rule in
-place, drop the euphemisms the old letters-only rule forced. Each is a
-semver-breaking API change, so they are **batched to land together before
-1.0.0** rather than dribbled out one at a time. Requires `M22.2` (the rule).
+**Done** (the breaking follow-on to `M22.2`). With the identifier rule in
+place, dropped the euphemisms the old letters-only rule forced. Each is a
+semver-breaking API change, so they **landed together before
+1.0.0** rather than dribbled out one at a time. Required `M22.2` (the rule).
 
 The breaking renames:
 
@@ -1743,11 +1743,17 @@ The breaking renames:
 | `uuid.generate("v4")` / `generate("v7")` | `uuid.v4()` / `uuid.v7()` | the version becomes a real method, not a string argument |
 | `crypto.pbkdf(...)` | `crypto.pbkdf2(...)` | PBKDF2 dropped its "2" |
 
-Additive companion (not breaking, may ship alongside): spellable
-algorithm-method names now that digits are allowed - `hash.md5(b)` / `sha1(b)` /
-`sha256(b)` and `crc.crc32(b)` / `crc64(b)` beside the stringly-typed
-`compute(b, algo)` form the euphemism forced (the `hash` / `crc` "dance"); the
-old `compute` can stay or be deprecated toward removal.
+Per-algorithm digest shortcuts considered and **rejected.** Digits make
+`hash.sha256(b)` / `crc.crc32(b)` spellable, and they were briefly added beside
+`compute(b, algo)` - then removed on **stance #1** (one way per thing). The
+decisive point: the neighbours in the same family - `hash.hmac(_, _, algo)`,
+`crypto.pbkdf2(_, _, _, _, algo)`, `crypto.hkdf(_, _, _, _, algo)` - are
+irreducibly algorithm-as-value (SCRAM / JWT / TLS negotiate the hash at runtime,
+and `sasl.j` already threads a runtime `$s.algo` through all of them). Splitting
+only `compute` into `sha256()` would leave the family inconsistent (digest =
+method, MAC / KDF = string) and force a dispatch ladder at the one genuine
+runtime caller, so `compute(b, algo)` stays the single canonical form and the
+shortcuts are not added. Recorded in `docs/technical/rejected.md`.
 
 **Not renamed.** `binary` is named around the reserved **`bytes` type keyword**,
 not a digit, so the rule change does not help it - it stays `binary`. `intl`

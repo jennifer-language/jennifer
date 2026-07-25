@@ -97,21 +97,25 @@ func TestVersionOfNilIsZero(t *testing.T) {
 	}
 }
 
-func TestGenerateFnDispatch(t *testing.T) {
-	out, err := generateFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("v4")})
+func TestGeneratorFns(t *testing.T) {
+	out, err := v4Fn(interpreter.BuiltinCtx{}, nil)
 	if err != nil {
-		t.Fatalf("generate v4: %v", err)
+		t.Fatalf("v4: %v", err)
 	}
-	if _, ok := parse(out.Str); !ok {
-		t.Errorf("generate(\"v4\") produced invalid UUID %q", out.Str)
+	if b, ok := parse(out.Str); !ok || b[6]>>4 != 4 {
+		t.Errorf("v4() produced %q (version %d), want a valid v4", out.Str, b[6]>>4)
 	}
-	if _, err := generateFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("v9")}); err == nil {
-		t.Error("expected an error for an unknown version tag")
+	out7, err := v7Fn(interpreter.BuiltinCtx{}, nil)
+	if err != nil {
+		t.Fatalf("v7: %v", err)
 	}
-	if _, err := generateFn(interpreter.BuiltinCtx{}, nil); err == nil {
-		t.Error("expected an arity error for no argument")
+	if b, ok := parse(out7.Str); !ok || b[6]>>4 != 7 {
+		t.Errorf("v7() produced %q (version %d), want a valid v7", out7.Str, b[6]>>4)
 	}
-	if _, err := generateFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(4)}); err == nil {
-		t.Error("expected a type error for a non-string argument")
+	if _, err := v4Fn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("v4")}); err == nil {
+		t.Error("expected an arity error when v4 is given an argument")
+	}
+	if _, err := v7Fn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1)}); err == nil {
+		t.Error("expected an arity error when v7 is given an argument")
 	}
 }

@@ -583,10 +583,10 @@ io.printf("decode x+y   = %d\n", json.asInt($parsed, "/x") + json.asInt($parsed,
 use uuid;
 
 io.printf("=== uuid ===\n");
-io.printf("v4 version   = %d\n", uuid.version(uuid.generate("v4")));
-io.printf("v7 version   = %d\n", uuid.version(uuid.generate("v7")));
-io.printf("valid        = %t\n", uuid.isValid(uuid.generate("v4")));
-io.printf("parse bytes  = %d\n", len(uuid.parse(uuid.generate("v4"))));
+io.printf("v4 version   = %d\n", uuid.version(uuid.v4()));
+io.printf("v7 version   = %d\n", uuid.version(uuid.v7()));
+io.printf("valid        = %t\n", uuid.isValid(uuid.v4()));
+io.printf("parse bytes  = %d\n", len(uuid.parse(uuid.v4())));
 io.printf("NIL          = %s\n", uuid.NIL);
 
 # --- crypto (crypto-grade random, constant-time compare, KDFs) ---
@@ -602,7 +602,7 @@ io.printf("randBytes len= %d\n", len(crypto.randBytes(16)));
 io.printf("randInt range= %t\n", crypto.randInt(1, 6) >= 1 and crypto.randInt(1, 6) <= 6);
 io.printf("hmacEqual    = %t / %t\n", crypto.hmacEqual($cpw, $cpw), crypto.hmacEqual($cpw, $csalt));
 io.printf("pbkdf        = %s\n",
-    encoding.toText(crypto.pbkdf($cpw, $csalt, 1, 16, "sha256"), "hex"));
+    encoding.toText(crypto.pbkdf2($cpw, $csalt, 1, 16, "sha256"), "hex"));
 io.printf("hkdf len     = %d\n", len(crypto.hkdf($cpw, $csalt, $cinfo, 32, "sha256")));
 
 # --- compress (byte-stream pack / unpack) ---

@@ -94,7 +94,7 @@ func decodeData(blob as string) {
  * @return {string} the new session ID
  */
 export func create(mc as memcache.Session, ttl as int) {
-    def id as string init uuid.generate("v4");
+    def id as string init uuid.v4();
     def empty as map of string to string init {};
     memcache.set($mc, cacheKey($id), encodeData($empty), $ttl);
     return $id;

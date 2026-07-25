@@ -39,4 +39,4 @@ copies share the underlying port, so close it exactly once.
 
 ## See also
 
-[fs](fs.md), [net](net.md), [spi](spi.md), [iic](iic.md), [gpio](gpio.md).
+[fs](fs.md), [net](net.md), [spi](spi.md), [i2c](i2c.md), [gpio](gpio.md).

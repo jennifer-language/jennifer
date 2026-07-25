@@ -3,9 +3,9 @@
 
 //go:build linux && !tinygo
 
-// Linux implementation of the `iic` library over golang.org/x/sys/unix.
+// Linux implementation of the `i2c` library over golang.org/x/sys/unix.
 
-package iiclib
+package i2clib
 
 import (
 	"fmt"
@@ -55,35 +55,35 @@ func resolveBus(fn string, args []Value) (*busState, error) {
 	defer busesMu.Unlock()
 	b, ok := buses[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: iic.Bus id %d is not open (already closed, or never opened)", fn, id)
+		return nil, fmt.Errorf("%s: i2c.Bus id %d is not open (already closed, or never opened)", fn, id)
 	}
 	return b, nil
 }
 
-// iic.open(path, addr) -> iic.Bus. addr is a 7-bit slave address (0x08..0x77 is
+// i2c.open(path, addr) -> i2c.Bus. addr is a 7-bit slave address (0x08..0x77 is
 // the usable range; 0..0x7f is accepted).
 func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if err := devio.WantArgs("iic.open", args, 2); err != nil {
+	if err := devio.WantArgs("i2c.open", args, 2); err != nil {
 		return interpreter.Null(), err
 	}
-	path, err := devio.StringArg("iic.open", args, 0, "path")
+	path, err := devio.StringArg("i2c.open", args, 0, "path")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	addr, err := devio.IntArg("iic.open", args, 1, "addr")
+	addr, err := devio.IntArg("i2c.open", args, 1, "addr")
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if addr < 0 || addr > 0x7f {
-		return interpreter.Null(), fmt.Errorf("iic.open: slave address %d out of 7-bit range (0..127)", addr)
+		return interpreter.Null(), fmt.Errorf("i2c.open: slave address %d out of 7-bit range (0..127)", addr)
 	}
 	f, oerr := os.OpenFile(path, os.O_RDWR, 0)
 	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.open: %s: %v", path, oerr)
+		return interpreter.Null(), fmt.Errorf("i2c.open: %s: %v", path, oerr)
 	}
 	if serr := unix.IoctlSetInt(int(f.Fd()), i2cSlave, int(addr)); serr != nil {
 		_ = f.Close()
-		return interpreter.Null(), fmt.Errorf("iic.open: selecting address 0x%02x: %v", addr, serr)
+		return interpreter.Null(), fmt.Errorf("i2c.open: selecting address 0x%02x: %v", addr, serr)
 	}
 	busesMu.Lock()
 	nextID++
@@ -93,27 +93,27 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return devio.Handle(LibraryName, "Bus", id), nil
 }
 
-// iic.read(bus, n) -> bytes.
+// i2c.read(bus, n) -> bytes.
 func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if err := devio.WantArgs("iic.read", args, 2); err != nil {
+	if err := devio.WantArgs("i2c.read", args, 2); err != nil {
 		return interpreter.Null(), err
 	}
-	b, err := resolveBus("iic.read", args)
+	b, err := resolveBus("i2c.read", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	n, err := devio.IntArg("iic.read", args, 1, "n")
+	n, err := devio.IntArg("i2c.read", args, 1, "n")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	sz, err := devio.ReadSize("iic.read", n)
+	sz, err := devio.ReadSize("i2c.read", n)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	buf := make([]byte, sz)
 	got, rerr := unix.Read(int(b.f.Fd()), buf)
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.read: %v", rerr)
+		return interpreter.Null(), fmt.Errorf("i2c.read: %v", rerr)
 	}
 	if got < 0 {
 		got = 0
@@ -121,58 +121,58 @@ func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(buf[:got]), nil
 }
 
-// iic.write(bus, data) -> int (bytes written).
+// i2c.write(bus, data) -> int (bytes written).
 func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if err := devio.WantArgs("iic.write", args, 2); err != nil {
+	if err := devio.WantArgs("i2c.write", args, 2); err != nil {
 		return interpreter.Null(), err
 	}
-	b, err := resolveBus("iic.write", args)
+	b, err := resolveBus("i2c.write", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	data, err := devio.BytesArg("iic.write", args, 1, "data")
+	data, err := devio.BytesArg("i2c.write", args, 1, "data")
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	wrote, werr := unix.Write(int(b.f.Fd()), data)
 	if werr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.write: %v", werr)
+		return interpreter.Null(), fmt.Errorf("i2c.write: %v", werr)
 	}
 	return interpreter.IntVal(int64(wrote)), nil
 }
 
-// iic.readReg(bus, reg, n) -> bytes. Writes the 1-byte register pointer, then
+// i2c.readReg(bus, reg, n) -> bytes. Writes the 1-byte register pointer, then
 // reads n bytes (the common "set register, read back" transaction).
 func readRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if err := devio.WantArgs("iic.readReg", args, 3); err != nil {
+	if err := devio.WantArgs("i2c.readReg", args, 3); err != nil {
 		return interpreter.Null(), err
 	}
-	b, err := resolveBus("iic.readReg", args)
+	b, err := resolveBus("i2c.readReg", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	reg, err := devio.IntArg("iic.readReg", args, 1, "reg")
+	reg, err := devio.IntArg("i2c.readReg", args, 1, "reg")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	n, err := devio.IntArg("iic.readReg", args, 2, "n")
+	n, err := devio.IntArg("i2c.readReg", args, 2, "n")
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if reg < 0 || reg > 0xff {
-		return interpreter.Null(), fmt.Errorf("iic.readReg: register %d out of byte range (0..255)", reg)
+		return interpreter.Null(), fmt.Errorf("i2c.readReg: register %d out of byte range (0..255)", reg)
 	}
-	sz, err := devio.ReadSize("iic.readReg", n)
+	sz, err := devio.ReadSize("i2c.readReg", n)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if _, werr := unix.Write(int(b.f.Fd()), []byte{byte(reg)}); werr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.readReg: selecting register 0x%02x: %v", reg, werr)
+		return interpreter.Null(), fmt.Errorf("i2c.readReg: selecting register 0x%02x: %v", reg, werr)
 	}
 	buf := make([]byte, sz)
 	got, rerr := unix.Read(int(b.f.Fd()), buf)
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.readReg: %v", rerr)
+		return interpreter.Null(), fmt.Errorf("i2c.readReg: %v", rerr)
 	}
 	if got < 0 {
 		got = 0
@@ -180,33 +180,33 @@ func readRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(buf[:got]), nil
 }
 
-// iic.writeReg(bus, reg, data) -> int (data bytes written, not counting the
+// i2c.writeReg(bus, reg, data) -> int (data bytes written, not counting the
 // register pointer). Writes the register pointer and data in one transaction.
 func writeRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if err := devio.WantArgs("iic.writeReg", args, 3); err != nil {
+	if err := devio.WantArgs("i2c.writeReg", args, 3); err != nil {
 		return interpreter.Null(), err
 	}
-	b, err := resolveBus("iic.writeReg", args)
+	b, err := resolveBus("i2c.writeReg", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	reg, err := devio.IntArg("iic.writeReg", args, 1, "reg")
+	reg, err := devio.IntArg("i2c.writeReg", args, 1, "reg")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	data, err := devio.BytesArg("iic.writeReg", args, 2, "data")
+	data, err := devio.BytesArg("i2c.writeReg", args, 2, "data")
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if reg < 0 || reg > 0xff {
-		return interpreter.Null(), fmt.Errorf("iic.writeReg: register %d out of byte range (0..255)", reg)
+		return interpreter.Null(), fmt.Errorf("i2c.writeReg: register %d out of byte range (0..255)", reg)
 	}
 	frame := make([]byte, 0, len(data)+1)
 	frame = append(frame, byte(reg))
 	frame = append(frame, data...)
 	wrote, werr := unix.Write(int(b.f.Fd()), frame)
 	if werr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.writeReg: %v", werr)
+		return interpreter.Null(), fmt.Errorf("i2c.writeReg: %v", werr)
 	}
 	// Report data bytes written, excluding the register pointer.
 	if wrote > 0 {
@@ -215,12 +215,12 @@ func writeRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.IntVal(int64(wrote)), nil
 }
 
-// iic.close(bus) -> null.
+// i2c.close(bus) -> null.
 func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if err := devio.WantArgs("iic.close", args, 1); err != nil {
+	if err := devio.WantArgs("i2c.close", args, 1); err != nil {
 		return interpreter.Null(), err
 	}
-	id, err := devio.HandleID("iic.close", args[0], LibraryName, "Bus")
+	id, err := devio.HandleID("i2c.close", args[0], LibraryName, "Bus")
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -228,12 +228,12 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, ok := buses[id]
 	if !ok {
 		busesMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("iic.close: iic.Bus id %d is not open (already closed?)", id)
+		return interpreter.Null(), fmt.Errorf("i2c.close: i2c.Bus id %d is not open (already closed?)", id)
 	}
 	delete(buses, id)
 	busesMu.Unlock()
 	if cerr := b.f.Close(); cerr != nil {
-		return interpreter.Null(), fmt.Errorf("iic.close: %v", cerr)
+		return interpreter.Null(), fmt.Errorf("i2c.close: %v", cerr)
 	}
 	return interpreter.Null(), nil
 }

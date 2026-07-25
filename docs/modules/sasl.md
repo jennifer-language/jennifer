@@ -62,7 +62,7 @@ if (not sasl.scramVerify($s, serverFinal)) {
 }
 ```
 
-`scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.pbkdf` with
+`scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.pbkdf2` with
 `"sha1"` / `"sha256"`), so SCRAM-SHA-1 (MongoDB, XMPP) and SCRAM-SHA-256
 (PostgreSQL, modern mail) both work. `scramVerify` compares the server
 signature with `crypto.hmacEqual` (constant-time). The wire strings are the

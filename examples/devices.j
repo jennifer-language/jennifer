@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
-# The device-I/O libraries: serial / spi / iic / gpio, all over the Linux
+# The device-I/O libraries: serial / spi / i2c / gpio, all over the Linux
 # /dev + ioctl interface. Each block is guarded so this demo runs on any machine
 # (it just reports "no device" when the hardware / kernel node is absent) - on a
 # real single-board computer the guarded calls do the actual I/O.
@@ -11,7 +11,7 @@
 # the cleanup lives next to the open, not scattered across exit paths.
 use serial;
 use spi;
-use iic;
+use i2c;
 use gpio;
 use convert;
 use io;
@@ -40,14 +40,14 @@ try {
     io.printf("spi: no device\n");
 }
 
-# iic: read a register from an I2C slave.
+# i2c: read a register from an I2C slave.
 try {
-    def bus as iic.Bus init iic.open("/dev/i2c-1", 0x76);
-    defer iic.close($bus);
-    def id as bytes init iic.readReg($bus, 0xd0, 1);
-    io.printf("iic: chip id byte read\n");
+    def bus as i2c.Bus init i2c.open("/dev/i2c-1", 0x76);
+    defer i2c.close($bus);
+    def id as bytes init i2c.readReg($bus, 0xd0, 1);
+    io.printf("i2c: chip id byte read\n");
 } catch (e) {
-    io.printf("iic: no device\n");
+    io.printf("i2c: no device\n");
 }
 
 # gpio: drive an output pin (pin-keyed, like the sysfs gpio module).

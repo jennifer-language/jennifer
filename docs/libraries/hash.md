@@ -45,6 +45,12 @@ lists the supported set:
 | `hash.compute(b, algo)`       | `bytes` | Full digest of the entire input.       |
 | `hash.hmac(key, message, algo)` | `bytes` | Keyed-hash MAC (RFC 2104) over the same algorithms. |
 
+The algorithm is always a value (`compute(b, "sha256")`), the same shape as
+`hmac` and the `crypto` KDFs - one convention across the whole hash / crypto
+family, so a runtime-negotiated algorithm (SCRAM, JWT) is just a variable, not a
+dispatch ladder. There are deliberately no `hash.sha256(b)` shortcuts (see
+[rejected.md](../technical/rejected.md)).
+
 ## HMAC
 
 `hash.hmac(key, message, algo)` computes the keyed-hash message authentication

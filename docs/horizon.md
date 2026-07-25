@@ -269,7 +269,7 @@ stubbed - so this is a handful of concrete gaps, not a rewrite.
 **What's already fine.** Separators / EOL / `$HOME` / temp are
 `runtime.GOOS`-derived (`internal/lib/os/oslib.go`), `os/exec` is enabled on
 Windows (the exec gate keys on `runtime.Compiler != "tinygo"`, not GOOS), and
-signals plus the four Linux-only hardware libs (`serial` / `spi` / `iic` / `gpio`)
+signals plus the four Linux-only hardware libs (`serial` / `spi` / `i2c` / `gpio`)
 already stub cleanly on non-Linux (`*_other.go`).
 
 **Fixes:**

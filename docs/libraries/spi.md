@@ -26,4 +26,4 @@ compose with `spawn`.
 
 ## See also
 
-[serial](serial.md), [iic](iic.md), [gpio](gpio.md), [fs](fs.md).
+[serial](serial.md), [i2c](i2c.md), [gpio](gpio.md), [fs](fs.md).

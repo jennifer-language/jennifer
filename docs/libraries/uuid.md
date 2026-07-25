@@ -8,22 +8,18 @@ Self-contained and TinyGo-clean.
 
 | Call                  | Returns  | Notes                                                                 |
 | --------------------- | -------- | --------------------------------------------------------------------- |
-| `uuid.generate(v)`    | `string` | New UUID; `v` is `"v4"` (random) or `"v7"` (time-ordered).            |
+| `uuid.v4()`           | `string` | A new random (version 4) UUID.                                        |
+| `uuid.v7()`           | `string` | A new time-ordered (version 7) UUID.                                 |
 | `uuid.parse(s)`       | `bytes`  | The 16 bytes of a well-formed UUID string; errors on malformed input. |
 | `uuid.isValid(s)`     | `bool`   | Whether `s` is a well-formed UUID string.                             |
 | `uuid.version(s)`     | `int`    | The version digit (4, 7, ...; `0` for `uuid.NIL`); errors on malformed input. |
 | `uuid.NIL`            | `string` | The all-zero UUID `"00000000-0000-0000-0000-000000000000"`.           |
 
-The version is a **string argument** (`"v4"` / `"v7"`), not a
-`uuid.v4()` method - Jennifer identifiers are letters-only, so the
-variant lives in an argument, the same shape as `hash.compute(b,
-"sha-256")` or `encoding.toText(b, "base64")`.
-
 ```jennifer
 use io;
 use uuid;
 
-def id as string init uuid.generate("v4");
+def id as string init uuid.v4();
 io.printf("%s (v%d)\n", $id, uuid.version($id));   # e.g. 524f1d03-...-042736d40bd9 (v4)
 
 if (uuid.isValid($id)) {
@@ -33,15 +29,15 @@ if (uuid.isValid($id)) {
 
 ## v4 vs v7
 
-- **`"v4"`** - fully random. Use for opaque identifiers with no ordering.
-- **`"v7"`** - a 48-bit millisecond timestamp in the leading bytes, random
+- **`uuid.v4()`** - fully random. Use for opaque identifiers with no ordering.
+- **`uuid.v7()`** - a 48-bit millisecond timestamp in the leading bytes, random
   after. Two v7s created later sort lexically after earlier ones, so they
   make good database keys (index locality) while staying globally unique.
 
 ```jennifer
-def a as string init uuid.generate("v7");
+def a as string init uuid.v7();
 # ... later ...
-def b as string init uuid.generate("v7");
+def b as string init uuid.v7();
 # $a < $b  (string comparison reflects creation order)
 ```
 

@@ -156,7 +156,7 @@ export func save(db as DB) {
     # Uniquify the temp name: a fixed `.tmp` sibling lets two concurrent saves
     # share one path, so one could rename while the other is mid-write and
     # publish a torn file - defeating the crash-atomic guarantee.
-    def tmp as string init $db.path + ".tmp." + uuid.generate("v4");
+    def tmp as string init $db.path + ".tmp." + uuid.v4();
     fs.writeString($tmp, $text);
     fs.rename($tmp, $db.path);
 }

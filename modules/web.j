@@ -639,7 +639,7 @@ export func sessionId(ctx as Context, cookieName as string) {
     if (len($id) > 0) {
         return $id;
     }
-    $id = uuid.generate("v4");
+    $id = uuid.v4();
     def opts as CookieOptions;
     $opts.path = "/";
     $opts.httpOnly = true;
@@ -890,7 +890,7 @@ func csrfValid(secret as string, token as string) {
  * @return {string} the token to embed in the form / send as a header
  */
 export func csrfToken(ctx as Context, secret as string) {
-    def rand as string init uuid.generate("v4");
+    def rand as string init uuid.v4();
     def token as string init $rand + "." + csrfSign($secret, $rand);
     def opts as CookieOptions;
     $opts.path = "/";

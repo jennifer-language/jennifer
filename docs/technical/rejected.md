@@ -855,3 +855,34 @@ func divmod(a as int, b as int) {
 }
 def d as DivMod init divmod(17, 5);   # $d.quotient == 3, $d.remainder == 2
 ```
+
+## Per-algorithm digest / checksum shortcuts (`hash.sha256(b)`, `crc.crc32(b)`)
+
+Considered once digit-bearing identifiers (M22.2) made the names spellable:
+per-algorithm one-shot methods - `hash.md5(b)` / `sha1(b)` / `sha256(b)` /
+`sha384(b)` / `sha512(b)` and `crc.crc32(b)` / `crc64(b)` - beside the existing
+`hash.compute(b, algo)` / `crc.compute(b, algo)`.
+
+Rejected on **stance #1 (one way per thing)** because:
+
+- **They are a parallel API for the same job.** `hash.sha256(b)` and
+  `hash.compute(b, "sha256")` produce the identical bytes; that is exactly the
+  two-ways redundancy the stance rejects (its own examples are `++` / `+=` /
+  two `printf` flavors).
+- **The rest of the family is irreducibly algorithm-as-value, so the shortcuts
+  would make it *less* consistent, not more.** `hash.hmac(_, _, algo)`,
+  `crypto.pbkdf2(_, _, _, _, algo)`, and `crypto.hkdf(_, _, _, _, algo)` all take
+  the algorithm as a runtime string and cannot cleanly go static (SHA-1 vs
+  SHA-256 vs SHA-512 across three functions is a large surface, and the algorithm
+  is *negotiated* - SCRAM, JWT `alg`, TLS suites pick it on the wire). Splitting
+  only `compute` would leave the crypto/hash surface half per-method, half
+  algo-string.
+- **"Runtime algorithm => use `if()`" breaks the one real caller.** `sasl.j`
+  threads a server-negotiated `$s.algo` through `compute`, `hmac`, *and*
+  `pbkdf2` together; forcing a per-method dispatch ladder there (while `hmac` /
+  `pbkdf2` beside it still take the string) is worse on every axis.
+
+The chosen form: the algorithm is always a value, uniformly -
+`hash.compute(b, algo)`, `hash.hmac(k, m, algo)`, `crypto.pbkdf2(..., algo)`,
+`crypto.hkdf(..., algo)` - so a fixed algorithm is a string literal and a
+negotiated one is a variable, with no new surface and no dispatch ladder.
