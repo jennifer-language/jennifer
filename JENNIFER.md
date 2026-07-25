@@ -498,7 +498,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `patch` / `delete` / `head` / `options` return an
   `http.Response` (`status` / `statusText` / lowercased `headers` / `body`);
   `http.header(resp, name)` reads a response header case-insensitively. Handles
-  Content-Length and chunked framing; text (UTF-8) bodies. Redirects returned,
+  Content-Length and chunked framing; text (UTF-8) bodies. For **binary**
+  downloads (a `.tar.gz`, an image) use `http.getBytes(url, headers)` /
+  `requestBytes` / `requestWithBytes` -> `http.BytesResponse` with a raw `bytes`
+  `body` (the string `Response` throws on non-UTF-8). Redirects returned,
   not followed. For a self-signed / private-CA `https://` server pass
   `http.TlsOptions{skipVerify, caCert}` through `http.requestTls(method, url,
   headers, body, tls)` (or `requestWithTls(..., timeoutMs, maxBytes, tls)`); the

@@ -31,12 +31,16 @@ string (`""` for none).
 
 | Call / type                                 | Notes                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------ |
-| `http.Response`                             | `status` (int), `statusText`, `headers` (lowercased keys), `body`. |
+| `http.Response`                             | `status` (int), `statusText`, `headers` (lowercased keys), `body` (string, UTF-8). |
+| `http.BytesResponse`                        | Same, but `body` is raw `bytes` - the byte-safe response for binary downloads. |
 | `http.TlsOptions`                           | `skipVerify` (bool), `caCert` (`bytes`, PEM). Zero value = full verification (what `request` uses). |
 | `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
 | `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit per-read idle timeout (`0` = none) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
 | `http.requestTls(method, url, headers, body, tls)` | As `request`, with explicit `TlsOptions` for an `https://` server (self-signed / private CA). |
 | `http.requestWithTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestWith`, with explicit `TlsOptions`. |
+| `http.requestBytes(method, url, headers, body)` | Byte-safe request: returns a `BytesResponse` (raw `bytes` body) - for binary content. |
+| `http.requestWithBytes(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestBytes`, with explicit timeout / cap / `TlsOptions` (pass negative `maxBytes` for a large download). |
+| `http.getBytes(url, headers)`               | GET returning a raw-`bytes` body (the download shortcut). |
 | `http.get(url, headers)`                    | GET.                                                               |
 | `http.post(url, contentType, body, headers)`| POST; sets `Content-Type`.                                         |
 | `http.put(url, contentType, body, headers)` | PUT; sets `Content-Type`.                                          |
@@ -83,10 +87,32 @@ closes when done) and decodes the body, handling both framings:
 - **Content-Length** - the body is taken as exactly that many bytes.
 - **Transfer-Encoding: chunked** - the chunks are decoded and concatenated.
 
-The body is returned as **text** (UTF-8). A JSON / HTML / XML body round-trips
-exactly (the whole body is decoded as one unit, so it is byte-exact); a binary
-body (an image, a gzip stream) is not decodable to a string and raises an error
-- a `bytes` body accessor is a planned follow-on.
+`request` and the verb shortcuts return the body as **text** (UTF-8): a JSON /
+HTML / XML body round-trips exactly, but a binary body (an image, a gzip stream)
+is not valid UTF-8 and raises an error. For binary content use the **byte verbs**
+below, which return the body as raw `bytes` - the framing above is byte-exact, so
+only the text decode differs.
+
+## Binary downloads
+
+`http.getBytes(url, headers)` (and the general `requestBytes` /
+`requestWithBytes`) return an `http.BytesResponse` whose `body` is raw `bytes` -
+the byte-safe path for a `.tar.gz`, an image, or any non-text payload the string
+`Response` cannot hold:
+
+```jennifer
+use fs;
+use compress;
+use archive;
+def r as http.BytesResponse init http.getBytes("https://example.com/app.tar.gz", {});
+fs.writeBytes("app.tar.gz", $r.body);                  # exact bytes, no corruption
+def entries as list of archive.Entry init archive.unpack(compress.unpack($r.body, "gzip"), "tar");
+```
+
+`headers` keys are lowercased, so read metadata directly (`$r.headers["content-type"]`).
+A large download that would exceed the default 64 MiB cap uses
+`requestWithBytes(..., maxBytes, tls)` with a **negative** `maxBytes` (unbounded),
+and the same call carries `TlsOptions` for a self-signed host.
 
 ## Timeouts
 

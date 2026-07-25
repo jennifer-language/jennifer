@@ -49,6 +49,25 @@ export def struct Response {
 };
 
 /**
+ * A response with a **raw `bytes` body** - the byte-safe counterpart to
+ * `Response`, for downloading binary payloads (a `.tar.gz`, an image, any
+ * non-text content) that a UTF-8 string body cannot hold. Returned by
+ * `requestBytes` / `requestWithBytes` / `getBytes`. `headers` keys are
+ * lowercased (read `$r.headers["content-type"]` directly, or with `http.header`
+ * after wrapping - the map is shared shape with `Response`).
+ * @field status {int} the numeric status code
+ * @field statusText {string} the reason phrase from the status line
+ * @field headers {map of string to string} response headers, keys lowercased
+ * @field body {bytes} the response body, exactly as received (no decoding)
+ */
+export def struct BytesResponse {
+    status as int,
+    statusText as string,
+    headers as map of string to string,
+    body as bytes
+};
+
+/**
  * TLS options for an `https://` request, mirroring `net.TLSOptions`. The zero
  * value (`skipVerify` false, empty `caCert`) full-verifies the server
  * certificate against the URL host, which is what a plain `request` / verb
@@ -323,9 +342,11 @@ func parseHeaders(lines as list of string) {
     return $headers;
 }
 
-# parseResponse parses a complete raw response (headers + body bytes) into a
-# Response, de-chunking or trimming the body to its framed length.
-func parseResponse(raw as bytes) {
+# parseRaw parses a complete raw response (headers + body bytes) into a
+# BytesResponse, de-chunking or trimming the body to its framed length. The body
+# stays raw bytes - this is the byte-exact core both the text and binary paths
+# build on; `parseResponse` decodes it to a string, the byte verbs keep it.
+func parseRaw(raw as bytes) {
     def hend as int init headerEnd($raw);
     if ($hend < 0) {
         throw Error{kind: "http", message: "malformed response (no header terminator)",
@@ -357,8 +378,17 @@ func parseResponse(raw as bytes) {
             $bodyBytes = sliceBytes($bodyBytes, 0, $cl);
         }
     }
-    return Response{status: $status, statusText: $statusText, headers: $headers,
-        body: convert.stringFromBytes($bodyBytes, "utf-8")};
+    return BytesResponse{status: $status, statusText: $statusText, headers: $headers,
+        body: $bodyBytes};
+}
+
+# parseResponse parses a raw response into a text Response, decoding the body as
+# UTF-8. Throws (strict, no replacement) on a non-UTF-8 body - use the byte verbs
+# (`requestBytes` / `getBytes`) for binary payloads.
+func parseResponse(raw as bytes) {
+    def r as BytesResponse init parseRaw($raw);
+    return Response{status: $r.status, statusText: $r.statusText, headers: $r.headers,
+        body: convert.stringFromBytes($r.body, "utf-8")};
 }
 
 # isChunked reports whether the response uses chunked transfer-encoding.
@@ -451,11 +481,13 @@ func dial(u as Url, tls as TlsOptions) {
 export func requestWith(method as string, url as string,
     headers as map of string to string, body as string, timeoutMs as int, maxBytes as int) {
     def t as TlsOptions;   # zero value: full certificate verification (unchanged)
-    return sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t);
+    return parseResponse(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t));
 }
 
-# sendCore is the single request implementation; the public variants differ only
-# in which TlsOptions they hand it. An `http://` URL ignores `tls`.
+# sendCore is the single wire implementation - dial, send, read - returning the
+# **raw response bytes** (head + framed body). The public variants differ only in
+# which TlsOptions they hand it and whether they parse the result as a text
+# `Response` or a byte-safe `BytesResponse`. An `http://` URL ignores `tls`.
 func sendCore(method as string, url as string, headers as map of string to string,
     body as string, timeoutMs as int, maxBytes as int, tls as TlsOptions) {
     def u as Url init parseUrl($url);
@@ -471,7 +503,7 @@ func sendCore(method as string, url as string, headers as map of string to strin
         net.setDeadline($conn, $timeoutMs);   # covers the write and the first read
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
-    return parseResponse(readToEOF($conn, $timeoutMs, $maxBytes));
+    return readToEOF($conn, $timeoutMs, $maxBytes);
 }
 
 /**
@@ -490,7 +522,7 @@ func sendCore(method as string, url as string, headers as map of string to strin
 export func requestWithTls(method as string, url as string,
     headers as map of string to string, body as string, timeoutMs as int,
     maxBytes as int, tls as TlsOptions) {
-    return sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls);
+    return parseResponse(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
 }
 
 /**
@@ -521,6 +553,55 @@ export func requestTls(method as string, url as string,
 export func request(method as string, url as string,
     headers as map of string to string, body as string) {
     return requestWith($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0);
+}
+
+/**
+ * Send one request and return the body as **raw `bytes`** (a `BytesResponse`) -
+ * the byte-safe path for downloading binary content (a `.tar.gz`, an image) that
+ * a UTF-8 text `Response` cannot hold. Explicit per-read idle timeout and body
+ * cap; pass a negative `maxBytes` for an unbounded download (a large release
+ * archive), or `TlsOptions` for a self-signed / private-CA `https://` host.
+ * @param method {string} the HTTP method (e.g. "GET")
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for no body)
+ * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
+ * @param tls {TlsOptions} certificate-verification options for the TLS handshake
+ * @return {BytesResponse} the response with a raw bytes body
+ * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
+ */
+export func requestWithBytes(method as string, url as string,
+    headers as map of string to string, body as string, timeoutMs as int,
+    maxBytes as int, tls as TlsOptions) {
+    return parseRaw(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
+}
+
+/**
+ * Send one request and return a raw-bytes `BytesResponse` (default idle timeout,
+ * default 64 MiB cap, full TLS verification). The binary counterpart to
+ * `request`; for a large download or a self-signed host use `requestWithBytes`.
+ * @param method {string} the HTTP method (e.g. "GET")
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for no body)
+ * @return {BytesResponse} the response with a raw bytes body
+ * @throws {Error} kind "http" if the response is malformed or exceeds the cap, or a "read timed out" error on timeout
+ */
+export func requestBytes(method as string, url as string,
+    headers as map of string to string, body as string) {
+    def t as TlsOptions;   # zero value: full certificate verification
+    return requestWithBytes($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0, $t);
+}
+
+/**
+ * GET a URL and return its body as raw `bytes` (the download shortcut).
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @return {BytesResponse} the response with a raw bytes body
+ */
+export func getBytes(url as string, headers as map of string to string) {
+    return requestBytes("GET", $url, $headers, "");
 }
 
 /**

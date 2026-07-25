@@ -1932,6 +1932,30 @@ work; a wrong-typed field value is still rejected. Pinned by
 `TestModuleStructAsFieldTypeInMainStruct` and
 `TestModuleStructWithSiblingStructField`.
 
+### M22.10 - byte-capable `http` download
+
+**Done.** The `http` client could not fetch a binary payload (a `.tar.gz`, an
+image): every response body was built as `convert.stringFromBytes(_, "utf-8")`,
+which is strict (throws on non-UTF-8 by the "strict at boundaries" stance), so
+`http.request` on a gzip URL threw `stringFromBytes: input is not valid UTF-8`.
+The whole stack **up to that last step was already byte-exact** (socket read,
+Content-Length trim, chunked `dechunk` all operate on `bytes`), so the fix was an
+additive byte path, not a rewrite:
+
+- **`http.BytesResponse`** - the byte-safe twin of `Response`, with `body as
+  bytes` instead of `string`.
+- **`http.requestBytes` / `requestWithBytes` / `getBytes`** - return a
+  `BytesResponse` with the raw body. `requestWithBytes` carries the explicit
+  timeout / `maxBytes` (negative = unbounded, for a large archive) / `TlsOptions`.
+- Internally, `parseResponse` split into `parseRaw` (returns the byte-exact
+  `BytesResponse` core) plus a thin text decoder, and `sendCore` now returns the
+  raw wire bytes; the text verbs are unchanged (still throw on a non-UTF-8 body,
+  by design). `rest` stays text/JSON-only.
+
+Verified end-to-end in `cmd/jennifer/http_bytes_test.go` (a gzip served over
+loopback downloads with matching sha256 and unpacks back, while the text `get`
+refuses the same body) plus a `parseRaw`-keeps-binary overlay test.
+
 ---
 
 ## Requirements for 1.0.0 stable
