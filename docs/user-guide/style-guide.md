@@ -54,9 +54,9 @@ nothing here will surprise you.
   form has the opening brace at end-of-line, each body statement on its
   own indented line, and the closing brace on its own line. Applies
   uniformly to method bodies, control-flow blocks (`if / elseif / else`,
-  `while`, `for`, `repeat`), `try { } catch (e) { }`, and `spawn { }`
-  block expressions. Single-line blocks are still legal source (the
-  parser accepts them), but `fmt` rewrites them to the expanded form
+  `while`, `for`, `repeat`, `match`), `try { } catch (e) { }`, and
+  `spawn { }` block expressions. Single-line blocks are still legal source
+  (the parser accepts them), but `fmt` rewrites them to the expanded form
   for consistency.
 - **Struct declarations expand to one field per line.**
   `def struct Point { x as int, y as int };` reflows to
@@ -74,6 +74,31 @@ nothing here will surprise you.
   `} elseif (cond) { ... }`, `} catch (e) { ... }`, and
   `} until (cond);` all keep the trailing keyword on the same line as
   the closing brace. `};` (a struct-decl terminator) also cuddles.
+- **`match` arms each start on their own line - they do *not* cuddle.** A
+  `match` is a flat list of peer arms (a `switch` / `case`, not a nested
+  conditional), so - like `switch`/`case`/`when` in C, Go, Rust, Swift, Kotlin,
+  Ruby, and Python - each `when` (and the `else`) begins its own line at the arm
+  indent, with its body on its own indented lines and its `}` on its own line.
+  This is the one place `else` starts a line rather than cuddling a `}`: the
+  `} else {` cuddle rule is for an `if`'s conditional tail, and a `match`'s `else`
+  is a case-list arm, not that. Reading down the `when` column is the point. A
+  `when` value list that overflows the line wraps with each continuation value
+  aligned under the first:
+
+  ```jennifer
+  match ($state) {
+      when "idle" {
+          begin();
+      }
+      when longEventName1(),
+           longEventName2() {
+          handle();
+      }
+      else {
+          reject();
+      }
+  }
+  ```
 
 ## Line length
 

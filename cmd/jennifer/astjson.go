@@ -96,6 +96,23 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 			emitNullField(b, "else", indent+1)
 		}
 		endObj(b, indent)
+	case *parser.MatchStmt:
+		startObj(b, indent)
+		emitTypeAndPos(b, "MatchStmt", v, indent+1)
+		emitNodeField(b, "subject", v.Subject, indent+1)
+		emitNodeListField(b, "arms", asNodes(v.Arms), indent+1)
+		if v.Else != nil {
+			emitNodeField(b, "else", v.Else, indent+1)
+		} else {
+			emitNullField(b, "else", indent+1)
+		}
+		endObj(b, indent)
+	case parser.MatchArm:
+		startObj(b, indent)
+		emitTypeAndPos(b, "MatchArm", v, indent+1)
+		emitNodeListField(b, "values", asNodes(v.Values), indent+1)
+		emitNodeField(b, "body", v.Body, indent+1)
+		endObj(b, indent)
 
 	case *parser.WhileStmt:
 		startObj(b, indent)

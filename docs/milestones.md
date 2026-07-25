@@ -1665,72 +1665,57 @@ reasoning in `docs/technical/rejected.md`.
 
 ### M22.4 - `match` statement (multi-way value dispatch)
 
-**Planned.** A multi-way branch so a chain of `if` / `elseif` comparing one
-subject reads as a single dispatch. Keywords **`match` / `when` / `else`**, chosen
-so the construct can *grow* into pattern matching later (see `M22.5`) rather
-than shipping a `switch` now and needing a second `match` construct - one
-branch-on-a-subject statement, not two.
+**Done.** A multi-way branch (`match` / `when` / `else`) so a chain of `if` /
+`elseif` over one subject reads as a single dispatch. Keywords chosen so it can
+*grow* into pattern matching (`M22.5` adds guards / structural patterns to the
+same `when`, no new keyword) rather than shipping a `switch` and needing a second
+construct.
 
 ```jennifer
 match ($x) {
-    when 1 { io.printf("one\n"); }
-    when 2, 3, 4 { io.printf("a few\n"); }   # multiple values per arm
-    else { io.printf("many\n"); }             # optional
+    when 1 {
+        io.printf("one\n");
+    }
+    when 2, 3, 4 {              # multiple values per arm (an OR of equality)
+        io.printf("a few\n");
+    }
+    else {                     # optional default, last; no-arm-no-else is a no-op
+        io.printf("many\n");
+    }
 }
 ```
 
-**Semantics (v1: literal / value dispatch, no type-system work):**
+**Semantics** (v1: value dispatch, no type-system work): parenthesized subject
+evaluated **once**; each `when` lists one or more values (any expressions, not
+just literals) compared to the subject by strict `==` (`Value.Equal`, the
+operator's exact path); first matching arm wins, an arm's values evaluate
+left-to-right only until a match. **No fall-through** and **not a `break`
+target** - `break` / `continue` in an arm act on the enclosing loop (Go's "break
+breaks the switch" trap is unrepresentable). Each arm is its own scope; a
+statement, not an expression.
 
-- **`match (EXPR) { ... }`** - parenthesized subject (like `if (cond)` /
-  `while (cond)`), evaluated **once**.
-- **`when V [, V ...] { block }`** - one or more values (any expressions, not just
-  literals: `when MAX`, `when $threshold`), compared to the subject by Jennifer's
-  strict `==` (same exact / type-strict rules as everywhere). First arm whose
-  value list contains a match runs; its `V`s are evaluated left-to-right only
-  until a match. Arms are checked top-to-bottom.
-- **No fall-through.** Each arm is an independent block; there is no `break` to
-  end an arm and no implicit fall to the next (the C footgun is unrepresentable).
-  A `match` is therefore **not** a `break` target: `break` / `continue` inside an
-  arm act on the enclosing loop, avoiding Go's "break breaks the switch" trap.
-- **`else { block }`** - optional default; reuses `else` rather than adding a
-  `default` keyword. **No matching arm and no `else` is a well-defined no-op**
-  (like Go), not an error.
-- **A statement, not an expression** - arms act / assign / `return`, consistent
-  with `if` (Jennifer rejected the ternary to avoid "blocks yield their last
-  expression"; a `match`-expression would reopen that and stays deferred).
-- Each arm's block is its own scope (per-branch, like `if` blocks), via the
-  resolver.
-- **Canonical layout is a multiline block** (a style rule, applied by `fmt`).
-  Whitespace is insignificant, so a whole `match` *may* be written on one line -
-  but the recommended and `jennifer fmt`-canonical form is the subject line
-  `match (EXPR) {`, then **one arm per line** indented one level
-  (`when ... { ... }`, with `else { ... }` last), then the closing `}` on its own
-  line - the same visual shape as an `if` / `elseif` / `else` chain. Prose
-  examples in the docs use this multiline form (not the compact single-line one),
-  and `fmt` reflows a single-line `match` into it.
+**Layout** (a `fmt` rule): a `match` is a **flat list of arms**, laid out like a
+`switch` / `case` in every other language (C / Go / Rust / Swift / Kotlin / Ruby
+/ Python all start each arm with its keyword) - each `when` / `else` on its
+**own** line at the arm indent, body indented, `}` on its own line. Arms do
+**not** cuddle the previous `}` (the `} else {` cuddle rule is an `if`'s
+conditional tail; a `match`'s `else` is a case-list arm, so the `when` column
+reads top-to-bottom). A wrapped `when` value list aligns continuation values
+under the first. The compact one-line-per-arm form was set aside (the streaming
+formatter can't measure an arm to choose compact-vs-expand).
 
-**Grows into `M22.5`.** This is the foundation the sum-types milestone extends:
-`when` gains guards (`when $x > 5`) and structural patterns (`when Some(v)`) with
-no new keyword. `M22.5` accordingly becomes "sum types, which extend this
-`match`," not a separate construct.
-
-**Implementation surface:** lexer keywords `match` / `when` (grep `modules/` +
-`examples/` for any identifier collisions first - reserving them is a small
-pre-1.0 break if used as a name); a `MatchStmt` AST node (subject + ordered arms,
-each arm a `[]Expr` value list + block, plus an optional else block); the parser
-(`match (` after the existing statement dispatch); the interpreter (eval subject
-once, `Value.Equal` against each arm's values, run the first match's block via
-`execBlock`); the resolver (per-arm block scopes); grammar EBNF / PEG; the spec
-(`CLAUDE.md` control-flow, `JENNIFER.md`); the four editor highlighters;
-**`jennifer fmt`** (the token-level formatter, `cmd/jennifer/fmt.go`, must
-recognize `match` / `when` / `else` and reflow a `match` to the canonical
-multiline block - one arm per line, indented - via its brace-classification
-walk); the **style guide** (`docs/user-guide/style-guide.md`, the design guide -
-document the multiline `match` layout as the recommended form, and add a
-`fmt`-round-trip example); the `control-flow` user-guide page; and lexer / parser
-/ interpreter tests (including a `fmt` idempotence / reflow test for `match`)
-plus a golden example. **Requires:** none hard (value dispatch needs no type
-system).
+**Implementation.** New `MatchStmt{Subject, []MatchArm{Values, Body}, Else}` AST;
+`execMatch` evaluates the subject once and runs the first matching arm via
+`execBlock`. The one wrinkle was the header `{` ambiguity (`when Name {` reading
+`Name{...}` as a struct literal): the parser's `noStructLit` flag is set while
+parsing a `when` value list and re-enabled on entering any `(` / `[` / call /
+list / map body (Go's `exprLev` rule), so `when MAX {` is a constant + block and
+a composite-literal value takes parens (`when (Point{x:1}) {`). `tokens` /
+`profile` / `repl` needed no `match`-specific code (generic `posFor` / brace-depth
+handling); `ast` gained `MatchStmt` / `MatchArm` cases; four editor highlighters
++ the docs bundle updated. Two reserved-keyword collisions renamed (`totp.j`
+`match` -> `matched`; `feed_test.j` `when` -> `nowStamp`, `match` -> `matched`).
+Verified across behavior / fmt-idempotence / `-race` / a golden example.
 
 ### M22.5 - sum types (enums) + pattern `match`
 

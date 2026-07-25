@@ -328,6 +328,24 @@ func (r *resolver) resolveStmt(s Stmt) error {
 			return r.resolveBlock(st.Else)
 		}
 		return nil
+	case *MatchStmt:
+		if err := r.resolveExpr(st.Subject); err != nil {
+			return err
+		}
+		for ai := range st.Arms {
+			for _, v := range st.Arms[ai].Values {
+				if err := r.resolveExpr(v); err != nil {
+					return err
+				}
+			}
+			if err := r.resolveBlock(st.Arms[ai].Body); err != nil {
+				return err
+			}
+		}
+		if st.Else != nil {
+			return r.resolveBlock(st.Else)
+		}
+		return nil
 	case *WhileStmt:
 		if err := r.resolveExpr(st.Cond); err != nil {
 			return err

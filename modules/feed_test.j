@@ -13,7 +13,7 @@
 use testing;
 
 # A fixed instant used across the round-trip tests.
-func when() {
+func nowStamp() {
     return time.fromIso("2026-07-20T14:30:00Z");
 }
 
@@ -24,11 +24,11 @@ func sample() {
             entryUpdated(
                 entryPublished(
                     entryId(entry("First Post", "https://example.org/1"), "id-1"),
-                    when()),
-                when()),
+                    nowStamp()),
+                nowStamp()),
             "A summary & <tag>"),
         "Full body");
-    return add(feedUpdated(feed("My Blog", "https://example.org"), when()), $e);
+    return add(feedUpdated(feed("My Blog", "https://example.org"), nowStamp()), $e);
 }
 
 func testFeedConstructorDefaults() {
@@ -150,13 +150,13 @@ func containsStr(haystack as string, needle as string) {
         return true;
     }
     for (def i as int init 0; $i + len($nee) <= len($hay); $i = $i + 1) {
-        def match as bool init true;
+        def matched as bool init true;
         for (def j as int init 0; $j < len($nee); $j = $j + 1) {
             if ($hay[$i + $j] != $nee[$j]) {
-                $match = false;
+                $matched = false;
             }
         }
-        if ($match) {
+        if ($matched) {
             return true;
         }
     }
@@ -165,7 +165,7 @@ func containsStr(haystack as string, needle as string) {
 use strings;
 
 func testRssDateFormat() {
-    testing.assertEqual(rssDate(when()), "Mon, 20 Jul 2026 14:30:00 +0000");
+    testing.assertEqual(rssDate(nowStamp()), "Mon, 20 Jul 2026 14:30:00 +0000");
 }
 
 func testParseRssDateBothForms() {

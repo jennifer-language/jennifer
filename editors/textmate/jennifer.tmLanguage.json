@@ -69,7 +69,7 @@
       "patterns": [
         {
           "name": "keyword.control.jennifer",
-          "match": "\\b(if|elseif|else|while|for|in|repeat|until|break|continue|return|exit|try|catch|throw|defer|errdefer|spawn)\\b"
+          "match": "\\b(if|elseif|else|while|for|in|repeat|until|match|when|break|continue|return|exit|try|catch|throw|defer|errdefer|spawn)\\b"
         },
         {
           "name": "keyword.declaration.jennifer",

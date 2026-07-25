@@ -516,3 +516,21 @@ func TestTokenizeErrdeferKeyword(t *testing.T) {
 		t.Errorf("second token = %s(%q), want IDENT(cleanup)", toks[1].Type, toks[1].Lexeme)
 	}
 }
+
+// TestTokenizeMatchKeywords covers the `match` / `when` keywords (M22.4). `else`
+// is shared with `if`; it already has coverage above.
+func TestTokenizeMatchKeywords(t *testing.T) {
+	toks, err := Tokenize("match when else")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	want := []TokenType{TOKEN_MATCH, TOKEN_WHEN, TOKEN_ELSE, TOKEN_EOF}
+	if len(toks) != len(want) {
+		t.Fatalf("got %d tokens, want %d: %v", len(toks), len(want), toks)
+	}
+	for i, w := range want {
+		if toks[i].Type != w {
+			t.Errorf("tok %d: got %s (%q), want %s", i, toks[i].Type, toks[i].Lexeme, w)
+		}
+	}
+}

@@ -94,6 +94,25 @@ type parser struct {
 	// input that would overflow the Go stack (the interpreter has no recover();
 	// a stack overflow is a fatal, uncatchable crash). See parseExpr.
 	exprDepth int
+	// noStructLit suppresses parsing a trailing `Name{...}` as a struct literal in
+	// a header position where the `{` must instead open a block - specifically a
+	// `match` subject and a `when` value. Zero value (false) = struct literals
+	// allowed everywhere (the normal case). It is set true only while parsing a
+	// `when` value list and cleared again on entering any bracketed sub-expression
+	// (`( )`, `[ ]`, a call's args, a list / map / struct-literal body), where a
+	// `{` is unambiguous - so `when (Point{x:1})` and `when f(Rec{n:1})` still
+	// work. Mirrors Go's `exprLev` composite-literal rule.
+	noStructLit bool
+}
+
+// allowStructLit clears noStructLit for the rest of the calling function
+// (restoring the prior value on return). Call it right after consuming an opening
+// bracket, where a `{` can only be a struct-literal body, never a block - so a
+// `match`/`when` header suppression does not leak into the bracketed contents.
+func (p *parser) allowStructLit() func() {
+	saved := p.noStructLit
+	p.noStructLit = false
+	return func() { p.noStructLit = saved }
 }
 
 func (p *parser) peek() lexer.Token       { return p.tokens[p.pos] }
@@ -489,6 +508,8 @@ func (p *parser) parseStatement() (Stmt, error) {
 		return p.parseFor()
 	case lexer.TOKEN_REPEAT:
 		return p.parseRepeat()
+	case lexer.TOKEN_MATCH:
+		return p.parseMatch()
 	case lexer.TOKEN_BREAK:
 		return p.parseBreak()
 	case lexer.TOKEN_CONTINUE:
@@ -994,6 +1015,75 @@ func (p *parser) parseWhile() (Stmt, error) {
 	return &WhileStmt{pos: pos{File: wt.File, Line: wt.Line, Col: wt.Col}, Cond: cond, Body: body}, nil
 }
 
+// parseMatch parses `match (EXPR) { when V [, V]* { body } ... [else { body }]? }`.
+// The subject is parenthesized (evaluated once at runtime); each `when` arm holds
+// a comma-separated value list and a block; an optional `else` is the default and
+// must come last. There is no fall-through and `match` is not a `break` target.
+func (p *parser) parseMatch() (Stmt, error) {
+	mt, _ := p.match(lexer.TOKEN_MATCH)
+	subject, err := p.parseParenCond("match")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(lexer.TOKEN_LBRACE, "to begin `match` body"); err != nil {
+		return nil, err
+	}
+	stmt := &MatchStmt{pos: pos{File: mt.File, Line: mt.Line, Col: mt.Col}, Subject: subject}
+	seenElse := false
+	for {
+		if p.check(lexer.TOKEN_WHEN) {
+			if seenElse {
+				t := p.peek()
+				return nil, &ParseError{Msg: "a `when` arm cannot follow `else` in a `match` (else must be last)", File: t.File, Line: t.Line, Col: t.Col}
+			}
+			wt := p.advance()
+			// A `when` value is a header expression: a trailing `{` opens the arm
+			// block, so a bare `Name{...}` is not read as a struct literal here
+			// (parenthesize a struct-literal value). Cleared again for the block.
+			savedNSL := p.noStructLit
+			p.noStructLit = true
+			var values []Expr
+			v, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, v)
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				vn, err := p.parseExpr()
+				if err != nil {
+					return nil, err
+				}
+				values = append(values, vn)
+			}
+			p.noStructLit = savedNSL
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Arms = append(stmt.Arms, MatchArm{pos: pos{File: wt.File, Line: wt.Line, Col: wt.Col}, Values: values, Body: body})
+		} else if p.check(lexer.TOKEN_ELSE) {
+			if seenElse {
+				t := p.peek()
+				return nil, &ParseError{Msg: "a `match` can have only one `else`", File: t.File, Line: t.Line, Col: t.Col}
+			}
+			p.advance()
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Else = body
+			seenElse = true
+		} else {
+			break
+		}
+	}
+	if _, err := p.expect(lexer.TOKEN_RBRACE, "to end `match` body (each arm is `when V { ... }` or `else { ... }`)"); err != nil {
+		return nil, err
+	}
+	return stmt, nil
+}
+
 func (p *parser) parseFor() (Stmt, error) {
 	ft, _ := p.match(lexer.TOKEN_FOR)
 	if _, err := p.expect(lexer.TOKEN_LPAREN, "after `for`"); err != nil {
@@ -1360,7 +1450,8 @@ func (p *parser) parseRange() (Expr, error) {
 // SliceExpr, a plain index an IndexExpr.
 func (p *parser) parseBracketSuffix(target Expr) (Expr, error) {
 	bra := p.peek()
-	p.advance() // consume [
+	p.advance()                // consume [
+	defer p.allowStructLit()() // an index/slice expr is a normal expression context
 	var lo, hi Expr
 	var err error
 	if p.peek().Type != lexer.TOKEN_DOTDOT {
@@ -1638,7 +1729,8 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 	if callee.Type == lexer.TOKEN_IDENT && containsUnderscore(callee.Lexeme) {
 		return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", callee.Lexeme), File: callee.File, Line: callee.Line, Col: callee.Col}
 	}
-	p.advance() // consume LPAREN
+	p.advance()                // consume LPAREN
+	defer p.allowStructLit()() // inside args, a `{` is a struct literal, not a block
 	var args []Expr
 	if !p.check(lexer.TOKEN_RPAREN) {
 		for {
@@ -1667,7 +1759,8 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 // "zero-initialised", which the interpreter accepts only when the
 // struct has no fields - otherwise every field is required.
 func (p *parser) parseStructLitTail(name lexer.Token) (Expr, error) {
-	p.advance() // consume LBRACE
+	p.advance()                // consume LBRACE
+	defer p.allowStructLit()() // field values are a normal expression context
 	var fields []StructLitField
 	seen := map[string]bool{}
 	if !p.check(lexer.TOKEN_RBRACE) {
@@ -1735,7 +1828,8 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 		if containsUnderscore(name.Lexeme) {
 			return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 		}
-		p.advance() // consume LPAREN
+		p.advance()                // consume LPAREN
+		defer p.allowStructLit()() // inside args, a `{` is a struct literal, not a block
 		var args []Expr
 		if !p.check(lexer.TOKEN_RPAREN) {
 			for {
@@ -1762,7 +1856,9 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 	// Namespaced struct literal: prefix.Name { field: expr, ... }.
 	// Checked before the qualified-const path so a struct's
 	// PascalCase / camelCase name doesn't trip the constant-name rule.
-	if p.check(lexer.TOKEN_LBRACE) {
+	// Suppressed in a `match`/`when` header, where the `{` opens the block and
+	// `prefix.NAME` reads as a qualified constant reference.
+	if !p.noStructLit && p.check(lexer.TOKEN_LBRACE) {
 		lit, err := p.parseStructLitTail(name)
 		if err != nil {
 			return nil, err
@@ -2020,7 +2116,10 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		if p.check(lexer.TOKEN_DOT) {
 			return p.parseQualifiedTail(t)
 		}
-		if p.check(lexer.TOKEN_LBRACE) {
+		// A trailing `{` is a struct-literal body - except in a `match`/`when`
+		// header, where it opens the block; there the IDENT is a bare constant
+		// reference (`when MAX {`). Parenthesize a struct-literal value.
+		if !p.noStructLit && p.check(lexer.TOKEN_LBRACE) {
 			return p.parseStructLitTail(t)
 		}
 		if !p.check(lexer.TOKEN_LPAREN) {
@@ -2051,10 +2150,12 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		}
 	case lexer.TOKEN_LPAREN:
 		p.advance()
+		restore := p.allowStructLit() // a parenthesized value re-enables struct literals
 		e, err := p.parseExpr()
 		if err != nil {
 			return nil, err
 		}
+		restore()
 		if _, err := p.expect(lexer.TOKEN_RPAREN, "to close grouped expression"); err != nil {
 			return nil, err
 		}
@@ -2073,6 +2174,7 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 // an empty list whose element type is decided by the enclosing context.
 func (p *parser) parseListLit() (Expr, error) {
 	bra, _ := p.match(lexer.TOKEN_LBRACKET)
+	defer p.allowStructLit()() // list elements are a normal expression context
 	var elems []Expr
 	for !p.check(lexer.TOKEN_RBRACKET) {
 		e, err := p.parseExpr()
@@ -2099,6 +2201,7 @@ func (p *parser) parseListLit() (Expr, error) {
 // context, so the ambiguity is already resolved by the caller.
 func (p *parser) parseMapLit() (Expr, error) {
 	brace, _ := p.match(lexer.TOKEN_LBRACE)
+	defer p.allowStructLit()() // keys/values are a normal expression context
 	var keys, vals []Expr
 	for !p.check(lexer.TOKEN_RBRACE) {
 		key, err := p.parseExpr()

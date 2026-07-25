@@ -495,3 +495,60 @@ func TestFmtPreservesComments(t *testing.T) {
 		})
 	}
 }
+
+// TestFmtMatchReflow pins the canonical `match` layout: a single-line match is
+// expanded so each `when` / `else` arm starts on its own line (a flat case list,
+// like switch/match in other languages), body on its own indented lines. Unlike
+// an if-chain's `} else {`, match arms do NOT cuddle the previous arm's `}`.
+func TestFmtMatchReflow(t *testing.T) {
+	src := `use io;
+match ($x) { when 1 { a(); } when 2, 3 { b(); c(); } else { d(); } }`
+	want := `use io;
+match ($x) {
+    when 1 {
+        a();
+    }
+    when 2, 3 {
+        b();
+        c();
+    }
+    else {
+        d();
+    }
+}
+`
+	if got := fmtSource(t, src); got != want {
+		t.Errorf("match reflow mismatch:\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+}
+
+// TestFmtTriviaBeforeCloseBrace covers the fix for a trailing comment or a blank
+// line immediately before a closing `}`: the brace must still dedent to its
+// block's indent, not stay at the body indent. A `}` that closes a map literal
+// (which does not dedent) must be unaffected.
+func TestFmtTriviaBeforeCloseBrace(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"trailing comment before block close",
+			"use io;\nif (1 == 1) {\n    a();   # note\n}\n",
+			"use io;\nif (1 == 1) {\n    a(); # note\n}\n"},
+		{"blank line before block close",
+			"use io;\nif (1 == 1) {\n\n    a();\n\n}\n",
+			"use io;\nif (1 == 1) {\n\n    a();\n\n}\n"},
+		{"trailing comment before struct-decl close",
+			"def struct P {\n    x as int,\n    y as int   # last\n};\n",
+			"def struct P {\n    x as int,\n    y as int # last\n};\n"},
+		{"trailing comment before match-arm close",
+			"use io;\nmatch ($x) {\n    when 1 {\n        a();  # c\n    }\n}\n",
+			"use io;\nmatch ($x) {\n    when 1 {\n        a(); # c\n    }\n}\n"},
+	}
+	for _, c := range cases {
+		got := fmtSource(t, c.src)
+		if got != c.want {
+			t.Errorf("%s:\n--- got ---\n%s--- want ---\n%s", c.name, got, c.want)
+		}
+		// idempotent
+		if again := fmtSource(t, got); again != got {
+			t.Errorf("%s: not idempotent:\n--- once ---\n%s--- twice ---\n%s", c.name, got, again)
+		}
+	}
+}

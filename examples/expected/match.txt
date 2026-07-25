@@ -1,0 +1,6 @@
+classify(0) = zero
+classify(2) = small
+classify(7) = other
+classify(9) = the max
+kept sum = 4
+stopping

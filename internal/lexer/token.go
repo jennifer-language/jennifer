@@ -35,6 +35,8 @@ const (
 	TOKEN_FOR
 	TOKEN_REPEAT   // `repeat { ... } until (cond);` post-test loop
 	TOKEN_UNTIL    // companion to `repeat`
+	TOKEN_MATCH    // `match (EXPR) { when V { ... } else { ... } }` multi-way dispatch
+	TOKEN_WHEN     // arm of a `match` block
 	TOKEN_BREAK    // exit innermost loop
 	TOKEN_CONTINUE // skip to next iteration of innermost loop
 	TOKEN_EXIT     // terminate the program; optional int expression sets exit code
@@ -142,6 +144,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_FOR:         "FOR",
 	TOKEN_REPEAT:      "REPEAT",
 	TOKEN_UNTIL:       "UNTIL",
+	TOKEN_MATCH:       "MATCH",
+	TOKEN_WHEN:        "WHEN",
 	TOKEN_BREAK:       "BREAK",
 	TOKEN_CONTINUE:    "CONTINUE",
 	TOKEN_EXIT:        "EXIT",
@@ -252,6 +256,8 @@ var keywords = map[string]TokenType{
 	"for":      TOKEN_FOR,
 	"repeat":   TOKEN_REPEAT,
 	"until":    TOKEN_UNTIL,
+	"match":    TOKEN_MATCH,
+	"when":     TOKEN_WHEN,
 	"break":    TOKEN_BREAK,
 	"continue": TOKEN_CONTINUE,
 	"exit":     TOKEN_EXIT,

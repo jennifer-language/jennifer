@@ -160,16 +160,16 @@ export func verifyAt(secret as string, code as string, unixSeconds as int, opts 
     # digits matched (and which window), which a network attacker can exploit
     # against a 2FA endpoint. crypto.hmacEqual runs in time independent of the
     # contents.
-    def match as bool init false;
+    def matched as bool init false;
     def step as int init -1;
     while ($step <= 1) {
         def computed as bytes init convert.bytesFromString(hotp($key, $counter + $step, $digits, $algorithm), "utf-8");
         if (crypto.hmacEqual($computed, $codeBytes)) {
-            $match = true;
+            $matched = true;
         }
         $step = $step + 1;
     }
-    return $match;
+    return $matched;
 }
 
 /**

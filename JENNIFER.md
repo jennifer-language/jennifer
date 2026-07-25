@@ -135,13 +135,33 @@ for (def i in 0..10) { ... }   # for-each over a half-open range (lazy)
 
 repeat { ... } until ($done);  # post-test loop; body runs at least once
 
+match ($cmd) {                 # multi-way value dispatch (subject evaluated once)
+    when "start" {
+        start();
+    }
+    when "stop", "halt" {      # several values per arm (an OR of equality)
+        stop();
+    }
+    else {                     # optional default, must be last
+        unknown();
+    }
+}
+
 break;      # exit innermost loop
 continue;   # next iteration
 exit;       # terminate the whole program (exit 0); exit EXPR sets the code
 ```
 
-Conditions must be `bool` (there is no truthiness). `break`/`continue` do not
-cross a method-call or `spawn` boundary.
+Conditions must be `bool` (there is no truthiness). `and` / `or` **short-circuit**
+(`true or f()` never calls `f`). `break`/`continue` do not cross a method-call or
+`spawn` boundary.
+
+`match` compares the subject to each `when` value by strict `==`; the first
+matching arm runs and its values evaluate left-to-right only until a match. There
+is **no fall-through**, and `match` is **not** a `break` target - `break` /
+`continue` in an arm act on the enclosing loop. A bare `when Name { }` reads
+`Name` as a value and `{` as the block, so a struct-literal value needs parens:
+`when (Point{x: 1}) { ... }`. No matching arm and no `else` is a no-op.
 
 ### Errors
 

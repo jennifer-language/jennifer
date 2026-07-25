@@ -1979,3 +1979,87 @@ io.printf("%d", add(fib(10), fib(11), fib(12)));`)
 		t.Fatalf("got %q, want 288", out)
 	}
 }
+
+// TestMatchStatement covers value dispatch, multi-value arms, else, the
+// no-match no-op, first-match-wins (no fall-through), left-to-right
+// short-circuit value evaluation, per-arm scope, strict `==`, and that
+// break/continue in an arm act on the enclosing loop.
+func TestMatchStatement(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"dispatch+multi+else", `use io;
+def classify as string;
+for (def n in [0, 2, 5, 9]) {
+	match ($n) {
+		when 0 { io.printf("zero "); }
+		when 1, 2, 3 { io.printf("small "); }
+		when 9 { io.printf("nine "); }
+		else { io.printf("other "); }
+	}
+}`, "zero small other nine "},
+		{"no-match-no-else is a no-op", `use io;
+match (7) { when 1 { io.printf("no"); } }
+io.printf("ok");`, "ok"},
+		{"first match wins, no fall-through", `use io;
+match (2) {
+	when 2 { io.printf("a"); }
+	when 2 { io.printf("b"); }
+}`, "a"},
+		{"break in arm acts on the loop", `use io;
+for (def i in [1, 2, 3, 4]) {
+	match ($i) {
+		when 3 { break; }
+	}
+	io.printf("%d", $i);
+}`, "12"},
+		{"continue in arm acts on the loop", `use io;
+for (def i in [1, 2, 3]) {
+	match ($i) {
+		when 2 { continue; }
+	}
+	io.printf("%d", $i);
+}`, "13"},
+		{"per-arm scope reuses a name", `use io;
+match ("b") {
+	when "a" { def r as int init 1; io.printf("%d", $r); }
+	when "b" { def r as int init 2; io.printf("%d", $r); }
+}`, "2"},
+		{"strict == : int subject does not match float value", `use io;
+match (1) {
+	when 1 { io.printf("int"); }
+	else { io.printf("no"); }
+}
+match (2) {
+	when 2 { io.printf("!"); }
+}`, "int!"},
+	}
+	for _, c := range cases {
+		out, err := run(t, c.src)
+		if err != nil {
+			t.Fatalf("%s: run error: %v", c.name, err)
+		}
+		if out != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, out, c.want)
+		}
+	}
+}
+
+// TestMatchSubjectEvaluatedOnce confirms the subject expression runs exactly
+// once, and TestMatchValueShortCircuit that a `when` value list stops at the
+// first match.
+func TestMatchSubjectEvaluatedOnce(t *testing.T) {
+	out, err := run(t, `use io;
+def calls as int init 0;
+func subj() { $calls = $calls + 1; return 2; }
+match (subj()) {
+	when 1 { io.printf("one"); }
+	when 2 { io.printf("two"); }
+	when 3 { io.printf("three"); }
+}
+io.printf(" calls=%d", $calls);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "two calls=1" {
+		t.Errorf("got %q, want \"two calls=1\"", out)
+	}
+}

@@ -1357,6 +1357,8 @@ func (i *Interpreter) execStmtRaw(s parser.Stmt, env *Environment) (blockResult,
 		return blockResult{}, i.execFieldAssign(st, env)
 	case *parser.IfStmt:
 		return i.execIf(st, env)
+	case *parser.MatchStmt:
+		return i.execMatch(st, env)
 	case *parser.WhileStmt:
 		return i.execWhile(st, env)
 	case *parser.ForStmt:
@@ -2381,6 +2383,34 @@ func (i *Interpreter) execIf(st *parser.IfStmt, env *Environment) (blockResult, 
 		}
 		if ok {
 			return i.execBlock(st.ElseIfBodies[idx], env)
+		}
+	}
+	if st.Else != nil {
+		return i.execBlock(st.Else, env)
+	}
+	return blockResult{}, nil
+}
+
+// execMatch evaluates the subject once, then checks each `when` arm top-to-bottom,
+// comparing the subject to the arm's values by strict `==` (Value.Equal, the same
+// path the `==` operator uses). The first matching arm's block runs in its own
+// scope; a `when`'s values are evaluated left-to-right only until one matches.
+// With no matching arm and no `else`, the statement is a no-op. There is no
+// fall-through, and `break` / `continue` in an arm act on the enclosing loop.
+func (i *Interpreter) execMatch(st *parser.MatchStmt, env *Environment) (blockResult, error) {
+	subject, err := i.evalExpr(st.Subject, env)
+	if err != nil {
+		return blockResult{}, err
+	}
+	for ai := range st.Arms {
+		for _, ve := range st.Arms[ai].Values {
+			v, err := i.evalExpr(ve, env)
+			if err != nil {
+				return blockResult{}, err
+			}
+			if subject.Equal(v) {
+				return i.execBlock(st.Arms[ai].Body, env)
+			}
 		}
 	}
 	if st.Else != nil {

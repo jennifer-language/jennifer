@@ -376,6 +376,27 @@ type IfStmt struct {
 
 func (*IfStmt) stmtNode() {}
 
+// MatchArm is one `when V [, V ...] { body }` arm of a MatchStmt. Values holds
+// one or more expressions compared to the subject by strict `==`; the first arm
+// with any matching value runs its Body.
+type MatchArm struct {
+	pos
+	Values []Expr
+	Body   *Block
+}
+
+// MatchStmt: `match (EXPR) { when V [, V ...] { body } ... [else { body }]? }`
+// Subject is evaluated once; Arms are checked top-to-bottom; Else (optional
+// default) may be nil. A statement, not an expression; no fall-through.
+type MatchStmt struct {
+	pos
+	Subject Expr
+	Arms    []MatchArm
+	Else    *Block // nil if absent
+}
+
+func (*MatchStmt) stmtNode() {}
+
 // WhileStmt: `while (cond) { body }`
 type WhileStmt struct {
 	pos

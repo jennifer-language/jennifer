@@ -67,6 +67,7 @@ statement   = defineStmt
             | forStmt
             | forEachStmt
             | repeatStmt
+            | matchStmt
             | breakStmt
             | continueStmt
             | exitStmt
@@ -172,6 +173,19 @@ repeatStmt  = "repeat" block "until" "(" expr ")" ";" ;
                                        (* post-test loop: the body runs at
                                           least once; exits when the
                                           condition is true *)
+
+matchStmt   = "match" "(" expr ")" "{"
+                  { "when" expr { "," expr } block }
+                  [ "else" block ]
+              "}" ;
+                                       (* multi-way value dispatch: the subject
+                                          is compared to each `when` value by
+                                          `==`; first match wins; `else` is the
+                                          optional default and must be last. A
+                                          bare `Name` value followed by `{` reads
+                                          the `{` as the arm block, not a struct
+                                          literal - parenthesize a struct-literal
+                                          value. No fall-through. *)
 
 exprStmt    = expr ";" ;
 

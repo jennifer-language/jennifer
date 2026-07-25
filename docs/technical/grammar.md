@@ -140,6 +140,8 @@ below.
 | `AppendStmt`            | stmt | `Target *VarExpr`, `Value Expr` - `$xs[] = item;`                                                     |
 | `ReturnStmt`            | stmt | `Value Expr` (nil for bare `return;`)                                                                      |
 | `IfStmt`                | stmt | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block`                            |
+| `MatchStmt`             | stmt | `Subject Expr`, `Arms []MatchArm`, `Else *Block` (nil if absent) - `match (EXPR) { when ... else ... }`     |
+| `MatchArm`              | node | `Values []Expr` (>=1, compared to the subject by `==`), `Body *Block`                                       |
 | `WhileStmt`             | stmt | `Cond`, `Body *Block`                                                                                      |
 | `ForStmt`               | stmt | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil)                                      |
 | `ForEachStmt`           | stmt | `VarName`, `Coll Expr`, `Body *Block`, `IterSlot` (slot for the iterator in each iteration frame)  |

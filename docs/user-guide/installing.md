@@ -111,11 +111,22 @@ sudo mkdir -p /usr/share/jennifer/modules
 sudo install -m 0644 share/jennifer/modules/*.j /usr/share/jennifer/modules/
 ```
 
-### Docker (container image)
+### Container image
 
 Each release publishes multi-arch (`linux/amd64` + `linux/arm64`) images to GHCR.
 The image bundles both binaries and the system modules, so a bare
-`import "name.j";` resolves with no setup:
+`import "name.j";` resolves with no setup. The container sets `WORKDIR /work` and
+`ENTRYPOINT ["jennifer"]`, so you mount your code at `/work` and pass the
+`jennifer` subcommand as the container command.
+
+Two variants: `:latest` / `:<version>` is the Debian-slim default (full host
+features - `os.run`, TLS); `:static` / `:<version>-static` is a minimal
+distroless build (~15-25MB, no `/bin/sh`, so `os.run` of external programs is
+unavailable - use it for pure-interpreter or web-serving workloads). Build
+details and local-build recipes are in
+[`packaging/docker/README.md`](https://github.com/jennifer-language/jennifer/blob/main/packaging/docker/README.md).
+
+#### Docker
 
 ```sh
 # Run a script from the current directory (mounted at /work).
@@ -131,12 +142,47 @@ docker run --rm -it ghcr.io/jennifer-language/jennifer
 docker run --rm -p 8080:8080 -v "$PWD:/work" ghcr.io/jennifer-language/jennifer run server.j
 ```
 
-Two variants: `:latest` / `:<version>` is the Debian-slim default (full host
-features - `os.run`, TLS); `:static` / `:<version>-static` is a minimal
-distroless build (~15-25MB, no `/bin/sh`, so `os.run` of external programs is
-unavailable - use it for pure-interpreter or web-serving workloads). Build
-details and local-build recipes are in
-[`packaging/docker/README.md`](https://github.com/jennifer-language/jennifer/blob/main/packaging/docker/README.md).
+For a long-running service, a Compose file keeps the mount, port, and restart
+policy in one place:
+
+```yaml
+# compose.yaml  (or docker-compose.yml)
+services:
+  app:
+    image: ghcr.io/jennifer-language/jennifer:latest
+    command: ["run", "server.j"]   # args to the `jennifer` entrypoint
+    volumes:
+      - ./:/work                    # your code, resolved from the image's /work workdir
+    ports:
+      - "8080:8080"                 # match the port your program serves on
+    restart: unless-stopped
+```
+
+```sh
+docker compose up        # start (add -d to run detached)
+```
+
+#### Podman
+
+Podman is a daemonless, rootless-capable drop-in: the same image and flags work,
+just swap `docker` for `podman`.
+
+```sh
+# Run a script (add :Z to the bind mount on SELinux hosts so the container can read it).
+podman run --rm -v "$PWD:/work:Z" ghcr.io/jennifer-language/jennifer run app.j
+
+# Interactive REPL.
+podman run --rm -it ghcr.io/jennifer-language/jennifer
+
+# Serve a web app.
+podman run --rm -p 8080:8080 -v "$PWD:/work:Z" ghcr.io/jennifer-language/jennifer run server.j
+```
+
+`podman compose up` reads the same Compose file shown above. To run it as a
+managed background service, generate a systemd/Quadlet unit with
+`podman generate systemd` (or a `.container` Quadlet file). Rootless Podman can't
+bind host ports below 1024 without extra configuration - map to a high port
+(`-p 8080:8080`) and reverse-proxy if you need `:80` / `:443`.
 
 ### macOS / Windows (unsupported)
 

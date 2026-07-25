@@ -49,7 +49,7 @@ StructField  <- WordName "as" Type
 # for `def IDENT in`, which ordered choice reproduces).
 
 Statement    <- DefineStmt
-              / IfStmt / WhileStmt / ForEachStmt / ForStmt / RepeatStmt
+              / IfStmt / WhileStmt / ForEachStmt / ForStmt / RepeatStmt / MatchStmt
               / BreakStmt / ContinueStmt / ReturnStmt / ExitStmt
               / TryStmt / ThrowStmt / DeferStmt
               / AssignStmt / AppendStmt / IndexAssign / FieldAssign
@@ -71,6 +71,15 @@ ForInit      <- DefineStmt / AssignStmt / ";"
                  # empty init
 ForStep      <- VARREF "=" Expr        # no trailing ";" - the ")" ends it
 RepeatStmt   <- "repeat" Block "until" "(" Expr ")" ";"
+MatchStmt    <- "match" "(" Expr ")" "{"
+                  ("when" Expr ("," Expr)* Block)*
+                  ("else" Block)?
+                "}"
+                 # the subject and each `when` value parse with struct-literal
+                 # suppression on (a bare `Name` followed by `{` is a value +
+                 # the block, not `Name{...}`); the flag is re-enabled inside
+                 # any "(" / "[" / call / list / map, mirroring Go's exprLev.
+                 # `else` must be last (enforced by the parser, not the grammar).
 BreakStmt    <- "break" ";"
 ContinueStmt <- "continue" ";"
 ReturnStmt   <- "return" Expr? ";"

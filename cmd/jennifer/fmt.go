@@ -80,7 +80,21 @@ type fmtState struct {
 	// (statements), a struct-decl body (one field per line), or a map
 	// literal (key:value pairs). Matching `}` pops; the kind
 	// determines indenting and newline behavior.
-	braceStack []byte // 'b' block, 'm' map literal, 's' struct decl
+	braceStack []byte // 'b' block, 'm' map literal, 's' struct decl, 'M' match body
+	// parenDepth is the current `(`/`[` nesting depth. Used to tell the `{` that
+	// opens a `match` body / `when` arm (paren depth 0) from a `{` inside a value
+	// expression (a map literal at depth > 0).
+	parenDepth int
+	// pendingMatchBrace flags "the next block `{` at paren depth 0 opens a match
+	// body". Set when TOKEN_MATCH is emitted; consumed by that `{`; reset on `;`.
+	pendingMatchBrace bool
+	// pendingArmBrace flags "the next block `{` at paren depth 0 opens a `when`
+	// arm body". Set when TOKEN_WHEN is emitted; consumed by that `{`; reset on `;`.
+	pendingArmBrace bool
+	// inWhenValues is true while emitting a `when` value list (between `when` and
+	// the arm `{`); a wrapped list aligns its continuation values under the first.
+	inWhenValues bool
+	whenValueCol int
 	// lastBraceKind remembers the kind of the most recently emitted
 	// `{` or `}` so the next token's separator logic can ask "was that
 	// `}` a block close or a map close?" after the stack was already
@@ -104,6 +118,7 @@ const (
 	braceBlock  = byte('b')
 	braceMap    = byte('m')
 	braceStruct = byte('s')
+	braceMatch  = byte('M') // a `match (EXPR) { ... }` body (arms formatted like if/else branches)
 )
 
 const fmtIndent = "    " // 4 spaces, per style-guide.md
@@ -124,7 +139,7 @@ func (f *fmtState) emit(t, next lexer.Token) {
 		lexer.TOKEN_COMMENT_LINE,
 		lexer.TOKEN_COMMENT_BLOCK,
 		lexer.TOKEN_BLANK_LINE:
-		f.emitTrivia(t)
+		f.emitTrivia(t, next)
 		return
 	}
 	// Classify `{` before writing it. Three kinds:
@@ -139,6 +154,15 @@ func (f *fmtState) emit(t, next lexer.Token) {
 	if t.Type == lexer.TOKEN_LBRACE {
 		var kind byte
 		switch {
+		case f.pendingMatchBrace && f.parenDepth == 0:
+			// `match (subject) {` - the body brace, right after the subject `)`.
+			kind = braceMatch
+			f.pendingMatchBrace = false
+		case f.pendingArmBrace && f.parenDepth == 0:
+			// `when V { ... }` - the arm body; formatted as a normal block.
+			kind = braceBlock
+			f.pendingArmBrace = false
+			f.inWhenValues = false
 		case f.pendingStructBrace:
 			kind = braceStruct
 			f.pendingStructBrace = false
@@ -149,7 +173,7 @@ func (f *fmtState) emit(t, next lexer.Token) {
 		}
 		f.braceStack = append(f.braceStack, kind)
 		f.lastBraceKind = kind
-		openBlock = kind == braceBlock || kind == braceStruct
+		openBlock = kind == braceBlock || kind == braceStruct || kind == braceMatch
 	}
 	// Closing brace: pop and find out what kind we're closing. For block
 	// and struct `}` we dedent before writing so the brace lands at the
@@ -160,7 +184,7 @@ func (f *fmtState) emit(t, next lexer.Token) {
 		kind := f.braceStack[len(f.braceStack)-1]
 		f.braceStack = f.braceStack[:len(f.braceStack)-1]
 		f.lastBraceKind = kind
-		if kind == braceBlock || kind == braceStruct {
+		if kind == braceBlock || kind == braceStruct || kind == braceMatch {
 			if f.indent > 0 {
 				f.indent--
 			}
@@ -178,8 +202,23 @@ func (f *fmtState) emit(t, next lexer.Token) {
 	switch t.Type {
 	case lexer.TOKEN_STRUCT:
 		f.pendingStructBrace = true
+	case lexer.TOKEN_MATCH:
+		f.pendingMatchBrace = true
+	case lexer.TOKEN_WHEN:
+		f.pendingArmBrace = true
+		f.inWhenValues = true
+		f.whenValueCol = f.col + 1 // first value column: one space past `when`
 	case lexer.TOKEN_SEMI:
 		f.pendingStructBrace = false
+		f.pendingMatchBrace = false
+		f.pendingArmBrace = false
+		f.inWhenValues = false
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+		f.parenDepth++
+	case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+		if f.parenDepth > 0 {
+			f.parenDepth--
+		}
 	}
 	f.prev = t
 	f.hasPrev = true
@@ -191,13 +230,35 @@ func (f *fmtState) emit(t, next lexer.Token) {
 	}
 }
 
+// nextLineIndent is the indent level the line *after* this trivia should get.
+// It is the current indent, minus one when the upcoming token is a `}` that
+// closes a block / struct / match body: that `}` dedents in emit() *after* the
+// trivia runs, so pre-emitting the full indent here would leave a closing brace
+// that follows a trailing comment or a blank line over-indented. Only the token
+// immediately after the trivia needs this; anything further is handled by its
+// own separator (which runs after the dedent).
+func (f *fmtState) nextLineIndent(next lexer.Token) int {
+	ind := f.indent
+	if next.Type == lexer.TOKEN_RBRACE && len(f.braceStack) > 0 {
+		switch f.braceStack[len(f.braceStack)-1] {
+		case braceBlock, braceStruct, braceMatch:
+			ind--
+		}
+	}
+	if ind < 0 {
+		ind = 0
+	}
+	return ind
+}
+
 // emitTrivia handles comments and blank lines. It writes only output -
 // it does NOT touch prev/lastBraceKind/prevIsOperand/prevIsUnaryMinus
 // so the surrounding state machine continues to see the most recent
 // regular token. atLineStart IS updated because the separator logic
 // for the next regular token reads it to decide whether to skip a
-// leading separator.
-func (f *fmtState) emitTrivia(t lexer.Token) {
+// leading separator. `next` is the following regular token, used to size the
+// indent of the line this trivia opens (see nextLineIndent).
+func (f *fmtState) emitTrivia(t, next lexer.Token) {
 	switch t.Type {
 	case lexer.TOKEN_COMMENT_SHEBANG:
 		// Shebang must be at file head, col 1. Re-emit verbatim and
@@ -217,8 +278,9 @@ func (f *fmtState) emitTrivia(t lexer.Token) {
 		}
 		f.writeString(t.Lexeme)
 		f.writeByte('\n')
-		// Next real token starts a fresh line at the current indent.
-		for i := 0; i < f.indent; i++ {
+		// Next real token starts a fresh line, indented for what it is (a
+		// following `}` dedents, so it lands one level out).
+		for i := 0; i < f.nextLineIndent(next); i++ {
 			f.writeString(fmtIndent)
 		}
 		f.atLineStart = true
@@ -241,7 +303,13 @@ func (f *fmtState) emitTrivia(t lexer.Token) {
 				f.newline()
 			}
 			f.writeString(t.Lexeme)
-			f.newline()
+			// End the comment line and indent for the next token (a following
+			// `}` lands one level out).
+			f.writeByte('\n')
+			for i := 0; i < f.nextLineIndent(next); i++ {
+				f.writeString(fmtIndent)
+			}
+			f.atLineStart = true
 			return
 		}
 		// Inline: emit a space before the comment unless the previous
@@ -271,7 +339,7 @@ func (f *fmtState) emitTrivia(t lexer.Token) {
 			f.writeByte('\n')
 		}
 		f.writeByte('\n')
-		for i := 0; i < f.indent; i++ {
+		for i := 0; i < f.nextLineIndent(next); i++ {
 			f.writeString(fmtIndent)
 		}
 		f.atLineStart = true
@@ -338,6 +406,17 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 		f.newline()
 		return
 	}
+	// `when` value list `,`: keep on one line, but if the source wrapped it or
+	// it grew too long, break after the comma and align the next value under
+	// the first (like a wrapped call-arg list).
+	if f.prev.Type == lexer.TOKEN_COMMA && f.inWhenValues {
+		if t.Line > f.prev.Line || f.col > maxLineLength {
+			f.newlineToCol(f.whenValueCol)
+			return
+		}
+		f.writeByte(' ')
+		return
+	}
 	// Closing brace: block or struct `}` ends a multi-line container;
 	// the next token starts a new line, except for the cuddled tail
 	// forms - `} else`, `} elseif`, `} catch`, `} until`, and
@@ -347,10 +426,20 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 		if t.Type == lexer.TOKEN_SEMI {
 			return
 		}
-		if f.prevBraceKind() == braceBlock || f.prevBraceKind() == braceStruct {
+		if f.prevBraceKind() == braceBlock || f.prevBraceKind() == braceStruct || f.prevBraceKind() == braceMatch {
 			switch t.Type {
 			case lexer.TOKEN_ELSE, lexer.TOKEN_ELSEIF,
 				lexer.TOKEN_CATCH, lexer.TOKEN_UNTIL:
+				// Tail keywords cuddle the preceding `}` in an if / try / repeat
+				// chain: `} else {`, `} elseif (c) {`, `} catch (e) {`,
+				// `} until (c);`. A `match`, though, is a flat list of peer arms
+				// (like a switch / case in every other language), so each `when`
+				// and the `else` starts its own line - handled by falling through
+				// to newline below, and this explicit case for the match `else`.
+				if t.Type == lexer.TOKEN_ELSE && f.currentBraceKind() == braceMatch {
+					f.newline()
+					return
+				}
 				f.writeByte(' ')
 				return
 			}
@@ -370,7 +459,7 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	// starts on its own indented line. Map-literal `{` keeps the
 	// contents inline with no padding (matches the existing `(` rule).
 	if f.prev.Type == lexer.TOKEN_LBRACE {
-		if f.prevBraceKind() == braceBlock || f.prevBraceKind() == braceStruct {
+		if f.prevBraceKind() == braceBlock || f.prevBraceKind() == braceStruct || f.prevBraceKind() == braceMatch {
 			f.newline()
 			return
 		}
@@ -473,6 +562,16 @@ func (f *fmtState) continuationLine() {
 	f.writeByte('\n')
 	for i := 0; i < f.indent+1; i++ {
 		f.writeString(fmtIndent)
+	}
+	f.atLineStart = true
+}
+
+// newlineToCol ends the current line and pads the next with spaces to `col`,
+// used to align a wrapped `when` value list under its first value.
+func (f *fmtState) newlineToCol(col int) {
+	f.writeByte('\n')
+	for i := 0; i < col; i++ {
+		f.writeByte(' ')
 	}
 	f.atLineStart = true
 }

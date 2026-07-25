@@ -586,3 +586,37 @@ func TestParseErrdeferRejectsNonCall(t *testing.T) {
 		t.Errorf("expected errdefer-needs-a-call error, got %v", err)
 	}
 }
+
+// TestParseMatchErrors covers the structural rules the parser enforces on a
+// `match`: `else` must be last (no `when` after it) and appear at most once.
+func TestParseMatchErrors(t *testing.T) {
+	cases := []struct{ name, src, wantSubstr string }{
+		{"when after else", `match ($x) { else { } when 1 { } }`, "else"},
+		{"two else", `match ($x) { when 1 { } else { } else { } }`, "one `else`"},
+		{"missing body", `match ($x) { when 1 }`, "block"},
+	}
+	for _, c := range cases {
+		_, err := Parse(c.src)
+		if err == nil {
+			t.Errorf("%s: expected a parse error, got none", c.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.wantSubstr) {
+			t.Errorf("%s: error %q does not contain %q", c.name, err.Error(), c.wantSubstr)
+		}
+	}
+}
+
+// TestParseMatchValueStructLiteral checks the `{` disambiguation: a bare
+// `when Name { ... }` reads `Name` as a value and `{` as the arm block, while a
+// parenthesized `when (Name{...})` is a struct-literal value.
+func TestParseMatchValueStructLiteral(t *testing.T) {
+	// `when MAX {` - MAX is a constant value; `{` opens the block (no struct lit).
+	if _, err := Parse(`def const MAX as int init 9; match ($x) { when MAX { } }`); err != nil {
+		t.Errorf("bare constant when-value should parse: %v", err)
+	}
+	// Parenthesized struct-literal value is allowed.
+	if _, err := Parse(`def struct P { x as int }; match ($p) { when (P{x: 1}) { } }`); err != nil {
+		t.Errorf("parenthesized struct-literal when-value should parse: %v", err)
+	}
+}

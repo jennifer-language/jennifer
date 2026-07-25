@@ -136,6 +136,21 @@ is no implicit truthiness. Use a comparison (`$x == 0`) to get a bool.
 For-each (`for (def x in $coll)`) doesn't take a condition - it walks
 the whole collection (or the whole range).
 
+**A condition short-circuits.** `and` / `or` only evaluate their right operand
+when the result is not already decided, so a call on the right side may never
+run:
+
+```jennifer
+use io;
+func printer() { io.printf("ran "); return true; }
+if (true or printer()) { io.printf("a\n"); }    # prints "a" - printer() is skipped
+if (false and printer()) { io.printf("b\n"); }  # prints nothing - printer() is skipped
+if (true and printer()) { io.printf("c\n"); }   # prints "ran c" - printer() runs
+```
+
+Put the cheap or decisive test on the left, and don't rely on a side effect in a
+short-circuited operand.
+
 A range `lo..hi` is **half-open** (`[lo, hi)`): it includes `lo` and
 excludes `hi`, so `0..n` runs exactly `n` times. Bounds are int; `lo >
 hi` is an error and `lo == hi` is empty. The same `..` builds a list
@@ -197,7 +212,67 @@ inversion ("loop until done") reads as English and matches the rest of
 Jennifer's word-operator style (`and`, `or`, `not`). Like every other
 condition slot, `cond` must be `bool`.
 
-## `break` and `continue`
+## `match` (multi-way value dispatch)
+
+When a chain of `if` / `elseif` compares **one subject** against several values,
+`match` says it once:
+
+```jennifer
+match ($cmd) {
+    when "start" {
+        start();
+    }
+    when "stop", "halt" {      # several values in one arm
+        stop();
+    }
+    else {                     # optional default, must be last
+        io.printf("unknown: %s\n", $cmd);
+    }
+}
+```
+
+- The **subject** is evaluated **once**, then compared to each `when` value by
+  the strict `==` operator (the same exact, type-strict rules - an `int` subject
+  never matches a `float` value). The **first** arm with a matching value runs;
+  the rest are skipped.
+- An arm lists **one or more values** (`when 2, 3, 4`), which is an *OR of
+  equality* - the arm runs if the subject equals any of them. The values are
+  evaluated left-to-right and **stop at the first match**, so a side-effecting
+  value in a later position may not run.
+- Values are **any expression**, not just literals - `when MAX`, `when $limit`,
+  `when lo(), hi()`. A bare `when Name { ... }` reads `Name` as the value and the
+  `{` as the arm block, so **parenthesize a composite-literal value**: a struct
+  literal `when (Point{x: 1, y: 2}) { ... }` (required), and a map literal
+  `when ({"a": 1}) { ... }` (optional, but the parens let `jennifer fmt` lay the
+  arm out cleanly).
+- **No fall-through.** Each arm is an independent block; there is no `break` to
+  end an arm and nothing falls into the next. Because of that, **`match` is not a
+  `break` target**: a `break` or `continue` inside an arm acts on the enclosing
+  **loop**, never the match - which sidesteps C's "break breaks the switch" and
+  "forgot the break" traps at once.
+
+  ```jennifer
+  for (def n in [1, 2, 3, 4]) {
+      match ($n) {
+          when 3 {
+              break;     # breaks the for loop, not the match
+          }
+      }
+      io.printf("%d ", $n);   # 1 2
+  }
+  ```
+
+- `else` is the **optional** default and must come last. **No matching arm and
+  no `else` is a well-defined no-op** (nothing runs), not an error.
+- `match` is a **statement, not an expression** - arms act, assign, or `return`,
+  the same as `if`. Each arm's block is its own scope.
+
+`jennifer fmt` lays a `match` out as a flat list of arms - like a `switch` /
+`case` in other languages: the subject on the opening line, then each `when`
+(and the `else`) starting its **own** line at the arm indent with its body on
+its own indented lines. Arms do **not** cuddle the previous arm's `}` (unlike an
+`if`'s `} else {`), so you can scan the `when` column top to bottom. A long
+`when` value list wraps with each continuation value aligned under the first.
 
 `break;` exits the **innermost** enclosing loop:
 
