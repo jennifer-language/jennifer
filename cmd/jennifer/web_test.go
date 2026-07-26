@@ -216,6 +216,70 @@ task.wait($server);`, webMod, httpMod)
 	}
 }
 
+// TestWebSessionValidation drives OM-008 end to end: a client-supplied session
+// cookie that does not match the minted UUID shape is rejected and re-minted (so
+// a planted cookie cannot fix the session id), while a valid UUID cookie is
+// trusted and echoed back unchanged. renewSession rotates to a fresh id.
+func TestWebSessionValidation(t *testing.T) {
+	webMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "web.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use httpd;
+use task;
+use strings;
+use uuid;
+import %q as web;
+import %q as http;
+
+func whoami(ctx as web.Context) { web.text($ctx, 200, web.sessionId($ctx, "sid")); }
+func rotate(ctx as web.Context) { web.text($ctx, 200, web.renewSession($ctx, "sid")); }
+
+def app as web.App init web.new();
+$app = web.get($app, "/whoami", "whoami");
+$app = web.get($app, "/rotate", "rotate");
+def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+def addr as string init httpd.address($srv);
+def server as task of null init spawn { web.serveOn($app, $srv); };
+
+# A bogus (non-UUID) cookie is discarded: a fresh valid UUID is returned and set.
+def bogus as map of string to string init {};
+$bogus["Cookie"] = "sid=not-a-uuid";
+def r1 as http.Response init http.get("http://" + $addr + "/whoami", $bogus);
+testing.assertEqual($r1.status, 200);
+testing.assertTrue(uuid.isValid($r1.body));
+testing.assertTrue(not ($r1.body == "not-a-uuid"));
+testing.assertTrue(strings.startsWith(http.header($r1, "Set-Cookie"), "sid="));
+
+# A valid UUID cookie is trusted: echoed back unchanged, no re-mint.
+def good as map of string to string init {};
+$good["Cookie"] = "sid=" + $r1.body;
+def r2 as http.Response init http.get("http://" + $addr + "/whoami", $good);
+testing.assertEqual($r2.body, $r1.body);
+
+# renewSession rotates to a different valid id.
+def r3 as http.Response init http.get("http://" + $addr + "/rotate", $good);
+testing.assertTrue(uuid.isValid($r3.body));
+testing.assertTrue(not ($r3.body == $r1.body));
+
+httpd.shutdown($srv);
+task.wait($server);`, webMod, httpMod)
+
+	progPath := filepath.Join(dir, "sessval.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("web session-validation program failed with code %d", code)
+	}
+}
+
 // TestWebCors drives the CORS policy end to end: with web.cors set, a normal GET
 // carries the Access-Control-Allow-Origin header, and an OPTIONS preflight is
 // answered 204 with the configured Allow-Methods (before any route runs). Also

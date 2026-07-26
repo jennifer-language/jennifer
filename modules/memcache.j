@@ -39,6 +39,11 @@ export def struct Options {
 # blocking forever. `connect` sets `Session.timeout`; override it or use 0 to disable.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 
+# Cap on a server-declared value length (64 MiB, the tree-wide house rule): a
+# hostile or desynchronised server declaring a huge `VALUE ... <bytes>` would
+# otherwise drive `fillBytes` to OOM the (recover-less) interpreter.
+def const MAX_VALUE_BYTES as int init 67108864;
+
 /**
  * An open memcached connection.
  * @field conn {net.Conn} the underlying socket
@@ -144,6 +149,38 @@ func fail(message as string) {
     throw Error{kind: "memcache", message: $message, file: "", line: 0, col: 0};
 }
 
+# checkValueLen rejects a server-declared VALUE length outside [0, MAX_VALUE_BYTES]
+# before it is used to size a read.
+func checkValueLen(n as int) {
+    if ($n < 0 or $n > MAX_VALUE_BYTES) {
+        fail("VALUE length out of range: " + convert.toString($n));
+    }
+    return;
+}
+
+# checkKey rejects a key that would corrupt the text protocol. memcached keys may
+# not be empty, exceed 250 bytes, or contain a space, control byte (<= 0x20), or
+# DEL (0x7f); a CR/LF in particular would inject extra command lines the server
+# executes (OM-001), so this is validated in the module - once - rather than left
+# to every caller (session ids, rate-limit keys, and app data all flow here).
+func checkKey(key as string) {
+    def raw as bytes init convert.bytesFromString($key, "utf-8");
+    if (len($raw) == 0) {
+        fail("key must not be empty");
+    }
+    if (len($raw) > 250) {
+        fail("key exceeds the 250-byte memcached limit");
+    }
+    def i as int init 0;
+    while ($i < len($raw)) {
+        def b as int init $raw[$i];
+        if ($b <= 32 or $b == 127) {
+            fail("key contains an illegal byte (space, control, or DEL) at position " + convert.toString($i));
+        }
+        $i = $i + 1;
+    }
+}
+
 # checkError throws on a protocol-error reply line.
 func checkError(line as string) {
     if (strings.startsWith($line, "ERROR")) {
@@ -166,6 +203,7 @@ func storeHeader(verb as string, key as string, value as string, exptime as int)
 
 # store runs a storage command and returns its reply line.
 func store(session as Session, verb as string, key as string, value as string, exptime as int) {
+    checkKey($key);
     writeCmd($session, storeHeader($verb, $key, $value, $exptime) + "\r\n" + $value + "\r\n");
     def resp as Line init recvLine($session, emptyBytes());
     checkError($resp.text);
@@ -181,7 +219,7 @@ func store(session as Session, verb as string, key as string, value as string, e
  */
 export func connect(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
-    return Session{conn: net.connect($addr), timeout: DEFAULT_TIMEOUT_MS};
+    return Session{conn: net.connect($addr, DEFAULT_TIMEOUT_MS), timeout: DEFAULT_TIMEOUT_MS};
 }
 
 /**
@@ -228,6 +266,7 @@ export func add(session as Session, key as string, value as string, exptime as i
  * @return {string} the value, or "" when absent / expired
  */
 export func get(session as Session, key as string) {
+    checkKey($key);
     writeCmd($session, "get " + $key + "\r\n");
     def first as Line init recvLine($session, emptyBytes());
     checkError($first.text);
@@ -235,7 +274,14 @@ export func get(session as Session, key as string) {
         return "";
     }
     def parts as list of string init strings.split($first.text, " ");
+    # A well-formed VALUE line is `VALUE <key> <flags> <bytes>`; anything shorter
+    # is a truncated or desynchronised reply (OM-015) - report it as a protocol
+    # error, not a bare interpreter index-out-of-bounds.
+    if (len($parts) < 4) {
+        fail("malformed VALUE reply: " + $first.text);
+    }
     def nbytes as int init convert.toInt($parts[3]);
+    checkValueLen($nbytes);
     # `nbytes` is the value's byte length; frame and slice over bytes so a
     # multi-byte value round-trips exactly, decoding to a string only once the
     # whole value is in hand.
@@ -254,6 +300,7 @@ export func get(session as Session, key as string) {
  * @throws {Error} kind "memcache" on an unexpected reply
  */
 export func delete(session as Session, key as string) {
+    checkKey($key);
     writeCmd($session, "delete " + $key + "\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
@@ -275,6 +322,7 @@ export func delete(session as Session, key as string) {
  * @throws {Error} kind "memcache" on an unexpected reply
  */
 export func touch(session as Session, key as string, exptime as int) {
+    checkKey($key);
     writeCmd($session, "touch " + $key + " " + convert.toString($exptime) + "\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
@@ -290,6 +338,7 @@ export func touch(session as Session, key as string, exptime as int) {
 # counter runs incr / decr and returns the new value, or -1 when the key is
 # absent (memcached will not create it).
 func counter(session as Session, verb as string, key as string, delta as int) {
+    checkKey($key);
     writeCmd($session, $verb + " " + $key + " " + convert.toString($delta) + "\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);

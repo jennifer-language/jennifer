@@ -113,8 +113,16 @@ while (true) {
 }
 ```
 
-`serveDir` cleans the request path so a `../` cannot climb above `root`;
-`serveFile` answers with one specific file regardless of the request path.
+`serveDir` cleans the request path so a `../` cannot climb above `root`, rejects
+a request path containing a backslash (`400`), and re-verifies the joined path is
+still under `root` before serving it (`404` otherwise); `serveFile` answers with
+one specific file regardless of the request path.
+
+**Symlinks are followed.** Both verbs open the resolved path directly (Go's
+`http.ServeFile` behaviour), so a symbolic link *inside* `root` that points
+outside it exposes its target. If the served tree can contain links created by
+another user or an upload feature, resolve and containment-check the path
+yourself before serving, or serve from a directory you fully control.
 
 ## Graceful shutdown
 

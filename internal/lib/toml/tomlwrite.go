@@ -278,6 +278,9 @@ func setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if err := checkWriteDepth("toml.set", out); err != nil {
+		return interpreter.Null(), err
+	}
 	return wrap(out), nil
 }
 
@@ -290,6 +293,9 @@ func insertFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if err := checkWriteDepth("toml.insert", out); err != nil {
+		return interpreter.Null(), err
+	}
 	return wrap(out), nil
 }
 
@@ -300,6 +306,9 @@ func appendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	out, err := insertInto("toml.append", node, append(tokens, "-"), raw)
 	if err != nil {
+		return interpreter.Null(), err
+	}
+	if err := checkWriteDepth("toml.append", out); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -357,6 +366,12 @@ func moveFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	}
 	out, err := setInto("toml.move", removed, toTokens, moved)
 	if err != nil {
+		return interpreter.Null(), err
+	}
+	// Unlike set/insert/append (which add at most one level), move splices a whole
+	// subtree under an arbitrary location, so the result can nest far deeper than
+	// either operand - guard it too, or an over-deep tree reaches ==/DeepCopy.
+	if err := checkWriteDepth("toml.move", out); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil

@@ -407,7 +407,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   binary only; `jennifer-tiny` stubs it.
 - **`time`**, **`fs`**, **`net`**, **`regex`**, **`hash`**, **`crc`**,
   **`crypto`**, **`compress`**, **`archive`**, **`encoding`**, **`uuid`**,
-  **`meta`**, **`testing`** - clock, files, sockets, RE2 regex, digests,
+  **`meta`**, **`testing`** - clock, files, sockets, RE2 regex, digests
+  (`hash.compute`/`hmac`, plus constant-time `hash.equal` for MAC / token
+  checks),
   checksums, security primitives (crypto-grade random `crypto.randBytes`/
   `randInt`, constant-time `crypto.hmacEqual`, key derivation `crypto.hkdf`/
   `crypto.pbkdf2`, AES-256-GCM `crypto.encrypt`/`decrypt`, Ed25519
@@ -501,7 +503,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `spawn` + `time.sleep` loop. Both binaries.
 - **`htmlwriter`** - build an HTML element tree and render escaped HTML5:
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
-  constructors, `render` / `renderAll`, `escape`. A writer, not a parser.
+  constructors, `render` / `renderAll`, `escape`, `safeUrl(url)` (an
+  `http`/`https`/`mailto` allowlist for `href`/`src`, else `"#"`). A writer, not
+  a parser. `element` / `attr` reject a tag / attribute name outside
+  `[A-Za-z][A-Za-z0-9-]*` (a name is structure, not escapable data).
 - **`tengine`** - a lightweight-CMS text template engine (a subset of Go
   `text/template`) rendered over a `json.Value` tree. `tengine.newSet()` ->
   `Set`; `tengine.add(set, name, src)` -> `Set` (extracting `{{ define }}`
@@ -567,8 +572,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   "showUser")` / `post` / `put` / `patch` / `delete` / `route`); patterns take
   `:param` captures and a trailing `*rest` wildcard (`/files/*path`; `/*path` as
   an SPA fallback, registered last), plus
-  `web.before` middleware and `web.notFound`; a handler is `func name(ctx as
-  web.Context)`, dispatched by `meta.callMain`. `web.Context` helpers:
+  `web.before` middleware, `web.notFound`, and `web.onError` (a throwing
+  handler / middleware is contained as a 500 and reported to the onError handler,
+  else stderr - never silently dropped); a `HEAD` request is served by the
+  matching `GET` route (body auto-suppressed); a handler is `func name(ctx as
+  web.Context)`, dispatched by `meta.callMain`. **Requests are handled serially
+  (one at a time) in v1** - a blocking handler stalls all others; keep handlers
+  fast and scale out with processes. `web.Context` helpers:
   `param` / `query` / `method` / `path` / `header` / `body` (bytes) / `bodyJson`
   / `form` / `formValue` / `remoteAddr`, and `text` / `html` / `sendJson` /
   `redirect` / `respond` / `setHeader` / `serveFile` / `serveDir` / `sendGzip`
@@ -578,9 +588,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `sameSite`). **Sessions:** `web.sessionId($ctx, cookieName)` resolves or mints
   the session-id cookie (a new UUID + `Secure`, `HttpOnly`, `SameSite=Lax` cookie
   on first use; `Secure` is default-on, `JENNIFER_WEB_INSECURE_COOKIES=1` opts out
-  for local plaintext dev); `web`
-  owns only that cookie, the session store stays the app's (e.g. `session` over
-  `memcache`), so `web` forces no store dependency. **CORS:** `web.cors($app,
+  for local plaintext dev). An incoming id cookie is accepted only if it matches
+  the minted UUID shape (else re-minted - this blocks metacharacter smuggling
+  through the id, but is **not** a fixation defence: a well-formed planted UUID
+  still passes). The fixation defence is `web.renewSession($ctx, cookieName)`,
+  which rotates the id after a privilege change (login).
+  `web` owns only that cookie, the session store stays the app's (e.g. `session`
+  over `memcache`), so `web` forces no store dependency. **CORS:** `web.cors($app,
   opts)` with a `web.CorsOptions` (`allowOrigin` / `allowMethods` /
   `allowHeaders` / `allowCredentials` / `maxAge`) sets an app-wide policy - the
   serve loop adds the `Access-Control-*` headers and answers an `OPTIONS`

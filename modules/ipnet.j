@@ -7,7 +7,9 @@
  * for allow-lists and subnet math. An `Address` holds its raw bytes (4 for IPv4,
  * 16 for IPv6, network byte order); a `Network` pairs a base address with a
  * prefix length. Pure Jennifer over `strings` + `convert` and the bitwise
- * operators; both binaries.
+ * operators; both binaries. `parseAddress` folds an IPv4-mapped IPv6 literal
+ * (`::ffff:a.b.c.d`) down to a v4 `Address` so it can't slip past a v4
+ * allow-list (see `unmap`).
  * @module ipnet
  * @example
  * import "ipnet.j" as ipnet;
@@ -193,12 +195,50 @@ func parse6(s as string) {
  */
 export func parseAddress(s as string) {
     if (strings.contains($s, ":")) {
-        return Address{ version: 6, octets: parse6($s) };
+        return unmap(Address{ version: 6, octets: parse6($s) });
     }
     if (strings.contains($s, ".")) {
         return Address{ version: 4, octets: parse4($s) };
     }
     fail("not an IP address: " + $s);
+}
+
+/**
+ * Fold an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`, the `::ffff:0:0/96`
+ * range) down to the plain IPv4 `Address` it represents; any other address is
+ * returned unchanged. Without this, `::ffff:127.0.0.1` stays a version-6
+ * `Address` and silently misses a version-4 network in a `contains` allow-list
+ * / deny-list check - a bypass of exactly the kind the leading-zero and
+ * embedded-IPv4 guards already close (OM-010). `parseAddress` applies it, so a
+ * v4-mapped literal parses straight to a v4 `Address`. The deprecated
+ * IPv4-compatible form (`::a.b.c.d`) is intentionally left alone: it is
+ * ambiguous with low addresses like `::1` and unmapping it would be wrong.
+ * @param addr {Address} the address to normalize
+ * @return {Address} a v4 Address if `addr` was v4-mapped, else `addr` unchanged
+ */
+export func unmap(addr as Address) {
+    if (not ($addr.version == 6)) {
+        return $addr;
+    }
+    if (not (len($addr.octets) == 16)) {
+        return $addr;
+    }
+    def i as int init 0;
+    while ($i < 10) {
+        if (not ($addr.octets[$i] == 0)) {
+            return $addr;
+        }
+        $i = $i + 1;
+    }
+    if (not ($addr.octets[10] == 0xff and $addr.octets[11] == 0xff)) {
+        return $addr;
+    }
+    def out as bytes;
+    $out[] = $addr.octets[12];
+    $out[] = $addr.octets[13];
+    $out[] = $addr.octets[14];
+    $out[] = $addr.octets[15];
+    return Address{ version: 4, octets: $out };
 }
 
 # format4 renders 4 bytes as dotted-quad.

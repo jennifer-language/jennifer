@@ -317,6 +317,7 @@ func unpackZip(b []byte) ([]entry, error) {
 	// The declared values can lie, so the readCapped budget below stays
 	// the authoritative check.
 	var declared uint64
+	maxDec := uint64(maxDecompressed)
 	fileCount := 0
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
@@ -326,10 +327,15 @@ func unpackZip(b []byte) ([]entry, error) {
 		if fileCount > maxEntries {
 			return nil, fmt.Errorf("archive holds more than %d entries", maxEntries)
 		}
-		declared += f.UncompressedSize64
-		if declared > uint64(maxDecompressed) {
+		// Compare each declared size against the *remaining* budget instead of
+		// summing into `declared` and testing after: a crafted set of sizes that
+		// sums past 2^64 would wrap the running total to a small value and slip
+		// through the post-sum check. `declared <= maxDec` is an invariant here,
+		// so `maxDec - declared` never underflows.
+		if f.UncompressedSize64 > maxDec-declared {
 			return nil, fmt.Errorf("total decompressed size exceeds the %d-byte limit", maxDecompressed)
 		}
+		declared += f.UncompressedSize64
 	}
 	var entries []entry
 	budget := maxDecompressed

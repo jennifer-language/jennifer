@@ -343,8 +343,9 @@ func errorFrom(resp as http.Response) {
             if (json.has($n, "/error")) {
                 return json.asString($n, "/error");
             }
-        } catch (e) {
-            # body is not JSON; fall through to the status message
+        } catch (e) {  # lint-disable: L103
+            # Intentionally empty: a non-JSON error body falls through to the
+            # status message below. Bound to keep the swallow deliberate.
         }
     }
     return "request failed with status " + convert.toString($resp.status);

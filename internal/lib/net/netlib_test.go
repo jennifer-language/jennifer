@@ -726,6 +726,40 @@ func TestReadAllCapRejects(t *testing.T) {
 	}
 }
 
+// TestReadAllNegativeUnlimited proves a negative maxBytes is the explicit
+// "no limit" sentinel (OF-005): the default is now a finite 256 MiB cap, so
+// unlimited must be opted into.
+func TestReadAllNegativeUnlimited(t *testing.T) {
+	addr := pickListenerAddr(t)
+	l, err := stdnet.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("stdnet.Listen: %v", err)
+	}
+	defer l.Close()
+	payload := strings.Repeat("z", 20000)
+	go func() {
+		c, aErr := l.Accept()
+		if aErr != nil {
+			return
+		}
+		_, _ = c.Write([]byte(payload))
+		c.Close()
+	}()
+	out, runErr := runProg(t, fmt.Sprintf(`
+		use io; use net; use convert;
+		def c as net.Conn init net.connect(%q);
+		def body as bytes init net.readAll($c, -1, 5000);
+		net.close($c);
+		io.printf("%%d", len($body));
+	`, addr))
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != fmt.Sprintf("%d", len(payload)) {
+		t.Fatalf("readAll(-1) length = %s, want %d", out, len(payload))
+	}
+}
+
 // TestReadNExact proves net.readN returns exactly n bytes and a short read
 // (peer closed early) is a catchable error, not a truncated return.
 func TestReadNExact(t *testing.T) {

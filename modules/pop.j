@@ -215,8 +215,22 @@ func readLine(conn as net.Conn) {
     return stripCR(convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8"));
 }
 
+# rejectControl throws if s carries a control byte. POP3 commands are CRLF
+# terminated single lines, so a CR/LF in an argument (user, password) would inject
+# extra commands (OM-006). Checked once here, the choke every command passes through.
+func rejectControl(s as string, what as string) {
+    for (def c in strings.chars($s)) {
+        def cp as int init convert.toCodepoint($c);
+        if ($cp < 32 or $cp == 127) {
+            throw Error{kind: "pop", message: $what + " contains a control character (POP3 command injection)", file: "", line: 0, col: 0};
+        }
+    }
+    return;
+}
+
 # command sends one line and returns the single-line status reply.
 func command(conn as net.Conn, line as string) {
+    rejectControl($line, "POP3 command");
     net.writeBytes($conn, convert.bytesFromString($line + "\r\n", "utf-8"));
     return readLine($conn);
 }

@@ -69,3 +69,17 @@ func testResponseCapAllowsAtLimit() {
     capResponse(MAX_RESPONSE_BYTES);
     testing.assertTrue(true);
 }
+
+func injectImapCRLF() { quoteArg("user\r\nA1 LOGOUT"); }
+# A raw-interpolated argument (a STORE flag list, as addFlags/removeFlags build)
+# is caught by the command() choke-point guard, which runs before the socket
+# write - so a zero Conn is fine here, rejectControl throws first.
+func injectImapFlags() {
+    def c as net.Conn;
+    command($c, "STORE 1 +FLAGS.SILENT (x)\r\nA1 LOGOUT\r\n(y)");
+}
+func testImapInjectionBlocked() {   # OM-006
+    testing.assertThrows("injectImapCRLF", "imap");
+    testing.assertThrows("injectImapFlags", "imap");
+    quoteArg("normal.user@example.com");   # a valid arg does not throw
+}

@@ -145,6 +145,12 @@ func processTokens(tokens []lexer.Token, baseDir string, visited map[string]bool
 // of input tokens consumed.
 func handleInclude(tokens []lexer.Token, i int, baseDir string, visited map[string]bool) ([]lexer.Token, int, error) {
 	inc := tokens[i]
+	// Defensive: `include` is never the final token today (the lexer always
+	// appends TOKEN_EOF), but reading tokens[i+1] on that invariant held at a
+	// distance is a panic-by-refactor risk. Guard it, mirroring validateModuleImport.
+	if i+1 >= len(tokens) {
+		return nil, 0, &PreprocessError{Msg: "`include` must be followed by a quoted path", File: inc.File, Line: inc.Line, Col: inc.Col}
+	}
 	next := tokens[i+1]
 
 	// `include "path.j" ;`

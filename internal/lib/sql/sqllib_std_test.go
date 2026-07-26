@@ -321,3 +321,35 @@ func TestCursorConcurrentIsRaceFree(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestRedactDSN checks that a credential in a DSN-bearing error string is masked
+// before it can reach a Jennifer Error.message, a log, or an HTTP 500 body.
+func TestRedactDSN(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"failed to connect to postgres://user:secret@host:5432/db", "failed to connect to postgres://user:xxxxx@host:5432/db"},
+		{"dial mysql user:hunter2@tcp(10.0.0.1:3306)/app", "dial mysql user:xxxxx@tcp(10.0.0.1:3306)/app"},
+		{"parse error: host=db user=admin password=topsecret sslmode=disable", "parse error: host=db user=admin password=xxxxx sslmode=disable"},
+		// A MySQL password containing a raw '/' (legal, unencoded) must not slip
+		// through - the exact bypass the naive `[^@/\s]*` class allowed.
+		{"root:pa/ss@tcp(down:3306)/app", "root:xxxxx@tcp(down:3306)/app"},
+		// ... and a raw '@' in the password (matched greedily to the net token).
+		{"root:p@ss@unix(/tmp/mysql.sock)/db", "root:xxxxx@unix(/tmp/mysql.sock)/db"},
+		// Net omitted (bare '/db').
+		{"acct:pw/1@/appdb", "acct:xxxxx@/appdb"},
+		// pgx keyword form with a quoted, space-bearing password.
+		{"parse: host=db password='foo bar baz' user=admin", "parse: host=db password=xxxxx user=admin"},
+		{"connection refused", "connection refused"}, // nothing to redact
+	}
+	leaks := []string{"secret", "hunter2", "topsecret", "pa/ss", "p@ss", "pw/1", "foo bar baz"}
+	for _, c := range cases {
+		got := redactDSN(c.in)
+		if got != c.want {
+			t.Errorf("redactDSN(%q) = %q, want %q", c.in, got, c.want)
+		}
+		for _, secret := range leaks {
+			if c.in != "connection refused" && strings.Contains(c.in, secret) && strings.Contains(got, secret) {
+				t.Errorf("redactDSN(%q) leaked credential %q: %q", c.in, secret, got)
+			}
+		}
+	}
+}

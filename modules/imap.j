@@ -66,8 +66,23 @@ def const TAG as string init "JEN";
 
 # --- pure protocol helpers (private, unit-tested) ------------------
 
+# rejectControl throws if s contains a control byte. RFC 3501's QUOTED-CHAR
+# excludes CR and LF, so a value carrying them cannot be sent as a quoted string
+# at all - unchecked it splits the command line and injects IMAP commands (OM-006).
+func rejectControl(s as string, what as string) {
+    for (def c in strings.chars($s)) {
+        def cp as int init convert.toCodepoint($c);
+        if ($cp < 32 or $cp == 127) {
+            throw Error{kind: "imap", message: $what + " contains a control character (IMAP command injection)", file: "", line: 0, col: 0};
+        }
+    }
+    return;
+}
+
 # quoteArg wraps a LOGIN argument as an IMAP quoted string, escaping `\` and `"`.
+# Control characters (which a quoted string cannot represent) are rejected first.
 func quoteArg(s as string) {
+    rejectControl($s, "IMAP argument");
     def esc as string init strings.replace($s, "\\", "\\\\");
     $esc = strings.replace($esc, "\"", "\\\"");
     return "\"" + $esc + "\"";
@@ -269,6 +284,12 @@ func readResponse(conn as net.Conn, tag as string) {
 
 # command sends a tagged command and returns the full response.
 func command(conn as net.Conn, line as string) {
+    # Reject a control character in the whole command line at this single choke
+    # point (every command passes through here), so a caller-supplied argument
+    # interpolated raw - a mailbox name, a FETCH field list, a STORE flag list -
+    # cannot inject a CR/LF and smuggle a second command (OM-006). Quoted args are
+    # additionally control-checked before quoting; this is the backstop.
+    rejectControl($line, "command");
     net.writeBytes($conn, convert.bytesFromString(TAG + " " + $line + "\r\n", "utf-8"));
     return readResponse($conn, TAG);
 }
@@ -504,6 +525,9 @@ export func fetchMessage(session as Session, n as int) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetchHeaders(session as Session, n as int, fields as string) {
+    # `fields` is interpolated raw (not a quoted string), so it must not carry a
+    # CR/LF or the `)]` that would close the fetch item and inject a command.
+    rejectControl($fields, "IMAP header field list");
     def cmd as string init "FETCH " + convert.toString($n) + " BODY.PEEK[HEADER.FIELDS (" + $fields + ")]";
     return extractLiteral(command($session.conn, $cmd));
 }

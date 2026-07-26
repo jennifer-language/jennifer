@@ -11,8 +11,10 @@
 package sqllib
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -24,6 +26,35 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lib/devio"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// A driver's connect / ping error can echo back the DSN, which for
+// postgres://user:secret@host or user:pass@tcp(...) or a pgx `password=secret`
+// keyword string carries the credential. Redact it before the text reaches a
+// Jennifer Error.message, a log line, or an HTTP 500 body. Three forms, each an
+// RE2 (linear-time, no ReDoS) pattern:
+var (
+	// URL DSN userinfo: scheme://user:PASSWORD@host. A URL password is
+	// percent-encoded, so it carries no raw '@'; keep the scheme+user, mask up
+	// to the '@'.
+	dsnURLPwRe = regexp.MustCompile(`(://[A-Za-z0-9._~%+-]+:)[^@\s]*@`)
+	// go-sql-driver DSN userinfo: user:PASSWORD@net(addr) or user:PASSWORD@/db.
+	// A MySQL password may contain raw '/' and '@' (both legal, unencoded), so
+	// match greedily to the '@' that introduces the network - a `tcp(` / `unix(`
+	// / custom-dialer `word(`, or a bare `/` when the net is omitted. Anchoring on
+	// that net token both captures a '/'- or '@'-bearing password and avoids
+	// touching a host `@host:port` (which is not followed by `word(` or `/`).
+	dsnMyPwRe = regexp.MustCompile(`([A-Za-z0-9._~%+-]+:)\S*@([A-Za-z][A-Za-z0-9]*\(|/)`)
+	// libpq / pgx keyword form: password=VALUE, value single/double-quoted (may
+	// contain spaces) or a bare run.
+	dsnKwPwRe = regexp.MustCompile(`(?i)(password\s*=\s*)('[^']*'|"[^"]*"|\S+)`)
+)
+
+func redactDSN(s string) string {
+	s = dsnURLPwRe.ReplaceAllString(s, "${1}xxxxx@")
+	s = dsnMyPwRe.ReplaceAllString(s, "${1}xxxxx@${2}")
+	s = dsnKwPwRe.ReplaceAllString(s, "${1}xxxxx")
+	return s
+}
 
 // -------- registries --------
 
@@ -39,7 +70,25 @@ type rowState struct {
 	cur     []interface{} // the current row's scanned values; nil before next() / after exhaustion
 	scanned bool
 	done    bool // the cursor has been fully consumed (Next returned false)
+	// cancel releases the query's context; it governs the cursor's lifetime, so
+	// it is called (never before) at every rows-close site. nil for hand-built
+	// states.
+	cancel context.CancelFunc
 }
+
+// maxHandles bounds each sql registry so a leaked handle (one dropped without
+// its close verb) surfaces as a catchable error instead of growing the process
+// - and, for rows, before it can pin more pool connections. Generous: a real
+// program holds a handful of live handles.
+const maxHandles = 4096
+
+// queryTimeout bounds a query / exec and the pool-connection acquisition it can
+// block on, so a leaked *sql.Rows that pins a connection cannot make a later
+// call block forever (a leaked cursor + no context is the OF-007 hang). The
+// context also governs the returned cursor's Next / Scan, so a read that runs
+// longer than this fails - the documented trade-off for a bounded client; a
+// scripting default, not a long-analytics one.
+const queryTimeout = 30 * time.Second
 
 var (
 	mu    sync.Mutex
@@ -50,13 +99,73 @@ var (
 	nid   int64
 )
 
+// registerRows caps the rows registry and stores the cursor plus its
+// context-cancel. On overflow it closes rs, cancels the context, and returns an
+// error. Call without mu held.
+func registerRows(rs *sql.Rows, cols []string, cancel context.CancelFunc) (int64, error) {
+	mu.Lock()
+	if len(rows) >= maxHandles {
+		mu.Unlock()
+		_ = rs.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return 0, fmt.Errorf("too many open sql.Rows (limit %d); each sql.query needs a matching sql.closeRows or a full sql.next", maxHandles)
+	}
+	nid++
+	id := nid
+	rows[id] = &rowState{id: id, rows: rs, cols: cols, cancel: cancel}
+	mu.Unlock()
+	return id, nil
+}
+
+// CloseAll closes every live sql handle and clears the registries. The CLI runs
+// it at exit (next to termlib.RestoreAll) so a program that leaks a connection /
+// cursor / statement / transaction does not leave the driver's pool connection
+// or the server-side transaction dangling past process teardown.
+func CloseAll() {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, r := range rows {
+		if r != nil {
+			if r.rows != nil {
+				_ = r.rows.Close()
+			}
+			if r.cancel != nil {
+				r.cancel()
+			}
+		}
+	}
+	for _, s := range stmts {
+		if s != nil {
+			_ = s.Close()
+		}
+	}
+	for _, t := range txs {
+		if t != nil {
+			_ = t.Rollback()
+		}
+	}
+	for _, d := range conns {
+		if d != nil {
+			_ = d.Close()
+		}
+	}
+	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*sql.Tx{}, map[int64]*sql.Stmt{}
+}
+
 // ResetForTest closes everything and clears the registries between tests.
 func ResetForTest() {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, r := range rows {
-		if r != nil && r.rows != nil {
-			_ = r.rows.Close()
+		if r != nil {
+			if r.rows != nil {
+				_ = r.rows.Close()
+			}
+			if r.cancel != nil {
+				r.cancel()
+			}
 		}
 	}
 	for _, s := range stmts {
@@ -126,8 +235,8 @@ func toDriverArgs(fn string, params []Value) ([]interface{}, error) {
 // querier is satisfied by *sql.DB and *sql.Tx, so sql.query / sql.exec accept a
 // Connection or a Tx uniformly.
 type querier interface {
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	Exec(query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
 func resolveQuerier(fn string, v Value) (querier, error) {
@@ -186,13 +295,18 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	db, oerr := sql.Open(goDriver, dsn)
 	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.open: %v", oerr)
+		return interpreter.Null(), fmt.Errorf("sql.open: %s", redactDSN(oerr.Error()))
 	}
 	if perr := db.Ping(); perr != nil {
 		_ = db.Close()
-		return interpreter.Null(), fmt.Errorf("sql.open: %v", perr)
+		return interpreter.Null(), fmt.Errorf("sql.open: %s", redactDSN(perr.Error()))
 	}
 	mu.Lock()
+	if len(conns) >= maxHandles {
+		mu.Unlock()
+		_ = db.Close()
+		return interpreter.Null(), fmt.Errorf("sql.open: too many open sql.Connection (limit %d); each needs a matching sql.close", maxHandles)
+	}
 	nid++
 	id := nid
 	conns[id] = db
@@ -234,20 +348,25 @@ func runQuery(fn string, q querier, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	rs, qerr := q.Query(sqlText, params...)
+	// The context governs the whole cursor lifetime; cancel is stored in the
+	// rowState and fired at close, not here (a defer would kill the cursor before
+	// the first sql.next).
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	rs, qerr := q.QueryContext(ctx, sqlText, params...)
 	if qerr != nil {
+		cancel()
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, qerr)
 	}
 	cols, cerr := rs.Columns()
 	if cerr != nil {
 		_ = rs.Close()
+		cancel()
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, cerr)
 	}
-	mu.Lock()
-	nid++
-	id := nid
-	rows[id] = &rowState{id: id, rows: rs, cols: cols}
-	mu.Unlock()
+	id, rerr := registerRows(rs, cols, cancel)
+	if rerr != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %v", fn, rerr)
+	}
 	return handle("Rows", id), nil
 }
 
@@ -260,7 +379,9 @@ func runExec(fn string, q querier, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	res, eerr := q.Exec(sqlText, params...)
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	res, eerr := q.ExecContext(ctx, sqlText, params...)
 	if eerr != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, eerr)
 	}
@@ -358,6 +479,9 @@ func nextFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		r.cur = nil
 		r.scanned = false
 		_ = r.rows.Close()
+		if r.cancel != nil {
+			r.cancel()
+		}
 		releaseRow(r.id)
 		if rerr != nil {
 			return interpreter.Null(), fmt.Errorf("sql.next: %v", rerr)
@@ -596,7 +720,11 @@ func closeRowsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if r.done {
 		return interpreter.Null(), nil // already closed on exhaustion
 	}
-	if cerr := r.rows.Close(); cerr != nil {
+	cerr := r.rows.Close()
+	if r.cancel != nil {
+		r.cancel()
+	}
+	if cerr != nil {
 		return interpreter.Null(), fmt.Errorf("sql.closeRows: %v", cerr)
 	}
 	return interpreter.Null(), nil
@@ -624,6 +752,11 @@ func beginFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("sql.begin: %v", berr)
 	}
 	mu.Lock()
+	if len(txs) >= maxHandles {
+		mu.Unlock()
+		_ = tx.Rollback()
+		return interpreter.Null(), fmt.Errorf("sql.begin: too many open sql.Tx (limit %d); each needs a matching sql.commit or sql.rollback", maxHandles)
+	}
 	nid++
 	tid := nid
 	txs[tid] = tx
@@ -692,6 +825,11 @@ func prepareFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("sql.prepare: %v", perr)
 	}
 	mu.Lock()
+	if len(stmts) >= maxHandles {
+		mu.Unlock()
+		_ = st.Close()
+		return interpreter.Null(), fmt.Errorf("sql.prepare: too many open sql.Statement (limit %d); each needs a matching sql.closeStmt", maxHandles)
+	}
 	nid++
 	sid := nid
 	stmts[sid] = st
@@ -726,20 +864,22 @@ func queryStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	rs, qerr := st.Query(params...)
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	rs, qerr := st.QueryContext(ctx, params...)
 	if qerr != nil {
+		cancel()
 		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %v", qerr)
 	}
 	cols, cerr := rs.Columns()
 	if cerr != nil {
 		_ = rs.Close()
+		cancel()
 		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %v", cerr)
 	}
-	mu.Lock()
-	nid++
-	rid := nid
-	rows[rid] = &rowState{id: rid, rows: rs, cols: cols}
-	mu.Unlock()
+	rid, rerr := registerRows(rs, cols, cancel)
+	if rerr != nil {
+		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %v", rerr)
+	}
 	return handle("Rows", rid), nil
 }
 
@@ -756,7 +896,9 @@ func execStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	res, eerr := st.Exec(params...)
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	res, eerr := st.ExecContext(ctx, params...)
 	if eerr != nil {
 		return interpreter.Null(), fmt.Errorf("sql.execStmt: %v", eerr)
 	}

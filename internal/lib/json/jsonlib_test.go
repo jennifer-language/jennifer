@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -44,6 +45,11 @@ func TestEncodeScalars(t *testing.T) {
 		{interpreter.FloatVal(2.0), "2.0"}, // float keeps a decimal so it round-trips as float
 		{interpreter.StringVal("hi\n\"x\""), `"hi\n\"x\""`},
 		{interpreter.BytesVal([]byte("hi")), `"aGk="`},
+		// OF-003: HTML-sensitive characters escape to \u00xx (Go's default), so a
+		// value embedded in <script> or an attribute cannot break out. Output stays
+		// valid JSON and decodes to the identical string.
+		{interpreter.StringVal("</script><b>a&b</b>"), `"\u003c/script\u003e\u003cb\u003ea\u0026b\u003c/b\u003e"`},
+		{interpreter.StringVal("a\u2028b\u2029c"), `"a\u2028b\u2029c"`},
 	}
 	for _, c := range cases {
 		if got := enc(t, c.v); got != c.want {
@@ -214,5 +220,68 @@ func TestRoundTrip(t *testing.T) {
 	in := `{"nums":[1,2.5],"ok":true,"s":"x"}`
 	if out := enc(t, dec(t, in)); out != in {
 		t.Errorf("text round-trip: %q -> %q", in, out)
+	}
+}
+
+// TestEncodeDepthGuard: OF-014 - a value nested past MaxNestingDepth (reachable
+// only via the json.set/insert/append write API, which can grow a tree past what
+// the decoder allows) must fail encode with a catchable error rather than
+// overflow the Go stack. A tree at exactly the limit still encodes.
+func TestEncodeDepthGuard(t *testing.T) {
+	nest := func(levels int) interpreter.Value {
+		v := interpreter.IntVal(1)
+		for i := 0; i < levels; i++ {
+			v = interpreter.ListVal(parser.ListType(parser.PrimitiveType(parser.TypeInt)), []interpreter.Value{v})
+		}
+		return v
+	}
+	// At the limit: innermost scalar sits at depth == MaxNestingDepth, allowed.
+	if _, err := encodeFn([]interpreter.Value{nest(limits.MaxNestingDepth)}, false); err != nil {
+		t.Errorf("encode at depth limit should succeed, got %v", err)
+	}
+	// One past the limit: rejected, not a crash.
+	if _, err := encodeFn([]interpreter.Value{nest(limits.MaxNestingDepth + 5)}, false); err == nil {
+		t.Error("expected a depth-limit error for an over-deep value")
+	}
+	// The write-API construction guard rejects the same shape at build time.
+	if exceedsDepth(nest(limits.MaxNestingDepth), limits.MaxNestingDepth) {
+		t.Error("a tree at the limit must not be flagged as exceeding it")
+	}
+	if !exceedsDepth(nest(limits.MaxNestingDepth+1), limits.MaxNestingDepth) {
+		t.Error("a tree past the limit must be flagged")
+	}
+}
+
+// TestMoveDepthGuard: OF-014 - json.move splices a whole subtree under an
+// arbitrary location, so it can build a tree deeper than either operand even
+// though set/insert/append cannot. It must run the same construction-time depth
+// guard, or an over-deep tree reaches ==/DeepCopy and overflows the Go stack.
+func TestMoveDepthGuard(t *testing.T) {
+	// A chain of n single-key maps ("k") ending in an empty map (so a child can
+	// still be added at the bottom).
+	chain := func(n int) interpreter.Value {
+		v := mapVal(nil)
+		for i := 0; i < n; i++ {
+			v = mapVal([]interpreter.MapEntry{{Key: interpreter.StringVal("k"), Value: v}})
+		}
+		return v
+	}
+	half := maxNestingDepth/2 + 50 // each branch ~ half the limit; combined exceeds it
+	doc := wrap(mapVal([]interpreter.MapEntry{
+		{Key: interpreter.StringVal("a"), Value: chain(half)},
+		{Key: interpreter.StringVal("b"), Value: chain(half)},
+	}))
+	// The document itself is within the limit (encodes fine).
+	if _, err := encodeFn([]interpreter.Value{doc}, false); err != nil {
+		t.Fatalf("setup doc should encode, got %v", err)
+	}
+	// Move /a to the bottom of /b's chain -> ~2*half deep, over the limit.
+	to := "/b" + strings.Repeat("/k", half) + "/moved"
+	_, err := moveFn(interpreter.BuiltinCtx{}, []interpreter.Value{doc, interpreter.StringVal("/a"), interpreter.StringVal(to)})
+	if err == nil {
+		t.Fatal("json.move produced an over-deep tree with no error (OF-014 bypass)")
+	}
+	if !strings.Contains(err.Error(), "nests deeper") {
+		t.Errorf("expected a depth-limit error, got %v", err)
 	}
 }

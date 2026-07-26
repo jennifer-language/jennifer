@@ -44,6 +44,7 @@ lists the supported set:
 | ----------------------------- | ------- | -------------------------------------- |
 | `hash.compute(b, algo)`       | `bytes` | Full digest of the entire input.       |
 | `hash.hmac(key, message, algo)` | `bytes` | Keyed-hash MAC (RFC 2104) over the same algorithms. |
+| `hash.equal(a, b)`            | `bool`  | Constant-time equality of two `bytes` (see below). |
 
 The algorithm is always a value (`compute(b, "sha256")`), the same shape as
 `hmac` and the `crypto` KDFs - one convention across the whole hash / crypto
@@ -70,7 +71,30 @@ io.printf("%s\n", encoding.toText($mac, "hex"));
 ```
 
 To **verify**, recompute the MAC over the same message and compare it to the
-received one (comparing the full digests, not a prefix).
+received one (comparing the full digests, not a prefix) with `hash.equal`.
+
+## Constant-time comparison
+
+`hash.equal(a, b)` reports whether two `bytes` are identical in **constant
+time** - the comparison takes the same time whether the values differ in the
+first byte or the last (`crypto/subtle.ConstantTimeCompare`). Use it to check a
+received MAC, digest, or token against the expected one: a plain `==` on the
+raw bytes (or a byte-by-byte loop that returns early) leaks *where* the first
+mismatch is through its timing, which over many attempts lets an attacker forge
+a valid MAC one byte at a time. Values of different lengths compare unequal.
+
+```jennifer
+use hash;
+
+# expected and received are both `bytes` (e.g. two MACs)
+if (hash.equal($expected, $received)) {
+    # authentic
+}
+```
+
+Reach for `hash.equal` (or [`crypto.hmacEqual`](crypto.md), the same primitive)
+whenever the comparison is a security decision; ordinary `==` on non-secret data
+is fine.
 
 ## Streaming
 

@@ -576,46 +576,11 @@ func wrapEl(tag as string, text as string) {
 # link. Whitespace and control characters are stripped before the scheme is
 # read, because browsers ignore them inside a scheme (so "java\tscript:" and
 # "  javascript:" would otherwise execute).
+# safeHref returns a URL safe for an href (http / https / mailto, else "#").
+# The scheme allowlist lives in htmlwriter (html.safeUrl) so the anti-XSS policy
+# has one home; this thin wrapper keeps the local call sites readable.
 func safeHref(url as string) {
-    def cs as list of string init strings.chars($url);
-    def probe as string init "";
-    def i as int init 0;
-    while ($i < len($cs)) {
-        if (convert.toCodepoint($cs[$i]) > 32) {
-            $probe = $probe + $cs[$i];
-        }
-        $i = $i + 1;
-    }
-    if (len($probe) == 0) {
-        return $url;
-    }
-    # Read the scheme: the run before the first ':', but only if that ':'
-    # comes before any '/', '?', or '#' (otherwise there is no scheme and the
-    # reference is relative, hence safe).
-    def pcs as list of string init strings.chars($probe);
-    def scheme as string init "";
-    def hasScheme as bool init false;
-    def j as int init 0;
-    while ($j < len($pcs)) {
-        def ch as string init $pcs[$j];
-        if ($ch == ":") {
-            $hasScheme = true;
-            break;
-        }
-        if ($ch == "/" or $ch == "?" or $ch == "#") {
-            break;
-        }
-        $scheme = $scheme + $ch;
-        $j = $j + 1;
-    }
-    if (not $hasScheme) {
-        return $url;
-    }
-    def low as string init strings.lower($scheme);
-    if ($low == "http" or $low == "https" or $low == "mailto") {
-        return $url;
-    }
-    return "#";
+    return html.safeUrl($url);
 }
 
 func linkNode(text as string, url as string, title as string) {

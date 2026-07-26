@@ -90,3 +90,11 @@ func testHelpers() {
     testing.assertEqual(unquoteDouble("\"a\\tb\""), "a\tb");
     testing.assertEqual(parseValue("  bare  "), "bare");
 }
+
+func testEnvNameValidation() {   # OM-021
+    testing.assertTrue(validEnvName("PATH_2"));
+    testing.assertTrue(validEnvName("_x"));
+    testing.assertFalse(validEnvName("2BAD"));
+    testing.assertFalse(validEnvName("A=B"));
+    testing.assertFalse(validEnvName(""));
+}

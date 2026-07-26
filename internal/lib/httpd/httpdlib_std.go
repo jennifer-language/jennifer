@@ -253,12 +253,17 @@ func makeHandler(st *serverState) http.Handler {
 		id := registerReq(rs)
 		defer unregisterReq(id)
 
+		// One timer per wait, stopped as soon as its select returns, rather than
+		// time.After (which leaves a 60 s timer in the runtime timer heap per
+		// request even when another arm wins - GC pressure at high rps).
+		admitTimer := time.NewTimer(respondTimeout)
+		defer admitTimer.Stop()
 		select {
 		case st.reqs <- rs:
 		case <-st.closing:
 			http.Error(w, "server shutting down", http.StatusServiceUnavailable)
 			return
-		case <-time.After(respondTimeout):
+		case <-admitTimer.C:
 			// The program isn't draining the accept queue (stuck between
 			// listen and accept, or accepting too slowly). Without this arm
 			// the handler goroutine, its admission slot, and the client
@@ -266,13 +271,16 @@ func makeHandler(st *serverState) http.Handler {
 			http.Error(w, "server not accepting requests", http.StatusServiceUnavailable)
 			return
 		}
+		admitTimer.Stop()
 
+		respondTimer := time.NewTimer(respondTimeout)
+		defer respondTimer.Stop()
 		select {
 		case <-rs.done:
 		case <-st.closing:
 			http.Error(w, "server shutting down", http.StatusServiceUnavailable)
 			return
-		case <-time.After(respondTimeout):
+		case <-respondTimer.C:
 			// The program accepted this request but never answered it (e.g. it
 			// threw between accept and respond). Claim the response so a late
 			// respond can't double-write, then answer 500 and unpark -
@@ -352,6 +360,13 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if err != nil {
 			return interpreter.Null(), fmt.Errorf("httpd.listen: %v", err)
 		}
+	}
+	if network == "unix" {
+		// net.Listen creates the socket as 0777 &^ umask, so a process with a
+		// permissive umask (0, or a container entrypoint that cleared it)
+		// publishes a world-connectable socket - bypassing the reverse proxy the
+		// unix: prefix exists to sit behind. Tighten it to owner+group (0660).
+		_ = os.Chmod(address, 0o660)
 	}
 	st := newServer(ln)
 	go func() { _ = st.srv.Serve(ln) }()
@@ -666,11 +681,39 @@ func serveDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// A backslash never appears in a well-formed URL path. path.Clean treats only
+	// '/' as a separator, so "/..\\..\\x" survives it intact - but on Windows
+	// filepath.Join *does* split on '\\' and would resolve the ".." above root.
+	// Reject the backslash outright rather than rely on the host separator.
+	if strings.ContainsRune(rs.r.URL.Path, '\\') {
+		return answerWithStatus(rs, http.StatusBadRequest, "bad request")
+	}
 	// path.Clean on a rooted path collapses any ".." so the request cannot
 	// escape root; then map slashes to the host separator under root.
 	clean := path.Clean("/" + rs.r.URL.Path)
 	full := filepath.Join(root, filepath.FromSlash(clean))
+	// Defence in depth: re-verify the joined path is still under root on the host
+	// filesystem before serving it.
+	if rel, rerr := filepath.Rel(root, full); rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return answerWithStatus(rs, http.StatusNotFound, "not found")
+	}
 	return answerWithFile(rs, full)
+}
+
+// answerWithStatus marks a request to be answered with a plain status + body
+// from the handler goroutine (the error path for serveDir's traversal guards).
+func answerWithStatus(rs *reqState, status int, body string) (Value, error) {
+	rs.mu.Lock()
+	if rs.responded {
+		rs.mu.Unlock()
+		return interpreter.Null(), fmt.Errorf("request already answered")
+	}
+	rs.responded = true
+	rs.status = status
+	rs.respBody = []byte(body)
+	rs.mu.Unlock()
+	close(rs.done)
+	return interpreter.Null(), nil
 }
 
 // answerWithFile marks a request to be answered by ServeFile from the handler

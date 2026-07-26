@@ -24,6 +24,9 @@ func unavailable(fn string) (Value, error) {
 // ResetForTest is a no-op where no state exists.
 func ResetForTest() {}
 
+// CloseAll is a no-op where no handle registry exists (the CLI exit sweep).
+func CloseAll() {}
+
 func openFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)    { return unavailable("sql.open") }
 func closeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)   { return unavailable("sql.close") }
 func queryFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)   { return unavailable("sql.query") }

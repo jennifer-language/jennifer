@@ -1663,59 +1663,32 @@ through all of them). So `compute(b, algo)` stays the single canonical form and
 the algorithm is always a value across the whole hash / crypto family. Full
 reasoning in `docs/technical/rejected.md`.
 
-### M22.4 - `match` statement (multi-way value dispatch)
+### M22.4 - `match` statement (multi-way value dispatch, compacted)
 
-**Done.** A multi-way branch (`match` / `when` / `else`) so a chain of `if` /
-`elseif` over one subject reads as a single dispatch. Keywords chosen so it can
-*grow* into pattern matching (`M22.5` adds guards / structural patterns to the
-same `when`, no new keyword) rather than shipping a `switch` and needing a second
-construct.
-
-```jennifer
-match ($x) {
-    when 1 {
-        io.printf("one\n");
-    }
-    when 2, 3, 4 {              # multiple values per arm (an OR of equality)
-        io.printf("a few\n");
-    }
-    else {                     # optional default, last; no-arm-no-else is a no-op
-        io.printf("many\n");
-    }
-}
-```
-
-**Semantics** (v1: value dispatch, no type-system work): parenthesized subject
-evaluated **once**; each `when` lists one or more values (any expressions, not
-just literals) compared to the subject by strict `==` (`Value.Equal`, the
-operator's exact path); first matching arm wins, an arm's values evaluate
-left-to-right only until a match. **No fall-through** and **not a `break`
-target** - `break` / `continue` in an arm act on the enclosing loop (Go's "break
-breaks the switch" trap is unrepresentable). Each arm is its own scope; a
-statement, not an expression.
-
-**Layout** (a `fmt` rule): a `match` is a **flat list of arms**, laid out like a
-`switch` / `case` in every other language (C / Go / Rust / Swift / Kotlin / Ruby
-/ Python all start each arm with its keyword) - each `when` / `else` on its
-**own** line at the arm indent, body indented, `}` on its own line. Arms do
-**not** cuddle the previous `}` (the `} else {` cuddle rule is an `if`'s
-conditional tail; a `match`'s `else` is a case-list arm, so the `when` column
-reads top-to-bottom). A wrapped `when` value list aligns continuation values
-under the first. The compact one-line-per-arm form was set aside (the streaming
-formatter can't measure an arm to choose compact-vs-expand).
-
-**Implementation.** New `MatchStmt{Subject, []MatchArm{Values, Body}, Else}` AST;
-`execMatch` evaluates the subject once and runs the first matching arm via
-`execBlock`. The one wrinkle was the header `{` ambiguity (`when Name {` reading
-`Name{...}` as a struct literal): the parser's `noStructLit` flag is set while
-parsing a `when` value list and re-enabled on entering any `(` / `[` / call /
-list / map body (Go's `exprLev` rule), so `when MAX {` is a constant + block and
-a composite-literal value takes parens (`when (Point{x:1}) {`). `tokens` /
-`profile` / `repl` needed no `match`-specific code (generic `posFor` / brace-depth
-handling); `ast` gained `MatchStmt` / `MatchArm` cases; four editor highlighters
-+ the docs bundle updated. Two reserved-keyword collisions renamed (`totp.j`
-`match` -> `matched`; `feed_test.j` `when` -> `nowStamp`, `match` -> `matched`).
-Verified across behavior / fmt-idempotence / `-race` / a golden example.
+**Done.** A multi-way branch - `match (EXPR) { when V [, V ...] { } ... else { } }` -
+so a chain of `if` / `elseif` over one subject reads as a single dispatch.
+Keywords `match` / `when` (reserved - a pre-1.0 break, renamed collisions in
+`totp.j` / `feed_test.j`) chosen so it can *grow* into pattern matching (`M22.5`
+adds guards / structural patterns to the same `when`, no new keyword).
+**Semantics** (v1, value dispatch only): the parenthesized subject is evaluated
+**once** and compared to each arm's values by strict `==` (`Value.Equal`, the
+operator's path); the first matching arm wins; an arm's values short-circuit
+left-to-right; **no fall-through**, and `match` is **not a `break` target**
+(`break` / `continue` act on the enclosing loop, so Go's "break breaks the switch"
+trap is unrepresentable); optional `else` last; no-match-no-`else` is a no-op;
+each arm is its own scope; a statement, not an expression. **`fmt`** lays it out
+as a flat case list (like `switch`/`case` everywhere) - each `when` / `else` on
+its own line at the arm indent, **not** cuddling the previous `}` (a `match` arm
+is a case, unlike an `if`'s `} else {` tail); wrapped value lists align under the
+first value. **Implementation:** new `MatchStmt{Subject, []MatchArm{Values, Body},
+Else}` AST, `execMatch` runs the first matching arm via `execBlock`; the header
+`{` ambiguity (`when Name {` vs a `Name{...}` struct literal) is resolved by the
+parser's `noStructLit` flag - set across a `when` value list, re-enabled inside
+`(` / `[` / call / list / map bodies (Go's `exprLev` rule) - so a composite-literal
+value takes parens (`when (Point{x:1}) {`). `ast` gained the node cases, `tokens` /
+`profile` / `repl` needed none (generic handling), four editor highlighters + the
+docs bundle updated. Full spec in CLAUDE.md; verified across behavior /
+fmt-idempotence / `-race` / a golden example.
 
 ### M22.5 - sum types (enums) + pattern `match`
 
@@ -1941,57 +1914,41 @@ Verified end-to-end in `cmd/jennifer/http_bytes_test.go` (a gzip served over
 loopback downloads with matching sha256 and unpacks back, while the text `get`
 refuses the same body) plus a `parseRaw`-keeps-binary overlay test.
 
-### M22.11 - injection & output-encoding hardening
+### M22.11-M22.13 - Hardening
 
-**Planned.** The injection / XSS / encoding cluster - a value that reaches a wire
-or an HTML / SQL sink without the right escaping.
+**All done.** The three grouped milestones from two security / robustness audits.
+Every fix ships with a test (a module `*_test.j` overlay case or a Go table /
+integration test). **Per-finding detail (severity, reproducer, code sites) lives
+in the two report files**; this table is the milestone index, and the reasoned
+non-literal choices follow it.
 
-| id | area | fix |
-| --- | --- | --- |
-| `OM-002` (HIGH) | `orm` | validate `col` / order column against `Schema.columns` (or an identifier regex), map `op` through an allowlist to a literal, quote table names per dialect; correct the module's "injection-safe" doc claim (true of values, false of identifiers) |
-| `OM-006` | `imap` / `pop` | add `rejectControl` (as `smtp` has) to user / pass / mailbox / `fields` - CR/LF in `quoteArg` and the unquoted `fields` inject commands |
-| `OM-007` | `statsd` | reject `:` `\|` `\n` `\r` in a value and any non-`[A-Za-z0-9._-]` in a name (as `prometheus` / `influxdb` already do) |
-| `OM-011` | `htmlwriter` | validate tag / attribute names against `^[A-Za-z][A-Za-z0-9-]*$`; promote `markdown`'s `safeHref` to an exported `safeUrl` |
-| `OM-012` | `tengine` | an auto-escape-by-default mode (`\| raw` opt-out), or a prominent "every user interpolation needs `\| html`" warning |
-| `OF-003` | `json` | HTML-escape `<` `>` `&` U+2028 U+2029 as `\u00xx` (Go's `encoding/json` default; output stays valid JSON, decodes identically), and/or ship a `strings.escapeHtml` - the stdlib has no HTML escaper today |
-| `OF-008` | `hash` | add `hash.equal(a, b)` delegating to `crypto/subtle.ConstantTimeCompare` (a `== on bytes` MAC compare is a timing oracle); label md5 / sha1 non-cryptographic |
-| `OM-020` | `http` | `parseUrl` must split `?` / `#` before locating the authority (a query-only URL folds `?q=` into the host) |
-| `OM-021` | `dotenv` | validate key names (`^[A-Za-z_][A-Za-z0-9_]*$`); doc that `load` mutates the process env inherited by `os.run` children |
-| `OM-010` | `ipnet` | fold `::ffff:a.b.c.d` to a v4 `Address` (or export `unmap`) so an SSRF deny-list is not bypassed by the mapped form |
+| M#     | Theme | Findings -> what shipped |
+| ------ | ----- | ------------------------ |
+| M22.11 | injection & output-encoding | `OM-002` orm identifier/operator allowlists + quoted idents; `OM-006` imap/pop `rejectControl` (CRLF); `OM-007` statsd metric name/value validation; `OM-011` htmlwriter tag/attr name check + exported `safeUrl` (markdown's `safeHref` delegates to it); `OM-012` tengine no-auto-escape SECURITY warning; `OF-003` json.encode HTML-escapes `< > & U+2028 U+2029` as `\u00xx`; `OF-008` new `hash.equal` (constant-time); `OM-020` http.parseUrl splits `?`/`#` before the authority; `OM-021` dotenv env-name validation; `OM-010` ipnet folds v4-mapped `::ffff:0:0/96` to a v4 `Address` (new `unmap`). |
+| M22.12 | network / resource / path robustness | `OM-004` memcache/mikrotik/amqp 64 MiB cap on server-declared lengths; `OM-005` mikrotik connect+read timeouts + cleartext-default warning; `OM-017` memcache/label connect timeouts; `OF-005` net.readAll defaults to a 256 MiB cap (negative = unlimited); `OF-009` net.startTLS snapshots state under `s.mu` + holds `s.readMu` across the handshake; `OF-007` bounded handle registries (sql/fs/os/compress/net) + sql 30 s query/exec deadline + `sql.CloseAll` CLI teardown; `OF-013` archive per-entry size budget (no `uint64` wrap); `OF-004` httpd.serveDir rejects `\` + re-verifies containment; `OF-011` httpd chmods a `unix:` socket to 0660; `OF-012` documented the serveFile/serveDir symlink follow; `OF-010` sql redacts the DSN password from errors; `OF-014` json/toml/yaml write-API depth guard (bounds the tree at construction, covering encode / `%v` / `==` / `DeepCopy`); `OM-014` flatdb.save preserves the target's mode (0600 default) + removes the temp file on a failed rename. |
+| M22.13 | web framework | `OM-008` web.sessionId trusts only a minted-UUID-shaped cookie (re-mints otherwise) + new `web.renewSession`; `OM-009` new `web.onError` hook, else a swallowed handler error goes to stderr; `OM-013` web.form/percentDecode decode leniently + csrfCheck gates the form fallback on content type; `OM-019` a `HEAD` request is served by the matching `GET` route; `OF-017` httpd stops its two per-request timers (`NewTimer` + `defer Stop`). |
 
-### M22.12 - network, resource & path robustness
+**Reasoned non-literal choices** (the fix chosen over the literal one, with why):
 
-**Planned.** Timeouts, unbounded reads, handle leaks, a data race, and path safety.
-
-| id | area | fix |
-| --- | --- | --- |
-| `OM-004` | `memcache` / `mikrotik` / `amqp` | add the `MAX_*_BYTES` pre-check on a server-declared length (six sibling clients already do); a hostile peer declaring ~4 GiB is an uncatchable OOM |
-| `OM-005` | `mikrotik` | thread a connect timeout + per-read `setDeadline`; flag the plaintext default (it ships admin credentials in the clear) or make TLS the default |
-| `OM-017` | `memcache` / `label` | connect timeouts (every other client passes one) |
-| `OF-005` | `net` | default `readAll` to a finite cap (256 MiB, matching the siblings), explicit sentinel for unlimited; align the doc with the negative-value behaviour |
-| `OF-009` | `net` | `startTLS` must snapshot `r` / `c` / `deadline` under `s.mu` and hold `s.readMu` across the handshake (a race, and a parked reader that would consume raw TLS bytes as plaintext) |
-| `OF-007` | `sql` / `os` / `net` / `fs` / `compress` / `httpd` | bound each handle registry the way `term` does; `Query`/`ExecContext` with a deadline in `sql` (a leaked `*sql.Rows` pins a pool connection, then blocks forever); a teardown sweep at CLI exit |
-| `OF-013` | `archive` | compare each declared entry size against the remaining budget (summed `UncompressedSize64` can wrap past 2^64 and skip the cheap pre-check) |
-| `OF-004` | `httpd` | `serveDir`: reject a `\` in the request path and re-verify containment after the join (Windows-only traversal) |
-| `OF-011` | `httpd` | `chmod 0660` a `unix:` socket after listen (a permissive umask publishes it world-connectable) |
-| `OF-012` | `httpd` | document the symlink-follow in `serveFile` / `serveDir` (optionally close it via `os.Root`) |
-| `OF-010` | `sql` | redact the DSN password before wrapping `open` / `Ping` errors |
-| `OF-014` | `json` / `value` / toml / yaml / xml writers | thread `MaxNestingDepth` into the **outbound** paths (`encode` / `Display` / `==` / `DeepCopy`) - a `json.set`-grown tree is an uncatchable stack overflow; also the shared-subtree encode-size amplification |
-| `OM-014` | `flatdb` | `stat` the target and preserve its mode on `save` (don't silently widen to `0644`, default `0600` for a new file); clean up the temp file on a failed rename |
-
-### M22.13 - web framework hardening
-
-**Planned.** `web`-centric availability, session, and operability findings.
-
-| id | fix |
-| --- | --- |
-| `OM-003` (HIGH) | run each accepted request in a bounded `spawn` pool (`httpd`'s `maxInFlight` is the natural ceiling) - `web` is serial today, so one slow handler stalls every other request; state it loudly if serial is a deliberate v1 choice |
-| `OM-008` | validate the incoming session cookie against the minted UUID shape and re-mint on mismatch; add `web.renewSession` (session-fixation defence); this is the delivery vector for `OM-001` |
-| `OM-009` | an optional `web.onError(app, handlerName)`; when unset, write the swallowed handler error's kind / message / position to stderr rather than dropping it entirely |
-| `OM-013` | decode `web.form` / `percentDecode` leniently (a non-UTF-8 urlencoded body is legal and currently 500s); have `csrfCheck` skip the form fallback for a non-urlencoded content type |
-| `OM-019` | answer `HEAD` for a route registered with `web.get`, body suppressed (HTTP requires it; health checks / caches use it) |
-| `OF-006` | `meta.call` / `callMain` docs: an explicit "match against a program-defined allowlist first" warning + a registration-based dispatch surface so the safe path is the easy one |
-| `OF-017` | stop `httpd`'s two per-request timers (`NewTimer` + `defer Stop`, or one shared `context.WithTimeout`) - GC pressure at high rps |
+- **`OM-003`** (web serial handling, HIGH) - kept **serial** for v1 and documented
+  loudly, not a `spawn` pool: dispatch runs through `meta.callMain` into the entry
+  program, which shares one root `Environment` (the `callDepth` counter and
+  globals), so concurrent handlers would race on interpreter state. Per-handler
+  concurrency needs interpreter-level work first.
+- **`OF-006`** (unrestricted `meta.call`, a design note) - shipped the prominent
+  "match untrusted input against a program-defined allowlist first" warning + a
+  worked example in `meta.md`, not a new registration primitive (a two-line `.j`
+  allowlist already makes the safe path easy; `web` only dispatches
+  author-registered route-handler names, never request data).
+- **`OM-012`** took the tengine SECURITY warning, not an auto-escape mode (keeps
+  the advertised `text/template` semantics); **`OF-003`** the inline `\u00xx`
+  escape, not a separate `strings.escapeHtml`.
+- **`OM-010`** folds only the well-defined `::ffff:0:0/96` mapped form; the
+  deprecated IPv4-compatible `::a.b.c.d` is left as v6 (ambiguous with `::1`).
+- **`OF-007`** applied the full bounds + deadline + teardown to `sql` (the worst
+  instance) and registry bounds to `fs` / `os` / `compress` / `net`; httpd requests
+  already self-unregister and its listeners are OS-fd-bounded. `OF-013` stays
+  defence in depth (the extraction-time `readCapped` budget is authoritative).
 
 ---
 

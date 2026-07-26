@@ -132,3 +132,21 @@ func saveAsEmpty() {
 func testSaveAsEmptyPathThrows() {
     testing.assertThrows("saveAsEmpty", "flatdb");
 }
+
+# OM-014: save must not silently widen a tightened store's permissions, and a
+# brand-new file defaults to 0600 (not fs.writeString's 0644).
+func testSavePreservesMode() {
+    def path as string init os.tempDir() + "/flatdb_mode_scratch.json";
+    def db as DB init open($path);
+    $db = set($db, "/k", json.decode("1"));
+    save($db);                                  # first write of a new file
+    def st1 as fs.Stat init fs.stat($path);
+    testing.assertEqual($st1.mode, 0o600);
+    # A later save preserves the operator's chosen mode instead of resetting to 0644.
+    fs.chmod($path, 0o640);
+    $db = set($db, "/k", json.decode("2"));
+    save($db);
+    def st2 as fs.Stat init fs.stat($path);
+    testing.assertEqual($st2.mode, 0o640);
+    fs.remove($path);
+}

@@ -70,6 +70,15 @@ Encode errors (positioned at the call): a `map` with a non-string key, a
 `task` value, or a non-finite `float` (`NaN` / infinity have no JSON
 image).
 
+**HTML-safe strings.** In string values the characters `<`, `>`, and `&`, and
+the line / paragraph separators U+2028 / U+2029, are escaped as `\u003c`,
+`\u003e`, `\u0026`, `\u2028`, and `\u2029` (matching Go's default
+`SetEscapeHTML(true)`). This keeps encoded JSON safe to embed directly in an
+HTML `<script>` block or a JSONP response - a value of `</script>` cannot break
+out of the element, and the two separators cannot terminate a JavaScript string
+literal. The output is still valid JSON and decodes back to the exact same
+string, so a decode / encode round-trip is unaffected.
+
 ```jennifer
 use io;
 use json;

@@ -14,7 +14,11 @@
  * not parallel modules. The query builder is functional (like the `json` write
  * surface): `orm.where(orm.from($schema), "age", ">", "18")` returns a fresh
  * `orm.Query`, rendered to **parameterized** SQL by `orm.toSql`. Values bind
- * only through placeholders (injection safety inherited from `sql`).
+ * only through placeholders (injection safety inherited from `sql`); the tokens
+ * that cannot be parameterized - table / column identifiers and comparison
+ * operators - are validated at build time (identifiers must be bare SQL names,
+ * operators must be from a fixed allowlist), so caller-supplied `col` / `op` /
+ * order / join / table strings cannot inject SQL either.
  *
  * A record - both the input to `insert` / `update` and the result of `find` /
  * `all` - is a `map of string to string` keyed by column name (the row form that
@@ -117,6 +121,64 @@ func checkDialect(dialect as string) {
     }
 }
 
+func fail(message as string) {
+    throw Error{kind: "orm", message: "orm: " + $message, file: "", line: 0, col: 0};
+}
+
+# validIdentSegment reports whether s is one bare SQL identifier: a letter or `_`
+# followed by letters, digits, or `_`. ASCII only (identifiers are).
+func validIdentSegment(s as string) {
+    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    if (len($raw) == 0) {
+        return false;
+    }
+    def i as int init 0;
+    while ($i < len($raw)) {
+        def b as int init $raw[$i];
+        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or $b == 95;
+        def digit as bool init $b >= 48 and $b <= 57;
+        if ($i == 0) {
+            if (not $alpha) {
+                return false;
+            }
+        } else {
+            if (not ($alpha or $digit)) {
+                return false;
+            }
+        }
+        $i = $i + 1;
+    }
+    return true;
+}
+
+# checkIdent validates a column / table identifier, optionally qualified as
+# `table.col`, and throws otherwise. Identifiers reach the SQL text
+# unparameterized - only `value`s bind through placeholders - so this is the
+# injection guard for every non-value token (OM-002).
+func checkIdent(name as string, what as string) {
+    def parts as list of string init strings.split($name, ".");
+    if (len($parts) < 1 or len($parts) > 2) {
+        fail($what + " must be a bare or `table.col` identifier, got: " + $name);
+    }
+    for (def p in $parts) {
+        if (not validIdentSegment($p)) {
+            fail($what + " must be a SQL identifier (letter/`_`, then letters/digits/`_`), got: " + $name);
+        }
+    }
+}
+
+# checkOp maps a comparison operator through an allowlist to its canonical form,
+# throwing on anything else - the operator is interpolated raw, so it must be a
+# known operator, not caller-controlled free text (OM-002). IN / IS are omitted
+# because they do not fit the module's single-bound-value-per-condition shape.
+func checkOp(op as string) {
+    def norm as string init strings.upper(strings.trim($op));
+    if ($norm == "=" or $norm == "!=" or $norm == "<>" or $norm == "<" or $norm == ">" or $norm == "<=" or $norm == ">=" or $norm == "LIKE" or $norm == "NOT LIKE") {
+        return $norm;
+    }
+    fail("operator not allowed: \"" + $op + "\" (use = != <> < > <= >= LIKE or \"NOT LIKE\")");
+}
+
 /**
  * Start a schema for a table with its primary-key column and dialect. Add
  * columns with `orm.column`.
@@ -128,6 +190,8 @@ func checkDialect(dialect as string) {
  */
 export func schema(table as string, primaryKey as string, dialect as string) {
     checkDialect($dialect);
+    checkIdent($table, "table name");
+    checkIdent($primaryKey, "primary-key column");
     return Schema{table: $table, columns: [], primaryKey: $primaryKey, dialect: $dialect};
 }
 
@@ -139,6 +203,7 @@ export func schema(table as string, primaryKey as string, dialect as string) {
  * @return {Schema} the extended schema
  */
 export func column(s as Schema, name as string, kind as string) {
+    checkIdent($name, "column name");
     def out as Schema init $s;
     def cols as list of Column init $out.columns;
     $cols[] = Column{name: $name, kind: $kind};
@@ -201,9 +266,10 @@ export func from(s as Schema) {
  * @return {Query} the extended query
  */
 export func where(q as Query, col as string, op as string, value as string) {
+    checkIdent($col, "column");
     def out as Query init $q;
     def ws as list of Condition init $out.wheres;
-    $ws[] = Condition{column: $col, op: $op};
+    $ws[] = Condition{column: $col, op: checkOp($op)};
     $out.wheres = $ws;
     def ps as list of string init $out.params;
     $ps[] = $value;
@@ -219,6 +285,7 @@ export func where(q as Query, col as string, op as string, value as string) {
  * @return {Query} the extended query
  */
 export func orderBy(q as Query, col as string, dir as string) {
+    checkIdent($col, "order-by column");
     def out as Query init $q;
     def os as list of string init $out.orders;
     def word as string init "ASC";
@@ -265,6 +332,9 @@ export func offset(q as Query, n as int) {
  * @return {Query} the extended query
  */
 export func join(q as Query, table as string, leftCol as string, rightCol as string) {
+    checkIdent($table, "join table");
+    checkIdent($leftCol, "join column");
+    checkIdent($rightCol, "join column");
     def out as Query init $q;
     def js as list of string init $out.joins;
     $js[] = "INNER JOIN " + $table + " ON " + $leftCol + " = " + $rightCol;

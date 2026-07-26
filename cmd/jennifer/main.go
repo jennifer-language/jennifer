@@ -14,6 +14,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	metalib "jennifer-lang.dev/jennifer/internal/lib/meta"
 	"jennifer-lang.dev/jennifer/internal/lib/os"
+	sqllib "jennifer-lang.dev/jennifer/internal/lib/sql"
 	termlib "jennifer-lang.dev/jennifer/internal/lib/term"
 	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -344,6 +345,11 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 	// `finally`, but the CLI has Go's defer: restore any raw-mode terminal on the
 	// way out.
 	defer termlib.RestoreAll()
+	// Likewise sweep any sql handle a script leaked (a connection / cursor /
+	// statement / open transaction) so the driver closes its pool connections and
+	// rolls back server-side transactions cleanly at exit rather than on an abrupt
+	// process teardown. No-op on jennifer-tiny (no sql).
+	defer sqllib.CloseAll()
 	// The defer above does not run when a terminating signal (SIGINT / SIGTERM /
 	// SIGHUP) takes its default disposition, since that kills the process without
 	// unwinding. installTermSignalRestore traps those: an *uncaught* one restores

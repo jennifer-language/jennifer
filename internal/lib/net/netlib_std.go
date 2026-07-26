@@ -60,6 +60,12 @@ type udpState struct {
 	c stdnet.PacketConn
 }
 
+// maxNetHandles bounds each net registry (conns / listeners / udps) so a script
+// that leaks handles (dials / listens without a matching net.close) surfaces a
+// catchable error at a friendly limit rather than growing until it hits the OS
+// file-descriptor ceiling.
+const maxNetHandles = 4096
+
 var (
 	connsMu    sync.Mutex
 	conns      = map[int64]*connState{}
@@ -174,6 +180,11 @@ func connectFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	host, _, _ := stdnet.SplitHostPort(addr) // recorded so a later startTLS can reuse it
 	connsMu.Lock()
+	if len(conns) >= maxNetHandles {
+		connsMu.Unlock()
+		_ = c.Close()
+		return interpreter.Null(), fmt.Errorf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
+	}
 	nextConnID++
 	id := nextConnID
 	conns[id] = &connState{c: c, r: bufio.NewReader(c), host: host}
@@ -333,6 +344,11 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.connectTLS: %s: %v", addr, dialErr)
 	}
 	connsMu.Lock()
+	if len(conns) >= maxNetHandles {
+		connsMu.Unlock()
+		_ = c.Close()
+		return interpreter.Null(), fmt.Errorf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
+	}
 	nextConnID++
 	id := nextConnID
 	conns[id] = &connState{c: c, r: bufio.NewReader(c), host: host}
@@ -344,9 +360,13 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // bytes`: read from the connection until EOF and return the whole remaining
 // stream as one bytes, grown once in a Go loop (32 KiB chunks) instead of the
 // per-byte interpreted accumulation a `.j` read-to-EOF loop pays. This is the
-// throughput fix for whole-body reads (an HTTP / S3 object download). maxBytes
-// > 0 caps the result with a catchable error past it (like the module read
-// caps); <= 0 or omitted is unlimited. idleTimeoutMs > 0 re-arms a read
+// throughput fix for whole-body reads (an HTTP / S3 object download).
+//
+// maxBytes controls the ceiling: omitted or 0 uses the default 256 MiB cap
+// (matching net.readBytes / readN / recvFrom, so an attacker-shaped endless
+// stream is a catchable error, not an OOM of the recover-less interpreter); a
+// value > 0 sets an explicit cap; a *negative* value is the explicit "no limit"
+// sentinel for the rare trusted-peer case. idleTimeoutMs > 0 re-arms a read
 // deadline before each chunk (the same idle-timeout a `.j` loop gets from
 // net.setDeadline); a timeout is a distinct catchable error.
 func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -357,10 +377,20 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	maxBytes := int64(0)
+	// Default finite cap; omitted or 0 keeps it, >0 overrides it, <0 disables it
+	// (the explicit unlimited sentinel). readAll extracts the arg itself instead
+	// of via takeIntArg so a negative sentinel is accepted here only.
+	capped := true
+	maxBytes := int64(maxReadBytes)
 	if len(args) >= 2 {
-		if maxBytes, err = takeIntArg("net.readAll", args, 1, "maxBytes"); err != nil {
-			return interpreter.Null(), err
+		if args[1].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("net.readAll: maxBytes must be int, got %s", args[1].Kind)
+		}
+		switch m := args[1].Int; {
+		case m > 0:
+			maxBytes = m
+		case m < 0:
+			capped = false
 		}
 	}
 	idleMs := int64(0)
@@ -405,7 +435,7 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		nread, rerr := r.Read(tmp)
 		if nread > 0 {
-			if maxBytes > 0 && int64(len(out))+int64(nread) > maxBytes {
+			if capped && int64(len(out))+int64(nread) > maxBytes {
 				return interpreter.Null(), fmt.Errorf("net.readAll: stream exceeds the %d-byte limit", maxBytes)
 			}
 			out = append(out, tmp[:nread]...)
@@ -547,17 +577,31 @@ func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// Hold readMu across the whole handshake-and-swap so no blocking read is in
+	// flight while the transport is upgraded: a reader parked in net.readBytes
+	// keeps its snapshot of the pre-upgrade *bufio.Reader and would consume raw
+	// TLS record bytes as if they were plaintext after the swap. Snapshot the
+	// mutable fields under s.mu rather than reading them unlocked - a concurrent
+	// net.setDeadline writes s.deadline under mu, so an unlocked read races it.
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	s.mu.Lock()
+	r := s.r
+	c := s.c
+	deadline := s.deadline
+	s.mu.Unlock()
+
 	// Hand the handshake the buffered reader + raw conn so no read-ahead
 	// plaintext is lost, then swap the registry entry to the TLS conn. A
 	// timeout arms a handshake deadline on the underlying conn (a stalled peer
 	// otherwise hangs the upgrade), restored to the user's own deadline after.
-	tlsConn := tls.Client(&bufferedConn{r: s.r, Conn: s.c}, cfg)
+	tlsConn := tls.Client(&bufferedConn{r: r, Conn: c}, cfg)
 	if timeout > 0 {
-		_ = s.c.SetDeadline(time.Now().Add(timeout))
+		_ = c.SetDeadline(time.Now().Add(timeout))
 	}
 	hErr := tlsConn.Handshake()
 	if timeout > 0 {
-		_ = s.c.SetDeadline(s.deadline)
+		_ = c.SetDeadline(deadline)
 	}
 	if hErr != nil {
 		return interpreter.Null(), fmt.Errorf("net.startTLS: %v", hErr)
@@ -583,6 +627,11 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.listen: %s: %v", addr, lErr)
 	}
 	listenersMu.Lock()
+	if len(listeners) >= maxNetHandles {
+		listenersMu.Unlock()
+		_ = l.Close()
+		return interpreter.Null(), fmt.Errorf("net.listen: too many open listeners (limit %d); each needs a matching net.close", maxNetHandles)
+	}
 	nextListenerID++
 	id := nextListenerID
 	listeners[id] = &listenerState{l: l}
@@ -607,6 +656,11 @@ func acceptFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.accept: %v", aErr)
 	}
 	connsMu.Lock()
+	if len(conns) >= maxNetHandles {
+		connsMu.Unlock()
+		_ = c.Close()
+		return interpreter.Null(), fmt.Errorf("net.accept: too many open connections (limit %d); each accepted conn needs a matching net.close", maxNetHandles)
+	}
 	nextConnID++
 	newID := nextConnID
 	conns[newID] = &connState{c: c, r: bufio.NewReader(c)}
@@ -904,6 +958,11 @@ func listenUDPFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.listenUDP: %s: %v", addr, lErr)
 	}
 	udpsMu.Lock()
+	if len(udps) >= maxNetHandles {
+		udpsMu.Unlock()
+		_ = c.Close()
+		return interpreter.Null(), fmt.Errorf("net.listenUDP: too many open UDP sockets (limit %d); each needs a matching net.close", maxNetHandles)
+	}
 	nextUDPID++
 	id := nextUDPID
 	udps[id] = &udpState{c: c}

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,6 +281,30 @@ func TestRespondRejectsBadStatus(t *testing.T) {
 	}
 	if _, err := respondFn(noCtx, []Value{req, interpreter.IntVal(1000), interpreter.StringVal("x")}); err == nil {
 		t.Error("expected error for status 1000")
+	}
+}
+
+// TestServeDirRejectsBackslash verifies OF-004: a request path carrying a
+// backslash (a Windows separator that path.Clean's slash-only cleaning leaves
+// intact but filepath.Join would resolve above root) is answered 400, not served.
+func TestServeDirRejectsBackslash(t *testing.T) {
+	rs := &reqState{
+		done:   make(chan struct{}),
+		status: 200,
+		r:      &http.Request{URL: &url.URL{Path: `/..\..\secret.txt`}},
+	}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	req := makeRequest(id)
+	if _, err := serveDirFn(noCtx, []Value{req, interpreter.StringVal("/tmp/root")}); err != nil {
+		t.Fatalf("serveDir returned an error instead of a 400 answer: %v", err)
+	}
+	<-rs.done
+	if rs.status != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (400)", rs.status, http.StatusBadRequest)
+	}
+	if rs.useServeFile {
+		t.Error("a backslash path must not reach ServeFile")
 	}
 }
 

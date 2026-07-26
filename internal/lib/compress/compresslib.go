@@ -62,6 +62,11 @@ type compStream struct {
 // streams holds live streaming state keyed by integer handle; finalize removes
 // the entry so a later call errors. Mirrors hash's registry; a mutex guards it
 // so two spawned tasks opening streams don't corrupt the map.
+// maxStreams bounds the live stream registry so a script that leaks streams
+// (opens without a matching finalize / discard) surfaces a catchable error
+// instead of growing the in-memory registry without limit.
+const maxStreams = 4096
+
 var (
 	streamsMu sync.Mutex
 	streams   = map[int64]*compStream{}
@@ -220,6 +225,10 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), fmt.Errorf("compress.stream: %v", err)
 	}
 	streamsMu.Lock()
+	if len(streams) >= maxStreams {
+		streamsMu.Unlock()
+		return interpreter.Null(), fmt.Errorf("compress.stream: too many open streams (limit %d); each needs a matching compress.finalize or discard", maxStreams)
+	}
 	nextID++
 	id := nextID
 	streams[id] = &compStream{w: w, buf: &buf}

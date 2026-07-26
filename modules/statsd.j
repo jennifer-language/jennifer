@@ -57,8 +57,37 @@ func formatLine(prefix as string, name as string, value as string, kind as strin
     return metricName($prefix, $name) + ":" + $value + "|" + $kind;
 }
 
+# checkMetric rejects a name or value that would forge extra metrics. StatsD
+# packs several metrics in one datagram separated by "\n", and ":" / "|" are the
+# field separators, so a metric name outside [A-Za-z0-9._-] or a value carrying
+# ":" "|" "\n" "\r" injects fabricated counters / gauges (OM-007). Both are the
+# obvious place a program puts request data (`"http.ua." + $userAgent`).
+func checkMetric(name as string, value as string) {
+    def nb as bytes init convert.bytesFromString($name, "utf-8");
+    def i as int init 0;
+    while ($i < len($nb)) {
+        def b as int init $nb[$i];
+        def ok as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or ($b >= 48 and $b <= 57) or $b == 46 or $b == 95 or $b == 45;
+        if (not $ok) {
+            throw Error{kind: "statsd", message: "metric name has an illegal character (allowed: letters, digits, and . _ -)", file: "", line: 0, col: 0};
+        }
+        $i = $i + 1;
+    }
+    def vb as bytes init convert.bytesFromString($value, "utf-8");
+    def j as int init 0;
+    while ($j < len($vb)) {
+        def c as int init $vb[$j];
+        if ($c == 58 or $c == 124 or $c == 10 or $c == 13) {
+            throw Error{kind: "statsd", message: "metric value must not contain ':', '|', or a newline", file: "", line: 0, col: 0};
+        }
+        $j = $j + 1;
+    }
+    return;
+}
+
 # emit sends one metric datagram to the client's agent (fire-and-forget).
 func emit(c as Client, name as string, value as string, kind as string) {
+    checkMetric($name, $value);
     def line as string init formatLine($c.prefix, $name, $value, $kind);
     net.sendTo($c.socket, $c.address, convert.bytesFromString($line, "utf-8"));
 }

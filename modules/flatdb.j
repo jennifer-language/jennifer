@@ -174,7 +174,29 @@ func writeAtomic(path as string, data as json.Value) {
     def text as string init json.encode($data);
     def tmp as string init $path + ".tmp." + uuid.v4();
     fs.writeString($tmp, $text);
-    fs.rename($tmp, $path);
+    # Preserve the target's existing permissions before the rename replaces it:
+    # fs.writeString creates the temp at 0644, so a store the operator tightened
+    # to 0600 (tokens, credentials, user records) must not silently come back
+    # world-readable. A new file defaults to 0600, not 0644 (OM-014).
+    def mode as int init 0o600;
+    if (fs.exists($path) and fs.isFile($path)) {
+        def st as fs.Stat init fs.stat($path);
+        $mode = $st.mode;
+    }
+    fs.chmod($tmp, $mode);
+    # If the rename fails (cross-device, permissions, full disk), remove the temp
+    # so a complete readable copy of the document is not left behind under a stray
+    # name; then re-raise the original failure.
+    try {
+        fs.rename($tmp, $path);
+    } catch (err) {
+        try {
+            fs.remove($tmp);
+        } catch (rmErr) {
+            # best-effort cleanup; the rename failure below is what matters
+        }
+        throw $err;
+    }
 }
 
 /**

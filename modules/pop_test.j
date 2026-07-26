@@ -72,3 +72,8 @@ func testResponseCapAllowsAtLimit() {
     capResponse(MAX_RESPONSE_BYTES);
     testing.assertTrue(true);
 }
+
+func injectPop() { rejectControl("USER a\r\nPASS x", "USER"); }
+func testPopInjectionBlocked() {   # OM-006
+    testing.assertThrows("injectPop", "pop");
+}

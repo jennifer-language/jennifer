@@ -188,10 +188,23 @@ func parseUrl(url as string) {
     }
     def authority as string init $rest;
     def path as string init "/";
+    # The authority ends at the first `/` or `?`. A query-only URL
+    # (`http://host?q=1`, no path) is legal - the `?...` is the request target,
+    # not part of the host, so cut on `?` too or it dials `host?q=1:80` (OM-020).
     def slash as int init strings.indexOf($rest, "/");
-    if ($slash >= 0) {
-        $authority = strings.substring($rest, 0, $slash);
-        $path = strings.substring($rest, $slash, len($rest));
+    def query as int init strings.indexOf($rest, "?");
+    def cut as int init $slash;
+    if ($query >= 0 and ($cut < 0 or $query < $cut)) {
+        $cut = $query;
+    }
+    if ($cut >= 0) {
+        $authority = strings.substring($rest, 0, $cut);
+        def target as string init strings.substring($rest, $cut, len($rest));
+        if (strings.startsWith($target, "?")) {
+            $path = "/" + $target;
+        } else {
+            $path = $target;
+        }
     }
     # Strip userinfo (user[:pass]@) at the LAST '@' - a password may contain '@'.
     def at as int init lastAt($authority);

@@ -18,6 +18,7 @@
 use fs;
 use strings;
 use os;
+use convert;
 
 # --- value parsing (private) ------------------------------------------------
 
@@ -145,9 +146,39 @@ export func read(path as string) {
  * @return {map of string to string} the variables that were set
  * @throws {Error} on a filesystem error, or an invalid variable name
  */
+# validEnvName reports whether name is a POSIX-shaped environment variable name:
+# a letter or `_`, then letters, digits, or `_`. A malformed key reaching
+# os.setEnv could set the process environment in surprising ways (OM-021).
+func validEnvName(name as string) {
+    def raw as bytes init convert.bytesFromString($name, "utf-8");
+    if (len($raw) == 0) {
+        return false;
+    }
+    def i as int init 0;
+    while ($i < len($raw)) {
+        def b as int init $raw[$i];
+        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or $b == 95;
+        def digit as bool init $b >= 48 and $b <= 57;
+        if ($i == 0) {
+            if (not $alpha) {
+                return false;
+            }
+        } else {
+            if (not ($alpha or $digit)) {
+                return false;
+            }
+        }
+        $i = $i + 1;
+    }
+    return true;
+}
+
 export func load(path as string) {
     def vars as map of string to string init read($path);
     for (def key in $vars) {
+        if (not validEnvName($key)) {
+            throw Error{kind: "dotenv", message: "dotenv.load: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " + $key, file: "", line: 0, col: 0};
+        }
         os.setEnv($key, $vars[$key]);
     }
     return $vars;

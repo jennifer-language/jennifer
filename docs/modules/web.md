@@ -11,6 +11,33 @@ loop.
 Needs the default `jennifer` binary (the `httpd` engine is net-backed; the
 constrained `jennifer-tiny` has no network stack).
 
+## Concurrency: requests are handled serially
+
+The serve loop processes requests **one at a time**: it accepts a request, runs
+its handler to completion, then accepts the next. There is no per-request
+concurrency. A handler that blocks - a `sql` query, an outbound `http` / `rest`
+call, `memcache`, a slow file read - stalls **every** other request for its whole
+duration, so a single slow endpoint (or one slow client) can deny service to
+everyone, no malformed input required.
+
+This is a deliberate v1 constraint, not an oversight. Dispatch runs on the
+tree-walking interpreter through `meta.callMain` into the entry program, and that
+call machinery is single-threaded; running handlers concurrently (an internal
+`spawn` worker pool) would race on shared interpreter state. Per-handler
+concurrency is planned but needs interpreter-level work first.
+
+Until then:
+
+- **Keep handlers fast and non-blocking.** Do the minimum in the request path.
+- **Offload slow, response-independent work** (sending mail, writing an audit
+  log) to a `spawn` the handler does not wait on.
+- **Scale out with processes.** Run several `web` server processes behind a load
+  balancer / reverse proxy for real parallelism, the same way you would scale any
+  single-threaded worker.
+
+If your workload is I/O-heavy and latency-sensitive, size for this: measure your
+slowest handler and treat it as the serving floor.
+
 ## Handlers
 
 A handler is a top-level method taking a `web.Context`:
@@ -86,6 +113,16 @@ imports `session` / `memcache`). That keeps a `web` app that uses no sessions at
 | Call | Returns | |
 | ---- | ------- | - |
 | `web.sessionId($ctx, cookieName)` | `string` | The request's session id, minting a new UUID + `HttpOnly` / `SameSite=Lax` / path-`/` cookie on first use. |
+| `web.renewSession($ctx, cookieName)` | `string` | Rotate the id: mint a fresh UUID and set it as the cookie, returning the new id. |
+
+`sessionId` only accepts an incoming cookie that matches the UUID shape it mints;
+a malformed or non-UUID value is discarded and a fresh id issued. That check
+stops an attacker from smuggling metacharacters through the id into a store keyed
+by it, but it does **not** by itself stop session **fixation** - a well-formed
+UUID an attacker plants (via a sibling subdomain or a stray XSS) still passes.
+The fixation defence is to **rotate** the id: after any privilege change - a
+successful login, a logout, a role change - call `web.renewSession` and move your
+session data to the returned id.
 
 Call `web.sessionId` once per request and pair the id with your own store - for
 multi-process serving the [`session`](session.md) module over
@@ -118,6 +155,11 @@ threading it through:
 | `web.route($app, method, pattern, handler)` | The general form. |
 | `web.before($app, handler)` | Add a middleware (runs before each route handler). |
 | `web.notFound($app, handler)` | A custom handler for unmatched requests (default: a plain 404). |
+| `web.onError($app, handler)` | An error handler for a throwing route / middleware (default: log to stderr). |
+
+A `HEAD` request is served by the matching **`GET`** route automatically (HTTP
+requires it, and health checks / caches rely on it); the response body is
+suppressed by the server, so the handler needs no special-casing.
 
 Patterns are `/`-separated. A segment beginning with `:` captures a single
 parameter: `/users/:id/posts/:pid` matches `/users/7/posts/9` and captures `id`
@@ -155,6 +197,35 @@ $app = web.before($app, "requireKey");
 
 Every request is answered exactly once: if a handler throws or forgets to
 respond, the framework sends a `500` so the connection never hangs.
+
+## Error handling
+
+When a handler or middleware throws, `web` contains the error (so one bad request
+never stops the accept loop) and answers `500`. The error is **not** dropped: by
+default its kind / message / position is written to **stderr**. Register an error
+handler to route it somewhere else (a log file, an alerting service):
+
+```jennifer
+func logError(err as Error) {
+    io.eprintf("request failed: %s: %s (%s:%d)\n", $err.kind, $err.message, $err.file, $err.line);
+}
+$app = web.onError($app, "logError");
+```
+
+The handler receives the thrown value (the `Error` struct by convention) and runs
+after the `500` is already committed, so it is for observability, not for changing
+the response. An error thrown by the error handler itself is caught and logged,
+never re-raised.
+
+## Reading form bodies
+
+`web.form($ctx)` parses an `application/x-www-form-urlencoded` body into a map,
+and `web.formValue($ctx, name)` reads one field. Both decode **leniently**: a
+`%FF` escape or a latin-1 / binary field (legal urlencoded input) maps byte for
+byte rather than throwing, so a non-UTF-8 body is usable instead of a `500`.
+`web.csrfCheck` only falls back to the `csrf` form field for an actual
+urlencoded body - a JSON or multipart request is left to the `X-CSRF-Token`
+header.
 
 ## Authentication
 

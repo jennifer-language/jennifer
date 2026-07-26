@@ -41,6 +41,10 @@ The DSN format is the driver's:
 - Postgres: `"postgres://user:pw@host:5432/dbname"` (`?sslmode=disable` for a
   plaintext local server)
 
+A failed `open` / ping error has its DSN password **redacted** before it is
+raised, so a credential does not leak into an `Error.message`, a log, or an HTTP
+500 body.
+
 ## Query and exec
 
 `query` / `exec` take a **Connection or a Tx** as the first argument, the SQL
@@ -53,6 +57,15 @@ next, then the placeholder values.
 
 Parameters bind by type: `int` / `float` / `string` / `bool` / `bytes` / `null`.
 A struct is a positioned error - build the value first.
+
+Every `query` / `exec` (and the prepared-statement variants) runs under a **30 s
+deadline** that also bounds the pool-connection acquisition it may block on, so a
+leaked cursor pinning a pool connection cannot make a later call block forever.
+The deadline governs the returned cursor too, so read a large result promptly (or
+in batches). Each handle registry (connections, cursors, statements,
+transactions) is bounded, so a handle leaked in a loop surfaces a catchable
+"too many open" error rather than growing without limit; always pair `open` /
+`query` / `prepare` / `begin` with their close verb (a `defer` is the idiom).
 
 A **single `list` argument is spread** into the parameter sequence:
 `sql.exec($conn, $sql, $params)` binds each element of `$params` in turn, so a

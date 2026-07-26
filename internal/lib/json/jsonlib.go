@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // LibraryName is the namespace prefix (`json.`) and the `use` name.
@@ -93,6 +94,13 @@ func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) 
 
 // encodeValue writes v's JSON image to sb. depth drives the pretty indent.
 func encodeValue(sb *strings.Builder, v interpreter.Value, pretty bool, depth int) error {
+	// The decoder caps nesting at MaxNestingDepth, but the json.set / insert /
+	// append write API can grow a json.Value tree past it; without this the
+	// symmetric encode recursion (one Go frame per level) is an uncatchable stack
+	// overflow. Bound it here so encode / encodePretty / %v raise a catchable error.
+	if depth > limits.MaxNestingDepth {
+		return fmt.Errorf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
+	}
 	switch v.Kind {
 	case interpreter.KindNull:
 		sb.WriteString("null")
@@ -198,7 +206,12 @@ func newlineIndent(sb *strings.Builder, pretty bool, depth int) {
 
 // encodeString writes s as a quoted, escaped JSON string. Input is valid
 // UTF-8 (a Go string) and emitted as-is except for the mandatory escapes and
-// control characters below U+0020.
+// control characters below U+0020, plus HTML-sensitive characters (`<` `>` `&`
+// U+2028 U+2029) which are escaped to their `\u00xx` form. That last set matches
+// Go's encoding/json default (SetEscapeHTML(true)): JSON is routinely embedded in
+// an HTML `<script>` block or an attribute, and an unescaped `</script>` or line
+// separator would break out. The escapes stay valid JSON and decode to the
+// identical string, so a round-trip through json.decode is unchanged.
 func encodeString(sb *strings.Builder, s string) {
 	sb.WriteByte('"')
 	for _, r := range s {
@@ -217,6 +230,16 @@ func encodeString(sb *strings.Builder, s string) {
 			sb.WriteString(`\b`)
 		case '\f':
 			sb.WriteString(`\f`)
+		case '<':
+			sb.WriteString(`\u003c`)
+		case '>':
+			sb.WriteString(`\u003e`)
+		case '&':
+			sb.WriteString(`\u0026`)
+		case '\u2028':
+			sb.WriteString(`\u2028`)
+		case '\u2029':
+			sb.WriteString(`\u2029`)
 		default:
 			if r < 0x20 {
 				fmt.Fprintf(sb, `\u%04x`, r)

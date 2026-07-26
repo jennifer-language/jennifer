@@ -54,6 +54,7 @@ variable, then pass it). Attributes are a `list of Attr` built with `attr`.
 | `html.render(node)`                 | `string` | Serialize a node and its subtree to HTML5.                        |
 | `html.renderAll(nodes)`             | `string` | Serialize a `list of Node` fragment in order.                     |
 | `html.escape(s)`                    | `string` | HTML-escape a bare string for text context (the helper `render` uses). |
+| `html.safeUrl(url)`                 | `string` | The URL if its scheme is `http` / `https` / `mailto`, else `"#"` (anti-XSS `href`/`src` gate). |
 
 ## Escaping
 
@@ -77,6 +78,28 @@ io.printf("%s\n", html.render(html.element("span", $a, [])));
 
 `html.escape(s)` exposes the text-context escaper on its own, for when you
 need an escaped string without building a node.
+
+## Safe tag / attribute names
+
+`html.element` and `html.attr` validate the tag / attribute name against
+`[A-Za-z][A-Za-z0-9-]*` and throw an `Error` of kind `"htmlwriter"` on anything
+else. A name is markup structure, not data, so unlike a value it cannot be
+escaped: `html.attr("x onclick=alert(1)", "y")` or a tag built from an untrusted
+string would otherwise inject a live attribute or element. Legal names
+(`"data-id"`, `"h1"`, `"aria-label"`) build as before; a name carrying a space,
+`>`, `=`, `/`, or a quote is rejected at construction.
+
+## Safe URLs in links
+
+`html.safeUrl(url)` returns the URL when its scheme is `http`, `https`, or
+`mailto`, and `"#"` otherwise, so a `javascript:` (or `data:`) URL built from
+untrusted input cannot become a live `href` / `src`. Whitespace and control
+characters are ignored while reading the scheme, so `"java\tscript:..."` is
+still caught; a relative reference (no scheme) is returned unchanged.
+
+```jennifer
+$a[] = html.attr("href", html.safeUrl($userUrl));   # "#" if $userUrl is javascript:...
+```
 
 ## Void elements
 

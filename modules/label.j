@@ -36,6 +36,11 @@ use net;
 def const DEFAULT_BARCODE_HEIGHT as float init 15.0;
 def const DEFAULT_MODULE_SIZE as float init 1.0;
 
+# Network timeout (ms) for `send`, so an unreachable or wedged printer fails the
+# print instead of hanging the calling program forever (matching every other
+# network client in the tree). Bounds both the dial and the write.
+def const CONNECT_TIMEOUT_MS as int init 30000;
+
 # --- types ------------------------------------------------------------------
 
 /**
@@ -388,8 +393,9 @@ include "label_cab.j";
  * @throws {Error} on a network failure (a positioned `net` error)
  */
 export func send(host as string, port as int, rendered as string) {
-    def conn as net.Conn init net.connect($host + ":" + convert.toString($port));
+    def conn as net.Conn init net.connect($host + ":" + convert.toString($port), CONNECT_TIMEOUT_MS);
     defer net.close($conn);              # closed even when the write throws
+    net.setDeadline($conn, CONNECT_TIMEOUT_MS);   # bound the write too
     net.writeBytes($conn, convert.bytesFromString($rendered, "utf-8"));
     return null;
 }

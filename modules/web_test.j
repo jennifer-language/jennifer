@@ -130,7 +130,7 @@ func testNotFoundSets() {
 # badRoute registers an undefined handler, which web.route must reject.
 func badRoute() {
     def app as App init new();
-    def bad as App init route($app, "GET", "/x", "definitelyNotDefined");
+    route($app, "GET", "/x", "definitelyNotDefined");   # must throw: handler not defined
 }
 
 func testRouteValidatesHandler() {
@@ -279,4 +279,49 @@ func testSecureCookiesOptOut() {
     # Restore (empty reads as unset, so Secure is back on).
     os.setEnv("JENNIFER_WEB_INSECURE_COOKIES", "");
     testing.assertTrue(secureCookies());
+}
+
+# --- M22.13 additions -------------------------------------------------------
+
+func hErr(err as Error) { return; }
+
+# OM-019: a HEAD request matches a route registered with GET.
+func testHeadFallsBackToGet() {
+    def app as App init new();
+    $app = get($app, "/home", "hHome");
+    def m as Match init matchRoute($app, "HEAD", "/home");
+    testing.assertTrue($m.found);
+    testing.assertEqual($m.handler, "hHome");
+    # A HEAD with no GET route still misses.
+    testing.assertFalse(matchRoute($app, "HEAD", "/nope").found);
+    # An explicit HEAD route still wins for HEAD (registered directly).
+    def app2 as App init route(new(), "HEAD", "/ping", "hHome");
+    testing.assertTrue(matchRoute($app2, "HEAD", "/ping").found);
+}
+
+# OM-009: web.onError sets the handler; an undefined handler is rejected.
+func testOnErrorRegisters() {
+    def app as App init onError(new(), "hErr");
+    testing.assertEqual($app.onError, "hErr");
+    def threw as bool init false;
+    try {
+        onError(new(), "hMissing");
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}
+
+# OM-013: a non-UTF-8 form value decodes leniently instead of throwing.
+func testDecodeLenient() {
+    def b as bytes;
+    $b[] = 0x61;      # 'a'
+    $b[] = 0xff;      # invalid as a UTF-8 lead byte
+    $b[] = 0x62;      # 'b'
+    def s as string init decodeLenient($b);
+    testing.assertEqual(len($s), 3);          # a, U+00FF, b (byte->rune)
+    # A valid UTF-8 sequence still decodes as UTF-8.
+    testing.assertEqual(decodeLenient(convert.bytesFromString("é", "utf-8")), "é");
+    # percentDecode of a %FF escape no longer throws.
+    testing.assertEqual(len(percentDecode("a%FFb")), 3);
 }

@@ -120,6 +120,12 @@ func TestPrintfFormatErrors(t *testing.T) {
 		{[]interpreter.Value{interpreter.StringVal("hi"), interpreter.IntVal(1)}, "too many arguments"},
 		{[]interpreter.Value{interpreter.StringVal("%")}, "dangling"},
 		{[]interpreter.Value{interpreter.StringVal("%q"), interpreter.IntVal(1)}, "unknown format verb"},
+		// OF-001: an out-of-bound pad / prec / max / group is a catchable error,
+		// not an unbounded strings.Repeat / FormatFloat that OOM-kills the process.
+		{[]interpreter.Value{interpreter.StringVal("%s|pad=100000000000"), interpreter.StringVal("x")}, "exceeds the maximum field value"},
+		{[]interpreter.Value{interpreter.StringVal("%f|prec=999999999"), interpreter.FloatVal(1.5)}, "exceeds the maximum field value"},
+		{[]interpreter.Value{interpreter.StringVal("%s|max=9000000000"), interpreter.StringVal("x")}, "exceeds the maximum field value"},
+		{[]interpreter.Value{interpreter.StringVal("%d|group=8000000|sep=,"), interpreter.IntVal(1)}, "exceeds the maximum field value"},
 	}
 	for _, c := range cases {
 		var buf bytes.Buffer

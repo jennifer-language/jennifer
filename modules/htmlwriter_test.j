@@ -88,3 +88,40 @@ func testPrivateRenderAttrs() {
     testing.assertEqual(renderAttrs($attrs), " id=\"main\" data=\"x&amp;y\"");
     testing.assertEqual(renderAttrs([]), "");
 }
+
+# --- OM-011: tag / attribute name validation + safeUrl -----------------------
+
+func injectAttrName() {
+    attr("x onclick=alert(1)", "y");
+}
+func injectTagName() {
+    element("a href=x", [], []);
+}
+func injectTagSpace() {
+    element("bad tag", [], []);
+}
+func testNameInjectionBlocked() {
+    testing.assertThrows("injectAttrName", "htmlwriter");
+    testing.assertThrows("injectTagName", "htmlwriter");
+    testing.assertThrows("injectTagSpace", "htmlwriter");
+    # Legal names still build: letters, a digit, a hyphen.
+    testing.assertEqual(attr("data-x2", "v").name, "data-x2");
+    testing.assertEqual(element("h1", [], []).tag, "h1");
+}
+
+func testSafeUrl() {
+    testing.assertEqual(safeUrl("https://example.com/a"), "https://example.com/a");
+    testing.assertEqual(safeUrl("http://x"), "http://x");
+    testing.assertEqual(safeUrl("mailto:a@b.c"), "mailto:a@b.c");
+    testing.assertEqual(safeUrl("/relative/path"), "/relative/path");
+    testing.assertEqual(safeUrl("page.html"), "page.html");
+    # Dangerous schemes fold to "#", including ones hidden behind whitespace.
+    testing.assertEqual(safeUrl("javascript:alert(1)"), "#");
+    testing.assertEqual(safeUrl("java\tscript:alert(1)"), "#");
+    testing.assertEqual(safeUrl("  javascript:alert(1)"), "#");
+    testing.assertEqual(safeUrl("data:text/html,<script>"), "#");
+    # A non-ASCII (multibyte) URL must not error - rune-indexed, returned unchanged
+    # for an allowed/relative reference.
+    testing.assertEqual(safeUrl("http://exämple.com/x"), "http://exämple.com/x");
+    testing.assertEqual(safeUrl("/café/menü"), "/café/menü");
+}

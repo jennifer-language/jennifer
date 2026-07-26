@@ -94,3 +94,14 @@ func testRoundTripShortStrOffset() {
     def b as string init readShortStr($buf, 1 + byteLen($a));
     testing.assertEqual($b, "rk");
 }
+
+# OM-004: a broker-declared frame size beyond the cap is rejected before it
+# sizes a read.
+func overFrameCap() { checkFrameSize(MAX_FRAME_BYTES + 1); }
+func negFrameCap() { checkFrameSize(-1); }
+func testFrameSizeCap() {
+    testing.assertThrows("overFrameCap", "amqp");
+    testing.assertThrows("negFrameCap", "amqp");
+    checkFrameSize(MAX_FRAME_BYTES);   # exactly at the limit does not throw
+    checkFrameSize(0);
+}

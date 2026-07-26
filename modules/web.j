@@ -12,6 +12,17 @@
  * request helpers hang off the `web.Context` so a handler rarely reaches for
  * `httpd` directly. Needs the default `jennifer` binary (the `httpd` engine is
  * net-backed; the constrained `jennifer-tiny` has no network stack).
+ *
+ * CONCURRENCY: the serve loop handles requests **one at a time** - it accepts a
+ * request, runs its handler to completion, then accepts the next. A handler that
+ * blocks (a `sql` query, an outbound `http` call, a slow filesystem read) stalls
+ * every other request for its duration, so one slow endpoint can deny service to
+ * all. This is a deliberate v1 constraint: dispatch runs on the tree-walking
+ * interpreter via `meta.callMain` into the entry program, whose call machinery is
+ * single-threaded, so running handlers concurrently (a `spawn` pool) would race
+ * on shared interpreter state. Until per-handler concurrency lands, keep handlers
+ * fast and non-blocking, offload slow work to a `spawn` that the handler does not
+ * wait on, or run several server processes behind a load balancer for parallelism.
  * @module web
  * @example
  * def app as web.App init web.new();
@@ -21,6 +32,7 @@
 
 use httpd;
 use meta;
+use io;
 use json;
 use lists;
 use maps;
@@ -56,12 +68,14 @@ export def struct Route {
  * @field middleware {list of string} handler names run before each route
  * @field notFound {string} the not-found handler name (empty = built-in 404)
  * @field cors {CorsOptions} the CORS policy applied by the serve loop (zero-value = off)
+ * @field onError {string} the error-handler name (empty = log to stderr); see web.onError
  */
 export def struct App {
     routes as list of Route,
     middleware as list of string,
     notFound as string,
-    cors as CorsOptions
+    cors as CorsOptions,
+    onError as string
 };
 
 /**
@@ -112,7 +126,7 @@ export func new() {
     def routes as list of Route init [];
     def mw as list of string init [];
     def noCors as CorsOptions;
-    return App{ routes: $routes, middleware: $mw, notFound: "", cors: $noCors };
+    return App{ routes: $routes, middleware: $mw, notFound: "", cors: $noCors, onError: "" };
 }
 
 /**
@@ -223,6 +237,29 @@ export func notFound(app as App, handler as string) {
     return $out;
 }
 
+/**
+ * Register an error handler by name, returning a new App. When a handler or
+ * middleware throws, `web` catches it (so one failing request never stops the
+ * server) and invokes this handler with the thrown value - typically the `Error`
+ * struct `{kind, message, file, line, col}` - so the failure can be logged or
+ * alerted on. Without an error handler, `web` writes the error to stderr instead
+ * of dropping it silently. The handler runs after the 500 response is already
+ * committed, so it cannot change the response; it is for observability. An error
+ * *from* the error handler is itself caught and logged, never re-raised.
+ * @param app {App} the router to extend
+ * @param handler {string} the name of the error-handler method
+ * @return {App} a new App with the error handler set
+ * @throws {Error} kind "web" when the handler method is not defined
+ */
+export func onError(app as App, handler as string) {
+    if (not meta.definedMain($handler)) {
+        throw Error{ kind: "web", message: "web.onError: handler not defined: " + $handler, file: "", line: 0, col: 0 };
+    }
+    def out as App init $app;
+    $out.onError = $handler;
+    return $out;
+}
+
 # --- request / response helpers (on a Context) ------------------------------
 
 /**
@@ -296,6 +333,19 @@ func hexNibble(b as int) {
 }
 
 # percentDecode decodes a URL-encoded component: `%XX` -> byte, `+` -> space.
+# decodeLenient turns request bytes into a string without throwing on invalid
+# UTF-8: a urlencoded value is a byte string and `%FF` / a latin-1 or binary
+# field is legal input a client can send. Valid UTF-8 decodes normally; anything
+# else falls back to a lossless byte->rune (iso-8859-1) mapping so the value is
+# usable rather than a swallowed 500 (OM-013).
+func decodeLenient(raw as bytes) {
+    try {
+        return convert.stringFromBytes($raw, "utf-8");
+    } catch (err) {
+        return encoding.decode($raw, "iso-8859-1");
+    }
+}
+
 func percentDecode(s as string) {
     def raw as bytes init convert.bytesFromString($s, "utf-8");
     def out as bytes;
@@ -320,7 +370,7 @@ func percentDecode(s as string) {
             $i = $i + 1;
         }
     }
-    return convert.stringFromBytes($out, "utf-8");
+    return decodeLenient($out);
 }
 
 # parseForm parses an `application/x-www-form-urlencoded` body into a map.
@@ -348,7 +398,7 @@ func parseForm(bodytext as string) {
  * @return {map of string to string} the form fields
  */
 export func form(ctx as Context) {
-    return parseForm(convert.stringFromBytes(httpd.body($ctx.req), "utf-8"));
+    return parseForm(decodeLenient(httpd.body($ctx.req)));
 }
 
 /**
@@ -636,10 +686,23 @@ export func setCookie(ctx as Context, name as string, value as string, opts as C
  */
 export func sessionId(ctx as Context, cookieName as string) {
     def id as string init cookie($ctx, $cookieName);
-    if (len($id) > 0) {
+    # Only accept a cookie that matches the shape this module mints (a UUID). A
+    # malformed or non-UUID value is discarded and a fresh id minted - this blocks
+    # smuggling metacharacters through the id into a downstream store keyed by it
+    # (e.g. the `session`-over-`memcache` command line). It does NOT on its own
+    # prevent session fixation: a well-formed UUID an attacker plants still passes
+    # this check, so rotate the id with `web.renewSession` after any privilege
+    # change (login) - that is the fixation defence.
+    if (len($id) > 0 and uuid.isValid($id)) {
         return $id;
     }
-    $id = uuid.v4();
+    return mintSession($ctx, $cookieName);
+}
+
+# mintSession generates a fresh UUID session id, sets it as the session cookie
+# (Secure / HttpOnly / SameSite=Lax, path /), and returns it.
+func mintSession(ctx as Context, cookieName as string) {
+    def id as string init uuid.v4();
     def opts as CookieOptions;
     $opts.path = "/";
     $opts.httpOnly = true;
@@ -647,6 +710,20 @@ export func sessionId(ctx as Context, cookieName as string) {
     $opts.secure = secureCookies();
     setCookie($ctx, $cookieName, $id, $opts);
     return $id;
+}
+
+/**
+ * Rotate the session id: mint a fresh UUID, set it as the session cookie, and
+ * return the new id. Call this right after any privilege change - a successful
+ * login, a logout, a role change - so a session id an attacker may have fixed
+ * before authentication is thrown away. This is the standard session-fixation
+ * defence; the application must also move its own session data to the new id.
+ * @param ctx {Context} the request context
+ * @param cookieName {string} the session-id cookie name (e.g. "sid")
+ * @return {string} the freshly minted session id
+ */
+export func renewSession(ctx as Context, cookieName as string) {
+    return mintSession($ctx, $cookieName);
 }
 
 # --- routing internals ------------------------------------------------------
@@ -719,8 +796,7 @@ func matchPattern(r as Route, segs as list of string) {
 # matchRoute finds the first route matching method + path, capturing any `:param`
 # and trailing `*name` wildcard segments. Returns a Match with found=false when
 # nothing matches.
-func matchRoute(app as App, method as string, path as string) {
-    def segs as list of string init splitPath($path);
+func matchFor(app as App, method as string, segs as list of string) {
     for (def r in $app.routes) {
         if ($r.method == $method) {
             def m as Match init matchPattern($r, $segs);
@@ -730,6 +806,21 @@ func matchRoute(app as App, method as string, path as string) {
         }
     }
     return matchMiss();
+}
+
+func matchRoute(app as App, method as string, path as string) {
+    def segs as list of string init splitPath($path);
+    def m as Match init matchFor($app, $method, $segs);
+    if ($m.found) {
+        return $m;
+    }
+    # HTTP requires HEAD to be served wherever GET is: fall back to the GET
+    # routes for a HEAD request. net/http suppresses the response body for a HEAD
+    # request automatically, so the handler needs no special-casing (OM-019).
+    if ($method == "HEAD") {
+        return matchFor($app, "GET", $segs);
+    }
+    return $m;
 }
 
 # runMiddleware runs the chain; returns false as soon as one middleware halts.
@@ -766,7 +857,20 @@ func dispatch(app as App, handler as string, ctx as Context, req as httpd.Reques
             meta.callMain($handler, $ctx);
         }
     } catch (err) {
-        # middleware or handler failed - the safety net below turns it into a 500.
+        # Middleware or handler failed - the safety net below turns it into a 500.
+        # Report it (the app's onError handler, else stderr) so it is never
+        # silently dropped, wrapped in its own try so the reporting path can never
+        # take the request down. `err` may be any thrown value (the Error struct by
+        # convention), so it is passed untyped and stringified generically.
+        try {
+            if (not ($app.onError == "")) {
+                meta.callMain($app.onError, $err);
+            } else {
+                io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
+            }
+        } catch (reportErr) {
+            io.eprintf("web: error reporting failed: %s\n", convert.toString($reportErr));
+        }
     }
     ensureAnswered($req, 500, "500 internal server error\n");
 }
@@ -913,7 +1017,13 @@ export func csrfToken(ctx as Context, secret as string) {
 export func csrfCheck(ctx as Context, secret as string) {
     def submitted as string init header($ctx, "X-CSRF-Token");
     if ($submitted == "") {
-        $submitted = formValue($ctx, "csrf");
+        # Only fall back to the form field for an actual urlencoded body: a
+        # multipart or JSON body is not a form to parse, and trying makes every
+        # such request fail the check for the wrong reason (OM-013).
+        def ct as string init strings.lower(header($ctx, "Content-Type"));
+        if (strings.startsWith($ct, "application/x-www-form-urlencoded")) {
+            $submitted = formValue($ctx, "csrf");
+        }
     }
     if ($submitted == "") {
         return false;

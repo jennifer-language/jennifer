@@ -127,3 +127,22 @@ func testCreateTableDialects() {
     def s as Schema init column(schema("blobs", "id", "mysql"), "data", "bytes");
     testing.assertContains(createTable($s), "data BLOB");
 }
+
+# OM-002: identifiers and operators reach the SQL text unparameterized, so they
+# are validated at build time. Helpers for assertThrows (called by name).
+func injectOp() { where(from(usersSchema("postgres")), "id", "= 1 OR 1=1 --", "7"); }
+func injectCol() { where(from(usersSchema("postgres")), "id; DROP TABLE x", "=", "7"); }
+func injectOrder() { orderBy(from(usersSchema("postgres")), "1; DROP TABLE users", "asc"); }
+func injectTable() { schema("t; DROP TABLE x", "id", "mysql"); }
+func injectJoin() { join(from(usersSchema("postgres")), "other x", "a.b", "c.d"); }
+
+func testIdentifierAndOperatorInjectionBlocked() {
+    testing.assertThrows("injectOp", "orm");
+    testing.assertThrows("injectCol", "orm");
+    testing.assertThrows("injectOrder", "orm");
+    testing.assertThrows("injectTable", "orm");
+    testing.assertThrows("injectJoin", "orm");
+    # a qualified `table.col` identifier and an allowlisted operator still render
+    def q as Query init where(from(usersSchema("postgres")), "users.name", "like", "%a%");
+    testing.assertContains(toSql($q).sql, "users.name LIKE");
+}

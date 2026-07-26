@@ -298,8 +298,8 @@ func stringFromBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inte
 	return interpreter.StringVal(string(src)), nil
 }
 
-// utf8Valid wraps Go's utf8.Valid with a one-byte fast path. Inlined to
-// avoid pulling the `unicode/utf8` import into convert.go just for this.
+// utf8Valid reports whether b is valid UTF-8, rejecting overlong encodings,
+// surrogates, and code points above U+10FFFF, with a one-byte ASCII fast path.
 func utf8Valid(b []byte) bool {
 	for i := 0; i < len(b); {
 		if b[i] < 0x80 {

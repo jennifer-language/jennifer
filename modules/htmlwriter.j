@@ -21,6 +21,7 @@
 
 use strings;
 use lists;
+use convert;
 
 /**
  * A node is one of three kinds, tagged by `kind`: "element" (tag + attrs +
@@ -64,6 +65,7 @@ def const VOID as list of string init ["area", "base", "br", "col", "embed", "hr
  * @return {Node} the element node
  */
 export func element(tag as string, attrs as list of Attr, children as list of Node) {
+    checkName($tag, "tag");
     return Node{kind: "element", tag: $tag, attrs: $attrs, children: $children, text: ""};
 }
 
@@ -93,6 +95,7 @@ export func raw(s as string) {
  * @return {Attr} the attribute
  */
 export func attr(name as string, value as string) {
+    checkName($name, "attribute");
     return Attr{name: $name, value: $value};
 }
 
@@ -117,6 +120,99 @@ export func escape(s as string) {
 func escapeAttr(s as string) {
     def out as string init escape($s);
     return strings.replace($out, '"', "&quot;");
+}
+
+# --- name + URL safety (validation) --------------------------------
+
+# validName reports whether s is a safe HTML tag or attribute name: a letter,
+# then letters, digits, or '-'. This is the `^[A-Za-z][A-Za-z0-9-]*$` shape.
+# A name outside it (a space, '>', '=', '/', a quote) is how a data-driven tag
+# or attribute forges markup - `attr("x onclick=alert(1)", "y")` would emit a
+# live event handler - so both constructors reject it (OM-011).
+func validName(s as string) {
+    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    if (len($raw) == 0) {
+        return false;
+    }
+    def i as int init 0;
+    while ($i < len($raw)) {
+        def b as int init $raw[$i];
+        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
+        def digit as bool init $b >= 48 and $b <= 57;
+        if ($i == 0) {
+            if (not $alpha) {
+                return false;
+            }
+        } else {
+            if (not ($alpha or $digit or $b == 45)) {
+                return false;
+            }
+        }
+        $i = $i + 1;
+    }
+    return true;
+}
+
+# checkName throws when a tag / attribute name is not validName.
+func checkName(name as string, what as string) {
+    if (not validName($name)) {
+        throw Error{kind: "htmlwriter", message: "htmlwriter: illegal " + $what + " name (must match [A-Za-z][A-Za-z0-9-]*): " + $name, file: "", line: 0, col: 0};
+    }
+    return;
+}
+
+/**
+ * Return a URL safe to place in an `href` / `src` attribute, or `"#"` if its
+ * scheme is not one of `http` / `https` / `mailto`. Whitespace and control
+ * characters are ignored while reading the scheme (so `"java\tscript:..."` is
+ * still caught), and a relative reference (no scheme) is returned unchanged.
+ * This is the anti-XSS gate for building links from untrusted input.
+ * @param url {string} the URL to check
+ * @return {string} the URL if its scheme is allowed, else `"#"`
+ */
+export func safeUrl(url as string) {
+    # Iterate by rune (not byte): a non-ASCII URL must not error, and the scheme
+    # we test for is ASCII anyway. Drop whitespace / control characters
+    # (codepoint <= 32) while reading the scheme so "java\tscript:" is still caught.
+    def cs as list of string init strings.chars($url);
+    def probe as string init "";
+    def i as int init 0;
+    while ($i < len($cs)) {
+        if (convert.toCodepoint($cs[$i]) > 32) {
+            $probe = $probe + $cs[$i];
+        }
+        $i = $i + 1;
+    }
+    if (len($probe) == 0) {
+        return $url;
+    }
+    # The scheme is the run before the first ':', but only if that ':' comes
+    # before any '/', '?', or '#' (else there is no scheme and the reference is
+    # relative, hence safe).
+    def scheme as string init "";
+    def hasScheme as bool init false;
+    def j as int init 0;
+    def pn as int init len($probe);
+    while ($j < $pn) {
+        def ch as string init strings.substring($probe, $j, $j + 1);
+        if ($ch == ":") {
+            $hasScheme = true;
+            break;
+        }
+        if ($ch == "/" or $ch == "?" or $ch == "#") {
+            break;
+        }
+        $scheme = $scheme + $ch;
+        $j = $j + 1;
+    }
+    if (not $hasScheme) {
+        return $url;
+    }
+    def low as string init strings.lower($scheme);
+    if ($low == "http" or $low == "https" or $low == "mailto") {
+        return $url;
+    }
+    return "#";
 }
 
 # --- rendering (exported) ------------------------------------------

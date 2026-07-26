@@ -30,6 +30,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/subtle"
 	"fmt"
 	gohash "hash"
 	"sync"
@@ -80,6 +81,7 @@ func Install(in *interpreter.Interpreter) {
 
 	in.RegisterNamespaced(LibraryName, "compute", computeFn)
 	in.RegisterNamespaced(LibraryName, "hmac", hmacFn)
+	in.RegisterNamespaced(LibraryName, "equal", equalFn)
 	in.RegisterNamespaced(LibraryName, "stream", streamFn)
 	in.RegisterNamespaced(LibraryName, "update", updateFn)
 	in.RegisterNamespaced(LibraryName, "finalize", finalizeFn)
@@ -155,6 +157,22 @@ func hmacFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	mac := hmac.New(ctor, args[0].Bytes)
 	mac.Write(args[1].Bytes)
 	return interpreter.BytesVal(mac.Sum(nil)), nil
+}
+
+// equalFn implements `hash.equal(a, b) -> bool`: a constant-time byte compare,
+// for verifying a MAC or digest without a timing oracle. Plain `a == b` on bytes
+// returns on the first differing byte, which leaks how much of a forged MAC is
+// correct - so a program that only `use hash;` gets the safe compare here rather
+// than having to reach into `crypto.hmacEqual`. Constant-time in the byte content;
+// like `crypto/subtle.ConstantTimeCompare`, a length mismatch returns false.
+func equalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("hash.equal expects 2 arguments (a, b), got %d", len(args))
+	}
+	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("hash.equal: both arguments must be bytes")
+	}
+	return interpreter.BoolVal(subtle.ConstantTimeCompare(args[0].Bytes, args[1].Bytes) == 1), nil
 }
 
 // streamFn implements `hash.stream(algo) -> hash.Stream`.

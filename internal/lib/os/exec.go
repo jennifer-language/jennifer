@@ -95,6 +95,11 @@ var (
 	nextID  int64
 )
 
+// maxProcHandles bounds the live child-process registry so a script that leaks
+// os.Process handles (spawns without os.wait / os.release) surfaces a catchable
+// error instead of forking children without limit.
+const maxProcHandles = 4096
+
 // argvFromList unwraps a Jennifer `list of string` into a Go []string.
 // Empty list and non-list values produce a typed error tagged with
 // the caller's function name (`os.run` / `os.spawn`).
@@ -207,6 +212,16 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	cmd.Stdout = state.stdout
 	cmd.Stderr = state.stderr
+	// Bound the live-process registry before starting the child, so a script that
+	// leaks os.Process handles (spawns without os.wait / os.release) fails with a
+	// catchable error instead of forking without limit. Checked before Start so no
+	// orphan child is left behind on overflow.
+	handlesMu.Lock()
+	tooMany := len(handles) >= maxProcHandles
+	handlesMu.Unlock()
+	if tooMany {
+		return interpreter.Null(), fmt.Errorf("os.spawn: too many live child processes (limit %d); each os.spawn needs a matching os.wait or os.release", maxProcHandles)
+	}
 	if err := cmd.Start(); err != nil {
 		return interpreter.Null(), fmt.Errorf("os.spawn: %v", err)
 	}

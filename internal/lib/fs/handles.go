@@ -40,6 +40,11 @@ type handleState struct {
 // The registry: integer id -> live state. Guarded by handlesMu so
 // concurrent spawn tasks can share the map safely (though sharing a
 // handle across spawns is discouraged; each spawn should open its own).
+// maxOpenHandles bounds the live handle registry so a script that leaks file
+// handles (opens without a matching fs.close) surfaces a catchable error instead
+// of growing the registry - and hitting the OS fd limit - without bound.
+const maxOpenHandles = 4096
+
 var (
 	handlesMu sync.Mutex
 	handles   = map[int64]*handleState{}
@@ -149,6 +154,11 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		state.reader = bufio.NewReader(f)
 	}
 	handlesMu.Lock()
+	if len(handles) >= maxOpenHandles {
+		handlesMu.Unlock()
+		_ = f.Close()
+		return interpreter.Null(), fmt.Errorf("fs.open: too many open file handles (limit %d); each fs.open needs a matching fs.close", maxOpenHandles)
+	}
 	nextID++
 	id := nextID
 	handles[id] = state

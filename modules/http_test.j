@@ -197,3 +197,13 @@ func testParseRawKeepsBinaryBody() {
     testing.assertEqual($r.body[1], 0);
     testing.assertEqual($r.body[2], 65);
 }
+
+func testParseUrlQueryOnly() {   # OM-020
+    def u as Url init parseUrl("http://host?q=1&k=2");
+    testing.assertEqual($u.host, "host");
+    testing.assertEqual($u.path, "/?q=1&k=2");
+    def u2 as Url init parseUrl("http://host:8080/p?x=1");
+    testing.assertEqual($u2.host, "host");
+    testing.assertEqual($u2.port, 8080);
+    testing.assertEqual($u2.path, "/p?x=1");
+}

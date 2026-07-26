@@ -491,10 +491,21 @@ func setBoolMod(spec *FormatSpec, key, value string) error {
 	return nil
 }
 
+// maxFieldValue caps a printf field integer (pad / max / prec / group). Terminal
+// output never needs a larger one, and an unbounded value flows into
+// strings.Repeat / strconv.FormatFloat, where a huge count OOM-kills the process
+// - an uncatchable crash, since the interpreter has no recover(). Bounding it at
+// parse time turns the abuse into a positioned, catchable error instead. 1 MiB is
+// far past any real column width or precision.
+const maxFieldValue = 1 << 20
+
 func setIntField(value string, dst *int, has *bool) error {
 	n, err := strconv.Atoi(value)
 	if err != nil {
 		return fmt.Errorf("%q is not an integer", value)
+	}
+	if n > maxFieldValue {
+		return fmt.Errorf("%d exceeds the maximum field value %d", n, maxFieldValue)
 	}
 	*dst = n
 	*has = true

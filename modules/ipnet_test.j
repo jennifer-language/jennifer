@@ -49,15 +49,16 @@ func testParseSixLeftmostLongestRun() {
     testing.assertEqual(canon("2001:db8:0:1:1:1:1:1"), "2001:db8:0:1:1:1:1:1");
 }
 
+# parse6 keeps the full 16-byte v4-mapped form (parseAddress folds it to v4 -
+# see testUnmapV4Mapped - so this exercises the private parser directly).
 func testParseSixEmbeddedFour() {
-    def a as Address init parseAddress("::ffff:192.168.1.1");
-    testing.assertEqual($a.version, 6);
-    testing.assertEqual(len($a.octets), 16);
+    def octets as bytes init parse6("::ffff:192.168.1.1");
+    testing.assertEqual(len($octets), 16);
     # last four bytes are the embedded IPv4
-    testing.assertEqual($a.octets[12], 192);
-    testing.assertEqual($a.octets[15], 1);
-    testing.assertEqual($a.octets[10], 255);
-    testing.assertEqual($a.octets[11], 255);
+    testing.assertEqual($octets[12], 192);
+    testing.assertEqual($octets[15], 1);
+    testing.assertEqual($octets[10], 255);
+    testing.assertEqual($octets[11], 255);
 }
 
 func testParseSixExpandsToSixteenBytes() {
@@ -185,4 +186,22 @@ func testPrefixOutOfRangeThrows() {
         $threw = true;
     }
     testing.assertTrue($threw);
+}
+
+# --- OM-010: IPv4-mapped IPv6 is folded to a v4 address ----------------------
+
+func testUnmapV4Mapped() {
+    # ::ffff:a.b.c.d parses straight to a v4 Address, so a v4 allow-list matches.
+    def a as Address init parseAddress("::ffff:127.0.0.1");
+    testing.assertEqual($a.version, 4);
+    testing.assertEqual(len($a.octets), 4);
+    testing.assertTrue(contains(parse("127.0.0.0/8"), $a));
+    # unmap is idempotent on a plain v4 address and leaves real v6 alone.
+    def v4 as Address init parseAddress("10.0.0.1");
+    testing.assertEqual(unmap($v4).version, 4);
+    # ::1 (loopback) and a normal v6 address must NOT be folded.
+    testing.assertEqual(parseAddress("::1").version, 6);
+    testing.assertEqual(parseAddress("2001:db8::1").version, 6);
+    # The deprecated IPv4-compatible form is deliberately left as v6.
+    testing.assertEqual(parseAddress("::1.2.3.4").version, 6);
 }

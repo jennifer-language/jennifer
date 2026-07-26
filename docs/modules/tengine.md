@@ -21,6 +21,31 @@ def out as string init tengine.render($set, "base",
 
 Runnable: [`examples/modules/tengine_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/tengine_demo.j).
 
+## Security: output is not auto-escaped
+
+`tengine` is modelled on Go's `text/template`, **not** `html/template`: it does
+**no automatic HTML escaping**. Whatever a value contains is emitted verbatim,
+`<script>` and all. Rendering untrusted data (a form field, a URL parameter, a
+database row a user controls) straight into an HTML page is therefore a
+cross-site-scripting (XSS) hole.
+
+Escape every untrusted value that reaches HTML yourself, with the built-in
+`html` pipe:
+
+```jennifer
+# SAFE: the user-controlled field is escaped before it lands in the page.
+$set = tengine.add($set, "page", "<p>{{ .comment | html }}</p>");
+
+# UNSAFE: .comment is emitted raw - a comment of "<script>...</script>" runs.
+$set = tengine.add($set, "page", "<p>{{ .comment }}</p>");
+```
+
+The `html` pipe escapes `&`, `<`, `>`, `'`, and `"`. For attribute values and
+URLs the same caution applies: build links through `htmlwriter.safeUrl` (which
+rejects `javascript:` and other dangerous schemes) rather than interpolating a
+raw URL into an `href`. When a template mixes trusted markup with untrusted
+data, escape at the boundary - the engine cannot tell the two apart for you.
+
 ## Data model
 
 Templates render against a **`json.Value`** node (use `json.decode` to build

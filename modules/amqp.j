@@ -35,6 +35,12 @@ def const FRAME_HEADER as int init 2;
 def const FRAME_BODY as int init 3;
 def const FRAME_END as int init 206;   # 0xCE
 
+# Upper bound on a broker-declared frame size (64 MiB, the tree-wide house rule).
+# `readFrame` takes a 32-bit size straight off the wire; without this ceiling a
+# hostile or MITM'd broker declaring ~4 GiB would drive `readN` to OOM the
+# recover-less interpreter.
+def const MAX_FRAME_BYTES as int init 67108864;
+
 # The single channel this client uses.
 def const CHANNEL as int init 1;
 
@@ -144,6 +150,15 @@ def struct Frame {
 
 func fail(msg as string) {
     throw Error{ kind: "amqp", message: "amqp: " + $msg, file: "", line: 0, col: 0 };
+}
+
+# checkFrameSize rejects a broker-declared frame size outside [0, MAX_FRAME_BYTES]
+# before it is used to size a read.
+func checkFrameSize(n as int) {
+    if ($n < 0 or $n > MAX_FRAME_BYTES) {
+        fail("frame size out of range: " + convert.toString($n));
+    }
+    return;
 }
 
 func emptyBytes() {
@@ -337,6 +352,7 @@ func readFrame(socket as net.Conn) {
     def ftype as int init $h[0];
     def channel as int init readShort($h, 1);
     def size as int init readLong($h, 3);
+    checkFrameSize($size);
     def payload as bytes;
     if ($size > 0) {
         $payload = readN($socket, $size);

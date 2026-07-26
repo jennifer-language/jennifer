@@ -209,3 +209,37 @@ func TestHmacErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestEqualConstantTime pins OF-008: hash.equal is a length-checked, content
+// constant-time byte compare (crypto/subtle), the safe way to verify a MAC.
+func TestEqualConstantTime(t *testing.T) {
+	eq := func(a, b []byte) bool {
+		v, err := equalFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(a), interpreter.BytesVal(b)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.Bool
+	}
+	if !eq([]byte("abc"), []byte("abc")) {
+		t.Error("equal bytes should compare equal")
+	}
+	if eq([]byte("abc"), []byte("abd")) {
+		t.Error("differing bytes should compare unequal")
+	}
+	if eq([]byte("abc"), []byte("ab")) {
+		t.Error("length mismatch should compare unequal")
+	}
+	if eq([]byte(""), []byte("x")) {
+		t.Error("empty vs non-empty should compare unequal")
+	}
+	if !eq(nil, nil) {
+		t.Error("two empty should compare equal")
+	}
+	// type + arity errors
+	if _, err := equalFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("a"), interpreter.BytesVal([]byte("a"))}); err == nil {
+		t.Error("expected a type error for a non-bytes argument")
+	}
+	if _, err := equalFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal([]byte("a"))}); err == nil {
+		t.Error("expected an arity error")
+	}
+}

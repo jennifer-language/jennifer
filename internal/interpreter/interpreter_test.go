@@ -2063,3 +2063,23 @@ io.printf(" calls=%d", $calls);`)
 		t.Errorf("got %q, want \"two calls=1\"", out)
 	}
 }
+
+// TestIndexBoundsUseInt64Compare pins OF-002: a far-out-of-range index must
+// error, not (on a 32-bit build, where int(1<<32)==0) narrow to a small in-range
+// slot and silently read/write element 0. Passes on 64-bit; the int64-before-cast
+// comparison is what makes it hold on 32-bit too.
+func TestIndexBoundsUseInt64Compare(t *testing.T) {
+	cases := []string{
+		`use io; def xs as list of int init [1, 2, 3]; io.printf("%d", $xs[4294967296]);`, // list read
+		`def xs as list of int init [1, 2, 3]; $xs[4294967296] = 9;`,                      // list write
+		`use io; def b as bytes; $b[] = 1; $b[] = 2; io.printf("%d", $b[4294967296]);`,    // bytes read
+		`def b as bytes; $b[] = 1; $b[] = 2; $b[4294967296] = 5;`,                         // bytes write
+	}
+	for _, src := range cases {
+		if _, err := run(t, src); err == nil {
+			t.Errorf("expected an out-of-bounds error for %q, got none", src)
+		} else if !strings.Contains(err.Error(), "out of bounds") {
+			t.Errorf("expected an out-of-bounds error for %q, got %v", src, err)
+		}
+	}
+}

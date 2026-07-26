@@ -2136,11 +2136,14 @@ func indexInto(parent *Value, idx Value, st positioned) (*Value, error) {
 			file, line, col := posOf(st)
 			return nil, &runtimeError{Msg: fmt.Sprintf("list index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
-		n := int(idx.Int)
-		if n < 0 || n >= len(parent.List) {
+		// Compare in int64 before narrowing to int: on a 32-bit build (tinygo)
+		// int(1<<32) is 0, so a huge out-of-range index would pass the check and
+		// read/write element 0 - a silent wrong-slot instead of an error.
+		if idx.Int < 0 || idx.Int >= int64(len(parent.List)) {
 			file, line, col := posOf(st)
-			return nil, &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", n, len(parent.List)), File: file, Line: line, Col: col}
+			return nil, &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", idx.Int, len(parent.List)), File: file, Line: line, Col: col}
 		}
+		n := int(idx.Int)
 		return &parent.List[n], nil
 	case KindMap:
 		// Fast path: a complete index plus a hashable key answers hit and
@@ -2175,11 +2178,12 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("list index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
-		n := int(idx.Int)
-		if n < 0 || n >= len(parent.List) {
+		// int64 compare before narrowing (32-bit safety; see indexInto).
+		if idx.Int < 0 || idx.Int >= int64(len(parent.List)) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", n, len(parent.List)), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", idx.Int, len(parent.List)), File: file, Line: line, Col: col}
 		}
+		n := int(idx.Int)
 		if parent.ElemTyp != nil && !newVal.MatchesDeclared(*parent.ElemTyp) {
 			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to list element of declared type %s", newVal.Kind, parent.ElemTyp), File: file, Line: line, Col: col}
@@ -2248,11 +2252,12 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
-		n := int(idx.Int)
-		if n < 0 || n >= len(parent.Bytes) {
+		// int64 compare before narrowing (32-bit safety; see indexInto).
+		if idx.Int < 0 || idx.Int >= int64(len(parent.Bytes)) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", n, len(parent.Bytes)), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", idx.Int, len(parent.Bytes)), File: file, Line: line, Col: col}
 		}
+		n := int(idx.Int)
 		if newVal.Kind != KindInt {
 			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element must be int in [0, 255], got %s", newVal.Kind), File: file, Line: line, Col: col}
@@ -3101,11 +3106,12 @@ func readByteAt(parent Value, idx Value, node parser.Node) (Value, error) {
 		file, line, col := posFor(node)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("bytes index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 	}
-	n := int(idx.Int)
-	if n < 0 || n >= len(parent.Bytes) {
+	// int64 compare before narrowing (32-bit safety; see indexInto).
+	if idx.Int < 0 || idx.Int >= int64(len(parent.Bytes)) {
 		file, line, col := posFor(node)
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", n, len(parent.Bytes)), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", idx.Int, len(parent.Bytes)), File: file, Line: line, Col: col}
 	}
+	n := int(idx.Int)
 	return IntVal(int64(parent.Bytes[n])), nil
 }
 

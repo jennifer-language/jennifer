@@ -8,8 +8,13 @@
  * re-scans block bodies as it renders, which is fine at page / CMS scale. Dotted
  * paths resolve as JSON Pointers against the current node (`.a.b` -> `/a/b`; `.`
  * is the current node); `$` is the root node, `$var` a variable; a missing key
- * renders as empty. Output is **not** auto-escaped (like `text/template`, not
- * `html/template`) - pipe untrusted text through `html`.
+ * renders as empty.
+ *
+ * SECURITY: output is **not** auto-escaped (this is `text/template`, not
+ * `html/template`). Rendering untrusted data into an HTML page is an XSS hole
+ * unless you escape it yourself: pipe every value that reaches HTML through the
+ * `html` pipe (`{{ .userInput | html }}`), or escape upstream. The engine will
+ * emit whatever the data contains, `<script>` included.
  *
  * Actions: value output; `if` / `else if` / `else` with the comparison / boolean
  * functions `eq` `ne` `lt` `le` `gt` `ge` `and` `or` `not` (parenthesised

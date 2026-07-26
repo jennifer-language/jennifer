@@ -16,6 +16,13 @@
  * or `!fatal` reply throws `Error{kind: "mikrotik"}`. Needs the default
  * `jennifer` binary (`net`). Over `net` + `hash` (MD5 fallback) + `encoding` +
  * the bitwise operators.
+ *
+ * SECURITY: `mikrotik.options` uses **cleartext** TCP (port 8728), so the
+ * credentials and every command are readable on the wire. Use `mikrotik.optionsTLS`
+ * (api-ssl, port 8729) on any untrusted network. A `CONNECT_TIMEOUT_MS` deadline
+ * bounds the dial and every read, and a server-declared word length is capped at
+ * `MAX_WORD_BYTES` (64 MiB), so a wedged or hostile router cannot hang or OOM the
+ * program.
  * @module mikrotik
  * @example
  * import "mikrotik.j" as mikrotik;
@@ -65,10 +72,34 @@ func fail(msg as string) {
     throw Error{ kind: "mikrotik", message: "mikrotik: " + $msg, file: "", line: 0, col: 0 };
 }
 
+# Network timeout (ms) applied to the dial and to every read, so a blackholed or
+# mid-sentence router fails instead of hanging the program forever (the RouterOS
+# API has no framing that would otherwise bound a read).
+def const CONNECT_TIMEOUT_MS as int init 30000;
+
+# Cap on a server-declared word length (64 MiB, the tree-wide house rule). The
+# API length prefix is up to a 32-bit value read straight off the wire; without
+# this a hostile or MITM'd router (plaintext by default) declaring ~4 GiB would
+# drive `readN` to OOM the recover-less interpreter.
+def const MAX_WORD_BYTES as int init 67108864;
+
+# checkWordLen rejects a server-declared word length outside [0, MAX_WORD_BYTES]
+# before it is used to size a read.
+func checkWordLen(n as int) {
+    if ($n < 0 or $n > MAX_WORD_BYTES) {
+        fail("word length out of range: " + convert.toString($n));
+    }
+    return;
+}
+
 # --- options (exported) -----------------------------------------------------
 
 /**
- * Plain-TCP options (port 8728).
+ * Plain-TCP options (port 8728). SECURITY: this transport is **cleartext** - the
+ * login exchange and every command travel unencrypted, so an on-path attacker
+ * reads the router's admin credentials. Prefer `optionsTLS` (api-ssl, port 8729)
+ * on any network you do not fully trust; use `options` only on a loopback or an
+ * otherwise-secured link.
  * @param host {string} the router host
  * @param user {string} the API username
  * @param password {string} the API password
@@ -115,6 +146,7 @@ func appendBytes(dst as bytes, src as bytes) {
 func readN(socket as net.Conn, n as int) {
     def out as bytes;
     while (len($out) < $n) {
+        net.setDeadline($socket, CONNECT_TIMEOUT_MS);
         def chunk as bytes init net.readBytes($socket, $n - len($out));
         if (len($chunk) == 0) {
             fail("connection closed mid-sentence");
@@ -224,6 +256,7 @@ func readWord(socket as net.Conn) {
     if ($n == 0) {
         return "";
     }
+    checkWordLen($n);
     return convert.stringFromBytes(readN($socket, $n), "utf-8");
 }
 
@@ -371,9 +404,9 @@ export func connect(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
     def socket as net.Conn;
     if ($opts.tls) {
-        $socket = net.connectTLS($addr);
+        $socket = net.connectTLS($addr, CONNECT_TIMEOUT_MS);
     } else {
-        $socket = net.connect($addr);
+        $socket = net.connect($addr, CONNECT_TIMEOUT_MS);
     }
     def session as Session init Session{ socket: $socket };
     # A refused login must not leak the socket; on success the caller owns the

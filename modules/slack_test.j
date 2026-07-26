@@ -40,6 +40,8 @@ func testTextAndBlocks() {
 
 func testSectionEscaping() {
     def m as Message init section(message(), "a \"quote\" & <tag>\nnl");
+    # json.encode is HTML-safe: `&` `<` `>` become & < > (still
+    # valid JSON, decodes identically), so the Slack payload stays intact.
     testing.assertEqual(render($m),
-        "{\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"a \\\"quote\\\" & <tag>\\nnl\"}}]}");
+        "{\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"a \\\"quote\\\" \\u0026 \\u003ctag\\u003e\\nnl\"}}]}");
 }

@@ -95,6 +95,39 @@ Unlike `testing.run`, `meta.call` is transparent: it does not catch
 thrown `Error`, `exit` - propagates to the caller, catchable with
 `try` / `catch`.
 
+### Security: never dispatch on untrusted input
+
+`meta.call` / `meta.callMain` invoke **any** top-level method by name, with no
+built-in restriction. Passing a name that comes from request data, a URL, a
+message body, or any other untrusted source is a remote-code-execution hole - it
+reaches `deleteAllUsers`, `runMigration`, or any internal helper you never meant
+to expose. `meta.defined` answers "does it exist", which is **not** an
+authorization check.
+
+Always match untrusted input against a **program-defined allowlist** first, and
+call only a name that is on it:
+
+```jennifer
+use meta;
+use lists;
+
+# The only names an outside caller may reach.
+def const ACTIONS as list of string init ["listItems", "showItem"];
+
+func handleAction(name as string, arg as string) {
+    if (not lists.contains(ACTIONS, $name)) {
+        throw Error{kind: "app", message: "unknown action: " + $name, file: "", line: 0, col: 0};
+    }
+    return meta.call($name, $arg);      # safe: $name is proven to be on the allowlist
+}
+```
+
+A framework that maps requests to handlers must register the handler names up
+front and dispatch only registered ones - which is exactly what the
+[`web`](../modules/web.md) module does (routes are declared with `web.get` /
+`web.post`; the request's own path never becomes a method name). Follow the same
+discipline whenever you build dispatch on `meta.call`.
+
 ### `callMain` / `definedMain` - reaching the entry program
 
 Modules run on isolated sub-interpreters, so a `meta.call` *inside a
