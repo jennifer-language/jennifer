@@ -159,6 +159,31 @@ shared-memory primitives; that stance stays.
 independent and small; Tier 2 is the follow-on. Relates to `DRAFT#17` (a VM
 relocates the cooperative checkpoints Tier 1 rides on).
 
+#### DRAFT#25 - Go-side concurrent HTTP serve loop
+
+The `web` framework dispatches each request into an entry-program handler by name
+through `meta.callMain`, and `web.serveOn` runs that dispatch in a `.j` loop. Once
+`web` handles requests concurrently (each wrapped in a `spawn`), an optional
+refinement is to move only the **accept + bounded-worker-pool loop** into Go, as
+an `httpd` primitive (e.g. `httpd.serveLoop(server, handlerName)`, or a small
+engine-owned pool) that calls `Interpreter.CallHostWith` per request. Routing,
+middleware, and `web.Context` stay in `.j`.
+
+Why it might pay: a worker pool with a tunable ceiling is more natural in Go than
+expressed as `.j` `spawn`s; back-pressure / queue-depth limits live where the
+sockets already are (`httpd` already bounds `maxInFlight`); and the hot accept
+loop stops paying tree-walker overhead per request. Why it is only a refinement,
+not a fix: a handler is still a `.j` method invoked on the shared host
+interpreter, so making that invocation race-safe is the actual prerequisite and
+does the real work - this only relocates the loop. Keep `web` a `.j` module
+either way: dogfooding is a first-class goal, and with no closures a handler is
+always a by-name entry method, so a Go rewrite of the router would buy little and
+lose test surface.
+
+**Requires:** [M22.17](milestones.md) (race-safe concurrent host dispatch - the
+serve loop is unsafe without it). Relates to `DRAFT#21` (task cancellation /
+timeouts, which a per-request worker would use to bound a slow handler).
+
 ### Libraries (specialised domains)
 
 Each domain its own effort with sub-pieces as needed:

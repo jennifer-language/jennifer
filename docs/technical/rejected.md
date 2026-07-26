@@ -183,7 +183,8 @@ The chosen rule: ship `lists.range(start, end)` (M15.0) as the
 canonical way to allocate an integer sequence. Use site reads as
 "this allocates a list" instead of hiding behind two characters
 of punctuation. See
-[milestones.md > M15.0](../milestones.md#m150---existing-library-extensions).
+[milestones.md > M15](../milestones.md#m15---foundational-libraries--first-public-release-compacted)
+(M15.0).
 
 ## printf data-transformation modifiers
 

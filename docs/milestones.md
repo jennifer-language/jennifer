@@ -3,6 +3,14 @@
 Development is split into milestones. Each milestone produces a *working*
 interpreter that runs a strictly larger subset of the language.
 
+> **Note on compaction.** Older milestone entries are periodically **compacted** -
+> condensed to a short summary (and sometimes grouped) -
+> to keep this file readable and its length in check. The
+> compacted text records *what* shipped, not the full implementation design. For
+> the detailed design, rationale, and step-by-step evolution of any milestone,
+> **dig into the git history** (the commits for that milestone) - that is the
+> authoritative record of how it was built.
+
 ---
 
 ## M1 - End-to-end MVP
@@ -527,80 +535,22 @@ See:
 - [user-guide/syntax.md](user-guide/syntax.md) - non-decimal
   literals + digit separator.
 
-## M13 - Structs and catchable errors
+## M13-M13.2 - structs and catchable errors (compacted)
 
-**Status:** done.
+**All done.** The composite-data milestone, batched in dependency order: M13.1
+ships the struct mechanism, M13.2 the recoverable-error story built on it (the
+canonical error value is a struct), together unblocking composite library
+returns. Design detail: git history, the `user-guide`
+([types-and-values](user-guide/types-and-values.md#structs),
+[control-flow](user-guide/control-flow.md#try-catch-throw)) and
+[technical/interpreter.md](technical/interpreter.md) docs, and
+`examples/structs.j` / `examples/trycatch.j` (plus the matching `showcase.j`
+sections).
 
-The composite-data milestone, batched into two sub-milestones in
-dependency order: M13.1 ships the struct mechanism, M13.2 ships
-the error-handling design that uses it. Together they unblock
-every library that wants composite returns and give the language
-a recoverable-error story.
-
-## M13.1 - Structs / records
-
-**Status:** done.
-
-- `def struct Name { field as type, ... };` at top level
-  (hoisted before the first statement; duplicate names error in
-  `Run`, silently redefine in the REPL).
-- Literals `Name{ field: expr, ... }` with every field required;
-  `def x as Name;` (no init) zero-fills, recursing through
-  nested struct fields.
-- Field read `$p.field`, write `$p.field = ...;`. Lvalue chains
-  mix `[index]` and `.field` freely (`$L.from.x = 5;`,
-  `$bag.items[0] = 99;`); index-assign and field-assign share
-  one walker.
-- Value semantics like lists/maps; `const` deep at any depth.
-- Strict at boundaries: unknown struct type, missing / unknown
-  field at literal, field-type mismatch on write, field access
-  on a non-struct value are all positioned errors.
-
-See:
-- [user-guide/types-and-values.md](user-guide/types-and-values.md#structs) -
-  language angle.
-- [technical/interpreter.md](technical/interpreter.md#structs-m131) -
-  runtime details (`KindStruct`, hoisting, unified lvalue walker).
-- [technical/grammar.md](technical/grammar.md) - `structDef`,
-  `structLit`, `fieldAssign`, mixed-tail lvalues.
-- `examples/structs.j` standalone; `examples/showcase.j`
-  `=== M13.1 structs ===` section.
-
-## M13.2 - `try` / `catch` / `throw`
-
-**Status:** done.
-
-Catchable errors. New keywords `try`, `catch`, `throw`. Depends
-on M13.1 because the canonical error value is a struct.
-
-- `try { body } catch (NAME) { handler }` runs the body and, on
-  a catchable error, binds the thrown value to `$NAME` in a
-  fresh per-handler scope.
-- `throw EXPR;` raises any value; convention is the auto-hoisted
-  `Error{kind, message, file, line, col}` struct.
-- Runtime errors (out-of-bounds, missing key, type mismatch,
-  etc.) are wrapped into the canonical `Error` shape on entry
-  to the catch (`kind` defaults to `"runtime"` until sites
-  opt in to specific tags); user code catches both kinds
-  uniformly. `throw $err;` inside a catch re-raises to the
-  enclosing `try`.
-- **Not** catchable: `exit` (program-level escape, propagates
-  through `try`); `return` / `break` / `continue` (control
-  flow, flow through `try` unchanged).
-- No `finally` and no typed catch in v1.
-- Internals: `ErrorSignal` sentinel parallels `ExitSignal`;
-  `runtimeError.Kind` field threads the symbolic tag; user code
-  may not redefine the auto-hoisted `Error` struct.
-
-See:
-- [user-guide/control-flow.md](user-guide/control-flow.md#try-catch-throw) -
-  language angle.
-- [technical/interpreter.md](technical/interpreter.md#catchable-errors-m132) -
-  runtime details (`ErrorSignal`, wrapping, flow passthrough).
-- [technical/grammar.md](technical/grammar.md) - `tryStmt`,
-  `throwStmt`.
-- `examples/trycatch.j` standalone; `examples/showcase.j`
-  `=== M13.2 try/catch ===` section.
+| M#    | Topic | Summary |
+| ----- | ----- | ------- |
+| M13.1 | structs / records | `def struct Name { field as type, ... };` at top level (hoisted before the first statement; duplicate names error in `Run`, silently redefine in the REPL). Literals `Name{ field: expr, ... }` with every field required; `def x as Name;` zero-fills, recursing nested struct fields. Field read `$p.field` / write `$p.field = ...;`; lvalue chains mix `[index]` and `.field` freely (`$L.from.x = 5;`, `$bag.items[0] = 99;`) through one shared index/field walker. Value semantics like lists / maps; `const` deep at any depth. Strict at boundaries - unknown struct type, missing / unknown field at a literal, field-type mismatch on write, and field access on a non-struct are all positioned errors. Runtime: a `KindStruct` tagged-union value. |
+| M13.2 | `try` / `catch` / `throw` | Catchable errors (keywords `try` / `catch` / `throw`). `try { body } catch (NAME) { handler }` binds the thrown value to `$NAME` in a fresh per-handler scope; `throw EXPR;` raises any value, convention the auto-hoisted `Error{kind, message, file, line, col}` struct. The runtime errors today's builtins / ops raise (out-of-bounds, missing key, type mismatch) are wrapped into `Error` on entry to the catch (`kind` defaults to `"runtime"` until a site opts into a tag); `throw $err;` in a catch re-raises to the enclosing `try`. **Not** catchable: `exit` (propagates through `try`), and `return` / `break` / `continue` (control flow, flow through `try` unchanged). No `finally`, no typed catch in v1. Internals: an `ErrorSignal` sentinel parallels `ExitSignal`, `runtimeError.Kind` threads the tag, and the `Error` struct is reserved (user code may not redefine it). |
 
 ---
 
@@ -646,540 +596,93 @@ features added since); later slots ship a new library each.
 M15.8 closes the phase by making the result installable before
 Phase C starts adding I/O on top.
 
-## M15 - foundational libraries + first public release
+## M15 - foundational libraries + first public release (compacted)
 
-**Status:** done. All nine sub-milestones shipped. Three are
-language work (M15.2, M15.4), the rest are library / tooling /
-release work. Two recurring patterns surfaced in the shipped
-APIs and are worth remembering:
-- **Codec-table shape** (algorithm/format/codec passed as a
-  string argument). Used by `hash.compute(b, algo)`,
-  `crc.compute(b, algo)`, `encoding.encode(s, codec)`,
-  `encoding.toText(b, format)`. Originally adopted because
-  Jennifer's letters-only identifier rule rejects digits in
-  method names (so `hash.md5(...)` won't parse), but it also
-  honours stance #1 by collapsing parallel verbs into one.
-- **Integer-handle struct for opaque resources** (M15.2's
-  namespaced-struct mechanism + a single `id as int` field
-  indexing into a Go-side map). Used by `os.Process`,
-  `hash.Stream`, `crc.Stream`.
+**All done.** Nine sub-milestones - two language (M15.2, M15.4), the rest library
+/ tooling / release - that built out the foundational stdlib and shipped the
+first public release. Design detail: git history and the linked per-library
+docs. Two API patterns established here recur across later libraries:
 
-### M15.0 - existing-library extensions
+- **Codec-table shape** - the algorithm / format / codec is a string argument
+  (`hash.compute(b, algo)`, `crc.compute(b, algo)`, `encoding.encode(s, codec)`,
+  `encoding.toText(b, format)`), collapsing parallel verbs into one (stance #1)
+  and sidestepping the letters-only identifier rule that rejects `hash.md5(...)`.
+- **Integer-handle struct for opaque resources** - a namespaced struct with a
+  single `id as int` indexing a Go-side map (`os.Process`, `hash.Stream`,
+  `crc.Stream`).
 
-**Done.** Two extensions to the M9 `lists` library that needed
-post-M14 language features: `lists.shuffle(xs)` (Fisher-Yates,
-respects `math.randSeed`) and `lists.range(start, end[, step])`
-(half-open, deliberate single-arg omission per stance #2). See
-[libraries/lists.md](libraries/lists.md#shuffle) and
-[technical/design-decisions.md > Half-open ranges](technical/design-decisions.md#half-open-ranges)
-for the half-vs-closed-range rationale.
-
-### M15.1 - `os` + `meta` (process metadata)
-
-**Done.** Reshapes the M8-era `os` surface around one rule:
-immutable per-run host facts are uppercase constants
-(`PLATFORM`, `ARCH`, `EOL`, `DIRSEP`, `PATHSEP`, `ARGS`),
-operations are functions (`getEnv`, `hasFlag`, `flag`). Drops
-the `JENNIFER_` prefix that only made sense for bare-global use,
-and introduces a new `meta` library for interpreter-self-identity
-constants (`VERSION`, `BUILD`). CLI forwards trailing args to
-`os.ARGS` (script path at index 0). Breaking renames
-(`JENNIFER_VERSION` -> `meta.VERSION`, `os.platform()` ->
-`os.PLATFORM`, `os.JENNIFER_OS` -> `os.PLATFORM`,
-`os.JENNIFER_LF` -> `os.EOL`); old names now produce plain
-"undefined" errors with no rename-hint. See
-[libraries/os.md](libraries/os.md) and
-[libraries/meta.md](libraries/meta.md).
-
-### M15.2 - Language: library-provided namespaced struct types
-
-**Done.** Language work slotted inside Phase B because the next
-wave of libraries (M15.3 `os.{Result,Process}`, M15.5 `time.*`,
-M15.6 `hash.Stream`/`crc.Stream`, future M16.1 `fs`, M16.2 `net`)
-all need their own struct types and M13.1 only handled bare-IDENT
-names. Adds `def x as lib.Name;` type syntax,
-`lib.Name{field: ...}` literals, and the Go-side
-`Interpreter.RegisterNamespacedStruct` API. Reuses M13.1's value
-semantics, deep-`const`, and strict-boundary machinery; only the
-resolution path differs. User code can't register structs (Go-side
-only); methods on structs and inheritance stay out of scope. See
-[technical/interpreter.md > Library-provided namespaced structs](technical/interpreter.md#library-provided-namespaced-structs-m152).
-
-### M15.3 - `os` external-program execution
-
-**Done.** First library to consume the M15.2
-namespaced-struct mechanism. Surface: `os.Result {exitCode,
-stdout, stderr}` + `os.Process {pid}` as the public types;
-`os.run(argv) -> Result` blocking, `os.spawn(argv) -> Process`
-non-blocking, `os.wait/poll/kill(p)` for handle ops. `argv` is
-always `list of string` (no shell parsing; explicit
-`["sh", "-c", $cmd]` for that hop). Non-zero exit codes are
-values, not errors. **TinyGo limitation**: TinyGo's runtime
-doesn't implement `os/exec`, so the constrained `jennifer-tiny`
-binary returns a friendly "use the default `jennifer` binary" error
-instead of panicking - first place the two-binary story becomes
-user-visible. See
-[libraries/os.md > External programs](libraries/os.md#external-programs)
-and `examples/exec.j`.
-
-### M15.4 - Language: `len` built-in, `core` removed
-
-**Done.** Promoted `len(EXPR)` from the auto-loaded `core` library
-to a reserved keyword + language primary expression (polymorphic
-over string / list / map / bytes). Deleted `internal/lib/core/`
-entirely; `use core;` now returns a friendly migration error
-pointing at the built-in and at `meta.VERSION` / `meta.BUILD`.
-Stance #2 ("explicit over implicit") now applies uniformly: every
-library name lives behind a `use NAME;` prefix, no exceptions. See
-[technical/design-decisions.md > len is a language built-in](technical/design-decisions.md#len-is-a-language-built-in-not-a-library).
-
-### M15.5 - `time`
-
-**Done.** One opt-in library spanning instants, durations,
-fixed-offset zones, strftime format/parse, and ISO 8601
-round-trip. Three namespaced structs: `time.Time {nanos, offset}`
-(fields private API), `time.Duration {nanos}`, and
-`time.Zone {offset, name}` (fields public, so an IANA / DST
-companion can build them). Granularity (date-only
-vs time-of-day-only) is a property of formatting, not the value
-type. Unix timestamps are constructor / accessor pairs, not a
-separate type. IANA names and DST are out of the fixed-offset
-core - a Go-backed `time`-library extension, not a `.j` data map
-(see the Long-horizon "`time`: IANA / DST zones" entry). Three
-sub-milestones: **M15.5.1** core type + Unix + calendar + 1-based
-ISO weekday + arithmetic / comparison; **M15.5.2** strftime
-format/parse (chosen over Go's reference-time style for
-familiarity; v1 verbs `%Y %m %d %H %M %S %z %a %A %b %B %j %u
-%%`) + `time.zone(offset, name)` + `time.inZone` + the `time.UTC`
-constant coexisting with the `time.utc()` function via
-case-sensitive lookup + `time.iso` / `time.fromIso` RFC 3339
-round-trip; **M15.5.3** the `examples/benchmark.j` side-by-side
-TinyGo-vs-Go workload suite (eight workloads; the original spec's
-"Sieve of Eratosthenes" became trial-division because Jennifer's
-value-semantic list mutation turns the sieve into O(N^2)). See
-[libraries/time.md](libraries/time.md),
-`examples/time{,-format,benchmark}.j`.
-
-### M15.6 - `hash` and `crc`
-
-**Done.** Two opt-in libraries with parallel surfaces: `hash`
-for cryptographic-style digests (`"md5"`, `"sha1"`, `"sha256"`),
-`crc` for non-cryptographic checksums (`"crc32"` IEEE, `"crc64"`
-with Go's `crc64.ECMA` polynomial). Output is raw `bytes`
-(big-endian 4 / 8 bytes for CRC, natural width for hash). The
-split keeps "transport integrity" vs "content addressing"
-visible at the import line and matches Go's `crypto/*` vs
-`hash/crc*` arrangement. Both libraries ship the codec-table
-shape: `compute(b, algo)` one-shot, `stream(algo)` +
-`update($s, $b)` + `finalize($s) -> bytes` for chunked input.
-Streaming reuses the
-[integer-handle pattern from `os.Process`](#m153---os-external-program-execution).
-No convenience wrappers like `hash.md5String` or `hash.computeHex`
-(stance #1; users compose `convert.bytesFromString` and
-`encoding.toText`). Struct hashing deferred (needs stable byte
-serialization, its own design problem). See
-[libraries/hash.md](libraries/hash.md),
-[libraries/crc.md](libraries/crc.md), `examples/hash.j`.
-
-### M15.7 - `encoding`
-
-**Done.** Three-part surface: introspection
-(`isAscii`/`lenBytes`/`lenRunes`), binary-to-text
-(`toText`/`fromText` for `"hex"`/`"base64"`/`"base64-url"`), and
-character codecs (`encode`/`decode`/`codecs`). The cross-kind
-UTF-8 pair stays in `convert` (M12); `encoding` owns the
-table-based codec proliferation. Four codecs ship: `"ascii"`,
-`"iso-8859-1"`, `"windows-1252"`, `"ebcdic"`. The spec's per-format
-verbs (`encoding.hex`, `encoding.base64`, ...) consolidated into
-the codec-table pair to dodge the same digit-in-identifier rule
-M15.6 hit. Codec names and format strings are exact-match (the one
-canonical spelling only; the original alias / case normalisation was
-later dropped as a strictness lift, stance #2).
-Windows-1252's five canonically-undefined positions (0x81, 0x8D,
-0x8F, 0x90, 0x9D) reject symmetrically on encode and decode.
-Long-tail single-byte codecs (ISO-8859-{2..16},
-Windows-{1250,1251,1253..1258}) later shipped in
-[M16.15](#m1615---encoding-completion), generated from the Unicode
-mapping files. See
-[libraries/encoding.md](libraries/encoding.md),
-`examples/encoding.j`.
-
-### M15.8 - distribution + first public release
-
-**Done.** Packaging / CI / release-engineering only; no
-`.j`-source language change. Four sub-phases:
-
-- **CI** (`.github/workflows/test.yml`, `release.yml`). PR gate
-  runs `go vet` + `gofmt` + `go test ./...` + `make build` +
-  per-binary smoke run + repo-wide em-dash scan. Release
-  triggers on bare-semver tags (`[0-9]*.[0-9]*.[0-9]*`, no `v`
-  prefix per project convention), cross-compiles both binaries
-  for `linux/{amd64,arm64}` from one runner, QEMU-smoke-tests
-  the non-native arch, runs the benchmark on amd64 so release
-  notes carry fresh numbers, publishes a draft Release.
-- **Packaging** under `packaging/{debian,arch,mime,man}/`.
-  `scripts/build-deb.sh` produces the `.deb` (binaries +
-  gzipped man pages + shared `text/x-jennifer` MIME definition
-  + `update-mime-database` hooks). AUR ships `PKGBUILD-bin`
-  (release tarball) and `PKGBUILD-git` (source-tracking) with
-  a shared `.install` hook. Release pipeline auto-fills
-  `PKGBUILD-bin` (real `pkgver` + real `sha256sums_*`) as a
-  release asset so the AUR push is a one-step `curl`. The
-  `.pacman` standalone artefact from the original spec was
-  dropped - `PKGBUILD-bin` + `makepkg` covers the same need.
-- **Docs site** via mdBook 0.5.3 (pinned, fetched via direct
-  curl from `rust-lang/mdBook` releases - no third-party
-  action). `book.toml` at repo root, `src = "docs"`,
-  `docs/SUMMARY.md` maps the existing tree into five parts,
-  `docs/introduction.md` is the docs-site landing
-  (README stays GitHub-repo-focused). `.github/workflows/docs.yml`
-  publishes to GitHub Pages on every push to `main`.
-- **User-facing install docs**. README gained "Which binary?" +
-  "Install" sections with one command per path. `installing.md`
-  restructured to put package paths first; build-from-source
-  positioned as the developer path. `RELEASE.md` at the repo
-  root documents the steps CI can't do (AUR SSH push,
-  draft-publish review, pre-tag readiness checks).
-
-**Conventions established (worth keeping)**:
-
-- Bare semver tags (`0.14.1`, no `v` prefix); all pipelines pass
-  the tag straight through.
-- No top-level `LICENSE` file in v1 - the LGPL-3.0 text ships
-  inline in `packaging/debian/copyright` (the form distros
-  actually consume) + README links to gnu.org's canonical URL.
-
-**One-time manual setup** before the first push to `main`: in
-GitHub repo Settings -> Pages, set "Source" to "GitHub Actions"
-so `docs.yml` can deploy.
-
-**Deferred out of this milestone** (not gated on it): the
-cross-build for macOS / Windows and a real apt repository stay in
-[Requirements for 1.0.0 stable](#requirements-for-100-stable);
-the extra distribution formats (Homebrew, Snap, Nix, Flatpak,
-AppImage) moved to the [horizon idea collection](horizon.md).
+| M#    | Topic | Summary |
+| ----- | ----- | ------- |
+| M15.0 | existing-library extensions | `lists.shuffle(xs)` (Fisher-Yates, respects `math.randSeed`) and `lists.range(start, end[, step])` (half-open; the single-arg form is deliberately omitted, stance #2). |
+| M15.1 | `os` reshape + `meta` | Immutable per-run host facts became uppercase constants (`PLATFORM` / `ARCH` / `EOL` / `DIRSEP` / `PATHSEP` / `ARGS`), operations stay functions (`getEnv` / `hasFlag` / `flag`); dropped the `JENNIFER_` prefix. New `meta` library for interpreter identity (`VERSION` / `BUILD`); the CLI forwards trailing args to `os.ARGS` (script path at index 0). Breaking renames (`JENNIFER_VERSION` -> `meta.VERSION`, `os.platform()` -> `os.PLATFORM`, `os.JENNIFER_LF` -> `os.EOL`), old names now plain "undefined" errors. |
+| M15.2 | library-provided namespaced structs (language) | `def x as lib.Name;` type syntax + `lib.Name{field: ...}` literals + the Go `Interpreter.RegisterNamespacedStruct` API, reusing M13.1's value-semantics / deep-const / strict-boundary machinery (only resolution differs). User code can't register structs (Go-side only); no methods-on-structs / inheritance. Unblocks `os.Result`/`Process`, `time.*`, the `hash`/`crc` streams, later `fs`/`net`. |
+| M15.3 | `os` external-program execution | First consumer of M15.2. `os.Result{exitCode, stdout, stderr}` + `os.Process{pid}`; `os.run(argv) -> Result` (blocking), `os.spawn(argv) -> Process` (non-blocking) + `wait` / `poll` / `kill`. `argv` is always `list of string` (no shell parsing - use `["sh", "-c", $cmd]` explicitly). Non-zero exit codes are values, not errors. First user-visible two-binary split: `jennifer-tiny` has no `os/exec`, so it returns a friendly "use the default `jennifer` binary" error. |
+| M15.4 | `len` built-in, `core` removed (language) | Promoted `len(EXPR)` from the auto-loaded `core` library to a reserved keyword + primary expression (polymorphic over string / list / map / bytes). Deleted `internal/lib/core/`; `use core;` returns a friendly migration error pointing at the built-in and `meta.VERSION`/`BUILD`. Every library now lives behind a `use NAME;` (stance #2, no exceptions). |
+| M15.5 | `time` | Instants, durations, fixed-offset zones, strftime format / parse, ISO 8601 round-trip. Structs `time.Time{nanos, offset}` (private fields), `time.Duration{nanos}`, `time.Zone{offset, name}` (public, so an IANA/DST companion can build them). Granularity is a formatting property, not a type; Unix timestamps are constructor/accessor pairs, not a type. IANA/DST stay out of the fixed-offset core (a Go-backed extension, not a `.j` data map). Three parts: core + Unix + calendar + 1-based-ISO-weekday + arithmetic; strftime (`%Y %m %d %H %M %S %z %a %A %b %B %j %u %%`) + `time.zone`/`inZone` + `time.UTC` const alongside `time.utc()` + `time.iso`/`fromIso`; and `examples/benchmark.j` (the TinyGo-vs-Go suite; the sieve became trial-division since value-semantic list mutation makes a sieve O(N^2)). |
+| M15.6 | `hash` + `crc` | Two parallel codec-table libraries: `hash` (crypto-style digests `md5` / `sha1` / `sha256`), `crc` (`crc32` IEEE / `crc64` ECMA) - the split keeps "transport integrity" vs "content addressing" visible at the import line (mirrors Go's `crypto/*` vs `hash/crc*`). Output is raw `bytes`. `compute(b, algo)` one-shot + `stream(algo)` / `update` / `finalize` (the integer-handle pattern). No convenience wrappers like `hash.md5String` - compose `convert` + `encoding` (stance #1). Struct hashing deferred. |
+| M15.7 | `encoding` | Introspection (`isAscii` / `lenBytes` / `lenRunes`), binary-to-text `toText` / `fromText` (`hex` / `base64` / `base64-url`), character `encode` / `decode` / `codecs` (`ascii` / `iso-8859-1` / `windows-1252` / `ebcdic`). The cross-kind UTF-8 pair stays in `convert` (M12); `encoding` owns the codec proliferation. Exact-match codec / format names (the original alias / case-normalisation layer was later dropped, stance #2); Windows-1252's five undefined positions reject symmetrically. The long-tail single-byte codecs shipped later in [M16.15](#m16---io-libraries-and-developer-tooling-compacted). |
+| M15.8 | distribution + first public release | Packaging / CI / release only, no language change. **CI**: PR gate (`go vet` + `gofmt` + `go test ./...` + `make build` + per-binary smoke + em-dash scan); release on bare-semver tags cross-compiling `linux/{amd64,arm64}`, QEMU-smoke-testing the non-native arch, running the benchmark, publishing a draft Release. **Packaging** under `packaging/{debian,arch,mime,man}/` (`.deb` via `build-deb.sh` with man pages + `text/x-jennifer` MIME; AUR `PKGBUILD-bin` / `-git`, auto-filled by the pipeline). **Docs site** via pinned mdBook 0.5.3 -> GitHub Pages. Conventions kept: bare semver tags (no `v` prefix), no top-level `LICENSE` (LGPL text in `packaging/debian/copyright` + a README link). Deferred (not gated): the macOS / Windows cross-build and a real apt repo stay in [Requirements for 1.0.0 stable](#requirements-for-100-stable). |
 
 ---
 
-## M16 - I/O libraries and developer tooling
+## M16 - I/O libraries and developer tooling (compacted)
 
-**Status:** done. Phase C: system libraries that touch the OS or do
-significant compute, opened by a concurrency primitive (M16.0) that the
-I/O libraries build on, then a developer-tooling trio (lint / profile /
-test) and a run of self-contained data libraries. All sub-milestones
-shipped; git history holds the full per-milestone specs.
+**All done.** Phase C - system libraries that touch the OS or do significant
+compute, opened by the `spawn` concurrency primitive (M16.0) the I/O libraries
+build on, then a lint / profile / test developer-tooling trio and a run of
+self-contained data libraries. Design detail: git history and the linked
+per-library / per-tool docs.
 
-### M16.0 - Lightweight concurrency
-
-**Done.** `spawn { ... }` (block primary expression), `task of T` (new
-compound kind), and the `task` library (`wait` / `poll` / `discard` /
-`waitAll` / `waitAny`). Goroutine-backed but data-race-free by
-construction: `snapshotForSpawn` deep-copies a two-frame globals+locals
-snapshot at launch (tasks are the one carve-out from value semantics -
-copies share the `TaskState` pointer). A per-run registry loud-fails
-unobserved task errors at exit and bumps the exit code (a non-terminating
-undiscarded spawn hangs at exit - the documented trade-off). `task.wait`
-re-raises a body error at the wait site for `try`/`catch`; `waitAny` is
-the runtime's only `reflect.Select`. The Makefile passes
-`-stack-size=4mb -scheduler=tasks` to TinyGo. See
-[concurrency.md](user-guide/concurrency.md), [task.md](libraries/task.md).
-
-### M16.1 - `fs`
-
-**Done.** Blocking filesystem I/O composed with `spawn` (no `*Async`
-variants): whole-file `read`/`write`/`append` (String/Bytes), metadata
-(`exists`/`isFile`/`isDir`/`stat` -> `fs.Stat`), directory ops with the
-two-verb recursion split (`mkdir`/`mkdirAll`, `remove`/`removeAll`, plus
-`rename`/`list`/`walk`), and buffered `fs.File` handles
-(`open`/`readLine`/.../`close`; `eof` peeks one byte). Path- vs
-handle-form verbs dispatch on first-arg kind; `fs.File` shares state
-across copies (the handle carve-out from value semantics). See
-[fs.md](libraries/fs.md).
-
-### M16.2 - `net`
-
-**Done.** TCP (`connect`/`listen`/`accept`/`readBytes`/`writeBytes`),
-UDP (`listenUDP`/`sendTo`/`recvFrom`), and DNS
-(`lookup`/`reverseLookup`); polymorphic `close`/`address` over three
-handle registries. Blocking calls compose with `spawn`
-(accept-loop-per-connection). Build-tag split: `jennifer-tiny` returns
-friendly-error stubs (no netdev in TinyGo). See [net.md](libraries/net.md).
-
-### M16.3 - `regex`
-
-**Done.** RE2 (Go `regexp`, linear-time) over strings:
-`matches`/`find`/`findAll`/`replace`/`split`/`escape`;
-`regex.Match{text,start,end,groups,groupsNamed}` with rune indices and a
-`start=-1` no-match sentinel; an implicit 128-entry LRU pattern cache.
-Full surface in both binaries. See [regex.md](libraries/regex.md).
-
-### M16.4 - `testing` (system-library primitives)
-
-**Done.** The irreducible system-side surface a `.j` test framework needs:
-`testing.run(name)` invokes a zero-arg user method via the new
-`Interpreter.CallByName`, times it, and classifies every failure mode
-into a `testing.Result`; `results`/`reset` manage a mutex-guarded
-accumulator; `report` renders text / TAP / JUnit. The one place `exit` is
-caught (at the Go level, so language `try`/`catch` still cannot). See
-[testing.md](libraries/testing.md).
-
-### M16.5 - Interpreter performance pass
-
-**Done.** Five sub-milestones, user-visible behaviour unchanged: **.1**
-shared-marker copy-on-write on compound Values (append-in-a-loop O(N^2)
--> amortised O(N)); **.2** parse-time lexical slot resolution
-((Depth,Slot) coordinates + a `slots` slice, undefined/shadowing promoted
-to parse-time errors); **.3** pooled + pre-resolved + slot-bound
-method-call frames; **.4** namespaced-call / comparison / arg-bind /
-root-cache fast paths; **.5** compile-time constant folding plus a
-`Share()` scalar fast path. Numbers in [tinygo.md](technical/tinygo.md).
-
-### M16.6 - Developer tooling: linting
-
-**Done.** `jennifer lint` flags compile-legal-but-suspect patterns:
-grouped IDs (**L0nn** source errors, always on / **L1nn** correctness /
-**L2nn** style / **L3nn** lifecycle), `# lint-disable[-file]: IDS`
-suppression, `--checks` / `.jennifer-lint` config, and human / JSON /
-GitHub output (source errors render in the chosen format, so a JSON
-pipeline stays valid); exit 0/1/2. `!tinygo`. See
-[cli_lint.md](technical/cli_lint.md).
-
-### M16.7 - Developer tooling: profiling
-
-**Done.** `jennifer profile` attributes work to `.j` source positions
-(what `go tool pprof` cannot): a statement profile (hit count +
-self/cumulative wall-clock) and an `--allocs` value-copy profile; table /
-pprof (hand-encoded gzipped protobuf) / Chrome-trace output; program
-output goes to stderr so the profile owns stdout. `!tinygo`. See
-[cli_profile.md](technical/cli_profile.md).
-
-### M16.8 - Testing framework consolidation
-
-**Done.** An assertion vocabulary on M16.4's primitives (`assertEqual`
-... `assertThrows`, throwing `Error{kind:"assertion"}` at the call site),
-`CallByNameWith`/`runWith` argument dispatch, and the `jennifer test`
-subcommand (`test*` discovery or `--filter`, `setUp`/`tearDown`,
-`--isolated` per-test subprocess, text/TAP/JUnit, exit 0/1/2). Builtins
-can now raise a catchable Jennifer error via `interpreter.RaiseError`. See
-[cli_test.md](technical/cli_test.md).
-
-### M16.9 - `json`
-
-**Done.** Hand-rolled RFC 8259 encode/decode onto the tagged-union Value
-(no `encoding/json`, no reflect). `encode`/`encodePretty`/`decode`;
-structs and `map of string to V` map to objects, `bytes` to base64,
-numbers to `int` when integral else `float`. Also closed a type hole: a
-generic collection (a fresh literal or decode result) is validated entry
-by entry against the declared element type at every binding boundary.
-Decode's return shape was later superseded by
-[M16.16](#m1616---jsonvalue). See [json.md](libraries/json.md).
-
-### M16.10 - `uuid`
-
-**Done.** RFC 9562: `uuid.generate("v4")` (random) / `generate("v7")`
-(time-ordered), the version tag a string argument (identifiers are
-letters-only), plus `parse`/`isValid`/`version` and constant `NIL`.
-Randomness originally drew from `math`'s seedable RNG; M20.1 repointed it
-at `crypto`'s crypto-grade source, so v4 / v7 are now unguessable. See
-[uuid.md](libraries/uuid.md).
-
-### M16.11 - `compress`
-
-**Done.** Byte-stream size reduction (distinct from `encoding`'s
-representation codecs): `pack`/`unpack` for `"gzip"`/`"zlib"`/`"deflate"`
-with an optional `"fast"`/`"default"`/`"best"` level, plus a streaming
-`compress.Stream` handle. Go `compress/*`, TinyGo-clean. See
-[compress.md](libraries/compress.md).
-
-### M16.12 - `archive`
-
-**Done.** tar / zip containers over `bytes` (no `fs`, value-semantic):
-`pack`/`unpack` (verbs shared with `compress`) for
-`"tar"`/`"zip"`/`"tar.gz"`; a bundle is a
-`list of archive.Entry{name,data,mode,mtime}`. Go
-`archive/tar`+`archive/zip`. See [archive.md](libraries/archive.md).
-
-### M16.13 - `os.isTerminal`
-
-**Done.** `os.isTerminal(stream)` (`"stdout"`/`"stderr"`/`"stdin"`) ->
-bool, the gate for ANSI colour, via the character-device mode bit
-(`os.ModeCharDevice`) - pure stdlib (keeps `x/term` CLI-scoped),
-TinyGo-clean; an unstattable stream reports `false`. See
-[os.md](libraries/os.md).
-
-### M16.14 - `net` TLS
-
-**Done.** `net.connectTLS(address)` (implicit TLS) and
-`net.startTLS(conn)` (in-place STARTTLS upgrade), both yielding the
-transport-agnostic `net.Conn`. Certificate verification is on by default,
-with a `net.TLSOptions{skipVerify as bool, caCert as bytes}` opt-out. Go
-`crypto/tls` on the `!tinygo` build (stubbed on `jennifer-tiny`). See
-[net.md](libraries/net.md).
-
-### M16.15 - `encoding` completion
-
-**Done.** Filled out `encoding`: `toText`/`fromText` gained
-`quoted-printable`, `base32`/`base32-hex`, `ascii85`, and `z85`; the full
-ISO-8859-{1..16} / Windows-{1250..1258} single-byte codecs, generated
-from the Unicode mapping files (`gen_codecs.go` -> `codecs_gen.go`) so
-only `ascii`/`ebcdic` stay hand-written. Format and codec names are
-exact-match (the normalisation layer was dropped as a strictness lift,
-stance #2). See [encoding.md](libraries/encoding.md).
-
-### M16.16 - `json.Value`
-
-**Done.** The strict home for heterogeneous JSON without a language top
-type: `json.decode` returns an opaque `json.Value` - the first
-`KindObject` (the opaque sibling of `KindStruct`: discriminated by
-`(namespace, name)`, minted only by a library, rejecting operators /
-`[i]` / `.field`). `convert.typeOf` reports `"object"`,
-`convert.objectType` the specific `"json.Value"`. Reads and non-mutating
-writes share JSON Pointer (RFC 6901) addressing -
-`typeOf`/`get`/`has`/`keys`/`length`/`as*`/`isNull` and
-`map`/`list`/`set`/`insert`/`append`/`remove`/`move` (strict / no-vivify,
-`-` end-marker), with node types in `list`/`map` vocabulary - and a
-displayer hook renders a handle as its JSON. `json.decode`'s return type
-changed (a pre-1.0 break) and the decoder's number grammar was tightened
-to json.org. No `any` keyword (rationale in
-[rejected.md](technical/rejected.md)). See [json.md](libraries/json.md).
+| M#     | Topic | Summary |
+| ------ | ----- | ------- |
+| M16.0 | lightweight concurrency | `spawn { ... }` (block primary expression), `task of T` (new compound kind), the `task` library (`wait` / `poll` / `discard` / `waitAll` / `waitAny`). Goroutine-backed but race-free by construction: `snapshotForSpawn` deep-copies a globals+locals snapshot at launch; tasks share only the `TaskState` pointer (the one value-semantics carve-out). A per-run registry loud-fails unobserved task errors at exit (an undiscarded non-terminating spawn hangs at exit - the documented trade-off); `task.wait` re-raises a body error at the wait site; `waitAny` is the runtime's only `reflect.Select`. TinyGo builds with `-stack-size=4mb -scheduler=tasks`. |
+| M16.1 | `fs` | Blocking filesystem I/O composed with `spawn` (no `*Async`): whole-file `read`/`write`/`append` (String/Bytes), metadata (`exists`/`isFile`/`isDir`/`stat` -> `fs.Stat`), dir ops with the two-verb recursion split (`mkdir`/`mkdirAll`, `remove`/`removeAll`, `rename`/`list`/`walk`), buffered `fs.File` handles (`open`/`readLine`/.../`close`, `eof` peeks a byte). Path- vs handle-form verbs dispatch on the first-arg kind; `fs.File` shares state across copies (handle carve-out). |
+| M16.2 | `net` | TCP (`connect`/`listen`/`accept`/`readBytes`/`writeBytes`), UDP (`listenUDP`/`sendTo`/`recvFrom`), DNS (`lookup`/`reverseLookup`); polymorphic `close`/`address` over three handle registries; blocking calls compose with `spawn` (accept-loop-per-connection). Build-tag split: `jennifer-tiny` returns friendly-error stubs (no netdev in TinyGo). |
+| M16.3 | `regex` | RE2 (Go `regexp`, linear-time) over strings: `matches`/`find`/`findAll`/`replace`/`split`/`escape`; `regex.Match{text,start,end,groups,groupsNamed}` (rune indices, `start=-1` = no match); implicit 128-entry LRU pattern cache. Both binaries. |
+| M16.4 | `testing` (primitives) | The irreducible system side a `.j` test framework needs: `testing.run(name)` invokes a zero-arg user method via `Interpreter.CallByName`, times it, classifies failures into a `testing.Result`; `results`/`reset` (mutex-guarded); `report` (text / TAP / JUnit). The one place `exit` is caught (Go-level, so language `try`/`catch` still can't). |
+| M16.5 | interpreter performance pass | Five sub-parts, behaviour unchanged: **.1** shared-marker COW on compound Values (append-in-a-loop O(N^2) -> amortised O(N)); **.2** parse-time lexical slot resolution ((Depth,Slot) coordinates + a `slots` slice; undefined/shadowing promoted to parse-time errors); **.3** pooled + pre-resolved + slot-bound method-call frames; **.4** namespaced-call / comparison / arg-bind / root-cache fast paths; **.5** compile-time constant folding + a `Share()` scalar fast path. Numbers in [tinygo.md](technical/tinygo.md). |
+| M16.6 | lint | `jennifer lint` flags compile-legal-but-suspect patterns: grouped IDs (**L0nn** source errors / **L1nn** correctness / **L2nn** style / **L3nn** lifecycle), `# lint-disable[-file]: IDS` suppression, `--checks` / `.jennifer-lint` config, human / JSON / GitHub output (a JSON pipeline stays valid even on a source error); exit 0/1/2. `!tinygo`. |
+| M16.7 | profile | `jennifer profile` attributes work to `.j` source positions (what `go tool pprof` can't): a statement profile (hit count + self/cumulative wall-clock) and an `--allocs` value-copy profile; table / pprof (hand-encoded gzipped protobuf) / Chrome-trace output; program output to stderr so the profile owns stdout. `!tinygo`. |
+| M16.8 | testing framework consolidation | An assertion vocabulary on M16.4 (`assertEqual` ... `assertThrows`, throwing `Error{kind:"assertion"}` at the call site), `CallByNameWith`/`runWith` arg dispatch, and the `jennifer test` subcommand (`test*` discovery or `--filter`, `setUp`/`tearDown`, `--isolated` per-test subprocess, text/TAP/JUnit, exit 0/1/2). Builtins can now raise a catchable error via `interpreter.RaiseError`. |
+| M16.9 | `json` | Hand-rolled RFC 8259 encode/decode onto the tagged-union Value (no `encoding/json`, no reflect). `encode`/`encodePretty`/`decode`; structs and `map of string to V` -> objects, `bytes` -> base64, integral numbers -> `int` else `float`. Also closed a type hole: a generic collection (a fresh literal or decode result) is validated entry-by-entry against the declared element type at every binding boundary. Decode's return shape was later superseded by M16.16 (`json.Value`). |
+| M16.10 | `uuid` | RFC 9562: `generate("v4")` (random) / `generate("v7")` (time-ordered) - the version a string arg since identifiers were letters-only - plus `parse`/`isValid`/`version` and constant `NIL`. Randomness was later repointed from `math` to `crypto`'s crypto-grade source (M20.1), making v4/v7 unguessable; M22.3 renamed `generate("v4")` -> `v4()`. |
+| M16.11 | `compress` | Byte-stream size reduction (distinct from `encoding`'s representation codecs): `pack`/`unpack` for `gzip`/`zlib`/`deflate` with an optional `fast`/`default`/`best` level, plus a streaming `compress.Stream`. Go `compress/*`, TinyGo-clean. |
+| M16.12 | `archive` | tar / zip containers over `bytes` (no `fs`, value-semantic): `pack`/`unpack` (verbs shared with `compress`) for `tar`/`zip`/`tar.gz`; a bundle is a `list of archive.Entry{name,data,mode,mtime}`. Go `archive/tar`+`archive/zip`. |
+| M16.13 | `os.isTerminal` | `os.isTerminal("stdout"/"stderr"/"stdin")` -> bool (the ANSI-colour gate) via the char-device mode bit (`os.ModeCharDevice`) - pure stdlib (keeps `x/term` CLI-scoped), TinyGo-clean; an unstattable stream reports `false`. |
+| M16.14 | `net` TLS | `net.connectTLS(address)` (implicit) and `net.startTLS(conn)` (in-place STARTTLS upgrade), both yielding the transport-agnostic `net.Conn`. Cert verification on by default, `net.TLSOptions{skipVerify, caCert}` opt-out. Go `crypto/tls` on the `!tinygo` build (stubbed on tiny). |
+| M16.15 | `encoding` completion | `toText`/`fromText` gained `quoted-printable`, `base32`/`base32-hex`, `ascii85`, `z85`; the full ISO-8859-{1..16} / Windows-{1250..1258} single-byte codecs, generated from the Unicode mapping files (`gen_codecs.go` -> `codecs_gen.go`) so only `ascii`/`ebcdic` stay hand-written. Exact-match codec/format names (the normalisation layer was dropped, stance #2). |
+| M16.16 | `json.Value` | The strict home for heterogeneous JSON without a language top type: `json.decode` returns an opaque `json.Value` - the first `KindObject` (the opaque sibling of `KindStruct`: discriminated by `(namespace, name)`, minted only by a library, rejecting operators / `[i]` / `.field`). `convert.typeOf` -> `"object"`, `convert.objectType` -> `"json.Value"`. Reads + non-mutating writes share JSON Pointer (RFC 6901): `typeOf`/`get`/`has`/`keys`/`length`/`as*`/`isNull` and `map`/`list`/`set`/`insert`/`append`/`remove`/`move` (strict / no-vivify, `-` end-marker), node types in `list`/`map` vocabulary; a displayer renders a handle as its JSON. `json.decode`'s return type changed (a pre-1.0 break); the decoder's number grammar tightened to json.org. No `any` keyword (rationale in [rejected.md](technical/rejected.md)). |
 
 ---
 
 **Phase D: higher-level and Jennifer-coded libraries (M17-M20).**
 
-## M17 - Module system for Jennifer-coded libraries
+## M17 - module system for Jennifer-coded libraries (compacted)
 
-**Status:** done. All six sub-milestones shipped. Jennifer-coded libraries
-now get their own namespace, scope, and explicit `export`s via a real
-**module boundary** (`import "x.j" as x;`, parser + interpreter) that lives
-beside the textual `include "x.j";` splice (preprocessor, for composing one
-module out of several files). The settled, cross-cutting decisions
-(turned-down alternatives in [rejected.md](technical/rejected.md)): `import`
-is a parser + interpreter feature, not a preprocessor splice; each module is
-its own resolution context (own `use` set, namespace + export tables); the
-module top level is **declarations-only** - no mutable module state, so
-`spawn` capture is unaffected; the one global `Error` stands (modules add
-distinctly-named error structs, never redefine it); **private by default**,
-a leading `export` publishes a name (no `public` / `private` keyword);
-multi-file modules assemble via `include` behind one entry file (no
-directory-as-module, no cross-file re-export); modules need a filesystem
-(an FS-less `jennifer-tiny` host fails with the ordinary search-path error).
-User-facing reference: [imports.md](user-guide/imports.md) +
-[modules/index.md](modules/index.md). M18.x builds on top.
+**All done.** Jennifer-coded libraries get their own namespace, scope, and
+explicit `export`s via a real **module boundary** (`import "x.j" as x;`, a parser
++ interpreter feature) beside the textual `include "x.j";` splice (a preprocessor
+operation for composing one module from several files). Settled cross-cutting
+decisions (turned-down alternatives in [rejected.md](technical/rejected.md)): each
+module is its own resolution context (own `use` set, namespace + export tables);
+the module top level is **declarations-only** (no mutable state, so `spawn`
+capture is unaffected); the one global `Error` stands (modules add
+distinctly-named error structs, never redefine it); **private by default**, a
+leading `export` publishes (no `public` / `private` keyword); multi-file modules
+assemble via `include` behind one entry file (no directory-as-module); a module
+needs a filesystem (an FS-less `jennifer-tiny` host fails with the ordinary
+search-path error). Design detail: git history,
+[imports.md](user-guide/imports.md), [interpreter.md](technical/interpreter.md).
 
-### M17.1 - Source tree and resolution
+| M#    | Topic | Summary |
+| ----- | ----- | ------- |
+| M17.1 | source tree + resolution | `internal/module` `Classify` + `Resolve` map an import path (local `./` / `../`, absolute `/`, or a bare name walked on the search path) to a canonical absolute path, rejecting an ambiguous name (found in two search dirs) and a not-found. The system module dir resolves `--sysmoddir` > `JENNIFER_SYSMODDIR` > compile default (surfaced as `meta.SYSMODDIR`; a named-but-missing dir refuses to start, the compile default is best-effort); `-I DIR` (repeatable) appends after it. `jennifer version -v` reports the layers. |
+| M17.2 | import statement + loader | `import "path.j" [as NAME];` is a real statement (`ModuleImportStmt` - the preprocessor passes it through, the parser builds the node). The loader runs each module in a fresh sub-interpreter sharing one `moduleReg`, so **run-once** (cached by canonical path), **depth-first post-order init**, and **cycle detection** (erroring with every edge named) all fall out of the recursion. Load-time errors (a parse error or a throwing `def const` init) aren't catchable (`import` is a declaration, not an expression). `fmt` / `ast` / `tokens` round-trip an `import` line. |
+| M17.3 | module scope + namespacing | Declarations-only top level (`checkModuleDeclarationsOnly`: only `def const` / `def struct` / `func` / `use` / `import`; scripts keep both). `loadModuleImports` binds each alias (the `as NAME`, or the file stem) into `moduleAliases`, collision-checked against library prefixes. Consumer resolution rides the qualified-reference eval layer: `evalQualifiedCall` / `evalQualifiedConst` dispatch `alias.fn(args)` into the module's own interpreter via `CallByNameWith` (args evaluated in the consumer, body run against the module's globals + methods) and read `alias.CONST`. `use` non-transitivity, run-once sharing, and `-race` safety all follow from the fresh-sub-interpreter-per-module model. |
+| M17.4 | exports + visibility | `export` publishes a top-level `func` / `def struct` / `def const`; unmarked names stay private (reaching `mod.helper` is a positioned "not exported" error), and `export` in a `run` script is rejected. `checkReferentialClosure` rejects an exported field / parameter typed as a *private* module struct (library / namespaced types cross freely). **Cross-module struct identity** = boundary translation (`retagStructs`): a module's structs are bare inside it and re-tagged to `(module-stem, name)` as a value crosses out to an importer and back, so `def p as mod.Point`, `mod.Point{...}`, field reads, and pass-back all type-check while `a.Point` / `b.Point` stay distinct; the retag also tags the element-type metadata a `list` / `map` carries (`retagType`). A co-located `MODULE_test.j` overlay (a token splice in `jennifer test`) runs white-box tests against the module's private names. |
+| M17.5 | `ansi` module | First module built on the system (pure `.j`, one `use os;` across the boundary; a real dogfood of import / export / resolution). Exports `color` / `bgColor` / `style` (bold / dim / italic / underline / reverse) / `rgb` truecolor / `strip`, plus per-colour and per-style shortcuts (`ansi.red(s)`, `ansi.bold(s)`, ...). The ESC byte is built from a one-byte `bytes`; `strip` uses `regex`; unknown names `throw`. Stateless + TTY-aware: `enabled()` re-reads `NO_COLOR` / `FORCE_COLOR` / `os.isTerminal("stdout")` per call (no toggle state; degrades to always-on when `os.isTerminal` is absent). Colour is a string wrapper, so a `%s|color=` printf modifier was rejected in its favour. |
+| M17.6 | `semver` module | Strict [SemVer 2.0.0](https://semver.org) as a second pure-`.j` reference module (`use strings` / `convert` / `regex`, so both binaries), and the base a future `jvc` package manager needs. Exports `Version{major, minor, patch, prerelease, build}` + `parse` (throws on invalid) / `isValid` / `toString`; `compare` / `lt` / `eq` / `gt` (full SemVer precedence: numeric core, prerelease ranks below release, build ignored); `isStable` (`0.y.z` unstable by convention) / `isPrerelease`; `incMajor` / `incMinor` / `incPatch`; and `sort` (own pass over `compare`, since `lists.sort` is scalar-only). Strict - a loose `1.2.3.4` is rejected. `parse` uses the anchored RE2 pattern with named groups; precedence + sort are hand-written (the algorithmic dogfood). Building it surfaced + fixed the M17.4 `retagType` gap (a consumer `list of semver.Version` handed back into a module `list of Version`). Range / constraint matching (`^1.2.0`, `>=1.0.0`, `~1.2.3`) deferred to `jvc`. |
 
-**Done.** Path resolution in `internal/module`: `Classify` + `Resolve` map
-an import path (local `./` / `../`, absolute `/`, or a bare name walked on
-the search path) to a canonical absolute path, rejecting a name found in
-two search dirs and a not-found. The system module directory resolves
-`--sysmoddir` > `JENNIFER_SYSMODDIR` > compile-time default (surfaced as
-`meta.SYSMODDIR`; a named CLI / env dir that is missing or not a directory
-refuses to start, the compile default is best-effort), and `-I DIR`
-(repeatable) appends to the search path after it. `jennifer version -v`
-reports the resolved layers. See [cli.md](technical/cli.md).
-
-### M17.2 - Import statement and loader
-
-**Done.** `import "path.j" [as NAME];` is a real statement
-(`ModuleImportStmt`) - the preprocessor passes it through, the parser
-builds the node. The loader (`internal/interpreter/module.go`) runs each
-module in a fresh sub-interpreter sharing one `moduleReg` (run-once cache
-by canonical path, in-progress load stack, search path), so **run-once**,
-**depth-first post-order init**, and **cycle detection** (erroring with
-every edge named) all fall out of the recursion. Load-time errors (a parse
-error or a throwing `def const` initializer) fail the program and are not
-catchable - an `import` is a declaration, not an expression, so it cannot
-sit in a `try` / block. `jennifer fmt` / `ast` / `tokens` round-trip an
-`import` line. See [imports.md](user-guide/imports.md).
-
-### M17.3 - Module scope and namespacing
-
-**Done.** A module top level is **declarations-only**
-(`checkModuleDeclarationsOnly`: only `def const` / `def struct` / `func` /
-`use` / `import`; a mutable `def` or free-standing statement is a
-positioned load-time error - scripts keep both). `loadModuleImports` binds
-each alias (the `as NAME`, or the file stem) into `moduleAliases`,
-collision-checked against library prefixes. Consumer resolution rides the
-qualified-reference eval layer: `evalQualifiedCall` / `evalQualifiedConst`
-dispatch `alias.fn(args)` into the module's own interpreter via
-`CallByNameWith` (arguments evaluated in the consumer, body run against the
-module's globals + methods) and read `alias.CONST` from its scope. `use`
-non-transitivity, run-once sharing, and `-race` safety all follow from the
-fresh-sub-interpreter-per-module model - a module holds only immutable
-constants and read-only methods. See [interpreter.md](technical/interpreter.md).
-
-### M17.4 - Exports and visibility
-
-**Done.** `export` (a keyword) publishes a top-level `func` / `def struct` /
-`def const`; unmarked names stay private (reaching `mod.helper` from
-outside is a positioned "not exported from module" error), and `export` in
-a `jennifer run` script is rejected (module vs script by entry, via the
-`isModule` flag). `checkReferentialClosure` rejects an exported struct
-field or exported function parameter typed as a *private* module struct;
-library / namespaced types cross freely. **Cross-module struct identity**
-is boundary translation (`retagStructs`): a module's structs are bare
-inside it and re-tagged to `(module-stem, name)` as a value crosses out to
-an importer and back on the way in, so `def p as mod.Point`,
-`mod.Point{...}`, field reads, and pass-back all type-check while `a.Point`
-and `b.Point` stay distinct. The retag walks values *and* the collection
-type tags a `list` / `map` carries (`retagType`), so a
-`list of mod.Point` handed back into a module reads as its bare
-`list of Point` parameter. A co-located `MODULE_test.j` overlay (a token
-splice in `jennifer test`) runs white-box tests against the module's
-private names.
-
-### M17.5 - `ansi` module
-
-**Done.** `modules/ansi.j` - terminal styling as explicit string wrappers,
-the first module built on the system (pure Jennifer, one `use os;`
-dependency across the boundary; a real end-to-end dogfood of `import` /
-`export` / resolution). Exports `color` / `bgColor` / `style` (bold / dim /
-italic / underline / reverse) / `rgb` truecolor / `strip`, plus per-colour
-and per-style shortcuts (`ansi.red(s)`, `ansi.bold(s)`, ...). The ESC byte
-is built from a one-byte `bytes` (no string-literal escape for it); `strip`
-uses `regex`; unknown colour / style names `throw`. Stateless and
-TTY-aware: `enabled()` re-reads `NO_COLOR` / `FORCE_COLOR` /
-`os.isTerminal("stdout")` per call, so redirected output stays clean and no
-toggle state is stored (honours the no-mutable-state rule); degrades to
-always-on when `os.isTerminal` is absent. Colour is a string wrapper, so a
-`%s|color=` printf modifier is rejected in its favour
-([rejected.md](technical/rejected.md)). Demo
-`examples/modules/ansi_demo.j`; coverage
-`internal/interpreter/module_ansi_test.go` + a white-box
-`modules/ansi_test.j` overlay reading ansi's private tables; reference doc
-[modules/ansi.md](modules/ansi.md).
-
-### M17.6 - `semver` module
-
-**Done.** `modules/semver.j` - strict [SemVer 2.0.0](https://semver.org) as
-a second pure-Jennifer reference module (no system dependency beyond
-`use strings; use convert; use regex;`, so it runs on both binaries), and
-the foundation the future `jvc` package manager
-([Long horizon](#long-horizon-recorded-not-scheduled)) needs since
-`install gotify>=1.0.0` is semver comparison at its core. Exports
-`Version { major, minor, patch, prerelease, build }` plus `parse` (throws
-on invalid) / `isValid` / `toString` (round-trips `parse`); `compare` /
-`lt` / `eq` / `gt` (SemVer precedence: numeric core, a prerelease ranks
-*below* its release, prerelease fields compared numeric-below-alphanumeric,
-build metadata ignored); `isStable` (no prerelease and `major >= 1`;
-`0.y.z` is unstable by convention) / `isPrerelease`; `incMajor` / `incMinor`
-/ `incPatch` (reset the lower parts, clear pre + build); and `sort` (own
-pass over `compare`, since `lists.sort` is scalar-only). Strict, not a loose
-parser: a looser N-segment form (`1.2.3.4`) has no defined ordering and is
-rejected. `parse` matches the canonical anchored SemVer RE2 pattern with
-named groups (`regex.find` + `groupsNamed`); the precedence comparison and
-sort are hand-written Jennifer - the algorithmic dogfood. `meta.VERSION` is
-valid strict semver, so the module parses Jennifer's own version. Range /
-constraint matching (`^1.2.0`, `>=1.0.0`, `~1.2.3`) is the harder parser and
-is deferred to (or just before) `jvc`. Building the demo surfaced and fixed
-a latent M17.4 boundary gap: passing a consumer-typed `list of semver.Version`
-back into a module `list of Version` parameter (`semver.sort`) failed because
-the retag re-tagged the struct element *values* but not the list's
-element-*type* metadata - now covered by `retagType` (regression
-`TestModuleListOfStructCrossesBoundary`). Demo
-`examples/modules/semver_demo.j`; white-box `modules/semver_test.j` overlay
-(12 tests); reference doc [modules/semver.md](modules/semver.md).
 
 ## M18.x - Jennifer-coded modules
 
@@ -1265,282 +768,34 @@ under its library):
   `totp` / `webhook` build on (and that `jwt` / SigV4 will reuse).
 
 
-## M19 - cross-cutting tooling
+## M19 - cross-cutting tooling (compacted)
 
-The catch-all bucket for milestones that improve the interpreter or its
-tooling but belong to neither the Jennifer-coded modules of M18 nor the Go
-system libraries of M20. M19.1-M19.5 are a correctness / performance hardening
-pass over the interpreter core and libraries (races, dead code, algorithmic
-complexity, resource bounds, module identity); M19.6 is the coverage tool;
-M19.7 the `@scope/package` vendored-module resolver; M19.8 the one-time
-relocation to the `jennifer-language` org and a host-independent vanity module
-path; M19.9 the audit-driven correctness + hardening pass. None of this work
-needs `reflect` or breaks TinyGo-cleanliness.
+**All done.** The catch-all bucket for interpreter / tooling work belonging to
+neither the M18 `.j` modules nor the M20 Go system libraries: M19.1-M19.5 a
+correctness / performance hardening pass over the core + libraries; M19.6 the
+coverage tool; M19.7 the `@scope/package` vendored-module resolver; M19.8 the
+one-time org / vanity-path relocation; M19.9 the audit-driven hardening pass. No
+`reflect`, no TinyGo-cleanliness break. Design detail: git history and the linked
+docs.
 
-### M19.1 - Interpreter concurrency-safety
+| M#    | Topic | Summary |
+| ----- | ----- | ------- |
+| M19.1 | interpreter concurrency-safety | Both interpreter data races fixed, each pinned by a `-race` stress test. `snapshotForSpawn` snapshots the launching goroutine's own root frame (`effectiveGlobal(env)`), not the live `i.global`, so a nested spawn no longer races the main goroutine's global writes. Declared struct types are stamped once, single-threaded, before any statement (`resolveDeclaredTypesOnce`, after `loadModuleImports`) with a `parser.Type.Resolved` marker, so the per-execution re-resolve is a read-only no-op (also fixes a latent aliased-library-struct "canonical is aliased" rejection). Error timing unchanged. |
+| M19.2 | value representation cleanup | Removed the inert copy-on-write machinery (`Value.shared`, `Share()`, `Ensure()`, `ensureCOW`, the per-`VarExpr`-read `Share()`); the mutation sites grow the binding's own backing in place, reads return the binding directly. Value semantics rest (as before) on eager deep copies at every store site; the write-through alternative is in `rejected.md`. Dead COW reporting stripped from the `--allocs` profiler. A fresh list / map / struct literal RHS is already private, so `execDefine` / `execAssign` skip the redundant copy (`rhsFreshLiteral`), proven by a profiler-backed test. |
+| M19.3 | runtime perf: maps + call/loop hot path | Maps gained an advisory hash index (`Value.mapIdx`, encoded scalar key -> position) guarded by a `len(mapIdx) == len(Map)` stamp, so `$m[$k] = $v` over N keys is O(N) not O(N^2) while insertion order + value semantics are untouched (any stale / duplicate-key / non-hashable case fails the stamp and falls to the linear scan; a 100k-key build + for-each runs sub-second where the quadratic path took minutes). Plus: `execForEach` / `execFor` borrow frames from `envPool`; `DefineAt` skips the shadow walk on the slot path; `Run` pre-sizes `i.global`'s slots; the three mutation sites write the root binding through `(Depth, Slot)`; `lists.reverse`/`head`/`tail`/`slice`/`concat` shallow-copy instead of deep-copying an argument they overwrite. |
+| M19.4 | resource lifecycle + numeric strictness | `os.spawn` handles keyed by a monotonic id, not the OS pid (a recycled pid can't alias a handle or misroute `wait`/`poll`/`kill`); the reaper drains captured buffers to strings and drops the live `*bytes.Buffer`s (idempotent `wait` / `poll`-after-`wait` preserved). Numeric strictness: `convert.toInt` and `math.floor`/`ceil`/`round` reject NaN / +/-Inf / out-of-int64 floats; `math.abs(MinInt64)` errors; the `toml` decoder errors on an int past int64 (`json` keeps its deliberate fallback); the most-negative int literal `-9223372036854775808` parses to `MinInt64` (folded at unary-minus with a 2^63 range check). |
+| M19.5 | module struct identity: canonical path | Module structs were tagged only by the file **stem**, so two modules sharing a basename (`a/util.j`, `b/util.j`, or two `@scope/package` decks) produced identical `(namespace, name)` identity and a foreign struct passed the other's type check. Identity is now keyed by the module's canonical (resolved) **path**: `Value` and `parser.Type` gained a `ModPath` field that `Equal` / `MatchesDeclared` compare alongside `StructNS` (which stays the stem, for display, so `%v` still reads `benchmark.Point`); the boundary retag + method-parameter stamping thread the path. Two imports of the same file stay one type; different files differ - no import error. |
+| M19.6 | `.j` code coverage | `jennifer test --coverage[=text|json]` reports statement coverage by reusing the profiler's per-position hits (no second counting path): a statement profiler runs from top-level init through every test method, and `renderCoverage` intersects those hits with the AST's executable positions (`statementPositions`, mirroring `execStmt`'s recording). Scoped to the tested program's files (an imported-but-only-ran module does not skew it), per-file + total; `text` names the never-executed positions, `json` owns stdout (the human report moves to stderr). The plain `jennifer test` path is unchanged (a nil collector). An HTML view is a later `htmlwriter` consumer. |
+| M19.7 | `@scope/package` resolution (vendored decks) | A leading `@` is a vendored-deck reference expanded by one function (`resolveVendor`): the `@` swaps in the vendor root and a reference not ending in `.j` gets the package-named entry appended, so `@claude/bitcoin`, `@claude/bitcoin/`, and `@claude/bitcoin/utils.j` all reduce to a plain absolute path (after which run-once cache + M19.5 path identity are untouched). The entry is `<package>.j`, so `moduleStem` gives the package name and the display namespace / default alias fall out (`import "@claude/bitcoin/"` binds `bitcoin.`); two same-package decks across scopes are distinct types, colliding only on the default alias (resolve with `as`). Vendor root via `FindVendorRoot`: `--vendor` > `JENNIFER_VENDOR` > nearest `vendor/` above the program. Path safety: `@` front-only, no `.`/`..`, the file must stay inside the deck; a missing root is a guided error. The `jvc` manager over this stays DRAFT#12. |
+| M19.8 | relocation: `jennifer-language` org + vanity path | A one-time mechanical relocation, no language / interpreter behavior change: the repo moves to a `jennifer-language` GitHub org, and (separately) the Go module path moves **off** GitHub to a vanity path `jennifer-lang.dev/jennifer` served by a `go-import` meta page, so module identity is host-independent. Two distinct targets: the **Go module path** -> the vanity domain (`go.mod` + 112 `.go` imports rewritten; the meta page maps it to the org repo, plus a `go-source` tag for pkg.go.dev); **human-facing URLs** -> `github.com/jennifer-language/jennifer` (the `-lang`.dev vs `-language` org spelling is deliberate; the redirect keeps old links working, but canonical in-tree URLs are updated). Metadata / CI / packaging swept until `grep -rn 'mplx/jennifer-lang'` is empty; the first-party deck scope placeholder flips `@mplx/` -> `@jennifer/` (doc-only until `jvc`). |
+| M19.9 | audit-driven correctness + hardening | A systematic severity-ordered sweep of ~190 findings from a full bug / performance audit of `internal/` + `modules/`, each fix with a regression test (Go test or `_test.j` overlay). **Crash / safety:** OS-entropy RNG seeding (predictable UUIDs / session ids / passwords fixed; `math.randSeed` stays the deterministic opt-in), `json` / `toml` decode nesting caps, a `try`-body scope fix (a throw-skipped `def` reads undefined, not null), `tengine` recursion guards, `archive` zip-slip + aggregate-decompression caps, a JSON-pointer overflow guard, the two interpreter `-race` races + REPL-vs-spawn table mutation. **Correctness:** lvalue writes re-fetch their root after the RHS, index / append stamp the element type, path-keyed module structs, `barcode` (Code 128 stop / EAN check digit / Code 39 `*` / QR mask 3), `pdfwriter` WinAnsi / Info encoding, a full `toml` conformance pass, `http` / `web` (CSRF / cookie / CORS / ETag) hardening, quote-aware `vcard` / `ical`. **Performance:** the O(N^2) accumulation patterns retired (map hash index, `json` object decode, wire-framing reads in `redis` / `amqp` / `mqtt` / `mikrotik` / `imap` / `websocket`, list-join builders in `csv` / `barcode` / `influxdb` / `jsonl` / `statsd`, GF(256) inline). **Lifecycle:** `os.release` + capped child output, non-blocking `net.eof` + mutex-guarded `net.Conn`, `httpd` admission bounds / must-respond timeout / TLS-1.2 floor / safe unix-socket unlink, per-stream mutex + a `discard` verb on hash / crc / compress streams, `lint` descending into `spawn` / `repeat`. Plus **six coordinated pre-1.0 strictness breaks** (each with tests + operator / scoping docs): `%` is floored (Python; `-7 % 3 == 2`, `7 % -3 == -2`); integer arithmetic overflow is a positioned error, not a silent wrap; a duplicate map-literal key is an error; mixed `int` / `float` comparison is exact (no lossy promotion, so `9007199254740993 == 9007199254740992.0` is `false`); a method may not share a top-level var / const name (no-shadowing both directions); reading a constant with the `$` sigil (`$MAX`) is a parse error. |
 
-**Done.** Both interpreter data races fixed, each pinned by a `-race`
-stress test (nested-spawn global mutation; eight spawn workers each declaring an
-aliased module/library struct in a loop). `snapshotForSpawn` now snapshots the
-launching goroutine's own root frame via `effectiveGlobal(env)` instead of the
-live `i.global`, so a nested spawn no longer races the main goroutine's global
-writes. Declared struct types are stamped once, single-threaded, before any
-statement runs (`resolveDeclaredTypesOnce`, after `loadModuleImports`) and carry
-a `parser.Type.Resolved` marker, so the per-execution re-resolve in `execDefine`
-is a read-only no-op: a `def x as alias.Struct` reached from concurrent
-goroutines never re-stamps the shared AST node. Error timing is unchanged (the
-stamp pass is best-effort; an unresolved type still errors at execution at its
-original position), and the marker also fixes a latent bug where an aliased
-library struct re-resolved in a loop hit the "canonical is aliased" rejection.
-
-### M19.2 - Value representation cleanup
-
-**Done.** The inert copy-on-write machinery is gone: `Value.shared`, `Share()`,
-`Ensure()`, `ensureCOW`, and the per-`VarExpr`-read `Share()` call are removed;
-the four mutation sites now grow the binding's own backing in place, and reads
-return the binding value directly. Value semantics rest (as they already did)
-on eager deep copies at every store site, documented on the `Value` type and in
-`docs/technical/interpreter.md`; the write-through alternative is recorded in
-`docs/technical/rejected.md`. The now-dead COW-detachment reporting was stripped
-from the `--allocs` profiler (interface, collector, table, pprof) so it no
-longer advertises a section that can never fire. A fresh list / map / struct
-literal RHS is already private, so `execDefine` / `execAssign` skip the
-redundant whole-value copy (`rhsFreshLiteral`) - proven by a profiler-backed
-test (literal binding records zero eager copies; an aliasing `def b init $a`
-records one) alongside a value-independence test; `value_alias_test.go` and the
-full suite (incl. `-race`) stay green. `Value` shrinking stays deferred.
-
-### M19.3 - Runtime performance: maps and the call / loop hot path
-
-**Done.** Maps gained an advisory hash index (`Value.mapIdx`, encoded scalar key
--> position) guarded by a `len(mapIdx) == len(Map)` stamp, so `$m[$k] = $v` over
-N keys is O(N) not O(N^2) while insertion order and value semantics are
-untouched - any stale / duplicate-key / non-hashable-key case fails the stamp
-and falls back to the (correct) linear scan. A 100k-key build plus a 100k
-for-each of indexed reads runs in under a second where the quadratic path took
-minutes; pinned by `map_index_test.go` (order, updates, misses, duplicate and
-non-hashable keys, value-semantics independence, 5k-key consistency). The
-call/loop batch landed too: `execForEach` and `execFor` borrow their frames from
-`envPool` instead of allocating per iteration / per loop; `DefineAt` skips the
-enclosing-scope shadow walk on the resolver-verified slot path; `Run` pre-sizes
-`i.global`'s slots from `prog.NumGlobals` (no one-at-a-time O(n^2) growth); the
-three mutation sites (`execIndexAssign` / `execAppend` / `execFieldAssign`) fetch
-and write the root binding through `(Depth, Slot)` (`getBindingRoot` /
-`assignRoot`, guarded to keep the REPL name path chain-walking); and
-`lists.reverse` / `head` / `tail` / `slice` / `concat` take a shallow struct copy
-instead of deep-copying the whole argument they immediately overwrite. Full suite
-(incl. `value_alias_test.go`, the map ordering tests, and `-race`) stays green on
-both toolchains.
-
-### M19.4 - Resource lifecycle and numeric strictness
-
-**Done.** `os.spawn` handles are now keyed by a monotonic internal id, not the
-OS pid, so a recycled pid can never make a later spawn overwrite an earlier
-handle or make `os.wait` / `poll` / `kill` hit the wrong process (pinned by a
-distinct-handles test); the reaper also drains the captured buffers into strings
-and drops the live `*bytes.Buffer`s so a terminated handle stops pinning them
-for the program's life (idempotent `os.wait` and `poll`-after-`wait` are
-preserved - literal delete-on-reap would break both, so the persistent-handle
-contract stays and an explicit release stays a possible future add). Numeric
-strictness: `convert.toInt` and `math.floor` / `ceil` / `round` reject NaN,
-+/-Inf, and out-of-int64-range floats with positioned errors instead of an
-unchecked `int64(f)` cast, `math.abs(MinInt64)` errors (its magnitude does not
-fit), and the `toml` decoder makes an integer past int64 a decode error rather
-than a lossy-float downgrade (`json` keeps its deliberate fallback). The
-most-negative int literal `-9223372036854775808` (and `-0x8000000000000000`)
-now parses to `MinInt64` - folded at the unary-minus site with `ParseUint` +
-a 2^63 range check - while the bare magnitude stays a range error. The
-uncapped-allocation sinks were already capped ahead of this milestone
-(`net`/`fs` `maxReadBytes`/`maxHandleRead`, `compress`/`archive`
-`maxDecompressed`). All fixes carry regression tests; full suite green on both
-toolchains.
-
-### M19.5 - Module struct identity: keyed by canonical path
-
-**Done.** Module struct values were tagged only by the imported file's **stem**
-(`moduleStem`), so two modules whose files share a basename
-(`import "a/util.j" as u1; import "b/util.j" as u2;`, or two `@scope/package`
-decks) produced values with an identical `(namespace, name)` identity and a
-foreign struct passed the other's type check. Struct identity is now keyed by
-the module's canonical (resolved) **path**: `Value` and `parser.Type` gained a
-`ModPath` field that `Value.Equal` / `MatchesDeclared` compare alongside
-`StructNS` (which stays the file stem, for display only, so `%v` still reads
-`benchmark.Point`); the boundary retag threads the path, and method parameter
-types are stamped by `resolveDeclaredTypesOnce` so a `func f(s as mod.Struct)`
-param carries the passed value's identity. Two imports resolving to the same
-file stay one type; different files are different types - no import errors, no
-collision to reject. Pinned by same-stem-coexist / distinct-stem / re-import
-tests; full suite, all 53 overlays, and `-race` green on both toolchains.
-
-### M19.6 - `.j` code coverage
-
-**Done.** `jennifer test --coverage[=text|json]` reports statement coverage by
-reusing the profiler's per-position hit data (no second counting path):
-`loadForTestProg` installs a statement profiler before running so hits are
-captured from top-level init through every test method, and `renderCoverage`
-intersects those hits with the executable positions statically walked from the
-AST (`statementPositions`, which mirrors `execStmt`'s per-statement recording so
-the sets line up). It is scoped to the tested program's files - an imported
-module that merely ran does not skew it - and reports per-file plus a total; a
-module overlay shows the module and test files separately. `text` (default)
-prints percentages and names the never-executed positions; `json` emits a
-parseable report that owns stdout (the human test report moves to stderr, the
-`profile --format=pprof` rule). The plain `jennifer test` path is unchanged
-(`loadForTest` is now a thin wrapper passing a nil collector). Pinned by
-render-logic unit tests and end-to-end CLI tests (partial coverage names the
-uncovered lines; json parses on stdout; the plain run emits no coverage), and an
-HTML view is left as a later `htmlwriter` consumer.
-
-### M19.7 - `@scope/package` module resolution (vendored packages)
-
-**Done.** A leading `@` is a vendored-deck reference, expanded by one function
-(`resolveVendor` in `internal/module`): the `@` swaps in the vendor root and a
-reference not ending in `.j` gets the package-named entry appended, so
-`@claude/bitcoin`, `@claude/bitcoin/`, and an explicit `@claude/bitcoin/utils.j`
-all reduce to a plain absolute path - after which resolution, the run-once
-cache, and M19.5 path identity are untouched. Because the entry is
-`<package>.j` (named after the deck), `moduleStem` gives the package name, so
-the display namespace and default alias fall out with zero special-casing
-(`import "@claude/bitcoin/"` binds `bitcoin.`); two same-package decks across
-scopes (`@a/bitcoin`, `@b/bitcoin`) are distinct types (M19.5) and collide only
-on the default alias, resolved with `as`. The vendor root comes from
-`module.FindVendorRoot` with the sysmoddir-style layering (`--vendor` flag on
-`run`, else `JENNIFER_VENDOR`, else the nearest `vendor/` above the program;
-wired into `run` / `repl` / `test` via `SetVendorRoot`). Path safety: `@` only
-at the front, no `.`/`..` segments, and the resolved file must stay inside the
-deck directory; a missing vendor root is a guided error, not a crash. The parser
-exempts `@` deck references from the `.j` requirement. Pinned by module-package
-unit tests (expansion, error cases, vendor-root discovery) and end-to-end CLI
-tests (entry / explicit-file / default-alias imports, cross-deck type
-distinctness, missing-root error); full suite, all 53 overlays, and both
-toolchains stay green. The `jvc` manager layered over this stays DRAFT#12.
-
-### M19.8 - Relocation: `jennifer-language` org + vanity module path
-
-A one-time project relocation, no language or interpreter behavior change. The
-repository moves from the personal `github.com/mplx/jennifer-lang` to a
-`jennifer-language` GitHub org, and - separately - the Go module path moves **off**
-GitHub to a vanity import path (`jennifer-lang.dev/jennifer`) served by a
-`go-import` meta page, so the module identity no longer depends on where the
-code is hosted. Names are settled: the domain `jennifer-lang.dev` is registered,
-and the org is `jennifer-language` because `jennifer-lang` and `jenniferlang`
-were already taken on GitHub. The domain (`-lang`) and org (`-language`) spelling
-differing is deliberate and invisible in use - the canonical module path is the
-domain, and the org is only the git host the meta page points at. Purely
-mechanical, but it touches nearly every file (112 `.go`
-imports, ~60 docs, CI, packaging), so it gets a milestone to keep the sweep
-complete and reviewable, and it lands **before the first post-org release** so
-downstream references (AUR, doc links) migrate exactly once. Two distinct
-targets - keep them separate:
-
-- **Go module path -> the vanity domain.** `go.mod` becomes `module
-  jennifer-lang.dev/jennifer`; every internal import
-  (`github.com/mplx/jennifer-lang/... -> jennifer-lang.dev/jennifer/...`, 112
-  `.go` files) is rewritten. A one-file `go-import` meta page at
-  `jennifer-lang.dev/jennifer` maps the vanity path to the org repo
-  (`<meta name="go-import" content="jennifer-lang.dev/jennifer git
-  https://github.com/jennifer-language/jennifer">`, plus a `go-source` tag for
-  pkg.go.dev deep links), served from the same site that hosts the mdBook docs.
-  The path is now host-independent: a future repo move never touches `go.mod`
-  again.
-- **Human-facing URLs -> the org repo.** Clone URLs, issue links, and every
-  `github.com/mplx/jennifer-lang/blob/main/...` deep link move to
-  `github.com/jennifer-language/jennifer` (flagship repo named `jennifer`, not
-  doubled - the `rust-lang/rust` shape). These point at GitHub, **not** the
-  vanity domain (the `.dev` host only serves the `go-import` page and the docs).
-  GitHub's transfer redirect keeps old links working, but every canonical URL
-  in-tree is updated rather than left to the redirect. Sibling repos (`jvc`, the
-  deck registry) are created empty under the org as their own milestones land,
-  not here.
-- **Metadata / CI / packaging sweep.** `README.md` badges and links, `docs/**`
-  (installing, tooling, user-guide, technical), `JENNIFER.md`,
-  `modules/README.md`, `book.toml`, the one example that hardcodes the URL
-  (`examples/modules/barcode_demo.j`), the workflows
-  (`.github/workflows/{test,docs,release}.yml`), and the packaging manifests
-  (`packaging/arch/PKGBUILD-{bin,git}`, `packaging/arch/publish-{bin,git}.sh`,
-  `packaging/debian/copyright`, `scripts/build-deb.sh`) all move to the new
-  host. `grep -rn 'mplx/jennifer-lang'` comes back empty at the end.
-- **Jennifer deck scope.** The first-party package scope in docs / examples
-  flips from the placeholder `@mplx/...` to `@jennifer/...` (DRAFT#12 and the
-  [M19.7](#m197---scopepackage-module-resolution-vendored-packages) examples),
-  matching the org and the registry identity the vanity domain anchors.
-  Doc-only until `jvc` and the registry exist.
-
-**Acceptance.** `go get jennifer-lang.dev/jennifer/cmd/jennifer` resolves
-through the vanity meta page to the org repo; `go build ./...` and `go test
-./...` pass under the new module path; `make build` (both toolchains) still
-produces `jennifer` / `jennifer-tiny`; `grep -rn 'mplx/jennifer-lang'` is empty;
-the old GitHub URL redirects to the org; the AUR package builds from the new
-source; pkg.go.dev serves the module under `jennifer-lang.dev/jennifer`.
-
-### M19.9 - Audit-driven correctness + hardening pass
-
-**Done.** A systematic sweep through the findings of a full
-bug-and-performance audit of the interpreter (`internal/`) and the module
-library (`modules/`), worked in severity order: criticals first, then the
-value-semantics / type-safety holes, then module correctness, performance
-(the O(N^2) accumulation patterns), and hardening long-tail. Every fix
-lands with a regression test (Go test for interpreter code, `_test.j`
-overlay coverage for modules) and both-toolchain builds.
-
-The sweep touched roughly 190 audit findings across the interpreter core and
-the module library. Highlights by theme:
-
-- **Crash / safety.** OS-entropy RNG seeding (predictable UUIDs / session ids /
-  passwords fixed; `math.randSeed` stays the deterministic opt-in); `json` /
-  `toml` decode nesting caps; a catchable-error `try` body that owns its scope
-  so a throw-skipped `def` reads as undefined, not null; recursion guards
-  (`tengine`); zip-slip and aggregate-decompression caps (`archive`); a
-  JSON-pointer index overflow guard; the two interpreter `-race` data races
-  (nested-spawn snapshot, runtime AST re-stamp) and REPL-vs-spawn table mutation.
-- **Correctness.** Lvalue writes re-fetch their root after evaluating the RHS;
-  index / append stores stamp the container's element type; module structs are
-  path-identity keyed; the Code 128 stop pattern, EAN check digit, Code 39 `*`,
-  and QR mask rule 3 in `barcode`; `pdfwriter` WinAnsi / Info encoding; a full
-  `toml` conformance pass (datetime / string / number grammar, `\u` surrogates,
-  the four table-redefinition MUST-errors); `http.j` header / chunked-body
-  hardening, `web` CSRF / cookie / CORS / ETag, quote-aware `vcard` / `ical`
-  parsing, and many module `Error`-kind / status-guard fixes.
-- **Performance.** The O(N^2) accumulation patterns retired across the board:
-  the map hash index, `json` object decode, wire-framing reads
-  (`redis` / `amqp` / `mqtt` / `mikrotik` / `imap` / `websocket`), and list-join
-  output builders (`csv` / `barcode` SVG / `influxdb` / `jsonl` / `statsd`);
-  plus the GF(256) inline in `barcode`, `KindObject` payload sharing, the
-  slot-authoritative write path, pooled loop frames, and index-aware `maps`.
-- **Lifecycle / diagnostics.** `os.release` and capped child output; `net.eof`
-  non-blocking + mutex-guarded `net.Conn`; `httpd` admission bounds, must-respond
-  timeout, TLS-1.2 floor, and safe unix-socket unlink; per-stream mutex + a
-  `discard` verb on hash / crc / compress streams; `lint` descending into
-  `spawn` / `repeat` and honouring included-file suppression; per-goroutine
-  profiler trace tracks.
-
-**Break notes - six coordinated pre-1.0 strictness rulings** (each shipped with
-tests and the operator / scoping docs updated):
-
-- **`%` is now floored** (Python semantics), consistent with `//`, so the
-  div/mod identity holds for negative operands: `-7 % 3 == 2`, `7 % -3 == -2`
-  (was C/Go truncation `-1` / `1`). Runtime and constant folding changed
-  together.
-- **Integer arithmetic overflow is a positioned error**, not a silent wrap:
-  `9223372036854775807 + 1` (and `-`, `*`, `MinInt64 // -1`) errors; overflowing
-  literal ops are left unfolded so the runtime raises at the right position.
-- **A duplicate key in a map literal is an error** (`{"a":1,"a":2}`), not a
-  corrupt two-entry map where only the first was reachable.
-- **Mixed `int`/`float` comparison is exact** (including `==`): the int is not
-  promoted to a lossy `float64`, so `9007199254740993 == 9007199254740992.0` is
-  `false` and orderings are correct above 2^53.
-- **A method may not share its name with a top-level variable or constant**
-  (`def foo ...; func foo() {}` is a parse error) - no-shadowing now applies both
-  directions across the def/func namespace.
-- **Reading a constant with the `$` sigil is a parse error** (`$MAX`); the sigil
-  is reserved for mutable variables (`$CONST[...]` still reports the clearer
-  "cannot mutate constant" error).
 
 ## M20 - system libraries (compacted)
 
 Go **system libraries** (cryptographic primitives, plus formats too heavy or
 too reflect-bound for a Jennifer-coded `.j` module - the `json` pattern,
-[M16.9](#m169---json)), plus two cleanup keywords (`defer` / `errdefer`) and
+[M16.9](#m16---io-libraries-and-developer-tooling-compacted)), plus two cleanup keywords (`defer` / `errdefer`) and
 Unix-signal support that the libraries needed. **All done.** Ten sub-milestones,
 each shipped with the standard discipline: a `cmd/jennifer` / `*_test.go` suite,
 a `docs/libraries/*.md` reference, cheatsheet + `JENNIFER.md` entries, and a
@@ -2007,6 +1262,266 @@ was missing, plus a user-facing terminology rename:
 End-to-end LIST / STATUS / both APPEND variants are covered by the Go IMAP mock
 (which grew a literal-continuation `APPEND` responder). Pure `.j`, both binaries
 build.
+
+---
+
+### M22.16 - core hardening sweep
+
+**Planned.** A batch of small correctness / resource / performance residuals in
+the `internal/` tree - each self-contained and independent of the module work,
+grouped so they land as one reviewed pass:
+
+- **`sql` cursor deadline** - the query timeout currently governs the whole cursor
+  lifetime, so a `sql.next` loop reading a large table for longer than the deadline
+  dies mid-iteration and looks like a database failure. Split the two concerns: a
+  short deadline on acquiring the connection / issuing the statement, and either no
+  deadline or a caller-settable one on reading the cursor (`sql.setQueryTimeout(ms)`
+  or an `open` option), with error text that names the client as the source.
+- **`httpd` registry bound** - the server (and per-request) registries are the one
+  instance of the registry pattern the earlier hardening pass left unbounded; add
+  the same `maxServers` pre-insert check and catchable "too many open" error the
+  five other registries already carry.
+- **`hash` md5 / sha1 labelling** - mark md5 and sha1 non-cryptographic in the
+  `algoList` error text, the `docs/libraries/hash.md` algorithm table, and the
+  `hash.hmac` doc comment, so a checksum use is not confused with a security one
+  (both stay available for legacy interop).
+- **write-depth guard cost** - `json` / `yaml` / `toml` re-scan the entire result
+  after every `set` / `insert` / `append` to enforce the nesting cap; have the
+  write helpers compare the depth of the node they touched (they already walk the
+  pointer path) instead, with a subtree-only scan for `move`, and fold the three
+  identical `exceedsDepth` copies into one shared helper.
+- **`include` expansion cap** - per-path cycle detection (correct for diamonds)
+  lets a chain that includes the previous file twice expand to 2^n tokens, so ~30
+  tiny files exhaust memory; cap total spliced tokens (or include depth) with a
+  positioned preprocessor error. Untrusted *code* is outside the threat model, but
+  this is an easy accident in a generated-source pipeline.
+- **`printf` field cap** - the field cap is a generous `1 << 20`; lower it to a few
+  thousand (terminal layout never needs a megabyte-wide field) and replace the
+  `for width(n) < pad { n++ }` O(Pad) spin with the closed form.
+- **decoder error positions** - `json` / `xml` recompute line / column by
+  rescanning from offset 0 on every error; O(n) once per failed decode today, a
+  trap only if a future change accumulates diagnostics. Track position
+  incrementally so it does not get rediscovered.
+
+---
+
+### M22.17 - web hardening (concurrent dispatch)
+
+**Planned.** Turn the `web` framework from strictly-serial into safely-concurrent
+request handling, and fix the error-reporting hook a module can never feed a typed
+`Error`. Interpreter-first: the module-level change depends on core work, so the
+order below is mandatory.
+
+The naive fix - wrap `handleOne` in a `spawn` - was **reproduced to be unsafe**.
+Under `go build -race`, a `/fast` request issued 300 ms into a 2 s handler does
+drop from ~1700 ms to ~3 ms, but the race detector reports a data race on the
+call-depth counter (`root.callDepth++`). That counter is meant to live on the
+per-goroutine root env, but a spawned worker dispatching a handler through
+`meta.callMain` re-roots the handler frame at the shared host (and shared module)
+global, so concurrent workers mutate one shared `callDepth`. The M23 note that
+`web` stays serial *because concurrent dispatch races on shared interpreter state*
+is therefore correct as stated; the constraint is removed here properly, not
+papered over:
+
+1. **`Error` across `meta.callMain`** - the retag path stamps a module's struct
+   arguments with the module identity, but `Error` is auto-injected into every
+   interpreter, so `isOwnStructName("Error")` is true and a module's `Error`
+   arrives stamped with the module path, unbindable to an entry-program `as Error`
+   parameter. Track a module's *declared* structs separately from the
+   auto-registered `Error` and retag only the former, so a module can hand an
+   `Error` back across the boundary. (Regression test: a module that returns and
+   accepts an `Error` across `meta.callMain` in both directions.)
+2. **Race-safe concurrent host / module dispatch** - the prerequisite for spawning
+   handlers: move `callDepth` off the shared root env (goroutine-local), then audit
+   every other write to a shared `i.global` / module global reachable from a
+   concurrently-dispatched handler (global `def` / assign, the `CallExpr.Method` /
+   `Fn` node caches, the map hash-index, profiler / diag fields), and gate the
+   whole change behind a concurrent-handler stress test run under `-race`.
+3. **`web` spawn-per-request** - only after (2), wrap per-request handling in a
+   `spawn` (errors caught inside the spawn so nothing escapes as an unwaited-task
+   error; concurrency already bounded by `httpd`'s `maxInFlight`). Update the
+   header comment, `docs/modules/web.md`, `modules/README.md`, and `JENNIFER.md`,
+   all of which currently assert serial handling in bold, and reconcile the M23
+   web non-goal note. The 1700 ms -> 3 ms probe becomes the regression gate.
+4. **`web.onError` fail-safe** - depends on (1). Today registering an error handler
+   *replaces* the working stderr fallback and, because the `Error` is unbindable,
+   loses the error entirely - a deployment that follows the docs gets *less*
+   diagnostic output than one that ignores the hook. Report to stderr *in addition
+   to* calling the handler, correct the doc comment that promises a typed `Error`,
+   and add a real end-to-end test (register a handler, request a throwing route,
+   assert the handler observed the error's `kind` / `message`) - the current test
+   asserts only that the name was stored, which is why the dead hook shipped green.
+
+The reproduction that the spawn-per-request fix races on the shared call-depth
+counter gets a reasoning record in `docs/technical/design-decisions.md` when the
+milestone lands, since the concurrent-dispatch design turns on it.
+
+---
+
+## M23 - module improvements
+
+**Planned.** M22 lifted a handful of modules (notably `imap` and `http`); M23
+generalizes that across the module ecosystem. A survey of all 63 `.j` modules
+found the gaps **cluster into cross-cutting themes** rather than scattering per
+module, so the sub-milestones are organized by theme: a shared pattern (a
+receive loop, a persistent connection, a backend selector) is built once and
+applied to every module that needs it. Rough priority is value x
+how-many-users-hit-it. Each sub-milestone ships the usual per-module close-out (a
+100%-passing `*_test.j` overlay, updated `docs/modules/` + `JENNIFER.md`, both
+binaries build). **Deliberate non-goals** (not module bugs): `web` per-request
+concurrency (an interpreter-level job - see M22.13), `password` hashing (needs
+`x/crypto`), and fully-typed `orm` rows (awaits a language feature; the
+query-builder half is in scope). Sub-milestones may grow their own sub-numbering
+as they land.
+
+### M23.1 - streaming / server-push read loops
+
+**Planned.** The biggest structural theme: several protocol clients are
+one-request/one-reply and cannot express an unsolicited server message, which
+breaks the headline use case of each. Build one cooperative receive-loop-over-`net`
+pattern (poll at a safe point, no callbacks; the app opts into a `spawn` for
+concurrency), then apply it:
+- **`redis`** - `SUBSCRIBE` / `PSUBSCRIBE` + a message-receive loop (and
+  `PUBLISH`); plus pipelining (batch commands, read N replies) and `MULTI`/`EXEC`;
+  `SCAN` to retire the production-unsafe `KEYS`.
+- **`amqp`** - `Basic.Consume` (server-pushed delivery) beside the existing
+  `Basic.Get`; exchange declaration + queue binding (direct/topic/fanout);
+  message properties + `Basic.Nack`/requeue + publisher confirms.
+- **`mqtt`** - QoS-1 (PUBACK handshake) publish/subscribe, a robust subscribe
+  loop, retained messages + Last-Will, and auto-reconnect / session resumption.
+- **`mikrotik`** - command tagging (`.tag`) + `/listen` for streaming commands
+  (`/interface/monitor`, `/ping`) and `/cancel`; and clear the read deadline
+  `readN` arms after it returns, so a later read / write does not inherit a stale
+  one.
+- **`imap`** - `IDLE` push new-mail notification (shares the loop; the rest of
+  the mail work lives in M23.3).
+
+### M23.2 - connection reuse / persistent sessions
+
+**Planned.** Every call currently pays a fresh handshake. Add persistent,
+reusable connections:
+- **`http`** - keep-alive / connection reuse (a `Client` holding a persistent
+  socket per host) so a request loop to one host reconnects once, not N times;
+  automatic 3xx **redirect following**; a **cookie jar** (preserving multiple
+  `Set-Cookie`); a Basic-auth helper; and **retry / backoff** on 429 / 5xx.
+  `rest` inherits all of it and adds a per-request timeout + Link-header / cursor
+  **pagination** iterator.
+- **`smtp`** - a persistent `Session` (connect + EHLO + auth once, `send` many),
+  so a queue of N messages pays one TLS+auth handshake instead of N.
+
+### M23.3 - stable-identity verbs (cross-session correctness)
+
+**Planned.** `imap` and `pop` both key off volatile sequence numbers, silently
+breaking "fetch only what's new since last run":
+- **`imap`** - `UID FETCH` / `SEARCH` / `STORE` / `COPY` (stable identifiers that
+  survive expunge), native `MOVE` (RFC 6851), and ranged / partial `FETCH` for
+  large bodies. Pairs with the `IDLE` from M23.1.
+- **`pop`** - `UIDL` (per-message unique id -> leave-on-server / skip-seen),
+  `TOP` (headers-only preview), `RSET` / `NOOP`.
+
+### M23.4 - byte-exact binary values
+
+**Planned.** `redis` and `memcache` decode bulk values as UTF-8, so an arbitrary
+binary value (a serialized blob, a compressed payload) is not round-tripped. One
+shared design across both: `bytes`-valued get/set variants (or make the existing
+verbs byte-safe) so a non-UTF-8 value stores and loads exactly. Fold in the
+adjacent low-cost verbs while here - `memcache` `gets` / `cas` + multi-key `get`,
+and `redis` typed hash / list / set helpers.
+
+### M23.5 - selectable backends (stance #1)
+
+**Planned.** `session` and `ratelimit` are memcache-only, which contradicts the
+"one module, one selectable backend" stance:
+- **`session`** - a backend selector (memcache / redis / in-process) behind one
+  API; richer-than-`map of string to string` values via `json.Value`.
+- **`ratelimit`** - a pluggable backend plus a **sliding-window / token-bucket**
+  algorithm option beyond the current fixed-window (which lets a 2x burst
+  straddle a window boundary), and reset-time / retry-after reporting so a caller
+  can build a compliant `429`.
+
+### M23.6 - format & coverage completeness
+
+**Planned.** The deepest per-module gaps, where a module handles the easy case
+but not the real one. The broadest sub-milestone (likely to grow its own
+sub-numbering as pieces land):
+- **`barcode`** - DataMatrix, UPC-A/E, Code93, GS1-128 symbologies; QR numeric /
+  alphanumeric modes + versions 11-40; a human-readable text line under 1D
+  barcodes. Reconcile the mismatch where `label` advertises `datamatrix` that the
+  image side lacks.
+- **`pdfwriter`** - raster image embedding (PNG / JPEG XObjects), embedded /
+  subset TrueType fonts (Unicode / CJK body text), and text layout (word-wrap,
+  width measurement, alignment).
+- **`ical`** - recurrence (`RRULE` / `RDATE` / `EXDATE`), all-day `DATE` +
+  `TZID` / `VTIMEZONE`, and VTODO / VALARM / ORGANIZER / ATTENDEE.
+- **`orm`** - `OR` / `IN` / aggregates / `GROUP BY`, column projection, and
+  relations / joins as first-class (the SELECT-only, AND-only builder blocks
+  ordinary queries). Re-validate identifiers where the SQL is *rendered*
+  (`toSql` / `createTable` / insert / update), not only in the constructors, so a
+  raw `Schema` / `Query` struct literal cannot inject.
+- **`bucket`** - presigned URL generation (SigV4 query-signing), multipart +
+  `bytes` bodies (currently `string`, capped at 5 GB in memory), and content-type
+  / metadata / `HEAD` / copy.
+- **`ipnet`** - subnet math (split / aggregate / iterate / host-count / next-IP /
+  first-last-usable), classification predicates (isPrivate / isLoopback /
+  isMulticast / isLinkLocal / isGlobal), and network-in-network overlap; and fix
+  the regression that now rejects every IPv4-mapped CIDR (`::ffff:0:0/96`) - derive
+  the max prefix from the literal and translate the prefix on the v4 fold. (The
+  regression breaks existing deny-lists at startup, so it wants fixing ahead of
+  the rest of the `ipnet` work.)
+- **`font`** - CFF / OpenType (`OTTO`) outlines, kerning + `OS/2` metrics
+  (cap-height, ascender/descender/line-gap).
+- **`feed`** - `<enclosure>` (podcast media, its advertised use case), author +
+  categories.
+- **`mime`** - honour a text-body `charset` on decode (currently forced to
+  UTF-8), and RFC 2231 extended / continued filenames (`filename*=`).
+- **`vcard`** - `TYPE` parameters (work / home), a full `N` (prefix / middle /
+  suffix), and common fields (PHOTO / BDAY / NICKNAME / ...).
+- **`markdown`** - blockquotes, images, and nested lists.
+
+### M23.7 - observability completeness
+
+**Planned.** The metrics story is half-built:
+- **`prometheus`** - histogram + summary types (`_bucket` / `_sum` / `_count`,
+  quantiles), the most-used metric type, without which latency / SLO
+  instrumentation is impossible; optional per-sample timestamp + a Pushgateway
+  grouping-key helper.
+- **`statsd`** - sample rate (`|@0.1`), DogStatsD tags (`|#k:v`), float values,
+  and packet batching (newline-pack several metrics per datagram); and validate
+  the metric `prefix` on the same wire line the metric name is already checked on.
+- **`influxdb`** - 2.x / 3.x support (token auth, org / bucket params,
+  `/api/v2/write`, Flux) alongside the current 1.x.
+
+### M23.8 - ergonomic papercuts + notifier richness
+
+**Planned.** A sweep of cheap, high-value-per-effort wins across many modules:
+- **`log`** - a child / context logger (`with(fields)` binding persistent fields)
+  and a `fatal` level (log-then-exit).
+- **`cron`** - named months / weekdays (`JAN`-`DEC`, `MON`-`SUN`) and the
+  `@daily` / `@hourly` / `@reboot` / ... nickname macros.
+- **`docblock`** - update the identifier regexes for the M22.2 digit rule (so a
+  `func v4` / a `@param x2` / a const `SHA256` parse).
+- **`jwt`** - JWKS / `kid`-based key resolution and clock-skew leeway.
+- **`totp`** - a secret-generation helper and a configurable skew window; export
+  the internal HOTP; and document that replay defence (single-use tracking) and
+  brute-force rate limiting are the caller's responsibility (RFC 6238 5.2).
+- **`bloom`** - an optimal-sizing constructor (`bloom.optimal(n, fpr)`),
+  serialize / deserialize, and union / merge.
+- **`csv` / `jsonl`** - streaming reader / writer handles; `csv` dialect options
+  (quote char, comment prefix, trim); plus CSV formula-injection (CWE-1236)
+  mitigation - a `formatSafe` that prefixes a leading `= + - @` / tab / CR field
+  with `'`, and a doc note that plain export is unsafe for spreadsheet targets.
+- **`dotenv`** - `${VAR}` interpolation and multi-line quoted values.
+- **`gotify`** - `extras` (markdown content-type, click actions).
+- **`htmlwriter`** - boolean / valueless attributes (`disabled`, `checked`).
+- **`flatdb`** - clear the two residual lint warnings (a `lint-disable: L103` with
+  a reason on the best-effort cleanup catch; drop the unused test local).
+- **`webhook`** - replay-protected timestamped signing schemes (Stripe `t=,v1=`,
+  Slack `v0=`) + base64 / SHA-1 variants.
+- **notifier richness** (the meatier end of the bundle) - `discord` embed fields /
+  footer / author + username / avatar override; `telegram` inline keyboards +
+  `callback_query` handling + local-file upload (and redact the bot token, which
+  the API forces into the URL path, from logs / error messages); `slack`
+  `context` / `fields` / `actions` blocks.
 
 ---
 

@@ -139,13 +139,6 @@ export func read(path as string) {
     return parse(fs.readString($path));
 }
 
-/**
- * Read a `.env` file and set each variable in the process environment (via
- * `os.setEnv`), returning the parsed map.
- * @param path {string} the file path
- * @return {map of string to string} the variables that were set
- * @throws {Error} on a filesystem error, or an invalid variable name
- */
 # validEnvName reports whether name is a POSIX-shaped environment variable name:
 # a letter or `_`, then letters, digits, or `_`. A malformed key reaching
 # os.setEnv could set the process environment in surprising ways (OM-021).
@@ -173,6 +166,13 @@ func validEnvName(name as string) {
     return true;
 }
 
+/**
+ * Read a `.env` file and set each variable in the process environment (via
+ * `os.setEnv`), returning the parsed map.
+ * @param path {string} the file path
+ * @return {map of string to string} the variables that were set
+ * @throws {Error} on a filesystem error, or an invalid variable name
+ */
 export func load(path as string) {
     def vars as map of string to string init read($path);
     for (def key in $vars) {
