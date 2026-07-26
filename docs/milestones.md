@@ -1397,13 +1397,25 @@ milestone lands, since the concurrent-dispatch design turns on it.
 
 ### M22.18 - `dotenv` layering, profiles, interpolation
 
-**Planned.** Grow `dotenv` from a single-file `parse` / `read` / `load` into a
+**Done.** Grew `dotenv` from a single-file `parse` / `read` / `load` into a
 layered loader with environment profiles, `${VAR}` interpolation, and multi-line
 values - the dotenv-flow / Rails / Next.js shape, built with Jennifer's
 explicit-over-implicit stance and a strict security posture. Pure `.j` module
 work; **no interpreter change** in this cut (a CLI `--env` flag is parked beyond
 1.0.0 as `docs/horizon.md` `DRAFT#26`). Consolidates here the `${VAR}`
 interpolation + multi-line items that were parked in `M23.8`.
+
+Shipped `readCascade` / `resolve` / `loadCascade` / `autoload` over the enhanced
+`parse` (backward-reference `${VAR}` in unquoted + double-quoted values, multi-line
+double-quoted values with a positioned unterminated-quote error). The single-file
+`load` keeps its unconditional-override contract (the documented primitive); the
+cascade loaders are the real-env-wins path. Since there is no `os.hasEnv`, "already
+set in the real env" is `os.getEnv(k) != ""` (an env var set to `""` counts as
+unset - documented). Profile labels validated `^[A-Za-z0-9_-]{1,64}$` up front; one
+fixed `dir`, no walk-up. Overlay `modules/dotenv_test.j` (27 tests) + Go
+`TestDotenvCascade` (cascade order, cross-file interpolation, multi-line,
+real-env-wins in `resolve`/`loadCascade`, traversal rejection, `autoload` reading
+`JENNIFER_ENV`); docs / README / `JENNIFER.md` / demo updated.
 
 **Layered load.** Read, later overriding earlier, skipping absent files, from a
 single explicit base directory (`dir`, usually `os.cwd()`):

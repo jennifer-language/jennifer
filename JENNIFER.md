@@ -503,12 +503,23 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `json.Value`s (`json.decode` for scalars). Transport-agnostic (never imports
   `http`/`net`), so both binaries. Not a database engine - crash-atomic
   snapshotting of small data.
-- **`dotenv`** - read `.env` config files. `dotenv.parse(text)` /
+- **`dotenv`** - read `.env` config files with layered profiles + `${VAR}`
+  interpolation. Single-file primitives: `dotenv.parse(text)` /
   `dotenv.read(path)` -> `map of string to string`; `dotenv.load(path)` also sets
-  each variable via `os.setEnv` (returns the map). Handles `#` comments
-  (whole-line + inline on unquoted values), blank lines, a leading `export`,
-  single quotes (literal) and double quotes (expand `\n` / `\t` / `\r`). No
-  `${VAR}` interpolation. Over `fs` + `strings` + `os`; both binaries.
+  each variable via `os.setEnv` (unconditional override; returns the map). Cascade
+  loaders merge `.env` -> `.env.local` -> `.env.<profile>` ->
+  `.env.<profile>.local` from one explicit dir (no walk-up), with a real OS env
+  var always winning over a file value: `dotenv.readCascade(dir, profile)` (no env
+  mutation) / `dotenv.resolve(dir, profile)` (effective map, real env wins) /
+  `dotenv.loadCascade(dir, profile)` (setEnv only keys not already set) /
+  `dotenv.autoload(dir)` (profile from `JENNIFER_ENV`). Handles `#` comments
+  (whole-line + inline on unquoted values), a leading `export`, single quotes
+  (literal) and double quotes (expand `\n` / `\t` / `\r`, may span multiple
+  physical lines), and `${VAR}` interpolation in unquoted + double-quoted values
+  (backward-reference only: earlier keys -> real OS env -> ""; no `$(...)` command
+  substitution). Profile labels are validated `^[A-Za-z0-9_-]{1,64}$` (no
+  traversal). Over `fs` + `strings` + `os` + `path` + `regex` + `maps`; both
+  binaries.
 - **`cron`** - parse and evaluate cron expressions. `cron.parse(expr)` -> a
   `Schedule`; `cron.matches(schedule, t)` -> bool; `cron.next(schedule, after)` ->
   the next `time.Time` at or after a time (keeps its offset). Five fields

@@ -6,10 +6,12 @@
 #     jennifer test modules/dotenv_test.j
 #
 # The overlay splices dotenv.j in first, so these tests reach its private helpers
-# (parseValue, unquoteDouble, unquoteSingle, stripInlineComment, unescape) and the
-# exported parse by bare identifier. `read` / `load` (file + environment) are
-# verified in the Go suite (TestDotenv). dotenv.j already `use`s fs / strings /
-# os, so the overlay only adds testing.
+# (parseValue, unquoteDouble, unquoteSingle, stripInlineComment, unescape,
+# interpolate, parseWithBase, closingDoubleIndex, validProfile) and the exported
+# parse by bare identifier. The file + environment paths (read / load / the
+# cascade loaders: readCascade / resolve / loadCascade / autoload) are verified in
+# the Go suite (TestDotenv, TestDotenvCascade). dotenv.j already `use`s fs /
+# strings / os / path / regex / maps, so the overlay only adds testing.
 use testing;
 
 func testBasic() {
@@ -97,4 +99,103 @@ func testEnvNameValidation() {   # OM-021
     testing.assertFalse(validEnvName("2BAD"));
     testing.assertFalse(validEnvName("A=B"));
     testing.assertFalse(validEnvName(""));
+}
+
+# --- interpolation ----------------------------------------------------------
+
+func testInterpolationBackward() {
+    # A later value references an earlier key; the resolved value substitutes.
+    def m as map of string to string init parse("HOST=example.com\nURL=http://${HOST}/x");
+    testing.assertEqual($m["URL"], "http://example.com/x");
+}
+
+func testInterpolationForwardIsEmpty() {
+    # Backward-reference only: a reference to a not-yet-defined key yields "".
+    def m as map of string to string init parse("URL=http://${HOST}/x\nHOST=example.com");
+    testing.assertEqual($m["URL"], "http:///x");
+}
+
+func testInterpolationInDoubleQuotes() {
+    def m as map of string to string init parse("A=1\nB=\"v${A}v\"");
+    testing.assertEqual($m["B"], "v1v");
+}
+
+func testInterpolationNotInSingleQuotes() {
+    def m as map of string to string init parse("A=1\nB='v${A}v'");
+    testing.assertEqual($m["B"], "v${A}v");   # single quotes never interpolate
+}
+
+func testInterpolationInvalidRefIsLiteral() {
+    # `${` with no valid env name is kept literal, not treated as an empty ref.
+    def m as map of string to string init parse("A=${1BAD}\nB=${no close");
+    testing.assertEqual($m["A"], "${1BAD}");
+    testing.assertEqual($m["B"], "${no close");
+}
+
+func testNoCommandSubstitution() {
+    # `$(...)` and a lone `$` are plain characters - never executed or expanded.
+    def m as map of string to string init parse("A=$(echo hi)\nB=cost is $5");
+    testing.assertEqual($m["A"], "$(echo hi)");
+    testing.assertEqual($m["B"], "cost is $5");
+}
+
+func testInterpolateHelper() {
+    def acc as map of string to string init {"X": "9"};
+    testing.assertEqual(interpolate("a${X}b", $acc), "a9b");
+    testing.assertEqual(interpolate("none${MISSING}here", $acc), "nonehere");   # undefined -> ""
+    testing.assertEqual(interpolate("plain", $acc), "plain");
+}
+
+# --- multi-line double-quoted values ----------------------------------------
+
+func testMultilineDoubleQuoted() {
+    def m as map of string to string init parse("A=\"line1\nline2\nline3\"\nB=after");
+    testing.assertEqual($m["A"], "line1\nline2\nline3");
+    testing.assertEqual($m["B"], "after");   # parsing resumes after the closing line
+}
+
+func testMultilineWithInterpolation() {
+    def m as map of string to string init parse("H=host\nA=\"top\n${H}\nbot\"");
+    testing.assertEqual($m["A"], "top\nhost\nbot");
+}
+
+func testUnterminatedMultilineThrows() {
+    testing.assertThrows("unterminatedBody", "dotenv");
+}
+
+func unterminatedBody() {
+    parse("A=\"open\nstill open\n");
+}
+
+func testClosingDoubleIndex() {
+    testing.assertEqual(closingDoubleIndex("\"abc\""), 4);      # closing quote at index 4
+    testing.assertEqual(closingDoubleIndex("\"no close"), -1);  # not closed
+    testing.assertEqual(closingDoubleIndex("\"a\\\"b\""), 5);   # an escaped \" is not the close
+}
+
+# --- profile validation + cascade base ---------------------------------------
+
+func testValidProfile() {
+    testing.assertTrue(validProfile("production"));
+    testing.assertTrue(validProfile("staging-2"));
+    testing.assertTrue(validProfile("dev_1"));
+    testing.assertFalse(validProfile(""));
+    testing.assertFalse(validProfile("../../etc"));   # traversal blocked
+    testing.assertFalse(validProfile("a/b"));
+    testing.assertFalse(validProfile("with space"));
+}
+
+func testParseWithBaseLaterWins() {
+    def base as map of string to string init {"A": "1", "B": "2"};
+    def m as map of string to string init parseWithBase("B=override\nC=3", $base);
+    testing.assertEqual($m["A"], "1");         # inherited from base
+    testing.assertEqual($m["B"], "override");  # this text overrides base
+    testing.assertEqual($m["C"], "3");         # new key
+}
+
+func testParseWithBaseInterpolatesBase() {
+    # A `${VAR}` resolves against an earlier cascade file's keys (the base map).
+    def base as map of string to string init {"HOST": "h1"};
+    def m as map of string to string init parseWithBase("URL=${HOST}/p", $base);
+    testing.assertEqual($m["URL"], "h1/p");
 }
