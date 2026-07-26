@@ -25,6 +25,12 @@ import (
 type decoder struct {
 	s   string
 	pos int
+	// Memoized line/column for errf, advanced from lineOff to d.pos so repeated
+	// calls are O(n) total, not O(n) each. This decoder does reset pos backward
+	// in a few places (entity rescans), so errf guards for that and rescans.
+	lineOff int
+	line    int
+	col     int
 }
 
 // maxDepth caps element nesting. parseElement/parseContent recurse one Go frame
@@ -35,18 +41,23 @@ type decoder struct {
 // TinyGo binary's fixed-stack crash point (see internal/limits).
 const maxDepth = limits.MaxNestingDepth
 
-// errf tags an error with the line/column of the current position.
+// errf tags an error with the line/column of the current position. It advances
+// a memoized (line, col) from lineOff to d.pos rather than rescanning from the
+// start; a backward pos (entity rescan) falls back to a full rescan.
 func (d *decoder) errf(format string, a ...any) error {
-	line, col := 1, 1
-	for i := 0; i < d.pos && i < len(d.s); i++ {
-		if d.s[i] == '\n' {
-			line++
-			col = 1
-		} else {
-			col++
-		}
+	if d.line == 0 || d.pos < d.lineOff {
+		d.lineOff, d.line, d.col = 0, 1, 1
 	}
-	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), line, col)
+	for d.lineOff < d.pos && d.lineOff < len(d.s) {
+		if d.s[d.lineOff] == '\n' {
+			d.line++
+			d.col = 1
+		} else {
+			d.col++
+		}
+		d.lineOff++
+	}
+	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
 }
 
 func (d *decoder) eof() bool  { return d.pos >= len(d.s) }

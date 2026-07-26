@@ -22,61 +22,15 @@ import (
 	"fmt"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
-	"jennifer-lang.dev/jennifer/internal/limits"
+	"jennifer-lang.dev/jennifer/internal/lib/treedepth"
 )
 
 // exceedsDepth reports whether v's container nesting is deeper than budget
-// levels. It recurses at most budget+1 Go frames (returning early once the
-// budget is spent), so it is itself safe on an over-deep tree. Kept consistent
-// with encodeValue's `depth > MaxNestingDepth` cutoff: budget = MaxNestingDepth
-// allows that many nested containers, one more is rejected.
+// levels. The recursion lives once in the shared treedepth package; this thin
+// binding passes json.Value as the opaque-object type to descend. Kept
+// consistent with encodeValue's `depth > MaxNestingDepth` cutoff.
 func exceedsDepth(v interpreter.Value, budget int) bool {
-	switch v.Kind {
-	case interpreter.KindList:
-		if budget <= 0 {
-			return true
-		}
-		for _, e := range v.List {
-			if exceedsDepth(e, budget-1) {
-				return true
-			}
-		}
-	case interpreter.KindMap:
-		if budget <= 0 {
-			return true
-		}
-		for _, e := range v.Map {
-			if exceedsDepth(e.Value, budget-1) {
-				return true
-			}
-		}
-	case interpreter.KindStruct:
-		if budget <= 0 {
-			return true
-		}
-		for _, f := range v.Fields {
-			if exceedsDepth(f.Value, budget-1) {
-				return true
-			}
-		}
-	case interpreter.KindObject:
-		if inner, ok := v.AsObject(LibraryName, "Value"); ok {
-			return exceedsDepth(inner, budget)
-		}
-	}
-	return false
-}
-
-// checkWriteDepth rejects a write result whose tree nests past MaxNestingDepth.
-// The write API (set / insert / append) can otherwise grow a json.Value past the
-// depth the decoder enforces, and every outbound path (encode, %v, ==, the
-// binding-boundary DeepCopy) then recurses one Go frame per level into an
-// uncatchable stack overflow. Bounding it at construction keeps them all safe.
-func checkWriteDepth(fnName string, v interpreter.Value) error {
-	if exceedsDepth(v, limits.MaxNestingDepth) {
-		return fmt.Errorf("%s: result nests deeper than the %d-level limit", fnName, limits.MaxNestingDepth)
-	}
-	return nil
+	return treedepth.Exceeds(v, budget, LibraryName, "Value")
 }
 
 // ----- constructors --------------------------------------------------------
@@ -331,7 +285,7 @@ func setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := checkWriteDepth("json.set", out); err != nil {
+	if err := treedepth.CheckAt("json.set", len(tokens), raw, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -347,7 +301,7 @@ func insertFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := checkWriteDepth("json.insert", out); err != nil {
+	if err := treedepth.CheckAt("json.insert", len(tokens), raw, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -364,7 +318,9 @@ func appendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := checkWriteDepth("json.append", out); err != nil {
+	// append targets the container at `tokens` and adds one level (the `-`
+	// position), so the value lands at len(tokens)+1.
+	if err := treedepth.CheckAt("json.append", len(tokens)+1, raw, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -452,7 +408,7 @@ func moveFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	// Unlike set/insert/append (which add at most one level), move splices a whole
 	// subtree under an arbitrary location, so the result can nest far deeper than
 	// either operand - guard it too, or an over-deep tree reaches ==/DeepCopy.
-	if err := checkWriteDepth("json.move", out); err != nil {
+	if err := treedepth.CheckAt("json.move", len(toTokens), moved, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil

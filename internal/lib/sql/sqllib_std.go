@@ -13,10 +13,12 @@ package sqllib
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -82,13 +84,55 @@ type rowState struct {
 // program holds a handful of live handles.
 const maxHandles = 4096
 
-// queryTimeout bounds a query / exec and the pool-connection acquisition it can
-// block on, so a leaked *sql.Rows that pins a connection cannot make a later
-// call block forever (a leaked cursor + no context is the OF-007 hang). The
-// context also governs the returned cursor's Next / Scan, so a read that runs
-// longer than this fails - the documented trade-off for a bounded client; a
-// scripting default, not a long-analytics one.
-const queryTimeout = 30 * time.Second
+// queryTimeoutNanos is the client-side deadline (nanoseconds) applied to a
+// query / exec and the pool-connection acquisition it can block on, so a leaked
+// *sql.Rows that pins a connection cannot make a later call block forever (the
+// OF-007 hang). database/sql ties that deadline to the returned cursor's Next /
+// Scan too, so a `sql.next` read loop that runs longer than this used to fail
+// mid-iteration and look like a database error. It is therefore caller-settable:
+// `sql.setQueryTimeout(ms)` raises it for a long batch read, or 0 disables it
+// (unlimited). Default 30s (a scripting default). Atomic for spawn safety.
+var queryTimeoutNanos int64 = int64(30 * time.Second)
+
+// queryContext builds the per-operation context. A positive timeout bounds it;
+// 0 (unlimited) returns a cancel-only context so a leaked cursor's cancel at
+// close still releases its pool connection, without a deadline killing a long
+// read.
+func queryContext() (context.Context, context.CancelFunc) {
+	if ns := atomic.LoadInt64(&queryTimeoutNanos); ns > 0 {
+		return context.WithTimeout(context.Background(), time.Duration(ns))
+	}
+	return context.WithCancel(context.Background())
+}
+
+// setQueryTimeoutFn implements `sql.setQueryTimeout(ms)`: set the client-side
+// query / read deadline in milliseconds; 0 (or negative) disables it entirely,
+// so a batch job streaming a large table is not cut off mid-cursor. Process-wide
+// (the sql registry is package state); set it once at startup.
+func setQueryTimeoutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("sql.setQueryTimeout expects 1 argument (milliseconds), got %d", len(args))
+	}
+	ms, err := devio.IntArg("sql.setQueryTimeout", args, 0, "milliseconds")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	// 0 / negative disables the deadline. Anything past maxTimeoutMs would
+	// overflow the ms->ns multiply (int64 nanoseconds top out at ~292 years);
+	// checking before the multiply avoids a wrap to a small positive value that
+	// would silently install a near-zero deadline. Such a value is effectively
+	// unlimited anyway, so treat it as 0.
+	if ms <= 0 || ms > maxTimeoutMs {
+		atomic.StoreInt64(&queryTimeoutNanos, 0)
+	} else {
+		atomic.StoreInt64(&queryTimeoutNanos, ms*int64(time.Millisecond))
+	}
+	return interpreter.Null(), nil
+}
+
+// maxTimeoutMs is the largest millisecond value whose nanosecond form fits in an
+// int64 (floor of MaxInt64 / 1e6); a larger request is treated as unlimited.
+const maxTimeoutMs = int64(9_223_372_036_854)
 
 var (
 	mu    sync.Mutex
@@ -156,6 +200,9 @@ func CloseAll() {
 
 // ResetForTest closes everything and clears the registries between tests.
 func ResetForTest() {
+	// Reset the caller-settable query timeout to its default too, so a test that
+	// calls sql.setQueryTimeout cannot leak that state into later tests.
+	atomic.StoreInt64(&queryTimeoutNanos, int64(30*time.Second))
 	mu.Lock()
 	defer mu.Unlock()
 	for _, r := range rows {
@@ -351,7 +398,7 @@ func runQuery(fn string, q querier, args []Value) (Value, error) {
 	// The context governs the whole cursor lifetime; cancel is stored in the
 	// rowState and fired at close, not here (a defer would kill the cursor before
 	// the first sql.next).
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := queryContext()
 	rs, qerr := q.QueryContext(ctx, sqlText, params...)
 	if qerr != nil {
 		cancel()
@@ -379,7 +426,7 @@ func runExec(fn string, q querier, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := queryContext()
 	defer cancel()
 	res, eerr := q.ExecContext(ctx, sqlText, params...)
 	if eerr != nil {
@@ -484,6 +531,11 @@ func nextFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		releaseRow(r.id)
 		if rerr != nil {
+			// A deadline here is the client's own query timeout expiring
+			// mid-read, not a database failure. Name the source and the knob.
+			if errors.Is(rerr, context.DeadlineExceeded) {
+				return interpreter.Null(), fmt.Errorf("sql.next: the read exceeded the sql client query timeout (%s); raise it with sql.setQueryTimeout(ms), or 0 to disable, for a long cursor", time.Duration(atomic.LoadInt64(&queryTimeoutNanos)))
+			}
 			return interpreter.Null(), fmt.Errorf("sql.next: %v", rerr)
 		}
 		return interpreter.BoolVal(false), nil
@@ -864,7 +916,7 @@ func queryStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := queryContext()
 	rs, qerr := st.QueryContext(ctx, params...)
 	if qerr != nil {
 		cancel()
@@ -896,7 +948,7 @@ func execStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := queryContext()
 	defer cancel()
 	res, eerr := st.ExecContext(ctx, params...)
 	if eerr != nil {

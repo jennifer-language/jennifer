@@ -66,7 +66,29 @@ func Process(tokens []lexer.Token, baseDir, selfPath string) ([]lexer.Token, err
 	// formatter doesn't go through the preprocessor; the parser
 	// strips any survivors as a defensive last step.
 	tokens = stripTrivia(tokens)
-	return processTokens(tokens, baseDir, visited)
+	return processTokens(tokens, baseDir, visited, &expandCtx{cache: map[string][]lexer.Token{}})
+}
+
+// maxSplicedTokens bounds the total tokens spliced in across every `include`
+// expansion. Per-path cycle detection (copyVisited) is a stack, not a global
+// set, so a diamond re-expands correctly - but a chain where each file includes
+// the previous one twice doubles at every level, so ~30 tiny files reach 2^30
+// tokens and exhaust memory. Counting each file's own tokens once per inclusion
+// makes that exponential growth trip this bound early, while a linear or
+// diamond include tree (each file's tokens counted per actual inclusion) stays
+// well under it. Untrusted *code* is outside the threat model; this catches the
+// accidental blow-up in a generated-source pipeline.
+const maxSplicedTokens = 2_000_000
+
+// expandCtx carries state across the whole include expansion: the running count
+// of spliced tokens (against maxSplicedTokens) and a per-path token cache so a
+// file included many times (a diamond, or the pathological doubling chain) is
+// read and tokenized once, not once per inclusion. The cache also keeps the
+// bound cheap to reach: an exponential chain trips it from memory rather than
+// after hundreds of thousands of re-reads.
+type expandCtx struct {
+	total int
+	cache map[string][]lexer.Token // absPath -> stripped raw (pre-expansion) tokens
 }
 
 func stripTrivia(toks []lexer.Token) []lexer.Token {
@@ -87,7 +109,7 @@ func stripTrivia(toks []lexer.Token) []lexer.Token {
 	return out
 }
 
-func processTokens(tokens []lexer.Token, baseDir string, visited map[string]bool) ([]lexer.Token, error) {
+func processTokens(tokens []lexer.Token, baseDir string, visited map[string]bool, ctx *expandCtx) ([]lexer.Token, error) {
 	out := make([]lexer.Token, 0, len(tokens))
 	i := 0
 	for i < len(tokens) {
@@ -95,7 +117,7 @@ func processTokens(tokens []lexer.Token, baseDir string, visited map[string]bool
 
 		// `include "path/file.j";` - textual file splice
 		if tok.Type == lexer.TOKEN_INCLUDE {
-			expanded, advance, err := handleInclude(tokens, i, baseDir, visited)
+			expanded, advance, err := handleInclude(tokens, i, baseDir, visited, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -143,7 +165,7 @@ func processTokens(tokens []lexer.Token, baseDir string, visited map[string]bool
 //
 // Returns the spliced tokens (empty if it was a pass-through) and the number
 // of input tokens consumed.
-func handleInclude(tokens []lexer.Token, i int, baseDir string, visited map[string]bool) ([]lexer.Token, int, error) {
+func handleInclude(tokens []lexer.Token, i int, baseDir string, visited map[string]bool, ctx *expandCtx) ([]lexer.Token, int, error) {
 	inc := tokens[i]
 	// Defensive: `include` is never the final token today (the lexer always
 	// appends TOKEN_EOF), but reading tokens[i+1] on that invariant held at a
@@ -162,7 +184,7 @@ func handleInclude(tokens []lexer.Token, i int, baseDir string, visited map[stri
 				File: next.File, Line: next.Line, Col: next.Col,
 			}
 		}
-		spliced, err := spliceFile(path, baseDir, visited, next)
+		spliced, err := spliceFile(path, baseDir, visited, next, ctx)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -219,7 +241,7 @@ func validateModuleImport(tokens []lexer.Token, i int) error {
 	return nil
 }
 
-func spliceFile(path, baseDir string, visited map[string]bool, originTok lexer.Token) ([]lexer.Token, error) {
+func spliceFile(path, baseDir string, visited map[string]bool, originTok lexer.Token, ctx *expandCtx) ([]lexer.Token, error) {
 	fullPath := path
 	if !filepath.IsAbs(fullPath) {
 		fullPath = filepath.Join(baseDir, path)
@@ -234,24 +256,43 @@ func spliceFile(path, baseDir string, visited map[string]bool, originTok lexer.T
 			File: originTok.File, Line: originTok.Line, Col: originTok.Col,
 		}
 	}
-	srcBytes, err := os.ReadFile(fullPath)
-	if err != nil {
+	// Read + tokenize each file once, then serve every later inclusion from the
+	// cache. The file content is fixed for the run, so a cached copy is exact;
+	// this is what makes a diamond cheap and the pathological doubling chain
+	// trip the bound below from memory rather than after N re-reads.
+	incToks, cached := ctx.cache[absPath]
+	if !cached {
+		srcBytes, rerr := os.ReadFile(fullPath)
+		if rerr != nil {
+			return nil, &PreprocessError{
+				Msg:  fmt.Sprintf("cannot read imported file %q: %v", fullPath, rerr),
+				File: originTok.File, Line: originTok.Line, Col: originTok.Col,
+			}
+		}
+		toks, terr := lexer.TokenizeWithFile(string(srcBytes), fullPath)
+		if terr != nil {
+			return nil, terr
+		}
+		// Strip the included file's trivia (comments, blank lines) so the
+		// include / use / import recognizers see meaningful adjacent tokens -
+		// the same normalization the top-level Process applies.
+		incToks = stripTrivia(toks)
+		ctx.cache[absPath] = incToks
+	}
+	// Count this file's own tokens for every inclusion, before recursing. An
+	// exponential include chain trips the bound here early (a file at depth k
+	// included twice per level is counted 2^k times); a linear / diamond tree
+	// accrues only its actual inclusions.
+	ctx.total += len(incToks)
+	if ctx.total > maxSplicedTokens {
 		return nil, &PreprocessError{
-			Msg:  fmt.Sprintf("cannot read imported file %q: %v", fullPath, err),
+			Msg:  fmt.Sprintf("include expansion is too large (over %d spliced tokens); a chain of files that each `include` the previous more than once expands exponentially", maxSplicedTokens),
 			File: originTok.File, Line: originTok.Line, Col: originTok.Col,
 		}
 	}
-	incToks, err := lexer.TokenizeWithFile(string(srcBytes), fullPath)
-	if err != nil {
-		return nil, err
-	}
-	// Strip the included file's trivia (comments, blank lines) so the
-	// include / use / import recognizers see meaningful adjacent tokens -
-	// the same normalization the top-level Process applies.
-	incToks = stripTrivia(incToks)
 	childVisited := copyVisited(visited)
 	childVisited[absPath] = true
-	expanded, err := processTokens(incToks, filepath.Dir(fullPath), childVisited)
+	expanded, err := processTokens(incToks, filepath.Dir(fullPath), childVisited, ctx)
 	if err != nil {
 		return nil, err
 	}

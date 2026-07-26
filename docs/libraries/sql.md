@@ -58,11 +58,20 @@ next, then the placeholder values.
 Parameters bind by type: `int` / `float` / `string` / `bool` / `bytes` / `null`.
 A struct is a positioned error - build the value first.
 
-Every `query` / `exec` (and the prepared-statement variants) runs under a **30 s
-deadline** that also bounds the pool-connection acquisition it may block on, so a
-leaked cursor pinning a pool connection cannot make a later call block forever.
-The deadline governs the returned cursor too, so read a large result promptly (or
-in batches). Each handle registry (connections, cursors, statements,
+Every `query` / `exec` (and the prepared-statement variants) runs under a
+**client-side deadline** (default **30 s**) that also bounds the pool-connection
+acquisition it may block on, so a leaked cursor pinning a pool connection cannot
+make a later call block forever. Because that same deadline governs the returned
+cursor's `sql.next` reads, a long streaming loop over a big table would otherwise
+fail mid-iteration - looking like a database error when it is really the client
+timeout. So it is **caller-settable**: `sql.setQueryTimeout(ms)` raises it (or
+`sql.setQueryTimeout(0)` disables it entirely) for a long batch read. The timeout
+is process-wide; set it once at startup. When it does fire during a read,
+`sql.next` names the source and the knob, not a phantom database failure.
+
+| `sql.setQueryTimeout(ms)` | `null` | Set the client query/read deadline in milliseconds; `0` (or negative) disables it. Default 30 000. |
+
+Each handle registry (connections, cursors, statements,
 transactions) is bounded, so a handle leaked in a loop surfaces a catchable
 "too many open" error rather than growing without limit; always pair `open` /
 `query` / `prepare` / `begin` with their close verb (a `defer` is the idiom).

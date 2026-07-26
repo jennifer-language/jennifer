@@ -1300,9 +1300,9 @@ build.
 
 ### M22.16 - core hardening sweep
 
-**Planned.** A batch of small correctness / resource / performance residuals in
+**Done.** A batch of small correctness / resource / performance residuals in
 the `internal/` tree - each self-contained and independent of the module work,
-grouped so they land as one reviewed pass:
+landed as one reviewed pass:
 
 - **`sql` cursor deadline** - the query timeout currently governs the whole cursor
   lifetime, so a `sql.next` loop reading a large table for longer than the deadline

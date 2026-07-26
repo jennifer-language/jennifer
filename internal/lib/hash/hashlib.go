@@ -53,8 +53,10 @@ var algoCtor = map[string]func() gohash.Hash{
 }
 
 // algoList is the rendered "known algorithms" string used in error
-// messages. Kept in a known order so the message stays stable.
-const algoList = `"md5", "sha1", "sha256", "sha384", "sha512"`
+// messages. Kept in a known order so the message stays stable. md5 and sha1
+// are labelled non-cryptographic: they are here for checksums and legacy
+// interop, not security (both are broken for collision resistance).
+const algoList = `"md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", "sha384", "sha512"`
 
 // streamState wraps a live digest with its own mutex. The registry map is
 // guarded by streamsMu, but the digest itself is mutable state that spawned
@@ -137,6 +139,8 @@ func computeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 // Raw digest bytes out (hex / base64 via the `encoding` library, matching
 // compute). The keyed comparison of two MACs should use a constant-time check;
 // this returns the MAC, and callers verify by recomputing and comparing.
+// For security, use a SHA-2 algo (`"sha256"` and up): `"md5"` / `"sha1"` are
+// non-cryptographic here, for legacy-protocol interop only.
 func hmacFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("hash.hmac expects 3 arguments (key, message, algo), got %d", len(args))

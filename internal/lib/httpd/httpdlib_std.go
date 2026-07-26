@@ -103,8 +103,17 @@ type serverState struct {
 }
 
 // maxInFlight caps concurrent in-flight (body-buffered) requests. Bounds
-// worst-case buffered RSS to maxInFlight * maxBodyBytes.
+// worst-case buffered RSS to maxInFlight * maxBodyBytes. The per-request
+// registry (reqStates) is bounded by it: registerReq runs only after a slot is
+// acquired, and unregisterReq is deferred on the same handler.
 const maxInFlight = 256
+
+// maxServers bounds the live-server registry, the one httpd registry the
+// earlier hardening pass left unbounded. A program that calls httpd.listen in a
+// loop without a matching httpd.shutdown would otherwise grow `servers` (and
+// hold each listening socket) for the process's life. Matches the 4096 bound
+// the fs / net / os / compress / sql registries carry.
+const maxServers = 4096
 
 type respHeader struct{ key, value string }
 
@@ -165,6 +174,13 @@ func registerServer(st *serverState) int64 {
 	nextServerID++
 	servers[id] = st
 	return id
+}
+
+// serverCount reports the number of live servers, for the pre-listen bound.
+func serverCount() int {
+	serversMu.Lock()
+	defer serversMu.Unlock()
+	return len(servers)
 }
 
 func resolveServer(fnName string, id int64) (*serverState, error) {
@@ -346,6 +362,9 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if serverCount() >= maxServers {
+		return interpreter.Null(), fmt.Errorf("httpd.listen: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", maxServers)
+	}
 	network, address := parseListenAddr(addr)
 	ln, err := net.Listen(network, address)
 	if err != nil {
@@ -405,6 +424,9 @@ func listenTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	keyPEM, err := takeBytesArg("httpd.listenTLS", args, 2, "key")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if serverCount() >= maxServers {
+		return interpreter.Null(), fmt.Errorf("httpd.listenTLS: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", maxServers)
 	}
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {

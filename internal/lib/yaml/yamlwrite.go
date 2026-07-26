@@ -15,6 +15,7 @@ import (
 	"fmt"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/treedepth"
 )
 
 // ----- constructors --------------------------------------------------------
@@ -266,7 +267,7 @@ func setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := checkWriteDepth("yaml.set", out); err != nil {
+	if err := treedepth.CheckAt("yaml.set", len(tokens), raw, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -281,7 +282,7 @@ func insertFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := checkWriteDepth("yaml.insert", out); err != nil {
+	if err := treedepth.CheckAt("yaml.insert", len(tokens), raw, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -296,7 +297,7 @@ func appendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := checkWriteDepth("yaml.append", out); err != nil {
+	if err := treedepth.CheckAt("yaml.append", len(tokens)+1, raw, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil
@@ -359,7 +360,7 @@ func moveFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	// Unlike set/insert/append (which add at most one level), move splices a whole
 	// subtree under an arbitrary location, so the result can nest far deeper than
 	// either operand - guard it too, or an over-deep tree reaches ==/DeepCopy.
-	if err := checkWriteDepth("yaml.move", out); err != nil {
+	if err := treedepth.CheckAt("yaml.move", len(toTokens), moved, LibraryName, "Value"); err != nil {
 		return interpreter.Null(), err
 	}
 	return wrap(out), nil

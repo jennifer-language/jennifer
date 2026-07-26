@@ -290,3 +290,59 @@ func TestIncludeAtTopLevel(t *testing.T) {
 		t.Errorf("first import not preserved: %v %v", out[0], out[1])
 	}
 }
+
+// TestIncludeExpansionCapRejectsExponential pins the M22.16 guard: a chain where
+// each file includes the previous one twice expands exponentially, and must fail
+// with a positioned "too large" error rather than exhausting memory. The token
+// cache makes reaching the bound fast (in-memory), not N re-reads.
+func TestIncludeExpansionCapRejectsExponential(t *testing.T) {
+	files := map[string]string{"f0.j": `def x0 as int init 0;`}
+	for k := 1; k <= 40; k++ {
+		files[fmtName(k)] = `include "` + fmtName(k-1) + `"; include "` + fmtName(k-1) + `";`
+	}
+	files["main.j"] = `include "f39.j";`
+	dir := writeTmp(t, files)
+	mainPath := filepath.Join(dir, "main.j")
+	src, _ := os.ReadFile(mainPath)
+	toks, err := lexer.TokenizeWithFile(string(src), mainPath)
+	if err != nil {
+		t.Fatalf("lex: %v", err)
+	}
+	_, err = Process(toks, dir, mainPath)
+	if err == nil {
+		t.Fatal("exponential include expansion was not rejected")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("want an expansion-too-large error, got %v", err)
+	}
+}
+
+// TestIncludeDiamondStillWorks pins that a legitimate diamond (one file included
+// via two paths) still expands - the cap only trips exponential growth.
+func TestIncludeDiamondStillWorks(t *testing.T) {
+	dir := writeTmp(t, map[string]string{
+		"leaf.j": `def leaf as int init 1;`,
+		"a.j":    `include "leaf.j"; def a as int init 2;`,
+		"b.j":    `include "leaf.j"; def b as int init 3;`,
+		"main.j": `include "a.j"; include "b.j";`,
+	})
+	mainPath := filepath.Join(dir, "main.j")
+	src, _ := os.ReadFile(mainPath)
+	toks, _ := lexer.TokenizeWithFile(string(src), mainPath)
+	if _, err := Process(toks, dir, mainPath); err != nil {
+		t.Fatalf("a diamond include should expand fine, got %v", err)
+	}
+}
+
+func fmtName(k int) string { return "f" + itoa(k) + ".j" }
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}

@@ -188,6 +188,7 @@ flat lookup view, not authoritative.
 | [`sql`](sql.md)`.next($rows)` / `.columns($rows)` / `.closeRows($rows)` | Advance the cursor (false at end) / column names / close early. |
 | [`sql`](sql.md)`.asInt` / `.asFloat` / `.asString` / `.asBool` / `.asBytes($rows, col)` / `.isNull($rows, col)` | Read the current row's column (name or index), typed; a NULL column is an error (check isNull). |
 | [`sql`](sql.md)`.begin($c)` / `.commit($tx)` / `.rollback($tx)` | Transaction: begin -> sql.Tx (a query/exec target), then commit / rollback. |
+| [`sql`](sql.md)`.setQueryTimeout(ms)` | Set the client query/read deadline (ms); `0` disables it for a long cursor read. Default 30 000, process-wide. |
 | [`sql`](sql.md)`.prepare($c, sql)` / `.queryStmt($s, ...)` / `.execStmt($s, ...)` / `.closeStmt($s)` | Prepared-statement lifecycle. |
 | [`math`](math.md)`.ceil(x)`                           | Smallest int ≥ `x`. Accepts int (identity) or float.                                                                                |
 | [`math`](math.md)`.floor(x)`                          | Largest int ≤ `x`. Accepts int (identity) or float.                                                                                 |

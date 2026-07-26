@@ -49,20 +49,33 @@ type decoder struct {
 	s     string
 	pos   int
 	depth int // current container nesting, gated in parseValue
+	// Memoized line/column for errf: lineOff is how far into s the (line, col)
+	// pair has been advanced. d.pos moves forward during a decode, so errf walks
+	// the cache from lineOff to d.pos instead of rescanning from the start each
+	// time - O(n) total across any number of errf calls, not O(n) per call.
+	lineOff int
+	line    int
+	col     int
 }
 
 // errf builds an error tagged with the line/column of the current position.
+// It advances a memoized (line, col) from lineOff up to d.pos rather than
+// rescanning from the start, so repeated calls stay O(n) in total. A backward
+// move (should not happen in this decoder) falls back to a full rescan.
 func (d *decoder) errf(format string, a ...any) error {
-	line, col := 1, 1
-	for i := 0; i < d.pos && i < len(d.s); i++ {
-		if d.s[i] == '\n' {
-			line++
-			col = 1
-		} else {
-			col++
-		}
+	if d.line == 0 || d.pos < d.lineOff {
+		d.lineOff, d.line, d.col = 0, 1, 1
 	}
-	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), line, col)
+	for d.lineOff < d.pos && d.lineOff < len(d.s) {
+		if d.s[d.lineOff] == '\n' {
+			d.line++
+			d.col = 1
+		} else {
+			d.col++
+		}
+		d.lineOff++
+	}
+	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
 }
 
 func (d *decoder) skipWS() {

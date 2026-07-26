@@ -57,6 +57,7 @@ func Install(in *interpreter.Interpreter) {
 	// Connection lifecycle.
 	in.RegisterNamespaced(LibraryName, "open", openFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)
+	in.RegisterNamespaced(LibraryName, "setQueryTimeout", setQueryTimeoutFn)
 	// Query / exec (first arg: a Connection or a Tx).
 	in.RegisterNamespaced(LibraryName, "query", queryFn)
 	in.RegisterNamespaced(LibraryName, "exec", execFn)

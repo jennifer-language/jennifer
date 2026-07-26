@@ -495,9 +495,10 @@ func setBoolMod(spec *FormatSpec, key, value string) error {
 // output never needs a larger one, and an unbounded value flows into
 // strings.Repeat / strconv.FormatFloat, where a huge count OOM-kills the process
 // - an uncatchable crash, since the interpreter has no recover(). Bounding it at
-// parse time turns the abuse into a positioned, catchable error instead. 1 MiB is
-// far past any real column width or precision.
-const maxFieldValue = 1 << 20
+// parse time turns the abuse into a positioned, catchable error instead. A few
+// thousand is far past any real column width or precision, and keeps the
+// field-building work (an accepted pad allocates that many bytes) small.
+const maxFieldValue = 4096
 
 func setIntField(value string, dst *int, has *bool) error {
 	n, err := strconv.Atoi(value)
@@ -775,8 +776,19 @@ func zeroPadForGroup(digits string, spec FormatSpec, signLen int) string {
 		return signLen + nd + seps
 	}
 	n := len(digits)
-	for width(n) < spec.Pad {
-		n++
+	if !spec.HasGrp || spec.Group <= 0 {
+		// No separators: width == signLen + nd, so the needed digit count is
+		// the closed form directly - no scan.
+		if need := spec.Pad - signLen; need > n {
+			n = need
+		}
+	} else {
+		// Grouping adds separators whose count depends on nd, so walk up from
+		// the current digit count. Bounded by the field cap (maxFieldValue),
+		// which keeps this small - not the O(Pad) spin a megabyte cap allowed.
+		for width(n) < spec.Pad {
+			n++
+		}
 	}
 	if n > len(digits) {
 		digits = strings.Repeat("0", n-len(digits)) + digits

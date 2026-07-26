@@ -28,15 +28,15 @@ with the algorithm passed as a string. The shape mirrors
 
 | Algo string | Output width | Notes                                                            |
 | ----------- | ------------ | ---------------------------------------------------------------- |
-| `"md5"`     | 16 bytes     | Broken for collision resistance; useful for integrity / caching. |
-| `"sha1"`    | 20 bytes     | Broken for collision resistance; still common in legacy formats. |
+| `"md5"`     | 16 bytes     | **Non-cryptographic** (broken for collision resistance) - use for integrity / caching / legacy interop, never security. |
+| `"sha1"`    | 20 bytes     | **Non-cryptographic** (broken for collision resistance) - legacy formats (e.g. SCRAM-SHA-1) only, never security.       |
 | `"sha256"`  | 32 bytes     | The default choice for new code.                                 |
 | `"sha384"`  | 48 bytes     | Truncated SHA-512; used by some TLS / JOSE suites.               |
 | `"sha512"`  | 64 bytes     | Wider SHA-2 digest; used by some HMAC / TOTP variants.           |
 
 Passing an unknown algorithm is a positioned runtime error that
 lists the supported set:
-`hash.compute: unknown digest algorithm "md4"; known: "md5", "sha1", "sha256", "sha384", "sha512"`.
+`hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", "sha384", "sha512"`.
 
 ## One-shot
 
@@ -135,7 +135,7 @@ hex-encodes through `encoding.hex`. The example
 - Wrong scalar type:
   `hash.compute: first argument must be bytes, got string`.
 - Unknown algorithm:
-  `hash.compute: unknown digest algorithm "md4"; known: "md5", "sha1", "sha256"`.
+  `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256"`.
 - Reuse of a finalized stream:
   `hash.update: stream 3 has already been finalized or never existed`.
 
