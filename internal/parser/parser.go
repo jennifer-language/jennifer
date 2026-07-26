@@ -213,6 +213,14 @@ func (p *parser) parseProgram() (*Program, error) {
 				prog.Structs = append(prog.Structs, sd)
 				continue
 			}
+			if p.peekN(1).Type == lexer.TOKEN_ENUM {
+				ed, err := p.parseEnumDef()
+				if err != nil {
+					return nil, err
+				}
+				prog.Enums = append(prog.Enums, ed)
+				continue
+			}
 			fallthrough
 		default:
 			// Any other top-level statement: def / assign / if / while / for / expr.
@@ -390,6 +398,14 @@ func (p *parser) parseExported(prog *Program) error {
 		sd.Exported = true
 		prog.Structs = append(prog.Structs, sd)
 		return nil
+	case p.peek().Type == lexer.TOKEN_DEFINE && p.peekN(1).Type == lexer.TOKEN_ENUM:
+		ed, err := p.parseEnumDef()
+		if err != nil {
+			return err
+		}
+		ed.Exported = true
+		prog.Enums = append(prog.Enums, ed)
+		return nil
 	case p.peek().Type == lexer.TOKEN_DEFINE && p.peekN(1).Type == lexer.TOKEN_CONST:
 		st, err := p.parseDefineLike()
 		if err != nil {
@@ -397,7 +413,7 @@ func (p *parser) parseExported(prog *Program) error {
 		}
 		d, ok := st.(*DefineStmt)
 		if !ok || !d.IsConst {
-			return &ParseError{Msg: "only `def const`, `def struct`, and `func` can be exported", File: exp.File, Line: exp.Line, Col: exp.Col}
+			return &ParseError{Msg: "only `def const`, `def struct`, `def enum`, and `func` can be exported", File: exp.File, Line: exp.Line, Col: exp.Col}
 		}
 		d.Exported = true
 		prog.TopLevel = append(prog.TopLevel, st)
@@ -472,6 +488,105 @@ func (p *parser) parseStructDef() (*StructDef, error) {
 		return nil, err
 	}
 	return &StructDef{pos: pos{File: def.File, Line: def.Line, Col: def.Col}, Name: name.Lexeme, Fields: fields}, nil
+}
+
+// parseEnumDef parses `def enum Name { Variant [ { field as type, ... } ], ... };`.
+// Each variant is a PascalCase identifier, optionally carrying a mini-struct
+// field list. Mirrors parseStructDef's shape (name / field rules, trailing
+// comma, duplicate detection).
+func (p *parser) parseEnumDef() (*EnumDef, error) {
+	def, _ := p.match(lexer.TOKEN_DEFINE)
+	if _, err := p.expect(lexer.TOKEN_ENUM, "after `def`"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(lexer.TOKEN_IDENT, "for enum name")
+	if err != nil {
+		return nil, err
+	}
+	if containsUnderscore(name.Lexeme) {
+		return nil, &ParseError{Msg: fmt.Sprintf("enum name %q may not contain `_` (use PascalCase)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+	}
+	if _, err := p.expect(lexer.TOKEN_LBRACE, "after enum name"); err != nil {
+		return nil, err
+	}
+	var variants []EnumVariant
+	seen := map[string]bool{}
+	if p.check(lexer.TOKEN_RBRACE) {
+		return nil, &ParseError{Msg: fmt.Sprintf("enum %q must declare at least one variant", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+	}
+	for {
+		vname, err := p.expect(lexer.TOKEN_IDENT, "for enum variant name")
+		if err != nil {
+			return nil, err
+		}
+		if containsUnderscore(vname.Lexeme) {
+			return nil, &ParseError{Msg: fmt.Sprintf("enum variant name %q may not contain `_` (use PascalCase)", vname.Lexeme), File: vname.File, Line: vname.Line, Col: vname.Col}
+		}
+		if seen[vname.Lexeme] {
+			return nil, &ParseError{Msg: fmt.Sprintf("enum variant %q declared twice", vname.Lexeme), File: vname.File, Line: vname.Line, Col: vname.Col}
+		}
+		seen[vname.Lexeme] = true
+		var fields []StructField
+		// Optional payload: `{ field as type, ... }`. A payload-less variant
+		// (`Empty`) has no brace.
+		if p.check(lexer.TOKEN_LBRACE) {
+			p.advance()
+			fseen := map[string]bool{}
+			if !p.check(lexer.TOKEN_RBRACE) {
+				for {
+					if v := p.peek(); v.Type == lexer.TOKEN_VARREF {
+						return nil, &ParseError{
+							Msg:  fmt.Sprintf("field name has no `$`: write `%s as TYPE`", v.Lexeme),
+							File: v.File, Line: v.Line, Col: v.Col,
+						}
+					}
+					fname, err := p.expectFieldName("for enum variant field name")
+					if err != nil {
+						return nil, err
+					}
+					if containsUnderscore(fname.Lexeme) {
+						return nil, &ParseError{Msg: fmt.Sprintf("enum variant field name %q may not contain `_` (use camelCase)", fname.Lexeme), File: fname.File, Line: fname.Line, Col: fname.Col}
+					}
+					if fseen[fname.Lexeme] {
+						return nil, &ParseError{Msg: fmt.Sprintf("enum variant field %q declared twice", fname.Lexeme), File: fname.File, Line: fname.Line, Col: fname.Col}
+					}
+					fseen[fname.Lexeme] = true
+					if _, err := p.expect(lexer.TOKEN_AS, "after enum variant field name"); err != nil {
+						return nil, err
+					}
+					ftype, err := p.parseType()
+					if err != nil {
+						return nil, err
+					}
+					fields = append(fields, StructField{Name: fname.Lexeme, Type: ftype, File: fname.File, Line: fname.Line, Col: fname.Col})
+					if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
+						break
+					}
+					if p.check(lexer.TOKEN_RBRACE) {
+						break
+					}
+				}
+			}
+			if _, err := p.expect(lexer.TOKEN_RBRACE, "to close enum variant field list"); err != nil {
+				return nil, err
+			}
+		}
+		variants = append(variants, EnumVariant{Name: vname.Lexeme, Fields: fields, File: vname.File, Line: vname.Line, Col: vname.Col})
+		if _, ok := p.match(lexer.TOKEN_COMMA); !ok {
+			break
+		}
+		// Trailing comma before `}` is allowed.
+		if p.check(lexer.TOKEN_RBRACE) {
+			break
+		}
+	}
+	if _, err := p.expect(lexer.TOKEN_RBRACE, "to close enum variant list"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate enum definition"); err != nil {
+		return nil, err
+	}
+	return &EnumDef{pos: pos{File: def.File, Line: def.Line, Col: def.Col}, Name: name.Lexeme, Variants: variants}, nil
 }
 
 func (p *parser) parseBlock() (*Block, error) {
@@ -1061,7 +1176,10 @@ func (p *parser) parseMatch() (Stmt, error) {
 			if err != nil {
 				return nil, err
 			}
-			stmt.Arms = append(stmt.Arms, MatchArm{pos: pos{File: wt.File, Line: wt.Line, Col: wt.Col}, Values: values, Body: body})
+			// BindSlot starts at the -1 "no resolved slot" sentinel so an arm the
+			// resolver never rewrites (a spawn body, which is deliberately left
+			// unresolved) binds its payload by name instead of writing slot 0.
+			stmt.Arms = append(stmt.Arms, MatchArm{pos: pos{File: wt.File, Line: wt.Line, Col: wt.Col}, Values: values, Body: body, BindSlot: -1})
 		} else if p.check(lexer.TOKEN_ELSE) {
 			if seenElse {
 				t := p.peek()
@@ -1824,6 +1942,38 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 			return nil, err
 		}
 	}
+	// Cross-module enum construction: `alias.Enum.Variant{...}` or the
+	// payload-less `alias.Enum.Variant`. A third `.` segment is an enum variant
+	// only when neither the module alias nor the enum-type middle is a constant
+	// name - `CONST.sub.field` and `mod.CONST.field` are ordinary field-access /
+	// module-const chains and must fall through to the postfix loop.
+	if p.check(lexer.TOKEN_DOT) && !isValidConstName(prefix.Lexeme) && !isValidConstName(name.Lexeme) {
+		p.advance() // consume the second `.`
+		var variant lexer.Token
+		if isPostDotName(p.peek()) {
+			variant = p.peek()
+			p.advance()
+		} else {
+			var err error
+			variant, err = p.expect(lexer.TOKEN_IDENT, "for enum variant after `.`")
+			if err != nil {
+				return nil, err
+			}
+		}
+		base := pos{File: prefix.File, Line: prefix.Line, Col: prefix.Col}
+		if !p.noStructLit && p.check(lexer.TOKEN_LBRACE) {
+			lit, err := p.parseStructLitTail(variant)
+			if err != nil {
+				return nil, err
+			}
+			sl := lit.(*StructLit)
+			sl.NS = prefix.Lexeme
+			sl.Enum = name.Lexeme
+			sl.pos = base
+			return sl, nil
+		}
+		return &StructLit{pos: base, NS: prefix.Lexeme, Enum: name.Lexeme, Name: variant.Lexeme, Bare: true}, nil
+	}
 	if p.check(lexer.TOKEN_LPAREN) {
 		if containsUnderscore(name.Lexeme) {
 			return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
@@ -1884,7 +2034,15 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 				Field:  name.Lexeme,
 			}, nil
 		}
-		return nil, &ParseError{Msg: fmt.Sprintf("qualified constant name %q must be uppercase letters and digits in single-`_`-separated chunks, each chunk starting with a letter (e.g. SHA256)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+		// `Prefix.name` where neither is a valid constant name and there is no
+		// trailing `{` / `(`: a qualified reference the interpreter resolves from
+		// its tables - a payload-less enum variant (`Shape.Empty`) when Prefix is
+		// an enum, otherwise a namespace / module member. Deferring to eval keeps
+		// the grammar free of any capitalisation convention: whether a name is a
+		// type, a variant, or a namespace is decided by what it *refers to*, not
+		// by how it is spelled. (The one pre-existing convention - constants are
+		// ALL_CAPS - still routes an ALL_CAPS `name` to the const path above.)
+		return &QualifiedConstRefExpr{pos: pos{File: prefix.File, Line: prefix.Line, Col: prefix.Col}, Prefix: prefix.Lexeme, Name: name.Lexeme}, nil
 	}
 	return &QualifiedConstRefExpr{
 		pos:    pos{File: prefix.File, Line: prefix.Line, Col: prefix.Col},

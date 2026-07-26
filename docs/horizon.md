@@ -492,6 +492,25 @@ in `M22.6` (self-signed certs), and the GraphQL ones (`unraid`, `gitlab`,
 `github`) pull in `M22.7` (`graphql`). Demand-driven: build the deck for the
 box / service you run, not all of them speculatively.
 
+#### DRAFT#26 - Run profiles / `--env` CLI flag
+
+An optional **run profile** the CLI carries and hands to the program, of which
+`dotenv`'s `.env.<profile>` selection (`M22.18`) is the first consumer. The whole
+point is that a profile is one mechanism with two entry points:
+`jennifer run --env=prod script.j` is sugar that simply **sets `JENNIFER_ENV=prod`
+in the process environment before `Run`** - identical to
+`JENNIFER_ENV=prod jennifer run script.j` - so the module side stays pure `.j`
+(it reads one env var) and there is no bespoke `meta` / `os` API to maintain.
+Parking it here (not in `M22.18`) keeps that milestone interpreter-free: the env
+var alone delivers profiles; the flag is pure ergonomics. If it graduates it is a
+small `cmd/jennifer` change (parse `--env=X` as an interpreter flag ahead of the
+script path, validate the label the same way `dotenv` does, set the env var), plus
+a note in `docs/user-guide/tooling.md`. Only worth doing once profiles see real
+use; a bare env var is the honest MVP.
+
+**Requires:** `M22.18` (the `dotenv` profile consumer that motivates it). No hard
+interpreter dependency - a self-contained CLI arg-parse addition.
+
 ### Embedding, WASM, and sandboxing
 
 #### DRAFT#1 - Public interpreter API for third-party embedding

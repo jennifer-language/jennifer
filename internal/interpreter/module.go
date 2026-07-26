@@ -40,8 +40,14 @@ type loadedModule struct {
 
 // isOwnStruct reports whether name is one of this module's declared structs
 // (as opposed to a library struct or a value from another module).
+// isOwnStruct reports whether name is one of the module's own declared named
+// types (a struct or an enum). Both cross the module boundary with the same
+// identity retagging, so this predicate covers both.
 func (m *loadedModule) isOwnStruct(name string) bool {
-	_, ok := m.interp.structs[name]
+	if _, ok := m.interp.structs[name]; ok {
+		return true
+	}
+	_, ok := m.interp.enums[name]
 	return ok
 }
 
@@ -70,6 +76,19 @@ func retagStructs(v Value, fromNS, toNS, fromMod, toMod string, isOwn func(strin
 		}
 		// Match on (StructNS, ModPath): a foreign struct that merely shares
 		// the stem has a different ModPath, so it is left untouched.
+		if v.StructNS == fromNS && v.ModPath == fromMod && isOwn(v.StructName) {
+			nv.StructNS = toNS
+			nv.ModPath = toMod
+		}
+		return nv
+	case KindEnum:
+		// enums retag exactly like structs: rewrite the type identity and
+		// recurse into the variant payload.
+		nv := v
+		nv.Fields = make([]StructField, len(v.Fields))
+		for i, f := range v.Fields {
+			nv.Fields[i] = StructField{Name: f.Name, Value: retagStructs(f.Value, fromNS, toNS, fromMod, toMod, isOwn)}
+		}
 		if v.StructNS == fromNS && v.ModPath == fromMod && isOwn(v.StructName) {
 			nv.StructNS = toNS
 			nv.ModPath = toMod
@@ -109,7 +128,7 @@ func retagStructs(v Value, fromNS, toNS, fromMod, toMod string, isOwn func(strin
 // negative would skip a needed retag. Allocation-free.
 func subtreeNeedsRetag(v Value, fromNS, fromMod string, isOwn func(string) bool) bool {
 	switch v.Kind {
-	case KindStruct:
+	case KindStruct, KindEnum:
 		if v.StructNS == fromNS && v.ModPath == fromMod && isOwn(v.StructName) {
 			return true
 		}
@@ -188,6 +207,11 @@ func collectExports(prog *parser.Program) map[string]bool {
 	for _, s := range prog.Structs {
 		if s.Exported {
 			exports[s.Name] = true
+		}
+	}
+	for _, e := range prog.Enums {
+		if e.Exported {
+			exports[e.Name] = true
 		}
 	}
 	for _, st := range prog.TopLevel {
@@ -303,6 +327,17 @@ func findImpostorStruct(v Value, m *loadedModule) (Value, bool) {
 		// nested in a genuine module struct - is never re-branded (its NS is
 		// not the module's) and would fail the param-type check on its own, so
 		// it is not an impostor and must not be flagged here.
+		if m.isOwnStruct(v.StructName) && v.StructNS == "" && v.ModPath == "" {
+			return v, true
+		}
+		for _, f := range v.Fields {
+			if imp, found := findImpostorStruct(f.Value, m); found {
+				return imp, true
+			}
+		}
+	case KindEnum:
+		// An enum impostor is a bare enum whose type name is module-owned - the
+		// enum analogue of the struct case above.
 		if m.isOwnStruct(v.StructName) && v.StructNS == "" && v.ModPath == "" {
 			return v, true
 		}
@@ -471,7 +506,9 @@ func (i *Interpreter) resolveDeclaredStructNS(t *parser.Type, at parser.Node) er
 			}
 			t.StructNS = canonical
 		} else {
-			if _, ok := i.structs[t.StructName]; !ok {
+			_, isStruct := i.structs[t.StructName]
+			_, isEnum := i.enums[t.StructName]
+			if !isStruct && !isEnum {
 				file, line, col := posFor(at)
 				return &runtimeError{Msg: fmt.Sprintf("unknown struct type %q", t.StructName), File: file, Line: line, Col: col}
 			}
@@ -525,6 +562,19 @@ func (i *Interpreter) resolveDeclaredTypesOnce(prog *parser.Program) {
 		}
 		for fi := range sd.Fields {
 			_ = i.resolveDeclaredStructNS(&sd.Fields[fi].Type, sd)
+		}
+	}
+	// Enum variant field types get the same treatment as struct fields: a
+	// `Circle { c as mod.Point }` payload field must carry the module identity
+	// so its construction / field check matches the module struct value.
+	for _, ed := range prog.Enums {
+		if ed == nil {
+			continue
+		}
+		for vi := range ed.Variants {
+			for fi := range ed.Variants[vi].Fields {
+				_ = i.resolveDeclaredStructNS(&ed.Variants[vi].Fields[fi].Type, ed)
+			}
 		}
 	}
 	for _, s := range prog.TopLevel {
@@ -819,6 +869,12 @@ func rejectExportInScript(prog *parser.Program) error {
 	for _, s := range prog.Structs {
 		if s.Exported {
 			file, line, col := posFor(s)
+			return &runtimeError{Msg: msg, File: file, Line: line, Col: col}
+		}
+	}
+	for _, e := range prog.Enums {
+		if e.Exported {
+			file, line, col := posFor(e)
 			return &runtimeError{Msg: msg, File: file, Line: line, Col: col}
 		}
 	}

@@ -25,6 +25,10 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 		emitTypeAndPos(b, "Program", v, indent+1)
 		emitNodeListField(b, "imports", asNodes(v.Imports), indent+1)
 		emitNodeListField(b, "moduleImports", asNodes(v.ModuleImports), indent+1)
+		// Type declarations are hoisted out of TopLevel by the parser, so they
+		// have to be emitted from their own lists or they vanish from the dump.
+		emitNodeListField(b, "structs", asNodes(v.Structs), indent+1)
+		emitNodeListField(b, "enums", asNodes(v.Enums), indent+1)
 		emitNodeListField(b, "methods", asNodes(v.Methods), indent+1)
 		emitStmtListField(b, "topLevel", v.TopLevel, indent+1)
 		endObj(b, indent)
@@ -44,6 +48,44 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 		emitStringField(b, "path", v.Path, indent+1)
 		if v.AsName != "" {
 			emitStringField(b, "as", v.AsName, indent+1)
+		}
+		endObj(b, indent)
+
+	case *parser.StructDef:
+		startObj(b, indent)
+		emitTypeAndPos(b, "StructDef", v, indent+1)
+		emitStringField(b, "name", v.Name, indent+1)
+		emitBoolField(b, "exported", v.Exported, indent+1)
+		emitFieldsField(b, "fields", v.Fields, indent+1)
+		endObj(b, indent)
+
+	case *parser.EnumDef:
+		startObj(b, indent)
+		emitTypeAndPos(b, "EnumDef", v, indent+1)
+		emitStringField(b, "name", v.Name, indent+1)
+		emitBoolField(b, "exported", v.Exported, indent+1)
+		writeIndent(b, indent+1)
+		b.WriteString("\"variants\": ")
+		if len(v.Variants) == 0 {
+			b.WriteString("[],\n")
+		} else {
+			b.WriteString("[\n")
+			for i, vr := range v.Variants {
+				writeIndent(b, indent+2)
+				b.WriteString("{\n")
+				emitStringField(b, "name", vr.Name, indent+3)
+				emitFieldsField(b, "fields", vr.Fields, indent+3)
+				trimTrailingComma(b)
+				writeIndent(b, indent+2)
+				b.WriteByte('}')
+				if i < len(v.Variants)-1 {
+					b.WriteString(",\n")
+				} else {
+					b.WriteByte('\n')
+				}
+			}
+			writeIndent(b, indent+1)
+			b.WriteString("],\n")
 		}
 		endObj(b, indent)
 
@@ -110,7 +152,16 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 	case parser.MatchArm:
 		startObj(b, indent)
 		emitTypeAndPos(b, "MatchArm", v, indent+1)
-		emitNodeListField(b, "values", asNodes(v.Values), indent+1)
+		if v.Variant != "" {
+			// enum-pattern arm (`when Circle(c)`): the resolver replaced the
+			// value list with a variant tag and an optional payload binder.
+			emitStringField(b, "variant", v.Variant, indent+1)
+			if v.Bind != "" {
+				emitStringField(b, "bind", v.Bind, indent+1)
+			}
+		} else {
+			emitNodeListField(b, "values", asNodes(v.Values), indent+1)
+		}
 		emitNodeField(b, "body", v.Body, indent+1)
 		endObj(b, indent)
 
@@ -455,6 +506,34 @@ func emitStmtListField(b *strings.Builder, key string, items []parser.Stmt, inde
 		nodes[i] = s
 	}
 	emitNodeListField(b, key, nodes, indent)
+}
+
+// emitFieldsField renders a declared field list (a struct's fields, or an enum
+// variant's payload) as name/type pairs.
+func emitFieldsField(b *strings.Builder, key string, fields []parser.StructField, indent int) {
+	writeIndent(b, indent)
+	fmt.Fprintf(b, "%q: ", key)
+	if len(fields) == 0 {
+		b.WriteString("[],\n")
+		return
+	}
+	b.WriteString("[\n")
+	for i, f := range fields {
+		writeIndent(b, indent+1)
+		b.WriteString("{\n")
+		emitStringField(b, "name", f.Name, indent+2)
+		emitStringField(b, "type", f.Type.String(), indent+2)
+		trimTrailingComma(b)
+		writeIndent(b, indent+1)
+		b.WriteByte('}')
+		if i < len(fields)-1 {
+			b.WriteString(",\n")
+		} else {
+			b.WriteByte('\n')
+		}
+	}
+	writeIndent(b, indent)
+	b.WriteString("],\n")
 }
 
 func emitParamsField(b *strings.Builder, key string, params []parser.Param, indent int) {

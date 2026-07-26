@@ -98,6 +98,7 @@ type Interpreter struct {
 	nsAliasedAway     map[string]string // canonical namespace -> alias chosen by `use NAME as ALIAS;`
 	methods           map[string]*parser.MethodDef
 	structs           map[string]*parser.StructDef // top-level struct definitions hoisted at Run() time
+	enums             map[string]*parser.EnumDef   // top-level enum definitions hoisted at Run() time
 	global            *Environment                 // global scope where top-level statements live
 
 	// Module system: the registry shared across a program run (cache,
@@ -184,6 +185,7 @@ func New() *Interpreter {
 		nsAliasedAway:     map[string]string{},
 		methods:           map[string]*parser.MethodDef{},
 		structs:           map[string]*parser.StructDef{},
+		enums:             map[string]*parser.EnumDef{},
 	}
 	return in
 }
@@ -487,6 +489,84 @@ func (i *Interpreter) checkStructCycles() error {
 	for _, name := range names {
 		if color[name] == white {
 			if err := visit(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkEnumZeroCycles rejects an enum whose zero value (its first declared
+// variant, payload zeroed) would recurse forever. A recursive enum is fine as
+// long as its first variant is a safe base case (`enum List { Nil, Cons { tail
+// as List } }` zeroes to Nil), but an enum whose *first* variant contains the
+// enum by value - directly or through a struct / another enum's first variant -
+// has no finite zero and would stack-overflow at materialisation. Only local
+// by-value edges count (a `list` / `map` field, or a module / library type,
+// terminates); struct-only cycles are already caught by checkStructCycles, so
+// this runs after it and surfaces the enum-involving ones.
+func (i *Interpreter) checkEnumZeroCycles() error {
+	const white, gray, black = 0, 1, 2
+	color := make(map[string]int)
+	// localNamedDep returns ("E"|"S", name, true) when t is a direct local enum
+	// or struct field type - the only by-value zero edges.
+	localNamedDep := func(t parser.Type) (string, string, bool) {
+		if t.Kind != parser.TypeStruct || t.StructNS != "" || t.ModPath != "" {
+			return "", "", false
+		}
+		if _, ok := i.enums[t.StructName]; ok {
+			return "E", t.StructName, true
+		}
+		if _, ok := i.structs[t.StructName]; ok {
+			return "S", t.StructName, true
+		}
+		return "", "", false
+	}
+	var visit func(kind, name, rootEnum string) error
+	visit = func(kind, name, rootEnum string) error {
+		key := kind + ":" + name
+		switch color[key] {
+		case gray:
+			ed := i.enums[rootEnum]
+			file, line, col := "", 0, 0
+			if ed != nil {
+				file, line, col = posFor(ed)
+			}
+			return &runtimeError{
+				Msg:  fmt.Sprintf("enum %q has no finite zero value: its first variant recurses into itself by value; put a payload-less (or non-recursive) variant first, or recurse through a `list` / `map` field", rootEnum),
+				File: file, Line: line, Col: col,
+			}
+		case black:
+			return nil
+		}
+		color[key] = gray
+		// An enum's zero uses only its first variant; a struct's uses all fields.
+		var deps []parser.StructField
+		if kind == "E" {
+			if ed := i.enums[name]; ed != nil && len(ed.Variants) > 0 {
+				deps = ed.Variants[0].Fields
+			}
+		} else if sd := i.structs[name]; sd != nil {
+			deps = sd.Fields
+		}
+		for _, f := range deps {
+			if dk, dn, ok := localNamedDep(f.Type); ok {
+				if err := visit(dk, dn, rootEnum); err != nil {
+					return err
+				}
+			}
+		}
+		color[key] = black
+		return nil
+	}
+	names := make([]string, 0, len(i.enums))
+	for name := range i.enums {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if color["E:"+name] == white {
+			if err := visit("E", name, name); err != nil {
 				return err
 			}
 		}
@@ -836,7 +916,10 @@ func (i *Interpreter) CallHostWith(name string, args ...Value) (Value, error) {
 // isOwnStructName reports whether name is a struct declared in this
 // interpreter (used by CallHostWith's retagging).
 func (i *Interpreter) isOwnStructName(name string) bool {
-	_, ok := i.structs[name]
+	if _, ok := i.structs[name]; ok {
+		return true
+	}
+	_, ok := i.enums[name]
 	return ok
 }
 
@@ -894,7 +977,23 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 		}
 		i.structs[s.Name] = s
 	}
+	// Enums are hoisted alongside structs and share the type namespace, so an
+	// enum may not collide with a struct (or another enum) of the same name.
+	for _, e := range prog.Enums {
+		if _, exists := i.structs[e.Name]; exists {
+			file, line, col := posFor(e)
+			return &runtimeError{Msg: fmt.Sprintf("enum %q collides with a struct of the same name", e.Name), File: file, Line: line, Col: col}
+		}
+		if _, exists := i.enums[e.Name]; exists {
+			file, line, col := posFor(e)
+			return &runtimeError{Msg: fmt.Sprintf("enum %q is defined more than once", e.Name), File: file, Line: line, Col: col}
+		}
+		i.enums[e.Name] = e
+	}
 	if err := i.checkStructCycles(); err != nil {
+		return err
+	}
+	if err := i.checkEnumZeroCycles(); err != nil {
 		return err
 	}
 	// Methods: collect first so call order doesn't matter
@@ -932,6 +1031,14 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// re-resolve in execDefine is a guarded no-op and a shared type node
 	// reached from concurrent goroutines never write-races.
 	i.resolveDeclaredTypesOnce(prog)
+	// Finish the enum-pattern matches the resolver had to defer: their subject's
+	// enum is declared in a module, which only exists now that the imports are
+	// loaded and the declared types are stamped. This is where a cross-module
+	// `match` gets the same variant-name, duplicate-coverage and exhaustiveness
+	// checking a same-file one gets at parse time.
+	if err := i.validatePendingEnumMatches(prog); err != nil {
+		return err
+	}
 	if i.prof != nil {
 		i.prof.Start(time.Now())
 	}
@@ -1174,7 +1281,7 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 	// "concurrent map read and map write" is fatal and uncatchable. Refuse
 	// the mutating input while any task is live; plain statements are fine
 	// (spawn snapshots are isolated from the live global frame).
-	if len(prog.Methods) > 0 || len(prog.Structs) > 0 || len(prog.Imports) > 0 || len(prog.ModuleImports) > 0 {
+	if len(prog.Methods) > 0 || len(prog.Structs) > 0 || len(prog.Enums) > 0 || len(prog.Imports) > 0 || len(prog.ModuleImports) > 0 {
 		if i.hasLiveTasks() {
 			return Null(), fmt.Errorf("cannot define methods or structs or add imports while spawned tasks are running; task.wait() or task.discard() them first")
 		}
@@ -1196,7 +1303,14 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 		// REPL: silently re-define so a snippet can redeclare a struct.
 		i.structs[s.Name] = s
 	}
+	for _, e := range prog.Enums {
+		// REPL: silently re-define so a snippet can redeclare an enum.
+		i.enums[e.Name] = e
+	}
 	if err := i.checkStructCycles(); err != nil {
+		return Null(), err
+	}
+	if err := i.checkEnumZeroCycles(); err != nil {
 		return Null(), err
 	}
 	for _, m := range prog.Methods {
@@ -1468,7 +1582,14 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		// populate every field's zero value. Route through a dedicated
 		// helper that materialises the full field list (and validates
 		// that the named struct actually exists).
-		if st.VarType.Kind == parser.TypeStruct && i.isObjectType(st.VarType.StructNS, st.VarType.StructName) {
+		if st.VarType.Kind == parser.TypeStruct && i.isEnumType(st.VarType.StructNS, st.VarType.StructName, st.VarType.ModPath) {
+			// an enum zeroes to its first declared variant (payload zeroed).
+			zero, err := i.zeroEnumFor(st.VarType.StructNS, st.VarType.StructName, st.VarType.ModPath, st)
+			if err != nil {
+				return err
+			}
+			val = zero
+		} else if st.VarType.Kind == parser.TypeStruct && i.isObjectType(st.VarType.StructNS, st.VarType.StructName) {
 			// an opaque object type (json.Value) zeroes to an empty payload:
 			// a wrapped null node, not a struct.
 			val = ObjectVal(st.VarType.StructNS, st.VarType.StructName, Null())
@@ -1995,30 +2116,9 @@ func (i *Interpreter) zeroStructFor(ns, name, modPath string, st parser.Node) (V
 		}
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", name), File: file, Line: line, Col: col}
 	}
-	fields := make([]StructField, len(def.Fields))
-	for k, decl := range def.Fields {
-		var fv Value
-		if decl.Type.Kind == parser.TypeStruct {
-			subNS := decl.Type.StructNS
-			if subNS != "" {
-				// Field types resolved at registration may carry a
-				// call-site alias; canonicalise here. Errors here are
-				// non-fatal at this layer: if the prefix can't be
-				// resolved we fall through to the bare lookup, which
-				// surfaces a clean "unknown struct" error below.
-				if canonical, err := i.resolveNamespacePrefix(subNS); err == nil {
-					subNS = canonical
-				}
-			}
-			sub, err := i.zeroStructFor(subNS, decl.Type.StructName, decl.Type.ModPath, st)
-			if err != nil {
-				return Value{}, err
-			}
-			fv = sub
-		} else {
-			fv = stampDeclaredType(ZeroFor(decl.Type), decl.Type)
-		}
-		fields[k] = StructField{Name: decl.Name, Value: fv}
+	fields, err := i.zeroPayload(def.Fields, st)
+	if err != nil {
+		return Value{}, err
 	}
 	if ns != "" {
 		return NamespacedStructVal(ns, name, fields), nil
@@ -2407,14 +2507,38 @@ func (i *Interpreter) execMatch(st *parser.MatchStmt, env *Environment) (blockRe
 	if err != nil {
 		return blockResult{}, err
 	}
+	isEnum := subject.Kind == KindEnum
 	for ai := range st.Arms {
-		for _, ve := range st.Arms[ai].Values {
+		arm := &st.Arms[ai]
+		// Enum-pattern arm (`when Circle(c)` / `when Empty`): the resolver set
+		// Variant when the subject is a known enum type. Match on the active
+		// variant tag and bind the payload; value comparison never applies.
+		if arm.Variant != "" {
+			if isEnum && subject.Variant == arm.Variant {
+				return i.runPatternArm(arm, arm.Bind, subject, env)
+			}
+			continue
+		}
+		// A value arm, OR - in a `spawn` / REPL body the resolver deliberately
+		// skips (implementation-note 11) - an enum-pattern arm the resolver never
+		// rewrote. If the subject is an enum, read the arm head as a variant
+		// pattern at runtime before falling back to `==`, so pattern matching
+		// works inside `spawn` too.
+		if isEnum && len(arm.Values) == 1 {
+			if variant, bind, ok := i.enumArmPattern(arm.Values[0], subject); ok {
+				if subject.Variant == variant {
+					return i.runPatternArm(arm, bind, subject, env)
+				}
+				continue
+			}
+		}
+		for _, ve := range arm.Values {
 			v, err := i.evalExpr(ve, env)
 			if err != nil {
 				return blockResult{}, err
 			}
 			if subject.Equal(v) {
-				return i.execBlock(st.Arms[ai].Body, env)
+				return i.execBlock(arm.Body, env)
 			}
 		}
 	}
@@ -2422,6 +2546,85 @@ func (i *Interpreter) execMatch(st *parser.MatchStmt, env *Environment) (blockRe
 		return i.execBlock(st.Else, env)
 	}
 	return blockResult{}, nil
+}
+
+// matchPayloadNS tags the struct value a `match` arm binds for a variant payload
+// (`when Circle(c)` -> `$c`). It is deliberately not a valid namespace / module
+// stem, so the snapshot carries an identity no declared type can match: without
+// this, a payload whose variant name equals its own enum (or an in-scope struct)
+// would satisfy an `as ThatType` binding and let a struct value leak into an
+// enum-typed slot - a soundness hole that silently breaks exhaustiveness.
+const matchPayloadNS = "\x00payload"
+
+// enumArmPattern reads an unresolved `when` arm head as a variant pattern of the
+// subject's enum: `Variant` (a ConstRef) or `Variant(bind)` (a Call binding one
+// bare name). It returns ok only when the name is an actual variant of the
+// subject's enum, so a genuine value arm (`when $other`, `when SOME_CONST`) still
+// falls through to value comparison. Only the resolver-skipped paths (spawn /
+// REPL) reach here; the batch path arrives pre-rewritten with arm.Variant set.
+func (i *Interpreter) enumArmPattern(e parser.Expr, subject Value) (variant, bind string, ok bool) {
+	var name string
+	switch ex := e.(type) {
+	case *parser.ConstRefExpr:
+		name = ex.Name
+	case *parser.CallExpr:
+		if len(ex.Args) != 1 {
+			return "", "", false
+		}
+		a, isRef := ex.Args[0].(*parser.ConstRefExpr)
+		if !isRef {
+			return "", "", false
+		}
+		name, bind = ex.Callee, a.Name
+	default:
+		return "", "", false
+	}
+	def, found := i.lookupEnumDef(subject.StructNS, subject.StructName, subject.ModPath)
+	if !found {
+		return "", "", false
+	}
+	for vi := range def.Variants {
+		if def.Variants[vi].Name == name {
+			return name, bind, true
+		}
+	}
+	return "", "", false
+}
+
+// runPatternArm runs an enum-variant pattern arm's body, binding the variant
+// payload (when the arm has a binder) as a read-only snapshot in a fresh frame.
+// BindSlot >= 0 uses the resolver-assigned slot; < 0 (spawn / REPL, unresolved)
+// binds by name. The payload carries matchPayloadNS so it can never be re-bound
+// to a declared type, and is `const` so a write gets a clean "cannot mutate"
+// error rather than a struct-def-lookup failure - build a fresh value to
+// transform it. Mirrors how execForEach seeds its iteration variable.
+func (i *Interpreter) runPatternArm(arm *parser.MatchArm, bind string, subject Value, env *Environment) (blockResult, error) {
+	if bind == "" {
+		return i.execBlock(arm.Body, env)
+	}
+	fields := make([]StructField, len(subject.Fields))
+	for k, f := range subject.Fields {
+		fields[k] = StructField{Name: f.Name, Value: f.Value.Copy()}
+	}
+	payload := Value{Kind: KindStruct, StructNS: matchPayloadNS, StructName: subject.Variant, Fields: fields}
+	frame := borrowBlockEnv(env, arm.Body.NumSlots)
+	var derr error
+	if arm.BindSlot >= 0 {
+		derr = frame.DefineAt(arm.BindSlot, bind, payload, parser.Type{}, true)
+	} else {
+		derr = frame.Define(bind, payload, parser.Type{}, true)
+	}
+	if derr != nil {
+		releaseBlockEnv(frame)
+		file, line, col := posFor(arm)
+		return blockResult{}, &runtimeError{Msg: derr.Error(), File: file, Line: line, Col: col}
+	}
+	res, err := i.execStmts(arm.Body.Stmts, frame)
+	if len(frame.deferred) > 0 {
+		res, err = i.finishFrame(frame, res, err)
+	}
+	releaseBlockEnv(frame)
+	return res, err
 }
 
 func (i *Interpreter) execWhile(st *parser.WhileStmt, env *Environment) (blockResult, error) {
@@ -2949,6 +3152,18 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 // in *declaration* order regardless of the literal's source order so
 // the resulting Value is canonical.
 func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Value, error) {
+	// Enum construction reuses the StructLit node: a local `Enum.Variant{...}`
+	// (NS names an enum type) or the cross-module `alias.Enum.Variant{...}`
+	// (Enum segment set). Everything else is an ordinary struct literal.
+	//
+	// The two-segment form is ambiguous when a local enum shares its name with
+	// an imported module's alias or a library namespace: `m.Opt{ a: 7 }` is a
+	// module struct literal, not variant `Opt` of a local `def enum m`. The
+	// namespace wins - it is the older, cross-file meaning - so an enum named
+	// after an alias shadows nothing.
+	if ex.Enum != "" || (ex.NS != "" && i.enums[ex.NS] != nil && !i.isNamespaceOrAlias(ex.NS)) {
+		return i.evalEnumLit(ex, env)
+	}
 	// namespaced literals (`os.Result{ ... }`) resolve via the
 	// alias prefix then the NSStructs table; bare literals use the
 	// user-defined struct table as before.
@@ -3045,12 +3260,325 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	return StructVal(ex.Name, out), nil
 }
 
+// lookupEnumDef resolves an enum definition by (ns, name, modPath). A local
+// enum has empty ns/modPath; a module enum resolves through the canonical path
+// (or the stem fallback) into the module's own interpreter.
+func (i *Interpreter) lookupEnumDef(ns, name, modPath string) (*parser.EnumDef, bool) {
+	if modPath != "" {
+		if mod := i.moduleByPath(modPath); mod != nil {
+			if def, ok := mod.interp.enums[name]; ok {
+				return def, true
+			}
+		}
+		return nil, false
+	}
+	if ns != "" {
+		if mod := i.moduleByNS(ns); mod != nil {
+			if def, ok := mod.interp.enums[name]; ok {
+				return def, true
+			}
+		}
+		return nil, false
+	}
+	def, ok := i.enums[name]
+	return def, ok
+}
+
+// isEnumType reports whether (ns, name, modPath) names an enum type.
+func (i *Interpreter) isEnumType(ns, name, modPath string) bool {
+	_, ok := i.lookupEnumDef(ns, name, modPath)
+	return ok
+}
+
+// zeroEnumFor builds the zero value of an enum type: its first declared
+// variant, with any payload fields zeroed. A module enum is built inside the
+// module's own interpreter then retagged to the importer-visible identity,
+// mirroring zeroStructFor.
+func (i *Interpreter) zeroEnumFor(ns, name, modPath string, st parser.Node) (Value, error) {
+	if ns != "" || modPath != "" {
+		mod := i.moduleByPath(modPath)
+		if mod == nil {
+			mod = i.moduleByNS(ns)
+		}
+		if mod != nil {
+			if _, ok := mod.interp.enums[name]; ok {
+				v, err := mod.interp.zeroEnumFor("", name, "", st)
+				if err != nil {
+					return Value{}, err
+				}
+				return retagStructs(v, "", mod.ns, "", mod.path, mod.isOwnStruct), nil
+			}
+		}
+	}
+	def, ok := i.lookupEnumDef(ns, name, modPath)
+	if !ok {
+		file, line, col := posFor(st)
+		if ns != "" {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown enum %s.%s", ns, name), File: file, Line: line, Col: col}
+		}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown enum %q", name), File: file, Line: line, Col: col}
+	}
+	v0 := def.Variants[0]
+	fields, err := i.zeroPayload(v0.Fields, st)
+	if err != nil {
+		return Value{}, err
+	}
+	return EnumVal(ns, modPath, name, v0.Name, fields), nil
+}
+
+// validatePendingEnumMatches completes the checks the resolver had to defer for
+// a `match` whose subject type is declared in an imported module. The resolver
+// rewrote the arms into variant patterns (so binders got their slots) but could
+// not see the enum; now the module is loaded, so the variant names, duplicate
+// coverage and exhaustiveness are checked exactly as a same-file match's are.
+// Runs before the first statement executes, so a bad cross-module match fails
+// the program at load rather than falling silently through at runtime.
+func (i *Interpreter) validatePendingEnumMatches(prog *parser.Program) error {
+	for _, st := range prog.PendingEnumMatches {
+		if st == nil || st.EnumType == nil {
+			continue
+		}
+		t := st.EnumType
+		// Stamp the alias form (`sh.Shape`) to the module's (stem, path)
+		// identity. Idempotent, and best-effort: an unresolvable type falls
+		// through to the not-an-enum error below with its own position.
+		_ = i.resolveDeclaredStructNS(t, st)
+		ed, ok := i.lookupEnumDef(t.StructNS, t.StructName, t.ModPath)
+		if !ok {
+			file, line, col := posFor(st)
+			return &runtimeError{
+				Msg:  fmt.Sprintf("`match` uses variant patterns, but its subject type %s is not an enum", t.String()),
+				File: file, Line: line, Col: col,
+			}
+		}
+		if err := checkEnumArms(st, ed, t.String()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkEnumArms validates an already-rewritten pattern match against its enum:
+// every arm names a real variant, no variant is covered twice, a binder only
+// appears on a variant that has a payload, and the arm set is exhaustive unless
+// an `else` is present. Mirrors the resolver's same-file checks, including their
+// wording, so a cross-module match reports identically to a local one.
+func checkEnumArms(st *parser.MatchStmt, ed *parser.EnumDef, typeName string) error {
+	variantByName := make(map[string]*parser.EnumVariant, len(ed.Variants))
+	for vi := range ed.Variants {
+		variantByName[ed.Variants[vi].Name] = &ed.Variants[vi]
+	}
+	covered := make(map[string]bool, len(ed.Variants))
+	for ai := range st.Arms {
+		arm := &st.Arms[ai]
+		file, line, col := posFor(arm)
+		vdef, isVariant := variantByName[arm.Variant]
+		if !isVariant {
+			return &runtimeError{Msg: fmt.Sprintf("%q is not a variant of enum %s", arm.Variant, typeName), File: file, Line: line, Col: col}
+		}
+		if covered[arm.Variant] {
+			return &runtimeError{Msg: fmt.Sprintf("variant %s is covered more than once in this `match`", arm.Variant), File: file, Line: line, Col: col}
+		}
+		covered[arm.Variant] = true
+		if arm.Bind != "" && len(vdef.Fields) == 0 {
+			return &runtimeError{Msg: fmt.Sprintf("variant %s has no payload to bind (write `when %s`)", arm.Variant, arm.Variant), File: file, Line: line, Col: col}
+		}
+	}
+	if st.Else != nil {
+		return nil
+	}
+	var missing []string
+	for vi := range ed.Variants {
+		if !covered[ed.Variants[vi].Name] {
+			missing = append(missing, ed.Variants[vi].Name)
+		}
+	}
+	if len(missing) > 0 {
+		file, line, col := posFor(st)
+		return &runtimeError{
+			Msg:  fmt.Sprintf("`match` on enum %s is not exhaustive: missing %s (cover every variant or add an `else`)", typeName, strings.Join(missing, ", ")),
+			File: file, Line: line, Col: col,
+		}
+	}
+	return nil
+}
+
+// zeroPayload builds the zero values for a variant's (or struct's) declared
+// field list, recursing into nested struct / enum field types.
+func (i *Interpreter) zeroPayload(declFields []parser.StructField, st parser.Node) ([]StructField, error) {
+	fields := make([]StructField, len(declFields))
+	for k, decl := range declFields {
+		var fv Value
+		switch {
+		case decl.Type.Kind == parser.TypeStruct && i.isEnumType(decl.Type.StructNS, decl.Type.StructName, decl.Type.ModPath):
+			sub, err := i.zeroEnumFor(decl.Type.StructNS, decl.Type.StructName, decl.Type.ModPath, st)
+			if err != nil {
+				return nil, err
+			}
+			fv = sub
+		case decl.Type.Kind == parser.TypeStruct:
+			subNS := decl.Type.StructNS
+			if subNS != "" {
+				if canonical, err := i.resolveNamespacePrefix(subNS); err == nil {
+					subNS = canonical
+				}
+			}
+			sub, err := i.zeroStructFor(subNS, decl.Type.StructName, decl.Type.ModPath, st)
+			if err != nil {
+				return nil, err
+			}
+			fv = sub
+		default:
+			fv = stampDeclaredType(ZeroFor(decl.Type), decl.Type)
+		}
+		fields[k] = StructField{Name: decl.Name, Value: fv}
+	}
+	return fields, nil
+}
+
+// evalEnumLit constructs an enum value from a StructLit reused as an enum
+// literal: local `Enum.Variant` / `Enum.Variant{...}` (NS = enum type) or
+// cross-module `alias.Enum.Variant[...]` (Enum segment set, NS = module alias).
+func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value, error) {
+	var def *parser.EnumDef
+	var resolvedNS, resolvedModPath string
+	retagFieldType := func(t parser.Type) parser.Type { return t }
+	if ex.Enum != "" {
+		mod, ok := i.moduleAliases[ex.NS]
+		if !ok {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown module alias %q in enum construction %s.%s.%s", ex.NS, ex.NS, ex.Enum, ex.Name), File: file, Line: line, Col: col}
+		}
+		d, exists := mod.interp.enums[ex.Enum]
+		if !exists {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("module %q has no enum %q", ex.NS, ex.Enum), File: file, Line: line, Col: col}
+		}
+		if !mod.exports[ex.Enum] {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("%s.%s: enum %q is not exported from module %q", ex.NS, ex.Enum, ex.Enum, ex.NS), File: file, Line: line, Col: col}
+		}
+		def = d
+		resolvedNS = mod.ns
+		resolvedModPath = mod.path
+		modInterp, modNS, modPath := mod.interp, mod.ns, mod.path
+		retagFieldType = func(t parser.Type) parser.Type {
+			return *retagType(&t, "", modNS, "", modPath, func(name string) bool {
+				if _, ok := modInterp.structs[name]; ok {
+					return true
+				}
+				_, ok := modInterp.enums[name]
+				return ok
+			})
+		}
+	} else {
+		def = i.enums[ex.NS]
+	}
+	var vdef *parser.EnumVariant
+	for k := range def.Variants {
+		if def.Variants[k].Name == ex.Name {
+			vdef = &def.Variants[k]
+			break
+		}
+	}
+	if vdef == nil {
+		file, line, col := posFor(ex)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("enum %s has no variant %q", def.Name, ex.Name), File: file, Line: line, Col: col}
+	}
+	if ex.Bare {
+		if len(vdef.Fields) > 0 {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("variant %s.%s carries a payload; construct it as %s.%s{ ... }", def.Name, ex.Name, def.Name, ex.Name), File: file, Line: line, Col: col}
+		}
+		return EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, nil), nil
+	}
+	// The mirror of the check above: a payload-less variant is written bare, so
+	// `Shape.Empty{}` is a mistake worth naming rather than silently accepting.
+	if len(vdef.Fields) == 0 {
+		file, line, col := posFor(ex)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("variant %s.%s has no payload; write it as %s.%s, without braces", def.Name, ex.Name, def.Name, ex.Name), File: file, Line: line, Col: col}
+	}
+	provided := make(map[string]*parser.StructLitField, len(ex.Fields))
+	for k := range ex.Fields {
+		provided[ex.Fields[k].Name] = &ex.Fields[k]
+	}
+	declared := make(map[string]bool, len(vdef.Fields))
+	for _, f := range vdef.Fields {
+		declared[f.Name] = true
+	}
+	for _, f := range ex.Fields {
+		if !declared[f.Name] {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown field %q in variant %s.%s", f.Name, def.Name, ex.Name), File: f.File, Line: f.Line, Col: f.Col}
+		}
+	}
+	out := make([]StructField, 0, len(vdef.Fields))
+	for _, decl := range vdef.Fields {
+		lit, ok := provided[decl.Name]
+		if !ok {
+			file, line, col := posFor(ex)
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("missing field %q in variant %s.%s literal", decl.Name, def.Name, ex.Name), File: file, Line: line, Col: col}
+		}
+		v, err := i.evalExpr(lit.Expr, env)
+		if err != nil {
+			return Value{}, err
+		}
+		declType := retagFieldType(decl.Type)
+		if !v.MatchesDeclared(declType) {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of variant %s.%s expects %s, got %s", decl.Name, def.Name, ex.Name, declType, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
+		}
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), declType)})
+	}
+	return EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out), nil
+}
+
 // evalFieldAccess reads a struct field. Errors on a non-struct target
 // (with a positioned message naming the field that was requested) and
 // on an unknown field name (which can happen if the user mistypes a
 // field in a getter chain - the struct value carries the field list
 // so we can spot it here).
+// enumVariantFromFieldAccess reads a `Enum.Variant` that the parser shaped as
+// field access on a constant, which happens whenever the enum's type name is
+// spelled in caps (`RGB.Red`): the constant-name rule sends `RGB` down the
+// `ORIGIN.x` deep-const field-access path. handled is false when the target is
+// a real binding or is not an enum, leaving ordinary field access to run.
+func (i *Interpreter) enumVariantFromFieldAccess(ref *parser.ConstRefExpr, ex *parser.FieldAccessExpr, env *Environment) (Value, bool, error) {
+	// A real binding always wins: `ORIGIN.x` keeps meaning field access even if
+	// an enum of the same name exists.
+	if _, err := env.GetBinding(ref.Name); err == nil {
+		return Value{}, false, nil
+	}
+	ed, isEnum := i.enums[ref.Name]
+	if !isEnum {
+		return Value{}, false, nil
+	}
+	for vi := range ed.Variants {
+		if ed.Variants[vi].Name != ex.Field {
+			continue
+		}
+		if len(ed.Variants[vi].Fields) > 0 {
+			file, line, col := posFor(ex)
+			return Value{}, true, &runtimeError{Msg: fmt.Sprintf("variant %s.%s carries a payload; construct it as %s.%s{ ... }", ed.Name, ex.Field, ed.Name, ex.Field), File: file, Line: line, Col: col}
+		}
+		return EnumVal("", "", ed.Name, ex.Field, nil), true, nil
+	}
+	file, line, col := posFor(ex)
+	return Value{}, true, &runtimeError{Msg: fmt.Sprintf("enum %s has no variant %q", ed.Name, ex.Field), File: file, Line: line, Col: col}
+}
+
 func (i *Interpreter) evalFieldAccess(ex *parser.FieldAccessExpr, env *Environment) (Value, error) {
+	// `Prefix.name` with a constant-shaped Prefix and a non-constant-shaped name
+	// parses as field access on a (deep-const) struct - the `ORIGIN.x` form. An
+	// enum whose type name happens to be spelled in caps (`RGB.Red`) lands in
+	// exactly that shape, so try the variant reading before evaluating the
+	// target: without this the target lookup fails with a baffling
+	// "undefined name RGB" even though `def c as RGB;` and `match ($c)` both
+	// resolve the type fine. A real binding always wins, so `ORIGIN.x` keeps
+	// meaning field access.
+	if ref, isRef := ex.Target.(*parser.ConstRefExpr); isRef {
+		if v, handled, verr := i.enumVariantFromFieldAccess(ref, ex, env); handled {
+			return v, verr
+		}
+	}
 	parent, err := i.evalExpr(ex.Target, env)
 	if err != nil {
 		return Value{}, err
@@ -4119,6 +4647,17 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 //   - anything else: error as an unknown namespace.
 //
 // The caller decorates the returned error with positional info.
+// isNamespaceOrAlias reports whether prefix currently names an imported module
+// alias or an active library namespace. Used to settle the `NS.Name{...}`
+// ambiguity in favour of the namespace when a local enum shares its name.
+func (i *Interpreter) isNamespaceOrAlias(prefix string) bool {
+	if _, isModule := i.moduleAliases[prefix]; isModule {
+		return true
+	}
+	_, isNS := i.nsPrefixes[prefix]
+	return isNS
+}
+
 func (i *Interpreter) resolveNamespacePrefix(prefix string) (string, error) {
 	if ns, ok := i.nsPrefixes[prefix]; ok {
 		return ns, nil
@@ -4224,6 +4763,22 @@ func (i *Interpreter) evalQualifiedConst(c *parser.QualifiedConstRefExpr) (Value
 			return v, nil
 		}
 	}
+	// `Enum.Variant` where the variant name is constant-shaped (e.g. `A`, `OK`)
+	// lexes as a qualified constant reference; if the prefix is a local enum it
+	// is a payload-less variant construction.
+	if ed, ok := i.enums[c.Prefix]; ok {
+		for vi := range ed.Variants {
+			if ed.Variants[vi].Name == c.Name {
+				if len(ed.Variants[vi].Fields) > 0 {
+					file, line, col := posFor(c)
+					return Value{}, &runtimeError{Msg: fmt.Sprintf("variant %s.%s carries a payload; construct it as %s.%s{ ... }", ed.Name, c.Name, ed.Name, c.Name), File: file, Line: line, Col: col}
+				}
+				return EnumVal("", "", ed.Name, c.Name, nil), nil
+			}
+		}
+		file, line, col := posFor(c)
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("enum %s has no variant %q", ed.Name, c.Name), File: file, Line: line, Col: col}
+	}
 	// A module alias reads a constant from the loaded module's own scope.
 	if m, ok := i.moduleAliases[c.Prefix]; ok {
 		return i.moduleConst(m, c)
@@ -4236,6 +4791,11 @@ func (i *Interpreter) evalQualifiedConst(c *parser.QualifiedConstRefExpr) (Value
 	v, ok := i.NSConstants[nsKey{NS: ns, Name: c.Name}]
 	if !ok {
 		file, line, col := posFor(c)
+		// A name that is a function in the namespace was likely meant as a call
+		// - point at the missing `()` rather than reporting a phantom constant.
+		if _, isFn := i.NSBuiltins[nsKey{NS: ns, Name: c.Name}]; isFn {
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("%s.%s is a function; call it as %s.%s(...)", c.Prefix, c.Name, c.Prefix, c.Name), File: file, Line: line, Col: col}
+		}
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown constant %q in namespace %q", c.Name, ns), File: file, Line: line, Col: col}
 	}
 	return v, nil

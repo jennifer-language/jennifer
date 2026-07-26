@@ -73,8 +73,8 @@ an assistant usually guesses wrong:
 ## Types
 
 Primitive: `null`, `int`, `float`, `string`, `bool`, `bytes`.
-Compound: `list of T`, `map of K to V`, user `struct`s, `task of T` (a handle
-to a `spawn`ed computation).
+Compound: `list of T`, `map of K to V`, user `struct`s, user `enum`s (sum
+types), `task of T` (a handle to a `spawn`ed computation).
 
 - **int** literals: `42`, `0xff`, `0o755`, `0b1010`, with `_` digit separators
   (`1_000_000`, `0xDEAD_BEEF`).
@@ -89,6 +89,13 @@ to a `spawn`ed computation).
 - **map** literals: `{"a": 1, "b": 2}`, `{}`. Insertion-ordered.
 - **struct** literals: `Point{ x: 1, y: 2 }` after
   `def struct Point { x as int, y as int };`. Every field must be named.
+- **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
+  level. A value is one variant: construct with `Shape.Circle{ r: 2.0 }` or the
+  payload-less `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value
+  semantics + equality like structs. `def s as Shape;` (no init) zeroes to the
+  **first** variant, payload zeroed. Read the payload only through `match` (no
+  `$enum.field`). Names may be any case (an all-`UPPERCASE` name is a constant,
+  so don't name a type all-caps).
 
 ## Variables and constants
 
@@ -145,6 +152,14 @@ match ($cmd) {                 # multi-way value dispatch (subject evaluated onc
     else {                     # optional default, must be last
         unknown();
     }
+}
+
+# Over an enum subject, `match` dispatches on the variant and binds its payload.
+# It must be exhaustive (cover every variant) or carry an `else`.
+match ($shape) {
+    when Circle(c) { area($c.r); }   # $c is the variant's payload (a mini-struct)
+    when Rect(rc)  { area2($rc.w, $rc.h); }
+    when Empty     { }               # payload-less variant: no binder
 }
 
 break;      # exit innermost loop

@@ -285,3 +285,25 @@ func TestMoveDepthGuard(t *testing.T) {
 		t.Errorf("expected a depth-limit error, got %v", err)
 	}
 }
+
+// TestEncodeEnum pins the externally-tagged sum-type encoding: a payload-less
+// variant is its name as a string, a payloaded one a single-key object. Both
+// name the variant, which a bare payload object would not.
+func TestEncodeEnum(t *testing.T) {
+	payload := interpreter.EnumVal("", "", "Shape", "Circle", []interpreter.StructField{
+		{Name: "r", Value: interpreter.FloatVal(2.5)},
+		{Name: "n", Value: interpreter.IntVal(3)},
+	})
+	if got := enc(t, payload); got != `{"Circle":{"r":2.5,"n":3}}` {
+		t.Errorf("payloaded variant: got %s", got)
+	}
+	bare := interpreter.EnumVal("", "", "Shape", "Empty", nil)
+	if got := enc(t, bare); got != `"Empty"` {
+		t.Errorf("payload-less variant: got %s", got)
+	}
+	// Nested inside a list, so the seq path is exercised too.
+	list := interpreter.ListVal(parser.Type{}, []interpreter.Value{payload, bare})
+	if got := enc(t, list); got != `[{"Circle":{"r":2.5,"n":3}},"Empty"]` {
+		t.Errorf("list of variants: got %s", got)
+	}
+}

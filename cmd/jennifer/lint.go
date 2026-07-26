@@ -102,6 +102,14 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 	if err != nil {
 		return []lint.Diagnostic{sourceErrorDiag("L002", err, absPath)}, src, absPath, false
 	}
+	// Scope analysis is where undefined names, shadowing and enum-match
+	// checking (variant names, duplicate coverage, exhaustiveness) live. Without
+	// it `lint` passed clean on a file `run` refuses to load - the opposite of
+	// what a pre-commit check is for. Cross-module enum matches still need the
+	// modules loaded, so those are reported by `run` / `test`, not here.
+	if err := parser.Resolve(prog); err != nil {
+		return []lint.Diagnostic{sourceErrorDiag("L002", err, absPath)}, src, absPath, false
+	}
 
 	// A finding can anchor to an `include`d file (its path rides on the spliced
 	// tokens), but `# lint-disable` directives live in comments the preprocessor

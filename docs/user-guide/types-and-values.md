@@ -13,6 +13,7 @@
 | `list of T`     | `[1, 2, 3]`                                         | `[]`             | Ordered sequence; 0-indexed; mutable                                                                                   |
 | `map of K to V` | `{"a": 1, "b": 2}`                                  | `{}`             | Key→value; insertion-ordered; mutable                                                                                  |
 | user struct     | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs)                                                               |
+| user enum       | `Shape.Circle{r: 2.0}` (after `def enum Shape ...;`) | first variant, payload zeroed | One of a fixed set of variants (a sum type); consumed with `match`; see [Enums](#enums-sum-types)                       |
 | `task of T`     | *(no literal - produced by `spawn { ... }`)*         | *(cannot be defaulted; must be initialised)* | Handle to a concurrent computation; observed via the [`task`](../libraries/task.md) library. See [Concurrency](concurrency.md)     |
 
 The **Default** column is the value an uninitialized variable receives
@@ -483,3 +484,98 @@ depth.
   errors with the declared type and the actual value's kind.
 - **Field access on a non-struct value**: `$xs.foo` where `$xs` is a
   list errors with "field access `.foo` requires a struct, got list".
+
+## Enums (sum types)
+
+A **struct** bundles several values that all exist at once. An **enum** models
+the opposite: a value that is *exactly one* of a fixed set of **variants**. Each
+variant is either a payload-less tag or carries its own named fields (a
+mini-struct).
+
+```jennifer
+def enum Shape {
+    Circle { r as float },
+    Rect { w as float, h as float },
+    Empty
+};
+```
+
+Construct a value by naming the variant:
+
+```jennifer
+def a as Shape init Shape.Circle{ r: 2.0 };
+def b as Shape init Shape.Rect{ w: 3.0, h: 4.0 };
+def e as Shape init Shape.Empty;              # payload-less: no braces
+```
+
+### Consuming an enum with `match`
+
+You do not read an enum's payload with `.field` - the whole point is that only
+*one* variant is present, so `$s.r` would be meaningless when `$s` is a `Rect`.
+Instead, `match` dispatches on the variant and hands you the payload:
+
+```jennifer
+func area(s as Shape) {
+    match ($s) {
+        when Circle(c) { return 3.14159 * $c.r * $c.r; }   # $c holds { r }
+        when Rect(rc)  { return $rc.w * $rc.h; }            # $rc holds { w, h }
+        when Empty     { return 0.0; }                      # no binder
+    }
+    return -1.0;
+}
+```
+
+`when Circle(c)` binds the payload into a fresh `$c` for that arm only.
+`when Empty` matches the payload-less variant with no binder. The bound `$c` is
+a **read-only** snapshot - you read its fields (`$c.r`); to transform the data,
+build a new value.
+
+A `match` over an enum must be **exhaustive**: every variant must be covered, or
+the `match` must carry an `else`. A forgotten variant is a **compile-time error**,
+not a silent no-op - so when you add a variant later, the compiler points you at
+every `match` that needs updating.
+
+### Value semantics, equality, zero
+
+Enums copy by value like structs (`def b as Shape init $a;` is an independent
+copy), and compare equal when they are the same variant with equal payload
+(`Shape.Circle{r: 2.0} == Shape.Circle{r: 2.0}` is `true`;
+`... == Shape.Empty` is `false`). `const` is deep.
+
+`def s as Shape;` with no initializer gives the **first declared variant**, with
+its payload zeroed. So a recursive enum should declare a payload-less base case
+first:
+
+```jennifer
+def enum Lst { Nil, Cons { head as int, tail as Lst } };
+def empty as Lst;             # -> Lst.Nil (a finite, well-defined zero)
+```
+
+An enum whose *first* variant refers to itself by value has no finite zero and is
+rejected when the program loads.
+
+### Naming
+
+Enum and variant names can be spelled any way you like - `Shape`/`Circle`,
+`shape`/`circle`, `RGB`/`Red`, whatever reads well. The interpreter figures out
+what `Shape.Circle` means by looking it up, not from how it is capitalized.
+
+One thing to know if you give an enum an all-`UPPERCASE` name: that is also the
+spelling of a **constant**, so if a constant or variable of the same name is in
+scope, it wins and `RGB.Red` reads as a field access on it. Rename either one to
+clear the ambiguity.
+
+### Encoding an enum as JSON
+
+`json.encode` writes an enum in the conventional *externally tagged* form: a
+payload-less variant becomes its name as a string, and a payloaded one a
+single-key object naming the variant.
+
+```jennifer
+json.encode(Shape.Circle{ r: 2.5 })   # {"Circle":{"r":2.5}}
+json.encode(Shape.Empty)              # "Empty"
+```
+
+Decoding does not rebuild an enum - the wire form carries no enum type, so
+`json.decode` gives you the plain string or map and your program decides what it
+means.

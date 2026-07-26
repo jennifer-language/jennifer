@@ -447,7 +447,6 @@ func TestParseQualifiedErrors(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"const-form wants UPPERCASE", `use bio; def x as int init bio.lower;`, "uppercase"},
 		{"method name with underscore", `use bio; bio.my_call();`, "may not contain"},
 		{"alias with underscore", `use bio as b_alias;`, "may not contain"},
 		{"missing IDENT after dot", `use bio; bio.();`, "after `.`"},
@@ -618,5 +617,46 @@ func TestParseMatchValueStructLiteral(t *testing.T) {
 	// Parenthesized struct-literal value is allowed.
 	if _, err := Parse(`def struct P { x as int }; match ($p) { when (P{x: 1}) { } }`); err != nil {
 		t.Errorf("parenthesized struct-literal when-value should parse: %v", err)
+	}
+}
+
+// TestParseEnumDef checks `def enum` declaration parsing: payloaded and
+// payload-less variants, and the Sprint form.
+func TestParseEnumDef(t *testing.T) {
+	prog, err := Parse(`def enum Shape { Circle { r as float }, Rect { w as float, h as float }, Empty };`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(prog.Enums) != 1 {
+		t.Fatalf("want 1 enum, got %d", len(prog.Enums))
+	}
+	e := prog.Enums[0]
+	if e.Name != "Shape" || len(e.Variants) != 3 {
+		t.Fatalf("got name=%q variants=%d", e.Name, len(e.Variants))
+	}
+	if e.Variants[0].Name != "Circle" || len(e.Variants[0].Fields) != 1 {
+		t.Errorf("variant 0: %+v", e.Variants[0])
+	}
+	if e.Variants[2].Name != "Empty" || len(e.Variants[2].Fields) != 0 {
+		t.Errorf("variant 2 (payload-less): %+v", e.Variants[2])
+	}
+	got := Sprint(e)
+	want := "Enum(Shape{Circle{r as float}, Rect{w as float, h as float}, Empty})"
+	if got != want {
+		t.Errorf("Sprint: got %q want %q", got, want)
+	}
+}
+
+// TestParseEnumErrors checks positioned rejections in enum declarations.
+func TestParseEnumErrors(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"empty enum", `def enum E { };`, "at least one variant"},
+		{"dup variant", `def enum E { A, A };`, "declared twice"},
+		{"underscore name", `def enum My_Enum { A };`, "may not contain"},
+	}
+	for _, c := range cases {
+		if _, err := Parse(c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", c.name, err, c.want)
+		}
 	}
 }

@@ -200,7 +200,7 @@ func (f *fmtState) emit(t, next lexer.Token) {
 	// by SEMI (defensive - keeps a stray `struct` from tainting later
 	// braces).
 	switch t.Type {
-	case lexer.TOKEN_STRUCT:
+	case lexer.TOKEN_STRUCT, lexer.TOKEN_ENUM:
 		f.pendingStructBrace = true
 	case lexer.TOKEN_MATCH:
 		f.pendingMatchBrace = true

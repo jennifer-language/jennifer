@@ -82,7 +82,7 @@ contexts:
   keywords:
     - match: '\b(if|elseif|else|while|for|in|repeat|until|match|when|break|continue|return|exit|try|catch|throw|defer|errdefer|spawn)\b'
       scope: keyword.control.jennifer
-    - match: '\b(export|def|const|func|struct|use|include|import|as|of|to|init)\b'
+    - match: '\b(export|def|const|func|struct|enum|use|include|import|as|of|to|init)\b'
       scope: keyword.declaration.jennifer
     - match: '\b(and|or|not)\b'
       scope: keyword.operator.word.jennifer

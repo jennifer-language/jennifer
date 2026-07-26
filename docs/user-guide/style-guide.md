@@ -166,8 +166,14 @@ nothing here will surprise you.
 ## Names
 
 - **Variables, methods, parameters**: lowercase or `camelCase` if the name
-  has multiple words. Identifiers are `[A-Za-z]{1,64}` - no digits, no
-  underscores.
+  has multiple words.
+- **Structs, enums, and enum variants**: `PascalCase` - `Point`, `Shape`,
+  `Circle`. The interpreter does **not** enforce this (a name resolves by what
+  it refers to, not by how it is capitalized), so it is a convention, not a
+  rule. Following it keeps types visually distinct from `camelCase` values and
+  `UPPERCASE` constants, and sidesteps the one real collision: an
+  all-`UPPERCASE` type name would be read as a *constant* in `Name.member`
+  position, so never name a type in all caps.
 - **Constants**: `UPPERCASE`, with `_` as a single word separator. The
   full rule is `[A-Z]+(_[A-Z]+)*`, up to 64 characters: one or more
   uppercase chunks joined by single `_`. Every `_` must be immediately

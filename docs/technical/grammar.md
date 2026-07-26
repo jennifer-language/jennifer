@@ -124,12 +124,14 @@ below.
 
 | Node                    | Kind | Fields                                                                                                     |
 | ----------------------- | ---- | ---------------------------------------------------------------------------------------------------------- |
-| `Program`               | root | `Imports []*ImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `TopLevel []Stmt`, `NumGlobals int`                 |
+| `Program`               | root | `Imports []*ImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `Enums []*EnumDef`, `TopLevel []Stmt`, `NumGlobals int`                 |
 | `ImportStmt`            | stmt | `Name`, `AsName` (empty unless `use NAME as ALIAS;`)                                                       |
 | `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`                                                                    |
 | `Param`                 | -    | `Name`, `Type`                                                                                             |
 | `StructDef`             | stmt | `Name`, `Fields []StructField` (top-level only, hoisted before execution)                           |
 | `StructField`           | -    | `Name`, `Type` (each field of a struct definition)                                                         |
+| `EnumDef`               | stmt | `Name`, `Variants []EnumVariant` (top-level only, hoisted; a sum type)                              |
+| `EnumVariant`           | -    | `Name`, `Fields []StructField` (payload-less when empty)                                            |
 | `Block`                 | stmt | `Stmts []Stmt`, `NumSlots int` (hint used by `NewEnvironmentSized`)                                |
 | `DefineStmt`            | stmt | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit), `Slot int` (-1 = unresolved) |
 | `AssignStmt`            | stmt | `VarName`, `Value Expr`, `Depth`, `Slot` (both -1 = unresolved)                                   |
@@ -141,7 +143,7 @@ below.
 | `ReturnStmt`            | stmt | `Value Expr` (nil for bare `return;`)                                                                      |
 | `IfStmt`                | stmt | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block`                            |
 | `MatchStmt`             | stmt | `Subject Expr`, `Arms []MatchArm`, `Else *Block` (nil if absent) - `match (EXPR) { when ... else ... }`     |
-| `MatchArm`              | node | `Values []Expr` (>=1, compared to the subject by `==`), `Body *Block`                                       |
+| `MatchArm`              | node | `Values []Expr` (value arm, compared by `==`) OR `Variant`/`Bind`/`BindSlot` (enum-pattern arm, set by the resolver), `Body *Block`         |
 | `WhileStmt`             | stmt | `Cond`, `Body *Block`                                                                                      |
 | `ForStmt`               | stmt | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil)                                      |
 | `ForEachStmt`           | stmt | `VarName`, `Coll Expr`, `Body *Block`, `IterSlot` (slot for the iterator in each iteration frame)  |
@@ -164,7 +166,7 @@ below.
 | `IndexExpr`             | expr | `Target Expr`, `Index Expr` - `$xs[i]`, chained                                                            |
 | `RangeExpr`             | expr | `Lo Expr`, `Hi Expr` - half-open `lo..hi`; materialises `list of int` (or iterates lazily as a for-each source) |
 | `SliceExpr`             | expr | `Target Expr`, `Lo Expr`, `Hi Expr` (either endpoint nil for an open end) - `$xs[a..b]`, `$xs[a..]`, `$xs[..b]`, `$xs[..]` |
-| `StructLit`             | expr | `NS`, `Name`, `Fields []StructLitField` - `Point{...}` bare or `lib.Point{...}` namespaced |
+| `StructLit`             | expr | `NS`, `Enum`, `Name`, `Bare`, `Fields []StructLitField` - `Point{...}` / `lib.Point{...}`, reused for enum construction `Shape.Circle{...}` (`NS`=enum) and cross-module `mod.Shape.Circle{...}` (`Enum` set); `Bare` marks a payload-less form |
 | `StructLitField`        | -    | `Name`, `Expr` (one named field in a struct literal)                                                       |
 | `FieldAccessExpr`       | expr | `Target Expr`, `Field` - `$p.field`, chainable with `IndexExpr`                                    |
 

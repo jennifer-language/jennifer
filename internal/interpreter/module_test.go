@@ -389,3 +389,45 @@ func TestModuleRejectsNestedImpostorStruct(t *testing.T) {
 		t.Errorf("got %q, want 7", strings.TrimSpace(out))
 	}
 }
+
+// TestModuleEnumIdentityAndDispatch checks that an enum exported from a module
+// keeps its identity across the boundary: constructed with the alias, matched
+// by the module's own function, value-semantic, and zero-valued.
+func TestModuleEnumIdentityAndDispatch(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"shapes.j": `
+export def enum Shape { Circle { r as float }, None };
+export func describe(s as Shape) {
+    match ($s) {
+        when Circle(c) { return "circle"; }
+        when None { return "none"; }
+    }
+    return "?";
+}`,
+		"main.j": `
+use io;
+import "./shapes.j" as shapes;
+def a as shapes.Shape init shapes.Shape.Circle{ r: 2.0 };
+def b as shapes.Shape init shapes.Shape.None;
+def z as shapes.Shape;
+io.printf("%v / %v / %s / %s / %t / %v", $a, $b, shapes.describe($a), shapes.describe($b), $a == $b, $z);`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "shapes.Shape.Circle{r: 2.0} / shapes.Shape.None / circle / none / false / shapes.Shape.Circle{r: 0.0}"
+	if out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+}
+
+// TestModuleEnumNotExported checks an unexported enum stays private.
+func TestModuleEnumNotExported(t *testing.T) {
+	_, err := runModuleMain(t, map[string]string{
+		"m.j":    `def enum Hidden { A, B };`,
+		"main.j": `import "./m.j" as m; def x as m.Hidden init m.Hidden.A;`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not exported") && !strings.Contains(err.Error(), "no enum") {
+		t.Fatalf("want not-exported error, got %v", err)
+	}
+}

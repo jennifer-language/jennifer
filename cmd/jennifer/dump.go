@@ -133,6 +133,16 @@ func dumpAST(path string) int {
 		printErrorContext(src, absPath, err)
 		return 1
 	}
+	// Run scope analysis before emitting: it is what turns a `when Circle(c)`
+	// arm from a bare CallExpr into the variant/bind pattern the dump reports,
+	// and what fills in the Depth/Slot coordinates. A resolve error is the same
+	// error `run` would give, so surface it rather than dumping a half-analysed
+	// tree.
+	if err := parser.Resolve(prog); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
+		printErrorContext(src, absPath, err)
+		return 1
+	}
 	var b strings.Builder
 	emitNode(&b, prog, 0)
 	b.WriteByte('\n')

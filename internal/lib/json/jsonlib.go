@@ -148,6 +148,27 @@ func encodeValue(sb *strings.Builder, v interpreter.Value, pretty bool, depth in
 			sb.WriteString(colon(pretty))
 			return encodeValue(sb, v.Fields[i].Value, pretty, depth+1)
 		})
+	case interpreter.KindEnum:
+		// Externally tagged, the conventional JSON encoding for a sum type: a
+		// payload-less variant is its name as a string, a payloaded one is a
+		// single-key object `{"Variant": {fields}}`. Both are unambiguous about
+		// which variant is present, which a bare payload object would not be.
+		// Decoding does not reconstruct an enum - json.decode yields the plain
+		// string / map, and the program matches on it - because the wire form
+		// carries no enum type identity.
+		if len(v.Fields) == 0 {
+			encodeString(sb, v.Variant)
+			return nil
+		}
+		return encodeSeq(sb, 1, pretty, depth, '{', '}', func(int) error {
+			encodeString(sb, v.Variant)
+			sb.WriteString(colon(pretty))
+			return encodeSeq(sb, len(v.Fields), pretty, depth+1, '{', '}', func(i int) error {
+				encodeString(sb, v.Fields[i].Name)
+				sb.WriteString(colon(pretty))
+				return encodeValue(sb, v.Fields[i].Value, pretty, depth+2)
+			})
+		})
 	case interpreter.KindObject:
 		// a json.Value round-trips: unwrap it and encode its inner tree.
 		if inner, ok := v.AsObject(LibraryName, "Value"); ok {

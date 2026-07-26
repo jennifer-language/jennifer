@@ -924,7 +924,7 @@ reasoning in `docs/technical/rejected.md`.
 so a chain of `if` / `elseif` over one subject reads as a single dispatch.
 Keywords `match` / `when` (reserved - a pre-1.0 break, renamed collisions in
 `totp.j` / `feed_test.j`) chosen so it can *grow* into pattern matching (`M22.5`
-adds guards / structural patterns to the same `when`, no new keyword).
+adds enum-variant patterns to the same `when`, no new keyword).
 **Semantics** (v1, value dispatch only): the parenthesized subject is evaluated
 **once** and compared to each arm's values by strict `==` (`Value.Equal`, the
 operator's path); the first matching arm wins; an arm's values short-circuit
@@ -947,10 +947,43 @@ fmt-idempotence / `-race` / a golden example.
 
 ### M22.5 - sum types (enums) + pattern `match`
 
-**Planned** (graduated from `DRAFT#19`; the payoff `M22.4`'s `match` was designed
+**Done** (graduated from `DRAFT#19`; the payoff `M22.4`'s `match` was designed
 to grow into). Structs model a *record*; there is no way to model "one of N
 variants," and the interpreter's own `Value` is already a tagged union - this just
 exposes that shape to the language, with `match` as the way to consume it.
+
+**Shipped as designed, with two deliberate refinements decided during
+implementation:**
+
+- **Naming is case-agnostic; no PascalCase / camelCase convention is enforced.**
+  An early sketch leaned on capitalisation to tell an enum construction
+  (`Shape.Empty`) apart from a namespace member (`bio.lower`) at parse time. That
+  was rejected as a parser shortcut that burdens a *teaching* language with an
+  incidental "start lowercase here, uppercase there" rule for no user benefit.
+  Instead, `Prefix.Member` is resolved **at eval from the tables** - is `Prefix`
+  an enum? then `Member` is a variant; otherwise it is a namespace / module
+  member. Enum and variant names may be spelled any way. The **only** convention
+  in play is the one the language already teaches: an all-`UPPERCASE` name is a
+  *constant*, so an enum *type* named all-caps would read as a constant in
+  `Name.member` position (name types normally and it never comes up). A bare
+  `namespace.fn` (a call missing its `()`) now gets a "that's a function, call it
+  as `namespace.fn(...)`" error at eval instead of a parse-time
+  "must be uppercase".
+- **Pattern matching covers a local / same-module enum subject.** Exhaustiveness
+  and variant-pattern resolution run in the parse-time resolver, which sees the
+  program's own enums; matching an *imported* module enum from the importing
+  program is not auto-detected (the owning module matches its own enums, and
+  callers dispatch through a module function). Cross-module **identity,
+  construction, value semantics, and zero values** all work.
+
+The `Value` gained a `KindEnum` kind (a `(ns, name)` type + a `Variant` tag +
+the payload `Fields`), mirroring `KindStruct` for copy / equality / deep-const /
+`MatchesDeclared` / module retagging; the parser reuses the `StructLit` node for
+braced construction (with a third segment for the cross-module form) and defers
+the payload-less bare form to eval; the resolver tracks binding types so an
+enum-typed `match` subject drives pattern arms + the exhaustiveness check; `fmt`
+reflows an enum like a struct def; a golden `examples/enum.j` and lexer / parser /
+interpreter / cross-module tests pin it.
 
 **Declaration + construction:**
 
@@ -1358,6 +1391,76 @@ milestone lands, since the concurrent-dispatch design turns on it.
 
 ---
 
+### M22.18 - `dotenv` layering, profiles, interpolation
+
+**Planned.** Grow `dotenv` from a single-file `parse` / `read` / `load` into a
+layered loader with environment profiles, `${VAR}` interpolation, and multi-line
+values - the dotenv-flow / Rails / Next.js shape, built with Jennifer's
+explicit-over-implicit stance and a strict security posture. Pure `.j` module
+work; **no interpreter change** in this cut (a CLI `--env` flag is parked beyond
+1.0.0 as `docs/horizon.md` `DRAFT#26`). Consolidates here the `${VAR}`
+interpolation + multi-line items that were parked in `M23.8`.
+
+**Layered load.** Read, later overriding earlier, skipping absent files, from a
+single explicit base directory (`dir`, usually `os.cwd()`):
+`.env` -> `.env.local` -> `.env.<profile>` -> `.env.<profile>.local`. Two
+independent precedence axes:
+
+- **Profile label** (which `<profile>`): `JENNIFER_ENV` env var, else `""` (no
+  profile - meaning load the base files only, *not* a `.env.default` file).
+- **Value** (which wins, highest first): a **pre-existing OS env var** (never
+  overwritten - real env wins) > `.env.<profile>.local` > `.env.<profile>` >
+  `.env.local` > `.env`.
+
+**Surface** (exported):
+
+- `parse(text)` - enhanced with `${VAR}` interpolation + multi-line (below);
+  single-file `read(path)` / `load(path)` stay as the primitives, also enhanced.
+- `readCascade(dir, profile)` - the file layers merged into a map, **no env
+  mutation** (the explicit path).
+- `resolve(dir, profile)` - the **effective** map: `readCascade` overlaid by the
+  real OS env (real env wins), for programs that read the map instead of
+  `os.getEnv`.
+- `loadCascade(dir, profile)` - `readCascade` then `os.setEnv(k, v)` **only for
+  keys not already set** in the OS env (real env wins). Returns the file map.
+- `autoload(dir)` - convenience: `loadCascade(dir, <JENNIFER_ENV>)`, documented as
+  reading that one env var.
+
+**Interpolation.** `${VAR}` (`VAR` shaped like `validEnvName`) resolves against
+earlier-parsed keys (this file + earlier cascade files) -> real OS env -> empty
+string. **Backward-reference only**, so cycles are impossible by construction (no
+detection needed). It expands in unquoted and double-quoted values; single-quoted
+values are fully literal (`'${X}'` stays literal). **No `$(...)` / backtick
+command substitution** - those are plain characters; this is the hard security
+line (a `.env` value can never execute a command). Multi-line double-quoted values
+span physical lines (the parser tracks quote state across lines instead of the
+current line-by-line split; an unterminated quote is a positioned error).
+
+**Security posture**
+
+- **Strict profile validation** - the label is matched against
+  `^[A-Za-z0-9_-]{1,64}$` before building `.env.<profile>`, so a `JENNIFER_ENV`
+  from an untrusted upstream cannot path-traverse (`../../etc/x`, `prod/../y`).
+  `path.base` is not a sanitizer; validate up front. Builds on the existing
+  `validEnvName` (`OM-021`).
+- **Fixed base directory, no search / no walk-up** - loading from one explicit
+  `dir` is what closes the DLL-hijack class (a walked-up "nearest `.env`" would let
+  an attacker plant a file in a parent dir). `.env.local` overriding `.env` is safe
+  because they share that developer-controlled directory.
+- **Real env wins** - a committed file cannot clobber a deployment's real secret
+  (a pre-1.0 behavior change from today's unconditional-override `load`; called out
+  in the docs). To force-override, use `readCascade` + your own `os.setEnv` loop.
+- Consistent with the security model: `.env*` files are **trusted local input**
+  (the developer controls the working dir); dotenv is not a sandbox.
+
+**Deliverables:** `modules/dotenv.j` + a 100% `modules/dotenv_test.j`, a Go
+integration test (cascade order + real-env-wins + traversal rejection + multi-line
++ interpolation), `docs/modules/dotenv.md`, `modules/README.md` row, the
+`JENNIFER.md` bullet, and `examples/modules/dotenv_demo.j`. Both binaries build
+(pure `.j` over `fs` / `strings` / `os` / `path` / `regex`).
+
+---
+
 ## M23 - module improvements
 
 **Planned.** M22 lifted a handful of modules (notably `imap` and `http`); M23
@@ -1510,7 +1613,6 @@ sub-numbering as pieces land):
   (quote char, comment prefix, trim); plus CSV formula-injection (CWE-1236)
   mitigation - a `formatSafe` that prefixes a leading `= + - @` / tab / CR field
   with `'`, and a doc note that plain export is unsafe for spreadsheet targets.
-- **`dotenv`** - `${VAR}` interpolation and multi-line quoted values.
 - **`gotify`** - `extras` (markdown content-type, click actions).
 - **`htmlwriter`** - boolean / valueless attributes (`disabled`, `checked`).
 - **`flatdb`** - clear the two residual lint warnings (a `lint-disable: L103` with

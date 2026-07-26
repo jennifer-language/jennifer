@@ -53,7 +53,36 @@ type resolver struct {
 	// `Point{...}` literals and `def x as Point;` don't require
 	// a slot lookup but the resolver still needs to know they
 	// exist for future type-check hooks.
-	structs map[string]struct{}
+	structs map[string]*StructDef
+	// enums records enum declarations by name so a `match` over an
+	// enum-typed subject can resolve bare variant patterns and check
+	// exhaustiveness at parse time.
+	enums map[string]*EnumDef
+	// prog is the program being resolved, so a deferred enum match can
+	// register itself on PendingEnumMatches for the interpreter to validate
+	// after modules load.
+	prog *Program
+}
+
+// namedTypeOf returns a pointer to t when t names a struct / enum type, else
+// nil. The pointer aliases the AST node's own Type, so a later pass that stamps
+// a module type's (stem, path) identity in place (the interpreter's
+// resolveDeclaredTypesOnce) is visible through it - which is what lets a
+// deferred enum match be validated against the right module type.
+func namedTypeOf(t *Type) *Type {
+	if t == nil || t.Kind != TypeStruct {
+		return nil
+	}
+	return t
+}
+
+// isLocalNamed reports whether t names a type declared in *this* file: no
+// namespace and no module path. A module or library type carries one of those,
+// and must never be matched against a same-named local declaration - that is
+// how a local `def enum Shape` used to hijack a `match` over a module's
+// `sh.Shape` (wrong exhaustiveness, wrong payload shape).
+func isLocalNamed(t *Type) bool {
+	return t != nil && t.Kind == TypeStruct && t.StructNS == "" && t.ModPath == ""
 }
 
 type scopeFrame struct {
@@ -74,18 +103,34 @@ type scopeFrame struct {
 type slotInfo struct {
 	Slot    int
 	IsConst bool
+	// DeclType points at the binding's declared named type (a struct or enum
+	// type), or nil for a primitive / compound / untyped binding. Recorded for
+	// `def`s and method params so a `match` subject that is a variable or
+	// parameter of an enum type drives enum-pattern resolution and
+	// exhaustiveness. It is a pointer into the AST so the full identity
+	// (namespace + module path) stays visible, including whatever a later
+	// stamping pass fills in. Foreach / catch bindings stay untyped.
+	DeclType *Type
 }
 
 func (r *resolver) resolveProgram(p *Program) error {
+	r.prog = p
+	// Resolve is idempotent, so start the deferred-match list empty rather than
+	// appending a second copy of every entry on a re-resolve.
+	p.PendingEnumMatches = nil
 	// Hoist method + struct names so their bodies can reference each
 	// other in any order (mirrors the interpreter's Run() hoisting).
 	r.methods = make(map[string]*MethodDef, len(p.Methods))
 	for _, m := range p.Methods {
 		r.methods[m.Name] = m
 	}
-	r.structs = make(map[string]struct{}, len(p.Structs))
+	r.structs = make(map[string]*StructDef, len(p.Structs))
 	for _, s := range p.Structs {
-		r.structs[s.Name] = struct{}{}
+		r.structs[s.Name] = s
+	}
+	r.enums = make(map[string]*EnumDef, len(p.Enums))
+	for _, e := range p.Enums {
+		r.enums[e.Name] = e
 	}
 	// Struct definitions themselves declare no runtime bindings, so
 	// they don't consume slots. StructDef's InitExpr side (if the
@@ -141,7 +186,7 @@ func (r *resolver) resolveMethod(m *MethodDef, numGlobals int, globals *scopeFra
 				File: p.File, Line: p.Line, Col: p.Col,
 			}
 		}
-		callFrame.slots[p.Name] = slotInfo{Slot: i}
+		callFrame.slots[p.Name] = slotInfo{Slot: i, DeclType: namedTypeOf(&m.Params[i].Type)}
 		callFrame.count = i + 1
 	}
 
@@ -181,7 +226,7 @@ func (r *resolver) current() *scopeFrame { return r.scopes[len(r.scopes)-1] }
 // define records a new binding in the current frame. Returns a
 // positioned parse error if the name already binds in any visible
 // enclosing scope (Jennifer forbids shadowing).
-func (r *resolver) define(name string, isConst bool, file string, line, col int) (int, error) {
+func (r *resolver) define(name string, isConst bool, declType *Type, file string, line, col int) (int, error) {
 	if r.existsInChain(name) {
 		return -1, &ParseError{
 			Msg:  fmt.Sprintf("name %q is already defined in an enclosing scope", name),
@@ -190,7 +235,7 @@ func (r *resolver) define(name string, isConst bool, file string, line, col int)
 	}
 	cur := r.current()
 	idx := cur.count
-	cur.slots[name] = slotInfo{Slot: idx, IsConst: isConst}
+	cur.slots[name] = slotInfo{Slot: idx, IsConst: isConst, DeclType: declType}
 	cur.count++
 	return idx, nil
 }
@@ -288,6 +333,543 @@ func (r *resolver) resolveTarget(e Expr) error {
 	return r.resolveExpr(e)
 }
 
+// bindingType returns the declared named type of an in-scope binding, or nil if
+// absent or untyped. Mirrors lookup's scope walk.
+func (r *resolver) bindingType(name string) *Type {
+	for i := len(r.scopes) - 1; i >= 0; i-- {
+		if info, hit := r.scopes[i].slots[name]; hit {
+			return info.DeclType
+		}
+		if r.scopes[i].isRoot && i > 0 {
+			if info, hit := r.scopes[0].slots[name]; hit {
+				return info.DeclType
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// subjectType returns the declared named type of a match subject when it is
+// statically knowable: a variable / constant (from its binding) or a field
+// access into a *local* struct (from the struct's field type, recursively).
+// nil for anything else (a method result has no declared type). Field access
+// only descends through a local struct: a module struct's definition is not
+// resolver-visible, and resolving it against a same-named local one would pick
+// the wrong field types.
+func (r *resolver) subjectType(e Expr) *Type {
+	switch ex := e.(type) {
+	case *VarExpr:
+		return r.bindingType(ex.Name)
+	case *ConstRefExpr:
+		return r.bindingType(ex.Name)
+	case *FieldAccessExpr:
+		parent := r.subjectType(ex.Target)
+		if !isLocalNamed(parent) {
+			return nil
+		}
+		if sd, ok := r.structs[parent.StructName]; ok && sd != nil {
+			for fi := range sd.Fields {
+				if sd.Fields[fi].Name == ex.Field {
+					return namedTypeOf(&sd.Fields[fi].Type)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// rejectBinderPatternOnUntypedSubject errors when a value-match arm head is a
+// `Variant(bind)` destructuring pattern whose name is a known enum variant - a
+// pattern the resolver cannot serve because the subject's enum type is not
+// statically known. Payload-less heads are left alone (the runtime fallback
+// handles them). Returns nil when the head is not such a pattern.
+func (r *resolver) rejectBinderPatternOnUntypedSubject(v Expr) error {
+	call, ok := v.(*CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return nil
+	}
+	if _, ok := call.Args[0].(*ConstRefExpr); !ok {
+		return nil
+	}
+	for _, ed := range r.enums {
+		for vi := range ed.Variants {
+			if ed.Variants[vi].Name == call.Callee {
+				file, line, col := posFor(v)
+				return &ParseError{
+					Msg:  fmt.Sprintf("`when %s(...)` destructures enum %s, but this `match` subject is not statically an enum type; assign the subject to a variable first (`def s as %s init ...;` then `match ($s)`)", call.Callee, ed.Name, ed.Name),
+					File: file, Line: line, Col: col,
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// localEnumOf returns the locally-declared EnumDef t names, or nil. Only a type
+// with no namespace and no module path can name a local enum - a `mod.Shape`
+// subject must never resolve to a same-named local `def enum Shape`.
+func (r *resolver) localEnumOf(t *Type) *EnumDef {
+	if !isLocalNamed(t) {
+		return nil
+	}
+	return r.enums[t.StructName]
+}
+
+// deferrableEnumType reports whether t names a type this file cannot see the
+// declaration of - a module or library type. A `match` over such a subject may
+// still be an enum pattern match; the resolver rewrites the arms so the binder
+// gets a slot, and records the match on Program.PendingEnumMatches for the
+// interpreter to validate once the module is loaded.
+func deferrableEnumType(t *Type) bool {
+	return t != nil && t.Kind == TypeStruct && (t.StructNS != "" || t.ModPath != "")
+}
+
+// checkSpawnEnums applies enum-match checking inside a `spawn` body. Spawn
+// bodies are deliberately not slot-resolved (see resolveExpr's SpawnExpr case),
+// which used to mean they escaped enum checking altogether - a non-exhaustive
+// match inside a spawn simply fell through at runtime, with none of the
+// compile-time guarantee the feature exists to give. This walk is types-only: it
+// allocates no slots and rewrites no references, so the runtime's name-based
+// lookup for spawn bodies is untouched. It only tracks declared types well
+// enough to find each match's subject enum, tag the arms as variant patterns
+// (leaving BindSlot at -1 so the payload binds by name), and run the same checks
+// the batch path runs. A match whose arms are not all variant-shaped is left
+// alone, so an ordinary value match inside a spawn keeps working.
+func (r *resolver) checkSpawnEnums(body []Stmt) error {
+	if len(body) == 0 {
+		return nil
+	}
+	// types is a scope stack of declared types layered over the enclosing
+	// resolver scopes, which a spawn body captures by value.
+	types := []map[string]*Type{{}}
+	lookup := func(name string) *Type {
+		for i := len(types) - 1; i >= 0; i-- {
+			if t, hit := types[i][name]; hit {
+				return t
+			}
+		}
+		return r.bindingType(name)
+	}
+	var subjectType func(e Expr) *Type
+	subjectType = func(e Expr) *Type {
+		switch ex := e.(type) {
+		case *VarExpr:
+			return lookup(ex.Name)
+		case *ConstRefExpr:
+			return lookup(ex.Name)
+		case *FieldAccessExpr:
+			parent := subjectType(ex.Target)
+			if !isLocalNamed(parent) {
+				return nil
+			}
+			if sd, ok := r.structs[parent.StructName]; ok && sd != nil {
+				for fi := range sd.Fields {
+					if sd.Fields[fi].Name == ex.Field {
+						return namedTypeOf(&sd.Fields[fi].Type)
+					}
+				}
+			}
+		}
+		return nil
+	}
+	var walkStmts func(ss []Stmt) error
+	var walkBlock func(bl *Block) error
+	var walkExpr func(e Expr) error
+	// tag rewrites the arms of a variant-shaped match into patterns without
+	// touching slots, so both the runtime fast path and checkEnumArms can read
+	// them. Values is left in place: nothing consumes it once Variant is set.
+	// tag rewrites every arm head into (Variant, Bind). It reports ok=false when
+	// some arm is not pattern-shaped at all, in which case the match is left as
+	// an ordinary value match.
+	tag := func(st *MatchStmt) (bool, error) {
+		for ai := range st.Arms {
+			if len(st.Arms[ai].Values) != 1 {
+				return false, nil
+			}
+			variant, bind, ok, perr := r.patternExpr(st.Arms[ai].Values[0])
+			if perr != nil {
+				return false, perr
+			}
+			if !ok {
+				return false, nil
+			}
+			st.Arms[ai].Variant = variant
+			st.Arms[ai].Bind = bind
+		}
+		return true, nil
+	}
+	walkMatch := func(st *MatchStmt) error {
+		if len(st.Arms) == 0 {
+			return nil
+		}
+		t := subjectType(st.Subject)
+		// A locally declared enum subject is known to be an enum, so any
+		// pattern-shaped head is a variant - exactly as the batch path reads it.
+		// That matters for variants spelled like constants (`when A`), which the
+		// conservative shape test below deliberately does not claim.
+		if ed := r.localEnumOf(t); ed != nil {
+			ok, err := tag(st)
+			if err != nil || !ok {
+				return err
+			}
+			return checkEnumMatchArms(st, ed, ed.Name)
+		}
+		// A module type cannot be confirmed to be an enum from here, so only
+		// commit when every head is unambiguously a variant pattern; the
+		// interpreter finishes the check once the module is loaded.
+		if deferrableEnumType(t) && allArmsVariantShaped(st.Arms) {
+			ok, err := tag(st)
+			if err != nil || !ok {
+				return err
+			}
+			st.EnumType = t
+			if r.prog != nil {
+				r.prog.PendingEnumMatches = append(r.prog.PendingEnumMatches, st)
+			}
+		}
+		return nil
+	}
+	walkExpr = func(e Expr) error {
+		if sp, ok := e.(*SpawnExpr); ok {
+			return r.checkSpawnEnums(sp.Body)
+		}
+		return nil
+	}
+	walkBlock = func(bl *Block) error {
+		if bl == nil {
+			return nil
+		}
+		types = append(types, map[string]*Type{})
+		err := walkStmts(bl.Stmts)
+		types = types[:len(types)-1]
+		return err
+	}
+	walkStmts = func(ss []Stmt) error {
+		for _, s := range ss {
+			switch st := s.(type) {
+			case *DefineStmt:
+				if t := namedTypeOf(&st.VarType); t != nil {
+					types[len(types)-1][st.VarName] = t
+				}
+				if err := walkExpr(st.InitExpr); err != nil {
+					return err
+				}
+			case *MatchStmt:
+				if err := walkMatch(st); err != nil {
+					return err
+				}
+				for ai := range st.Arms {
+					if err := walkBlock(st.Arms[ai].Body); err != nil {
+						return err
+					}
+				}
+				if err := walkBlock(st.Else); err != nil {
+					return err
+				}
+			case *Block:
+				if err := walkBlock(st); err != nil {
+					return err
+				}
+			case *IfStmt:
+				if err := walkBlock(st.Then); err != nil {
+					return err
+				}
+				for idx := range st.ElseIfBodies {
+					if err := walkBlock(st.ElseIfBodies[idx]); err != nil {
+						return err
+					}
+				}
+				if err := walkBlock(st.Else); err != nil {
+					return err
+				}
+			case *WhileStmt:
+				if err := walkBlock(st.Body); err != nil {
+					return err
+				}
+			case *RepeatStmt:
+				if err := walkBlock(st.Body); err != nil {
+					return err
+				}
+			case *ForStmt:
+				types = append(types, map[string]*Type{})
+				if d, ok := st.Init.(*DefineStmt); ok {
+					if t := namedTypeOf(&d.VarType); t != nil {
+						types[len(types)-1][d.VarName] = t
+					}
+				}
+				err := walkBlock(st.Body)
+				types = types[:len(types)-1]
+				if err != nil {
+					return err
+				}
+			case *ForEachStmt:
+				if err := walkBlock(st.Body); err != nil {
+					return err
+				}
+			case *TryStmt:
+				if err := walkBlock(st.Body); err != nil {
+					return err
+				}
+				if err := walkBlock(st.CatchBody); err != nil {
+					return err
+				}
+			case *ExprStmt:
+				if err := walkExpr(st.Expr); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return walkStmts(body)
+}
+
+// allArmsVariantShaped reports whether every arm of a match is a single
+// variant-shaped head. A match that mixes in a value arm stays a value match,
+// so deferring can never reinterpret one.
+func allArmsVariantShaped(arms []MatchArm) bool {
+	for i := range arms {
+		if len(arms[i].Values) != 1 || !variantShapedArm(arms[i].Values[0]) {
+			return false
+		}
+	}
+	return true
+}
+
+// variantShapedArm reports whether a `when` head is unambiguously an enum
+// variant pattern rather than a value to compare against: `Variant(bind)`, or a
+// bare `Variant` whose name is not spelled like a constant. The constant
+// spelling is what keeps `when SOME_CONST` a value arm, so deferring a match
+// cannot silently reinterpret an existing value comparison.
+func variantShapedArm(e Expr) bool {
+	switch ex := e.(type) {
+	case *ConstRefExpr:
+		return !isValidConstName(ex.Name)
+	case *CallExpr:
+		if len(ex.Args) != 1 || isValidConstName(ex.Callee) {
+			return false
+		}
+		_, isName := ex.Args[0].(*ConstRefExpr)
+		return isName
+	}
+	return false
+}
+
+// patternExpr interprets a `when` arm head as an enum-variant pattern. It
+// accepts `Variant` (payload-less, a ConstRefExpr) and `Variant(bind)` (a
+// CallExpr with one bare-name argument), returning the variant name and binder
+// ("" if none). ok is false when the head is not pattern-shaped; a non-nil
+// error is a positioned misuse (e.g. a `$bind` sigil where a bare name belongs).
+func (r *resolver) patternExpr(e Expr) (variant, bind string, ok bool, err error) {
+	switch ex := e.(type) {
+	case *ConstRefExpr:
+		return ex.Name, "", true, nil
+	case *CallExpr:
+		if len(ex.Args) == 0 {
+			// `Variant()` - no binder; write the bare `Variant` form.
+			file, line, col := posFor(ex)
+			return "", "", false, &ParseError{Msg: fmt.Sprintf("payload-less variant pattern is written `when %s`, without `()`", ex.Callee), File: file, Line: line, Col: col}
+		}
+		if len(ex.Args) != 1 {
+			file, line, col := posFor(ex)
+			return "", "", false, &ParseError{Msg: fmt.Sprintf("variant pattern `%s(...)` binds exactly one payload name", ex.Callee), File: file, Line: line, Col: col}
+		}
+		bindRef, isName := ex.Args[0].(*ConstRefExpr)
+		if !isName {
+			file, line, col := posFor(ex.Args[0])
+			return "", "", false, &ParseError{Msg: "a variant pattern binder is a bare name (write `when Circle(c)`, not `$c`)", File: file, Line: line, Col: col}
+		}
+		return ex.Callee, bindRef.Name, true, nil
+	}
+	return "", "", false, nil
+}
+
+// resolveEnumMatch resolves a pattern match over an enum subject: each arm head
+// must be a distinct variant of ed, a binder gets its own arm-frame slot, and
+// the arm set must be exhaustive unless an `else` is present.
+func (r *resolver) resolveEnumMatch(st *MatchStmt, ed *EnumDef) error {
+	variantByName := make(map[string]*EnumVariant, len(ed.Variants))
+	for i := range ed.Variants {
+		variantByName[ed.Variants[i].Name] = &ed.Variants[i]
+	}
+	covered := make(map[string]bool, len(ed.Variants))
+	for ai := range st.Arms {
+		arm := &st.Arms[ai]
+		afile, aline, acol := posFor(arm)
+		if len(arm.Values) != 1 {
+			return &ParseError{Msg: fmt.Sprintf("a `match` arm on enum %s matches one variant pattern (no comma-separated value list)", ed.Name), File: afile, Line: aline, Col: acol}
+		}
+		variant, bind, ok, perr := r.patternExpr(arm.Values[0])
+		if perr != nil {
+			return perr
+		}
+		if !ok {
+			return &ParseError{Msg: fmt.Sprintf("`match` on enum %s expects variant patterns (`when Circle(c)` or `when Empty`)", ed.Name), File: afile, Line: aline, Col: acol}
+		}
+		vdef, isVariant := variantByName[variant]
+		if !isVariant {
+			return &ParseError{Msg: fmt.Sprintf("%q is not a variant of enum %s", variant, ed.Name), File: afile, Line: aline, Col: acol}
+		}
+		if covered[variant] {
+			return &ParseError{Msg: fmt.Sprintf("variant %s is covered more than once in this `match`", variant), File: afile, Line: aline, Col: acol}
+		}
+		covered[variant] = true
+		if bind != "" && len(vdef.Fields) == 0 {
+			return &ParseError{Msg: fmt.Sprintf("variant %s has no payload to bind (write `when %s`)", variant, variant), File: afile, Line: aline, Col: acol}
+		}
+		arm.Variant = variant
+		arm.Bind = bind
+		// Values is left in place, not cleared: the runtime reads Variant first
+		// (an arm with Variant set never consults Values), and keeping the
+		// original head lets a second Resolve re-derive the same (Variant, Bind)
+		// - so Resolve stays idempotent even for a pattern match.
+		// The arm body runs in a fresh frame; the binder (if any) is slot 0.
+		frame := &scopeFrame{slots: map[string]slotInfo{}}
+		r.push(frame)
+		arm.BindSlot = -1
+		if bind != "" {
+			slot, derr := r.define(bind, false, nil, afile, aline, acol)
+			if derr != nil {
+				r.pop()
+				return derr
+			}
+			arm.BindSlot = slot
+		}
+		for _, s := range arm.Body.Stmts {
+			if err := r.resolveStmt(s); err != nil {
+				r.pop()
+				return err
+			}
+		}
+		arm.Body.NumSlots = frame.count
+		r.pop()
+	}
+	if st.Else != nil {
+		return r.resolveBlock(st.Else)
+	}
+	var missing []string
+	for i := range ed.Variants {
+		if !covered[ed.Variants[i].Name] {
+			missing = append(missing, ed.Variants[i].Name)
+		}
+	}
+	if len(missing) > 0 {
+		file, line, col := posFor(st)
+		return &ParseError{Msg: fmt.Sprintf("`match` on enum %s is not exhaustive: missing %s (cover every variant or add an `else`)", ed.Name, joinNames(missing)), File: file, Line: line, Col: col}
+	}
+	return nil
+}
+
+// resolveDeferredEnumMatch handles a `match` whose subject is a module / library
+// type this file cannot see the declaration of. The arms are rewritten into
+// variant patterns exactly as for a local enum - so a binder gets its slot and
+// the arm body can read `$c` - but nothing is validated here: the variant names,
+// duplicate coverage, exhaustiveness, and even whether the type is an enum at
+// all are checked by the interpreter once the module is loaded, driven by
+// Program.PendingEnumMatches. Only called when every arm is variant-shaped.
+func (r *resolver) resolveDeferredEnumMatch(st *MatchStmt, t *Type) error {
+	for ai := range st.Arms {
+		arm := &st.Arms[ai]
+		afile, aline, acol := posFor(arm)
+		if len(arm.Values) != 1 {
+			return &ParseError{Msg: fmt.Sprintf("a `match` arm on %s matches one variant pattern (no comma-separated value list)", t.String()), File: afile, Line: aline, Col: acol}
+		}
+		variant, bind, ok, perr := r.patternExpr(arm.Values[0])
+		if perr != nil {
+			return perr
+		}
+		if !ok {
+			return &ParseError{Msg: fmt.Sprintf("`match` on %s expects variant patterns (`when Circle(c)` or `when Empty`)", t.String()), File: afile, Line: aline, Col: acol}
+		}
+		arm.Variant = variant
+		arm.Bind = bind
+		// Values kept (not cleared) for idempotency - see resolveEnumMatch.
+		frame := &scopeFrame{slots: map[string]slotInfo{}}
+		r.push(frame)
+		arm.BindSlot = -1
+		if bind != "" {
+			slot, derr := r.define(bind, false, nil, afile, aline, acol)
+			if derr != nil {
+				r.pop()
+				return derr
+			}
+			arm.BindSlot = slot
+		}
+		for _, s := range arm.Body.Stmts {
+			if err := r.resolveStmt(s); err != nil {
+				r.pop()
+				return err
+			}
+		}
+		arm.Body.NumSlots = frame.count
+		r.pop()
+	}
+	st.EnumType = t
+	if r.prog != nil {
+		r.prog.PendingEnumMatches = append(r.prog.PendingEnumMatches, st)
+	}
+	if st.Else != nil {
+		return r.resolveBlock(st.Else)
+	}
+	return nil
+}
+
+// checkEnumMatchArms validates an already-tagged pattern match against its enum
+// without touching slots: every arm names a real variant, none is covered twice,
+// a binder only appears where there is a payload, and the arms are exhaustive
+// unless an `else` is present. Used for spawn bodies, which are tagged but not
+// slot-resolved; the batch path interleaves the same checks with slot
+// allocation in resolveEnumMatch.
+func checkEnumMatchArms(st *MatchStmt, ed *EnumDef, typeName string) error {
+	variantByName := make(map[string]*EnumVariant, len(ed.Variants))
+	for vi := range ed.Variants {
+		variantByName[ed.Variants[vi].Name] = &ed.Variants[vi]
+	}
+	covered := make(map[string]bool, len(ed.Variants))
+	for ai := range st.Arms {
+		arm := &st.Arms[ai]
+		file, line, col := posFor(arm)
+		vdef, isVariant := variantByName[arm.Variant]
+		if !isVariant {
+			return &ParseError{Msg: fmt.Sprintf("%q is not a variant of enum %s", arm.Variant, typeName), File: file, Line: line, Col: col}
+		}
+		if covered[arm.Variant] {
+			return &ParseError{Msg: fmt.Sprintf("variant %s is covered more than once in this `match`", arm.Variant), File: file, Line: line, Col: col}
+		}
+		covered[arm.Variant] = true
+		if arm.Bind != "" && len(vdef.Fields) == 0 {
+			return &ParseError{Msg: fmt.Sprintf("variant %s has no payload to bind (write `when %s`)", arm.Variant, arm.Variant), File: file, Line: line, Col: col}
+		}
+	}
+	if st.Else != nil {
+		return nil
+	}
+	var missing []string
+	for vi := range ed.Variants {
+		if !covered[ed.Variants[vi].Name] {
+			missing = append(missing, ed.Variants[vi].Name)
+		}
+	}
+	if len(missing) > 0 {
+		file, line, col := posFor(st)
+		return &ParseError{Msg: fmt.Sprintf("`match` on enum %s is not exhaustive: missing %s (cover every variant or add an `else`)", typeName, joinNames(missing)), File: file, Line: line, Col: col}
+	}
+	return nil
+}
+
+// joinNames renders a variant-name list for an exhaustiveness error.
+func joinNames(names []string) string {
+	out := ""
+	for i, n := range names {
+		if i > 0 {
+			out += ", "
+		}
+		out += n
+	}
+	return out
+}
+
 func (r *resolver) resolveStmt(s Stmt) error {
 	switch st := s.(type) {
 	case *DefineStmt:
@@ -332,12 +914,43 @@ func (r *resolver) resolveStmt(s Stmt) error {
 		if err := r.resolveExpr(st.Subject); err != nil {
 			return err
 		}
+		// If the subject is a variable / parameter / constant of a locally
+		// declared enum type, this is a pattern match: arm heads are bare variant
+		// patterns, resolved against the enum, and coverage is checked for
+		// exhaustiveness right here.
+		subjTyp := r.subjectType(st.Subject)
+		if ed := r.localEnumOf(subjTyp); ed != nil {
+			return r.resolveEnumMatch(st, ed)
+		}
+		// The subject names a module / library type whose declaration this file
+		// cannot see. When every arm is unambiguously variant-shaped, rewrite them
+		// as patterns (so a binder gets a slot and the body can read it) and defer
+		// validation - variant names, duplicates, exhaustiveness, and whether the
+		// type is an enum at all - to the interpreter, after the module loads.
+		if deferrableEnumType(subjTyp) && len(st.Arms) > 0 && allArmsVariantShaped(st.Arms) {
+			return r.resolveDeferredEnumMatch(st, subjTyp)
+		}
+		// The subject is not a statically-known named type (a method result, say).
+		// Resolve arms as value arms; a bare variant-name head resolves name-based
+		// and the runtime match fallback recognizes it as a pattern against the
+		// actual enum value (so `match (mk())` works, just without resolve-time
+		// exhaustiveness).
 		for ai := range st.Arms {
+			// A `when Variant(bind)` head over a non-statically-enum subject is an
+			// unambiguous destructuring intent the resolver cannot serve (the
+			// binder needs the subject's type). Error clearly here rather than
+			// letting the body's `$bind` reference fail as "undefined variable".
+			if len(st.Arms[ai].Values) == 1 {
+				if err := r.rejectBinderPatternOnUntypedSubject(st.Arms[ai].Values[0]); err != nil {
+					return err
+				}
+			}
 			for _, v := range st.Arms[ai].Values {
 				if err := r.resolveExpr(v); err != nil {
 					return err
 				}
 			}
+			st.Arms[ai].BindSlot = -1
 			if err := r.resolveBlock(st.Arms[ai].Body); err != nil {
 				return err
 			}
@@ -509,7 +1122,7 @@ func (r *resolver) resolveDefine(st *DefineStmt) error {
 		}
 	}
 	file, line, col := posFor(st)
-	slot, err := r.define(st.VarName, st.IsConst, file, line, col)
+	slot, err := r.define(st.VarName, st.IsConst, namedTypeOf(&st.VarType), file, line, col)
 	if err != nil {
 		return err
 	}
@@ -620,7 +1233,12 @@ func (r *resolver) resolveExpr(e Expr) error {
 		// name-based lookup at runtime - not hot-loop territory,
 		// so the perf regression is limited to coarse-grained
 		// concurrency dispatch.
-		return nil
+		//
+		// Skipping *slot* analysis must not skip semantic analysis: an enum
+		// `match` inside a spawn still has to be exhaustive. checkSpawnEnums
+		// walks the body types-only - no slots, no reference rewrites - and
+		// applies the same enum checks the batch path applies.
+		return r.checkSpawnEnums(ex.Body)
 	case *IndexExpr:
 		if err := r.resolveExpr(ex.Target); err != nil {
 			return err

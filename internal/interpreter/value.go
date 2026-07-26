@@ -44,6 +44,7 @@ const (
 	KindStruct // user-defined record; fields are an ordered list of (name, value)
 	KindTask   // a pending or completed `spawn { ... }` computation
 	KindObject // opaque, library-owned value (e.g. json.Value); wraps an inner tree in Obj
+	KindEnum   // sum-type value: one variant of a `def enum`; StructName is the enum type, Variant the active variant, Fields its payload
 )
 
 func (k ValueKind) String() string {
@@ -70,6 +71,8 @@ func (k ValueKind) String() string {
 		return "task"
 	case KindObject:
 		return "object"
+	case KindEnum:
+		return "enum"
 	}
 	return "?"
 }
@@ -157,7 +160,8 @@ type Value struct {
 	List       []Value       // KindList: element data
 	Map        []MapEntry    // KindMap:  insertion-ordered entries
 	Bytes      []byte        // KindBytes: byte data
-	Fields     []StructField // KindStruct: declaration-ordered field values
+	Fields     []StructField // KindStruct / KindEnum: declaration-ordered field values (the variant payload for KindEnum)
+	Variant    string        // KindEnum: the active variant name (StructName holds the enum type name)
 	StructName string        // KindStruct: name of the struct definition this value belongs to
 	StructNS   string        // KindStruct: display namespace prefix (library name, or a module's file stem); empty for user-defined structs
 	ModPath    string        // KindStruct: module identity - the module's canonical path; empty for library / user structs. Two module files that share a stem stay distinct types because their ModPath differs, while StructNS keeps the readable stem for display.
@@ -327,6 +331,14 @@ func NamespacedStructVal(ns, name string, fields []StructField) Value {
 	return Value{Kind: KindStruct, StructNS: ns, StructName: name, Fields: fields}
 }
 
+// EnumVal constructs a sum-type value: one variant of an enum. enum is the
+// enum type name, variant the active variant, ns/modPath the enum type's
+// module identity (empty for a user-program enum), and fields the variant's
+// payload (nil for a payload-less variant).
+func EnumVal(ns, modPath, enum, variant string, fields []StructField) Value {
+	return Value{Kind: KindEnum, StructNS: ns, ModPath: modPath, StructName: enum, Variant: variant, Fields: fields}
+}
+
 // ObjectVal wraps an inner value tree as an opaque, library-owned
 // KindObject (e.g. json.Value). ns/name identify the owning type; the
 // language rejects operators / [index] / .field on it, so only that
@@ -454,6 +466,13 @@ func (v Value) DeepCopy() Value {
 			out[i] = StructField{Name: f.Name, Value: f.Value.Copy()}
 		}
 		return Value{Kind: KindStruct, StructNS: v.StructNS, ModPath: v.ModPath, StructName: v.StructName, Fields: out}
+	case KindEnum:
+		// value semantics mirror KindStruct: deep-copy the variant payload.
+		out := make([]StructField, len(v.Fields))
+		for i, f := range v.Fields {
+			out[i] = StructField{Name: f.Name, Value: f.Value.Copy()}
+		}
+		return Value{Kind: KindEnum, StructNS: v.StructNS, ModPath: v.ModPath, StructName: v.StructName, Variant: v.Variant, Fields: out}
 	case KindObject:
 		// The wrapped payload is immutable - the library write surface returns
 		// fresh handles, nothing mutates the tree in place - so share the Obj
@@ -574,7 +593,9 @@ func (v Value) Display() string {
 		// to reproduce it. `Name{field: value, ...}` for non-empty
 		// fields; `Name{}` for empty.
 		var b strings.Builder
-		if v.StructNS != "" {
+		// matchPayloadNS is an internal tag on a match-bound variant payload; it
+		// is not a user-visible namespace, so render just `Variant{...}`.
+		if v.StructNS != "" && v.StructNS != matchPayloadNS {
 			b.WriteString(v.StructNS)
 			b.WriteByte('.')
 		}
@@ -589,6 +610,31 @@ func (v Value) Display() string {
 			b.WriteString(displayElement(f.Value))
 		}
 		b.WriteByte('}')
+		return b.String()
+	case KindEnum:
+		// enum display reproduces the construction syntax:
+		// `[NS.]Enum.Variant` for a payload-less variant, and
+		// `[NS.]Enum.Variant{field: value, ...}` for a payloaded one.
+		var b strings.Builder
+		if v.StructNS != "" {
+			b.WriteString(v.StructNS)
+			b.WriteByte('.')
+		}
+		b.WriteString(v.StructName)
+		b.WriteByte('.')
+		b.WriteString(v.Variant)
+		if len(v.Fields) > 0 {
+			b.WriteByte('{')
+			for i, f := range v.Fields {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(f.Name)
+				b.WriteString(": ")
+				b.WriteString(displayElement(f.Value))
+			}
+			b.WriteByte('}')
+		}
 		return b.String()
 	case KindTask:
 		// tasks are opaque handles - the display form just
@@ -655,8 +701,11 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 		// struct types match by (namespace, name). This also covers the
 		// opaque KindObject types (json.Value): they register like a
 		// namespaced struct for parsing / declaration and carry the same
-		// ns+name, but their runtime kind is KindObject.
-		return (v.Kind == KindStruct || v.Kind == KindObject) && v.StructName == t.StructName && v.StructNS == t.StructNS && v.ModPath == t.ModPath
+		// ns+name, but their runtime kind is KindObject. An enum type name is
+		// parsed as a TypeStruct too (the parser cannot tell a struct name from
+		// an enum name after `as`); a KindEnum value carries its enum type in
+		// StructName, so the same (name, ns, modPath) identity check binds it.
+		return (v.Kind == KindStruct || v.Kind == KindObject || v.Kind == KindEnum) && v.StructName == t.StructName && v.StructNS == t.StructNS && v.ModPath == t.ModPath
 	case parser.TypeList:
 		if v.Kind != KindList {
 			return false
@@ -761,6 +810,24 @@ func (v Value) Equal(o Value) bool {
 			// declaration order. The namespace tag keeps a library
 			// `os.Result` distinct from a user-defined `Result`.
 			if v.StructName != o.StructName || v.StructNS != o.StructNS || v.ModPath != o.ModPath {
+				return false
+			}
+			if len(v.Fields) != len(o.Fields) {
+				return false
+			}
+			for i := range v.Fields {
+				if v.Fields[i].Name != o.Fields[i].Name {
+					return false
+				}
+				if !v.Fields[i].Value.Equal(o.Fields[i].Value) {
+					return false
+				}
+			}
+			return true
+		case KindEnum:
+			// enums compare equal when they are the same type (ns, name,
+			// modPath), the same variant, and every payload field matches.
+			if v.StructName != o.StructName || v.StructNS != o.StructNS || v.ModPath != o.ModPath || v.Variant != o.Variant {
 				return false
 			}
 			if len(v.Fields) != len(o.Fields) {

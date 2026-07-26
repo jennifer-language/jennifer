@@ -65,6 +65,7 @@ const (
 	TOKEN_TO     // "to" - K/V separator inside `map of K to V`
 	TOKEN_IN     // "in" - for-each iterator: `for (def x in $coll)`
 	TOKEN_STRUCT // `def struct Name { field as type, ... };`
+	TOKEN_ENUM   // `def enum Name { Variant { field as type, ... }, ... };`
 	TOKEN_LEN    // `len(EXPR)` polymorphic structural-length built-in
 	TOKEN_TASK   // the word "task" used as a type: `task of T`
 	TOKEN_SPAWN  // `spawn { ... }` block primary expression producing a `task of T`
@@ -172,6 +173,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_TO:          "TO",
 	TOKEN_IN:          "IN",
 	TOKEN_STRUCT:      "STRUCT",
+	TOKEN_ENUM:        "ENUM",
 	TOKEN_LEN:         "LEN",
 	TOKEN_TASK:        "TASK",
 	TOKEN_SPAWN:       "SPAWN",
@@ -283,6 +285,7 @@ var keywords = map[string]TokenType{
 	"to":       TOKEN_TO,
 	"in":       TOKEN_IN,
 	"struct":   TOKEN_STRUCT,
+	"enum":     TOKEN_ENUM,
 	"len":      TOKEN_LEN,
 	"task":     TOKEN_TASK,
 	"spawn":    TOKEN_SPAWN,

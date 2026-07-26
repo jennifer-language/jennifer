@@ -19,11 +19,12 @@ Terminals in CAPITALS are token classes from the lexer (see
 punctuation that match the corresponding token's lexeme.
 
 ```ebnf
-program     = { useStmt | moduleImport | exported | methodDef | structDef | statement } EOF ;
-exported    = "export" ( methodDef | structDef | constDefine ) ;
+program     = { useStmt | moduleImport | exported | methodDef | structDef | enumDef | statement } EOF ;
+exported    = "export" ( methodDef | structDef | enumDef | constDefine ) ;
                                        (* `export` publishes a name from a
                                           module; it may only precede a
-                                          `func`, `def struct`, or `def const`.
+                                          `func`, `def struct`, `def enum`, or
+                                          `def const`.
                                           Whether a program may contain
                                           `export` at all (module vs script)
                                           is decided at load time, not by the
@@ -50,6 +51,14 @@ structDef   = "def" "struct" IDENT "{" [ structField { "," structField } [ "," ]
                                           zero fields parse. Hoisted
                                           before the first top-level
                                           statement runs. *)
+enumDef     = "def" "enum" IDENT "{" enumVariant { "," enumVariant } [ "," ] "}" ";" ;
+                                       (* top-level only; a sum type. IDENT
+                                          names the enum; at least one variant.
+                                          Hoisted like structDef. A value of the
+                                          type is exactly one variant. *)
+enumVariant = IDENT [ "{" structField { "," structField } [ "," ] "}" ] ;
+                                       (* a payload-less tag, or a variant with
+                                          named fields (a mini-struct). *)
 structField = wordName "as" type ;     (* a field name may be any
                                           identifier-shaped word (see
                                           wordName below) - `from` / `to`
@@ -175,17 +184,28 @@ repeatStmt  = "repeat" block "until" "(" expr ")" ";" ;
                                           condition is true *)
 
 matchStmt   = "match" "(" expr ")" "{"
-                  { "when" expr { "," expr } block }
+                  { "when" ( valueArm | patternArm ) block }
                   [ "else" block ]
               "}" ;
-                                       (* multi-way value dispatch: the subject
-                                          is compared to each `when` value by
-                                          `==`; first match wins; `else` is the
-                                          optional default and must be last. A
-                                          bare `Name` value followed by `{` reads
-                                          the `{` as the arm block, not a struct
-                                          literal - parenthesize a struct-literal
-                                          value. No fall-through. *)
+valueArm    = expr { "," expr } ;      (* one or more values compared to the
+                                          subject by `==` *)
+patternArm  = IDENT [ "(" IDENT ")" ] ; (* an enum-variant pattern: a variant
+                                          name, optionally binding the payload
+                                          into a fresh name *)
+                                       (* Two arm forms, disambiguated at resolve
+                                          time by the subject's type. When the
+                                          subject is a variable / parameter of a
+                                          known enum type, every arm is a
+                                          patternArm (variant + optional binder),
+                                          checked for exhaustiveness (cover every
+                                          variant or add `else`). Otherwise arms
+                                          are valueArms: the subject is compared
+                                          to each value by `==`, first match wins,
+                                          `else` optional and last, no
+                                          fall-through. A bare `Name` value
+                                          followed by `{` reads the `{` as the arm
+                                          block - parenthesize a struct-literal
+                                          value. *)
 
 exprStmt    = expr ";" ;
 
@@ -202,15 +222,14 @@ taskType    = "task" "of" type ;       (* `task of T` - handle to
                                           `list of list of int` and
                                           `map of string to list of int`
                                           falls out naturally *)
-structType  = IDENT [ "." IDENT ] ;    (* User-defined struct type (bare
-                                          IDENT) or library-provided
-                                          namespaced struct type
-                                          (`IDENT.IDENT`). Resolved
-                                          at runtime against the
-                                          user-struct table or the
-                                          NSStructs table respectively;
-                                          unknown names are positioned
-                                          errors. *)
+structType  = IDENT [ "." IDENT ] ;    (* User-defined struct OR enum type
+                                          (bare IDENT), or a library-/module-
+                                          provided namespaced type
+                                          (`IDENT.IDENT`). The parser cannot tell
+                                          a struct name from an enum name here;
+                                          both are resolved at runtime against
+                                          the struct / enum / NSStructs tables.
+                                          Unknown names are positioned errors. *)
 
 expr        = rangeExpr ;
 rangeExpr   = orExpr [ ".." orExpr ] ;
@@ -277,24 +296,25 @@ lenExpr     = "len" "(" expr ")" ;     (* polymorphic
                                           not a library function; the
                                           `core` library that once
                                           hosted it no longer exists. *)
-structLit   = IDENT [ "." wordName ] "{" [ structLitField { "," structLitField } [ "," ] ] "}" ;
-                                       (* struct literal.
-                                          Bare IDENT names a user-defined
-                                          struct; `IDENT.IDENT` names a
-                                          library-provided namespaced
-                                          struct. The recogniser must
-                                          decide before the constant-name
-                                          check because struct names are
-                                          PascalCase / camelCase, not
-                                          uppercase.
-                                          The `{` after IDENT in
-                                          expression position is the
-                                          tie-breaker against `constRef`.
-                                          `P{}` parses; "every field
-                                          present exactly once" is a
-                                          post-parse check (duplicates at
-                                          parse time, missing fields at
-                                          evaluation). *)
+structLit   = IDENT [ "." wordName [ "." wordName ] ] "{" [ structLitField { "," structLitField } [ "," ] ] "}" ;
+                                       (* struct OR enum literal (same node).
+                                          Bare IDENT names a user struct;
+                                          `IDENT.IDENT` is a namespaced struct
+                                          (`os.Result{...}`) OR a local enum
+                                          variant (`Shape.Circle{...}`);
+                                          `IDENT.IDENT.IDENT` is a cross-module
+                                          enum variant (`mod.Shape.Circle{...}`).
+                                          The enum-vs-struct decision is made at
+                                          eval from the tables, not from
+                                          capitalisation. A payload-less enum
+                                          variant (`Shape.Empty`) has no `{...}`
+                                          and reaches eval as a constRef the
+                                          interpreter resolves against the enum.
+                                          The `{` after IDENT in expression
+                                          position is the tie-breaker against
+                                          `constRef`. `P{}` parses; "every field
+                                          present exactly once" is a post-parse
+                                          check. *)
 structLitField = wordName ":" expr ;
 call        = IDENT "(" [ expr { "," expr } ] ")" ;
 qualifiedCall      = IDENT "." wordName "(" [ expr { "," expr } ] ")" ;

@@ -314,6 +314,39 @@ Misuse:
   once, use a flag variable that the outer loop checks, or refactor
   the inner work into a method that `return`s when done.
 
+### Matching an enum (variant patterns)
+
+When the subject of a `match` is a variable or parameter whose type is an
+[enum](types-and-values.md#enums-sum-types), the arms are **variant patterns**
+instead of values. Each arm names a variant and, optionally, binds its payload:
+
+```jennifer
+def enum Shape { Circle { r as float }, Rect { w as float, h as float }, Empty };
+
+func describe(s as Shape) {
+    match ($s) {
+        when Circle(c) { return "circle radius " + convert.toString($c.r); }
+        when Rect(rc)  { return "rectangle"; }   # binder optional
+        when Empty     { return "nothing"; }     # payload-less variant
+    }
+    return "?";
+}
+```
+
+`when Circle(c)` binds the variant's payload into a fresh `$c` (a mini-struct
+with that variant's fields) for that arm only. A pattern `match` must be
+**exhaustive** - cover every variant or add an `else` - and a missing variant is
+a **compile-time error**, so adding a variant later flags every `match` you need
+to revisit. (A `match` over an ordinary value like an `int` or `string` stays
+non-exhaustive, as above.) `break` / `continue` in an arm still act on the
+enclosing loop, never the `match`.
+
+The check applies wherever the subject's enum type is known: in the same file,
+inside a `spawn` body, and for an enum imported from a module. A same-file match
+is checked when the file is parsed (so `jennifer lint` reports it); one over an
+imported enum is checked when the program loads, since the module has to be read
+first.
+
 ## `exit`
 
 `exit;` terminates the whole program immediately - it skips the rest

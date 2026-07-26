@@ -204,7 +204,14 @@ type Program struct {
 	ModuleImports []*ModuleImportStmt // `import "path.j" [as NAME];` module imports
 	Methods       []*MethodDef
 	Structs       []*StructDef // top-level `def struct Name { ... };` declarations
-	TopLevel      []Stmt       // top-level statements executed in source order after method hoisting
+	Enums         []*EnumDef   // top-level `def enum Name { Variant ..., ... };` declarations
+	// PendingEnumMatches lists every `match` whose arms the resolver rewrote
+	// into variant patterns without being able to validate them - the subject's
+	// enum lives in an imported module. Populated by Resolve(); the interpreter
+	// validates each one (variant names, duplicate coverage, exhaustiveness)
+	// after the modules are loaded. See MatchStmt.EnumType.
+	PendingEnumMatches []*MatchStmt
+	TopLevel           []Stmt // top-level statements executed in source order after method hoisting
 	// Number of slots the global frame needs. Populated by
 	// Resolve() during parse. Zero when Resolve() hasn't run - the
 	// interpreter falls back to name-based lookup in that case, which
@@ -269,6 +276,30 @@ type StructDef struct {
 }
 
 func (*StructDef) stmtNode() {}
+
+// EnumVariant is one variant of an `def enum` declaration. A payload-less
+// variant (`Empty`) has no Fields; a payloaded variant (`Circle { r as float }`)
+// carries a mini-struct field list.
+type EnumVariant struct {
+	Name   string
+	Fields []StructField
+	File   string
+	Line   int
+	Col    int
+}
+
+// EnumDef is a top-level `def enum Name { Variant [ { field as type, ... } ], ... };`
+// sum-type declaration. Hoisted at Run() time alongside struct definitions so
+// order of declaration doesn't matter. Each variant is a payload-less tag or a
+// mini-struct; a value of the enum type holds exactly one variant.
+type EnumDef struct {
+	pos
+	Name     string
+	Variants []EnumVariant
+	Exported bool // `export def enum ...` - published from the enclosing module
+}
+
+func (*EnumDef) stmtNode() {}
 
 type MethodDef struct {
 	pos
@@ -383,6 +414,15 @@ type MatchArm struct {
 	pos
 	Values []Expr
 	Body   *Block
+	// Variant / Bind carry an enum-variant pattern arm (`when Circle(c) {}` or
+	// payload-less `when Empty {}`). Variant is the variant name; Bind is the
+	// payload binder ("" = no binder). Set by the resolver when the match
+	// subject is a known enum type and the arm head is one of its variants;
+	// Values is empty for a pattern arm. BindSlot is the resolved slot the
+	// binder occupies in the arm's fresh block frame (-1 = none / unresolved).
+	Variant  string
+	Bind     string
+	BindSlot int
 }
 
 // MatchStmt: `match (EXPR) { when V [, V ...] { body } ... [else { body }]? }`
@@ -393,6 +433,13 @@ type MatchStmt struct {
 	Subject Expr
 	Arms    []MatchArm
 	Else    *Block // nil if absent
+	// EnumType is set when the resolver rewrote the arms into variant patterns
+	// but could not validate them, because the subject's type is declared in an
+	// imported module and so is invisible at parse time. It points at the
+	// subject's declared type in the AST (so a later identity-stamping pass is
+	// visible through it); the interpreter validates these once modules are
+	// loaded. nil for a value match and for a fully-checked local enum match.
+	EnumType *Type
 }
 
 func (*MatchStmt) stmtNode() {}
@@ -679,7 +726,9 @@ func (*SliceExpr) exprNode() {}
 type StructLit struct {
 	pos
 	NS     string // optional library prefix at the use site; empty for user-defined structs
+	Enum   string // enum-construction middle segment: set only for the cross-module form `NS.Enum.Variant{...}`, where NS is the module alias, Enum the enum type, Name the variant. Empty for a struct literal and for a same-module enum literal (`Enum.Variant{...}` parses as NS=Enum, Name=Variant).
 	Name   string
+	Bare   bool // true for the payload-less enum form written with no braces (`Shape.Empty`); Fields is nil. Distinguishes it from an empty struct literal `Foo{}` only for diagnostics.
 	Fields []StructLitField
 }
 
@@ -1125,7 +1174,17 @@ func Sprint(n Node) string {
 	case *AppendStmt:
 		return fmt.Sprintf("Append(%s = %s)", Sprint(v.Target), Sprint(v.Value))
 	case *StructLit:
-		s := v.Name + "{"
+		prefix := ""
+		if v.NS != "" {
+			prefix = v.NS + "."
+		}
+		if v.Enum != "" {
+			prefix += v.Enum + "."
+		}
+		if v.Bare {
+			return prefix + v.Name
+		}
+		s := prefix + v.Name + "{"
 		for i, f := range v.Fields {
 			if i > 0 {
 				s += ", "
@@ -1144,6 +1203,25 @@ func Sprint(n Node) string {
 				s += ", "
 			}
 			s += f.Name + " as " + f.Type.String()
+		}
+		return s + "})"
+	case *EnumDef:
+		s := "Enum(" + v.Name + "{"
+		for i, vr := range v.Variants {
+			if i > 0 {
+				s += ", "
+			}
+			s += vr.Name
+			if len(vr.Fields) > 0 {
+				s += "{"
+				for j, f := range vr.Fields {
+					if j > 0 {
+						s += ", "
+					}
+					s += f.Name + " as " + f.Type.String()
+				}
+				s += "}"
+			}
 		}
 		return s + "})"
 	case *ForEachStmt:

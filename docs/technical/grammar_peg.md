@@ -25,8 +25,8 @@ nothing).
 # --- program structure -------------------------------------------------------
 
 Program      <- (UseStmt / ModuleImport / Exported / MethodDef / StructDef
-               / Statement)* EOF
-Exported     <- "export" (MethodDef / StructDef / ConstDefine)
+               / EnumDef / Statement)* EOF
+Exported     <- "export" (MethodDef / StructDef / EnumDef / ConstDefine)
 UseStmt      <- "use" IDENT ("as" IDENT)? ";"
 ModuleImport <- "import" STRING ("as" IDENT)? ";"
 MethodDef    <- "func" IDENT "(" ParamList? ")" Block
@@ -39,6 +39,12 @@ StructField  <- WordName "as" Type
                  # zero fields parse (`def struct E { };`); a field name may be
                  # any identifier-shaped word (WordName, below) - `from` / `to`
                  # are fine - with camelCase (no `_`) enforced as a check
+
+EnumDef      <- "def" "enum" IDENT "{" EnumVariant ("," EnumVariant)* ","? "}" ";"
+EnumVariant  <- IDENT ("{" StructField ("," StructField)* ","? "}")?
+                 # a sum type; top-level only, hoisted like StructDef. At least
+                 # one variant. Each variant is a payload-less tag or carries a
+                 # mini-struct field list.
 
 # --- statements --------------------------------------------------------------
 # The parser dispatches on the leading token; the keyword alternatives are
@@ -72,7 +78,7 @@ ForInit      <- DefineStmt / AssignStmt / ";"
 ForStep      <- VARREF "=" Expr        # no trailing ";" - the ")" ends it
 RepeatStmt   <- "repeat" Block "until" "(" Expr ")" ";"
 MatchStmt    <- "match" "(" Expr ")" "{"
-                  ("when" Expr ("," Expr)* Block)*
+                  ("when" (Expr ("," Expr)*) Block)*
                   ("else" Block)?
                 "}"
                  # the subject and each `when` value parse with struct-literal
@@ -80,6 +86,12 @@ MatchStmt    <- "match" "(" Expr ")" "{"
                  # the block, not `Name{...}`); the flag is re-enabled inside
                  # any "(" / "[" / call / list / map, mirroring Go's exprLev.
                  # `else` must be last (enforced by the parser, not the grammar).
+                 # When the subject has a known enum type, the resolver
+                 # reinterprets each arm's single `Expr` as a variant pattern -
+                 # `Name` (payload-less) or `Name(bind)` (payload binder) - and
+                 # checks exhaustiveness. This is a resolve-time rewrite, not a
+                 # separate grammar production: a pattern arm parses as an
+                 # ordinary value expression (a ConstRef or a Call).
 BreakStmt    <- "break" ";"
 ContinueStmt <- "continue" ";"
 ReturnStmt   <- "return" Expr? ";"

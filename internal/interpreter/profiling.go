@@ -49,7 +49,9 @@ func (i *Interpreter) SetProfiler(p Profiler, timeStmts, timeCalls, trackAllocs 
 // isCompoundCopyKind reports whether a value of kind k gets a real deep copy
 // from Copy() (bytes/list/map/struct). Scalars copy trivially and tasks share
 // a pointer, so neither is a meaningful "eager copy" to count.
-func isCompoundCopyKind(k ValueKind) bool { return k >= KindBytes && k <= KindStruct }
+func isCompoundCopyKind(k ValueKind) bool {
+	return (k >= KindBytes && k <= KindStruct) || k == KindEnum
+}
 
 // eagerCopy is the profiling-aware form of Value.Copy() used at value-storage
 // sites (def / assignment). It behaves exactly like Copy() but, when

@@ -73,7 +73,7 @@
         },
         {
           "name": "keyword.declaration.jennifer",
-          "match": "\\b(export|def|const|func|struct|use|include|import|as|of|to|init)\\b"
+          "match": "\\b(export|def|const|func|struct|enum|use|include|import|as|of|to|init)\\b"
         },
         {
           "name": "keyword.operator.word.jennifer",
