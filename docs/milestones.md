@@ -1340,10 +1340,14 @@ landed as one reviewed pass:
 
 ### M22.17 - web hardening (concurrent dispatch)
 
-**Planned.** Turn the `web` framework from strictly-serial into safely-concurrent
-request handling, and fix the error-reporting hook a module can never feed a typed
-`Error`. Interpreter-first: the module-level change depends on core work, so the
-order below is mandatory.
+**Done.** Turned the `web` framework from strictly-serial into safely-concurrent
+request handling, and fixed the error-reporting hook a module could never feed a
+typed `Error`. Interpreter-first: the module-level change depended on core work,
+so the order below was mandatory. Each of the four items landed with its own
+gating test (`error_boundary_test.go`, `concurrent_dispatch_test.go` run under
+`-race`, `web_concurrency_test.go`'s slow-handler latency probe, and
+`web_onerror_test.go`'s typed-Error end-to-end), and the concurrent-dispatch
+reasoning is recorded in `docs/technical/design-decisions.md`.
 
 The naive fix - wrap `handleOne` in a `spawn` - was **reproduced to be unsafe**.
 Under `go build -race`, a `/fast` request issued 300 ms into a 2 s handler does
@@ -1471,11 +1475,12 @@ receive loop, a persistent connection, a backend selector) is built once and
 applied to every module that needs it. Rough priority is value x
 how-many-users-hit-it. Each sub-milestone ships the usual per-module close-out (a
 100%-passing `*_test.j` overlay, updated `docs/modules/` + `JENNIFER.md`, both
-binaries build). **Deliberate non-goals** (not module bugs): `web` per-request
-concurrency (an interpreter-level job - see M22.13), `password` hashing (needs
-`x/crypto`), and fully-typed `orm` rows (awaits a language feature; the
-query-builder half is in scope). Sub-milestones may grow their own sub-numbering
-as they land.
+binaries build). **Deliberate non-goals** (not module bugs): `password` hashing
+(needs `x/crypto`) and fully-typed `orm` rows (awaits a language feature; the
+query-builder half is in scope). (`web` per-request concurrency was a non-goal
+here while it needed interpreter-level work; that work landed in M22.17, so `web`
+now handles requests concurrently.) Sub-milestones may grow their own
+sub-numbering as they land.
 
 ### M23.1 - streaming / server-push read loops
 

@@ -241,3 +241,75 @@ hand-roll; `sql` extends the same judgment to a client too intricate to hand-rol
 *correctly* for engines people trust with production data. The bar stays high: a
 new heavyweight dependency needs this same "correctness maturity that a hand-roll
 would re-derive slowly and get subtly wrong" justification, not mere convenience.
+
+## Per-goroutine call-depth counter (concurrent `web` dispatch)
+
+Turning the `web` framework from serial to concurrent request handling looked
+like a one-line change: wrap each request in a `spawn`. The naive version worked
+- a fast request issued mid-way through a slow handler dropped from ~1700 ms to
+~3 ms - but `go test -race` reported a data race on the call-depth counter. The
+fix that makes concurrent dispatch safe turns on understanding why.
+
+The call-depth guard (the `RecursionError` analogue that raises a catchable
+error before the Go goroutine stack overflows fatally) counts nested method
+calls. It originally lived as a plain `int` on the per-goroutine **root env**
+(`i.global` in serial code, a `spawn` snapshot's globals frame inside a spawn),
+which is correct for ordinary spawn bodies: each snapshot is a distinct root, so
+parallel spawns never share the counter.
+
+Handler dispatch breaks that assumption. A handler is dispatched through
+`meta.callMain` into the **entry program's** interpreter, and `CallMethodWith`
+re-roots the handler frame at that interpreter's *shared* `host.global`. So the
+counter a handler's nested calls bump is `host.global`'s single field - and
+several `spawn`ed workers dispatching handlers into the one shared host all
+increment it at once. The value-semantics guarantee that makes ordinary spawns
+race-free ("each spawn deep-copies its scope") does **not** extend across the
+`meta.callMain` boundary, because the whole point of that boundary is to reach
+the *shared* entry program, not a copy.
+
+The fix makes the counter a `*int` **threaded down the logical call chain**
+rather than read off whatever root a frame happens to sit on. `evalCall` stamps
+the caller frame's counter onto the callee frame (`callFrame.depth = env.depth`)
+instead of reading `effectiveGlobal`'s shared one, so a chain shares one counter
+while concurrent chains stay isolated.
+
+The first cut of this minted a *fresh* counter at each cross-interpreter dispatch
+entry (`CallMethodWith`) - which is race-free, but wrong in a subtler way that an
+adversarial review caught: it **reset the depth at every boundary crossing**, so
+recursion that bounces through a dispatch builtin (`meta.call` self-recursion, a
+handler that re-dispatches itself via `meta.callMain`, a module method that calls
+back into the host) never accumulated past a single crossing and grew the Go
+stack unbounded - converting a **catchable** "call stack too deep" error into a
+**fatal, unrecoverable** Go stack overflow (a whole-process crash, e.g. a web
+handler taking down the entire server). A fresh counter per crossing is the wrong
+knob precisely because the milestone's own step-2 note warned "must NOT reset
+depth in a way that breaks meta.call recursion detection."
+
+So the counter is instead **threaded across the dispatch boundary too**, not
+reset. `dispatchModuleMethod` passes the consumer's `env.depth` into the module
+interpreter's `callMethodWithDepth`; the `meta.call` / `meta.callMain` builtins
+carry the caller's counter through `BuiltinCtx.Depth` into
+`CallByNameWithDepth` / `CallHostWithDepth`; and those dispatch entries increment
+it (a crossing adds Go frames like any call). Only a genuine root entry with no
+caller chain - the CLI invoking the entry program, a `testing` harness - mints a
+fresh counter. The caller's counter is always goroutine-local (a spawn worker's
+own, or `i.global`'s for the main goroutine), so threading it keeps concurrent
+chains isolated *and* lets a single logical chain accumulate across every
+boundary. The result is strictly better than the pre-change reach: recursion that
+bounces purely through `meta.call` (never guarded before, because those builtins
+bypassed `evalCall`'s increment) is now catchable too.
+
+Two consequences worth stating. First, the audit that gated the change (run
+under `-race`): the *other* shared interpreter state a concurrently-dispatched
+handler can reach is safe - the map hash-index is built only on an indexed
+*write* (a read never mutates the shared value), the resolver's
+`CallExpr.Method` / `Fn` caches are stamped single-threaded before any spawn and
+only read afterwards, the profiler's collector is mutex-guarded (and off the
+serve path anyway), and `diagReq` is atomic. Second, the one genuinely-unsafe
+pattern is left to the user and documented, not papered over: a handler that
+**writes** a shared top-level variable of the entry program races another
+handler doing the same, because handler workers run against the same host
+globals (no per-goroutine snapshot across `meta.callMain`). That is the
+threads-sharing-memory hazard every language has; the guidance is to keep
+per-request mutable state in the request/response or a synchronized store, not a
+bare global a handler assigns.

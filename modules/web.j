@@ -13,16 +13,19 @@
  * `httpd` directly. Needs the default `jennifer` binary (the `httpd` engine is
  * net-backed; the constrained `jennifer-tiny` has no network stack).
  *
- * CONCURRENCY: the serve loop handles requests **one at a time** - it accepts a
- * request, runs its handler to completion, then accepts the next. A handler that
- * blocks (a `sql` query, an outbound `http` call, a slow filesystem read) stalls
- * every other request for its duration, so one slow endpoint can deny service to
- * all. This is a deliberate v1 constraint: dispatch runs on the tree-walking
- * interpreter via `meta.callMain` into the entry program, whose call machinery is
- * single-threaded, so running handlers concurrently (a `spawn` pool) would race
- * on shared interpreter state. Until per-handler concurrency lands, keep handlers
- * fast and non-blocking, offload slow work to a `spawn` that the handler does not
- * wait on, or run several server processes behind a load balancer for parallelism.
+ * CONCURRENCY: the serve loop handles requests **concurrently** - it accepts a
+ * request, hands it to its own `spawn`ed worker, and immediately accepts the
+ * next, so a handler that blocks (a `sql` query, an outbound `http` call, a slow
+ * filesystem read) no longer stalls every other request. In-flight concurrency
+ * is bounded by the `httpd` engine's accept rate. Dispatch reaches the entry
+ * program's handlers via `meta.callMain`, and that cross-boundary call path is
+ * race-safe: each worker carries its own call-depth counter, and reads of shared
+ * program state (globals, constants, maps) are safe. The one thing that is *not*
+ * safe by construction is a handler **writing** a shared top-level variable of
+ * the entry program: those workers run against the same host globals (unlike a
+ * top-level `spawn`, which snapshots), so two handlers mutating one global race.
+ * Keep per-request mutable state in the request/response or a synchronized store
+ * (the `session` module), not in a top-level `def` a handler assigns.
  * @module web
  * @example
  * def app as web.App init web.new();
@@ -44,6 +47,7 @@ use hash;
 use crypto;
 use compress;
 use os;
+use task;
 import "./multipart.j" as formdata;
 
 /**
@@ -68,7 +72,7 @@ export def struct Route {
  * @field middleware {list of string} handler names run before each route
  * @field notFound {string} the not-found handler name (empty = built-in 404)
  * @field cors {CorsOptions} the CORS policy applied by the serve loop (zero-value = off)
- * @field onError {string} the error-handler name (empty = log to stderr); see web.onError
+ * @field onError {string} the error-handler name (empty = stderr only; stderr always logs); see web.onError
  */
 export def struct App {
     routes as list of Route,
@@ -240,12 +244,16 @@ export func notFound(app as App, handler as string) {
 /**
  * Register an error handler by name, returning a new App. When a handler or
  * middleware throws, `web` catches it (so one failing request never stops the
- * server) and invokes this handler with the thrown value - typically the `Error`
- * struct `{kind, message, file, line, col}` - so the failure can be logged or
- * alerted on. Without an error handler, `web` writes the error to stderr instead
- * of dropping it silently. The handler runs after the 500 response is already
- * committed, so it cannot change the response; it is for observability. An error
- * *from* the error handler is itself caught and logged, never re-raised.
+ * server), writes the failure to stderr, and *then also* invokes this handler
+ * with the thrown value - the `Error` struct `{kind, message, file, line, col}`
+ * for a runtime failure or a thrown `Error` (which crosses `meta.callMain`
+ * intact, so the handler may declare its parameter `as Error`; a handler that
+ * throws some other value delivers that value instead). The hook is **additive**:
+ * stderr always gets the error, so registering a handler adds alerting / struct-
+ * ured logging without ever losing the default diagnostic. The handler runs after
+ * the 500 response is already committed, so it cannot change the response; it is
+ * for observability. An error *from* the error handler is itself caught and
+ * logged, never re-raised.
  * @param app {App} the router to extend
  * @param handler {string} the name of the error-handler method
  * @return {App} a new App with the error handler set
@@ -858,18 +866,21 @@ func dispatch(app as App, handler as string, ctx as Context, req as httpd.Reques
         }
     } catch (err) {
         # Middleware or handler failed - the safety net below turns it into a 500.
-        # Report it (the app's onError handler, else stderr) so it is never
-        # silently dropped, wrapped in its own try so the reporting path can never
-        # take the request down. `err` may be any thrown value (the Error struct by
-        # convention), so it is passed untyped and stringified generically.
-        try {
-            if (not ($app.onError == "")) {
+        # Always write the failure to stderr, *then* (if set) also invoke the
+        # onError hook. The hook is additive, never a replacement: registering it
+        # must not make a deployment lose the diagnostic it would get without one.
+        # `err` is the thrown value - the canonical Error struct for a runtime
+        # failure or a thrown Error (which now crosses meta.callMain intact, so an
+        # onError handler may bind it `as Error`); a handler that throws some other
+        # value delivers that value. The hook call is wrapped in its own try so the
+        # reporting path can never take the request down.
+        io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
+        if (not ($app.onError == "")) {
+            try {
                 meta.callMain($app.onError, $err);
-            } else {
-                io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
+            } catch (reportErr) {
+                io.eprintf("web: onError handler failed: %s\n", convert.toString($reportErr));
             }
-        } catch (reportErr) {
-            io.eprintf("web: error reporting failed: %s\n", convert.toString($reportErr));
         }
     }
     ensureAnswered($req, 500, "500 internal server error\n");
@@ -1168,16 +1179,23 @@ func handleOne(app as App, req as httpd.Request) {
 export func serveOn(app as App, srv as httpd.Server) {
     while (true) {
         # Only httpd.accept failing (the server was shut down) ends the loop.
-        # A failure while handling one request must not take the server down,
-        # so request handling runs under its own catch that answers 500 and
-        # keeps serving.
         try {
             def req as httpd.Request init httpd.accept($srv);
-            try {
-                handleOne($app, $req);
-            } catch (reqErr) {
-                ensureAnswered($req, 500, "500 internal server error\n");
-            }
+            # Handle each request in its own spawned worker so a slow handler
+            # does not block the accept loop or the requests behind it. The
+            # worker catches its own errors (answers 500), so nothing escapes as
+            # an unobserved-task error; task.discard marks the worker observed so
+            # the task registry prunes it once done - a per-request spawn must
+            # not accumulate handles for the life of the server. In-flight
+            # concurrency is bounded by the httpd engine's accept rate.
+            def worker as task of null init spawn {
+                try {
+                    handleOne($app, $req);
+                } catch (reqErr) {
+                    ensureAnswered($req, 500, "500 internal server error\n");
+                }
+            };
+            task.discard($worker);
         } catch (acceptErr) {
             return;
         }

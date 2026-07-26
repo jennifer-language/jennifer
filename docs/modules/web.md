@@ -11,32 +11,52 @@ loop.
 Needs the default `jennifer` binary (the `httpd` engine is net-backed; the
 constrained `jennifer-tiny` has no network stack).
 
-## Concurrency: requests are handled serially
+## Concurrency: requests are handled concurrently
 
-The serve loop processes requests **one at a time**: it accepts a request, runs
-its handler to completion, then accepts the next. There is no per-request
-concurrency. A handler that blocks - a `sql` query, an outbound `http` / `rest`
-call, `memcache`, a slow file read - stalls **every** other request for its whole
-duration, so a single slow endpoint (or one slow client) can deny service to
-everyone, no malformed input required.
+The serve loop handles requests **concurrently**: it accepts a request, hands it
+to its own `spawn`ed worker, and immediately accepts the next. A handler that
+blocks - a `sql` query, an outbound `http` / `rest` call, `memcache`, a slow file
+read - no longer stalls the requests behind it; each runs on its own worker. In-
+flight concurrency is bounded by the `httpd` engine's accept rate.
 
-This is a deliberate v1 constraint, not an oversight. Dispatch runs on the
-tree-walking interpreter through `meta.callMain` into the entry program, and that
-call machinery is single-threaded; running handlers concurrently (an internal
-`spawn` worker pool) would race on shared interpreter state. Per-handler
-concurrency is planned but needs interpreter-level work first.
+Dispatch reaches the entry program's handlers through `meta.callMain`, and that
+cross-boundary call path is **race-safe**: each worker carries its own call-depth
+counter, and reads of shared program state (top-level constants, variables, and
+the maps / lists they hold) are safe to do from many handlers at once.
 
-Until then:
+The one thing that is **not** safe by construction is a handler **writing** a
+shared top-level variable of the entry program. Unlike a top-level `spawn` (which
+deep-copies the scope it captures, so a data race is impossible), handler workers
+run against the *same* entry-program globals - so two handlers that mutate one
+top-level `def` at overlapping times race on it, exactly like threads sharing
+memory in any language. Keep per-request mutable state where it belongs:
 
-- **Keep handlers fast and non-blocking.** Do the minimum in the request path.
-- **Offload slow, response-independent work** (sending mail, writing an audit
-  log) to a `spawn` the handler does not wait on.
-- **Scale out with processes.** Run several `web` server processes behind a load
-  balancer / reverse proxy for real parallelism, the same way you would scale any
-  single-threaded worker.
+- **In the request / response.** The `web.Context` and its helpers are per-request.
+- **In a synchronized store**, not a bare global a handler assigns. Server-side
+  session state goes through the `session` module; a counter or cache that several
+  handlers update needs its own synchronization, not a top-level `def`.
+- **Offload slow, response-independent work** (sending mail, writing an audit log)
+  to a `spawn` the handler does not wait on - now stacked on top of the per-request
+  worker.
 
-If your workload is I/O-heavy and latency-sensitive, size for this: measure your
-slowest handler and treat it as the serving floor.
+Reads of shared config set once at startup (a routing table, a settings map) are
+fine; it is concurrent *writes* to one global that you must avoid.
+
+### Shutdown and handler lifecycle
+
+Two consequences of per-request workers are worth knowing:
+
+- **Shutdown does not drain in-flight workers.** `httpd.shutdown` (from another
+  task or a signal handler) stops the accept loop; workers already running are
+  *not* waited on. Their clients still get a clean `503` (the engine unblocks
+  them), but a handler mid-way through response-independent work (a started write,
+  an outbound call) is abandoned when the process exits. If you need in-flight
+  requests to finish, quiesce the load before shutting down.
+- **`exit` from a handler does not stop the server.** Each worker is
+  `task.discard`ed, and `discard` suppresses a task's `exit` (standard task
+  semantics), so `exit` / `exit N` called inside a handler is inert - one request
+  cannot unilaterally terminate a multi-request server. Stop the server with
+  `httpd.shutdown` (optionally from an `os.catchSignal` handler), not `exit`.
 
 ## Handlers
 

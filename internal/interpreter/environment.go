@@ -40,6 +40,7 @@ func borrowBlockEnv(parent *Environment, numSlots int) *Environment {
 	e := envPool.Get().(*Environment)
 	e.parent = parent
 	e.root = rootFor(parent, e)
+	e.depth = inheritDepth(parent)
 	// releaseBlockEnv zeroes every used slot before returning the env
 	// to the pool, so the backing array's [0, cap) range is Binding{}
 	// on entry - we just re-slice to the requested length. When
@@ -71,6 +72,7 @@ func releaseBlockEnv(e *Environment) {
 	}
 	e.parent = nil
 	e.root = nil
+	e.depth = nil
 	e.profChild = 0
 	e.slots = e.slots[:0]
 	// Drop any deferred calls so a pooled frame never carries a stale one into
@@ -129,14 +131,23 @@ type Environment struct {
 	// interpreter would be raced by parallel spawn bodies. Only ever
 	// touched through env.root while statement profiling is active.
 	profChild time.Duration
-	// callDepth counts the Jennifer method calls currently nested on the Go
-	// stack. Like profChild it lives on the per-goroutine root env (i.global
-	// or a spawn snapshot root), so parallel `spawn` bodies each track their
-	// own depth without racing a shared Interpreter field. evalCall bumps it
-	// on entry and drops it on exit, raising a catchable error at
-	// limits.MaxCallDepth before the Go goroutine stack overflows fatally.
-	// Only ever touched through effectiveGlobal(env).
-	callDepth int
+	// depth points at the call-depth counter for this frame's logical call
+	// chain: the number of Jennifer method calls currently nested on the Go
+	// stack. evalCall bumps it on entry and drops it on exit, raising a
+	// catchable error at limits.MaxCallDepth before the Go goroutine stack
+	// overflows fatally.
+	//
+	// It is a *pointer* (not a plain int on the root env) so one counter can be
+	// shared down a call chain while staying isolated *across* chains that run
+	// concurrently. A fresh counter is minted at every goroutine root (i.global,
+	// a spawn snapshot root) and at every cross-interpreter dispatch entry
+	// (CallMethodWith gives a handler its own counter), and inherited from the
+	// parent frame everywhere else. That isolation is what lets several spawned
+	// workers dispatch handlers into the *shared* host interpreter concurrently
+	// without racing on one host-global counter - evalCall threads env.depth
+	// onto the callee frame, so a handler's nested calls accumulate on the
+	// handler's own counter, not effectiveGlobal's shared one.
+	depth *int
 	// deferred holds this frame's `defer`red calls, appended as each
 	// DeferStmt runs and executed LIFO by finishFrame when the frame exits
 	// (see execDefer / finishFrame). nil for the overwhelming majority of
@@ -158,12 +169,25 @@ func rootFor(parent, self *Environment) *Environment {
 	return parent
 }
 
+// inheritDepth returns the call-depth counter a new frame should carry: the
+// parent's (so a call chain shares one counter) or, at a goroutine root
+// (parent == nil), a fresh one. A cross-interpreter dispatch overrides the
+// result with a fresh counter of its own; see CallMethodWith.
+func inheritDepth(parent *Environment) *int {
+	if parent != nil && parent.depth != nil {
+		return parent.depth
+	}
+	d := 0
+	return &d
+}
+
 func NewEnvironment(parent *Environment) *Environment {
 	env := &Environment{
 		parent: parent,
 		vars:   make(map[string]Binding),
 	}
 	env.root = rootFor(parent, env)
+	env.depth = inheritDepth(parent)
 	return env
 }
 
@@ -177,6 +201,7 @@ func NewEnvironmentSized(parent *Environment, numSlots int) *Environment {
 		vars:   make(map[string]Binding),
 	}
 	env.root = rootFor(parent, env)
+	env.depth = inheritDepth(parent)
 	if numSlots > 0 {
 		env.slots = make([]Binding, numSlots)
 	}

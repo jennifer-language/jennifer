@@ -588,12 +588,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `:param` captures and a trailing `*rest` wildcard (`/files/*path`; `/*path` as
   an SPA fallback, registered last), plus
   `web.before` middleware, `web.notFound`, and `web.onError` (a throwing
-  handler / middleware is contained as a 500 and reported to the onError handler,
-  else stderr - never silently dropped); a `HEAD` request is served by the
-  matching `GET` route (body auto-suppressed); a handler is `func name(ctx as
-  web.Context)`, dispatched by `meta.callMain`. **Requests are handled serially
-  (one at a time) in v1** - a blocking handler stalls all others; keep handlers
-  fast and scale out with processes. `web.Context` helpers:
+  handler / middleware is contained as a 500, always logged to stderr, and *also*
+  handed to the onError handler when one is registered - which may bind it `as
+  Error`, since Error crosses `meta.callMain` intact); a `HEAD` request is served
+  by the matching `GET` route (body auto-suppressed); a handler is `func name(ctx
+  as web.Context)`, dispatched by `meta.callMain`. **Requests are handled
+  concurrently** - each in its own `spawn`ed worker, and the cross-boundary
+  dispatch is race-safe; reads of shared top-level state are safe, but do not have
+  two handlers **write** one top-level `def` at overlapping times (keep per-request
+  mutable state in the request/response or a synchronized store, not a bare
+  global). `web.Context` helpers:
   `param` / `query` / `method` / `path` / `header` / `body` (bytes) / `bodyJson`
   / `form` / `formValue` / `remoteAddr`, and `text` / `html` / `sendJson` /
   `redirect` / `respond` / `setHeader` / `serveFile` / `serveDir` / `sendGzip`

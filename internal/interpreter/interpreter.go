@@ -35,6 +35,15 @@ type BuiltinCtx struct {
 	File string
 	Line int
 	Col  int
+	// Depth is the caller frame's call-depth counter (env.depth at the call
+	// site). A dispatch builtin that re-enters the interpreter - meta.call /
+	// meta.callMain - threads it into CallByNameWithDepth / CallHostWithDepth so
+	// the re-entered chain keeps accumulating on the caller's goroutine-local
+	// counter instead of resetting: that is what keeps recursion that bounces
+	// through such a builtin tripping the catchable call-depth guard rather than
+	// overflowing the Go stack fatally. nil when unknown (the counter then starts
+	// fresh, as at a true root entry).
+	Depth *int
 }
 
 // Builtin is a Go-implemented library function callable from Jennifer source.
@@ -788,22 +797,7 @@ func (i *Interpreter) CallByName(name string) (Value, error) {
 	if len(m.Params) != 0 {
 		return Value{}, fmt.Errorf("method %q takes %d parameter(s); CallByName only invokes zero-parameter methods", name, len(m.Params))
 	}
-	if i.global == nil {
-		i.global = NewEnvironment(nil)
-	}
-	callFrame := borrowBlockEnv(effectiveGlobal(i.global), 0)
-	res, err := i.execBlock(m.Body, callFrame)
-	releaseBlockEnv(callFrame)
-	if err != nil {
-		return Value{}, err
-	}
-	if res.hasBreak || res.hasContinue {
-		return Value{}, unhandledLoopFlowError(res)
-	}
-	if res.hasReturn {
-		return res.value, nil
-	}
-	return Null(), nil
+	return i.callMethodWithDepth(m, nil)
 }
 
 // CallByNameWith invokes a top-level user method by name, binding args to its
@@ -812,11 +806,20 @@ func (i *Interpreter) CallByName(name string) (Value, error) {
 // entrypoint); used by testing.runWith and framework dispatchers that reach
 // methods by string name with runtime-computed argument lists.
 func (i *Interpreter) CallByNameWith(name string, args ...Value) (Value, error) {
+	return i.CallByNameWithDepth(name, nil, args...)
+}
+
+// CallByNameWithDepth is CallByNameWith threading the caller's call-depth
+// counter (see BuiltinCtx.Depth), so recursion that bounces through meta.call
+// keeps accumulating on the caller's goroutine-local counter and trips the
+// catchable depth guard instead of overflowing the Go stack. A nil counter
+// starts fresh (a true root entry).
+func (i *Interpreter) CallByNameWithDepth(name string, callerDepth *int, args ...Value) (Value, error) {
 	m, ok := i.methods[name]
 	if !ok {
 		return Value{}, fmt.Errorf("method %q is not defined", name)
 	}
-	return i.CallMethodWith(m, args...)
+	return i.callMethodWithDepth(m, callerDepth, args...)
 }
 
 // CallMethodWith dispatches an already-resolved *MethodDef with the given args,
@@ -825,6 +828,19 @@ func (i *Interpreter) CallByNameWith(name string, args ...Value) (Value, error) 
 // module-method fast path (dispatchModuleMethod) calls it with the *MethodDef
 // resolveQualifiedRefs cached on the call node.
 func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value, error) {
+	return i.callMethodWithDepth(m, nil, args...)
+}
+
+// callMethodWithDepth is the shared dispatch core. callerDepth threads the
+// caller's goroutine-local call-depth counter (env.depth at the dispatch site)
+// so a call chain that re-enters the interpreter across a boundary - a module
+// call (dispatchModuleMethod), meta.call / meta.callMain - keeps accumulating on
+// one counter and trips the catchable call-depth guard, while staying isolated
+// from other goroutines (each spawn worker carries its own counter). A nil
+// callerDepth mints a fresh counter: the correct behavior at a true root entry
+// (the CLI invoking the entry program, a `testing` harness) where there is no
+// caller chain to continue and each entry should stand alone.
+func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int, args ...Value) (Value, error) {
 	if len(args) != len(m.Params) {
 		return Value{}, fmt.Errorf("method %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args))
 	}
@@ -832,6 +848,12 @@ func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value,
 		i.global = NewEnvironment(nil)
 	}
 	callFrame := borrowBlockEnv(effectiveGlobal(i.global), len(m.Params))
+	dc := callerDepth
+	if dc == nil {
+		entryDepth := 0
+		dc = &entryDepth
+	}
+	callFrame.depth = dc
 	for idx, p := range m.Params {
 		if !args[idx].MatchesDeclared(p.Type) {
 			releaseBlockEnv(callFrame)
@@ -843,7 +865,21 @@ func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value,
 			return Value{}, err
 		}
 	}
+	// Count this cross-boundary dispatch as one call-depth unit: it adds Go
+	// stack frames just like an ordinary call, so recursion that bounces through
+	// the dispatch entry (meta.call self-recursion, a module method that calls
+	// back via meta.callMain) trips the catchable guard instead of overflowing
+	// the Go stack fatally. Balanced by the decrement below on every exit path.
+	*dc++
+	if *dc > limits.MaxCallDepth {
+		*dc--
+		releaseBlockEnv(callFrame)
+		return Value{}, &runtimeError{
+			Msg: fmt.Sprintf("call stack too deep: exceeded %d nested method calls (possible infinite recursion)", limits.MaxCallDepth),
+		}
+	}
 	res, err := i.execBlock(m.Body, callFrame)
+	*dc--
 	releaseBlockEnv(callFrame)
 	if err != nil {
 		return Value{}, err
@@ -898,15 +934,24 @@ func (i *Interpreter) Host() *Interpreter {
 // retags a returned module struct back inward. On the entry program itself
 // (Host() == i) it is just CallByNameWith. Backs meta.callMain.
 func (i *Interpreter) CallHostWith(name string, args ...Value) (Value, error) {
+	return i.CallHostWithDepth(name, nil, args...)
+}
+
+// CallHostWithDepth is CallHostWith threading the caller's call-depth counter
+// (see BuiltinCtx.Depth); meta.callMain passes it so a handler dispatched into
+// the host keeps accumulating call depth on the caller's goroutine-local counter
+// (recursion through the hop still trips the catchable guard) while staying
+// isolated from other concurrent workers. A nil counter starts fresh.
+func (i *Interpreter) CallHostWithDepth(name string, callerDepth *int, args ...Value) (Value, error) {
 	host := i.Host()
 	if host == i {
-		return i.CallByNameWith(name, args...)
+		return i.CallByNameWithDepth(name, callerDepth, args...)
 	}
 	retagged := make([]Value, len(args))
 	for idx, a := range args {
 		retagged[idx] = retagStructs(a, "", i.moduleNS, "", i.modulePath, i.isOwnStructName)
 	}
-	res, err := host.CallByNameWith(name, retagged...)
+	res, err := host.CallByNameWithDepth(name, callerDepth, retagged...)
 	if err != nil {
 		return res, err
 	}
@@ -916,6 +961,12 @@ func (i *Interpreter) CallHostWith(name string, args ...Value) (Value, error) {
 // isOwnStructName reports whether name is a struct declared in this
 // interpreter (used by CallHostWith's retagging).
 func (i *Interpreter) isOwnStructName(name string) bool {
+	// Error is auto-injected into every interpreter, so it is never a module's
+	// *declared* struct - retagging it would stamp a module's Error with the
+	// module identity and make it unbindable to a host `as Error` parameter.
+	if name == canonicalErrorStructName {
+		return false
+	}
 	if _, ok := i.structs[name]; ok {
 		return true
 	}
@@ -4563,15 +4614,18 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
 			}
 		}
-		// Call-depth guard. The counter lives on the per-goroutine root env
-		// (like the profiler's profChild), so parallel `spawn` bodies each
-		// track their own depth without racing a shared field. Raise a
+		// Call-depth guard. The counter is threaded from the caller frame onto
+		// the callee frame (rather than read off effectiveGlobal's shared root),
+		// so a chain shares one counter while concurrent chains stay isolated:
+		// parallel `spawn` bodies and handlers dispatched into the shared host
+		// via meta.callMain each track their own depth without racing. Raise a
 		// positioned, catchable error before the Go goroutine stack overflows
 		// into a fatal, unrecoverable crash - the analogue of a RecursionError.
-		root := effectiveGlobal(env)
-		root.callDepth++
-		if root.callDepth > limits.MaxCallDepth {
-			root.callDepth--
+		dc := env.depth
+		callFrame.depth = dc
+		*dc++
+		if *dc > limits.MaxCallDepth {
+			*dc--
 			releaseBlockEnv(callFrame)
 			file, line, col := posFor(c)
 			return Value{}, &runtimeError{
@@ -4581,7 +4635,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 		if i.prof != nil && i.profStmts {
 			pf, pl, pc := posFor(c)
-			i.prof.RecordCallDepth(pf, pl, pc, root.callDepth)
+			i.prof.RecordCallDepth(pf, pl, pc, *dc)
 		}
 		var res blockResult
 		var err error
@@ -4593,7 +4647,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		} else {
 			res, err = i.execBlock(m.Body, callFrame)
 		}
-		root.callDepth--
+		*dc--
 		releaseBlockEnv(callFrame)
 		if err != nil {
 			return Value{}, err
@@ -4624,7 +4678,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			args = append(args, v)
 		}
 		pf, pl, pc := posFor(c)
-		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc}
+		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth}
 		v, err := b.Fn(ctx, args)
 		if err != nil {
 			return Value{}, builtinError(err, pf, pl, pc)
@@ -4728,7 +4782,7 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 		args = append(args, v)
 	}
 	pf, pl, pc := posFor(c)
-	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc}
+	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth}
 	v, err := fn(ctx, args)
 	if err != nil {
 		return Value{}, builtinError(err, pf, pl, pc)

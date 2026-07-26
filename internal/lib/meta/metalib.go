@@ -59,14 +59,17 @@ func Install(in *interpreter.Interpreter) {
 	// calls it here. Unlike `testing.run`, it does not catch `exit`: dispatch
 	// is transparent, so every sentinel (runtime error, thrown Error, exit)
 	// propagates to the caller, catchable with `try` / `catch`.
-	in.RegisterNamespaced(LibraryName, "call", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	in.RegisterNamespaced(LibraryName, "call", func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) < 1 {
 			return interpreter.Null(), fmt.Errorf("meta.call expects at least 1 argument (name[, args...]), got 0")
 		}
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("meta.call: name must be string, got %s", args[0].Kind)
 		}
-		return in.CallByNameWith(args[0].Str, args[1:]...)
+		// Thread the caller's call-depth counter so recursion that bounces
+		// through meta.call still trips the catchable guard (not a fatal
+		// Go-stack overflow).
+		return in.CallByNameWithDepth(args[0].Str, ctx.Depth, args[1:]...)
 	})
 
 	// meta.defined(name) reports whether a top-level user method exists, so a
@@ -89,14 +92,17 @@ func Install(in *interpreter.Interpreter) {
 	// that boundary - this is the one explicit way to do so. Called from the
 	// entry program itself, `main` and the plain forms coincide (the entry
 	// program is its own host).
-	in.RegisterNamespaced(LibraryName, "callMain", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	in.RegisterNamespaced(LibraryName, "callMain", func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) < 1 {
 			return interpreter.Null(), fmt.Errorf("meta.callMain expects at least 1 argument (name[, args...]), got 0")
 		}
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("meta.callMain: name must be string, got %s", args[0].Kind)
 		}
-		return in.CallHostWith(args[0].Str, args[1:]...)
+		// Thread the caller's call-depth counter (see meta.call) so a handler
+		// dispatched into the host keeps accumulating depth on the caller's
+		// goroutine-local counter and stays catchable under recursion.
+		return in.CallHostWithDepth(args[0].Str, ctx.Depth, args[1:]...)
 	})
 
 	in.RegisterNamespaced(LibraryName, "definedMain", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

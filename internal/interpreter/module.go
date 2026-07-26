@@ -38,12 +38,19 @@ type loadedModule struct {
 	exports map[string]bool // top-level names marked `export` (funcs, consts, structs)
 }
 
-// isOwnStruct reports whether name is one of this module's declared structs
-// (as opposed to a library struct or a value from another module).
 // isOwnStruct reports whether name is one of the module's own declared named
-// types (a struct or an enum). Both cross the module boundary with the same
-// identity retagging, so this predicate covers both.
+// types (a struct or an enum), as opposed to a library struct, the reserved
+// Error, or a value from another module. Both structs and enums cross the module
+// boundary with the same identity retagging, so this predicate covers both.
 func (m *loadedModule) isOwnStruct(name string) bool {
+	// Error is auto-injected into every interpreter's struct table with a
+	// single bare (empty-NS, empty-path) identity shared program-wide, so it is
+	// never a module's *declared* struct: retagging it would stamp a module's
+	// Error with the module identity, leaving it unbindable to an entry-program
+	// `as Error` parameter. Keep it bare so it crosses the boundary intact.
+	if name == canonicalErrorStructName {
+		return false
+	}
 	if _, ok := m.interp.structs[name]; ok {
 		return true
 	}
@@ -422,7 +429,11 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 		// tagged `(module-stem, name)`; inside the module it is bare.
 		args[idx] = retagStructs(v, m.ns, "", m.path, "", m.isOwnStruct)
 	}
-	v, err := m.interp.CallMethodWith(md, args...)
+	// Thread the consumer's call-depth counter across the boundary so a chain
+	// that recurses through a module call keeps accumulating on one
+	// goroutine-local counter and trips the catchable guard (rather than
+	// resetting per crossing and overflowing the Go stack).
+	v, err := m.interp.callMethodWithDepth(md, env.depth, args...)
 	if err != nil {
 		switch err.(type) {
 		case *runtimeError, *ExitSignal, *ErrorSignal:
