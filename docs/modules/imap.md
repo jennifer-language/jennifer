@@ -4,11 +4,13 @@ Import with `import "imap.j" as imap;`. An **IMAP4rev1** receive client (RFC
 3501): tagged commands and untagged `*` responses over the `net` system
 library, with plaintext / implicit-TLS / STARTTLS transport and auth by `LOGIN`,
 XOAUTH2, CRAM-MD5, or SCRAM-SHA-1 / SCRAM-SHA-256.
-A useful **reading-plus-flagging subset** - select a mailbox, search it, fetch
-whole messages or named headers, and flag / copy / expunge them (so, also move) -
-not the full protocol. Retrieved messages come back as strings for the [`mime`](mime.md)
-module to parse. Because it uses `net`, this module needs
-the default **`jennifer`** binary.
+A practical subset - not the full protocol, but covering both **reading and
+basic folder management**: select a folder, search it with criteria, fetch
+whole messages or named headers, set/clear flags, copy messages, create a
+folder, and delete (mark `\Deleted` + expunge - so a **move** is copy + delete).
+It is not read-only. Retrieved messages come back as strings for the
+[`mime`](mime.md) module to parse. Because it uses `net`, this module needs the
+default **`jennifer`** binary.
 
 > **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
 > **stock** tiny build, which ships without a network driver - not a TinyGo
@@ -32,32 +34,191 @@ Runnable: [`examples/modules/imap_demo.j`](https://github.com/jennifer-language/
 
 ## Surface
 
-A session is stateful: `connect`, `selectMailbox`, `search` / `fetch` /
+A session is stateful: `connect`, `selectFolder`, `search` / `fetch` /
 `fetchHeaders`, optional `addFlags` / `expunge`, `logout`. `fetchAll` wraps the
-common "read every message in a mailbox" case.
+common "read every message in a folder" case.
 
 | Call / type                          | Notes                                                            |
 | ------------------------------------ | ---------------------------------------------------------------- |
 | `imap.Options`                       | `host`, `port`, `security`, `user`, `pass`, `auth`.              |
 | `imap.Session`                       | A live session over one connection (from `connect`).             |
 | `imap.connect(opts)`                 | Open a session: greeting, optional STARTTLS, `LOGIN` / SASL.     |
-| `imap.selectMailbox(session, name)`  | `SELECT` a mailbox (e.g. `"INBOX"`); returns its message count.  |
-| `imap.search(session)`               | `SEARCH ALL` - the sequence numbers in the selected mailbox (`list of int`). |
+| `imap.folders(session, pattern)`     | `LIST` the folders matching `pattern` (`"*"` = all) -> `list of imap.Folder` (`name`, `delimiter`, `flags`). |
+| `imap.status(session, folder)`       | `STATUS` counts for a folder without selecting it -> `imap.Status` (`messages`, `recent`, `unseen`, `uidnext`, `uidvalidity`). |
+| `imap.selectFolder(session, name)`  | `SELECT` a folder (e.g. `"INBOX"`); returns its message count.  |
+| `imap.Criteria`                      | A search filter (all fields optional; zero = match all). See [Searching](#searching). |
+| `imap.criteria()`                    | An empty `Criteria` (matches all). Set fields, then pass to `search`. |
+| `imap.search(session, criteria)`     | The sequence numbers matching `criteria` (`list of int`). `imap.criteria()` = every message. |
 | `imap.fetch(session, n)`             | `FETCH n BODY.PEEK[]` - message `n` as a raw string, for `mime.parse`. |
 | `imap.fetchMessage(session, n)`      | Fetch message `n` and parse it into a `mime.Part` tree (import `mime` too, then use `mime.attachments` / `mime.textBodies`). |
 | `imap.fetchHeaders(session, n, flds)`| `FETCH n BODY.PEEK[HEADER.FIELDS (flds)]` - only the named headers (e.g. `"SUBJECT DATE"`), cheaper than the whole body. |
 | `imap.flags(session, n)`             | `FETCH n (FLAGS)` - the flags set on message `n` as a space-separated string (confirm a `STORE` persisted). |
 | `imap.addFlags(session, n, flags)`   | `STORE n +FLAGS.SILENT (flags)` - add keywords / flags, e.g. `"$cl_1"` (Thunderbird tag colour) or `"\Deleted"`. A server that disallows a keyword answers OK but drops it - verify with `flags`. |
 | `imap.removeFlags(session, n, flags)`| `STORE n -FLAGS.SILENT (flags)` - clear keywords / flags (inverse of `addFlags`); removing an unset flag is a no-op. |
-| `imap.createMailbox(session, name)`  | `CREATE name` - make a mailbox; errors if it already exists, so `try`/`catch` for a create-if-missing. |
-| `imap.copy(session, n, mailbox)`     | `COPY n mailbox` - copy message `n` into another (existing) mailbox. A "move" is `copy` + `addFlags(..., "\Deleted")` + `expunge`. |
-| `imap.expunge(session)`              | `EXPUNGE` - permanently remove all `\Deleted` messages in the selected mailbox. |
+| `imap.createFolder(session, name)`  | `CREATE name` - make a folder; errors if it already exists, so `try`/`catch` for a create-if-missing. |
+| `imap.copy(session, n, folder)`     | `COPY n folder` - copy message `n` into another (existing) folder. A "move" is `copy` + `addFlags(..., "\Deleted")` + `expunge`. |
+| `imap.append(session, folder, msg)` | `APPEND` - upload a full RFC 5322 message into `folder` (e.g. save to Sent). |
+| `imap.appendWith(session, folder, flags, msg)` | `APPEND` with initial flags, e.g. `"\Seen"` for Sent or `"\Draft"` for a draft. |
+| `imap.expunge(session)`              | `EXPUNGE` - permanently remove all `\Deleted` messages in the selected folder. |
 | `imap.logout(session)`               | `LOGOUT` and close.                                              |
-| `imap.fetchAll(opts, mailbox)`       | Connect, select, retrieve every message, log out; `list of string`. |
+| `imap.fetchAll(opts, folder)`       | Connect, select, retrieve every message, log out; `list of string`. |
 
 `Options.security` is `"none"` (143), `"tls"` (implicit TLS on connect, 993),
 or `"starttls"`. `fetch` uses `BODY.PEEK[]`, so retrieving does **not** set the
-`\Seen` flag.
+`\Seen` flag. An internationalized (IDN) host is IDNA-encoded to its `xn--` form
+automatically (via [`idna`](idna.md)).
+
+## Authentication
+
+`connect` authenticates according to `Options.auth`; the non-LOGIN mechanisms go
+through the [`sasl`](sasl.md) module:
+
+| `auth`          | Mechanism |
+| --------------- | --------- |
+| `""` (default)  | Plain `LOGIN` (username + `pass`). |
+| `"xoauth2"`     | `AUTHENTICATE XOAUTH2` - pass the OAuth2 **access token** as `pass` (Gmail / Microsoft 365). |
+| `"cram"`        | `AUTHENTICATE CRAM-MD5` - challenge-response, no cleartext password. |
+| `"scram-sha-1"` / `"scram-sha-256"` | `AUTHENTICATE SCRAM-*` - salted challenge-response (non-initial-response form); the server signature is verified. |
+| `"auto"`        | Probe `CAPABILITY` and pick the strongest mechanism offered, falling back to `LOGIN`. |
+
+Use `security: "tls"` / `"starttls"` so `LOGIN` / XOAUTH2 credentials never go
+over the wire in the clear.
+
+## Browsing folders
+
+`folders(session, pattern)` runs `LIST` and returns the matching folders as
+`imap.Folder` values (`name`, `delimiter`, `flags`); `status(session, folder)`
+returns a folder's counts (`messages` / `unseen` / `recent` / `uidnext` /
+`uidvalidity`) **without** selecting it - ideal for a folder tree with unread
+badges. (IMAP calls these "mailboxes"; the module uses the everyday term
+*folder*.)
+
+```jennifer
+def s as imap.Session init imap.connect($opts);
+for (def f in imap.folders($s, "*")) {          # every folder, at any depth
+    def st as imap.Status init imap.status($s, $f.name);
+    io.printf("%s (%d unread)\n", $f.name, $st.unseen);
+}
+```
+
+Use `"%"` instead of `"*"` for the top level only, or a prefix like `Archive/*`
+to scope to a subtree. `flags` carries IMAP attributes such as `\HasChildren`
+(build a tree from the `delimiter`) and `\Noselect` (a container you cannot
+`selectFolder`). Non-ASCII folder names arrive in IMAP's modified-UTF-7 form.
+
+## Searching
+
+`search(session, criteria)` returns the sequence numbers of the messages in the
+selected folder that match a `Criteria`, so you fetch only the mail you want
+instead of pulling the whole folder. Build one from `imap.criteria()` (which
+matches everything) and set the fields you need - a zero-value `Criteria` is the
+old `SEARCH ALL`.
+
+The fields split by **where they run**:
+
+- **Server-side** - mapped straight to one IMAP `SEARCH` (a single round-trip, no
+  message bodies downloaded), and all ANDed together:
+  - `subject` / `from` / `to` / `text` - case-insensitive **substring** match
+    (`text` covers headers + body).
+  - `since` / `before` - an inclusive-since / exclusive-before range as standard
+    `time.Time` values (a zero-value time, the default, ignores the bound). Set
+    them straight from `time` - `$c.since = time.now()`, or a shifted time for
+    "the last week". IMAP `SEARCH` filters by calendar **day**, so a bound at
+    midnight is a pure server-side search; a bound that carries a **time-of-day**
+    is transparently refined to the exact instant on the client (against each
+    candidate's `INTERNALDATE`, the arrival clock `SEARCH` uses), so a sub-day
+    range like "since 14:30 today" just works - no extra call.
+  - `seen` / `unseen` / `flagged` / `answered` - flag state.
+  - `largerThan` / `smallerThan` - size in bytes.
+- **Client-side** - applied only to the messages the server-side search returns,
+  by fetching just their headers or structure (never full bodies):
+  - `subjectRegex` / `fromRegex` - an [RE2](regex.md) pattern matched against the
+    decoded `Subject` / `From` header (what IMAP's substring search can't do).
+  - `hasAttachments` - keep only messages whose `BODYSTRUCTURE` shows an
+    attachment. This is a **heuristic** (it looks for an `attachment`
+    content-disposition and downloads no body); an unusual message may fool it.
+
+```jennifer
+import "imap.j" as imap;
+import "mime.j" as mime;
+use time;
+
+def s as imap.Session init imap.connect($opts);
+imap.selectFolder($s, "INBOX");
+
+# Unseen invoices from billing since the start of the year, with an attachment.
+def c as imap.Criteria init imap.criteria();
+$c.from = "billing@";                                        # server-side substring
+$c.since = time.fromIso("2026-01-01T00:00:00Z");             # server-side date (a time.Time)
+$c.unseen = true;                                            # server-side flag
+$c.subjectRegex = "INV-2026-[0-9]+";                         # client-side regex on Subject
+$c.hasAttachments = true;                                    # client-side structure check
+
+for (def n in imap.search($s, $c)) {
+    def msg as mime.Part init imap.fetchMessage($s, $n);      # fetch only the matches
+    io.printf("%s\n", mime.headerValue($msg, "Subject"));
+}
+```
+
+The server-side fields (`from`, `since`, `unseen`) become one `SEARCH`; only
+the handful of messages it returns are then fetched to apply the `subjectRegex`
+and `hasAttachments` filters, so an inbox of thousands costs one search plus a
+few header/structure fetches - not a full download.
+
+Search strings are safe to build from data: substrings are sent as quoted,
+control-checked IMAP strings, dates come from `time.Time` values, and sizes are
+integers, so no criteria field can inject an IMAP command. An inverted range
+(`since` set after `before`) is a catchable `Error` (kind `"imap"`) rather than a
+silent empty result; `since == before` is a valid (empty) range.
+
+Not yet covered: non-ASCII search strings over `SEARCH` (use `subjectRegex` /
+`fromRegex` meanwhile), and UID-based search.
+
+## Managing messages
+
+Reading is only half of it - the module also **modifies** the folder. Flags
+(`STORE`), copy, delete (`\Deleted` + `EXPUNGE`), and folder creation are all
+supported, keyed by message sequence number.
+
+**Flag a message** (mark read, tag, star). Flags are a space-separated string;
+system flags start with `\`, keywords don't. A server that disallows a keyword
+answers `OK` but silently drops it, so read it back with `flags` if it matters:
+
+```jennifer
+imap.addFlags($s, 3, "\\Seen");           # mark message 3 read
+imap.addFlags($s, 3, "$cl_1");            # add a keyword/tag (Thunderbird colour label)
+imap.removeFlags($s, 3, "\\Flagged");     # unstar it
+io.printf("now: %s\n", imap.flags($s, 3)); # e.g. "\Seen $cl_1"
+```
+
+**Delete** a message - IMAP delete is two steps, mark then expunge:
+
+```jennifer
+imap.addFlags($s, 3, "\\Deleted");        # mark for deletion
+imap.expunge($s);                          # permanently remove every \Deleted message
+```
+
+**Move** a message - IMAP4rev1 has no atomic MOVE, so it is copy + delete:
+
+```jennifer
+imap.createFolder($s, "Archive");        # once; errors if it already exists (try/catch)
+imap.copy($s, 3, "Archive");              # copy into the target folder
+imap.addFlags($s, 3, "\\Deleted");        # then delete the original
+imap.expunge($s);
+```
+
+Note `EXPUNGE` renumbers the remaining messages, so gather the sequence numbers
+you want (with `search`) **before** expunging, or expunge last.
+
+**Save a message** into a folder with `append` (e.g. keep a copy in Sent after
+sending, or store a draft). The message is a full RFC 5322 string - headers, a
+blank line, then the body - built however you like (the `mime` module helps).
+`appendWith` sets initial flags:
+
+```jennifer
+imap.append($s, "Sent", $rawMessage);              # arrives unflagged
+imap.appendWith($s, "Drafts", "\\Draft", $draft);  # marked \Draft
+```
 
 ## Tagged responses and literals
 
@@ -85,24 +246,22 @@ runs in CI without an external server.
 
 ## Out of scope
 
-This is a reading subset, not full IMAP4rev1:
+A practical subset of IMAP4rev1, not the whole protocol. What it does **not**
+cover:
 
-- **Commands.** `LOGIN` / `SELECT` / `SEARCH ALL` / `FETCH BODY.PEEK[]` and
-  `BODY.PEEK[HEADER.FIELDS (...)]` / `STORE +/-FLAGS.SILENT` / `COPY` / `CREATE` /
-  `EXPUNGE` / `LOGOUT`. No `APPEND`, `RENAME` / `DELETE` mailbox management,
-  `MOVE` (use `COPY` + `\Deleted` + `EXPUNGE`), or `IDLE`; `SEARCH` is `ALL`-only
-  (no criteria).
-- **Auth.** `LOGIN` (default), or `AUTHENTICATE` with XOAUTH2 (`auth:
-  "xoauth2"`, for Google / Microsoft 365), CRAM-MD5 (`"cram"`), or SCRAM-SHA-1 /
-  SCRAM-SHA-256 (`"scram-sha-1"` / `"scram-sha-256"`), via [`sasl`](sasl.md).
-  `auth: "auto"` probes `CAPABILITY` and picks the strongest mechanism (else
-  LOGIN); `auth: ""` is plain LOGIN. SCRAM uses the non-initial-response form and
-  verifies the server
-  signature.
-- **Literals are read as 7-bit / ASCII.** MIME transfer encoding keeps mail
-  bodies ASCII; raw 8-bit literals are not yet byte-exact.
-- An internationalized (IDN) host is IDNA-encoded to its `xn--` form
-  automatically (via [`idna`](idna.md)).
+- **Commands.** No `RENAME` / `DELETE` of *folders* (only `CREATE` / `LIST` /
+  `STATUS`), no atomic `MOVE` (do `COPY` + `\Deleted` + `EXPUNGE`), and no `IDLE`
+  (poll instead). Everything works on **sequence numbers**, not UIDs, and
+  `SEARCH` sends ASCII-only criteria (no `CHARSET UTF-8`).
+- **Auth.** The supported mechanisms are in [Authentication](#authentication);
+  *not* covered are GSSAPI / Kerberos, NTLM, client-certificate auth, and OAuth2
+  token **acquisition** / refresh - obtain the access token yourself (e.g. via
+  the [`oauth`](oauth.md) module) and pass it as `pass` with `auth: "xoauth2"`.
+- **Extensions.** Only the IMAP4rev1 core - no `SORT` / `THREAD`, `CONDSTORE` /
+  `QRESYNC`, `COMPRESS`, `METADATA`, quota, or ACL support.
+
+(Message literals are read by byte count, so a raw 8-bit / multi-byte body **is**
+returned byte-exact - see [Tagged responses and literals](#tagged-responses-and-literals).)
 
 ## Timeouts and limits
 

@@ -1950,6 +1950,64 @@ non-literal choices follow it.
   already self-unregister and its listeners are OS-fd-bounded. `OF-013` stays
   defence in depth (the extraction-time `readCapped` budget is authoritative).
 
+### M22.14 - `imap` criteria-based search
+
+**Done.** `imap.search(session)` (which was `SEARCH ALL`, redundant with the
+mailbox count) is now `imap.search(session, criteria)` - a **breaking** signature
+change (pre-1.0), where an empty `imap.criteria()` reproduces the old behaviour.
+The new `imap.Criteria` struct filters as a **hybrid**: server-side fields map to
+one IMAP `SEARCH` (substring on `subject`/`from`/`to`/`text`, a `since` / `before`
+day-granular date range as `time.Time` values, flag state, size - all ANDed, one
+round-trip, no bodies), and client-side fields refine the returned candidates by
+fetching only their headers / structure (`subjectRegex` / `fromRegex` on the
+decoded header - what IMAP substring search can't do - and `hasAttachments` via a
+`BODYSTRUCTURE` disposition heuristic, no body download). Criteria strings can't
+inject a command: substrings go through `quoteArg` (control-checked + escaped +
+quoted), dates are rendered from `time.Time` (a controlled `dd-Mon-yyyy`, no
+user string), sizes are ints, and `command()` control-checks the whole line. The
+`since`/`before` fields are plain `time.Time` (a zero value = unset, rendered
+internally with `time.format` - no bespoke date type). IMAP `SEARCH` is
+day-granular, so a bound carrying a **time-of-day** is transparently refined to
+the exact instant client-side (against each candidate's `INTERNALDATE`, the clock
+`SEARCH` filters on; the `BEFORE` server date widens by a day so its own day's
+earlier messages survive for the refinement) - no extra parameter, a midnight
+bound stays pure server-side. `imap.criteria()` builds an empty filter; pure
+builders (`buildSearchCommand` / `bodyStructureShowsAttachment` /
+`parseInternalDate` / `hasTimeOfDay`) are white-box-tested in the overlay, the
+client refinement end-to-end in the Go suite. Follow-ups noted in `imap.md`:
+non-ASCII `SEARCH` strings, UID search. Pure `.j` (adds a `use time;`,
+TinyGo-clean), both binaries build.
+
+### M22.15 - `imap` folder browsing, APPEND, and folder rename
+
+**Done.** Rounded the `imap` client from read-plus-manage into a complete
+read / browse / manage / **save** client by adding the core IMAP4rev1 commands it
+was missing, plus a user-facing terminology rename:
+
+- **`folders(session, pattern)`** (`LIST`) - enumerate folders as `imap.Folder`
+  (`name`, `delimiter`, `flags`), so a program can discover the folder tree
+  instead of hardcoding `"INBOX"`. **`status(session, folder)`** (`STATUS`) -
+  message / unseen / recent / uidnext / uidvalidity counts **without** selecting
+  (folder badges, "new mail?" polls). Both parse via pure, overlay-tested helpers
+  (`parseListLine` / `parseStatus`).
+- **`append(session, folder, message)`** / **`appendWith(..., flags, ...)`**
+  (`APPEND`) - upload a full RFC 5322 message (save to Sent, store a Draft),
+  closing the read-only-ish gap. Uses the synchronizing-literal continuation flow
+  (`writeLine` the `{N}` head, wait for `+`, send the byte-counted body, read the
+  tagged completion); the mailbox is quoted and the head control-checked, the body
+  is an opaque literal.
+- **Terminology: "mailbox" -> "folder"** across the user-facing surface (a pre-1.0
+  breaking rename, since consistency forbids `selectMailbox` beside a `Folder`
+  struct): `selectMailbox` -> `selectFolder`, `createMailbox` -> `createFolder`,
+  the `Mailbox` struct -> `Folder`, and the `mailbox` parameters -> `folder`.
+  "Folder" is what every mail client and user calls these; the IMAP-spec term is
+  noted once in the docs for discoverability. `list` was unavailable (reserved
+  type keyword), so the LIST verb is `folders`.
+
+End-to-end LIST / STATUS / both APPEND variants are covered by the Go IMAP mock
+(which grew a literal-continuation `APPEND` responder). Pure `.j`, both binaries
+build.
+
 ---
 
 ## Requirements for 1.0.0 stable

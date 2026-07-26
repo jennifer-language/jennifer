@@ -2,8 +2,8 @@
 # Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * The imap module (modules/imap.j, IMAP4rev1) with mime (modules/mime.j): select a mailbox, fetch its messages, and parse each.
- * By default it targets a local IMAP server on 127.0.0.1:2143; with none running it prints the connection error rather than failing. Point host / port / user / pass at a real mailbox to fetch real mail. Needs the default `jennifer` binary (`jennifer-tiny` has no network stack).
+ * The imap module (modules/imap.j, IMAP4rev1) with mime (modules/mime.j): select a folder, fetch its messages, and parse each.
+ * By default it targets a local IMAP server on 127.0.0.1:2143; with none running it prints the connection error rather than failing. Point host / port / user / pass at a real account to fetch real mail. Needs the default `jennifer` binary (`jennifer-tiny` has no network stack).
  * @module imap_demo
  */
 use io;

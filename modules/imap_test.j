@@ -83,3 +83,186 @@ func testImapInjectionBlocked() {   # OM-006
     testing.assertThrows("injectImapFlags", "imap");
     quoteArg("normal.user@example.com");   # a valid arg does not throw
 }
+
+# --- criteria-based search (pure helpers) -----------------------------------
+
+func testBuildSearchAll() {
+    testing.assertEqual(buildSearchCommand(criteria()), "SEARCH ALL");
+}
+
+func testBuildSearchMultiField() {
+    def c as Criteria;
+    $c.subject = "hi";
+    $c.unseen = true;
+    $c.since = time.fromIso("2026-01-01T00:00:00Z");   # rendered internally
+    $c.largerThan = 1000;
+    testing.assertEqual(buildSearchCommand($c),
+        "SEARCH SUBJECT \"hi\" SINCE 01-Jan-2026 UNSEEN LARGER 1000");
+    # from / to / text / before / flags render too, in order.
+    def d as Criteria;
+    $d.from = "billing@x.com";
+    $d.flagged = true;
+    $d.before = time.fromIso("2026-03-01T00:00:00Z");
+    testing.assertEqual(buildSearchCommand($d),
+        "SEARCH FROM \"billing@x.com\" BEFORE 01-Mar-2026 FLAGGED");
+    # A client-side-only criteria still needs a server search (defaults to ALL).
+    def e as Criteria;
+    $e.subjectRegex = "INV-[0-9]+";
+    testing.assertEqual(buildSearchCommand($e), "SEARCH ALL");
+    testing.assertTrue(hasClientFilter($e));
+    testing.assertFalse(hasClientFilter($c));
+}
+
+# The date range comes from time.Time values rendered internally, so a zero-value
+# date is simply omitted (no SINCE / BEFORE token) and there is no date string to
+# validate or inject.
+func testUnsetDateOmitted() {
+    def c as Criteria;
+    $c.subject = "x";            # since / before left at their zero-value time
+    testing.assertEqual(buildSearchCommand($c), "SEARCH SUBJECT \"x\"");
+}
+
+# A search substring with a control character is rejected before the wire
+# (quoteArg control-checks it).
+func injectSearchSubject() {
+    def c as Criteria;
+    $c.subject = "x\r\nA1 LOGOUT";
+    buildSearchCommand($c);
+}
+func testSearchInjectionBlocked() {
+    testing.assertThrows("injectSearchSubject", "imap");
+}
+
+func testBodyStructureAttachmentHeuristic() {
+    def withAtt as string init "* 1 FETCH (BODYSTRUCTURE ((\"text\" \"plain\" ...)(\"application\" \"pdf\" (\"name\" \"a.pdf\") NIL NIL \"base64\" 1234)(\"attachment\" (\"filename\" \"a.pdf\")) ...))";
+    testing.assertTrue(bodyStructureShowsAttachment($withAtt));
+    def plain as string init "* 1 FETCH (BODYSTRUCTURE (\"text\" \"plain\" (\"charset\" \"utf-8\") NIL NIL \"7bit\" 42 3))";
+    testing.assertFalse(bodyStructureShowsAttachment($plain));
+    # Case-insensitive (some servers upper-case the disposition).
+    testing.assertTrue(bodyStructureShowsAttachment("(\"ATTACHMENT\" NIL)"));
+}
+
+# --- sub-day (time-of-day) date refinement ----------------------------------
+
+func testHasTimeOfDay() {
+    testing.assertFalse(hasTimeOfDay(time.fromIso("2026-01-01T00:00:00Z")));   # midnight
+    testing.assertTrue(hasTimeOfDay(time.fromIso("2026-01-01T14:30:00Z")));
+    testing.assertTrue(hasTimeOfDay(time.fromIso("2026-01-01T00:00:01Z")));    # one second in
+}
+
+# A midnight `before` is exact (server BEFORE that day); a `before` with a
+# time-of-day widens the server date to the next day so the client pass can keep
+# that day's earlier messages.
+func testBeforeWidening() {
+    def midnight as Criteria;
+    $midnight.before = time.fromIso("2026-01-20T00:00:00Z");
+    testing.assertEqual(buildSearchCommand($midnight), "SEARCH BEFORE 20-Jan-2026");
+    def timed as Criteria;
+    $timed.before = time.fromIso("2026-01-20T10:00:00Z");
+    testing.assertEqual(buildSearchCommand($timed), "SEARCH BEFORE 21-Jan-2026");   # widened
+    # `since` is never widened (inclusive on its own day is already a superset).
+    def s as Criteria;
+    $s.since = time.fromIso("2026-01-15T14:30:00Z");
+    testing.assertEqual(buildSearchCommand($s), "SEARCH SINCE 15-Jan-2026");
+}
+
+# A time-of-day on since/before turns on the client-side pass; a midnight bound
+# stays pure server-side.
+func testRefinePredicates() {
+    def timed as Criteria;
+    $timed.since = time.fromIso("2026-01-15T14:30:00Z");
+    testing.assertTrue(refineSinceNeeded($timed));
+    testing.assertTrue(hasClientFilter($timed));       # forces the client pass
+    def midnight as Criteria;
+    $midnight.since = time.fromIso("2026-01-15T00:00:00Z");
+    testing.assertFalse(refineSinceNeeded($midnight));
+    testing.assertFalse(hasClientFilter($midnight));   # pure server-side
+    def unset as Criteria;
+    testing.assertFalse(refineSinceNeeded($unset));
+    testing.assertFalse(refineBeforeNeeded($unset));
+}
+
+func testParseInternalDate() {
+    def id as time.Time init parseInternalDate("* 1 FETCH (INTERNALDATE \"15-Jan-2026 14:30:00 +0100\")");
+    testing.assertEqual(time.format($id, "%Y-%m-%dT%H:%M:%S%z"), "2026-01-15T14:30:00+0100");
+    # A single-digit day is space-padded on the wire; it still parses.
+    def sp as time.Time init parseInternalDate("* 2 FETCH (INTERNALDATE \" 5-Jan-2026 09:00:00 +0000\")");
+    testing.assertEqual(time.format($sp, "%Y-%m-%dT%H:%M:%S%z"), "2026-01-05T09:00:00+0000");
+}
+func missingInternalDate() { parseInternalDate("* 1 FETCH (FLAGS ())"); }
+func testParseInternalDateMissing() {
+    testing.assertThrows("missingInternalDate", "imap");
+}
+
+# An inverted date range (since after before) is a catchable error, not a silent
+# empty result; since == before (an empty range) is allowed.
+func invertedRange() {
+    def c as Criteria;
+    $c.since = time.fromIso("2026-03-01T00:00:00Z");
+    $c.before = time.fromIso("2026-01-01T00:00:00Z");
+    buildSearchCommand($c);
+}
+func testInvertedRangeRejected() {
+    testing.assertThrows("invertedRange", "imap");
+    # since <= before is fine (a valid, possibly-empty range).
+    def ok as Criteria;
+    $ok.since = time.fromIso("2026-01-01T00:00:00Z");
+    $ok.before = time.fromIso("2026-03-01T00:00:00Z");
+    testing.assertEqual(buildSearchCommand($ok), "SEARCH SINCE 01-Jan-2026 BEFORE 01-Mar-2026");
+}
+
+# --- LIST / STATUS parsing (pure helpers) -----------------------------------
+
+func testParseListLine() {
+    def mb as Folder init parseListLine("* LIST (\\HasNoChildren \\Marked) \"/\" \"INBOX\"");
+    testing.assertEqual($mb.name, "INBOX");
+    testing.assertEqual($mb.delimiter, "/");
+    testing.assertEqual(len($mb.flags), 2);
+    testing.assertEqual($mb.flags[0], "\\HasNoChildren");
+    # A \Noselect parent with a NIL delimiter and an atom name.
+    def nil as Folder init parseListLine("* LIST (\\Noselect) NIL Archive");
+    testing.assertEqual($nil.name, "Archive");
+    testing.assertEqual($nil.delimiter, "");
+    testing.assertEqual($nil.flags[0], "\\Noselect");
+}
+
+func testParseList() {
+    def resp as string init "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasChildren) \"/\" \"Archive\"\r\n* LIST (\\HasNoChildren) \"/\" \"Archive/2024\"\r\nJEN OK LIST completed\r\n";
+    def boxes as list of Folder init parseList($resp);
+    testing.assertEqual(len($boxes), 3);
+    testing.assertEqual($boxes[0].name, "INBOX");
+    testing.assertEqual($boxes[2].name, "Archive/2024");
+}
+
+func testParseStatus() {
+    def s as Status init parseStatus("* STATUS \"INBOX\" (MESSAGES 231 RECENT 0 UNSEEN 5 UIDNEXT 4321 UIDVALIDITY 1)\r\nJEN OK STATUS completed\r\n");
+    testing.assertEqual($s.messages, 231);
+    testing.assertEqual($s.unseen, 5);
+    testing.assertEqual($s.recent, 0);
+    testing.assertEqual($s.uidnext, 4321);
+    testing.assertEqual($s.uidvalidity, 1);
+    # Items may arrive in any order; only requested keys set, the rest stay 0.
+    def partial as Status init parseStatus("* STATUS \"Sent\" (UNSEEN 2 MESSAGES 40)\r\nJEN OK done\r\n");
+    testing.assertEqual($partial.messages, 40);
+    testing.assertEqual($partial.unseen, 2);
+    testing.assertEqual($partial.uidnext, 0);
+}
+
+# --- regression tests for the review findings -------------------------------
+
+# extractLiteral: the {N} is a BYTE count, so a multi-byte body must come back
+# byte-exact, not over-read by (bytes - runes) into the trailing `)`/CRLF/tag.
+# "HÉLLO" is 6 bytes / 5 runes -> marker {6}. (assertEqual, not assertContains.)
+func testExtractLiteralMultibyte() {
+    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] {6}\r\nHÉLLO)\r\nJEN OK\r\n"), "HÉLLO");
+    # An ASCII body still round-trips exactly.
+    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] {5}\r\nplain)\r\nJEN OK\r\n"), "plain");
+}
+
+# parseStatus: a folder name containing a '(' must not be mistaken for the item
+# list (the items are the trailing paren group).
+func testParseStatusParenInName() {
+    def s as Status init parseStatus("* STATUS \"My(Folder\" (MESSAGES 7 UNSEEN 2)\r\nJEN OK\r\n");
+    testing.assertEqual($s.messages, 7);
+    testing.assertEqual($s.unseen, 2);
+}

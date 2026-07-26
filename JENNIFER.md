@@ -682,12 +682,27 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   one at the same major.minor.patch), `maxSatisfying` / `minSatisfying(versions,
   range)`, `minVersion(range)`, `validRange(range)`, and the solver algebra
   `intersects(a, b)` / `subset(inner, outer)` / `gtr` / `ltr` / `outside` / `simplifyRange(versions, range)`, all prerelease-precise.
-- **`imap`** - receive mail (IMAP4rev1, RFC 3501) over `net`, a reading subset:
-  `imap.connect(opts)` -> `imap.Session`, then `selectMailbox(session, name)`
-  (count), `search(session)` (sequence numbers), `fetch(session, n)` (a whole
+- **`imap`** - IMAP4rev1 (RFC 3501) client over `net`; reads **and** manages
+  folders (not read-only; the user-facing term is "folder", the IMAP "mailbox"):
+  `imap.connect(opts)` -> `imap.Session`, then `folders(session, pattern)` (LIST
+  -> `imap.Folder` name/delimiter/flags), `status(session, folder)` (`imap.Status`
+  counts without selecting), `selectFolder(session, name)`
+  (count), `search(session, criteria)` (sequence numbers matching an
+  `imap.Criteria`), `fetch(session, n)` (a whole
   message as a string) or `fetchMessage(session, n)` (parsed to a `mime.Part`,
-  ready for `mime.attachments` / `textBodies`), `logout(session)`, plus
-  `imap.fetchAll(opts, mailbox)`. Handles tagged responses and `{N}` literals.
+  ready for `mime.attachments` / `textBodies`); manage with
+  `addFlags`/`removeFlags`/`flags`, `copy`, `append`/`appendWith` (upload a full
+  RFC 5322 message, e.g. save to Sent), `createFolder`, and delete via
+  `\Deleted` + `expunge` (so a move is copy + delete); `logout(session)`, plus
+  `imap.fetchAll(opts, folder)`. `imap.Criteria` (build with `imap.criteria()`
+  + fields) filters server-side (substring on `subject`/`from`/`to`/`text`, a
+  `since`/`before` date range set with plain `time.Time` values (rendered to the
+  IMAP date form internally; a time-of-day is refined to the exact instant
+  client-side, so sub-day ranges work), flag state, size)
+  and client-side (`subjectRegex`/`fromRegex` on the decoded header,
+  `hasAttachments` via a `BODYSTRUCTURE` heuristic) - only the server's candidates
+  are fetched, and criteria strings can't inject a command (quoted / validated).
+  Handles tagged responses and `{N}` literals.
   Throws `Error` (kind `"imap"`) on `NO` / `BAD`. **Default `jennifer` binary
   only** (`net`).
 - **`idna`** - internationalized domain names: `idna.toAscii(domain)` /

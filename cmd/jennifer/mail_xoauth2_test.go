@@ -175,7 +175,7 @@ func TestImapXoauth2(t *testing.T) {
 	prog := `import %q as imap;
 def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
 def s as imap.Session init imap.connect($o);
-def n as int init imap.selectMailbox($s, "INBOX");
+def n as int init imap.selectFolder($s, "INBOX");
 imap.logout($s);`
 	runXoauth2Test(t, "imap.j", "AUTHENTICATE XOAUTH2 ", prog, serve)
 }

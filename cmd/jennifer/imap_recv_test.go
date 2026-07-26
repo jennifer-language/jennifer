@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -45,8 +46,32 @@ func fakeIMAP(ln net.Listener) {
 		case "SEARCH":
 			fmt.Fprintf(conn, "* SEARCH 1 2\r\n%s OK SEARCH completed\r\n", tag)
 		case "FETCH":
-			fmt.Fprintf(conn, "* 1 FETCH (BODY[] {%d}\r\n%s)\r\n%s OK FETCH completed\r\n",
-				len(msg), msg, tag)
+			if strings.Contains(strings.ToUpper(line), "INTERNALDATE") {
+				// Both messages report the same arrival instant, for the
+				// sub-day since/before client-refinement test.
+				fmt.Fprintf(conn, "* 1 FETCH (INTERNALDATE \"15-Jan-2026 12:00:00 +0000\")\r\n%s OK FETCH completed\r\n", tag)
+			} else {
+				fmt.Fprintf(conn, "* 1 FETCH (BODY[] {%d}\r\n%s)\r\n%s OK FETCH completed\r\n",
+					len(msg), msg, tag)
+			}
+		case "LIST":
+			fmt.Fprintf(conn, "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n"+
+				"* LIST (\\HasChildren) \"/\" \"Archive\"\r\n%s OK LIST completed\r\n", tag)
+		case "STATUS":
+			fmt.Fprintf(conn, "* STATUS \"INBOX\" (MESSAGES 2 RECENT 0 UNSEEN 1 UIDNEXT 3 UIDVALIDITY 42)\r\n%s OK STATUS completed\r\n", tag)
+		case "APPEND":
+			// Literal-continuation flow: parse {N}, request the literal, consume
+			// exactly N bytes plus its trailing CRLF, then complete.
+			n := 0
+			if i := strings.LastIndex(line, "{"); i >= 0 {
+				fmt.Sscanf(line[i:], "{%d}", &n)
+			}
+			fmt.Fprintf(conn, "+ OK send the message\r\n")
+			if n > 0 {
+				_, _ = io.CopyN(io.Discard, r, int64(n))
+			}
+			_, _ = r.ReadString('\n') // the CRLF after the literal
+			fmt.Fprintf(conn, "%s OK [APPENDUID 42 3] APPEND completed\r\n", tag)
 		case "LOGOUT":
 			fmt.Fprintf(conn, "* BYE\r\n%s OK LOGOUT completed\r\n", tag)
 			return
@@ -75,13 +100,46 @@ func TestImapReceive(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
+use time;
+use lists;
 import %q as imap;
 def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
 def s as imap.Session init imap.connect($o);
-testing.assertEqual(imap.selectMailbox($s, "INBOX"), 2);
-def nums as list of int init imap.search($s);
+testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
+def nums as list of int init imap.search($s, imap.criteria());
 testing.assertEqual(len($nums), 2);
 testing.assertEqual($nums[1], 2);
+# Client-side regex filter over the candidates: the fetched header's Subject is
+# "Café", so a matching pattern keeps both and a non-matching one drops all.
+def hit as imap.Criteria init imap.criteria();
+$hit.subjectRegex = "Caf";
+testing.assertEqual(len(imap.search($s, $hit)), 2);
+def miss as imap.Criteria init imap.criteria();
+$miss.subjectRegex = "ZZZ-no-match";
+testing.assertEqual(len(imap.search($s, $miss)), 0);
+# Sub-day since: the day-granular server search returns candidates, then the
+# client refines by INTERNALDATE (the mock's messages arrived 2026-01-15T12:00Z).
+def early as imap.Criteria init imap.criteria();
+$early.since = time.fromIso("2026-01-15T10:00:00Z");   # before arrival -> both kept
+testing.assertEqual(len(imap.search($s, $early)), 2);
+def late as imap.Criteria init imap.criteria();
+$late.since = time.fromIso("2026-01-15T14:00:00Z");    # after arrival -> both dropped
+testing.assertEqual(len(imap.search($s, $late)), 0);
+# LIST: enumerate folders (name / delimiter / flags).
+def boxes as list of imap.Folder init imap.folders($s, "*");
+testing.assertEqual(len($boxes), 2);
+testing.assertEqual($boxes[0].name, "INBOX");
+testing.assertEqual($boxes[0].delimiter, "/");
+testing.assertEqual($boxes[1].name, "Archive");
+testing.assertTrue(lists.contains($boxes[1].flags, "\\HasChildren"));
+# STATUS: counts without selecting.
+def st as imap.Status init imap.status($s, "INBOX");
+testing.assertEqual($st.messages, 2);
+testing.assertEqual($st.unseen, 1);
+testing.assertEqual($st.uidvalidity, 42);
+# APPEND: upload a message (the literal-continuation flow); no throw = OK.
+imap.append($s, "Sent", "Subject: hi\r\nFrom: me@x\r\n\r\nbody\r\n");
+imap.appendWith($s, "Drafts", "\\Draft", "Subject: draft\r\n\r\nunfinished\r\n");
 def body as string init imap.fetch($s, 1);
 testing.assertContains($body, "Subject: Café");
 testing.assertContains($body, "the café résumé body");
