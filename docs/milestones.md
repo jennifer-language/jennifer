@@ -15,8 +15,6 @@ interpreter that runs a strictly larger subset of the language.
 
 ## M1 - End-to-end MVP
 
-**Status:** done.
-
 Smallest vertical slice that proves the pipeline (source → tokens →
 preprocessed tokens → AST → result):
 
@@ -32,8 +30,6 @@ preprocessed tokens → AST → result):
 ---
 
 ## M2 - Types, constants, scoping, control flow
-
-**Status:** done.
 
 Rounds out the "ordinary" feature set:
 
@@ -53,8 +49,6 @@ Rounds out the "ordinary" feature set:
 
 ## M3 - Methods with parameters and return values
 
-**Status:** done.
-
 - `func name(a as int, b as string) { ... }` with typed parameters,
   by-value argument passing, call-site arity + type checks
 - `return;` and `return EXPR;`; recursion works
@@ -66,8 +60,6 @@ Rounds out the "ordinary" feature set:
 ---
 
 ## M4 - Polish & ergonomics
-
-**Status:** done.
 
 - Logical operators `and`, `or`, `not` (word-based, short-circuit)
 - Unary minus
@@ -83,8 +75,6 @@ Rounds out the "ordinary" feature set:
 ---
 
 ## M5 - Interpreter improvements
-
-**Status:** done.
 
 - **Cross-file error sources** - errors raised inside an imported `.j`
   display the line from the imported file. See
@@ -122,8 +112,6 @@ Rounds out the "ordinary" feature set:
 
 ## M6 - Lists and maps
 
-**Status:** done.
-
 Two new compound types - `list` and `map` - plus the strings library
 functions deferred until compound types existed.
 
@@ -159,8 +147,6 @@ implementation contract.
 ---
 
 ## M7 - printf modifiers, stdin input, comment/division swap
-
-**Status:** done.
 
 A breaking syntax change to free up `//` for integer division and to
 allow shebangs, the long-promised format-verb modifier system, and
@@ -206,8 +192,6 @@ See:
 ---
 
 ## M8 - System library namespacing
-
-**Status:** done.
 
 A hybrid namespace model so domain libraries can ship without
 polluting the bare-name pool, plus the first real namespaced
@@ -261,8 +245,6 @@ See:
 
 ## M9 - Collection operations
 
-**Status:** done.
-
 Two new namespaced libraries cover the M6-deferred list/map
 manipulation helpers, a small append sugar shortens the common
 write pattern, and two follow-on breaking changes tidy up the
@@ -315,34 +297,7 @@ See:
 
 ---
 
-The next phase splits into four arcs after two architectural
-prerequisites: M10 lands the namespace-first library architecture
-that the rest of the standard library will be built on; Phase A
-(M11-M13) finishes the language so libraries have something to
-stand on; M14 closes the lexer-side gap (`fmt` losing comments
-and shebangs) so the first wave of struct-using libraries can
-ship with doc-comments intact; Phase B (M15.x) ships the
-foundational libraries that every Jennifer program needs,
-finishing with **M15.8 - the first public release** (CI, prebuilt
-binaries, .deb / pacman / AUR packaging); Phase C (M16.x) ships
-I/O libraries on top of the now-released foundation; Phase D
-(M17-M20) ships the higher-level ecosystem (Jennifer-coded
-libraries, the module system that unblocks them, crypto, a
-server). Everything beyond a 1.0.0 - embedding, WASM, and
-specialised domains - lives in the
-[beyond-1.0.0 idea collection](horizon.md).
-
-The library milestones use sub-numbering (M15.1, M15.2, ...) so
-each library ships and is reviewed independently. This is the
-first time we use sub-milestones; the practice is justified
-because each library is small enough to land in a single sitting
-once the language foundation is in place.
-
----
-
 ## M10 - Namespace-first library architecture
-
-**Status:** done.
 
 A pre-language-completion API-shape correction: every library is
 now namespaced, with bare-name globals reserved as a narrow
@@ -436,13 +391,7 @@ No new language features land here - that's M11.
 
 ---
 
-**Phase A: language completion (M11-M13).** These three milestones
-close the biggest daily-use gaps and add the foundational types every
-later library needs.
-
 ## M11 - Control-flow completion
-
-**Status:** done.
 
 Closes the biggest daily-use gap in the language and rounds out the
 printf modifier table at the same time. Five new keywords (`break`,
@@ -489,8 +438,6 @@ See:
 
 ## M12 - Bytes and bit operators
 
-**Status:** done.
-
 Adds the buffer-shaped primitive and the bit-twiddling vocabulary
 the standard library needs for hashing, encoding, crypto, and
 network code in later milestones.
@@ -535,9 +482,9 @@ See:
 - [user-guide/syntax.md](user-guide/syntax.md) - non-decimal
   literals + digit separator.
 
-## M13-M13.2 - structs and catchable errors (compacted)
+## M13-M13.2 - structs and catchable errors
 
-**All done.** The composite-data milestone, batched in dependency order: M13.1
+The composite-data milestone, batched in dependency order: M13.1
 ships the struct mechanism, M13.2 the recoverable-error story built on it (the
 canonical error value is a struct), together unblocking composite library
 returns. Design detail: git history, the `user-guide`
@@ -555,8 +502,6 @@ sections).
 ---
 
 ## M14 - Lexer comment + blank-line preservation
-
-**Status:** done.
 
 Closes the two M5-deferred items (`fmt drops comments`, `fmt
 drops blank lines`). No language change - the runtime still
@@ -588,17 +533,9 @@ See:
 
 ---
 
-**Phase B: foundational libraries (M15.x).** Small,
-frequently-used libraries grouped under M15 with sub-numbering.
-The leading M15.0 slot is the "wrap-up of existing libraries"
-(extensions to M8 / M9 / M10 libraries that depend on language
-features added since); later slots ship a new library each.
-M15.8 closes the phase by making the result installable before
-Phase C starts adding I/O on top.
+## M15 - foundational libraries + first public release
 
-## M15 - foundational libraries + first public release (compacted)
-
-**All done.** Nine sub-milestones - two language (M15.2, M15.4), the rest library
+Nine sub-milestones - two language (M15.2, M15.4), the rest library
 / tooling / release - that built out the foundational stdlib and shipped the
 first public release. Design detail: git history and the linked per-library
 docs. Two API patterns established here recur across later libraries:
@@ -625,9 +562,9 @@ docs. Two API patterns established here recur across later libraries:
 
 ---
 
-## M16 - I/O libraries and developer tooling (compacted)
+## M16 - I/O libraries and developer tooling
 
-**All done.** Phase C - system libraries that touch the OS or do significant
+System libraries that touch the OS or do significant
 compute, opened by the `spawn` concurrency primitive (M16.0) the I/O libraries
 build on, then a lint / profile / test developer-tooling trio and a run of
 self-contained data libraries. Design detail: git history and the linked
@@ -655,11 +592,9 @@ per-library / per-tool docs.
 
 ---
 
-**Phase D: higher-level and Jennifer-coded libraries (M17-M20).**
+## M17 - module system for Jennifer-coded libraries
 
-## M17 - module system for Jennifer-coded libraries (compacted)
-
-**All done.** Jennifer-coded libraries get their own namespace, scope, and
+Jennifer-coded libraries get their own namespace, scope, and
 explicit `export`s via a real **module boundary** (`import "x.j" as x;`, a parser
 + interpreter feature) beside the textual `include "x.j";` splice (a preprocessor
 operation for composing one module from several files). Settled cross-cutting
@@ -684,16 +619,14 @@ search-path error). Design detail: git history,
 | M17.6 | `semver` module | Strict [SemVer 2.0.0](https://semver.org) as a second pure-`.j` reference module (`use strings` / `convert` / `regex`, so both binaries), and the base a future `jvc` package manager needs. Exports `Version{major, minor, patch, prerelease, build}` + `parse` (throws on invalid) / `isValid` / `toString`; `compare` / `lt` / `eq` / `gt` (full SemVer precedence: numeric core, prerelease ranks below release, build ignored); `isStable` (`0.y.z` unstable by convention) / `isPrerelease`; `incMajor` / `incMinor` / `incPatch`; and `sort` (own pass over `compare`, since `lists.sort` is scalar-only). Strict - a loose `1.2.3.4` is rejected. `parse` uses the anchored RE2 pattern with named groups; precedence + sort are hand-written (the algorithmic dogfood). Building it surfaced + fixed the M17.4 `retagType` gap (a consumer `list of semver.Version` handed back into a module `list of Version`). Range / constraint matching (`^1.2.0`, `>=1.0.0`, `~1.2.3`) deferred to `jvc`. |
 
 
-## M18.x - Jennifer-coded modules
+## M18 - Jennifer-coded modules
 
 Built atop the existing system libraries. Each one ships as a Jennifer
 **module** under `modules/` (the directory introduced in M17); none of
 them are compiled into the interpreter binary. Sub-milestones in priority
 order.
 
-### M18.1-M18.40 - shipped modules (compacted)
-
-**All done.** Forty sub-milestones (with their nested parts) shipped as
+Forty sub-milestones (with their nested parts) shipped as
 pure-Jennifer `modules/` (except where noted as a Go **system library**), each
 with the standard discipline: a 100%-passing `*_test.j` overlay, a
 `cmd/jennifer/*_test.go` integration test, a `docs/modules/*.md` reference, an
@@ -768,9 +701,9 @@ under its library):
   `totp` / `webhook` build on (and that `jwt` / SigV4 will reuse).
 
 
-## M19 - cross-cutting tooling (compacted)
+## M19 - cross-cutting tooling
 
-**All done.** The catch-all bucket for interpreter / tooling work belonging to
+The catch-all bucket for interpreter / tooling work belonging to
 neither the M18 `.j` modules nor the M20 Go system libraries: M19.1-M19.5 a
 correctness / performance hardening pass over the core + libraries; M19.6 the
 coverage tool; M19.7 the `@scope/package` vendored-module resolver; M19.8 the
@@ -791,12 +724,12 @@ docs.
 | M19.9 | audit-driven correctness + hardening | A systematic severity-ordered sweep of ~190 findings from a full bug / performance audit of `internal/` + `modules/`, each fix with a regression test (Go test or `_test.j` overlay). **Crash / safety:** OS-entropy RNG seeding (predictable UUIDs / session ids / passwords fixed; `math.randSeed` stays the deterministic opt-in), `json` / `toml` decode nesting caps, a `try`-body scope fix (a throw-skipped `def` reads undefined, not null), `tengine` recursion guards, `archive` zip-slip + aggregate-decompression caps, a JSON-pointer overflow guard, the two interpreter `-race` races + REPL-vs-spawn table mutation. **Correctness:** lvalue writes re-fetch their root after the RHS, index / append stamp the element type, path-keyed module structs, `barcode` (Code 128 stop / EAN check digit / Code 39 `*` / QR mask 3), `pdfwriter` WinAnsi / Info encoding, a full `toml` conformance pass, `http` / `web` (CSRF / cookie / CORS / ETag) hardening, quote-aware `vcard` / `ical`. **Performance:** the O(N^2) accumulation patterns retired (map hash index, `json` object decode, wire-framing reads in `redis` / `amqp` / `mqtt` / `mikrotik` / `imap` / `websocket`, list-join builders in `csv` / `barcode` / `influxdb` / `jsonl` / `statsd`, GF(256) inline). **Lifecycle:** `os.release` + capped child output, non-blocking `net.eof` + mutex-guarded `net.Conn`, `httpd` admission bounds / must-respond timeout / TLS-1.2 floor / safe unix-socket unlink, per-stream mutex + a `discard` verb on hash / crc / compress streams, `lint` descending into `spawn` / `repeat`. Plus **six coordinated pre-1.0 strictness breaks** (each with tests + operator / scoping docs): `%` is floored (Python; `-7 % 3 == 2`, `7 % -3 == -2`); integer arithmetic overflow is a positioned error, not a silent wrap; a duplicate map-literal key is an error; mixed `int` / `float` comparison is exact (no lossy promotion, so `9007199254740993 == 9007199254740992.0` is `false`); a method may not share a top-level var / const name (no-shadowing both directions); reading a constant with the `$` sigil (`$MAX`) is a parse error. |
 
 
-## M20 - system libraries (compacted)
+## M20 - system libraries
 
 Go **system libraries** (cryptographic primitives, plus formats too heavy or
 too reflect-bound for a Jennifer-coded `.j` module - the `json` pattern,
 [M16.9](#m16---io-libraries-and-developer-tooling-compacted)), plus two cleanup keywords (`defer` / `errdefer`) and
-Unix-signal support that the libraries needed. **All done.** Ten sub-milestones,
+Unix-signal support that the libraries needed. Ten sub-milestones,
 each shipped with the standard discipline: a `cmd/jennifer` / `*_test.go` suite,
 a `docs/libraries/*.md` reference, cheatsheet + `JENNIFER.md` entries, and a
 runnable example. Per-function detail lives in
@@ -834,14 +767,14 @@ documented under its library):
   (interruptible loops, REPL Ctrl-C, terminating-signal terminal restore) builds
   on.
 
-## M21 - general backlog (compacted)
+## M21 - general backlog
 
 The catch-all bucket: milestones that fit no other track - not a Jennifer-coded
 module (M18), not interpreter / tooling work (M19), not a Go system library
 (M20), and not a beyond-1.0.0 idea (those live in the [horizon
 collection](horizon.md)). Anything worth recording with no natural home landed
 here, and graduated out once a cluster grew big enough to earn its own bucket.
-**All done** - thirteen sub-milestones across Jennifer-coded modules, security
+Thirteen sub-milestones across Jennifer-coded modules, security
 hardening, interpreter / language work, byte throughput, and Windows packaging.
 Each shipped module carries the standard discipline (a 100%-passing `*_test.j`
 overlay, a `cmd/jennifer/*_test.go` integration test, `docs/modules/*.md` +
@@ -888,616 +821,67 @@ Cross-cutting threads:
 
 ## M22 - additional libraries and language refinements
 
-Post-backlog work that belongs to neither the M20 system-library set nor the M21
-backlog: focused standard-library and module additions or enhancements, and small
-language cleanups, each landing when the need is concrete. A new library entry
-ships the usual surface (a Go package under `internal/lib/`, a line in
-`internal/stdlib.InstallAll`, a `docs/libraries/` reference, cheatsheet rows, a
-`JENNIFER.md` bullet); a `.j` module change ships its `*_test.j` overlay, its
-`docs/modules/` doc, and a `JENNIFER.md` bullet.
-
-### M22.1-M22.3 - `path` library, digit identifiers, library renames (compacted)
-
-**All done.** The first three M22 items: one new library, one language-rule
-relaxation, and the breaking renames the relaxation unlocked. Per-item surface
-detail lives in `docs/libraries/`, `JENNIFER.md`, and (for the rejected shortcut)
-`docs/technical/rejected.md`; this table is the milestone index.
+Post-backlog work belonging to neither the M20 system-library set nor the M21
+catch-all: focused standard-library and `.j`-module additions or enhancements,
+plus small language cleanups, each landing when the need was concrete. Eighteen
+sub-milestones. Each shipped with the standard discipline (a
+library adds a Go package + `internal/stdlib.InstallAll` line + `docs/libraries/`
+reference + cheatsheet rows; a `.j` module ships a 100%-passing `*_test.j`
+overlay + a `cmd/jennifer/*_test.go` integration test + `docs/modules/` doc +
+catalog + `JENNIFER.md` bullet + a demo; a language feature updates the spec +
+grammar EBNF/PEG + the editor highlighters). Per-item surface detail lives in
+those docs; this table is the milestone-number index.
 
 | M#    | Topic | Summary |
 | ----- | ----- | ------- |
-| M22.1 | `path` library | OS-aware path manipulation over Go `path/filepath`, the pure-string counterpart to `fs`'s I/O (so `.j` stops hand-rolling separator splits / hardcoding `/`). `use path;` -> `base` / `dir` / `ext` / `stem` / `join` (variadic) / `clean` / `isAbs` / `split` (`-> [dir, file]`). Its own library, not a `basename` on `fs`: path logic is string work that never touches disk, and it has 5+ functions (mirrors Go's `path/filepath` vs `os`/`io`). Manipulation subset only - `Abs` / `Glob` / `Walk` / `EvalSymlinks` excluded (they need the disk, belong with `fs`), so **no build-tag split**, TinyGo-clean, both binaries. Uses the host separator (portable; pairs with `os.DIRSEP`). Explicitly **not** a filename sanitizer - OS-aware `base` won't strip a foreign `\` on Linux. |
-| M22.2 | digits in identifiers | Relaxed the letters-only rule to allow interior / trailing digits, keeping identifiers **letter-initial** (graduated `DRAFT#20`); **additive, non-breaking** (every prior identifier stays valid). Regular idents `[A-Za-z][A-Za-z0-9]*` (still no `_`, <= 64); constants `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (ALLCAPS, digits within a chunk, `_` still constants-only) - so `sha256` / `SHA256` / `HTTP2` / `SCRAM_SHA256` are legal, `AES_256` still illegal (write `AES256`). Applies **uniformly** to every letter-initial identifier (the lexer emits one `IDENT` and can't scope digits to method names): variables, params, methods, struct type **and field** names (`x1` / `ipv4` / `md5` fields), library / `use as` / `import as` aliases; constants are the one separately-lexed class; paths / map keys are strings and already had digits. Letter-initial keeps lexing unambiguous (digit-first is always a number). Touched the lexer + constant validator + spec + `JENNIFER.md` + grammar EBNF / PEG + naming guidance + every editor highlighter. Ends the euphemism tax; the breaking renames land as M22.3. |
-| M22.3 | library renames | The euphemism-dropping renames the digit rule unlocked, landed together pre-1.0 (each semver-breaking, no deprecation window): `use iic;` -> `use i2c;`; `uuid.generate("v4")` / `generate("v7")` -> `uuid.v4()` / `uuid.v7()` (the version is a real method; `generate` removed); `crypto.pbkdf(...)` -> `crypto.pbkdf2(...)`. **Not renamed:** `binary` (named for the reserved `bytes` keyword, not a digit) and `intl` (modeled on JS `Intl`, not `i18n`). One batch updated each library, its `*_test.j` overlay + Go integration test, `docs/`, `JENNIFER.md`, the cheatsheet, and every caller. |
-
-**Rejected in M22.3 (stance #1):** per-algorithm digest shortcuts
-(`hash.sha256(b)` / `crc.crc32(b)`) were briefly added beside `compute(b, algo)`,
-then removed - they are a parallel API for one job, and the family neighbours
-(`hash.hmac`, `crypto.pbkdf2` / `hkdf`) are irreducibly algorithm-as-value
-(SCRAM / JWT / TLS negotiate the hash; `sasl.j` threads a runtime `$s.algo`
-through all of them). So `compute(b, algo)` stays the single canonical form and
-the algorithm is always a value across the whole hash / crypto family. Full
-reasoning in `docs/technical/rejected.md`.
-
-### M22.4 - `match` statement (multi-way value dispatch, compacted)
-
-**Done.** A multi-way branch - `match (EXPR) { when V [, V ...] { } ... else { } }` -
-so a chain of `if` / `elseif` over one subject reads as a single dispatch.
-Keywords `match` / `when` (reserved - a pre-1.0 break, renamed collisions in
-`totp.j` / `feed_test.j`) chosen so it can *grow* into pattern matching (`M22.5`
-adds enum-variant patterns to the same `when`, no new keyword).
-**Semantics** (v1, value dispatch only): the parenthesized subject is evaluated
-**once** and compared to each arm's values by strict `==` (`Value.Equal`, the
-operator's path); the first matching arm wins; an arm's values short-circuit
-left-to-right; **no fall-through**, and `match` is **not a `break` target**
-(`break` / `continue` act on the enclosing loop, so Go's "break breaks the switch"
-trap is unrepresentable); optional `else` last; no-match-no-`else` is a no-op;
-each arm is its own scope; a statement, not an expression. **`fmt`** lays it out
-as a flat case list (like `switch`/`case` everywhere) - each `when` / `else` on
-its own line at the arm indent, **not** cuddling the previous `}` (a `match` arm
-is a case, unlike an `if`'s `} else {` tail); wrapped value lists align under the
-first value. **Implementation:** new `MatchStmt{Subject, []MatchArm{Values, Body},
-Else}` AST, `execMatch` runs the first matching arm via `execBlock`; the header
-`{` ambiguity (`when Name {` vs a `Name{...}` struct literal) is resolved by the
-parser's `noStructLit` flag - set across a `when` value list, re-enabled inside
-`(` / `[` / call / list / map bodies (Go's `exprLev` rule) - so a composite-literal
-value takes parens (`when (Point{x:1}) {`). `ast` gained the node cases, `tokens` /
-`profile` / `repl` needed none (generic handling), four editor highlighters + the
-docs bundle updated. Full spec in CLAUDE.md; verified across behavior /
-fmt-idempotence / `-race` / a golden example.
-
-### M22.5 - sum types (enums) + pattern `match`
-
-**Done** (graduated from `DRAFT#19`; the payoff `M22.4`'s `match` was designed
-to grow into). Structs model a *record*; there is no way to model "one of N
-variants," and the interpreter's own `Value` is already a tagged union - this just
-exposes that shape to the language, with `match` as the way to consume it.
-
-**Shipped as designed, with two deliberate refinements decided during
-implementation:**
-
-- **Naming is case-agnostic; no PascalCase / camelCase convention is enforced.**
-  An early sketch leaned on capitalisation to tell an enum construction
-  (`Shape.Empty`) apart from a namespace member (`bio.lower`) at parse time. That
-  was rejected as a parser shortcut that burdens a *teaching* language with an
-  incidental "start lowercase here, uppercase there" rule for no user benefit.
-  Instead, `Prefix.Member` is resolved **at eval from the tables** - is `Prefix`
-  an enum? then `Member` is a variant; otherwise it is a namespace / module
-  member. Enum and variant names may be spelled any way. The **only** convention
-  in play is the one the language already teaches: an all-`UPPERCASE` name is a
-  *constant*, so an enum *type* named all-caps would read as a constant in
-  `Name.member` position (name types normally and it never comes up). A bare
-  `namespace.fn` (a call missing its `()`) now gets a "that's a function, call it
-  as `namespace.fn(...)`" error at eval instead of a parse-time
-  "must be uppercase".
-- **Pattern matching covers a local / same-module enum subject.** Exhaustiveness
-  and variant-pattern resolution run in the parse-time resolver, which sees the
-  program's own enums; matching an *imported* module enum from the importing
-  program is not auto-detected (the owning module matches its own enums, and
-  callers dispatch through a module function). Cross-module **identity,
-  construction, value semantics, and zero values** all work.
-
-The `Value` gained a `KindEnum` kind (a `(ns, name)` type + a `Variant` tag +
-the payload `Fields`), mirroring `KindStruct` for copy / equality / deep-const /
-`MatchesDeclared` / module retagging; the parser reuses the `StructLit` node for
-braced construction (with a third segment for the cross-module form) and defers
-the payload-less bare form to eval; the resolver tracks binding types so an
-enum-typed `match` subject drives pattern arms + the exhaustiveness check; `fmt`
-reflows an enum like a struct def; a golden `examples/enum.j` and lexer / parser /
-interpreter / cross-module tests pin it.
-
-**Declaration + construction:**
-
-```jennifer
-def enum Shape {
-    Circle { r as float },
-    Rect { w as float, h as float },
-    Empty
-};
-def s as Shape init Shape.Circle{ r: 2.0 };   # or Shape.Empty
-```
-
-- **`def enum Name { Variant [ { field as type, ... } ], ... };`** at top level,
-  hoisted before the first statement like `def struct`. Each variant is
-  payload-less or carries named fields (a mini-struct). Construction mirrors
-  struct literals: `Name.Variant{ ... }` / `Name.Variant` (payload-less).
-- Cross-module enum identity keyed by canonical path, exactly like module structs
-  (`ALIAS.Enum` / `ALIAS.Enum.Variant{...}`).
-
-**Consumption - extends `M22.4`'s `match` / `when` with variant patterns:**
-
-```jennifer
-match ($s) {
-    when Circle(c) { io.printf("area %f\n", math.PI * $c.r * $c.r); }
-    when Rect(rc)  { io.printf("area %f\n", $rc.w * $rc.h); }
-    when Empty     { io.printf("empty\n"); }
-}
-```
-
-- A pattern arm `when Variant(bind) { block }` binds the variant's payload into a
-  **fresh per-arm scope** (`$bind` is the mini-struct), reusing exactly the arm
-  scope machinery `M22.4` already builds - value arms and pattern arms coexist,
-  disambiguated at resolve time by whether the arm head is an enum variant.
-- **Exhaustiveness** for an enum subject is checked at **resolve time**: every
-  variant must be covered, or an `else` arm present, else a positioned parse
-  error. (Value-`match` over `int` / `string` stays non-exhaustive - there is no
-  finite variant set to check.) This is the strict, positioned-error stance
-  applied to control flow; a forgotten variant is a compile error, not a silent
-  no-op.
-
-**Implementation surface.** A new `Value` kind **`KindEnum`** mirroring
-`KindStruct` almost exactly - a `(namespace, name)` discriminant (which variant)
-plus a `Fields` payload - so it inherits value semantics, deep `const`,
-`Copy` / `DeepCopy`, and `MatchesDeclared` with little new machinery, and stays
-tagged-union / reflect-free (TinyGo-clean, no frame-pool concern). Parser: the
-`def enum` declaration and `Name.Variant{...}` construction, plus the pattern-arm
-grammar in `match` (payload slots resolved into the arm block scope via
-`borrowBlockEnv`). Resolver: the exhaustiveness check. Interpreter: `execMatch`
-extended to test the active variant and bind its payload. Plus grammar EBNF / PEG,
-the spec (`CLAUDE.md`, `JENNIFER.md`), the four editor highlighters, the
-`types-and-values` + `control-flow` user-guide pages, and lexer / parser /
-interpreter tests with a golden example.
-
-**Requires:** **`M22.4`** (the `match` / `when` construct pattern arms extend).
-Relates to `DRAFT#18` (first-class functions - a `match` result plus function
-values together give the functional-core idioms).
-
-### M22.6 - TLS options for `http` / `rest`
-
-**Done.** Let the `http` client (and `rest` on top) reach an HTTPS server with
-a self-signed or private-CA certificate, by threading TLS options through to
-`net.connectTLS`. Today `http` always full-verifies - `modules/http.j` calls
-`net.connectTLS($addr, DEFAULT_TIMEOUT_MS)` with no options - so it cannot talk to
-the self-signed certs that LAN appliances (Proxmox, Synology, an internal service)
-ship by default. This is the shared enabler for that whole "manage my own
-infrastructure" family. It needs **no interpreter or system-library change**:
-`net.connectTLS` already accepts `net.TLSOptions{ skipVerify, caCert }` (`M16.14`),
-so the work is purely plumbing it through the two `.j` modules.
-
-**Shape:**
-
-- **`http`** carries TLS options on the request path: an `http.TlsOptions` struct
-  (`{ skipVerify as bool, caCert as bytes }`, mirroring `net.TLSOptions`) plus
-  options-taking send variants `http.requestTls(method, url, headers, body, tls)`
-  and `http.requestWithTls(..., timeoutMs, maxBytes, tls)` (`http` is
-  function-based, with no `Request` struct to hang a field on). `https://` with no
-  options - `request` and the verb shortcuts, which pass the zero `TlsOptions` -
-  behaves exactly as today.
-- **`rest`** exposes it per-client (a `rest.Client` already bundles base URL +
-  default headers): a `tls as http.TlsOptions` field, a `rest.client(baseUrl)`
-  constructor (needed since the added required field breaks the old bare
-  `Client{baseUrl, headers}` literal), and builders mirroring `rest.withHeader` -
-  `rest.insecure(client)` (skip verification) and `rest.withCA(client, pem)`
-  (trust a PEM CA) - applied to every request.
-- **Secure by default.** Verification stays **on** unless explicitly relaxed;
-  `skipVerify` is opt-in with a MITM-risk note, `caCert` is the safer path (trust
-  the appliance's own CA). Matches `net.TLSOptions` semantics and the security
-  model (opt-in, documented, for a trusted-LAN endpoint - never a default).
-
-**Files:** `modules/http.j` + `modules/rest.j` (struct / builders / thread to
-`net.connectTLS`), their `*_test.j` overlays (TLS-builder shape tests),
-`docs/modules/http.md` + `rest.md`, `JENNIFER.md` bullets, the `rest_demo.j`
-constructor update. Default-binary-only (net-backed), so no TinyGo concern.
-**Verified:** Go integration tests (`cmd/jennifer/http_tls_test.go`) drive both
-surfaces against a self-signed loopback - the default request refuses the
-untrusted cert, `skipVerify` accepts it, and `withCA` trusts the server's own
-cert - plus a full Jennifer `httpd.listenTLS` round-trip. A real end-to-end
-test, not just a shape check.
-
-Dogfoods **M22.9**: `rest.Client.tls` is a module struct (`http.TlsOptions`) used
-as a struct field across the `main -> rest -> http` boundary.
-
-### M22.7 - `graphql` (GraphQL client module)
-
-**Done.** A thin GraphQL client `.j` module: build a request against one
-endpoint, POST `{ "query": ..., "variables": ... }`, and read the JSON response.
-GraphQL is a stable, general protocol (GitHub, GitLab, Shopify, Hasura - and the
-immediate motivation, Unraid's official API - all speak it), so unlike a
-vendor-specific NAS client (`DRAFT#24`) it belongs in **core `modules/` as a peer
-to `http` / `rest`**, not a deck. It is a `.j` module, not a Go library: the query
-is an opaque string the caller supplies (no need to parse GraphQL syntax - that is
-the server's job) and the response is JSON the `json` library already handles, so
-there is no per-byte hot path.
-
-**Shape:** a `graphql.Client` layered on a `rest.Client` (endpoint URL + auth
-header, and - via `M22.6` - TLS options for a self-signed host), plus
-`graphql.query(client, query, variables) -> json.Value`. The one
-GraphQL-specific wrinkle to get right: **a GraphQL error is an HTTP 200 with an
-`errors` array in the body**, not a non-2xx status - so `query` must inspect the
-payload and raise a positioned `Error` (kind `"graphql"`) carrying the server's
-messages, rather than trusting the status line. `variables` is a `json.Value` /
-`map`; a mutation is just a query string, so no separate verb is required (a
-`mutation` alias can be added if it reads better).
-
-**Files:** `modules/graphql.j` + `modules/graphql_test.j` (100%),
-`docs/modules/graphql.md`, a `JENNIFER.md` bullet, a demo. Default-binary-only
-(net-backed via `http` / `rest`). **Requires:** builds on `http` / `rest` +
-`json`; `M22.6` for self-signed endpoints (the homelab case). It is the GraphQL
-dependency the Unraid client in `DRAFT#24` consumes.
-
-Shipped as designed. `graphql.Client` wraps a `rest.Client` (so it inherits the
-`bearer` / `basic` / `header` / `withCA` / `insecure` builders and the
-`http.TlsOptions`), but `query` POSTs to the endpoint URL **verbatim via
-`http.requestTls`** rather than through `rest`'s path-joining verbs - `rest`'s
-`joinUrl` appends a trailing slash for an empty path (`.../graphql/`), which many
-GraphQL servers reject. `query` returns the **full** decoded response (result
-under `/data`), raising a `graphql` error on a non-empty top-level `errors` array
-(the HTTP-200 GraphQL convention, messages joined) or a non-2xx status (with the
-body). Two ergonomic additions beyond the minimal cut: **`queryNamed` /
-`tryQueryNamed`** take an `operationName` (for a document with several named
-operations), and **`tryQuery` / `tryQueryNamed`** return the raw envelope instead
-of raising on GraphQL errors - so a caller can branch on a structured error
-`code` (`extensions.code`, `path`) via the exported `hasErrors` / `errorMessages`
-plus the ordinary `json` accessors; they still raise on a non-2xx HTTP status
-(where there is no envelope). Overlay `graphql_test.j` (11 tests: `buildRequest`
-incl. `operationName` inclusion/omission, `hasErrors`, `errorMessages`, the
-partial-data-plus-errors and empty-errors-array cases) + Go `TestGraphql` (a local
-`httpd` stub round-trip: success, GraphQL-errors, HTTP-error, `operationName`
-transmission, and `tryQuery` structured-error access). A self-contained
-`examples/modules/graphql_demo.j` (stub server, no network). This closes the M22
-track.
-
-### M22.8 - self-referential struct guard
-
-**Done.** A struct that contains itself **by value** - directly
-(`def struct Node { v as int, next as Node }`) or mutually (A holds a B that
-holds an A) - has no finite zero value under Jennifer's value semantics (there is
-no null / pointer struct field to terminate it). It used to be accepted at
-declaration and then **fatally stack-overflow** (an uncatchable Go crash, past
-the call-depth cap) the moment its zero value or a literal was built. This turns
-that into a **positioned, actionable error at hoist time**:
-
-```
-struct "Node" cannot contain itself by value (field "next" is "Node"); a by-value
-struct cycle has no finite zero value - use `list of Node` (or a `map`) for
-recursive data
-```
-
-- `Interpreter.checkStructCycles` runs once **after** all top-level structs are
-  hoisted (so mutual cycles across the whole set are visible), at both entry
-  points (`Run` and `EvalInteractive`); module structs are checked via their
-  sub-interpreter's `Run`. A DFS with gray/black colouring over each struct's
-  **direct** struct-typed fields finds a back-edge.
-- Only a **direct, local user-struct** field is a by-value edge. Recursion
-  *through* a `list` / `map` / `task` field is allowed (their zero is
-  empty / a handle - finite), and a module- or library-struct field can never
-  cycle back to a local struct. So `def struct Tree { v as int, kids as list of
-  Tree };` and ordinary nesting (`Line { from as Point, to as Point }`) stay
-  legal - the guard only rejects the genuinely-infinite shapes.
-- Pinned by `TestStructSelfReferenceRejected` (direct, mutual, allowed
-  list-recursion, allowed nesting).
-
-**Adjacent gap (now fixed):** a **module** struct used as a *struct field type*
-was a separate cross-module field-identity bug, fixed in `M22.9` (below).
-
-### M22.9 - module structs as struct fields (cross-module field identity)
-
-**Done.** A module struct used as a **struct field type** now type-checks. It was
-previously rejected with "expects geo.Point, got struct" even though the same
-module struct works fine as a variable / parameter type (`def p as geo.Point`).
-Two related manifestations, both fixed:
-
-- **A main-program struct with a module-struct field**
-  (`def struct Line { from as geo.Point };`): `resolveDeclaredTypesOnce` (which
-  stamps the module's `(stem, path)` identity onto declared types after
-  `loadModuleImports`) never walked **struct field types** - only variable /
-  parameter types and `list` / `map` elements. So the field kept its unresolved
-  alias namespace while the field value carried the module identity, and the
-  check mismatched. Fix: also stamp each hoisted struct's field types in that
-  pass (recursing into `list` / `map` elements, so `pts as list of geo.Point`
-  resolves too). The `StructDef` pointers are shared with `i.structs`, so this
-  stamps the hoisted defs.
-- **A module struct whose own field references a sibling module struct**
-  (`Seg { a as Point }`), used across the import boundary: the module's field
-  types are bare (module-internal) but the boundary-crossed field values carry
-  the module's `(ns, path)` identity. Fix: retag the bare own-struct field types
-  to the module identity at the boundary check - at both struct-literal
-  construction and field assignment - via the existing `retagType` helper (which
-  already handles the same retag for `list` / `map` element types).
-
-Value semantics, chained lvalues into a nested module-struct field
-(`$L.from.x = 5`), and passing a nested field back into a module function all
-work; a wrong-typed field value is still rejected. Pinned by
-`TestModuleStructAsFieldTypeInMainStruct` and
-`TestModuleStructWithSiblingStructField`.
-
-### M22.10 - byte-capable `http` download
-
-**Done.** The `http` client could not fetch a binary payload (a `.tar.gz`, an
-image): every response body was built as `convert.stringFromBytes(_, "utf-8")`,
-which is strict (throws on non-UTF-8 by the "strict at boundaries" stance), so
-`http.request` on a gzip URL threw `stringFromBytes: input is not valid UTF-8`.
-The whole stack **up to that last step was already byte-exact** (socket read,
-Content-Length trim, chunked `dechunk` all operate on `bytes`), so the fix was an
-additive byte path, not a rewrite:
-
-- **`http.BytesResponse`** - the byte-safe twin of `Response`, with `body as
-  bytes` instead of `string`.
-- **`http.requestBytes` / `requestWithBytes` / `getBytes`** - return a
-  `BytesResponse` with the raw body. `requestWithBytes` carries the explicit
-  timeout / `maxBytes` (negative = unbounded, for a large archive) / `TlsOptions`.
-- Internally, `parseResponse` split into `parseRaw` (returns the byte-exact
-  `BytesResponse` core) plus a thin text decoder, and `sendCore` now returns the
-  raw wire bytes; the text verbs are unchanged (still throw on a non-UTF-8 body,
-  by design). `rest` stays text/JSON-only.
-
-Verified end-to-end in `cmd/jennifer/http_bytes_test.go` (a gzip served over
-loopback downloads with matching sha256 and unpacks back, while the text `get`
-refuses the same body) plus a `parseRaw`-keeps-binary overlay test.
-
-### M22.11-M22.13 - Hardening
-
-**All done.** The three grouped milestones from two security / robustness audits.
-Every fix ships with a test (a module `*_test.j` overlay case or a Go table /
-integration test). **Per-finding detail (severity, reproducer, code sites) lives
-in the two report files**; this table is the milestone index, and the reasoned
-non-literal choices follow it.
-
-| M#     | Theme | Findings -> what shipped |
-| ------ | ----- | ------------------------ |
-| M22.11 | injection & output-encoding | `OM-002` orm identifier/operator allowlists + quoted idents; `OM-006` imap/pop `rejectControl` (CRLF); `OM-007` statsd metric name/value validation; `OM-011` htmlwriter tag/attr name check + exported `safeUrl` (markdown's `safeHref` delegates to it); `OM-012` tengine no-auto-escape SECURITY warning; `OF-003` json.encode HTML-escapes `< > & U+2028 U+2029` as `\u00xx`; `OF-008` new `hash.equal` (constant-time); `OM-020` http.parseUrl splits `?`/`#` before the authority; `OM-021` dotenv env-name validation; `OM-010` ipnet folds v4-mapped `::ffff:0:0/96` to a v4 `Address` (new `unmap`). |
-| M22.12 | network / resource / path robustness | `OM-004` memcache/mikrotik/amqp 64 MiB cap on server-declared lengths; `OM-005` mikrotik connect+read timeouts + cleartext-default warning; `OM-017` memcache/label connect timeouts; `OF-005` net.readAll defaults to a 256 MiB cap (negative = unlimited); `OF-009` net.startTLS snapshots state under `s.mu` + holds `s.readMu` across the handshake; `OF-007` bounded handle registries (sql/fs/os/compress/net) + sql 30 s query/exec deadline + `sql.CloseAll` CLI teardown; `OF-013` archive per-entry size budget (no `uint64` wrap); `OF-004` httpd.serveDir rejects `\` + re-verifies containment; `OF-011` httpd chmods a `unix:` socket to 0660; `OF-012` documented the serveFile/serveDir symlink follow; `OF-010` sql redacts the DSN password from errors; `OF-014` json/toml/yaml write-API depth guard (bounds the tree at construction, covering encode / `%v` / `==` / `DeepCopy`); `OM-014` flatdb.save preserves the target's mode (0600 default) + removes the temp file on a failed rename. |
-| M22.13 | web framework | `OM-008` web.sessionId trusts only a minted-UUID-shaped cookie (re-mints otherwise) + new `web.renewSession`; `OM-009` new `web.onError` hook, else a swallowed handler error goes to stderr; `OM-013` web.form/percentDecode decode leniently + csrfCheck gates the form fallback on content type; `OM-019` a `HEAD` request is served by the matching `GET` route; `OF-017` httpd stops its two per-request timers (`NewTimer` + `defer Stop`). |
-
-**Reasoned non-literal choices** (the fix chosen over the literal one, with why):
-
-- **`OM-003`** (web serial handling, HIGH) - kept **serial** for v1 and documented
-  loudly, not a `spawn` pool: dispatch runs through `meta.callMain` into the entry
-  program, which shares one root `Environment` (the `callDepth` counter and
-  globals), so concurrent handlers would race on interpreter state. Per-handler
-  concurrency needs interpreter-level work first.
-- **`OF-006`** (unrestricted `meta.call`, a design note) - shipped the prominent
-  "match untrusted input against a program-defined allowlist first" warning + a
-  worked example in `meta.md`, not a new registration primitive (a two-line `.j`
-  allowlist already makes the safe path easy; `web` only dispatches
-  author-registered route-handler names, never request data).
-- **`OM-012`** took the tengine SECURITY warning, not an auto-escape mode (keeps
-  the advertised `text/template` semantics); **`OF-003`** the inline `\u00xx`
-  escape, not a separate `strings.escapeHtml`.
-- **`OM-010`** folds only the well-defined `::ffff:0:0/96` mapped form; the
-  deprecated IPv4-compatible `::a.b.c.d` is left as v6 (ambiguous with `::1`).
-- **`OF-007`** applied the full bounds + deadline + teardown to `sql` (the worst
-  instance) and registry bounds to `fs` / `os` / `compress` / `net`; httpd requests
-  already self-unregister and its listeners are OS-fd-bounded. `OF-013` stays
-  defence in depth (the extraction-time `readCapped` budget is authoritative).
-
-### M22.14 - `imap` criteria-based search
-
-**Done.** `imap.search(session)` (which was `SEARCH ALL`, redundant with the
-mailbox count) is now `imap.search(session, criteria)` - a **breaking** signature
-change (pre-1.0), where an empty `imap.criteria()` reproduces the old behaviour.
-The new `imap.Criteria` struct filters as a **hybrid**: server-side fields map to
-one IMAP `SEARCH` (substring on `subject`/`from`/`to`/`text`, a `since` / `before`
-day-granular date range as `time.Time` values, flag state, size - all ANDed, one
-round-trip, no bodies), and client-side fields refine the returned candidates by
-fetching only their headers / structure (`subjectRegex` / `fromRegex` on the
-decoded header - what IMAP substring search can't do - and `hasAttachments` via a
-`BODYSTRUCTURE` disposition heuristic, no body download). Criteria strings can't
-inject a command: substrings go through `quoteArg` (control-checked + escaped +
-quoted), dates are rendered from `time.Time` (a controlled `dd-Mon-yyyy`, no
-user string), sizes are ints, and `command()` control-checks the whole line. The
-`since`/`before` fields are plain `time.Time` (a zero value = unset, rendered
-internally with `time.format` - no bespoke date type). IMAP `SEARCH` is
-day-granular, so a bound carrying a **time-of-day** is transparently refined to
-the exact instant client-side (against each candidate's `INTERNALDATE`, the clock
-`SEARCH` filters on; the `BEFORE` server date widens by a day so its own day's
-earlier messages survive for the refinement) - no extra parameter, a midnight
-bound stays pure server-side. `imap.criteria()` builds an empty filter; pure
-builders (`buildSearchCommand` / `bodyStructureShowsAttachment` /
-`parseInternalDate` / `hasTimeOfDay`) are white-box-tested in the overlay, the
-client refinement end-to-end in the Go suite. Follow-ups noted in `imap.md`:
-non-ASCII `SEARCH` strings, UID search. Pure `.j` (adds a `use time;`,
-TinyGo-clean), both binaries build.
-
-### M22.15 - `imap` folder browsing, APPEND, and folder rename
-
-**Done.** Rounded the `imap` client from read-plus-manage into a complete
-read / browse / manage / **save** client by adding the core IMAP4rev1 commands it
-was missing, plus a user-facing terminology rename:
-
-- **`folders(session, pattern)`** (`LIST`) - enumerate folders as `imap.Folder`
-  (`name`, `delimiter`, `flags`), so a program can discover the folder tree
-  instead of hardcoding `"INBOX"`. **`status(session, folder)`** (`STATUS`) -
-  message / unseen / recent / uidnext / uidvalidity counts **without** selecting
-  (folder badges, "new mail?" polls). Both parse via pure, overlay-tested helpers
-  (`parseListLine` / `parseStatus`).
-- **`append(session, folder, message)`** / **`appendWith(..., flags, ...)`**
-  (`APPEND`) - upload a full RFC 5322 message (save to Sent, store a Draft),
-  closing the read-only-ish gap. Uses the synchronizing-literal continuation flow
-  (`writeLine` the `{N}` head, wait for `+`, send the byte-counted body, read the
-  tagged completion); the mailbox is quoted and the head control-checked, the body
-  is an opaque literal.
-- **Terminology: "mailbox" -> "folder"** across the user-facing surface (a pre-1.0
-  breaking rename, since consistency forbids `selectMailbox` beside a `Folder`
-  struct): `selectMailbox` -> `selectFolder`, `createMailbox` -> `createFolder`,
-  the `Mailbox` struct -> `Folder`, and the `mailbox` parameters -> `folder`.
-  "Folder" is what every mail client and user calls these; the IMAP-spec term is
-  noted once in the docs for discoverability. `list` was unavailable (reserved
-  type keyword), so the LIST verb is `folders`.
-
-End-to-end LIST / STATUS / both APPEND variants are covered by the Go IMAP mock
-(which grew a literal-continuation `APPEND` responder). Pure `.j`, both binaries
-build.
-
----
-
-### M22.16 - core hardening sweep
-
-**Done.** A batch of small correctness / resource / performance residuals in
-the `internal/` tree - each self-contained and independent of the module work,
-landed as one reviewed pass:
-
-- **`sql` cursor deadline** - the query timeout currently governs the whole cursor
-  lifetime, so a `sql.next` loop reading a large table for longer than the deadline
-  dies mid-iteration and looks like a database failure. Split the two concerns: a
-  short deadline on acquiring the connection / issuing the statement, and either no
-  deadline or a caller-settable one on reading the cursor (`sql.setQueryTimeout(ms)`
-  or an `open` option), with error text that names the client as the source.
-- **`httpd` registry bound** - the server (and per-request) registries are the one
-  instance of the registry pattern the earlier hardening pass left unbounded; add
-  the same `maxServers` pre-insert check and catchable "too many open" error the
-  five other registries already carry.
-- **`hash` md5 / sha1 labelling** - mark md5 and sha1 non-cryptographic in the
-  `algoList` error text, the `docs/libraries/hash.md` algorithm table, and the
-  `hash.hmac` doc comment, so a checksum use is not confused with a security one
-  (both stay available for legacy interop).
-- **write-depth guard cost** - `json` / `yaml` / `toml` re-scan the entire result
-  after every `set` / `insert` / `append` to enforce the nesting cap; have the
-  write helpers compare the depth of the node they touched (they already walk the
-  pointer path) instead, with a subtree-only scan for `move`, and fold the three
-  identical `exceedsDepth` copies into one shared helper.
-- **`include` expansion cap** - per-path cycle detection (correct for diamonds)
-  lets a chain that includes the previous file twice expand to 2^n tokens, so ~30
-  tiny files exhaust memory; cap total spliced tokens (or include depth) with a
-  positioned preprocessor error. Untrusted *code* is outside the threat model, but
-  this is an easy accident in a generated-source pipeline.
-- **`printf` field cap** - the field cap is a generous `1 << 20`; lower it to a few
-  thousand (terminal layout never needs a megabyte-wide field) and replace the
-  `for width(n) < pad { n++ }` O(Pad) spin with the closed form.
-- **decoder error positions** - `json` / `xml` recompute line / column by
-  rescanning from offset 0 on every error; O(n) once per failed decode today, a
-  trap only if a future change accumulates diagnostics. Track position
-  incrementally so it does not get rediscovered.
-
----
-
-### M22.17 - web hardening (concurrent dispatch)
-
-**Done.** Turned the `web` framework from strictly-serial into safely-concurrent
-request handling, and fixed the error-reporting hook a module could never feed a
-typed `Error`. Interpreter-first: the module-level change depended on core work,
-so the order below was mandatory. Each of the four items landed with its own
-gating test (`error_boundary_test.go`, `concurrent_dispatch_test.go` run under
-`-race`, `web_concurrency_test.go`'s slow-handler latency probe, and
-`web_onerror_test.go`'s typed-Error end-to-end), and the concurrent-dispatch
-reasoning is recorded in `docs/technical/design-decisions.md`.
-
-The naive fix - wrap `handleOne` in a `spawn` - was **reproduced to be unsafe**.
-Under `go build -race`, a `/fast` request issued 300 ms into a 2 s handler does
-drop from ~1700 ms to ~3 ms, but the race detector reports a data race on the
-call-depth counter (`root.callDepth++`). That counter is meant to live on the
-per-goroutine root env, but a spawned worker dispatching a handler through
-`meta.callMain` re-roots the handler frame at the shared host (and shared module)
-global, so concurrent workers mutate one shared `callDepth`. The M23 note that
-`web` stays serial *because concurrent dispatch races on shared interpreter state*
-is therefore correct as stated; the constraint is removed here properly, not
-papered over:
-
-1. **`Error` across `meta.callMain`** - the retag path stamps a module's struct
-   arguments with the module identity, but `Error` is auto-injected into every
-   interpreter, so `isOwnStructName("Error")` is true and a module's `Error`
-   arrives stamped with the module path, unbindable to an entry-program `as Error`
-   parameter. Track a module's *declared* structs separately from the
-   auto-registered `Error` and retag only the former, so a module can hand an
-   `Error` back across the boundary. (Regression test: a module that returns and
-   accepts an `Error` across `meta.callMain` in both directions.)
-2. **Race-safe concurrent host / module dispatch** - the prerequisite for spawning
-   handlers: move `callDepth` off the shared root env (goroutine-local), then audit
-   every other write to a shared `i.global` / module global reachable from a
-   concurrently-dispatched handler (global `def` / assign, the `CallExpr.Method` /
-   `Fn` node caches, the map hash-index, profiler / diag fields), and gate the
-   whole change behind a concurrent-handler stress test run under `-race`.
-3. **`web` spawn-per-request** - only after (2), wrap per-request handling in a
-   `spawn` (errors caught inside the spawn so nothing escapes as an unwaited-task
-   error; concurrency already bounded by `httpd`'s `maxInFlight`). Update the
-   header comment, `docs/modules/web.md`, `modules/README.md`, and `JENNIFER.md`,
-   all of which currently assert serial handling in bold, and reconcile the M23
-   web non-goal note. The 1700 ms -> 3 ms probe becomes the regression gate.
-4. **`web.onError` fail-safe** - depends on (1). Today registering an error handler
-   *replaces* the working stderr fallback and, because the `Error` is unbindable,
-   loses the error entirely - a deployment that follows the docs gets *less*
-   diagnostic output than one that ignores the hook. Report to stderr *in addition
-   to* calling the handler, correct the doc comment that promises a typed `Error`,
-   and add a real end-to-end test (register a handler, request a throwing route,
-   assert the handler observed the error's `kind` / `message`) - the current test
-   asserts only that the name was stored, which is why the dead hook shipped green.
-
-The reproduction that the spawn-per-request fix races on the shared call-depth
-counter gets a reasoning record in `docs/technical/design-decisions.md` when the
-milestone lands, since the concurrent-dispatch design turns on it.
-
----
-
-### M22.18 - `dotenv` layering, profiles, interpolation
-
-**Done.** Grew `dotenv` from a single-file `parse` / `read` / `load` into a
-layered loader with environment profiles, `${VAR}` interpolation, and multi-line
-values - the dotenv-flow / Rails / Next.js shape, built with Jennifer's
-explicit-over-implicit stance and a strict security posture. Pure `.j` module
-work; **no interpreter change** in this cut (a CLI `--env` flag is parked beyond
-1.0.0 as `docs/horizon.md` `DRAFT#26`). Consolidates here the `${VAR}`
-interpolation + multi-line items that were parked in `M23.8`.
-
-Shipped `readCascade` / `resolve` / `loadCascade` / `autoload` over the enhanced
-`parse` (backward-reference `${VAR}` in unquoted + double-quoted values, multi-line
-double-quoted values with a positioned unterminated-quote error). The single-file
-`load` keeps its unconditional-override contract (the documented primitive); the
-cascade loaders are the real-env-wins path. Since there is no `os.hasEnv`, "already
-set in the real env" is `os.getEnv(k) != ""` (an env var set to `""` counts as
-unset - documented). Profile labels validated `^[A-Za-z0-9_-]{1,64}$` up front; one
-fixed `dir`, no walk-up. Overlay `modules/dotenv_test.j` (27 tests) + Go
-`TestDotenvCascade` (cascade order, cross-file interpolation, multi-line,
-real-env-wins in `resolve`/`loadCascade`, traversal rejection, `autoload` reading
-`JENNIFER_ENV`); docs / README / `JENNIFER.md` / demo updated.
-
-**Layered load.** Read, later overriding earlier, skipping absent files, from a
-single explicit base directory (`dir`, usually `os.cwd()`):
-`.env` -> `.env.local` -> `.env.<profile>` -> `.env.<profile>.local`. Two
-independent precedence axes:
-
-- **Profile label** (which `<profile>`): `JENNIFER_ENV` env var, else `""` (no
-  profile - meaning load the base files only, *not* a `.env.default` file).
-- **Value** (which wins, highest first): a **pre-existing OS env var** (never
-  overwritten - real env wins) > `.env.<profile>.local` > `.env.<profile>` >
-  `.env.local` > `.env`.
-
-**Surface** (exported):
-
-- `parse(text)` - enhanced with `${VAR}` interpolation + multi-line (below);
-  single-file `read(path)` / `load(path)` stay as the primitives, also enhanced.
-- `readCascade(dir, profile)` - the file layers merged into a map, **no env
-  mutation** (the explicit path).
-- `resolve(dir, profile)` - the **effective** map: `readCascade` overlaid by the
-  real OS env (real env wins), for programs that read the map instead of
-  `os.getEnv`.
-- `loadCascade(dir, profile)` - `readCascade` then `os.setEnv(k, v)` **only for
-  keys not already set** in the OS env (real env wins). Returns the file map.
-- `autoload(dir)` - convenience: `loadCascade(dir, <JENNIFER_ENV>)`, documented as
-  reading that one env var.
-
-**Interpolation.** `${VAR}` (`VAR` shaped like `validEnvName`) resolves against
-earlier-parsed keys (this file + earlier cascade files) -> real OS env -> empty
-string. **Backward-reference only**, so cycles are impossible by construction (no
-detection needed). It expands in unquoted and double-quoted values; single-quoted
-values are fully literal (`'${X}'` stays literal). **No `$(...)` / backtick
-command substitution** - those are plain characters; this is the hard security
-line (a `.env` value can never execute a command). Multi-line double-quoted values
-span physical lines (the parser tracks quote state across lines instead of the
-current line-by-line split; an unterminated quote is a positioned error).
-
-**Security posture**
-
-- **Strict profile validation** - the label is matched against
-  `^[A-Za-z0-9_-]{1,64}$` before building `.env.<profile>`, so a `JENNIFER_ENV`
-  from an untrusted upstream cannot path-traverse (`../../etc/x`, `prod/../y`).
-  `path.base` is not a sanitizer; validate up front. Builds on the existing
-  `validEnvName` (`OM-021`).
-- **Fixed base directory, no search / no walk-up** - loading from one explicit
-  `dir` is what closes the DLL-hijack class (a walked-up "nearest `.env`" would let
-  an attacker plant a file in a parent dir). `.env.local` overriding `.env` is safe
-  because they share that developer-controlled directory.
-- **Real env wins** - a committed file cannot clobber a deployment's real secret
-  (a pre-1.0 behavior change from today's unconditional-override `load`; called out
-  in the docs). To force-override, use `readCascade` + your own `os.setEnv` loop.
-- Consistent with the security model: `.env*` files are **trusted local input**
-  (the developer controls the working dir); dotenv is not a sandbox.
-
-**Deliverables:** `modules/dotenv.j` + a 100% `modules/dotenv_test.j`, a Go
-integration test (cascade order + real-env-wins + traversal rejection + multi-line
-+ interpolation), `docs/modules/dotenv.md`, `modules/README.md` row, the
-`JENNIFER.md` bullet, and `examples/modules/dotenv_demo.j`. Both binaries build
-(pure `.j` over `fs` / `strings` / `os` / `path` / `regex`).
-
----
+| M22.1 | `path` library | OS-aware path manipulation over Go `path/filepath`, the pure-string counterpart to `fs`'s I/O: `base` / `dir` / `ext` / `stem` / `join` (variadic) / `clean` / `isAbs` / `split`. Manipulation subset only (no disk-touching `Abs` / `Glob` / `Walk`), so **no build-tag split**, TinyGo-clean, both binaries. Host separator (portable). Explicitly **not** a filename sanitizer. |
+| M22.2 | digits in identifiers | Relaxed letters-only to **letter-initial** `[A-Za-z][A-Za-z0-9]*` (still no `_`, <= 64); constants `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (digits within a chunk). **Additive / non-breaking** - so `sha256` / `SHA256` / `HTTP2` / `SCRAM_SHA256` legal, `AES_256` still illegal (write `AES256`). One `IDENT` token, so it applies uniformly (vars / params / methods / struct type **and field** names / `use as` / `import as` aliases); constants the one separately-lexed class. Graduated `DRAFT#20`; unlocks the M22.3 renames. |
+| M22.3 | library renames | The breaking renames the digit rule unlocked, one pre-1.0 batch (no deprecation window): `use iic;` -> `use i2c;`; `uuid.generate("v4"/"v7")` -> `uuid.v4()` / `v7()` (`generate` removed); `crypto.pbkdf` -> `pbkdf2`. **Not renamed:** `binary` (the `bytes` keyword, not a digit), `intl` (JS `Intl`). Each batch updated the library, its overlay + Go test, docs, cheatsheet, and every caller. **Rejected** (stance #1): per-algorithm digest shortcuts (`hash.sha256` / `crc.crc32`) - the hash / crypto family is irreducibly algorithm-as-value (SCRAM / JWT / TLS negotiate the hash), so `compute(b, algo)` stays canonical (`rejected.md`). |
+| M22.4 | `match` statement | Multi-way value dispatch `match (EXPR) { when V [, V ...] { } ... else { } }`: subject evaluated **once**, strict `==` (`Value.Equal`), first match wins, values short-circuit left-to-right, **no fall-through**, **not a `break` target** (`break` / `continue` act on the enclosing loop), optional `else` last, no-match-no-`else` is a no-op; a statement, each arm its own scope. Keywords `match` / `when` (pre-1.0 break). `fmt` lays arms out flat (each `when` / `else` on its own line, **not** cuddled). New `MatchStmt`; the header `{` ambiguity (`when Name {` vs a `Name{...}` literal) is resolved by the parser's `noStructLit` flag. Designed to grow into M22.5 patterns. |
+| M22.5 | sum types (enums) + pattern `match` | `def enum Name { Variant [ { field as type, ... } ], ... };` (top-level, hoisted like `def struct`); `Name.Variant{...}` / `Name.Variant` construction; `match` gains variant patterns `when Variant(bind) { }` binding the payload into a fresh per-arm scope, with **exhaustiveness checked at resolve time** for a local / same-module enum subject. New `Value` `KindEnum` mirroring `KindStruct` (value semantics, deep-const, cross-module identity by canonical path, retag), tagged-union / reflect-free. **Case-agnostic** naming - `Prefix.Member` resolved from the tables at eval, not capitalisation, so no PascalCase rule is forced on a teaching language (only the pre-existing "ALL-CAPS is a constant" rule still applies). Graduated `DRAFT#19`. |
+| M22.6 | TLS options for `http` / `rest` | Reach an HTTPS host with a self-signed / private-CA cert. `http.TlsOptions{skipVerify, caCert}` + send variants `http.requestTls` / `requestWithTls`; `rest.Client.tls` field + a `rest.client(baseUrl)` constructor (the added required field breaks the bare literal) + `rest.withCA(c, pem)` (preferred) / `rest.insecure(c)`. **Secure by default** (verification stays on unless explicitly relaxed). Pure `.j` plumbing to `net.connectTLS` (M16.14) - no interpreter or system-library change. Verified end-to-end against a self-signed loopback (`http_tls_test.go`). Dogfoods M22.9 (`http.TlsOptions` as a struct field across `main -> rest -> http`). |
+| M22.7 | `graphql` client module | Thin GraphQL client over `http` / `rest`: `client(endpoint)` + `bearer` / `basic` / `header` / `withCA` / `insecure` builders, `query(c, query, variables) -> json.Value` (POST `{query, variables}`; result under `/data`). Gets the GraphQL convention right - a non-empty top-level `errors` array is an **HTTP 200**, not a non-2xx - raising a `graphql` error with the joined messages; a non-2xx also raises. `queryNamed` / `tryQueryNamed` add an `operationName`; `tryQuery` / `tryQueryNamed` return the raw envelope (no raise on GraphQL errors) for structured-error handling via exported `hasErrors` / `errorMessages` + `json` accessors. POSTs the endpoint **verbatim** via `http.requestTls` (`rest`'s `joinUrl` would append a trailing slash). The GraphQL dependency `DRAFT#24` (Unraid) consumes. |
+| M22.8 | self-referential struct guard | A struct containing itself **by value** (direct or mutual) has no finite zero value and used to fatally stack-overflow when its zero / a literal was built; `Interpreter.checkStructCycles` (a gray/black DFS over direct struct-typed fields, run after hoisting at both `Run` and `EvalInteractive`) now rejects it at hoist time with a positioned error pointing at `list of Self`. Recursion through a `list` / `map` / `task` field and ordinary nesting stay legal. |
+| M22.9 | module structs as struct fields | A module struct used as a **struct field type** now type-checks (was rejected "expects geo.Point, got struct" though it worked as a variable type). `resolveDeclaredTypesOnce` now also stamps struct **field** types with the module's `(stem, path)` identity (recursing into `list` / `map` elements), and a module struct's own sibling-struct field types retag to the module identity at the boundary check (construction + field assignment, via `retagType`). Value semantics + chained lvalues into a nested module-struct field work. |
+| M22.10 | byte-capable `http` download | `http` could not fetch a binary body (the response was always `convert.stringFromBytes(_, "utf-8")`, which throws on non-UTF-8). Added a byte path reusing the already byte-exact framing: `http.BytesResponse` (`body as bytes`) + `requestBytes` / `requestWithBytes` / `getBytes` (`parseResponse` split into a `parseRaw` byte core + a text decoder). Text verbs unchanged (still throw on non-UTF-8, by design); `rest` stays text / JSON. Pinned by `http_bytes_test.go` (a gzip round-trips with matching sha256). |
+| M22.14 | `imap` criteria-based search | `imap.search(session)` -> `imap.search(session, criteria)` (breaking; an empty `imap.criteria()` = the old `SEARCH ALL`). `imap.Criteria` filters **hybrid**: server-side fields map to one IMAP `SEARCH` (substring on subject/from/to/text, a `since` / `before` day-range as `time.Time`, flags, size - all ANDed, one round-trip), client-side fields refine the candidates by fetching only headers / `BODYSTRUCTURE` (`subjectRegex` / `fromRegex`, `hasAttachments` heuristic). Injection-safe (`quoteArg` + control-checked line); a time-of-day bound is transparently refined client-side against each candidate's `INTERNALDATE`. Pure `.j`. |
+| M22.15 | `imap` browse / APPEND / rename | Rounded `imap` into a full read / browse / manage / **save** client: `folders` (`LIST`) + `status` (`STATUS`, no select), `append` / `appendWith` (`APPEND` via the synchronizing-literal continuation flow). Terminology rename (pre-1.0 breaking): mailbox -> **folder** (`selectFolder` / `createFolder` / the `Folder` struct); the LIST verb is `folders` (`list` is a reserved type keyword). |
+| M22.16 | core hardening sweep | Small `internal/` correctness / resource / performance residuals, one reviewed pass: `sql` cursor deadline split from the acquire / statement deadline (caller-settable `sql.setQueryTimeout`); `httpd` registry `maxServers` bound + catchable "too many open"; md5 / sha1 labelled **non-cryptographic**; the json / toml / yaml write-depth guard checks only the touched node (not a full re-scan) and folds three `exceedsDepth` copies into a shared helper; an `include` total-token cap (a diamond that re-includes the previous file expands 2^n); the `printf` field cap lowered from `1<<20` + closed-form padding; incremental json / xml decoder error positions. |
+| M22.17 | web hardening (concurrent dispatch) | Turned `web` from strictly-serial into **safely-concurrent**, interpreter-first (four ordered steps, each with a gating test; reasoning in `design-decisions.md`). (1) `Error` crosses `meta.callMain` intact - track a module's *declared* structs separately from the auto-injected `Error`, retag only the former. (2) Race-safe dispatch - the call-depth counter became a per-chain `*int` threaded down the frames (fresh at each goroutine root, incremented at `evalCall` **and** every cross-boundary dispatch), fixing both the `-race` data race and a fatal re-entry Go-stack overflow; the rest of the reachable shared state (map hash-index reads, resolver caches, profiler, diag) audited clean. (3) spawn-per-request in `web` (errors caught inside; `task.discard` prunes; concurrency bounded by `httpd`). (4) `web.onError` fail-safe - always stderr **and** the hook, which now binds `as Error`. The 1700 ms -> 3 ms latency probe is the regression gate. Supersedes the M22.13 `OM-003` "web stays serial" note. |
+| M22.18 | `dotenv` layering, profiles, interpolation | Grew `dotenv` into a layered loader: `readCascade` / `resolve` / `loadCascade` / `autoload` merge `.env` -> `.env.local` -> `.env.<profile>` -> `.env.<profile>.local` from one fixed `dir` (no walk-up, closing the file-hijack class), with a **real OS env var always winning** over a file value; profile from `JENNIFER_ENV` (empty = base files only). Enhanced `parse`: **backward-reference** `${VAR}` (unquoted + double-quoted, resolving earlier keys -> real OS env -> "", so cycles are impossible; no `$(...)` command substitution), multi-line double-quoted values (positioned unterminated-quote error). Strict profile validation `^[A-Za-z0-9_-]{1,64}$` (no traversal). Single-file `load` keeps unconditional-override (the primitive); the cascade loaders are real-env-wins. `os.getEnv(k) != ""` is the "already set" test (no `os.hasEnv`; `""` counts as unset). Consolidated the `${VAR}` / multi-line items parked in M23.8. |
+
+**M22.11-M22.13 - hardening (two audits).** Three grouped milestones from two
+security / robustness audits (`internal/` and `modules/`), each fix shipping a
+test. **Per-finding detail (severity, reproducer, code sites) lives in the two
+report files;** the themes:
+
+- **M22.11 - injection & output-encoding:** orm identifier / operator allowlists;
+  imap / pop CRLF rejection; statsd metric validation; htmlwriter tag / attr
+  checks + exported `safeUrl`; a tengine no-auto-escape SECURITY warning;
+  `json.encode` HTML-escaping (`< > & U+2028 U+2029`); a new constant-time
+  `hash.equal`; `http.parseUrl` authority split; dotenv env-name validation
+  (`OM-021`); `ipnet` v4-mapped `::ffff:0:0/96` fold (`unmap`).
+- **M22.12 - network / resource / path robustness:** 64 MiB caps on
+  server-declared lengths; connect / read timeouts + cleartext warnings; a
+  `net.readAll` default cap; `net.startTLS` locking; bounded handle registries +
+  a `sql` query deadline + DSN-password redaction; `archive` per-entry budget;
+  `httpd.serveDir` traversal rejection + `unix:`-socket perms; the json / toml /
+  yaml write-API depth guard.
+- **M22.13 - web framework:** `web.sessionId` trusts only a minted-UUID-shaped
+  cookie + `web.renewSession`; the `web.onError` hook (else stderr); lenient
+  form / percent decoding + csrf content-type gate; a `HEAD` served by the
+  matching `GET` route; httpd per-request timer cleanup.
+
+**Reasoned non-literal choices** (the fix chosen over the literal one): `OM-003`
+(web) shipped **serial** for v1 with loud docs because concurrent dispatch raced
+shared interpreter state - **later removed properly in M22.17**; `OF-006`
+(unrestricted `meta.call`) shipped a docs allowlist pattern + `meta.md` example,
+not a new primitive (a two-line `.j` allowlist suffices; `web` only dispatches
+author-registered handler names); `OM-012` a tengine warning, not an auto-escape
+mode (keeps `text/template` semantics); `OM-010` folds only the well-defined
+`::ffff:0:0/96` mapped form; `OF-007` applied full bounds + deadline + teardown
+to `sql` (the worst instance) and registry bounds to `fs` / `os` / `compress` /
+`net`.
 
 ## M23 - module improvements
 
@@ -1667,12 +1051,6 @@ sub-numbering as pieces land):
 ---
 
 ## Requirements for 1.0.0 stable
-
-The core CI + release + packaging items that used to live here
-were promoted into M15.8 (the last step before Phase C). What
-stays here are the distribution requirements for a stable 1.0.0
-that aren't themselves milestones - they can land any time and
-don't block any feature milestone:
 
 - **Cross-build for macOS / Windows.** Waits on the
   platform-portability work in the [horizon ideas](horizon.md); ships as

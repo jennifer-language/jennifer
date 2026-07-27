@@ -177,7 +177,13 @@ backed by a Go dependency, not a hand-rolled descent).
 The same 4 MB ceiling limits how deep *Jennifer method calls* can nest at
 runtime - each call stacks many Go frames in the tree-walker - so the
 interpreter enforces a second, sibling cap in the same package,
-`internal/limits.MaxCallDepth`, in `evalCall`. It too is build-tag split, but
+`internal/limits.MaxCallDepth`. The counter is a per-call-chain `*int` threaded
+down the frames (fresh at each goroutine root) and bumped on **every** method
+entry - both an ordinary call (`evalCall`) and a cross-boundary dispatch (a
+module call, `meta.call` / `meta.callMain`) - so recursion that bounces through a
+dispatch boundary accumulates on one chain and is caught too, rather than
+resetting per hop and segfaulting (which matters most on `jennifer-tiny`'s low
+cap). It too is build-tag split, but
 lower than the nesting cap because a call frame is heavier than one nesting
 step: 10000 on the default binary (a heavy recursive body crashes Go's growable
 stack near 50k), and 48 on `jennifer-tiny` (whose stack was raised from 2 MB to
@@ -185,8 +191,8 @@ stack near 50k), and 48 on `jennifer-tiny` (whose stack was raised from 2 MB to
 the deepest recursion a shipped example reaches - `examples/benchmark.j`'s serial
 `fib(23)` - is depth 24). Exceeding it
 is a catchable "call stack too deep" runtime
-error - the analogue of Python's `RecursionError` - instead of a segfault; it
-guards `spawn` bodies on their own goroutines too.
+error - the analogue of Python's `RecursionError` - instead of a segfault; each
+`spawn` body gets its own counter on its goroutine.
 
 **TinyGo scheduler**. `jennifer-tiny` pins the cooperative
 single-thread scheduler (`-scheduler=tasks` in the Makefile).
