@@ -585,6 +585,24 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   pem)` (trust a PEM cert, preferred) or `rest.insecure(c)` (skip verification -
   trusted-LAN only). A 4xx/5xx is a `Response` value, not a crash. **Default
   `jennifer` binary only** (`net`).
+- **`graphql`** - a thin GraphQL client over `http` / `rest`. Build a client with
+  `graphql.client(endpoint)` (the full GraphQL URL, POSTed verbatim), layer auth /
+  TLS with `graphql.bearer(c, token)` / `basic` / `header(c, name, value)` /
+  `withCA(c, pem)` / `insecure(c)` (each returns a new `Client`), then
+  `graphql.query(c, query, variables)` POSTs `{"query": ..., "variables": ...}`
+  and returns the decoded response as a `json.Value` (the result is under
+  `/data`). The query is an opaque string (a mutation is just a query string);
+  `variables` is a `json.Value` (empty `json.map()` for none). The GraphQL-specific
+  rule it gets right: a GraphQL execution error is an **HTTP 200 with a top-level
+  `errors` array**, not a non-2xx status, so `query` raises a positioned `Error`
+  (kind `"graphql"`) carrying the joined server messages; a non-2xx status also
+  raises (with the status + body). To handle GraphQL errors without a `catch` -
+  branch on an error `code`, read partial data - `graphql.tryQuery(c, query,
+  variables)` returns the raw envelope (both `/data` and `/errors`) and raises
+  only on a non-2xx status; inspect it with `graphql.hasErrors($resp)` /
+  `graphql.errorMessages($resp)` and the `json` accessors. For a document with
+  several named operations, `graphql.queryNamed` / `tryQueryNamed` take a trailing
+  `operationName`. **Default `jennifer` binary only** (`net`).
 - **`oauth`** - a generic OAuth2 client (the *get-a-token* half; `sasl` is the
   *use-a-token* half) over `http` + `json`: `oauth.clientCredentials(cfg)` /
   `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` -> `deviceWait(cfg,

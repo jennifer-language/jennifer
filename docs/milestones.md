@@ -1088,7 +1088,7 @@ as a struct field across the `main -> rest -> http` boundary.
 
 ### M22.7 - `graphql` (GraphQL client module)
 
-**Planned.** A thin GraphQL client `.j` module: build a request against one
+**Done.** A thin GraphQL client `.j` module: build a request against one
 endpoint, POST `{ "query": ..., "variables": ... }`, and read the JSON response.
 GraphQL is a stable, general protocol (GitHub, GitLab, Shopify, Hasura - and the
 immediate motivation, Unraid's official API - all speak it), so unlike a
@@ -1113,6 +1113,28 @@ messages, rather than trusting the status line. `variables` is a `json.Value` /
 (net-backed via `http` / `rest`). **Requires:** builds on `http` / `rest` +
 `json`; `M22.6` for self-signed endpoints (the homelab case). It is the GraphQL
 dependency the Unraid client in `DRAFT#24` consumes.
+
+Shipped as designed. `graphql.Client` wraps a `rest.Client` (so it inherits the
+`bearer` / `basic` / `header` / `withCA` / `insecure` builders and the
+`http.TlsOptions`), but `query` POSTs to the endpoint URL **verbatim via
+`http.requestTls`** rather than through `rest`'s path-joining verbs - `rest`'s
+`joinUrl` appends a trailing slash for an empty path (`.../graphql/`), which many
+GraphQL servers reject. `query` returns the **full** decoded response (result
+under `/data`), raising a `graphql` error on a non-empty top-level `errors` array
+(the HTTP-200 GraphQL convention, messages joined) or a non-2xx status (with the
+body). Two ergonomic additions beyond the minimal cut: **`queryNamed` /
+`tryQueryNamed`** take an `operationName` (for a document with several named
+operations), and **`tryQuery` / `tryQueryNamed`** return the raw envelope instead
+of raising on GraphQL errors - so a caller can branch on a structured error
+`code` (`extensions.code`, `path`) via the exported `hasErrors` / `errorMessages`
+plus the ordinary `json` accessors; they still raise on a non-2xx HTTP status
+(where there is no envelope). Overlay `graphql_test.j` (11 tests: `buildRequest`
+incl. `operationName` inclusion/omission, `hasErrors`, `errorMessages`, the
+partial-data-plus-errors and empty-errors-array cases) + Go `TestGraphql` (a local
+`httpd` stub round-trip: success, GraphQL-errors, HTTP-error, `operationName`
+transmission, and `tryQuery` structured-error access). A self-contained
+`examples/modules/graphql_demo.j` (stub server, no network). This closes the M22
+track.
 
 ### M22.8 - self-referential struct guard
 

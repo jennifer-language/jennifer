@@ -1,0 +1,26 @@
+# Keep the Docker build context small and hermetic. The image build (see
+# packaging/docker/Dockerfile) needs the Go/TinyGo sources, go.mod/go.sum, the
+# modules, JENNIFER.md, and packaging/debian/copyright - nothing else.
+
+.git
+.github
+.gitignore
+
+# Build outputs and release artifacts.
+dist/
+book-output/
+/jennifer
+/jennifer-tiny
+/jennifer.exe
+*.tar.gz
+*.deb
+*.sha256
+
+# Regenerated in the build stage from the VERSION build arg (never copied in).
+internal/version/version_gen.go
+
+# Not needed to compile or assemble the image.
+docs/
+site/
+editors/
+theme/

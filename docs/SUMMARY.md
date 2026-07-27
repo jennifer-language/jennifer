@@ -80,6 +80,7 @@
 - [`font`](modules/font.md)
 - [`gotify`](modules/gotify.md)
 - [`gpio`](modules/gpio.md)
+- [`graphql`](modules/graphql.md)
 - [`htmlwriter`](modules/htmlwriter.md)
 - [`http`](modules/http.md)
 - [`ical`](modules/ical.md)
