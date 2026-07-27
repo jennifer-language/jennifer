@@ -232,6 +232,7 @@ needs to mint keys and request certificates. Same default-binary-only split.
 | `crypto.rsaGenerateKey(bits)` | `bytes` | A fresh RSA private key as PKCS#8 PEM. `bits` is 2048, 3072, or 4096. |
 | `crypto.ecGenerateKey(curve)` | `bytes` | A fresh EC private key as SEC1 PEM. `curve` is `"p256"`, `"p384"`, or `"p521"`. |
 | `crypto.jwkPublic(privatePem)` | `string` | The **RFC 7638 canonical** public JWK JSON of the key (members sorted, no whitespace). |
+| `crypto.jwkToPem(jwkJson)` | `string` | The **inverse** of `jwkPublic`: parse a public JWK (an RSA `{kty, n, e}` or EC `{kty, crv, x, y}` key) and return a PKIX / SubjectPublicKeyInfo `PUBLIC KEY` PEM - exactly the shape `rsaVerify` / `ecdsaVerify` accept. Resolves a JWKS entry (by `kid`) to a verification key. Curves `P-256` / `P-384` / `P-521`; an off-curve point or malformed JWK is an error. |
 | `crypto.csr(privatePem, domains)` | `bytes` | A DER PKCS#10 certificate-signing request over a `list of string` of domains (subject-alt DNS names; the first is the common name), signed with the key. |
 
 `jwkPublic` is canonical, so its SHA-256 is the **JWK thumbprint** (RFC 7638) -

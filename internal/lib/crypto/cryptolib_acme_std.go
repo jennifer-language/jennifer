@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -147,6 +148,108 @@ func curveName(c elliptic.Curve) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported curve")
 	}
+}
+
+// curveByName is the inverse of curveName: the JOSE curve identifier to the
+// standard NIST curve. Unknown / unsupported curves (P-256K, Ed25519 as an "EC"
+// crv, ...) are rejected.
+func curveByName(name string) (elliptic.Curve, error) {
+	switch name {
+	case "P-256":
+		return elliptic.P256(), nil
+	case "P-384":
+		return elliptic.P384(), nil
+	case "P-521":
+		return elliptic.P521(), nil
+	default:
+		return nil, fmt.Errorf("unsupported curve %q (want P-256 / P-384 / P-521)", name)
+	}
+}
+
+// jwkToPemFn implements crypto.jwkToPem(jwkJson) -> string: the inverse of
+// jwkPublic. It parses a public JWK (an RSA `{kty,n,e}` or EC `{kty,crv,x,y}`
+// key; the base64url members are the RFC 7518 big-endian integers) and returns a
+// PKIX / SubjectPublicKeyInfo PEM ("PUBLIC KEY") - exactly the shape
+// crypto.rsaVerify / crypto.ecdsaVerify accept, so a JWKS entry resolves to a
+// verification key. This is the missing half that lets `jwt` verify against a
+// JWKS by `kid` without hand-rolling ASN.1. Only public members are read; a JWK
+// carrying private fields (`d`, `p`, ...) still yields only the public key.
+func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 || args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem expects 1 string argument (JWK JSON)")
+	}
+	var jwk struct {
+		Kty string `json:"kty"`
+		N   string `json:"n"`
+		E   string `json:"e"`
+		Crv string `json:"crv"`
+		X   string `json:"x"`
+		Y   string `json:"y"`
+	}
+	if err := json.Unmarshal([]byte(args[0].Str), &jwk); err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid JWK JSON: %v", err)
+	}
+	var pub crypto.PublicKey
+	switch jwk.Kty {
+	case "RSA":
+		if jwk.N == "" || jwk.E == "" {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: RSA JWK is missing \"n\" or \"e\"")
+		}
+		nb, err := b64uRaw.DecodeString(jwk.N)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad RSA modulus \"n\": %v", err)
+		}
+		eb, err := b64uRaw.DecodeString(jwk.E)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad RSA exponent \"e\": %v", err)
+		}
+		n := new(big.Int).SetBytes(nb)
+		e := new(big.Int).SetBytes(eb)
+		// A public exponent must be a small positive odd int (typically 65537).
+		// Reject anything that would not fit an int or is nonsensical, so a
+		// malformed JWK is a clean error rather than a huge / invalid key.
+		if n.Sign() <= 0 || e.Sign() <= 0 || !e.IsInt64() || e.Int64() > (1<<31-1) || e.Int64() < 2 {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid RSA parameters")
+		}
+		// Cap the modulus size: this key is typically resolved from a remote /
+		// attacker-influenced JWKS, and rsaVerify runs a modular exponentiation
+		// whose cost is ~O(bits^2), so an oversized modulus is a CPU-DoS at verify
+		// time. 16384 bits is well past any real RSA key.
+		if n.BitLen() > 16384 {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: RSA modulus too large (%d bits; max 16384)", n.BitLen())
+		}
+		pub = &rsa.PublicKey{N: n, E: int(e.Int64())}
+	case "EC":
+		curve, err := curveByName(jwk.Crv)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: %v", err)
+		}
+		if jwk.X == "" || jwk.Y == "" {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: EC JWK is missing \"x\" or \"y\"")
+		}
+		xb, err := b64uRaw.DecodeString(jwk.X)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad EC coordinate \"x\": %v", err)
+		}
+		yb, err := b64uRaw.DecodeString(jwk.Y)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad EC coordinate \"y\": %v", err)
+		}
+		pub = &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(xb), Y: new(big.Int).SetBytes(yb)}
+	default:
+		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: unsupported key type %q (want \"RSA\" or \"EC\")", jwk.Kty)
+	}
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: %v", err)
+	}
+	// Round-trip the DER to validate the key (rejects an off-curve EC point,
+	// which MarshalPKIXPublicKey does not check but ParsePKIXPublicKey does).
+	if _, err := x509.ParsePKIXPublicKey(der); err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid public key: %v", err)
+	}
+	out := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+	return interpreter.StringVal(string(out)), nil
 }
 
 // ----- CSR (PKCS#10) -----

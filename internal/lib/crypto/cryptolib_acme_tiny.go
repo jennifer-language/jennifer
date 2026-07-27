@@ -23,6 +23,10 @@ func jwkPublicFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	return asymUnavailable("jwkPublic")
 }
 
+func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return asymUnavailable("jwkToPem")
+}
+
 func csrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	return asymUnavailable("csr")
 }

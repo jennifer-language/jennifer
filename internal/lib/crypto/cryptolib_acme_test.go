@@ -196,3 +196,98 @@ func TestCSRForDomains(t *testing.T) {
 	}
 	_ = pem.Block{}
 }
+
+// TestJwkToPemRoundTrip proves crypto.jwkToPem is a correct inverse of
+// jwkPublic: a key -> jwkPublic -> jwkToPem produces a PEM public key that
+// verifies a signature made with the matching private key, for both RSA and EC.
+func TestJwkToPemRoundTrip(t *testing.T) {
+	msg := []byte("the quick brown fox")
+
+	// RSA
+	rsaKey, err := rsaGenerateKeyFn(noCtx, []interpreter.Value{interpreter.IntVal(2048)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rjwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(rsaKey.Bytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpem, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(rjwk.Str)})
+	if err != nil {
+		t.Fatalf("jwkToPem RSA: %v", err)
+	}
+	rsig, err := rsaSignFn(noCtx, []interpreter.Value{bytesArg(rsaKey.Bytes), bytesArg(msg), interpreter.StringVal("sha256")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := rsaVerifyFn(noCtx, []interpreter.Value{bytesArg([]byte(rpem.Str)), bytesArg(msg), bytesArg(rsig.Bytes), interpreter.StringVal("sha256")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok.Kind != interpreter.KindBool || !ok.Bool {
+		t.Errorf("RSA: signature did not verify against the jwkToPem public key")
+	}
+
+	// EC (P-256)
+	ecKey, err := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal("p256")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ejwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(ecKey.Bytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	epem, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(ejwk.Str)})
+	if err != nil {
+		t.Fatalf("jwkToPem EC: %v", err)
+	}
+	esig, err := ecdsaSignFn(noCtx, []interpreter.Value{bytesArg(ecKey.Bytes), bytesArg(msg), interpreter.StringVal("sha256")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = ecdsaVerifyFn(noCtx, []interpreter.Value{bytesArg([]byte(epem.Str)), bytesArg(msg), bytesArg(esig.Bytes), interpreter.StringVal("sha256")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok.Kind != interpreter.KindBool || !ok.Bool {
+		t.Errorf("EC: signature did not verify against the jwkToPem public key")
+	}
+}
+
+// TestJwkToPemRejectsMalformed pins that jwkToPem errors (not panics) on bad input.
+func TestJwkToPemRejectsMalformed(t *testing.T) {
+	cases := []string{
+		`not json`,
+		`{"kty":"oct","k":"AAAA"}`,                         // symmetric key, unsupported
+		`{"kty":"RSA","e":"AQAB"}`,                         // missing n
+		`{"kty":"RSA","n":"!!bad!!","e":"AQAB"}`,           // bad base64url
+		`{"kty":"EC","crv":"P-999","x":"AA","y":"AA"}`,     // unknown curve
+		`{"kty":"EC","crv":"P-256","x":"AAAA","y":"AAAA"}`, // off-curve point
+	}
+	for _, c := range cases {
+		if _, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(c)}); err == nil {
+			t.Errorf("jwkToPem(%q) = nil error, want an error", c)
+		}
+	}
+}
+
+// TestJwkToPemRejectsOversizedModulus pins the RSA modulus size cap: a JWK whose
+// modulus exceeds 16384 bits is rejected (a hostile JWKS entry cannot become a
+// CPU-DoS at rsaVerify time), not turned into a giant, slow-to-verify key.
+func TestJwkToPemRejectsOversizedModulus(t *testing.T) {
+	big := make([]byte, 2049) // 2049 bytes = 16392 bits, just past the 16384 cap
+	for i := range big {
+		big[i] = 0xff
+	}
+	jwk := `{"kty":"RSA","e":"AQAB","n":"` + base64.RawURLEncoding.EncodeToString(big) + `"}`
+	if _, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(jwk)}); err == nil {
+		t.Fatal("jwkToPem accepted a >16384-bit RSA modulus; want an error")
+	}
+	// A normal 2048-bit modulus is still accepted (regression guard on the cap).
+	ok := make([]byte, 256) // 2048 bits
+	ok[0] = 0xff
+	jwk2 := `{"kty":"RSA","e":"AQAB","n":"` + base64.RawURLEncoding.EncodeToString(ok) + `"}`
+	if _, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(jwk2)}); err != nil {
+		t.Fatalf("jwkToPem rejected a normal 2048-bit modulus: %v", err)
+	}
+}

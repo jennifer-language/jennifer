@@ -90,6 +90,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "rsaGenerateKey", rsaGenerateKeyFn)
 	in.RegisterNamespaced(LibraryName, "ecGenerateKey", ecGenerateKeyFn)
 	in.RegisterNamespaced(LibraryName, "jwkPublic", jwkPublicFn)
+	in.RegisterNamespaced(LibraryName, "jwkToPem", jwkToPemFn)
 	in.RegisterNamespaced(LibraryName, "csr", csrFn)
 }
 
