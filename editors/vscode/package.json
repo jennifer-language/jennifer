@@ -1,0 +1,55 @@
+{
+  "name": "jennifer",
+  "displayName": "Jennifer",
+  "description": "Syntax highlighting for the Jennifer programming language (.j).",
+  "version": "0.1.0",
+  "publisher": "jennifer-lang",
+  "license": "LGPL-3.0-only",
+  "author": {
+    "name": "mplx",
+    "email": "jennifer@mplx.dev"
+  },
+  "homepage": "https://jennifer-lang.dev/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jennifer-language/jennifer.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/jennifer-language/jennifer/issues"
+  },
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "jennifer",
+    "syntax",
+    "highlighting"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "jennifer",
+        "aliases": [
+          "Jennifer",
+          "jennifer"
+        ],
+        "extensions": [
+          ".j"
+        ],
+        "firstLine": "^#!.*\\bjennifer\\b",
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "jennifer",
+        "scopeName": "source.jennifer",
+        "path": "./syntaxes/jennifer.tmLanguage.json"
+      }
+    ]
+  }
+}

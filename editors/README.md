@@ -27,10 +27,14 @@ cp vim/ftdetect/jennifer.vim ~/.vim/ftdetect/
 `textmate/jennifer.tmLanguage.json` is a TextMate grammar (scope
 `source.jennifer`), consumed by any TextMate-compatible editor.
 
-- **VS Code**: create a minimal language extension whose
-  `contributes.grammars` points at this file, mapping `source.jennifer` to the
-  `.j` extension. (`yo code` scaffolds one; drop the grammar in and set
-  `"language": "jennifer"`, `"extensions": [".j"]`.)
+- **VS Code**: a ready-made minimal extension lives in [`vscode/`](vscode/) -
+  copy or symlink that folder into your VS Code extensions directory (Linux /
+  macOS / Windows steps in [`vscode/README.md`](vscode/README.md)), or open it and
+  press <kbd>F5</kbd>. Its bundled `vscode/syntaxes/jennifer.tmLanguage.json` is a
+  **byte-for-byte copy** of `textmate/jennifer.tmLanguage.json` (VS Code cannot
+  load a grammar from outside the extension folder); when you change the TextMate
+  grammar, copy it across so the two stay identical
+  (`cp textmate/jennifer.tmLanguage.json vscode/syntaxes/`).
 - **Sublime Text**: use the native `sublime/jennifer.sublime-syntax` (see
   below), or install a package that references this TextMate grammar.
 - **Zed**: reference the grammar from a language extension.
