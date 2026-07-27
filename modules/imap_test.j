@@ -266,3 +266,53 @@ func testParseStatusParenInName() {
     testing.assertEqual($s.messages, 7);
     testing.assertEqual($s.unseen, 2);
 }
+
+# --- IDLE / server-push parsing (pure helpers) ------------------------------
+
+# parseNotification turns an untagged push line into a typed Notification; a
+# non-push line (tagged completion, "* SEARCH", anything else) is the empty
+# sentinel. The live IDLE dialogue is Go-tested against the imap mock.
+func testParseNotification() {
+    def exists as Notification init parseNotification("* 5 EXISTS");
+    testing.assertEqual($exists.kind, "exists");
+    testing.assertEqual($exists.number, 5);
+    def expunge as Notification init parseNotification("* 2 EXPUNGE");
+    testing.assertEqual($expunge.kind, "expunge");
+    testing.assertEqual($expunge.number, 2);
+    def recent as Notification init parseNotification("* 3 RECENT");
+    testing.assertEqual($recent.kind, "recent");
+    testing.assertEqual($recent.number, 3);
+    # A lower-case keyword still parses (kind is normalized to lower).
+    testing.assertEqual(parseNotification("* 9 exists").kind, "exists");
+}
+
+# A line that is not a modeled push becomes the empty sentinel (kind "").
+func testParseNotificationSentinel() {
+    testing.assertEqual(parseNotification("JEN OK IDLE completed").kind, "");
+    testing.assertEqual(parseNotification("* SEARCH 1 2 5").kind, "");
+    testing.assertEqual(parseNotification("* 4 FETCH (FLAGS (\\Seen))").kind, "");
+    def none as Notification init noNotification();
+    testing.assertEqual($none.kind, "");
+    testing.assertEqual($none.number, 0);
+}
+
+# isContinuation recognizes the "+ idling" (or bare "+") IDLE continuation.
+func testIsContinuation() {
+    testing.assertTrue(isContinuation("+ idling"));
+    testing.assertTrue(isContinuation("+"));
+    testing.assertTrue(isContinuation("+ OK still here"));
+    testing.assertFalse(isContinuation("* 5 EXISTS"));
+    testing.assertFalse(isContinuation("JEN OK completed"));
+}
+
+# hasCapability detects a whole-token capability, case-insensitively, in a
+# CAPABILITY response (the gate supportsIdle uses).
+func testHasCapability() {
+    def resp as string init "* CAPABILITY IMAP4rev1 IDLE STARTTLS AUTH=PLAIN\r\nJEN OK CAPABILITY completed\r\n";
+    testing.assertTrue(hasCapability($resp, "IDLE"));
+    testing.assertTrue(hasCapability($resp, "idle"));   # case-insensitive
+    testing.assertTrue(hasCapability($resp, "STARTTLS"));
+    testing.assertFalse(hasCapability($resp, "MOVE"));
+    # A capability name that is only a substring of a token does not match.
+    testing.assertFalse(hasCapability($resp, "IDL"));
+}

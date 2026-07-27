@@ -83,6 +83,31 @@ export def struct Reply {
     items as list of Reply
 };
 
+/**
+ * A pushed pub/sub message (from `receiveMessage`).
+ * @field kind {string} "message" (a plain channel push) or "pmessage" (a
+ *   pattern push)
+ * @field channel {string} the channel the message was published to
+ * @field pattern {string} the subscribed glob pattern ("" for a plain message)
+ * @field payload {string} the message body
+ */
+export def struct Message {
+    kind as string,
+    channel as string,
+    pattern as string,
+    payload as string
+};
+
+/**
+ * One step of a `scan` cursor walk.
+ * @field cursor {int} the cursor to pass to the next `scan` (0 ends the walk)
+ * @field keys {list of string} the keys returned by this step
+ */
+export def struct ScanResult {
+    cursor as int,
+    keys as list of string
+};
+
 # One parse step's result: the value, the byte offset in the buffer just past
 # what was consumed, and whether the buffer held a complete value. A cursor
 # (`pos`) rather than a sliced remainder keeps parsing an N-element array O(N)
@@ -229,6 +254,65 @@ func parseComplete(buf as bytes) {
     return parseAt($buf, 0);
 }
 
+# subscribeArgs builds the argument list for a (P)SUBSCRIBE / (P)UNSUBSCRIBE
+# command: the verb followed by each channel / pattern. Pure, so the overlay can
+# check the encoded wire form without a server.
+func subscribeArgs(verb as string, names as list of string) {
+    def args as list of string init [$verb];
+    for (def name in $names) {
+        $args[] = $name;
+    }
+    return $args;
+}
+
+# publishArgs builds the argument list for a PUBLISH command.
+func publishArgs(channel as string, message as string) {
+    return ["PUBLISH", $channel, $message];
+}
+
+# encodePipeline renders several commands into one back-to-back RESP payload, so
+# a pipeline is a single write followed by N reads (one network round trip).
+func encodePipeline(commands as list of list of string) {
+    def out as string init "";
+    for (def cmd in $commands) {
+        $out = $out + encodeCommand($cmd);
+    }
+    return $out;
+}
+
+# messageFromReply classifies a pushed pub/sub array into a Message. A `message`
+# push is `[ "message", channel, payload ]`; a `pmessage` push is
+# `[ "pmessage", pattern, channel, payload ]`; a (un)subscribe confirmation is
+# `[ verb, channel, count ]` and keeps its verb as `kind` with an empty payload.
+# A non-array or short reply yields an empty-kind Message. Pure and total, so the
+# overlay exercises the framing without a socket.
+func messageFromReply(reply as Reply) {
+    if ($reply.kind != "array" or len($reply.items) < 3) {
+        return Message{kind: "", channel: "", pattern: "", payload: ""};
+    }
+    def tag as string init $reply.items[0].str;
+    if ($tag == "message") {
+        return Message{kind: "message", channel: $reply.items[1].str, pattern: "", payload: $reply.items[2].str};
+    }
+    if ($tag == "pmessage" and len($reply.items) >= 4) {
+        return Message{kind: "pmessage", channel: $reply.items[2].str, pattern: $reply.items[1].str, payload: $reply.items[3].str};
+    }
+    return Message{kind: $tag, channel: $reply.items[1].str, pattern: "", payload: ""};
+}
+
+# scanResultFromReply reads a SCAN reply - a two-element array of the next
+# cursor (a bulk string) and an array of keys - into a ScanResult. Pure.
+func scanResultFromReply(reply as Reply) {
+    def keys as list of string init [];
+    if ($reply.kind == "array" and len($reply.items) >= 2) {
+        for (def item in $reply.items[1].items) {
+            $keys[] = $item.str;
+        }
+        return ScanResult{cursor: convert.toInt($reply.items[0].str), keys: $keys};
+    }
+    return ScanResult{cursor: 0, keys: $keys};
+}
+
 # --- net dialogue (private) ----------------------------------------
 
 # readReply reads bytes until a complete RESP reply has arrived, then returns it.
@@ -258,6 +342,40 @@ func readReply(conn as net.Conn, timeoutMs as int) {
         capReply(len($buf));
     }
     return replyNil();
+}
+
+# readReplies reads exactly `count` complete replies, buffering across socket
+# reads so that replies the server coalesced into one TCP segment are all parsed.
+# A single `readReply` per reply drops any bytes past the first complete reply,
+# which silently loses the rest of a pipelined batch (and blocks the next read).
+# `ParseResult.pos` gives the bytes one reply consumed, so the leftover is kept
+# and re-parsed. Over-read is the only hazard here - the next request has not been
+# sent - so buffering within this one call is sufficient.
+func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
+    def replies as list of Reply init [];
+    def buf as bytes;
+    while (len($replies) < $count) {
+        def pr as ParseResult init parseComplete($buf);
+        if ($pr.complete) {
+            $replies[] = $pr.reply;
+            $buf = $buf[$pr.pos..];
+            continue;
+        }
+        if ($timeoutMs > 0) {
+            net.setDeadline($conn, $timeoutMs);
+        }
+        def chunk as bytes init net.readBytes($conn, 4096);
+        if (len($chunk) == 0) {
+            throw Error{kind: "redis", message: "redis: connection closed after " + convert.toString(len($replies)) + " of " + convert.toString($count) + " replies", file: "", line: 0, col: 0};
+        }
+        def k as int init 0;
+        while ($k < len($chunk)) {
+            $buf[] = $chunk[$k];
+            $k = $k + 1;
+        }
+        capReply(len($buf));
+    }
+    return $replies;
 }
 
 func dial(opts as Options) {
@@ -402,4 +520,195 @@ export func quit(session as Session) {
     # must not leak the fd).
     defer net.close($session.conn);
     command($session, ["QUIT"]);
+}
+
+# --- pub/sub (exported) --------------------------------------------
+
+# writeCommand sends a command without reading its reply - the shape a
+# subscribed connection needs, since (un)subscribe confirmations arrive
+# interleaved with pushes and are drained by `receiveMessage`.
+func writeCommand(session as Session, args as list of string) {
+    net.writeBytes($session.conn, convert.bytesFromString(encodeCommand($args), "utf-8"));
+}
+
+/**
+ * Subscribe to one or more channels. After subscribing, the connection is in
+ * subscribed mode and may only run (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT
+ * until fully unsubscribed; read pushes with `receiveMessage`.
+ * @param session {Session} the open session
+ * @param channels {list of string} the channels to subscribe to
+ */
+export func subscribe(session as Session, channels as list of string) {
+    writeCommand($session, subscribeArgs("SUBSCRIBE", $channels));
+}
+
+/**
+ * Subscribe to one or more glob patterns (e.g. "news.*").
+ * @param session {Session} the open session
+ * @param patterns {list of string} the patterns to subscribe to
+ */
+export func psubscribe(session as Session, patterns as list of string) {
+    writeCommand($session, subscribeArgs("PSUBSCRIBE", $patterns));
+}
+
+/**
+ * Unsubscribe from the given channels, or from all channels when the list is
+ * empty.
+ * @param session {Session} the open session
+ * @param channels {list of string} the channels to leave ([] means all)
+ */
+export func unsubscribe(session as Session, channels as list of string) {
+    writeCommand($session, subscribeArgs("UNSUBSCRIBE", $channels));
+}
+
+/**
+ * Unsubscribe from the given patterns, or from all patterns when the list is
+ * empty.
+ * @param session {Session} the open session
+ * @param patterns {list of string} the patterns to leave ([] means all)
+ */
+export func punsubscribe(session as Session, patterns as list of string) {
+    writeCommand($session, subscribeArgs("PUNSUBSCRIBE", $patterns));
+}
+
+/**
+ * Publish `message` to `channel` and return the number of subscribers that
+ * received it. Runs on an ordinary (non-subscribed) connection.
+ * @param session {Session} the open session
+ * @param channel {string} the channel to publish to
+ * @param message {string} the message body
+ * @return {int} the number of subscribers that received the message
+ */
+export func publish(session as Session, channel as string, message as string) {
+    return command($session, publishArgs($channel, $message)).num;
+}
+
+/**
+ * Block until the next `message` / `pmessage` push arrives, skipping the
+ * (un)subscribe confirmation frames. Wrap the call in a `spawn` to receive
+ * concurrently with the rest of the program; the per-read idle timeout
+ * (`Session.timeout`, milliseconds) bounds the wait and raises a catchable
+ * error on a stall.
+ * @param session {Session} the open, subscribed session
+ * @return {Message} the next channel / pattern push
+ * @throws {Error} kind "redis" on a server error reply or a closed connection
+ */
+export func receiveMessage(session as Session) {
+    # Buffer across reads and parse each reply out of the buffer, so a subscribe
+    # confirmation and the first pushed message coalesced into one TCP segment are
+    # both handled (a per-reply read would drop the message with the leftover and
+    # then block). NOTE: a message coalesced *after* the one returned - rapid
+    # consecutive pushes landing in a single read - can still be lost across calls,
+    # since a value-semantic Session cannot retain the leftover buffer; a buffered
+    # `net` reader is the follow-up for that tail case.
+    def buf as bytes;
+    while (true) {
+        def pr as ParseResult init parseComplete($buf);
+        if ($pr.complete) {
+            $buf = $buf[$pr.pos..];
+            def reply as Reply init $pr.reply;
+            if ($reply.kind == "error") {
+                throw Error{kind: "redis", message: $reply.str, file: "", line: 0, col: 0};
+            }
+            def msg as Message init messageFromReply($reply);
+            if ($msg.kind == "message" or $msg.kind == "pmessage") {
+                return $msg;
+            }
+            continue;
+        }
+        if ($session.timeout > 0) {
+            net.setDeadline($session.conn, $session.timeout);
+        }
+        def chunk as bytes init net.readBytes($session.conn, 4096);
+        if (len($chunk) == 0) {
+            throw Error{kind: "redis", message: "redis: connection closed while awaiting a message", file: "", line: 0, col: 0};
+        }
+        def k as int init 0;
+        while ($k < len($chunk)) {
+            $buf[] = $chunk[$k];
+            $k = $k + 1;
+        }
+        capReply(len($buf));
+    }
+    return Message{kind: "", channel: "", pattern: "", payload: ""};
+}
+
+# --- pipelining (exported) -----------------------------------------
+
+/**
+ * Send several commands in one write and read exactly one reply per command
+ * (a single network round trip). Unlike `command`, a `-ERR` reply does not
+ * throw - each command's outcome is returned in order, so inspect each `Reply`.
+ * @param session {Session} the open session
+ * @param commands {list of list of string} each command as an argument list
+ * @return {list of Reply} one reply per command, in order
+ */
+export func pipeline(session as Session, commands as list of list of string) {
+    net.writeBytes($session.conn, convert.bytesFromString(encodePipeline($commands), "utf-8"));
+    # Read all N replies buffered - the server may return them coalesced in one
+    # TCP segment, which a per-reply read would drop past the first.
+    return readReplies($session.conn, $session.timeout, len($commands));
+}
+
+# --- transactions (exported) ---------------------------------------
+
+/**
+ * Begin a transaction (MULTI). Commands issued after this are queued (each
+ * replies "+QUEUED") until `exec` runs them atomically or `discard` drops them.
+ * @param session {Session} the open session
+ */
+export func multi(session as Session) {
+    command($session, ["MULTI"]);
+}
+
+/**
+ * Execute the queued transaction (EXEC) and return one reply per queued
+ * command, in order. An aborted transaction (a `nil` EXEC reply) yields an
+ * empty list.
+ * @param session {Session} the open session
+ * @return {list of Reply} the queued commands' replies
+ */
+export func exec(session as Session) {
+    def reply as Reply init command($session, ["EXEC"]);
+    def out as list of Reply init [];
+    if ($reply.kind == "array") {
+        for (def item in $reply.items) {
+            $out[] = $item;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Discard the queued transaction (DISCARD).
+ * @param session {Session} the open session
+ */
+export func discard(session as Session) {
+    command($session, ["DISCARD"]);
+}
+
+# --- scan (exported) -----------------------------------------------
+
+/**
+ * Walk the keyspace one page at a time (SCAN), the production-safe iterator:
+ * start with `cursor` 0 and repeat until the returned cursor is 0 again. Pass
+ * `pattern` "" to skip the MATCH glob and `count` 0 to skip the COUNT hint.
+ * Prefer this over `keys`, which blocks the server on a large keyspace.
+ * @param session {Session} the open session
+ * @param cursor {int} the cursor (0 to begin)
+ * @param pattern {string} a glob to filter keys ("" for no filter)
+ * @param count {int} a per-page size hint (0 for the server default)
+ * @return {ScanResult} the next cursor and this page's keys
+ */
+export func scan(session as Session, cursor as int, pattern as string, count as int) {
+    def args as list of string init ["SCAN", convert.toString($cursor)];
+    if (len($pattern) > 0) {
+        $args[] = "MATCH";
+        $args[] = $pattern;
+    }
+    if ($count > 0) {
+        $args[] = "COUNT";
+        $args[] = convert.toString($count);
+    }
+    return scanResultFromReply(command($session, $args));
 }

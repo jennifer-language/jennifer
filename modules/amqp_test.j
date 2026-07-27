@@ -105,3 +105,105 @@ func testFrameSizeCap() {
     checkFrameSize(MAX_FRAME_BYTES);   # exactly at the limit does not throw
     checkFrameSize(0);
 }
+
+# --- new method encoders / decoders -----------------------------------------
+
+# encodeExchangeDeclare: reserved(0) | "logs" | "fanout" | durable bit | empty table.
+func testEncodeExchangeDeclare() {
+    testing.assertEqual(hex(encodeExchangeDeclare("logs", "fanout", true)),
+        "0000046c6f67730666616e6f75740200000000");
+    # non-durable clears the flag octet.
+    testing.assertEqual(hex(encodeExchangeDeclare("logs", "fanout", false)),
+        "0000046c6f67730666616e6f75740000000000");
+}
+
+# encodeQueueBind: reserved(0) | "jobs" | "logs" | "rk" | no-wait(0) | empty table.
+func testEncodeQueueBind() {
+    testing.assertEqual(hex(encodeQueueBind("jobs", "logs", "rk")),
+        "0000046a6f6273046c6f677302726b0000000000");
+}
+
+# encodeBasicConsume: reserved(0) | "jobs" | "ctag" | flags | empty table.
+func testEncodeBasicConsume() {
+    # autoAck false -> flags octet 0x00.
+    testing.assertEqual(hex(encodeBasicConsume("jobs", "ctag", false)),
+        "0000046a6f627304637461670000000000");
+    # autoAck true -> no-ack bit (0x02).
+    testing.assertEqual(hex(encodeBasicConsume("jobs", "ctag", true)),
+        "0000046a6f627304637461670200000000");
+    # An empty consumer tag asks the broker to name it (single 0x00 length byte).
+    testing.assertEqual(hex(encodeBasicConsume("q", "", false)),
+        "00000171000000000000");
+}
+
+# encodeBasicNack: delivery-tag(u64) | flags(multiple, requeue).
+func testEncodeBasicNack() {
+    # multiple=false, requeue=true -> flags 0x02.
+    testing.assertEqual(hex(encodeBasicNack(5, false, true)), "000000000000000502");
+    # multiple=true, requeue=false -> flags 0x01.
+    testing.assertEqual(hex(encodeBasicNack(7, true, false)), "000000000000000701");
+    # both -> flags 0x03.
+    testing.assertEqual(hex(encodeBasicNack(1, true, true)), "000000000000000103");
+}
+
+# encodeConfirmSelect: a single no-wait bit (0x00).
+func testEncodeConfirmSelect() {
+    testing.assertEqual(hex(encodeConfirmSelect()), "00");
+}
+
+# encodeProperties: property-flags word then each present value, MSB flag first.
+func testEncodeProperties() {
+    # A zero Properties -> flags 0x0000, no values.
+    def zero as Properties;
+    testing.assertEqual(hex(encodeProperties($zero)), "0000");
+    # content-type + persistent -> flags 0x9000, "text/plain", delivery-mode 2.
+    def a as Properties init Properties{ contentType: "text/plain", persistent: true, correlationId: "", replyTo: "" };
+    testing.assertEqual(hex(encodeProperties($a)),
+        "90000a746578742f706c61696e02");
+    # correlation-id + reply-to -> flags 0x0600, "abc", "q1" (correlation before reply).
+    def b as Properties init Properties{ contentType: "", persistent: false, correlationId: "abc", replyTo: "q1" };
+    testing.assertEqual(hex(encodeProperties($b)),
+        "060003616263027131");
+}
+
+# decodeDeliverMethod parses Basic.Deliver args into a Delivery (empty body).
+func testDecodeDeliverMethod() {
+    def args as bytes;
+    $args = putShortStr($args, "ctag");
+    $args = putLongLong($args, 42);
+    $args = putOctet($args, 1);          # redelivered
+    $args = putShortStr($args, "logs");
+    $args = putShortStr($args, "rk");
+    def d as Delivery init decodeDeliverMethod($args);
+    testing.assertEqual($d.consumerTag, "ctag");
+    testing.assertEqual($d.deliveryTag, 42);
+    testing.assertEqual($d.redelivered, true);
+    testing.assertEqual($d.exchange, "logs");
+    testing.assertEqual($d.routingKey, "rk");
+    testing.assertEqual(len($d.body), 0);
+}
+
+# A method frame + content header + body frame(s) assemble into one Delivery:
+# decode the body size from the header payload, then attach the collected body.
+func testDeliveryFromContentAndBody() {
+    def args as bytes;
+    $args = putShortStr($args, "");      # broker-named consumer
+    $args = putLongLong($args, 9);
+    $args = putOctet($args, 0);          # not redelivered
+    $args = putShortStr($args, "");      # default exchange
+    $args = putShortStr($args, "jobs");
+    # content header: class | weight | body-size | property-flags.
+    def hdr as bytes;
+    $hdr = putShort($hdr, CLS_BASIC);
+    $hdr = putShort($hdr, 0);
+    $hdr = putLongLong($hdr, 5);
+    $hdr = putShort($hdr, 0);
+    testing.assertEqual(decodeContentBodySize($hdr), 5);
+    def body as bytes init convert.bytesFromString("hello", "utf-8");
+    def d as Delivery init deliveryFrom($args, $body);
+    testing.assertEqual($d.deliveryTag, 9);
+    testing.assertEqual($d.redelivered, false);
+    testing.assertEqual($d.exchange, "");
+    testing.assertEqual($d.routingKey, "jobs");
+    testing.assertEqual(hex($d.body), hex($body));
+}

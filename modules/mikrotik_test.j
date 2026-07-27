@@ -122,3 +122,59 @@ func testWordLenCap() {
     checkWordLen(MAX_WORD_BYTES);   # exactly at the limit does not throw
     checkWordLen(1);
 }
+
+# --- tagging + streaming (pure helpers) -------------------------------------
+
+# A tagged command sentence carries a trailing `.tag=<id>` API word after the
+# command (and any attribute words), so replies can be correlated.
+func testBuildTaggedWords() {
+    def none as map of string to string init {};
+    def noq as list of string init [];
+    def w as list of string init buildTaggedWords("/interface/monitor", $none, $noq, "7");
+    testing.assertEqual(len($w), 2);
+    testing.assertEqual($w[0], "/interface/monitor");
+    testing.assertEqual($w[1], ".tag=7");
+
+    # The tag word follows the attribute words.
+    def attrs as map of string to string init {};
+    $attrs["interface"] = "ether1";
+    def wa as list of string init buildTaggedWords("/interface/monitor", $attrs, $noq, "abc");
+    testing.assertEqual(len($wa), 3);
+    testing.assertEqual($wa[0], "/interface/monitor");
+    testing.assertEqual($wa[1], "=interface=ether1");
+    testing.assertEqual($wa[2], ".tag=abc");
+}
+
+# parseTag reads the `.tag=` word back off a reply sentence; "" when absent.
+func testParseTag() {
+    def tagged as list of string init ["!re", ".tag=42", "=name=ether1", "=type=ether"];
+    testing.assertEqual(parseTag($tagged), "42");
+
+    def untagged as list of string init ["!re", "=name=ether1"];
+    testing.assertEqual(parseTag($untagged), "");
+
+    # `.tag` is distinct from the `=key=value` attribute words: parseFields does
+    # not pick it up, and parseTag does not pick up a `=tag=` attribute.
+    def f as map of string to string init parseFields($tagged);
+    testing.assertTrue(not maps.has($f, "tag"));
+    testing.assertEqual(parseTag(["!re", "=tag=99"]), "");
+}
+
+# buildCancelWords builds the `/cancel` sentence naming the tag to stop.
+func testBuildCancelWords() {
+    def w as list of string init buildCancelWords("42");
+    testing.assertEqual(len($w), 2);
+    testing.assertEqual($w[0], "/cancel");
+    testing.assertEqual($w[1], "=tag=42");
+}
+
+# A tag round-trips: encode it into a sentence, read it back off the reply.
+func testTagRoundTrip() {
+    def none as map of string to string init {};
+    def noq as list of string init [];
+    def sent as list of string init buildTaggedWords("/ping", $none, $noq, "xyz");
+    # The router echoes the tag on its reply; parseTag recovers it.
+    def reply as list of string init ["!re", ".tag=xyz", "=host=1.2.3.4"];
+    testing.assertEqual(parseTag($reply), parseTag($sent));
+    testing.assertEqual(parseTag($sent), "xyz");
+}

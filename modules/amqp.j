@@ -51,8 +51,10 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 # Class ids.
 def const CLS_CONNECTION as int init 10;
 def const CLS_CHANNEL as int init 20;
+def const CLS_EXCHANGE as int init 40;
 def const CLS_QUEUE as int init 50;
 def const CLS_BASIC as int init 60;
+def const CLS_CONFIRM as int init 85;
 
 # Method ids (per class).
 def const CONN_START as int init 10;
@@ -65,16 +67,41 @@ def const CONN_CLOSE as int init 50;
 def const CONN_CLOSEOK as int init 51;
 def const CH_OPEN as int init 10;
 def const CH_OPENOK as int init 11;
+def const EX_DECLARE as int init 10;
+def const EX_DECLAREOK as int init 11;
 def const Q_DECLARE as int init 10;
 def const Q_DECLAREOK as int init 11;
+def const Q_BIND as int init 20;
+def const Q_BINDOK as int init 21;
+def const B_CONSUME as int init 20;
+def const B_CONSUMEOK as int init 21;
+def const B_CANCEL as int init 30;
+def const B_CANCELOK as int init 31;
 def const B_PUBLISH as int init 40;
+def const B_DELIVER as int init 60;
 def const B_GET as int init 70;
 def const B_GETOK as int init 71;
 def const B_GETEMPTY as int init 72;
 def const B_ACK as int init 80;
+def const B_NACK as int init 120;
+def const CONFIRM_SELECT as int init 10;
+def const CONFIRM_SELECTOK as int init 11;
 
-# The durable flag bit for Queue.Declare.
+# The durable flag bit for Queue.Declare (and Exchange.Declare).
 def const Q_DURABLE as int init 2;
+
+# The no-ack flag bit (bit 1) for Basic.Consume.
+def const B_NOACK as int init 2;
+
+# Content-header property-flag bit masks (Basic properties), most-significant
+# bit first: content-type, delivery-mode, correlation-id, reply-to.
+def const PROP_CONTENT_TYPE as int init 0x8000;   # bit 15
+def const PROP_DELIVERY_MODE as int init 0x1000;  # bit 12
+def const PROP_CORRELATION_ID as int init 0x0400; # bit 10
+def const PROP_REPLY_TO as int init 0x0200;       # bit 9
+
+# delivery-mode 2 = persistent (survives a broker restart when the queue is durable).
+def const DELIVERY_PERSISTENT as int init 2;
 
 /**
  * Connection options.
@@ -129,6 +156,39 @@ export def struct QueueInfo {
 export def struct Message {
     empty as bool,
     deliveryTag as int,
+    exchange as string,
+    routingKey as string,
+    body as bytes
+};
+
+/**
+ * Message properties carried on a publish (all optional; a "" string or a false
+ * flag omits that property from the wire, keeping the content header minimal).
+ * @field contentType {string} the MIME content-type (e.g. "application/json"); "" omits it
+ * @field persistent {bool} true sets delivery-mode 2 (persistent); false omits it (transient)
+ * @field correlationId {string} the correlation id (request / reply matching); "" omits it
+ * @field replyTo {string} the reply-to queue / routing key; "" omits it
+ */
+export def struct Properties {
+    contentType as string,
+    persistent as bool,
+    correlationId as string,
+    replyTo as string
+};
+
+/**
+ * A message pushed by the broker via Basic.Deliver (returned by receiveDelivery).
+ * @field consumerTag {string} the consumer tag the delivery is for
+ * @field deliveryTag {int} the delivery tag (pass to ack / nack)
+ * @field redelivered {bool} true if the broker has delivered this message before
+ * @field exchange {string} the exchange the message came from
+ * @field routingKey {string} the routing key
+ * @field body {bytes} the message body
+ */
+export def struct Delivery {
+    consumerTag as string,
+    deliveryTag as int,
+    redelivered as bool,
     exchange as string,
     routingKey as string,
     body as bytes
@@ -306,6 +366,152 @@ func byteLen(s as string) {
     return len(convert.bytesFromString($s, "utf-8"));
 }
 
+# --- method encoders / decoders (pure, socket-free) -------------------------
+#
+# These build or parse the *arguments* portion of a method frame (everything
+# after class-id + method-id), or a content header's property section. Kept pure
+# so the overlay can assert them byte-exactly without a broker; the socket-facing
+# API functions below wrap them with writeMethod / expectMethod.
+
+# encodeExchangeDeclare builds Exchange.Declare args: reserved, exchange, type,
+# flag octet (durable), empty arguments table.
+func encodeExchangeDeclare(name as string, exType as string, durable as bool) {
+    def args as bytes;
+    $args = putShort($args, 0);            # reserved-1
+    $args = putShortStr($args, $name);
+    $args = putShortStr($args, $exType);
+    def flags as int init 0;
+    if ($durable) {
+        $flags = $flags | Q_DURABLE;       # durable bit (bit 1)
+    }
+    $args = putOctet($args, $flags);       # passive|durable|auto-delete|internal|no-wait
+    return putEmptyTable($args);
+}
+
+# encodeQueueBind builds Queue.Bind args: reserved, queue, exchange, routing-key,
+# no-wait bit, empty arguments table.
+func encodeQueueBind(queue as string, exchange as string, routingKey as string) {
+    def args as bytes;
+    $args = putShort($args, 0);            # reserved-1
+    $args = putShortStr($args, $queue);
+    $args = putShortStr($args, $exchange);
+    $args = putShortStr($args, $routingKey);
+    $args = putOctet($args, 0);            # no-wait = false
+    return putEmptyTable($args);
+}
+
+# encodeBasicConsume builds Basic.Consume args: reserved, queue, consumer-tag,
+# flag octet (no-ack when autoAck), empty arguments table. An empty consumer-tag
+# asks the broker to generate one (returned in Consume-Ok).
+func encodeBasicConsume(queue as string, consumerTag as string, autoAck as bool) {
+    def args as bytes;
+    $args = putShort($args, 0);            # reserved-1
+    $args = putShortStr($args, $queue);
+    $args = putShortStr($args, $consumerTag);
+    def flags as int init 0;
+    if ($autoAck) {
+        $flags = $flags | B_NOACK;         # no-ack bit (bit 1)
+    }
+    $args = putOctet($args, $flags);       # no-local|no-ack|exclusive|no-wait
+    return putEmptyTable($args);
+}
+
+# encodeBasicCancel builds Basic.Cancel args: consumer-tag, no-wait bit.
+func encodeBasicCancel(consumerTag as string) {
+    def args as bytes;
+    $args = putShortStr($args, $consumerTag);
+    $args = putOctet($args, 0);            # no-wait = false
+    return $args;
+}
+
+# encodeBasicNack builds Basic.Nack args: delivery-tag, flag octet (multiple,
+# requeue).
+func encodeBasicNack(deliveryTag as int, multiple as bool, requeue as bool) {
+    def args as bytes;
+    $args = putLongLong($args, $deliveryTag);
+    def flags as int init 0;
+    if ($multiple) {
+        $flags = $flags | 1;               # multiple bit (bit 0)
+    }
+    if ($requeue) {
+        $flags = $flags | 2;               # requeue bit (bit 1)
+    }
+    return putOctet($args, $flags);
+}
+
+# encodeConfirmSelect builds Confirm.Select args: a single no-wait bit.
+func encodeConfirmSelect() {
+    def args as bytes;
+    return putOctet($args, 0);             # no-wait = false
+}
+
+# encodeProperties builds a content header's property section: the 16-bit
+# property-flags word followed by each present property value, most-significant
+# flag bit first (content-type, delivery-mode, correlation-id, reply-to). An
+# unset field ("" / false) is omitted from both the flags and the value list, so
+# a zero Properties encodes as the two-byte "0000" (no properties).
+func encodeProperties(props as Properties) {
+    def flags as int init 0;
+    if ($props.contentType != "") {
+        $flags = $flags | PROP_CONTENT_TYPE;
+    }
+    if ($props.persistent) {
+        $flags = $flags | PROP_DELIVERY_MODE;
+    }
+    if ($props.correlationId != "") {
+        $flags = $flags | PROP_CORRELATION_ID;
+    }
+    if ($props.replyTo != "") {
+        $flags = $flags | PROP_REPLY_TO;
+    }
+    def out as bytes;
+    $out = putShort($out, $flags);
+    if ($props.contentType != "") {
+        $out = putShortStr($out, $props.contentType);
+    }
+    if ($props.persistent) {
+        $out = putOctet($out, DELIVERY_PERSISTENT);
+    }
+    if ($props.correlationId != "") {
+        $out = putShortStr($out, $props.correlationId);
+    }
+    if ($props.replyTo != "") {
+        $out = putShortStr($out, $props.replyTo);
+    }
+    return $out;
+}
+
+# decodeContentBodySize reads the 64-bit body-size from a content-header frame
+# payload (class(2) weight(2) body-size(8) property-flags ...).
+func decodeContentBodySize(payload as bytes) {
+    return readLongLong($payload, 4);
+}
+
+# decodeDeliverMethod parses Basic.Deliver args (consumer-tag, delivery-tag,
+# redelivered bit, exchange, routing-key) into a Delivery with an empty body;
+# the body is filled from the following content-header + body frames.
+func decodeDeliverMethod(args as bytes) {
+    def consumerTag as string init readShortStr($args, 0);
+    def off as int init 1 + byteLen($consumerTag);
+    def deliveryTag as int init readLongLong($args, $off);
+    $off = $off + 8;
+    def redelivered as bool init ($args[$off] & 1) == 1;
+    $off = $off + 1;
+    def exchange as string init readShortStr($args, $off);
+    $off = $off + 1 + byteLen($exchange);
+    def routingKey as string init readShortStr($args, $off);
+    def body as bytes;
+    return Delivery{ consumerTag: $consumerTag, deliveryTag: $deliveryTag, redelivered: $redelivered, exchange: $exchange, routingKey: $routingKey, body: $body };
+}
+
+# deliveryFrom decodes Basic.Deliver args and attaches an already-assembled body
+# - the pure combination of a method frame + content header + body frame(s).
+func deliveryFrom(args as bytes, body as bytes) {
+    def d as Delivery init decodeDeliverMethod($args);
+    $d.body = $body;
+    return $d;
+}
+
 # --- frame I/O (private) ----------------------------------------------------
 
 func readN(socket as net.Conn, n as int) {
@@ -382,6 +588,63 @@ func expectMethod(socket as net.Conn, classId as int, methodId as int, what as s
         fail("expected " + $what + ", got class " + convert.toString($m.classId) + " method " + convert.toString($m.methodId));
     }
     return $m;
+}
+
+# readMessageBody reads a content-header frame (for the body size) and the
+# following body frame(s), assembling the whole body. Shared by get (Basic.Get-Ok)
+# and receiveDelivery (Basic.Deliver).
+func readMessageBody(c as Conn) {
+    def hf as Frame init readFrame($c.socket);
+    def bodySize as int init decodeContentBodySize($hf.payload);
+    def body as bytes;
+    # Append in place to keep multi-frame body assembly O(N), not O(N^2).
+    while (len($body) < $bodySize) {
+        def bf as Frame init readFrame($c.socket);
+        def k as int init 0;
+        while ($k < len($bf.payload)) {
+            $body[] = $bf.payload[$k];
+            $k = $k + 1;
+        }
+    }
+    return $body;
+}
+
+# writeContentAndBody writes a Basic content-header frame (class, weight,
+# body-size, property section) then the body split into frames no larger than the
+# negotiated frame-max. `propBytes` is the encoded property-flags + property list
+# (a two-byte "0000" for no properties). Shared by publish / publishWith.
+func writeContentAndBody(c as Conn, body as bytes, propBytes as bytes) {
+    def hdr as bytes;
+    $hdr = putShort($hdr, CLS_BASIC);
+    $hdr = putShort($hdr, 0);              # weight (always 0)
+    $hdr = putLongLong($hdr, len($body));
+    $hdr = appendBytes($hdr, $propBytes);  # property-flags + property list
+    writeFrame($c.socket, FRAME_HEADER, $c.channel, $hdr);
+
+    if (len($body) > 0) {
+        # A single FRAME_BODY over the broker's limit (RabbitMQ default 131072)
+        # triggers a connection-level error and drops the connection. Each frame
+        # carries 8 octets of overhead (1 type + 2 channel + 4 size + 1 end), so
+        # the payload budget is frameMax - 8. A frameMax of 0 means no limit.
+        def maxPayload as int init 0;
+        if ($c.frameMax > 8) {
+            $maxPayload = $c.frameMax - 8;
+        }
+        if ($maxPayload <= 0 or len($body) <= $maxPayload) {
+            writeFrame($c.socket, FRAME_BODY, $c.channel, $body);
+        } else {
+            def off as int init 0;
+            def total as int init len($body);
+            while ($off < $total) {
+                def stop as int init $off + $maxPayload;
+                if ($stop > $total) {
+                    $stop = $total;
+                }
+                writeFrame($c.socket, FRAME_BODY, $c.channel, sliceBytes($body, $off, $stop));
+                $off = $stop;
+            }
+        }
+    }
 }
 
 # --- handshake (private) ----------------------------------------------------
@@ -523,6 +786,36 @@ func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
 }
 
 /**
+ * Declare an exchange (idempotent, durable). `exType` is "direct", "topic", or
+ * "fanout".
+ * @param c {Conn} the connection
+ * @param name {string} the exchange name
+ * @param exType {string} the exchange type ("direct" / "topic" / "fanout")
+ * @throws {Error} kind "amqp" on failure
+ */
+export func declareExchange(c as Conn, name as string, exType as string) {
+    def args as bytes init encodeExchangeDeclare($name, $exType, true);
+    writeMethod($c.socket, $c.channel, CLS_EXCHANGE, EX_DECLARE, $args);
+    expectMethod($c.socket, CLS_EXCHANGE, EX_DECLAREOK, "Exchange.Declare-Ok");
+}
+
+/**
+ * Bind a queue to an exchange with a routing key. For a "fanout" exchange the
+ * routing key is ignored; for "direct" it is matched exactly; for "topic" it is
+ * a pattern (`*` / `#`).
+ * @param c {Conn} the connection
+ * @param queue {string} the queue name
+ * @param exchange {string} the exchange name
+ * @param routingKey {string} the binding routing key / pattern
+ * @throws {Error} kind "amqp" on failure
+ */
+export func bindQueue(c as Conn, queue as string, exchange as string, routingKey as string) {
+    def args as bytes init encodeQueueBind($queue, $exchange, $routingKey);
+    writeMethod($c.socket, $c.channel, CLS_QUEUE, Q_BIND, $args);
+    expectMethod($c.socket, CLS_QUEUE, Q_BINDOK, "Queue.Bind-Ok");
+}
+
+/**
  * Publish a message body to an exchange with a routing key. Use exchange "" for
  * the default exchange (routing key = queue name).
  * @param c {Conn} the connection
@@ -532,47 +825,30 @@ func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
  * @throws {Error} kind "amqp" on failure
  */
 export func publish(c as Conn, exchange as string, routingKey as string, body as bytes) {
+    def zero as Properties;
+    publishWith($c, $exchange, $routingKey, $body, $zero);
+}
+
+/**
+ * Publish a message body carrying message properties (content-type, persistence,
+ * correlation-id, reply-to). Otherwise identical to publish. Build the property
+ * set with `Properties{...}`; an unset field ("" / false) is omitted from the
+ * wire.
+ * @param c {Conn} the connection
+ * @param exchange {string} the exchange name ("" for the default)
+ * @param routingKey {string} the routing key
+ * @param body {bytes} the message body
+ * @param props {Properties} the message properties
+ * @throws {Error} kind "amqp" on failure
+ */
+export func publishWith(c as Conn, exchange as string, routingKey as string, body as bytes, props as Properties) {
     def args as bytes;
     $args = putShort($args, 0);                # reserved
     $args = putShortStr($args, $exchange);
     $args = putShortStr($args, $routingKey);
     $args = putOctet($args, 0);                 # mandatory / immediate bits
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_PUBLISH, $args);
-
-    # content header: class, weight, body-size, property-flags (none).
-    def hdr as bytes;
-    $hdr = putShort($hdr, CLS_BASIC);
-    $hdr = putShort($hdr, 0);
-    $hdr = putLongLong($hdr, len($body));
-    $hdr = putShort($hdr, 0);
-    writeFrame($c.socket, FRAME_HEADER, $c.channel, $hdr);
-
-    if (len($body) > 0) {
-        # Split the body into frames no larger than the negotiated frame-max: a
-        # single FRAME_BODY over the broker's limit (RabbitMQ default 131072)
-        # triggers a connection-level error and drops the connection. Each
-        # frame carries 8 octets of overhead (1 type + 2 channel + 4 size + 1
-        # end), so the payload budget is frameMax - 8. A frameMax of 0 means no
-        # limit.
-        def maxPayload as int init 0;
-        if ($c.frameMax > 8) {
-            $maxPayload = $c.frameMax - 8;
-        }
-        if ($maxPayload <= 0 or len($body) <= $maxPayload) {
-            writeFrame($c.socket, FRAME_BODY, $c.channel, $body);
-        } else {
-            def off as int init 0;
-            def total as int init len($body);
-            while ($off < $total) {
-                def stop as int init $off + $maxPayload;
-                if ($stop > $total) {
-                    $stop = $total;
-                }
-                writeFrame($c.socket, FRAME_BODY, $c.channel, sliceBytes($body, $off, $stop));
-                $off = $stop;
-            }
-        }
-    }
+    writeContentAndBody($c, $body, encodeProperties($props));
 }
 
 /**
@@ -585,6 +861,38 @@ export func publish(c as Conn, exchange as string, routingKey as string, body as
  */
 export func publishText(c as Conn, exchange as string, routingKey as string, text as string) {
     publish($c, $exchange, $routingKey, convert.bytesFromString($text, "utf-8"));
+}
+
+/**
+ * Put the channel into publisher-confirm mode (Confirm.Select). After this, each
+ * publish is confirmed by the broker; call waitConfirm once per publish to block
+ * for that confirmation. Idempotent.
+ * @param c {Conn} the connection
+ * @throws {Error} kind "amqp" on failure
+ */
+export func confirmSelect(c as Conn) {
+    def args as bytes init encodeConfirmSelect();
+    writeMethod($c.socket, $c.channel, CLS_CONFIRM, CONFIRM_SELECT, $args);
+    expectMethod($c.socket, CLS_CONFIRM, CONFIRM_SELECTOK, "Confirm.Select-Ok");
+}
+
+/**
+ * Block for the broker's confirmation of the next outstanding publish (only valid
+ * after confirmSelect). Returns true on Basic.Ack (the broker took
+ * responsibility for the message) and false on Basic.Nack (the broker could not).
+ * @param c {Conn} the connection
+ * @return {bool} true when confirmed, false when nacked
+ * @throws {Error} kind "amqp" on an unexpected reply
+ */
+export func waitConfirm(c as Conn) {
+    def m as Method init readMethod($c.socket);
+    if ($m.classId == CLS_BASIC and $m.methodId == B_ACK) {
+        return true;
+    }
+    if ($m.classId == CLS_BASIC and $m.methodId == B_NACK) {
+        return false;
+    }
+    fail("expected a publisher confirm (Basic.Ack / Basic.Nack), got class " + convert.toString($m.classId) + " method " + convert.toString($m.methodId));
 }
 
 /**
@@ -621,21 +929,8 @@ export func get(c as Conn, queue as string, autoAck as bool) {
     $off = $off + 1 + byteLen($exchange);
     def routingKey as string init readShortStr($m.args, $off);
 
-    # content header frame carries the body size.
-    def hf as Frame init readFrame($c.socket);
-    def bodySize as int init readLongLong($hf.payload, 4);
-
-    # body frames until the whole body is collected.
-    def body as bytes;
-    while (len($body) < $bodySize) {
-        def bf as Frame init readFrame($c.socket);
-        # Append in place to keep multi-frame body assembly O(N), not O(N^2).
-        def k as int init 0;
-        while ($k < len($bf.payload)) {
-            $body[] = $bf.payload[$k];
-            $k = $k + 1;
-        }
-    }
+    # content header frame + body frame(s) carry the message body.
+    def body as bytes init readMessageBody($c);
     return Message{ empty: false, deliveryTag: $deliveryTag, exchange: $exchange, routingKey: $routingKey, body: $body };
 }
 
@@ -649,6 +944,68 @@ export func ack(c as Conn, deliveryTag as int) {
     $args = putLongLong($args, $deliveryTag);
     $args = putOctet($args, 0);   # multiple = false
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_ACK, $args);
+}
+
+/**
+ * Negatively acknowledge a delivered message (Basic.Nack). With `requeue` true
+ * the broker re-queues the message for redelivery; with false it is dropped (or
+ * dead-lettered if configured). Nacks a single message (not "multiple").
+ * @param c {Conn} the connection
+ * @param deliveryTag {int} the delivery tag from a Message / Delivery
+ * @param requeue {bool} whether the broker should re-queue the message
+ */
+export func nack(c as Conn, deliveryTag as int, requeue as bool) {
+    def args as bytes init encodeBasicNack($deliveryTag, false, $requeue);
+    writeMethod($c.socket, $c.channel, CLS_BASIC, B_NACK, $args);
+}
+
+/**
+ * Start a server-pushed subscription with Basic.Consume and return the consumer
+ * tag (the broker generates one). Follow with receiveDelivery in a loop - wrap it
+ * in a `spawn` so the pushed deliveries do not block the rest of the program.
+ * When `autoAck` is false, ack (or nack) each Delivery by its deliveryTag.
+ * @param c {Conn} the connection
+ * @param queue {string} the queue name
+ * @param autoAck {bool} whether the broker should auto-acknowledge each delivery
+ * @return {string} the consumer tag (pass to cancelConsume)
+ * @throws {Error} kind "amqp" on failure
+ */
+export func consume(c as Conn, queue as string, autoAck as bool) {
+    def args as bytes init encodeBasicConsume($queue, "", $autoAck);
+    writeMethod($c.socket, $c.channel, CLS_BASIC, B_CONSUME, $args);
+    def ok as Method init expectMethod($c.socket, CLS_BASIC, B_CONSUMEOK, "Basic.Consume-Ok");
+    return readShortStr($ok.args, 0);
+}
+
+/**
+ * Block for the next server-pushed message (Basic.Deliver + content header + body
+ * frame(s)) and return it as a Delivery. Only valid after consume. This is the
+ * cooperative receive loop: there is no callback - the app calls receiveDelivery
+ * repeatedly, typically from inside its own `spawn`, and acts on each Delivery.
+ * @param c {Conn} the connection
+ * @return {Delivery} the next delivered message
+ * @throws {Error} kind "amqp" on a non-delivery frame or a dropped connection
+ */
+export func receiveDelivery(c as Conn) {
+    def m as Method init readMethod($c.socket);
+    if (not ($m.classId == CLS_BASIC and $m.methodId == B_DELIVER)) {
+        fail("expected Basic.Deliver, got class " + convert.toString($m.classId) + " method " + convert.toString($m.methodId));
+    }
+    def body as bytes init readMessageBody($c);
+    return deliveryFrom($m.args, $body);
+}
+
+/**
+ * Cancel a subscription started with consume (Basic.Cancel). After this the
+ * broker sends no further deliveries for that consumer tag.
+ * @param c {Conn} the connection
+ * @param consumerTag {string} the consumer tag returned by consume
+ * @throws {Error} kind "amqp" on failure
+ */
+export func cancelConsume(c as Conn, consumerTag as string) {
+    def args as bytes init encodeBasicCancel($consumerTag);
+    writeMethod($c.socket, $c.channel, CLS_BASIC, B_CANCEL, $args);
+    expectMethod($c.socket, CLS_BASIC, B_CANCELOK, "Basic.Cancel-Ok");
 }
 
 /**

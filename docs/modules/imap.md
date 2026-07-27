@@ -62,6 +62,12 @@ common "read every message in a folder" case.
 | `imap.expunge(session)`              | `EXPUNGE` - permanently remove all `\Deleted` messages in the selected folder. |
 | `imap.logout(session)`               | `LOGOUT` and close.                                              |
 | `imap.fetchAll(opts, folder)`       | Connect, select, retrieve every message, log out; `list of string`. |
+| `imap.Notification`                  | One server push during IDLE: `kind` (`"exists"` / `"expunge"` / `"recent"` / `""`), `number`. |
+| `imap.supportsIdle(session)`         | `CAPABILITY` gate - true when the server advertises IDLE (RFC 2177). |
+| `imap.idle(session)`                 | Enter IDLE (`IDLE` -> `+ idling`); the server now pushes mailbox changes. |
+| `imap.receiveNotification(session)` | Block for the next push -> `imap.Notification` (empty sentinel when IDLE ends). |
+| `imap.pollNotification(session, timeoutMs)` | Like `receiveNotification`, but wait at most `timeoutMs` ms (`net.setDeadline`), then the empty sentinel. |
+| `imap.done(session)`                 | Leave IDLE (`DONE` + tagged completion), back to command mode.   |
 
 `Options.security` is `"none"` (143), `"tls"` (implicit TLS on connect, 993),
 or `"starttls"`. `fetch` uses `BODY.PEEK[]`, so retrieving does **not** set the
@@ -244,14 +250,74 @@ extraction, `EXISTS` / `SEARCH` parsing, `LOGIN` argument quoting, and tagged
 in-process fake IMAP server in the Go test suite (`TestImapReceive`), so it
 runs in CI without an external server.
 
+## IDLE (server push)
+
+Instead of re-polling `STATUS` on a timer, `IDLE` (RFC 2177) lets the server
+**push** mailbox changes as they happen - new mail, an expunge, a recent-count
+change. The idiom is a cooperative read loop: **idle -> receive / poll -> done**.
+There are no callbacks; you read pushes with a blocking `receiveNotification` (or
+a timeout-bounded `pollNotification`) and, when you want to stop, break out with
+`done`. It is the same M23.1 streaming / server-push shape the other read loops
+share, so wrapping the loop in a `spawn` runs push handling beside the rest of
+your program.
+
+Each push arrives as an `imap.Notification`: `kind` is `"exists"` (the mailbox
+now holds this many messages - new mail), `"expunge"` (the message at this
+sequence number was removed), or `"recent"` (recent-count change); `number` is
+the count / sequence number it carried. A `kind` of `""` is the **idle-gap
+sentinel** - `pollNotification` timed out, or IDLE ended - so it never blocks a
+poll loop.
+
+```jennifer
+import "imap.j" as imap;
+
+def s as imap.Session init imap.connect($opts);
+imap.selectFolder($s, "INBOX");
+if (not imap.supportsIdle($s)) {
+    io.printf("server has no IDLE - fall back to a STATUS poll\n");
+    exit 1;
+}
+
+imap.idle($s);                                  # enter IDLE; server now pushes
+def n as imap.Notification init imap.receiveNotification($s);   # blocks for the next push
+if ($n.kind == "exists") {
+    io.printf("new mail: the mailbox now has %d messages\n", $n.number);
+}
+imap.done($s);                                  # leave IDLE, back to command mode
+def latest as string init imap.fetch($s, $n.number);   # ordinary commands work again
+```
+
+`pollNotification($s, timeoutMs)` is the non-blocking variant - it returns the
+next push if one arrives within `timeoutMs`, otherwise the empty sentinel, so a
+loop can do other work between checks:
+
+```jennifer
+imap.idle($s);
+while (running()) {
+    def n as imap.Notification init imap.pollNotification($s, 1000);   # wait up to 1 s
+    if ($n.kind == "exists") {
+        handleNewMail($s, $n.number);
+    }
+    doOtherWork();
+}
+imap.done($s);
+```
+
+A server **drops an idle session after about 29 minutes** (RFC 2177 advises
+re-issuing well before that), so a long-lived client must periodically `done`
+and `idle` again - break IDLE, then re-enter it - rather than assume the same
+IDLE stays live forever. Always pair an `idle` with a `done` before running any
+other command: while idling, the connection is dedicated to the push stream.
+
 ## Out of scope
 
 A practical subset of IMAP4rev1, not the whole protocol. What it does **not**
 cover:
 
 - **Commands.** No `RENAME` / `DELETE` of *folders* (only `CREATE` / `LIST` /
-  `STATUS`), no atomic `MOVE` (do `COPY` + `\Deleted` + `EXPUNGE`), and no `IDLE`
-  (poll instead). Everything works on **sequence numbers**, not UIDs, and
+  `STATUS`) and no atomic `MOVE` (do `COPY` + `\Deleted` + `EXPUNGE`). `IDLE` is
+  supported (see [IDLE](#idle-server-push)) for the `EXISTS` / `EXPUNGE` /
+  `RECENT` pushes. Everything works on **sequence numbers**, not UIDs, and
   `SEARCH` sends ASCII-only criteria (no `CHARSET UTF-8`).
 - **Auth.** The supported mechanisms are in [Authentication](#authentication);
   *not* covered are GSSAPI / Kerberos, NTLM, client-certificate auth, and OAuth2

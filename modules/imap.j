@@ -1112,3 +1112,227 @@ export func fetchAll(opts as Options, folder as string) {
     logout($session);
     return $msgs;
 }
+
+# --- IDLE / server push (RFC 2177) ---------------------------------
+# A cooperative read loop rather than callbacks: enter IDLE, then block in
+# receiveNotification (or poll with a timeout) for the server's untagged pushes,
+# and break out with done. The app wraps the loop in its own `spawn` when it
+# wants push handling to run alongside other work. This is the M23.1
+# streaming / server-push shape shared with the other read loops.
+
+/**
+ * One server-pushed mailbox change delivered during IDLE (RFC 2177). A `kind` of
+ * "" is the idle-gap sentinel (`imap.pollNotification` timed out, or IDLE ended)
+ * carrying no push.
+ * @field kind {string} the push kind: "exists" (new message count), "expunge" (a message was removed), "recent" (recent-count change), or "" (no push / idle gap)
+ * @field number {int} the sequence number or count the push carried (0 for the sentinel)
+ */
+export def struct Notification {
+    kind as string,
+    number as int
+};
+
+# noNotification is the idle-gap sentinel: a poll timed out or IDLE ended, so no
+# push is available. The caller tests `len($n.kind) == 0`.
+func noNotification() {
+    return Notification{ kind: "", number: 0 };
+}
+
+# parseNotification turns one untagged line into a typed Notification: a
+# "* N EXISTS" / "* N EXPUNGE" / "* N RECENT" push becomes {kind, number}; any
+# other line (a tagged completion, a "* SEARCH", an unmodeled untagged response)
+# becomes the empty sentinel. Pure: unit-tested without a server.
+func parseNotification(line as string) {
+    def m as regex.Match init regex.find("(?i)^\\* ([0-9]+) (EXISTS|EXPUNGE|RECENT)", $line);
+    if ($m.start < 0) {
+        return noNotification();
+    }
+    return Notification{ kind: strings.lower($m.groups[1]), number: convert.toInt($m.groups[0]) };
+}
+
+# isContinuation reports whether a line is a "+"/"+ ..." command continuation -
+# the server's "+ idling" reply that means IDLE is active and it will now push.
+# Pure: unit-tested without a server.
+func isContinuation(line as string) {
+    def t as string init strings.trim($line);
+    return strings.startsWith($t, "+ ") or $t == "+";
+}
+
+# hasCapability reports whether a CAPABILITY response advertises `token`
+# (case-insensitive, whole-token). Pure: unit-tested without a server.
+func hasCapability(resp as string, token as string) {
+    def want as string init strings.upper($token);
+    for (def tk in strings.split(strings.replace($resp, "\r\n", " "), " ")) {
+        if (strings.upper(strings.trim($tk)) == $want) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Report whether the server advertises the IDLE extension (RFC 2177) in its
+ * `CAPABILITY` reply. Call before `idle`: a server without IDLE answers the
+ * `IDLE` command with a tagged "NO"/"BAD", which `idle` surfaces as an `Error`.
+ * @param session {Session} the open session
+ * @return {bool} true when IDLE is advertised
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func supportsIdle(session as Session) {
+    return hasCapability(command($session.conn, "CAPABILITY"), "IDLE");
+}
+
+# idleReadChunk reads up to 512 bytes, mapping a read timeout to an empty result
+# (an IDLE gap is a value, not a throw). A closed peer also returns empty.
+func idleReadChunk(conn as net.Conn) {
+    try {
+        return net.readBytes($conn, 512);
+    } catch (e) {
+        if (strings.contains($e.message, "timed out")) {
+            return emptyBytes();
+        }
+        throw $e;
+    }
+}
+
+# idleReadLine reads one CRLF-terminated line during IDLE under a caller-chosen
+# read deadline (ms; 0 blocks indefinitely). Returns the line (no CRLF), or ""
+# when the deadline elapsed or the peer closed before a full line arrived - the
+# "no push yet" signal the receive loop reads. The deadline is absolute (armed
+# once), so the whole line must arrive within `timeoutMs`.
+func idleReadLine(conn as net.Conn, timeoutMs as int) {
+    # Clear the read deadline on every exit path (like net.setDeadline maps to
+    # Go's SetDeadline, which governs writes too): a timed-out poll would otherwise
+    # leave an expired deadline that makes the next write - e.g. `done`'s DONE -
+    # fail with a spurious i/o timeout.
+    defer net.setDeadline($conn, 0);
+    net.setDeadline($conn, $timeoutMs);
+    def buf as bytes;
+    def nl as int init -1;
+    def scanFrom as int init 0;
+    while ($nl < 0) {
+        def chunk as bytes init idleReadChunk($conn);
+        if (len($chunk) == 0) {
+            return "";
+        }
+        def before as int init len($buf);
+        def k as int init 0;
+        while ($k < len($chunk)) {
+            $buf[] = $chunk[$k];
+            $k = $k + 1;
+        }
+        capResponse(len($buf));
+        # Scan from the overlap point, indexing $buf in place (a helper taking
+        # the whole buffer would deep-copy it each pass).
+        def blen as int init len($buf);
+        def si as int init $scanFrom;
+        while ($si + 1 < $blen and $nl < 0) {
+            if ($buf[$si] == 13 and $buf[$si + 1] == 10) {
+                $nl = $si;
+            }
+            $si = $si + 1;
+        }
+        $scanFrom = $before - 1;
+        if ($scanFrom < 0) {
+            $scanFrom = 0;
+        }
+    }
+    return convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8");
+}
+
+# readNotification is the shared receive core: read lines under `timeoutMs`
+# (0 = block) until a modeled push arrives (returned typed) or there is nothing
+# to return - an idle gap, a closed peer, or the tagged completion that ends
+# IDLE - in which case the empty sentinel is returned. An untagged line the
+# module does not model (e.g. "* n FETCH") is skipped, so the loop keeps waiting
+# for the next real push.
+func readNotification(conn as net.Conn, timeoutMs as int) {
+    while (true) {
+        def line as string init idleReadLine($conn, $timeoutMs);
+        if (len($line) == 0) {
+            return noNotification();
+        }
+        def n as Notification init parseNotification($line);
+        if (len($n.kind) > 0) {
+            return $n;
+        }
+        if (isTagged($line, TAG)) {
+            return noNotification();
+        }
+    }
+    return noNotification();
+}
+
+/**
+ * Enter IDLE (RFC 2177): send `IDLE` and wait for the server's "+ idling"
+ * continuation, leaving the session in the idling state so the server pushes
+ * mailbox changes (call `supportsIdle` first - a server that lacks the extension
+ * answers with a tagged "NO"/"BAD", surfaced here as an `Error`). Follow with
+ * `receiveNotification` / `pollNotification` to read pushes, then `done` to
+ * return to command mode. A server drops an idle session after about 29 minutes,
+ * so a long-lived client must periodically `done` and `idle` again.
+ * @param session {Session} the open session
+ * @throws {Error} kind "imap" when the server does not enter IDLE (e.g. a tagged "NO"/"BAD")
+ */
+export func idle(session as Session) {
+    writeLine($session.conn, TAG + " IDLE");
+    def line as string init readLine($session.conn);
+    if (not isContinuation($line)) {
+        # Not the "+ idling" continuation - surface the server's tagged
+        # completion (a "NO"/"BAD" throws; anything else is unexpected).
+        expectTaggedOK($line, TAG);
+        throw Error{kind: "imap", message: "imap.idle: server did not enter IDLE: " + strings.trim($line), file: "", line: 0, col: 0};
+    }
+    return;
+}
+
+/**
+ * Block until the next server push arrives while idling and return it as a typed
+ * `Notification` ("exists" new-mail / "expunge" / "recent"). Returns the empty
+ * sentinel (`kind == ""`) only if the peer closes or the server ends IDLE. No
+ * callbacks - wrap this in a loop, and in a `spawn` to run it beside other work.
+ * Requires an `idle` first.
+ * @param session {Session} the idling session
+ * @return {Notification} the next push, or the empty sentinel when IDLE ends
+ * @throws {Error} kind "imap" on a read failure other than a timeout
+ */
+export func receiveNotification(session as Session) {
+    return readNotification($session.conn, 0);
+}
+
+/**
+ * Like `receiveNotification`, but wait at most `timeoutMs` milliseconds (armed
+ * with `net.setDeadline`): return the next push if one arrives in time, else the
+ * empty sentinel (`kind == ""`) so a poll loop can do other work between checks.
+ * Requires an `idle` first.
+ * @param session {Session} the idling session
+ * @param timeoutMs {int} the maximum time to wait, in milliseconds
+ * @return {Notification} the next push, or the empty sentinel on a timeout
+ * @throws {Error} kind "imap" on a read failure other than a timeout
+ */
+export func pollNotification(session as Session, timeoutMs as int) {
+    return readNotification($session.conn, $timeoutMs);
+}
+
+/**
+ * Leave IDLE: send `DONE`, drain any pending pushes, and read the tagged
+ * completion of the `IDLE` command, returning the session to command mode so
+ * ordinary calls (`fetch`, `search`, ...) work again. Pair every `idle` with a
+ * `done`.
+ * @param session {Session} the idling session
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func done(session as Session) {
+    writeLine($session.conn, "DONE");
+    # After DONE the server may flush buffered untagged pushes before the tagged
+    # completion of the IDLE command; skip to that tagged line (bounded so a
+    # server streaming untagged lines can't loop us forever).
+    def line as string init readLine($session.conn);
+    def guard as int init 0;
+    while (not isTagged($line, TAG) and $guard < 1024) {
+        $line = readLine($session.conn);
+        $guard = $guard + 1;
+    }
+    expectTaggedOK($line, TAG);
+    return;
+}

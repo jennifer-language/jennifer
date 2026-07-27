@@ -8,6 +8,12 @@ on [`net`](../libraries/net.md) (+ TLS), with an MD5 fallback via `hash`. Needs
 the default `jennifer` binary. A `!trap` / `!fatal` reply throws
 `Error{kind: "mikrotik"}`.
 
+> **Higher-level client.** This module is the thin protocol layer. For a
+> thick-layer RouterOS client (typed resources / higher-level operations built on
+> top of it), see the **`routeros` deck** at
+> [github.com/jennifer-language/deck-routeros](https://github.com/jennifer-language/deck-routeros)
+> - a vendored `jvc` deck.
+
 ```jennifer
 import "mikrotik.j" as mikrotik;
 
@@ -89,13 +95,73 @@ RouterOS query word starting with `?`: `?type=ether` (equals), `?disabled`
 / `?#|` for compound queries. A query word missing its leading `?` throws
 `Error{kind: "mikrotik"}`.
 
+## Tags and streaming
+
+Some RouterOS commands do not run to a single `!done` - they **push `!re`
+sentences over time** (`/interface/monitor`, `/ping`, a `.../print` with
+`follow`). To read one you tag the command so its replies can be correlated,
+pull each pushed reply in a loop, and issue `/cancel` to stop it.
+
+A **tag** is an API `.tag=<id>` word attached to a command sentence; the router
+echoes it on every reply to that command. `talkTagged` attaches one to an
+ordinary (one-shot) command; `listen` attaches an auto-generated tag to a
+streaming command and hands it back.
+
+| Call | Returns | |
+| ---- | ------- | - |
+| `mikrotik.talkTagged(s, command, attrs, tag)` | `list of map of string to string` | like `talk`, with a `.tag=<id>` word (pass `""` to auto-generate); still one-shot |
+| `mikrotik.listen(s, command, params)` | `string` | start a **streaming** command; returns its tag (does not read a reply) |
+| `mikrotik.receiveReply(s, tag)` | `map of string to string` | **block** for the next pushed reply for `tag`; `{}` at stream end |
+| `mikrotik.cancel(s, tag)` | | stop the stream (issues `/cancel` naming the tag) |
+
+The idiom is **listen -> receive-loop -> cancel**. Jennifer has no callbacks, so
+`receiveReply` is a cooperative blocking pull; wrap the loop in a `spawn` to run
+it alongside the rest of the program. `receiveReply` returns each reply's fields
+as a `=key=value` map, and an **empty map** (`len(...) == 0`) once the stream has
+ended - the loop's stop signal. Replies bearing a different tag (another stream
+on the same session) are skipped.
+
+```jennifer
+def tag as string init mikrotik.listen($s, "/interface/monitor", {"interface": "ether1"});
+def reader as task of null init spawn {
+    repeat {
+        def reply as map of string to string init mikrotik.receiveReply($s, $tag);
+        if (len($reply) == 0) {
+            return;   # stream ended (cancelled)
+        }
+        # $reply["rx-bits-per-second"], $reply["tx-bits-per-second"], ...
+    } until (false);
+};
+# ... let it stream, then stop it:
+mikrotik.cancel($s, $tag);
+task.wait($reader);
+```
+
+`cancel` is fire-and-forget: the router answers the stream with a `!trap`
+(category `interrupted`) then `!done`, which `receiveReply` absorbs and turns
+into the `{}` stop signal, so the receive loop exits cleanly. A genuine `!trap` /
+`!fatal` (a bad command, a dropped connection) still throws
+`Error{kind: "mikrotik"}` out of `receiveReply`.
+
+## Read deadlines
+
+Every bounded read arms a `net.setDeadline` window (`CONNECT_TIMEOUT_MS`) so a
+blackholed or mid-sentence router fails instead of hanging. That window is
+**cleared** (`net.setDeadline(conn, 0)`) on every exit path of the read - a
+`defer` in `readN` runs it on both the normal return and a throw - so a stale
+deadline never leaks to the next read or write on the socket (which would
+otherwise inherit it and spuriously time out, a hazard that matters once a
+long-lived streaming session interleaves reads and writes).
+
 ## Scope
 
 - **Binary API, v6 and v7.** The v7 REST API (HTTP + JSON) is a different,
   stateless shape and a possible second backend later; v1 ships the binary API.
-- **Synchronous `talk`.** `.tag`-multiplexed concurrent commands are a follow-on -
-  each call runs to its `!done` before the next. (Server-side **query words** are
-  supported, via `talkQuery` / `printWhere`.)
+- **Tagged + streaming, one connection.** `talkTagged` / `listen` /
+  `receiveReply` / `cancel` add `.tag`-correlated commands and server-push read
+  loops over the single session socket; a synchronous `talk` still runs to its
+  `!done` before the next. Server-side **query words** are supported, via
+  `talkQuery` / `printWhere`.
 - **`!trap` throws.** A command error surfaces as `Error{kind: "mikrotik"}`
   (the trailing `!done` is consumed first, so the session stays usable); a
   `!fatal` (connection closing) throws immediately.

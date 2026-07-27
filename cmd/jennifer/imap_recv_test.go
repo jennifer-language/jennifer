@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeIMAP accepts one connection and serves a minimal IMAP4rev1 dialogue for a
@@ -151,5 +152,108 @@ imap.logout($s);`, imapMod, port)
 
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("imap receive program failed with code %d", code)
+	}
+}
+
+// fakeIMAPIdle serves the login / SELECT / CAPABILITY prelude, then the RFC 2177
+// IDLE dialogue: on `<tag> IDLE` it answers a `+ idling` continuation and then
+// pushes two untagged notifications (`* 5 EXISTS`, `* 1 EXPUNGE`); on the bare
+// `DONE` line (which carries no tag) it answers the fixed-tag IDLE completion.
+// The continuation and each push go out as separate writes with a short gap so
+// the client's line reader (which discards anything past the first CRLF in a
+// chunk) sees each on its own read, exercising the real push framing.
+func fakeIMAPIdle(ln net.Listener) {
+	conn, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	fmt.Fprintf(conn, "* OK IMAP4rev1 ready\r\n")
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		trimmed := strings.TrimRight(line, "\r\n")
+		// DONE is a bare, untagged line that ends the IDLE command; answer with
+		// the fixed command tag the module uses (imap.j's `TAG`).
+		if strings.ToUpper(trimmed) == "DONE" {
+			fmt.Fprintf(conn, "JEN OK IDLE terminated\r\n")
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			continue
+		}
+		tag, cmd := fields[0], strings.ToUpper(fields[1])
+		switch cmd {
+		case "SELECT":
+			fmt.Fprintf(conn, "* 2 EXISTS\r\n* 0 RECENT\r\n%s OK SELECT completed\r\n", tag)
+		case "CAPABILITY":
+			fmt.Fprintf(conn, "* CAPABILITY IMAP4rev1 IDLE\r\n%s OK CAPABILITY completed\r\n", tag)
+		case "IDLE":
+			// Enter IDLE, then push mailbox changes as distinct writes so each
+			// arrives on its own client read.
+			fmt.Fprintf(conn, "+ idling\r\n")
+			time.Sleep(100 * time.Millisecond)
+			fmt.Fprintf(conn, "* 5 EXISTS\r\n")
+			time.Sleep(100 * time.Millisecond)
+			fmt.Fprintf(conn, "* 1 EXPUNGE\r\n")
+		case "LOGOUT":
+			fmt.Fprintf(conn, "* BYE\r\n%s OK LOGOUT completed\r\n", tag)
+			return
+		default: // LOGIN, ...
+			fmt.Fprintf(conn, "%s OK %s completed\r\n", tag, cmd)
+		}
+	}
+}
+
+// A .j program drives the imap IDLE surface against the in-process server:
+// gate on supportsIdle, enter idle, read the EXISTS push via pollNotification
+// (a bounded wait that lands inside its window) and the EXPUNGE push via a
+// blocking receiveNotification, then leave IDLE cleanly with done. Assertions
+// run through `testing.assert*`, so any mismatch fails loadForTest.
+func TestImapIdle(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	go fakeIMAPIdle(ln)
+
+	imapMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "imap.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+import %q as imap;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
+def s as imap.Session init imap.connect($o);
+testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
+# CAPABILITY gate: the server advertises IDLE.
+testing.assertTrue(imap.supportsIdle($s));
+# Enter IDLE and read the server's pushes as typed notifications.
+imap.idle($s);
+# A bounded poll returns the first push (EXISTS 5) once it arrives in-window.
+def a as imap.Notification init imap.pollNotification($s, 2000);
+testing.assertEqual($a.kind, "exists");
+testing.assertEqual($a.number, 5);
+# A blocking receive returns the next push (EXPUNGE 1).
+def b as imap.Notification init imap.receiveNotification($s);
+testing.assertEqual($b.kind, "expunge");
+testing.assertEqual($b.number, 1);
+# Leave IDLE cleanly and log out.
+imap.done($s);
+imap.logout($s);`, imapMod, port)
+	progPath := filepath.Join(dir, "idle.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("imap idle program failed with code %d", code)
 	}
 }

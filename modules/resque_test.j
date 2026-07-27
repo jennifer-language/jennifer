@@ -17,6 +17,15 @@ func testKeys() {
     testing.assertEqual(failedKey(), "resque:failed");
 }
 
+func testQueueFromKey() {
+    # the inverse of queueKey, as BLPOP echoes the popped key
+    testing.assertEqual(queueFromKey("resque:queue:email"), "email");
+    testing.assertEqual(queueFromKey("resque:queue:high"), "high");
+    testing.assertEqual(queueFromKey(queueKey("work")), "work");
+    # a key without the prefix is returned unchanged (defensive)
+    testing.assertEqual(queueFromKey("other"), "other");
+}
+
 func testEncodePayload() {
     testing.assertEqual(encodePayload("SendWelcome", ["a@b.c", "en"]),
         "{\"class\":\"SendWelcome\",\"args\":[\"a@b.c\",\"en\"]}");

@@ -117,3 +117,79 @@ func testReplyCapAllowsAtLimit() {
     capReply(MAX_REPLY_BYTES);
     testing.assertTrue(true);
 }
+
+# ---- pub/sub command encoding ----
+func testEncodeSubscribe() {
+    testing.assertEqual(encodeCommand(subscribeArgs("SUBSCRIBE", ["news", "weather"])),
+        "*3\r\n$9\r\nSUBSCRIBE\r\n$4\r\nnews\r\n$7\r\nweather\r\n");
+    testing.assertEqual(encodeCommand(subscribeArgs("PSUBSCRIBE", ["news.*"])),
+        "*2\r\n$10\r\nPSUBSCRIBE\r\n$6\r\nnews.*\r\n");
+}
+
+func testEncodeUnsubscribeAll() {
+    # An empty channel list is UNSUBSCRIBE-from-all (just the verb).
+    testing.assertEqual(encodeCommand(subscribeArgs("UNSUBSCRIBE", [])),
+        "*1\r\n$11\r\nUNSUBSCRIBE\r\n");
+}
+
+func testEncodePublish() {
+    testing.assertEqual(encodeCommand(publishArgs("news", "hello")),
+        "*3\r\n$7\r\nPUBLISH\r\n$4\r\nnews\r\n$5\r\nhello\r\n");
+}
+
+# ---- pushed message parsing ----
+func testMessageFromReply() {
+    def pr as ParseResult init parseComplete(b("*3\r\n$7\r\nmessage\r\n$4\r\nnews\r\n$5\r\nhello\r\n"));
+    def m as Message init messageFromReply($pr.reply);
+    testing.assertEqual($m.kind, "message");
+    testing.assertEqual($m.channel, "news");
+    testing.assertEqual($m.pattern, "");
+    testing.assertEqual($m.payload, "hello");
+}
+
+func testPmessageFromReply() {
+    def pr as ParseResult init parseComplete(b("*4\r\n$8\r\npmessage\r\n$6\r\nnews.*\r\n$8\r\nnews.tec\r\n$2\r\nhi\r\n"));
+    def m as Message init messageFromReply($pr.reply);
+    testing.assertEqual($m.kind, "pmessage");
+    testing.assertEqual($m.pattern, "news.*");
+    testing.assertEqual($m.channel, "news.tec");
+    testing.assertEqual($m.payload, "hi");
+}
+
+func testSubscribeConfirmationNotAMessage() {
+    # A subscribe confirmation carries its verb as kind, so receiveMessage skips
+    # it (kind is neither "message" nor "pmessage").
+    def pr as ParseResult init parseComplete(b("*3\r\n$9\r\nsubscribe\r\n$4\r\nnews\r\n:1\r\n"));
+    def m as Message init messageFromReply($pr.reply);
+    testing.assertEqual($m.kind, "subscribe");
+    testing.assertEqual($m.channel, "news");
+}
+
+func testMessageFromNonArray() {
+    testing.assertEqual(messageFromReply(replyInt(7)).kind, "");
+}
+
+# ---- pipeline encoding ----
+func testEncodePipeline() {
+    testing.assertEqual(encodePipeline([["PING"], ["SET", "k", "v"]]),
+        "*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n");
+    testing.assertEqual(encodePipeline([]), "");
+}
+
+# ---- SCAN reply parsing ----
+func testScanResultFromReply() {
+    # SCAN returns [ nextCursor(bulk), [ keys... ] ].
+    def pr as ParseResult init parseComplete(b("*2\r\n$2\r\n17\r\n*2\r\n$4\r\nkey1\r\n$4\r\nkey2\r\n"));
+    def sr as ScanResult init scanResultFromReply($pr.reply);
+    testing.assertEqual($sr.cursor, 17);
+    testing.assertEqual(len($sr.keys), 2);
+    testing.assertEqual($sr.keys[0], "key1");
+    testing.assertEqual($sr.keys[1], "key2");
+}
+
+func testScanResultTerminalCursor() {
+    def pr as ParseResult init parseComplete(b("*2\r\n$1\r\n0\r\n*0\r\n"));
+    def sr as ScanResult init scanResultFromReply($pr.reply);
+    testing.assertEqual($sr.cursor, 0);
+    testing.assertEqual(len($sr.keys), 0);
+}

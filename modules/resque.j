@@ -15,7 +15,8 @@
  * @example
  * import "resque.j" as resque;
  * import "redis.j" as redis;
- * def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: 6379, security: "none", user: "", password: "", db: 0});
+ * def db as redis.Session init redis.connect(redis.Options{
+ *     host: "127.0.0.1", port: 6379, security: "none", user: "", password: "", db: 0});
  * resque.enqueue($db, "email", "SendWelcome", ["user@example.com", "en"]);
  * def job as resque.Job init resque.reserve($db, ["high", "email"]);
  */
@@ -64,6 +65,16 @@ func failedKey() {
     return NAMESPACE + ":failed";
 }
 
+# queueFromKey recovers the queue name from a full `resque:queue:NAME` key (the
+# inverse of queueKey), as BLPOP echoes the key it popped from.
+func queueFromKey(key as string) {
+    def prefix as string init NAMESPACE + ":queue:";
+    if (strings.startsWith($key, $prefix)) {
+        return strings.substring($key, len($prefix));
+    }
+    return $key;
+}
+
 # --- envelope (private) --------------------------------------------
 
 # encodePayload renders the Resque job envelope for `class` + `args`.
@@ -104,6 +115,18 @@ func decodeJob(queue as string, raw as string) {
     return Job{queue: $queue, class: json.asString($node, "/class"), args: $args};
 }
 
+# checkReplies restores the fail-loud contract for a pipelined write batch:
+# `redis.pipeline` returns each command's outcome instead of throwing on a
+# `-ERR` (unlike `redis.command`), so a WRONGTYPE or other server error would be
+# silently swallowed. Re-raise the first error reply as a resque error.
+func checkReplies(replies as list of redis.Reply) {
+    for (def r in $replies) {
+        if ($r.kind == "error") {
+            throw Error{kind: "resque", message: $r.str, file: "", line: 0, col: 0};
+        }
+    }
+}
+
 # --- producer (exported) -------------------------------------------
 
 /**
@@ -115,8 +138,14 @@ func decodeJob(queue as string, raw as string) {
  */
 export func enqueue(session as redis.Session, queue as string, class as string,
     args as list of string) {
-    redis.command($session, ["SADD", queuesKey(), $queue]);
-    redis.command($session, ["RPUSH", queueKey($queue), encodePayload($class, $args)]);
+    # Register the queue and push the envelope in one round trip - Ruby-resque
+    # pipelines the same SADD + RPUSH, and order is preserved on the single
+    # connection (SADD executes before RPUSH). checkReplies keeps the fail-loud
+    # behaviour `command` gave, which `pipeline` drops.
+    checkReplies(redis.pipeline($session, [
+        ["SADD", queuesKey(), $queue],
+        ["RPUSH", queueKey($queue), encodePayload($class, $args)]
+    ]));
 }
 
 # --- consumer (exported) -------------------------------------------
@@ -134,6 +163,46 @@ export func reserve(session as redis.Session, queues as list of string) {
         if ($r.kind == "string") {
             return decodeJob($queue, $r.str);
         }
+    }
+    return Job{queue: "", class: "", args: []};
+}
+
+/**
+ * Reserve the next job, BLOCKING on the given queues until one has work or
+ * `timeoutSec` elapses (Redis `BLPOP`) instead of polling with `reserve`. A
+ * worker loop parks on the socket rather than spinning. Queues are honoured in
+ * priority order (BLPOP returns from the first non-empty). `timeoutSec` 0 blocks
+ * indefinitely (Redis semantics).
+ * @param session {redis.Session} the open Redis session
+ * @param queues {list of string} the queue names to watch, in priority order
+ * @param timeoutSec {int} seconds to block; 0 blocks until a job arrives
+ * @return {Job} the reserved job, or an empty `Job` (`class` "") on timeout
+ */
+export func reserveBlocking(session as redis.Session, queues as list of string,
+    timeoutSec as int) {
+    # No queues -> nothing to reserve (parity with reserve, and BLPOP with no key
+    # is a server error).
+    if (len($queues) == 0) {
+        return Job{queue: "", class: "", args: []};
+    }
+    def args as list of string init ["BLPOP"];
+    for (def queue in $queues) {
+        $args[] = queueKey($queue);
+    }
+    $args[] = convert.toString($timeoutSec);
+    # `command` re-arms Session.timeout as a read deadline before each read, so a
+    # server block longer than it would time the client out first. Widen the
+    # deadline to outlast the BLPOP window (0 = block forever, so disable it).
+    # This mutates only the value-copy of the session passed in, never the
+    # caller's; the widening lives for this one call.
+    if ($timeoutSec > 0) {
+        $session.timeout = ($timeoutSec * 1000) + 5000;
+    } else {
+        $session.timeout = 0;
+    }
+    def r as redis.Reply init redis.command($session, $args);
+    if ($r.kind == "array" and len($r.items) >= 2) {
+        return decodeJob(queueFromKey($r.items[0].str), $r.items[1].str);
     }
     return Job{queue: "", class: "", args: []};
 }
@@ -196,9 +265,20 @@ export func queues(session as redis.Session) {
  * @return {int} the total number of pending jobs
  */
 export func size(session as redis.Session) {
+    def qs as list of string init queues($session);
+    if (len($qs) == 0) {
+        return 0;
+    }
+    # One LLEN per queue, pipelined into a single round trip instead of N.
+    def cmds as list of list of string init [];
+    for (def queue in $qs) {
+        $cmds[] = ["LLEN", queueKey($queue)];
+    }
+    def replies as list of redis.Reply init redis.pipeline($session, $cmds);
+    checkReplies($replies);
     def total as int init 0;
-    for (def queue in queues($session)) {
-        $total = $total + queueLength($session, $queue);
+    for (def r in $replies) {
+        $total = $total + $r.num;
     }
     return $total;
 }

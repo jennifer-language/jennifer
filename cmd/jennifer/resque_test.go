@@ -15,9 +15,12 @@ import (
 )
 
 // fakeResqueRedis accepts one connection and serves the small RESP2 command set
-// the resque module needs - SADD / SMEMBERS (the queue registry), RPUSH / LPOP
-// (the queues and the failed list), and LLEN - over an in-memory store, so the
-// module's enqueue / reserve / introspection path runs on a real socket in CI.
+// the resque module needs - SADD / SMEMBERS (the queue registry), RPUSH / LPOP /
+// BLPOP (the queues and the failed list), and LLEN - over an in-memory store, so
+// the module's enqueue / reserve / introspection path runs on a real socket in
+// CI. Pipelined batches (enqueue's SADD+RPUSH, size's LLENs) need no special
+// handling: the client writes them back-to-back and this per-command loop replies
+// to each in order, which the client's buffered reader collects.
 func fakeResqueRedis(ln net.Listener) {
 	conn, err := ln.Accept()
 	if err != nil {
@@ -84,6 +87,23 @@ func fakeResqueRedis(ln net.Listener) {
 				fmt.Fprint(conn, bulk(l[0]))
 				lists[args[1]] = l[1:]
 			}
+		case "BLPOP":
+			// BLPOP key1 ... keyN timeout: pop from the first non-empty list and
+			// reply the [key, value] pair; a nil array when none has work. This
+			// mock never actually blocks (it answers the timeout case at once),
+			// which is enough to exercise the client's array / nil-array parse.
+			popped := false
+			for _, key := range args[1 : len(args)-1] {
+				if l := lists[key]; len(l) > 0 {
+					fmt.Fprintf(conn, "*2\r\n%s%s", bulk(key), bulk(l[0]))
+					lists[key] = l[1:]
+					popped = true
+					break
+				}
+			}
+			if !popped {
+				fmt.Fprint(conn, "*-1\r\n")
+			}
 		case "LLEN":
 			fmt.Fprintf(conn, ":%d\r\n", len(lists[args[1]]))
 		case "QUIT":
@@ -141,6 +161,14 @@ resque.fail($db, $second, "boom");
 testing.assertEqual(resque.size($db), 1);
 def drained as resque.Job init resque.reserve($db, ["high"]);
 testing.assertEqual(len($drained.class), 0);
+resque.enqueue($db, "blk", "Later", ["x"]);
+def got as resque.Job init resque.reserveBlocking($db, ["high", "blk"], 1);
+testing.assertEqual($got.queue, "blk");
+testing.assertEqual($got.class, "Later");
+testing.assertEqual($got.args[0], "x");
+def miss as resque.Job init resque.reserveBlocking($db, ["blk"], 1);
+testing.assertEqual(len($miss.class), 0);
+testing.assertEqual(len(resque.reserveBlocking($db, [], 1).class), 0);
 redis.quit($db);`, resqueMod, redisMod, port)
 	progPath := filepath.Join(dir, "jobs.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

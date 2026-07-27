@@ -36,6 +36,8 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.Options`                      | `host`, `port`, `security`, `user`, `password`, `db`.                 |
 | `redis.Session`                      | A live session over one connection (from `connect`).                  |
 | `redis.Reply`                        | A parsed reply: `kind`, `str`, `num`, `items` (see below).            |
+| `redis.Message`                      | A pushed pub/sub message: `kind`, `channel`, `pattern`, `payload`.    |
+| `redis.ScanResult`                   | One `scan` page: `cursor` (`int`), `keys` (`list of string`).         |
 | `redis.connect(opts)`                | Open a session; `AUTH` when `password` set, `SELECT` when `db > 0`.   |
 | `redis.command(session, args)`       | Send any command (`list of string`); returns the raw `Reply`.         |
 | `redis.get(session, key)`            | `GET` - the string value, or `""` when the key is missing.            |
@@ -44,9 +46,20 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.exists(session, key)`         | `EXISTS` - `bool`.                                                    |
 | `redis.incr(session, key)`           | `INCR` - the new value (`int`).                                       |
 | `redis.decr(session, key)`           | `DECR` - the new value (`int`).                                       |
-| `redis.keys(session, pattern)`       | `KEYS` - `list of string` matching a glob (`"*"`, `"user:*"`).        |
+| `redis.keys(session, pattern)`       | `KEYS` - `list of string` matching a glob (production-unsafe; see below). |
+| `redis.scan(session, cursor, pattern, count)` | `SCAN` - one `ScanResult` page (the production-safe walk).    |
 | `redis.ping(session)`                | `PING` - the server's `"PONG"`.                                       |
 | `redis.quit(session)`                | `QUIT` and close.                                                     |
+| `redis.subscribe(session, channels)` | `SUBSCRIBE` to a `list of string` of channels.                        |
+| `redis.psubscribe(session, patterns)`| `PSUBSCRIBE` to a `list of string` of glob patterns.                  |
+| `redis.unsubscribe(session, channels)` | `UNSUBSCRIBE` (`[]` leaves all channels).                           |
+| `redis.punsubscribe(session, patterns)` | `PUNSUBSCRIBE` (`[]` leaves all patterns).                         |
+| `redis.publish(session, channel, message)` | `PUBLISH` - the number of subscribers that received it (`int`). |
+| `redis.receiveMessage(session)`      | Block for the next `Message` push (pair with `spawn`).                |
+| `redis.pipeline(session, commands)`  | Send `list of list of string`, read one `Reply` each (one round trip). |
+| `redis.multi(session)`               | `MULTI` - begin a transaction.                                        |
+| `redis.exec(session)`                | `EXEC` - run the queued commands; `list of Reply` (empty if aborted). |
+| `redis.discard(session)`             | `DISCARD` - drop the queued transaction.                              |
 
 `Options.security` is `"none"` (plaintext, port 6379) or `"tls"` (implicit
 TLS, `rediss`). `password` `""` skips `AUTH`; `db` `0` skips `SELECT`. When a
@@ -95,6 +108,115 @@ try {
 `command` only throws on an error *reply*; a network failure surfaces as the
 underlying `net` error.
 
+## Pub/Sub
+
+`publish` sends a message on an ordinary connection and returns the number of
+subscribers that received it. On the receiving side, `subscribe` /
+`psubscribe` put a connection into **subscribed mode**, and `receiveMessage`
+blocks for the next push:
+
+```jennifer
+# Publisher (an ordinary connection).
+def n as int init redis.publish($db, "news", "hello");   # subscribers reached
+
+# Subscriber (a dedicated connection).
+def sub as redis.Session init redis.connect($opts);
+redis.subscribe($sub, ["news", "weather"]);
+def msg as redis.Message init redis.receiveMessage($sub);
+io.printf("[%s] %s\n", $msg.channel, $msg.payload);
+```
+
+A `Message` has `kind` (`"message"` for a channel push, `"pmessage"` for a
+pattern push), `channel`, `pattern` (`""` for a plain message), and `payload`.
+`receiveMessage` drains the interleaved `subscribe` / `unsubscribe`
+confirmation frames itself and returns only real `message` / `pmessage`
+pushes; a server error reply or a closed connection throws a catchable `Error`
+(kind `"redis"`).
+
+**A subscribed connection is restricted.** Once subscribed, the connection may
+only run `(P)SUBSCRIBE` / `(P)UNSUBSCRIBE` / `PING` / `QUIT` until it is fully
+unsubscribed - the server rejects any other command. Use a **separate**
+connection for `publish` and normal commands. `unsubscribe($sub, [])` (an empty
+list) leaves every channel; `punsubscribe($sub, [])` every pattern.
+
+### The receive loop (with `spawn`)
+
+`receiveMessage` is a plain blocking call - there are no handler callbacks.
+The program opts into concurrency by wrapping the loop in its own `spawn`, so
+it can keep working while messages arrive:
+
+```jennifer
+def worker as task of null init spawn {
+    while (true) {
+        def m as redis.Message init redis.receiveMessage($sub);
+        handle($m.channel, $m.payload);
+    }
+};
+```
+
+The per-read idle timeout (`Session.timeout`, milliseconds) bounds each wait:
+lower it for a tighter poll and catch the `Error` a stalled read raises, or set
+it to `0` to block indefinitely.
+
+## Pipelining
+
+`pipeline` sends several commands in one write and reads exactly one reply per
+command, so N commands cost a single network round trip instead of N:
+
+```jennifer
+def replies as list of redis.Reply init redis.pipeline($db, [
+    ["SET", "a", "1"],
+    ["INCR", "a"],
+    ["GET", "a"],
+]);
+io.printf("a is now %s\n", $replies[2].str);   # 2
+```
+
+Unlike `command`, `pipeline` does **not** throw on a `-ERR` reply - a pipeline
+can mix succeeding and failing commands, so each command's outcome is returned
+in order and the caller inspects each `Reply` (an error reply has
+`kind == "error"`).
+
+## Transactions
+
+`multi` / `exec` / `discard` wrap `MULTI` / `EXEC` / `DISCARD`. Commands issued
+between `multi` and `exec` are **queued** (each replies `+QUEUED`); `exec` runs
+them atomically and returns one `Reply` per queued command, in order:
+
+```jennifer
+redis.multi($db);
+redis.command($db, ["SET", "counter", "10"]);   # +QUEUED
+redis.command($db, ["INCR", "counter"]);         # +QUEUED
+def results as list of redis.Reply init redis.exec($db);
+io.printf("counter is %d\n", $results[1].num);   # 11
+```
+
+An aborted transaction (a `nil` `EXEC` reply) yields an empty list. `discard`
+drops the queued commands without running them.
+
+## `scan` vs `keys`
+
+`keys` returns every match in one shot, but it **blocks the whole server**
+while it walks the keyspace - fine for a small dev database, unsafe in
+production. `scan` is the cursor-based iterator: it returns a page of keys and
+the next cursor, so the server stays responsive. Start at cursor `0` and repeat
+until the returned cursor is `0` again:
+
+```jennifer
+def cursor as int init 0;
+repeat {
+    def page as redis.ScanResult init redis.scan($db, $cursor, "user:*", 100);
+    for (def k in $page.keys) {
+        io.printf("%s\n", $k);
+    }
+    $cursor = $page.cursor;
+} until ($cursor == 0);
+```
+
+Pass `pattern` `""` to skip the `MATCH` filter and `count` `0` to skip the
+`COUNT` per-page hint (`COUNT` is advisory - a page may hold more or fewer
+keys, and an empty page with a non-zero cursor is normal).
+
 ## Bulk strings are read as UTF-8 text
 
 RESP bulk-string lengths are byte counts, but the parser reads values as
@@ -107,19 +229,25 @@ byte-native read lands.
 ## Testing
 
 The pure protocol logic - the RESP command encoder and the simple-string /
-error / integer / bulk / nil / array decoder, including the incomplete-buffer
-and leftover-buffer cases - is unit-tested in the overlay
-(`modules/redis_test.j`). The networked session is covered end to end by an
-in-process RESP server in the Go test suite (`TestRedisCommands`), so it runs
-in CI without a Redis install.
+error / integer / bulk / nil / array decoder (including the incomplete-buffer
+and leftover-buffer cases), the pub/sub command builders, the
+`message` / `pmessage` push classifier, the pipeline encoder, and the SCAN
+reply reader - is unit-tested in the overlay (`modules/redis_test.j`). The
+networked session, pub/sub delivery, pipelining, transactions, and SCAN are
+covered end to end by an in-process RESP server in the Go test suite
+(`TestRedisCommands`), so it runs in CI without a Redis install.
 
 ## Out of scope
 
 - **A working subset**, not the full command set: strings, counters, keys,
-  and the generic `command` for the rest. Lists / hashes / sets are reachable
-  through `command`; typed helpers for them can follow.
-- **No pipelining, pub/sub, or RESP3.** One request, one reply.
-- **No connection pool.** One `Session` is one connection.
+  pub/sub, pipelining, transactions, and SCAN, plus the generic `command` for
+  the rest. Lists / hashes / sets are reachable through `command`; typed
+  helpers for them can follow.
+- **RESP2 only, no RESP3.** Pub/sub pushes are read from the same connection
+  as replies (the RESP2 model), not over a RESP3 out-of-band push channel.
+- **No connection pool.** One `Session` is one connection; a subscribed
+  connection needs its own session, separate from the one issuing `publish`
+  and ordinary commands.
 - **`rediss` TLS** rides `net`'s default certificate verification.
 
 ## Timeouts and limits

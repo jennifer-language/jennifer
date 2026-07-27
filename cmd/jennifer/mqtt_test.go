@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // encodeRemLenBroker encodes an MQTT remaining-length varint (broker side).
@@ -137,5 +138,119 @@ mqtt.disconnect($c);`, mqttMod, port)
 
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("mqtt pub/sub program failed with code %d", code)
+	}
+}
+
+// buildQos1PublishBroker builds a QoS-1 PUBLISH the broker pushes to the client:
+// fixed-header flags byte 0x32 (type 3, QoS 1), the remaining-length varint, then
+// a 2-byte topic length + topic + 2-byte packet id + payload.
+func buildQos1PublishBroker(topic string, packetId int, payload string) []byte {
+	tb := []byte(topic)
+	var body []byte
+	body = append(body, byte(len(tb)>>8), byte(len(tb)))
+	body = append(body, tb...)
+	body = append(body, byte(packetId>>8), byte(packetId))
+	body = append(body, []byte(payload)...)
+	pkt := []byte{0x32}
+	pkt = append(pkt, encodeRemLenBroker(len(body))...)
+	pkt = append(pkt, body...)
+	return pkt
+}
+
+// fakeBrokerQos1 speaks the QoS-1 handshakes on one connection: CONNACK on
+// CONNECT; for the client's QoS-1 PUBLISH it reads the packet id (the 2-byte
+// value after the topic in the variable header) and replies with a PUBACK
+// (0x40 0x02 <id-hi> <id-lo>) for that exact id; on SUBSCRIBE it replies with a
+// SUBACK granting QoS 1, then pushes a QoS-1 PUBLISH to the client and reads the
+// client's PUBACK for it, reporting the acknowledged packet id on ackCh (or -1
+// on any framing failure) so the test can verify the ack round-trips.
+func fakeBrokerQos1(ln net.Listener, ackCh chan int) {
+	const pushPacketID = 7
+	conn, err := ln.Accept()
+	if err != nil {
+		ackCh <- -1
+		return
+	}
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	for {
+		hb, body, err := readPacketBroker(r)
+		if err != nil {
+			return
+		}
+		switch hb >> 4 {
+		case 1: // CONNECT -> CONNACK (accepted)
+			_, _ = conn.Write([]byte{0x20, 0x02, 0x00, 0x00})
+		case 3: // QoS-1 PUBLISH from publishQos1 -> PUBACK for its packet id
+			tlen := int(body[0])<<8 | int(body[1])
+			idx := 2 + tlen
+			pid := int(body[idx])<<8 | int(body[idx+1])
+			_, _ = conn.Write([]byte{0x40, 0x02, byte(pid >> 8), byte(pid)})
+		case 8: // SUBSCRIBE -> SUBACK granting QoS 1, then push a QoS-1 PUBLISH
+			_, _ = conn.Write([]byte{0x90, 0x03, body[0], body[1], 0x01})
+			_, _ = conn.Write(buildQos1PublishBroker("q1/sub", pushPacketID, "pushed"))
+			ahb, abody, err := readPacketBroker(r)
+			if err != nil || ahb>>4 != 4 || len(abody) < 2 {
+				ackCh <- -1
+				return
+			}
+			ackCh <- int(abody[0])<<8 | int(abody[1])
+		case 14: // DISCONNECT
+			return
+		}
+	}
+}
+
+// TestMqttQos1 drives the mqtt client's QoS-1 surface against a fake broker that
+// speaks the PUBACK handshakes: publishQos1 (a QoS-1 PUBLISH that blocks for the
+// matching PUBACK) must return without throwing, and subscribeQos1 + receive
+// must return the broker-pushed QoS-1 message and answer it with a PUBACK. The
+// broker reports the acknowledged packet id so the test confirms the client's
+// PUBACK round-trips with the pushed message's id.
+func TestMqttQos1(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	ackCh := make(chan int, 1)
+	go fakeBrokerQos1(ln, ackCh)
+
+	mqttMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "mqtt.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use convert;
+import %q as mqtt;
+def o as mqtt.Options init mqtt.Options{host: "127.0.0.1", port: %d, clientId: "t", keepalive: 30, security: "none", username: "", password: ""};
+def c as mqtt.Client init mqtt.connect($o);
+def pl as bytes init convert.bytesFromString("q1payload", "utf-8");
+mqtt.publishQos1($c, "q1/pub", $pl, false);
+$c = mqtt.subscribeQos1($c, "q1/sub");
+def m as mqtt.Message init mqtt.receive($c);
+testing.assertEqual($m.topic, "q1/sub");
+testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "pushed");
+mqtt.disconnect($c);`, mqttMod, port)
+	progPath := filepath.Join(dir, "qos1.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("mqtt QoS-1 program failed with code %d", code)
+	}
+
+	// The client must have PUBACKed the broker-pushed QoS-1 message with the
+	// packet id the broker sent (7).
+	select {
+	case ackedID := <-ackCh:
+		if ackedID != 7 {
+			t.Fatalf("client PUBACK acknowledged packet id %d, want 7", ackedID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("broker never received the client's PUBACK for the pushed QoS-1 message")
 	}
 }

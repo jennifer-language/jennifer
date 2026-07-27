@@ -36,11 +36,12 @@ own.
 | Call / type                                  | Notes                                                             |
 | -------------------------------------------- | ----------------------------------------------------------------- |
 | `resque.Job`                                 | A reserved job: `queue`, `class`, `args` (`list of string`).      |
-| `resque.enqueue(session, queue, class, args)` | Register `queue` and push a job (`class` + string `args`) onto it. |
-| `resque.reserve(session, queues)`            | Pop the next job from the first non-empty queue (priority order); an empty `Job` when all are drained. |
+| `resque.enqueue(session, queue, class, args)` | Register `queue` and push a job (`class` + string `args`) onto it, in one pipelined round trip (SADD + RPUSH, as Ruby-resque does). |
+| `resque.reserve(session, queues)`            | Pop the next job from the first non-empty queue (priority order), non-blocking; an empty `Job` when all are drained. |
+| `resque.reserveBlocking(session, queues, timeoutSec)` | Like `reserve`, but **blocks** on the queues (Redis `BLPOP`) until one has work or `timeoutSec` elapses (0 = block forever); an empty `Job` on timeout. |
 | `resque.queueLength(session, queue)`         | Pending jobs on one queue.                                        |
 | `resque.queues(session)`                     | Registered queue names (`list of string`).                       |
-| `resque.size(session)`                       | Total pending jobs across every queue.                           |
+| `resque.size(session)`                       | Total pending jobs across every queue (one pipelined batch of LLENs). |
 | `resque.fail(session, job, message)`         | Record a failed job on the failed list.                          |
 
 `args` is a `list of string` - it maps to Ruby-resque's *positional* arguments
@@ -80,7 +81,11 @@ while (true) {
 ```
 
 `reserve` checks the queues in the order you pass, so put higher-priority queue
-names first. Within one queue jobs are FIFO.
+names first. Within one queue jobs are FIFO. For a worker that should sleep
+rather than spin when the queues are empty, use `reserveBlocking`, which parks on
+the socket (Redis `BLPOP`) until a job arrives or `timeoutSec` elapses; it widens
+the session's read deadline for the duration of that one call so the client does
+not give up before the server does.
 
 ## Compatibility notes
 
@@ -101,8 +106,6 @@ positional array; this module emits the positional Ruby form.
 
 Basics first - these are deferred to a later pass:
 
-- **Blocking reserve.** `reserve` polls; a `BLPOP`-based blocking wait (so a
-  worker sleeps instead of spinning) is a later add.
 - **Full Resque failure records.** `fail` writes a simplified entry, not the
   complete `failed_at` / `exception` / `backtrace` / `worker` shape.
 - **Scheduled / delayed jobs and retries.**

@@ -37,6 +37,7 @@ use lists;
 use maps;
 use hash;
 use encoding;
+use uuid;
 
 /**
  * Connection options.
@@ -145,6 +146,12 @@ func appendBytes(dst as bytes, src as bytes) {
 
 func readN(socket as net.Conn, n as int) {
     def out as bytes;
+    # Clear the read deadline on every exit path (normal return, and the throw
+    # from a mid-sentence close), so the bounded read window armed below never
+    # leaks a stale deadline to a later read/write on this socket - which would
+    # otherwise inherit it and spuriously time out. `defer` captures $socket now
+    # and runs `net.setDeadline($socket, 0)` when this block exits (0 clears it).
+    defer net.setDeadline($socket, 0);
     while (len($out) < $n) {
         net.setDeadline($socket, CONNECT_TIMEOUT_MS);
         def chunk as bytes init net.readBytes($socket, $n - len($out));
@@ -296,6 +303,19 @@ func parseFields(sentence as list of string) {
     return $fields;
 }
 
+# parseTag returns the value of a reply sentence's `.tag=<id>` word (the API tag
+# word, distinct from the `=key=value` attribute words `parseFields` folds), or
+# "" when the sentence carries no tag. Used to correlate a pushed reply back to
+# the command that started it.
+func parseTag(sentence as list of string) {
+    for (def w in $sentence) {
+        if (strings.startsWith($w, ".tag=")) {
+            return strings.substring($w, 5, len($w));
+        }
+    }
+    return "";
+}
+
 # buildWords turns a command plus attribute and query words into a word list.
 # Attribute words are `=key=value`; query words are raw RouterOS query words -
 # each starts with `?` (e.g. `?type=ether`, `?>mtu=1000`, or a `?#&` / `?#|` /
@@ -315,10 +335,38 @@ func buildWords(command as string, attrs as map of string to string, queries as 
     return $words;
 }
 
-# exchange sends a command and reads reply sentences until `!done`, collecting
-# `!re` rows and the `!done` ret; a `!trap` / `!fatal` throws.
-func exchange(session as Session, command as string, attrs as map of string to string, queries as list of string) {
-    writeSentence($session.socket, buildWords($command, $attrs, $queries));
+# buildTaggedWords is buildWords plus a trailing `.tag=<tag>` API word, so the
+# router echoes the tag on every reply to this command and a later `/cancel` can
+# name it. The command word stays first; the tag word (like every API word) may
+# follow in any order.
+func buildTaggedWords(command as string, attrs as map of string to string, queries as list of string, tag as string) {
+    def words as list of string init buildWords($command, $attrs, $queries);
+    $words[] = ".tag=" + $tag;
+    return $words;
+}
+
+# buildCancelWords builds a `/cancel` sentence naming the tag to stop:
+# ["/cancel", "=tag=<tag>"]. Sent to interrupt a streaming command started with
+# that tag; the router answers the streaming command with `!trap` (category
+# "interrupted") then `!done`.
+func buildCancelWords(tag as string) {
+    return ["/cancel", "=tag=" + $tag];
+}
+
+# resolveTag returns the caller's tag when non-empty, else an auto-generated,
+# collision-free one (a UUID, drawn from crypto-grade randomness).
+func resolveTag(tag as string) {
+    if (len($tag) == 0) {
+        return uuid.v4();
+    }
+    return $tag;
+}
+
+# collectReply reads reply sentences until `!done`, collecting `!re` rows and the
+# `!done` ret; a `!trap` / `!fatal` throws. Shared by the untagged `exchange` and
+# the tagged `talkTagged` (both bounded, one-shot commands; a streaming command
+# never reaches `!done` and is read with `receiveReply` instead).
+func collectReply(session as Session) {
     def rows as list of map of string to string init [];
     def ret as string init "";
     def trapMsg as string init "";
@@ -363,6 +411,12 @@ func exchange(session as Session, command as string, attrs as map of string to s
         fail("!trap: " + $msg);
     }
     return Reply{ rows: $rows, ret: $ret };
+}
+
+# exchange sends a command and collects its reply to `!done`.
+func exchange(session as Session, command as string, attrs as map of string to string, queries as list of string) {
+    writeSentence($session.socket, buildWords($command, $attrs, $queries));
+    return collectReply($session);
 }
 
 # --- login (private) --------------------------------------------------------
@@ -485,6 +539,118 @@ export func printWhere(session as Session, path as string, queries as list of st
  */
 export func run(session as Session, command as string, attrs as map of string to string) {
     return exchange($session, $command, $attrs, []).ret;
+}
+
+# --- tagging + streaming (exported) -----------------------------------------
+
+/**
+ * Like `talk`, but attaches a `.tag=<id>` word so the router echoes the tag on
+ * every reply, letting a caller correlate this command's replies. Pass `tag: ""`
+ * to auto-generate a unique tag. The reply is still collected to `!done` (a
+ * one-shot command); for a command that pushes replies over time use `listen` +
+ * `receiveReply`.
+ * @param session {Session} the session
+ * @param command {string} the API command (e.g. "/interface/print")
+ * @param attrs {map of string to string} attribute words ({} for none)
+ * @param tag {string} the correlation tag, or "" to auto-generate one
+ * @return {list of map of string to string} the reply rows
+ * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
+ */
+export func talkTagged(session as Session, command as string, attrs as map of string to string, tag as string) {
+    def t as string init resolveTag($tag);
+    def noq as list of string init [];
+    writeSentence($session.socket, buildTaggedWords($command, $attrs, $noq, $t));
+    return collectReply($session).rows;
+}
+
+/**
+ * Start a **streaming** command (one that pushes `!re` sentences over time, e.g.
+ * "/interface/monitor" or "/ping") and return its auto-generated tag. Does NOT
+ * read a reply - the stream has no `!done` until it is stopped. Pull each pushed
+ * reply with `receiveReply($s, tag)` (typically from a `spawn`ed loop), and stop
+ * it with `cancel($s, tag)`.
+ * @param session {Session} the session
+ * @param command {string} the streaming API command
+ * @param params {map of string to string} attribute words for the command ({} for none)
+ * @return {string} the tag naming this stream (feed it to receiveReply / cancel)
+ */
+export func listen(session as Session, command as string, params as map of string to string) {
+    def tag as string init uuid.v4();
+    def noq as list of string init [];
+    writeSentence($session.socket, buildTaggedWords($command, $params, $noq, $tag));
+    return $tag;
+}
+
+/**
+ * Block until the next pushed reply for `tag` arrives and return it as a
+ * `=key=value` field map. Returns an **empty map** when the stream has ended (a
+ * `!done` for the tag - e.g. after `cancel`), which is the loop's stop signal.
+ * Replies carrying a different tag are skipped (they belong to another stream on
+ * the same session). A `cancel`-induced `!trap` (category "interrupted") is
+ * absorbed; any other `!trap` / `!fatal` throws.
+ * @param session {Session} the session
+ * @param tag {string} the stream tag returned by `listen`
+ * @return {map of string to string} the next reply's fields, or {} at stream end
+ * @throws {Error} kind "mikrotik" on a genuine !trap / !fatal reply
+ */
+export func receiveReply(session as Session, tag as string) {
+    def result as map of string to string init {};
+    def found as bool init false;
+    def ended as bool init false;
+    repeat {
+        def sentence as list of string init readSentence($session.socket);
+        def reply as string init "";
+        if (len($sentence) > 0) {
+            $reply = $sentence[0];
+        }
+        def rtag as string init parseTag($sentence);
+        def mine as bool init (len($tag) == 0 or $rtag == $tag);
+        if ($reply == "!re") {
+            if ($mine) {
+                $result = parseFields($sentence);
+                $found = true;
+            }
+        } elseif ($reply == "!done") {
+            if ($mine) {
+                $ended = true;
+            }
+        } elseif ($reply == "!trap") {
+            def fields as map of string to string init parseFields($sentence);
+            def cat as string init "";
+            if (maps.has($fields, "category")) {
+                $cat = $fields["category"];
+            }
+            # A cancel interrupts the streaming command with a trap; it is normal
+            # end-of-stream, not an error, so keep reading for the trailing !done.
+            if ($cat != "interrupted") {
+                def m as string init "command failed";
+                if (maps.has($fields, "message")) {
+                    $m = $fields["message"];
+                }
+                fail("!trap: " + $m);
+            }
+        } elseif ($reply == "!fatal") {
+            def ff as map of string to string init parseFields($sentence);
+            def fm as string init "connection error";
+            if (maps.has($ff, "message")) {
+                $fm = $ff["message"];
+            }
+            fail("!fatal: " + $fm);
+        }
+    } until ($found or $ended);
+    return $result;
+}
+
+/**
+ * Stop a streaming command started with `listen` by issuing `/cancel` naming its
+ * tag. Fire-and-forget: the resulting `!trap` (interrupted) and `!done` for the
+ * stream, plus the `/cancel`'s own reply, are drained by the `receiveReply` loop
+ * (which then returns {} and lets the loop exit).
+ * @param session {Session} the session
+ * @param tag {string} the stream tag returned by `listen`
+ */
+export func cancel(session as Session, tag as string) {
+    writeSentence($session.socket, buildCancelWords($tag));
 }
 
 /**
