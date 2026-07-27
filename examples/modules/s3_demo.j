@@ -7,11 +7,11 @@
  * request with AWS Signature Version 4. Needs real credentials, so it reads them
  * from the environment and prints usage when they are absent (works with AWS S3,
  * MinIO, Cloudflare R2, Backblaze B2 - just point S3_ENDPOINT at the store).
- * @module bucket_demo
+ * @module s3_demo
  */
 use io;
 use os;
-import "../../modules/bucket.j" as bucket;
+import "../../modules/s3.j" as s3;
 import "../../modules/http.j" as http;
 
 def endpoint as string init os.getEnv("S3_ENDPOINT");
@@ -27,23 +27,23 @@ if ($endpoint == "" or $key == "" or $store == "") {
     exit;
 }
 
-def client as bucket.Client init bucket.connect($endpoint, $region, $key, $secret);
+def client as s3.Client init s3.connect($endpoint, $region, $key, $secret);
 
-def putRes as http.Response init bucket.put(
+def putRes as http.Response init s3.put(
     $client,
     $store,
     "jennifer-demo.txt",
     "hello from jennifer");
 io.printf("put    jennifer-demo.txt -> %d\n", $putRes.status);
 
-def getRes as http.Response init bucket.get($client, $store, "jennifer-demo.txt");
+def getRes as http.Response init s3.get($client, $store, "jennifer-demo.txt");
 io.printf("get    jennifer-demo.txt -> %d  body=%s\n", $getRes.status, $getRes.body);
 
-def listRes as http.Response init bucket.listObjects($client, $store);
+def listRes as http.Response init s3.listObjects($client, $store);
 io.printf("list   %s -> %d\n", $store, $listRes.status);
-for (def k in bucket.objectKeys($listRes.body)) {
+for (def k in s3.objectKeys($listRes.body)) {
     io.printf("  - %s\n", $k);
 }
 
-def delRes as http.Response init bucket.delete($client, $store, "jennifer-demo.txt");
+def delRes as http.Response init s3.delete($client, $store, "jennifer-demo.txt");
 io.printf("delete jennifer-demo.txt -> %d\n", $delRes.status);

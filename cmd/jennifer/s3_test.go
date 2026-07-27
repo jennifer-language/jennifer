@@ -41,12 +41,12 @@ func sigV4Expected(r *http.Request, body []byte, region, secret string) string {
 	return hex.EncodeToString(hsh(kSign, stringToSign))
 }
 
-// TestBucketRequests drives the bucket module's get / put / delete / listObjects
+// TestS3Requests drives the s3 module's get / put / delete / listObjects
 // against an S3-shaped server that re-derives and checks the SigV4 signature over
 // the wire (a 403 on mismatch), also confirming x-amz-content-sha256 equals the
 // body's hash. A signing or transport bug throws in the .j program and fails
 // loadForTest.
-func TestBucketRequests(t *testing.T) {
+func TestS3Requests(t *testing.T) {
 	const region = "us-east-1"
 	const accessKey = "AKIDEXAMPLE"
 	const secret = "test-secret-key"
@@ -90,7 +90,7 @@ func TestBucketRequests(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	bucketMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "bucket.j"))
+	s3Mod, err := filepath.Abs(filepath.Join("..", "..", "modules", "s3.j"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,29 +100,29 @@ func TestBucketRequests(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
-import %q as bucket;
+import %q as s3;
 import %q as http;
-def c as bucket.Client init bucket.connect(%q, %q, %q, %q);
-def pu as http.Response init bucket.put($c, "mybucket", "hello.txt", %q);
+def c as s3.Client init s3.connect(%q, %q, %q, %q);
+def pu as http.Response init s3.put($c, "mybucket", "hello.txt", %q);
 testing.assertEqual($pu.status, 200);
-def g as http.Response init bucket.get($c, "mybucket", "hello.txt");
+def g as http.Response init s3.get($c, "mybucket", "hello.txt");
 testing.assertEqual($g.status, 200);
 testing.assertEqual($g.body, %q);
-def d as http.Response init bucket.delete($c, "mybucket", "hello.txt");
+def d as http.Response init s3.delete($c, "mybucket", "hello.txt");
 testing.assertEqual($d.status, 204);
-def l as http.Response init bucket.listObjects($c, "mybucket");
+def l as http.Response init s3.listObjects($c, "mybucket");
 testing.assertEqual($l.status, 200);
-def keys as list of string init bucket.objectKeys($l.body);
+def keys as list of string init s3.objectKeys($l.body);
 testing.assertEqual(len($keys), 2);
 testing.assertEqual($keys[0], "hello.txt");
 testing.assertEqual($keys[1], "docs/readme.md");`,
-		bucketMod, httpMod, srv.URL, region, accessKey, secret, objectBody, objectBody)
-	progPath := filepath.Join(dir, "bucket.j")
+		s3Mod, httpMod, srv.URL, region, accessKey, secret, objectBody, objectBody)
+	progPath := filepath.Join(dir, "s3.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, code := loadForTest(progPath); code != testExitPass {
-		t.Fatalf("bucket program failed with code %d", code)
+		t.Fatalf("s3 program failed with code %d", code)
 	}
 }

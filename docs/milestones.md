@@ -660,7 +660,7 @@ the milestone-number index (numbers were assigned in rough priority order).
 | M18.16     | `web` cookies + sessions| cookie helpers + cookie-keyed sessions on the `web` framework.                                   |
 | M18.17     | `totp`                  | RFC 6238 TOTP: `generate` / `verify` / `uri`. Over `hash.hmac` + `encoding` + `time`.            |
 | M18.18     | `webhook`               | GitHub `X-Hub-Signature-256` HMAC `sign` / `verify` (pure) + `send` (over `http`).               |
-| M18.19     | `bucket`                | S3-compatible object storage over `http` (AWS SigV4): `connect` / `get` / `put` / `delete` / `listObjects`. One module for AWS S3 + MinIO / R2 / B2. |
+| M18.19     | `s3`                    | S3-compatible object storage over `http` (AWS SigV4): `connect` / `get` / `put` / `delete` / `listObjects`. One module for AWS S3 + MinIO / R2 / B2. Renamed `bucket` -> `s3` once the M22.2 digit-identifier rule made `s3` a legal namespace (cf. M22.3's `iic` -> `i2c`); a pre-1.0 break, one batch across the module / overlay / Go test / demo / docs. |
 | M18.20     | `dotenv`                | `.env` config: `parse` / `read` / `load` (into env via `os.setEnv`). Over `fs` + `strings` + `os`. |
 | M18.21     | `cron`                  | parse cron expressions; `next(schedule, after)` / `matches`. A calculator over `time`.           |
 | M18.22     | `log`                   | leveled structured logging (`debug`..`error`; text / logfmt / json) to stdout / stderr / file / RFC 5424 syslog. |
@@ -989,7 +989,7 @@ sub-numbering as pieces land):
   ordinary queries). Re-validate identifiers where the SQL is *rendered*
   (`toSql` / `createTable` / insert / update), not only in the constructors, so a
   raw `Schema` / `Query` struct literal cannot inject.
-- **`bucket`** - presigned URL generation (SigV4 query-signing), multipart +
+- **`s3`** - presigned URL generation (SigV4 query-signing), multipart +
   `bytes` bodies (currently `string`, capped at 5 GB in memory), and content-type
   / metadata / `HEAD` / copy.
 - **`ipnet`** - subnet math (split / aggregate / iterate / host-count / next-IP /

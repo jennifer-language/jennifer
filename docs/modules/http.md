@@ -59,7 +59,7 @@ only bounds a *stalled* server, so this size cap is what keeps a hostile server
 body to OOM. A caller that needs a larger (or unbounded) body passes an explicit
 `maxBytes` to `http.requestWith` - `0` keeps the 64 MiB default, a negative value
 lifts the cap for a trusted large download, a positive value sets an exact
-ceiling. The `bucket` module (object storage) already lifts it; the verb
+ceiling. The `s3` module (object storage) already lifts it; the verb
 shortcuts (`get` / `post` / ...) and `request` keep the default.
 
 The shortcuts are thin wrappers over `request`, which is **method-agnostic** -

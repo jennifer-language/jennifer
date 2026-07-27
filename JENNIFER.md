@@ -839,11 +839,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   POSTs the payload as `application/json` with the signature header and returns
   an `http.Response` (**default `jennifer` binary only**, over `http`). Sign /
   verify the raw body bytes, before any parsing. Over `hash.hmac` + `encoding`.
-- **`bucket`** - an S3-compatible object-storage client (AWS S3 / MinIO /
+- **`s3`** - an S3-compatible object-storage client (AWS S3 / MinIO /
   Cloudflare R2 / Backblaze B2), every request AWS Signature V4-signed.
-  `bucket.connect(endpoint, region, accessKey, secretKey)` -> a `Client`, then
-  `bucket.get` / `put` / `delete` / `listObjects(client, bucket[, key][, body])`
-  each return an `http.Response`; `bucket.objectKeys(xml)` pulls the keys out of a
+  `s3.connect(endpoint, region, accessKey, secretKey)` -> a `Client`, then
+  `s3.get` / `put` / `delete` / `listObjects(client, bucket[, key][, body])`
+  each return an `http.Response`; `s3.objectKeys(xml)` pulls the keys out of a
   `listObjects` body. Path-style addressing, configurable endpoint (one module,
   every store). The list op is `listObjects` (not `list`, a reserved keyword).
   `Client.timeout` (ms; `connect` defaults it to 30000, `0` disables) fails a

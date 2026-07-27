@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# bucket_test.j - white-box tests for bucket.j's SigV4 signing + canonicalization.
+# s3_test.j - white-box tests for s3.j's SigV4 signing + canonicalization.
 # Run with:
 #
-#     jennifer test modules/bucket_test.j
+#     jennifer test modules/s3_test.j
 #
-# The overlay splices bucket.j in first, so these tests reach its private helpers
+# The overlay splices s3.j in first, so these tests reach its private helpers
 # (authorization, hostOf, uriEncodePath, signingKey) by bare identifier. The
 # networked get / put / delete / list are verified against an in-process S3-shaped
-# server in the Go suite (TestBucketRequests). bucket.j already `use`s hash /
+# server in the Go suite (TestS3Requests). s3.j already `use`s hash /
 # encoding / convert / time / regex / strings / lists, so the overlay adds testing.
 # The signature vector is cross-checked against an independent SigV4 implementation.
 use testing;

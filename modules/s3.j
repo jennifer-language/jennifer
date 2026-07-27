@@ -11,12 +11,11 @@
  * `encoding` (hex) + `time` (the request timestamp) + `http`. Needs the default
  * `jennifer` binary (`net` via `http`).
  *
- * Named `bucket` (not `s3`) because a module namespace is letters-only.
- * @module bucket
+ * @module s3
  * @example
- * def c as bucket.Client init bucket.connect("https://s3.us-east-1.amazonaws.com", "us-east-1", key, secret);
- * def r as http.Response init bucket.put($c, "mybucket", "hello.txt", "hi there");
- * def o as http.Response init bucket.get($c, "mybucket", "hello.txt");
+ * def c as s3.Client init s3.connect("https://s3.us-east-1.amazonaws.com", "us-east-1", key, secret);
+ * def r as http.Response init s3.put($c, "mybucket", "hello.txt", "hi there");
+ * def o as http.Response init s3.get($c, "mybucket", "hello.txt");
  */
 use hash;
 use encoding;
@@ -258,9 +257,9 @@ export func delete(client as Client, bucketName as string, key as string) {
 
 /**
  * List a bucket's objects (S3 ListObjectsV2). The response body is the S3 XML
- * listing; pass it to `bucket.objectKeys` to pull out the keys. S3 returns at
- * most 1000 keys per page: check `bucket.isTruncated` on the body and, if true,
- * call `bucket.listObjectsFrom` with `bucket.nextContinuationToken` to fetch the
+ * listing; pass it to `s3.objectKeys` to pull out the keys. S3 returns at
+ * most 1000 keys per page: check `s3.isTruncated` on the body and, if true,
+ * call `s3.listObjectsFrom` with `s3.nextContinuationToken` to fetch the
  * next page (loop until not truncated).
  * @param client {Client} the client
  * @param bucketName {string} the bucket
@@ -294,7 +293,7 @@ func tokenEncode(s as string) {
 
 /**
  * Fetch one further page of a ListObjectsV2 listing, starting after `token` (the
- * value from `bucket.nextContinuationToken` on the previous page's body).
+ * value from `s3.nextContinuationToken` on the previous page's body).
  * @param client {Client} the client
  * @param bucketName {string} the bucket
  * @param token {string} the continuation token from the previous page
@@ -335,7 +334,7 @@ export func nextContinuationToken(xml as string) {
 
 /**
  * Extract the object keys from a ListObjectsV2 XML body (the `<Key>` elements).
- * @param xml {string} the body from `bucket.listObjects`
+ * @param xml {string} the body from `s3.listObjects`
  * @return {list of string} the object keys, in listing order
  */
 export func objectKeys(xml as string) {
@@ -343,7 +342,7 @@ export func objectKeys(xml as string) {
     def matches as list of regex.Match init regex.findAll("<Key>([^<]*)</Key>", $xml);
     for (def m in $matches) {
         # XML content escapes the five predefined entities; decode them so a key
-        # like "reports&amp;data.txt" round-trips back into bucket.get / delete.
+        # like "reports&amp;data.txt" round-trips back into s3.get / delete.
         $keys[] = unescapeXml($m.groups[0]);
     }
     return $keys;
