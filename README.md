@@ -7,22 +7,30 @@
 
 # Jennifer Programming Language
 
-Jennifer is a interpreted programming language.
+Jennifer is an interpreted programming language.
 
-Jennifer is batteries-included: a broad standard
-library and a growing set of distributable modules cover what real programs
-actually need, so you build genuine tools, not toys. Text handling has full
-[regular expressions](docs/libraries/regex.md); structured data flows through
-[JSON](docs/libraries/json.md); email is a complete stack -
-[SMTP](docs/modules/smtp.md) to send, [POP3](docs/modules/pop.md) and
-[IMAP](docs/modules/imap.md) to receive; in-memory data stores come through
-[Redis](docs/modules/redis.md) and [memcached](docs/modules/memcache.md)
-clients; the web runs from an ergonomic [REST client](docs/modules/rest.md)
-to turnkey integrations such as [Gotify](docs/modules/gotify.md) push
-notifications; and lightweight
-[concurrency](docs/user-guide/concurrency.md) is built into the language via
-`spawn` and the [task](docs/libraries/task.md) library. Browse the full
-[library catalog](docs/libraries/index.md) and
+Jennifer is batteries-included, and not just in name: **35 built-in libraries
+and 64 distributable modules - over 400 functions and constants** cover what
+real programs actually need, so you build genuine tools, not toys. Talk to a
+real database with the [SQL](docs/libraries/sql.md) library
+(MySQL / MariaDB and PostgreSQL, parameterized and injection-safe) or map rows
+to structs with the [ORM](docs/modules/orm.md). Read and write
+[JSON](docs/libraries/json.md), [YAML](docs/libraries/yaml.md),
+[TOML](docs/libraries/toml.md), and [XML](docs/libraries/xml.md); match text
+with full [regular expressions](docs/libraries/regex.md). The web works both
+ways: an [HTTP/S client](docs/modules/http.md) and ergonomic
+[REST](docs/modules/rest.md) layer to call out, a built-in
+[HTTP server](docs/libraries/httpd.md) and [web framework](docs/modules/web.md)
+to serve. Email is a complete stack - [SMTP](docs/modules/smtp.md) to send,
+[POP3](docs/modules/pop.md) / [IMAP](docs/modules/imap.md) to receive; caches
+and stores come through [Redis](docs/modules/redis.md) and
+[memcached](docs/modules/memcache.md) clients. Security is the real thing, not a
+stub: [AES-256-GCM, Ed25519, HKDF / PBKDF2, and JWT](docs/libraries/crypto.md).
+And lightweight [concurrency](docs/user-guide/concurrency.md) is built into the
+language via `spawn` and the [task](docs/libraries/task.md) library. It all
+ships in **one self-contained static binary** - about 21 MB with everything,
+~9 MB for the embeddable build - with no runtime, package manager, or dependency
+tree to install. Browse the full [library catalog](docs/libraries/index.md) and
 [module catalog](docs/modules/index.md) - both grow with every release.
 
 It is also a natural fit for teaching and learning: an interactive

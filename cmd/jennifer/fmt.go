@@ -118,16 +118,79 @@ func fmtInPlace(path string) int {
 	if formatted == src {
 		return 0
 	}
-	mode := os.FileMode(0o644)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
+	// Self-check: refuse to write if the format changed anything but whitespace.
+	// fmt is token-preserving by design (implementation-note 8) and the tests pin
+	// it, but -w mutates source in place, so re-verify per file - a future
+	// formatter bug can then never silently corrupt a file.
+	if !sameCodeTokens(src, formatted) {
+		fmt.Fprintf(os.Stderr, "jennifer fmt: internal error - formatting %s would change its tokens; refusing to write (please report this)\n", path)
+		return 1
 	}
-	if err := writeFileAtomic(path, []byte(formatted), mode); err != nil {
+	// Resolve symlinks so `fmt -w link.j` rewrites the target rather than
+	// replacing the link itself with a regular file (the atomic rename otherwise
+	// clobbers the link).
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(target); err == nil {
+		mode = info.Mode().Perm()
+		// Respect a read-only source (as gofmt does): the atomic rename only needs
+		// write permission on the directory, so it would otherwise override a
+		// `chmod -w` a user set deliberately.
+		if mode&0o200 == 0 {
+			fmt.Fprintf(os.Stderr, "jennifer fmt: %s is read-only; not rewriting (chmod +w to format it)\n", path)
+			return 1
+		}
+	}
+	if err := writeFileAtomic(target, []byte(formatted), mode); err != nil {
 		fmt.Fprintf(os.Stderr, "jennifer fmt: writing %s: %v\n", path, err)
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "formatted %s\n", path)
 	return 0
+}
+
+// sameCodeTokens reports whether a and b have the same non-trivia token stream -
+// same type, same processed value (Lexeme), and same source spelling (Raw) - so
+// they differ only in whitespace, comments, and blank lines. Comparing Raw as
+// well as Lexeme means the check catches not just a semantic change (a wrong
+// value or a dropped token) but also a surface-fidelity regression (a digit
+// separator or quote style lost). It is the runtime proof that a format
+// preserved the program, checked before an in-place write commits; a source that
+// fails to lex compares unequal.
+func sameCodeTokens(a, b string) bool {
+	ta, oka := codeTokens(a)
+	tb, okb := codeTokens(b)
+	if !oka || !okb || len(ta) != len(tb) {
+		return false
+	}
+	for i := range ta {
+		if ta[i].Type != tb[i].Type || ta[i].Lexeme != tb[i].Lexeme || ta[i].Raw != tb[i].Raw {
+			return false
+		}
+	}
+	return true
+}
+
+// codeTokens lexes src and returns its tokens with all trivia (comments, blank
+// lines) dropped; ok is false when src does not lex.
+func codeTokens(src string) ([]lexer.Token, bool) {
+	toks, err := lexer.TokenizeWithFile(src, "")
+	if err != nil {
+		return nil, false
+	}
+	out := make([]lexer.Token, 0, len(toks))
+	for _, t := range toks {
+		switch t.Type {
+		case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+			lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE:
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, true
 }
 
 // writeFileAtomic writes data to a temp file in path's directory, fsyncs and
@@ -257,6 +320,10 @@ type fmtState struct {
 
 type wrapFrame struct {
 	wraps bool
+	// forHeader is true for the `(` of a `for (init; cond; step)` header, so the
+	// two header `;`s stay inline. Set only on paren frames whose `(` follows a
+	// `for` keyword; a stray identifier ending in "for" can never set it.
+	forHeader bool
 }
 
 const (
@@ -374,6 +441,9 @@ func (f *fmtState) emit(t, next lexer.Token) {
 			wraps = f.decideCallWrap(f.tokenIdx)
 		}
 		f.pushWrap(wraps)
+		if f.hasPrev && f.prev.Type == lexer.TOKEN_FOR {
+			f.wrapStack[len(f.wrapStack)-1].forHeader = true
+		}
 		f.parenDepth++
 	}
 	// Closing `}` / `]` / `)`: pop the container and, when it was multiline,
@@ -926,34 +996,13 @@ func (f *fmtState) finish() string {
 }
 
 // insideForHeader reports whether we're between the two `for (...;...;...)`
-// semicolons. The check is approximate: it walks back through the output
-// string looking for an unmatched `(` preceded by `for`. Cheap enough at
-// formatter cadence and avoids carrying a token-aware paren stack.
-//
-// Used so the formatter writes a space (not a newline) after the two
-// internal `for`-header semicolons.
+// semicolons, so the formatter writes a space (not a newline) after them. A
+// header `;` sits directly inside the `for`'s `(` (any brackets in the init /
+// cond expression are already balanced), so the innermost open container is that
+// paren - an O(1) flag read on the wrap stack, set only when a `(` follows a
+// `for` keyword (no output-string scan, no `waitfor`-style false match).
 func (f *fmtState) insideForHeader() bool {
-	s := f.out.String()
-	depth := 0
-	// Walk backwards counting parens; a `(` with depth 0 is our enclosing
-	// LPAREN. Check whether the keyword preceding it was `for`.
-	for i := len(s) - 1; i >= 0; i-- {
-		switch s[i] {
-		case ')':
-			depth++
-		case '(':
-			if depth == 0 {
-				// Check the word that ends just before the `(`.
-				j := i - 1
-				for j >= 0 && s[j] == ' ' {
-					j--
-				}
-				return j >= 2 && s[j-2:j+1] == "for"
-			}
-			depth--
-		}
-	}
-	return false
+	return len(f.wrapStack) > 0 && f.wrapStack[len(f.wrapStack)-1].forHeader
 }
 
 // canonicalLexeme returns the source-form spelling of a token. For a numeric

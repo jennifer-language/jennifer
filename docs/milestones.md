@@ -1053,65 +1053,62 @@ an all-256-byte-values round-trip.
 ### M23.9 - `fmt`: shape-aware wrapping + raw-literal fidelity (compacted)
 
 **Done.** `jennifer fmt` (a token-stream machine, implementation-note 8) had no
-notion of width and no raw-literal fidelity, so it collapsed every struct / map /
-list literal and long call onto one line (a 16-field `FirewallRule{...}` ->
-~700 columns), expanded every `when` arm, stripped digit separators, and
-flattened multi-line strings. Now:
+notion of width or raw-literal fidelity - it collapsed every struct / map / list
+literal and long call onto one line (16-field `FirewallRule{...}` -> ~700 cols),
+expanded every `when` arm, stripped digit separators, and flattened multi-line
+strings. Rebuilt:
 
-**Shape-aware wrapping.**
-- **Literals** wrap one element per line past 100 columns (open bracket at line
-  end, elements indented, close on its own line); a `> maxInlineElements` (6)
-  count also wraps struct / map literals (lists wrap on width alone). Nested
-  containers decide independently; a `spawn` block or embedded comment forces it.
-- **Calls** with >=2 args wrap one arg per line when long, the close `)`
-  **hugging the last arg** (`foo(\n    a,\n    b)`); a single-arg / empty /
-  control-flow / grouping `(` never wraps.
-- **Single-statement `when` / `else` arms stay inline** (`when V { stmt; }`);
-  longer arms expand. Each `when` still starts its own line.
-- **Operator chains fill then break** - a one-operand lookahead breaks after the
-  last `+` / `and` / `or` whose next operand (plus the hanging operator) overflows.
-
-**Spacing:** literal bodies are tight everywhere - `Point{x: 1}`, `{k: v}`,
-`[1, 2]` - a struct / enum literal only binds the brace to its type name
-(`Point{`, not `Point {`); decls stay multi-line; `Name{}` when empty.
-
-**Raw-literal fidelity.** The lexer `Token` gained a `Raw` field (a literal's exact
-source spelling, captured by `withRaw` in `readString` / `readNumber`); `fmt`
-re-emits it for `INT` / `FLOAT` / `STRING`, so **digit separators** (`1_000_000`,
-`0xDEAD_BEEF`), the base prefix, **quote style** (`'single'` stays single),
-escapes, and **embedded newlines** survive verbatim (multi-line strings no longer
-collapse to `\n`). "Prefer double quotes" is now a human guideline `fmt` respects,
-not one it rewrites.
+- **Wrapping.** A literal wraps one element per line past 100 columns (open
+  bracket at line end, elements indented, close on its own line); struct / map
+  literals also wrap over `maxInlineElements` (6) members (lists on width alone),
+  and a `spawn` block or embedded comment forces it. A **call** with >=2 args
+  wraps one arg per line when long, `)` hugging the last arg (`foo(\n    a,\n
+  b)`); a single-arg / empty / control-flow / grouping `(` never wraps. A
+  **single-statement `when` / `else` arm** stays inline; longer ones expand.
+  **Operator chains** fill then break after the last `+` / `and` / `or` whose
+  next operand would overflow. Nested containers decide independently.
+- **Spacing:** all literal bodies tight, Go-style (`Point{x: 1}`, `{k: v}`,
+  `[1, 2]`); a struct / enum literal only binds the brace to its type name
+  (`Point{`); decls stay multi-line.
+- **Raw-literal fidelity.** A lexer `Token.Raw` field (captured by `withRaw` in
+  `readString` / `readNumber`) carries a literal's exact source spelling; `fmt`
+  re-emits it for numbers / strings, so digit separators (`1_000_000`), base
+  prefix, quote style (`'single'`), escapes, and embedded newlines survive
+  verbatim. "Prefer double quotes" stays a human guideline `fmt` respects.
 
 **Approach (token-level, no AST).** A bounded lookahead (`spanEnd` /
 `inlineContainerWidth` / `topLevelElements`) decides each container at its open
 bracket; `effectiveStartCol` makes it layout-exact; a unified `wrapStack` +
 `prevContainerWraps` resolve which container a comma belongs to; indent is driven
-off the wrap frame (blocks, decls, arms, wrapped literals / calls share one path).
-Linear in tokens.
+off the wrap frame. Linear in tokens.
 
-**`fmt` / `lint` contract - verified.** `fmt` is authoritative for layout and never
-authors an over-long line, so it never hands `lint` an `L203` the source lacked;
-and `TestFmtPreservesTokenStream` proves across the whole corpus that a format
-changes **only whitespace** (the non-trivia token stream is byte-identical before
-and after). Also pinned by `TestFmtNeverAuthorsLongLine`,
-`TestFmtPreservesLiteralLexemes`, `TestFmtWrapsLongCall`.
+**`fmt` / `lint` contract - verified.** `fmt` never authors an over-long line (so
+it never hands `lint` an `L203` the source lacked), and `TestFmtPreservesTokenStream`
+proves across the whole corpus that a format changes **only whitespace** - the
+non-trivia token stream is byte-identical. Also pinned by
+`TestFmtNeverAuthorsLongLine` / `PreservesLiteralLexemes` / `WrapsLongCall`.
 
-**`jennifer fmt -w` / `--write`** - atomic (temp + rename) in-place rewrite of the
-named files, skipping already-canonical ones and preserving mode. `fmt` takes
-files only (a directory is an error): **file selection - globs, recursion via
-`**` - is the shell's job** (stance #1), so no `-r`, and no `-i` write-flag synonym.
+**`jennifer fmt -w`** - atomic (temp + rename) in-place rewrite of the named
+files, mode-preserving, skipping already-canonical ones. `fmt` takes files only
+(a directory errors): file selection - globs, `**` recursion - is the shell's job
+(stance #1), so no `-r` / `-i`. The write **follows symlinks** (rewrites the
+target), **refuses a read-only file** (exit 1, like `gofmt`), and **self-verifies**
+(re-lexes its output, refuses to write if the non-trivia tokens - values *and*
+`Raw` - changed): a per-file runtime guarantee `-w` can never corrupt or
+de-fidelity a source.
 
-**Corpus reflow.** With fidelity + the token-stream guard in place, `modules/` +
-`examples/` were reflowed: over-limit lines dropped ~700 -> ~215 (the rest
-irreducible - a lone long string or comment has no safe break), idempotent, all
-overlays green. Hand-crafted files stay excluded: `examples/linting.j` (a
-lint-findings demo `fmt` would neutralise) and the `barcode` / `font` modules
-(aligned code tables); the exclusion is manual (no fmt-the-corpus target).
+**Corpus reflow.** `modules/` + `examples/` reflowed: over-limit lines ~700 ->
+~215 (the rest irreducible - a lone long string or comment has no safe break),
+idempotent, all overlays green. Hand-crafted exclusions (manual, no
+fmt-the-corpus target): `examples/linting.j` and the `barcode` / `font` modules.
 
-`maxInlineElements = 6` (struct / map only); all literal bodies tight (Go-style,
-no padding); decls multi-line; the `fmt` / `lint` width `100`s stay two constants
-guarded by the invariant test.
+**Resolved / audited.** `maxInlineElements = 6` (struct / map only); the
+`fmt` / `lint` `100`s stay two constants guarded by the invariant test. An
+independent audit (`fmt-report.md`) re-proved **0 token-stream differences** and
+drove edge fixes: `insideForHeader` O(n^2) -> O(1) (a `forHeader` wrap-frame flag;
+40k statements 26 s -> 0.17 s, plus a `waitfor` word-boundary false match gone).
+Left: `Token.Raw` captured on every lex (within noise). **Pre-1.0 break**
+(canonical output changed).
 
 ---
 

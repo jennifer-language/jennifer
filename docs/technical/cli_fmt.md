@@ -19,6 +19,21 @@ ambiguous. There is exactly one write flag - `-w` / `--write`, no `-i` synonym -
 and no style options: like `gofmt`, the formatter is opinionated by design, so a
 whole codebase reads the same and diffs stay minimal.
 
+The write is careful about what it touches:
+
+- **Atomic + verified.** The formatted text is written to a temp file in the same
+  directory and `rename`d over the original, so a crash or a full disk can never
+  leave a truncated source. Before that rename, `fmt` re-lexes its own output and
+  refuses to write if the non-trivia token stream (values *and* surface spellings)
+  differs from the input - a runtime guarantee that a format only ever changes
+  whitespace, never a program.
+- **Symlinks are followed.** `fmt -w link.j` rewrites the link's target and leaves
+  `link.j` a symlink (it does not replace the link with a regular file).
+- **Read-only files are left alone.** A source with no write permission (`chmod
+  -w`) is refused with exit 1, matching `gofmt`; `chmod +w` it to format it.
+- **Line endings.** The output uses LF; a CRLF file is rewritten with LF endings
+  (Jennifer source is LF).
+
 ### Selecting files: use the shell
 
 `fmt` formats exactly the files you name; it does **no** globbing or directory

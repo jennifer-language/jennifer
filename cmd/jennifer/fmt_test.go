@@ -837,3 +837,67 @@ func TestFmtPreservesTokenStream(t *testing.T) {
 		})
 	}
 }
+
+// TestFmtWriteFollowsSymlink (OF-022): `fmt -w` on a symlink rewrites its target
+// and leaves the link a symlink, rather than replacing the link with a file.
+func TestFmtWriteFollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.j")
+	link := filepath.Join(dir, "link.j")
+	os.WriteFile(target, []byte("func f(){def p as P init P{x:1};}\n"), 0o644)
+	if err := os.Symlink("target.j", link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if code := runFmt([]string{"-w", link}); code != 0 {
+		t.Fatalf("fmt -w link exit %d", code)
+	}
+	if info, _ := os.Lstat(link); info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("link.j is no longer a symlink after fmt -w")
+	}
+	got, _ := os.ReadFile(target)
+	if want := "func f() {\n    def p as P init P{x: 1};\n}\n"; string(got) != want {
+		t.Errorf("target not formatted through the link:\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestFmtWriteRespectsReadOnly (OF-023): `fmt -w` refuses a read-only file and
+// leaves it untouched, rather than overriding the mode via the atomic rename.
+func TestFmtWriteRespectsReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ro.j")
+	orig := "func g(){def q as Q init Q{y:2};}\n"
+	os.WriteFile(p, []byte(orig), 0o444)
+	if code := runFmt([]string{"-w", p}); code != 1 {
+		t.Errorf("read-only file: got exit %d, want 1", code)
+	}
+	if got, _ := os.ReadFile(p); string(got) != orig {
+		t.Errorf("read-only file was modified: %q", got)
+	}
+}
+
+// TestSameCodeTokens (OF-025) pins the write-guard predicate: whitespace / comment
+// differences are equal; a changed value, a dropped token, or a lost digit
+// separator / quote style are not.
+func TestSameCodeTokens(t *testing.T) {
+	equal := [][2]string{
+		{"def x as int init 1 ;", "def x as int init 1;"},     // whitespace
+		{"def x as int init 1;  # c", "def x as int init 1;"}, // comment
+		{"def n as int init 1_000_000;", "def n as int init 1_000_000;"},
+	}
+	for _, c := range equal {
+		if !sameCodeTokens(c[0], c[1]) {
+			t.Errorf("expected equal: %q vs %q", c[0], c[1])
+		}
+	}
+	diff := [][2]string{
+		{"def x as int init 1;", "def x as int init 2;"},               // value
+		{"def x as int init 1;", "def x as int init 1 + 1;"},           // extra tokens
+		{"def n as int init 1_000_000;", "def n as int init 1000000;"}, // digit-sep fidelity
+		{"def q as string init 'x';", "def q as string init \"x\";"},   // quote fidelity
+	}
+	for _, c := range diff {
+		if sameCodeTokens(c[0], c[1]) {
+			t.Errorf("expected different: %q vs %q", c[0], c[1])
+		}
+	}
+}

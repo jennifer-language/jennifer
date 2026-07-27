@@ -8,7 +8,7 @@
 
 # Jennifer
 
-Jennifer is a interpreted programming language
+Jennifer is an interpreted programming language
 written in (Tiny)Go and ships as two binaries:
 
 - **`jennifer`** - standard Go build, full host-feature surface.
@@ -20,19 +20,26 @@ written in (Tiny)Go and ships as two binaries:
   or embeddability matters (embedded systems, minimal containers,
   small-footprint scripting hosts).
 
-Jennifer is batteries-included: a broad standard
-library and a growing set of distributable modules cover what real programs
-actually need, so you build genuine tools, not toys. Text handling has full
-[regular expressions](libraries/regex.md); structured data flows through
-[JSON](libraries/json.md); email is a complete stack -
-[SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) and
-[IMAP](modules/imap.md) to receive; in-memory data stores come through
-[Redis](modules/redis.md) and [memcached](modules/memcache.md) clients; the
-web runs from an ergonomic [REST client](modules/rest.md) to turnkey
-integrations such as [Gotify](modules/gotify.md) push notifications; and
+Jennifer is batteries-included, and not just in name: **35 built-in libraries
+and 64 distributable modules - over 400 functions and constants** cover what
+real programs actually need, so you build genuine tools, not toys. Talk to a
+real database with the [SQL](libraries/sql.md) library (MySQL / MariaDB and
+PostgreSQL, parameterized and injection-safe) or map rows to structs with the
+[ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
+[YAML](libraries/yaml.md), [TOML](libraries/toml.md), and [XML](libraries/xml.md);
+match text with full [regular expressions](libraries/regex.md). The web works
+both ways: an [HTTP/S client](modules/http.md) and ergonomic
+[REST](modules/rest.md) layer to call out, a built-in [HTTP server](libraries/httpd.md)
+and [web framework](modules/web.md) to serve. Email is a complete stack -
+[SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) / [IMAP](modules/imap.md)
+to receive; caches and stores come through [Redis](modules/redis.md) and
+[memcached](modules/memcache.md) clients. Security is the real thing, not a stub:
+[AES-256-GCM, Ed25519, HKDF / PBKDF2, and JWT](libraries/crypto.md). And
 lightweight [concurrency](user-guide/concurrency.md) is built into the language
-via `spawn` and the [task](libraries/task.md) library. Browse the full
-[library catalog](libraries/index.md) and
+via `spawn` and the [task](libraries/task.md) library. It all ships in **one
+self-contained static binary** - about 21 MB with everything, ~9 MB for the
+embeddable build - with no runtime, package manager, or dependency tree to
+install. Browse the full [library catalog](libraries/index.md) and
 [module catalog](modules/index.md) - both grow with every release.
 
 It is also a natural fit for teaching and learning: an interactive
