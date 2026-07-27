@@ -16,12 +16,14 @@ import "../../modules/http.j" as http;
 import "../../modules/discord.j" as discord;
 
 def url as string init os.getEnv("DISCORD_WEBHOOK");
-if (len(os.ARGS) > 1) { $url = os.ARGS[1]; }
+if (len(os.ARGS) > 1) {
+    $url = os.ARGS[1];
+}
 
 # Build a message with content plus two coloured embeds.
 def m as discord.Message init discord.content(discord.message(), "Deploy finished");
-$m = discord.embed($m, "Deploy", "build 1234 is live in production", 3066993);   # green
-$m = discord.embed($m, "Checks", "all checks passed", 3447003);                  # blue
+$m = discord.embed($m, "Deploy", "build 1234 is live in production", 3066993); # green
+$m = discord.embed($m, "Checks", "all checks passed", 3447003); # blue
 
 io.printf("plain payload: %s\n", discord.render(discord.content(discord.message(), "hello")));
 io.printf("embed payload: %s\n", discord.render($m));

@@ -56,7 +56,22 @@ export def struct Attr {
 };
 
 # The HTML5 void elements: they never have a closing tag or children.
-def const VOID as list of string init ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"];  # lint-disable: L203
+def const VOID as list of string init [
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr"
+]; # lint-disable: L203
 
 # --- constructors (exported) ---------------------------------------
 
@@ -173,7 +188,14 @@ func validName(s as string) {
 # checkName throws when a tag / attribute name is not validName.
 func checkName(name as string, what as string) {
     if (not validName($name)) {
-        throw Error{kind: "htmlwriter", message: "htmlwriter: illegal " + $what + " name (must match [A-Za-z][A-Za-z0-9-]*): " + $name, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "htmlwriter",
+            message: "htmlwriter: illegal " + $what + " name (must match [A-Za-z][A-Za-z0-9-]*): " +
+                $name,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }

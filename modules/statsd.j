@@ -67,9 +67,16 @@ func checkMetric(name as string, value as string) {
     def i as int init 0;
     while ($i < len($nb)) {
         def b as int init $nb[$i];
-        def ok as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or ($b >= 48 and $b <= 57) or $b == 46 or $b == 95 or $b == 45;
+        def ok as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or
+            ($b >= 48 and $b <= 57) or $b == 46 or $b == 95 or $b == 45;
         if (not $ok) {
-            throw Error{kind: "statsd", message: "metric name has an illegal character (allowed: letters, digits, and . _ -)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "statsd",
+                message: "metric name has an illegal character (allowed: letters, digits, and . _ -)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         $i = $i + 1;
     }
@@ -78,7 +85,13 @@ func checkMetric(name as string, value as string) {
     while ($j < len($vb)) {
         def c as int init $vb[$j];
         if ($c == 58 or $c == 124 or $c == 10 or $c == 13) {
-            throw Error{kind: "statsd", message: "metric value must not contain ':', '|', or a newline", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "statsd",
+                message: "metric value must not contain ':', '|', or a newline",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         $j = $j + 1;
     }
@@ -114,7 +127,7 @@ export func client(host as string) {
  */
 export func clientWith(address as string, prefix as string) {
     def sock as net.UDPSocket init net.listenUDP(":0");
-    return Client{ socket: $sock, address: $address, prefix: $prefix };
+    return Client{socket: $sock, address: $address, prefix: $prefix};
 }
 
 # --- metric verbs (exported) ------------------------------------------------

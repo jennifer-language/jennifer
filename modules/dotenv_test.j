@@ -43,14 +43,14 @@ func testInlineComment() {
 func testSingleQuotesLiteral() {
     def m as map of string to string init parse("A='hello world'\nB='keep # hash'\nC='a\\nb'");
     testing.assertEqual($m["A"], "hello world");
-    testing.assertEqual($m["B"], "keep # hash");   # no inline-comment strip inside quotes
-    testing.assertEqual($m["C"], "a\\nb");          # single quotes are literal: backslash-n, not newline
+    testing.assertEqual($m["B"], "keep # hash"); # no inline-comment strip inside quotes
+    testing.assertEqual($m["C"], "a\\nb"); # single quotes are literal: backslash-n, not newline
 }
 
 func testDoubleQuotesEscapes() {
     def m as map of string to string init parse("A=\"hello world\"\nB=\"line1\\nline2\"\nC=\"tab\\there\"");
     testing.assertEqual($m["A"], "hello world");
-    testing.assertEqual($m["B"], "line1\nline2");   # \n expands to a newline
+    testing.assertEqual($m["B"], "line1\nline2"); # \n expands to a newline
     testing.assertEqual($m["C"], "tab\there");
 }
 
@@ -85,7 +85,7 @@ func testCrlf() {
 func testHelpers() {
     testing.assertEqual(unescape("n"), "\n");
     testing.assertEqual(unescape("t"), "\t");
-    testing.assertEqual(unescape("x"), "x");                # unknown escape -> literal
+    testing.assertEqual(unescape("x"), "x"); # unknown escape -> literal
     testing.assertEqual(stripInlineComment("val # c"), "val");
     testing.assertEqual(stripInlineComment("val"), "val");
     testing.assertEqual(unquoteSingle("'abc'"), "abc");
@@ -93,7 +93,7 @@ func testHelpers() {
     testing.assertEqual(parseValue("  bare  "), "bare");
 }
 
-func testEnvNameValidation() {   # OM-021
+func testEnvNameValidation() { # OM-021
     testing.assertTrue(validEnvName("PATH_2"));
     testing.assertTrue(validEnvName("_x"));
     testing.assertFalse(validEnvName("2BAD"));
@@ -122,7 +122,7 @@ func testInterpolationInDoubleQuotes() {
 
 func testInterpolationNotInSingleQuotes() {
     def m as map of string to string init parse("A=1\nB='v${A}v'");
-    testing.assertEqual($m["B"], "v${A}v");   # single quotes never interpolate
+    testing.assertEqual($m["B"], "v${A}v"); # single quotes never interpolate
 }
 
 func testInterpolationInvalidRefIsLiteral() {
@@ -142,7 +142,7 @@ func testNoCommandSubstitution() {
 func testInterpolateHelper() {
     def acc as map of string to string init {"X": "9"};
     testing.assertEqual(interpolate("a${X}b", $acc), "a9b");
-    testing.assertEqual(interpolate("none${MISSING}here", $acc), "nonehere");   # undefined -> ""
+    testing.assertEqual(interpolate("none${MISSING}here", $acc), "nonehere"); # undefined -> ""
     testing.assertEqual(interpolate("plain", $acc), "plain");
 }
 
@@ -151,7 +151,7 @@ func testInterpolateHelper() {
 func testMultilineDoubleQuoted() {
     def m as map of string to string init parse("A=\"line1\nline2\nline3\"\nB=after");
     testing.assertEqual($m["A"], "line1\nline2\nline3");
-    testing.assertEqual($m["B"], "after");   # parsing resumes after the closing line
+    testing.assertEqual($m["B"], "after"); # parsing resumes after the closing line
 }
 
 func testMultilineWithInterpolation() {
@@ -168,9 +168,9 @@ func unterminatedBody() {
 }
 
 func testClosingDoubleIndex() {
-    testing.assertEqual(closingDoubleIndex("\"abc\""), 4);      # closing quote at index 4
-    testing.assertEqual(closingDoubleIndex("\"no close"), -1);  # not closed
-    testing.assertEqual(closingDoubleIndex("\"a\\\"b\""), 5);   # an escaped \" is not the close
+    testing.assertEqual(closingDoubleIndex("\"abc\""), 4); # closing quote at index 4
+    testing.assertEqual(closingDoubleIndex("\"no close"), -1); # not closed
+    testing.assertEqual(closingDoubleIndex("\"a\\\"b\""), 5); # an escaped \" is not the close
 }
 
 # --- profile validation + cascade base ---------------------------------------
@@ -180,7 +180,7 @@ func testValidProfile() {
     testing.assertTrue(validProfile("staging-2"));
     testing.assertTrue(validProfile("dev_1"));
     testing.assertFalse(validProfile(""));
-    testing.assertFalse(validProfile("../../etc"));   # traversal blocked
+    testing.assertFalse(validProfile("../../etc")); # traversal blocked
     testing.assertFalse(validProfile("a/b"));
     testing.assertFalse(validProfile("with space"));
 }
@@ -188,9 +188,9 @@ func testValidProfile() {
 func testParseWithBaseLaterWins() {
     def base as map of string to string init {"A": "1", "B": "2"};
     def m as map of string to string init parseWithBase("B=override\nC=3", $base);
-    testing.assertEqual($m["A"], "1");         # inherited from base
-    testing.assertEqual($m["B"], "override");  # this text overrides base
-    testing.assertEqual($m["C"], "3");         # new key
+    testing.assertEqual($m["A"], "1"); # inherited from base
+    testing.assertEqual($m["B"], "override"); # this text overrides base
+    testing.assertEqual($m["C"], "3"); # new key
 }
 
 func testParseWithBaseInterpolatesBase() {

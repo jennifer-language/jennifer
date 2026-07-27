@@ -28,16 +28,33 @@ func makeEsc() {
 
 # SGR codes for foreground colour, background colour, and text style.
 def const FG as map of string to string init {
-    "black": "30", "red": "31", "green": "32", "yellow": "33",
-    "blue": "34", "magenta": "35", "cyan": "36", "white": "37",
-    "gray": "90", "grey": "90"
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+    "gray": "90",
+    "grey": "90"
 };
 def const BG as map of string to string init {
-    "black": "40", "red": "41", "green": "42", "yellow": "43",
-    "blue": "44", "magenta": "45", "cyan": "46", "white": "47"
+    "black": "40",
+    "red": "41",
+    "green": "42",
+    "yellow": "43",
+    "blue": "44",
+    "magenta": "45",
+    "cyan": "46",
+    "white": "47"
 };
 def const STYLE as map of string to string init {
-    "bold": "1", "dim": "2", "italic": "3", "underline": "4", "reverse": "7"
+    "bold": "1",
+    "dim": "2",
+    "italic": "3",
+    "underline": "4",
+    "reverse": "7"
 };
 
 # enabled reports whether to emit escapes at all: NO_COLOR forces off,
@@ -71,7 +88,13 @@ func wrap(s as string, code as string) {
 # lookup returns the SGR code for name in table, or throws on an unknown name.
 func lookup(table as map of string to string, name as string, kind as string) {
     if (not maps.has($table, $name)) {
-        throw Error{kind: "value", message: "unknown ansi " + $kind + ": " + $name, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "unknown ansi " + $kind + ": " + $name,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $table[$name];
 }
@@ -115,7 +138,10 @@ export func style(s as string, name as string) {
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
 export func rgb(s as string, r as int, g as int, b as int) {
-    return wrap($s, "38;2;" + convert.toString(clampChannel($r)) + ";" + convert.toString(clampChannel($g)) + ";" + convert.toString(clampChannel($b)));
+    return wrap(
+        $s,
+        "38;2;" + convert.toString(clampChannel($r)) + ";" + convert.toString(clampChannel($g)) +
+            ";" + convert.toString(clampChannel($b)));
 }
 
 # clampChannel bounds a colour channel to [0, 255] so an out-of-range argument
@@ -145,82 +171,110 @@ export func strip(s as string) {
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func black(s as string) { return color($s, "black"); }
+export func black(s as string) {
+    return color($s, "black");
+}
 /**
  * Wrap a string in red foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func red(s as string) { return color($s, "red"); }
+export func red(s as string) {
+    return color($s, "red");
+}
 /**
  * Wrap a string in green foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func green(s as string) { return color($s, "green"); }
+export func green(s as string) {
+    return color($s, "green");
+}
 /**
  * Wrap a string in yellow foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func yellow(s as string) { return color($s, "yellow"); }
+export func yellow(s as string) {
+    return color($s, "yellow");
+}
 /**
  * Wrap a string in blue foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func blue(s as string) { return color($s, "blue"); }
+export func blue(s as string) {
+    return color($s, "blue");
+}
 /**
  * Wrap a string in magenta foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func magenta(s as string) { return color($s, "magenta"); }
+export func magenta(s as string) {
+    return color($s, "magenta");
+}
 /**
  * Wrap a string in cyan foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func cyan(s as string) { return color($s, "cyan"); }
+export func cyan(s as string) {
+    return color($s, "cyan");
+}
 /**
  * Wrap a string in white foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func white(s as string) { return color($s, "white"); }
+export func white(s as string) {
+    return color($s, "white");
+}
 /**
  * Wrap a string in gray foreground colour.
  * @param s {string} the text to colourize
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func gray(s as string) { return color($s, "gray"); }
+export func gray(s as string) {
+    return color($s, "gray");
+}
 /**
  * Wrap a string in the bold text style.
  * @param s {string} the text to style
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func bold(s as string) { return style($s, "bold"); }
+export func bold(s as string) {
+    return style($s, "bold");
+}
 /**
  * Wrap a string in the dim text style.
  * @param s {string} the text to style
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func dim(s as string) { return style($s, "dim"); }
+export func dim(s as string) {
+    return style($s, "dim");
+}
 /**
  * Wrap a string in the italic text style.
  * @param s {string} the text to style
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func italic(s as string) { return style($s, "italic"); }
+export func italic(s as string) {
+    return style($s, "italic");
+}
 /**
  * Wrap a string in the underline text style.
  * @param s {string} the text to style
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func underline(s as string) { return style($s, "underline"); }
+export func underline(s as string) {
+    return style($s, "underline");
+}
 /**
  * Wrap a string in the reverse (inverted) text style.
  * @param s {string} the text to style
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
-export func reverse(s as string) { return style($s, "reverse"); }
+export func reverse(s as string) {
+    return style($s, "reverse");
+}

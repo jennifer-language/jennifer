@@ -385,9 +385,14 @@ jennifer ast examples/hello.j
 jennifer fmt examples/hello.j
 ```
 
-`fmt` writes the formatted source to stdout. To rewrite in place,
-use your shell: `jennifer fmt foo.j > foo.j.new && mv foo.j.new
-foo.j`. The formatter is idempotent (`fmt` of `fmt` output equals
-`fmt` output) and preserves runtime behavior - every example in
-this repo is checked both ways by the test suite. See
+By default `fmt` writes the formatted source to stdout. Pass
+`-w` (or `--write`) to rewrite files in place instead - one or
+more named files (`jennifer fmt -w foo.j`, `jennifer fmt -w
+*.j`); an already-canonical file is left untouched. `fmt`
+formats the files you name and does no globbing itself - let the
+shell select files, recursively via `**` (see
+[the formatter reference](../technical/cli_fmt.md)). The
+formatter is idempotent (`fmt` of `fmt` output equals `fmt`
+output) and preserves runtime behavior - every example in this
+repo is checked both ways by the test suite. See
 [style-guide.md](style-guide.md) for the full style rules.

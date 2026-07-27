@@ -69,8 +69,8 @@ fs.removeAll(ROOT + "/a");
 io.printf("after removeAll: exists(a) = %t\n", fs.exists(ROOT + "/a"));
 
 # ---- directory listing (sorted, non-recursive) ----
-fs.writeString(ROOT + "/alpha",   "one");
-fs.writeString(ROOT + "/bravo",   "two");
+fs.writeString(ROOT + "/alpha", "one");
+fs.writeString(ROOT + "/bravo", "two");
 fs.writeString(ROOT + "/charlie", "three");
 def names as list of string init fs.list(ROOT);
 io.printf("list: %a\n", $names);

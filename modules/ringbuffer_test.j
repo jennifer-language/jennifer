@@ -24,7 +24,7 @@ func testPushOverwritesOldest() {
     $r = push($r, "a");
     $r = push($r, "b");
     $r = push($r, "c");
-    $r = push($r, "d");   # overwrites "a"
+    $r = push($r, "d"); # overwrites "a"
     testing.assertEqual(size($r), 3);
     testing.assertTrue(isFull($r));
     testing.assertEqual(first($r), "b");

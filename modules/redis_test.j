@@ -25,7 +25,8 @@ func reststr(orig as string, pr as ParseResult) {
 }
 
 func testEncodeCommand() {
-    testing.assertEqual(encodeCommand(["SET", "key", "value"]),
+    testing.assertEqual(
+        encodeCommand(["SET", "key", "value"]),
         "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n");
     testing.assertEqual(encodeCommand(["PING"]), "*1\r\n$4\r\nPING\r\n");
 }
@@ -96,9 +97,9 @@ func testParseMixedArray() {
 }
 
 func testParseIncomplete() {
-    testing.assertFalse(parseComplete(b("+OK")).complete);          # no CRLF yet
-    testing.assertFalse(parseComplete(b("$5\r\nhel")).complete);    # short bulk
-    testing.assertFalse(parseComplete(b("*2\r\n$3\r\nfoo\r\n")).complete);   # missing element
+    testing.assertFalse(parseComplete(b("+OK")).complete); # no CRLF yet
+    testing.assertFalse(parseComplete(b("$5\r\nhel")).complete); # short bulk
+    testing.assertFalse(parseComplete(b("*2\r\n$3\r\nfoo\r\n")).complete); # missing element
 }
 
 func testParseLeavesRest() {
@@ -112,7 +113,9 @@ func testParseLeavesRest() {
 func testReplyCapRejectsOversized() {
     testing.assertThrows("overReplyCap", "redis");
 }
-func overReplyCap() { capReply(MAX_REPLY_BYTES + 1); }
+func overReplyCap() {
+    capReply(MAX_REPLY_BYTES + 1);
+}
 func testReplyCapAllowsAtLimit() {
     capReply(MAX_REPLY_BYTES);
     testing.assertTrue(true);
@@ -120,20 +123,24 @@ func testReplyCapAllowsAtLimit() {
 
 # ---- pub/sub command encoding ----
 func testEncodeSubscribe() {
-    testing.assertEqual(encodeCommand(subscribeArgs("SUBSCRIBE", ["news", "weather"])),
+    testing.assertEqual(
+        encodeCommand(subscribeArgs("SUBSCRIBE", ["news", "weather"])),
         "*3\r\n$9\r\nSUBSCRIBE\r\n$4\r\nnews\r\n$7\r\nweather\r\n");
-    testing.assertEqual(encodeCommand(subscribeArgs("PSUBSCRIBE", ["news.*"])),
+    testing.assertEqual(
+        encodeCommand(subscribeArgs("PSUBSCRIBE", ["news.*"])),
         "*2\r\n$10\r\nPSUBSCRIBE\r\n$6\r\nnews.*\r\n");
 }
 
 func testEncodeUnsubscribeAll() {
     # An empty channel list is UNSUBSCRIBE-from-all (just the verb).
-    testing.assertEqual(encodeCommand(subscribeArgs("UNSUBSCRIBE", [])),
+    testing.assertEqual(
+        encodeCommand(subscribeArgs("UNSUBSCRIBE", [])),
         "*1\r\n$11\r\nUNSUBSCRIBE\r\n");
 }
 
 func testEncodePublish() {
-    testing.assertEqual(encodeCommand(publishArgs("news", "hello")),
+    testing.assertEqual(
+        encodeCommand(publishArgs("news", "hello")),
         "*3\r\n$7\r\nPUBLISH\r\n$4\r\nnews\r\n$5\r\nhello\r\n");
 }
 
@@ -171,7 +178,8 @@ func testMessageFromNonArray() {
 
 # ---- pipeline encoding ----
 func testEncodePipeline() {
-    testing.assertEqual(encodePipeline([["PING"], ["SET", "k", "v"]]),
+    testing.assertEqual(
+        encodePipeline([["PING"], ["SET", "k", "v"]]),
         "*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n");
     testing.assertEqual(encodePipeline([]), "");
 }

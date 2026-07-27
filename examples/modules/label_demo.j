@@ -13,12 +13,17 @@ import "../../modules/label.j" as label;
 # A device-independent 100x50 mm shipping label, described once in millimetres.
 def l as label.Label init label.new(100.0, 50.0);
 $l = label.box($l, 1.0, 1.0, 98.0, 48.0, 0.4);
-def title as label.TextOptions; $title.height = 6.0; $title.bold = true;
+def title as label.TextOptions;
+$title.height = 6.0;
+$title.bold = true;
 $l = label.text($l, 5.0, 5.0, $title, "ACME LOGISTICS");
-def small as label.TextOptions; $small.height = 3.0;
+def small as label.TextOptions;
+$small.height = 3.0;
 $l = label.text($l, 5.0, 14.0, $small, "Order 4711");
 # A point-sized caption turned on its side (rotation is portable across dialects).
-def side as label.TextOptions; $side.points = 7; $side.rotation = 90;
+def side as label.TextOptions;
+$side.points = 7;
+$side.rotation = 90;
 $l = label.text($l, 96.0, 20.0, $side, "PICK");
 # Most barcodes need no options; a zero-value BarcodeOptions is "no options".
 def noopts as label.BarcodeOptions;

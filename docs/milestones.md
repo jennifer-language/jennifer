@@ -900,27 +900,32 @@ here while it needed interpreter-level work; that work landed in M22.17, so `web
 now handles requests concurrently.) Sub-milestones may grow their own
 sub-numbering as they land.
 
-### M23.1 - streaming / server-push read loops
+### M23.1 - streaming / server-push read loops (compacted)
 
-**Planned.** The biggest structural theme: several protocol clients are
-one-request/one-reply and cannot express an unsolicited server message, which
-breaks the headline use case of each. Build one cooperative receive-loop-over-`net`
-pattern (poll at a safe point, no callbacks; the app opts into a `spawn` for
-concurrency), then apply it:
-- **`redis`** - `SUBSCRIBE` / `PSUBSCRIBE` + a message-receive loop (and
-  `PUBLISH`); plus pipelining (batch commands, read N replies) and `MULTI`/`EXEC`;
-  `SCAN` to retire the production-unsafe `KEYS`.
-- **`amqp`** - `Basic.Consume` (server-pushed delivery) beside the existing
-  `Basic.Get`; exchange declaration + queue binding (direct/topic/fanout);
-  message properties + `Basic.Nack`/requeue + publisher confirms.
-- **`mqtt`** - QoS-1 (PUBACK handshake) publish/subscribe, a robust subscribe
-  loop, retained messages + Last-Will, and auto-reconnect / session resumption.
-- **`mikrotik`** - command tagging (`.tag`) + `/listen` for streaming commands
-  (`/interface/monitor`, `/ping`) and `/cancel`; and clear the read deadline
-  `readN` arms after it returns, so a later read / write does not inherit a stale
-  one.
-- **`imap`** - `IDLE` push new-mail notification (shares the loop; the rest of
-  the mail work lives in M23.3).
+**Done.** The biggest structural theme: several protocol clients were
+one-request/one-reply and could not express an unsolicited server message. Shipped
+one cooperative receive-loop-over-`net` shape across all five - a **blocking
+`receive*`** (+ a timeout-bounded `poll`) reading the next push at a safe point,
+**no callbacks**, the app opting into concurrency via its own `spawn`. Each module
+factored its wire framing into pure encode/parse helpers at 100% overlay coverage,
+with the live loops driven by a mock-server `cmd/jennifer/*_test.go`. Review fixed
+two read-path bugs the streaming exposed: `redis`'s per-reply reader dropped
+server-coalesced frames, so `pipeline` and the pub/sub confirmation-then-message
+path are now **buffered** (parse every reply out of one read via
+`ParseResult.pos`, pinned by a coalesced-frame Go test); and `imap`'s `IDLE` poll
+left an expired `net.setDeadline` breaking the next write, fixed with the same
+block-level `defer net.setDeadline(_, 0)` as `mikrotik`'s `readN`. Residual
+(follow-up `net`-level): a value-semantic `Session` cannot retain a leftover
+buffer across calls, so pushes coalescing *across* separate `receive*` calls can
+still drop a frame - a buffered `net` reader is the general fix.
+
+| Module | Shipped |
+| ------ | ------- |
+| `redis` | Pub/sub (`subscribe` / `psubscribe` / `publish`, blocking `receiveMessage` draining interleaved subscribe confirmations), one-round-trip `pipeline`, `multi` / `exec` / `discard`, a `scan` cursor; `keys` flagged production-unsafe. |
+| `amqp` | `Basic.Consume` (server-pushed `receiveDelivery`) beside the pull `get`; `declareExchange` / `bindQueue` (direct/topic/fanout); message `Properties` + `nack`/requeue; publisher confirms (`confirmSelect` / `waitConfirm`). |
+| `mqtt` | QoS-1 publish/subscribe with the PUBACK handshake (`publishQos1` / `subscribeQos1`, `receive`/`poll`), retained messages, a CONNECT Last-Will (`connectWith`), and `reconnect` session resumption (re-subscribes tracked subs). |
+| `mikrotik` | `.tag`-correlated commands (`talkTagged`) + `/listen`-style streaming (`listen` / `receiveReply` / `cancel`); `readN` clears the read deadline it arms (block-level `defer net.setDeadline($socket, 0)`) so a later read/write cannot inherit it. |
+| `imap` | RFC 2177 `IDLE`: `idle` -> blocking `receiveNotification` / timeout-bounded `pollNotification` -> `done`, typed `EXISTS` / `EXPUNGE` / `RECENT` notifications (rest of the mail work in M23.3). |
 
 ### M23.2 - connection reuse / persistent sessions
 
@@ -1044,6 +1049,69 @@ an all-256-byte-values round-trip.
 | `discord` | Full embeds (`embedField` / `embedFooter` / `embedAuthor`) + per-message `username` / `avatar` identity override. |
 | `telegram` | Inline keyboards, `parseCallbackQuery` / `answerCallbackQuery`, local-file upload (`sendPhotoFile` / `sendDocumentFile` via multipart + `http.requestRawBody`), and bot-token redaction from every raised error. |
 | `slack` | Block Kit `contextBlock` / `fieldsSection` / `actionsBlock` (URL buttons). |
+
+### M23.9 - `fmt`: shape-aware wrapping + raw-literal fidelity (compacted)
+
+**Done.** `jennifer fmt` (a token-stream machine, implementation-note 8) had no
+notion of width and no raw-literal fidelity, so it collapsed every struct / map /
+list literal and long call onto one line (a 16-field `FirewallRule{...}` ->
+~700 columns), expanded every `when` arm, stripped digit separators, and
+flattened multi-line strings. Now:
+
+**Shape-aware wrapping.**
+- **Literals** wrap one element per line past 100 columns (open bracket at line
+  end, elements indented, close on its own line); a `> maxInlineElements` (6)
+  count also wraps struct / map literals (lists wrap on width alone). Nested
+  containers decide independently; a `spawn` block or embedded comment forces it.
+- **Calls** with >=2 args wrap one arg per line when long, the close `)`
+  **hugging the last arg** (`foo(\n    a,\n    b)`); a single-arg / empty /
+  control-flow / grouping `(` never wraps.
+- **Single-statement `when` / `else` arms stay inline** (`when V { stmt; }`);
+  longer arms expand. Each `when` still starts its own line.
+- **Operator chains fill then break** - a one-operand lookahead breaks after the
+  last `+` / `and` / `or` whose next operand (plus the hanging operator) overflows.
+
+**Spacing:** literal bodies are tight everywhere - `Point{x: 1}`, `{k: v}`,
+`[1, 2]` - a struct / enum literal only binds the brace to its type name
+(`Point{`, not `Point {`); decls stay multi-line; `Name{}` when empty.
+
+**Raw-literal fidelity.** The lexer `Token` gained a `Raw` field (a literal's exact
+source spelling, captured by `withRaw` in `readString` / `readNumber`); `fmt`
+re-emits it for `INT` / `FLOAT` / `STRING`, so **digit separators** (`1_000_000`,
+`0xDEAD_BEEF`), the base prefix, **quote style** (`'single'` stays single),
+escapes, and **embedded newlines** survive verbatim (multi-line strings no longer
+collapse to `\n`). "Prefer double quotes" is now a human guideline `fmt` respects,
+not one it rewrites.
+
+**Approach (token-level, no AST).** A bounded lookahead (`spanEnd` /
+`inlineContainerWidth` / `topLevelElements`) decides each container at its open
+bracket; `effectiveStartCol` makes it layout-exact; a unified `wrapStack` +
+`prevContainerWraps` resolve which container a comma belongs to; indent is driven
+off the wrap frame (blocks, decls, arms, wrapped literals / calls share one path).
+Linear in tokens.
+
+**`fmt` / `lint` contract - verified.** `fmt` is authoritative for layout and never
+authors an over-long line, so it never hands `lint` an `L203` the source lacked;
+and `TestFmtPreservesTokenStream` proves across the whole corpus that a format
+changes **only whitespace** (the non-trivia token stream is byte-identical before
+and after). Also pinned by `TestFmtNeverAuthorsLongLine`,
+`TestFmtPreservesLiteralLexemes`, `TestFmtWrapsLongCall`.
+
+**`jennifer fmt -w` / `--write`** - atomic (temp + rename) in-place rewrite of the
+named files, skipping already-canonical ones and preserving mode. `fmt` takes
+files only (a directory is an error): **file selection - globs, recursion via
+`**` - is the shell's job** (stance #1), so no `-r`, and no `-i` write-flag synonym.
+
+**Corpus reflow.** With fidelity + the token-stream guard in place, `modules/` +
+`examples/` were reflowed: over-limit lines dropped ~700 -> ~215 (the rest
+irreducible - a lone long string or comment has no safe break), idempotent, all
+overlays green. Hand-crafted files stay excluded: `examples/linting.j` (a
+lint-findings demo `fmt` would neutralise) and the `barcode` / `font` modules
+(aligned code tables); the exclusion is manual (no fmt-the-corpus target).
+
+`maxInlineElements = 6` (struct / map only); all literal bodies tight (Go-style,
+no padding); decls multi-line; the `fmt` / `lint` width `100`s stay two constants
+guarded by the invariant test.
 
 ---
 

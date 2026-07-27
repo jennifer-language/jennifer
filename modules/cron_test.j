@@ -21,7 +21,7 @@ func testParseFields() {
     testing.assertEqual(len($s.minutes), 1);
     testing.assertEqual($s.minutes[0], 30);
     testing.assertEqual($s.hours[0], 9);
-    testing.assertEqual(len($s.weekdays), 5);        # Mon..Fri (ISO 1-5)
+    testing.assertEqual(len($s.weekdays), 5); # Mon..Fri (ISO 1-5)
     testing.assertEqual($s.weekdays[0], 1);
     testing.assertTrue($s.domStar);
     testing.assertFalse($s.dowStar);
@@ -31,70 +31,80 @@ func testRangesStepsLists() {
     def s as Schedule init parse("0,30 */6 1-3 * *");
     testing.assertEqual(len($s.minutes), 2);
     testing.assertEqual($s.minutes[1], 30);
-    testing.assertEqual(len($s.hours), 4);           # 0,6,12,18
+    testing.assertEqual(len($s.hours), 4); # 0,6,12,18
     testing.assertEqual($s.hours[3], 18);
-    testing.assertEqual(len($s.daysOfMonth), 3);     # 1,2,3
+    testing.assertEqual(len($s.daysOfMonth), 3); # 1,2,3
     testing.assertEqual($s.daysOfMonth[2], 3);
 }
 
 func testSundayAliases() {
-    testing.assertEqual(parse("0 0 * * 0").weekdays[0], 7);   # cron 0 -> ISO 7
-    testing.assertEqual(parse("0 0 * * 7").weekdays[0], 7);   # cron 7 -> ISO 7
+    testing.assertEqual(parse("0 0 * * 0").weekdays[0], 7); # cron 0 -> ISO 7
+    testing.assertEqual(parse("0 0 * * 7").weekdays[0], 7); # cron 7 -> ISO 7
 }
 
 func testMatches() {
     def s as Schedule init parse("30 9 * * 1-5");
-    testing.assertTrue(matches($s, at("2026-03-16T09:30:00+00:00")));    # Monday 09:30
-    testing.assertFalse(matches($s, at("2026-03-16T09:31:00+00:00")));   # wrong minute
-    testing.assertFalse(matches($s, at("2026-03-15T09:30:00+00:00")));   # Sunday
-    testing.assertTrue(matches($s, at("2026-03-16T09:30:45+00:00")));    # seconds ignored
+    testing.assertTrue(matches($s, at("2026-03-16T09:30:00+00:00"))); # Monday 09:30
+    testing.assertFalse(matches($s, at("2026-03-16T09:31:00+00:00"))); # wrong minute
+    testing.assertFalse(matches($s, at("2026-03-15T09:30:00+00:00"))); # Sunday
+    testing.assertTrue(matches($s, at("2026-03-16T09:30:45+00:00"))); # seconds ignored
 }
 
 func testNextWeekday() {
     def s as Schedule init parse("30 9 * * 1-5");
     # from Saturday 10:30 -> Monday 09:30
-    testing.assertEqual(time.iso(next($s, at("2026-03-14T10:30:00+00:00"))), "2026-03-16T09:30:00Z");
+    testing.assertEqual(
+        time.iso(next($s, at("2026-03-14T10:30:00+00:00"))),
+        "2026-03-16T09:30:00Z");
 }
 
 func testNextStep() {
     def s as Schedule init parse("*/15 * * * *");
-    testing.assertEqual(time.iso(next($s, at("2026-03-14T10:31:00+00:00"))), "2026-03-14T10:45:00Z");
+    testing.assertEqual(
+        time.iso(next($s, at("2026-03-14T10:31:00+00:00"))),
+        "2026-03-14T10:45:00Z");
     # at an exact matching minute, "at or after" returns that minute
-    testing.assertEqual(time.iso(next($s, at("2026-03-14T10:45:00+00:00"))), "2026-03-14T10:45:00Z");
+    testing.assertEqual(
+        time.iso(next($s, at("2026-03-14T10:45:00+00:00"))),
+        "2026-03-14T10:45:00Z");
 }
 
 func testNextMonthRollover() {
     def s as Schedule init parse("0 0 1 * *");
-    testing.assertEqual(time.iso(next($s, at("2026-03-14T10:30:00+00:00"))), "2026-04-01T00:00:00Z");
+    testing.assertEqual(
+        time.iso(next($s, at("2026-03-14T10:30:00+00:00"))),
+        "2026-04-01T00:00:00Z");
 }
 
 func testDomOrDowRule() {
     # "13th OR any Friday" - both fields restricted, so either matches
     def s as Schedule init parse("0 0 13 * 5");
-    testing.assertTrue(matches($s, at("2026-03-20T00:00:00+00:00")));    # a Friday
-    testing.assertTrue(matches($s, at("2026-02-13T00:00:00+00:00")));    # the 13th (a Friday too)
-    testing.assertTrue(matches($s, at("2026-01-13T00:00:00+00:00")));    # the 13th (a Tuesday)
-    testing.assertFalse(matches($s, at("2026-03-19T00:00:00+00:00")));   # Thursday, not the 13th
+    testing.assertTrue(matches($s, at("2026-03-20T00:00:00+00:00"))); # a Friday
+    testing.assertTrue(matches($s, at("2026-02-13T00:00:00+00:00"))); # the 13th (a Friday too)
+    testing.assertTrue(matches($s, at("2026-01-13T00:00:00+00:00"))); # the 13th (a Tuesday)
+    testing.assertFalse(matches($s, at("2026-03-19T00:00:00+00:00"))); # Thursday, not the 13th
 }
 
 func testKeepsOffset() {
     # next preserves the input's zone offset
     def s as Schedule init parse("0 12 * * *");
-    testing.assertEqual(time.iso(next($s, at("2026-03-14T08:00:00+02:00"))), "2026-03-14T12:00:00+02:00");
+    testing.assertEqual(
+        time.iso(next($s, at("2026-03-14T08:00:00+02:00"))),
+        "2026-03-14T12:00:00+02:00");
 }
 
 # --- error cases ------------------------------------------------------------
 
 func badFieldCount() {
-    parse("30 9 * *");     # only 4 fields
+    parse("30 9 * *"); # only 4 fields
 }
 
 func badRange() {
-    parse("99 9 * * *");   # minute 99 out of range
+    parse("99 9 * * *"); # minute 99 out of range
 }
 
 func badStep() {
-    parse("*/0 * * * *");  # zero step
+    parse("*/0 * * * *"); # zero step
 }
 
 func testErrors() {
@@ -111,7 +121,7 @@ func testNamedMonths() {
     testing.assertEqual(len($lst.months), 2);
     testing.assertEqual($lst.months[1], 7);
     def rng as Schedule init parse("0 0 1 Mar-May *");
-    testing.assertEqual(len($rng.months), 3);          # 3,4,5
+    testing.assertEqual(len($rng.months), 3); # 3,4,5
     testing.assertEqual($rng.months[2], 5);
 }
 
@@ -129,7 +139,7 @@ func testNamedWeekdays() {
 }
 
 func badMonthName() {
-    parse("0 0 1 FOO *");    # not a real month name
+    parse("0 0 1 FOO *"); # not a real month name
 }
 
 func testNamedErrors() {
@@ -137,14 +147,26 @@ func testNamedErrors() {
 }
 
 func testMacros() {
-    testing.assertEqual(time.iso(next(parse("@yearly"), at("2026-03-14T10:30:00+00:00"))), "2027-01-01T00:00:00Z");
-    testing.assertEqual(time.iso(next(parse("@annually"), at("2026-03-14T10:30:00+00:00"))), "2027-01-01T00:00:00Z");
-    testing.assertEqual(time.iso(next(parse("@monthly"), at("2026-03-14T10:30:00+00:00"))), "2026-04-01T00:00:00Z");
-    testing.assertEqual(time.iso(next(parse("@daily"), at("2026-03-14T10:30:00+00:00"))), "2026-03-15T00:00:00Z");
-    testing.assertEqual(time.iso(next(parse("@midnight"), at("2026-03-14T10:30:00+00:00"))), "2026-03-15T00:00:00Z");
-    testing.assertEqual(time.iso(next(parse("@hourly"), at("2026-03-14T10:30:00+00:00"))), "2026-03-14T11:00:00Z");
+    testing.assertEqual(
+        time.iso(next(parse("@yearly"), at("2026-03-14T10:30:00+00:00"))),
+        "2027-01-01T00:00:00Z");
+    testing.assertEqual(
+        time.iso(next(parse("@annually"), at("2026-03-14T10:30:00+00:00"))),
+        "2027-01-01T00:00:00Z");
+    testing.assertEqual(
+        time.iso(next(parse("@monthly"), at("2026-03-14T10:30:00+00:00"))),
+        "2026-04-01T00:00:00Z");
+    testing.assertEqual(
+        time.iso(next(parse("@daily"), at("2026-03-14T10:30:00+00:00"))),
+        "2026-03-15T00:00:00Z");
+    testing.assertEqual(
+        time.iso(next(parse("@midnight"), at("2026-03-14T10:30:00+00:00"))),
+        "2026-03-15T00:00:00Z");
+    testing.assertEqual(
+        time.iso(next(parse("@hourly"), at("2026-03-14T10:30:00+00:00"))),
+        "2026-03-14T11:00:00Z");
     # @weekly fires Sunday 00:00
-    testing.assertTrue(matches(parse("@weekly"), at("2026-03-15T00:00:00+00:00")));   # a Sunday
+    testing.assertTrue(matches(parse("@weekly"), at("2026-03-15T00:00:00+00:00"))); # a Sunday
 }
 
 func testRebootSchedule() {
@@ -156,11 +178,11 @@ func testRebootSchedule() {
 }
 
 func rebootNext() {
-    next(parse("@reboot"), at("2026-03-14T10:30:00+00:00"));   # no scheduled time
+    next(parse("@reboot"), at("2026-03-14T10:30:00+00:00")); # no scheduled time
 }
 
 func badMacro() {
-    parse("@nope");    # unknown nickname
+    parse("@nope"); # unknown nickname
 }
 
 func testMacroErrors() {
@@ -169,9 +191,9 @@ func testMacroErrors() {
 }
 
 func testHelpers() {
-    testing.assertEqual(len(fields("  30   9 * * 1  ")), 5);       # collapses whitespace
+    testing.assertEqual(len(fields("  30   9 * * 1  ")), 5); # collapses whitespace
     testing.assertEqual(len(parseTerm("1-5", 0, 59, "minute")), 5);
-    testing.assertEqual(len(parseTerm("*/20", 0, 59, "minute")), 3);   # 0,20,40
+    testing.assertEqual(len(parseTerm("*/20", 0, 59, "minute")), 3); # 0,20,40
     def s as Schedule init parse("0 0 * * *");
-    testing.assertTrue(dayMatches($s, at("2026-03-14T00:00:00+00:00")));   # both day fields *
+    testing.assertTrue(dayMatches($s, at("2026-03-14T00:00:00+00:00"))); # both day fields *
 }

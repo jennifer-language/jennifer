@@ -58,8 +58,12 @@ io.printf("  by %s, version %s\n\n", $doc.module.author, $doc.module.version);
 
 io.printf("functions:\n");
 for (def f in $doc.funcs) {
-    io.printf("  %s  (exported=%t, %d params -> %s)\n",
-        $f.name, $f.exported, len($f.params), $f.returns.type);
+    io.printf(
+        "  %s  (exported=%t, %d params -> %s)\n",
+        $f.name,
+        $f.exported,
+        len($f.params),
+        $f.returns.type);
     io.printf("    %s\n", $f.summary);
 }
 

@@ -79,15 +79,23 @@ func testUnsupportedAlgRejected() {
     testing.assertThrows("signNoneAlg", "value");
     testing.assertThrows("signBogusAlg", "value");
 }
-func signNoneAlg() { sign(sampleClaims(), secret(), "none"); }
-func signBogusAlg() { sign(sampleClaims(), secret(), "HS999"); }
+func signNoneAlg() {
+    sign(sampleClaims(), secret(), "none");
+}
+func signBogusAlg() {
+    sign(sampleClaims(), secret(), "HS999");
+}
 
 func testMalformedTokenRejected() {
     testing.assertThrows("verifyTwoSegments", "value");
     testing.assertThrows("decodeEmpty", "value");
 }
-func verifyTwoSegments() { verify("a.b", secret(), "HS256"); }
-func decodeEmpty() { decode(""); }
+func verifyTwoSegments() {
+    verify("a.b", secret(), "HS256");
+}
+func decodeEmpty() {
+    decode("");
+}
 
 func testExpiredRejected() {
     testing.assertThrows("verifyExpired", "value");
@@ -185,11 +193,12 @@ func verifyPaddedSignature() {
     verify($tok + "=", secret(), "HS256");
 }
 
-
 # ---- reject a token carrying an unsupported crit header (RFC 7515) ----
 
 func verifyCritToken() {
-    def head as string init encodeSegment(convert.bytesFromString("{\"alg\":\"HS256\",\"typ\":\"JWT\",\"crit\":[\"exp\"]}", "utf-8"));
+    def head as string init encodeSegment(convert.bytesFromString(
+        "{\"alg\":\"HS256\",\"typ\":\"JWT\",\"crit\":[\"exp\"]}",
+        "utf-8"));
     def payload as string init encodeSegment(convert.bytesFromString("{\"sub\":\"x\"}", "utf-8"));
     verify($head + "." + $payload + ".AAAA", secret(), "HS256");
 }
@@ -208,7 +217,11 @@ func claimsWithAudList() {
 
 func testVerifyWithMatchingIssAndAud() {
     def tok as string init sign(claimsWithIss(), secret(), "HS256");
-    def back as json.Value init verifyWith($tok, secret(), "HS256", Policy{iss: "good-iss", aud: "good-aud"});
+    def back as json.Value init verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "good-iss", aud: "good-aud"});
     testing.assertEqual(json.asString($back, "/sub"), "ada");
 }
 
@@ -220,7 +233,11 @@ func testVerifyWithEmptyPolicyActsLikeVerify() {
 
 func testVerifyWithAudienceArrayMatch() {
     def tok as string init sign(claimsWithAudList(), secret(), "HS256");
-    def back as json.Value init verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "good-aud"});
+    def back as json.Value init verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "", aud: "good-aud"});
     testing.assertEqual(json.asString($back, "/sub"), "ada");
 }
 
@@ -245,13 +262,15 @@ func verifyBadAud() {
 # expiredBy builds a token whose exp is `secondsAgo` seconds in the past.
 func expiredBy(secondsAgo as int) {
     def now as int init time.unix(time.now());
-    def claims as json.Value init json.decode("{\"sub\":\"x\",\"exp\":" + convert.toString($now - $secondsAgo) + "}");
+    def claims as json.Value init json.decode("{\"sub\":\"x\",\"exp\":" +
+        convert.toString($now - $secondsAgo) + "}");
     return sign($claims, secret(), "HS256");
 }
 # notYetBy builds a token whose nbf is `secondsAhead` seconds in the future.
 func notYetBy(secondsAhead as int) {
     def now as int init time.unix(time.now());
-    def claims as json.Value init json.decode("{\"sub\":\"y\",\"nbf\":" + convert.toString($now + $secondsAhead) + "}");
+    def claims as json.Value init json.decode("{\"sub\":\"y\",\"nbf\":" +
+        convert.toString($now + $secondsAhead) + "}");
     return sign($claims, secret(), "HS256");
 }
 
@@ -299,7 +318,8 @@ func verifyNegativeLeeway() {
 # signWithKid signs like jwt.sign but adds a "kid" to the header, so the token
 # selects a key by id. Uses the module's private encodeSegment / computeSig.
 func signWithKid(claims as json.Value, key as bytes, alg as string, kid as string) {
-    def headerJson as string init "{\"alg\":\"" + $alg + "\",\"typ\":\"JWT\",\"kid\":\"" + $kid + "\"}";
+    def headerJson as string init "{\"alg\":\"" + $alg + "\",\"typ\":\"JWT\",\"kid\":\"" + $kid +
+        "\"}";
     def head as string init encodeSegment(convert.bytesFromString($headerJson, "utf-8"));
     def payload as string init encodeSegment(convert.bytesFromString(json.encode($claims), "utf-8"));
     def signingInput as string init $head + "." + $payload;

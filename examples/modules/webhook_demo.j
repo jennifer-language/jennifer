@@ -20,7 +20,9 @@ io.printf("X-Hub-Signature-256: %s\n", $sig);
 
 # The receiver recomputes over the raw body it got and compares.
 io.printf("valid delivery:      %t\n", webhook.verify($payload, $sig, $secret));
-io.printf("tampered payload:    %t\n", webhook.verify("{\"event\":\"push\",\"ref\":\"evil\"}", $sig, $secret));
+io.printf(
+    "tampered payload:    %t\n",
+    webhook.verify("{\"event\":\"push\",\"ref\":\"evil\"}", $sig, $secret));
 io.printf("wrong secret:        %t\n", webhook.verify($payload, $sig, "guessed"));
 
 # To actually deliver it (needs the default `jennifer` binary, over `http`):

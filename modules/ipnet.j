@@ -43,7 +43,7 @@ export def struct Network {
 # --- errors (private) -------------------------------------------------------
 
 func fail(msg as string) {
-    throw Error{ kind: "ipnet", message: $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "ipnet", message: $msg, file: "", line: 0, col: 0};
 }
 
 # --- small parsers (private) ------------------------------------------------
@@ -195,10 +195,10 @@ func parse6(s as string) {
  */
 export func parseAddress(s as string) {
     if (strings.contains($s, ":")) {
-        return unmap(Address{ version: 6, octets: parse6($s) });
+        return unmap(Address{version: 6, octets: parse6($s)});
     }
     if (strings.contains($s, ".")) {
-        return Address{ version: 4, octets: parse4($s) };
+        return Address{version: 4, octets: parse4($s)};
     }
     fail("not an IP address: " + $s);
 }
@@ -238,7 +238,7 @@ export func unmap(addr as Address) {
     $out[] = $addr.octets[13];
     $out[] = $addr.octets[14];
     $out[] = $addr.octets[15];
-    return Address{ version: 4, octets: $out };
+    return Address{version: 4, octets: $out};
 }
 
 # format4 renders 4 bytes as dotted-quad.
@@ -376,7 +376,10 @@ export func parse(cidr as string) {
     if ($prefix > $maxp) {
         fail("prefix out of range 0.." + convert.toString($maxp) + ": " + $cidr);
     }
-    return Network{ addr: Address{ version: $addr.version, octets: applyMask($addr.octets, $prefix) }, prefix: $prefix };
+    return Network{
+        addr: Address{version: $addr.version, octets: applyMask($addr.octets, $prefix)},
+        prefix: $prefix
+    };
 }
 
 /**
@@ -459,7 +462,7 @@ export func netmask(net as Network) {
         $out[] = $b;
         $i = $i + 1;
     }
-    return Address{ version: $net.addr.version, octets: $out };
+    return Address{version: $net.addr.version, octets: $out};
 }
 
 /**
@@ -484,5 +487,5 @@ export func broadcast(net as Network) {
         $out[] = $b;
         $i = $i + 1;
     }
-    return Address{ version: $net.addr.version, octets: $out };
+    return Address{version: $net.addr.version, octets: $out};
 }

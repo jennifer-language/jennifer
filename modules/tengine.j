@@ -113,7 +113,7 @@ def const MAX_NESTING as int init 256;
 export func newSet() {
     def names as list of string init [];
     def sources as list of string init [];
-    return Set{ names: $names, sources: $sources };
+    return Set{names: $names, sources: $sources};
 }
 
 # addRaw stores one name -> source pair, returning a new Set.
@@ -173,7 +173,13 @@ export func add(set as Set, name as string, src as string) {
         def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
         def j as int init closeActionIndex($afterOpen);
         if ($j < 0) {
-            throw Error{ kind: "tengine", message: "tengine: unterminated action in " + $name, file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "tengine",
+                message: "tengine: unterminated action in " + $name,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
         def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
@@ -203,7 +209,13 @@ export func add(set as Set, name as string, src as string) {
  */
 export func render(set as Set, entry as string, data as json.Value) {
     if (not setHas($set, $entry)) {
-        throw Error{ kind: "tengine", message: "tengine: no such template: " + $entry, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "tengine",
+            message: "tengine: no such template: " + $entry,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return exec($set, setGet($set, $entry), $data, $data, emptyVars(), 0);
 }
@@ -212,9 +224,22 @@ export func render(set as Set, entry as string, data as json.Value) {
 # and the variable environment, returning the output. `depth` counts nesting
 # levels (control blocks, template / block includes, range bodies) and trips
 # MAX_NESTING so an include cycle throws instead of overflowing the stack.
-func exec(set as Set, src as string, node as json.Value, root as json.Value, vars as map of string to json.Value, depth as int) {
+func exec(
+    set as Set,
+    src as string,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value,
+    depth as int) {
     if ($depth > MAX_NESTING) {
-        throw Error{ kind: "tengine", message: "tengine: nesting exceeds " + convert.toString(MAX_NESTING) + " levels (template include cycle?)", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "tengine",
+            message: "tengine: nesting exceeds " + convert.toString(MAX_NESTING) +
+                " levels (template include cycle?)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     # Collect output fragments and join once: an accumulating `+` over a large
     # template (or a big rendered sub-block) is O(N^2) in the output size.
@@ -231,7 +256,13 @@ func exec(set as Set, src as string, node as json.Value, root as json.Value, var
         def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
         def j as int init closeActionIndex($afterOpen);
         if ($j < 0) {
-            throw Error{ kind: "tengine", message: "tengine: unterminated action", file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "tengine",
+                message: "tengine: unterminated action",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
         def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
@@ -252,9 +283,21 @@ func exec(set as Set, src as string, node as json.Value, root as json.Value, var
                 $argNode = resolveTerm($na.arg, $node, $root, $env);
             }
             if (not setHas($set, $na.name)) {
-                throw Error{ kind: "tengine", message: "tengine: no such template: " + $na.name, file: "", line: 0, col: 0 };
+                throw Error{
+                    kind: "tengine",
+                    message: "tengine: no such template: " + $na.name,
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
             }
-            $parts[] = exec($set, setGet($set, $na.name), $argNode, $argNode, emptyVars(), $depth + 1);
+            $parts[] = exec(
+                $set,
+                setGet($set, $na.name),
+                $argNode,
+                $argNode,
+                emptyVars(),
+                $depth + 1);
             $rest = $tail;
         } elseif ($kind == "comment" or $kind == "end" or $kind == "else") {
             $rest = $tail;
@@ -267,7 +310,11 @@ func exec(set as Set, src as string, node as json.Value, root as json.Value, var
 }
 
 # execAssign handles `{{ $x := PIPELINE }}`, returning the updated environment.
-func execAssign(action as string, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func execAssign(
+    action as string,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     def eq as int init strings.indexOf($action, ":=");
     def name as string init stripDollar(strings.trim(strings.substring($action, 0, $eq)));
     def rhs as string init strings.trim(strings.substring($action, $eq + 2, len($action)));
@@ -278,7 +325,15 @@ func execAssign(action as string, node as json.Value, root as json.Value, vars a
 
 # execControl renders one control action (if / with / range / block), returning
 # the produced output.
-func execControl(set as Set, kind as string, action as string, bp as BlockParts, node as json.Value, root as json.Value, vars as map of string to json.Value, depth as int) {
+func execControl(
+    set as Set,
+    kind as string,
+    action as string,
+    bp as BlockParts,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value,
+    depth as int) {
     if ($kind == "if") {
         if (isTruthy(evalExprString(pipelineOf($action), $node, $root, $vars))) {
             return exec($set, $bp.thenPart, $node, $root, $vars, $depth + 1);
@@ -312,7 +367,15 @@ func execControl(set as Set, kind as string, action as string, bp as BlockParts,
 # execRange renders a range body once per element (list) or value (map, insertion
 # order), rebinding `.` and any `$i, $e` bindings; an empty collection renders the
 # else part.
-func execRange(set as Set, val as json.Value, bp as BlockParts, node as json.Value, root as json.Value, vars as map of string to json.Value, rv as RangeVars, depth as int) {
+func execRange(
+    set as Set,
+    val as json.Value,
+    bp as BlockParts,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value,
+    rv as RangeVars,
+    depth as int) {
     def t as string init json.typeOf($val);
     # Collect per-iteration fragments and join once: an accumulating `+` over a
     # large range is O(N^2) in the rendered output size.
@@ -348,7 +411,11 @@ func execRange(set as Set, val as json.Value, bp as BlockParts, node as json.Val
 
 # bindLoop returns a copy of the environment with the range's index / element
 # variables bound (each optional).
-func bindLoop(vars as map of string to json.Value, rv as RangeVars, key as json.Value, elem as json.Value) {
+func bindLoop(
+    vars as map of string to json.Value,
+    rv as RangeVars,
+    key as json.Value,
+    elem as json.Value) {
     def env as map of string to json.Value init $vars;
     if (len($rv.indexVar) > 0) {
         $env[$rv.indexVar] = $key;
@@ -373,7 +440,13 @@ func takeBlock(src as string) {
     while (true) {
         def i as int init strings.indexOf($rest, "{{");
         if ($i < 0) {
-            throw Error{ kind: "tengine", message: "tengine: missing {{ end }}", file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "tengine",
+                message: "tengine: missing {{ end }}",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def pre as string init strings.substring($rest, 0, $i);
         if ($inElse) {
@@ -384,7 +457,13 @@ func takeBlock(src as string) {
         def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
         def j as int init closeActionIndex($afterOpen);
         if ($j < 0) {
-            throw Error{ kind: "tengine", message: "tengine: unterminated action", file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "tengine",
+                message: "tengine: unterminated action",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
         def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
@@ -399,7 +478,11 @@ func takeBlock(src as string) {
             }
         } elseif ($action == "end") {
             if ($depth == 0) {
-                return BlockParts{ thenPart: $thenPart, elsePart: repeatEnds($elsePart, $opened), remainder: $tail };
+                return BlockParts{
+                    thenPart: $thenPart,
+                    elsePart: repeatEnds($elsePart, $opened),
+                    remainder: $tail
+                };
             }
             $depth = $depth - 1;
             if ($inElse) {
@@ -441,14 +524,18 @@ func handleElse(action as string, inElse as bool, opened as int, elsePart as str
     def cond as string init strings.trim(afterFirstWord($action));
     if (len($cond) == 0) {
         if ($opened == 0 and not $inElse) {
-            return ElseState{ inElse: true, opened: $opened, elsePart: $elsePart };
+            return ElseState{inElse: true, opened: $opened, elsePart: $elsePart};
         }
-        return ElseState{ inElse: $inElse, opened: $opened, elsePart: $elsePart + "{{else}}" };
+        return ElseState{inElse: $inElse, opened: $opened, elsePart: $elsePart + "{{else}}"};
     }
     if ($opened == 0 and not $inElse) {
-        return ElseState{ inElse: true, opened: 1, elsePart: $elsePart + "{{" + $cond + "}}" };
+        return ElseState{inElse: true, opened: 1, elsePart: $elsePart + "{{" + $cond + "}}"};
     }
-    return ElseState{ inElse: $inElse, opened: $opened + 1, elsePart: $elsePart + "{{else}}{{" + $cond + "}}" };
+    return ElseState{
+        inElse: $inElse,
+        opened: $opened + 1,
+        elsePart: $elsePart + "{{else}}{{" + $cond + "}}"
+    };
 }
 
 # --- expression evaluation (private) ----------------------------------------
@@ -456,7 +543,11 @@ func handleElse(action as string, inElse as bool, opened as int, elsePart as str
 # resolveTerm resolves one term to a json.Value: `.` / `.a.b` (against the node),
 # `$` / `$.a.b` (root), `$var` / `$var.a.b` (variable), a "quoted" string, a
 # number, `true` / `false`, or a bare word (a string).
-func resolveTerm(term as string, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func resolveTerm(
+    term as string,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     if ($term == ".") {
         return $node;
     }
@@ -523,7 +614,8 @@ func closeActionIndex(s as string) {
     # Detect a comment: skip leading whitespace and an optional `-` trim marker,
     # then look for `/*`.
     def k as int init 0;
-    while ($k < $n and ($cs[$k] == " " or $cs[$k] == "\t" or $cs[$k] == "\r" or $cs[$k] == "\n" or $cs[$k] == "-")) {
+    while ($k < $n and
+        ($cs[$k] == " " or $cs[$k] == "\t" or $cs[$k] == "\r" or $cs[$k] == "\n" or $cs[$k] == "-")) {
         $k = $k + 1;
     }
     if ($k + 1 < $n and $cs[$k] == "/" and $cs[$k + 1] == "*") {
@@ -666,20 +758,31 @@ func isFunc(name as string) {
 
 # evalExpr evaluates a prefix expression starting at token `pos`, returning the
 # value and the position just past it.
-func evalExpr(toks as list of string, pos as int, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func evalExpr(
+    toks as list of string,
+    pos as int,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     def tok as string init $toks[$pos];
     if ($tok == "(") {
         def inner as Eval init evalExpr($toks, $pos + 1, $node, $root, $vars);
-        return Eval{ value: $inner.value, pos: $inner.pos + 1 };
+        return Eval{value: $inner.value, pos: $inner.pos + 1};
     }
     if (isFunc($tok)) {
         return evalFunc($tok, $toks, $pos + 1, $node, $root, $vars);
     }
-    return Eval{ value: resolveTerm($tok, $node, $root, $vars), pos: $pos + 1 };
+    return Eval{value: resolveTerm($tok, $node, $root, $vars), pos: $pos + 1};
 }
 
 # evalFunc applies a condition / boolean function to its argument expressions.
-func evalFunc(name as string, toks as list of string, pos as int, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func evalFunc(
+    name as string,
+    toks as list of string,
+    pos as int,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     if ($name == "printf") {
         def parts as list of json.Value init [];
         def p as int init $pos;
@@ -689,13 +792,16 @@ func evalFunc(name as string, toks as list of string, pos as int, node as json.V
             $parts[] = $a.value;
         }
         if (len($parts) == 0) {
-            return Eval{ value: strVal(""), pos: $p };
+            return Eval{value: strVal(""), pos: $p};
         }
-        return Eval{ value: strVal(sprintfValues(nodeToString($parts[0]), tailValues($parts))), pos: $p };
+        return Eval{
+            value: strVal(sprintfValues(nodeToString($parts[0]), tailValues($parts))),
+            pos: $p
+        };
     }
     if ($name == "not") {
         def a as Eval init evalExpr($toks, $pos, $node, $root, $vars);
-        return Eval{ value: boolVal(not isTruthy($a.value)), pos: $a.pos };
+        return Eval{value: boolVal(not isTruthy($a.value)), pos: $a.pos};
     }
     if ($name == "and" or $name == "or") {
         def acc as bool init ($name == "and");
@@ -709,15 +815,19 @@ func evalFunc(name as string, toks as list of string, pos as int, node as json.V
                 $acc = $acc or isTruthy($a.value);
             }
         }
-        return Eval{ value: boolVal($acc), pos: $p };
+        return Eval{value: boolVal($acc), pos: $p};
     }
     def a as Eval init evalExpr($toks, $pos, $node, $root, $vars);
     def b as Eval init evalExpr($toks, $a.pos, $node, $root, $vars);
-    return Eval{ value: boolVal(compareValues($name, $a.value, $b.value)), pos: $b.pos };
+    return Eval{value: boolVal(compareValues($name, $a.value, $b.value)), pos: $b.pos};
 }
 
 # evalExprString evaluates a whole expression string to a value.
-func evalExprString(expr as string, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func evalExprString(
+    expr as string,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     def toks as list of string init tokenize($expr);
     if (len($toks) == 0) {
         return nullVal();
@@ -794,7 +904,11 @@ func compareOrder(a as json.Value, b as json.Value) {
 # --- output pipelines (private) ---------------------------------------------
 
 # evalPipeline evaluates a `term | func | func` pipeline to a value.
-func evalPipeline(pipeline as string, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func evalPipeline(
+    pipeline as string,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     def segs as list of string init splitPipes($pipeline);
     def val as json.Value init evalExprString(strings.trim($segs[0]), $node, $root, $vars);
     def k as int init 1;
@@ -806,13 +920,22 @@ func evalPipeline(pipeline as string, node as json.Value, root as json.Value, va
 }
 
 # evalOutput evaluates a pipeline and renders it as output text.
-func evalOutput(pipeline as string, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func evalOutput(
+    pipeline as string,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     return nodeToString(evalPipeline($pipeline, $node, $root, $vars));
 }
 
 # applyPipe applies one pipe stage (a function name and optional argument terms)
 # to a value, returning the transformed value.
-func applyPipe(seg as string, val as json.Value, node as json.Value, root as json.Value, vars as map of string to json.Value) {
+func applyPipe(
+    seg as string,
+    val as json.Value,
+    node as json.Value,
+    root as json.Value,
+    vars as map of string to json.Value) {
     def toks as list of string init tokenize($seg);
     def name as string init $toks[0];
     if ($name == "upper") {
@@ -862,7 +985,13 @@ func applyPipe(seg as string, val as json.Value, node as json.Value, root as jso
         $args[] = $val;
         return strVal(sprintfValues(nodeToString($fmtEval.value), $args));
     }
-    throw Error{ kind: "tengine", message: "tengine: unknown pipe function: " + $name, file: "", line: 0, col: 0 };
+    throw Error{
+        kind: "tengine",
+        message: "tengine: unknown pipe function: " + $name,
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 # --- printf (private) -------------------------------------------------------
@@ -930,20 +1059,35 @@ func parseVerb(cs as list of string, start as int) {
         $verb = $cs[$i];
         $i = $i + 1;
     }
-    return Verb{ verb: $verb, width: $width, leftAlign: $leftAlign, zeroPad: $zeroPad, prec: $prec, pos: $i };
+    return Verb{
+        verb: $verb,
+        width: $width,
+        leftAlign: $leftAlign,
+        zeroPad: $zeroPad,
+        prec: $prec,
+        pos: $i
+    };
 }
 
 # formatVerb renders one argument per a parsed verb spec.
 func formatVerb(spec as Verb, arg as json.Value) {
     if ($spec.verb == "d") {
-        return padNumber(convert.toString(intValueOf($arg)), $spec.width, $spec.leftAlign, $spec.zeroPad);
+        return padNumber(
+            convert.toString(intValueOf($arg)),
+            $spec.width,
+            $spec.leftAlign,
+            $spec.zeroPad);
     }
     if ($spec.verb == "f") {
         def p as int init 6;
         if ($spec.prec >= 0) {
             $p = $spec.prec;
         }
-        return padNumber(formatFloatStr(numOf($arg), $p), $spec.width, $spec.leftAlign, $spec.zeroPad);
+        return padNumber(
+            formatFloatStr(numOf($arg), $p),
+            $spec.width,
+            $spec.leftAlign,
+            $spec.zeroPad);
     }
     if ($spec.verb == "t") {
         return padStr(boolStr(isTruthy($arg)), $spec.width, $spec.leftAlign);
@@ -1174,7 +1318,8 @@ func actionKind(action as string) {
         return "assign";
     }
     def w as string init firstWord($action);
-    if ($w == "if" or $w == "range" or $w == "with" or $w == "block" or $w == "define" or $w == "template") {
+    if ($w == "if" or $w == "range" or $w == "with" or $w == "block" or $w == "define" or
+        $w == "template") {
         return $w;
     }
     if ($action == "end") {
@@ -1218,17 +1363,20 @@ func stripDollar(s as string) {
 func parseRange(pipeline as string) {
     def assign as int init strings.indexOf($pipeline, ":=");
     if ($assign < 0) {
-        return RangeVars{ indexVar: "", elemVar: "", source: $pipeline };
+        return RangeVars{indexVar: "", elemVar: "", source: $pipeline};
     }
     def lhs as string init strings.trim(strings.substring($pipeline, 0, $assign));
-    def source as string init strings.trim(strings.substring($pipeline, $assign + 2, len($pipeline)));
+    def source as string init strings.trim(strings.substring(
+        $pipeline,
+        $assign + 2,
+        len($pipeline)));
     def comma as int init strings.indexOf($lhs, ",");
     if ($comma < 0) {
-        return RangeVars{ indexVar: "", elemVar: stripDollar($lhs), source: $source };
+        return RangeVars{indexVar: "", elemVar: stripDollar($lhs), source: $source};
     }
     def idx as string init stripDollar(strings.trim(strings.substring($lhs, 0, $comma)));
     def elem as string init stripDollar(strings.trim(strings.substring($lhs, $comma + 1, len($lhs))));
-    return RangeVars{ indexVar: $idx, elemVar: $elem, source: $source };
+    return RangeVars{indexVar: $idx, elemVar: $elem, source: $source};
 }
 
 # parseNameArg parses a `"name" arg` tail off an action like `template "body" .`.
@@ -1239,7 +1387,7 @@ func parseNameArg(action as string) {
     def close as int init strings.indexOf($afterQ, $q);
     def name as string init strings.substring($afterQ, 0, $close);
     def arg as string init strings.trim(strings.substring($afterQ, $close + 1, len($afterQ)));
-    return NameArg{ name: $name, arg: $arg };
+    return NameArg{name: $name, arg: $arg};
 }
 
 # trimMarkers normalizes `{{-` / `-}}` whitespace-trim markers: `{{-` drops the
@@ -1257,7 +1405,13 @@ func trimMarkers(src as string) {
         def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
         def j as int init closeActionIndex($afterOpen);
         if ($j < 0) {
-            throw Error{ kind: "tengine", message: "tengine: unterminated action", file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "tengine",
+                message: "tengine: unterminated action",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def inner as string init strings.substring($afterOpen, 0, $j);
         def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
@@ -1302,7 +1456,8 @@ func titleCase(s as string) {
         }
         $first = false;
         if (len($w) > 0) {
-            $out = $out + strings.upper(strings.substring($w, 0, 1)) + strings.substring($w, 1, len($w));
+            $out = $out + strings.upper(strings.substring($w, 0, 1)) +
+                strings.substring($w, 1, len($w));
         }
     }
     return $out;

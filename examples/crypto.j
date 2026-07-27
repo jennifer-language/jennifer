@@ -31,10 +31,10 @@ io.printf("hmacEqual(unequal) = %t\n", crypto.hmacEqual($a, $c));
 def password as bytes init convert.bytesFromString("password", "utf-8");
 def salt as bytes init convert.bytesFromString("salt", "utf-8");
 def empty as bytes;
-io.printf("pbkdf(password,salt,1,32) = %s\n",
+io.printf(
+    "pbkdf(password,salt,1,32) = %s\n",
     encoding.toText(crypto.pbkdf2($password, $salt, 1, 32, "sha256"), "hex"));
-io.printf("hkdf derived length = %d\n",
-    len(crypto.hkdf($password, $salt, $empty, 42, "sha256")));
+io.printf("hkdf derived length = %d\n", len(crypto.hkdf($password, $salt, $empty, 42, "sha256")));
 
 use hash;
 
@@ -43,7 +43,8 @@ use hash;
 def key as bytes init crypto.randBytes(32);
 def secret as bytes init convert.bytesFromString("attack at dawn", "utf-8");
 def box as bytes init crypto.encrypt($key, $secret);
-io.printf("decrypt round-trip = %s\n",
+io.printf(
+    "decrypt round-trip = %s\n",
     convert.stringFromBytes(crypto.decrypt($key, $box), "utf-8"));
 def tampered as bytes init $box;
 $tampered[len($tampered) - 1] = ($tampered[len($tampered) - 1] + 1) % 256;
@@ -58,7 +59,8 @@ try {
 def kp as crypto.Keypair init crypto.signKeypair();
 def sig as bytes init crypto.sign($kp.private, $secret);
 io.printf("verify genuine = %t\n", crypto.verify($kp.public, $secret, $sig));
-io.printf("verify forged  = %t\n",
+io.printf(
+    "verify forged  = %t\n",
     crypto.verify($kp.public, convert.bytesFromString("retreat", "utf-8"), $sig));
 
 # SHA-384 digest (added in the hash fill-out).

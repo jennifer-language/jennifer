@@ -24,8 +24,14 @@ func handle(db as redis.Session, job as resque.Job) {
     }
 }
 
-def opts as redis.Options init redis.Options{host: "127.0.0.1", port: 6379,
-    security: "none", user: "", password: "", db: 0};
+def opts as redis.Options init redis.Options{
+    host: "127.0.0.1",
+    port: 6379,
+    security: "none",
+    user: "",
+    password: "",
+    db: 0
+};
 
 try {
     def db as redis.Session init redis.connect($opts);
@@ -42,7 +48,7 @@ try {
     while (not $done) {
         def job as resque.Job init resque.reserve($db, ["high", "email"]);
         if (len($job.class) == 0) {
-            $done = true;                # every queue drained
+            $done = true; # every queue drained
         } else {
             try {
                 handle($db, $job);

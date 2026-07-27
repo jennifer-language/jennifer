@@ -136,16 +136,18 @@ func checkReplies(replies as list of redis.Reply) {
  * @param class {string} the worker class the job names
  * @param args {list of string} the job's positional arguments
  */
-export func enqueue(session as redis.Session, queue as string, class as string,
+export func enqueue(
+    session as redis.Session,
+    queue as string,
+    class as string,
     args as list of string) {
     # Register the queue and push the envelope in one round trip - Ruby-resque
     # pipelines the same SADD + RPUSH, and order is preserved on the single
     # connection (SADD executes before RPUSH). checkReplies keeps the fail-loud
     # behaviour `command` gave, which `pipeline` drops.
-    checkReplies(redis.pipeline($session, [
-        ["SADD", queuesKey(), $queue],
-        ["RPUSH", queueKey($queue), encodePayload($class, $args)]
-    ]));
+    checkReplies(redis.pipeline(
+        $session,
+        [["SADD", queuesKey(), $queue], ["RPUSH", queueKey($queue), encodePayload($class, $args)]]));
 }
 
 # --- consumer (exported) -------------------------------------------
@@ -178,8 +180,7 @@ export func reserve(session as redis.Session, queues as list of string) {
  * @param timeoutSec {int} seconds to block; 0 blocks until a job arrives
  * @return {Job} the reserved job, or an empty `Job` (`class` "") on timeout
  */
-export func reserveBlocking(session as redis.Session, queues as list of string,
-    timeoutSec as int) {
+export func reserveBlocking(session as redis.Session, queues as list of string, timeoutSec as int) {
     # No queues -> nothing to reserve (parity with reserve, and BLPOP with no key
     # is a server error).
     if (len($queues) == 0) {

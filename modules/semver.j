@@ -45,7 +45,7 @@ export def struct Version {
 # groups: three numeric core parts (no leading zeros), an optional
 # dot-separated prerelease (numeric ids have no leading zero; alphanumeric ids
 # are free), and an optional dot-separated build.
-def const SEMVER as string init "^(?P<major>0|[1-9][0-9]*)\\.(?P<minor>0|[1-9][0-9]*)\\.(?P<patch>0|[1-9][0-9]*)(?:-(?P<prerelease>(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?P<build>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$";  # lint-disable: L203
+def const SEMVER as string init "^(?P<major>0|[1-9][0-9]*)\\.(?P<minor>0|[1-9][0-9]*)\\.(?P<patch>0|[1-9][0-9]*)(?:-(?P<prerelease>(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?P<build>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"; # lint-disable: L203
 
 # --- small helpers (private) ---------------------------------------
 
@@ -341,7 +341,6 @@ export func incPatch(v as Version) {
 }
 
 # --- sort (exported) -----------------------------------------------
-
 
 /**
  * Return a new list ordered ascending by SemVer precedence. lists.sort is
@@ -645,7 +644,8 @@ func preAtTuple(comparator as string, v as Version) {
         return false;
     }
     def t as Version init parse($o);
-    return len($t.prerelease) > 0 and $t.major == $v.major and $t.minor == $v.minor and $t.patch == $v.patch;
+    return len($t.prerelease) > 0 and $t.major == $v.major and $t.minor == $v.minor and
+        $t.patch == $v.patch;
 }
 
 # isBareOperator reports whether a token is a comparator operator with no
@@ -909,7 +909,9 @@ export func minSatisfying(versions as list of string, range as string) {
  * @return {string} a canonical version, or "" if none was found
  */
 export func coerce(s as string) {
-    def m as regex.Match init regex.find("(?P<maj>[0-9]+)(?:\\.(?P<min>[0-9]+))?(?:\\.(?P<pat>[0-9]+))?", $s);
+    def m as regex.Match init regex.find(
+        "(?P<maj>[0-9]+)(?:\\.(?P<min>[0-9]+))?(?:\\.(?P<pat>[0-9]+))?",
+        $s);
     if ($m.start < 0) {
         return "";
     }
@@ -977,7 +979,8 @@ func releaseCore(v as Version) {
 
 # tupleStr is the "major.minor.patch" key used to pin a prerelease tuple.
 func tupleStr(v as Version) {
-    return convert.toString($v.major) + "." + convert.toString($v.minor) + "." + convert.toString($v.patch);
+    return convert.toString($v.major) + "." + convert.toString($v.minor) + "." +
+        convert.toString($v.patch);
 }
 func pinnedAt(pins as list of string, t as string) {
     for (def p in $pins) {
@@ -1014,33 +1017,81 @@ func boundGe(op as string) {
     def o as string init strings.trim($op);
     def none as list of string init [];
     if (isValid($o)) {
-        return Interval{lo: parse($o), loIncl: true, hi: infVersion(), hiIncl: true, pins: pinList($o)};
+        return Interval{
+            lo: parse($o),
+            loIncl: true,
+            hi: infVersion(),
+            hiIncl: true,
+            pins: pinList($o)
+        };
     }
-    return Interval{lo: coreLower(parseCore($o)), loIncl: true, hi: infVersion(), hiIncl: true, pins: $none};
+    return Interval{
+        lo: coreLower(parseCore($o)),
+        loIncl: true,
+        hi: infVersion(),
+        hiIncl: true,
+        pins: $none
+    };
 }
 func boundGt(op as string) {
     def o as string init strings.trim($op);
     def none as list of string init [];
     if (isValid($o)) {
-        return Interval{lo: parse($o), loIncl: false, hi: infVersion(), hiIncl: true, pins: pinList($o)};
+        return Interval{
+            lo: parse($o),
+            loIncl: false,
+            hi: infVersion(),
+            hiIncl: true,
+            pins: pinList($o)
+        };
     }
-    return Interval{lo: tildeUpper(parseCore($o)), loIncl: true, hi: infVersion(), hiIncl: true, pins: $none};
+    return Interval{
+        lo: tildeUpper(parseCore($o)),
+        loIncl: true,
+        hi: infVersion(),
+        hiIncl: true,
+        pins: $none
+    };
 }
 func boundLe(op as string) {
     def o as string init strings.trim($op);
     def none as list of string init [];
     if (isValid($o)) {
-        return Interval{lo: zeroVersion(), loIncl: true, hi: parse($o), hiIncl: true, pins: pinList($o)};
+        return Interval{
+            lo: zeroVersion(),
+            loIncl: true,
+            hi: parse($o),
+            hiIncl: true,
+            pins: pinList($o)
+        };
     }
-    return Interval{lo: zeroVersion(), loIncl: true, hi: tildeUpper(parseCore($o)), hiIncl: false, pins: $none};
+    return Interval{
+        lo: zeroVersion(),
+        loIncl: true,
+        hi: tildeUpper(parseCore($o)),
+        hiIncl: false,
+        pins: $none
+    };
 }
 func boundLt(op as string) {
     def o as string init strings.trim($op);
     def none as list of string init [];
     if (isValid($o)) {
-        return Interval{lo: zeroVersion(), loIncl: true, hi: parse($o), hiIncl: false, pins: pinList($o)};
+        return Interval{
+            lo: zeroVersion(),
+            loIncl: true,
+            hi: parse($o),
+            hiIncl: false,
+            pins: pinList($o)
+        };
     }
-    return Interval{lo: zeroVersion(), loIncl: true, hi: coreLower(parseCore($o)), hiIncl: false, pins: $none};
+    return Interval{
+        lo: zeroVersion(),
+        loIncl: true,
+        hi: coreLower(parseCore($o)),
+        hiIncl: false,
+        pins: $none
+    };
 }
 func boundEq(op as string) {
     def o as string init strings.trim($op);
@@ -1054,9 +1105,21 @@ func boundEq(op as string) {
     }
     def core as Core init parseCore($o);
     if ($core.count >= 3) {
-        return Interval{lo: coreLower($core), loIncl: true, hi: coreLower($core), hiIncl: true, pins: $none};
+        return Interval{
+            lo: coreLower($core),
+            loIncl: true,
+            hi: coreLower($core),
+            hiIncl: true,
+            pins: $none
+        };
     }
-    return Interval{lo: coreLower($core), loIncl: true, hi: tildeUpper($core), hiIncl: false, pins: $none};
+    return Interval{
+        lo: coreLower($core),
+        loIncl: true,
+        hi: tildeUpper($core),
+        hiIncl: false,
+        pins: $none
+    };
 }
 
 func comparatorInterval(c as string) {
@@ -1072,17 +1135,41 @@ func comparatorInterval(c as string) {
         # bound (and pins it), so minVersion / the interval algebra return the
         # exact prerelease the caret allows rather than the bare release.
         if (isValid($operand)) {
-            return Interval{lo: parse($operand), loIncl: true, hi: caretUpper($core), hiIncl: false, pins: pinList($operand)};
+            return Interval{
+                lo: parse($operand),
+                loIncl: true,
+                hi: caretUpper($core),
+                hiIncl: false,
+                pins: pinList($operand)
+            };
         }
-        return Interval{lo: coreLower($core), loIncl: true, hi: caretUpper($core), hiIncl: false, pins: $none};
+        return Interval{
+            lo: coreLower($core),
+            loIncl: true,
+            hi: caretUpper($core),
+            hiIncl: false,
+            pins: $none
+        };
     }
     if (strings.startsWith($s, "~")) {
         def operand as string init rest($s, 1);
         def core as Core init parseCore($operand);
         if (isValid($operand)) {
-            return Interval{lo: parse($operand), loIncl: true, hi: tildeUpper($core), hiIncl: false, pins: pinList($operand)};
+            return Interval{
+                lo: parse($operand),
+                loIncl: true,
+                hi: tildeUpper($core),
+                hiIncl: false,
+                pins: pinList($operand)
+            };
         }
-        return Interval{lo: coreLower($core), loIncl: true, hi: tildeUpper($core), hiIncl: false, pins: $none};
+        return Interval{
+            lo: coreLower($core),
+            loIncl: true,
+            hi: tildeUpper($core),
+            hiIncl: false,
+            pins: $none
+        };
     }
     if (strings.startsWith($s, ">=")) {
         return boundGe(rest($s, 2));
@@ -1177,7 +1264,13 @@ func clauseToInterval(clause as string) {
         for (def p in pinList($bStr)) {
             $pins[] = $p;
         }
-        return Interval{lo: coreLower(parseCore($aStr)), loIncl: true, hi: $hi, hiIncl: $hiIncl, pins: $pins};
+        return Interval{
+            lo: coreLower(parseCore($aStr)),
+            loIncl: true,
+            hi: $hi,
+            hiIncl: $hiIncl,
+            pins: $pins
+        };
     }
     def iv as Interval init fullInterval();
     for (def c in tokenize($cl)) {
@@ -1265,7 +1358,13 @@ func mergeCover(ivs as list of Interval) {
             if ($touch) {
                 def hc as int init compare($iv.hi, $cur.hi);
                 if ($hc > 0 or ($hc == 0 and $iv.hiIncl)) {
-                    $cur = Interval{lo: $cur.lo, loIncl: $cur.loIncl, hi: $iv.hi, hiIncl: $iv.hiIncl, pins: $none};
+                    $cur = Interval{
+                        lo: $cur.lo,
+                        loIncl: $cur.loIncl,
+                        hi: $iv.hi,
+                        hiIncl: $iv.hiIncl,
+                        pins: $none
+                    };
                 }
             } else {
                 $merged[] = $cur;
@@ -1405,7 +1504,13 @@ export func subset(inner as string, outer as string) {
                     $tcover[] = $o;
                 }
             }
-            def preSpan as Interval init Interval{lo: preMin($t), loIncl: true, hi: releaseCore(parse($t)), hiIncl: false, pins: $none};
+            def preSpan as Interval init Interval{
+                lo: preMin($t),
+                loIncl: true,
+                hi: releaseCore(parse($t)),
+                hiIncl: false,
+                pins: $none
+            };
             def sPre as Interval init intersectIntervals($s, $preSpan);
             if (not intervalEmpty($sPre)) {
                 if (not coveredByCover($sPre, mergeCover($tcover))) {

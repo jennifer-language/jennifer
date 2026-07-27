@@ -12,7 +12,7 @@ use testing;
 
 func testEscapeText() {
     testing.assertEqual(escape("a < b & c > d"), "a &lt; b &amp; c &gt; d");
-    testing.assertEqual(escape("&amp;"), "&amp;amp;");   # & escaped first, no re-escape
+    testing.assertEqual(escape("&amp;"), "&amp;amp;"); # & escaped first, no re-escape
     testing.assertEqual(escape("plain"), "plain");
 }
 
@@ -28,7 +28,7 @@ func testElementBasic() {
     def kids as list of Node init [];
     $kids[] = text("hi");
     testing.assertEqual(render(element("p", [], $kids)), "<p>hi</p>");
-    testing.assertEqual(render(element("br", [], [])), "<br>");   # void
+    testing.assertEqual(render(element("br", [], [])), "<br>"); # void
 }
 
 func testAttributes() {
@@ -58,7 +58,9 @@ func testBoolAttrMixed() {
     $attrs[] = boolAttr("checked");
     $attrs[] = boolAttr("required");
     $attrs[] = attr("name", "agree");
-    testing.assertEqual(render(element("input", $attrs, [])), "<input type=\"checkbox\" checked required name=\"agree\">");
+    testing.assertEqual(
+        render(element("input", $attrs, [])),
+        "<input type=\"checkbox\" checked required name=\"agree\">");
 }
 
 func injectBoolAttrName() {
@@ -106,7 +108,7 @@ func testPrivateEscapeAttr() {
 
 func testPrivateIsVoid() {
     testing.assertTrue(isVoid("br"));
-    testing.assertTrue(isVoid("IMG"));      # case-insensitive
+    testing.assertTrue(isVoid("IMG")); # case-insensitive
     testing.assertTrue(isVoid("hr"));
     testing.assertFalse(isVoid("div"));
     testing.assertFalse(isVoid("span"));

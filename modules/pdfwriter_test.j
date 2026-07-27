@@ -61,9 +61,9 @@ func testFontDedup() {
     def p as Page init page(612, 792);
     $p = text($p, 0, 0, "Helvetica", 12, "a");
     $p = text($p, 0, 20, "Helvetica", 12, "b");
-    testing.assertEqual(len($p.fonts), 1);           # same font once
+    testing.assertEqual(len($p.fonts), 1); # same font once
     $p = text($p, 0, 40, "Times-Roman", 12, "c");
-    testing.assertEqual(len($p.fonts), 2);           # a second distinct font
+    testing.assertEqual(len($p.fonts), 2); # a second distinct font
 }
 
 func testLineContent() {
@@ -93,10 +93,10 @@ func sampleDoc() {
 
 func testRenderHeaderBytes() {
     def out as bytes init render(sampleDoc());
-    testing.assertEqual($out[0], 0x25);   # %
-    testing.assertEqual($out[1], 0x50);   # P
-    testing.assertEqual($out[2], 0x44);   # D
-    testing.assertEqual($out[3], 0x46);   # F
+    testing.assertEqual($out[0], 0x25); # %
+    testing.assertEqual($out[1], 0x50); # P
+    testing.assertEqual($out[2], 0x44); # D
+    testing.assertEqual($out[3], 0x46); # F
     testing.assertTrue(len($out) > 200);
 }
 
@@ -112,7 +112,7 @@ func testRenderEmptyDocument() {
 func testDefaultProducer() {
     def doc as Document init document();
     testing.assertEqual($doc.info["Producer"], "Jennifer pdfwriter");
-    testing.assertEqual(len($doc.info), 1);   # no CreationDate auto-stamped
+    testing.assertEqual(len($doc.info), 1); # no CreationDate auto-stamped
 }
 
 func testInfoSetter() {
@@ -120,12 +120,14 @@ func testInfoSetter() {
     $doc = info($doc, "Author", "Ada");
     testing.assertEqual($doc.info["Title"], "My Report");
     testing.assertEqual($doc.info["Author"], "Ada");
-    testing.assertEqual($doc.info["Producer"], "Jennifer pdfwriter");   # default preserved
+    testing.assertEqual($doc.info["Producer"], "Jennifer pdfwriter"); # default preserved
 }
 
 func testPdfDate() {
     testing.assertEqual(pdfDate(time.fromIso("2026-07-14T16:00:00Z")), "D:20260714160000+00'00'");
-    testing.assertEqual(pdfDate(time.fromIso("2026-01-02T03:04:05+01:00")), "D:20260102030405+01'00'");
+    testing.assertEqual(
+        pdfDate(time.fromIso("2026-01-02T03:04:05+01:00")),
+        "D:20260102030405+01'00'");
 }
 
 func testRenderIsDeterministic() {

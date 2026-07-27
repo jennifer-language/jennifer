@@ -17,7 +17,9 @@ use os;
 import "../../modules/telegram.j" as telegram;
 
 def token as string init os.getEnv("TELEGRAM_TOKEN");
-if (len(os.ARGS) > 1) { $token = os.ARGS[1]; }
+if (len(os.ARGS) > 1) {
+    $token = os.ARGS[1];
+}
 
 if (len($token) == 0) {
     io.printf("set TELEGRAM_TOKEN or pass a bot token to run the demo\n");
@@ -35,7 +37,7 @@ def offset as int init 0;
 def updates as list of telegram.Update init telegram.getUpdates($bot, $offset, 30);
 io.printf("got %d update(s)\n", len($updates));
 for (def u in $updates) {
-    $offset = $u.updateId + 1;   # advance past this update
+    $offset = $u.updateId + 1; # advance past this update
     if ($u.hasMessage and len($u.message.text) > 0) {
         io.printf("  chat %d: %s\n", $u.message.chatId, $u.message.text);
         telegram.sendMessage($bot, $u.message.chatId, "you said: " + $u.message.text);

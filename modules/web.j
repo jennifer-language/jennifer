@@ -130,7 +130,7 @@ export func new() {
     def routes as list of Route init [];
     def mw as list of string init [];
     def noCors as CorsOptions;
-    return App{ routes: $routes, middleware: $mw, notFound: "", cors: $noCors, onError: "" };
+    return App{routes: $routes, middleware: $mw, notFound: "", cors: $noCors, onError: ""};
 }
 
 /**
@@ -144,9 +144,15 @@ export func new() {
  */
 export func route(app as App, method as string, pattern as string, handler as string) {
     if (not meta.definedMain($handler)) {
-        throw Error{ kind: "web", message: "web.route: handler not defined: " + $handler, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "web",
+            message: "web.route: handler not defined: " + $handler,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
-    def r as Route init Route{ method: $method, pattern: $pattern, handler: $handler };
+    def r as Route init Route{method: $method, pattern: $pattern, handler: $handler};
     def out as App init $app;
     $out.routes = lists.push($out.routes, $r);
     return $out;
@@ -218,7 +224,13 @@ export func delete(app as App, pattern as string, handler as string) {
  */
 export func before(app as App, handler as string) {
     if (not meta.definedMain($handler)) {
-        throw Error{ kind: "web", message: "web.before: middleware not defined: " + $handler, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "web",
+            message: "web.before: middleware not defined: " + $handler,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as App init $app;
     $out.middleware = lists.push($out.middleware, $handler);
@@ -234,7 +246,13 @@ export func before(app as App, handler as string) {
  */
 export func notFound(app as App, handler as string) {
     if (not meta.definedMain($handler)) {
-        throw Error{ kind: "web", message: "web.notFound: handler not defined: " + $handler, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "web",
+            message: "web.notFound: handler not defined: " + $handler,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as App init $app;
     $out.notFound = $handler;
@@ -261,7 +279,13 @@ export func notFound(app as App, handler as string) {
  */
 export func onError(app as App, handler as string) {
     if (not meta.definedMain($handler)) {
-        throw Error{ kind: "web", message: "web.onError: handler not defined: " + $handler, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "web",
+            message: "web.onError: handler not defined: " + $handler,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as App init $app;
     $out.onError = $handler;
@@ -275,14 +299,18 @@ export func onError(app as App, handler as string) {
  * @param ctx {Context} the request context
  * @return {string} the HTTP method (e.g. "GET")
  */
-export func method(ctx as Context) { return httpd.method($ctx.req); }
+export func method(ctx as Context) {
+    return httpd.method($ctx.req);
+}
 
 /**
  * Return the request's URL path.
  * @param ctx {Context} the request context
  * @return {string} the request path
  */
-export func path(ctx as Context) { return httpd.path($ctx.req); }
+export func path(ctx as Context) {
+    return httpd.path($ctx.req);
+}
 
 /**
  * Return a query-string parameter value.
@@ -290,7 +318,9 @@ export func path(ctx as Context) { return httpd.path($ctx.req); }
  * @param name {string} the query parameter name
  * @return {string} the parameter value, or "" if absent
  */
-export func query(ctx as Context, name as string) { return httpd.query($ctx.req, $name); }
+export func query(ctx as Context, name as string) {
+    return httpd.query($ctx.req, $name);
+}
 
 /**
  * Return a request header value.
@@ -298,7 +328,9 @@ export func query(ctx as Context, name as string) { return httpd.query($ctx.req,
  * @param name {string} the header name
  * @return {string} the header value, or "" if absent
  */
-export func header(ctx as Context, name as string) { return httpd.header($ctx.req, $name); }
+export func header(ctx as Context, name as string) {
+    return httpd.header($ctx.req, $name);
+}
 
 /**
  * Return the raw request body as bytes (binary-safe). Use `web.form` /
@@ -307,14 +339,18 @@ export func header(ctx as Context, name as string) { return httpd.header($ctx.re
  * @param ctx {Context} the request context
  * @return {bytes} the request body
  */
-export func body(ctx as Context) { return httpd.body($ctx.req); }
+export func body(ctx as Context) {
+    return httpd.body($ctx.req);
+}
 
 /**
  * Return the client's network address (host:port).
  * @param ctx {Context} the request context
  * @return {string} the remote address
  */
-export func remoteAddr(ctx as Context) { return httpd.remoteAddr($ctx.req); }
+export func remoteAddr(ctx as Context) {
+    return httpd.remoteAddr($ctx.req);
+}
 
 /**
  * Decode the request body as JSON. Errors (invalid JSON) propagate - catch them
@@ -390,8 +426,10 @@ func parseForm(bodytext as string) {
     for (def pair in strings.split($bodytext, "&")) {
         def eq as int init strings.indexOf($pair, "=");
         if ($eq >= 0) {
-            $out[percentDecode(strings.substring($pair, 0, $eq))] =
-                percentDecode(strings.substring($pair, $eq + 1, len($pair)));
+            $out[percentDecode(strings.substring($pair, 0, $eq))] = percentDecode(strings.substring(
+                $pair,
+                $eq + 1,
+                len($pair)));
         } elseif (len($pair) > 0) {
             $out[percentDecode($pair)] = "";
         }
@@ -558,7 +596,10 @@ export func sendGzip(ctx as Context, status as int, body as string) {
     httpd.setHeader($ctx.req, "Vary", "Accept-Encoding");
     if (acceptsGzip(httpd.header($ctx.req, "Accept-Encoding"))) {
         httpd.setHeader($ctx.req, "Content-Encoding", "gzip");
-        httpd.respond($ctx.req, $status, compress.pack(convert.bytesFromString($body, "utf-8"), "gzip"));
+        httpd.respond(
+            $ctx.req,
+            $status,
+            compress.pack(convert.bytesFromString($body, "utf-8"), "gzip"));
         return null;
     }
     httpd.respond($ctx.req, $status, $body);
@@ -612,7 +653,14 @@ func rejectCookieInjection(s as string, what as string) {
         strings.contains($s, "\r") or strings.contains($s, "\n") or
         strings.contains($s, "\0") or strings.contains($s, " ") or
         strings.contains($s, "\t")) {
-        throw Error{ kind: "web", message: "web cookie " + $what + " contains an illegal character (control, ';', ',', or whitespace)", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "web",
+            message: "web cookie " + $what +
+                " contains an illegal character (control, ';', ',', or whitespace)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
 }
 
@@ -751,7 +799,7 @@ func splitPath(p as string) {
 # matchMiss is the "no match" Match value.
 func matchMiss() {
     def empty as map of string to string init {};
-    return Match{ found: false, handler: "", params: $empty };
+    return Match{found: false, handler: "", params: $empty};
 }
 
 # matchPattern tries one route against the request's path segments. A `:name`
@@ -798,7 +846,7 @@ func matchPattern(r as Route, segs as list of string) {
         }
         $params[$wildKey] = $rest;
     }
-    return Match{ found: true, handler: $r.handler, params: $params };
+    return Match{found: true, handler: $r.handler, params: $params};
 }
 
 # matchRoute finds the first route matching method + path, capturing any `:param`
@@ -903,7 +951,7 @@ export def struct BasicCredentials {
 
 # parseBasicAuth decodes an `Authorization: Basic base64(user:pass)` header value.
 func parseBasicAuth(header as string) {
-    def absent as BasicCredentials init BasicCredentials{ user: "", password: "", present: false };
+    def absent as BasicCredentials init BasicCredentials{user: "", password: "", present: false};
     def sp as int init strings.indexOf($header, " ");
     if ($sp < 0) {
         return $absent;
@@ -922,7 +970,11 @@ func parseBasicAuth(header as string) {
     if ($colon < 0) {
         return $absent;
     }
-    return BasicCredentials{ user: strings.substring($decoded, 0, $colon), password: strings.substring($decoded, $colon + 1, len($decoded)), present: true };
+    return BasicCredentials{
+        user: strings.substring($decoded, 0, $colon),
+        password: strings.substring($decoded, $colon + 1, len($decoded)),
+        present: true
+    };
 }
 
 # parseBearer extracts the token from an `Authorization: Bearer <token>` header
@@ -971,7 +1023,10 @@ export func bearerToken(ctx as Context) {
 
 # csrfSign returns the hex HMAC-SHA256 of `rand` under `secret`.
 func csrfSign(secret as string, rand as string) {
-    def mac as bytes init hash.hmac(convert.bytesFromString($secret, "utf-8"), convert.bytesFromString($rand, "utf-8"), "sha256");
+    def mac as bytes init hash.hmac(
+        convert.bytesFromString($secret, "utf-8"),
+        convert.bytesFromString($rand, "utf-8"),
+        "sha256");
     return encoding.toText($mac, "hex");
 }
 
@@ -979,7 +1034,8 @@ func csrfSign(secret as string, rand as string) {
 # many leading characters of a secret matched. Delegates to crypto.hmacEqual
 # (Go's vetted subtle.ConstantTimeCompare) over the UTF-8 bytes.
 func constantTimeEqual(a as string, b as string) {
-    return crypto.hmacEqual(convert.bytesFromString($a, "utf-8"),
+    return crypto.hmacEqual(
+        convert.bytesFromString($a, "utf-8"),
         convert.bytesFromString($b, "utf-8"));
 }
 
@@ -1105,7 +1161,13 @@ export func cors(app as App, opts as CorsOptions) {
     # A wildcard origin with credentials is forbidden by the Fetch spec and
     # every browser hard-rejects it; catch the misconfiguration at setup.
     if ($opts.allowCredentials and $opts.allowOrigin == "*") {
-        throw Error{ kind: "web", message: "web.cors: allowCredentials cannot be combined with a wildcard allowOrigin; name an explicit origin", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "web",
+            message: "web.cors: allowCredentials cannot be combined with a wildcard allowOrigin; name an explicit origin",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as App init $app;
     $out.cors = $opts;
@@ -1148,11 +1210,12 @@ func handleOne(app as App, req as httpd.Request) {
     def m as string init httpd.method($req);
     def p as string init httpd.path($req);
     def matched as Match init matchRoute($app, $m, $p);
-    def ctx as Context init Context{ req: $req, params: $matched.params };
+    def ctx as Context init Context{req: $req, params: $matched.params};
     if (corsEnabled($app)) {
         applyCors($ctx, $app.cors);
     }
-    if (corsEnabled($app) and $m == "OPTIONS" and len(httpd.header($req, "Origin")) > 0 and len(httpd.header($req, "Access-Control-Request-Method")) > 0) {
+    if (corsEnabled($app) and $m == "OPTIONS" and len(httpd.header($req, "Origin")) > 0 and
+        len(httpd.header($req, "Access-Control-Request-Method")) > 0) {
         # A genuine CORS preflight (carries Origin + Access-Control-Request-
         # Method): the CORS headers are set, answer 204 without routing. A
         # plain OPTIONS (no preflight headers) routes normally, so a registered

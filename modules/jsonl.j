@@ -114,7 +114,7 @@ export def struct Reader {
  * @return {Reader} the reader
  */
 export func openReader(path as string) {
-    return Reader{ file: fs.open($path, "read") };
+    return Reader{file: fs.open($path, "read")};
 }
 
 /**
@@ -152,11 +152,11 @@ export func readRecord(reader as Reader) {
     while (not fs.eof($reader.file)) {
         def line as string init strings.trim(fs.readLine($reader.file));
         if (not ($line == "")) {
-            return Record{ value: json.decode($line), done: false };
+            return Record{value: json.decode($line), done: false};
         }
     }
     def empty as json.Value init json.decode("null");
-    return Record{ value: $empty, done: true };
+    return Record{value: $empty, done: true};
 }
 
 /**
@@ -178,7 +178,7 @@ export func closeReader(reader as Reader) {
  * @return {Reader} the reader
  */
 export func reader(file as fs.File) {
-    return Reader{ file: $file };
+    return Reader{file: $file};
 }
 
 /**
@@ -211,7 +211,7 @@ export def struct Writer {
  * @return {Writer} the writer
  */
 export func writer(file as fs.File) {
-    return Writer{ file: $file };
+    return Writer{file: $file};
 }
 
 /**

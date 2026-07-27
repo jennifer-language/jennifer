@@ -149,7 +149,7 @@ export func withHeader(c as Client, name as string, value as string) {
  * @return {Client} a new client
  */
 export func client(baseUrl as string) {
-    def t as http.TlsOptions;   # zero value: verify the server certificate
+    def t as http.TlsOptions; # zero value: verify the server certificate
     return Client{baseUrl: $baseUrl, headers: {}, tls: $t};
 }
 
@@ -185,8 +185,13 @@ export func insecure(c as Client) {
 
 # send runs one request through `http`, joining the URL and merging the client's
 # default headers, and wraps the reply as a rest Response.
-func send(c as Client, method as string, path as string,
-    query as map of string to string, contentType as string, body as string) {
+func send(
+    c as Client,
+    method as string,
+    path as string,
+    query as map of string to string,
+    contentType as string,
+    body as string) {
     def url as string init joinUrl($c.baseUrl, $path) + queryString($query);
     def headers as map of string to string init $c.headers;
     if (len($contentType) > 0) {
@@ -271,7 +276,13 @@ export func getJson(c as Client, path as string, query as map of string to strin
     # page, which would otherwise throw a generic JSON-parse error and lose the
     # status and body. Surface a typed rest error carrying both.
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{kind: "rest", message: "rest.getJson: HTTP " + convert.toString($r.status) + ": " + $r.body, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "rest",
+            message: "rest.getJson: HTTP " + convert.toString($r.status) + ": " + $r.body,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return json.decode($r.body);
 }

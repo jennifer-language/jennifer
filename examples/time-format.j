@@ -18,22 +18,19 @@ def t as time.Time init time.fromIso("2024-06-15T12:34:56Z");
 io.printf("date=%s\n", time.format($t, "%Y-%m-%d"));
 io.printf("clock=%s\n", time.format($t, "%H:%M:%S"));
 io.printf("zone=%s\n", time.format($t, "%z"));
-io.printf("named=%s %s, %s %s %s\n",
+io.printf(
+    "named=%s %s, %s %s %s\n",
     time.format($t, "%A"),
     time.format($t, "%B"),
     time.format($t, "%d"),
     time.format($t, "%Y"),
     time.format($t, "%H:%M:%S"));
-io.printf("dayofyear=%s isoweekday=%s\n",
-    time.format($t, "%j"),
-    time.format($t, "%u"));
+io.printf("dayofyear=%s isoweekday=%s\n", time.format($t, "%j"), time.format($t, "%u"));
 
 # --- Re-render in a fixed-offset zone ---
 def vienna as time.Zone init time.zone(3600, "CET");
 def tv as time.Time init time.inZone($t, $vienna);
-io.printf("vienna=%s offset=%d\n",
-    time.format($tv, "%Y-%m-%d %H:%M %z"),
-    $tv.offset);
+io.printf("vienna=%s offset=%d\n", time.format($tv, "%Y-%m-%d %H:%M %z"), $tv.offset);
 io.printf("vienna.name=%s\n", $vienna.name);
 
 # --- UTC constant + ISO round-trip ---

@@ -40,13 +40,26 @@ def const PREFIX as string init "sess:";
 func checkId(id as string) {
     def n as int init len($id);
     if ($n == 0 or $n > 250) {
-        throw Error{kind: "session", message: "invalid session id: must be 1 to 250 characters", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "session",
+            message: "invalid session id: must be 1 to 250 characters",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     for (def c in strings.chars($id)) {
         def cp as int init convert.toCodepoint($c);
-        def ok as bool init ($cp >= 97 and $cp <= 122) or ($cp >= 65 and $cp <= 90) or ($cp >= 48 and $cp <= 57) or $cp == 45;
+        def ok as bool init ($cp >= 97 and $cp <= 122) or ($cp >= 65 and $cp <= 90) or
+            ($cp >= 48 and $cp <= 57) or $cp == 45;
         if (not $ok) {
-            throw Error{kind: "session", message: "invalid session id: only letters, digits, and '-' are allowed", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "session",
+                message: "invalid session id: only letters, digits, and '-' are allowed",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
 }
@@ -118,8 +131,7 @@ export func load(mc as memcache.Session, id as string) {
  * @param data {map of string to string} the session data to store
  * @param ttl {int} the session lifetime in seconds
  */
-export func save(mc as memcache.Session, id as string,
-    data as map of string to string, ttl as int) {
+export func save(mc as memcache.Session, id as string, data as map of string to string, ttl as int) {
     memcache.set($mc, cacheKey($id), encodeData($data), $ttl);
 }
 

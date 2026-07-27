@@ -85,7 +85,7 @@ export func send(webhookUrl as string, content as string) {
  */
 export func message() {
     def embeds as list of Embed init [];
-    return Message{ content: "", embeds: $embeds, username: "", avatar: "" };
+    return Message{content: "", embeds: $embeds, username: "", avatar: ""};
 }
 
 /**
@@ -140,8 +140,12 @@ export func embed(m as Message, title as string, description as string, color as
     def out as Message init $m;
     def fields as list of string init [];
     def e as Embed init Embed{
-        title: $title, description: $description, color: $color,
-        fields: $fields, footer: "", author: ""
+        title: $title,
+        description: $description,
+        color: $color,
+        fields: $fields,
+        footer: "",
+        author: ""
     };
     $out.embeds = lists.push($out.embeds, $e);
     return $out;
@@ -151,9 +155,13 @@ export func embed(m as Message, title as string, description as string, color as
 # is none to modify.
 func lastEmbedIndex(m as Message) {
     if (len($m.embeds) == 0) {
-        throw Error{kind: "discord",
+        throw Error{
+            kind: "discord",
             message: "discord: no embed to modify; add one with embed(...) first",
-            file: "", line: 0, col: 0};
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return len($m.embeds) - 1;
 }

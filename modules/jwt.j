@@ -38,9 +38,15 @@ use convert;
 
 # The algorithms this module accepts, by JOSE `alg` name.
 def const SUPPORTED as list of string init [
-    "HS256", "HS384", "HS512",
-    "RS256", "RS384", "RS512",
-    "ES256", "ES384", "ES512",
+    "HS256",
+    "HS384",
+    "HS512",
+    "RS256",
+    "RS384",
+    "RS512",
+    "ES256",
+    "ES384",
+    "ES512",
     "EdDSA"
 ];
 
@@ -76,7 +82,13 @@ func decodeSegment(s as string) {
     }
     def out as bytes init encoding.fromText($padded, "base64-url");
     if (encodeSegment($out) != $s) {
-        throw Error{kind: "value", message: "jwt: non-canonical base64url segment", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt: non-canonical base64url segment",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $out;
 }
@@ -85,7 +97,13 @@ func decodeSegment(s as string) {
 
 func requireAlg(alg as string) {
     if (not lists.contains(SUPPORTED, $alg)) {
-        throw Error{kind: "value", message: "jwt: unsupported algorithm " + $alg, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt: unsupported algorithm " + $alg,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
 }
 
@@ -204,29 +222,63 @@ export func verify(token as string, key as bytes, alg as string) {
  */
 export func verifyLeeway(token as string, key as bytes, alg as string, leeway as int) {
     if ($leeway < 0) {
-        throw Error{kind: "value", message: "jwt.verifyLeeway: leeway must be non-negative", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyLeeway: leeway must be non-negative",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     requireAlg($alg);
     def parts as list of string init strings.split($token, ".");
     if (len($parts) != 3) {
-        throw Error{kind: "value", message: "jwt.verify: malformed token (want three dot-separated segments)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verify: malformed token (want three dot-separated segments)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
-    def head as json.Value init json.decode(convert.stringFromBytes(decodeSegment($parts[0]), "utf-8"));
+    def head as json.Value init json.decode(convert.stringFromBytes(
+        decodeSegment($parts[0]),
+        "utf-8"));
     if (not json.has($head, "/alg") or json.asString($head, "/alg") != $alg) {
-        throw Error{kind: "value", message: "jwt.verify: token algorithm does not match the expected " + $alg, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verify: token algorithm does not match the expected " + $alg,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     # RFC 7515 4.1.11: a verifier must reject a token carrying a `crit` (critical
     # header extensions) member it does not understand. This module understands
     # none, so any `crit` is a refusal - never silently ignore a critical header.
     if (json.has($head, "/crit")) {
-        throw Error{kind: "value", message: "jwt.verify: token has an unsupported \"crit\" header", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verify: token has an unsupported \"crit\" header",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def signingInput as string init $parts[0] + "." + $parts[1];
     def sig as bytes init decodeSegment($parts[2]);
     if (not checkSig($alg, convert.bytesFromString($signingInput, "utf-8"), $sig, $key)) {
-        throw Error{kind: "value", message: "jwt.verify: signature verification failed", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verify: signature verification failed",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
-    def claims as json.Value init json.decode(convert.stringFromBytes(decodeSegment($parts[1]), "utf-8"));
+    def claims as json.Value init json.decode(convert.stringFromBytes(
+        decodeSegment($parts[1]),
+        "utf-8"));
     def now as int init time.unix(time.now());
     # Widen each bound by `leeway`: still-expired only past `exp + leeway`, and
     # not-yet-valid only before `nbf - leeway`. The `leeway` is moved to the `now`
@@ -235,10 +287,22 @@ export func verifyLeeway(token as string, key as bytes, alg as string, leeway as
     # cannot trigger an integer-overflow error instead of a clean rejection - the
     # arithmetic is on `now` (~1.7e9) and the caller's small non-negative leeway.
     if (json.has($claims, "/exp") and $now - $leeway >= json.asInt($claims, "/exp")) {
-        throw Error{kind: "value", message: "jwt.verify: token has expired", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verify: token has expired",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     if (json.has($claims, "/nbf") and $now + $leeway < json.asInt($claims, "/nbf")) {
-        throw Error{kind: "value", message: "jwt.verify: token is not yet valid", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verify: token is not yet valid",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $claims;
 }
@@ -283,12 +347,25 @@ export func verifyWith(token as string, key as bytes, alg as string, policy as P
     def claims as json.Value init verify($token, $key, $alg);
     if ($policy.iss != "") {
         if (not json.has($claims, "/iss") or json.asString($claims, "/iss") != $policy.iss) {
-            throw Error{kind: "value", message: "jwt.verifyWith: issuer (iss) does not match the expected " + $policy.iss, file: "", line: 0, col: 0};
+            throw Error{
+                kind: "value",
+                message: "jwt.verifyWith: issuer (iss) does not match the expected " + $policy.iss,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     if ($policy.aud != "") {
         if (not audienceMatches($claims, $policy.aud)) {
-            throw Error{kind: "value", message: "jwt.verifyWith: audience (aud) does not include the expected " + $policy.aud, file: "", line: 0, col: 0};
+            throw Error{
+                kind: "value",
+                message: "jwt.verifyWith: audience (aud) does not include the expected " +
+                    $policy.aud,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     return $claims;
@@ -325,11 +402,23 @@ export func verifyWith(token as string, key as bytes, alg as string, policy as P
 export func verifyWithKeys(token as string, keysByKid as map of string to string, alg as string) {
     def head as json.Value init header($token);
     if (not json.has($head, "/kid")) {
-        throw Error{kind: "value", message: "jwt.verifyWithKeys: token header has no \"kid\"", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyWithKeys: token header has no \"kid\"",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def kid as string init json.asString($head, "/kid");
     if (not maps.has($keysByKid, $kid)) {
-        throw Error{kind: "value", message: "jwt.verifyWithKeys: no key registered for kid " + $kid, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyWithKeys: no key registered for kid " + $kid,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def key as bytes init convert.bytesFromString(keyMaterialFor($alg, $keysByKid[$kid]), "utf-8");
     return verify($token, $key, $alg);
@@ -372,16 +461,35 @@ func keyMaterialFor(alg as string, value as string) {
 export func verifyJwks(token as string, jwksJson as string, alg as string) {
     requireAlg($alg);
     if (strings.startsWith($alg, "HS")) {
-        throw Error{kind: "value", message: "jwt.verifyJwks: an HMAC algorithm (" + $alg + ") has no JWKS public key; use verifyWithKeys with the shared secret", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyJwks: an HMAC algorithm (" + $alg +
+                ") has no JWKS public key; use verifyWithKeys with the shared secret",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def head as json.Value init header($token);
     if (not json.has($head, "/kid")) {
-        throw Error{kind: "value", message: "jwt.verifyJwks: token header has no \"kid\"", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyJwks: token header has no \"kid\"",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def kid as string init json.asString($head, "/kid");
     def set as json.Value init json.decode($jwksJson);
     if (not json.has($set, "/keys") or not (json.typeOf($set, "/keys") == "list")) {
-        throw Error{kind: "value", message: "jwt.verifyJwks: JWKS has no \"keys\" array", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyJwks: JWKS has no \"keys\" array",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def n as int init json.length($set, "/keys");
     def i as int init 0;
@@ -394,7 +502,13 @@ export func verifyJwks(token as string, jwksJson as string, alg as string) {
         }
         $i = $i + 1;
     }
-    throw Error{kind: "value", message: "jwt.verifyJwks: no key in the JWKS matches kid " + $kid, file: "", line: 0, col: 0};
+    throw Error{
+        kind: "value",
+        message: "jwt.verifyJwks: no key in the JWKS matches kid " + $kid,
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 /**
@@ -426,7 +540,13 @@ export func header(token as string) {
 func segment(token as string, i as int) {
     def parts as list of string init strings.split($token, ".");
     if (len($parts) != 3) {
-        throw Error{kind: "value", message: "jwt: malformed token (want three dot-separated segments)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "jwt: malformed token (want three dot-separated segments)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $parts[$i];
 }

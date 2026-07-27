@@ -112,7 +112,8 @@ func counterBytes(counter as int) {
 func hotpKey(key as bytes, counter as int, digits as int, algorithm as string) {
     def mac as bytes init hash.hmac($key, counterBytes($counter), $algorithm);
     def offset as int init $mac[len($mac) - 1] & 0x0F;
-    def bin as int init ((($mac[$offset] & 0x7F) << 24) | ($mac[$offset + 1] << 16) | ($mac[$offset + 2] << 8) | $mac[$offset + 3]);
+    def bin as int init ((($mac[$offset] & 0x7F) << 24) | ($mac[$offset + 1] << 16) | ($mac[$offset +
+        2] << 8) | $mac[$offset + 3]);
     return padCode($bin % powTen($digits), $digits);
 }
 
@@ -155,7 +156,13 @@ export func generateAt(secret as string, unixSeconds as int, opts as Options) {
  */
 export func generateSecretN(nbytes as int) {
     if ($nbytes <= 0) {
-        throw Error{ kind: "totp", message: "totp: secret byte length must be positive", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "totp",
+            message: "totp: secret byte length must be positive",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def raw as bytes init crypto.randBytes($nbytes);
     return strings.replace(encoding.toText($raw, "base32"), "=", "");
@@ -192,7 +199,12 @@ export func generate(secret as string, opts as Options) {
  * @param opts {Options} digits / period / algorithm (zero-value = defaults)
  * @return {bool} true if the code matches any step within the window
  */
-export func verifyWindowAt(secret as string, code as string, unixSeconds as int, window as int, opts as Options) {
+export func verifyWindowAt(
+    secret as string,
+    code as string,
+    unixSeconds as int,
+    window as int,
+    opts as Options) {
     def key as bytes init decodeSecret($secret);
     def digits as int init digitsOf($opts);
     def algorithm as string init algorithmOf($opts);
@@ -206,7 +218,9 @@ export func verifyWindowAt(secret as string, code as string, unixSeconds as int,
     def matched as bool init false;
     def step as int init -$window;
     while ($step <= $window) {
-        def computed as bytes init convert.bytesFromString(hotpKey($key, $counter + $step, $digits, $algorithm), "utf-8");
+        def computed as bytes init convert.bytesFromString(
+            hotpKey($key, $counter + $step, $digits, $algorithm),
+            "utf-8");
         if (crypto.hmacEqual($computed, $codeBytes)) {
             $matched = true;
         }

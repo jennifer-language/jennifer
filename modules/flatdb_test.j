@@ -71,7 +71,7 @@ func testOpenEmptyFileIsEmpty() {
 func testWritersAreImmutable() {
     def db as DB init open("/no/such/flatdb/path/missing.json");
     def grown as DB init set($db, "/x", json.decode("1"));
-    testing.assertFalse(has($db, "/x"));       # original untouched
+    testing.assertFalse(has($db, "/x")); # original untouched
     testing.assertTrue(has($grown, "/x"));
 }
 
@@ -88,7 +88,7 @@ func testOpenStringIsValueSemantic() {
     def db as DB init openString("{\"count\": 2}");
     def db2 as DB init set($db, "/count", json.decode("5"));
     testing.assertEqual(json.asInt(get($db2, "/count")), 5);
-    testing.assertEqual(json.asInt(get($db, "/count")), 2);   # original unchanged
+    testing.assertEqual(json.asInt(get($db, "/count")), 2); # original unchanged
 }
 
 # saveReadOnly is a helper for testReadOnlySaveThrows (not a test itself).
@@ -104,10 +104,10 @@ func testSaveAsPromotesReadOnlyToWritable() {
     def ro as DB init openString("{\"n\": 1}");
     def w as DB init saveAs($ro, $p);
     testing.assertTrue(fs.exists($p));
-    testing.assertEqual($w.path, $p);            # returned handle bound to the new path
-    testing.assertEqual(length($ro, ""), 1);     # original untouched (value semantics)
+    testing.assertEqual($w.path, $p); # returned handle bound to the new path
+    testing.assertEqual(length($ro, ""), 1); # original untouched (value semantics)
     def w2 as DB init set($w, "/n", json.decode("2"));
-    save($w2);                                   # writable now (has a path)
+    save($w2); # writable now (has a path)
     testing.assertEqual(json.asInt(get(open($p), "/n")), 2);
     fs.remove($p);
 }
@@ -117,9 +117,9 @@ func testSaveAsForksIndependently() {
     def pb as string init os.tempDir() + "/flatdb_b_" + uuid.v4() + ".json";
     def a as DB init set(open($pa), "/who", json.decode("\"a\""));
     save($a);
-    def b as DB init saveAs($a, $pb);            # copy to a new file
+    def b as DB init saveAs($a, $pb); # copy to a new file
     save(set($b, "/who", json.decode("\"b\"")));
-    testing.assertEqual(json.asString(get(open($pa), "/who")), "a");   # original file unchanged
+    testing.assertEqual(json.asString(get(open($pa), "/who")), "a"); # original file unchanged
     testing.assertEqual(json.asString(get(open($pb), "/who")), "b");
     fs.remove($pa);
     fs.remove($pb);
@@ -139,7 +139,7 @@ func testSavePreservesMode() {
     def path as string init os.tempDir() + "/flatdb_mode_scratch.json";
     def db as DB init open($path);
     $db = set($db, "/k", json.decode("1"));
-    save($db);                                  # first write of a new file
+    save($db); # first write of a new file
     def st1 as fs.Stat init fs.stat($path);
     testing.assertEqual($st1.mode, 0o600);
     # A later save preserves the operator's chosen mode instead of resetting to 0644.

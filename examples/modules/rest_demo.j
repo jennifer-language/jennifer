@@ -11,12 +11,16 @@ use io;
 use json;
 import "../../modules/rest.j" as rest;
 
-def api as rest.Client init rest.withHeader(rest.client("http://127.0.0.1:8080"),
-    "Authorization", rest.bearer("demo-token"));
+def api as rest.Client init rest.withHeader(
+    rest.client("http://127.0.0.1:8080"),
+    "Authorization",
+    rest.bearer("demo-token"));
 
 try {
     # create a resource from a JSON value
-    def created as rest.Response init rest.postJson($api, "/users",
+    def created as rest.Response init rest.postJson(
+        $api,
+        "/users",
         json.decode("{\"name\":\"ada\"}"));
     io.printf("POST /users -> %d\n", $created.status);
 

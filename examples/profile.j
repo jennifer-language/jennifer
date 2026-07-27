@@ -42,7 +42,9 @@ func spawnCopies() {
     def handles as list of task of int;
     def i as int init 0;
     while ($i < 8) {
-        $handles[] = spawn { return lists.first($data); };
+        $handles[] = spawn {
+            return lists.first($data);
+        };
         $i = $i + 1;
     }
     def sum as int init 0;
@@ -67,5 +69,4 @@ func aliasMutate() {
     return $base[0];
 }
 
-io.printf("eager=%d spawn=%d base=%d\n",
-    eagerCopies(), spawnCopies(), aliasMutate());
+io.printf("eager=%d spawn=%d base=%d\n", eagerCopies(), spawnCopies(), aliasMutate());

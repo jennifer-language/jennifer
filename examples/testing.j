@@ -29,20 +29,12 @@ func addPasses() {
     if (1 + 1 == 2) {
         return;
     }
-    throw Error{
-        kind: "assertion",
-        message: "1 + 1 was not 2",
-        file: "", line: 0, col: 0
-    };
+    throw Error{kind: "assertion", message: "1 + 1 was not 2", file: "", line: 0, col: 0};
 }
 
 # ---- failure via user throw with an Error struct ----
 func addFails() {
-    throw Error{
-        kind: "assertion",
-        message: "expected 42, got 41",
-        file: "", line: 0, col: 0
-    };
+    throw Error{kind: "assertion", message: "expected 42, got 41", file: "", line: 0, col: 0};
 }
 
 # ---- failure via runtime error ----

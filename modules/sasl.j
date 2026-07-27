@@ -215,8 +215,13 @@ func hashLen(algo as string) {
 # can pin the RFC's nonce and check the exact wire bytes.
 func scramStartNonce(user as string, algo as string, nonce as string) {
     def bare as string init "n=" + scramEscape($user) + ",r=" + $nonce;
-    return Scram{ algo: $algo, clientNonce: $nonce, clientFirstBare: $bare,
-        clientFinal: "", serverSig: "" };
+    return Scram{
+        algo: $algo,
+        clientNonce: $nonce,
+        clientFirstBare: $bare,
+        clientFinal: "",
+        serverSig: ""
+    };
 }
 
 /**
@@ -253,11 +258,22 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     def sf as string init baseDecode($serverFirst);
     def rnonce as string init scramAttr($sf, "r");
     if (not strings.startsWith($rnonce, $s.clientNonce)) {
-        throw Error{ kind: "sasl", message: "sasl: server nonce does not extend the client nonce", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "sasl",
+            message: "sasl: server nonce does not extend the client nonce",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def salt as bytes init encoding.fromText(scramAttr($sf, "s"), "base64");
     def iters as int init convert.toInt(scramAttr($sf, "i"));
-    def salted as bytes init crypto.pbkdf2(convert.bytesFromString($password, "utf-8"), $salt, $iters, hashLen($s.algo), $s.algo);
+    def salted as bytes init crypto.pbkdf2(
+        convert.bytesFromString($password, "utf-8"),
+        $salt,
+        $iters,
+        hashLen($s.algo),
+        $s.algo);
     def clientKey as bytes init hmacStr($salted, "Client Key", $s.algo);
     def storedKey as bytes init hash.compute($clientKey, $s.algo);
     def finalNoProof as string init "c=biws,r=" + $rnonce;
@@ -291,6 +307,7 @@ export func scramFinalToken(s as Scram) {
  */
 export func scramVerify(s as Scram, serverFinal as string) {
     def v as string init scramAttr(baseDecode($serverFinal), "v");
-    return crypto.hmacEqual(convert.bytesFromString($v, "utf-8"),
+    return crypto.hmacEqual(
+        convert.bytesFromString($v, "utf-8"),
         convert.bytesFromString($s.serverSig, "utf-8"));
 }

@@ -90,7 +90,7 @@ export def struct Result {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "influxdb", message: "influxdb: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "influxdb", message: "influxdb: " + $msg, file: "", line: 0, col: 0};
 }
 
 # --- clients (exported) -----------------------------------------------------
@@ -114,7 +114,7 @@ export func client(url as string, db as string) {
  * @return {Client} a ready client
  */
 export func clientWith(url as string, db as string, user as string, password as string) {
-    return Client{ url: $url, db: $db, user: $user, password: $password };
+    return Client{url: $url, db: $db, user: $user, password: $password};
 }
 
 # --- line-protocol escaping (private) ---------------------------------------
@@ -160,7 +160,13 @@ func escapeStringField(s as string) {
 export func point(measurement as string) {
     def tags as list of string init [];
     def fields as list of string init [];
-    return Point{ measurement: $measurement, tags: $tags, fields: $fields, timestamp: 0, timed: false };
+    return Point{
+        measurement: $measurement,
+        tags: $tags,
+        fields: $fields,
+        timestamp: 0,
+        timed: false
+    };
 }
 
 /**
@@ -280,7 +286,8 @@ export func line(p as Point) {
     # escape for it). Reject the point so it fails alone instead of silently
     # breaking every point in the write.
     if (strings.contains($out, "\n") or strings.contains($out, "\r")) {
-        fail("point \"" + $p.measurement + "\" contains a newline in a measurement / tag / field value (not representable in line protocol)");
+        fail("point \"" + $p.measurement +
+            "\" contains a newline in a measurement / tag / field value (not representable in line protocol)");
     }
     return $out;
 }
@@ -343,7 +350,7 @@ func errorFrom(resp as http.Response) {
             if (json.has($n, "/error")) {
                 return json.asString($n, "/error");
             }
-        } catch (e) {  # lint-disable: L103
+        } catch (e) { # lint-disable: L103
             # Intentionally empty: a non-JSON error body falls through to the
             # status message below. Bound to keep the swallow deliberate.
         }
@@ -371,7 +378,11 @@ export func write(c as Client, points as list of Point) {
     }
     def body as string init strings.join($lines, "\n");
     def url as string init joinBase($c.url, "/write") + "?db=" + urlEncode($c.db) + "&precision=ns";
-    def resp as http.Response init http.post($url, "text/plain; charset=utf-8", $body, authHeaders($c));
+    def resp as http.Response init http.post(
+        $url,
+        "text/plain; charset=utf-8",
+        $body,
+        authHeaders($c));
     if ($resp.status >= 300) {
         fail(errorFrom($resp));
     }
@@ -443,7 +454,7 @@ func parseSeries(node as json.Value, base as string) {
             $r = $r + 1;
         }
     }
-    return Series{ name: $name, tags: $tags, columns: $columns, values: $values };
+    return Series{name: $name, tags: $tags, columns: $columns, values: $values};
 }
 
 # parseQuery turns a decoded `/query` response into a Result, throwing on a
@@ -451,7 +462,7 @@ func parseSeries(node as json.Value, base as string) {
 func parseQuery(node as json.Value) {
     def series as list of Series init [];
     if (not json.has($node, "/results")) {
-        return Result{ series: $series };
+        return Result{series: $series};
     }
     def nres as int init json.length($node, "/results");
     def i as int init 0;
@@ -470,7 +481,7 @@ func parseQuery(node as json.Value) {
         }
         $i = $i + 1;
     }
-    return Result{ series: $series };
+    return Result{series: $series};
 }
 
 /**
@@ -481,8 +492,13 @@ func parseQuery(node as json.Value) {
  * @throws {Error} kind "influxdb" on a request failure or a query error
  */
 export func query(c as Client, influxql as string) {
-    def url as string init joinBase($c.url, "/query") + "?db=" + urlEncode($c.db) + "&q=" + urlEncode($influxql);
-    def resp as http.Response init http.post($url, "application/x-www-form-urlencoded", "", authHeaders($c));
+    def url as string init joinBase($c.url, "/query") + "?db=" + urlEncode($c.db) + "&q=" +
+        urlEncode($influxql);
+    def resp as http.Response init http.post(
+        $url,
+        "application/x-www-form-urlencoded",
+        "",
+        authHeaders($c));
     if ($resp.status >= 300) {
         fail(errorFrom($resp));
     }

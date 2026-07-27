@@ -252,7 +252,8 @@ func sanitizeField(s as string) {
         return $s;
     }
     def first as string init strings.substring($s, 0, 1);
-    if ($first == "=" or $first == "+" or $first == "-" or $first == "@" or $first == "\t" or $first == "\r") {
+    if ($first == "=" or $first == "+" or $first == "-" or $first == "@" or $first == "\t" or
+        $first == "\r") {
         return "'" + $s;
     }
     return $s;
@@ -316,7 +317,7 @@ export def struct Dialect {
  * @return {Dialect} the dialect
  */
 export func dialect(delimiter as string) {
-    return Dialect{ delimiter: $delimiter, quote: '"', comment: "", trim: false };
+    return Dialect{delimiter: $delimiter, quote: '"', comment: "", trim: false};
 }
 
 # startsAt reports whether `chars` matches `prefix` starting at index i.
@@ -364,7 +365,8 @@ func parseCore(s as string, delim as string, quote as string, comment as string,
         def c as string init $chars[$i];
         # A comment prefix is honoured only at the very start of a record and
         # outside quotes: skip the whole physical line, terminator included.
-        if (not $inQuotes and not $fieldStarted and not $rowStarted and $comment != "" and startsAt($chars, $i, $comment, $n)) {
+        if (not $inQuotes and not $fieldStarted and not $rowStarted and $comment != "" and
+            startsAt($chars, $i, $comment, $n)) {
             while ($i < $n and $chars[$i] != "\n" and $chars[$i] != "\r") {
                 $i = $i + 1;
             }
@@ -508,7 +510,7 @@ export def struct Reader {
  * @return {Reader} the reader
  */
 export func reader(file as fs.File) {
-    return Reader{ file: $file, delim: "," };
+    return Reader{file: $file, delim: ","};
 }
 
 /**
@@ -519,7 +521,7 @@ export func reader(file as fs.File) {
  * @return {Reader} the reader
  */
 export func readerWith(file as fs.File, delim as string) {
-    return Reader{ file: $file, delim: $delim };
+    return Reader{file: $file, delim: $delim};
 }
 
 # quoteCount returns the number of `"` characters in a string, used to detect a
@@ -597,7 +599,7 @@ export def struct Writer {
  * @return {Writer} the writer
  */
 export func writer(file as fs.File) {
-    return Writer{ file: $file, delim: "," };
+    return Writer{file: $file, delim: ","};
 }
 
 /**
@@ -608,7 +610,7 @@ export func writer(file as fs.File) {
  * @return {Writer} the writer
  */
 export func writerWith(file as fs.File, delim as string) {
-    return Writer{ file: $file, delim: $delim };
+    return Writer{file: $file, delim: $delim};
 }
 
 /**

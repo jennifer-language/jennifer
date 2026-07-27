@@ -16,7 +16,7 @@ func testAppendReadUintRoundTrip() {
     $buf = appendUint($buf, 0xdeadbeef);
     testing.assertEqual(readUint($buf, 0), 0xdeadbeef);
     $buf = appendUint($buf, 0);
-    $buf = appendUint($buf, 4294967295);   # 0xffffffff
+    $buf = appendUint($buf, 4294967295); # 0xffffffff
     testing.assertEqual(readUint($buf, 4), 0);
     testing.assertEqual(readUint($buf, 8), 4294967295);
 }
@@ -24,9 +24,9 @@ func testAppendReadUintRoundTrip() {
 func testBuildRequestShape() {
     def req as bytes init buildRequest(time.fromUnix(1000000000));
     testing.assertEqual(len($req), 48);
-    testing.assertEqual($req[0], 0x23);   # LI=0, VN=4, Mode=3 client
-    testing.assertEqual($req[1], 0);      # stratum
-    testing.assertEqual($req[2], 0);      # poll
+    testing.assertEqual($req[0], 0x23); # LI=0, VN=4, Mode=3 client
+    testing.assertEqual($req[1], 0); # stratum
+    testing.assertEqual($req[2], 0); # poll
 }
 
 func testBuildRequestTransmitRoundTrip() {

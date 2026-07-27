@@ -31,7 +31,9 @@ io.printf("decoded (unverified) sub = %s\n", json.asString(jwt.decode($token), "
 
 # Verify: checks the signature, the header alg, and the exp claim.
 def verified as json.Value init jwt.verify($token, $secret, "HS256");
-io.printf("verified sub = %s, role = %s\n\n", json.asString($verified, "/sub"),
+io.printf(
+    "verified sub = %s, role = %s\n\n",
+    json.asString($verified, "/sub"),
     json.asString($verified, "/role"));
 
 # --- security properties ---
@@ -43,7 +45,8 @@ io.printf("wrong alg  -> %s\n", verifyOutcome($token, $secret, "RS256"));
 # --- EdDSA: a public-key token, no external key material needed ---
 def kp as crypto.Keypair init crypto.signKeypair();
 def edToken as string init jwt.sign($claims, $kp.private, "EdDSA");
-io.printf("\nEdDSA verified sub = %s\n",
+io.printf(
+    "\nEdDSA verified sub = %s\n",
     json.asString(jwt.verify($edToken, $kp.public, "EdDSA"), "/sub"));
 
 # verifyOutcome verifies a token and reports "accepted" or the rejection reason -

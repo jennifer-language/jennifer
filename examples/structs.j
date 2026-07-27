@@ -24,11 +24,14 @@ use io;
  * @field x {int} the x coordinate
  * @field y {int} the y coordinate
  */
-def struct Point { x as int, y as int };
+def struct Point {
+    x as int,
+    y as int
+};
 
 # Constructed literal.
-def origin as Point init Point{ x: 0, y: 0 };
-def p as Point init Point{ x: 3, y: 4 };
+def origin as Point init Point{x: 0, y: 0};
+def p as Point init Point{x: 3, y: 4};
 io.printf("origin = %v\n", $origin);
 io.printf("p = %v\n", $p);
 
@@ -54,8 +57,11 @@ io.printf("zero = %v\n", $z);
  * @field from {Point} the start point
  * @field to {Point} the end point
  */
-def struct Line { from as Point, to as Point };
-def L as Line init Line{ from: Point{ x: 0, y: 0 }, to: Point{ x: 10, y: 20 } };
+def struct Line {
+    from as Point,
+    to as Point
+};
+def L as Line init Line{from: Point{x: 0, y: 0}, to: Point{x: 10, y: 20}};
 io.printf("L = %v\n", $L);
 io.printf("L.to.x = %d\n", $L.to.x);
 

@@ -20,14 +20,24 @@ io.printf("account key (PEM, %d bytes) generated\n", len($key));
 
 # Build a client by hand to show the offline challenge math (real code uses
 # acme.connect, which fetches the CA directory over the network).
-def client as acme.Client init acme.Client{directory: "", newNonce: "", newAccount: "",
-    newOrder: "", accountKey: $key, alg: "ES256", kid: ""};
+def client as acme.Client init acme.Client{
+    directory: "",
+    newNonce: "",
+    newAccount: "",
+    newOrder: "",
+    accountKey: $key,
+    alg: "ES256",
+    kid: ""
+};
 
 # For a challenge token TOKEN the CA hands you:
 def token as string init "sample-challenge-token";
-io.printf("\nHTTP-01: serve this at /.well-known/acme-challenge/%s\n  %s\n",
-    $token, acme.keyAuthorization($client, $token));
-io.printf("\nDNS-01: set this TXT at _acme-challenge.<domain>\n  %s\n",
+io.printf(
+    "\nHTTP-01: serve this at /.well-known/acme-challenge/%s\n  %s\n",
+    $token,
+    acme.keyAuthorization($client, $token));
+io.printf(
+    "\nDNS-01: set this TXT at _acme-challenge.<domain>\n  %s\n",
     acme.dnsRecord($client, $token));
 
 # getCertificate runs the whole HTTP-01 flow against a CA. `serveChallenge` is
@@ -40,7 +50,9 @@ func getCertificate(directoryUrl as string, email as string, domains as list of 
 
     def order as acme.Order init acme.order($session, $domains);
     for (def i as int init 0; $i < len($order.authorizations); $i = $i + 1) {
-        def authz as acme.Authorization init acme.authorization($session, $order.authorizations[$i]);
+        def authz as acme.Authorization init acme.authorization(
+            $session,
+            $order.authorizations[$i]);
         def ch as acme.Challenge init acme.challenge($authz, "http-01");
         # Publish acme.keyAuthorization($session, $ch.token) at
         # /.well-known/acme-challenge/$ch.token on http://$authz.domain, then:

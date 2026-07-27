@@ -45,14 +45,30 @@ func testPutStringPrefix() {
 }
 
 func testBuildConnectBytes() {
-    def opts as Options init Options{ host: "h", port: 1883, clientId: "a", keepalive: 60, security: "none", username: "", password: "" };
+    def opts as Options init Options{
+        host: "h",
+        port: 1883,
+        clientId: "a",
+        keepalive: 60,
+        security: "none",
+        username: "",
+        password: ""
+    };
     # [type 0x10][remlen 13][vh: "MQTT" level 4 flags 0x02 keepalive 60][pl: "a"]
     def want as bytes init bytesOf([16, 13, 0, 4, 77, 81, 84, 84, 4, 2, 0, 60, 0, 1, 97]);
     testing.assertEqual(buildConnect($opts), $want);
 }
 
 func testBuildConnectSetsCredentialFlags() {
-    def opts as Options init Options{ host: "h", port: 1883, clientId: "a", keepalive: 0, security: "none", username: "u", password: "p" };
+    def opts as Options init Options{
+        host: "h",
+        port: 1883,
+        clientId: "a",
+        keepalive: 0,
+        security: "none",
+        username: "u",
+        password: "p"
+    };
     def packet as bytes init buildConnect($opts);
     # flags byte sits after the 6-byte "MQTT" string and the 1-byte level, at
     # offset 2 (header+remlen) + 6 + 1 = 9: clean-session|username|password.
@@ -69,7 +85,7 @@ func testFrameAssembly() {
 func testParsePublishQosZero() {
     # body = topic "t/x" (length-prefixed) + payload "hi"
     def body as bytes init bytesOf([0, 3, 116, 47, 120, 104, 105]);
-    def pkt as Packet init Packet{ typ: 3, flags: 0, body: $body };
+    def pkt as Packet init Packet{typ: 3, flags: 0, body: $body};
     def m as Message init parsePublish($pkt);
     testing.assertEqual($m.topic, "t/x");
     testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "hi");
@@ -78,7 +94,7 @@ func testParsePublishQosZero() {
 func testParsePublishSkipsPacketIdAtQosOne() {
     # QoS 1 PUBLISH: flags 0x02, body = topic "a" + packet-id (2 bytes) + "hi"
     def body as bytes init bytesOf([0, 1, 97, 0, 5, 104, 105]);
-    def pkt as Packet init Packet{ typ: 3, flags: 0x02, body: $body };
+    def pkt as Packet init Packet{typ: 3, flags: 0x02, body: $body};
     def m as Message init parsePublish($pkt);
     testing.assertEqual($m.topic, "a");
     testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "hi");
@@ -88,7 +104,9 @@ func testParsePublishSkipsPacketIdAtQosOne() {
 func testPacketCapRejectsOversized() {
     testing.assertThrows("overPacketCap", "mqtt");
 }
-func overPacketCap() { capPacket(MAX_PACKET_BYTES + 1); }
+func overPacketCap() {
+    capPacket(MAX_PACKET_BYTES + 1);
+}
 func testPacketCapAllowsAtLimit() {
     capPacket(MAX_PACKET_BYTES);
     testing.assertTrue(true);
@@ -113,10 +131,10 @@ func testBuildPublishRetainOnlyFlag() {
 }
 func testPublishPacketIdExtraction() {
     # QoS 1 PUBLISH body: topic "a" + packet id 5 + payload "hi".
-    def q1 as Packet init Packet{ typ: 3, flags: 0x02, body: bytesOf([0, 1, 97, 0, 5, 104, 105]) };
+    def q1 as Packet init Packet{typ: 3, flags: 0x02, body: bytesOf([0, 1, 97, 0, 5, 104, 105])};
     testing.assertEqual(publishPacketId($q1), 5);
     # QoS 0 PUBLISH carries no packet id: -1.
-    def q0 as Packet init Packet{ typ: 3, flags: 0x00, body: bytesOf([0, 1, 97, 104, 105]) };
+    def q0 as Packet init Packet{typ: 3, flags: 0x00, body: bytesOf([0, 1, 97, 104, 105])};
     testing.assertEqual(publishPacketId($q0), -1);
 }
 
@@ -127,9 +145,9 @@ func testBuildPuback() {
     testing.assertEqual(buildPuback(258), bytesOf([64, 2, 1, 2]));
 }
 func testParsePuback() {
-    def a as Packet init Packet{ typ: 4, flags: 0, body: bytesOf([0, 5]) };
+    def a as Packet init Packet{typ: 4, flags: 0, body: bytesOf([0, 5])};
     testing.assertEqual(parsePuback($a), 5);
-    def b as Packet init Packet{ typ: 4, flags: 0, body: bytesOf([1, 2]) };
+    def b as Packet init Packet{typ: 4, flags: 0, body: bytesOf([1, 2])};
     testing.assertEqual(parsePuback($b), 258);
 }
 func testPubackRoundTrip() {
@@ -137,30 +155,78 @@ func testPubackRoundTrip() {
     # to the same packet id.
     def full as bytes init buildPuback(4242);
     def body as bytes init bytesOf([$full[2], $full[3]]);
-    def pkt as Packet init Packet{ typ: 4, flags: 0, body: $body };
+    def pkt as Packet init Packet{typ: 4, flags: 0, body: $body};
     testing.assertEqual(parsePuback($pkt), 4242);
 }
 
 # ---- CONNECT with Last-Will + clean-session flags ----
 func testBuildConnectFullWithWill() {
-    def opts as Options init Options{ host: "h", port: 1883, clientId: "a", keepalive: 60, security: "none", username: "", password: "" };
-    def will as Will init Will{ topic: "w", payload: bytesOf([98, 121, 101]), qos: 1, retain: true };
+    def opts as Options init Options{
+        host: "h",
+        port: 1883,
+        clientId: "a",
+        keepalive: 60,
+        security: "none",
+        username: "",
+        password: ""
+    };
+    def will as Will init Will{topic: "w", payload: bytesOf([98, 121, 101]), qos: 1, retain: true};
     # clean-session false, will flag 0x04, will-QoS 1 (0x08), will-retain 0x20
     # => flags 0x2C (44). Payload: clientId "a", will topic "w", will payload "bye".
-    def want as bytes init bytesOf([16, 21, 0, 4, 77, 81, 84, 84, 4, 44, 0, 60, 0, 1, 97, 0, 1, 119, 0, 3, 98, 121, 101]);
+    def want as bytes init bytesOf([
+        16,
+        21,
+        0,
+        4,
+        77,
+        81,
+        84,
+        84,
+        4,
+        44,
+        0,
+        60,
+        0,
+        1,
+        97,
+        0,
+        1,
+        119,
+        0,
+        3,
+        98,
+        121,
+        101
+    ]);
     testing.assertEqual(buildConnectFull($opts, $will, false), $want);
 }
 func testBuildConnectFullCleanSessionFlag() {
-    def opts as Options init Options{ host: "h", port: 1883, clientId: "a", keepalive: 0, security: "none", username: "", password: "" };
-    def none as Will init Will{ topic: "", payload: bytesOf([]), qos: 0, retain: false };
+    def opts as Options init Options{
+        host: "h",
+        port: 1883,
+        clientId: "a",
+        keepalive: 0,
+        security: "none",
+        username: "",
+        password: ""
+    };
+    def none as Will init Will{topic: "", payload: bytesOf([]), qos: 0, retain: false};
     # No will, clean-session true => flags byte (offset 9) is 0x02.
     testing.assertEqual(buildConnectFull($opts, $none, true)[9], 0x02);
     # No will, clean-session false => flags byte is 0x00.
     testing.assertEqual(buildConnectFull($opts, $none, false)[9], 0x00);
 }
 func testBuildConnectFullWillFlagsCombine() {
-    def opts as Options init Options{ host: "h", port: 1883, clientId: "a", keepalive: 0, security: "none", username: "", password: "" };
-    def will as Will init Will{ topic: "w", payload: bytesOf([1]), qos: 1, retain: true };
+    def opts as Options init Options{
+        host: "h",
+        port: 1883,
+        clientId: "a",
+        keepalive: 0,
+        security: "none",
+        username: "",
+        password: ""
+    };
+    def will as Will init Will{topic: "w", payload: bytesOf([1]), qos: 1, retain: true};
     # clean-session true (0x02) + will (0x04) + will-QoS 1 (0x08) + retain (0x20)
     # => 0x2E (46).
     testing.assertEqual(buildConnectFull($opts, $will, true)[9], 0x2E);
@@ -168,11 +234,11 @@ func testBuildConnectFullWillFlagsCombine() {
 
 # ---- SUBACK granted-QoS parse ----
 func testParseSubackQosGranted() {
-    def s0 as Packet init Packet{ typ: 9, flags: 0, body: bytesOf([0, 1, 0]) };
+    def s0 as Packet init Packet{typ: 9, flags: 0, body: bytesOf([0, 1, 0])};
     testing.assertEqual(parseSubackQos($s0), 0);
-    def s1 as Packet init Packet{ typ: 9, flags: 0, body: bytesOf([0, 1, 1]) };
+    def s1 as Packet init Packet{typ: 9, flags: 0, body: bytesOf([0, 1, 1])};
     testing.assertEqual(parseSubackQos($s1), 1);
     # 0x80 signals the broker rejected the subscription.
-    def fail as Packet init Packet{ typ: 9, flags: 0, body: bytesOf([0, 1, 128]) };
+    def fail as Packet init Packet{typ: 9, flags: 0, body: bytesOf([0, 1, 128])};
     testing.assertEqual(parseSubackQos($fail), 128);
 }

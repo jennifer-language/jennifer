@@ -31,14 +31,17 @@ func testLoginSteps() {
 
 func testBearer() {
     # SASL XOAUTH2: base64("user=...\x01auth=Bearer ...\x01\x01")
-    testing.assertEqual(bearer("me@gmail.com", "ya29.TOKEN"),
+    testing.assertEqual(
+        bearer("me@gmail.com", "ya29.TOKEN"),
         "dXNlcj1tZUBnbWFpbC5jb20BYXV0aD1CZWFyZXIgeWEyOS5UT0tFTgEB");
 }
 
 # negotiate picks the strongest supported password mechanism, case-insensitively,
 # and never auto-selects XOAUTH2 (a token, not a password).
 func testNegotiate() {
-    testing.assertEqual(negotiate(["PLAIN", "LOGIN", "CRAM-MD5", "SCRAM-SHA-1", "SCRAM-SHA-256"]), "scram-sha-256");
+    testing.assertEqual(
+        negotiate(["PLAIN", "LOGIN", "CRAM-MD5", "SCRAM-SHA-1", "SCRAM-SHA-256"]),
+        "scram-sha-256");
     testing.assertEqual(negotiate(["cram-md5", "scram-sha-1"]), "scram-sha-1");
     testing.assertEqual(negotiate(["PLAIN", "CRAM-MD5"]), "cram");
     testing.assertEqual(negotiate(["PLAIN", "LOGIN"]), "");
@@ -59,12 +62,11 @@ func testCramVector() {
 # "pencil", the client nonce pinned so the exact wire bytes are checked.
 func testScramShaOne() {
     def st as Scram init scramStartNonce("user", "sha1", "fyko+d2lbbFgONRv9qkxdawL");
-    testing.assertEqual(baseDecode(scramClientFirst($st)),
-        "n,,n=user,r=fyko+d2lbbFgONRv9qkxdawL");
-    def serverFirst as string init baseEncode(
-        "r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096");
+    testing.assertEqual(baseDecode(scramClientFirst($st)), "n,,n=user,r=fyko+d2lbbFgONRv9qkxdawL");
+    def serverFirst as string init baseEncode("r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096");
     $st = scramClientFinal($st, $serverFirst, "pencil");
-    testing.assertEqual($st.clientFinal,
+    testing.assertEqual(
+        $st.clientFinal,
         "c=biws,r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,p=v0X8v3Bz2T0CJGbJQyF0X+HI4Ts=");
     # The server proves it too: v= must verify, a wrong one must not.
     testing.assertTrue(scramVerify($st, baseEncode("v=rmF9pqV8S7suAoZWja4dJRkFsKQ=")));
@@ -74,12 +76,14 @@ func testScramShaOne() {
 # SCRAM-SHA-256, the RFC 7677 section 3 worked example (same user/password).
 func testScramShaTwoFiftySix() {
     def st as Scram init scramStartNonce("user", "sha256", "rOprNGfwEbeRWgbNEkqO");
-    def serverFirst as string init baseEncode(
-        "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096");
+    def serverFirst as string init baseEncode("r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096");
     $st = scramClientFinal($st, $serverFirst, "pencil");
-    testing.assertEqual($st.clientFinal,
+    testing.assertEqual(
+        $st.clientFinal,
         "c=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,p=dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ=");
-    testing.assertTrue(scramVerify($st, baseEncode("v=6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=")));
+    testing.assertTrue(scramVerify(
+        $st,
+        baseEncode("v=6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=")));
 }
 
 # A server nonce that does not extend the client nonce is a MITM signal.
@@ -87,7 +91,10 @@ func testScramRejectsBadServerNonce() {
     def st as Scram init scramStartNonce("user", "sha256", "clientNonceXYZ");
     def threw as bool init false;
     try {
-        scramClientFinal($st, baseEncode("r=totallyDifferent,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096"), "pencil");
+        scramClientFinal(
+            $st,
+            baseEncode("r=totallyDifferent,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096"),
+            "pencil");
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "sasl");

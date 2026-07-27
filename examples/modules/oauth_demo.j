@@ -27,8 +27,10 @@ if (len($id) == 0 or len($secret) == 0) {
 
         # 2. Poll until they approve.
         def tok as oauth.Token init oauth.deviceWait($cfg, $dev);
-        io.printf("got an access token (expiresAt %d, refreshable: %t)\n",
-            $tok.expiresAt, len($tok.refreshToken) > 0);
+        io.printf(
+            "got an access token (expiresAt %d, refreshable: %t)\n",
+            $tok.expiresAt,
+            len($tok.refreshToken) > 0);
 
         # 3. Turn it into the SASL XOAUTH2 string an IMAP / SMTP server wants.
         io.printf("XOAUTH2 -> %s\n", sasl.bearer("you@gmail.com", $tok.accessToken));

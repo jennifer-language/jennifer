@@ -15,10 +15,16 @@ use convert;
 def alpha as bytes init convert.bytesFromString("hello", "utf-8");
 def bravo as bytes init convert.bytesFromString("read me", "utf-8");
 def one as archive.Entry init archive.Entry{
-    name: "hi.txt", data: $alpha, mode: 0o644, mtime: 1700000000
+    name: "hi.txt",
+    data: $alpha,
+    mode: 0o644,
+    mtime: 1700000000
 };
 def two as archive.Entry init archive.Entry{
-    name: "docs/readme.txt", data: $bravo, mode: 0o644, mtime: 1700000000
+    name: "docs/readme.txt",
+    data: $bravo,
+    mode: 0o644,
+    mtime: 1700000000
 };
 def es as list of archive.Entry init [$one, $two];
 

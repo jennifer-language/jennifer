@@ -7,9 +7,9 @@
 
 # Jennifer Programming Language
 
-Jennifer is a small, experimental, interpreted programming language.
+Jennifer is a interpreted programming language.
 
-But small is not bare. Jennifer is batteries-included: a broad standard
+Jennifer is batteries-included: a broad standard
 library and a growing set of distributable modules cover what real programs
 actually need, so you build genuine tools, not toys. Text handling has full
 [regular expressions](docs/libraries/regex.md); structured data flows through

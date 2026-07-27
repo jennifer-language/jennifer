@@ -15,7 +15,15 @@ use strings;
 import "../../modules/ringbuffer.j" as ringbuffer;
 
 # Keep only the last 4 log lines of a longer stream.
-def stream as list of string init ["boot", "connect", "auth", "query", "query", "close", "reconnect"];
+def stream as list of string init [
+    "boot",
+    "connect",
+    "auth",
+    "query",
+    "query",
+    "close",
+    "reconnect"
+];
 def recent as ringbuffer.RingBuffer init ringbuffer.new(4);
 for (def line in $stream) {
     $recent = ringbuffer.push($recent, $line);

@@ -13,7 +13,12 @@ import "../../modules/ipnet.j" as ipnet;
 
 # Canonical formatting (RFC 5952 for IPv6).
 io.printf("=== canonical addresses ===\n");
-for (def s in ["192.168.1.1", "2001:0db8:0000:0000:0000:0000:0000:0001", "::1", "fe80::1ff:fe23:4567:890a"]) {
+for (def s in [
+    "192.168.1.1",
+    "2001:0db8:0000:0000:0000:0000:0000:0001",
+    "::1",
+    "fe80::1ff:fe23:4567:890a"
+]) {
     io.printf("  %s -> %s\n", $s, ipnet.toString(ipnet.parseAddress($s)));
 }
 
@@ -21,8 +26,11 @@ for (def s in ["192.168.1.1", "2001:0db8:0000:0000:0000:0000:0000:0001", "::1", 
 io.printf("=== subnet facts ===\n");
 for (def cidr in ["192.168.1.0/24", "203.0.113.128/26", "2001:db8::/32"]) {
     def net as ipnet.Network init ipnet.parse($cidr);
-    io.printf("  %s  netmask=%s  broadcast=%s\n", ipnet.networkString($net),
-        ipnet.toString(ipnet.netmask($net)), ipnet.toString(ipnet.broadcast($net)));
+    io.printf(
+        "  %s  netmask=%s  broadcast=%s\n",
+        ipnet.networkString($net),
+        ipnet.toString(ipnet.netmask($net)),
+        ipnet.toString(ipnet.broadcast($net)));
 }
 
 # Allow-list check: is a client address inside any allowed CIDR?

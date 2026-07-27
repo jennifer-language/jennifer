@@ -26,8 +26,11 @@ try {
     def i as int init 1;
     while ($i <= 5) {
         def ok as bool init ratelimit.allow($mc, $key, $limit, 60);
-        io.printf("request %d -> %t   (remaining: %d)\n", $i,
-            $ok, ratelimit.remaining($mc, $key, $limit));
+        io.printf(
+            "request %d -> %t   (remaining: %d)\n",
+            $i,
+            $ok,
+            ratelimit.remaining($mc, $key, $limit));
         $i = $i + 1;
     }
 

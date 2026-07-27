@@ -139,7 +139,13 @@ func rejectControl(s as string, what as string) {
     for (def c in strings.chars($s)) {
         def cp as int init convert.toCodepoint($c);
         if ($cp < 32 or $cp == 127) {
-            throw Error{kind: "smtp", message: $what + " contains a control character (SMTP command injection)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "smtp",
+                message: $what + " contains a control character (SMTP command injection)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     return;
@@ -163,7 +169,13 @@ func asciiEnvelope(addr as string) {
     # RFC 5321 4.5.3.1.3: the forward/reverse path is at most 256 octets
     # including the angle brackets, so the bare address is <= 254.
     if (len($addr) == 0 or len($addr) > 254) {
-        throw Error{kind: "smtp", message: "envelope address must be 1 to 254 characters (RFC 5321): " + $addr, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "smtp",
+            message: "envelope address must be 1 to 254 characters (RFC 5321): " + $addr,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     # Split at the LAST '@': a quoted local part may itself contain '@', so
     # splitting at the first one would truncate the local part and mangle the
@@ -178,15 +190,33 @@ func asciiEnvelope(addr as string) {
         $ci = $ci + 1;
     }
     if ($at < 0) {
-        throw Error{kind: "smtp", message: "envelope address is missing '@' (want local@domain, RFC 5321): " + $addr, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "smtp",
+            message: "envelope address is missing '@' (want local@domain, RFC 5321): " + $addr,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def local as string init strings.substring($addr, 0, $at);
     def domain as string init strings.substring($addr, $at + 1, len($addr));
     if (len($local) == 0) {
-        throw Error{kind: "smtp", message: "envelope address has an empty local part (RFC 5321): " + $addr, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "smtp",
+            message: "envelope address has an empty local part (RFC 5321): " + $addr,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     if (len($domain) == 0) {
-        throw Error{kind: "smtp", message: "envelope address has an empty domain (RFC 5321): " + $addr, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "smtp",
+            message: "envelope address has an empty domain (RFC 5321): " + $addr,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return asciiOnly($local, "address local part") + "@" + idna.toAscii($domain);
 }
@@ -307,7 +337,13 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
     # SASL credentials to the server over an unencrypted connection - "tls" and
     # a completed "starttls" upgrade are encrypted; "none" is plaintext.
     if ($opts.security == "none" and not $opts.allowInsecureAuth) {
-        throw Error{kind: "smtp", message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "smtp",
+            message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     if ($mech == "plain") {
         def resp as string init "AUTH PLAIN " + sasl.plain($opts.user, $opts.pass);
@@ -371,7 +407,13 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     if ($finalReply.code == 334) {
         if (not sasl.scramVerify($sc, saslChallenge($finalReply.text))) {
             command($conn, "*");
-            throw Error{kind: "smtp", message: $wire + ": server signature verification failed", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "smtp",
+                message: $wire + ": server signature verification failed",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         expect(command($conn, "="), 235, 235, $wire + " completion");
         return;
@@ -400,8 +442,7 @@ func dial(opts as Options) {
  * @param message {string} the full RFC 5322 message body
  * @throws {Error} kind "smtp" when the server rejects a command or an address is not ASCII-safe
  */
-export func send(opts as Options, from as string, recipients as list of string,
-        message as string) {
+export func send(opts as Options, from as string, recipients as list of string, message as string) {
     # IDNA-encode envelope domains (and reject a non-ASCII local part) before
     # opening a connection.
     def sender as string init asciiEnvelope($from);
@@ -421,7 +462,13 @@ export func send(opts as Options, from as string, recipients as list of string,
         # it. A MITM stripping the capability to keep the session in plaintext
         # is refused here rather than silently continuing unencrypted.
         if (not ehloAdvertises($caps.text, "STARTTLS")) {
-            throw Error{kind: "smtp", message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "smtp",
+                message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
         $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);

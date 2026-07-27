@@ -102,11 +102,7 @@ for (def name in $totals) {
 # nested index writes (`$grid[$i][$i]`) and that the outer iteration
 # variable lives in its own scope each pass through the C-style for.
 io.printf("\n=== identity matrix 3x3 ===\n");
-def grid as list of list of int init [
-    [0, 0, 0],
-    [0, 0, 0],
-    [0, 0, 0]
-];
+def grid as list of list of int init [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
 for (def i as int init 0; $i < 3; $i = $i + 1) {
     $grid[$i][$i] = 1;
 }

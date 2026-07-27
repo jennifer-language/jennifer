@@ -13,12 +13,9 @@ use regex;
 use maps;
 
 # ---- boolean predicate ----
-io.printf("matches \"hello\" in \"hello, world\" : %t\n",
-    regex.matches("hello", "hello, world"));
-io.printf("matches (?i)HELLO in \"hello\"       : %t\n",
-    regex.matches("(?i)HELLO", "hello"));
-io.printf("matches ^[A-Z]$ in \"hi\"            : %t\n",
-    regex.matches("^[A-Z]$", "hi"));
+io.printf("matches \"hello\" in \"hello, world\" : %t\n", regex.matches("hello", "hello, world"));
+io.printf("matches (?i)HELLO in \"hello\"       : %t\n", regex.matches("(?i)HELLO", "hello"));
+io.printf("matches ^[A-Z]$ in \"hi\"            : %t\n", regex.matches("^[A-Z]$", "hi"));
 
 # ---- first match with positional groups ----
 def m as regex.Match init regex.find("(\\d+):(\\d+)", "log 12:34 hit 56:78");
@@ -39,10 +36,10 @@ for (def hit in $all) {
 
 # ---- named groups ----
 def pair as regex.Match init regex.find(
-    "(?P<key>[a-z]+)=(?P<val>[0-9]+)", "PORT: port=8080 host=1");
+    "(?P<key>[a-z]+)=(?P<val>[0-9]+)",
+    "PORT: port=8080 host=1");
 io.printf("\nnamed groups : text=%s\n", $pair.text);
-io.printf("  key=%s val=%s\n",
-    $pair.groupsNamed["key"], $pair.groupsNamed["val"]);
+io.printf("  key=%s val=%s\n", $pair.groupsNamed["key"], $pair.groupsNamed["val"]);
 io.printf("  has(key) = %t\n", maps.has($pair.groupsNamed, "key"));
 
 # ---- replace with positional group ----
@@ -51,7 +48,8 @@ io.printf("\nreplace $1   : %s\n", $r);
 
 # ---- replace with named group ----
 def rNamed as string init regex.replace(
-    "(?P<host>[\\w.]+):(?P<port>\\d+)", "cache.example.com:11211",
+    "(?P<host>[\\w.]+):(?P<port>\\d+)",
+    "cache.example.com:11211",
     "host=${host} port=${port}");
 io.printf("replace name : %s\n", $rNamed);
 
@@ -66,5 +64,4 @@ for (def p in $parts) {
 def literal as string init "1+2=(3)";
 def pat as string init regex.escape($literal);
 io.printf("\nescape       : literal=%s pattern=%s\n", $literal, $pat);
-io.printf("  matches ok : %t\n",
-    regex.matches($pat, "the answer to 1+2=(3) is unknown"));
+io.printf("  matches ok : %t\n", regex.matches($pat, "the answer to 1+2=(3) is unknown"));

@@ -19,16 +19,26 @@ import "../../modules/mikrotik.j" as mikrotik;
 def host as string init "192.168.88.1";
 def user as string init "admin";
 def password as string init "";
-if (len(os.ARGS) > 1) { $host = os.ARGS[1]; }
-if (len(os.ARGS) > 2) { $user = os.ARGS[2]; }
-if (len(os.ARGS) > 3) { $password = os.ARGS[3]; }
+if (len(os.ARGS) > 1) {
+    $host = os.ARGS[1];
+}
+if (len(os.ARGS) > 2) {
+    $user = os.ARGS[2];
+}
+if (len(os.ARGS) > 3) {
+    $password = os.ARGS[3];
+}
 
 io.printf("connecting to %s (user %s) ...\n", $host, $user);
 try {
     def s as mikrotik.Session init mikrotik.connect(mikrotik.options($host, $user, $password));
     io.printf("logged in\n\ninterfaces:\n");
     for (def iface in mikrotik.print($s, "/interface")) {
-        io.printf("  %s|pad=14 %s|pad=10 running=%s\n", $iface["name"], $iface["type"], $iface["running"]);
+        io.printf(
+            "  %s|pad=14 %s|pad=10 running=%s\n",
+            $iface["name"],
+            $iface["type"],
+            $iface["running"]);
     }
     io.printf("\nip addresses:\n");
     for (def addr in mikrotik.print($s, "/ip/address")) {

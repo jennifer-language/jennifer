@@ -120,12 +120,14 @@ func testHtmlHeading() {
 }
 
 func testHtmlEmphasisAndCode() {
-    testing.assertEqual(toHtml("a **b** *c* `d<e>`"),
+    testing.assertEqual(
+        toHtml("a **b** *c* `d<e>`"),
         "<p>a <strong>b</strong> <em>c</em> <code>d&lt;e&gt;</code></p>");
 }
 
 func testHtmlLinkEscapesHref() {
-    testing.assertEqual(toHtml("[t](http://x/?a=1&b=2)"),
+    testing.assertEqual(
+        toHtml("[t](http://x/?a=1&b=2)"),
         "<p><a href=\"http://x/?a=1&amp;b=2\">t</a></p>");
 }
 
@@ -262,7 +264,7 @@ func testSplitCells() {
     def c as list of string init splitCells("| a | b\\|c | d |");
     testing.assertEqual(len($c), 3);
     testing.assertEqual($c[0], "a");
-    testing.assertEqual($c[1], "b|c");   # escaped pipe is literal
+    testing.assertEqual($c[1], "b|c"); # escaped pipe is literal
     testing.assertEqual($c[2], "d");
 }
 
@@ -307,30 +309,34 @@ func testPipeLineWithoutDelimiterIsParagraph() {
 
 func testHtmlTable() {
     def src as string init "| N | S |\n| :--- | ---: |\n| Ada | 95 |";
-    testing.assertEqual(toHtml($src),
+    testing.assertEqual(
+        toHtml($src),
         "<table><thead><tr><th align=\"left\">N</th><th align=\"right\">S</th></tr></thead>" +
-        "<tbody><tr><td align=\"left\">Ada</td><td align=\"right\">95</td></tr></tbody></table>");
+            "<tbody><tr><td align=\"left\">Ada</td><td align=\"right\">95</td></tr></tbody></table>");
 }
 
 func testHtmlTableCellsAreInline() {
     def src as string init "| a |\n| --- |\n| **b** & `c<d>` |";
-    testing.assertEqual(toHtml($src),
+    testing.assertEqual(
+        toHtml($src),
         "<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>" +
-        "<strong>b</strong> &amp; <code>c&lt;d&gt;</code>" +
-        "</td></tr></tbody></table>");
+            "<strong>b</strong> &amp; <code>c&lt;d&gt;</code>" +
+            "</td></tr></tbody></table>");
 }
 
 func testHtmlTableShortRowPads() {
     def src as string init "| A | B | C |\n| --- | --- | --- |\n| only |";
-    testing.assertEqual(toHtml($src),
+    testing.assertEqual(
+        toHtml($src),
         "<table><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead>" +
-        "<tbody><tr><td>only</td><td></td><td></td></tr></tbody></table>");
+            "<tbody><tr><td>only</td><td></td><td></td></tr></tbody></table>");
 }
 
 func testAnsiTableAligns() {
     # Columns align to the widest cell; right column is right-padded, divider rules.
     def src as string init "| step | ms |\n| :--- | ---: |\n| parse | 12 |\n| render | 8 |";
-    testing.assertEqual(ansi.strip(toAnsi($src)),
+    testing.assertEqual(
+        ansi.strip(toAnsi($src)),
         "step   | ms\n-------+---\nparse  | 12\nrender |  8");
 }
 
@@ -339,16 +345,18 @@ func testTableRoundTripsToHtml() {
     def rows as list of list of string init [];
     $rows[] = ["1", "2"];
     def src as string init table(["A", "B"], ["left", "right"], $rows);
-    testing.assertEqual(toHtml($src),
+    testing.assertEqual(
+        toHtml($src),
         "<table><thead><tr><th align=\"left\">A</th><th align=\"right\">B</th></tr></thead>" +
-        "<tbody><tr><td align=\"left\">1</td><td align=\"right\">2</td></tr></tbody></table>");
+            "<tbody><tr><td align=\"left\">1</td><td align=\"right\">2</td></tr></tbody></table>");
 }
 
 # --- tablePretty (public) ---
 
 func testTablePrettyAligns() {
     def messy as string init "| Name | Score |\n|:-|-:|\n| Ada | 95 |\n| Grace | 8 |";
-    testing.assertEqual(tablePretty($messy),
+    testing.assertEqual(
+        tablePretty($messy),
         "| Name  | Score |\n| :---- | ----: |\n| Ada   |    95 |\n| Grace |     8 |");
 }
 

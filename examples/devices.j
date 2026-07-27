@@ -19,7 +19,7 @@ use io;
 # serial: open a port at 115200 8N1, write a command, read a reply.
 try {
     def port as serial.Port init serial.open("/dev/ttyUSB0", 115200);
-    defer serial.close($port);              # closed however this block exits
+    defer serial.close($port); # closed however this block exits
     serial.write($port, convert.bytesFromString("AT\r\n", "utf-8"));
     def reply as bytes init serial.read($port, 64);
     io.printf("serial: read %d bytes\n", len($reply));
@@ -33,7 +33,7 @@ try {
     defer spi.close($dev);
     spi.configure($dev, 0, 1000000);
     def cmd as bytes;
-    $cmd[] = 0x9f;                           # e.g. a JEDEC read-id opcode
+    $cmd[] = 0x9f; # e.g. a JEDEC read-id opcode
     def rx as bytes init spi.transfer($dev, $cmd);
     io.printf("spi: got %d bytes\n", len($rx));
 } catch (e) {

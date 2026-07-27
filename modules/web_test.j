@@ -14,8 +14,12 @@
 use testing;
 
 # Dummy handlers so route registration's meta.defined check passes.
-func hHome(ctx as Context) { return; }
-func hUser(ctx as Context) { return; }
+func hHome(ctx as Context) {
+    return;
+}
+func hUser(ctx as Context) {
+    return;
+}
 
 func testSplitPath() {
     testing.assertEqual(len(splitPath("/a/b/")), 2);
@@ -68,7 +72,9 @@ func testMatchWildcardPrefixEmpty() {
 func testMatchSpaFallback() {
     def app as App init new();
     $app = get($app, "/*path", "hHome");
-    testing.assertEqual(matchRoute($app, "GET", "/deep/nested/page").params["path"], "deep/nested/page");
+    testing.assertEqual(
+        matchRoute($app, "GET", "/deep/nested/page").params["path"],
+        "deep/nested/page");
     testing.assertEqual(matchRoute($app, "GET", "/").params["path"], "");
 }
 
@@ -130,7 +136,7 @@ func testNotFoundSets() {
 # badRoute registers an undefined handler, which web.route must reject.
 func badRoute() {
     def app as App init new();
-    route($app, "GET", "/x", "definitelyNotDefined");   # must throw: handler not defined
+    route($app, "GET", "/x", "definitelyNotDefined"); # must throw: handler not defined
 }
 
 func testRouteValidatesHandler() {
@@ -156,7 +162,8 @@ func testFormatSetCookieFull() {
     $o.maxAge = 3600;
     $o.httpOnly = true;
     $o.sameSite = "Lax";
-    testing.assertEqual(formatSetCookie("sid", "abc", $o),
+    testing.assertEqual(
+        formatSetCookie("sid", "abc", $o),
         "sid=abc; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax");
 }
 
@@ -179,9 +186,9 @@ func testCsrfValid() {
     def rand as string init "sometoken";
     def good as string init $rand + "." + csrfSign($secret, $rand);
     testing.assertTrue(csrfValid($secret, $good));
-    testing.assertFalse(csrfValid($secret, $rand + ".deadbeef"));   # bad signature
-    testing.assertFalse(csrfValid("othersecret", $good));           # wrong secret
-    testing.assertFalse(csrfValid($secret, "nodot"));               # malformed
+    testing.assertFalse(csrfValid($secret, $rand + ".deadbeef")); # bad signature
+    testing.assertFalse(csrfValid("othersecret", $good)); # wrong secret
+    testing.assertFalse(csrfValid($secret, "nodot")); # malformed
     testing.assertFalse(csrfValid($secret, ""));
 }
 
@@ -244,15 +251,28 @@ func testCorsRegisters() {
     testing.assertFalse(corsEnabled($app));
 }
 
-
 # ---- CRLF injection in cookie Path / Domain ----
 
 func injectCookiePath() {
-    def o as CookieOptions init CookieOptions{path: "/a\r\nSet-Cookie: evil=1", domain: "", maxAge: 0, httpOnly: false, secure: false, sameSite: ""};
+    def o as CookieOptions init CookieOptions{
+        path: "/a\r\nSet-Cookie: evil=1",
+        domain: "",
+        maxAge: 0,
+        httpOnly: false,
+        secure: false,
+        sameSite: ""
+    };
     formatSetCookie("sid", "abc", $o);
 }
 func injectCookieDomain() {
-    def o as CookieOptions init CookieOptions{path: "", domain: "x\r\nSet-Cookie: evil=1", maxAge: 0, httpOnly: false, secure: false, sameSite: ""};
+    def o as CookieOptions init CookieOptions{
+        path: "",
+        domain: "x\r\nSet-Cookie: evil=1",
+        maxAge: 0,
+        httpOnly: false,
+        secure: false,
+        sameSite: ""
+    };
     formatSetCookie("sid", "abc", $o);
 }
 func testCookiePathRejectsCrlf() {
@@ -262,7 +282,14 @@ func testCookieDomainRejectsCrlf() {
     testing.assertThrows("injectCookieDomain", "web");
 }
 func testCleanCookieAccepted() {
-    def o as CookieOptions init CookieOptions{path: "/", domain: "example.com", maxAge: 0, httpOnly: true, secure: true, sameSite: "Lax"};
+    def o as CookieOptions init CookieOptions{
+        path: "/",
+        domain: "example.com",
+        maxAge: 0,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax"
+    };
     testing.assertContains(formatSetCookie("sid", "abc", $o), "Path=/; Domain=example.com");
 }
 
@@ -283,7 +310,9 @@ func testSecureCookiesOptOut() {
 
 # --- M22.13 additions -------------------------------------------------------
 
-func hErr(err as Error) { return; }
+func hErr(err as Error) {
+    return;
+}
 
 # OM-019: a HEAD request matches a route registered with GET.
 func testHeadFallsBackToGet() {
@@ -315,11 +344,11 @@ func testOnErrorRegisters() {
 # OM-013: a non-UTF-8 form value decodes leniently instead of throwing.
 func testDecodeLenient() {
     def b as bytes;
-    $b[] = 0x61;      # 'a'
-    $b[] = 0xff;      # invalid as a UTF-8 lead byte
-    $b[] = 0x62;      # 'b'
+    $b[] = 0x61; # 'a'
+    $b[] = 0xff; # invalid as a UTF-8 lead byte
+    $b[] = 0x62; # 'b'
     def s as string init decodeLenient($b);
-    testing.assertEqual(len($s), 3);          # a, U+00FF, b (byte->rune)
+    testing.assertEqual(len($s), 3); # a, U+00FF, b (byte->rune)
     # A valid UTF-8 sequence still decodes as UTF-8.
     testing.assertEqual(decodeLenient(convert.bytesFromString("é", "utf-8")), "é");
     # percentDecode of a %FF escape no longer throws.

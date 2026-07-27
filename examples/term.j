@@ -21,8 +21,7 @@ if (not os.isTerminal("stdin")) {
     io.printf("term needs an interactive terminal; run this in a real TTY.\n");
 } else {
     def dim as term.Size init term.size("stdout");
-    io.printf("terminal is %d rows x %d cols. Press keys (q to quit).\r\n",
-        $dim.rows, $dim.cols);
+    io.printf("terminal is %d rows x %d cols. Press keys (q to quit).\r\n", $dim.rows, $dim.cols);
 
     # Enter raw mode; the returned handle is passed back to term.restore so the
     # terminal is always put back the way it was.
@@ -30,7 +29,7 @@ if (not os.isTerminal("stdin")) {
     def running as bool init true;
     while ($running) {
         def b as int init term.readByte();
-        if ($b == -1 or $b == 113) {   # -1 = end of input, 113 = 'q'
+        if ($b == -1 or $b == 113) { # -1 = end of input, 113 = 'q'
             $running = false;
         } else {
             io.printf("byte %d\r\n", $b);

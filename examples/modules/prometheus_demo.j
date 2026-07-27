@@ -11,14 +11,16 @@ use io;
 import "../../modules/prometheus.j" as prometheus;
 
 # A counter with a few labelled series.
-def reqs as prometheus.Metric init prometheus.counter("http_requests_total",
+def reqs as prometheus.Metric init prometheus.counter(
+    "http_requests_total",
     "Total HTTP requests by method and status");
 $reqs = prometheus.observe($reqs, {"method": "get", "code": "200"}, 1027.0);
 $reqs = prometheus.observe($reqs, {"method": "post", "code": "200"}, 3.0);
 $reqs = prometheus.observe($reqs, {"method": "get", "code": "404"}, 12.0);
 
 # A gauge with a single, label-less sample.
-def temp as prometheus.Metric init prometheus.gauge("cpu_temperature_celsius",
+def temp as prometheus.Metric init prometheus.gauge(
+    "cpu_temperature_celsius",
     "Current CPU temperature");
 $temp = prometheus.observe($temp, {}, 41.5);
 

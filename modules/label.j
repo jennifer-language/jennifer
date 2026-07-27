@@ -168,7 +168,21 @@ export def struct Device {
 
 # noCab returns a zero-value CabSetup (emit no cab-specific setup).
 func noCab() {
-    return CabSetup{ jobName: "", heat: 0, speed: 0, mode: "", orientation: "", sensor: "", xOffset: 0.0, yOffset: 0.0, height: 0.0, pitch: 0.0, width: 0.0, columnPitch: 0.0, columns: 0 };
+    return CabSetup{
+        jobName: "",
+        heat: 0,
+        speed: 0,
+        mode: "",
+        orientation: "",
+        sensor: "",
+        xOffset: 0.0,
+        yOffset: 0.0,
+        height: 0.0,
+        pitch: 0.0,
+        width: 0.0,
+        columnPitch: 0.0,
+        columns: 0
+    };
 }
 
 /**
@@ -177,7 +191,7 @@ func noCab() {
  * @return {Device} a ZPL device
  */
 export func zpl(dpi as int) {
-    return Device{ dialect: "zpl", dpi: $dpi, cab: noCab() };
+    return Device{dialect: "zpl", dpi: $dpi, cab: noCab()};
 }
 
 /**
@@ -185,7 +199,7 @@ export func zpl(dpi as int) {
  * @return {Device} a cab device
  */
 export func cab() {
-    return Device{ dialect: "cab", dpi: 0, cab: noCab() };
+    return Device{dialect: "cab", dpi: 0, cab: noCab()};
 }
 
 /**
@@ -194,7 +208,7 @@ export func cab() {
  * @return {Device} a cab device
  */
 export func cabWith(setup as CabSetup) {
-    return Device{ dialect: "cab", dpi: 0, cab: $setup };
+    return Device{dialect: "cab", dpi: 0, cab: $setup};
 }
 
 /**
@@ -227,7 +241,7 @@ export def struct BarcodeOptions {
  */
 export func new(width as float, height as float) {
     def fs as list of Field init [];
-    return Label{ width: $width, height: $height, quantity: 1, fields: $fs };
+    return Label{width: $width, height: $height, quantity: 1, fields: $fs};
 }
 
 /**
@@ -240,7 +254,24 @@ export func new(width as float, height as float) {
  * @return {Label} a new Label with the text field added
  */
 export func text(label as Label, x as float, y as float, opts as TextOptions, content as string) {
-    def f as Field init Field{ kind: "text", x: $x, y: $y, w: 0.0, h: $opts.height, thickness: 0.0, barcodeType: "", data: $content, checkDigit: "", errorLevel: "", hideText: false, rotation: $opts.rotation, points: $opts.points, bold: $opts.bold, moduleWidth: 0.0, ratio: 0.0 };
+    def f as Field init Field{
+        kind: "text",
+        x: $x,
+        y: $y,
+        w: 0.0,
+        h: $opts.height,
+        thickness: 0.0,
+        barcodeType: "",
+        data: $content,
+        checkDigit: "",
+        errorLevel: "",
+        hideText: false,
+        rotation: $opts.rotation,
+        points: $opts.points,
+        bold: $opts.bold,
+        moduleWidth: 0.0,
+        ratio: 0.0
+    };
     def out as Label init $label;
     $out.fields = lists.push($out.fields, $f);
     return $out;
@@ -280,15 +311,34 @@ func isDigits(s as string) {
  * @return {Label} a new Label with the barcode field added
  * @throws {Error} kind "label" for an unknown type or invalid ITF data
  */
-export func barcode(label as Label, x as float, y as float, type as string, opts as BarcodeOptions, data as string) {
-    if (not ($type == "code128" or $type == "ean13" or $type == "ean8" or $type == "itf" or $type == "code39" or
+export func barcode(
+    label as Label,
+    x as float,
+    y as float,
+    type as string,
+    opts as BarcodeOptions,
+    data as string) {
+    if (not ($type == "code128" or $type == "ean13" or $type == "ean8" or $type == "itf" or
+        $type == "code39" or
         $type == "gs1-128" or $type == "datamatrix" or $type == "qr")) {
-        throw Error{ kind: "label", message: "label: unknown barcode type: " + $type, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "label",
+            message: "label: unknown barcode type: " + $type,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def d as string init $data;
     if ($type == "itf") {
         if (not isDigits($d)) {
-            throw Error{ kind: "label", message: "label: ITF barcode data must be numeric: " + $d, file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "label",
+                message: "label: ITF barcode data must be numeric: " + $d,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         if (len($d) % 2 == 1) {
             $d = "0" + $d;
@@ -303,7 +353,24 @@ export func barcode(label as Label, x as float, y as float, type as string, opts
     if ($opts.height > 0.0) {
         $size = $opts.height;
     }
-    def f as Field init Field{ kind: "barcode", x: $x, y: $y, w: 0.0, h: $size, thickness: 0.0, barcodeType: $type, data: $d, checkDigit: $opts.checkDigit, errorLevel: $opts.errorLevel, hideText: $opts.hideText, rotation: 0, points: 0, bold: false, moduleWidth: $opts.moduleWidth, ratio: $opts.ratio };
+    def f as Field init Field{
+        kind: "barcode",
+        x: $x,
+        y: $y,
+        w: 0.0,
+        h: $size,
+        thickness: 0.0,
+        barcodeType: $type,
+        data: $d,
+        checkDigit: $opts.checkDigit,
+        errorLevel: $opts.errorLevel,
+        hideText: $opts.hideText,
+        rotation: 0,
+        points: 0,
+        bold: false,
+        moduleWidth: $opts.moduleWidth,
+        ratio: $opts.ratio
+    };
     def out as Label init $label;
     $out.fields = lists.push($out.fields, $f);
     return $out;
@@ -321,7 +388,24 @@ export func barcode(label as Label, x as float, y as float, type as string, opts
  * @return {Label} a new Label with the image field added
  */
 export func image(label as Label, x as float, y as float, name as string) {
-    def f as Field init Field{ kind: "image", x: $x, y: $y, w: 0.0, h: 0.0, thickness: 0.0, barcodeType: "", data: $name, checkDigit: "", errorLevel: "", hideText: false, rotation: 0, points: 0, bold: false, moduleWidth: 0.0, ratio: 0.0 };
+    def f as Field init Field{
+        kind: "image",
+        x: $x,
+        y: $y,
+        w: 0.0,
+        h: 0.0,
+        thickness: 0.0,
+        barcodeType: "",
+        data: $name,
+        checkDigit: "",
+        errorLevel: "",
+        hideText: false,
+        rotation: 0,
+        points: 0,
+        bold: false,
+        moduleWidth: 0.0,
+        ratio: 0.0
+    };
     def out as Label init $label;
     $out.fields = lists.push($out.fields, $f);
     return $out;
@@ -338,7 +422,24 @@ export func image(label as Label, x as float, y as float, name as string) {
  * @return {Label} a new Label with the box added
  */
 export func box(label as Label, x as float, y as float, w as float, h as float, thickness as float) {
-    def f as Field init Field{ kind: "box", x: $x, y: $y, w: $w, h: $h, thickness: $thickness, barcodeType: "", data: "", checkDigit: "", errorLevel: "", hideText: false, rotation: 0, points: 0, bold: false, moduleWidth: 0.0, ratio: 0.0 };
+    def f as Field init Field{
+        kind: "box",
+        x: $x,
+        y: $y,
+        w: $w,
+        h: $h,
+        thickness: $thickness,
+        barcodeType: "",
+        data: "",
+        checkDigit: "",
+        errorLevel: "",
+        hideText: false,
+        rotation: 0,
+        points: 0,
+        bold: false,
+        moduleWidth: 0.0,
+        ratio: 0.0
+    };
     def out as Label init $label;
     $out.fields = lists.push($out.fields, $f);
     return $out;
@@ -372,7 +473,13 @@ export func render(label as Label, device as Device) {
     if ($device.dialect == "cab") {
         return renderCab($label, $device.cab);
     }
-    throw Error{ kind: "label", message: "label: unknown dialect: " + $device.dialect, file: "", line: 0, col: 0 };
+    throw Error{
+        kind: "label",
+        message: "label: unknown dialect: " + $device.dialect,
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 # --- dialect encoders (each in its own file, spliced in here) ---------------
@@ -393,9 +500,11 @@ include "label_cab.j";
  * @throws {Error} on a network failure (a positioned `net` error)
  */
 export func send(host as string, port as int, rendered as string) {
-    def conn as net.Conn init net.connect($host + ":" + convert.toString($port), CONNECT_TIMEOUT_MS);
-    defer net.close($conn);              # closed even when the write throws
-    net.setDeadline($conn, CONNECT_TIMEOUT_MS);   # bound the write too
+    def conn as net.Conn init net.connect(
+        $host + ":" + convert.toString($port),
+        CONNECT_TIMEOUT_MS);
+    defer net.close($conn); # closed even when the write throws
+    net.setDeadline($conn, CONNECT_TIMEOUT_MS); # bound the write too
     net.writeBytes($conn, convert.bytesFromString($rendered, "utf-8"));
     return null;
 }

@@ -10,8 +10,8 @@
 use io;
 import "../../modules/totp.j" as totp;
 
-def secret as string init "JBSWY3DPEHPK3PXP";     # the base32 secret both sides share
-def o as totp.Options;                            # zero-value: 6 digits, 30 s, SHA-1
+def secret as string init "JBSWY3DPEHPK3PXP"; # the base32 secret both sides share
+def o as totp.Options; # zero-value: 6 digits, 30 s, SHA-1
 
 # A deterministic code at a fixed instant, then verify it across the skew window.
 def at as int init 1700000000;

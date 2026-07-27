@@ -33,13 +33,13 @@ func loadCatalog(path as string) {
 # A fresh unique scratch directory, then the two catalog files (the "assets" a
 # real app ships).
 def dir as string init fs.makeTempDir("", "intl-");
-fs.writeString($dir + "/en.toml",
-    "greeting = \"Hello, {name}!\"\n"
-    + "cart = \"You have {n} items in your cart\"\n"
-    + "bye = \"Goodbye\"\n");
-fs.writeString($dir + "/de.toml",
-    "greeting = \"Hallo, {name}!\"\n"
-    + "bye = \"Auf Wiedersehen\"\n");
+fs.writeString(
+    $dir + "/en.toml",
+    "greeting = \"Hello, {name}!\"\n" + "cart = \"You have {n} items in your cart\"\n" +
+        "bye = \"Goodbye\"\n");
+fs.writeString(
+    $dir + "/de.toml",
+    "greeting = \"Hallo, {name}!\"\n" + "bye = \"Auf Wiedersehen\"\n");
 
 # Load them: the first language loaded (en) is the default / fallback.
 intl.load("en", loadCatalog($dir + "/en.toml"));
@@ -49,7 +49,7 @@ intl.setLocale("de");
 io.printf("locale: %s\n", intl.locale());
 io.printf("%s\n", intl.tr("greeting", {"name": "Welt"}));
 io.printf("%s\n", intl.tr("bye"));
-io.printf("%s\n", intl.tr("cart", {"n": 3}));   # not in de -> falls back to en
+io.printf("%s\n", intl.tr("cart", {"n": 3})); # not in de -> falls back to en
 
 # Clean up the scratch directory.
 fs.removeAll($dir);

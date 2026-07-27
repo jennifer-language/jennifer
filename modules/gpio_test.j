@@ -63,7 +63,9 @@ func testMissingBaseErrors() {
     testing.assertThrows("setupMissing", "gpio");
 }
 
-func setupSideways() { setup(17, "sideways"); }
+func setupSideways() {
+    setup(17, "sideways");
+}
 
 func testInvalidDirection() {
     testing.assertThrows("setupSideways", "gpio");

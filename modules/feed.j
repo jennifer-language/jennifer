@@ -116,7 +116,15 @@ export func add(f as Feed, e as Entry) {
  * @return {Entry} the new entry
  */
 export func entry(title as string, link as string) {
-    return Entry{title: $title, link: $link, id: "", published: epoch(), updated: epoch(), summary: "", content: ""};
+    return Entry{
+        title: $title,
+        link: $link,
+        id: "",
+        published: epoch(),
+        updated: epoch(),
+        summary: "",
+        content: ""
+    };
 }
 /**
  * A copy of `e` with its stable id set.
@@ -243,7 +251,13 @@ export func build(f as Feed, format as string) {
     if ($format == "atom") {
         return buildAtom($f);
     }
-    throw Error{kind: "value", message: "feed.build: unknown format: " + $format + " (want \"rss\" or \"atom\")", file: "", line: 0, col: 0};
+    throw Error{
+        kind: "value",
+        message: "feed.build: unknown format: " + $format + " (want \"rss\" or \"atom\")",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 func buildRss(f as Feed) {
@@ -281,7 +295,10 @@ func buildRss(f as Feed) {
 }
 
 func buildAtom(f as Feed) {
-    def root as xml.Value init xml.setAttr(xml.element("feed"), "xmlns", "http://www.w3.org/2005/Atom");
+    def root as xml.Value init xml.setAttr(
+        xml.element("feed"),
+        "xmlns",
+        "http://www.w3.org/2005/Atom");
     $root = xml.append($root, el("title", $f.title));
     $root = xml.append($root, xml.setAttr(xml.element("link"), "href", $f.link));
     if (isSet($f.updated)) {
@@ -334,7 +351,13 @@ func kindOf(root as xml.Value) {
     if ($tag == "feed") {
         return "atom";
     }
-    throw Error{kind: "value", message: "feed.parse: not a feed (root element <" + $tag + ">, want <rss> or <feed>)", file: "", line: 0, col: 0};
+    throw Error{
+        kind: "value",
+        message: "feed.parse: not a feed (root element <" + $tag + ">, want <rss> or <feed>)",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 /**
@@ -380,7 +403,12 @@ func parseRss(root as xml.Value) {
         };
         $es[] = $e;
     }
-    return Feed{title: textOf($channel, "title"), link: textOf($channel, "link"), updated: $updated, entries: $es};
+    return Feed{
+        title: textOf($channel, "title"),
+        link: textOf($channel, "link"),
+        updated: $updated,
+        entries: $es
+    };
 }
 
 func parseAtom(root as xml.Value) {
@@ -399,7 +427,12 @@ func parseAtom(root as xml.Value) {
         };
         $es[] = $e;
     }
-    return Feed{title: textOf($root, "title"), link: atomLink($root), updated: parseAtomDate(textOf($root, "updated")), entries: $es};
+    return Feed{
+        title: textOf($root, "title"),
+        link: atomLink($root),
+        updated: parseAtomDate(textOf($root, "updated")),
+        entries: $es
+    };
 }
 
 # ---- fetch ----
@@ -416,7 +449,13 @@ export func fetch(url as string) {
     def headers as map of string to string init {};
     def resp as http.Response init http.get($url, $headers);
     if ($resp.status < 200 or $resp.status >= 300) {
-        throw Error{kind: "http", message: "feed.fetch: " + $url + " returned status " + convert.toString($resp.status), file: "", line: 0, col: 0};
+        throw Error{
+            kind: "http",
+            message: "feed.fetch: " + $url + " returned status " + convert.toString($resp.status),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return parse($resp.body);
 }

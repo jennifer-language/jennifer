@@ -100,8 +100,10 @@ func recvLine(session as Session, buf as bytes) {
             $si = $si + 1;
         }
         if ($nl >= 0) {
-            return Line{text: convert.stringFromBytes(byteSlice($b, 0, $nl), "utf-8"),
-                rest: byteSlice($b, $nl + 2, len($b))};
+            return Line{
+                text: convert.stringFromBytes(byteSlice($b, 0, $nl), "utf-8"),
+                rest: byteSlice($b, $nl + 2, len($b))
+            };
         }
         if ($session.timeout > 0) {
             net.setDeadline($session.conn, $session.timeout);
@@ -175,7 +177,8 @@ func checkKey(key as string) {
     while ($i < len($raw)) {
         def b as int init $raw[$i];
         if ($b <= 32 or $b == 127) {
-            fail("key contains an illegal byte (space, control, or DEL) at position " + convert.toString($i));
+            fail("key contains an illegal byte (space, control, or DEL) at position " +
+                convert.toString($i));
         }
         $i = $i + 1;
     }

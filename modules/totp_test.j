@@ -53,26 +53,26 @@ func testRfcShaFiveTwelve() {
 
 func testSixDigitDefault() {
     def s as string init seed("12345678901234567890");
-    def o as Options;                                  # zero-value: 6 digits, sha1
-    testing.assertEqual(generateAt($s, 59, $o), "287082");   # last 6 of 94287082
+    def o as Options; # zero-value: 6 digits, sha1
+    testing.assertEqual(generateAt($s, 59, $o), "287082"); # last 6 of 94287082
 }
 
 func testVerifySkewWindow() {
     def s as string init seed("12345678901234567890");
     def o as Options;
-    def code as string init generateAt($s, 59, $o);    # code for step floor(59/30)=1
-    testing.assertTrue(verifyAt($s, $code, 59, $o));    # same step
-    testing.assertTrue(verifyAt($s, $code, 75, $o));    # next step, within +1
-    testing.assertTrue(verifyAt($s, $code, 29, $o));    # previous step, within -1
-    testing.assertFalse(verifyAt($s, $code, 120, $o));  # two steps away, outside window
-    testing.assertFalse(verifyAt($s, "000000", 59, $o));# wrong code
+    def code as string init generateAt($s, 59, $o); # code for step floor(59/30)=1
+    testing.assertTrue(verifyAt($s, $code, 59, $o)); # same step
+    testing.assertTrue(verifyAt($s, $code, 75, $o)); # next step, within +1
+    testing.assertTrue(verifyAt($s, $code, 29, $o)); # previous step, within -1
+    testing.assertFalse(verifyAt($s, $code, 120, $o)); # two steps away, outside window
+    testing.assertFalse(verifyAt($s, "000000", 59, $o)); # wrong code
 }
 
 func testSecretNormalization() {
     def o as Options;
     def canon as string init generateAt("JBSWY3DPEHPK3PXP", 59, $o);
-    testing.assertEqual(generateAt("jbswy3dpehpk3pxp", 59, $o), $canon);       # lowercase
-    testing.assertEqual(generateAt("JBSW Y3DP EHPK 3PXP", 59, $o), $canon);    # spaced
+    testing.assertEqual(generateAt("jbswy3dpehpk3pxp", 59, $o), $canon); # lowercase
+    testing.assertEqual(generateAt("JBSW Y3DP EHPK 3PXP", 59, $o), $canon); # spaced
 }
 
 func testHotpRfc4226Vectors() {
@@ -93,7 +93,7 @@ func testHotpRfc4226Vectors() {
 func testHotpIsTotpBuildingBlock() {
     # TOTP is HOTP over floor(unixSeconds / period): at t=59, step = 1.
     def s as string init seed("12345678901234567890");
-    def o as Options;                                  # 6 digits, 30 s, sha1
+    def o as Options; # 6 digits, 30 s, sha1
     testing.assertEqual(generateAt($s, 59, $o), hotp($s, 1));
 }
 
@@ -108,7 +108,7 @@ func testGenerateSecretRoundTrips() {
 }
 
 func testGenerateSecretNLength() {
-    def sec as string init generateSecretN(10);        # 80 bits -> 16 base32 chars
+    def sec as string init generateSecretN(10); # 80 bits -> 16 base32 chars
     testing.assertEqual(len($sec), 16);
     def o as Options;
     def code as string init generateAt($sec, 500, $o);
@@ -126,7 +126,7 @@ func testGenerateSecretNRejectsNonPositive() {
 func testVerifyWindowAccepts() {
     def s as string init seed("12345678901234567890");
     def o as Options;
-    def prev as string init generateAt($s, 29, $o);    # step floor(29/30)=0
+    def prev as string init generateAt($s, 29, $o); # step floor(29/30)=0
     # now is step floor(120/30)=4, three steps away: a window of 3 reaches it.
     testing.assertFalse(verifyWindowAt($s, $prev, 120, 3, $o));
     testing.assertTrue(verifyWindowAt($s, $prev, 120, 4, $o));
@@ -135,11 +135,11 @@ func testVerifyWindowAccepts() {
 func testVerifyWindowRejectsOutside() {
     def s as string init seed("12345678901234567890");
     def o as Options;
-    def code as string init generateAt($s, 59, $o);    # step 1
+    def code as string init generateAt($s, 59, $o); # step 1
     # window 0 only checks the current step: same time passes, adjacent fails.
     testing.assertTrue(verifyWindowAt($s, $code, 59, 0, $o));
-    testing.assertFalse(verifyWindowAt($s, $code, 29, 0, $o));  # step 0, outside window 0
-    testing.assertTrue(verifyWindowAt($s, $code, 29, 1, $o));   # step 0, within window 1
+    testing.assertFalse(verifyWindowAt($s, $code, 29, 0, $o)); # step 0, outside window 0
+    testing.assertTrue(verifyWindowAt($s, $code, 29, 1, $o)); # step 0, within window 1
 }
 
 func testCounterBytesBigEndian() {
@@ -151,7 +151,8 @@ func testCounterBytesBigEndian() {
 
 func testUriDefault() {
     def o as Options;
-    testing.assertEqual(uri("ACME", "jane@acme.example", "JBSWY3DPEHPK3PXP", $o),
+    testing.assertEqual(
+        uri("ACME", "jane@acme.example", "JBSWY3DPEHPK3PXP", $o),
         "otpauth://totp/ACME:jane%40acme.example?secret=JBSWY3DPEHPK3PXP&issuer=ACME&algorithm=SHA1&digits=6&period=30");
 }
 
@@ -160,6 +161,7 @@ func testUriCustom() {
     $o.digits = 8;
     $o.period = 60;
     $o.algorithm = "sha256";
-    testing.assertEqual(uri("A B", "u", "S", $o),
+    testing.assertEqual(
+        uri("A B", "u", "S", $o),
         "otpauth://totp/A%20B:u?secret=S&issuer=A%20B&algorithm=SHA256&digits=8&period=60");
 }

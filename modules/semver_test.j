@@ -33,16 +33,16 @@ func testRoundTrip() {
 }
 
 func testValidRejects() {
-    testing.assertFalse(isValid("1.2.3.4"));   # four segments
-    testing.assertFalse(isValid("1.2"));        # too few
-    testing.assertFalse(isValid("01.0.0"));     # leading zero in core
-    testing.assertFalse(isValid("1.0.0-"));     # empty prerelease
-    testing.assertFalse(isValid("1.0.0+"));     # empty build
-    testing.assertFalse(isValid("1.0.0-01"));   # leading zero in numeric prerelease
+    testing.assertFalse(isValid("1.2.3.4")); # four segments
+    testing.assertFalse(isValid("1.2")); # too few
+    testing.assertFalse(isValid("01.0.0")); # leading zero in core
+    testing.assertFalse(isValid("1.0.0-")); # empty prerelease
+    testing.assertFalse(isValid("1.0.0+")); # empty build
+    testing.assertFalse(isValid("1.0.0-01")); # leading zero in numeric prerelease
     testing.assertFalse(isValid("1.0.0-a..b")); # empty prerelease field
     testing.assertFalse(isValid(""));
     testing.assertTrue(isValid("0.0.0"));
-    testing.assertTrue(isValid("1.0.0-alpha-beta"));  # hyphen inside an identifier
+    testing.assertTrue(isValid("1.0.0-alpha-beta")); # hyphen inside an identifier
 }
 
 func testParseThrowsOnInvalid() {
@@ -67,7 +67,7 @@ func testPrereleasePrecedence() {
     testing.assertEqual(cmp("1.0.0-alpha.1", "1.0.0-alpha.beta"), -1);
     testing.assertEqual(cmp("1.0.0-alpha.beta", "1.0.0-beta"), -1);
     testing.assertEqual(cmp("1.0.0-beta", "1.0.0-beta.2"), -1);
-    testing.assertEqual(cmp("1.0.0-beta.2", "1.0.0-beta.11"), -1);   # numeric, not lexical
+    testing.assertEqual(cmp("1.0.0-beta.2", "1.0.0-beta.11"), -1); # numeric, not lexical
     testing.assertEqual(cmp("1.0.0-beta.11", "1.0.0-rc.1"), -1);
     testing.assertEqual(cmp("1.0.0-rc.1", "1.0.0"), -1);
 }
@@ -79,7 +79,7 @@ func testBuildIgnored() {
 
 func testClassify() {
     testing.assertTrue(isStable(parse("1.0.0")));
-    testing.assertFalse(isStable(parse("0.5.0")));       # 0.y.z is unstable
+    testing.assertFalse(isStable(parse("0.5.0"))); # 0.y.z is unstable
     testing.assertFalse(isStable(parse("1.0.0-rc")));
     testing.assertTrue(isPrerelease(parse("1.0.0-rc")));
     testing.assertFalse(isPrerelease(parse("1.0.0")));
@@ -114,8 +114,8 @@ func testPrivateHelpers() {
     testing.assertEqual(sign(0), 0);
     testing.assertEqual(sign(9), 1);
     testing.assertEqual(compareStr("alpha", "beta"), -1);
-    testing.assertEqual(compareIdent("1", "beta"), -1);   # numeric ranks below alphanumeric
-    testing.assertEqual(compareIdent("2", "11"), -1);     # numeric compared numerically
+    testing.assertEqual(compareIdent("1", "beta"), -1); # numeric ranks below alphanumeric
+    testing.assertEqual(compareIdent("2", "11"), -1); # numeric compared numerically
 }
 
 func testParsesInterpreterVersion() {
@@ -136,7 +136,7 @@ func testCompareHelpers() {
     testing.assertTrue(lte(parse("2.0.0"), parse("2.0.0")));
     testing.assertTrue(lte(parse("1.0.0"), parse("2.0.0")));
     testing.assertTrue(neq(parse("1.0.0"), parse("1.0.1")));
-    testing.assertFalse(neq(parse("1.0.0"), parse("1.0.0+build")));   # build ignored
+    testing.assertFalse(neq(parse("1.0.0"), parse("1.0.0+build"))); # build ignored
 }
 
 func testDiff() {
@@ -145,7 +145,7 @@ func testDiff() {
     testing.assertEqual(diff(parse("1.2.3"), parse("1.2.4")), "patch");
     testing.assertEqual(diff(parse("1.2.3"), parse("1.2.3-rc.1")), "prerelease");
     testing.assertEqual(diff(parse("1.2.3"), parse("1.2.3")), "");
-    testing.assertEqual(diff(parse("1.2.3"), parse("1.2.3+build")), "");   # build ignored
+    testing.assertEqual(diff(parse("1.2.3"), parse("1.2.3+build")), ""); # build ignored
 }
 
 func testRsort() {
@@ -166,7 +166,7 @@ func testWildcardMatchesAnyRelease() {
     testing.assertTrue(satisfies("0.0.1", ""));
     testing.assertTrue(satisfies("9.9.9", "any"));
     testing.assertFalse(satisfies("not-a-version", "*"));
-    testing.assertFalse(satisfies("1.0.0-rc.1", "*"));   # prerelease excluded
+    testing.assertFalse(satisfies("1.0.0-rc.1", "*")); # prerelease excluded
 }
 
 func testExactAndCaret() {
@@ -216,10 +216,10 @@ func testInvalidVersionNeverMatches() {
 func testCaretTildePrereleaseLowerBound() {
     testing.assertTrue(satisfies("1.2.3-rc.2", "^1.2.3-rc.1"));
     testing.assertTrue(satisfies("1.2.3-rc.1", "^1.2.3-rc.1"));
-    testing.assertFalse(satisfies("1.2.3-rc.0", "^1.2.3-rc.1"));   # below the pinned prerelease
-    testing.assertTrue(satisfies("1.2.4", "^1.2.3-rc.1"));         # a later release still matches
+    testing.assertFalse(satisfies("1.2.3-rc.0", "^1.2.3-rc.1")); # below the pinned prerelease
+    testing.assertTrue(satisfies("1.2.4", "^1.2.3-rc.1")); # a later release still matches
     testing.assertTrue(satisfies("1.2.3-rc.2", "~1.2.3-rc.1"));
-    testing.assertFalse(satisfies("1.3.0-rc.1", "~1.2.3-rc.1"));   # outside the tilde patch window
+    testing.assertFalse(satisfies("1.3.0-rc.1", "~1.2.3-rc.1")); # outside the tilde patch window
 }
 
 func testMinVersionCaretPrerelease() {
@@ -233,7 +233,7 @@ func testCompoundAnd() {
     testing.assertTrue(satisfies("1.5.0", ">=1.2.0 <2.0.0"));
     testing.assertFalse(satisfies("2.0.0", ">=1.2.0 <2.0.0"));
     testing.assertFalse(satisfies("1.1.0", ">=1.2.0 <2.0.0"));
-    testing.assertTrue(satisfies("1.9.0", ">=1.2.0,<2.0.0"));   # comma also = AND
+    testing.assertTrue(satisfies("1.9.0", ">=1.2.0,<2.0.0")); # comma also = AND
 }
 
 func testCompoundOr() {
@@ -244,10 +244,10 @@ func testCompoundOr() {
 
 func testHyphenRanges() {
     testing.assertTrue(satisfies("2.0.0", "1.2.3 - 2.3.4"));
-    testing.assertTrue(satisfies("2.3.4", "1.2.3 - 2.3.4"));   # inclusive upper
+    testing.assertTrue(satisfies("2.3.4", "1.2.3 - 2.3.4")); # inclusive upper
     testing.assertFalse(satisfies("2.3.5", "1.2.3 - 2.3.4"));
     testing.assertFalse(satisfies("1.2.2", "1.2.3 - 2.3.4"));
-    testing.assertTrue(satisfies("2.3.9", "1.2 - 2.3"));       # partial upper -> <2.4.0
+    testing.assertTrue(satisfies("2.3.9", "1.2 - 2.3")); # partial upper -> <2.4.0
     testing.assertFalse(satisfies("2.4.0", "1.2 - 2.3"));
 }
 
@@ -256,9 +256,9 @@ func testXRangesAndBarePartials() {
     testing.assertFalse(satisfies("2.0.0", "1.x"));
     testing.assertTrue(satisfies("1.2.7", "1.2.*"));
     testing.assertFalse(satisfies("1.3.0", "1.2.X"));
-    testing.assertTrue(satisfies("1.2.7", "1.2"));            # bare 2-part = 1.2.x
+    testing.assertTrue(satisfies("1.2.7", "1.2")); # bare 2-part = 1.2.x
     testing.assertFalse(satisfies("1.3.0", "1.2"));
-    testing.assertTrue(satisfies("1.9.0", "1"));              # bare 1-part = 1.x
+    testing.assertTrue(satisfies("1.9.0", "1")); # bare 1-part = 1.x
 }
 
 # --- ranges: selection + validation (new) ---------------------------
@@ -270,7 +270,7 @@ func testMaxSatisfying() {
     testing.assertEqual(maxSatisfying($vers, "~1.0.0"), "1.0.0");
     testing.assertEqual(maxSatisfying($vers, "^9.0.0"), "");
     def messy as list of string init ["bad", "1.2.0", "also-bad", "1.3.0"];
-    testing.assertEqual(maxSatisfying($messy, "^1.0.0"), "1.3.0");   # invalids skipped
+    testing.assertEqual(maxSatisfying($messy, "^1.0.0"), "1.3.0"); # invalids skipped
 }
 
 func testMinSatisfying() {
@@ -326,7 +326,7 @@ func testCoerce() {
     testing.assertEqual(coerce("1.2"), "1.2.0");
     testing.assertEqual(coerce("2"), "2.0.0");
     testing.assertEqual(coerce("release-2.3"), "2.3.0");
-    testing.assertEqual(coerce("v01.02.03"), "1.2.3");   # leading zeros normalised
+    testing.assertEqual(coerce("v01.02.03"), "1.2.3"); # leading zeros normalised
     testing.assertEqual(coerce("latest"), "");
 }
 
@@ -334,7 +334,7 @@ func testClean() {
     testing.assertEqual(clean("v1.2.3"), "1.2.3");
     testing.assertEqual(clean("  =1.2.3  "), "1.2.3");
     testing.assertEqual(clean("1.2.3+build"), "1.2.3+build");
-    testing.assertEqual(clean("1.2"), "");               # strict: not a full version
+    testing.assertEqual(clean("1.2"), ""); # strict: not a full version
     testing.assertEqual(clean("garbage"), "");
 }
 
@@ -364,18 +364,18 @@ func testSubset() {
     testing.assertTrue(subset("~1.2.3", "^1.0.0"));
     testing.assertTrue(subset(">=1.2.0 <1.5.0", "^1.0.0"));
     testing.assertTrue(subset("^1.0.0 || ^2.0.0", ">=1.0.0 <3.0.0"));
-    testing.assertFalse(subset("^1.0.0 || ^3.0.0", "^1.0.0"));   # the ^3 clause is not covered
+    testing.assertFalse(subset("^1.0.0 || ^3.0.0", "^1.0.0")); # the ^3 clause is not covered
 }
 
 func testGtrLtrOutside() {
     testing.assertTrue(gtr("2.0.0", "^1.2.0"));
     testing.assertFalse(gtr("1.5.0", "^1.2.0"));
-    testing.assertFalse(gtr("9.9.9", ">=1.0.0"));               # unbounded above
+    testing.assertFalse(gtr("9.9.9", ">=1.0.0")); # unbounded above
     testing.assertTrue(ltr("0.9.0", "^1.2.0"));
     testing.assertFalse(ltr("1.5.0", "^1.2.0"));
     testing.assertTrue(outside("2.0.0", "^1.2.0"));
     testing.assertTrue(outside("0.1.0", "^1.2.0"));
-    testing.assertFalse(outside("2.5.0", "^1.0.0 || ^3.0.0"));  # interior gap is not outside
+    testing.assertFalse(outside("2.5.0", "^1.0.0 || ^3.0.0")); # interior gap is not outside
 }
 
 # --- range algebra: prerelease-precise ------------------------------
@@ -383,20 +383,20 @@ func testGtrLtrOutside() {
 func testMinVersionPrerelease() {
     testing.assertEqual(minVersion(">=1.2.3-rc.1"), "1.2.3-rc.1");
     testing.assertEqual(minVersion(">=1.2.3-rc.1 <2.0.0"), "1.2.3-rc.1");
-    testing.assertEqual(minVersion(">1.2.3-rc.1"), "1.2.3");   # excluded prerelease -> its release
+    testing.assertEqual(minVersion(">1.2.3-rc.1"), "1.2.3"); # excluded prerelease -> its release
 }
 
 func testIntersectsPrerelease() {
-    testing.assertTrue(intersects(">=1.2.3-rc.1 <1.2.3", ">=1.2.3-rc.2 <1.2.3"));   # same tuple
-    testing.assertFalse(intersects(">=1.2.3-rc.1 <1.2.3", ">=1.5.0-rc.1 <1.5.0"));  # different tuple
-    testing.assertFalse(intersects(">=1.2.3-rc.1 <1.2.3", "^1.0.0"));               # pre-only vs release
-    testing.assertTrue(intersects(">=1.2.3-rc.1 <2.0.0", "^1.5.0"));                # shares releases
+    testing.assertTrue(intersects(">=1.2.3-rc.1 <1.2.3", ">=1.2.3-rc.2 <1.2.3")); # same tuple
+    testing.assertFalse(intersects(">=1.2.3-rc.1 <1.2.3", ">=1.5.0-rc.1 <1.5.0")); # different tuple
+    testing.assertFalse(intersects(">=1.2.3-rc.1 <1.2.3", "^1.0.0")); # pre-only vs release
+    testing.assertTrue(intersects(">=1.2.3-rc.1 <2.0.0", "^1.5.0")); # shares releases
 }
 
 func testSubsetPrerelease() {
     testing.assertTrue(subset(">=1.2.3-rc.1 <1.3.0", ">=1.2.3-rc.1 <1.3.0"));
-    testing.assertFalse(subset(">=1.2.3-rc.1 <2.0.0", "^1.2.3"));                   # caret admits no prereleases
-    testing.assertTrue(subset(">=1.2.3-rc.5 <1.5.0", ">=1.2.3-rc.1 <2.0.0"));       # outer pins the tuple
+    testing.assertFalse(subset(">=1.2.3-rc.1 <2.0.0", "^1.2.3")); # caret admits no prereleases
+    testing.assertTrue(subset(">=1.2.3-rc.5 <1.5.0", ">=1.2.3-rc.1 <2.0.0")); # outer pins the tuple
 }
 
 func testLtrPrerelease() {
@@ -408,10 +408,12 @@ func testLtrPrerelease() {
 
 func testSimplifyRange() {
     def vers as list of string init ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "2.0.0", "2.1.0"];
-    testing.assertEqual(simplifyRange($vers, ">=1.0.0 <=1.0.0 || >=1.1.0 <=1.3.0"), ">=1.0.0 <=1.3.0");
+    testing.assertEqual(
+        simplifyRange($vers, ">=1.0.0 <=1.0.0 || >=1.1.0 <=1.3.0"),
+        ">=1.0.0 <=1.3.0");
     testing.assertEqual(simplifyRange($vers, ">=1.0.0"), "*");
     testing.assertEqual(simplifyRange($vers, "^9.0.0"), "<0.0.0-0");
-    testing.assertEqual(simplifyRange($vers, "^1.0.0"), "^1.0.0");   # original kept when shorter
+    testing.assertEqual(simplifyRange($vers, "^1.0.0"), "^1.0.0"); # original kept when shorter
     testing.assertEqual(simplifyRange($vers, "1.0.0 || 2.1.0"), "1.0.0 || 2.1.0");
 }
 
@@ -420,6 +422,6 @@ func testSimplifyRange() {
 func testSimplifyRangePreservesPrereleases() {
     def vers as list of string init ["1.2.3-rc.1"];
     def out as string init simplifyRange($vers, ">=1.2.3-rc.1 <1.3.0");
-    testing.assertFalse($out == "*");                 # "*" would match nothing here
+    testing.assertFalse($out == "*"); # "*" would match nothing here
     testing.assertTrue(satisfies("1.2.3-rc.1", $out)); # the produced range keeps it
 }

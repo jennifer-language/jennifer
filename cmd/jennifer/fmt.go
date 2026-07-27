@@ -9,37 +9,162 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
 )
 
-// runFmt formats path's source to stdout per docs/user-guide/style-guide.md. The
-// formatter operates on the token stream rather than the AST so it can
-// preserve `import "file.j";` statements verbatim (the preprocessor would
-// otherwise inline them) and any parentheses the user wrote (the AST
-// erases redundant grouping).
+// runFmt formats the named files per docs/user-guide/style-guide.md. Without a
+// flag it writes a single file's canonical form to stdout; with -w / --write it
+// rewrites each file in place (only touching files whose content actually
+// changes). File selection - globs, recursion - is the shell's job, so a
+// directory argument is a usage error, not a tree walk. One write flag, not a
+// family of synonyms.
 //
-// Comments and blank lines now survive `fmt`. The lexer emits them
-// as trivia tokens (TOKEN_COMMENT_*, TOKEN_BLANK_LINE); the formatter
-// recognises each kind and re-emits it at the position it had in the
-// source. Comments inside an expression (`printf(/* note */ $x)`) are
-// supported only by-position - they are not parsed for attachment to
-// any particular subexpression.
-func runFmt(path string) int {
+// The formatter operates on the token stream rather than the AST, so it preserves
+// `import "file.j";` statements verbatim (the preprocessor would otherwise inline
+// them), the parentheses the user wrote (the AST erases redundant grouping), and
+// comments / blank lines (the lexer emits them as trivia tokens re-placed by
+// position; an in-expression `printf(/* note */ $x)` is positional only).
+func runFmt(args []string) int {
+	write := false
+	var files []string
+	for _, a := range args {
+		switch a {
+		case "-w", "--write":
+			write = true
+		case "-":
+			files = append(files, a)
+		default:
+			if strings.HasPrefix(a, "-") {
+				fmt.Fprintf(os.Stderr, "jennifer fmt: unknown flag %q (use -w / --write to rewrite in place)\n", a)
+				return 2
+			}
+			files = append(files, a)
+		}
+	}
+	if len(files) == 0 {
+		fmt.Fprintln(os.Stderr, "jennifer fmt: no input file")
+		return 2
+	}
+	// `fmt` formats the files it is named - selecting files (globs, recursion)
+	// is the shell's job, so a directory argument is a usage error rather than a
+	// silent tree walk. See the globbing note in docs/technical/cli_fmt.md.
+	for _, f := range files {
+		if f == "-" {
+			continue
+		}
+		if info, err := os.Stat(f); err == nil && info.IsDir() {
+			fmt.Fprintf(os.Stderr, "jennifer fmt: %s is a directory; fmt takes files - let the shell select them (e.g. %s/**/*.j)\n", f, f)
+			return 2
+		}
+	}
+	if !write {
+		if len(files) > 1 {
+			fmt.Fprintln(os.Stderr, "jennifer fmt: formatting several files to stdout is ambiguous; pass -w to rewrite them in place")
+			return 2
+		}
+		return fmtToStdout(files[0])
+	}
+	status := 0
+	for _, f := range files {
+		if f == "-" {
+			fmt.Fprintln(os.Stderr, "jennifer fmt: -w cannot rewrite stdin")
+			status = 2
+			continue
+		}
+		if code := fmtInPlace(f); code != 0 {
+			status = code
+		}
+	}
+	return status
+}
+
+// formatFile lexes and formats one source, returning its canonical text. ok is
+// false (with a diagnostic already printed) on a read or lex error.
+func formatFile(path string) (src, formatted string, ok bool) {
 	src, label, absPath, _, ok := loadProgramSource(path)
 	if !ok {
-		return 1
+		return "", "", false
 	}
 	tokens, err := lexer.TokenizeWithFile(src, absPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", label, err.Error())
 		printErrorContext(src, absPath, err)
+		return "", "", false
+	}
+	return src, formatTokens(tokens), true
+}
+
+func fmtToStdout(path string) int {
+	_, formatted, ok := formatFile(path)
+	if !ok {
 		return 1
 	}
-	formatted := formatTokens(tokens)
 	io.WriteString(os.Stdout, formatted)
 	return 0
+}
+
+// fmtInPlace rewrites path with its canonical form. An already-canonical file is
+// left untouched (no mtime churn); a changed file keeps its existing mode. The
+// write is atomic - a temp file in the same directory then a rename - so a crash
+// or a full disk mid-write can never truncate or corrupt the original source.
+func fmtInPlace(path string) int {
+	src, formatted, ok := formatFile(path)
+	if !ok {
+		return 1
+	}
+	if formatted == src {
+		return 0
+	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeFileAtomic(path, []byte(formatted), mode); err != nil {
+		fmt.Fprintf(os.Stderr, "jennifer fmt: writing %s: %v\n", path, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "formatted %s\n", path)
+	return 0
+}
+
+// writeFileAtomic writes data to a temp file in path's directory, fsyncs and
+// chmods it, then renames it over path. The rename is atomic on POSIX, so a
+// reader (or a crash) never observes a partially written source file; the temp
+// file is cleaned up on any error before the rename.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".jfmt-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // formatTokens emits canonical Jennifer source from a complete token list
@@ -50,11 +175,12 @@ func formatTokens(tokens []lexer.Token) string {
 	// effectively "line start" for separator purposes. That makes
 	// a leading comment skip the spurious blank line that would
 	// otherwise appear before it.
-	f := &fmtState{indent: 0, atLineStart: true}
+	f := &fmtState{indent: 0, atLineStart: true, tokens: tokens}
 	for i, t := range tokens {
 		if t.Type == lexer.TOKEN_EOF {
 			break
 		}
+		f.tokenIdx = i
 		f.emit(t, peekAt(tokens, i+1))
 	}
 	return f.finish()
@@ -69,8 +195,9 @@ type fmtState struct {
 	indent      int // current block depth in indent units
 	col         int // current output column (rune count since last '\n')
 	prev        lexer.Token
-	hasPrev     bool // false before the first token
-	atLineStart bool // true right after newline+indent has been written
+	beforePrev  lexer.Token // the real token two back (trivia skipped); a `.` here marks f.prev as a namespaced member name
+	hasPrev     bool        // false before the first token
+	atLineStart bool        // true right after newline+indent has been written
 	// Token kinds that "begin an operand context" - i.e. when the next
 	// token is `-`, that `-` is binary, not unary. Maintained on every
 	// emit() so unary-vs-binary disambiguation stays a state lookup.
@@ -112,14 +239,41 @@ type fmtState struct {
 	// next TOKEN_LBRACE. Reset defensively on `;` so a stray `struct`
 	// keyword doesn't corrupt later formatting.
 	pendingStructBrace bool
+	// tokens is the full token slice and tokenIdx the index of the token
+	// currently being emitted, so emit() can look ahead over a whole
+	// container (to the matching close bracket) to decide whether it wraps.
+	tokens   []lexer.Token
+	tokenIdx int
+	// wrapStack mirrors every open `(` / `[` / `{` so the innermost
+	// container's wrap state is known for a top-level `,` (which container
+	// does this comma separate?). `wraps` is true when the container is
+	// rendered multiline: its body is indented one level and its top-level
+	// commas break to newlines. lastWrap caches the flag of the most
+	// recently closed container (read when its `}` / `]` is emitted, after
+	// the pop).
+	wrapStack []wrapFrame
+	lastWrap  bool
+}
+
+type wrapFrame struct {
+	wraps bool
 }
 
 const (
-	braceBlock  = byte('b')
-	braceMap    = byte('m')
-	braceStruct = byte('s')
-	braceMatch  = byte('M') // a `match (EXPR) { ... }` body (arms formatted like if/else branches)
+	braceBlock     = byte('b')
+	braceMap       = byte('m')
+	braceStruct    = byte('s')
+	braceMatch     = byte('M') // a `match (EXPR) { ... }` body (arms formatted like if/else branches)
+	braceStructLit = byte('L') // a struct / enum literal `Name{...}` (tight brace + tight body, like a map)
+	braceArm       = byte('a') // a `when` / `else` arm body (a block that may stay inline when short)
 )
+
+// maxInlineElements is the top-level element count above which a struct / enum /
+// map / list literal wraps to one element per line regardless of width. Width
+// (maxLineLength) is the dominant trigger; this is the secondary guard for a
+// literal that fits under 100 columns but packs so many members it reads better
+// stacked. Tunable; see docs/user-guide/style-guide.md.
+const maxInlineElements = 6
 
 const fmtIndent = "    " // 4 spaces, per style-guide.md
 
@@ -150,44 +304,102 @@ func (f *fmtState) emit(t, next lexer.Token) {
 	//   - map literal: anywhere else (the parser only allows `{` in
 	//     expression position when it's a map literal, so any
 	//     non-block, non-struct context must be a map).
-	openBlock := false
+	// Classify `{` before writing it - the separator before a struct-literal
+	// brace is tight, so the kind must be known first - and decide whether the
+	// container it opens is rendered multiline. Kinds:
+	//   - match body / arm body: paren depth 0, flagged by pendingMatch/Arm.
+	//   - struct-decl body: `def struct Name {` (pendingStructBrace).
+	//   - block: after `)` / `else` / `try` / `spawn` / `repeat`.
+	//   - struct / enum literal: a `{` right after an IDENT (`Name{`).
+	//   - map literal: anywhere else.
 	if t.Type == lexer.TOKEN_LBRACE {
 		var kind byte
 		switch {
 		case f.pendingMatchBrace && f.parenDepth == 0:
-			// `match (subject) {` - the body brace, right after the subject `)`.
 			kind = braceMatch
 			f.pendingMatchBrace = false
 		case f.pendingArmBrace && f.parenDepth == 0:
-			// `when V { ... }` - the arm body; formatted as a normal block.
-			kind = braceBlock
+			kind = braceArm
 			f.pendingArmBrace = false
 			f.inWhenValues = false
 		case f.pendingStructBrace:
 			kind = braceStruct
 			f.pendingStructBrace = false
+		case f.hasPrev && f.prev.Type == lexer.TOKEN_ELSE && f.currentBraceKind() == braceMatch:
+			// A `match` `else` is a peer arm (like `when`), not an if-else block,
+			// so it may stay inline when it holds a single short statement.
+			kind = braceArm
 		case f.hasPrev && isBlockOpener(f.prev.Type):
 			kind = braceBlock
+		case f.hasPrev && f.prev.Type == lexer.TOKEN_IDENT:
+			kind = braceStructLit
 		default:
 			kind = braceMap
 		}
+		var wraps bool
+		switch kind {
+		case braceBlock, braceMatch, braceStruct:
+			wraps = true
+		case braceArm:
+			wraps = f.decideArmWrap(f.tokenIdx)
+		case braceStructLit:
+			wraps = f.decideWrap(f.tokenIdx, true)
+		default: // braceMap
+			wraps = f.decideWrap(f.tokenIdx, true)
+		}
 		f.braceStack = append(f.braceStack, kind)
 		f.lastBraceKind = kind
-		openBlock = kind == braceBlock || kind == braceStruct || kind == braceMatch
+		f.pushWrap(wraps)
 	}
-	// Closing brace: pop and find out what kind we're closing. For block
-	// and struct `}` we dedent before writing so the brace lands at the
-	// outer indent; for map literal `}` we don't touch indent. The
-	// popped kind is also remembered in lastBraceKind so the next
-	// token's separator logic can branch correctly.
+	// Opening `[` / `(`: a `[` in value position (not hugging an indexable
+	// target) is a list literal that may wrap; an index / slice `[` and every
+	// `(` never wrap. parenDepth still counts both, for match / arm detection.
+	if t.Type == lexer.TOKEN_LBRACKET {
+		wraps := false
+		if !(f.hasPrev && noSpaceBeforeLBracket(f.prev.Type)) {
+			// A list wraps on width only - a long list of short scalars reads
+			// fine on one line, so the element-count trigger (for key:value
+			// literals) does not apply.
+			wraps = f.decideWrap(f.tokenIdx, false)
+		}
+		f.pushWrap(wraps)
+		f.parenDepth++
+	}
+	if t.Type == lexer.TOKEN_LPAREN {
+		// A call-argument `(` (one that hugs its callee) wraps one arg per line
+		// when it is long; a control-flow `(` (`if (`, `while (`) and a grouping
+		// `(` never wrap.
+		wraps := false
+		if f.hasPrev && (noSpaceBeforeLParen(f.prev.Type) || f.beforePrev.Type == lexer.TOKEN_DOT) {
+			wraps = f.decideCallWrap(f.tokenIdx)
+		}
+		f.pushWrap(wraps)
+		f.parenDepth++
+	}
+	// Closing `}` / `]` / `)`: pop the container and, when it was multiline,
+	// dedent before writing so the close bracket lands at the outer indent.
 	if t.Type == lexer.TOKEN_RBRACE && len(f.braceStack) > 0 {
 		kind := f.braceStack[len(f.braceStack)-1]
 		f.braceStack = f.braceStack[:len(f.braceStack)-1]
 		f.lastBraceKind = kind
-		if kind == braceBlock || kind == braceStruct || kind == braceMatch {
-			if f.indent > 0 {
-				f.indent--
-			}
+		if f.popWrap() && f.indent > 0 {
+			f.indent--
+		}
+	}
+	if t.Type == lexer.TOKEN_RBRACKET {
+		if f.popWrap() && f.indent > 0 {
+			f.indent--
+		}
+		if f.parenDepth > 0 {
+			f.parenDepth--
+		}
+	}
+	if t.Type == lexer.TOKEN_RPAREN {
+		if f.popWrap() && f.indent > 0 {
+			f.indent--
+		}
+		if f.parenDepth > 0 {
+			f.parenDepth--
 		}
 	}
 	// Detect whether the `-` we're about to write is unary. A `-` is
@@ -195,10 +407,8 @@ func (f *fmtState) emit(t, next lexer.Token) {
 	isUnaryMinus := t.Type == lexer.TOKEN_MINUS && !f.prevIsOperand
 	f.writeSeparator(t)
 	f.writeToken(t, next)
-	// Track "next `{` is a struct-decl body" across the intervening
-	// identifier: set on STRUCT, reset by LBRACE (consumed above) or
-	// by SEMI (defensive - keeps a stray `struct` from tainting later
-	// braces).
+	// Track "next `{` is a struct-decl / match / arm body" across the
+	// intervening tokens; reset defensively on `;`.
 	switch t.Type {
 	case lexer.TOKEN_STRUCT, lexer.TOKEN_ENUM:
 		f.pendingStructBrace = true
@@ -213,21 +423,20 @@ func (f *fmtState) emit(t, next lexer.Token) {
 		f.pendingMatchBrace = false
 		f.pendingArmBrace = false
 		f.inWhenValues = false
-	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
-		f.parenDepth++
-	case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
-		if f.parenDepth > 0 {
-			f.parenDepth--
-		}
 	}
+	// Indent the body of a container that just opened multiline. Driven off
+	// the wrap frame so blocks, struct decls, match bodies, wrapped literals,
+	// multiline arms, and wrapped call-argument lists indent uniformly (their
+	// close dedents above).
+	if (t.Type == lexer.TOKEN_LBRACE || t.Type == lexer.TOKEN_LBRACKET || t.Type == lexer.TOKEN_LPAREN) && f.curWraps() {
+		f.indent++
+	}
+	f.beforePrev = f.prev
 	f.prev = t
 	f.hasPrev = true
 	f.atLineStart = false
 	f.prevIsOperand = isOperandToken(t)
 	f.prevIsUnaryMinus = isUnaryMinus
-	if openBlock {
-		f.indent++
-	}
 }
 
 // nextLineIndent is the indent level the line *after* this trivia should get.
@@ -239,11 +448,8 @@ func (f *fmtState) emit(t, next lexer.Token) {
 // own separator (which runs after the dedent).
 func (f *fmtState) nextLineIndent(next lexer.Token) int {
 	ind := f.indent
-	if next.Type == lexer.TOKEN_RBRACE && len(f.braceStack) > 0 {
-		switch f.braceStack[len(f.braceStack)-1] {
-		case braceBlock, braceStruct, braceMatch:
-			ind--
-		}
+	if (next.Type == lexer.TOKEN_RBRACE || next.Type == lexer.TOKEN_RBRACKET) && f.curWraps() {
+		ind--
 	}
 	if ind < 0 {
 		ind = 0
@@ -375,6 +581,11 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 		f.writeByte(' ')
 		return
 	}
+	// Tight brace of a struct / enum literal: `Name{` (no space, so the brace
+	// reads as bound to the type name rather than a block opener).
+	if t.Type == lexer.TOKEN_LBRACE && f.currentBraceKind() == braceStructLit {
+		return
+	}
 	// Column-based reflow at binary joiners. When a line has already
 	// grown past maxLineLength, or when the source itself put a break
 	// at this point, wrap AFTER the joiner so the operator hangs at
@@ -382,27 +593,35 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	// extra indent level per hanging continuation line, matching what
 	// the style guide recommends.
 	if isBinaryJoiner(f.prev.Type) && !f.prevIsUnaryMinus {
-		if t.Line > f.prev.Line || f.col > maxLineLength {
+		// Break when the source broke here, when the line is already over the
+		// limit, or when appending the next operand would push it over - the
+		// last case fills the line before wrapping and is what stops a long
+		// concat (whose overflowing operand is a single token) from printing
+		// past the limit and tripping the line-length lint.
+		opW, followW := f.nextOperandWidth(f.tokenIdx)
+		// Reserve the leading space before the operand and, when another joiner
+		// follows it, the ` +` / ` and` / ` or` that will hang at the end of this
+		// line after the operand - so the hanging operator does not itself spill
+		// past the limit.
+		if t.Line > f.prev.Line || f.col > maxLineLength ||
+			f.col+1+opW+followW > maxLineLength {
 			f.continuationLine()
 			return
 		}
 	}
 	// Statement terminator: ";" closes a statement; the next token starts
-	// a new line at the current indent. Exception: the two `;`s inside
-	// `for (...; ...; ...)` stay on the same line (handled by the
-	// paren-depth check below).
+	// a new line at the current indent. Exceptions: the two `;`s inside
+	// `for (...; ...; ...)` stay inline, and an inline `when` / `else` arm
+	// keeps its single statement's `;` on the same line as the closing `}`.
 	if f.prev.Type == lexer.TOKEN_SEMI {
-		if !f.insideForHeader() {
-			f.newline()
+		if f.insideForHeader() {
+			f.writeByte(' ')
 			return
 		}
-		f.writeByte(' ')
-		return
-	}
-	// Struct-decl `,`: each field on its own line. The comma itself
-	// was already emitted (tight-on-left); the next field's leading
-	// token gets a newline here instead of a space.
-	if f.prev.Type == lexer.TOKEN_COMMA && f.currentBraceKind() == braceStruct {
+		if t.Type == lexer.TOKEN_RBRACE && f.lastBraceKind == braceArm && !f.lastWrap {
+			f.writeByte(' ')
+			return
+		}
 		f.newline()
 		return
 	}
@@ -417,25 +636,33 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 		f.writeByte(' ')
 		return
 	}
-	// Closing brace: block or struct `}` ends a multi-line container;
-	// the next token starts a new line, except for the cuddled tail
-	// forms - `} else`, `} elseif`, `} catch`, `} until`, and
-	// `};` where the semicolon hugs the brace so a struct decl reads
-	// as `};` on one line. Map-literal `}` stays inline (no newline).
+	// Top-level `,` of a multiline container - a struct decl, or a wrapped
+	// struct / enum / map / list literal - puts each element on its own line.
+	// prevContainerWraps looks past the current token's own frame when that
+	// token is itself an opening bracket (a list whose element is a map).
+	if f.prev.Type == lexer.TOKEN_COMMA && f.prevContainerWraps(t) {
+		f.newline()
+		return
+	}
+	// After a `}` that closed a block / struct-decl / match / multiline arm:
+	// the next token starts a new line, except the cuddled tail forms
+	// (`} else`, `} elseif`, `} catch`, `} until`, `};`). A `match`'s `else`
+	// is a peer arm and does start its own line.
 	if f.prev.Type == lexer.TOKEN_RBRACE {
-		if t.Type == lexer.TOKEN_SEMI {
+		// A `}` hugs a following `;` / `,` / `)` - a statement terminator or a
+		// separator / close after a block expression used as a value, e.g. a
+		// `spawn { ... }` element in a list (`},`) or a call argument (`})`). A
+		// following `]` is deliberately NOT here: a `]` closing a multiline list
+		// lands on its own line, handled by the list-close rule below.
+		switch t.Type {
+		case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN:
 			return
 		}
-		if f.prevBraceKind() == braceBlock || f.prevBraceKind() == braceStruct || f.prevBraceKind() == braceMatch {
+		k := f.prevBraceKind()
+		if k == braceBlock || k == braceStruct || k == braceMatch || k == braceArm {
 			switch t.Type {
 			case lexer.TOKEN_ELSE, lexer.TOKEN_ELSEIF,
 				lexer.TOKEN_CATCH, lexer.TOKEN_UNTIL:
-				// Tail keywords cuddle the preceding `}` in an if / try / repeat
-				// chain: `} else {`, `} elseif (c) {`, `} catch (e) {`,
-				// `} until (c);`. A `match`, though, is a flat list of peer arms
-				// (like a switch / case in every other language), so each `when`
-				// and the `else` starts its own line - handled by falling through
-				// to newline below, and this explicit case for the match `else`.
 				if t.Type == lexer.TOKEN_ELSE && f.currentBraceKind() == braceMatch {
 					f.newline()
 					return
@@ -446,32 +673,86 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 			f.newline()
 			return
 		}
-		// Map literal close: fall through to default-space-or-tight-rules.
+		// A map / struct-literal `}` falls through to the tight rules (the
+		// following `,` / `;` / `)` hugs it).
 	}
-	// About-to-emit `}` for a struct decl: newline first so the closing
-	// brace lands on its own line at the outer indent (indent was
-	// already decremented in emit()).
-	if t.Type == lexer.TOKEN_RBRACE && f.lastBraceKind == braceStruct {
-		f.newline()
+	// About-to-emit a container close. Struct decls and multiline map /
+	// struct-literal bodies put `}` on its own line; a multiline list puts `]`
+	// on its own line. Inline struct-lit / map / list / index closes stay tight.
+	if t.Type == lexer.TOKEN_RBRACE {
+		switch f.lastBraceKind {
+		case braceStruct:
+			f.newline()
+			return
+		case braceStructLit, braceMap:
+			if f.lastWrap {
+				f.newline()
+			}
+			return
+		}
+	}
+	if t.Type == lexer.TOKEN_RBRACKET {
+		if f.lastWrap {
+			f.newline()
+		}
 		return
 	}
-	// Opening brace: block and struct `{` trigger a newline so the body
-	// starts on its own indented line. Map-literal `{` keeps the
-	// contents inline with no padding (matches the existing `(` rule).
+	// Opening a container body. Block / struct-decl / match `{` and a multiline
+	// map / struct-lit newline; an inline arm keeps its statement on the line;
+	// an inline struct-lit / map literal keeps its body tight (no padding).
 	if f.prev.Type == lexer.TOKEN_LBRACE {
-		if f.prevBraceKind() == braceBlock || f.prevBraceKind() == braceStruct || f.prevBraceKind() == braceMatch {
+		k := f.prevBraceKind()
+		if k == braceBlock || k == braceStruct || k == braceMatch {
 			f.newline()
 			return
 		}
-		// Map literal: no padding inside.
+		if k == braceArm {
+			if f.prevContainerWraps(t) {
+				f.newline()
+			} else {
+				f.writeByte(' ')
+			}
+			return
+		}
+		if f.prevContainerWraps(t) {
+			f.newline()
+			return
+		}
+		// Inline map / struct-literal: no padding inside.
 		return
 	}
-	// No space between an IDENT or TYPE keyword and an opening `(` - call
-	// sites (`printf(`) and type-conversion sites (`int(`) both use the
-	// tight form. The leading keyword forms (`if (`, `while (`, `for (`,
-	// `elseif (`) get a space, handled by the default case below since
-	// those keyword types aren't in noSpaceBeforeLParen.
-	if t.Type == lexer.TOKEN_LPAREN && noSpaceBeforeLParen(f.prev.Type) {
+	// Opening a list literal `[`: a multiline list breaks after `[`; an inline
+	// list (and every index / slice `[`) keeps its contents on the line.
+	if f.prev.Type == lexer.TOKEN_LBRACKET {
+		// The `t != ]` guard keeps an empty `[]` tight: its `[` frame is already
+		// popped by the time its `]` reaches here, so prevContainerWraps would
+		// otherwise read the enclosing (possibly wrapping) container.
+		if t.Type != lexer.TOKEN_RBRACKET && f.prevContainerWraps(t) {
+			f.newline()
+			return
+		}
+		return
+	}
+	// Opening `(`: a wrapped call-argument list breaks after `(` (first arg on
+	// its own indented line); an inline call / control-flow / grouping `(` keeps
+	// its contents on the line. The `t != )` guard keeps an empty `()` tight
+	// (same already-popped-frame reason as `[]` above).
+	if f.prev.Type == lexer.TOKEN_LPAREN {
+		if t.Type != lexer.TOKEN_RPAREN && f.prevContainerWraps(t) {
+			f.newline()
+			return
+		}
+		return
+	}
+	// No space between a callee and its opening `(`. Two cases: a bare call /
+	// cast / `len` (`printf(`, `int(`, `len(`), and - the general one - any
+	// `.`-qualified member name (`json.map(`, `strings.repeat(`), where the
+	// member may be a keyword the lexer tokenised as such, so the whitelist
+	// can't see it; the preceding `.` (two real tokens back) is the tell. The
+	// leading keyword forms (`if (`, `while (`, `for (`, `match (`) get a space:
+	// their keyword isn't in the whitelist and isn't dot-qualified.
+	if t.Type == lexer.TOKEN_LPAREN &&
+		(noSpaceBeforeLParen(f.prev.Type) || f.beforePrev.Type == lexer.TOKEN_DOT) {
 		return
 	}
 	// Index expressions hug their target: `$xs[0]`, `foo()[1]`,
@@ -479,11 +760,6 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	// expression (IDENT, VARREF, RPAREN, RBRACKET, RBRACE-from-map) gets
 	// tight binding to a following `[`.
 	if t.Type == lexer.TOKEN_LBRACKET && noSpaceBeforeLBracket(f.prev.Type) {
-		return
-	}
-	// No space before a map literal `}` (the closing brace was already
-	// classified during emit and recorded in lastBraceKind).
-	if t.Type == lexer.TOKEN_RBRACE && f.lastBraceKind == braceMap {
 		return
 	}
 	// Tight punctuation: nothing between `(`/`[`/map-`{` and the next
@@ -506,6 +782,63 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	}
 	// Default: single space.
 	f.writeByte(' ')
+}
+
+// nextOperandWidth returns the rendered width of the operand beginning at
+// tokens[i] (the token right after a binary joiner), up to the next same-depth
+// joiner or boundary (`;`, `,`, or a close bracket that ends the enclosing
+// group), and followW: the width of ` <joiner>` when another binary joiner
+// immediately follows the operand (0 at a boundary). Used to decide whether
+// appending this operand - plus the operator that would hang after it - fits.
+func (f *fmtState) nextOperandWidth(i int) (int, int) {
+	depth := 0
+	width := 0
+	for j := i; j < len(f.tokens); j++ {
+		t := f.tokens[j]
+		switch t.Type {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth == 0 {
+				return width, 0
+			}
+			depth--
+		case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA:
+			if depth == 0 {
+				return width, 0
+			}
+		case lexer.TOKEN_PLUS, lexer.TOKEN_AND, lexer.TOKEN_OR:
+			if depth == 0 && j > i {
+				return width, 1 + tokenWidth(t) // space + the hanging joiner
+			}
+		}
+		if j > i {
+			prevUnary := f.tokens[j-1].Type == lexer.TOKEN_MINUS &&
+				(j-2 < 0 || !isOperandToken(f.tokens[j-2]))
+			width += inlineSepWidth(f.tokens[j-1], t, prevUnary)
+		}
+		width += tokenWidth(t)
+	}
+	return width, 0
+}
+
+// prevContainerWraps reports whether the container we are currently *inside*
+// (the one whose open bracket is f.prev) is being rendered multiline. When the
+// current token cur is itself an opening bracket its own frame is already on the
+// wrap stack, so the enclosing container is one below the top.
+func (f *fmtState) prevContainerWraps(cur lexer.Token) bool {
+	n := len(f.wrapStack)
+	switch cur.Type {
+	case lexer.TOKEN_LBRACE, lexer.TOKEN_LBRACKET, lexer.TOKEN_LPAREN:
+		if n >= 2 {
+			return f.wrapStack[n-2].wraps
+		}
+		return false
+	}
+	if n >= 1 {
+		return f.wrapStack[n-1].wraps
+	}
+	return false
 }
 
 // writeByte / writeString are the only two paths that reach f.out;
@@ -541,7 +874,15 @@ func (f *fmtState) writeToken(t, _ lexer.Token) {
 		f.writeByte('$')
 		f.writeString(t.Lexeme)
 	case lexer.TOKEN_STRING:
-		f.writeString(quoteJenniferString(t.Lexeme))
+		// Emit the exact source spelling (quotes, escapes, embedded newlines) so
+		// a multi-line or specifically-escaped string survives verbatim; only a
+		// token with no captured Raw (a hand-built AST in a test) falls back to
+		// re-quoting the processed value.
+		if t.Raw != "" {
+			f.writeString(t.Raw)
+		} else {
+			f.writeString(quoteJenniferString(t.Lexeme))
+		}
 	default:
 		f.writeString(canonicalLexeme(t))
 	}
@@ -615,11 +956,14 @@ func (f *fmtState) insideForHeader() bool {
 	return false
 }
 
-// canonicalLexeme returns the source-form spelling of a token. For
-// keywords and punctuation, the constant lexeme in the token is already
-// canonical; for INT and FLOAT literals we use the lexeme as captured by
-// the lexer (no normalization of float forms in v1).
+// canonicalLexeme returns the source-form spelling of a token. For a numeric
+// literal Raw carries the exact source (digit separators, base prefix), which
+// the processed Lexeme has lost, so it wins; for keywords and punctuation the
+// constant lexeme is already canonical.
 func canonicalLexeme(t lexer.Token) string {
+	if t.Raw != "" {
+		return t.Raw
+	}
 	if t.Lexeme != "" {
 		return t.Lexeme
 	}
@@ -764,4 +1108,317 @@ func peekAt(tokens []lexer.Token, i int) lexer.Token {
 		return lexer.Token{}
 	}
 	return tokens[i]
+}
+
+// --- container wrap lookahead --------------------------------------------
+
+func (f *fmtState) pushWrap(w bool) { f.wrapStack = append(f.wrapStack, wrapFrame{wraps: w}) }
+
+// popWrap removes the innermost container frame, caching its wrap flag in
+// lastWrap (read by the closing `}` / `]` separator, which runs after the pop).
+func (f *fmtState) popWrap() bool {
+	if len(f.wrapStack) == 0 {
+		return false
+	}
+	w := f.wrapStack[len(f.wrapStack)-1].wraps
+	f.wrapStack = f.wrapStack[:len(f.wrapStack)-1]
+	f.lastWrap = w
+	return w
+}
+
+// curWraps reports whether the innermost open container is being rendered
+// multiline. Used to decide a top-level `,`'s separator and the token right
+// after an opening bracket.
+func (f *fmtState) curWraps() bool {
+	if len(f.wrapStack) == 0 {
+		return false
+	}
+	return f.wrapStack[len(f.wrapStack)-1].wraps
+}
+
+// spanEnd returns the index of the close bracket matching the open bracket at
+// tokens[open] (`{`->`}` or `[`->`]`), or -1 if unbalanced. Nesting of the
+// other bracket type is irrelevant: valid source is balanced, so counting one
+// type finds the match.
+func spanEnd(tokens []lexer.Token, open int) int {
+	var openT, closeT lexer.TokenType
+	switch tokens[open].Type {
+	case lexer.TOKEN_LBRACE:
+		openT, closeT = lexer.TOKEN_LBRACE, lexer.TOKEN_RBRACE
+	case lexer.TOKEN_LBRACKET:
+		openT, closeT = lexer.TOKEN_LBRACKET, lexer.TOKEN_RBRACKET
+	case lexer.TOKEN_LPAREN:
+		openT, closeT = lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN
+	default:
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(tokens); i++ {
+		switch tokens[i].Type {
+		case openT:
+			depth++
+		case closeT:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// topLevelElements counts the comma-separated elements directly inside the
+// container tokens[open..close] (commas at the container's own depth, +1), or 0
+// for an empty container.
+func topLevelElements(tokens []lexer.Token, open, close int) int {
+	if close <= open+1 {
+		return 0
+	}
+	depth := 0
+	commas := 0
+	for i := open; i < close; i++ {
+		switch tokens[i].Type {
+		case lexer.TOKEN_LBRACE, lexer.TOKEN_LBRACKET, lexer.TOKEN_LPAREN:
+			depth++
+		case lexer.TOKEN_RBRACE, lexer.TOKEN_RBRACKET, lexer.TOKEN_RPAREN:
+			depth--
+		case lexer.TOKEN_COMMA:
+			if depth == 1 {
+				commas++
+			}
+		}
+	}
+	return commas + 1
+}
+
+// tokenWidth returns the rune width of a token's canonical spelling.
+func tokenWidth(t lexer.Token) int {
+	switch t.Type {
+	case lexer.TOKEN_VARREF:
+		return 1 + len([]rune(t.Lexeme))
+	case lexer.TOKEN_STRING:
+		if t.Raw != "" {
+			return len([]rune(t.Raw))
+		}
+		return len([]rune(quoteJenniferString(t.Lexeme)))
+	default:
+		return len([]rune(canonicalLexeme(t)))
+	}
+}
+
+// inlineContainerWidth returns the rune width of tokens[open..close] rendered on
+// one line (open is a `{` or `[`). Used to decide whether a container fits under
+// the column limit; a small estimation error only nudges a borderline
+// container's wrap decision, never correctness.
+func inlineContainerWidth(tokens []lexer.Token, open, close int) int {
+	width := 0
+	for i := open; i <= close; i++ {
+		t := tokens[i]
+		if i > open {
+			prevUnary := tokens[i-1].Type == lexer.TOKEN_MINUS &&
+				(i-2 < open || !isOperandToken(tokens[i-2]))
+			width += inlineSepWidth(tokens[i-1], t, prevUnary)
+		}
+		width += tokenWidth(t)
+	}
+	return width
+}
+
+// inlineSepWidth returns the separator width (0 or 1) the inline formatter would
+// put between prev and cur, mirroring writeSeparator's non-newline branches.
+// prevUnary is true when prev is a unary minus.
+func inlineSepWidth(prev, cur lexer.Token, prevUnary bool) int {
+	// Tight before a struct / enum literal brace: `Name{`.
+	if cur.Type == lexer.TOKEN_LBRACE && prev.Type == lexer.TOKEN_IDENT {
+		return 0
+	}
+	// Inline literal bodies are tight (no padding inside `{` / `}`).
+	if prev.Type == lexer.TOKEN_LBRACE || cur.Type == lexer.TOKEN_RBRACE {
+		return 0
+	}
+	switch cur.Type {
+	case lexer.TOKEN_RPAREN, lexer.TOKEN_COMMA, lexer.TOKEN_SEMI,
+		lexer.TOKEN_DOT, lexer.TOKEN_DOTDOT, lexer.TOKEN_RBRACKET, lexer.TOKEN_COLON:
+		return 0
+	}
+	switch prev.Type {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_DOT, lexer.TOKEN_DOTDOT, lexer.TOKEN_LBRACKET:
+		return 0
+	}
+	if cur.Type == lexer.TOKEN_LPAREN && noSpaceBeforeLParen(prev.Type) {
+		return 0
+	}
+	if cur.Type == lexer.TOKEN_LBRACKET && noSpaceBeforeLBracket(prev.Type) {
+		return 0
+	}
+	if prevUnary {
+		return 0
+	}
+	return 1
+}
+
+// decideWrap reports whether the literal container opening at tokens[open]
+// (a `{` or `[`) should be rendered multiline: it wraps when embedded trivia
+// forces it, when it has more than maxInlineElements top-level elements, or when
+// its inline rendering would push the line past maxLineLength. f.col is the
+// column the open bracket lands at, so the check is layout-aware.
+func (f *fmtState) decideWrap(open int, applyCount bool) bool {
+	end := spanEnd(f.tokens, open)
+	if end < 0 || end == open+1 {
+		return false
+	}
+	for i := open + 1; i < end; i++ {
+		switch f.tokens[i].Type {
+		case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+			lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE:
+			// Embedded trivia can't sit on a joined line.
+			return true
+		case lexer.TOKEN_SPAWN:
+			// A `spawn { ... }` block element is inherently multiline (the block
+			// body always expands), so the container that holds it must wrap -
+			// its inline form does not exist however narrow it looks.
+			return true
+		}
+	}
+	if applyCount && topLevelElements(f.tokens, open, end) > maxInlineElements {
+		return true
+	}
+	w := inlineContainerWidth(f.tokens, open, end)
+	trail := 0
+	if end+1 < len(f.tokens) {
+		switch f.tokens[end+1].Type {
+		case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			trail = 1
+		}
+	}
+	return f.effectiveStartCol()+w+trail > maxLineLength
+}
+
+// decideCallWrap reports whether a call-argument list opening at tokens[open]
+// (a call `(`) should wrap one argument per line: only with **two or more**
+// arguments (a lone argument has no better shape, and a lone spawn/block arg
+// expands on its own), and then when embedded trivia / a spawn block forces it
+// or its inline rendering would pass the column limit. The close `)` hugs the
+// last argument (handled by the RPAREN separator rules), so a wrapped call reads
+// `foo(\n    a,\n    b)`.
+func (f *fmtState) decideCallWrap(open int) bool {
+	end := spanEnd(f.tokens, open)
+	if end < 0 || end == open+1 {
+		return false
+	}
+	if topLevelElements(f.tokens, open, end) < 2 {
+		return false
+	}
+	for i := open + 1; i < end; i++ {
+		switch f.tokens[i].Type {
+		case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+			lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE, lexer.TOKEN_SPAWN:
+			return true
+		}
+	}
+	w := inlineContainerWidth(f.tokens, open, end)
+	trail := 0
+	if end+1 < len(f.tokens) {
+		switch f.tokens[end+1].Type {
+		case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			trail = 1
+		}
+	}
+	return f.effectiveStartCol()+w+trail > maxLineLength
+}
+
+// effectiveStartCol is the column the token about to be emitted will actually
+// land at. It is f.col mid-line, but when the separator before it will be a
+// newline (this container is an element of an enclosing multiline container, so
+// it starts fresh at the body indent) the running column is irrelevant and the
+// indent column is what matters.
+func (f *fmtState) effectiveStartCol() int {
+	if f.startsFreshLine() {
+		return f.indent * len(fmtIndent)
+	}
+	// f.col is the column *before* the separator that will precede this bracket
+	// is written, so add that separator's width to get the bracket's true
+	// landing column (else a mid-line literal is under-measured by the space).
+	return f.col + f.leadingSepWidth(f.tokenIdx)
+}
+
+// leadingSepWidth predicts the width (0 or 1) of the separator writeSeparator
+// will put immediately before the bracket at tokens[open]: 0 when it hugs the
+// previous token (a struct-literal `Name{`, or a `(` / `[` / `.` / index on the
+// left), else a single space.
+func (f *fmtState) leadingSepWidth(open int) int {
+	if !f.hasPrev {
+		return 0
+	}
+	cur := f.tokens[open]
+	if cur.Type == lexer.TOKEN_LBRACE && f.prev.Type == lexer.TOKEN_IDENT {
+		return 0
+	}
+	// A call `(` hugs its callee (`foo(`, `ns.name(`), so no separator precedes it.
+	if cur.Type == lexer.TOKEN_LPAREN &&
+		(noSpaceBeforeLParen(f.prev.Type) || f.beforePrev.Type == lexer.TOKEN_DOT) {
+		return 0
+	}
+	switch f.prev.Type {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_DOT, lexer.TOKEN_DOTDOT, lexer.TOKEN_LBRACKET:
+		return 0
+	}
+	if cur.Type == lexer.TOKEN_LBRACKET && noSpaceBeforeLBracket(f.prev.Type) {
+		return 0
+	}
+	return 1
+}
+
+// startsFreshLine predicts whether the token about to be emitted is preceded by
+// a newline: the first / next element of an enclosing multiline container, or a
+// fresh statement after `;` / a block `}`.
+func (f *fmtState) startsFreshLine() bool {
+	if !f.hasPrev {
+		return false
+	}
+	switch f.prev.Type {
+	case lexer.TOKEN_COMMA, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+		return f.curWraps()
+	case lexer.TOKEN_SEMI:
+		return !f.insideForHeader()
+	case lexer.TOKEN_RBRACE:
+		return true
+	}
+	return false
+}
+
+// decideArmWrap reports whether a `when` / `else` arm body opening at
+// tokens[open] should expand across lines. A single-statement arm that fits the
+// column limit stays inline (`when V { stmt; }`); anything else (multiple
+// statements, an embedded comment, or an overflowing line) expands like a block.
+func (f *fmtState) decideArmWrap(open int) bool {
+	end := spanEnd(f.tokens, open)
+	if end < 0 {
+		return true
+	}
+	depth := 0
+	semis := 0
+	for i := open; i < end; i++ {
+		switch f.tokens[i].Type {
+		case lexer.TOKEN_LBRACE, lexer.TOKEN_LBRACKET, lexer.TOKEN_LPAREN:
+			depth++
+		case lexer.TOKEN_RBRACE, lexer.TOKEN_RBRACKET, lexer.TOKEN_RPAREN:
+			depth--
+		case lexer.TOKEN_SEMI:
+			if depth == 1 {
+				semis++
+			}
+		case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+			lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE:
+			return true
+		case lexer.TOKEN_SPAWN:
+			// A `spawn { ... }` in the arm body forces the arm multiline.
+			return true
+		}
+	}
+	if semis != 1 {
+		return true
+	}
+	w := inlineContainerWidth(f.tokens, open, end)
+	return f.effectiveStartCol()+w > maxLineLength
 }

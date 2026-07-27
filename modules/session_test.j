@@ -18,9 +18,9 @@ func testCacheKey() {
 
 func testPointer() {
     testing.assertEqual(pointer("user"), "/user");
-    testing.assertEqual(pointer("a/b"), "/a~1b");     # "/" escapes to ~1
-    testing.assertEqual(pointer("x~y"), "/x~0y");     # "~" escapes to ~0
-    testing.assertEqual(pointer("~/"), "/~0~1");      # both, in the right order
+    testing.assertEqual(pointer("a/b"), "/a~1b"); # "/" escapes to ~1
+    testing.assertEqual(pointer("x~y"), "/x~0y"); # "~" escapes to ~0
+    testing.assertEqual(pointer("~/"), "/~0~1"); # both, in the right order
 }
 
 func testRoundTrip() {

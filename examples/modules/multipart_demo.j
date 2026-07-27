@@ -16,7 +16,10 @@ import "../../modules/multipart.j" as multipart;
 def parts as list of multipart.Part init [
     multipart.field("title", "quarterly report"),
     multipart.field("author", "alice"),
-    multipart.file("attachment", "note.txt", "text/plain",
+    multipart.file(
+        "attachment",
+        "note.txt",
+        "text/plain",
         convert.bytesFromString("see attached", "utf-8"))
 ];
 
@@ -28,7 +31,12 @@ io.printf("--- parsed back ---\n");
 def back as list of multipart.Part init multipart.parse($form.contentType, $form.body);
 for (def p in $back) {
     if (multipart.isFile($p)) {
-        io.printf("file  %s -> %s (%s, %d bytes)\n", $p.name, $p.filename, $p.contentType, len($p.data));
+        io.printf(
+            "file  %s -> %s (%s, %d bytes)\n",
+            $p.name,
+            $p.filename,
+            $p.contentType,
+            len($p.data));
     } else {
         io.printf("field %s = %s\n", $p.name, multipart.text($p));
     }

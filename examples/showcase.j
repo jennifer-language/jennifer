@@ -37,7 +37,14 @@ def nothing as null;
 def empty as int;
 
 io.printf("=== variables ===\n");
-io.printf("x=%d y=%f name=%s flag=%t nothing=%v empty=%d\n", $x, $y, $name, $flag, $nothing, $empty);   # lint-disable: L203
+io.printf(
+    "x=%d y=%f name=%s flag=%t nothing=%v empty=%d\n",
+    $x,
+    $y,
+    $name,
+    $flag,
+    $nothing,
+    $empty); # lint-disable: L203
 
 # --- Arithmetic, including the Python-3 / vs // distinction ---
 io.printf("=== arithmetic ===\n");
@@ -200,14 +207,17 @@ $ns[] = 9;
 $ns[] = 2;
 io.printf("after append: len=%d last=%d\n", len($ns), lists.last($ns));
 def sorted as list of int init lists.sort($ns);
-for (def v in $sorted) { io.printf("%d ", $v); }
+for (def v in $sorted) {
+    io.printf("%d ", $v);
+}
 io.printf("\n");
 def reversed as list of int init lists.reverse($sorted);
 io.printf("first(reversed)=%d last(reversed)=%d\n", lists.first($reversed), lists.last($reversed));
-io.printf("contains 4 = %t, contains 99 = %t\n",
-    lists.contains($ns, 4), lists.contains($ns, 99));
+io.printf("contains 4 = %t, contains 99 = %t\n", lists.contains($ns, 4), lists.contains($ns, 99));
 def slice as list of int init lists.slice($sorted, 1, 4);
-for (def v in $slice) { io.printf("%d ", $v); }
+for (def v in $slice) {
+    io.printf("%d ", $v);
+}
 io.printf("\n");
 def joined as list of int init lists.concat([1, 2], [3, 4]);
 io.printf("concat len=%d\n", len($joined));
@@ -249,9 +259,13 @@ io.printf("=== maps lib ===\n");
 def points as map of string to int init {"alice": 90, "bob": 80, "carol": 70};
 def names as list of string init maps.keys($points);
 def vals as list of int init maps.values($points);
-for (def n in $names) { io.printf("%s ", $n); }
+for (def n in $names) {
+    io.printf("%s ", $n);
+}
 io.printf("\n");
-for (def v in $vals) { io.printf("%d ", $v); }
+for (def v in $vals) {
+    io.printf("%d ", $v);
+}
 io.printf("\n");
 def smaller as map of string to int init maps.delete($points, "bob");
 io.printf("after delete: len=%d has(bob)=%t\n", len($smaller), maps.has($smaller, "bob"));
@@ -277,8 +291,12 @@ io.printf("convert.typeOf(meta.BUILD)   = %s\n", convert.typeOf(meta.BUILD));
 # actual values (vary by host / how the program was launched).
 io.printf("=== os ARGS + flags ===\n");
 io.printf("convert.typeOf(os.ARGS)            = %s\n", convert.typeOf(os.ARGS));
-io.printf("convert.typeOf(os.hasFlag(\"x\"))    = %s\n", convert.typeOf(os.hasFlag("--definitely-not-a-real-flag")));   # lint-disable: L203
-io.printf("convert.typeOf(os.flag(\"x\"))       = %s\n", convert.typeOf(os.flag("--definitely-not-a-real-flag")));   # lint-disable: L203
+io.printf(
+    "convert.typeOf(os.hasFlag(\"x\"))    = %s\n",
+    convert.typeOf(os.hasFlag("--definitely-not-a-real-flag"))); # lint-disable: L203
+io.printf(
+    "convert.typeOf(os.flag(\"x\"))       = %s\n",
+    convert.typeOf(os.flag("--definitely-not-a-real-flag"))); # lint-disable: L203
 
 # --- Constants in expressions ---
 io.printf("=== constants ===\n");
@@ -321,14 +339,18 @@ io.printf("=== control flow ===\n");
 
 # break leaves the innermost loop early
 for (def k as int init 0; $k < 10; $k = $k + 1) {
-    if ($k == 4) { break; }
+    if ($k == 4) {
+        break;
+    }
     io.printf("%d ", $k);
 }
 io.printf("\n");
 
 # continue skips one iteration; the step (k = k + 1) still runs.
 for (def k as int init 0; $k < 5; $k = $k + 1) {
-    if ($k == 2) { continue; }
+    if ($k == 2) {
+        continue;
+    }
     io.printf("%d ", $k);
 }
 io.printf("\n");
@@ -372,7 +394,7 @@ io.printf("=== bit ops ===\n");
 io.printf("0xff & 0x0f    = %d|base=16\n", 0xff & 0x0f);
 io.printf("0x0f | 0xf0    = %d|base=16\n", 0x0f | 0xf0);
 io.printf("0xff ^ 0xaa    = %d|base=16\n", 0xff ^ 0xaa);
-io.printf("~0             = %d\n", ~0);
+io.printf("~0             = %d\n", ~ 0);
 io.printf("1 << 8         = %d\n", 1 << 8);
 io.printf("256 >> 1       = %d\n", 256 >> 1);
 
@@ -395,11 +417,17 @@ io.printf("round-trip     = %s", $roundTripped);
 # Value semantics: assignment copies. Nested structs work and the
 # lvalue chain reaches through them. A dedicated walkthrough lives
 # in examples/structs.j.
-def struct Point { x as int, y as int };
-def struct Line { from as Point, to as Point };
+def struct Point {
+    x as int,
+    y as int
+};
+def struct Line {
+    from as Point,
+    to as Point
+};
 
 io.printf("=== structs ===\n");
-def p as Point init Point{ x: 3, y: 4 };
+def p as Point init Point{x: 3, y: 4};
 io.printf("p              = %v\n", $p);
 io.printf("p.x p.y        = %d %d\n", $p.x, $p.y);
 $p.x = 30;
@@ -407,7 +435,7 @@ io.printf("after $p.x=30  = %v\n", $p);
 def q as Point init $p;
 $q.y = 99;
 io.printf("copied + edited = p=%v q=%v\n", $p, $q);
-def L as Line init Line{ from: Point{ x: 0, y: 0 }, to: Point{ x: 10, y: 20 } };
+def L as Line init Line{from: Point{x: 0, y: 0}, to: Point{x: 10, y: 20}};
 $L.from.x = 5;
 io.printf("nested write   = %v\n", $L);
 
@@ -484,7 +512,9 @@ io.printf("=== encoding ===\n");
 io.printf("base64(abc)  = %s\n", encoding.toText($digestIn, "base64"));
 def qpbytes as bytes init convert.bytesFromString("a=b=c", "utf-8");
 io.printf("qprintable   = %s\n", encoding.toText($qpbytes, "quoted-printable"));
-io.printf("hex round    = %s\n", convert.stringFromBytes(encoding.fromText("616263", "hex"), "utf-8"));   # lint-disable: L203
+io.printf(
+    "hex round    = %s\n",
+    convert.stringFromBytes(encoding.fromText("616263", "hex"), "utf-8")); # lint-disable: L203
 io.printf("isAscii(abc) = %t\n", encoding.isAscii($digestIn));
 io.printf("lenRunes     = %d\n", encoding.lenRunes(convert.bytesFromString("café", "utf-8")));
 def latin as bytes init encoding.encode("café", "iso-8859-1");
@@ -500,12 +530,20 @@ io.printf("iso-8859-1 dec = %s\n", encoding.decode($latin, "iso-8859-1"));
 use task;
 
 io.printf("=== task ===\n");
-def one as task of int init spawn { return 21 + 21; };
+def one as task of int init spawn {
+    return 21 + 21;
+};
 io.printf("wait single  = %d\n", task.wait($one));
 def many as list of task of int init [
-    spawn { return 1; },
-    spawn { return 2; },
-    spawn { return 3; }
+    spawn {
+        return 1;
+    },
+    spawn {
+        return 2;
+    },
+    spawn {
+        return 3;
+    }
 ];
 io.printf("waitAll      = %a\n", task.waitAll($many));
 
@@ -565,8 +603,7 @@ io.printf("matches      = %t\n", regex.matches("^\\d+$", "42"));
 def hit as regex.Match init regex.find("(\\w+):(\\d+)", "port:8080");
 io.printf("find         = %s (%s / %s)\n", $hit.text, $hit.groups[0], $hit.groups[1]);
 def named as regex.Match init regex.find("(?P<key>\\w+)=(?P<val>\\d+)", "n=7");
-io.printf("named group  = key=%s val=%s\n",
-    $named.groupsNamed["key"], $named.groupsNamed["val"]);
+io.printf("named group  = key=%s val=%s\n", $named.groupsNamed["key"], $named.groupsNamed["val"]);
 io.printf("replace      = %s\n", regex.replace("\\d+", "port 8080 host 22", "###"));
 io.printf("split        = %a\n", regex.split("\\s+", "a  b  c"));
 io.printf("escape       = %s\n", regex.escape("1+2=(3)"));
@@ -601,7 +638,8 @@ def cinfo as bytes;
 io.printf("randBytes len= %d\n", len(crypto.randBytes(16)));
 io.printf("randInt range= %t\n", crypto.randInt(1, 6) >= 1 and crypto.randInt(1, 6) <= 6);
 io.printf("hmacEqual    = %t / %t\n", crypto.hmacEqual($cpw, $cpw), crypto.hmacEqual($cpw, $csalt));
-io.printf("pbkdf        = %s\n",
+io.printf(
+    "pbkdf        = %s\n",
     encoding.toText(crypto.pbkdf2($cpw, $csalt, 1, 16, "sha256"), "hex"));
 io.printf("hkdf len     = %d\n", len(crypto.hkdf($cpw, $csalt, $cinfo, 32, "sha256")));
 
@@ -613,7 +651,8 @@ use compress;
 io.printf("=== compress ===\n");
 def craw as bytes init convert.bytesFromString(strings.repeat("compress me ", 50), "utf-8");
 def crt as bytes init compress.unpack(compress.pack($craw, "gzip"), "gzip");
-io.printf("gzip rt ok   = %t\n",
+io.printf(
+    "gzip rt ok   = %t\n",
     convert.stringFromBytes($crt, "utf-8") == strings.repeat("compress me ", 50));
 io.printf("shrank       = %t\n", len(compress.pack($craw, "gzip")) < len($craw));
 
@@ -622,11 +661,17 @@ use archive;
 
 io.printf("=== archive ===\n");
 def aentry as archive.Entry init archive.Entry{
-    name: "a.txt", data: convert.bytesFromString("alpha", "utf-8"), mode: 0o644, mtime: 1700000000
+    name: "a.txt",
+    data: convert.bytesFromString("alpha", "utf-8"),
+    mode: 0o644,
+    mtime: 1700000000
 };
 def aback as list of archive.Entry init archive.unpack(archive.pack([$aentry], "tar"), "tar");
-io.printf("entries=%d name=%s data=%s\n",
-    len($aback), $aback[0].name, convert.stringFromBytes($aback[0].data, "utf-8"));
+io.printf(
+    "entries=%d name=%s data=%s\n",
+    len($aback),
+    $aback[0].name,
+    convert.stringFromBytes($aback[0].data, "utf-8"));
 
 # --- toml (opaque toml.Value, JSON-Pointer accessors, like json) ---
 use toml;
@@ -640,16 +685,21 @@ use xml;
 
 io.printf("=== xml ===\n");
 def xdoc as xml.Value init xml.decode("<book id=\"1\"><title>Go &amp; XML</title></book>");
-io.printf("tag=%s id=%s title=%s\n",
-    xml.tag($xdoc), xml.attr($xdoc, "id"), xml.text(xml.get($xdoc, "title")));
+io.printf(
+    "tag=%s id=%s title=%s\n",
+    xml.tag($xdoc),
+    xml.attr($xdoc, "id"),
+    xml.text(xml.get($xdoc, "title")));
 
 # --- yaml (opaque yaml.Value, same accessors as json / toml) ---
 use yaml;
 
 io.printf("=== yaml ===\n");
 def ydoc as yaml.Value init yaml.decode("name: jen\nnums: [1, 2, 3]\n");
-io.printf("name=%s nums=%d\n",
-    yaml.asString($ydoc, "/name"), yaml.length(yaml.get($ydoc, "/nums")));
+io.printf(
+    "name=%s nums=%d\n",
+    yaml.asString($ydoc, "/name"),
+    yaml.length(yaml.get($ydoc, "/nums")));
 
 # --- intl (message catalogs + locale-aware translation) ---
 use intl;

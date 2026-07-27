@@ -80,24 +80,58 @@ func linkSpan(text as string, url as string, title as string) {
 
 func paraBlock(lines as list of string) {
     def joined as string init strings.join($lines, " ");
-    return Block{kind: "paragraph", level: 0, text: $joined, ordered: false,
-        items: [], headings: [], aligns: [], rows: []};
+    return Block{
+        kind: "paragraph",
+        level: 0,
+        text: $joined,
+        ordered: false,
+        items: [],
+        headings: [],
+        aligns: [],
+        rows: []
+    };
 }
 
 func listBlock(items as list of string, ordered as bool) {
-    return Block{kind: "list", level: 0, text: "", ordered: $ordered,
-        items: $items, headings: [], aligns: [], rows: []};
+    return Block{
+        kind: "list",
+        level: 0,
+        text: "",
+        ordered: $ordered,
+        items: $items,
+        headings: [],
+        aligns: [],
+        rows: []
+    };
 }
 
-func tableBlock(headings as list of string, aligns as list of string,
-        rows as list of list of string) {
-    return Block{kind: "table", level: 0, text: "", ordered: false, items: [],
-        headings: $headings, aligns: $aligns, rows: $rows};
+func tableBlock(
+    headings as list of string,
+    aligns as list of string,
+    rows as list of list of string) {
+    return Block{
+        kind: "table",
+        level: 0,
+        text: "",
+        ordered: false,
+        items: [],
+        headings: $headings,
+        aligns: $aligns,
+        rows: $rows
+    };
 }
 
 func codeBlockNode(text as string) {
-    return Block{kind: "code", level: 0, text: $text, ordered: false,
-        items: [], headings: [], aligns: [], rows: []};
+    return Block{
+        kind: "code",
+        level: 0,
+        text: $text,
+        ordered: false,
+        items: [],
+        headings: [],
+        aligns: [],
+        rows: []
+    };
 }
 
 # --- inline scanner (private) --------------------------------------
@@ -203,7 +237,8 @@ func parseInline(s as string) {
         # strong: **text** (flanking: no whitespace just inside the markers, so
         # a space-flanked `**` is literal, not a delimiter).
         def dbl as int init -1;
-        if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and not isFlankSpace($cs[$i + 2])) {
+        if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and
+            not isFlankSpace($cs[$i + 2])) {
             def k as int init $nDblStar[$i + 2];
             if ($k < $n and not isFlankSpace($cs[$k - 1])) {
                 $dbl = $k;
@@ -289,7 +324,9 @@ func linkSpanFrom(text as string, rawDest as string) {
     def url as string init strings.substring($dest, 0, $sp);
     def rawTitle as string init strings.trim(strings.substring($dest, $sp + 1, len($dest)));
     # Strip a single pair of surrounding double or single quotes.
-    if (len($rawTitle) >= 2 and (strings.startsWith($rawTitle, "\"") and strings.endsWith($rawTitle, "\"") or strings.startsWith($rawTitle, "'") and strings.endsWith($rawTitle, "'"))) {
+    if (len($rawTitle) >= 2 and
+        (strings.startsWith($rawTitle, "\"") and strings.endsWith($rawTitle, "\"") or
+        strings.startsWith($rawTitle, "'") and strings.endsWith($rawTitle, "'"))) {
         $rawTitle = strings.substring($rawTitle, 1, len($rawTitle) - 1);
     }
     return linkSpan($text, $url, $rawTitle);
@@ -499,8 +536,16 @@ func parseBlocks(md as string) {
 }
 
 func headingBlock(level as int, text as string) {
-    return Block{kind: "heading", level: $level, text: $text, ordered: false,
-        items: [], headings: [], aligns: [], rows: []};
+    return Block{
+        kind: "heading",
+        level: $level,
+        text: $text,
+        ordered: false,
+        items: [],
+        headings: [],
+        aligns: [],
+        rows: []
+    };
 }
 
 # collectFence gathers the fenced code block opening at line `open` and returns
@@ -726,19 +771,13 @@ func indentLines(s as string, prefix as string) {
 # isWideRune approximates the Unicode East-Asian Width "W"/"F" categories plus
 # the common emoji blocks - the code points a terminal renders two columns wide.
 func isWideRune(cp as int) {
-    return ($cp >= 0x1100 and $cp <= 0x115F)
-        or ($cp >= 0x2E80 and $cp <= 0x303E)
-        or ($cp >= 0x3041 and $cp <= 0x33FF)
-        or ($cp >= 0x3400 and $cp <= 0x4DBF)
-        or ($cp >= 0x4E00 and $cp <= 0x9FFF)
-        or ($cp >= 0xA000 and $cp <= 0xA4CF)
-        or ($cp >= 0xAC00 and $cp <= 0xD7A3)
-        or ($cp >= 0xF900 and $cp <= 0xFAFF)
-        or ($cp >= 0xFE30 and $cp <= 0xFE4F)
-        or ($cp >= 0xFF00 and $cp <= 0xFF60)
-        or ($cp >= 0xFFE0 and $cp <= 0xFFE6)
-        or ($cp >= 0x1F300 and $cp <= 0x1FAFF)
-        or ($cp >= 0x20000 and $cp <= 0x3FFFD);
+    return ($cp >= 0x1100 and $cp <= 0x115F) or ($cp >= 0x2E80 and $cp <= 0x303E) or
+        ($cp >= 0x3041 and $cp <= 0x33FF) or ($cp >= 0x3400 and $cp <= 0x4DBF) or
+        ($cp >= 0x4E00 and $cp <= 0x9FFF) or ($cp >= 0xA000 and $cp <= 0xA4CF) or
+        ($cp >= 0xAC00 and $cp <= 0xD7A3) or ($cp >= 0xF900 and $cp <= 0xFAFF) or
+        ($cp >= 0xFE30 and $cp <= 0xFE4F) or ($cp >= 0xFF00 and $cp <= 0xFF60) or
+        ($cp >= 0xFFE0 and $cp <= 0xFFE6) or ($cp >= 0x1F300 and $cp <= 0x1FAFF) or
+        ($cp >= 0x20000 and $cp <= 0x3FFFD);
 }
 
 # displayWidth is the terminal column width of s: East-Asian wide / fullwidth
@@ -808,8 +847,7 @@ func padCell(styled as string, plain as int, width as int, align as string) {
 
 # ansiRow renders one ` | `-separated row padded to the column widths; the
 # header row is bold.
-func ansiRow(cells as list of string, aligns as list of string,
-        widths as list of int, bold as bool) {
+func ansiRow(cells as list of string, aligns as list of string, widths as list of int, bold as bool) {
     def out as string init "";
     def i as int init 0;
     while ($i < len($widths)) {
@@ -1092,8 +1130,10 @@ func alignRow(aligns as list of string, cols as int) {
  * @return {string} the GFM table source
  * @throws {Error} when an align value is not "left" / "right" / "center" / "none"
  */
-export func table(headings as list of string, aligns as list of string,
-        rows as list of list of string) {
+export func table(
+    headings as list of string,
+    aligns as list of string,
+    rows as list of list of string) {
     def cols as int init len($headings);
     def out as string init tableRow($headings, $cols);
     $out = $out + "\n" + alignRow($aligns, $cols);
@@ -1155,8 +1195,11 @@ func delimCell(width as int, align as string) {
 }
 
 # prettyRow renders one padded `| a | b |` source row to the column widths.
-func prettyRow(cells as list of string, widths as list of int,
-        aligns as list of string, cols as int) {
+func prettyRow(
+    cells as list of string,
+    widths as list of int,
+    aligns as list of string,
+    cols as int) {
     def out as string init "|";
     def i as int init 0;
     while ($i < $cols) {

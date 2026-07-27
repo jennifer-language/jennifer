@@ -55,22 +55,25 @@ func taggedNo() {
 }
 
 func testExpectTaggedOKPasses() {
-    expectTaggedOK("JEN OK completed", "JEN");   # no throw
+    expectTaggedOK("JEN OK completed", "JEN"); # no throw
     testing.assertTrue(true);
 }
-
 
 # ---- read cap (DoS from an oversized literal / unterminated response) ----
 func testResponseCapRejectsOversized() {
     testing.assertThrows("overRespCap", "imap");
 }
-func overRespCap() { capResponse(MAX_RESPONSE_BYTES + 1); }
+func overRespCap() {
+    capResponse(MAX_RESPONSE_BYTES + 1);
+}
 func testResponseCapAllowsAtLimit() {
     capResponse(MAX_RESPONSE_BYTES);
     testing.assertTrue(true);
 }
 
-func injectImapCRLF() { quoteArg("user\r\nA1 LOGOUT"); }
+func injectImapCRLF() {
+    quoteArg("user\r\nA1 LOGOUT");
+}
 # A raw-interpolated argument (a STORE flag list, as addFlags/removeFlags build)
 # is caught by the command() choke-point guard, which runs before the socket
 # write - so a zero Conn is fine here, rejectControl throws first.
@@ -78,10 +81,10 @@ func injectImapFlags() {
     def c as net.Conn;
     command($c, "STORE 1 +FLAGS.SILENT (x)\r\nA1 LOGOUT\r\n(y)");
 }
-func testImapInjectionBlocked() {   # OM-006
+func testImapInjectionBlocked() { # OM-006
     testing.assertThrows("injectImapCRLF", "imap");
     testing.assertThrows("injectImapFlags", "imap");
-    quoteArg("normal.user@example.com");   # a valid arg does not throw
+    quoteArg("normal.user@example.com"); # a valid arg does not throw
 }
 
 # --- criteria-based search (pure helpers) -----------------------------------
@@ -94,16 +97,18 @@ func testBuildSearchMultiField() {
     def c as Criteria;
     $c.subject = "hi";
     $c.unseen = true;
-    $c.since = time.fromIso("2026-01-01T00:00:00Z");   # rendered internally
+    $c.since = time.fromIso("2026-01-01T00:00:00Z"); # rendered internally
     $c.largerThan = 1000;
-    testing.assertEqual(buildSearchCommand($c),
+    testing.assertEqual(
+        buildSearchCommand($c),
         "SEARCH SUBJECT \"hi\" SINCE 01-Jan-2026 UNSEEN LARGER 1000");
     # from / to / text / before / flags render too, in order.
     def d as Criteria;
     $d.from = "billing@x.com";
     $d.flagged = true;
     $d.before = time.fromIso("2026-03-01T00:00:00Z");
-    testing.assertEqual(buildSearchCommand($d),
+    testing.assertEqual(
+        buildSearchCommand($d),
         "SEARCH FROM \"billing@x.com\" BEFORE 01-Mar-2026 FLAGGED");
     # A client-side-only criteria still needs a server search (defaults to ALL).
     def e as Criteria;
@@ -118,7 +123,7 @@ func testBuildSearchMultiField() {
 # validate or inject.
 func testUnsetDateOmitted() {
     def c as Criteria;
-    $c.subject = "x";            # since / before left at their zero-value time
+    $c.subject = "x"; # since / before left at their zero-value time
     testing.assertEqual(buildSearchCommand($c), "SEARCH SUBJECT \"x\"");
 }
 
@@ -145,9 +150,9 @@ func testBodyStructureAttachmentHeuristic() {
 # --- sub-day (time-of-day) date refinement ----------------------------------
 
 func testHasTimeOfDay() {
-    testing.assertFalse(hasTimeOfDay(time.fromIso("2026-01-01T00:00:00Z")));   # midnight
+    testing.assertFalse(hasTimeOfDay(time.fromIso("2026-01-01T00:00:00Z"))); # midnight
     testing.assertTrue(hasTimeOfDay(time.fromIso("2026-01-01T14:30:00Z")));
-    testing.assertTrue(hasTimeOfDay(time.fromIso("2026-01-01T00:00:01Z")));    # one second in
+    testing.assertTrue(hasTimeOfDay(time.fromIso("2026-01-01T00:00:01Z"))); # one second in
 }
 
 # A midnight `before` is exact (server BEFORE that day); a `before` with a
@@ -159,7 +164,7 @@ func testBeforeWidening() {
     testing.assertEqual(buildSearchCommand($midnight), "SEARCH BEFORE 20-Jan-2026");
     def timed as Criteria;
     $timed.before = time.fromIso("2026-01-20T10:00:00Z");
-    testing.assertEqual(buildSearchCommand($timed), "SEARCH BEFORE 21-Jan-2026");   # widened
+    testing.assertEqual(buildSearchCommand($timed), "SEARCH BEFORE 21-Jan-2026"); # widened
     # `since` is never widened (inclusive on its own day is already a superset).
     def s as Criteria;
     $s.since = time.fromIso("2026-01-15T14:30:00Z");
@@ -172,11 +177,11 @@ func testRefinePredicates() {
     def timed as Criteria;
     $timed.since = time.fromIso("2026-01-15T14:30:00Z");
     testing.assertTrue(refineSinceNeeded($timed));
-    testing.assertTrue(hasClientFilter($timed));       # forces the client pass
+    testing.assertTrue(hasClientFilter($timed)); # forces the client pass
     def midnight as Criteria;
     $midnight.since = time.fromIso("2026-01-15T00:00:00Z");
     testing.assertFalse(refineSinceNeeded($midnight));
-    testing.assertFalse(hasClientFilter($midnight));   # pure server-side
+    testing.assertFalse(hasClientFilter($midnight)); # pure server-side
     def unset as Criteria;
     testing.assertFalse(refineSinceNeeded($unset));
     testing.assertFalse(refineBeforeNeeded($unset));
@@ -189,7 +194,9 @@ func testParseInternalDate() {
     def sp as time.Time init parseInternalDate("* 2 FETCH (INTERNALDATE \" 5-Jan-2026 09:00:00 +0000\")");
     testing.assertEqual(time.format($sp, "%Y-%m-%dT%H:%M:%S%z"), "2026-01-05T09:00:00+0000");
 }
-func missingInternalDate() { parseInternalDate("* 1 FETCH (FLAGS ())"); }
+func missingInternalDate() {
+    parseInternalDate("* 1 FETCH (FLAGS ())");
+}
 func testParseInternalDateMissing() {
     testing.assertThrows("missingInternalDate", "imap");
 }
@@ -310,7 +317,7 @@ func testIsContinuation() {
 func testHasCapability() {
     def resp as string init "* CAPABILITY IMAP4rev1 IDLE STARTTLS AUTH=PLAIN\r\nJEN OK CAPABILITY completed\r\n";
     testing.assertTrue(hasCapability($resp, "IDLE"));
-    testing.assertTrue(hasCapability($resp, "idle"));   # case-insensitive
+    testing.assertTrue(hasCapability($resp, "idle")); # case-insensitive
     testing.assertTrue(hasCapability($resp, "STARTTLS"));
     testing.assertFalse(hasCapability($resp, "MOVE"));
     # A capability name that is only a substring of a token does not match.

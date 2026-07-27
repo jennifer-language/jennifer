@@ -12,8 +12,10 @@ import "../../modules/orm.j" as orm;
 
 # Declare the table mapping once (no reflection). The dialect - "postgres" here -
 # selects the placeholder and DDL spelling.
-def users as orm.Schema init orm.column(orm.column(orm.column(
-    orm.schema("users", "id", "postgres"), "id", "int"), "name", "string"), "age", "int");
+def users as orm.Schema init orm.column(
+    orm.column(orm.column(orm.schema("users", "id", "postgres"), "id", "int"), "name", "string"),
+    "age",
+    "int");
 
 io.printf("DDL:\n  %s\n\n", orm.createTable($users));
 
@@ -21,15 +23,17 @@ io.printf("DDL:\n  %s\n\n", orm.createTable($users));
 def q as orm.Query init orm.limit(
     orm.orderBy(
         orm.where(orm.where(orm.from($users), "age", ">=", "18"), "name", "LIKE", "a%"),
-        "age", "desc"),
+        "age",
+        "desc"),
     25);
 def rendered as orm.Rendered init orm.toSql($q);
-io.printf("query:\n  %s\n  params = %d (values bind through placeholders)\n\n",
-    $rendered.sql, len($rendered.params));
+io.printf(
+    "query:\n  %s\n  params = %d (values bind through placeholders)\n\n",
+    $rendered.sql,
+    len($rendered.params));
 
 # The same schema in MySQL renders `?` placeholders instead of `$1` / `$2`.
-def mysqlUsers as orm.Schema init orm.column(
-    orm.schema("users", "id", "mysql"), "name", "string");
+def mysqlUsers as orm.Schema init orm.column(orm.schema("users", "id", "mysql"), "name", "string");
 io.printf("mysql:\n  %s\n", orm.toSql(orm.where(orm.from($mysqlUsers), "name", "=", "ada")).sql);
 
 # runCrud shows the Data-Mapper CRUD shape against a live connection: you pass a
@@ -40,19 +44,20 @@ func runCrud(conn as sql.Connection, s as orm.Schema) {
     $ada["id"] = "1";
     $ada["name"] = "ada";
     $ada["age"] = "36";
-    orm.insert($conn, $s, $ada);                          # INSERT
-
-    def found as map of string to string init orm.find($conn, $s, "1");   # SELECT by id
+    orm.insert($conn, $s, $ada); # INSERT
+    
+    def found as map of string to string init orm.find($conn, $s, "1"); # SELECT by id
     io.printf("found: %s\n", $found["name"]);
 
     $found["age"] = "37";
-    orm.update($conn, $s, $found);                        # UPDATE by primary key
-
-    def adults as list of map of string to string init orm.all($conn,
-        orm.where(orm.from($s), "age", ">=", "18"));      # SELECT with a filter
+    orm.update($conn, $s, $found); # UPDATE by primary key
+    
+    def adults as list of map of string to string init orm.all(
+        $conn,
+        orm.where(orm.from($s), "age", ">=", "18")); # SELECT with a filter
     io.printf("adults: %d\n", len($adults));
 
-    orm.delete($conn, $s, "1");                           # DELETE by id
+    orm.delete($conn, $s, "1"); # DELETE by id
 }
 
 use sql;

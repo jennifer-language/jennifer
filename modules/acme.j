@@ -157,13 +157,25 @@ func fetchNonce(client as Client) {
     def resp as http.Response init http.head($client.newNonce, {});
     def nonce as string init http.header($resp, "Replay-Nonce");
     if (len($nonce) == 0) {
-        throw Error{kind: "acme", message: "acme: no Replay-Nonce from " + $client.newNonce, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "acme",
+            message: "acme: no Replay-Nonce from " + $client.newNonce,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     # RFC 8555 nonces are base64url tokens. Reject anything else outright, so a
     # hostile or buggy CA cannot feed a crafted value toward the JWS header (the
     # header also JSON-escapes it - defence in depth).
     if (not isNonceSafe($nonce)) {
-        throw Error{kind: "acme", message: "acme: malformed Replay-Nonce (not base64url)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "acme",
+            message: "acme: malformed Replay-Nonce (not base64url)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $nonce;
 }
@@ -229,8 +241,14 @@ func jws(client as Client, url as string, payload as string, useJwk as bool) {
 func jwsOk(client as Client, url as string, payload as string, useJwk as bool) {
     def resp as http.Response init jws($client, $url, $payload, $useJwk);
     if ($resp.status >= 400) {
-        throw Error{kind: "acme", message: "acme: request to " + $url + " failed (" +
-            convert.toString($resp.status) + "): " + $resp.body, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "acme",
+            message: "acme: request to " + $url + " failed (" +
+                convert.toString($resp.status) + "): " + $resp.body,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $resp;
 }
@@ -256,7 +274,13 @@ func algForKey(accountKey as bytes) {
     if (strings.contains($jwk, "\"crv\":\"P-521\"")) {
         return "ES512";
     }
-    throw Error{kind: "acme", message: "acme: unsupported account key type (want RSA or EC P-256/P-384/P-521)", file: "", line: 0, col: 0};
+    throw Error{
+        kind: "acme",
+        message: "acme: unsupported account key type (want RSA or EC P-256/P-384/P-521)",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 /**
@@ -271,7 +295,13 @@ func algForKey(accountKey as bytes) {
 export func connect(directoryUrl as string, accountKey as bytes) {
     def resp as http.Response init http.get($directoryUrl, {});
     if ($resp.status != 200) {
-        throw Error{kind: "acme", message: "acme.connect: directory fetch failed (" + convert.toString($resp.status) + ")", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "acme",
+            message: "acme.connect: directory fetch failed (" + convert.toString($resp.status) + ")",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def dir as json.Value init json.decode($resp.body);
     return Client{
@@ -303,7 +333,13 @@ export func register(client as Client, email as string) {
     def resp as http.Response init jwsOk($client, $client.newAccount, $payload, true);
     def kid as string init http.header($resp, "Location");
     if (len($kid) == 0) {
-        throw Error{kind: "acme", message: "acme.register: no account Location header", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "acme",
+            message: "acme.register: no account Location header",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as Client init $client;
     $out.kid = $kid;
@@ -408,7 +444,13 @@ export func challenge(authz as Authorization, kind as string) {
             return $authz.challenges[$i];
         }
     }
-    throw Error{kind: "acme", message: "acme.challenge: no " + $kind + " challenge for " + $authz.domain, file: "", line: 0, col: 0};
+    throw Error{
+        kind: "acme",
+        message: "acme.challenge: no " + $kind + " challenge for " + $authz.domain,
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 # ---- challenge responses (pure) ----
@@ -424,7 +466,9 @@ export func challenge(authz as Authorization, kind as string) {
  */
 export func keyAuthorization(client as Client, token as string) {
     def jwk as string init crypto.jwkPublic($client.accountKey);
-    def thumb as string init encodeSeg(hash.compute(convert.bytesFromString($jwk, "utf-8"), "sha256"));
+    def thumb as string init encodeSeg(hash.compute(
+        convert.bytesFromString($jwk, "utf-8"),
+        "sha256"));
     return $token + "." + $thumb;
 }
 
@@ -465,7 +509,11 @@ export func accept(client as Client, challengeUrl as string) {
  * @return {Authorization} the settled authorization
  * @throws {Error} if it is still pending after `maxTries`
  */
-export func pollAuthorization(client as Client, authzUrl as string, intervalMs as int, maxTries as int) {
+export func pollAuthorization(
+    client as Client,
+    authzUrl as string,
+    intervalMs as int,
+    maxTries as int) {
     for (def i as int init 0; $i < $maxTries; $i = $i + 1) {
         def a as Authorization init authorization($client, $authzUrl);
         if ($a.status != "pending") {
@@ -473,7 +521,14 @@ export func pollAuthorization(client as Client, authzUrl as string, intervalMs a
         }
         time.sleep(time.fromMilliseconds($intervalMs));
     }
-    throw Error{kind: "acme", message: "acme.pollAuthorization: still pending after " + convert.toString($maxTries) + " tries", file: "", line: 0, col: 0};
+    throw Error{
+        kind: "acme",
+        message: "acme.pollAuthorization: still pending after " + convert.toString($maxTries) +
+            " tries",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 /**
@@ -488,7 +543,12 @@ export func pollAuthorization(client as Client, authzUrl as string, intervalMs a
  * @return {Order} the finalized order (`certificate` set when valid)
  * @throws {Error} on a finalize error or if issuance does not complete
  */
-export func finalize(client as Client, order as Order, csrDer as bytes, intervalMs as int, maxTries as int) {
+export func finalize(
+    client as Client,
+    order as Order,
+    csrDer as bytes,
+    intervalMs as int,
+    maxTries as int) {
     def payload as string init "{\"csr\":\"" + encodeSeg($csrDer) + "\"}";
     jwsOk($client, $order.finalize, $payload, false);
     for (def i as int init 0; $i < $maxTries; $i = $i + 1) {
@@ -497,11 +557,24 @@ export func finalize(client as Client, order as Order, csrDer as bytes, interval
             return $o;
         }
         if ($o.status == "invalid") {
-            throw Error{kind: "acme", message: "acme.finalize: order became invalid", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "acme",
+                message: "acme.finalize: order became invalid",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         time.sleep(time.fromMilliseconds($intervalMs));
     }
-    throw Error{kind: "acme", message: "acme.finalize: certificate not issued after " + convert.toString($maxTries) + " tries", file: "", line: 0, col: 0};
+    throw Error{
+        kind: "acme",
+        message: "acme.finalize: certificate not issued after " + convert.toString($maxTries) +
+            " tries",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 /**
@@ -513,7 +586,13 @@ export func finalize(client as Client, order as Order, csrDer as bytes, interval
  */
 export func downloadCertificate(client as Client, order as Order) {
     if (len($order.certificate) == 0) {
-        throw Error{kind: "acme", message: "acme.downloadCertificate: order has no certificate URL yet", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "acme",
+            message: "acme.downloadCertificate: order has no certificate URL yet",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def resp as http.Response init jwsOk($client, $order.certificate, "", false);
     return $resp.body;

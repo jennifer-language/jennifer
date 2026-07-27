@@ -18,8 +18,15 @@ use strings;
 # only touch the key).
 func client() {
     def key as bytes init crypto.ecGenerateKey("p256");
-    return Client{directory: "", newNonce: "", newAccount: "", newOrder: "",
-        accountKey: $key, alg: "ES256", kid: ""};
+    return Client{
+        directory: "",
+        newNonce: "",
+        newAccount: "",
+        newOrder: "",
+        accountKey: $key,
+        alg: "ES256",
+        kid: ""
+    };
 }
 
 func testEncodeSegStripsPadding() {
@@ -59,12 +66,26 @@ func testDnsRecordShape() {
 }
 
 func testChallengeSelection() {
-    def httpCh as Challenge init Challenge{kind: "http-01", url: "u1", token: "t1", status: "pending"};
-    def dnsCh as Challenge init Challenge{kind: "dns-01", url: "u2", token: "t2", status: "pending"};
+    def httpCh as Challenge init Challenge{
+        kind: "http-01",
+        url: "u1",
+        token: "t1",
+        status: "pending"
+    };
+    def dnsCh as Challenge init Challenge{
+        kind: "dns-01",
+        url: "u2",
+        token: "t2",
+        status: "pending"
+    };
     def chs as list of Challenge init [];
     $chs[] = $httpCh;
     $chs[] = $dnsCh;
-    def authz as Authorization init Authorization{domain: "example.com", status: "pending", challenges: $chs};
+    def authz as Authorization init Authorization{
+        domain: "example.com",
+        status: "pending",
+        challenges: $chs
+    };
     testing.assertEqual(challenge($authz, "http-01").url, "u1");
     testing.assertEqual(challenge($authz, "dns-01").token, "t2");
 }
@@ -81,16 +102,19 @@ func selectMissing() {
 
 func testParseOrderReadsFields() {
     # parseOrder builds an Order from a response body; feed it a canned one.
-    def resp as http.Response init http.Response{status: 200, statusText: "OK", headers: {},
-        body: "{\"status\":\"pending\",\"authorizations\":[\"https://ca/authz/1\",\"https://ca/authz/2\"],\"finalize\":\"https://ca/finalize\"}"};
+    def resp as http.Response init http.Response{
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        body: "{\"status\":\"pending\",\"authorizations\":[\"https://ca/authz/1\",\"https://ca/authz/2\"],\"finalize\":\"https://ca/finalize\"}"
+    };
     def o as Order init parseOrder("https://ca/order/1", $resp);
     testing.assertEqual($o.url, "https://ca/order/1");
     testing.assertEqual($o.status, "pending");
     testing.assertEqual(len($o.authorizations), 2);
     testing.assertEqual($o.authorizations[1], "https://ca/authz/2");
-    testing.assertEqual($o.certificate, "");        # not issued yet
+    testing.assertEqual($o.certificate, ""); # not issued yet
 }
-
 
 # ---- complete JSON escaping + nonce validation ----
 

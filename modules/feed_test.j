@@ -36,7 +36,7 @@ func testFeedConstructorDefaults() {
     testing.assertEqual($f.title, "T");
     testing.assertEqual($f.link, "L");
     testing.assertEqual(len($f.entries), 0);
-    testing.assertFalse(isSet($f.updated));            # unset by default
+    testing.assertFalse(isSet($f.updated)); # unset by default
 }
 
 func testEntryConstructorDefaults() {
@@ -51,11 +51,11 @@ func testEntryConstructorDefaults() {
 func testBuildersAreValueSemantic() {
     def base as Entry init entry("t", "l");
     def withId as Entry init entryId($base, "x");
-    testing.assertEqual($base.id, "");                 # original untouched
+    testing.assertEqual($base.id, ""); # original untouched
     testing.assertEqual($withId.id, "x");
     def f as Feed init feed("t", "l");
     def added as Feed init add($f, $base);
-    testing.assertEqual(len($f.entries), 0);           # original untouched
+    testing.assertEqual(len($f.entries), 0); # original untouched
     testing.assertEqual(len($added.entries), 1);
 }
 
@@ -67,12 +67,16 @@ func testKindDetection() {
 func testBuildRejectsUnknownFormat() {
     testing.assertThrows("buildJson", "value");
 }
-func buildJson() { build(sample(), "json"); }
+func buildJson() {
+    build(sample(), "json");
+}
 
 func testParseRejectsNonFeed() {
     testing.assertThrows("parseHtml", "value");
 }
-func parseHtml() { parse("<html><body>nope</body></html>"); }
+func parseHtml() {
+    parse("<html><body>nope</body></html>");
+}
 
 func testBuildRssStructure() {
     def out as string init build(sample(), "rss");
@@ -101,7 +105,7 @@ func testRssRoundTrip() {
     testing.assertEqual($e.title, "First Post");
     testing.assertEqual($e.link, "https://example.org/1");
     testing.assertEqual($e.id, "id-1");
-    testing.assertEqual($e.summary, "A summary & <tag>");     # entities survive
+    testing.assertEqual($e.summary, "A summary & <tag>"); # entities survive
     testing.assertEqual(time.iso($e.published), "2026-07-20T14:30:00Z");
 }
 
@@ -112,7 +116,7 @@ func testAtomRoundTrip() {
     testing.assertEqual(time.iso($f.updated), "2026-07-20T14:30:00Z");
     def e as Entry init $f.entries[0];
     testing.assertEqual($e.title, "First Post");
-    testing.assertEqual($e.link, "https://example.org/1");   # from href attribute
+    testing.assertEqual($e.link, "https://example.org/1"); # from href attribute
     testing.assertEqual($e.id, "id-1");
     testing.assertEqual($e.content, "Full body");
     testing.assertEqual(time.iso($e.published), "2026-07-20T14:30:00Z");
@@ -130,7 +134,7 @@ func testEscapingRoundTrip() {
 }
 
 func testUnsetDatesOmitted() {
-    def f as Feed init add(feed("F", "L"), entry("e", "l"));    # no dates set
+    def f as Feed init add(feed("F", "L"), entry("e", "l")); # no dates set
     def rss as string init build($f, "rss");
     testing.assertFalse(containsStr($rss, "<pubDate>"));
     testing.assertFalse(containsStr($rss, "<lastBuildDate>"));
@@ -169,10 +173,12 @@ func testRssDateFormat() {
 }
 
 func testParseRssDateBothForms() {
-    testing.assertEqual(time.iso(parseRssDate("Mon, 20 Jul 2026 14:30:00 +0000")),
+    testing.assertEqual(
+        time.iso(parseRssDate("Mon, 20 Jul 2026 14:30:00 +0000")),
         "2026-07-20T14:30:00Z");
     # Bare form (no weekday) also parses.
-    testing.assertEqual(time.iso(parseRssDate("20 Jul 2026 14:30:00 +0000")),
+    testing.assertEqual(
+        time.iso(parseRssDate("20 Jul 2026 14:30:00 +0000")),
         "2026-07-20T14:30:00Z");
 }
 
@@ -183,8 +189,7 @@ func testParseDateLenient() {
 }
 
 func testParseAtomDate() {
-    testing.assertEqual(time.iso(parseAtomDate("2026-07-20T14:30:00Z")),
-        "2026-07-20T14:30:00Z");
+    testing.assertEqual(time.iso(parseAtomDate("2026-07-20T14:30:00Z")), "2026-07-20T14:30:00Z");
 }
 
 func testTextOfAndKindOf() {

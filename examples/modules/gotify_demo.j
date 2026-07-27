@@ -20,8 +20,7 @@ if (len($url) == 0 or len($token) == 0) {
 } else {
     def g as gotify.Config init gotify.Config{url: $url, token: $token};
     try {
-        def r as http.Response init gotify.push($g, "Jennifer",
-            "Hello from the gotify demo", 5);
+        def r as http.Response init gotify.push($g, "Jennifer", "Hello from the gotify demo", 5);
         io.printf("push -> %d %s\n", $r.status, $r.statusText);
     } catch (e) {
         io.printf("no Gotify server at %s (%s)\n", $url, $e.message);

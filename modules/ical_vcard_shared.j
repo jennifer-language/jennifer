@@ -75,7 +75,7 @@ func fold(line as string) {
             $parts[] = $cur;
             $cur = "";
             $curBytes = 0;
-            $limit = 74;   # continuation lines: 1 octet is the leading space
+            $limit = 74; # continuation lines: 1 octet is the leading space
         }
         $cur = $cur + $ch;
         $curBytes = $curBytes + $chBytes;

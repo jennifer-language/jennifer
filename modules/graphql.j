@@ -146,7 +146,8 @@ func buildRequest(query as string, variables as json.Value, operationName as str
  * @return {bool} true if the response reports one or more GraphQL errors
  */
 export func hasErrors(resp as json.Value) {
-    return json.has($resp, "/errors") and json.typeOf($resp, "/errors") == "list" and json.length($resp, "/errors") > 0;
+    return json.has($resp, "/errors") and json.typeOf($resp, "/errors") == "list" and
+        json.length($resp, "/errors") > 0;
 }
 
 /**
@@ -179,19 +180,41 @@ export func errorMessages(resp as json.Value) {
 # envelope to return). raiseOnErrors additionally raises on a GraphQL `errors`
 # array (the `query` behaviour); when false, the envelope is returned as-is (the
 # `tryQuery` behaviour) so the caller inspects the errors itself.
-func run(c as Client, query as string, variables as json.Value, operationName as string, raiseOnErrors as bool) {
+func run(
+    c as Client,
+    query as string,
+    variables as json.Value,
+    operationName as string,
+    raiseOnErrors as bool) {
     def req as json.Value init buildRequest($query, $variables, $operationName);
     def headers as map of string to string init $c.rest.headers;
     $headers["Content-Type"] = "application/json";
     # POST to the endpoint URL verbatim (no path joining), via the same TLS-aware
     # send rest uses - so a self-signed host configured with withCA / insecure works.
-    def r as http.Response init http.requestTls("POST", $c.rest.baseUrl, $headers, json.encode($req), $c.rest.tls);
+    def r as http.Response init http.requestTls(
+        "POST",
+        $c.rest.baseUrl,
+        $headers,
+        json.encode($req),
+        $c.rest.tls);
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{kind: "graphql", message: "graphql: HTTP " + convert.toString($r.status) + ": " + $r.body, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "graphql",
+            message: "graphql: HTTP " + convert.toString($r.status) + ": " + $r.body,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def resp as json.Value init json.decode($r.body);
     if ($raiseOnErrors and hasErrors($resp)) {
-        throw Error{kind: "graphql", message: "graphql: " + errorMessages($resp), file: "", line: 0, col: 0};
+        throw Error{
+            kind: "graphql",
+            message: "graphql: " + errorMessages($resp),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $resp;
 }
@@ -228,7 +251,11 @@ export func query(c as Client, query as string, variables as json.Value) {
  * @return {json.Value} the full decoded response (data under `/data`)
  * @throws {Error} kind "graphql" on GraphQL errors or a non-2xx HTTP status
  */
-export func queryNamed(c as Client, query as string, variables as json.Value, operationName as string) {
+export func queryNamed(
+    c as Client,
+    query as string,
+    variables as json.Value,
+    operationName as string) {
     return run($c, $query, $variables, $operationName, true);
 }
 
@@ -259,6 +286,10 @@ export func tryQuery(c as Client, query as string, variables as json.Value) {
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
  * @throws {Error} kind "graphql" only on a non-2xx HTTP status
  */
-export func tryQueryNamed(c as Client, query as string, variables as json.Value, operationName as string) {
+export func tryQueryNamed(
+    c as Client,
+    query as string,
+    variables as json.Value,
+    operationName as string) {
     return run($c, $query, $variables, $operationName, false);
 }

@@ -15,22 +15,34 @@
 use testing;
 
 func testAuthorizationVector() {
-    def c as Client init connect("https://examplebucket.s3.amazonaws.com", "us-east-1",
-        "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
-    def auth as string init authorization($c, "GET", "examplebucket.s3.amazonaws.com",
-        "/test.txt", "", hexDigest(""), "20130524T000000Z", "20130524");
-    testing.assertEqual($auth,
+    def c as Client init connect(
+        "https://examplebucket.s3.amazonaws.com",
+        "us-east-1",
+        "AKIAIOSFODNN7EXAMPLE",
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+    def auth as string init authorization(
+        $c,
+        "GET",
+        "examplebucket.s3.amazonaws.com",
+        "/test.txt",
+        "",
+        hexDigest(""),
+        "20130524T000000Z",
+        "20130524");
+    testing.assertEqual(
+        $auth,
         "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=df548e2ce037944d03f3e68682813b093763996d597cf890ca3d9037fd231eb4");
 }
 
 func testConnectDefaults() {
     def c as Client init connect("https://s3.amazonaws.com", "us-east-1", "k", "s");
-    testing.assertEqual($c.timeout, 30000);   # a hung endpoint fails, not hangs
+    testing.assertEqual($c.timeout, 30000); # a hung endpoint fails, not hangs
     testing.assertEqual($c.region, "us-east-1");
 }
 
 func testHexDigestEmpty() {
-    testing.assertEqual(hexDigest(""),
+    testing.assertEqual(
+        hexDigest(""),
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 }
 
@@ -39,19 +51,19 @@ func testSigningKeyWidth() {
 }
 
 func testHostOf() {
-    testing.assertEqual(hostOf("https://s3.amazonaws.com"), "s3.amazonaws.com");        # default https port omitted
-    testing.assertEqual(hostOf("https://s3.amazonaws.com:443"), "s3.amazonaws.com");     # explicit default omitted
-    testing.assertEqual(hostOf("http://example.com"), "example.com");                    # default http port omitted
-    testing.assertEqual(hostOf("http://localhost:9000"), "localhost:9000");              # non-default port kept
+    testing.assertEqual(hostOf("https://s3.amazonaws.com"), "s3.amazonaws.com"); # default https port omitted
+    testing.assertEqual(hostOf("https://s3.amazonaws.com:443"), "s3.amazonaws.com"); # explicit default omitted
+    testing.assertEqual(hostOf("http://example.com"), "example.com"); # default http port omitted
+    testing.assertEqual(hostOf("http://localhost:9000"), "localhost:9000"); # non-default port kept
     testing.assertEqual(hostOf("https://minio.example.com:9000"), "minio.example.com:9000");
 }
 
 func testUriEncodePath() {
     testing.assertEqual(uriEncodePath("simple.txt"), "simple.txt");
-    testing.assertEqual(uriEncodePath("a/b/c.txt"), "a/b/c.txt");         # slashes kept
-    testing.assertEqual(uriEncodePath("my file.txt"), "my%20file.txt");   # space encoded
-    testing.assertEqual(uriEncodePath("a+b&c"), "a%2Bb%26c");             # + and & encoded
-    testing.assertEqual(uriEncodePath("na~me-1.0_x"), "na~me-1.0_x");     # unreserved kept
+    testing.assertEqual(uriEncodePath("a/b/c.txt"), "a/b/c.txt"); # slashes kept
+    testing.assertEqual(uriEncodePath("my file.txt"), "my%20file.txt"); # space encoded
+    testing.assertEqual(uriEncodePath("a+b&c"), "a%2Bb%26c"); # + and & encoded
+    testing.assertEqual(uriEncodePath("na~me-1.0_x"), "na~me-1.0_x"); # unreserved kept
 }
 
 func testObjectPath() {

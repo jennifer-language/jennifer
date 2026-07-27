@@ -40,10 +40,12 @@ flatdb.save($db);
 # Reopen from disk and query through JSON Pointer.
 def store as flatdb.DB init flatdb.open($path);
 io.printf("records: %d\n", flatdb.length($store, "/runs"));
-io.printf("first:   %s (%d ms)\n",
+io.printf(
+    "first:   %s (%d ms)\n",
     json.asString(flatdb.get($store, "/runs/0/cpu")),
     json.asInt(flatdb.get($store, "/runs/0/ms")));
-io.printf("second:  %s (%d ms)\n",
+io.printf(
+    "second:  %s (%d ms)\n",
     json.asString(flatdb.get($store, "/runs/1/cpu")),
     json.asInt(flatdb.get($store, "/runs/1/ms")));
 
@@ -53,7 +55,9 @@ def n as int init flatdb.length($store, "/runs");
 def i as int init 0;
 while ($i < $n) {
     def base as string init "/runs/" + convert.toString($i);
-    io.printf("  #%d: %s (%d ms)\n", $i,
+    io.printf(
+        "  #%d: %s (%d ms)\n",
+        $i,
         json.asString(flatdb.get($store, $base + "/cpu")),
         json.asInt(flatdb.get($store, $base + "/ms")));
     $i = $i + 1;

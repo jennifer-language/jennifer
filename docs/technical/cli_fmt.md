@@ -1,17 +1,45 @@
 # Formatter (`cmd/jennifer/fmt.go`)
 
-`jennifer fmt <file.j>` rewrites Jennifer source into the one canonical style
-defined in [../user-guide/style-guide.md](../user-guide/style-guide.md) and
-prints the result to **stdout**. It never edits the file in place, so apply it
-by redirecting:
+`jennifer fmt [-w] <file.j>...` rewrites Jennifer source into the one canonical
+style defined in [../user-guide/style-guide.md](../user-guide/style-guide.md).
+By default it prints the result to **stdout**; `-w` (or `--write`) rewrites the
+named files in place instead:
 
 ```sh
-jennifer fmt prog.j            # preview the formatted source
-jennifer fmt prog.j > out.j    # write it out (or pipe to `sponge`, an editor, ...)
+jennifer fmt prog.j            # preview the formatted source on stdout
+jennifer fmt prog.j > out.j    # or redirect it (pipe to `sponge`, an editor, ...)
+jennifer fmt -w prog.j         # rewrite prog.j in place
+jennifer fmt -w a.j b.j        # rewrite several named files in place
 ```
 
-There are no style options: like `gofmt`, the formatter is opinionated by
-design, so a whole codebase reads the same and diffs stay minimal.
+`-w` skips a file whose content is already canonical (no needless mtime churn)
+and preserves each file's mode; it prints `formatted <path>` to stderr for each
+file it changes. Sending several files to stdout without `-w` is refused as
+ambiguous. There is exactly one write flag - `-w` / `--write`, no `-i` synonym -
+and no style options: like `gofmt`, the formatter is opinionated by design, so a
+whole codebase reads the same and diffs stay minimal.
+
+### Selecting files: use the shell
+
+`fmt` formats exactly the files you name; it does **no** globbing or directory
+walking of its own (a directory argument is a usage error). Selecting files is
+the shell's job - that is the one obvious way to do it, and it composes with
+every other command. A filemask works flat, and recursively via `**`:
+
+```sh
+# bash / zsh
+jennifer fmt -w src/*.j                 # flat: every .j in src/
+shopt -s globstar                       # bash: enable ** (zsh has it on)
+jennifer fmt -w src/**/*.j              # recursive: every .j under src/
+jennifer fmt -w src/**/mikrotik*.j      # recursive filemask
+
+# fish (** is recursive by default, no setup)
+jennifer fmt -w src/**.j                # recursive: every .j under src/
+jennifer fmt -w src/**/mikrotik*.j      # recursive filemask
+```
+
+For anything the glob can't express, pipe from `find`:
+`find src -name '*.j' | xargs jennifer fmt -w`.
 
 ## Before / after
 

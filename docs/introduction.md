@@ -8,7 +8,7 @@
 
 # Jennifer
 
-Jennifer is a small, experimental, interpreted programming language
+Jennifer is a interpreted programming language
 written in (Tiny)Go and ships as two binaries:
 
 - **`jennifer`** - standard Go build, full host-feature surface.
@@ -20,7 +20,7 @@ written in (Tiny)Go and ships as two binaries:
   or embeddability matters (embedded systems, minimal containers,
   small-footprint scripting hosts).
 
-But small is not bare. Jennifer is batteries-included: a broad standard
+Jennifer is batteries-included: a broad standard
 library and a growing set of distributable modules cover what real programs
 actually need, so you build genuine tools, not toys. Text handling has full
 [regular expressions](libraries/regex.md); structured data flows through

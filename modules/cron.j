@@ -62,7 +62,7 @@ export def struct Schedule {
 
 # fail throws a catchable cron error.
 func fail(message as string) {
-    throw Error{ kind: "cron", message: "cron: " + $message, file: "", line: 0, col: 0 };
+    throw Error{kind: "cron", message: "cron: " + $message, file: "", line: 0, col: 0};
 }
 
 # nameToNumber translates a three-letter month (`JAN`-`DEC` -> 1-12) or weekday
@@ -72,7 +72,20 @@ func fail(message as string) {
 func nameToNumber(s as string, field as string) {
     def up as string init strings.upper($s);
     if ($field == "month") {
-        def months as list of string init ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+        def months as list of string init [
+            "JAN",
+            "FEB",
+            "MAR",
+            "APR",
+            "MAY",
+            "JUN",
+            "JUL",
+            "AUG",
+            "SEP",
+            "OCT",
+            "NOV",
+            "DEC"
+        ];
         def i as int init 0;
         for (def m in $months) {
             if ($m == $up) {
@@ -245,7 +258,8 @@ export func parse(expr as string) {
     }
     def parts as list of string init fields($expr);
     if (not (len($parts) == 5)) {
-        fail("expression needs 5 fields (minute hour day month weekday), got " + convert.toString(len($parts)));
+        fail("expression needs 5 fields (minute hour day month weekday), got " +
+            convert.toString(len($parts)));
     }
     # day-of-week: parse 0-7, then fold 0 (cron Sunday) to ISO 7
     def dowRaw as list of int init parseField($parts[4], 0, 7, "day-of-week");
@@ -318,7 +332,7 @@ export func matches(schedule as Schedule, t as time.Time) {
 # time's offset.
 func truncateMinute(t as time.Time) {
     def sub as int init time.second($t) * 1000000000 + time.nanosecond($t);
-    return time.add($t, time.Duration{ nanos: 0 - $sub });
+    return time.add($t, time.Duration{nanos: 0 - $sub});
 }
 
 # nextMidnight jumps to 00:00 of the following day (seconds already zeroed).

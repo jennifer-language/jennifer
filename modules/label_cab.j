@@ -32,8 +32,8 @@
 # print-setup lines come from a `label.CabSetup`; the H/O lines are cab-only (no
 # ZPL equivalent).
 
-def const BARCODE_NARROW as float init 0.3;   # narrow-element width (mm)
-def const ITF_RATIO as int init 3;            # wide:narrow ratio for ratio-oriented linear codes
+def const BARCODE_NARROW as float init 0.3; # narrow-element width (mm)
+def const ITF_RATIO as int init 3; # wide:narrow ratio for ratio-oriented linear codes
 
 # cabBarcodeType maps a portable type to a cab symbology name (uppercase, so the
 # human-readable line is printed for the linear codes).
@@ -125,7 +125,8 @@ func cabField(f as Field) {
         if ($f.points > 0) {
             $size = "pt" + convert.toString($f.points);
         }
-        return "T " + $x + "," + $y + "," + convert.toString($f.rotation) + "," + $font + "," + $size + ";" + cabEscape($f.data);
+        return "T " + $x + "," + $y + "," + convert.toString($f.rotation) + "," + $font + "," +
+            $size + ";" + cabEscape($f.data);
     }
     if ($f.kind == "box") {
         return "G " + $x + "," + $y + ",0;R:" + convert.toString($f.w) + "," +
@@ -177,7 +178,8 @@ func renderCab(label as Label, setup as CabSetup) {
             "," + convert.toString($setup.height) + "," + convert.toString($setup.pitch) +
             "," + convert.toString($setup.width);
         if ($setup.columns > 1) {
-            $out = $out + "," + convert.toString($setup.columnPitch) + "," + convert.toString($setup.columns);
+            $out = $out + "," + convert.toString($setup.columnPitch) + "," +
+                convert.toString($setup.columns);
         }
     }
     $out = $out + "\n";

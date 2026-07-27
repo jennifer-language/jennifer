@@ -11,8 +11,8 @@ use io;
 
 try {
     def db as sql.Connection init sql.open("postgres", "postgres://user:pw@localhost/app");
-    defer sql.close($db);                    # closed however this block exits
-
+    defer sql.close($db); # closed however this block exits
+    
     # exec with a bound parameter ($1 for Postgres, ? for MySQL).
     def res as sql.Result init sql.exec($db, "insert into t(v) values ($1)", "hello");
     io.printf("inserted %d row(s)\n", $res.affected);

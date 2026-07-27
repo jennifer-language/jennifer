@@ -60,7 +60,13 @@ export def struct Client {
  * @return {Client} a configured client (30 s timeout; set `.timeout` to change it)
  */
 export func connect(endpoint as string, region as string, accessKey as string, secretKey as string) {
-    return Client{ endpoint: $endpoint, region: $region, accessKey: $accessKey, secretKey: $secretKey, timeout: DEFAULT_TIMEOUT_MS };
+    return Client{
+        endpoint: $endpoint,
+        region: $region,
+        accessKey: $accessKey,
+        secretKey: $secretKey,
+        timeout: DEFAULT_TIMEOUT_MS
+    };
 }
 
 # --- low-level crypto helpers -----------------------------------------------
@@ -144,19 +150,28 @@ func hostOf(endpoint as string) {
 # authorization builds the SigV4 Authorization header value for a request. The
 # signed header set is fixed (host, x-amz-content-sha256, x-amz-date), so any
 # other header (e.g. Content-Type) may be sent unsigned.
-func authorization(client as Client, method as string, host as string, canonicalUri as string,
-    canonicalQuery as string, payloadHash as string, isoDate as string, shortDate as string) {
+func authorization(
+    client as Client,
+    method as string,
+    host as string,
+    canonicalUri as string,
+    canonicalQuery as string,
+    payloadHash as string,
+    isoDate as string,
+    shortDate as string) {
     def canonicalHeaders as string init "host:" + $host + "\n" +
         "x-amz-content-sha256:" + $payloadHash + "\n" +
         "x-amz-date:" + $isoDate + "\n";
     def signedHeaders as string init "host;x-amz-content-sha256;x-amz-date";
-    def canonicalRequest as string init $method + "\n" + $canonicalUri + "\n" + $canonicalQuery + "\n" +
+    def canonicalRequest as string init $method + "\n" + $canonicalUri + "\n" + $canonicalQuery +
+        "\n" +
         $canonicalHeaders + "\n" + $signedHeaders + "\n" + $payloadHash;
     def scope as string init $shortDate + "/" + $client.region + "/" + SERVICE + "/aws4_request";
     def stringToSign as string init ALGORITHM + "\n" + $isoDate + "\n" + $scope + "\n" +
         hexDigest($canonicalRequest);
     def signature as string init encoding.toText(
-        hmacRaw(signingKey($client.secretKey, $shortDate, $client.region), $stringToSign), "hex");
+        hmacRaw(signingKey($client.secretKey, $shortDate, $client.region), $stringToSign),
+        "hex");
     return ALGORITHM + " Credential=" + $client.accessKey + "/" + $scope +
         ", SignedHeaders=" + $signedHeaders + ", Signature=" + $signature;
 }
@@ -164,13 +179,25 @@ func authorization(client as Client, method as string, host as string, canonical
 # --- request dispatch -------------------------------------------------------
 
 # doRequest signs and sends one request, returning the http.Response.
-func doRequest(client as Client, method as string, canonicalUri as string, canonicalQuery as string, body as string) {
+func doRequest(
+    client as Client,
+    method as string,
+    canonicalUri as string,
+    canonicalQuery as string,
+    body as string) {
     def host as string init hostOf($client.endpoint);
     def payloadHash as string init hexDigest($body);
     def isoDate as string init time.format(time.utc(), "%Y%m%dT%H%M%SZ");
     def shortDate as string init strings.substring($isoDate, 0, 8);
-    def auth as string init authorization($client, $method, $host, $canonicalUri,
-        $canonicalQuery, $payloadHash, $isoDate, $shortDate);
+    def auth as string init authorization(
+        $client,
+        $method,
+        $host,
+        $canonicalUri,
+        $canonicalQuery,
+        $payloadHash,
+        $isoDate,
+        $shortDate);
     def headers as map of string to string init {};
     $headers["x-amz-date"] = $isoDate;
     $headers["x-amz-content-sha256"] = $payloadHash;
@@ -257,7 +284,8 @@ func tokenEncode(s as string) {
         if (strings.indexOf($unreserved, $ch) >= 0) {
             $out[] = $ch;
         } else {
-            $out[] = "%" + strings.substring($hexdig, ($b >> 4) & 15, (($b >> 4) & 15) + 1) + strings.substring($hexdig, $b & 15, ($b & 15) + 1);
+            $out[] = "%" + strings.substring($hexdig, ($b >> 4) & 15, (($b >> 4) & 15) + 1) +
+                strings.substring($hexdig, $b & 15, ($b & 15) + 1);
         }
         $i = $i + 1;
     }
@@ -273,7 +301,12 @@ func tokenEncode(s as string) {
  * @return {http.Response} the response (body = ListBucketResult XML on 200)
  */
 export func listObjectsFrom(client as Client, bucketName as string, token as string) {
-    return doRequest($client, "GET", "/" + $bucketName, "list-type=2&continuation-token=" + tokenEncode($token), "");
+    return doRequest(
+        $client,
+        "GET",
+        "/" + $bucketName,
+        "list-type=2&continuation-token=" + tokenEncode($token),
+        "");
 }
 
 /**
@@ -291,7 +324,9 @@ export func isTruncated(xml as string) {
  * @return {string} the next continuation token, or "" if the listing is complete
  */
 export func nextContinuationToken(xml as string) {
-    def m as regex.Match init regex.find("<NextContinuationToken>([^<]*)</NextContinuationToken>", $xml);
+    def m as regex.Match init regex.find(
+        "<NextContinuationToken>([^<]*)</NextContinuationToken>",
+        $xml);
     if ($m.start == -1) {
         return "";
     }

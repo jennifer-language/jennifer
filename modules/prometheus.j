@@ -171,10 +171,16 @@ func escapeHelp(s as string) {
  */
 export func counter(name as string, help as string) {
     if (not isValidName($name)) {
-        throw Error{ kind: "prometheus", message: "prometheus: invalid metric name: " + $name, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "prometheus",
+            message: "prometheus: invalid metric name: " + $name,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def s as list of Sample init [];
-    return Metric{ name: $name, help: $help, type: "counter", samples: $s };
+    return Metric{name: $name, help: $help, type: "counter", samples: $s};
 }
 
 /**
@@ -186,10 +192,16 @@ export func counter(name as string, help as string) {
  */
 export func gauge(name as string, help as string) {
     if (not isValidName($name)) {
-        throw Error{ kind: "prometheus", message: "prometheus: invalid metric name: " + $name, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "prometheus",
+            message: "prometheus: invalid metric name: " + $name,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def s as list of Sample init [];
-    return Metric{ name: $name, help: $help, type: "gauge", samples: $s };
+    return Metric{name: $name, help: $help, type: "gauge", samples: $s};
 }
 
 # labelsEqual reports whether two label sets have identical keys and values.
@@ -221,7 +233,13 @@ func labelsEqual(a as map of string to string, b as map of string to string) {
 export func observe(metric as Metric, labels as map of string to string, value as float) {
     for (def k in $labels) {
         if (not isValidLabelName($k)) {
-            throw Error{ kind: "prometheus", message: "prometheus: invalid label name: " + $k, file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "prometheus",
+                message: "prometheus: invalid label name: " + $k,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     def out as Metric init $metric;
@@ -231,12 +249,12 @@ export func observe(metric as Metric, labels as map of string to string, value a
         if (labelsEqual($out.samples[$i].labels, $labels)) {
             $out.samples[$i].value = $value;
             $replaced = true;
-            break;   # a label set appears once; stop scanning
+            break; # a label set appears once; stop scanning
         }
         $i = $i + 1;
     }
     if (not $replaced) {
-        $out.samples = lists.push($out.samples, Sample{ labels: $labels, value: $value });
+        $out.samples = lists.push($out.samples, Sample{labels: $labels, value: $value});
     }
     return $out;
 }
@@ -330,7 +348,7 @@ func parseLabels(node as json.Value, pointer as string) {
 func parsePoint(node as json.Value, pointer as string) {
     def ts as float init json.asFloat($node, $pointer + "/0");
     def val as float init convert.toFloat(json.asString($node, $pointer + "/1"));
-    return Point{ timestamp: $ts, value: $val };
+    return Point{timestamp: $ts, value: $val};
 }
 
 # parseResult turns a decoded `/api/v1/query*` response into a Result. Throws
@@ -342,7 +360,7 @@ func parseResult(node as json.Value) {
         if (json.has($node, "/error")) {
             $msg = json.asString($node, "/error");
         }
-        throw Error{ kind: "prometheus", message: "prometheus: " + $msg, file: "", line: 0, col: 0 };
+        throw Error{kind: "prometheus", message: "prometheus: " + $msg, file: "", line: 0, col: 0};
     }
     def rtype as string init json.asString($node, "/data/resultType");
     def series as list of Series init [];
@@ -350,8 +368,8 @@ func parseResult(node as json.Value) {
         def pt as Point init parsePoint($node, "/data/result");
         def empty as map of string to string init {};
         def one as list of Point init [$pt];
-        $series[] = Series{ metric: $empty, values: $one };
-        return Result{ resultType: $rtype, series: $series };
+        $series[] = Series{metric: $empty, values: $one};
+        return Result{resultType: $rtype, series: $series};
     }
     def n as int init json.length($node, "/data/result");
     def i as int init 0;
@@ -369,10 +387,10 @@ func parseResult(node as json.Value) {
                 $j = $j + 1;
             }
         }
-        $series[] = Series{ metric: $labels, values: $pts };
+        $series[] = Series{metric: $labels, values: $pts};
         $i = $i + 1;
     }
-    return Result{ resultType: $rtype, series: $series };
+    return Result{resultType: $rtype, series: $series};
 }
 
 # decodeBody decodes a Prometheus HTTP response, mapping a non-JSON body (a 502
@@ -382,7 +400,13 @@ func decodeBody(resp as http.Response) {
     try {
         $node = json.decode($resp.body);
     } catch (e) {
-        throw Error{ kind: "prometheus", message: "prometheus: non-JSON response (HTTP " + convert.toString($resp.status) + ")", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "prometheus",
+            message: "prometheus: non-JSON response (HTTP " + convert.toString($resp.status) + ")",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $node;
 }
@@ -413,7 +437,12 @@ export func query(base as string, promql as string) {
  * @return {Result} the parsed result matrix
  * @throws {Error} kind "prometheus" when the server reports a query error
  */
-export func queryRange(base as string, promql as string, start as string, end as string, step as string) {
+export func queryRange(
+    base as string,
+    promql as string,
+    start as string,
+    end as string,
+    step as string) {
     def url as string init joinBase($base, "/api/v1/query_range") + "?query=" + urlEncode($promql) +
         "&start=" + urlEncode($start) + "&end=" + urlEncode($end) + "&step=" + urlEncode($step);
     def resp as http.Response init http.get($url, {});

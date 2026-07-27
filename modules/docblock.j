@@ -31,26 +31,40 @@ use lists;
  * @field line {int} the source line the doc comment documents
  * @field message {string} the human-readable description of the problem
  */
-export def struct Diagnostic { severity as string, line as int, message as string };
+export def struct Diagnostic {
+    severity as string,
+    line as int,
+    message as string
+};
 /**
  * One documented parameter or struct field.
  * @field name {string} the parameter or field name
  * @field type {string} the declared type, verbatim in Jennifer syntax
  * @field description {string} the prose description
  */
-export def struct ParamDoc { name as string, type as string, description as string };
+export def struct ParamDoc {
+    name as string,
+    type as string,
+    description as string
+};
 /**
  * A documented return value.
  * @field type {string} the returned type, verbatim in Jennifer syntax
  * @field description {string} the prose description
  */
-export def struct ReturnDoc { type as string, description as string };
+export def struct ReturnDoc {
+    type as string,
+    description as string
+};
 /**
  * A documented thrown error.
  * @field type {string} the thrown type, verbatim in Jennifer syntax
  * @field description {string} the prose description
  */
-export def struct ThrowDoc { type as string, description as string };
+export def struct ThrowDoc {
+    type as string,
+    description as string
+};
 /**
  * The module preamble documentation (the doc comment carrying a module tag).
  * @field summary {string} the one-line summary
@@ -60,7 +74,14 @@ export def struct ThrowDoc { type as string, description as string };
  * @field license {string} the documented license
  * @field see {list of string} the cross-references
  */
-export def struct ModuleDoc { summary as string, description as string, author as string, version as string, license as string, see as list of string };
+export def struct ModuleDoc {
+    summary as string,
+    description as string,
+    author as string,
+    version as string,
+    license as string,
+    see as list of string
+};
 /**
  * The documentation of one constant.
  * @field name {string} the constant name
@@ -73,7 +94,17 @@ export def struct ModuleDoc { summary as string, description as string, author a
  * @field see {list of string} the cross-references
  * @field internal {bool} whether the constant is marked internal
  */
-export def struct ConstDoc { name as string, exported as bool, type as string, summary as string, description as string, since as string, deprecated as string, see as list of string, internal as bool };
+export def struct ConstDoc {
+    name as string,
+    exported as bool,
+    type as string,
+    summary as string,
+    description as string,
+    since as string,
+    deprecated as string,
+    see as list of string,
+    internal as bool
+};
 /**
  * The documentation of one struct.
  * @field name {string} the struct name
@@ -86,7 +117,17 @@ export def struct ConstDoc { name as string, exported as bool, type as string, s
  * @field see {list of string} the cross-references
  * @field internal {bool} whether the struct is marked internal
  */
-export def struct StructDoc { name as string, exported as bool, summary as string, description as string, fields as list of ParamDoc, since as string, deprecated as string, see as list of string, internal as bool };
+export def struct StructDoc {
+    name as string,
+    exported as bool,
+    summary as string,
+    description as string,
+    fields as list of ParamDoc,
+    since as string,
+    deprecated as string,
+    see as list of string,
+    internal as bool
+};
 /**
  * The documentation of one method.
  * @field name {string} the method name
@@ -102,7 +143,20 @@ export def struct StructDoc { name as string, exported as bool, summary as strin
  * @field see {list of string} the cross-references
  * @field internal {bool} whether the method is marked internal
  */
-export def struct FuncDoc { name as string, exported as bool, summary as string, description as string, params as list of ParamDoc, returns as ReturnDoc, throws as list of ThrowDoc, examples as list of string, since as string, deprecated as string, see as list of string, internal as bool };
+export def struct FuncDoc {
+    name as string,
+    exported as bool,
+    summary as string,
+    description as string,
+    params as list of ParamDoc,
+    returns as ReturnDoc,
+    throws as list of ThrowDoc,
+    examples as list of string,
+    since as string,
+    deprecated as string,
+    see as list of string,
+    internal as bool
+};
 /**
  * The full documentation extracted from one source file.
  * @field module {ModuleDoc} the module preamble documentation
@@ -111,15 +165,28 @@ export def struct FuncDoc { name as string, exported as bool, summary as string,
  * @field consts {list of ConstDoc} the documented constants
  * @field diagnostics {list of Diagnostic} the reported documentation problems
  */
-export def struct FileDoc { module as ModuleDoc, funcs as list of FuncDoc, structs as list of StructDoc, consts as list of ConstDoc, diagnostics as list of Diagnostic };
+export def struct FileDoc {
+    module as ModuleDoc,
+    funcs as list of FuncDoc,
+    structs as list of StructDoc,
+    consts as list of ConstDoc,
+    diagnostics as list of Diagnostic
+};
 
 # ===== private intermediates =====
 
-def struct RawDoc { body as string, after as int, line as int };
+def struct RawDoc {
+    body as string,
+    after as int,
+    line as int
+};
 
 # A tag's gathered body (inline text plus continuation lines) and the line
 # index just past it.
-def struct TagBody { text as string, next as int };
+def struct TagBody {
+    text as string,
+    next as int
+};
 
 # tagBody joins a tag's inline `rest` with any following non-tag continuation
 # lines (wrapped description prose), so a multi-line @param / @return / @throws
@@ -138,14 +205,23 @@ func tagBody(lines as list of string, rest as string, start as int, cnt as int) 
         }
         $j = $j + 1;
     }
-    return TagBody{ text: strings.join($parts, " "), next: $j };
+    return TagBody{text: strings.join($parts, " "), next: $j};
 }
 def struct Parsed {
-    summary as string, description as string,
-    params as list of ParamDoc, returns as ReturnDoc, throws as list of ThrowDoc,
-    examples as list of string, see as list of string,
-    since as string, deprecated as string, internal as bool,
-    author as string, version as string, license as string, isModule as bool
+    summary as string,
+    description as string,
+    params as list of ParamDoc,
+    returns as ReturnDoc,
+    throws as list of ThrowDoc,
+    examples as list of string,
+    see as list of string,
+    since as string,
+    deprecated as string,
+    internal as bool,
+    author as string,
+    version as string,
+    license as string,
+    isModule as bool
 };
 
 # ===== the entry point =====
@@ -159,7 +235,14 @@ def struct Parsed {
  */
 export func parse(source as string) {
     def raws as list of RawDoc init scanDocs($source);
-    def module as ModuleDoc init ModuleDoc{ summary: "", description: "", author: "", version: "", license: "", see: [] };
+    def module as ModuleDoc init ModuleDoc{
+        summary: "",
+        description: "",
+        author: "",
+        version: "",
+        license: "",
+        see: []
+    };
     def funcs as list of FuncDoc init [];
     def structs as list of StructDoc init [];
     def consts as list of ConstDoc init [];
@@ -184,41 +267,105 @@ export func parse(source as string) {
             # construct rather than the comment's closing line.
             def gap as int init len($rawTail) - len($tail);
             def line as int init $raw.line + countNewlines(strings.substring($rawTail, 0, $gap));
-            def fm as regex.Match init regex.find("^(export\\s+)?func\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\(([^)]*)\\)", $tail);
-            def sm as regex.Match init regex.find("^(export\\s+)?def\\s+struct\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\{([^}]*)\\}", $tail);
-            def cm as regex.Match init regex.find("^(export\\s+)?def\\s+const\\s+([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init", $tail);
+            def fm as regex.Match init regex.find(
+                "^(export\\s+)?func\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\(([^)]*)\\)",
+                $tail);
+            def sm as regex.Match init regex.find(
+                "^(export\\s+)?def\\s+struct\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\{([^}]*)\\}",
+                $tail);
+            def cm as regex.Match init regex.find(
+                "^(export\\s+)?def\\s+const\\s+([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init",
+                $tail);
             if (not ($fm.start == -1)) {
                 $funcs[] = buildFunc($p, $fm.groups[1], not ($fm.groups[0] == ""));
-                $diags = lists.concat($diags, crossCheck("param", $fm.groups[1], $line, $p.params, declNames($fm.groups[2])));
+                $diags = lists.concat(
+                    $diags,
+                    crossCheck("param", $fm.groups[1], $line, $p.params, declNames($fm.groups[2])));
             } elseif (not ($sm.start == -1)) {
                 $structs[] = buildStruct($p, $sm.groups[1], not ($sm.groups[0] == ""));
-                $diags = lists.concat($diags, crossCheck("field", $sm.groups[1], $line, $p.params, declNames($sm.groups[2])));
+                $diags = lists.concat(
+                    $diags,
+                    crossCheck("field", $sm.groups[1], $line, $p.params, declNames($sm.groups[2])));
             } elseif (not ($cm.start == -1)) {
-                $consts[] = buildConst($p, $cm.groups[1], not ($cm.groups[0] == ""), strings.trim($cm.groups[2]));
+                $consts[] = buildConst(
+                    $p,
+                    $cm.groups[1],
+                    not ($cm.groups[0] == ""),
+                    strings.trim($cm.groups[2]));
             } else {
-                $diags[] = Diagnostic{ severity: "warning", line: $line, message: "doc comment precedes no documentable construct (orphaned)" };
+                $diags[] = Diagnostic{
+                    severity: "warning",
+                    line: $line,
+                    message: "doc comment precedes no documentable construct (orphaned)"
+                };
             }
         }
     }
-    return FileDoc{ module: $module, funcs: $funcs, structs: $structs, consts: $consts, diagnostics: $diags };
+    return FileDoc{
+        module: $module,
+        funcs: $funcs,
+        structs: $structs,
+        consts: $consts,
+        diagnostics: $diags
+    };
 }
 
 # ===== struct builders (Parsed -> the public shapes) =====
 
 func buildFunc(p as Parsed, name as string, exported as bool) {
-    return FuncDoc{ name: $name, exported: $exported, summary: $p.summary, description: $p.description, params: $p.params, returns: $p.returns, throws: $p.throws, examples: $p.examples, since: $p.since, deprecated: $p.deprecated, see: $p.see, internal: $p.internal };
+    return FuncDoc{
+        name: $name,
+        exported: $exported,
+        summary: $p.summary,
+        description: $p.description,
+        params: $p.params,
+        returns: $p.returns,
+        throws: $p.throws,
+        examples: $p.examples,
+        since: $p.since,
+        deprecated: $p.deprecated,
+        see: $p.see,
+        internal: $p.internal
+    };
 }
 
 func buildStruct(p as Parsed, name as string, exported as bool) {
-    return StructDoc{ name: $name, exported: $exported, summary: $p.summary, description: $p.description, fields: $p.params, since: $p.since, deprecated: $p.deprecated, see: $p.see, internal: $p.internal };
+    return StructDoc{
+        name: $name,
+        exported: $exported,
+        summary: $p.summary,
+        description: $p.description,
+        fields: $p.params,
+        since: $p.since,
+        deprecated: $p.deprecated,
+        see: $p.see,
+        internal: $p.internal
+    };
 }
 
 func buildConst(p as Parsed, name as string, exported as bool, ctype as string) {
-    return ConstDoc{ name: $name, exported: $exported, type: $ctype, summary: $p.summary, description: $p.description, since: $p.since, deprecated: $p.deprecated, see: $p.see, internal: $p.internal };
+    return ConstDoc{
+        name: $name,
+        exported: $exported,
+        type: $ctype,
+        summary: $p.summary,
+        description: $p.description,
+        since: $p.since,
+        deprecated: $p.deprecated,
+        see: $p.see,
+        internal: $p.internal
+    };
 }
 
 func buildModule(p as Parsed) {
-    return ModuleDoc{ summary: $p.summary, description: $p.description, author: $p.author, version: $p.version, license: $p.license, see: $p.see };
+    return ModuleDoc{
+        summary: $p.summary,
+        description: $p.description,
+        author: $p.author,
+        version: $p.version,
+        license: $p.license,
+        see: $p.see
+    };
 }
 
 # ===== comment scanner =====
@@ -256,7 +403,8 @@ func scanDocs(source as string) {
             }
             $i = $i + 1;
         } elseif ($c == "/" and $i + 1 < $n and $cs[$i + 1] == "*") {
-            def isDoc as bool init ($i + 2 < $n and $cs[$i + 2] == "*" and not ($i + 3 < $n and $cs[$i + 3] == "/"));
+            def isDoc as bool init ($i + 2 < $n and $cs[$i + 2] == "*" and
+                not ($i + 3 < $n and $cs[$i + 3] == "/"));
             def openLen as int init 2;
             if ($isDoc) {
                 $openLen = 3;
@@ -273,7 +421,7 @@ func scanDocs(source as string) {
                     $bodyEnd = $afterEnd - 2;
                 }
                 def body as string init strings.substring($source, $i + $openLen, $bodyEnd);
-                $out[] = RawDoc{ body: $body, after: $afterEnd, line: $line + $nl };
+                $out[] = RawDoc{body: $body, after: $afterEnd, line: $line + $nl};
             }
             $line = $line + $nl;
             $i = $afterEnd;
@@ -329,7 +477,7 @@ func parseBody(body as string) {
     def throws as list of ThrowDoc init [];
     def examples as list of string init [];
     def see as list of string init [];
-    def returns as ReturnDoc init ReturnDoc{ type: "", description: "" };
+    def returns as ReturnDoc init ReturnDoc{type: "", description: ""};
     def since as string init "";
     def deprecated as string init "";
     def author as string init "";
@@ -373,7 +521,7 @@ func parseBody(body as string) {
                 } elseif ($tag == "throws") {
                     def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
                     def t as ReturnDoc init parseTyped($tb.text);
-                    $throws[] = ThrowDoc{ type: $t.type, description: $t.description };
+                    $throws[] = ThrowDoc{type: $t.type, description: $t.description};
                     $i = $tb.next;
                 } elseif ($tag == "example") {
                     def exLines as list of string init [];
@@ -421,7 +569,22 @@ func parseBody(body as string) {
             }
         }
     }
-    return Parsed{ summary: $summary, description: strings.trim(strings.join($descLines, "\n")), params: $params, returns: $returns, throws: $throws, examples: $examples, see: $see, since: $since, deprecated: $deprecated, internal: $internal, author: $author, version: $version, license: $license, isModule: $isModule };
+    return Parsed{
+        summary: $summary,
+        description: strings.trim(strings.join($descLines, "\n")),
+        params: $params,
+        returns: $returns,
+        throws: $throws,
+        examples: $examples,
+        see: $see,
+        since: $since,
+        deprecated: $deprecated,
+        internal: $internal,
+        author: $author,
+        version: $version,
+        license: $license,
+        isModule: $isModule
+    };
 }
 
 # cleanLine strips a line's leading doc decoration (optional whitespace + `*` +
@@ -436,20 +599,26 @@ func isTag(line as string) {
 
 # parseParam parses `name {type} desc`.
 func parseParam(rest as string) {
-    def m as regex.Match init regex.find("^([A-Za-z][A-Za-z0-9]*)\\s+\\{([^}]*)\\}\\s*(.*)$", $rest);
+    def m as regex.Match init regex.find(
+        "^([A-Za-z][A-Za-z0-9]*)\\s+\\{([^}]*)\\}\\s*(.*)$",
+        $rest);
     if ($m.start == -1) {
-        return ParamDoc{ name: firstWord($rest), type: "", description: "" };
+        return ParamDoc{name: firstWord($rest), type: "", description: ""};
     }
-    return ParamDoc{ name: $m.groups[0], type: strings.trim($m.groups[1]), description: strings.trim($m.groups[2]) };
+    return ParamDoc{
+        name: $m.groups[0],
+        type: strings.trim($m.groups[1]),
+        description: strings.trim($m.groups[2])
+    };
 }
 
 # parseTyped parses `{type} desc` (for @return / @throws).
 func parseTyped(rest as string) {
     def m as regex.Match init regex.find("^\\{([^}]*)\\}\\s*(.*)$", $rest);
     if ($m.start == -1) {
-        return ReturnDoc{ type: "", description: strings.trim($rest) };
+        return ReturnDoc{type: "", description: strings.trim($rest)};
     }
-    return ReturnDoc{ type: strings.trim($m.groups[0]), description: strings.trim($m.groups[1]) };
+    return ReturnDoc{type: strings.trim($m.groups[0]), description: strings.trim($m.groups[1])};
 }
 
 func firstWord(s as string) {
@@ -481,7 +650,12 @@ func declNames(sig as string) {
 # crossCheck matches documented names against the real declaration, producing a
 # Diagnostic for each documented name that is not real and each real name that
 # is undocumented.
-func crossCheck(kind as string, cname as string, line as int, docParams as list of ParamDoc, realNames as list of string) {
+func crossCheck(
+    kind as string,
+    cname as string,
+    line as int,
+    docParams as list of ParamDoc,
+    realNames as list of string) {
     def diags as list of Diagnostic init [];
     def docNames as list of string init [];
     for (def d in $docParams) {
@@ -489,12 +663,20 @@ func crossCheck(kind as string, cname as string, line as int, docParams as list 
     }
     for (def dn in $docNames) {
         if (not lists.contains($realNames, $dn)) {
-            $diags[] = Diagnostic{ severity: "warning", line: $line, message: "@" + $kind + " \"" + $dn + "\" is not a " + $kind + " of " + $cname };
+            $diags[] = Diagnostic{
+                severity: "warning",
+                line: $line,
+                message: "@" + $kind + " \"" + $dn + "\" is not a " + $kind + " of " + $cname
+            };
         }
     }
     for (def rn in $realNames) {
         if (not lists.contains($docNames, $rn)) {
-            $diags[] = Diagnostic{ severity: "warning", line: $line, message: $kind + " \"" + $rn + "\" of " + $cname + " has no @" + $kind };
+            $diags[] = Diagnostic{
+                severity: "warning",
+                line: $line,
+                message: $kind + " \"" + $rn + "\" of " + $cname + " has no @" + $kind
+            };
         }
     }
     return $diags;

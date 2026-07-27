@@ -16,7 +16,9 @@ use os;
 import "../../modules/websocket.j" as websocket;
 
 def url as string init "wss://ws.postman-echo.com/raw";
-if (len(os.ARGS) > 1) { $url = os.ARGS[1]; }
+if (len(os.ARGS) > 1) {
+    $url = os.ARGS[1];
+}
 
 io.printf("connecting to %s ...\n", $url);
 def ws as websocket.Conn init websocket.connect($url);

@@ -63,7 +63,7 @@ func testSplitStructuredKeepsEscapedSemicolon() {
 func testComponentOutOfRange() {
     def parts as list of string init splitStructured("a;b");
     testing.assertEqual(component($parts, 0), "a");
-    testing.assertEqual(component($parts, 5), "");   # missing component -> ""
+    testing.assertEqual(component($parts, 5), ""); # missing component -> ""
 }
 
 # --- encode (exported) ------------------------------------------------------
@@ -84,7 +84,7 @@ func testEncodeOmitsEmptyFields() {
     testing.assertTrue(strings.contains($text, "FN:Just A Name\r\n"));
     testing.assertFalse(strings.contains($text, "ORG"));
     testing.assertFalse(strings.contains($text, "TITLE"));
-    testing.assertFalse(strings.contains($text, "\r\nN:"));   # the N property line (not FN)
+    testing.assertFalse(strings.contains($text, "\r\nN:")); # the N property line (not FN)
     testing.assertFalse(strings.contains($text, "ADR"));
     testing.assertFalse(strings.contains($text, "NOTE"));
 }

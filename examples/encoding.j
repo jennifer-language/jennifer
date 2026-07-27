@@ -20,7 +20,8 @@ io.printf("len(cafe runes) = %d\n", len($cafe));
 io.printf("encoding.lenBytes(cafe) = %d\n", encoding.lenBytes($cafe));
 io.printf("encoding.lenRunes(bytes) = %d\n", encoding.lenRunes($cafeBytes));
 io.printf("encoding.isAscii(cafe) = %t\n", encoding.isAscii($cafeBytes));
-io.printf("encoding.isAscii(hello) = %t\n",
+io.printf(
+    "encoding.isAscii(hello) = %t\n",
     encoding.isAscii(convert.bytesFromString("hello", "utf-8")));
 
 # --- toText / fromText: hex ---
@@ -51,8 +52,12 @@ for (def name in $codecs) {
 
 # --- ISO-8859-1 round-trip ---
 def latin as bytes init encoding.encode($cafe, "iso-8859-1");
-io.printf("encode iso-8859-1 'café' bytes = %d %d %d %d\n",
-    $latin[0], $latin[1], $latin[2], $latin[3]);
+io.printf(
+    "encode iso-8859-1 'café' bytes = %d %d %d %d\n",
+    $latin[0],
+    $latin[1],
+    $latin[2],
+    $latin[3]);
 io.printf("decode iso-8859-1 = %s\n", encoding.decode($latin, "iso-8859-1"));
 
 # --- Windows-1252: 0x80 is the EURO SIGN (versus Latin-1's C1 control) ---
@@ -62,14 +67,18 @@ io.printf("decode back = %s\n", encoding.decode($euroBytes, "windows-1252"));
 
 # --- EBCDIC IBM-1047 ---
 def helloEbcdic as bytes init encoding.encode("Hello", "ebcdic");
-io.printf("encode ebcdic 'Hello' bytes = %d %d %d %d %d\n",
-    $helloEbcdic[0], $helloEbcdic[1], $helloEbcdic[2],
-    $helloEbcdic[3], $helloEbcdic[4]);
+io.printf(
+    "encode ebcdic 'Hello' bytes = %d %d %d %d %d\n",
+    $helloEbcdic[0],
+    $helloEbcdic[1],
+    $helloEbcdic[2],
+    $helloEbcdic[3],
+    $helloEbcdic[4]);
 io.printf("decode ebcdic = %s\n", encoding.decode($helloEbcdic, "ebcdic"));
 
 # --- Codec names are exact (canonical only, no IANA aliases) ---
 try {
-    encoding.decode($latin, "ISO-8859-1");   # an alias, not the canonical name
+    encoding.decode($latin, "ISO-8859-1"); # an alias, not the canonical name
     io.printf("ISO-8859-1: unexpectedly accepted\n");
 } catch (aliasErr) {
     io.printf("codec names are exact: use 'iso-8859-1', not 'ISO-8859-1'\n");

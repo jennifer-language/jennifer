@@ -70,7 +70,7 @@ def struct Reply {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "mikrotik", message: "mikrotik: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "mikrotik", message: "mikrotik: " + $msg, file: "", line: 0, col: 0};
 }
 
 # Network timeout (ms) applied to the dial and to every read, so a blackholed or
@@ -107,7 +107,7 @@ func checkWordLen(n as int) {
  * @return {Options} the options
  */
 export func options(host as string, user as string, password as string) {
-    return Options{ host: $host, port: 8728, user: $user, password: $password, tls: false };
+    return Options{host: $host, port: 8728, user: $user, password: $password, tls: false};
 }
 
 /**
@@ -118,7 +118,7 @@ export func options(host as string, user as string, password as string) {
  * @return {Options} the options
  */
 export func optionsTLS(host as string, user as string, password as string) {
-    return Options{ host: $host, port: 8729, user: $user, password: $password, tls: true };
+    return Options{host: $host, port: 8729, user: $user, password: $password, tls: true};
 }
 
 /**
@@ -227,7 +227,8 @@ func decodeLen(buf as bytes, off as int) {
         return (($head & 0x1f) << 16) | ($buf[$off + 1] << 8) | $buf[$off + 2];
     }
     if ($size == 4) {
-        return (($head & 0x0f) << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off + 3];
+        return (($head & 0x0f) << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off +
+            3];
     }
     return ($buf[$off + 1] << 24) | ($buf[$off + 2] << 16) | ($buf[$off + 3] << 8) | $buf[$off + 4];
 }
@@ -295,7 +296,10 @@ func parseFields(sentence as list of string) {
             def rest as string init strings.substring($w, 1, len($w));
             def eq as int init strings.indexOf($rest, "=");
             if ($eq >= 0) {
-                $fields[strings.substring($rest, 0, $eq)] = strings.substring($rest, $eq + 1, len($rest));
+                $fields[strings.substring($rest, 0, $eq)] = strings.substring(
+                    $rest,
+                    $eq + 1,
+                    len($rest));
             }
         }
         $i = $i + 1;
@@ -339,7 +343,11 @@ func buildWords(command as string, attrs as map of string to string, queries as 
 # router echoes the tag on every reply to this command and a later `/cancel` can
 # name it. The command word stays first; the tag word (like every API word) may
 # follow in any order.
-func buildTaggedWords(command as string, attrs as map of string to string, queries as list of string, tag as string) {
+func buildTaggedWords(
+    command as string,
+    attrs as map of string to string,
+    queries as list of string,
+    tag as string) {
     def words as list of string init buildWords($command, $attrs, $queries);
     $words[] = ".tag=" + $tag;
     return $words;
@@ -410,11 +418,15 @@ func collectReply(session as Session) {
         }
         fail("!trap: " + $msg);
     }
-    return Reply{ rows: $rows, ret: $ret };
+    return Reply{rows: $rows, ret: $ret};
 }
 
 # exchange sends a command and collects its reply to `!done`.
-func exchange(session as Session, command as string, attrs as map of string to string, queries as list of string) {
+func exchange(
+    session as Session,
+    command as string,
+    attrs as map of string to string,
+    queries as list of string) {
     writeSentence($session.socket, buildWords($command, $attrs, $queries));
     return collectReply($session);
 }
@@ -462,7 +474,7 @@ export func connect(opts as Options) {
     } else {
         $socket = net.connect($addr, CONNECT_TIMEOUT_MS);
     }
-    def session as Session init Session{ socket: $socket };
+    def session as Session init Session{socket: $socket};
     # A refused login must not leak the socket; on success the caller owns the
     # open session.
     errdefer net.close($socket);
@@ -498,7 +510,11 @@ export func talk(session as Session, command as string, attrs as map of string t
  * @return {list of map of string to string} the matching reply rows
  * @throws {Error} kind "mikrotik" on a bad query word or a !trap / !fatal reply
  */
-export func talkQuery(session as Session, command as string, attrs as map of string to string, queries as list of string) {
+export func talkQuery(
+    session as Session,
+    command as string,
+    attrs as map of string to string,
+    queries as list of string) {
     return exchange($session, $command, $attrs, $queries).rows;
 }
 
@@ -556,7 +572,11 @@ export func run(session as Session, command as string, attrs as map of string to
  * @return {list of map of string to string} the reply rows
  * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
  */
-export func talkTagged(session as Session, command as string, attrs as map of string to string, tag as string) {
+export func talkTagged(
+    session as Session,
+    command as string,
+    attrs as map of string to string,
+    tag as string) {
     def t as string init resolveTag($tag);
     def noq as list of string init [];
     writeSentence($session.socket, buildTaggedWords($command, $attrs, $noq, $t));

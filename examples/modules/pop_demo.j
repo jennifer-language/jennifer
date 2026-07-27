@@ -10,15 +10,23 @@ use io;
 import "../../modules/pop.j" as pop;
 import "../../modules/mime.j" as mime;
 
-def opts as pop.Options init pop.Options{host: "127.0.0.1", port: 2110,
-    security: "none", user: "demo", pass: "demo", auth: ""};
+def opts as pop.Options init pop.Options{
+    host: "127.0.0.1",
+    port: 2110,
+    security: "none",
+    user: "demo",
+    pass: "demo",
+    auth: ""
+};
 
 try {
     def msgs as list of string init pop.fetchAll($opts);
     io.printf("fetched %d message(s):\n", len($msgs));
     for (def raw in $msgs) {
         def m as mime.Part init mime.parse($raw);
-        io.printf("  from %s | subject: %s\n", mime.headerValue($m, "From"),
+        io.printf(
+            "  from %s | subject: %s\n",
+            mime.headerValue($m, "From"),
             mime.headerValue($m, "Subject"));
     }
 } catch (e) {

@@ -36,18 +36,26 @@ for (def part in mime.parts($back)) {
 # Attach a binary file and extract it back out. attachmentBytes carries raw
 # bytes (here a tiny "PNG" with a 0xff byte no UTF-8 decode would survive).
 def raw as bytes;
-$raw[] = 0x89; $raw[] = 0x50; $raw[] = 0x4E; $raw[] = 0x47; $raw[] = 0xff; $raw[] = 0x00;
-def withFile as mime.Part init mime.multipart("mixed", "=_mixed_7", [
-    $plain,
-    mime.attachmentBytes("logo.png", "image/png", $raw)
-]);
+$raw[] = 0x89;
+$raw[] = 0x50;
+$raw[] = 0x4E;
+$raw[] = 0x47;
+$raw[] = 0xff;
+$raw[] = 0x00;
+def withFile as mime.Part init mime.multipart(
+    "mixed",
+    "=_mixed_7",
+    [$plain, mime.attachmentBytes("logo.png", "image/png", $raw)]);
 
 # Round-trip through the wire, then pull the parts apart with the accessors.
 def parsed as mime.Part init mime.parse(mime.encode($withFile));
 io.printf("=== attachments ===\n");
 for (def att in mime.attachments($parsed)) {
-    io.printf("  %s (%s), %d bytes\n",
-        mime.filename($att), mime.contentType($att), len(mime.data($att)));
+    io.printf(
+        "  %s (%s), %d bytes\n",
+        mime.filename($att),
+        mime.contentType($att),
+        len(mime.data($att)));
 }
 io.printf("=== text bodies ===\n");
 for (def tb in mime.textBodies($parsed)) {

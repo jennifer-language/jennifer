@@ -31,6 +31,10 @@ io.printf("=== parsed %d cards ===\n", len($cards));
 for (def c in $cards) {
     io.printf("- %s <%s>\n", $c.formattedName, $c.emails[0]);
     if (len($c.addresses) > 0) {
-        io.printf("    %s, %s %s\n", $c.addresses[0].street, $c.addresses[0].locality, $c.addresses[0].country);
+        io.printf(
+            "    %s, %s %s\n",
+            $c.addresses[0].street,
+            $c.addresses[0].locality,
+            $c.addresses[0].country);
     }
 }

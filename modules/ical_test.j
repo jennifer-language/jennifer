@@ -16,7 +16,11 @@ func at(iso as string) {
 }
 
 func sampleEvent() {
-    def ev as Event init event("evt-1@example.com", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Launch; party, cake");
+    def ev as Event init event(
+        "evt-1@example.com",
+        at("2024-06-15T13:00:00Z"),
+        at("2024-06-15T14:00:00Z"),
+        "Launch; party, cake");
     $ev = describe($ev, "Line one\nLine two with, comma");
     $ev = locate($ev, "Room 5");
     return $ev;

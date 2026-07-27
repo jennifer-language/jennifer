@@ -83,10 +83,15 @@ export def struct Address {
 export func card(formattedName as string) {
     return Card{
         formattedName: $formattedName,
-        family: "", given: "",
-        organization: "", title: "",
-        emails: [], phones: [], addresses: [],
-        url: "", note: ""
+        family: "",
+        given: "",
+        organization: "",
+        title: "",
+        emails: [],
+        phones: [],
+        addresses: [],
+        url: "",
+        note: ""
     };
 }
 
@@ -147,8 +152,19 @@ export func addPhone(c as Card, phone as string) {
  * @param country {string} the country name
  * @return {Address} the address
  */
-export func address(street as string, locality as string, region as string, postalCode as string, country as string) {
-    return Address{ street: $street, locality: $locality, region: $region, postalCode: $postalCode, country: $country };
+export func address(
+    street as string,
+    locality as string,
+    region as string,
+    postalCode as string,
+    country as string) {
+    return Address{
+        street: $street,
+        locality: $locality,
+        region: $region,
+        postalCode: $postalCode,
+        country: $country
+    };
 }
 
 /**
@@ -367,8 +383,12 @@ export func parse(text as string) {
             $cur.phones = lists.push($cur.phones, unescapeText($value));
         } elseif ($name == "ADR") {
             def parts as list of string init splitStructured($value);
-            def a as Address init address(component($parts, 2), component($parts, 3),
-                component($parts, 4), component($parts, 5), component($parts, 6));
+            def a as Address init address(
+                component($parts, 2),
+                component($parts, 3),
+                component($parts, 4),
+                component($parts, 5),
+                component($parts, 6));
             $cur.addresses = lists.push($cur.addresses, $a);
         } elseif ($name == "URL") {
             $cur.url = unescapeText($value);

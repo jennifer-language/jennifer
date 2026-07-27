@@ -22,7 +22,7 @@ try {
 
     def data as map of string to string init session.load($mc, $id);
     $data["user"] = "ada";
-    $data["name"] = "José";           # non-ASCII survives (base64-wrapped)
+    $data["name"] = "José"; # non-ASCII survives (base64-wrapped)
     session.save($mc, $id, $data, 1800);
 
     # A later request loads it back.

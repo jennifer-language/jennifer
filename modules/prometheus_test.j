@@ -32,7 +32,9 @@ func testObserveUpsertReplacesSameLabelSet() {
     $m = observe($m, {"room": "kitchen"}, 21.5);
     $m = observe($m, {"room": "hall"}, 18.0);
     testing.assertEqual(len($m.samples), 2);
-    testing.assertEqual(render([$m]), "# TYPE temp gauge\ntemp{room=\"kitchen\"} 21.5\ntemp{room=\"hall\"} 18.0\n");
+    testing.assertEqual(
+        render([$m]),
+        "# TYPE temp gauge\ntemp{room=\"kitchen\"} 21.5\ntemp{room=\"hall\"} 18.0\n");
 }
 
 func testLabelKeysSortDeterministically() {

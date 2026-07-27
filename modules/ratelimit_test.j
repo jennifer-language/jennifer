@@ -12,9 +12,9 @@
 use testing;
 
 func testWithinLimit() {
-    testing.assertTrue(withinLimit(1, 5));      # first hit
-    testing.assertTrue(withinLimit(5, 5));      # last allowed hit
-    testing.assertFalse(withinLimit(6, 5));     # over the limit
+    testing.assertTrue(withinLimit(1, 5)); # first hit
+    testing.assertTrue(withinLimit(5, 5)); # last allowed hit
+    testing.assertFalse(withinLimit(6, 5)); # over the limit
 }
 
 func testRemainingFromEmpty() {

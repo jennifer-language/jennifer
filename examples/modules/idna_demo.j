@@ -9,8 +9,13 @@
 use io;
 import "../../modules/idna.j" as idna;
 
-def domains as list of string init ["münchen.de", "bücher.example", "café.fr",
-    "señor.correos.es", "example.com"];
+def domains as list of string init [
+    "münchen.de",
+    "bücher.example",
+    "café.fr",
+    "señor.correos.es",
+    "example.com"
+];
 
 io.printf("unicode  ->  ascii (xn--)  ->  round-trip\n");
 for (def d in $domains) {

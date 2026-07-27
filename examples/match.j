@@ -16,18 +16,10 @@ def const MAX as int init 9;
 # One or more values per arm; `when MAX` shows a non-literal value.
 func classify(n as int) {
     match ($n) {
-        when 0 {
-            return "zero";
-        }
-        when 1, 2, 3 {
-            return "small";
-        }
-        when MAX {
-            return "the max";
-        }
-        else {
-            return "other";
-        }
+        when 0 { return "zero"; }
+        when 1, 2, 3 { return "small"; }
+        when MAX { return "the max"; }
+        else { return "other"; }
     }
     return "unreached";
 }
@@ -58,13 +50,7 @@ io.printf("kept sum = %d\n", $kept);
 # The subject can be any type; here a string dispatch.
 def cmd as string init "stop";
 match ($cmd) {
-    when "start" {
-        io.printf("starting\n");
-    }
-    when "stop", "halt" {
-        io.printf("stopping\n");
-    }
-    else {
-        io.printf("unknown command\n");
-    }
+    when "start" { io.printf("starting\n"); }
+    when "stop", "halt" { io.printf("stopping\n"); }
+    else { io.printf("unknown command\n"); }
 }

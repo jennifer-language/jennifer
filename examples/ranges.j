@@ -13,19 +13,25 @@ use convert;
 # A range literal builds a `list of int`.
 def r as list of int init 1..6;
 io.printf("range 1..6:");
-for (def x in $r) { io.printf(" %d", $x); }
+for (def x in $r) {
+    io.printf(" %d", $x);
+}
 io.printf("\n");
 
 # A bare range in a for-each iterates lazily.
 def sum as int init 0;
-for (def i in 0..10) { $sum = $sum + $i; }
+for (def i in 0..10) {
+    $sum = $sum + $i;
+}
 io.printf("sum 0..10: %d\n", $sum);
 
 # Slicing a list yields a fresh copy.
 def xs as list of int init [10, 20, 30, 40, 50];
 def mid as list of int init $xs[1..4];
 io.printf("xs[1..4]:");
-for (def v in $mid) { io.printf(" %d", $v); }
+for (def v in $mid) {
+    io.printf(" %d", $v);
+}
 io.printf("\n");
 
 # Open-ended slices default to 0 / len.

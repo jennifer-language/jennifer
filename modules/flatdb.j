@@ -54,7 +54,7 @@ export func open(path as string) {
             $doc = json.decode($text);
         }
     }
-    return DB{ path: $path, data: $doc };
+    return DB{path: $path, data: $doc};
 }
 
 /**
@@ -74,7 +74,7 @@ export func openString(text as string) {
     if (len(strings.trim($text)) > 0) {
         $doc = json.decode($text);
     }
-    return DB{ path: "", data: $doc };
+    return DB{path: "", data: $doc};
 }
 
 # --- readers (do not change the DB) ----------------------------------------
@@ -134,7 +134,7 @@ export func length(db as DB, pointer as string) {
  * @throws {Error} when an intermediate container does not exist
  */
 export func set(db as DB, pointer as string, value as json.Value) {
-    return DB{ path: $db.path, data: json.set($db.data, $pointer, $value) };
+    return DB{path: $db.path, data: json.set($db.data, $pointer, $value)};
 }
 
 /**
@@ -147,7 +147,7 @@ export func set(db as DB, pointer as string, value as json.Value) {
  * @throws {Error} when pointer does not resolve to an existing list
  */
 export func append(db as DB, pointer as string, value as json.Value) {
-    return DB{ path: $db.path, data: json.append($db.data, $pointer, $value) };
+    return DB{path: $db.path, data: json.append($db.data, $pointer, $value)};
 }
 
 /**
@@ -158,7 +158,7 @@ export func append(db as DB, pointer as string, value as json.Value) {
  * @throws {Error} when pointer does not resolve
  */
 export func remove(db as DB, pointer as string) {
-    return DB{ path: $db.path, data: json.remove($db.data, $pointer) };
+    return DB{path: $db.path, data: json.remove($db.data, $pointer)};
 }
 
 # --- persistence -----------------------------------------------------------
@@ -192,7 +192,7 @@ func writeAtomic(path as string, data as json.Value) {
     } catch (err) {
         try {
             fs.remove($tmp);
-        } catch (rmErr) {  # lint-disable: L103
+        } catch (rmErr) { # lint-disable: L103
             # best-effort cleanup; the rename failure below is what matters
         }
         throw $err;
@@ -209,7 +209,13 @@ func writeAtomic(path as string, data as json.Value) {
  */
 export func save(db as DB) {
     if (len($db.path) == 0) {
-        throw Error{kind: "flatdb", message: "flatdb.save: this DB is read-only (loaded with openString and has no backing file); use flatdb.saveAs(db, path)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "flatdb",
+            message: "flatdb.save: this DB is read-only (loaded with openString and has no backing file); use flatdb.saveAs(db, path)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     writeAtomic($db.path, $db.data);
 }
@@ -230,8 +236,14 @@ export func save(db as DB) {
  */
 export func saveAs(db as DB, path as string) {
     if (len($path) == 0) {
-        throw Error{kind: "flatdb", message: "flatdb.saveAs: path must not be empty", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "flatdb",
+            message: "flatdb.saveAs: path must not be empty",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     writeAtomic($path, $db.data);
-    return DB{ path: $path, data: $db.data };
+    return DB{path: $path, data: $db.data};
 }

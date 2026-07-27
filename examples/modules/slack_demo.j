@@ -16,7 +16,9 @@ import "../../modules/http.j" as http;
 import "../../modules/slack.j" as slack;
 
 def url as string init os.getEnv("SLACK_WEBHOOK");
-if (len(os.ARGS) > 1) { $url = os.ARGS[1]; }
+if (len(os.ARGS) > 1) {
+    $url = os.ARGS[1];
+}
 
 # Build a Block Kit message.
 def m as slack.Message init slack.message();

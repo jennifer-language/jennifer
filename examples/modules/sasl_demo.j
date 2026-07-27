@@ -24,7 +24,9 @@ io.printf("XOAUTH2     -> %s\n", sasl.bearer("alice@example.com", "ya29.a0Access
 
 # CRAM-MD5: the server sends a base64 challenge; the client answers with an
 # HMAC-MD5 of it keyed by the password (the password never crosses the wire).
-def challenge as string init encoding.toText(convert.bytesFromString("<12345.1@mail.example>", "utf-8"), "base64");
+def challenge as string init encoding.toText(
+    convert.bytesFromString("<12345.1@mail.example>", "utf-8"),
+    "base64");
 io.printf("CRAM-MD5    -> %s\n", sasl.cram("alice", "s3cret", $challenge));
 
 # SCRAM (here SCRAM-SHA-256) is a salted multi-step exchange; this prints the

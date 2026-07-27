@@ -19,8 +19,12 @@ import "../../modules/influxdb.j" as influxdb;
 
 def url as string init "http://localhost:8086";
 def db as string init "metrics";
-if (len(os.ARGS) > 1) { $url = os.ARGS[1]; }
-if (len(os.ARGS) > 2) { $db = os.ARGS[2]; }
+if (len(os.ARGS) > 1) {
+    $url = os.ARGS[1];
+}
+if (len(os.ARGS) > 2) {
+    $db = os.ARGS[2];
+}
 
 def client as influxdb.Client init influxdb.client($url, $db);
 

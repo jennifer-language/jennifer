@@ -20,9 +20,15 @@ import "../../modules/amqp.j" as amqp;
 def host as string init "localhost";
 def user as string init "guest";
 def password as string init "guest";
-if (len(os.ARGS) > 1) { $host = os.ARGS[1]; }
-if (len(os.ARGS) > 2) { $user = os.ARGS[2]; }
-if (len(os.ARGS) > 3) { $password = os.ARGS[3]; }
+if (len(os.ARGS) > 1) {
+    $host = os.ARGS[1];
+}
+if (len(os.ARGS) > 2) {
+    $user = os.ARGS[2];
+}
+if (len(os.ARGS) > 3) {
+    $password = os.ARGS[3];
+}
 
 io.printf("connecting to %s (user %s) ...\n", $host, $user);
 try {
@@ -45,7 +51,10 @@ try {
         if ($m.empty) {
             $more = false;
         } else {
-            io.printf("  got [tag %d] %s\n", $m.deliveryTag, convert.stringFromBytes($m.body, "utf-8"));
+            io.printf(
+                "  got [tag %d] %s\n",
+                $m.deliveryTag,
+                convert.stringFromBytes($m.body, "utf-8"));
             amqp.ack($c, $m.deliveryTag);
             $count = $count + 1;
         }

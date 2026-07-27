@@ -46,10 +46,10 @@ func testParseCRLF() {
 }
 
 func testParseEdges() {
-    testing.assertEqual(len(parse("")), 0);            # empty input, no rows
-    testing.assertEqual(len(parse("a,b\n")), 1);       # trailing newline, no extra row
+    testing.assertEqual(len(parse("")), 0); # empty input, no rows
+    testing.assertEqual(len(parse("a,b\n")), 1); # trailing newline, no extra row
     def e as list of list of string init parse("\"\",x,");
-    testing.assertEqual(len($e[0]), 3);                # empty quoted, value, trailing empty
+    testing.assertEqual(len($e[0]), 3); # empty quoted, value, trailing empty
     testing.assertEqual($e[0][0], "");
     testing.assertEqual($e[0][1], "x");
     testing.assertEqual($e[0][2], "");
@@ -111,7 +111,7 @@ func testFromRecords() {
     $recs[] = $one;
     def rows as list of list of string init fromRecords(["name", "age"], $recs);
     testing.assertEqual(len($rows), 2);
-    testing.assertEqual($rows[0][0], "name");   # header row
+    testing.assertEqual($rows[0][0], "name"); # header row
     testing.assertEqual($rows[1][0], "Ada");
     testing.assertEqual($rows[1][1], "36");
 }
@@ -141,7 +141,7 @@ func testPrivateNeedsQuote() {
     testing.assertTrue(needsQuote("a\"b", ","));
     testing.assertTrue(needsQuote("a\nb", ","));
     testing.assertTrue(needsQuote("a\rb", ","));
-    testing.assertFalse(needsQuote("a,b", "\t"));   # comma is not the tab delimiter
+    testing.assertFalse(needsQuote("a,b", "\t")); # comma is not the tab delimiter
 }
 
 func testPrivateQuoteField() {
@@ -158,11 +158,11 @@ func testPrivateSanitizeField() {
     testing.assertEqual(sanitizeField("+1"), "'+1");
     testing.assertEqual(sanitizeField("-1"), "'-1");
     testing.assertEqual(sanitizeField("@ref"), "'@ref");
-    testing.assertEqual(sanitizeField("\tx"), "'\tx");        # leading tab
-    testing.assertEqual(sanitizeField("\rx"), "'\rx");        # leading CR
-    testing.assertEqual(sanitizeField("plain"), "plain");     # normal untouched
-    testing.assertEqual(sanitizeField(""), "");               # empty untouched
-    testing.assertEqual(sanitizeField("a=b"), "a=b");         # only the FIRST char matters
+    testing.assertEqual(sanitizeField("\tx"), "'\tx"); # leading tab
+    testing.assertEqual(sanitizeField("\rx"), "'\rx"); # leading CR
+    testing.assertEqual(sanitizeField("plain"), "plain"); # normal untouched
+    testing.assertEqual(sanitizeField(""), ""); # empty untouched
+    testing.assertEqual(sanitizeField("a=b"), "a=b"); # only the FIRST char matters
 }
 
 func testFormatSafeNeutralises() {
@@ -174,7 +174,7 @@ func testFormatSafeNeutralises() {
     testing.assertEqual($back[0][2], "'-2");
     testing.assertEqual($back[0][3], "'@ref");
     testing.assertEqual($back[0][4], "'\tinj");
-    testing.assertEqual($back[0][5], "normal");   # left alone
+    testing.assertEqual($back[0][5], "normal"); # left alone
 }
 
 func testFormatSafeWithDelimiter() {
@@ -195,11 +195,11 @@ func testDialectDefaults() {
 }
 
 func testParseDialectSemicolonCommentTrim() {
-    def d as Dialect init Dialect{ delimiter: ";", quote: "\"", comment: "#", trim: true };
+    def d as Dialect init Dialect{delimiter: ";", quote: "\"", comment: "#", trim: true};
     def text as string init "# a header comment\n a ; b ; c \nx;y;z\n# trailing comment";
     def rows as list of list of string init parseDialect($text, $d);
     testing.assertEqual(len($rows), 2);
-    testing.assertEqual($rows[0][0], "a");   # unquoted field trimmed
+    testing.assertEqual($rows[0][0], "a"); # unquoted field trimmed
     testing.assertEqual($rows[0][1], "b");
     testing.assertEqual($rows[0][2], "c");
     testing.assertEqual($rows[1][0], "x");
@@ -208,7 +208,7 @@ func testParseDialectSemicolonCommentTrim() {
 
 func testParseDialectQuotedKeepsWhitespace() {
     # A quoted field keeps its whitespace even under trim=true.
-    def d as Dialect init Dialect{ delimiter: ";", quote: "\"", comment: "", trim: true };
+    def d as Dialect init Dialect{delimiter: ";", quote: "\"", comment: "", trim: true};
     def rows as list of list of string init parseDialect("\" keep \"; drop ", $d);
     testing.assertEqual($rows[0][0], " keep ");
     testing.assertEqual($rows[0][1], "drop");
@@ -229,7 +229,7 @@ func testStreamCsvRoundTrip() {
     def wf as fs.File init fs.open($path, "write");
     def w as Writer init writer($wf);
     writeRow($w, ["name", "note"]);
-    writeRow($w, ["Smith, J", "hi"]);       # embedded comma forces quoting
+    writeRow($w, ["Smith, J", "hi"]); # embedded comma forces quoting
     writeRow($w, ["Ada", "plain"]);
     closeWriter($w);
 
@@ -247,7 +247,7 @@ func testStreamCsvRoundTrip() {
 
     testing.assertEqual(len($rows), 3);
     testing.assertEqual($rows[0][0], "name");
-    testing.assertEqual($rows[1][0], "Smith, J");   # quoted comma survived streaming
+    testing.assertEqual($rows[1][0], "Smith, J"); # quoted comma survived streaming
     testing.assertEqual($rows[1][1], "hi");
     testing.assertEqual($rows[2][1], "plain");
 }

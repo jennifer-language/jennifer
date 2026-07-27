@@ -39,7 +39,10 @@ io.printf("%s %s\n", json.typeOf(json.decode("42")), json.typeOf(json.decode("4.
  * @field x {int} the x coordinate
  * @field y {int} the y coordinate
  */
-def struct Point { x as int, y as int };
+def struct Point {
+    x as int,
+    y as int
+};
 def d as json.Value init json.decode("{\"x\": 1, \"y\": 2}");
-def p as Point init Point{ x: json.asInt($d, "/x"), y: json.asInt($d, "/y") };
+def p as Point init Point{x: json.asInt($d, "/x"), y: json.asInt($d, "/y")};
 io.printf("point = %s\n", json.encode($p));

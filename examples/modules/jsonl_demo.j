@@ -32,7 +32,9 @@ for (def rec in $parsed) {
 # Write to a file, append one more, then stream it back a record at a time.
 def path as string init os.tempDir() + "/jsonl_demo.jsonl";
 jsonl.writeFile($path, $rows);
-jsonl.appendFile($path, [json.decode("{\"event\": \"purchase\", \"user\": \"ada\", \"amount\": 9}")]);
+jsonl.appendFile(
+    $path,
+    [json.decode("{\"event\": \"purchase\", \"user\": \"ada\", \"amount\": 9}")]);
 
 io.printf("=== streaming %s ===\n", $path);
 def reader as jsonl.Reader init jsonl.openReader($path);

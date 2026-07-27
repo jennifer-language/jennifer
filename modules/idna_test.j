@@ -20,7 +20,7 @@ func testToAsciiVectors() {
 
 func testToAsciiAsciiUnchanged() {
     testing.assertEqual(toAscii("example.com"), "example.com");
-    testing.assertEqual(toAscii("Example.COM"), "example.com");   # lowercased
+    testing.assertEqual(toAscii("Example.COM"), "example.com"); # lowercased
 }
 
 func testToAsciiMultiLabel() {
@@ -51,8 +51,8 @@ func testCharToDigit() {
     testing.assertEqual(charToDigit("z"), 25);
     testing.assertEqual(charToDigit("0"), 26);
     testing.assertEqual(charToDigit("9"), 35);
-    testing.assertEqual(charToDigit("A"), 0);       # case-insensitive
-    testing.assertEqual(charToDigit("-"), -1);      # not a digit
+    testing.assertEqual(charToDigit("A"), 0); # case-insensitive
+    testing.assertEqual(charToDigit("-"), -1); # not a digit
 }
 
 func testDigitToChar() {
@@ -62,9 +62,9 @@ func testDigitToChar() {
 }
 
 func testThreshold() {
-    testing.assertEqual(threshold(36, 72), 1);      # k <= bias -> tmin
-    testing.assertEqual(threshold(108, 72), 26);    # k >= bias+tmax -> tmax
-    testing.assertEqual(threshold(80, 72), 8);      # k - bias
+    testing.assertEqual(threshold(36, 72), 1); # k <= bias -> tmin
+    testing.assertEqual(threshold(108, 72), 26); # k >= bias+tmax -> tmax
+    testing.assertEqual(threshold(80, 72), 8); # k - bias
 }
 
 func testEncodeLabelDirect() {
@@ -75,8 +75,12 @@ func testEncodeLabelDirect() {
 
 # A malformed ACE label must throw a typed idna error rather than crash or
 # return garbage (a spoofing aid).
-func decodeInvalidDigit() { decodeLabel("mnchen-!ya"); }
-func decodeTruncated() { decodeLabel("mnchen-3y"); }   # drops the terminating digit
+func decodeInvalidDigit() {
+    decodeLabel("mnchen-!ya");
+}
+func decodeTruncated() {
+    decodeLabel("mnchen-3y");
+} # drops the terminating digit
 func testDecodeLabelRejectsMalformed() {
     testing.assertThrows("decodeInvalidDigit", "idna");
     testing.assertThrows("decodeTruncated", "idna");

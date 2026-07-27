@@ -213,11 +213,23 @@ func decodeStep(cs as list of string, ic as int, i as int, bias as int) {
         # character that is not a valid base-36 digit; reject both instead of
         # indexing out of bounds or accumulating a -1 digit.
         if ($cur >= $total) {
-            throw Error{kind: "idna", message: "idna: truncated punycode label", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "idna",
+                message: "idna: truncated punycode label",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def digit as int init charToDigit($cs[$cur]);
         if ($digit < 0) {
-            throw Error{kind: "idna", message: "idna: invalid punycode digit '" + $cs[$cur] + "'", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "idna",
+                message: "idna: invalid punycode digit '" + $cs[$cur] + "'",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         $cur = $cur + 1;
         $acc = $acc + $digit * $w;
@@ -264,7 +276,13 @@ func decodeLabel(ace as string) {
         # A hostile label can drive n past the Unicode range; reject it before
         # it reaches fromCodepoint (a spoofing / garbage-output guard).
         if ($n > 1114111) {
-            throw Error{kind: "idna", message: "idna: decoded code point out of range", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "idna",
+                message: "idna: decoded code point out of range",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         $i = $i % $outLen;
         $output = insertAt($output, $i, $n);
@@ -286,7 +304,13 @@ func labelToAscii(label as string) {
     }
     # DNS labels are at most 63 octets; a longer A-label is invalid.
     if (len($alabel) > 63) {
-        throw Error{kind: "idna", message: "idna: A-label exceeds 63 octets: " + $alabel, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "idna",
+            message: "idna: A-label exceeds 63 octets: " + $alabel,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $alabel;
 }

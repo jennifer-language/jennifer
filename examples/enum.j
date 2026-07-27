@@ -12,8 +12,8 @@
 use io;
 
 def enum Shape {
-    Circle { r as float },
-    Rect { w as float, h as float },
+    Circle{r as float},
+    Rect{w as float, h as float},
     Empty
 };
 
@@ -22,15 +22,9 @@ def enum Shape {
 # a compile error, not a silent no-op.
 func area(s as Shape) {
     match ($s) {
-        when Circle(c) {
-            return 3.14159 * $c.r * $c.r;
-        }
-        when Rect(rc) {
-            return $rc.w * $rc.h;
-        }
-        when Empty {
-            return 0.0;
-        }
+        when Circle(c) { return 3.14159 * $c.r * $c.r; }
+        when Rect(rc) { return $rc.w * $rc.h; }
+        when Empty { return 0.0; }
     }
     return -1.0;
 }
@@ -44,18 +38,14 @@ func name(s as Shape) {
     return "?";
 }
 
-def shapes as list of Shape init [
-    Shape.Circle{ r: 2.0 },
-    Shape.Rect{ w: 3.0, h: 4.0 },
-    Shape.Empty
-];
+def shapes as list of Shape init [Shape.Circle{r: 2.0}, Shape.Rect{w: 3.0, h: 4.0}, Shape.Empty];
 
 for (def s in $shapes) {
     io.printf("%s area = %f\n", name($s), area($s));
 }
 
 # Value semantics: a copy is independent; equality is by variant + payload.
-def a as Shape init Shape.Circle{ r: 1.0 };
+def a as Shape init Shape.Circle{r: 1.0};
 def b as Shape init $a;
 io.printf("a == b: %t\n", $a == $b);
 io.printf("a == Empty: %t\n", $a == Shape.Empty);

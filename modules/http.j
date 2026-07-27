@@ -146,16 +146,28 @@ func dechunk(body as bytes) {
         if ($lineEnd < 0) {
             # A chunk-size line with no CRLF means the connection dropped
             # mid-stream: fail loudly rather than return a silent partial body.
-            throw Error{kind: "http", message: "truncated body: chunk size line has no CRLF", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "http",
+                message: "truncated body: chunk size line has no CRLF",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def size as int init hexToInt(strings.trim(bytesToStr($body, $pos, $lineEnd)));
         if ($size == 0) {
-            return $out;   # terminal 0-length chunk: complete
+            return $out; # terminal 0-length chunk: complete
         }
         def dataStart as int init $lineEnd + 2;
         def dataEnd as int init $dataStart + $size;
         if ($dataEnd > $n) {
-            throw Error{kind: "http", message: "truncated body: chunk declares more bytes than received", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "http",
+                message: "truncated body: chunk declares more bytes than received",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def j as int init $dataStart;
         while ($j < $dataEnd) {
@@ -165,7 +177,13 @@ func dechunk(body as bytes) {
         $pos = $dataEnd + 2;
     }
     # Ran out of input without ever seeing the terminal 0-length chunk.
-    throw Error{kind: "http", message: "truncated body: missing terminal chunk", file: "", line: 0, col: 0};
+    throw Error{
+        kind: "http",
+        message: "truncated body: missing terminal chunk",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 # --- request / response (private) ----------------------------------
@@ -274,14 +292,32 @@ func hasControlChar(s as string) {
 # second request (HTTP request splitting / header injection).
 func rejectInjection(u as Url, headers as map of string to string) {
     if (hasControlChar($u.host) or hasControlChar($u.path)) {
-        throw Error{kind: "http", message: "request target contains a control character (CR/LF/NUL)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "http",
+            message: "request target contains a control character (CR/LF/NUL)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     for (def k in $headers) {
         if (hasControlChar($k)) {
-            throw Error{kind: "http", message: "header name contains a control character (CR/LF/NUL)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "http",
+                message: "header name contains a control character (CR/LF/NUL)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         if (hasControlChar($headers[$k])) {
-            throw Error{kind: "http", message: "header value contains a control character (CR/LF/NUL): " + $k, file: "", line: 0, col: 0};
+            throw Error{
+                kind: "http",
+                message: "header value contains a control character (CR/LF/NUL): " + $k,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
 }
@@ -307,7 +343,13 @@ func buildHead(method as string, u as Url, headers as map of string to string, c
     # The method goes onto the request line verbatim, so a CR / LF / NUL in it
     # would smuggle extra headers or a second request just like the target does.
     if (hasControlChar($method)) {
-        throw Error{kind: "http", message: "request method contains a control character (CR/LF/NUL)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "http",
+            message: "request method contains a control character (CR/LF/NUL)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as string init $method + " " + $u.path + " HTTP/1.1\r\n";
     $out = $out + "Host: " + hostHeader($u) + "\r\n";
@@ -373,8 +415,13 @@ func parseHeaders(lines as list of string) {
 func parseRaw(raw as bytes) {
     def hend as int init headerEnd($raw);
     if ($hend < 0) {
-        throw Error{kind: "http", message: "malformed response (no header terminator)",
-            file: "", line: 0, col: 0};
+        throw Error{
+            kind: "http",
+            message: "malformed response (no header terminator)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def headerText as string init bytesToStr($raw, 0, $hend);
     def lines as list of string init strings.split($headerText, "\r\n");
@@ -402,8 +449,12 @@ func parseRaw(raw as bytes) {
             $bodyBytes = sliceBytes($bodyBytes, 0, $cl);
         }
     }
-    return BytesResponse{status: $status, statusText: $statusText, headers: $headers,
-        body: $bodyBytes};
+    return BytesResponse{
+        status: $status,
+        statusText: $statusText,
+        headers: $headers,
+        body: $bodyBytes
+    };
 }
 
 # parseResponse parses a raw response into a text Response, decoding the body as
@@ -411,8 +462,12 @@ func parseRaw(raw as bytes) {
 # (`requestBytes` / `getBytes`) for binary payloads.
 func parseResponse(raw as bytes) {
     def r as BytesResponse init parseRaw($raw);
-    return Response{status: $r.status, statusText: $r.statusText, headers: $r.headers,
-        body: convert.stringFromBytes($r.body, "utf-8")};
+    return Response{
+        status: $r.status,
+        statusText: $r.statusText,
+        headers: $r.headers,
+        body: convert.stringFromBytes($r.body, "utf-8")
+    };
 }
 
 # isChunked reports whether the response uses chunked transfer-encoding.
@@ -464,7 +519,13 @@ func readToEOF(conn as net.Conn, timeoutMs as int, maxBytes as int) {
         # Re-tag the cap-exceeded error as kind "http" so callers catch it the
         # same way as before; re-raise anything else (timeout, I/O) unchanged.
         if (strings.contains($e.message, "exceeds the")) {
-            throw Error{kind: "http", message: "http: response body exceeds " + convert.toString($limit) + " bytes", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "http",
+                message: "http: response body exceeds " + convert.toString($limit) + " bytes",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         throw $e;
     }
@@ -502,9 +563,14 @@ func dial(u as Url, tls as TlsOptions) {
  * @return {Response} the parsed response
  * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
  */
-export func requestWith(method as string, url as string,
-    headers as map of string to string, body as string, timeoutMs as int, maxBytes as int) {
-    def t as TlsOptions;   # zero value: full certificate verification (unchanged)
+export func requestWith(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    timeoutMs as int,
+    maxBytes as int) {
+    def t as TlsOptions; # zero value: full certificate verification (unchanged)
     return parseResponse(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t));
 }
 
@@ -512,8 +578,14 @@ export func requestWith(method as string, url as string,
 # **raw response bytes** (head + framed body). The public variants differ only in
 # which TlsOptions they hand it and whether they parse the result as a text
 # `Response` or a byte-safe `BytesResponse`. An `http://` URL ignores `tls`.
-func sendCore(method as string, url as string, headers as map of string to string,
-    body as string, timeoutMs as int, maxBytes as int, tls as TlsOptions) {
+func sendCore(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    timeoutMs as int,
+    maxBytes as int,
+    tls as TlsOptions) {
     def u as Url init parseUrl($url);
     # Build (and validate) the request before opening a socket, so an injected
     # header / path throws without dialing and nothing malformed hits the wire.
@@ -524,7 +596,7 @@ func sendCore(method as string, url as string, headers as map of string to strin
     # hitting timeouts would otherwise exhaust file descriptors).
     defer net.close($conn);
     if ($timeoutMs > 0) {
-        net.setDeadline($conn, $timeoutMs);   # covers the write and the first read
+        net.setDeadline($conn, $timeoutMs); # covers the write and the first read
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
     return readToEOF($conn, $timeoutMs, $maxBytes);
@@ -534,8 +606,14 @@ func sendCore(method as string, url as string, headers as map of string to strin
 # and the raw body as two separate socket writes, so an arbitrary-binary body (a
 # multipart file upload, a protobuf) reaches the wire byte-for-byte instead of
 # being mangled by a UTF-8 string round-trip. Returns the raw response bytes.
-func sendCoreRaw(method as string, url as string, headers as map of string to string,
-    body as bytes, timeoutMs as int, maxBytes as int, tls as TlsOptions) {
+func sendCoreRaw(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as bytes,
+    timeoutMs as int,
+    maxBytes as int,
+    tls as TlsOptions) {
     def u as Url init parseUrl($url);
     def head as string init buildHead($method, $u, $headers, len($body));
     def conn as net.Conn init dial($u, $tls);
@@ -565,9 +643,14 @@ func sendCoreRaw(method as string, url as string, headers as map of string to st
  * @return {Response} the parsed response
  * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
  */
-export func requestRawBody(method as string, url as string,
-    headers as map of string to string, body as bytes, timeoutMs as int, maxBytes as int) {
-    def t as TlsOptions;   # zero value: full certificate verification
+export func requestRawBody(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as bytes,
+    timeoutMs as int,
+    maxBytes as int) {
+    def t as TlsOptions; # zero value: full certificate verification
     return parseResponse(sendCoreRaw($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t));
 }
 
@@ -584,9 +667,14 @@ export func requestRawBody(method as string, url as string,
  * @return {Response} the parsed response
  * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
  */
-export func requestRawBodyTls(method as string, url as string,
-    headers as map of string to string, body as bytes, timeoutMs as int,
-    maxBytes as int, tls as TlsOptions) {
+export func requestRawBodyTls(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as bytes,
+    timeoutMs as int,
+    maxBytes as int,
+    tls as TlsOptions) {
     return parseResponse(sendCoreRaw($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
 }
 
@@ -603,9 +691,14 @@ export func requestRawBodyTls(method as string, url as string,
  * @return {Response} the parsed response
  * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
  */
-export func requestWithTls(method as string, url as string,
-    headers as map of string to string, body as string, timeoutMs as int,
-    maxBytes as int, tls as TlsOptions) {
+export func requestWithTls(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    timeoutMs as int,
+    maxBytes as int,
+    tls as TlsOptions) {
     return parseResponse(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
 }
 
@@ -620,8 +713,12 @@ export func requestWithTls(method as string, url as string,
  * @return {Response} the parsed response
  * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
  */
-export func requestTls(method as string, url as string,
-    headers as map of string to string, body as string, tls as TlsOptions) {
+export func requestTls(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    tls as TlsOptions) {
     return requestWithTls($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0, $tls);
 }
 
@@ -634,8 +731,11 @@ export func requestTls(method as string, url as string,
  * @return {Response} the parsed response
  * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
  */
-export func request(method as string, url as string,
-    headers as map of string to string, body as string) {
+export func request(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string) {
     return requestWith($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0);
 }
 
@@ -655,9 +755,14 @@ export func request(method as string, url as string,
  * @return {BytesResponse} the response with a raw bytes body
  * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
  */
-export func requestWithBytes(method as string, url as string,
-    headers as map of string to string, body as string, timeoutMs as int,
-    maxBytes as int, tls as TlsOptions) {
+export func requestWithBytes(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    timeoutMs as int,
+    maxBytes as int,
+    tls as TlsOptions) {
     return parseRaw(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
 }
 
@@ -672,9 +777,12 @@ export func requestWithBytes(method as string, url as string,
  * @return {BytesResponse} the response with a raw bytes body
  * @throws {Error} kind "http" if the response is malformed or exceeds the cap, or a "read timed out" error on timeout
  */
-export func requestBytes(method as string, url as string,
-    headers as map of string to string, body as string) {
-    def t as TlsOptions;   # zero value: full certificate verification
+export func requestBytes(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string) {
+    def t as TlsOptions; # zero value: full certificate verification
     return requestWithBytes($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0, $t);
 }
 
@@ -706,7 +814,10 @@ export func get(url as string, headers as map of string to string) {
  * @param headers {map of string to string} extra request headers ({} for none)
  * @return {Response} the parsed response
  */
-export func post(url as string, contentType as string, body as string,
+export func post(
+    url as string,
+    contentType as string,
+    body as string,
     headers as map of string to string) {
     def h as map of string to string init $headers;
     $h["Content-Type"] = $contentType;
@@ -721,7 +832,10 @@ export func post(url as string, contentType as string, body as string,
  * @param headers {map of string to string} extra request headers ({} for none)
  * @return {Response} the parsed response
  */
-export func put(url as string, contentType as string, body as string,
+export func put(
+    url as string,
+    contentType as string,
+    body as string,
     headers as map of string to string) {
     def h as map of string to string init $headers;
     $h["Content-Type"] = $contentType;
@@ -736,7 +850,10 @@ export func put(url as string, contentType as string, body as string,
  * @param headers {map of string to string} extra request headers ({} for none)
  * @return {Response} the parsed response
  */
-export func patch(url as string, contentType as string, body as string,
+export func patch(
+    url as string,
+    contentType as string,
+    body as string,
     headers as map of string to string) {
     def h as map of string to string init $headers;
     $h["Content-Type"] = $contentType;

@@ -162,7 +162,12 @@ func jsonBody(title as string, message as string, priority as int, extras as Ext
  * @param extras {Extras} the extras to attach (a zero Extras adds none)
  * @return {http.Response} 2xx on success; a bad token surfaces as a 4xx value
  */
-export func pushExtras(cfg as Config, title as string, message as string, priority as int, extras as Extras) {
+export func pushExtras(
+    cfg as Config,
+    title as string,
+    message as string,
+    priority as int,
+    extras as Extras) {
     def headers as map of string to string init {"X-Gotify-Key": $cfg.token};
     def body as string init jsonBody($title, $message, $priority, $extras);
     return http.post($cfg.url + "/message", "application/json", $body, $headers);
@@ -193,6 +198,16 @@ export func pushMarkdown(cfg as Config, title as string, message as string, prio
  * @param clickUrl {string} the URL to open when the notification is tapped
  * @return {http.Response} 2xx on success; a bad token surfaces as a 4xx value
  */
-export func pushWith(cfg as Config, title as string, message as string, priority as int, clickUrl as string) {
-    return pushExtras($cfg, $title, $message, $priority, Extras{markdown: false, clickUrl: $clickUrl});
+export func pushWith(
+    cfg as Config,
+    title as string,
+    message as string,
+    priority as int,
+    clickUrl as string) {
+    return pushExtras(
+        $cfg,
+        $title,
+        $message,
+        $priority,
+        Extras{markdown: false, clickUrl: $clickUrl});
 }

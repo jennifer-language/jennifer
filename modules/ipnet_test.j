@@ -64,10 +64,10 @@ func testParseSixEmbeddedFour() {
 func testParseSixExpandsToSixteenBytes() {
     def a as Address init parseAddress("2001:db8::");
     testing.assertEqual(len($a.octets), 16);
-    testing.assertEqual($a.octets[0], 32);   # 0x20
-    testing.assertEqual($a.octets[1], 1);    # 0x01
-    testing.assertEqual($a.octets[2], 13);   # 0x0d
-    testing.assertEqual($a.octets[3], 184);  # 0xb8
+    testing.assertEqual($a.octets[0], 32); # 0x20
+    testing.assertEqual($a.octets[1], 1); # 0x01
+    testing.assertEqual($a.octets[2], 13); # 0x0d
+    testing.assertEqual($a.octets[3], 184); # 0xb8
     testing.assertEqual($a.octets[4], 0);
 }
 
@@ -76,7 +76,7 @@ func testParseSixExpandsToSixteenBytes() {
 func testParseNetworkZeroesHostBits() {
     def n as Network init parse("192.168.1.42/24");
     testing.assertEqual($n.prefix, 24);
-    testing.assertEqual(networkString($n), "192.168.1.0/24");   # .42 host bits dropped
+    testing.assertEqual(networkString($n), "192.168.1.0/24"); # .42 host bits dropped
 }
 
 func testNetmaskFour() {
@@ -94,11 +94,14 @@ func testBroadcastFour() {
 
 func testNetmaskSix() {
     testing.assertEqual(toString(netmask(parse("2001:db8::/32"))), "ffff:ffff::");
-    testing.assertEqual(toString(netmask(parse("2001:db8:abcd:1200::/56"))), "ffff:ffff:ffff:ff00::");
+    testing.assertEqual(
+        toString(netmask(parse("2001:db8:abcd:1200::/56"))),
+        "ffff:ffff:ffff:ff00::");
 }
 
 func testBroadcastSix() {
-    testing.assertEqual(toString(broadcast(parse("2001:db8::/32"))),
+    testing.assertEqual(
+        toString(broadcast(parse("2001:db8::/32"))),
         "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff");
 }
 
@@ -136,7 +139,7 @@ func testEqualAndVersion() {
     testing.assertFalse(equal(parseAddress("10.0.0.1"), parseAddress("10.0.0.2")));
     # same bits, different notation still equal
     testing.assertTrue(equal(parseAddress("2001:db8::1"), parseAddress("2001:0db8:0:0:0:0:0:1")));
-    testing.assertFalse(equal(parseAddress("10.0.0.1"), parseAddress("::1")));   # version differs
+    testing.assertFalse(equal(parseAddress("10.0.0.1"), parseAddress("::1"))); # version differs
     testing.assertEqual(version(parseAddress("10.0.0.1")), 4);
     testing.assertEqual(version(parseAddress("::1")), 6);
 }
@@ -171,11 +174,11 @@ func caughtIpnet(bad as string) {
 }
 
 func testParseErrors() {
-    testing.assertTrue(caughtIpnet("999.1.1.1"));       # octet out of range
-    testing.assertTrue(caughtIpnet("1.2.3"));           # too few octets
-    testing.assertTrue(caughtIpnet("2001:db8::1::2"));  # multiple ::
-    testing.assertTrue(caughtIpnet("2001:db8:zz::1"));  # bad hex
-    testing.assertTrue(caughtIpnet("hello"));           # not an IP
+    testing.assertTrue(caughtIpnet("999.1.1.1")); # octet out of range
+    testing.assertTrue(caughtIpnet("1.2.3")); # too few octets
+    testing.assertTrue(caughtIpnet("2001:db8::1::2")); # multiple ::
+    testing.assertTrue(caughtIpnet("2001:db8:zz::1")); # bad hex
+    testing.assertTrue(caughtIpnet("hello")); # not an IP
 }
 
 func testPrefixOutOfRangeThrows() {

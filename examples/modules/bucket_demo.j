@@ -29,7 +29,11 @@ if ($endpoint == "" or $key == "" or $store == "") {
 
 def client as bucket.Client init bucket.connect($endpoint, $region, $key, $secret);
 
-def putRes as http.Response init bucket.put($client, $store, "jennifer-demo.txt", "hello from jennifer");
+def putRes as http.Response init bucket.put(
+    $client,
+    $store,
+    "jennifer-demo.txt",
+    "hello from jennifer");
 io.printf("put    jennifer-demo.txt -> %d\n", $putRes.status);
 
 def getRes as http.Response init bucket.get($client, $store, "jennifer-demo.txt");

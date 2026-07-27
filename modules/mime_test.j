@@ -15,7 +15,7 @@ use testing;
 
 func testCrlf() {
     testing.assertEqual(crlf("a\nb"), "a\r\nb");
-    testing.assertEqual(crlf("a\r\nb"), "a\r\nb");   # already CRLF, no doubling
+    testing.assertEqual(crlf("a\r\nb"), "a\r\nb"); # already CRLF, no doubling
 }
 
 func testStripWS() {
@@ -66,7 +66,8 @@ func testParseHeadersUnfolds() {
 func testTextAsciiUsesSevenBit() {
     def m as Part init text("text/plain", "plain");
     testing.assertEqual(headerValue($m, "Content-Transfer-Encoding"), "7bit");
-    testing.assertEqual(encode($m),
+    testing.assertEqual(
+        encode($m),
         "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nplain");
 }
 
@@ -80,13 +81,13 @@ func testAttachmentUsesBaseEncoding() {
     def a as Part init attachment("f.txt", "text/plain", "hello");
     testing.assertEqual(headerValue($a, "Content-Transfer-Encoding"), "base64");
     testing.assertContains(encode($a), "Content-Disposition: attachment; filename=\"f.txt\"");
-    testing.assertContains(encode($a), "aGVsbG8=");   # base64("hello")
+    testing.assertContains(encode($a), "aGVsbG8="); # base64("hello")
 }
 
 func testWithHeaderReplaces() {
     def m as Part init text("text/plain", "x");
     def n as Part init withHeader($m, "Subject", "one");
-    def nn as Part init withHeader($n, "subject", "two");   # case-insensitive replace
+    def nn as Part init withHeader($n, "subject", "two"); # case-insensitive replace
     testing.assertEqual(headerValue($nn, "Subject"), "two");
 }
 
@@ -95,13 +96,14 @@ func testMultipartEncode() {
     $kids[] = text("text/plain", "A");
     $kids[] = text("text/plain", "B");
     def mp as Part init multipart("mixed", "BX", $kids);
-    testing.assertEqual(encode($mp),
+    testing.assertEqual(
+        encode($mp),
         "Content-Type: multipart/mixed; boundary=\"BX\"\r\n\r\n" +
-        "--BX\r\nContent-Type: text/plain; charset=utf-8\r\n" +
-        "Content-Transfer-Encoding: 7bit\r\n\r\nA\r\n" +
-        "--BX\r\nContent-Type: text/plain; charset=utf-8\r\n" +
-        "Content-Transfer-Encoding: 7bit\r\n\r\nB\r\n" +
-        "--BX--\r\n");
+            "--BX\r\nContent-Type: text/plain; charset=utf-8\r\n" +
+            "Content-Transfer-Encoding: 7bit\r\n\r\nA\r\n" +
+            "--BX\r\nContent-Type: text/plain; charset=utf-8\r\n" +
+            "Content-Transfer-Encoding: 7bit\r\n\r\nB\r\n" +
+            "--BX--\r\n");
 }
 
 # --- parsing + round-trips (public) ---
@@ -118,7 +120,8 @@ func testRoundTripQuotedPrintable() {
 }
 
 func testRoundTripBaseEncoding() {
-    testing.assertEqual(body(parse(encode(attachment("a.txt", "text/plain", "hi\nthere & more")))),
+    testing.assertEqual(
+        body(parse(encode(attachment("a.txt", "text/plain", "hi\nthere & more")))),
         "hi\nthere & more");
 }
 
@@ -159,13 +162,14 @@ func testEncodeWordShape() {
 }
 
 func testDecodeBWord() {
-    testing.assertEqual(decodeWord("=?utf-8?B?V2lsbGtvbW1lbiBpbiBJbnN0YnJ1Y2s=?="),
+    testing.assertEqual(
+        decodeWord("=?utf-8?B?V2lsbGtvbW1lbiBpbiBJbnN0YnJ1Y2s=?="),
         "Willkommen in Instbruck");
 }
 
 func testDecodeQWord() {
     testing.assertEqual(decodeWord("=?UTF-8?Q?caf=C3=A9?="), "café");
-    testing.assertEqual(decodeWord("=?UTF-8?Q?a_b?="), "a b");   # "_" is a space
+    testing.assertEqual(decodeWord("=?UTF-8?Q?a_b?="), "a b"); # "_" is a space
 }
 
 func testDecodeAdjacentWordsCollapseSpace() {
@@ -174,8 +178,7 @@ func testDecodeAdjacentWordsCollapseSpace() {
 }
 
 func testDecodeKeepsSurroundingText() {
-    testing.assertEqual(decodeWord("Re: " + encodeWord("café") + " today"),
-        "Re: café today");
+    testing.assertEqual(decodeWord("Re: " + encodeWord("café") + " today"), "Re: café today");
 }
 
 func testDecodeNoEncodedWord() {
@@ -191,7 +194,7 @@ func testEncodeAppliesToSubject() {
     def m as Part init withHeader(text("text/plain", "hi"), "Subject", "Grüße");
     def enc as string init encode($m);
     testing.assertContains($enc, "Subject: =?UTF-8?B?");
-    testing.assertFalse(strings.contains($enc, "Grüße"));   # raw form must not leak
+    testing.assertFalse(strings.contains($enc, "Grüße")); # raw form must not leak
 }
 
 func testSubjectRoundTripThroughParse() {
@@ -225,9 +228,9 @@ func testMultiAddressEachEncoded() {
 }
 
 func testEncodeWordFoldsLong() {
-    def long as string init strings.repeat("é", 60);   # 120 bytes -> multiple words
+    def long as string init strings.repeat("é", 60); # 120 bytes -> multiple words
     def e as string init encodeWord($long);
-    testing.assertContains($e, "\r\n ");        # folded
+    testing.assertContains($e, "\r\n "); # folded
     testing.assertEqual(decodeWord($e), $long); # and reversible
 }
 
@@ -236,13 +239,17 @@ func testEncodeWordFoldsLong() {
 func testBinaryAttachmentRoundTrip() {
     # Bytes that are NOT valid UTF-8, so a text decode would have corrupted them.
     def raw as bytes;
-    $raw[] = 0xff; $raw[] = 0x00; $raw[] = 0xC3; $raw[] = 0x28; $raw[] = 0x89;
+    $raw[] = 0xff;
+    $raw[] = 0x00;
+    $raw[] = 0xC3;
+    $raw[] = 0x28;
+    $raw[] = 0x89;
     def att as Part init attachmentBytes("logo.png", "image/png", $raw);
     def msg as Part init multipart("mixed", "B1", [text("text/plain", "see attached"), $att]);
     def back as Part init parse(encode($msg));
 
-    testing.assertEqual(len(walk($back)), 2);       # two leaves
-
+    testing.assertEqual(len(walk($back)), 2); # two leaves
+    
     def atts as list of Part init attachments($back);
     testing.assertEqual(len($atts), 1);
     testing.assertEqual(filename($atts[0]), "logo.png");
@@ -262,7 +269,7 @@ func testTextBodiesAlternative() {
     $kids[] = text("text/plain", "plain view");
     $kids[] = text("text/html", "<p>html view</p>");
     def msg as Part init parse(encode(multipart("alternative", "B2", $kids)));
-    testing.assertEqual(len(textBodies($msg)), 2);  # both alternatives are readable bodies
+    testing.assertEqual(len(textBodies($msg)), 2); # both alternatives are readable bodies
     def html as list of Part init findParts($msg, "text/html");
     testing.assertEqual(len($html), 1);
     testing.assertEqual(body($html[0]), "<p>html view</p>");
@@ -271,7 +278,7 @@ func testTextBodiesAlternative() {
 
 func testWalkSingleText() {
     def p as Part init parse("Content-Type: text/plain\r\n\r\njust text");
-    testing.assertEqual(len(walk($p)), 1);          # a leaf walks to itself
+    testing.assertEqual(len(walk($p)), 1); # a leaf walks to itself
     testing.assertEqual(len(attachments($p)), 0);
     testing.assertEqual(len(textBodies($p)), 1);
     testing.assertEqual(body($p), "just text");
@@ -285,6 +292,6 @@ func testFilenameNameFallback() {
     testing.assertEqual(filename($p), "pic.png");
     testing.assertTrue(isAttachment($p));
     testing.assertEqual(disposition($p), "");
-    testing.assertEqual(body($p), "");              # binary part: no text view
+    testing.assertEqual(body($p), ""); # binary part: no text view
     testing.assertEqual(convert.stringFromBytes(data($p), "utf-8"), "hi");
 }

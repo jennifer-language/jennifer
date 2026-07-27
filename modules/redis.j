@@ -54,7 +54,13 @@ def const MAX_REPLY_BYTES as int init 67108864;
 # capReply throws when an accumulated reply has grown past the cap.
 func capReply(n as int) {
     if ($n > MAX_REPLY_BYTES) {
-        throw Error{kind: "redis", message: "redis: reply exceeds the " + convert.toString(MAX_REPLY_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "redis",
+            message: "redis: reply exceeds the " + convert.toString(MAX_REPLY_BYTES) + "-byte limit",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }
@@ -229,19 +235,19 @@ func parseAt(buf as bytes, pos as int) {
     def typ as int init $buf[$pos];
     def payload as string init convert.stringFromBytes(byteSlice($buf, $pos + 1, $nl), "utf-8");
     def after as int init $nl + 2;
-    if ($typ == 43) {          # '+'
+    if ($typ == 43) { # '+'
         return done(replyStr("string", $payload), $after);
     }
-    if ($typ == 45) {          # '-'
+    if ($typ == 45) { # '-'
         return done(replyStr("error", $payload), $after);
     }
-    if ($typ == 58) {          # ':'
+    if ($typ == 58) { # ':'
         return done(replyInt(convert.toInt($payload)), $after);
     }
-    if ($typ == 36) {          # '$'
+    if ($typ == 36) { # '$'
         return parseBulkAt($payload, $buf, $after);
     }
-    if ($typ == 42) {          # '*'
+    if ($typ == 42) { # '*'
         return parseArrayAt($payload, $buf, $after);
     }
     # Unknown type byte: surface the whole line as a string.
@@ -292,10 +298,20 @@ func messageFromReply(reply as Reply) {
     }
     def tag as string init $reply.items[0].str;
     if ($tag == "message") {
-        return Message{kind: "message", channel: $reply.items[1].str, pattern: "", payload: $reply.items[2].str};
+        return Message{
+            kind: "message",
+            channel: $reply.items[1].str,
+            pattern: "",
+            payload: $reply.items[2].str
+        };
     }
     if ($tag == "pmessage" and len($reply.items) >= 4) {
-        return Message{kind: "pmessage", channel: $reply.items[2].str, pattern: $reply.items[1].str, payload: $reply.items[3].str};
+        return Message{
+            kind: "pmessage",
+            channel: $reply.items[2].str,
+            pattern: $reply.items[1].str,
+            payload: $reply.items[3].str
+        };
     }
     return Message{kind: $tag, channel: $reply.items[1].str, pattern: "", payload: ""};
 }
@@ -366,7 +382,14 @@ func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
         }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
-            throw Error{kind: "redis", message: "redis: connection closed after " + convert.toString(len($replies)) + " of " + convert.toString($count) + " replies", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "redis",
+                message: "redis: connection closed after " + convert.toString(len($replies)) +
+                    " of " + convert.toString($count) + " replies",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def k as int init 0;
         while ($k < len($chunk)) {
@@ -621,7 +644,13 @@ export func receiveMessage(session as Session) {
         }
         def chunk as bytes init net.readBytes($session.conn, 4096);
         if (len($chunk) == 0) {
-            throw Error{kind: "redis", message: "redis: connection closed while awaiting a message", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "redis",
+                message: "redis: connection closed while awaiting a message",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def k as int init 0;
         while ($k < len($chunk)) {

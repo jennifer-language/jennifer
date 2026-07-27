@@ -53,7 +53,7 @@ export def struct Built {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "multipart", message: "multipart: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "multipart", message: "multipart: " + $msg, file: "", line: 0, col: 0};
 }
 
 # --- part constructors (exported) -------------------------------------------
@@ -65,7 +65,12 @@ func fail(msg as string) {
  * @return {Part} the part
  */
 export func field(name as string, value as string) {
-    return Part{ name: $name, filename: "", contentType: "", data: convert.bytesFromString($value, "utf-8") };
+    return Part{
+        name: $name,
+        filename: "",
+        contentType: "",
+        data: convert.bytesFromString($value, "utf-8")
+    };
 }
 
 /**
@@ -77,7 +82,7 @@ export func field(name as string, value as string) {
  * @return {Part} the part
  */
 export func file(name as string, filename as string, contentType as string, data as bytes) {
-    return Part{ name: $name, filename: $filename, contentType: $contentType, data: $data };
+    return Part{name: $name, filename: $filename, contentType: $contentType, data: $data};
 }
 
 /**
@@ -163,7 +168,7 @@ export func buildWith(parts as list of Part, boundary as string) {
         $body[] = $tail[$ti];
         $ti = $ti + 1;
     }
-    return Built{ contentType: "multipart/form-data; boundary=" + $boundary, body: $body };
+    return Built{contentType: "multipart/form-data; boundary=" + $boundary, body: $body};
 }
 
 /**
@@ -184,7 +189,7 @@ func boundaryOf(contentType as string) {
     if ($idx < 0) {
         return "";
     }
-    def start as int init $idx + 9;   # len("boundary=")
+    def start as int init $idx + 9; # len("boundary=")
     def rest as string init strings.substring($contentType, $start, len($contentType));
     if (strings.startsWith($rest, "\"")) {
         def inner as string init strings.substring($rest, 1, len($rest));
@@ -307,12 +312,12 @@ export func parse(contentType as string, body as bytes) {
     while ($si < len($segs)) {
         def seg as bytes init $segs[$si];
         if (binary.startsWith($seg, $dashes)) {
-            $si = len($segs);   # closing delimiter; stop
+            $si = len($segs); # closing delimiter; stop
             continue;
         }
         def pb as bytes;
         if (len($seg) >= 2) {
-            $pb = binary.slice($seg, 2, len($seg));   # strip the leading CRLF
+            $pb = binary.slice($seg, 2, len($seg)); # strip the leading CRLF
         }
         $parts[] = parsePart($pb);
         $si = $si + 1;

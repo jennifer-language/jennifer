@@ -79,13 +79,14 @@ func testParseUpdatesEmpty() {
 
 func testRenderInlineKeyboard() {
     def rows as list of list of Button init [
-        [ urlButton("Open", "https://example.org"), inlineButton("Ping", "ping") ],
-        [ inlineButton("Close", "close") ]
+        [urlButton("Open", "https://example.org"), inlineButton("Ping", "ping")],
+        [inlineButton("Close", "close")]
     ];
-    testing.assertEqual(renderInlineKeyboard($rows),
+    testing.assertEqual(
+        renderInlineKeyboard($rows),
         "{\"inline_keyboard\":[[{\"text\":\"Open\",\"url\":\"https://example.org\"}," +
-        "{\"text\":\"Ping\",\"callback_data\":\"ping\"}]," +
-        "[{\"text\":\"Close\",\"callback_data\":\"close\"}]]}");
+            "{\"text\":\"Ping\",\"callback_data\":\"ping\"}]," +
+            "[{\"text\":\"Close\",\"callback_data\":\"close\"}]]}");
 }
 
 func testRenderInlineKeyboardEmpty() {

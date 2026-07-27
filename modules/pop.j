@@ -132,7 +132,6 @@ func parseSizes(body as string) {
     return $out;
 }
 
-
 func expectOK(line as string, ctx as string) {
     if (not statusOK($line)) {
         def msg as string init $ctx + ": " + strings.trim($line);
@@ -155,7 +154,14 @@ def const MAX_RESPONSE_BYTES as int init 67108864;
 # capResponse throws when an accumulated response has grown past the cap.
 func capResponse(n as int) {
     if ($n > MAX_RESPONSE_BYTES) {
-        throw Error{kind: "pop", message: "pop: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "pop",
+            message: "pop: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) +
+                "-byte limit",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }
@@ -190,7 +196,6 @@ func lfIndex(buf as bytes, from as int) {
     return -1;
 }
 
-
 # readLine reads one CRLF-terminated status line (single-line responses do not
 # over-read: the server sends the line and waits). The chunk is appended into
 # the owning `buf` in place (amortised O(1) per byte); a by-value append helper
@@ -222,7 +227,13 @@ func rejectControl(s as string, what as string) {
     for (def c in strings.chars($s)) {
         def cp as int init convert.toCodepoint($c);
         if ($cp < 32 or $cp == 127) {
-            throw Error{kind: "pop", message: $what + " contains a control character (POP3 command injection)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "pop",
+                message: $what + " contains a control character (POP3 command injection)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     return;
@@ -270,7 +281,8 @@ func readMultiline(conn as net.Conn, ctx as string) {
             $si = 0;
         }
         while ($si + 4 < $blen and not $found) {
-            if ($body[$si] == 13 and $body[$si + 1] == 10 and $body[$si + 2] == 46 and $body[$si + 3] == 13 and $body[$si + 4] == 10) {
+            if ($body[$si] == 13 and $body[$si + 1] == 10 and $body[$si + 2] == 46 and
+                $body[$si + 3] == 13 and $body[$si + 4] == 10) {
                 $found = true;
             }
             $si = $si + 1;
@@ -348,7 +360,9 @@ func apopTimestamp(greeting as string) {
 # apopDigest is the lowercase-hex MD5 of the timestamp banner concatenated with
 # the password - the APOP shared-secret proof (RFC 1939).
 func apopDigest(stamp as string, pass as string) {
-    return encoding.toText(hash.compute(convert.bytesFromString($stamp + $pass, "utf-8"), "md5"), "hex");
+    return encoding.toText(
+        hash.compute(convert.bytesFromString($stamp + $pass, "utf-8"), "md5"),
+        "hex");
 }
 
 # apopAuth runs POP3 APOP (RFC 1939): the shared secret is proved by sending
@@ -357,7 +371,13 @@ func apopDigest(stamp as string, pass as string) {
 func apopAuth(conn as net.Conn, opts as Options, greeting as string) {
     def stamp as string init apopTimestamp($greeting);
     if ($stamp == "") {
-        throw Error{kind: "pop3", message: "APOP: the server greeting carries no timestamp", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "pop3",
+            message: "APOP: the server greeting carries no timestamp",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     expectOK(command($conn, "APOP " + $opts.user + " " + apopDigest($stamp, $opts.pass)), "APOP");
 }
@@ -413,15 +433,25 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
         return;
     }
     if ($mech == "xoauth2") {
-        expectOK(command($conn, "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass)), "AUTH XOAUTH2");
+        expectOK(
+            command($conn, "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass)),
+            "AUTH XOAUTH2");
         return;
     }
     if ($mech == "cram") {
         def chal as string init command($conn, "AUTH CRAM-MD5");
         if (not strings.startsWith(strings.trim($chal), "+ ")) {
-            throw Error{kind: "pop3", message: "AUTH CRAM-MD5: " + strings.trim($chal), file: "", line: 0, col: 0};
+            throw Error{
+                kind: "pop3",
+                message: "AUTH CRAM-MD5: " + strings.trim($chal),
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
-        expectOK(command($conn, sasl.cram($opts.user, $opts.pass, popChallenge($chal))), "CRAM-MD5 response");
+        expectOK(
+            command($conn, sasl.cram($opts.user, $opts.pass, popChallenge($chal))),
+            "CRAM-MD5 response");
         return;
     }
     if ($mech == "scram-sha-1" or $mech == "scram-sha-256") {
@@ -446,14 +476,26 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     def sc as sasl.Scram init sasl.scramStart($opts.user, $algo);
     def first as string init command($conn, "AUTH " + $wire + " " + sasl.scramClientFirst($sc));
     if (not strings.startsWith(strings.trim($first), "+ ")) {
-        throw Error{kind: "pop3", message: $wire + " server-first: " + strings.trim($first), file: "", line: 0, col: 0};
+        throw Error{
+            kind: "pop3",
+            message: $wire + " server-first: " + strings.trim($first),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     $sc = sasl.scramClientFinal($sc, popChallenge($first), $opts.pass);
     def final as string init command($conn, sasl.scramFinalToken($sc));
     if (strings.startsWith(strings.trim($final), "+ ")) {
         if (not sasl.scramVerify($sc, popChallenge($final))) {
             command($conn, "*");
-            throw Error{kind: "pop3", message: $wire + ": server signature verification failed", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "pop3",
+                message: $wire + ": server signature verification failed",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         expectOK(command($conn, ""), $wire + " completion");
         return;

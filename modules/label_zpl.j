@@ -121,7 +121,8 @@ func zplOrient(rotation as int) {
 
 # zplField renders one field as a ZPL command sequence.
 func zplField(f as Field, dpi as int) {
-    def origin as string init "^FO" + convert.toString(mmToDots($f.x, $dpi)) + "," + convert.toString(mmToDots($f.y, $dpi));
+    def origin as string init "^FO" + convert.toString(mmToDots($f.x, $dpi)) + "," +
+        convert.toString(mmToDots($f.y, $dpi));
     if ($f.kind == "text") {
         # A point size (1/72 inch) wins over a millimetre height when set.
         def dots as int init mmToDots($f.h, $dpi);
@@ -129,7 +130,8 @@ func zplField(f as Field, dpi as int) {
             $dots = math.round(convert.toFloat($f.points) * convert.toFloat($dpi) / 72.0);
         }
         def h as string init convert.toString($dots);
-        return $origin + "^A0" + zplOrient($f.rotation) + "," + $h + "," + $h + "^FH^FD" + zplEscape($f.data) + "^FS";
+        return $origin + "^A0" + zplOrient($f.rotation) + "," + $h + "," + $h + "^FH^FD" +
+            zplEscape($f.data) + "^FS";
     }
     if ($f.kind == "box") {
         return $origin + "^GB" + convert.toString(mmToDots($f.w, $dpi)) + "," +
@@ -146,7 +148,13 @@ func zplField(f as Field, dpi as int) {
 # renderZpl renders a whole label as a ZPL command stream.
 func renderZpl(label as Label, dpi as int) {
     if ($dpi <= 0) {
-        throw Error{ kind: "label", message: "label: zpl render needs a positive dpi", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "label",
+            message: "label: zpl render needs a positive dpi",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def out as string init "^XA\n";
     for (def f in $label.fields) {

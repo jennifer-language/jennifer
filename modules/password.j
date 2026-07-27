@@ -94,7 +94,7 @@ export def struct Strength {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "password", message: $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "password", message: $msg, file: "", line: 0, col: 0};
 }
 
 # effMin is a class's effective minimum: the requested minimum when the class
@@ -116,10 +116,17 @@ func effMin(enabled as bool, m as int) {
  */
 export func schema() {
     return Schema{
-        minLength: 16, maxLength: 16,
-        lower: true, upper: true, digits: true, symbols: true,
+        minLength: 16,
+        maxLength: 16,
+        lower: true,
+        upper: true,
+        digits: true,
+        symbols: true,
         symbolSet: SYMBOLS,
-        minLower: 1, minUpper: 1, minDigits: 1, minSymbols: 1,
+        minLower: 1,
+        minUpper: 1,
+        minDigits: 1,
+        minSymbols: 1,
         excludeAmbiguous: false
     };
 }
@@ -214,10 +221,18 @@ func filterOut(s as string, remove as string) {
 # classPool returns the (ambiguity-filtered) character pool for one class.
 func classPool(s as Schema, which as string) {
     def base as string init "";
-    if ($which == "lower") { $base = LOWER; }
-    if ($which == "upper") { $base = UPPER; }
-    if ($which == "digits") { $base = DIGITS; }
-    if ($which == "symbols") { $base = $s.symbolSet; }
+    if ($which == "lower") {
+        $base = LOWER;
+    }
+    if ($which == "upper") {
+        $base = UPPER;
+    }
+    if ($which == "digits") {
+        $base = DIGITS;
+    }
+    if ($which == "symbols") {
+        $base = $s.symbolSet;
+    }
     if ($s.excludeAmbiguous) {
         $base = filterOut($base, AMBIGUOUS);
     }
@@ -227,10 +242,18 @@ func classPool(s as Schema, which as string) {
 # alphabet returns the union of the enabled classes' pools.
 func alphabet(s as Schema) {
     def a as string init "";
-    if ($s.lower) { $a = $a + classPool($s, "lower"); }
-    if ($s.upper) { $a = $a + classPool($s, "upper"); }
-    if ($s.digits) { $a = $a + classPool($s, "digits"); }
-    if ($s.symbols) { $a = $a + classPool($s, "symbols"); }
+    if ($s.lower) {
+        $a = $a + classPool($s, "lower");
+    }
+    if ($s.upper) {
+        $a = $a + classPool($s, "upper");
+    }
+    if ($s.digits) {
+        $a = $a + classPool($s, "digits");
+    }
+    if ($s.symbols) {
+        $a = $a + classPool($s, "symbols");
+    }
     return $a;
 }
 
@@ -307,7 +330,8 @@ export func generate(s as Schema) {
     # happened to fall below `required` made the same schema succeed or throw
     # depending on the draw.
     if ($required > $s.maxLength) {
-        fail("class minimums (" + convert.toString($required) + ") exceed maxLength (" + convert.toString($s.maxLength) + ")");
+        fail("class minimums (" + convert.toString($required) + ") exceed maxLength (" +
+            convert.toString($s.maxLength) + ")");
     }
     def minTarget as int init $s.minLength;
     if ($required > $minTarget) {
@@ -362,7 +386,7 @@ export func validate(s as Schema, pw as string) {
     if ($sym < effMin($s.symbols, $s.minSymbols)) {
         $reasons[] = "needs at least " + convert.toString($s.minSymbols) + " symbols";
     }
-    return Report{ valid: (len($reasons) == 0), reasons: $reasons };
+    return Report{valid: (len($reasons) == 0), reasons: $reasons};
 }
 
 # --- complexity (exported) --------------------------------------------------
@@ -398,10 +422,18 @@ func binaryLog(x as float) {
 
 # labelFor maps entropy bits to a qualitative strength band.
 func labelFor(bits as float) {
-    if ($bits < 28.0) { return "very weak"; }
-    if ($bits < 36.0) { return "weak"; }
-    if ($bits < 60.0) { return "reasonable"; }
-    if ($bits < 128.0) { return "strong"; }
+    if ($bits < 28.0) {
+        return "very weak";
+    }
+    if ($bits < 36.0) {
+        return "weak";
+    }
+    if ($bits < 60.0) {
+        return "reasonable";
+    }
+    if ($bits < 128.0) {
+        return "strong";
+    }
     return "very strong";
 }
 
@@ -420,13 +452,31 @@ export func complexity(pw as string) {
     def sym as int init $n - $lo - $up - $dig;
     def classes as int init 0;
     def pool as int init 0;
-    if ($lo > 0) { $classes = $classes + 1; $pool = $pool + 26; }
-    if ($up > 0) { $classes = $classes + 1; $pool = $pool + 26; }
-    if ($dig > 0) { $classes = $classes + 1; $pool = $pool + 10; }
-    if ($sym > 0) { $classes = $classes + 1; $pool = $pool + len(SYMBOLS); }
+    if ($lo > 0) {
+        $classes = $classes + 1;
+        $pool = $pool + 26;
+    }
+    if ($up > 0) {
+        $classes = $classes + 1;
+        $pool = $pool + 26;
+    }
+    if ($dig > 0) {
+        $classes = $classes + 1;
+        $pool = $pool + 10;
+    }
+    if ($sym > 0) {
+        $classes = $classes + 1;
+        $pool = $pool + len(SYMBOLS);
+    }
     def bits as float init 0.0;
     if ($pool >= 2 and $n > 0) {
         $bits = convert.toFloat($n) * binaryLog(convert.toFloat($pool));
     }
-    return Strength{ length: $n, classes: $classes, poolSize: $pool, entropy: $bits, label: labelFor($bits) };
+    return Strength{
+        length: $n,
+        classes: $classes,
+        poolSize: $pool,
+        entropy: $bits,
+        label: labelFor($bits)
+    };
 }

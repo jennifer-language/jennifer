@@ -39,10 +39,11 @@ func serve(srv as httpd.Server) {
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
-def server as task of null init spawn { serve($srv); };
+def server as task of null init spawn {
+    serve($srv);
+};
 
-def gql as graphql.Client init graphql.header(
-    graphql.client("http://" + $addr), "X-Demo", "1");
+def gql as graphql.Client init graphql.header(graphql.client("http://" + $addr), "X-Demo", "1");
 
 # A successful query - read the result from under /data.
 def resp as json.Value init graphql.query($gql, "{ viewer { login } }", json.map());

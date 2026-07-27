@@ -10,8 +10,14 @@
 use io;
 import "../../modules/redis.j" as redis;
 
-def opts as redis.Options init redis.Options{host: "127.0.0.1", port: 6379,
-    security: "none", user: "", password: "", db: 0};
+def opts as redis.Options init redis.Options{
+    host: "127.0.0.1",
+    port: 6379,
+    security: "none",
+    user: "",
+    password: "",
+    db: 0
+};
 
 try {
     def db as redis.Session init redis.connect($opts);

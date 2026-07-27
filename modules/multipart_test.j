@@ -19,18 +19,22 @@ func testBuildExactBody() {
     def parts as list of Part init [field("title", "hi"), field("n", "42")];
     def form as Built init buildWith($parts, "B");
     testing.assertEqual($form.contentType, "multipart/form-data; boundary=B");
-    testing.assertEqual(asString($form.body),
+    testing.assertEqual(
+        asString($form.body),
         "--B\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhi\r\n" +
-        "--B\r\nContent-Disposition: form-data; name=\"n\"\r\n\r\n42\r\n" +
-        "--B--\r\n");
+            "--B\r\nContent-Disposition: form-data; name=\"n\"\r\n\r\n42\r\n" +
+            "--B--\r\n");
 }
 
 func testBuildFilePart() {
-    def parts as list of Part init [file("doc", "a.txt", "text/plain", convert.bytesFromString("body", "utf-8"))];
+    def parts as list of Part init [
+        file("doc", "a.txt", "text/plain", convert.bytesFromString("body", "utf-8"))
+    ];
     def form as Built init buildWith($parts, "X");
-    testing.assertEqual(asString($form.body),
+    testing.assertEqual(
+        asString($form.body),
         "--X\r\nContent-Disposition: form-data; name=\"doc\"; filename=\"a.txt\"\r\n" +
-        "Content-Type: text/plain\r\n\r\nbody\r\n--X--\r\n");
+            "Content-Type: text/plain\r\n\r\nbody\r\n--X--\r\n");
 }
 
 func testRoundTripFields() {
@@ -94,18 +98,27 @@ func testExtractParamKeyBoundary() {
 # value cannot inject headers or a premature body separator; the escaped value
 # round-trips through extractParam.
 func testBuildEscapesParams() {
-    def parts as list of Part init [Part{name: "f", filename: "a\".txt", contentType: "", data: convert.bytesFromString("x", "utf-8")}];
+    def parts as list of Part init [
+        Part{
+            name: "f",
+            filename: "a\".txt",
+            contentType: "",
+            data: convert.bytesFromString("x", "utf-8")
+        }
+    ];
     def form as Built init buildWith($parts, "B");
     def text as string init convert.stringFromBytes($form.body, "utf-8");
     testing.assertContains($text, "filename=\"a\\\".txt\"");
-    testing.assertFalse(strings.contains($text, "a\".txt\""));   # not the raw unescaped form
+    testing.assertFalse(strings.contains($text, "a\".txt\"")); # not the raw unescaped form
     def back as list of Part init parse($form.contentType, $form.body);
     testing.assertEqual($back[0].filename, "a\".txt");
 }
 
 func testParseHandWritten() {
     def raw as string init "--B\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\nalice\r\n--B--\r\n";
-    def back as list of Part init parse("multipart/form-data; boundary=B", convert.bytesFromString($raw, "utf-8"));
+    def back as list of Part init parse(
+        "multipart/form-data; boundary=B",
+        convert.bytesFromString($raw, "utf-8"));
     testing.assertEqual(len($back), 1);
     testing.assertEqual($back[0].name, "user");
     testing.assertEqual(text($back[0]), "alice");

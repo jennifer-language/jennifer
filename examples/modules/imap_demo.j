@@ -10,15 +10,23 @@ use io;
 import "../../modules/imap.j" as imap;
 import "../../modules/mime.j" as mime;
 
-def opts as imap.Options init imap.Options{host: "127.0.0.1", port: 2143,
-    security: "none", user: "demo", pass: "demo", auth: ""};
+def opts as imap.Options init imap.Options{
+    host: "127.0.0.1",
+    port: 2143,
+    security: "none",
+    user: "demo",
+    pass: "demo",
+    auth: ""
+};
 
 try {
     def msgs as list of string init imap.fetchAll($opts, "INBOX");
     io.printf("fetched %d message(s) from INBOX:\n", len($msgs));
     for (def raw in $msgs) {
         def m as mime.Part init mime.parse($raw);
-        io.printf("  from %s | subject: %s\n", mime.headerValue($m, "From"),
+        io.printf(
+            "  from %s | subject: %s\n",
+            mime.headerValue($m, "From"),
             mime.headerValue($m, "Subject"));
     }
 } catch (e) {

@@ -13,8 +13,10 @@ use strings;
 
 # A three-column schema in a chosen dialect.
 func usersSchema(dialect as string) {
-    return column(column(column(
-        schema("users", "id", $dialect), "id", "int"), "name", "string"), "age", "int");
+    return column(
+        column(column(schema("users", "id", $dialect), "id", "int"), "name", "string"),
+        "age",
+        "int");
 }
 
 func testSchemaAndColumns() {
@@ -29,14 +31,20 @@ func testSchemaAndColumns() {
 func testDialectRejected() {
     testing.assertThrows("badDialect", "orm");
 }
-func badDialect() { schema("t", "id", "sqlite"); }
+func badDialect() {
+    schema("t", "id", "sqlite");
+}
 
 func testSelectAll() {
     testing.assertEqual(toSql(from(usersSchema("mysql"))).sql, "SELECT * FROM users");
 }
 
 func testWherePostgresPlaceholders() {
-    def q as Query init where(where(from(usersSchema("postgres")), "age", ">", "18"), "name", "=", "ada");
+    def q as Query init where(
+        where(from(usersSchema("postgres")), "age", ">", "18"),
+        "name",
+        "=",
+        "ada");
     def r as Rendered init toSql($q);
     testing.assertEqual($r.sql, "SELECT * FROM users WHERE age > $1 AND name = $2");
     testing.assertEqual(len($r.params), 2);
@@ -45,35 +53,46 @@ func testWherePostgresPlaceholders() {
 }
 
 func testWhereMysqlPlaceholders() {
-    def q as Query init where(where(from(usersSchema("mysql")), "age", ">", "18"), "name", "=", "ada");
+    def q as Query init where(
+        where(from(usersSchema("mysql")), "age", ">", "18"),
+        "name",
+        "=",
+        "ada");
     testing.assertEqual(toSql($q).sql, "SELECT * FROM users WHERE age > ? AND name = ?");
 }
 
 func testOrderLimitOffset() {
-    def q as Query init offset(limit(orderBy(orderBy(from(usersSchema("postgres")),
-        "age", "desc"), "name", "asc"), 10), 20);
-    testing.assertEqual(toSql($q).sql,
+    def q as Query init offset(
+        limit(orderBy(orderBy(from(usersSchema("postgres")), "age", "desc"), "name", "asc"), 10),
+        20);
+    testing.assertEqual(
+        toSql($q).sql,
         "SELECT * FROM users ORDER BY age DESC, name ASC LIMIT 10 OFFSET 20");
 }
 
 func testJoin() {
     def q as Query init join(from(usersSchema("mysql")), "orders", "users.id", "orders.userId");
-    testing.assertEqual(toSql($q).sql,
+    testing.assertEqual(
+        toSql($q).sql,
         "SELECT * FROM users INNER JOIN orders ON users.id = orders.userId");
 }
 
 func testWhereAfterJoinNumbersPlaceholders() {
     # A join has no params, so the first WHERE placeholder is still $1.
-    def q as Query init where(join(from(usersSchema("postgres")), "orders", "users.id", "orders.userId"),
-        "age", ">", "21");
-    testing.assertEqual(toSql($q).sql,
+    def q as Query init where(
+        join(from(usersSchema("postgres")), "orders", "users.id", "orders.userId"),
+        "age",
+        ">",
+        "21");
+    testing.assertEqual(
+        toSql($q).sql,
         "SELECT * FROM users INNER JOIN orders ON users.id = orders.userId WHERE age > $1");
 }
 
 func testBuilderIsNonMutating() {
     def base as Query init from(usersSchema("mysql"));
     def withWhere as Query init where($base, "id", "=", "1");
-    testing.assertEqual(len($base.wheres), 0);        # original untouched
+    testing.assertEqual(len($base.wheres), 0); # original untouched
     testing.assertEqual(len($withWhere.wheres), 1);
 }
 
@@ -95,7 +114,8 @@ func testBuildInsertOmitsAbsentColumns() {
 }
 
 func testBuildInsertMysql() {
-    testing.assertEqual(buildInsert(usersSchema("mysql"), aRecord()).sql,
+    testing.assertEqual(
+        buildInsert(usersSchema("mysql"), aRecord()).sql,
         "INSERT INTO users (name, age) VALUES (?, ?)");
 }
 
@@ -105,13 +125,15 @@ func testBuildUpdate() {
     def r as Rendered init buildUpdate(usersSchema("postgres"), $rec);
     # Non-key columns SET, matched by the key last.
     testing.assertEqual($r.sql, "UPDATE users SET name = $1, age = $2 WHERE id = $3");
-    testing.assertEqual($r.params[2], "7");           # the key value binds last
+    testing.assertEqual($r.params[2], "7"); # the key value binds last
 }
 
 func testBuildUpdateRequiresKey() {
     testing.assertThrows("updateNoKey", "orm");
 }
-func updateNoKey() { buildUpdate(usersSchema("mysql"), aRecord()); }   # no "id"
+func updateNoKey() {
+    buildUpdate(usersSchema("mysql"), aRecord());
+} # no "id"
 
 func testBuildByKey() {
     def find as Rendered init buildByKey("SELECT *", usersSchema("mysql"), "3");
@@ -122,7 +144,8 @@ func testBuildByKey() {
 }
 
 func testCreateTableDialects() {
-    testing.assertEqual(createTable(usersSchema("postgres")),
+    testing.assertEqual(
+        createTable(usersSchema("postgres")),
         "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER, PRIMARY KEY (id))");
     def s as Schema init column(schema("blobs", "id", "mysql"), "data", "bytes");
     testing.assertContains(createTable($s), "data BLOB");
@@ -130,11 +153,21 @@ func testCreateTableDialects() {
 
 # OM-002: identifiers and operators reach the SQL text unparameterized, so they
 # are validated at build time. Helpers for assertThrows (called by name).
-func injectOp() { where(from(usersSchema("postgres")), "id", "= 1 OR 1=1 --", "7"); }
-func injectCol() { where(from(usersSchema("postgres")), "id; DROP TABLE x", "=", "7"); }
-func injectOrder() { orderBy(from(usersSchema("postgres")), "1; DROP TABLE users", "asc"); }
-func injectTable() { schema("t; DROP TABLE x", "id", "mysql"); }
-func injectJoin() { join(from(usersSchema("postgres")), "other x", "a.b", "c.d"); }
+func injectOp() {
+    where(from(usersSchema("postgres")), "id", "= 1 OR 1=1 --", "7");
+}
+func injectCol() {
+    where(from(usersSchema("postgres")), "id; DROP TABLE x", "=", "7");
+}
+func injectOrder() {
+    orderBy(from(usersSchema("postgres")), "1; DROP TABLE users", "asc");
+}
+func injectTable() {
+    schema("t; DROP TABLE x", "id", "mysql");
+}
+func injectJoin() {
+    join(from(usersSchema("postgres")), "other x", "a.b", "c.d");
+}
 
 func testIdentifierAndOperatorInjectionBlocked() {
     testing.assertThrows("injectOp", "orm");

@@ -25,13 +25,7 @@ io.printf("=== user throw ===\n");
  */
 func parseConfig(src as string) {
     if (not strings.contains($src, "=")) {
-        throw Error{
-            kind: "parse_error",
-            message: "missing `=`",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "parse_error", message: "missing `=`", file: "", line: 0, col: 0};
     }
     return $src;
 }
@@ -65,7 +59,7 @@ try {
 # --- throwing a non-struct value still works ---
 io.printf("=== throw any value ===\n");
 try {
-    throw "raw string error";   # lint-disable: L104
+    throw "raw string error"; # lint-disable: L104
 } catch (err) {
     io.printf("caught %s of kind %s\n", $err, convert.typeOf($err));
 }

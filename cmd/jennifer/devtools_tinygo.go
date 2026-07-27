@@ -36,7 +36,7 @@ func devToolUnavailable(name string) int {
 
 func dumpTokens(string) int        { return devToolUnavailable("tokens") }
 func dumpAST(string) int           { return devToolUnavailable("ast") }
-func runFmt(string) int            { return devToolUnavailable("fmt") }
+func runFmt(args []string) int     { return devToolUnavailable("fmt") }
 func runLint(args []string) int    { return devToolUnavailable("lint") }
 func runProfile(args []string) int { return devToolUnavailable("profile") }
 func runTest(args []string) int    { return devToolUnavailable("test") }

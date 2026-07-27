@@ -35,10 +35,14 @@ func testFormatGaugeTimingSet() {
     testing.assertEqual(formatLine("app", "users", "u123", "s"), "app.users:u123|s");
 }
 
-func injectStatsdName() { checkMetric("a:b|c", "1"); }
-func injectStatsdValue() { checkMetric("ok", "1|c\nother:5"); }
-func testMetricInjectionBlocked() {   # OM-007
+func injectStatsdName() {
+    checkMetric("a:b|c", "1");
+}
+func injectStatsdValue() {
+    checkMetric("ok", "1|c\nother:5");
+}
+func testMetricInjectionBlocked() { # OM-007
     testing.assertThrows("injectStatsdName", "statsd");
     testing.assertThrows("injectStatsdValue", "statsd");
-    checkMetric("http.requests.ok", "42");   # a valid metric does not throw
+    checkMetric("http.requests.ok", "42"); # a valid metric does not throw
 }

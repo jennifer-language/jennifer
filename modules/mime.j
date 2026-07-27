@@ -543,8 +543,14 @@ export func text(contentType as string, body as string) {
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", $contentType + "; charset=utf-8");
     $hs[] = mkHeader("Content-Transfer-Encoding", $enc);
-    return Part{headers: $hs, body: $body, encoding: $enc, parts: [], boundary: "",
-        data: convert.bytesFromString($body, "utf-8")};
+    return Part{
+        headers: $hs,
+        body: $body,
+        encoding: $enc,
+        parts: [],
+        boundary: "",
+        data: convert.bytesFromString($body, "utf-8")
+    };
 }
 
 /**
@@ -561,10 +567,19 @@ export func attachment(filename as string, contentType as string, body as string
     $hs[] = mkHeader("Content-Transfer-Encoding", "base64");
     # Escape `\` and `"` so a filename containing a quote can't break out of the
     # quoted-string parameter.
-    def safeName as string init strings.replace(strings.replace($filename, "\\", "\\\\"), "\"", "\\\"");
+    def safeName as string init strings.replace(
+        strings.replace($filename, "\\", "\\\\"),
+        "\"",
+        "\\\"");
     $hs[] = mkHeader("Content-Disposition", "attachment; filename=\"" + $safeName + "\"");
-    return Part{headers: $hs, body: $body, encoding: "base64", parts: [], boundary: "",
-        data: convert.bytesFromString($body, "utf-8")};
+    return Part{
+        headers: $hs,
+        body: $body,
+        encoding: "base64",
+        parts: [],
+        boundary: "",
+        data: convert.bytesFromString($body, "utf-8")
+    };
 }
 
 /**
@@ -580,10 +595,12 @@ export func attachmentBytes(filename as string, contentType as string, data as b
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", $contentType);
     $hs[] = mkHeader("Content-Transfer-Encoding", "base64");
-    def safeName as string init strings.replace(strings.replace($filename, "\\", "\\\\"), "\"", "\\\"");
+    def safeName as string init strings.replace(
+        strings.replace($filename, "\\", "\\\\"),
+        "\"",
+        "\\\"");
     $hs[] = mkHeader("Content-Disposition", "attachment; filename=\"" + $safeName + "\"");
-    return Part{headers: $hs, body: "", encoding: "base64", parts: [], boundary: "",
-        data: $data};
+    return Part{headers: $hs, body: "", encoding: "base64", parts: [], boundary: "", data: $data};
 }
 
 /**
@@ -596,8 +613,14 @@ export func attachmentBytes(filename as string, contentType as string, data as b
 export func multipart(subtype as string, boundary as string, parts as list of Part) {
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", "multipart/" + $subtype + "; boundary=\"" + $boundary + "\"");
-    return Part{headers: $hs, body: "", encoding: "", parts: $parts, boundary: $boundary,
-        data: emptyBytes()};
+    return Part{
+        headers: $hs,
+        body: "",
+        encoding: "",
+        parts: $parts,
+        boundary: $boundary,
+        data: emptyBytes()
+    };
 }
 
 /**
@@ -669,8 +692,14 @@ export func parse(text as string) {
     def boundary as string init extractBoundary(findHeader($hs, "Content-Type"));
     if (len($boundary) > 0) {
         def kids as list of Part init parseMultipart($bodyText, $boundary);
-        return Part{headers: $hs, body: "", encoding: "", parts: $kids,
-            boundary: $boundary, data: emptyBytes()};
+        return Part{
+            headers: $hs,
+            body: "",
+            encoding: "",
+            parts: $kids,
+            boundary: $boundary,
+            data: emptyBytes()
+        };
     }
     def enc as string init findHeader($hs, "Content-Transfer-Encoding");
     if (len($enc) == 0) {
@@ -685,8 +714,7 @@ export func parse(text as string) {
     if (len($ct) == 0 or strings.startsWith($ct, "text/")) {
         $bodyStr = decodeBody($bodyText, $enc);
     }
-    return Part{headers: $hs, body: $bodyStr, encoding: $enc,
-        parts: [], boundary: "", data: $data};
+    return Part{headers: $hs, body: $bodyStr, encoding: $enc, parts: [], boundary: "", data: $data};
 }
 
 # --- accessors + helpers (exported) --------------------------------
@@ -735,7 +763,10 @@ func paramValue(header as string, key as string) {
     if ($idx < 0) {
         return "";
     }
-    def rest as string init strings.trim(strings.substring($header, $idx + len($key) + 1, len($header)));
+    def rest as string init strings.trim(strings.substring(
+        $header,
+        $idx + len($key) + 1,
+        len($header)));
     if (strings.startsWith($rest, "\"")) {
         def tail as string init strings.substring($rest, 1, len($rest));
         def end as int init strings.indexOf($tail, "\"");
@@ -778,7 +809,9 @@ export func disposition(part as Part) {
  * @return {string} the filename
  */
 export func filename(part as Part) {
-    def name as string init paramValue(findHeader($part.headers, "Content-Disposition"), "filename");
+    def name as string init paramValue(
+        findHeader($part.headers, "Content-Disposition"),
+        "filename");
     if (len($name) == 0) {
         $name = paramValue(findHeader($part.headers, "Content-Type"), "name");
     }
@@ -840,7 +873,8 @@ export func attachments(part as Part) {
 export func textBodies(part as Part) {
     def out as list of Part init [];
     for (def leaf in walk($part)) {
-        if (strings.startsWith(strings.lower(contentType($leaf)), "text/") and not isAttachment($leaf)) {
+        if (strings.startsWith(strings.lower(contentType($leaf)), "text/") and
+            not isAttachment($leaf)) {
             $out[] = $leaf;
         }
     }

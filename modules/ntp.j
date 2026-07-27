@@ -41,7 +41,7 @@ export def struct Result {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "ntp", message: $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "ntp", message: $msg, file: "", line: 0, col: 0};
 }
 
 # --- packet codec (private) -------------------------------------------------
@@ -107,7 +107,7 @@ export func query(host as string) {
  */
 export func queryWith(address as string, timeoutMs as int) {
     def sock as net.UDPSocket init net.listenUDP(":0");
-    defer net.close($sock);              # closed however the query exits
+    defer net.close($sock); # closed however the query exits
     net.setDeadline($sock, $timeoutMs);
     def orig as time.Time init time.now();
     net.sendTo($sock, $address, buildRequest($orig));
@@ -135,6 +135,8 @@ export func queryWith(address as string, timeoutMs as int) {
     def localMid as time.Time init time.fromUnixNanos(($nOrig + $nDst) // 2);
     def offset as time.Duration init time.sub($serverMid, $localMid);
     def delayNanos as int init ($nDst - $nOrig) - ($nXmt - $nRec);
-    def delay as time.Duration init time.sub(time.fromUnixNanos($delayNanos), time.fromUnixNanos(0));
-    return Result{ serverTime: $xmt, offset: $offset, delay: $delay };
+    def delay as time.Duration init time.sub(
+        time.fromUnixNanos($delayNanos),
+        time.fromUnixNanos(0));
+    return Result{serverTime: $xmt, offset: $offset, delay: $delay};
 }

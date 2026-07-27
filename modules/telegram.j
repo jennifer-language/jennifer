@@ -115,7 +115,7 @@ export def struct CallbackQuery {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "telegram", message: "telegram: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "telegram", message: "telegram: " + $msg, file: "", line: 0, col: 0};
 }
 
 /**
@@ -156,7 +156,7 @@ export func bot(token as string) {
  * @return {Bot} a ready bot
  */
 export func botWith(token as string, baseUrl as string) {
-    return Bot{ token: $token, baseUrl: $baseUrl };
+    return Bot{token: $token, baseUrl: $baseUrl};
 }
 
 # --- form encoding (private) ------------------------------------------------
@@ -234,7 +234,9 @@ func checkResponse(node as json.Value) {
 # node (with a verified `ok: true`).
 func call(b as Bot, method as string, params as map of string to string, timeoutMs as int) {
     def url as string init $b.baseUrl + "/bot" + $b.token + "/" + $method;
-    def headers as map of string to string init {"Content-Type": "application/x-www-form-urlencoded"};
+    def headers as map of string to string init {
+        "Content-Type": "application/x-www-form-urlencoded"
+    };
     # A transport error from the http layer can carry the request URL - and thus
     # the token - in its message. Rethrow it with the token redacted so a leaked
     # log or a caught Error never exposes the secret.
@@ -307,7 +309,7 @@ func parseUser(node as json.Value, base as string) {
     if (json.has($node, $base + "/username")) {
         $username = json.asString($node, $base + "/username");
     }
-    return User{ id: $id, isBot: $isBot, firstName: $firstName, username: $username };
+    return User{id: $id, isBot: $isBot, firstName: $firstName, username: $username};
 }
 
 # parseMessage reads a Message object at `base`.
@@ -328,7 +330,7 @@ func parseMessage(node as json.Value, base as string) {
     if (json.has($node, $base + "/date")) {
         $date = json.asInt($node, $base + "/date");
     }
-    return Message{ messageId: $msgId, chatId: $chatId, text: $text, date: $date };
+    return Message{messageId: $msgId, chatId: $chatId, text: $text, date: $date};
 }
 
 # parseUpdates reads the `/result` array into a list of Update.
@@ -344,7 +346,7 @@ func parseUpdates(node as json.Value) {
         if ($hasMsg) {
             $msg = parseMessage($node, $base + "/message");
         }
-        $updates[] = Update{ updateId: $updateId, hasMessage: $hasMsg, message: $msg };
+        $updates[] = Update{updateId: $updateId, hasMessage: $hasMsg, message: $msg};
         $i = $i + 1;
     }
     return $updates;
@@ -385,7 +387,7 @@ export func parseCallbackQuery(update as json.Value) {
     } catch (e) {
         fail("parseCallbackQuery: malformed callback_query: " + $e.message);
     }
-    return CallbackQuery{ id: $id, from: $from, data: $data, messageId: $messageId };
+    return CallbackQuery{id: $id, from: $from, data: $data, messageId: $messageId};
 }
 
 # --- inline keyboards (exported) --------------------------------------------
@@ -397,7 +399,7 @@ export func parseCallbackQuery(update as json.Value) {
  * @return {Button} the button
  */
 export func urlButton(text as string, url as string) {
-    return Button{ text: $text, url: $url, callbackData: "" };
+    return Button{text: $text, url: $url, callbackData: ""};
 }
 
 /**
@@ -409,7 +411,7 @@ export func urlButton(text as string, url as string) {
  * @return {Button} the button
  */
 export func inlineButton(text as string, callbackData as string) {
-    return Button{ text: $text, url: "", callbackData: $callbackData };
+    return Button{text: $text, url: "", callbackData: $callbackData};
 }
 
 /**
@@ -456,7 +458,12 @@ export func renderInlineKeyboard(rows as list of list of Button) {
  * @param data {bytes} the file content
  * @return {multipart.Built} the built form (Content-Type header + body)
  */
-export func buildUpload(field as string, chatId as int, filename as string, contentType as string, data as bytes) {
+export func buildUpload(
+    field as string,
+    chatId as int,
+    filename as string,
+    contentType as string,
+    data as bytes) {
     def parts as list of multipart.Part init [
         multipart.field("chat_id", convert.toString($chatId)),
         multipart.file($field, $filename, $contentType, $data)
@@ -557,7 +564,11 @@ export func sendChatAction(b as Bot, chatId as int, action as string) {
  * @return {Message} the sent message
  * @throws {Error} kind "telegram" on an API error
  */
-export func sendMessageWithKeyboard(b as Bot, chatId as int, text as string, rows as list of list of Button) {
+export func sendMessageWithKeyboard(
+    b as Bot,
+    chatId as int,
+    text as string,
+    rows as list of list of Button) {
     def params as map of string to string init {};
     $params["chat_id"] = convert.toString($chatId);
     $params["text"] = $text;
@@ -597,7 +608,12 @@ export func answerCallbackQuery(b as Bot, callbackId as string, text as string) 
  */
 export func sendPhotoFile(b as Bot, chatId as int, filePath as string, contentType as string) {
     def data as bytes init fs.readBytes($filePath);
-    def form as multipart.Built init buildUpload("photo", $chatId, path.base($filePath), $contentType, $data);
+    def form as multipart.Built init buildUpload(
+        "photo",
+        $chatId,
+        path.base($filePath),
+        $contentType,
+        $data);
     return parseMessage(callMultipart($b, "sendPhoto", $form, DEFAULT_TIMEOUT_MS), "/result");
 }
 
@@ -613,7 +629,12 @@ export func sendPhotoFile(b as Bot, chatId as int, filePath as string, contentTy
  */
 export func sendDocumentFile(b as Bot, chatId as int, filePath as string, contentType as string) {
     def data as bytes init fs.readBytes($filePath);
-    def form as multipart.Built init buildUpload("document", $chatId, path.base($filePath), $contentType, $data);
+    def form as multipart.Built init buildUpload(
+        "document",
+        $chatId,
+        path.base($filePath),
+        $contentType,
+        $data);
     return parseMessage(callMultipart($b, "sendDocument", $form, DEFAULT_TIMEOUT_MS), "/result");
 }
 

@@ -26,8 +26,12 @@ while ($i < 3) {
 }
 
 # 2. A custom policy: 20-24 chars, no symbols, exclude ambiguous glyphs.
-def readable as password.Schema init password.withoutAmbiguous(
-    password.withClasses(password.withLength($policy, 20, 24), true, true, true, false));
+def readable as password.Schema init password.withoutAmbiguous(password.withClasses(
+    password.withLength($policy, 20, 24),
+    true,
+    true,
+    true,
+    false));
 io.printf("\nreadable (no symbols, no ambiguous glyphs):\n  %s\n", password.generate($readable));
 
 # 3. Validate user-supplied passwords against the default policy.
@@ -46,6 +50,11 @@ for (def candidate in $samples) {
 io.printf("\ncomplexity scoring:\n");
 for (def candidate in $samples) {
     def s as password.Strength init password.complexity($candidate);
-    io.printf("  %s|pad=14 classes=%d  pool=%d  %d bits  %s\n",
-        $candidate, $s.classes, $s.poolSize, convert.toInt($s.entropy), $s.label);
+    io.printf(
+        "  %s|pad=14 classes=%d  pool=%d  %d bits  %s\n",
+        $candidate,
+        $s.classes,
+        $s.poolSize,
+        convert.toInt($s.entropy),
+        $s.label);
 }

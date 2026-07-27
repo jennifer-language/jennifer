@@ -16,7 +16,9 @@ use io;
  * @return {int} n! (n factorial)
  */
 func fact(n as int) {
-    if ($n == 0) { return 1; }
+    if ($n == 0) {
+        return 1;
+    }
     return $n * fact($n - 1);
 }
 

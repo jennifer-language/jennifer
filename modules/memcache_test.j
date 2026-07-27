@@ -32,28 +32,42 @@ func testStoreHeaderByteLength() {
 }
 
 # Helpers for testCheckKeyRejectsInjection (assertThrows invokes by name).
-func injectCRLF() { checkKey("sess:abc\r\nset pwned 0 0 5\r\nOWNED"); }
-func injectSpace() { checkKey("a b"); }
-func injectEmpty() { checkKey(""); }
-func injectLong() { checkKey(strings.repeat("k", 251)); }
-func injectDEL() { checkKey("a" + convert.fromCodepoint(127) + "b"); }
+func injectCRLF() {
+    checkKey("sess:abc\r\nset pwned 0 0 5\r\nOWNED");
+}
+func injectSpace() {
+    checkKey("a b");
+}
+func injectEmpty() {
+    checkKey("");
+}
+func injectLong() {
+    checkKey(strings.repeat("k", 251));
+}
+func injectDEL() {
+    checkKey("a" + convert.fromCodepoint(127) + "b");
+}
 
 func testCheckKeyRejectsInjection() {
-    testing.assertThrows("injectCRLF", "memcache");   # OM-001: CRLF would inject commands
+    testing.assertThrows("injectCRLF", "memcache"); # OM-001: CRLF would inject commands
     testing.assertThrows("injectSpace", "memcache");
     testing.assertThrows("injectEmpty", "memcache");
-    testing.assertThrows("injectLong", "memcache");   # > 250 bytes
+    testing.assertThrows("injectLong", "memcache"); # > 250 bytes
     testing.assertThrows("injectDEL", "memcache");
-    checkKey("sess:abc123-valid_key");                # a normal key does not throw
+    checkKey("sess:abc123-valid_key"); # a normal key does not throw
 }
 
 # OM-004: a server-declared VALUE length beyond the cap is rejected before it
 # sizes a read (the sibling MAX_*_BYTES house rule).
-func overValueCap() { checkValueLen(MAX_VALUE_BYTES + 1); }
-func negValueCap() { checkValueLen(-1); }
+func overValueCap() {
+    checkValueLen(MAX_VALUE_BYTES + 1);
+}
+func negValueCap() {
+    checkValueLen(-1);
+}
 func testValueLenCap() {
     testing.assertThrows("overValueCap", "memcache");
     testing.assertThrows("negValueCap", "memcache");
-    checkValueLen(MAX_VALUE_BYTES);   # exactly at the limit does not throw
+    checkValueLen(MAX_VALUE_BYTES); # exactly at the limit does not throw
     checkValueLen(0);
 }

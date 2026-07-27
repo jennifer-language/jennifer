@@ -64,6 +64,10 @@ def widthSha1 as bytes init hash.compute($input, "sha1");
 def widthSha256 as bytes init hash.compute($input, "sha256");
 def widthCrc32 as bytes init crc.compute($input, "crc32");
 def widthCrc64 as bytes init crc.compute($input, "crc64");
-io.printf("widths: md5=%d sha1=%d sha256=%d crc32=%d crc64=%d\n",
-    len($widthMd5), len($widthSha1), len($widthSha256),
-    len($widthCrc32), len($widthCrc64));
+io.printf(
+    "widths: md5=%d sha1=%d sha256=%d crc32=%d crc64=%d\n",
+    len($widthMd5),
+    len($widthSha1),
+    len($widthSha256),
+    len($widthCrc32),
+    len($widthCrc64));

@@ -28,8 +28,10 @@ def const HEADER as string init "X-Hub-Signature-256";
 
 # hexMac is the lowercase-hex HMAC-SHA256 of payload keyed by secret.
 func hexMac(payload as string, secret as string) {
-    def mac as bytes init hash.hmac(convert.bytesFromString($secret, "utf-8"),
-        convert.bytesFromString($payload, "utf-8"), "sha256");
+    def mac as bytes init hash.hmac(
+        convert.bytesFromString($secret, "utf-8"),
+        convert.bytesFromString($payload, "utf-8"),
+        "sha256");
     return encoding.toText($mac, "hex");
 }
 
@@ -48,7 +50,8 @@ export func sign(payload as string, secret as string) {
 # timing, how many leading characters matched. Delegates to crypto.hmacEqual
 # (Go's vetted subtle.ConstantTimeCompare) over the UTF-8 bytes.
 func equalConstantTime(a as string, b as string) {
-    return crypto.hmacEqual(convert.bytesFromString($a, "utf-8"),
+    return crypto.hmacEqual(
+        convert.bytesFromString($a, "utf-8"),
         convert.bytesFromString($b, "utf-8"));
 }
 
@@ -72,8 +75,10 @@ export func verify(payload as string, signature as string, secret as string) {
 # ("sha1" / "sha256"), enc picks the text encoding ("hex" / "base64"). The
 # composable core the Stripe / Slack / generic schemes below all build on.
 func macText(secret as string, base as string, algo as string, enc as string) {
-    def mac as bytes init hash.hmac(convert.bytesFromString($secret, "utf-8"),
-        convert.bytesFromString($base, "utf-8"), $algo);
+    def mac as bytes init hash.hmac(
+        convert.bytesFromString($secret, "utf-8"),
+        convert.bytesFromString($base, "utf-8"),
+        $algo);
     return encoding.toText($mac, $enc);
 }
 
@@ -132,8 +137,12 @@ export func stripeSign(secret as string, body as string, timestamp as int) {
  * @param now {int} the current unix time (seconds)
  * @return {bool} true if a signature is valid and the timestamp is fresh
  */
-export func stripeVerify(secret as string, body as string, header as string,
-    toleranceSeconds as int, now as int) {
+export func stripeVerify(
+    secret as string,
+    body as string,
+    header as string,
+    toleranceSeconds as int,
+    now as int) {
     def haveT as bool init false;
     def tstr as string init "";
     def sigs as list of string init [];
@@ -196,8 +205,13 @@ export func slackSign(secret as string, body as string, timestamp as int) {
  * @param now {int} the current unix time (seconds)
  * @return {bool} true if the signature is valid and the timestamp is fresh
  */
-export func slackVerify(secret as string, body as string, timestamp as int,
-    signature as string, toleranceSeconds as int, now as int) {
+export func slackVerify(
+    secret as string,
+    body as string,
+    timestamp as int,
+    signature as string,
+    toleranceSeconds as int,
+    now as int) {
     def expected as string init slackSign($secret, $body, $timestamp);
     def matched as bool init equalConstantTime($expected, strings.lower($signature));
     return $matched and fresh($now, $timestamp, $toleranceSeconds);
@@ -214,8 +228,12 @@ export func slackVerify(secret as string, body as string, timestamp as int,
  * @param encoding {string} the text encoding: "hex" or "base64"
  * @return {string} the encoded signature (no scheme prefix)
  */
-export func timestampedSign(secret as string, body as string, timestamp as int,
-    algo as string, encoding as string) {
+export func timestampedSign(
+    secret as string,
+    body as string,
+    timestamp as int,
+    algo as string,
+    encoding as string) {
     def base as string init convert.toString($timestamp) + "." + $body;
     return macText($secret, $base, $algo, $encoding);
 }
@@ -235,9 +253,15 @@ export func timestampedSign(secret as string, body as string, timestamp as int,
  * @param now {int} the current unix time (seconds)
  * @return {bool} true if the signature is valid and the timestamp is fresh
  */
-export func timestampedVerify(secret as string, body as string, timestamp as int,
-    signature as string, algo as string, encoding as string,
-    toleranceSeconds as int, now as int) {
+export func timestampedVerify(
+    secret as string,
+    body as string,
+    timestamp as int,
+    signature as string,
+    algo as string,
+    encoding as string,
+    toleranceSeconds as int,
+    now as int) {
     def expected as string init timestampedSign($secret, $body, $timestamp, $algo, $encoding);
     def matched as bool init equalConstantTime($expected, $signature);
     return $matched and fresh($now, $timestamp, $toleranceSeconds);

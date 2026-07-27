@@ -27,7 +27,8 @@ func testQueueFromKey() {
 }
 
 func testEncodePayload() {
-    testing.assertEqual(encodePayload("SendWelcome", ["a@b.c", "en"]),
+    testing.assertEqual(
+        encodePayload("SendWelcome", ["a@b.c", "en"]),
         "{\"class\":\"SendWelcome\",\"args\":[\"a@b.c\",\"en\"]}");
 }
 

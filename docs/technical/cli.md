@@ -6,7 +6,7 @@ jennifer run -             read source from stdin
 jennifer repl              interactive REPL
 jennifer tokens <file.j>   dump the lexer's token stream
 jennifer ast <file.j>      dump the preprocessed AST as JSON
-jennifer fmt <file.j>      format source per docs/user-guide/style-guide.md
+jennifer fmt [-w] <file.j>...  format source per style-guide.md (-w rewrites in place)
 jennifer lint <file.j>     report compile-legal but suspect patterns
 jennifer profile <file.j>  profile hit counts and wall-clock per source position
 jennifer test <file.j>     discover and run the file's test methods
@@ -32,7 +32,7 @@ page. The development subcommands (`tokens`, `ast`, `fmt`, `lint`, `profile`,
 | `repl`             | Interactive read-eval-print loop, with a line editor and history. | [REPL](cli_repl.md)                             |
 | `tokens <file.j>`  | Dump the lexer's token stream.                          | [Inspection](cli_inspect.md)                              |
 | `ast <file.j>`     | Dump the preprocessed AST as JSON.                      | [Inspection](cli_inspect.md)                              |
-| `fmt <file.j>`     | Format source per the style guide (stdout only).        | [Formatter](cli_fmt.md)                                   |
+| `fmt [-w] <file.j>...` | Format source per the style guide (stdout; `-w`/`--write` rewrites in place). | [Formatter](cli_fmt.md)                    |
 | `lint <file.j>`    | Report compile-legal but suspect patterns.              | [Linter](cli_lint.md)                                     |
 | `profile <file.j>` | Per-position hit counts and wall-clock timings.         | [Profiler](cli_profile.md)                                |
 | `test <file.j>`    | Discover and run the file's test methods.               | [Test runner](cli_test.md)                                |

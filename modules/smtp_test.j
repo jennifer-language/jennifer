@@ -15,7 +15,7 @@ use testing;
 func testParseCode() {
     testing.assertEqual(parseCode("250 OK"), 250);
     testing.assertEqual(parseCode("354 Go ahead"), 354);
-    testing.assertEqual(parseCode("ab"), 0);   # too short
+    testing.assertEqual(parseCode("ab"), 0); # too short
 }
 
 func testReplyFinalCodeSingleLine() {
@@ -61,19 +61,38 @@ func idnLocal() {
 }
 
 func testClientNameDefault() {
-    def bare as Options init Options{host: "h", port: 25, security: "none",
-        clientName: "", user: "", pass: "", auth: "", allowInsecureAuth: false};
+    def bare as Options init Options{
+        host: "h",
+        port: 25,
+        security: "none",
+        clientName: "",
+        user: "",
+        pass: "",
+        auth: "",
+        allowInsecureAuth: false
+    };
     testing.assertEqual(clientName($bare), "localhost");
-    def named as Options init Options{host: "h", port: 25, security: "none",
-        clientName: "me.example", user: "", pass: "", auth: "", allowInsecureAuth: false};
+    def named as Options init Options{
+        host: "h",
+        port: 25,
+        security: "none",
+        clientName: "me.example",
+        user: "",
+        pass: "",
+        auth: "",
+        allowInsecureAuth: false
+    };
     testing.assertEqual(clientName($named), "me.example");
 }
 
-
 # ---- CRLF / control-character injection in addresses + EHLO name ----
 
-func injectAddress() { asciiEnvelope("alice@example.com\r\nRCPT TO:<evil@x>"); }
-func injectHelper() { rejectControl("host\r\nDATA", "test"); }
+func injectAddress() {
+    asciiEnvelope("alice@example.com\r\nRCPT TO:<evil@x>");
+}
+func injectHelper() {
+    rejectControl("host\r\nDATA", "test");
+}
 
 func testEnvelopeRejectsCrlf() {
     testing.assertThrows("injectAddress", "smtp");
@@ -103,17 +122,23 @@ func testEhloStartTlsAbsent() {
 func testEnvelopeRejectsMissingAt() {
     testing.assertThrows("envNoAt", "smtp");
 }
-func envNoAt() { asciiEnvelope("nobody"); }
+func envNoAt() {
+    asciiEnvelope("nobody");
+}
 
 func testEnvelopeRejectsEmptyLocal() {
     testing.assertThrows("envEmptyLocal", "smtp");
 }
-func envEmptyLocal() { asciiEnvelope("@example.com"); }
+func envEmptyLocal() {
+    asciiEnvelope("@example.com");
+}
 
 func testEnvelopeRejectsEmptyDomain() {
     testing.assertThrows("envEmptyDomain", "smtp");
 }
-func envEmptyDomain() { asciiEnvelope("alice@"); }
+func envEmptyDomain() {
+    asciiEnvelope("alice@");
+}
 
 func testAuthRefusedOverCleartext() {
     testing.assertThrows("cleartextAuth", "smtp");

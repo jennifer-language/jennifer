@@ -161,9 +161,13 @@ func tokenFromNode(node as json.Value, nowUnix as int) {
     if (json.has($node, "/scope")) {
         $scope = json.asString($node, "/scope");
     }
-    return Token{accessToken: json.asString($node, "/access_token"),
-        tokenType: $tokenType, refreshToken: $refreshToken, scope: $scope,
-        expiresAt: $expiresAt};
+    return Token{
+        accessToken: json.asString($node, "/access_token"),
+        tokenType: $tokenType,
+        refreshToken: $refreshToken,
+        scope: $scope,
+        expiresAt: $expiresAt
+    };
 }
 
 # decodeToken decodes a token-endpoint body, mapping a non-JSON response (a 502
@@ -232,9 +236,12 @@ func nowUnix() {
  * @throws {Error} kind "oauth" on a token-endpoint error
  */
 export func clientCredentials(config as Config) {
-    def params as map of string to string init {"grant_type": "client_credentials",
-        "client_id": $config.clientId, "client_secret": $config.clientSecret,
-        "scope": $config.scope};
+    def params as map of string to string init {
+        "grant_type": "client_credentials",
+        "client_id": $config.clientId,
+        "client_secret": $config.clientSecret,
+        "scope": $config.scope
+    };
     return parseTokenBody(postForm($config.tokenUrl, $params).body, nowUnix());
 }
 
@@ -247,9 +254,12 @@ export func clientCredentials(config as Config) {
  * @throws {Error} kind "oauth" on a token-endpoint error
  */
 export func refresh(config as Config, refreshToken as string) {
-    def params as map of string to string init {"grant_type": "refresh_token",
-        "refresh_token": $refreshToken, "client_id": $config.clientId,
-        "client_secret": $config.clientSecret};
+    def params as map of string to string init {
+        "grant_type": "refresh_token",
+        "refresh_token": $refreshToken,
+        "client_id": $config.clientId,
+        "client_secret": $config.clientSecret
+    };
     def t as Token init parseTokenBody(postForm($config.tokenUrl, $params).body, nowUnix());
     if (len($t.refreshToken) == 0) {
         $t.refreshToken = $refreshToken;
@@ -264,8 +274,10 @@ export func refresh(config as Config, refreshToken as string) {
  * @throws {Error} kind "oauth" on a device-endpoint error
  */
 export func deviceStart(config as Config) {
-    def params as map of string to string init {"client_id": $config.clientId,
-        "scope": $config.scope};
+    def params as map of string to string init {
+        "client_id": $config.clientId,
+        "scope": $config.scope
+    };
     def node as json.Value init json.decode(postForm($config.deviceUrl, $params).body);
     if (json.has($node, "/error")) {
         fail(errorMessage($node));
@@ -284,9 +296,13 @@ export func deviceStart(config as Config) {
     if (json.has($node, "/expires_in")) {
         $expiresAt = nowUnix() + json.asInt($node, "/expires_in");
     }
-    return DeviceAuth{deviceCode: json.asString($node, "/device_code"),
-        userCode: json.asString($node, "/user_code"), verificationUri: $vuri,
-        interval: $interval, expiresAt: $expiresAt};
+    return DeviceAuth{
+        deviceCode: json.asString($node, "/device_code"),
+        userCode: json.asString($node, "/user_code"),
+        verificationUri: $vuri,
+        interval: $interval,
+        expiresAt: $expiresAt
+    };
 }
 
 /**
@@ -308,7 +324,9 @@ export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
         }
         def params as map of string to string init {
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "device_code": $deviceAuth.deviceCode, "client_id": $config.clientId};
+            "device_code": $deviceAuth.deviceCode,
+            "client_id": $config.clientId
+        };
         # Google's token endpoint requires the client secret in the device
         # polling request; include it when configured (public clients leave it
         # empty).
@@ -349,9 +367,13 @@ export func isExpired(token as Token) {
  * @return {Config} a Config wired to Google's endpoints
  */
 export func google(clientId as string, clientSecret as string, scope as string) {
-    return Config{tokenUrl: "https://oauth2.googleapis.com/token",
+    return Config{
+        tokenUrl: "https://oauth2.googleapis.com/token",
         deviceUrl: "https://oauth2.googleapis.com/device/code",
-        clientId: $clientId, clientSecret: $clientSecret, scope: $scope};
+        clientId: $clientId,
+        clientSecret: $clientSecret,
+        scope: $scope
+    };
 }
 
 /**
@@ -362,11 +384,15 @@ export func google(clientId as string, clientSecret as string, scope as string) 
  * @param scope {string} the space-separated requested scopes
  * @return {Config} a Config wired to the tenant's endpoints
  */
-export func microsoft(tenant as string, clientId as string, clientSecret as string,
-    scope as string) {
+export func microsoft(tenant as string, clientId as string, clientSecret as string, scope as string) {
     def base as string init "https://login.microsoftonline.com/" + $tenant + "/oauth2/v2.0";
-    return Config{tokenUrl: $base + "/token", deviceUrl: $base + "/devicecode",
-        clientId: $clientId, clientSecret: $clientSecret, scope: $scope};
+    return Config{
+        tokenUrl: $base + "/token",
+        deviceUrl: $base + "/devicecode",
+        clientId: $clientId,
+        clientSecret: $clientSecret,
+        scope: $scope
+    };
 }
 
 # --- token store (exported) ----------------------------------------
@@ -392,9 +418,11 @@ export func save(path as string, token as Token) {
  */
 export func load(path as string) {
     def node as json.Value init json.decode(fs.readString($path));
-    return Token{accessToken: json.asString($node, "/accessToken"),
+    return Token{
+        accessToken: json.asString($node, "/accessToken"),
         tokenType: json.asString($node, "/tokenType"),
         refreshToken: json.asString($node, "/refreshToken"),
         scope: json.asString($node, "/scope"),
-        expiresAt: json.asInt($node, "/expiresAt")};
+        expiresAt: json.asInt($node, "/expiresAt")
+    };
 }

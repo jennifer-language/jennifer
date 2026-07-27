@@ -315,9 +315,9 @@ func TestFmtBlockOpeners(t *testing.T) {
 
 // TestFmtStructDeclMultiline covers the struct-declaration reflow:
 // `def struct Name { f as T, g as U };` must land one field per line,
-// with `};` cuddled on the closing brace. Struct literals
-// (`Name{ f: v, g: w }`) stay inline - they share the map-literal
-// classifier and read like maps at the call site.
+// with `};` cuddled on the closing brace. A short struct / enum literal
+// (`Name{f: v, g: w}`) stays inline with a tight brace and tight body
+// body that mark it as bound data (a long one wraps one field per line).
 func TestFmtStructDeclMultiline(t *testing.T) {
 	cases := []struct {
 		name, src, want string
@@ -333,14 +333,14 @@ func TestFmtStructDeclMultiline(t *testing.T) {
 			"def struct Bag {\n    items as list of int,\n    count as int\n};\n",
 		},
 		{
-			"struct literal stays inline",
+			"short struct literal stays inline, tight everywhere",
 			`def p as Point init Point{x:1,y:2};`,
-			"def p as Point init Point {x: 1, y: 2};\n",
+			"def p as Point init Point{x: 1, y: 2};\n",
 		},
 		{
-			"struct decl inside a program keeps outer indent",
+			"struct literal inside a program keeps outer indent",
 			`func f(){def p as Point init Point{x:1,y:2};return $p;}`,
-			"func f() {\n    def p as Point init Point {x: 1, y: 2};\n    return $p;\n}\n",
+			"func f() {\n    def p as Point init Point{x: 1, y: 2};\n    return $p;\n}\n",
 		},
 	}
 	for _, c := range cases {
@@ -379,9 +379,12 @@ func TestFmtColumnReflow(t *testing.T) {
 			"if ($ok and\n    $ready) {\n    return;\n}\n",
 		},
 		{
+			// Fills the line, then breaks after the `+` whose next operand would
+			// overflow - so every line stays under the limit (the old reactive
+			// break left a 108-column first line).
 			"long concat auto-wraps after +",
 			`def s as string init "` + strings.Repeat("x", 40) + `" + "` + strings.Repeat("y", 40) + `" + "` + strings.Repeat("z", 40) + `";`,
-			"def s as string init \"" + strings.Repeat("x", 40) + "\" + \"" + strings.Repeat("y", 40) + "\" +\n    \"" + strings.Repeat("z", 40) + "\";\n",
+			"def s as string init \"" + strings.Repeat("x", 40) + "\" +\n    \"" + strings.Repeat("y", 40) + "\" + \"" + strings.Repeat("z", 40) + "\";\n",
 		},
 	}
 	for _, c := range cases {
@@ -496,25 +499,23 @@ func TestFmtPreservesComments(t *testing.T) {
 	}
 }
 
-// TestFmtMatchReflow pins the canonical `match` layout: a single-line match is
-// expanded so each `when` / `else` arm starts on its own line (a flat case list,
-// like switch/match in other languages), body on its own indented lines. Unlike
-// an if-chain's `} else {`, match arms do NOT cuddle the previous arm's `}`.
+// TestFmtMatchReflow pins the canonical `match` layout: each `when` / `else` arm
+// starts on its own line (a flat case list, like switch/match in other
+// languages). An arm holding a single short statement stays inline
+// (`when 1 { a(); }`); a multi-statement arm expands one statement per line.
+// Unlike an if-chain's `} else {`, match arms do NOT cuddle the previous arm's
+// `}`.
 func TestFmtMatchReflow(t *testing.T) {
 	src := `use io;
 match ($x) { when 1 { a(); } when 2, 3 { b(); c(); } else { d(); } }`
 	want := `use io;
 match ($x) {
-    when 1 {
-        a();
-    }
+    when 1 { a(); }
     when 2, 3 {
         b();
         c();
     }
-    else {
-        d();
-    }
+    else { d(); }
 }
 `
 	if got := fmtSource(t, src); got != want {
@@ -550,5 +551,289 @@ func TestFmtTriviaBeforeCloseBrace(t *testing.T) {
 		if again := fmtSource(t, got); again != got {
 			t.Errorf("%s: not idempotent:\n--- once ---\n%s--- twice ---\n%s", c.name, got, again)
 		}
+	}
+}
+
+// TestFmtLiteralWrapping covers the length- and shape-aware literal formatting:
+// a short struct / enum / map / list literal stays inline (struct / enum
+// literals with a tight brace and tight body), an empty literal stays tight,
+// and an inline arm keeps a single short statement on its line.
+func TestFmtLiteralWrapping(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{
+			"short struct literal: tight body (no padding)",
+			`def p as P init P{a:1,b:2};`,
+			"def p as P init P{a: 1, b: 2};\n",
+		},
+		{
+			"short map literal stays tight",
+			`def m as map of string to int init {"a":1,"b":2};`,
+			"def m as map of string to int init {\"a\": 1, \"b\": 2};\n",
+		},
+		{
+			"short list stays inline",
+			`def xs as list of int init [1,2,3];`,
+			"def xs as list of int init [1, 2, 3];\n",
+		},
+		{
+			"empty struct literal is tight",
+			`def p as P init P{};`,
+			"def p as P init P{};\n",
+		},
+		{
+			"nested struct literal stays tight",
+			`def c as C init C{name:"x",inner:D{k:1}};`,
+			"def c as C init C{name: \"x\", inner: D{k: 1}};\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := fmtSource(t, c.src)
+			if got != c.want {
+				t.Errorf("got %q\nwant %q", got, c.want)
+			}
+			if again := fmtSource(t, got); again != got {
+				t.Errorf("not idempotent:\n--- once ---\n%s--- twice ---\n%s", got, again)
+			}
+		})
+	}
+}
+
+// TestFmtNeverAuthorsLongLine is the fmt / lint contract (M23.9): for source
+// whose over-length is entirely due to wrappable constructs - a long literal or
+// a binary-operator chain - fmt's output has no line past the 100-column limit,
+// so fmt never hands `lint` an L203 (line-too-long) the source did not already
+// have. A single over-long token or a long call-argument list has no safe break
+// point and is deliberately out of scope (it stays on one line).
+func TestFmtNeverAuthorsLongLine(t *testing.T) {
+	srcs := []string{
+		// long struct literal (wraps one field per line)
+		`def r as Rule init Rule{chain:"forward",action:"drop",proto:"tcp",src:"10.0.0.0/8",dst:"0.0.0.0/0",comment:"a fairly long descriptive comment here"};`,
+		// long list of maps (list wraps; each short map stays inline on its line)
+		`def rows as list of map of string to string init [{"id":"1","name":"alpha","note":"first row here"},{"id":"2","name":"beta","note":"second row here too indeed"}];`,
+		// long concat (fills, then breaks after a joiner)
+		`def s as string init "prefix aaaaaaaaaaaaaaaaaaaaaaaaaaaa" + $x + " middle bbbbbbbbbbbbbbbbbbbbbbbb " + $y + " suffix cccccccccccccccccccccccccccc";`,
+		// nested literals inside a block (extra indent), decided independently
+		`func f() { def c as Cfg init Cfg{name:"service",tags:["a","b","c"],limits:Limits{max:100,min:1},note:"some longer note to push the width over the limit"}; }`,
+	}
+	for i, src := range srcs {
+		out := fmtSource(t, src)
+		for _, line := range strings.Split(out, "\n") {
+			if w := len([]rune(line)); w > maxLineLength {
+				t.Errorf("case %d: fmt authored a %d-column line (over %d):\n%s",
+					i, w, maxLineLength, line)
+			}
+		}
+		if again := fmtSource(t, out); again != out {
+			t.Errorf("case %d: not idempotent:\n--- once ---\n%s--- twice ---\n%s", i, out, again)
+		}
+	}
+}
+
+// TestFmtWriteInPlace covers `jennifer fmt -w`: it rewrites a file to its
+// canonical form, leaves an already-canonical file untouched, and refuses to
+// send several files to stdout without -w.
+func TestFmtWriteInPlace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.j")
+	if err := os.WriteFile(path, []byte("func f(){def p as P init P{x:1,y:2};}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := runFmt([]string{"-w", path}); code != 0 {
+		t.Fatalf("fmt -w exit %d", code)
+	}
+	got, _ := os.ReadFile(path)
+	want := "func f() {\n    def p as P init P{x: 1, y: 2};\n}\n"
+	if string(got) != want {
+		t.Errorf("in-place result:\n got %q\nwant %q", got, want)
+	}
+	// A second pass is a no-op (already canonical); content stays put.
+	info1, _ := os.Stat(path)
+	if code := runFmt([]string{"--write", path}); code != 0 {
+		t.Fatalf("second fmt -w exit %d", code)
+	}
+	again, _ := os.ReadFile(path)
+	if string(again) != want {
+		t.Errorf("second pass changed a canonical file: %q", again)
+	}
+	if info2, err := os.Stat(path); err == nil && !info2.ModTime().Equal(info1.ModTime()) {
+		t.Errorf("canonical file was rewritten (mtime changed) on a no-op pass")
+	}
+	// Several files to stdout (no -w) is an error.
+	b := filepath.Join(dir, "b.j")
+	os.WriteFile(b, []byte("def x as int init 1;\n"), 0o644)
+	if code := runFmt([]string{path, b}); code != 2 {
+		t.Errorf("multiple files to stdout: got exit %d, want 2", code)
+	}
+}
+
+// TestFmtKeywordMemberCallHugsParen covers a namespaced call whose member name
+// is a word the lexer tokenises as a keyword - a type keyword (`json.map()`,
+// `json.list()`) or a statement keyword (`strings.repeat()`). The `.`-qualified
+// call must still hug its `(` (no `json.map ()` / `strings.repeat ()`), while a
+// genuine leading keyword (`if (`, `while (`) keeps its space.
+func TestFmtKeywordMemberCallHugsParen(t *testing.T) {
+	cases := map[string]string{
+		`def r as json.Value init json.map ( );`:        "def r as json.Value init json.map();\n",
+		`def l as json.Value init json.list ( );`:       "def l as json.Value init json.list();\n",
+		`def d as toml.Value init toml.map ( );`:        "def d as toml.Value init toml.map();\n",
+		`def k as string init strings.repeat ("k", 1);`: "def k as string init strings.repeat(\"k\", 1);\n",
+		"if ($x) {\nreturn;\n}":                         "if ($x) {\n    return;\n}\n",
+		"while ($x) {\nreturn;\n}":                      "while ($x) {\n    return;\n}\n",
+	}
+	for src, want := range cases {
+		if got := fmtSource(t, src); got != want {
+			t.Errorf("src %q:\n got %q\nwant %q", src, got, want)
+		}
+	}
+}
+
+// TestFmtSpawnBlockInContainer covers a container holding `spawn { ... }` block
+// elements: the block is inherently multiline, so the container must wrap (one
+// element per line) and a block `}` must hug a following `,` / `)` / `;` rather
+// than pushing it to the next line (`},` not `}\n,`).
+func TestFmtSpawnBlockInContainer(t *testing.T) {
+	src := "def many as list of task of int init [spawn { return 1; }, spawn { return 2; }];"
+	want := "def many as list of task of int init [\n" +
+		"    spawn {\n        return 1;\n    },\n" +
+		"    spawn {\n        return 2;\n    }\n" +
+		"];\n"
+	if got := fmtSource(t, src); got != want {
+		t.Errorf("spawn-in-list:\n got %q\nwant %q", got, want)
+	}
+	// A block `}` hugs the `)` and `;` of an enclosing call (`});`).
+	call := "use task;\ndef v as int init task.wait(spawn { return 5; });"
+	callWant := "use task;\ndef v as int init task.wait(spawn {\n    return 5;\n});\n"
+	if got := fmtSource(t, call); got != callWant {
+		t.Errorf("spawn-in-call:\n got %q\nwant %q", got, callWant)
+	}
+	// Idempotent.
+	if again := fmtSource(t, fmtSource(t, src)); again != want {
+		t.Errorf("not idempotent")
+	}
+}
+
+// TestFmtRejectsDirectory covers the deliberate non-feature: `fmt` formats the
+// files it is named and does no directory walking (file selection is the
+// shell's job), so a directory argument is a usage error, not a tree walk.
+func TestFmtRejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.j"), []byte("func f(){return;}\n"), 0o644)
+	if code := runFmt([]string{"-w", dir}); code != 2 {
+		t.Errorf("directory argument: got exit %d, want 2 (usage error)", code)
+	}
+	// The .j inside must be untouched (no silent walk).
+	got, _ := os.ReadFile(filepath.Join(dir, "a.j"))
+	if string(got) != "func f(){return;}\n" {
+		t.Errorf("directory contents were rewritten: %q", got)
+	}
+}
+
+// TestFmtPreservesLiteralLexemes covers M23.10 fidelity: fmt re-emits a numeric
+// or string literal's exact source spelling (digit separators, base prefix,
+// quote style, escapes, embedded newlines) rather than the processed value.
+func TestFmtPreservesLiteralLexemes(t *testing.T) {
+	cases := map[string]string{
+		`def n as int init 1_000_000;`:     "def n as int init 1_000_000;\n",
+		`def h as int init 0xDEAD_BEEF;`:   "def h as int init 0xDEAD_BEEF;\n",
+		`def b as int init 0b1010_0110;`:   "def b as int init 0b1010_0110;\n",
+		`def f as float init 1_000.000_5;`: "def f as float init 1_000.000_5;\n",
+		`def q as string init 'single';`:   "def q as string init 'single';\n",
+		"def e as string init \"a\\nb\";":  "def e as string init \"a\\nb\";\n",
+		"def m as string init \"x\ny\";":   "def m as string init \"x\ny\";\n", // raw newline preserved
+	}
+	for src, want := range cases {
+		if got := fmtSource(t, src); got != want {
+			t.Errorf("src %q:\n got %q\nwant %q", src, got, want)
+		}
+		if again := fmtSource(t, fmtSource(t, src)); again != want {
+			t.Errorf("src %q not idempotent", src)
+		}
+	}
+}
+
+// TestFmtWrapsLongCall covers M23.10 call-argument wrapping: a long call with two
+// or more arguments wraps one per line with `)` hugging the last argument; a
+// short call, a single-argument call, and an empty call stay inline.
+func TestFmtWrapsLongCall(t *testing.T) {
+	long := `def s as E init ns.event("standup-2024-06-17@team", fromIso("2024-06-17T09:00:00Z"), fromIso("2024-06-17T09:15:00Z"), "Daily standup");`
+	want := "def s as E init ns.event(\n" +
+		"    \"standup-2024-06-17@team\",\n" +
+		"    fromIso(\"2024-06-17T09:00:00Z\"),\n" +
+		"    fromIso(\"2024-06-17T09:15:00Z\"),\n" +
+		"    \"Daily standup\");\n"
+	if got := fmtSource(t, long); got != want {
+		t.Errorf("long call:\n got %q\nwant %q", got, want)
+	}
+	inline := map[string]string{
+		`def x as int init foo(1, 2);`: "def x as int init foo(1, 2);\n", // short: inline
+		`func f() { a(); }`:            "func f() {\n    a();\n}\n",      // empty: tight
+	}
+	for src, w := range inline {
+		if got := fmtSource(t, src); got != w {
+			t.Errorf("src %q:\n got %q\nwant %q", src, got, w)
+		}
+	}
+	if again := fmtSource(t, fmtSource(t, long)); again != want {
+		t.Errorf("long call not idempotent")
+	}
+}
+
+// TestFmtPreservesTokenStream is the definitive fidelity guard: across every .j
+// in examples/ and modules/, formatting must change only whitespace/trivia - the
+// sequence of non-trivia tokens (type + lexeme) is byte-identical before and
+// after. This is what makes a corpus reflow safe: fmt can never alter a literal
+// value, an identifier, or the program's structure.
+func TestFmtPreservesTokenStream(t *testing.T) {
+	roots := []string{
+		filepath.Join("..", "..", "examples"),
+		filepath.Join("..", "..", "modules"),
+	}
+	nonTrivia := func(src string) []lexer.Token {
+		toks, err := lexer.TokenizeWithFile(src, "<f>")
+		if err != nil {
+			return nil
+		}
+		var out []lexer.Token
+		for _, tk := range toks {
+			switch tk.Type {
+			case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+				lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE:
+				continue
+			}
+			out = append(out, tk)
+		}
+		return out
+	}
+	for _, root := range roots {
+		abs, _ := filepath.Abs(root)
+		filepath.WalkDir(abs, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".j") {
+				return nil
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			orig := nonTrivia(string(b))
+			if orig == nil {
+				return nil // unlexable source; not this test's concern
+			}
+			formatted := fmtSource(t, string(b))
+			after := nonTrivia(formatted)
+			rel, _ := filepath.Rel(abs, path)
+			if len(orig) != len(after) {
+				t.Errorf("%s: token count changed %d -> %d after fmt", rel, len(orig), len(after))
+				return nil
+			}
+			for i := range orig {
+				if orig[i].Type != after[i].Type || orig[i].Lexeme != after[i].Lexeme {
+					t.Errorf("%s: token %d changed: %v(%q) -> %v(%q)", rel, i,
+						orig[i].Type, orig[i].Lexeme, after[i].Type, after[i].Lexeme)
+					return nil
+				}
+			}
+			return nil
+		})
 	}
 }

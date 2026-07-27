@@ -87,7 +87,7 @@ def struct Frame {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "websocket", message: "websocket: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "websocket", message: "websocket: " + $msg, file: "", line: 0, col: 0};
 }
 
 # --- byte helpers (private) -------------------------------------------------
@@ -139,7 +139,9 @@ func parseUrl(url as string) {
     # The host and path are written verbatim into the GET / Host lines of the
     # upgrade request, so a CR / LF / NUL in the URL would smuggle arbitrary HTTP
     # headers (request splitting) into the handshake.
-    if (strings.contains($url, "\r") or strings.contains($url, "\n") or strings.contains($url, "\0")) {
+    if (strings.contains($url, "\r") or strings.contains($url, "\n") or strings.contains(
+        $url,
+        "\0")) {
         fail("URL contains a control character (CR/LF/NUL)");
     }
     def secure as bool init false;
@@ -169,7 +171,7 @@ func parseUrl(url as string) {
         $host = strings.substring($hostport, 0, $colon);
         $port = convert.toInt(strings.substring($hostport, $colon + 1, len($hostport)));
     }
-    return Target{ secure: $secure, host: $host, port: $port, path: $path };
+    return Target{secure: $secure, host: $host, port: $port, path: $path};
 }
 
 # makeKey returns a fresh base64 Sec-WebSocket-Key (16 random bytes).
@@ -197,7 +199,8 @@ func readHandshakeResponse(socket as net.Conn) {
         $buf[] = $one[0];
         def m as int init len($buf);
         # `\r\n\r\n` is 13,10,13,10.
-        if ($m >= 4 and $buf[$m - 1] == 10 and $buf[$m - 2] == 13 and $buf[$m - 3] == 10 and $buf[$m - 4] == 13) {
+        if ($m >= 4 and $buf[$m - 1] == 10 and $buf[$m - 2] == 13 and $buf[$m - 3] == 10 and
+            $buf[$m - 4] == 13) {
             $done = true;
         }
         if ($m > 8192) {
@@ -324,7 +327,14 @@ func readFrame(socket as net.Conn) {
         $mkey = readN($socket, 4);
     }
     if ($n > MAX_MESSAGE_BYTES) {
-        throw Error{kind: "websocket", message: "websocket: frame declares " + convert.toString($n) + " bytes, over the " + convert.toString(MAX_MESSAGE_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "websocket",
+            message: "websocket: frame declares " + convert.toString($n) + " bytes, over the " +
+                convert.toString(MAX_MESSAGE_BYTES) + "-byte limit",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def payload as bytes;
     if ($n > 0) {
@@ -337,7 +347,7 @@ func readFrame(socket as net.Conn) {
             $j = $j + 1;
         }
     }
-    return Frame{ opcode: $opcode, fin: $fin, payload: $payload };
+    return Frame{opcode: $opcode, fin: $fin, payload: $payload};
 }
 
 # --- API (exported) ---------------------------------------------------------
@@ -375,7 +385,7 @@ export func connectWith(url as string, timeoutMs as int) {
     net.setDeadline($socket, HANDSHAKE_TIMEOUT_MS);
     handshake($socket, $t, makeKey());
     net.setDeadline($socket, 0);
-    return Conn{ socket: $socket, timeoutMs: $timeoutMs };
+    return Conn{socket: $socket, timeoutMs: $timeoutMs};
 }
 
 # sendFrame writes one masked frame, bounded by the connection timeout.
@@ -440,12 +450,12 @@ export func receive(c as Conn) {
             # reassembly continues; only a standalone pong surfaces as a
             # message.
             if (not $started) {
-                $control = Message{ kind: "pong", text: "", data: $f.payload };
+                $control = Message{kind: "pong", text: "", data: $f.payload};
                 $isControl = true;
                 $done = true;
             }
         } elseif ($f.opcode == OP_CLOSE) {
-            $control = Message{ kind: "close", text: "", data: $f.payload };
+            $control = Message{kind: "close", text: "", data: $f.payload};
             $isControl = true;
             $done = true;
         } else {
@@ -467,7 +477,14 @@ export func receive(c as Conn) {
                 $code[] = 3;
                 $code[] = 241;
                 net.writeBytes($c.socket, encodeFrame(OP_CLOSE, $code));
-                throw Error{kind: "websocket", message: "websocket: reassembled message exceeds the " + convert.toString(MAX_MESSAGE_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+                throw Error{
+                    kind: "websocket",
+                    message: "websocket: reassembled message exceeds the " +
+                        convert.toString(MAX_MESSAGE_BYTES) + "-byte limit",
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
             }
             if ($f.fin == 1) {
                 $done = true;
@@ -479,9 +496,9 @@ export func receive(c as Conn) {
         return $control;
     }
     if ($dataOpcode == OP_TEXT) {
-        return Message{ kind: "text", text: convert.stringFromBytes($acc, "utf-8"), data: $acc };
+        return Message{kind: "text", text: convert.stringFromBytes($acc, "utf-8"), data: $acc};
     }
-    return Message{ kind: "binary", text: "", data: $acc };
+    return Message{kind: "binary", text: "", data: $acc};
 }
 
 /**

@@ -20,8 +20,11 @@ try {
     io.printf("body (%d bytes):\n%s\n", len($r.body), $r.body);
 
     # a POST with a JSON body and an auth header
-    def sent as http.Response init http.post($base + "/items", "application/json",
-        "{\"name\":\"ada\"}", {"Authorization": "Bearer demo-token"});
+    def sent as http.Response init http.post(
+        $base + "/items",
+        "application/json",
+        "{\"name\":\"ada\"}",
+        {"Authorization": "Bearer demo-token"});
     io.printf("POST /items -> %d\n", $sent.status);
 } catch (e) {
     io.printf("no HTTP server at %s (%s)\n", $base, $e.message);

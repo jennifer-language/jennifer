@@ -24,7 +24,8 @@ func testSignVector() {
 
 func testHexMac() {
     # hexMac is the bare hex, no sha256= prefix.
-    testing.assertEqual(hexMac(PAYLOAD, SECRET),
+    testing.assertEqual(
+        hexMac(PAYLOAD, SECRET),
         "757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17");
 }
 
@@ -46,15 +47,15 @@ func testVerifyTamperedPayload() {
 }
 
 func testVerifyMalformedSignature() {
-    testing.assertFalse(verify(PAYLOAD, "sha256=deadbeef", SECRET));   # wrong length
-    testing.assertFalse(verify(PAYLOAD, "", SECRET));                  # empty
-    testing.assertFalse(verify(PAYLOAD, "notaprefix", SECRET));        # no sha256=
+    testing.assertFalse(verify(PAYLOAD, "sha256=deadbeef", SECRET)); # wrong length
+    testing.assertFalse(verify(PAYLOAD, "", SECRET)); # empty
+    testing.assertFalse(verify(PAYLOAD, "notaprefix", SECRET)); # no sha256=
 }
 
 func testEqualConstantTime() {
     testing.assertTrue(equalConstantTime("abc", "abc"));
-    testing.assertFalse(equalConstantTime("abc", "abd"));   # same length, differs
-    testing.assertFalse(equalConstantTime("abc", "ab"));    # different length
+    testing.assertFalse(equalConstantTime("abc", "abd")); # same length, differs
+    testing.assertFalse(equalConstantTime("abc", "ab")); # different length
     testing.assertTrue(equalConstantTime("", ""));
 }
 
@@ -67,9 +68,9 @@ func testSignRoundTrip() {
 
 # --- timestamped, replay-protected schemes ----------------------------------
 
-def const TS as int init 1492774800;   # a fixed unix timestamp for signing
-def const NOW as int init 1492774830;  # 30s later: within a 300s tolerance
-def const OLD as int init 1492780800;  # now 100 minutes later: beyond tolerance
+def const TS as int init 1492774800; # a fixed unix timestamp for signing
+def const NOW as int init 1492774830; # 30s later: within a 300s tolerance
+def const OLD as int init 1492780800; # now 100 minutes later: beyond tolerance
 def const BODY as string init "{\"event\":\"payment\"}";
 def const TOL as int init 300;
 
@@ -99,8 +100,8 @@ func testStripeMultipleV1() {
     # Extra v1= entries: valid if any matches; malformed / missing parts fail.
     def h as string init stripeSign(SECRET, BODY, TS);
     testing.assertTrue(stripeVerify(SECRET, BODY, $h + ",v1=deadbeef", TOL, NOW));
-    testing.assertFalse(stripeVerify(SECRET, BODY, "v1=deadbeef", TOL, NOW));   # no t=
-    testing.assertFalse(stripeVerify(SECRET, BODY, "t=1492774800", TOL, NOW));  # no v1=
+    testing.assertFalse(stripeVerify(SECRET, BODY, "v1=deadbeef", TOL, NOW)); # no t=
+    testing.assertFalse(stripeVerify(SECRET, BODY, "t=1492774800", TOL, NOW)); # no v1=
 }
 
 func testSlackRoundTrip() {
@@ -134,9 +135,9 @@ func testGenericSha256Base64() {
 }
 
 func testFreshHelper() {
-    testing.assertTrue(fresh(NOW, TS, TOL));     # 30s apart, within 300s
-    testing.assertFalse(fresh(OLD, TS, TOL));    # far apart
-    testing.assertTrue(fresh(TS, NOW, TOL));     # symmetric (future skew)
+    testing.assertTrue(fresh(NOW, TS, TOL)); # 30s apart, within 300s
+    testing.assertFalse(fresh(OLD, TS, TOL)); # far apart
+    testing.assertTrue(fresh(TS, NOW, TOL)); # symmetric (future skew)
     testing.assertTrue(absInt(-5) == 5);
     testing.assertTrue(absInt(5) == 5);
 }

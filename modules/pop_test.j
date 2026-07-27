@@ -37,9 +37,9 @@ func testParseDotBodyUnstuffs() {
 }
 
 func testDotTerminated() {
-    testing.assertTrue(dotTerminated(".\r\n"));           # empty body
+    testing.assertTrue(dotTerminated(".\r\n")); # empty body
     testing.assertTrue(dotTerminated("body\r\n.\r\n"));
-    testing.assertFalse(dotTerminated("body\r\nmore"));   # not yet complete
+    testing.assertFalse(dotTerminated("body\r\nmore")); # not yet complete
 }
 
 func testParseSizes() {
@@ -50,16 +50,17 @@ func testParseSizes() {
     testing.assertEqual($szs[2], 300);
 }
 
-
 func testApopTimestamp() {
-    testing.assertEqual(apopTimestamp("+OK POP3 ready <1896.697170952@dbc.mtview.ca.us>"),
+    testing.assertEqual(
+        apopTimestamp("+OK POP3 ready <1896.697170952@dbc.mtview.ca.us>"),
         "<1896.697170952@dbc.mtview.ca.us>");
     testing.assertEqual(apopTimestamp("+OK no timestamp here"), "");
 }
 
 func testApopDigest() {
     # RFC 1939 worked example: <1896.697170952@dbc.mtview.ca.us> + "tanstaaf".
-    testing.assertEqual(apopDigest("<1896.697170952@dbc.mtview.ca.us>", "tanstaaf"),
+    testing.assertEqual(
+        apopDigest("<1896.697170952@dbc.mtview.ca.us>", "tanstaaf"),
         "c4c9334bac560ecc979e58001b3e22fb");
 }
 
@@ -67,13 +68,17 @@ func testApopDigest() {
 func testResponseCapRejectsOversized() {
     testing.assertThrows("overRespCap", "pop");
 }
-func overRespCap() { capResponse(MAX_RESPONSE_BYTES + 1); }
+func overRespCap() {
+    capResponse(MAX_RESPONSE_BYTES + 1);
+}
 func testResponseCapAllowsAtLimit() {
     capResponse(MAX_RESPONSE_BYTES);
     testing.assertTrue(true);
 }
 
-func injectPop() { rejectControl("USER a\r\nPASS x", "USER"); }
-func testPopInjectionBlocked() {   # OM-006
+func injectPop() {
+    rejectControl("USER a\r\nPASS x", "USER");
+}
+func testPopInjectionBlocked() { # OM-006
     testing.assertThrows("injectPop", "pop");
 }

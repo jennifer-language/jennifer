@@ -53,15 +53,27 @@ export def struct Page {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "pdfwriter", message: $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "pdfwriter", message: $msg, file: "", line: 0, col: 0};
 }
 
 # standardFonts lists the 14 base fonts every PDF viewer provides.
 func standardFonts() {
-    return ["Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
-        "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
-        "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
-        "Symbol", "ZapfDingbats"];
+    return [
+        "Helvetica",
+        "Helvetica-Bold",
+        "Helvetica-Oblique",
+        "Helvetica-BoldOblique",
+        "Times-Roman",
+        "Times-Bold",
+        "Times-Italic",
+        "Times-BoldItalic",
+        "Courier",
+        "Courier-Bold",
+        "Courier-Oblique",
+        "Courier-BoldOblique",
+        "Symbol",
+        "ZapfDingbats"
+    ];
 }
 
 # --- builders (exported) ----------------------------------------------------
@@ -74,7 +86,7 @@ func standardFonts() {
  */
 export func document() {
     def meta as map of string to string init {"Producer": "Jennifer pdfwriter"};
-    return Document{ pages: [], info: $meta };
+    return Document{pages: [], info: $meta};
 }
 
 /**
@@ -101,7 +113,8 @@ export func info(doc as Document, key as string, value as string) {
 export func pdfDate(t as time.Time) {
     def base as string init time.format($t, "%Y%m%d%H%M%S");
     def z as string init time.format($t, "%z");
-    return "D:" + $base + strings.substring($z, 0, 1) + strings.substring($z, 1, 3) + "'" + strings.substring($z, 3, 5) + "'";
+    return "D:" + $base + strings.substring($z, 0, 1) + strings.substring($z, 1, 3) + "'" +
+        strings.substring($z, 3, 5) + "'";
 }
 
 /**
@@ -112,7 +125,7 @@ export func pdfDate(t as time.Time) {
  * @return {Page} the page
  */
 export func page(width as int, height as int) {
-    return Page{ width: $width, height: $height, content: "", fonts: [] };
+    return Page{width: $width, height: $height, content: "", fonts: []};
 }
 
 # hexByte renders a byte as two uppercase hex digits.
@@ -131,7 +144,8 @@ func pdfName(key as string) {
     def i as int init 0;
     while ($i < len($raw)) {
         def b as int init $raw[$i];
-        if ($b <= 32 or $b >= 127 or $b == 35 or $b == 47 or $b == 40 or $b == 41 or $b == 60 or $b == 62 or $b == 91 or $b == 93 or $b == 123 or $b == 125 or $b == 37) {
+        if ($b <= 32 or $b >= 127 or $b == 35 or $b == 47 or $b == 40 or $b == 41 or $b == 60 or
+            $b == 62 or $b == 91 or $b == 93 or $b == 123 or $b == 125 or $b == 37) {
             $out[] = "#" + hexByte($b);
         } else {
             $out[] = convert.fromCodepoint($b);
@@ -177,7 +191,8 @@ func infoValue(v as string) {
 
 # octalTriple renders a byte as three octal digits for a PDF `\ddd` escape.
 func octalTriple(b as int) {
-    return convert.toString(($b >> 6) & 7) + convert.toString(($b >> 3) & 7) + convert.toString($b & 7);
+    return convert.toString(($b >> 6) & 7) + convert.toString(($b >> 3) & 7) +
+        convert.toString($b & 7);
 }
 
 # escapeString transcodes text to WinAnsi (windows-1252) bytes to match the
@@ -229,7 +244,8 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
         $pg.fonts = lists.push($pg.fonts, $font);
     }
     $pg.content = $pg.content + "BT\n/" + $font + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n(" + escapeString($str) + ") Tj\nET\n";
+        convert.toString($x) + " " + convert.toString($y) + " Td\n(" + escapeString($str) +
+        ") Tj\nET\n";
     return $pg;
 }
 
@@ -295,7 +311,8 @@ export func color(pg as Page, red as int, green as int, blue as int) {
     def r as string init colorComp($red);
     def g as string init colorComp($green);
     def b as string init colorComp($blue);
-    $pg.content = $pg.content + $r + " " + $g + " " + $b + " rg\n" + $r + " " + $g + " " + $b + " RG\n";
+    $pg.content = $pg.content + $r + " " + $g + " " + $b + " rg\n" + $r + " " + $g + " " + $b +
+        " RG\n";
     return $pg;
 }
 
@@ -415,7 +432,10 @@ export func render(doc as Document) {
         $p = $p + 1;
     }
     $offsets[] = len($buf);
-    $buf = appendStr($buf, "2 0 obj\n<< /Type /Pages /Kids [" + $kids + "] /Count " + convert.toString($numPages) + " >>\nendobj\n");
+    $buf = appendStr(
+        $buf,
+        "2 0 obj\n<< /Type /Pages /Kids [" + $kids + "] /Count " + convert.toString($numPages) +
+            " >>\nendobj\n");
 
     # per page: the page dict and its (compressed) content stream
     $p = 0;
@@ -424,16 +444,23 @@ export func render(doc as Document) {
         def contentNum as int init 4 + 2 * $p;
         def fontDict as string init "";
         for (def fn in $pg.fonts) {
-            $fontDict = $fontDict + "/" + $fn + " " + convert.toString(fontObjNum($fontNames, $fn, $fontBase)) + " 0 R ";
+            $fontDict = $fontDict + "/" + $fn + " " +
+                convert.toString(fontObjNum($fontNames, $fn, $fontBase)) + " 0 R ";
         }
         $offsets[] = len($buf);
-        $buf = appendStr($buf, convert.toString(3 + 2 * $p) + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
-            convert.toString($pg.width) + " " + convert.toString($pg.height) + "] /Resources << /Font << " + $fontDict +
-            ">> >> /Contents " + convert.toString($contentNum) + " 0 R >>\nendobj\n");
+        $buf = appendStr(
+            $buf,
+            convert.toString(3 + 2 * $p) + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
+                convert.toString($pg.width) + " " + convert.toString($pg.height) +
+                "] /Resources << /Font << " + $fontDict +
+                ">> >> /Contents " + convert.toString($contentNum) + " 0 R >>\nendobj\n");
 
         def comp as bytes init compress.pack(convert.bytesFromString($pg.content, "utf-8"), "zlib");
         $offsets[] = len($buf);
-        $buf = appendStr($buf, convert.toString($contentNum) + " 0 obj\n<< /Length " + convert.toString(len($comp)) + " /Filter /FlateDecode >>\nstream\n");
+        $buf = appendStr(
+            $buf,
+            convert.toString($contentNum) + " 0 obj\n<< /Length " + convert.toString(len($comp)) +
+                " /Filter /FlateDecode >>\nstream\n");
         $buf = appendBytes($buf, $comp);
         $buf = appendStr($buf, "\nendstream\nendobj\n");
         $p = $p + 1;
@@ -449,8 +476,11 @@ export func render(doc as Document) {
         if ($fontNames[$f] == "Symbol" or $fontNames[$f] == "ZapfDingbats") {
             $enc = "";
         }
-        $buf = appendStr($buf, convert.toString($fontBase + $f) + " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /" +
-            $fontNames[$f] + $enc + " >>\nendobj\n");
+        $buf = appendStr(
+            $buf,
+            convert.toString($fontBase + $f) +
+                " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /" +
+                $fontNames[$f] + $enc + " >>\nendobj\n");
         $f = $f + 1;
     }
 
@@ -479,7 +509,9 @@ export func render(doc as Document) {
     if ($hasInfo) {
         $trailerInfo = " /Info " + convert.toString($infoNum) + " 0 R";
     }
-    $buf = appendStr($buf, "trailer\n<< /Size " + convert.toString($totalObjs + 1) + " /Root 1 0 R" + $trailerInfo +
-        " >>\nstartxref\n" + convert.toString($xrefOffset) + "\n%%EOF\n");
+    $buf = appendStr(
+        $buf,
+        "trailer\n<< /Size " + convert.toString($totalObjs + 1) + " /Root 1 0 R" + $trailerInfo +
+            " >>\nstartxref\n" + convert.toString($xrefOffset) + "\n%%EOF\n");
     return $buf;
 }

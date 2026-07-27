@@ -117,7 +117,13 @@ export def struct Query {
 
 func checkDialect(dialect as string) {
     if ($dialect != "mysql" and $dialect != "postgres") {
-        throw Error{kind: "orm", message: "orm: dialect must be \"mysql\" or \"postgres\", got " + $dialect, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "orm",
+            message: "orm: dialect must be \"mysql\" or \"postgres\", got " + $dialect,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
 }
 
@@ -162,7 +168,8 @@ func checkIdent(name as string, what as string) {
     }
     for (def p in $parts) {
         if (not validIdentSegment($p)) {
-            fail($what + " must be a SQL identifier (letter/`_`, then letters/digits/`_`), got: " + $name);
+            fail($what + " must be a SQL identifier (letter/`_`, then letters/digits/`_`), got: " +
+                $name);
         }
     }
 }
@@ -173,7 +180,8 @@ func checkIdent(name as string, what as string) {
 # because they do not fit the module's single-bound-value-per-condition shape.
 func checkOp(op as string) {
     def norm as string init strings.upper(strings.trim($op));
-    if ($norm == "=" or $norm == "!=" or $norm == "<>" or $norm == "<" or $norm == ">" or $norm == "<=" or $norm == ">=" or $norm == "LIKE" or $norm == "NOT LIKE") {
+    if ($norm == "=" or $norm == "!=" or $norm == "<>" or $norm == "<" or $norm == ">" or
+        $norm == "<=" or $norm == ">=" or $norm == "LIKE" or $norm == "NOT LIKE") {
         return $norm;
     }
     fail("operator not allowed: \"" + $op + "\" (use = != <> < > <= >= LIKE or \"NOT LIKE\")");
@@ -252,8 +260,18 @@ func sqlType(kind as string, dialect as string) {
  * @return {Query} the base query
  */
 export func from(s as Schema) {
-    return Query{table: $s.table, dialect: $s.dialect, wheres: [], params: [],
-        joins: [], orders: [], hasLimit: false, limitN: 0, hasOffset: false, offsetN: 0};
+    return Query{
+        table: $s.table,
+        dialect: $s.dialect,
+        wheres: [],
+        params: [],
+        joins: [],
+        orders: [],
+        hasLimit: false,
+        limitN: 0,
+        hasOffset: false,
+        offsetN: 0
+    };
 }
 
 /**
@@ -360,7 +378,9 @@ export func toSql(q as Query) {
             if ($i > 0) {
                 $stmt = $stmt + " AND ";
             }
-            $stmt = $stmt + $q.wheres[$i].column + " " + $q.wheres[$i].op + " " + ph($q.dialect, $n);
+            $stmt = $stmt + $q.wheres[$i].column + " " + $q.wheres[$i].op + " " + ph(
+                $q.dialect,
+                $n);
             $n = $n + 1;
         }
     }
@@ -414,13 +434,22 @@ func buildInsert(s as Schema, record as map of string to string) {
             $params[] = $record[$name];
         }
     }
-    return Rendered{sql: "INSERT INTO " + $s.table + " (" + $cols + ") VALUES (" + $phs + ")", params: $params};
+    return Rendered{
+        sql: "INSERT INTO " + $s.table + " (" + $cols + ") VALUES (" + $phs + ")",
+        params: $params
+    };
 }
 
 # buildUpdate renders an UPDATE of every non-key present column, matched by key.
 func buildUpdate(s as Schema, record as map of string to string) {
     if (not maps.has($record, $s.primaryKey)) {
-        throw Error{kind: "orm", message: "orm.update: record has no primary key (" + $s.primaryKey + ")", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "orm",
+            message: "orm.update: record has no primary key (" + $s.primaryKey + ")",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def sets as string init "";
     def params as list of string init [];
@@ -436,7 +465,8 @@ func buildUpdate(s as Schema, record as map of string to string) {
             $params[] = $record[$name];
         }
     }
-    def stmt as string init "UPDATE " + $s.table + " SET " + $sets + " WHERE " + $s.primaryKey + " = " + ph($s.dialect, $n);
+    def stmt as string init "UPDATE " + $s.table + " SET " + $sets + " WHERE " + $s.primaryKey +
+        " = " + ph($s.dialect, $n);
     $params[] = $record[$s.primaryKey];
     return Rendered{sql: $stmt, params: $params};
 }
@@ -445,7 +475,8 @@ func buildUpdate(s as Schema, record as map of string to string) {
 func buildByKey(verb as string, s as Schema, id as string) {
     def params as list of string init [];
     $params[] = $id;
-    def stmt as string init $verb + " FROM " + $s.table + " WHERE " + $s.primaryKey + " = " + ph($s.dialect, 1);
+    def stmt as string init $verb + " FROM " + $s.table + " WHERE " + $s.primaryKey + " = " +
+        ph($s.dialect, 1);
     return Rendered{sql: $stmt, params: $params};
 }
 
@@ -493,7 +524,13 @@ export func find(conn as sql.Connection, s as Schema, id as string) {
     def r as Rendered init buildByKey("SELECT *", $s, $id);
     def rows as sql.Rows init sql.query($conn, $r.sql, $r.params);
     if (not sql.next($rows)) {
-        throw Error{kind: "orm", message: "orm.find: no " + $s.table + " with " + $s.primaryKey + " = " + $id, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "orm",
+            message: "orm.find: no " + $s.table + " with " + $s.primaryKey + " = " + $id,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def row as map of string to string init mapRow($rows);
     sql.closeRows($rows);

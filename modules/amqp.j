@@ -33,7 +33,7 @@ use convert;
 def const FRAME_METHOD as int init 1;
 def const FRAME_HEADER as int init 2;
 def const FRAME_BODY as int init 3;
-def const FRAME_END as int init 206;   # 0xCE
+def const FRAME_END as int init 206; # 0xCE
 
 # Upper bound on a broker-declared frame size (64 MiB, the tree-wide house rule).
 # `readFrame` takes a 32-bit size straight off the wire; without this ceiling a
@@ -95,10 +95,10 @@ def const B_NOACK as int init 2;
 
 # Content-header property-flag bit masks (Basic properties), most-significant
 # bit first: content-type, delivery-mode, correlation-id, reply-to.
-def const PROP_CONTENT_TYPE as int init 0x8000;   # bit 15
-def const PROP_DELIVERY_MODE as int init 0x1000;  # bit 12
+def const PROP_CONTENT_TYPE as int init 0x8000; # bit 15
+def const PROP_DELIVERY_MODE as int init 0x1000; # bit 12
 def const PROP_CORRELATION_ID as int init 0x0400; # bit 10
-def const PROP_REPLY_TO as int init 0x0200;       # bit 9
+def const PROP_REPLY_TO as int init 0x0200; # bit 9
 
 # delivery-mode 2 = persistent (survives a broker restart when the queue is durable).
 def const DELIVERY_PERSISTENT as int init 2;
@@ -209,7 +209,7 @@ def struct Frame {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "amqp", message: "amqp: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "amqp", message: "amqp: " + $msg, file: "", line: 0, col: 0};
 }
 
 # checkFrameSize rejects a broker-declared frame size outside [0, MAX_FRAME_BYTES]
@@ -236,7 +236,14 @@ func emptyBytes() {
  * @return {Options} the options
  */
 export func options(host as string, user as string, password as string) {
-    return Options{ host: $host, port: 5672, user: $user, password: $password, vhost: "/", security: "none" };
+    return Options{
+        host: $host,
+        port: 5672,
+        user: $user,
+        password: $password,
+        vhost: "/",
+        security: "none"
+    };
 }
 
 /**
@@ -329,8 +336,8 @@ func putEmptyTable(b as bytes) {
 func putStringTable(b as bytes, entries as map of string to string) {
     def body as bytes;
     for (def key in $entries) {
-        $body = putShortStr($body, $key);      # field name (shortstr)
-        $body = putOctet($body, 83);           # 'S' = long-string value type
+        $body = putShortStr($body, $key); # field name (shortstr)
+        $body = putOctet($body, 83); # 'S' = long-string value type
         $body = putLongStr($body, $entries[$key]);
     }
     def out as bytes init putLong($b, len($body));
@@ -377,14 +384,14 @@ func byteLen(s as string) {
 # flag octet (durable), empty arguments table.
 func encodeExchangeDeclare(name as string, exType as string, durable as bool) {
     def args as bytes;
-    $args = putShort($args, 0);            # reserved-1
+    $args = putShort($args, 0); # reserved-1
     $args = putShortStr($args, $name);
     $args = putShortStr($args, $exType);
     def flags as int init 0;
     if ($durable) {
-        $flags = $flags | Q_DURABLE;       # durable bit (bit 1)
+        $flags = $flags | Q_DURABLE; # durable bit (bit 1)
     }
-    $args = putOctet($args, $flags);       # passive|durable|auto-delete|internal|no-wait
+    $args = putOctet($args, $flags); # passive|durable|auto-delete|internal|no-wait
     return putEmptyTable($args);
 }
 
@@ -392,11 +399,11 @@ func encodeExchangeDeclare(name as string, exType as string, durable as bool) {
 # no-wait bit, empty arguments table.
 func encodeQueueBind(queue as string, exchange as string, routingKey as string) {
     def args as bytes;
-    $args = putShort($args, 0);            # reserved-1
+    $args = putShort($args, 0); # reserved-1
     $args = putShortStr($args, $queue);
     $args = putShortStr($args, $exchange);
     $args = putShortStr($args, $routingKey);
-    $args = putOctet($args, 0);            # no-wait = false
+    $args = putOctet($args, 0); # no-wait = false
     return putEmptyTable($args);
 }
 
@@ -405,14 +412,14 @@ func encodeQueueBind(queue as string, exchange as string, routingKey as string) 
 # asks the broker to generate one (returned in Consume-Ok).
 func encodeBasicConsume(queue as string, consumerTag as string, autoAck as bool) {
     def args as bytes;
-    $args = putShort($args, 0);            # reserved-1
+    $args = putShort($args, 0); # reserved-1
     $args = putShortStr($args, $queue);
     $args = putShortStr($args, $consumerTag);
     def flags as int init 0;
     if ($autoAck) {
-        $flags = $flags | B_NOACK;         # no-ack bit (bit 1)
+        $flags = $flags | B_NOACK; # no-ack bit (bit 1)
     }
-    $args = putOctet($args, $flags);       # no-local|no-ack|exclusive|no-wait
+    $args = putOctet($args, $flags); # no-local|no-ack|exclusive|no-wait
     return putEmptyTable($args);
 }
 
@@ -420,7 +427,7 @@ func encodeBasicConsume(queue as string, consumerTag as string, autoAck as bool)
 func encodeBasicCancel(consumerTag as string) {
     def args as bytes;
     $args = putShortStr($args, $consumerTag);
-    $args = putOctet($args, 0);            # no-wait = false
+    $args = putOctet($args, 0); # no-wait = false
     return $args;
 }
 
@@ -431,10 +438,10 @@ func encodeBasicNack(deliveryTag as int, multiple as bool, requeue as bool) {
     $args = putLongLong($args, $deliveryTag);
     def flags as int init 0;
     if ($multiple) {
-        $flags = $flags | 1;               # multiple bit (bit 0)
+        $flags = $flags | 1; # multiple bit (bit 0)
     }
     if ($requeue) {
-        $flags = $flags | 2;               # requeue bit (bit 1)
+        $flags = $flags | 2; # requeue bit (bit 1)
     }
     return putOctet($args, $flags);
 }
@@ -442,7 +449,7 @@ func encodeBasicNack(deliveryTag as int, multiple as bool, requeue as bool) {
 # encodeConfirmSelect builds Confirm.Select args: a single no-wait bit.
 func encodeConfirmSelect() {
     def args as bytes;
-    return putOctet($args, 0);             # no-wait = false
+    return putOctet($args, 0); # no-wait = false
 }
 
 # encodeProperties builds a content header's property section: the 16-bit
@@ -501,7 +508,14 @@ func decodeDeliverMethod(args as bytes) {
     $off = $off + 1 + byteLen($exchange);
     def routingKey as string init readShortStr($args, $off);
     def body as bytes;
-    return Delivery{ consumerTag: $consumerTag, deliveryTag: $deliveryTag, redelivered: $redelivered, exchange: $exchange, routingKey: $routingKey, body: $body };
+    return Delivery{
+        consumerTag: $consumerTag,
+        deliveryTag: $deliveryTag,
+        redelivered: $redelivered,
+        exchange: $exchange,
+        routingKey: $routingKey,
+        body: $body
+    };
 }
 
 # deliveryFrom decodes Basic.Deliver args and attaches an already-assembled body
@@ -567,7 +581,7 @@ func readFrame(socket as net.Conn) {
     if (not ($end[0] == FRAME_END)) {
         fail("bad frame terminator");
     }
-    return Frame{ ftype: $ftype, channel: $channel, payload: $payload };
+    return Frame{ftype: $ftype, channel: $channel, payload: $payload};
 }
 
 # readMethod reads a method frame and splits out its class / method / args.
@@ -578,14 +592,19 @@ func readMethod(socket as net.Conn) {
     }
     def classId as int init readShort($f.payload, 0);
     def methodId as int init readShort($f.payload, 2);
-    return Method{ classId: $classId, methodId: $methodId, args: sliceBytes($f.payload, 4, len($f.payload)) };
+    return Method{
+        classId: $classId,
+        methodId: $methodId,
+        args: sliceBytes($f.payload, 4, len($f.payload))
+    };
 }
 
 # expectMethod reads a method frame and asserts its class / method.
 func expectMethod(socket as net.Conn, classId as int, methodId as int, what as string) {
     def m as Method init readMethod($socket);
     if (not ($m.classId == $classId and $m.methodId == $methodId)) {
-        fail("expected " + $what + ", got class " + convert.toString($m.classId) + " method " + convert.toString($m.methodId));
+        fail("expected " + $what + ", got class " + convert.toString($m.classId) + " method " +
+            convert.toString($m.methodId));
     }
     return $m;
 }
@@ -616,9 +635,9 @@ func readMessageBody(c as Conn) {
 func writeContentAndBody(c as Conn, body as bytes, propBytes as bytes) {
     def hdr as bytes;
     $hdr = putShort($hdr, CLS_BASIC);
-    $hdr = putShort($hdr, 0);              # weight (always 0)
+    $hdr = putShort($hdr, 0); # weight (always 0)
     $hdr = putLongLong($hdr, len($body));
-    $hdr = appendBytes($hdr, $propBytes);  # property-flags + property list
+    $hdr = appendBytes($hdr, $propBytes); # property-flags + property list
     writeFrame($c.socket, FRAME_HEADER, $c.channel, $hdr);
 
     if (len($body) > 0) {
@@ -727,7 +746,7 @@ export func connect(opts as Options) {
     # owns the open connection.
     errdefer net.close($socket);
     def frameMax as int init handshake($socket, $opts);
-    return Conn{ socket: $socket, channel: CHANNEL, frameMax: $frameMax };
+    return Conn{socket: $socket, channel: CHANNEL, frameMax: $frameMax};
 }
 
 /**
@@ -760,7 +779,13 @@ export func declareQueue(c as Conn, name as string, durable as bool) {
  */
 export func declareQuorumQueue(c as Conn, name as string) {
     if ($name == "") {
-        throw Error{ kind: "amqp", message: "declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "amqp",
+            message: "declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def empty as bytes;
     def table as bytes init putStringTable($empty, {"x-queue-type": "quorum"});
@@ -772,17 +797,17 @@ export func declareQuorumQueue(c as Conn, name as string) {
 # by declareQueue (empty arguments) and declareQuorumQueue (x-queue-type).
 func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
     def args as bytes;
-    $args = putShort($args, 0);            # reserved
+    $args = putShort($args, 0); # reserved
     $args = putShortStr($args, $name);
     $args = putOctet($args, $flags);
-    $args = appendBytes($args, $table);    # arguments field-table
+    $args = appendBytes($args, $table); # arguments field-table
     writeMethod($c.socket, $c.channel, CLS_QUEUE, Q_DECLARE, $args);
     def ok as Method init expectMethod($c.socket, CLS_QUEUE, Q_DECLAREOK, "Queue.Declare-Ok");
     def qname as string init readShortStr($ok.args, 0);
     def off as int init 1 + byteLen($qname);
     def messageCount as int init readLong($ok.args, $off);
     def consumerCount as int init readLong($ok.args, $off + 4);
-    return QueueInfo{ name: $qname, messageCount: $messageCount, consumerCount: $consumerCount };
+    return QueueInfo{name: $qname, messageCount: $messageCount, consumerCount: $consumerCount};
 }
 
 /**
@@ -841,12 +866,17 @@ export func publish(c as Conn, exchange as string, routingKey as string, body as
  * @param props {Properties} the message properties
  * @throws {Error} kind "amqp" on failure
  */
-export func publishWith(c as Conn, exchange as string, routingKey as string, body as bytes, props as Properties) {
+export func publishWith(
+    c as Conn,
+    exchange as string,
+    routingKey as string,
+    body as bytes,
+    props as Properties) {
     def args as bytes;
-    $args = putShort($args, 0);                # reserved
+    $args = putShort($args, 0); # reserved
     $args = putShortStr($args, $exchange);
     $args = putShortStr($args, $routingKey);
-    $args = putOctet($args, 0);                 # mandatory / immediate bits
+    $args = putOctet($args, 0); # mandatory / immediate bits
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_PUBLISH, $args);
     writeContentAndBody($c, $body, encodeProperties($props));
 }
@@ -892,7 +922,8 @@ export func waitConfirm(c as Conn) {
     if ($m.classId == CLS_BASIC and $m.methodId == B_NACK) {
         return false;
     }
-    fail("expected a publisher confirm (Basic.Ack / Basic.Nack), got class " + convert.toString($m.classId) + " method " + convert.toString($m.methodId));
+    fail("expected a publisher confirm (Basic.Ack / Basic.Nack), got class " +
+        convert.toString($m.classId) + " method " + convert.toString($m.methodId));
 }
 
 /**
@@ -906,7 +937,7 @@ export func waitConfirm(c as Conn) {
  */
 export func get(c as Conn, queue as string, autoAck as bool) {
     def args as bytes;
-    $args = putShort($args, 0);            # reserved
+    $args = putShort($args, 0); # reserved
     $args = putShortStr($args, $queue);
     def noAck as int init 0;
     if ($autoAck) {
@@ -917,21 +948,33 @@ export func get(c as Conn, queue as string, autoAck as bool) {
 
     def m as Method init readMethod($c.socket);
     if ($m.classId == CLS_BASIC and $m.methodId == B_GETEMPTY) {
-        return Message{ empty: true, deliveryTag: 0, exchange: "", routingKey: "", body: emptyBytes() };
+        return Message{
+            empty: true,
+            deliveryTag: 0,
+            exchange: "",
+            routingKey: "",
+            body: emptyBytes()
+        };
     }
     if (not ($m.classId == CLS_BASIC and $m.methodId == B_GETOK)) {
         fail("unexpected reply to Basic.Get");
     }
     # Get-Ok: delivery-tag(u64) redelivered(bit) exchange(shortstr) routing-key(shortstr) message-count(u32)
     def deliveryTag as int init readLongLong($m.args, 0);
-    def off as int init 9;   # 8 (delivery-tag) + 1 (redelivered bit)
+    def off as int init 9; # 8 (delivery-tag) + 1 (redelivered bit)
     def exchange as string init readShortStr($m.args, $off);
     $off = $off + 1 + byteLen($exchange);
     def routingKey as string init readShortStr($m.args, $off);
 
     # content header frame + body frame(s) carry the message body.
     def body as bytes init readMessageBody($c);
-    return Message{ empty: false, deliveryTag: $deliveryTag, exchange: $exchange, routingKey: $routingKey, body: $body };
+    return Message{
+        empty: false,
+        deliveryTag: $deliveryTag,
+        exchange: $exchange,
+        routingKey: $routingKey,
+        body: $body
+    };
 }
 
 /**
@@ -942,7 +985,7 @@ export func get(c as Conn, queue as string, autoAck as bool) {
 export func ack(c as Conn, deliveryTag as int) {
     def args as bytes;
     $args = putLongLong($args, $deliveryTag);
-    $args = putOctet($args, 0);   # multiple = false
+    $args = putOctet($args, 0); # multiple = false
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_ACK, $args);
 }
 
@@ -989,7 +1032,8 @@ export func consume(c as Conn, queue as string, autoAck as bool) {
 export func receiveDelivery(c as Conn) {
     def m as Method init readMethod($c.socket);
     if (not ($m.classId == CLS_BASIC and $m.methodId == B_DELIVER)) {
-        fail("expected Basic.Deliver, got class " + convert.toString($m.classId) + " method " + convert.toString($m.methodId));
+        fail("expected Basic.Deliver, got class " + convert.toString($m.classId) + " method " +
+            convert.toString($m.methodId));
     }
     def body as bytes init readMessageBody($c);
     return deliveryFrom($m.args, $body);
@@ -1017,10 +1061,10 @@ export func close(c as Conn) {
     # (a dead broker must not leak the fd).
     defer net.close($c.socket);
     def args as bytes;
-    $args = putShort($args, 200);          # reply code: OK
-    $args = putShortStr($args, "");      # reply text
-    $args = putShort($args, 0);            # class-id
-    $args = putShort($args, 0);            # method-id
+    $args = putShort($args, 200); # reply code: OK
+    $args = putShortStr($args, ""); # reply text
+    $args = putShort($args, 0); # class-id
+    $args = putShort($args, 0); # method-id
     writeMethod($c.socket, 0, CLS_CONNECTION, CONN_CLOSE, $args);
     expectMethod($c.socket, CLS_CONNECTION, CONN_CLOSEOK, "Connection.Close-Ok");
 }

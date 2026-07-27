@@ -766,7 +766,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   and client-side (`subjectRegex`/`fromRegex` on the decoded header,
   `hasAttachments` via a `BODYSTRUCTURE` heuristic) - only the server's candidates
   are fetched, and criteria strings can't inject a command (quoted / validated).
-  Handles tagged responses and `{N}` literals.
+  Handles tagged responses and `{N}` literals. RFC 2177 `IDLE` push:
+  `idle(session)` -> blocking `receiveNotification` / timeout-bounded
+  `pollNotification` -> `done`, delivering typed `EXISTS` / `EXPUNGE` / `RECENT`
+  notifications.
   Throws `Error` (kind `"imap"`) on `NO` / `BAD`. **Default `jennifer` binary
   only** (`net`).
 - **`idna`** - internationalized domain names: `idna.toAscii(domain)` /
@@ -786,15 +789,19 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `del` / `exists` / `incr` / `decr` / `keys(session, pattern)` / `ping`, plus
   a generic `redis.command(session, args)` returning a raw `redis.Reply`
   (`kind` / `str` / `num` / `items`, walked like a `json.Value`) for any other
-  command. `connect` does optional `AUTH` / `SELECT`; a `-ERR` reply throws
-  `Error` (kind `"redis"`). **Default `jennifer` binary only** (`net`).
+  command. RESP2 pub/sub (`subscribe` / `psubscribe` / `publish` / blocking
+  `receiveMessage`), one-round-trip `pipeline`, `multi` / `exec` / `discard`
+  transactions, and a production-safe `scan` cursor (`keys` is now flagged
+  production-unsafe). `connect` does optional `AUTH` / `SELECT`; a `-ERR` reply
+  throws `Error` (kind `"redis"`). **Default `jennifer` binary only** (`net`).
 - **`resque`** - background jobs on Redis, wire-compatible with Resque:
   `resque.enqueue(session, queue, class, args)` schedules a job (JSON envelope
   `{"class","args"}` onto `resque:queue:NAME`, queue registered in the
   `resque:queues` set); `resque.reserve(session, queues)` -> `resque.Job`
   (`queue` / `class` / `args`) pops the next job from the first non-empty queue
-  in priority order (empty `Job` when drained); plus `queueLength` / `queues` /
-  `size` / `fail`. A Ruby-resque / php-resque worker can process the jobs and
+  in priority order (empty `Job` when drained), or `resque.reserveBlocking(session,
+  queues, timeoutSec)` blocks on the queues (Redis `BLPOP`) until one has work;
+  plus `queueLength` / `queues` / `size` / `fail`. A Ruby-resque / php-resque worker can process the jobs and
   vice versa; the worker's `class`-dispatch loop is user code. `args` is a
   `list of string` (Ruby positional). Built on `redis` + `json`. **Default
   `jennifer` binary only** (`net`).
@@ -878,7 +885,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `net.setDeadline`), plus `ping` / `disconnect`. Binary packet framing (1-byte
   header, remaining-length varint, length-prefixed payload) is built with the
   bitwise operators and `bytes`; `connect` / `subscribe` throw `Error` (kind
-  `"mqtt"`) on refusal. Basics-first (QoS 0; no retained / will / QoS 1-2).
+  `"mqtt"`) on refusal. QoS-1 publish/subscribe with the PUBACK handshake
+  (`publishQos1` / `subscribeQos1`), retained messages, a CONNECT Last-Will
+  (`connectWith`), and `reconnect` session resumption sit alongside the
+  callback-free `receive` / `poll` loop.
   **Default `jennifer` binary only** (`net`).
 - **`log`** - leveled, structured logging. A `log.Logger` carries a minimum
   level (`debug` < `info` < `warn` < `error`), a format (`text` / `logfmt` /
@@ -1099,10 +1109,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   content-header + body frames (exchange "" routes to a queue by name);
   `get(c, queue, autoAck) -> Message{empty, deliveryTag, exchange, routingKey, body}`
   pulls the next message with a synchronous `Basic.Get` (loop until `empty`);
-  `ack(c, deliveryTag)`; `close(c)`. All integer / short-string / long-string /
+  `ack(c, deliveryTag)`; `close(c)`. Server-pushed `Basic.Consume` via a blocking
+  `receiveDelivery` (beside pull `get`), `declareExchange` / `bindQueue`, message
+  `Properties` on publish, `nack` / requeue, and publisher confirms
+  (`confirmSelect` / `waitConfirm`). All integer / short-string / long-string /
   field-table / frame encoding is hand-built from `bytes` and the bitwise operators.
   Single channel, SASL PLAIN, optional TLS (`Options.security = "tls"` for
-  AMQPS), pull (not async delivery). A protocol error throws
+  AMQPS). A protocol error throws
   `Error{kind: "amqp"}`. **Default `jennifer` binary only** (`net`).
 - **`multipart`** - build and parse `multipart/form-data` (RFC 7578), the file-upload
   counterpart to `mime`. `multipart.field(name, value)` and
@@ -1155,7 +1168,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   attrs, queries)` / `printWhere(s, path, queries)` add raw `?...` **query words**
   (each starting with `?`, e.g. `?type=ether`) to filter rows on the router. The wire protocol is
   sentence-based (length-prefixed words, zero-length terminator) with RouterOS's
-  variable-length length codec, hand-built from `bytes` + the bitwise operators. A
+  variable-length length codec, hand-built from `bytes` + the bitwise operators.
+  `.tag`-correlated commands and `/listen`-style server-push streaming (`listen`
+  / `receiveReply` / `cancel`); a bounded read no longer leaks a stale deadline to
+  the next operation. A
   `!trap` / `!fatal` reply throws `Error{kind: "mikrotik"}`. Over `net` + `hash` (MD5
   fallback) + `encoding`. **Default `jennifer` binary only** (`net`).
 

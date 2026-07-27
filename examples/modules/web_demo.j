@@ -82,7 +82,9 @@ $app = web.get($app, "/hit", "hit");
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
-def server as task of null init spawn { web.serveOn($app, $srv); };
+def server as task of null init spawn {
+    web.serveOn($app, $srv);
+};
 
 # --- act as our own client --------------------------------------------------
 

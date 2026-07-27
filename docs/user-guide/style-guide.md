@@ -21,9 +21,13 @@ nothing here will surprise you.
 - **No space inside parentheses**: `io.printf("hi")`, not `io.printf( "hi" )`.
 - **One space between a keyword and its `(`**: `if (cond)`, `while (cond)`,
   `for (...)`. Function calls don't get this space: `io.printf(...)`.
-- **No space inside `[ ]` or `{ }` list/map literals**: `[1, 2, 3]`,
-  `{"a": 1, "b": 2}`, not `[ 1, 2, 3 ]` or `{ "a" : 1 }`. Empty
-  literals are `[]` and `{}`. Same rule as `()`.
+- **No space inside `[ ]` or `{ }` literals**: `[1, 2, 3]`,
+  `{"a": 1, "b": 2}`, `Point{x: 1, y: 2}`, not `[ 1, 2, 3 ]` /
+  `{ "a" : 1 }` / `Point{ x: 1 }`. This is uniform - list, map, and
+  struct / enum literals are all tight (a struct literal also binds
+  the brace to its type name: `Point{`, not `Point {`, see
+  [Braces](#braces)). Empty literals are `[]`, `{}`, `Name{}`. Same
+  rule as `()`.
 - **No space before `[`**: `$xs[0]`, not `$xs [0]`. Index expressions
   hug their target.
 - **No space inside `[]` for the append form**: `$xs[] = item;`,
@@ -68,8 +72,29 @@ nothing here will surprise you.
   };
   ```
 
-  Struct *literals* (`Point{x: 1, y: 2}`) stay inline - they read like
-  map literals and the two form styles match.
+- **Struct / enum literals bind the brace to the type name, tight**:
+  `Point{x: 1, y: 2}` - no space before `{` (so the brace reads as bound to
+  `Point`, not a block) and no space inside it. Bodies are tight just like
+  map and list literals (`{k: v}`, `[1, 2]`) - one uniform rule, no
+  exceptions. An empty literal is `Name{}`.
+- **Long literals wrap to one element per line.** A struct / enum / map /
+  list literal stays inline while it fits; once its single-line form would
+  pass the 100-column limit (or a struct / map literal has more than a
+  handful of members), `fmt` breaks it with the opening bracket at
+  end-of-line, one element per indented line, and the closing bracket on
+  its own line:
+
+  ```jennifer
+  def rule as FirewallRule init FirewallRule{
+      chain: "forward",
+      action: "drop",
+      comment: "block inbound"
+  };
+  ```
+
+  Each container decides independently, so a wrapped list of short maps
+  keeps each map inline on its own line. A list of scalars wraps on width
+  only (a long row of short numbers reads fine on one line).
 - **Tail keywords cuddle the preceding `}`.** `} else { ... }`,
   `} elseif (cond) { ... }`, `} catch (e) { ... }`, and
   `} until (cond);` all keep the trailing keyword on the same line as
@@ -78,36 +103,37 @@ nothing here will surprise you.
   `match` is a flat list of peer arms (a `switch` / `case`, not a nested
   conditional), so - like `switch`/`case`/`when` in C, Go, Rust, Swift, Kotlin,
   Ruby, and Python - each `when` (and the `else`) begins its own line at the arm
-  indent, with its body on its own indented lines and its `}` on its own line.
-  This is the one place `else` starts a line rather than cuddling a `}`: the
-  `} else {` cuddle rule is for an `if`'s conditional tail, and a `match`'s `else`
-  is a case-list arm, not that. Reading down the `when` column is the point. A
-  `when` value list that overflows the line wraps with each continuation value
-  aligned under the first:
+  indent. An arm holding a **single short statement stays inline**
+  (`when "idle" { begin(); }`); an arm with two or more statements, or one that
+  overflows the line, expands one statement per indented line with its `}` on its
+  own line. This is the one place `else` starts a line rather than cuddling a
+  `}`: the `} else {` cuddle rule is for an `if`'s conditional tail, and a
+  `match`'s `else` is a case-list arm, not that. Reading down the `when` column
+  is the point. A `when` value list that overflows the line wraps with each
+  continuation value aligned under the first:
 
   ```jennifer
   match ($state) {
-      when "idle" {
-          begin();
-      }
+      when "idle" { begin(); }
       when longEventName1(),
            longEventName2() {
+          prepare();
           handle();
       }
-      else {
-          reject();
-      }
+      else { reject(); }
   }
   ```
 
 ## Line length
 
-- **Soft limit: 100 columns.** `fmt` doesn't hard-wrap arbitrary code
-  (that would risk changing meaning), but it will break at the
-  binary joiners `+`, `and`, and `or` when a line has already grown
-  past 100 columns. The break lands *after* the joiner - the
-  operator hangs at end-of-line and the continuation is indented one
-  level deeper:
+- **Soft limit: 100 columns.** `fmt` keeps lines under 100 columns where it
+  can without changing meaning. It has two levers: it **wraps a literal**
+  (struct / enum / map / list) to one element per line (see
+  [Braces](#braces)), and it **breaks a binary-operator chain** (`+`, `and`,
+  `or`) after the operator. The operator break fills the line first, then
+  hangs the operator at end-of-line and indents the continuation one level
+  deeper - so it breaks at the last joiner whose next operand would still fit,
+  not the first one past the limit:
 
   ```jennifer
   def body as string init "line one\r\n" +
@@ -115,11 +141,14 @@ nothing here will surprise you.
       "line three\r\n";
   ```
 
-  Source-level line breaks at these joiners are also preserved even
-  when the line would fit under 100 - so the shape above survives a
-  `fmt` round-trip byte-for-byte. Long argument lists, deeply nested
-  calls, and everything else stay on one line unless you break them
-  by hand; `fmt` isn't going to guess where.
+  Source-level line breaks at these joiners are also preserved even when the
+  line would fit under 100 - so the shape above survives a `fmt` round-trip
+  byte-for-byte. What `fmt` will **not** guess at: a long argument list or a
+  deeply nested call has no safe break point, so it stays on one line, and a
+  single token longer than the limit (a long string literal, a URL) stays
+  over it - break those by hand. Because `fmt` never *introduces* an
+  over-long line, its output does not add [`lint`](tooling.md) `L203`
+  (`line-too-long`) findings that the source did not already have.
 
 ## Statements
 
@@ -206,9 +235,15 @@ user-method pool even when aliasing has technically freed it.
 - **Prefer double quotes**: `"hello"` over `'hello'`. Both forms parse
   escape sequences the same way, but mixing styles in one file reads as
   noise. Use single quotes only when the string contains a `"` you'd
-  otherwise need to escape.
-- **Escape sequences are explicit**: `"\n"`, `"\t"`, `"\\"`. Don't rely
-  on multi-line string literals - Jennifer doesn't have them.
+  otherwise need to escape. This is a human guideline: **`fmt` preserves a
+  string literal's exact source spelling** - its quotes, its escape choices,
+  and any line breaks inside it - rather than rewriting them, so a
+  deliberately single-quoted or multi-line string survives a format
+  untouched (a formatter must not silently alter a literal's value or shape).
+- **Escape sequences are explicit**: `"\n"`, `"\t"`, `"\\"`. A string
+  literal *may* span multiple lines (a raw newline between the quotes is
+  part of the value), which is handy for an embedded template or sample; `fmt`
+  keeps it as written rather than collapsing it to `\n`.
 
 ## Comments
 

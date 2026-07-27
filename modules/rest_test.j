@@ -34,9 +34,9 @@ func testQueryStringMulti() {
 }
 
 func testUrlEncode() {
-    testing.assertEqual(urlEncode("hello world"), "hello%20world");     # space -> %20
-    testing.assertEqual(urlEncode("café"), "caf%C3%A9");                 # per-byte UTF-8
-    testing.assertEqual(urlEncode("A-Z_a.z~0"), "A-Z_a.z~0");           # unreserved literal
+    testing.assertEqual(urlEncode("hello world"), "hello%20world"); # space -> %20
+    testing.assertEqual(urlEncode("café"), "caf%C3%A9"); # per-byte UTF-8
+    testing.assertEqual(urlEncode("A-Z_a.z~0"), "A-Z_a.z~0"); # unreserved literal
 }
 
 func testBearer() {
@@ -52,14 +52,14 @@ func testWithHeader() {
     def cli as Client init client("http://api");
     def authed as Client init withHeader($cli, "Authorization", bearer("x"));
     testing.assertEqual($authed.headers["Authorization"], "Bearer x");
-    testing.assertEqual(len($cli.headers), 0);      # original unchanged (value semantics)
+    testing.assertEqual(len($cli.headers), 0); # original unchanged (value semantics)
 }
 
 func testClientDefaults() {
     def cli as Client init client("http://api");
     testing.assertEqual($cli.baseUrl, "http://api");
     testing.assertEqual(len($cli.headers), 0);
-    testing.assertEqual($cli.tls.skipVerify, false);   # verify on by default
+    testing.assertEqual($cli.tls.skipVerify, false); # verify on by default
     testing.assertEqual(len($cli.tls.caCert), 0);
 }
 
@@ -67,7 +67,7 @@ func testInsecure() {
     def cli as Client init client("https://appliance");
     def open as Client init insecure($cli);
     testing.assertEqual($open.tls.skipVerify, true);
-    testing.assertEqual($cli.tls.skipVerify, false);   # original unchanged (value semantics)
+    testing.assertEqual($cli.tls.skipVerify, false); # original unchanged (value semantics)
 }
 
 func testWithCA() {
@@ -75,6 +75,6 @@ func testWithCA() {
     def pem as bytes init convert.bytesFromString("-----BEGIN CERTIFICATE-----", "utf-8");
     def pinned as Client init withCA($cli, $pem);
     testing.assertEqual(len($pinned.tls.caCert), len($pem));
-    testing.assertEqual($pinned.tls.skipVerify, false);   # withCA still authenticates
-    testing.assertEqual(len($cli.tls.caCert), 0);         # original unchanged
+    testing.assertEqual($pinned.tls.skipVerify, false); # withCA still authenticates
+    testing.assertEqual(len($cli.tls.caCert), 0); # original unchanged
 }

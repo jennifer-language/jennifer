@@ -52,7 +52,9 @@ def const BYTE_SCAN_REPS as int init 10;
 # fib is intentionally the textbook exponential recursive form so the
 # interpreter dispatch loop dominates the cost.
 func fib(n as int) {
-    if ($n < 2) { return $n; }
+    if ($n < 2) {
+        return $n;
+    }
     return fib($n - 1) + fib($n - 2);
 }
 
@@ -62,8 +64,12 @@ func fib(n as int) {
 # is the outer-loop iteration count (often 1 for "single sweep"
 # workloads).
 func printRow(name as string, base as int, iters as int, ms as int) {
-    io.printf("%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %d|pad=12|align=right\n",   # lint-disable: L203
-        $name, $base, $iters, $ms);
+    io.printf(
+        "%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %d|pad=12|align=right\n", # lint-disable: L203
+        $name,
+        $base,
+        $iters,
+        $ms);
 }
 
 func printDivider() {
@@ -166,14 +172,17 @@ func benchListCopy() {
 }
 
 # A user-defined struct exercised through assignment (which deep-copies).
-def struct Point { x as int, y as int };
+def struct Point {
+    x as int,
+    y as int
+};
 
 func benchStructList() {
     def start as time.Time init time.now();
     def points as list of Point init [];
     def i as int init 0;
     while ($i < STRUCT_LIST_SIZE) {
-        $points[] = Point{ x: $i, y: $i * 2 };
+        $points[] = Point{x: $i, y: $i * 2};
         $i = $i + 1;
     }
     # Read each back so we exercise the struct deep-copy on read.
@@ -232,7 +241,9 @@ func benchMapChurn() {
 func primesInRange(lo as int, hi as int) {
     def count as int init 0;
     def n as int init $lo;
-    if ($n < 2) { $n = 2; }
+    if ($n < 2) {
+        $n = 2;
+    }
     while ($n <= $hi) {
         def isPrime as bool init true;
         def d as int init 2;
@@ -261,7 +272,9 @@ func benchPrimesParallel() {
         if ($w == PARALLEL_WORKERS - 1) {
             $hi = PRIME_LIMIT;
         }
-        $workers[] = spawn { return primesInRange($lo, $hi); };
+        $workers[] = spawn {
+            return primesInRange($lo, $hi);
+        };
         $w = $w + 1;
     }
     def counts as list of int init task.waitAll($workers);
@@ -302,7 +315,9 @@ func benchNewtonParallel() {
         if ($w == PARALLEL_WORKERS - 1) {
             $hi = NEWTON_ITERS + 1;
         }
-        $workers[] = spawn { return newtonRange($lo, $hi); };
+        $workers[] = spawn {
+            return newtonRange($lo, $hi);
+        };
         $w = $w + 1;
     }
     task.waitAll($workers);
@@ -339,7 +354,9 @@ func benchMonteCarloParallel() {
         if ($w == PARALLEL_WORKERS - 1) {
             $throws = MONTECARLO_THROWS - $per * (PARALLEL_WORKERS - 1);
         }
-        $workers[] = spawn { return monteCarloWorker($seed, $throws); };
+        $workers[] = spawn {
+            return monteCarloWorker($seed, $throws);
+        };
         $w = $w + 1;
     }
     task.waitAll($workers);
@@ -356,7 +373,9 @@ func benchFibParallel() {
     def workers as list of task of int init [];
     def w as int init 0;
     while ($w < PARALLEL_WORKERS) {
-        $workers[] = spawn { return fib(FIB_N); };
+        $workers[] = spawn {
+            return fib(FIB_N);
+        };
         $w = $w + 1;
     }
     task.waitAll($workers);
@@ -372,8 +391,12 @@ func printSpeedupRow(name as string, serialMs as int, parallelMs as int) {
     if ($parallelMs > 0) {
         $ratio = convert.toFloat($serialMs) / convert.toFloat($parallelMs);
     }
-    io.printf("%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n",   # lint-disable: L203
-        $name, $serialMs, $parallelMs, $ratio);
+    io.printf(
+        "%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n", # lint-disable: L203
+        $name,
+        $serialMs,
+        $parallelMs,
+        $ratio);
 }
 
 # cpuModel returns the CPU brand string. The OS-specific probing lives here
@@ -421,7 +444,18 @@ func dmiHint() {
         $s = strings.trim(readFileOr("/sys/class/dmi/id/sys_vendor"));
     }
     def low as string init strings.lower($s);
-    for (def mark in ["virtual", "vmware", "qemu", "kvm", "virtualbox", "microsoft", "xen", "amazon", "google", "bochs"]) {
+    for (def mark in [
+        "virtual",
+        "vmware",
+        "qemu",
+        "kvm",
+        "virtualbox",
+        "microsoft",
+        "xen",
+        "amazon",
+        "google",
+        "bochs"
+    ]) {
         if (strings.contains($low, $mark)) {
             return $s;
         }
@@ -465,8 +499,18 @@ func detectVirt() {
 # (--format json) - the latter is what a future `flatdb` performance
 # database would ingest, keyed on cpu / platform / arch / build.
 
-def struct Bench { name as string, base as int, iters as int, timeMs as int };
-def struct Par { name as string, serialMs as int, parMs as int, speedup as float };
+def struct Bench {
+    name as string,
+    base as int,
+    iters as int,
+    timeMs as int
+};
+def struct Par {
+    name as string,
+    serialMs as int,
+    parMs as int,
+    speedup as float
+};
 def struct Report {
     schema as string,
     build as string,
@@ -501,15 +545,23 @@ func emitText(r as Report) {
     io.printf("\n");
 
     printDivider();
-    io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",   # lint-disable: L203
-        "Workload", "base", "iters", "time_ms");
+    io.printf(
+        "%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n", # lint-disable: L203
+        "Workload",
+        "base",
+        "iters",
+        "time_ms");
     printDivider();
     for (def w in $r.workloads) {
         printRow($w.name, $w.base, $w.iters, $w.timeMs);
     }
     printDivider();
-    io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %d|pad=12|align=right\n",   # lint-disable: L203
-        "total", "", "", $r.totalMs);
+    io.printf(
+        "%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %d|pad=12|align=right\n", # lint-disable: L203
+        "total",
+        "",
+        "",
+        $r.totalMs);
 
     io.printf("\n");
     printDivider();
@@ -518,12 +570,20 @@ func emitText(r as Report) {
         io.printf("NOTE: virtualized / containerized host - these parallel numbers may not reflect bare-metal scaling.\n");
     }
     printDivider();
-    io.printf("%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n",   # lint-disable: L203
-        "Workload", "serial_ms", "par_ms", "speedup");
+    io.printf(
+        "%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n", # lint-disable: L203
+        "Workload",
+        "serial_ms",
+        "par_ms",
+        "speedup");
     printDivider();
     for (def p in $r.parallel) {
-        io.printf("%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n",   # lint-disable: L203
-            $p.name, $p.serialMs, $p.parMs, $p.speedup);
+        io.printf(
+            "%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n", # lint-disable: L203
+            $p.name,
+            $p.serialMs,
+            $p.parMs,
+            $p.speedup);
     }
     printDivider();
     return;
@@ -545,7 +605,9 @@ func emitJson(r as Report) {
 # reference machine to record it (numbers are machine-specific, not committed).
 # Needle "NEEDLE" placed at the end so every scan traverses the whole buffer.
 func byteScanNaive() {
-    def buf as bytes init convert.bytesFromString(strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE", "utf-8");
+    def buf as bytes init convert.bytesFromString(
+        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE",
+        "utf-8");
     def n as int init len($buf);
     def start as time.Time init time.now();
     def r as int init 0;
@@ -566,7 +628,9 @@ func byteScanNaive() {
 }
 
 func byteScanFast() {
-    def buf as bytes init convert.bytesFromString(strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE", "utf-8");
+    def buf as bytes init convert.bytesFromString(
+        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE",
+        "utf-8");
     def needle as bytes init convert.bytesFromString("NEEDLE", "utf-8");
     def start as time.Time init time.now();
     def r as int init 0;
@@ -592,14 +656,54 @@ def msMapChurn as int init benchMapChurn();
 def workloads as list of Bench init [];
 $workloads[] = Bench{name: "fib(N) recursive", base: FIB_N, iters: 1, timeMs: $msFib};
 $workloads[] = Bench{name: "primes up to LIMIT", base: PRIME_LIMIT, iters: 1, timeMs: $msPrimes};
-$workloads[] = Bench{name: "newton sqrt batch", base: NEWTON_ITERS, iters: NEWTON_ITERS, timeMs: $msNewton};
-$workloads[] = Bench{name: "monte carlo pi", base: MONTECARLO_THROWS, iters: MONTECARLO_THROWS, timeMs: $msMonteCarlo};
-$workloads[] = Bench{name: "list sort/reverse/slice", base: LIST_SIZE, iters: LIST_COPY_REPS, timeMs: $msListCopy};
-$workloads[] = Bench{name: "struct list build+read", base: STRUCT_LIST_SIZE, iters: STRUCT_LIST_SIZE, timeMs: $msStructList};
-$workloads[] = Bench{name: "string join", base: STRING_JOIN_SIZE, iters: STRING_JOIN_SIZE, timeMs: $msStringJoin};
-$workloads[] = Bench{name: "map insert+read", base: MAP_CHURN_SIZE, iters: MAP_CHURN_SIZE, timeMs: $msMapChurn};
-$workloads[] = Bench{name: "byte scan naive (per-byte)", base: BYTE_BUF_SIZE, iters: BYTE_SCAN_REPS, timeMs: $msByteScanNaive};
-$workloads[] = Bench{name: "byte scan binary.indexOf (Go)", base: BYTE_BUF_SIZE, iters: BYTE_SCAN_REPS, timeMs: $msByteScanFast};
+$workloads[] = Bench{
+    name: "newton sqrt batch",
+    base: NEWTON_ITERS,
+    iters: NEWTON_ITERS,
+    timeMs: $msNewton
+};
+$workloads[] = Bench{
+    name: "monte carlo pi",
+    base: MONTECARLO_THROWS,
+    iters: MONTECARLO_THROWS,
+    timeMs: $msMonteCarlo
+};
+$workloads[] = Bench{
+    name: "list sort/reverse/slice",
+    base: LIST_SIZE,
+    iters: LIST_COPY_REPS,
+    timeMs: $msListCopy
+};
+$workloads[] = Bench{
+    name: "struct list build+read",
+    base: STRUCT_LIST_SIZE,
+    iters: STRUCT_LIST_SIZE,
+    timeMs: $msStructList
+};
+$workloads[] = Bench{
+    name: "string join",
+    base: STRING_JOIN_SIZE,
+    iters: STRING_JOIN_SIZE,
+    timeMs: $msStringJoin
+};
+$workloads[] = Bench{
+    name: "map insert+read",
+    base: MAP_CHURN_SIZE,
+    iters: MAP_CHURN_SIZE,
+    timeMs: $msMapChurn
+};
+$workloads[] = Bench{
+    name: "byte scan naive (per-byte)",
+    base: BYTE_BUF_SIZE,
+    iters: BYTE_SCAN_REPS,
+    timeMs: $msByteScanNaive
+};
+$workloads[] = Bench{
+    name: "byte scan binary.indexOf (Go)",
+    base: BYTE_BUF_SIZE,
+    iters: BYTE_SCAN_REPS,
+    timeMs: $msByteScanFast
+};
 
 def total as int init 0;
 for (def w in $workloads) {
@@ -622,10 +726,30 @@ def spMonte as float init speedup($msMonteCarlo, $msMonteCarloPar);
 def spFib as float init speedup($fibSerial, $msFibPar);
 
 def parallel as list of Par init [];
-$parallel[] = Par{name: "primes up to LIMIT", serialMs: $msPrimes, parMs: $msPrimesPar, speedup: $spPrimes};
-$parallel[] = Par{name: "newton sqrt batch", serialMs: $msNewton, parMs: $msNewtonPar, speedup: $spNewton};
-$parallel[] = Par{name: "monte carlo pi", serialMs: $msMonteCarlo, parMs: $msMonteCarloPar, speedup: $spMonte};
-$parallel[] = Par{name: "fib(N) x workers", serialMs: $fibSerial, parMs: $msFibPar, speedup: $spFib};
+$parallel[] = Par{
+    name: "primes up to LIMIT",
+    serialMs: $msPrimes,
+    parMs: $msPrimesPar,
+    speedup: $spPrimes
+};
+$parallel[] = Par{
+    name: "newton sqrt batch",
+    serialMs: $msNewton,
+    parMs: $msNewtonPar,
+    speedup: $spNewton
+};
+$parallel[] = Par{
+    name: "monte carlo pi",
+    serialMs: $msMonteCarlo,
+    parMs: $msMonteCarloPar,
+    speedup: $spMonte
+};
+$parallel[] = Par{
+    name: "fib(N) x workers",
+    serialMs: $fibSerial,
+    parMs: $msFibPar,
+    speedup: $spFib
+};
 
 def report as Report init Report{
     schema: "jennifer-benchmark/1",

@@ -58,7 +58,7 @@ export func send(webhookUrl as string, text as string) {
  */
 export func message() {
     def blocks as list of string init [];
-    return Message{ text: "", blocks: $blocks };
+    return Message{text: "", blocks: $blocks};
 }
 
 /**
@@ -82,7 +82,8 @@ export func text(m as Message, text as string) {
  */
 export func section(m as Message, markdown as string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":" + json.encode($markdown) + "}}";
+    def block as string init "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":" +
+        json.encode($markdown) + "}}";
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -95,7 +96,8 @@ export func section(m as Message, markdown as string) {
  */
 export func header(m as Message, heading as string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":" + json.encode($heading) + "}}";
+    def block as string init "{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":" +
+        json.encode($heading) + "}}";
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -109,7 +111,8 @@ export func header(m as Message, heading as string) {
  */
 export func contextBlock(m as Message, text as string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":" + json.encode($text) + "}]}";
+    def block as string init "{\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":" +
+        json.encode($text) + "}]}";
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -141,7 +144,8 @@ export func fieldsSection(m as Message, fields as list of string) {
  * @return {string} the button JSON fragment
  */
 export func button(text as string, url as string) {
-    return "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":" + json.encode($text) + "},\"url\":" + json.encode($url) + "}";
+    return "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":" + json.encode($text) +
+        "},\"url\":" + json.encode($url) + "}";
 }
 
 /**
@@ -153,7 +157,8 @@ export func button(text as string, url as string) {
  */
 export func actionsBlock(m as Message, buttons as list of string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"actions\",\"elements\":[" + strings.join($buttons, ",") + "]}";
+    def block as string init "{\"type\":\"actions\",\"elements\":[" + strings.join($buttons, ",") +
+        "]}";
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }

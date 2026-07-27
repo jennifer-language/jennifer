@@ -28,8 +28,11 @@ io.printf("unixMillis=%d\n", time.unixMillis($t));
 
 # --- Duration: 90 seconds shown three ways ---
 def d as time.Duration init time.fromSeconds(90);
-io.printf("seconds=%d ms=%d minutes=%d\n",
-    time.seconds($d), time.milliseconds($d), time.minutes($d));
+io.printf(
+    "seconds=%d ms=%d minutes=%d\n",
+    time.seconds($d),
+    time.milliseconds($d),
+    time.minutes($d));
 
 # --- Arithmetic: t + 1 hour, then subtract back to a Duration ---
 def hour as time.Duration init time.fromHours(1);
@@ -39,7 +42,8 @@ io.printf("later.unix=%d gap.seconds=%d\n", time.unix($later), time.seconds($gap
 
 # --- Comparison: earlier instants compare correctly ---
 def earlier as time.Time init time.fromUnix(1718452700);
-io.printf("earlier<t=%t t<earlier=%t equal=%t\n",
+io.printf(
+    "earlier<t=%t t<earlier=%t equal=%t\n",
     time.before($earlier, $t),
     time.before($t, $earlier),
     time.equal($t, $t));

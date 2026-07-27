@@ -229,9 +229,16 @@ func (t TokenType) String() string {
 type Token struct {
 	Type   TokenType
 	Lexeme string
-	Line   int
-	Col    int
-	File   string
+	// Raw is the exact source spelling of a numeric or string literal (with
+	// digit separators, the base prefix, the original quotes and escapes, and
+	// any embedded newlines). Lexeme carries the *processed* value, which loses
+	// that surface form, so `jennifer fmt` re-emits Raw to stay byte-faithful
+	// (`1_000_000` and a multi-line string survive a format). Empty for every
+	// other token kind.
+	Raw  string
+	Line int
+	Col  int
+	File string
 }
 
 func (t Token) String() string {

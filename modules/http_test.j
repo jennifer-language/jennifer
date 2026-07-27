@@ -28,9 +28,9 @@ func testParseUrlHttpsPort() {
 }
 
 func testParseUrlDefaults() {
-    def u as Url init parseUrl("http://host");     # no path -> "/"
+    def u as Url init parseUrl("http://host"); # no path -> "/"
     testing.assertEqual($u.path, "/");
-    def h as Url init parseUrl("https://host");     # https default port
+    def h as Url init parseUrl("https://host"); # https default port
     testing.assertEqual($h.port, 443);
 }
 
@@ -54,7 +54,7 @@ func testParseUrlBracketHostUserinfoFragment() {
 }
 
 func testHostHeader() {
-    testing.assertEqual(hostHeader(parseUrl("http://h/")), "h");        # default port omitted
+    testing.assertEqual(hostHeader(parseUrl("http://h/")), "h"); # default port omitted
     testing.assertEqual(hostHeader(parseUrl("https://h/")), "h");
     testing.assertEqual(hostHeader(parseUrl("http://h:8080/")), "h:8080");
 }
@@ -65,14 +65,14 @@ func testBuildRequestGet() {
     testing.assertContains($req, "Host: h\r\n");
     testing.assertContains($req, "Connection: close\r\n");
     testing.assertContains($req, "User-Agent: jennifer-http\r\n");
-    testing.assertTrue(strings.endsWith($req, "\r\n\r\n"));    # no body
+    testing.assertTrue(strings.endsWith($req, "\r\n\r\n")); # no body
 }
 
 func testBuildRequestPostBody() {
     def hdrs as map of string to string init {"Content-Type": "application/json"};
     def req as string init buildRequest("POST", parseUrl("http://h/i"), $hdrs, "{}");
     testing.assertContains($req, "Content-Type: application/json\r\n");
-    testing.assertContains($req, "Content-Length: 2\r\n");     # "{}" is 2 bytes
+    testing.assertContains($req, "Content-Length: 2\r\n"); # "{}" is 2 bytes
     testing.assertTrue(strings.endsWith($req, "\r\n\r\n{}"));
 }
 
@@ -86,12 +86,13 @@ func testBuildRequestPatch() {
 func testBuildRequestOptions() {
     def req as string init buildRequest("OPTIONS", parseUrl("http://h/i"), {}, "");
     testing.assertTrue(strings.startsWith($req, "OPTIONS /i HTTP/1.1\r\n"));
-    testing.assertTrue(strings.endsWith($req, "\r\n\r\n"));      # no body
+    testing.assertTrue(strings.endsWith($req, "\r\n\r\n")); # no body
 }
 
 func testParseResponseContentLength() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello", "utf-8");
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello",
+        "utf-8");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 200);
     testing.assertEqual($r.statusText, "OK");
@@ -102,14 +103,16 @@ func testParseResponseContentLength() {
 func testParseResponseChunked() {
     def raw as bytes init convert.bytesFromString(
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
-        "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n", "utf-8");
+            "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n",
+        "utf-8");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.body, "hello world");
 }
 
 func testParseResponseStatusText() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n", "utf-8");
+        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+        "utf-8");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 404);
     testing.assertEqual($r.statusText, "Not Found");
@@ -120,7 +123,8 @@ func testParseResponseStatusText() {
 # is the whole remainder, the reason phrase empty) rather than throw.
 func testParseResponseEmptyReasonPhrase() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n", "utf-8");
+        "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n",
+        "utf-8");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 200);
     testing.assertEqual($r.statusText, "");
@@ -128,10 +132,11 @@ func testParseResponseEmptyReasonPhrase() {
 
 func testHeaderLookup() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 204 No Content\r\nX-Test: abc\r\n\r\n", "utf-8");
+        "HTTP/1.1 204 No Content\r\nX-Test: abc\r\n\r\n",
+        "utf-8");
     def r as Response init parseResponse($raw);
     testing.assertEqual(header($r, "x-test"), "abc");
-    testing.assertEqual(header($r, "X-TEST"), "abc");     # case-insensitive
+    testing.assertEqual(header($r, "X-TEST"), "abc"); # case-insensitive
     testing.assertEqual(header($r, "missing"), "");
 }
 
@@ -158,7 +163,6 @@ func testRejectsHeaderInjection() {
     testing.assertThrows("injectViaPath", "http");
 }
 
-
 # ---- CRLF injection via the HTTP method ----
 
 func injectMethod() {
@@ -184,10 +188,15 @@ func testParseRawKeepsBinaryBody() {
     # the byte path. Feed it a response whose body is not valid UTF-8 (a 0xff
     # byte) and confirm parseRaw preserves it, where parseResponse would throw.
     def raw as bytes;
-    def head as bytes init convert.bytesFromString("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n", "utf-8");
+    def head as bytes init convert.bytesFromString(
+        "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n",
+        "utf-8");
     def i as int init 0;
-    while ($i < len($head)) { $raw[] = $head[$i]; $i = $i + 1; }
-    $raw[] = 0xff;   # invalid as UTF-8 lead byte
+    while ($i < len($head)) {
+        $raw[] = $head[$i];
+        $i = $i + 1;
+    }
+    $raw[] = 0xff; # invalid as UTF-8 lead byte
     $raw[] = 0x00;
     $raw[] = 0x41;
     def r as BytesResponse init parseRaw($raw);
@@ -198,7 +207,7 @@ func testParseRawKeepsBinaryBody() {
     testing.assertEqual($r.body[2], 65);
 }
 
-func testParseUrlQueryOnly() {   # OM-020
+func testParseUrlQueryOnly() { # OM-020
     def u as Url init parseUrl("http://host?q=1&k=2");
     testing.assertEqual($u.host, "host");
     testing.assertEqual($u.path, "/?q=1&k=2");

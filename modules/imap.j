@@ -76,7 +76,13 @@ func rejectControl(s as string, what as string) {
     for (def c in strings.chars($s)) {
         def cp as int init convert.toCodepoint($c);
         if ($cp < 32 or $cp == 127) {
-            throw Error{kind: "imap", message: $what + " contains a control character (IMAP command injection)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "imap",
+                message: $what + " contains a control character (IMAP command injection)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     return;
@@ -118,7 +124,9 @@ func extractLiteral(response as string) {
     # so a rune-indexed slice would over-read a multi-byte body by (bytes - runes).
     # Re-encode the tail after the marker and take exactly `n` bytes (a valid
     # char boundary for a valid-UTF-8 message), so the body is returned byte-exact.
-    def rest as bytes init convert.bytesFromString(strings.substring($response, $m.end, len($response)), "utf-8");
+    def rest as bytes init convert.bytesFromString(
+        strings.substring($response, $m.end, len($response)),
+        "utf-8");
     def take as int init $n;
     if ($take > len($rest)) {
         $take = len($rest);
@@ -186,7 +194,14 @@ def const MAX_RESPONSE_BYTES as int init 67108864;
 # capResponse throws when an accumulated response has grown past the cap.
 func capResponse(n as int) {
     if ($n > MAX_RESPONSE_BYTES) {
-        throw Error{kind: "imap", message: "imap: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) + "-byte limit", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "imap",
+            message: "imap: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) +
+                "-byte limit",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }
@@ -247,12 +262,12 @@ func readResponse(conn as net.Conn, tag as string) {
                 $k = $k + 1;
             }
             capResponse(len($buf));
-            $scanFrom = $blen - 1;   # overlap 1 byte for a straddling CRLF
+            $scanFrom = $blen - 1; # overlap 1 byte for a straddling CRLF
             continue;
         }
         def line as string init convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8");
         $pos = $nl + 2;
-        $scanFrom = $pos;   # next line's scan starts at the new cursor
+        $scanFrom = $pos; # next line's scan starts at the new cursor
         # An unexpected `+ ...` continuation (e.g. a SASL error mid-AUTHENTICATE)
         # would otherwise read as an untagged line and the loop would block until
         # timeout. Answer with an empty line so the server sends its tagged NO.
@@ -470,7 +485,13 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     if (strings.startsWith(strings.trim($final), "+")) {
         if (not sasl.scramVerify($sc, imapChallenge($final))) {
             writeLine($conn, "*");
-            throw Error{kind: "imap", message: $wire + ": server signature verification failed", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "imap",
+                message: $wire + ": server signature verification failed",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         writeLine($conn, "");
         expectTaggedOK(readLine($conn), TAG);
@@ -509,7 +530,7 @@ func parseListLine(line as string) {
     def m as regex.Match init regex.find("^\\* LIST \\(([^)]*)\\) (NIL|\"([^\"]*)\") (.+)$", $line);
     def flags as list of string init [];
     if ($m.start < 0) {
-        return Folder{ name: "", delimiter: "", flags: $flags };
+        return Folder{name: "", delimiter: "", flags: $flags};
     }
     for (def f in strings.split(strings.trim($m.groups[0]), " ")) {
         if (len(strings.trim($f)) > 0) {
@@ -526,7 +547,7 @@ func parseListLine(line as string) {
         $name = strings.replace($name, "\\\"", "\"");
         $name = strings.replace($name, "\\\\", "\\");
     }
-    return Folder{ name: $name, delimiter: $delim, flags: $flags };
+    return Folder{name: $name, delimiter: $delim, flags: $flags};
 }
 
 # parseList collects the Folder entries from a LIST response.
@@ -579,7 +600,7 @@ export def struct Status {
 # it to the innermost group, so a folder name containing a `(` can't be mistaken
 # for the item list.
 func parseStatus(resp as string) {
-    def s as Status init Status{ messages: 0, recent: 0, unseen: 0, uidnext: 0, uidvalidity: 0 };
+    def s as Status init Status{messages: 0, recent: 0, unseen: 0, uidnext: 0, uidvalidity: 0};
     def m as regex.Match init regex.find("STATUS [^\r\n]*\\(([^()]*)\\)", $resp);
     if ($m.start < 0) {
         return $s;
@@ -615,7 +636,9 @@ func parseStatus(resp as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func status(session as Session, folder as string) {
-    return parseStatus(command($session.conn, "STATUS " + quoteArg($folder) + " (MESSAGES RECENT UNSEEN UIDNEXT UIDVALIDITY)"));
+    return parseStatus(command(
+        $session.conn,
+        "STATUS " + quoteArg($folder) + " (MESSAGES RECENT UNSEEN UIDNEXT UIDVALIDITY)"));
 }
 
 /**
@@ -699,7 +722,8 @@ func timeSet(t as time.Time) {
 # SEARCH dates are day-granular, so a time-of-day means the day-level server
 # filter must be refined to the exact instant on the client (like a regex field).
 func hasTimeOfDay(t as time.Time) {
-    return time.hour($t) > 0 or time.minute($t) > 0 or time.second($t) > 0 or time.nanosecond($t) > 0;
+    return time.hour($t) > 0 or time.minute($t) > 0 or time.second($t) > 0 or
+        time.nanosecond($t) > 0;
 }
 
 # buildSearchCommand renders the server-side fields of a Criteria into one IMAP
@@ -731,7 +755,13 @@ func buildSearchCommand(c as Criteria) {
     # almost always a mistake - reject it as a catchable error rather than
     # silently returning no messages. `since == before` (empty range) is allowed.
     if ($hasSince and $hasBefore and time.before($c.before, $c.since)) {
-        throw Error{kind: "imap", message: "imap.search: `since` must be on or before `before` (the date range is inverted)", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "imap",
+            message: "imap.search: `since` must be on or before `before` (the date range is inverted)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     if ($hasSince) {
         # SINCE is inclusive on the calendar date, already a superset of an
@@ -785,8 +815,8 @@ func refineBeforeNeeded(c as Criteria) {
 
 # hasClientFilter reports whether any field needs a client-side post-filter pass.
 func hasClientFilter(c as Criteria) {
-    return len($c.subjectRegex) > 0 or len($c.fromRegex) > 0 or $c.hasAttachments
-        or refineSinceNeeded($c) or refineBeforeNeeded($c);
+    return len($c.subjectRegex) > 0 or len($c.fromRegex) > 0 or $c.hasAttachments or
+        refineSinceNeeded($c) or refineBeforeNeeded($c);
 }
 
 # bodyStructureShowsAttachment applies the has-attachment heuristic to a raw
@@ -798,7 +828,9 @@ func bodyStructureShowsAttachment(resp as string) {
 
 # bodyStructureHasAttachment probes message n's structure (no body download).
 func bodyStructureHasAttachment(session as Session, n as int) {
-    def resp as string init command($session.conn, "FETCH " + convert.toString($n) + " BODYSTRUCTURE");
+    def resp as string init command(
+        $session.conn,
+        "FETCH " + convert.toString($n) + " BODYSTRUCTURE");
     return bodyStructureShowsAttachment($resp);
 }
 
@@ -808,7 +840,13 @@ func bodyStructureHasAttachment(session as Session, n as int) {
 func parseInternalDate(resp as string) {
     def m as regex.Match init regex.find("INTERNALDATE \"([^\"]*)\"", $resp);
     if ($m.start < 0) {
-        throw Error{kind: "imap", message: "imap.search: no INTERNALDATE in FETCH response", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "imap",
+            message: "imap.search: no INTERNALDATE in FETCH response",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def raw as string init $m.groups[0];
     if (strings.startsWith($raw, " ")) {
@@ -820,20 +858,29 @@ func parseInternalDate(resp as string) {
 # messageInternalDate fetches message n's INTERNALDATE (the arrival time SINCE /
 # BEFORE filter on) as a time.Time, for the exact-instant date refinement.
 func messageInternalDate(session as Session, n as int) {
-    def resp as string init command($session.conn, "FETCH " + convert.toString($n) + " INTERNALDATE");
+    def resp as string init command(
+        $session.conn,
+        "FETCH " + convert.toString($n) + " INTERNALDATE");
     return parseInternalDate($resp);
 }
 
 # matchesClientFilters applies the client-side criteria to one candidate message,
 # fetching only the headers / structure each needs. `refineSince` / `refineBefore`
 # are precomputed once by the caller (they depend only on the criteria, not on n).
-func matchesClientFilters(session as Session, n as int, c as Criteria, refineSince as bool, refineBefore as bool) {
+func matchesClientFilters(
+    session as Session,
+    n as int,
+    c as Criteria,
+    refineSince as bool,
+    refineBefore as bool) {
     if (len($c.subjectRegex) > 0 or len($c.fromRegex) > 0) {
         def part as mime.Part init mime.parse(fetchHeaders($session, $n, "SUBJECT FROM"));
-        if (len($c.subjectRegex) > 0 and not regex.matches($c.subjectRegex, mime.headerValue($part, "Subject"))) {
+        if (len($c.subjectRegex) > 0 and
+            not regex.matches($c.subjectRegex, mime.headerValue($part, "Subject"))) {
             return false;
         }
-        if (len($c.fromRegex) > 0 and not regex.matches($c.fromRegex, mime.headerValue($part, "From"))) {
+        if (len($c.fromRegex) > 0 and
+            not regex.matches($c.fromRegex, mime.headerValue($part, "From"))) {
             return false;
         }
     }
@@ -843,10 +890,10 @@ func matchesClientFilters(session as Session, n as int, c as Criteria, refineSin
     if ($refineSince or $refineBefore) {
         def id as time.Time init messageInternalDate($session, $n);
         if ($refineSince and time.before($id, $c.since)) {
-            return false;    # earlier than the inclusive lower bound
+            return false; # earlier than the inclusive lower bound
         }
         if ($refineBefore and not time.before($id, $c.before)) {
-            return false;    # not strictly before the exclusive upper bound
+            return false; # not strictly before the exclusive upper bound
         }
     }
     if ($c.hasAttachments and not bodyStructureHasAttachment($session, $n)) {
@@ -925,7 +972,8 @@ export func fetchHeaders(session as Session, n as int, fields as string) {
     # `fields` is interpolated raw (not a quoted string), so it must not carry a
     # CR/LF or the `)]` that would close the fetch item and inject a command.
     rejectControl($fields, "IMAP header field list");
-    def cmd as string init "FETCH " + convert.toString($n) + " BODY.PEEK[HEADER.FIELDS (" + $fields + ")]";
+    def cmd as string init "FETCH " + convert.toString($n) + " BODY.PEEK[HEADER.FIELDS (" +
+        $fields + ")]";
     return extractLiteral(command($session.conn, $cmd));
 }
 
@@ -1014,7 +1062,8 @@ export func copy(session as Session, n as int, folder as string) {
 # own CR/LF are data, not a command boundary).
 func appendLiteral(session as Session, folder as string, flagsPart as string, message as string) {
     def raw as bytes init convert.bytesFromString($message, "utf-8");
-    def head as string init TAG + " APPEND " + quoteArg($folder) + $flagsPart + " {" + convert.toString(len($raw)) + "}";
+    def head as string init TAG + " APPEND " + quoteArg($folder) + $flagsPart + " {" +
+        convert.toString(len($raw)) + "}";
     rejectControl($head, "APPEND command");
     writeLine($session.conn, $head);
     def cont as string init readLine($session.conn);
@@ -1135,7 +1184,7 @@ export def struct Notification {
 # noNotification is the idle-gap sentinel: a poll timed out or IDLE ended, so no
 # push is available. The caller tests `len($n.kind) == 0`.
 func noNotification() {
-    return Notification{ kind: "", number: 0 };
+    return Notification{kind: "", number: 0};
 }
 
 # parseNotification turns one untagged line into a typed Notification: a
@@ -1147,7 +1196,7 @@ func parseNotification(line as string) {
     if ($m.start < 0) {
         return noNotification();
     }
-    return Notification{ kind: strings.lower($m.groups[1]), number: convert.toInt($m.groups[0]) };
+    return Notification{kind: strings.lower($m.groups[1]), number: convert.toInt($m.groups[0])};
 }
 
 # isContinuation reports whether a line is a "+"/"+ ..." command continuation -
@@ -1281,7 +1330,13 @@ export func idle(session as Session) {
         # Not the "+ idling" continuation - surface the server's tagged
         # completion (a "NO"/"BAD" throws; anything else is unexpected).
         expectTaggedOK($line, TAG);
-        throw Error{kind: "imap", message: "imap.idle: server did not enter IDLE: " + strings.trim($line), file: "", line: 0, col: 0};
+        throw Error{
+            kind: "imap",
+            message: "imap.idle: server did not enter IDLE: " + strings.trim($line),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }

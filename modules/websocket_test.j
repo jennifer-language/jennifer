@@ -48,7 +48,10 @@ func testEncodeSmallTextFrame() {
     # "Hi" masked with 01 02 03 04: FIN|text=0x81, MASK|len2=0x82, mask, then
     # 0x48^01=0x49, 0x69^02=0x6b.
     def mask as bytes init encoding.fromText("01020304", "hex");
-    def frame as bytes init encodeFrameMasked(OP_TEXT, convert.bytesFromString("Hi", "utf-8"), $mask);
+    def frame as bytes init encodeFrameMasked(
+        OP_TEXT,
+        convert.bytesFromString("Hi", "utf-8"),
+        $mask);
     testing.assertEqual(hex($frame), "818201020304496b");
 }
 
@@ -87,10 +90,11 @@ func testMakeKeyLength() {
     testing.assertTrue(strings.endsWith($key, "=="));
 }
 
-
 # ---- CRLF injection in the handshake URL ----
 
-func injectUrl() { parseUrl("ws://example.com/path\r\nX-Injected: 1"); }
+func injectUrl() {
+    parseUrl("ws://example.com/path\r\nX-Injected: 1");
+}
 func testUrlRejectsCrlf() {
     testing.assertThrows("injectUrl", "websocket");
 }

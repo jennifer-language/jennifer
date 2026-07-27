@@ -37,9 +37,16 @@ def const CSI as string init ESC + "[";
 # SGR foreground colour codes for `textColor` (per-cell, so the diff stays
 # correct); mirrors the `ansi` module's names.
 def const FG as map of string to string init {
-    "black": "30", "red": "31", "green": "32", "yellow": "33",
-    "blue": "34", "magenta": "35", "cyan": "36", "white": "37",
-    "gray": "90", "grey": "90"
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+    "gray": "90",
+    "grey": "90"
 };
 
 /**
@@ -185,7 +192,13 @@ export func exitAlt() {
  */
 export func newScreen(rows as int, cols as int) {
     if ($rows <= 0 or $cols <= 0) {
-        throw Error{kind: "value", message: "screen.newScreen: rows and cols must be positive", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "screen.newScreen: rows and cols must be positive",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def cells as list of string init [];
     def total as int init $rows * $cols;
@@ -252,7 +265,13 @@ export func text(buf as Buffer, x as int, y as int, s as string) {
  */
 export func textColor(buf as Buffer, x as int, y as int, s as string, color as string) {
     if (not maps.has(FG, $color)) {
-        throw Error{kind: "value", message: "screen.textColor: unknown colour: " + $color, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "value",
+            message: "screen.textColor: unknown colour: " + $color,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return writeRunes($buf, $x, $y, strings.chars($s), FG[$color]);
 }
@@ -409,7 +428,8 @@ export func diff(old as Buffer, new as Buffer) {
                 # Start of a changed run: emit one move, then every changed
                 # cell until the buffers agree again.
                 $parts[] = moveTo($x, $y);
-                for (; $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x]; $x = $x + 1) {
+                for (; $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x]; $x = $x +
+                    1) {
                     $parts[] = $new.cells[$y * $cols + $x];
                 }
             }
@@ -440,35 +460,83 @@ func csiParam(seq as list of int) {
 
 # tildeKey maps a CSI "<n>~" parameter to its key name.
 func tildeKey(param as int) {
-    if ($param == 1) { return "home"; }
-    if ($param == 2) { return "insert"; }
-    if ($param == 3) { return "delete"; }
-    if ($param == 4) { return "end"; }
-    if ($param == 5) { return "pageup"; }
-    if ($param == 6) { return "pagedown"; }
-    if ($param == 15) { return "f5"; }
-    if ($param == 17) { return "f6"; }
-    if ($param == 18) { return "f7"; }
-    if ($param == 19) { return "f8"; }
-    if ($param == 20) { return "f9"; }
-    if ($param == 21) { return "f10"; }
-    if ($param == 23) { return "f11"; }
-    if ($param == 24) { return "f12"; }
+    if ($param == 1) {
+        return "home";
+    }
+    if ($param == 2) {
+        return "insert";
+    }
+    if ($param == 3) {
+        return "delete";
+    }
+    if ($param == 4) {
+        return "end";
+    }
+    if ($param == 5) {
+        return "pageup";
+    }
+    if ($param == 6) {
+        return "pagedown";
+    }
+    if ($param == 15) {
+        return "f5";
+    }
+    if ($param == 17) {
+        return "f6";
+    }
+    if ($param == 18) {
+        return "f7";
+    }
+    if ($param == 19) {
+        return "f8";
+    }
+    if ($param == 20) {
+        return "f9";
+    }
+    if ($param == 21) {
+        return "f10";
+    }
+    if ($param == 23) {
+        return "f11";
+    }
+    if ($param == 24) {
+        return "f12";
+    }
     return "unknown";
 }
 
 # finalKey maps a CSI / SS3 final byte (arrows, home/end, F1-F4) to a name.
 func finalKey(b as int) {
-    if ($b == 65) { return "up"; }
-    if ($b == 66) { return "down"; }
-    if ($b == 67) { return "right"; }
-    if ($b == 68) { return "left"; }
-    if ($b == 72) { return "home"; }
-    if ($b == 70) { return "end"; }
-    if ($b == 80) { return "f1"; }
-    if ($b == 81) { return "f2"; }
-    if ($b == 82) { return "f3"; }
-    if ($b == 83) { return "f4"; }
+    if ($b == 65) {
+        return "up";
+    }
+    if ($b == 66) {
+        return "down";
+    }
+    if ($b == 67) {
+        return "right";
+    }
+    if ($b == 68) {
+        return "left";
+    }
+    if ($b == 72) {
+        return "home";
+    }
+    if ($b == 70) {
+        return "end";
+    }
+    if ($b == 80) {
+        return "f1";
+    }
+    if ($b == 81) {
+        return "f2";
+    }
+    if ($b == 82) {
+        return "f3";
+    }
+    if ($b == 83) {
+        return "f4";
+    }
     return "unknown";
 }
 
@@ -487,13 +555,27 @@ export func decodeKey(seq as list of int) {
     }
     def b as int init $seq[0];
     if (len($seq) == 1) {
-        if ($b == 13 or $b == 10) { return Key{name: "enter", char: ""}; }
-        if ($b == 9) { return Key{name: "tab", char: ""}; }
-        if ($b == 27) { return Key{name: "escape", char: ""}; }
-        if ($b == 127 or $b == 8) { return Key{name: "backspace", char: ""}; }
-        if ($b == 0) { return Key{name: "ctrl-space", char: ""}; }
-        if ($b >= 1 and $b <= 26) { return Key{name: "ctrl-" + charOf($b + 96), char: ""}; }
-        if ($b >= 32 and $b <= 126) { return Key{name: "char", char: charOf($b)}; }
+        if ($b == 13 or $b == 10) {
+            return Key{name: "enter", char: ""};
+        }
+        if ($b == 9) {
+            return Key{name: "tab", char: ""};
+        }
+        if ($b == 27) {
+            return Key{name: "escape", char: ""};
+        }
+        if ($b == 127 or $b == 8) {
+            return Key{name: "backspace", char: ""};
+        }
+        if ($b == 0) {
+            return Key{name: "ctrl-space", char: ""};
+        }
+        if ($b >= 1 and $b <= 26) {
+            return Key{name: "ctrl-" + charOf($b + 96), char: ""};
+        }
+        if ($b >= 32 and $b <= 126) {
+            return Key{name: "char", char: charOf($b)};
+        }
         return Key{name: "unknown", char: ""};
     }
     # Multi-byte: an ESC-introduced sequence.

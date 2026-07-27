@@ -293,7 +293,13 @@ func parseWithBase(text as string, base as map of string to string) {
                 $j = $j + 1;
             }
             if (not $closed) {
-                throw Error{kind: "dotenv", message: "dotenv: unterminated double-quoted value for key `" + $key + "`", file: "", line: $i + 1, col: 0};
+                throw Error{
+                    kind: "dotenv",
+                    message: "dotenv: unterminated double-quoted value for key `" + $key + "`",
+                    file: "",
+                    line: $i + 1,
+                    col: 0
+                };
             }
             $out[$key] = interpolate(unquoteDouble($acc), $out);
             $i = $i + 1;
@@ -328,7 +334,14 @@ export func load(path as string) {
     def vars as map of string to string init read($path);
     for (def key in $vars) {
         if (not validEnvName($key)) {
-            throw Error{kind: "dotenv", message: "dotenv.load: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " + $key, file: "", line: 0, col: 0};
+            throw Error{
+                kind: "dotenv",
+                message: "dotenv.load: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " +
+                    $key,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         os.setEnv($key, $vars[$key]);
     }
@@ -362,7 +375,14 @@ func cascadeFiles(profile as string) {
  */
 export func readCascade(dir as string, profile as string) {
     if (len($profile) > 0 and not validProfile($profile)) {
-        throw Error{kind: "dotenv", message: "dotenv: invalid profile name (must match [A-Za-z0-9_-] and be 1-64 chars): " + $profile, file: "", line: 0, col: 0};
+        throw Error{
+            kind: "dotenv",
+            message: "dotenv: invalid profile name (must match [A-Za-z0-9_-] and be 1-64 chars): " +
+                $profile,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def acc as map of string to string init {};
     for (def name in cascadeFiles($profile)) {
@@ -416,7 +436,14 @@ export func loadCascade(dir as string, profile as string) {
     def m as map of string to string init readCascade($dir, $profile);
     for (def key in $m) {
         if (not validEnvName($key)) {
-            throw Error{kind: "dotenv", message: "dotenv.loadCascade: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " + $key, file: "", line: 0, col: 0};
+            throw Error{
+                kind: "dotenv",
+                message: "dotenv.loadCascade: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " +
+                    $key,
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         if (len(os.getEnv($key)) == 0) {
             os.setEnv($key, $m[$key]);

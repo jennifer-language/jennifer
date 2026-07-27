@@ -37,7 +37,7 @@ export def struct RingBuffer {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "ringbuffer", message: "ringbuffer: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "ringbuffer", message: "ringbuffer: " + $msg, file: "", line: 0, col: 0};
 }
 
 /**
@@ -51,7 +51,7 @@ export func new(capacity as int) {
         fail("capacity must be >= 1");
     }
     def items as list of string init [];
-    return RingBuffer{ items: $items, capacity: $capacity };
+    return RingBuffer{items: $items, capacity: $capacity};
 }
 
 /**
@@ -65,7 +65,7 @@ export func push(rb as RingBuffer, item as string) {
     def out as RingBuffer init $rb;
     $out.items = lists.push($out.items, $item);
     if (len($out.items) > $out.capacity) {
-        $out.items = lists.slice($out.items, 1);   # drop the oldest
+        $out.items = lists.slice($out.items, 1); # drop the oldest
     }
     return $out;
 }

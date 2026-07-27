@@ -45,7 +45,7 @@ export def struct Filter {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "bloom", message: "bloom: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "bloom", message: "bloom: " + $msg, file: "", line: 0, col: 0};
 }
 
 # ln returns the natural logarithm of x (x > 0). The math library has no log,
@@ -127,7 +127,7 @@ export func new(size as int, hashes as int) {
         $bits[] = 0;
         $i = $i + 1;
     }
-    return Filter{ bits: $bits, size: $size, hashes: $hashes };
+    return Filter{bits: $bits, size: $size, hashes: $hashes};
 }
 
 /**
@@ -280,7 +280,7 @@ export func deserialize(b as bytes) {
         $bits[] = $b[8 + $i];
         $i = $i + 1;
     }
-    return Filter{ bits: $bits, size: $size, hashes: $hashes };
+    return Filter{bits: $bits, size: $size, hashes: $hashes};
 }
 
 /**

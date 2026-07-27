@@ -65,7 +65,7 @@ export def struct Event {
  * @return {Calendar} the empty calendar
  */
 export func calendar() {
-    return Calendar{ prodid: "-//Jennifer//ical//EN", events: [] };
+    return Calendar{prodid: "-//Jennifer//ical//EN", events: []};
 }
 
 /**
@@ -74,7 +74,7 @@ export func calendar() {
  * @return {Calendar} the empty calendar
  */
 export func calendarWith(prodid as string) {
-    return Calendar{ prodid: $prodid, events: [] };
+    return Calendar{prodid: $prodid, events: []};
 }
 
 /**
@@ -87,7 +87,15 @@ export func calendarWith(prodid as string) {
  * @return {Event} the event
  */
 export func event(uid as string, start as time.Time, end as time.Time, summary as string) {
-    return Event{ uid: $uid, stamp: $start, start: $start, end: $end, summary: $summary, description: "", location: "" };
+    return Event{
+        uid: $uid,
+        stamp: $start,
+        start: $start,
+        end: $end,
+        summary: $summary,
+        description: "",
+        location: ""
+    };
 }
 
 /**
@@ -261,7 +269,11 @@ export func parse(text as string) {
                 if ($endStr == "") {
                     $endStr = $startStr;
                 }
-                def ev as Event init event($uid, parseDateTime($startStr), parseDateTime($endStr), $summary);
+                def ev as Event init event(
+                    $uid,
+                    parseDateTime($startStr),
+                    parseDateTime($endStr),
+                    $summary);
                 $ev = describe($ev, $description);
                 $ev = locate($ev, $location);
                 if (not ($stampStr == "")) {

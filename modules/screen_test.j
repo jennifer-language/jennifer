@@ -28,8 +28,12 @@ func testNewScreenDimsAndBlank() {
     testing.assertEqual(get($buf, 5, 3), " ");
 }
 
-func zeroRows() { newScreen(0, 5); }
-func negativeCols() { newScreen(5, -1); }
+func zeroRows() {
+    newScreen(0, 5);
+}
+func negativeCols() {
+    newScreen(5, -1);
+}
 func testNewScreenRejectsNonPositive() {
     testing.assertThrows("zeroRows", "value");
     testing.assertThrows("negativeCols", "value");
@@ -53,7 +57,7 @@ func testSetClipsOutOfRange() {
 func testSetDoesNotMutateInput() {
     def buf as Buffer init newScreen(1, 3);
     def other as Buffer init set($buf, 0, 0, "A");
-    testing.assertEqual(get($buf, 0, 0), " ");        # original untouched
+    testing.assertEqual(get($buf, 0, 0), " "); # original untouched
     testing.assertEqual(get($other, 0, 0), "A");
 }
 
@@ -69,7 +73,7 @@ func testTextClipsAtRowEnd() {
     def buf as Buffer init text(newScreen(1, 5), 3, 0, "hello");
     testing.assertEqual(get($buf, 3, 0), "h");
     testing.assertEqual(get($buf, 4, 0), "e");
-    testing.assertEqual(len($buf.cells), 5);          # nothing wrapped/appended
+    testing.assertEqual(len($buf.cells), 5); # nothing wrapped/appended
 }
 
 func testTextOffScreenRowIsNoop() {
@@ -84,7 +88,9 @@ func testTextColorWrapsEachCell() {
     testing.assertEqual(get($buf, 1, 0), esc() + "[31m" + "b" + esc() + "[0m");
 }
 
-func unknownColor() { textColor(newScreen(1, 3), 0, 0, "x", "mauve"); }
+func unknownColor() {
+    textColor(newScreen(1, 3), 0, 0, "x", "mauve");
+}
 func testTextColorRejectsUnknownColor() {
     testing.assertThrows("unknownColor", "value");
 }
@@ -93,7 +99,7 @@ func testFill() {
     def buf as Buffer init fill(newScreen(3, 3), 0, 0, 2, 2, "#");
     testing.assertEqual(get($buf, 0, 0), "#");
     testing.assertEqual(get($buf, 1, 1), "#");
-    testing.assertEqual(get($buf, 2, 2), " ");        # outside the rect
+    testing.assertEqual(get($buf, 2, 2), " "); # outside the rect
 }
 
 func testHlineVline() {
@@ -113,9 +119,9 @@ func testBoxBorderAndInterior() {
     testing.assertEqual(get($buf, 3, 0), "┐");
     testing.assertEqual(get($buf, 0, 2), "└");
     testing.assertEqual(get($buf, 3, 2), "┘");
-    testing.assertEqual(get($buf, 1, 0), "─");        # top edge
-    testing.assertEqual(get($buf, 0, 1), "│");        # left edge
-    testing.assertEqual(get($buf, 1, 1), " ");        # interior untouched
+    testing.assertEqual(get($buf, 1, 0), "─"); # top edge
+    testing.assertEqual(get($buf, 0, 1), "│"); # left edge
+    testing.assertEqual(get($buf, 1, 1), " "); # interior untouched
 }
 
 func testBoxTooSmallIsNoop() {
@@ -181,8 +187,7 @@ func testDiffTwoSeparateRuns() {
     def before as Buffer init newScreen(1, 5);
     def after as Buffer init set(set($before, 0, 0, "A"), 4, 0, "B");
     # Two non-adjacent changes -> two moves.
-    testing.assertEqual(diff($before, $after),
-        moveTo(0, 0) + "A" + moveTo(4, 0) + "B");
+    testing.assertEqual(diff($before, $after), moveTo(0, 0) + "A" + moveTo(4, 0) + "B");
 }
 
 func testDiffFallsBackToFullRenderOnSizeChange() {
@@ -228,7 +233,7 @@ func testDecodeArrows() {
 func testDecodeHomeEndBothForms() {
     testing.assertEqual(decodeKey([27, 91, 72]).name, "home");
     testing.assertEqual(decodeKey([27, 91, 70]).name, "end");
-    testing.assertEqual(decodeKey([27, 79, 72]).name, "home");     # SS3 form
+    testing.assertEqual(decodeKey([27, 79, 72]).name, "home"); # SS3 form
     testing.assertEqual(decodeKey([27, 79, 70]).name, "end");
 }
 
@@ -254,7 +259,7 @@ func testDecodeAltAndEdges() {
     testing.assertEqual($alt.char, "x");
     testing.assertEqual(decodeKey([]).name, "eof");
     testing.assertEqual(decodeKey([200]).name, "unknown");
-    testing.assertEqual(decodeKey([27, 91, 122]).name, "unknown");   # unknown final
+    testing.assertEqual(decodeKey([27, 91, 122]).name, "unknown"); # unknown final
 }
 
 # ---- private helpers ----
@@ -268,7 +273,7 @@ func testCharOf() {
 func testCsiParam() {
     testing.assertEqual(csiParam([27, 91, 51, 126]), 3);
     testing.assertEqual(csiParam([27, 91, 50, 52, 126]), 24);
-    testing.assertEqual(csiParam([27, 91, 65]), -1);        # no digits
+    testing.assertEqual(csiParam([27, 91, 65]), -1); # no digits
 }
 
 func testTildeAndFinalHelpers() {

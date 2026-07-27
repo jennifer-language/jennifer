@@ -72,7 +72,7 @@ export def struct Logger {
  * @return {Logger} the logger
  */
 export func new(level as string, format as string) {
-    return Logger{ level: $level, format: $format, sink: "stdout", target: "", app: "", fields: {} };
+    return Logger{level: $level, format: $format, sink: "stdout", target: "", app: "", fields: {}};
 }
 
 /**
@@ -82,7 +82,7 @@ export func new(level as string, format as string) {
  * @return {Logger} the logger
  */
 export func toStderr(level as string, format as string) {
-    return Logger{ level: $level, format: $format, sink: "stderr", target: "", app: "", fields: {} };
+    return Logger{level: $level, format: $format, sink: "stderr", target: "", app: "", fields: {}};
 }
 
 /**
@@ -93,7 +93,7 @@ export func toStderr(level as string, format as string) {
  * @return {Logger} the logger
  */
 export func toFile(level as string, format as string, path as string) {
-    return Logger{ level: $level, format: $format, sink: "file", target: $path, app: "", fields: {} };
+    return Logger{level: $level, format: $format, sink: "file", target: $path, app: "", fields: {}};
 }
 
 /**
@@ -105,7 +105,14 @@ export func toFile(level as string, format as string, path as string) {
  * @return {Logger} the logger
  */
 export func toSyslog(level as string, address as string, app as string) {
-    return Logger{ level: $level, format: "syslog", sink: "syslog", target: $address, app: $app, fields: {} };
+    return Logger{
+        level: $level,
+        format: "syslog",
+        sink: "syslog",
+        target: $address,
+        app: $app,
+        fields: {}
+    };
 }
 
 /**
@@ -120,7 +127,14 @@ export func toSyslog(level as string, address as string, app as string) {
  */
 export func with(logger as Logger, fields as map of string to string) {
     def merged as map of string to string init mergeFields($logger.fields, $fields);
-    return Logger{ level: $logger.level, format: $logger.format, sink: $logger.sink, target: $logger.target, app: $logger.app, fields: $merged };
+    return Logger{
+        level: $logger.level,
+        format: $logger.format,
+        sink: $logger.sink,
+        target: $logger.target,
+        app: $logger.app,
+        fields: $merged
+    };
 }
 
 # --- level filtering (private) ----------------------------------------------
@@ -155,14 +169,9 @@ func shouldLog(logger as Logger, level as string) {
 # first (before the quote / newline escapes we add), and a raw newline is
 # encoded rather than left to split the record into a forged second line.
 func quoteIfNeeded(v as string) {
-    def needs as bool init len($v) == 0
-        or strings.contains($v, " ")
-        or strings.contains($v, "\"")
-        or strings.contains($v, "=")
-        or strings.contains($v, "\\")
-        or strings.contains($v, "\n")
-        or strings.contains($v, "\r")
-        or strings.contains($v, "\t");
+    def needs as bool init len($v) == 0 or strings.contains($v, " ") or
+        strings.contains($v, "\"") or strings.contains($v, "=") or strings.contains($v, "\\") or
+        strings.contains($v, "\n") or strings.contains($v, "\r") or strings.contains($v, "\t");
     if (not $needs) {
         return $v;
     }
@@ -191,7 +200,11 @@ func renderText(level as string, message as string, fields as map of string to s
 }
 
 # renderLogfmt: `time=<ts> level=<level> msg="..." k=v ...`.
-func renderLogfmt(level as string, message as string, fields as map of string to string, ts as string) {
+func renderLogfmt(
+    level as string,
+    message as string,
+    fields as map of string to string,
+    ts as string) {
     def s as string init "time=" + $ts + " level=" + $level + " msg=" + quoteIfNeeded($message);
     for (def k in $fields) {
         $s = $s + " " + $k + "=" + quoteIfNeeded($fields[$k]);
@@ -219,7 +232,12 @@ func renderJson(level as string, message as string, fields as map of string to s
 }
 
 # render produces one record line per the logger's format.
-func render(logger as Logger, level as string, message as string, fields as map of string to string, t as time.Time) {
+func render(
+    logger as Logger,
+    level as string,
+    message as string,
+    fields as map of string to string,
+    t as time.Time) {
     def ts as string init time.iso($t);
     if ($logger.format == "json") {
         return renderJson($level, $message, $fields, $ts);
@@ -251,7 +269,12 @@ func syslogSeverity(level as string) {
 
 # syslogLine renders an RFC 5424 line: `<PRI>1 <ts> <host> <app> - - - <msg>`
 # (facility 1 = user). Fields ride in the message as logfmt pairs.
-func syslogLine(logger as Logger, level as string, message as string, fields as map of string to string, t as time.Time) {
+func syslogLine(
+    logger as Logger,
+    level as string,
+    message as string,
+    fields as map of string to string,
+    t as time.Time) {
     def pri as int init 8 + syslogSeverity($level);
     def host as string init os.getEnv("HOSTNAME");
     if ($host == "") {
@@ -265,7 +288,8 @@ func syslogLine(logger as Logger, level as string, message as string, fields as 
     for (def k in $fields) {
         $msg = $msg + " " + $k + "=" + quoteIfNeeded($fields[$k]);
     }
-    return "<" + convert.toString($pri) + ">1 " + time.iso($t) + " " + $host + " " + $app + " - - - " + $msg;
+    return "<" + convert.toString($pri) + ">1 " + time.iso($t) + " " + $host + " " + $app +
+        " - - - " + $msg;
 }
 
 # sendSyslog opens a fresh UDP socket per record. A persistent socket would need
@@ -275,7 +299,7 @@ func syslogLine(logger as Logger, level as string, message as string, fields as 
 # paths, prefer the file or console sink (or batch upstream).
 func sendSyslog(logger as Logger, line as string) {
     def sock as net.UDPSocket init net.listenUDP(":0");
-    defer net.close($sock);              # closed even when the send throws
+    defer net.close($sock); # closed even when the send throws
     net.sendTo($sock, $logger.target, convert.bytesFromString($line, "utf-8"));
     return null;
 }
@@ -308,7 +332,11 @@ func emit(logger as Logger, level as string, message as string, fields as map of
  * @param fields {map of string to string} structured key/value fields ({} for none)
  * @throws {Error} on a sink failure (a positioned `fs` / `net` error)
  */
-export func at(logger as Logger, level as string, message as string, fields as map of string to string) {
+export func at(
+    logger as Logger,
+    level as string,
+    message as string,
+    fields as map of string to string) {
     if (shouldLog($logger, $level)) {
         emit($logger, $level, $message, mergeFields($logger.fields, $fields));
     }

@@ -12,15 +12,15 @@ use io;
 use time;
 import "../../modules/cron.j" as cron;
 
-def base as time.Time init time.fromIso("2026-03-14T10:30:00+00:00");   # a Saturday
+def base as time.Time init time.fromIso("2026-03-14T10:30:00+00:00"); # a Saturday
 io.printf("next fire after %s:\n", time.iso($base));
 
 def specs as list of string init [
-    "*/15 * * * *",     # every 15 minutes
-    "0 9 * * 1-5",      # 09:00 on weekdays
-    "0 0 1 * *",        # midnight on the 1st of each month
-    "0 0 13 * 5",       # midnight on Friday the 13th (dom OR dow)
-    "0 0 * * 0"         # midnight on Sundays
+    "*/15 * * * *", # every 15 minutes
+    "0 9 * * 1-5", # 09:00 on weekdays
+    "0 0 1 * *", # midnight on the 1st of each month
+    "0 0 13 * 5", # midnight on Friday the 13th (dom OR dow)
+    "0 0 * * 0" # midnight on Sundays
 ];
 for (def spec in $specs) {
     def s as cron.Schedule init cron.parse($spec);

@@ -86,11 +86,7 @@ func main() {
 		}
 		os.Exit(dumpAST(os.Args[2]))
 	case "fmt":
-		if len(os.Args) != 3 {
-			usage()
-			os.Exit(2)
-		}
-		os.Exit(runFmt(os.Args[2]))
+		os.Exit(runFmt(os.Args[2:]))
 	case "lint":
 		os.Exit(runLint(os.Args[2:]))
 	case "profile":

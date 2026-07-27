@@ -13,7 +13,7 @@
 use testing;
 
 func testUrlEncode() {
-    testing.assertEqual(urlEncode("a b"), "a+b");           # form space -> +
+    testing.assertEqual(urlEncode("a b"), "a+b"); # form space -> +
     testing.assertEqual(urlEncode("a&b=c"), "a%26b%3Dc");
     testing.assertEqual(urlEncode("openid email"), "openid+email");
 }
@@ -24,23 +24,22 @@ func testFormBody() {
 }
 
 func testTokenFromNode() {
-    def node as json.Value init json.decode(
-        "{\"access_token\":\"abc\",\"token_type\":\"Bearer\"," +
+    def node as json.Value init json.decode("{\"access_token\":\"abc\",\"token_type\":\"Bearer\"," +
         "\"expires_in\":3600,\"refresh_token\":\"r1\",\"scope\":\"mail\"}");
     def t as Token init tokenFromNode($node, 1000);
     testing.assertEqual($t.accessToken, "abc");
     testing.assertEqual($t.tokenType, "Bearer");
     testing.assertEqual($t.refreshToken, "r1");
     testing.assertEqual($t.scope, "mail");
-    testing.assertEqual($t.expiresAt, 4600);                # nowUnix 1000 + 3600
+    testing.assertEqual($t.expiresAt, 4600); # nowUnix 1000 + 3600
 }
 
 func testTokenFromNodeDefaults() {
     def node as json.Value init json.decode("{\"access_token\":\"x\"}");
     def t as Token init tokenFromNode($node, 1000);
-    testing.assertEqual($t.tokenType, "Bearer");            # default
+    testing.assertEqual($t.tokenType, "Bearer"); # default
     testing.assertEqual($t.refreshToken, "");
-    testing.assertEqual($t.expiresAt, 0);                   # no expires_in -> unknown
+    testing.assertEqual($t.expiresAt, 0); # no expires_in -> unknown
 }
 
 func testParseTokenError() {
@@ -63,10 +62,10 @@ func testPollState() {
 }
 
 func testTokenExpired() {
-    testing.assertFalse(tokenExpired(0, 1000));      # unknown expiry -> not expired
-    testing.assertFalse(tokenExpired(2000, 1000));   # 1030 < 2000
-    testing.assertTrue(tokenExpired(1020, 1000));    # 1030 >= 1020 (within 30s skew)
-    testing.assertTrue(tokenExpired(1000, 1000));    # already past
+    testing.assertFalse(tokenExpired(0, 1000)); # unknown expiry -> not expired
+    testing.assertFalse(tokenExpired(2000, 1000)); # 1030 < 2000
+    testing.assertTrue(tokenExpired(1020, 1000)); # 1030 >= 1020 (within 30s skew)
+    testing.assertTrue(tokenExpired(1000, 1000)); # already past
 }
 
 # ---- token store permissions (0600) ----
@@ -76,7 +75,13 @@ func testSaveTightensPermissions() {
     # A fresh path so writeString creates it at the default 0644; save must
     # then chmod it to owner-only 0600 (384).
     def path as string init $dir + "/token.json";
-    def t as Token init Token{accessToken: "secret-access", tokenType: "Bearer", refreshToken: "r", scope: "", expiresAt: 0};
+    def t as Token init Token{
+        accessToken: "secret-access",
+        tokenType: "Bearer",
+        refreshToken: "r",
+        scope: "",
+        expiresAt: 0
+    };
     save($path, $t);
     def st as fs.Stat init fs.stat($path);
     testing.assertEqual($st.mode, 384);

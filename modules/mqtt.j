@@ -184,7 +184,7 @@ func decodeRemLen(buf as bytes, start as int) {
             $more = false;
         }
     } until (not $more);
-    return DecodedLen{ value: $value, size: $i - $start };
+    return DecodedLen{value: $value, size: $i - $start};
 }
 
 # frame assembles a control packet: the fixed-header byte, the encoded
@@ -201,7 +201,7 @@ func frame(header as int, vh as bytes, pl as bytes) {
 
 # noWill returns the "no Last-Will" sentinel (an empty topic).
 func noWill() {
-    return Will{ topic: "", payload: emptyBytes(), qos: 0, retain: false };
+    return Will{topic: "", payload: emptyBytes(), qos: 0, retain: false};
 }
 
 # buildConnectFull builds the CONNECT packet (type 1) for the given options,
@@ -255,7 +255,13 @@ func buildConnect(opts as Options) {
 # buildPublish builds a PUBLISH packet (type 3). The flags nibble carries DUP
 # (bit 3), the QoS (bits 2-1), and retain (bit 0); a QoS>0 packet inserts the
 # 2-byte packet identifier after the topic.
-func buildPublish(topic as string, payload as bytes, qos as int, packetId as int, dup as bool, retain as bool) {
+func buildPublish(
+    topic as string,
+    payload as bytes,
+    qos as int,
+    packetId as int,
+    dup as bool,
+    retain as bool) {
     def header as int init 0x30;
     if ($dup) {
         $header = $header | 0x08;
@@ -321,7 +327,7 @@ func parsePublish(pkt as Packet) {
         $idx = $idx + 2;
     }
     def payload as bytes init sliceBytes($body, $idx, len($body));
-    return Message{ topic: $topic, payload: $payload };
+    return Message{topic: $topic, payload: $payload};
 }
 
 # --- socket reading ---------------------------------------------------------
@@ -335,7 +341,14 @@ def const MAX_PACKET_BYTES as int init 67108864;
 # capPacket throws when a declared packet length is over the cap.
 func capPacket(n as int) {
     if ($n > MAX_PACKET_BYTES) {
-        throw Error{ kind: "mqtt", message: "mqtt: packet declares " + convert.toString($n) + " bytes, over the " + convert.toString(MAX_PACKET_BYTES) + "-byte limit", file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "mqtt",
+            message: "mqtt: packet declares " + convert.toString($n) + " bytes, over the " +
+                convert.toString(MAX_PACKET_BYTES) + "-byte limit",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }
@@ -351,7 +364,13 @@ func readN(conn as net.Conn, n as int) {
         return net.readN($conn, $n);
     } catch (e) {
         if (strings.contains($e.message, "closed after")) {
-            throw Error{ kind: "mqtt", message: "mqtt: connection closed mid-packet", file: "", line: 0, col: 0 };
+            throw Error{
+                kind: "mqtt",
+                message: "mqtt: connection closed mid-packet",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         throw $e;
     }
@@ -383,7 +402,7 @@ func readPacketBody(conn as net.Conn, hb as int) {
     if ($rem > 0) {
         $body = readN($conn, $rem);
     }
-    return Packet{ typ: $typ, flags: $flags, body: $body };
+    return Packet{typ: $typ, flags: $flags, body: $body};
 }
 
 # ackIfQos1 sends the PUBACK for an incoming PUBLISH when it is QoS 1 (a QoS-0
@@ -451,14 +470,26 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     def pkt as Packet init readPacketBody($conn, $h[0]);
     net.setDeadline($conn, 0);
     if (not ($pkt.typ == 2)) {
-        throw Error{ kind: "mqtt", message: "mqtt: expected CONNACK, got packet type " + convert.toString($pkt.typ), file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "mqtt",
+            message: "mqtt: expected CONNACK, got packet type " + convert.toString($pkt.typ),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def code as int init $pkt.body[1];
     if (not ($code == 0)) {
-        throw Error{ kind: "mqtt", message: "mqtt: connection refused, CONNACK code " + convert.toString($code), file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "mqtt",
+            message: "mqtt: connection refused, CONNACK code " + convert.toString($code),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def subs as list of Subscription init [];
-    return Client{ conn: $conn, opts: $opts, will: $will, cleanSession: $cleanSession, subs: $subs };
+    return Client{conn: $conn, opts: $opts, will: $will, cleanSession: $cleanSession, subs: $subs};
 }
 
 /**
@@ -577,7 +608,14 @@ export func publishQos1(client as Client, topic as string, payload as bytes, ret
             net.writeBytes($client.conn, buildPublish($topic, $payload, 1, $pid, true, $retain));
         }
     }
-    throw Error{ kind: "mqtt", message: "mqtt: no PUBACK for packet id " + convert.toString($pid) + " after " + convert.toString(PUBACK_RETRIES) + " attempts", file: "", line: 0, col: 0 };
+    throw Error{
+        kind: "mqtt",
+        message: "mqtt: no PUBACK for packet id " + convert.toString($pid) + " after " +
+            convert.toString(PUBACK_RETRIES) + " attempts",
+        file: "",
+        line: 0,
+        col: 0
+    };
 }
 
 # awaitPuback waits up to timeoutMs for the PUBACK matching pid, returning true
@@ -655,14 +693,26 @@ func subscribeAt(client as Client, topic as string, qos as int) {
     def pkt as Packet init readPacketBody($client.conn, $h[0]);
     net.setDeadline($client.conn, 0);
     if (not ($pkt.typ == 9)) {
-        throw Error{ kind: "mqtt", message: "mqtt: expected SUBACK, got packet type " + convert.toString($pkt.typ), file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "mqtt",
+            message: "mqtt: expected SUBACK, got packet type " + convert.toString($pkt.typ),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def granted as int init parseSubackQos($pkt);
     if ($granted == 0x80) {
-        throw Error{ kind: "mqtt", message: "mqtt: subscribe rejected for topic " + $topic, file: "", line: 0, col: 0 };
+        throw Error{
+            kind: "mqtt",
+            message: "mqtt: subscribe rejected for topic " + $topic,
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def updated as Client init $client;
-    $updated.subs = lists.push($client.subs, Subscription{ topic: $topic, qos: $granted });
+    $updated.subs = lists.push($client.subs, Subscription{topic: $topic, qos: $granted});
     return $updated;
 }
 
@@ -675,7 +725,7 @@ func subscribeAt(client as Client, topic as string, qos as int) {
  */
 export func receive(client as Client) {
     net.setDeadline($client.conn, 0);
-    def msg as Message init Message{ topic: "", payload: emptyBytes() };
+    def msg as Message init Message{topic: "", payload: emptyBytes()};
     def waiting as bool init true;
     while ($waiting) {
         def h as bytes init readN($client.conn, 1);

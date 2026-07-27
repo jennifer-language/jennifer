@@ -66,7 +66,7 @@ io.printf("server received: %s\n", $seen);
 # The calls below just show the strict validation, which runs offline:
 
 try {
-    net.connectTLS("localhost");   # no port
+    net.connectTLS("localhost"); # no port
     io.printf("missing port: not rejected\n");
 } catch (portErr) {
     io.printf("connectTLS rejects a missing port\n");

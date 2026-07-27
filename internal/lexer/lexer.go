@@ -110,6 +110,7 @@ func (l *Lexer) Next() (Token, error) {
 	}
 
 	startLine, startCol := l.line, l.col
+	startPos := l.pos
 	ch := l.src[l.pos]
 
 	switch {
@@ -217,11 +218,13 @@ func (l *Lexer) Next() (Token, error) {
 		}
 		return Token{Type: TOKEN_DOT, Lexeme: ".", Line: startLine, Col: startCol}, nil
 	case ch == '"' || ch == '\'':
-		return l.readString(ch, startLine, startCol)
+		tok, err := l.readString(ch, startLine, startCol)
+		return l.withRaw(startPos, tok, err)
 	case ch == '$':
 		return l.readVarRef(startLine, startCol)
 	case isASCIIDigit(ch):
-		return l.readNumber(startLine, startCol)
+		tok, err := l.readNumber(startLine, startCol)
+		return l.withRaw(startPos, tok, err)
 	case isIdentStart(ch):
 		return l.readIdentifierOrKeyword(startLine, startCol)
 	}
@@ -372,6 +375,16 @@ func (l *Lexer) readBlockComment() (Token, bool, error) {
 		l.advance()
 	}
 	return Token{Type: TOKEN_COMMENT_BLOCK, Lexeme: b.String(), Line: startLine, Col: startCol}, true, nil
+}
+
+// withRaw stamps a successfully-lexed number/string token with its exact source
+// spelling (from startPos to the current position). On a lex error the token is
+// passed through untouched.
+func (l *Lexer) withRaw(startPos int, tok Token, err error) (Token, error) {
+	if err == nil {
+		tok.Raw = string(l.src[startPos:l.pos])
+	}
+	return tok, err
 }
 
 func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
