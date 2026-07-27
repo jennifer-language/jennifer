@@ -36,12 +36,14 @@ export def struct Node {
     kind as string, tag as string,
     attrs as list of Attr, children as list of Node, text as string
 };
-export def struct Attr { name as string, value as string };
+export def struct Attr { name as string, value as string, boolean as bool };
 ```
 
 Children are supplied to `element` as a `list of Node` you build first (the
 append sugar does not chain into a struct field, so build the list in a
-variable, then pass it). Attributes are a `list of Attr` built with `attr`.
+variable, then pass it). Attributes are a `list of Attr` built with `attr`
+(a normal `name="value"` attribute) or `boolAttr` (a valueless boolean
+attribute).
 
 ## Surface
 
@@ -51,6 +53,7 @@ variable, then pass it). Attributes are a `list of Attr` built with `attr`.
 | `html.text(s)`                      | `Node`   | A text node; `s` is HTML-escaped on render.                       |
 | `html.raw(s)`                       | `Node`   | A verbatim node; `s` is **not** escaped. Trusted markup only.     |
 | `html.attr(name, value)`            | `Attr`   | One attribute; `value` is escaped in attribute context on render. |
+| `html.boolAttr(name)`               | `Attr`   | A boolean (valueless) attribute; renders as the bare name (`disabled`). |
 | `html.render(node)`                 | `string` | Serialize a node and its subtree to HTML5.                        |
 | `html.renderAll(nodes)`             | `string` | Serialize a `list of Node` fragment in order.                     |
 | `html.escape(s)`                    | `string` | HTML-escape a bare string for text context (the helper `render` uses). |
@@ -78,6 +81,24 @@ io.printf("%s\n", html.render(html.element("span", $a, [])));
 
 `html.escape(s)` exposes the text-context escaper on its own, for when you
 need an escaped string without building a node.
+
+## Boolean attributes
+
+HTML boolean attributes - `disabled`, `checked`, `selected`, `required`,
+`readonly`, `multiple`, `autofocus`, and the like - carry no value: their
+presence alone is the truth. Build one with `html.boolAttr(name)` and it
+renders as the bare name, not `name=""`. Normal and boolean attributes mix
+freely on one element, in the order you append them; a boolean-attribute
+name is validated exactly like an `attr` name.
+
+```jennifer
+def a as list of html.Attr init [];
+$a[] = html.attr("type", "checkbox");
+$a[] = html.boolAttr("checked");
+$a[] = html.boolAttr("required");
+io.printf("%s\n", html.render(html.element("input", $a, [])));
+# <input type="checkbox" checked required>
+```
 
 ## Safe tag / attribute names
 

@@ -76,3 +76,65 @@ func testParseUpdatesEmpty() {
     def us as list of Update init parseUpdates(json.decode("{\"ok\":true,\"result\":[]}"));
     testing.assertEqual(len($us), 0);
 }
+
+func testRenderInlineKeyboard() {
+    def rows as list of list of Button init [
+        [ urlButton("Open", "https://example.org"), inlineButton("Ping", "ping") ],
+        [ inlineButton("Close", "close") ]
+    ];
+    testing.assertEqual(renderInlineKeyboard($rows),
+        "{\"inline_keyboard\":[[{\"text\":\"Open\",\"url\":\"https://example.org\"}," +
+        "{\"text\":\"Ping\",\"callback_data\":\"ping\"}]," +
+        "[{\"text\":\"Close\",\"callback_data\":\"close\"}]]}");
+}
+
+func testRenderInlineKeyboardEmpty() {
+    def rows as list of list of Button init [];
+    testing.assertEqual(renderInlineKeyboard($rows), "{\"inline_keyboard\":[]}");
+}
+
+func testParseCallbackQuery() {
+    def body as string init "{\"update_id\":200,\"callback_query\":{" +
+        "\"id\":\"cbq-99\"," +
+        "\"from\":{\"id\":42,\"is_bot\":false,\"first_name\":\"Ada\",\"username\":\"ada\"}," +
+        "\"message\":{\"message_id\":7,\"chat\":{\"id\":5},\"date\":1,\"text\":\"pick\"}," +
+        "\"data\":\"ping\"}}";
+    def cq as CallbackQuery init parseCallbackQuery(json.decode($body));
+    testing.assertEqual($cq.id, "cbq-99");
+    testing.assertEqual($cq.data, "ping");
+    testing.assertEqual($cq.from.id, 42);
+    testing.assertEqual($cq.from.username, "ada");
+    testing.assertEqual($cq.messageId, 7);
+}
+
+func testParseCallbackQueryAbsent() {
+    def cq as CallbackQuery init parseCallbackQuery(json.decode("{\"update_id\":201}"));
+    testing.assertEqual($cq.id, "");
+    testing.assertEqual($cq.data, "");
+    testing.assertEqual($cq.messageId, 0);
+}
+
+func testBuildUpload() {
+    def data as bytes init convert.bytesFromString("PNGDATA", "utf-8");
+    def form as multipart.Built init buildUpload("photo", -1001, "pic.png", "image/png", $data);
+    testing.assertTrue(strings.contains($form.contentType, "multipart/form-data; boundary="));
+    # Round-trip the built body back through multipart.parse to assert its shape.
+    def parts as list of multipart.Part init multipart.parse($form.contentType, $form.body);
+    testing.assertEqual(len($parts), 2);
+    testing.assertEqual($parts[0].name, "chat_id");
+    testing.assertEqual(multipart.text($parts[0]), "-1001");
+    testing.assertEqual($parts[1].name, "photo");
+    testing.assertEqual($parts[1].filename, "pic.png");
+    testing.assertEqual($parts[1].contentType, "image/png");
+    testing.assertEqual(multipart.text($parts[1]), "PNGDATA");
+}
+
+func testRedactToken() {
+    def token as string init "123456:ABC-secretpart";
+    def msg as string init "http: POST https://api.telegram.org/bot" + $token +
+        "/sendMessage read timed out";
+    def red as string init redactToken($msg, $token);
+    testing.assertTrue(not strings.contains($red, $token));
+    testing.assertTrue(not strings.contains($red, "secretpart"));
+    testing.assertTrue(strings.contains($red, "bot<redacted>"));
+}

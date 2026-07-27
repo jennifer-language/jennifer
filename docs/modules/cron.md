@@ -50,6 +50,56 @@ Each field accepts `*` (every value), a single number, an `a-b` range, an
 | `30 3 * * 0` | 03:30 on Sundays |
 | `0 0 13 * 5` | midnight on Friday the 13th (see below) |
 
+### Named months and weekdays
+
+The month field also accepts the three-letter names `JAN FEB MAR APR MAY JUN JUL
+AUG SEP OCT NOV DEC` (as 1-12) and the day-of-week field accepts `SUN MON TUE WED
+THU FRI SAT` (as 0-6). Names are **case-insensitive** (`jan`, `Jan`, `JAN` all
+work) and can appear anywhere a number can - single values, ranges, and lists:
+
+| Expression | Same as |
+| ---------- | ------- |
+| `0 9 * * MON-FRI` | `0 9 * * 1-5` (09:00 on weekdays) |
+| `0 0 1 JAN,JUL *` | `0 0 1 1,7 *` (1st of January and July) |
+| `30 3 * * SUN` | `30 3 * * 0` (03:30 on Sundays) |
+
+Like the numeric `0`, `SUN` is Sunday (there is no name for the alternate `7`).
+
+### Nickname macros
+
+A whole expression may instead be one of the standard `@` nicknames, which expand
+to a five-field expression before parsing:
+
+| Nickname | Expands to | Fires |
+| -------- | ---------- | ----- |
+| `@yearly`, `@annually` | `0 0 1 1 *` | midnight on January 1st |
+| `@monthly` | `0 0 1 * *` | midnight on the 1st of each month |
+| `@weekly` | `0 0 * * 0` | midnight each Sunday |
+| `@daily`, `@midnight` | `0 0 * * *` | midnight every day |
+| `@hourly` | `0 * * * *` | the top of every hour |
+
+Nicknames are case-insensitive. An unknown `@name` throws a catchable `Error`
+(kind `"cron"`).
+
+### `@reboot`
+
+`@reboot` means "at startup", so it has **no time-based schedule**. It parses to a
+`Schedule` whose `reboot` field is `true`, and that flag changes the two evaluators:
+
+- `cron.matches($s, t)` is **always `false`** for a `@reboot` schedule (no clock
+  time ever fires it).
+- `cron.next($s, after)` **throws** a catchable `Error` (kind `"cron"`) - there is
+  no next fire time.
+
+Test for it yourself and run the job once at program start:
+
+```jennifer
+def s as cron.Schedule init cron.parse("@reboot");
+if ($s.reboot) {
+    runJob();   # fire once, at startup
+}
+```
+
 ### The day-of-month / day-of-week rule
 
 When **both** the day-of-month and day-of-week fields are restricted (neither is
@@ -71,8 +121,9 @@ arithmetic.
 
 ## Scope
 
-- **Standard five fields.** No seconds field, no `@daily` / `@reboot` macros, and
-  no non-standard extensions (`L`, `W`, `#`, `?`).
+- **Standard five fields**, plus named months / weekdays and the `@` nickname
+  macros (including `@reboot`) above. No seconds field and no non-standard
+  extensions (`L`, `W`, `#`, `?`).
 - **A calculator, not a runner.** It never touches the clock. Drive it yourself:
   `time.sleep(time.sub(cron.next($s, time.now()), time.now()))`, then run the job.
 

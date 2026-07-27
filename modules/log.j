@@ -29,6 +29,21 @@ use convert;
 use time;
 use os;
 
+# --- persistent fields (private) --------------------------------------------
+
+# mergeFields copies base then overlays extra (so extra / per-call fields win on
+# a key collision). Value-semantic: the result is a fresh map.
+func mergeFields(base as map of string to string, extra as map of string to string) {
+    def m as map of string to string init {};
+    for (def k in $base) {
+        $m[$k] = $base[$k];
+    }
+    for (def k in $extra) {
+        $m[$k] = $extra[$k];
+    }
+    return $m;
+}
+
 /**
  * A value-semantic logger configuration. Build one with `new` / `toStderr` /
  * `toFile` / `toSyslog`.
@@ -37,13 +52,15 @@ use os;
  * @field sink {string} where records go: "stdout", "stderr", "file", or "syslog"
  * @field target {string} the file path (file sink) or "host:port" (syslog sink); "" for a console sink
  * @field app {string} an application / tag name (the syslog APP-NAME; "" means none)
+ * @field fields {map of string to string} persistent context fields attached to every record (see `with`); {} for none
  */
 export def struct Logger {
     level as string,
     format as string,
     sink as string,
     target as string,
-    app as string
+    app as string,
+    fields as map of string to string
 };
 
 # --- constructors (exported) ------------------------------------------------
@@ -55,7 +72,7 @@ export def struct Logger {
  * @return {Logger} the logger
  */
 export func new(level as string, format as string) {
-    return Logger{ level: $level, format: $format, sink: "stdout", target: "", app: "" };
+    return Logger{ level: $level, format: $format, sink: "stdout", target: "", app: "", fields: {} };
 }
 
 /**
@@ -65,7 +82,7 @@ export func new(level as string, format as string) {
  * @return {Logger} the logger
  */
 export func toStderr(level as string, format as string) {
-    return Logger{ level: $level, format: $format, sink: "stderr", target: "", app: "" };
+    return Logger{ level: $level, format: $format, sink: "stderr", target: "", app: "", fields: {} };
 }
 
 /**
@@ -76,7 +93,7 @@ export func toStderr(level as string, format as string) {
  * @return {Logger} the logger
  */
 export func toFile(level as string, format as string, path as string) {
-    return Logger{ level: $level, format: $format, sink: "file", target: $path, app: "" };
+    return Logger{ level: $level, format: $format, sink: "file", target: $path, app: "", fields: {} };
 }
 
 /**
@@ -88,12 +105,28 @@ export func toFile(level as string, format as string, path as string) {
  * @return {Logger} the logger
  */
 export func toSyslog(level as string, address as string, app as string) {
-    return Logger{ level: $level, format: "syslog", sink: "syslog", target: $address, app: $app };
+    return Logger{ level: $level, format: "syslog", sink: "syslog", target: $address, app: $app, fields: {} };
+}
+
+/**
+ * A child logger carrying persistent context `fields`. Every record emitted
+ * through the returned logger includes these fields, merged with any per-call
+ * fields (a per-call key of the same name wins). Composes: calling `with` again
+ * on the result merges the new fields on top of the carried ones. The parent
+ * logger is unchanged (value semantics).
+ * @param logger {Logger} the parent logger
+ * @param fields {map of string to string} the persistent fields to attach
+ * @return {Logger} a new logger with the merged persistent fields
+ */
+export func with(logger as Logger, fields as map of string to string) {
+    def merged as map of string to string init mergeFields($logger.fields, $fields);
+    return Logger{ level: $logger.level, format: $logger.format, sink: $logger.sink, target: $logger.target, app: $logger.app, fields: $merged };
 }
 
 # --- level filtering (private) ----------------------------------------------
 
-# rank orders the levels; an unknown level ranks as info.
+# rank orders the levels; an unknown level ranks as info. "fatal" ranks highest,
+# so it clears every logger's threshold and is always emitted.
 func rank(level as string) {
     if ($level == "debug") {
         return 0;
@@ -103,6 +136,9 @@ func rank(level as string) {
     }
     if ($level == "error") {
         return 3;
+    }
+    if ($level == "fatal") {
+        return 4;
     }
     return 1;
 }
@@ -196,8 +232,11 @@ func render(logger as Logger, level as string, message as string, fields as map 
 
 # --- syslog (private) -------------------------------------------------------
 
-# syslogSeverity maps a level to an RFC 5424 severity (err=3 .. debug=7).
+# syslogSeverity maps a level to an RFC 5424 severity (crit=2 .. debug=7).
 func syslogSeverity(level as string) {
+    if ($level == "fatal") {
+        return 2;
+    }
     if ($level == "error") {
         return 3;
     }
@@ -271,7 +310,7 @@ func emit(logger as Logger, level as string, message as string, fields as map of
  */
 export func at(logger as Logger, level as string, message as string, fields as map of string to string) {
     if (shouldLog($logger, $level)) {
-        emit($logger, $level, $message, $fields);
+        emit($logger, $level, $message, mergeFields($logger.fields, $fields));
     }
     return null;
 }
@@ -314,4 +353,17 @@ export func warn(logger as Logger, message as string, fields as map of string to
  */
 export func error(logger as Logger, message as string, fields as map of string to string) {
     return at($logger, "error", $message, $fields);
+}
+
+/**
+ * Emit a fatal record and then terminate the program with exit code 1. The
+ * "fatal" level ranks above every other, so the record is always emitted
+ * regardless of the logger's minimum level.
+ * @param logger {Logger} the logger
+ * @param message {string} the log message
+ * @param fields {map of string to string} structured fields ({} for none)
+ */
+export func fatal(logger as Logger, message as string, fields as map of string to string) {
+    at($logger, "fatal", $message, $fields);
+    exit 1;
 }

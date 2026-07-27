@@ -43,6 +43,10 @@ def struct slack.Message {
 | `slack.text(m, text)` | `Message` | set the fallback / notification text |
 | `slack.section(m, markdown)` | `Message` | append a section block (mrkdwn) |
 | `slack.header(m, heading)` | `Message` | append a header block (plain text) |
+| `slack.contextBlock(m, text)` | `Message` | append a context block (small muted mrkdwn) |
+| `slack.fieldsSection(m, fields)` | `Message` | append a section laid out as two-column fields |
+| `slack.button(text, url)` | `string` | build a URL button fragment for `actionsBlock` |
+| `slack.actionsBlock(m, buttons)` | `Message` | append an actions block of buttons |
 | `slack.divider(m)` | `Message` | append a divider block |
 | `slack.render(m)` | `string` | render the JSON payload |
 | `slack.sendMessage(webhookUrl, m)` | `http.Response` | post the built message |
@@ -52,13 +56,30 @@ quotes, newlines, and other meta-characters are safe. The fallback `text` is
 shown in notifications and by clients that do not render blocks - set it even
 when you use blocks.
 
+`fieldsSection` takes a `list of string` of mrkdwn snippets (Slack packs them
+into a two-column grid - a common convention is `"*Key:*\nvalue"` per field).
+For an actions block, build each button with `slack.button(text, url)` and pass
+the list to `actionsBlock`:
+
+```jennifer
+def m as slack.Message init slack.message();
+$m = slack.header($m, "Deploy");
+$m = slack.fieldsSection($m, ["*Env:*\nprod", "*Build:*\n1234"]);
+$m = slack.actionsBlock($m, [
+    slack.button("View build", "https://ci.example.com/build/1234"),
+    slack.button("Logs", "https://ci.example.com/build/1234/logs")
+]);
+$m = slack.contextBlock($m, "posted by ci-bot");
+```
+
 ## Scope
 
 - **Incoming Webhooks**, not the Web API - no bot tokens, `chat.postMessage`,
   threads, reactions, or file uploads. The channel is fixed by the webhook.
-- **A subset of Block Kit** - `section` / `header` / `divider`. Fields,
-  accessories, images, and interactive elements are not built here (compose the
-  JSON yourself and post via [`http`](http.md) if you need them).
+- **A subset of Block Kit** - `section` / `header` / `context` / `fields` /
+  `actions` (URL buttons) / `divider`. Accessories, images, and non-button
+  interactive elements are not built here (compose the JSON yourself and post
+  via [`http`](http.md) if you need them).
 - **No retry / rate-limit handling** - a non-2xx is returned as the response
   value for the caller to inspect, not thrown.
 

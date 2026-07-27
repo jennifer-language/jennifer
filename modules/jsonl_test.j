@@ -85,3 +85,31 @@ func testDecodeToleratesWhitespaceAroundValue() {
     testing.assertEqual(json.asInt(json.get($got[0], "/a")), 1);
     testing.assertEqual(json.asInt($got[1]), 42);
 }
+
+# --- file-handle streaming reader / writer round-trip ---------------
+# jsonl.j already `use`s fs, so the overlay reaches fs.* directly.
+
+func testStreamValueRoundTrip() {
+    def path as string init fs.makeTempFile("", "jsonl-", ".jsonl");
+    def wf as fs.File init fs.open($path, "write");
+    def w as Writer init writer($wf);
+    writeValue($w, rec("{\"id\":1,\"name\":\"ada\"}"));
+    writeValue($w, rec("[10,20,30]"));
+    writeValue($w, rec("42"));
+    closeWriter($w);
+
+    def rf as fs.File init fs.open($path, "read");
+    def r as Reader init reader($rf);
+    def got as list of json.Value init [];
+    while (not fs.eof($rf)) {
+        $got[] = readValue($r);
+    }
+    closeReader($r);
+    fs.remove($path);
+
+    testing.assertEqual(len($got), 3);
+    testing.assertEqual(json.asInt(json.get($got[0], "/id")), 1);
+    testing.assertEqual(json.asString(json.get($got[0], "/name")), "ada");
+    testing.assertEqual(json.length($got[1]), 2 + 1);
+    testing.assertEqual(json.asInt($got[2]), 42);
+}

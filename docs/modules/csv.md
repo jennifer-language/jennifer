@@ -25,10 +25,21 @@ Runnable: [`examples/modules/csv_demo.j`](https://github.com/jennifer-language/j
 | --------------------------------- | -------------------------------- | ---------------------------------------------------------------------------- |
 | `csv.parse(s)`                    | `list of list of string`         | Parse standard comma-delimited CSV into rows of fields.                      |
 | `csv.parseWith(s, delim)`         | `list of list of string`         | Same, with a single-character delimiter (`"\t"` for TSV).                    |
-| `csv.format(rows)`                | `string`                         | Encode rows as comma-delimited CSV; quotes fields that need it.             |
+| `csv.format(rows)`                | `string`                         | Encode rows as comma-delimited CSV; quotes fields that need it. **Unsafe for spreadsheets** - see below. |
 | `csv.formatWith(rows, delim)`     | `string`                         | Same, with a single-character delimiter.                                     |
+| `csv.formatSafe(rows)`            | `string`                         | Like `format`, but neutralises spreadsheet formula injection. The export-to-spreadsheet path. |
+| `csv.formatSafeWith(rows, delim)` | `string`                         | Like `formatWith`, injection-neutralised.                                    |
+| `csv.dialect(delim)`              | `csv.Dialect`                    | A dialect with the given delimiter and defaults (quote `"`, no comment, no trim). |
+| `csv.parseDialect(text, d)`       | `list of list of string`         | Parse under a `csv.Dialect` (custom quote, comment-line skip, unquoted-field trim). |
+| `csv.formatDialect(rows, d)`      | `string`                         | Format under a `csv.Dialect` (custom delimiter and quote).                   |
 | `csv.toRecords(rows)`             | `list of map of string to string`| Treat row 0 as a header; map each later row to a header-keyed record.        |
 | `csv.fromRecords(header, records)`| `list of list of string`         | Inverse: a header row followed by one row per record, in `header` order.     |
+| `csv.reader(file)` / `readerWith(file, delim)` | `csv.Reader`        | Wrap an open read-mode `fs.File` as a streaming reader.                      |
+| `csv.readRow(reader)`             | `list of string`                 | Read one complete record (spans physical lines inside a quoted field); `[]` at EOF. |
+| `csv.readerEof(reader)`           | `bool`                           | True once no further record remains; loop `while (not readerEof($r))`.       |
+| `csv.reader`/`writer` `closeReader`/`closeWriter` | `null`          | Close the underlying file handle.                                            |
+| `csv.writer(file)` / `writerWith(file, delim)` | `csv.Writer`        | Wrap an open write/append-mode `fs.File` as a streaming writer.              |
+| `csv.writeRow(writer, fields)`    | `null`                           | Append one quoted-as-needed record terminated by LF.                         |
 
 ## Parsing (RFC 4180)
 
@@ -67,6 +78,104 @@ Only the **record separators** normalise: a `CRLF`- or `CR`-terminated
 input re-emits with `LF` between records. Line breaks *inside* a quoted
 field are field content and pass through verbatim, so no data is altered.
 
+## Spreadsheet formula injection (use `formatSafe`)
+
+**`format` / `formatWith` are UNSAFE for a CSV that a spreadsheet will
+open.** RFC 4180 quoting does not stop CSV formula injection
+([CWE-1236](https://cwe.mitre.org/data/definitions/1236.html)): a field
+whose first character is `=`, `+`, `-`, `@`, a tab (`0x09`), or a CR
+(`0x0D`) is interpreted by Excel and Google Sheets as a **formula** on
+import - so a value like `=SUM(...)`, or a payload like
+`=cmd|'/c calc'!A1`, executes in the victim's spreadsheet. A field is
+still just text in the CSV; the danger is the consuming spreadsheet.
+
+`formatSafe` / `formatSafeWith` are the export-to-spreadsheet path: they
+behave exactly like `format` / `formatWith` but, before quoting, prefix
+any such field with a single apostrophe (`'`), the standard neutraliser
+that every major spreadsheet treats as "this cell is literal text":
+
+```jennifer
+def rows as list of list of string init [];
+$rows[] = ["=SUM(A1:A9)", "normal"];
+io.printf("%s\n", csv.formatSafe($rows));
+# '=SUM(A1:A9),normal      <- the formula is now inert text on import
+```
+
+Only a field's **first** character is inspected (so `a=b` is untouched),
+and a normal field is left exactly as `format` would write it. Use plain
+`format` only when the target is another program that parses CSV as data,
+never a spreadsheet.
+
+## Dialects
+
+`csv.Dialect` groups the non-standard knobs so a caller can read a
+`;`-delimited, `#`-commented, whitespace-padded file in one call:
+
+```jennifer
+def struct csv.Dialect {
+    delimiter as string,   # the field delimiter
+    quote as string,       # the quote character (default ")
+    comment as string,     # a comment-line prefix, or "" for none
+    trim as bool           # trim whitespace from *unquoted* fields on parse
+};
+```
+
+`csv.dialect(delim)` builds one with the standard defaults (quote `"`, no
+comment, no trim); set the other fields to customise. `parseDialect` reads
+under it, `formatDialect` writes under it (the `comment` / `trim` fields are
+parse-only):
+
+```jennifer
+def d as csv.Dialect init csv.dialect(";");
+$d.comment = "#";
+$d.trim = true;
+def rows as list of list of string init csv.parseDialect("# note\n a ; b ;c", $d);
+# rows == [["a", "b", "c"]]
+```
+
+- **`comment`** skips a physical line only when the line's **record** starts
+  with the prefix (outside any quoted field), so a `#` inside data is safe.
+- **`trim`** trims **unquoted** fields only; a quoted field keeps its
+  whitespace verbatim (`"  keep  "` stays `  keep  `).
+- The plain `parse` / `parseWith` / `format` / `formatWith` are unchanged -
+  a dialect is opt-in.
+
+## Streaming a large file
+
+For a table too large to hold in memory, `csv.reader` / `csv.writer` wrap an
+open `fs.File` handle and process one record at a time. The wrapped file
+shares its read position across value copies (like every `fs` handle), so
+successive `readRow` calls advance the same stream. `readRow` reads a
+**complete** record even when a quoted field spans several physical lines:
+
+```jennifer
+use fs;
+import "csv.j" as csv;
+
+def rf as fs.File init fs.open("big.csv", "read");
+def r as csv.Reader init csv.reader($rf);
+while (not csv.readerEof($r)) {
+    def row as list of string init csv.readRow($r);
+    if (len($row) > 0) {
+        # process one record without loading the whole file
+    }
+}
+csv.closeReader($r);
+
+def wf as fs.File init fs.open("out.csv", "write");
+def w as csv.Writer init csv.writer($wf);
+csv.writeRow($w, ["name", "note"]);
+csv.writeRow($w, ["Smith, J", "hi"]);   # embedded comma auto-quoted
+csv.closeWriter($w);
+```
+
+`readRow` returns `[]` at end-of-file (and for a blank line), so
+`readerEof` is the loop guard. `readerWith` / `writerWith` take a custom
+delimiter for streaming TSV. The streaming reader decodes an embedded
+newline (a quoted field split across lines) back to `\n`; a `\r` inside a
+quoted field is normalised to `\n` on the streaming path (the whole-file
+`parse` preserves it).
+
 ## Header-keyed records
 
 Most CSV has a header row. `toRecords` pairs it with the data rows, giving
@@ -99,9 +208,9 @@ Details worth knowing:
 
 Type inference (numbers, booleans, dates) is not part of this module -
 every field is a `string`, and the caller converts what it needs with
-`convert.toInt` / `convert.toFloat`. Streaming a file too large to hold in
-memory is also out of scope: `parse` takes a whole string. Read the file
-with `fs.readString` (or slurp stdin) and hand the text in.
+`convert.toInt` / `convert.toFloat`. For whole-file work, read with
+`fs.readString` (or slurp stdin) and hand the text to `parse`; for a file
+too large to hold in memory, use the streaming `reader` / `writer` above.
 
 ## See also
 

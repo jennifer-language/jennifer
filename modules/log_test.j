@@ -94,6 +94,49 @@ func testSyslogLine() {
     testing.assertTrue(strings.startsWith(syslogLine($lg, "warn", "x", none(), fixed()), "<12>1 "));
 }
 
+# mergeFields overlays extra over base; a per-call key wins on collision.
+func testMergeFields() {
+    def m as map of string to string init mergeFields({"user": "ada"}, {"user": "bob", "x": "1"});
+    testing.assertEqual($m["user"], "bob");
+    testing.assertEqual($m["x"], "1");
+    # base is preserved when extra is empty
+    def b as map of string to string init mergeFields({"a": "1"}, {});
+    testing.assertEqual($b["a"], "1");
+}
+
+# with stores persistent context fields on the returned logger.
+func testWithStoresFields() {
+    def lg as Logger init with(new("info", "text"), fields());
+    testing.assertEqual($lg.fields["user"], "ada");
+    testing.assertEqual($lg.fields["id"], "42");
+    # the parent is unchanged (value semantics)
+    testing.assertEqual(len(new("info", "text").fields), 0);
+}
+
+# with composes: a second with merges on top of the carried fields.
+func testWithComposes() {
+    def a as Logger init with(new("info", "text"), {"a": "1"});
+    def b as Logger init with($a, {"b": "2"});
+    testing.assertEqual($b.fields["a"], "1");
+    testing.assertEqual($b.fields["b"], "2");
+    # a later with of the same key wins
+    def c as Logger init with($b, {"a": "9"});
+    testing.assertEqual($c.fields["a"], "9");
+}
+
+# fatal ranks above every level, so it clears any threshold and always logs.
+func testFatalAlwaysLogs() {
+    testing.assertTrue(shouldLog(new("error", "text"), "fatal"));
+    testing.assertTrue(shouldLog(new("info", "text"), "fatal"));
+    testing.assertTrue(shouldLog(new("debug", "text"), "fatal"));
+}
+
+# fatal maps to RFC 5424 severity critical (2), just above error (3).
+func testFatalSeverity() {
+    testing.assertEqual(syslogSeverity("fatal"), 2);
+    testing.assertEqual(syslogSeverity("error"), 3);
+}
+
 func testConstructors() {
     testing.assertEqual(new("info", "text").sink, "stdout");
     testing.assertEqual(toStderr("info", "text").sink, "stderr");

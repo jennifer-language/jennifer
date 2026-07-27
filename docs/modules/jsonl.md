@@ -73,6 +73,45 @@ while (true) {
 jsonl.closeReader($r);
 ```
 
+### Streaming over a caller-owned file handle
+
+When the caller already holds an open `fs.File` (or wants to stream both a
+reader and a writer), the file-handle surface wraps an open handle instead of a
+path. `reader` / `writer` take an `fs.File`; `writeValue` appends one compact
+JSON value plus a newline; `readValue` returns the next record as a `json.Value`
+directly.
+
+| Call | Returns | |
+| ---- | ------- | - |
+| `jsonl.reader(file)` | `Reader` | wrap an open read-mode `fs.File` |
+| `jsonl.readValue(reader)` | `json.Value` | the next record (skips blank lines); JSON `null` at end |
+| `jsonl.writer(file)` | `Writer` | wrap an open write/append-mode `fs.File` |
+| `jsonl.writeValue(writer, value)` | `null` | append one value terminated by a newline |
+| `jsonl.closeWriter(writer)` | `null` | close the writer |
+
+```jennifer
+use fs;
+import "jsonl.j" as jsonl;
+
+def wf as fs.File init fs.open("events.jsonl", "append");
+def w as jsonl.Writer init jsonl.writer($wf);
+jsonl.writeValue($w, json.decode("{\"event\":\"login\"}"));
+jsonl.closeWriter($w);
+
+def rf as fs.File init fs.open("events.jsonl", "read");
+def r as jsonl.Reader init jsonl.reader($rf);
+while (not fs.eof($rf)) {
+    def v as json.Value init jsonl.readValue($r);
+    # process $v
+}
+jsonl.closeReader($r);
+```
+
+`readValue` returns a JSON `null` once the stream is exhausted. JSONL written by
+`writeValue` has exactly one value per line and no trailing blanks, so `not
+fs.eof(...)` is a reliable loop guard; when you need to tell end-of-stream from a
+genuine `null` record, use `readRecord` and its explicit `done` flag instead.
+
 ## Scope
 
 - **Records are `json.Value`.** JSONL is a framing convention, not a new

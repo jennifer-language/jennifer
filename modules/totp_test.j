@@ -75,6 +75,73 @@ func testSecretNormalization() {
     testing.assertEqual(generateAt("JBSW Y3DP EHPK 3PXP", 59, $o), $canon);    # spaced
 }
 
+func testHotpRfc4226Vectors() {
+    # RFC 4226 Appendix D: ASCII secret "12345678901234567890", counters 0..9.
+    def s as string init seed("12345678901234567890");
+    testing.assertEqual(hotp($s, 0), "755224");
+    testing.assertEqual(hotp($s, 1), "287082");
+    testing.assertEqual(hotp($s, 2), "359152");
+    testing.assertEqual(hotp($s, 3), "969429");
+    testing.assertEqual(hotp($s, 4), "338314");
+    testing.assertEqual(hotp($s, 5), "254676");
+    testing.assertEqual(hotp($s, 6), "287922");
+    testing.assertEqual(hotp($s, 7), "162583");
+    testing.assertEqual(hotp($s, 8), "399871");
+    testing.assertEqual(hotp($s, 9), "520489");
+}
+
+func testHotpIsTotpBuildingBlock() {
+    # TOTP is HOTP over floor(unixSeconds / period): at t=59, step = 1.
+    def s as string init seed("12345678901234567890");
+    def o as Options;                                  # 6 digits, 30 s, sha1
+    testing.assertEqual(generateAt($s, 59, $o), hotp($s, 1));
+}
+
+func testGenerateSecretRoundTrips() {
+    def sec as string init generateSecret();
+    # 20 random bytes -> 160 bits -> 32 base32 chars, unpadded.
+    testing.assertEqual(len($sec), 32);
+    testing.assertFalse(strings.contains($sec, "="));
+    def o as Options;
+    def code as string init generateAt($sec, 1000000000, $o);
+    testing.assertTrue(verifyAt($sec, $code, 1000000000, $o));
+}
+
+func testGenerateSecretNLength() {
+    def sec as string init generateSecretN(10);        # 80 bits -> 16 base32 chars
+    testing.assertEqual(len($sec), 16);
+    def o as Options;
+    def code as string init generateAt($sec, 500, $o);
+    testing.assertTrue(verifyAt($sec, $code, 500, $o));
+}
+
+func secretZeroBytes() {
+    return generateSecretN(0);
+}
+
+func testGenerateSecretNRejectsNonPositive() {
+    testing.assertThrows("secretZeroBytes", "totp");
+}
+
+func testVerifyWindowAccepts() {
+    def s as string init seed("12345678901234567890");
+    def o as Options;
+    def prev as string init generateAt($s, 29, $o);    # step floor(29/30)=0
+    # now is step floor(120/30)=4, three steps away: a window of 3 reaches it.
+    testing.assertFalse(verifyWindowAt($s, $prev, 120, 3, $o));
+    testing.assertTrue(verifyWindowAt($s, $prev, 120, 4, $o));
+}
+
+func testVerifyWindowRejectsOutside() {
+    def s as string init seed("12345678901234567890");
+    def o as Options;
+    def code as string init generateAt($s, 59, $o);    # step 1
+    # window 0 only checks the current step: same time passes, adjacent fails.
+    testing.assertTrue(verifyWindowAt($s, $code, 59, 0, $o));
+    testing.assertFalse(verifyWindowAt($s, $code, 29, 0, $o));  # step 0, outside window 0
+    testing.assertTrue(verifyWindowAt($s, $code, 29, 1, $o));   # step 0, within window 1
+}
+
 func testCounterBytesBigEndian() {
     def b as bytes init counterBytes(1);
     testing.assertEqual(len($b), 8);

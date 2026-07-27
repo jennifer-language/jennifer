@@ -149,3 +149,124 @@ func testPrivateQuoteField() {
     testing.assertEqual(quoteField("a,b", ","), "\"a,b\"");
     testing.assertEqual(quoteField("a\"b", ","), "\"a\"\"b\"");
 }
+
+# --- formula-injection mitigation (CWE-1236) ------------------------
+
+# White-box: the private sanitizeField neutraliser.
+func testPrivateSanitizeField() {
+    testing.assertEqual(sanitizeField("=SUM(A1)"), "'=SUM(A1)");
+    testing.assertEqual(sanitizeField("+1"), "'+1");
+    testing.assertEqual(sanitizeField("-1"), "'-1");
+    testing.assertEqual(sanitizeField("@ref"), "'@ref");
+    testing.assertEqual(sanitizeField("\tx"), "'\tx");        # leading tab
+    testing.assertEqual(sanitizeField("\rx"), "'\rx");        # leading CR
+    testing.assertEqual(sanitizeField("plain"), "plain");     # normal untouched
+    testing.assertEqual(sanitizeField(""), "");               # empty untouched
+    testing.assertEqual(sanitizeField("a=b"), "a=b");         # only the FIRST char matters
+}
+
+func testFormatSafeNeutralises() {
+    def rows as list of list of string init [];
+    $rows[] = ["=1+2", "+cmd", "-2", "@ref", "\tinj", "normal"];
+    def back as list of list of string init parse(formatSafe($rows));
+    testing.assertEqual($back[0][0], "'=1+2");
+    testing.assertEqual($back[0][1], "'+cmd");
+    testing.assertEqual($back[0][2], "'-2");
+    testing.assertEqual($back[0][3], "'@ref");
+    testing.assertEqual($back[0][4], "'\tinj");
+    testing.assertEqual($back[0][5], "normal");   # left alone
+}
+
+func testFormatSafeWithDelimiter() {
+    def rows as list of list of string init [];
+    $rows[] = ["=danger", "ok"];
+    def out as string init formatSafeWith($rows, "\t");
+    testing.assertEqual($out, "'=danger\tok");
+}
+
+# --- dialects -------------------------------------------------------
+
+func testDialectDefaults() {
+    def d as Dialect init dialect(";");
+    testing.assertEqual($d.delimiter, ";");
+    testing.assertEqual($d.quote, "\"");
+    testing.assertEqual($d.comment, "");
+    testing.assertFalse($d.trim);
+}
+
+func testParseDialectSemicolonCommentTrim() {
+    def d as Dialect init Dialect{ delimiter: ";", quote: "\"", comment: "#", trim: true };
+    def text as string init "# a header comment\n a ; b ; c \nx;y;z\n# trailing comment";
+    def rows as list of list of string init parseDialect($text, $d);
+    testing.assertEqual(len($rows), 2);
+    testing.assertEqual($rows[0][0], "a");   # unquoted field trimmed
+    testing.assertEqual($rows[0][1], "b");
+    testing.assertEqual($rows[0][2], "c");
+    testing.assertEqual($rows[1][0], "x");
+    testing.assertEqual($rows[1][2], "z");
+}
+
+func testParseDialectQuotedKeepsWhitespace() {
+    # A quoted field keeps its whitespace even under trim=true.
+    def d as Dialect init Dialect{ delimiter: ";", quote: "\"", comment: "", trim: true };
+    def rows as list of list of string init parseDialect("\" keep \"; drop ", $d);
+    testing.assertEqual($rows[0][0], " keep ");
+    testing.assertEqual($rows[0][1], "drop");
+}
+
+func testFormatDialect() {
+    def rows as list of list of string init [];
+    $rows[] = ["a;b", "plain"];
+    def d as Dialect init dialect(";");
+    # The field carrying the delimiter is quoted with the dialect quote char.
+    testing.assertEqual(formatDialect($rows, $d), "\"a;b\";plain");
+}
+
+# --- streaming reader / writer round-trip ---------------------------
+
+func testStreamCsvRoundTrip() {
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    def wf as fs.File init fs.open($path, "write");
+    def w as Writer init writer($wf);
+    writeRow($w, ["name", "note"]);
+    writeRow($w, ["Smith, J", "hi"]);       # embedded comma forces quoting
+    writeRow($w, ["Ada", "plain"]);
+    closeWriter($w);
+
+    def rf as fs.File init fs.open($path, "read");
+    def r as Reader init reader($rf);
+    def rows as list of list of string init [];
+    while (not readerEof($r)) {
+        def row as list of string init readRow($r);
+        if (len($row) > 0) {
+            $rows[] = $row;
+        }
+    }
+    closeReader($r);
+    fs.remove($path);
+
+    testing.assertEqual(len($rows), 3);
+    testing.assertEqual($rows[0][0], "name");
+    testing.assertEqual($rows[1][0], "Smith, J");   # quoted comma survived streaming
+    testing.assertEqual($rows[1][1], "hi");
+    testing.assertEqual($rows[2][1], "plain");
+}
+
+func testStreamCsvQuotedNewlineSpansLines() {
+    # A quoted field with an embedded newline spans two physical lines; readRow
+    # must read the whole record.
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    fs.writeString($path, "a,\"x\ny\"\nb,c\n");
+
+    def rf as fs.File init fs.open($path, "read");
+    def r as Reader init reader($rf);
+    def first as list of string init readRow($r);
+    def second as list of string init readRow($r);
+    closeReader($r);
+    fs.remove($path);
+
+    testing.assertEqual(len($first), 2);
+    testing.assertEqual($first[1], "x\ny");
+    testing.assertEqual($second[0], "b");
+    testing.assertEqual($second[1], "c");
+}

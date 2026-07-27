@@ -101,6 +101,64 @@ export func header(m as Message, heading as string) {
 }
 
 /**
+ * Add a context block (small, muted helper text in mrkdwn). Returns a fresh
+ * message.
+ * @param m {Message} the message
+ * @param text {string} the context text (mrkdwn)
+ * @return {Message} a message with the context block appended
+ */
+export func contextBlock(m as Message, text as string) {
+    def out as Message init $m;
+    def block as string init "{\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":" + json.encode($text) + "}]}";
+    $out.blocks = lists.push($out.blocks, $block);
+    return $out;
+}
+
+/**
+ * Add a section block laid out as two-column fields (each entry rendered as
+ * mrkdwn). Slack packs the fields into a two-column grid. Returns a fresh
+ * message.
+ * @param m {Message} the message
+ * @param fields {list of string} the field texts (mrkdwn), in order
+ * @return {Message} a message with the fields section appended
+ */
+export func fieldsSection(m as Message, fields as list of string) {
+    def out as Message init $m;
+    def parts as list of string init [];
+    for (def f in $fields) {
+        $parts[] = "{\"type\":\"mrkdwn\",\"text\":" + json.encode($f) + "}";
+    }
+    def block as string init "{\"type\":\"section\",\"fields\":[" + strings.join($parts, ",") + "]}";
+    $out.blocks = lists.push($out.blocks, $block);
+    return $out;
+}
+
+/**
+ * Build a single URL button element for an actions block. Returns the
+ * pre-rendered button JSON fragment; pass a list of these to `actionsBlock`.
+ * @param text {string} the button label (plain text)
+ * @param url {string} the URL the button opens
+ * @return {string} the button JSON fragment
+ */
+export func button(text as string, url as string) {
+    return "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":" + json.encode($text) + "},\"url\":" + json.encode($url) + "}";
+}
+
+/**
+ * Add an actions block from one or more buttons (built with `button`). Returns
+ * a fresh message.
+ * @param m {Message} the message
+ * @param buttons {list of string} pre-rendered button fragments (see `button`)
+ * @return {Message} a message with the actions block appended
+ */
+export func actionsBlock(m as Message, buttons as list of string) {
+    def out as Message init $m;
+    def block as string init "{\"type\":\"actions\",\"elements\":[" + strings.join($buttons, ",") + "]}";
+    $out.blocks = lists.push($out.blocks, $block);
+    return $out;
+}
+
+/**
  * Add a divider block (a horizontal rule). Returns a fresh message.
  * @param m {Message} the message
  * @return {Message} a message with the divider appended

@@ -42,13 +42,17 @@ export def struct Node {
 };
 
 /**
- * One name/value HTML attribute.
+ * One HTML attribute. A normal attribute has a name and a value and renders as
+ * `name="value"`; a boolean attribute (`boolean: true`, built by `boolAttr`)
+ * carries no value and renders as the bare name (`disabled`, `checked`, ...).
  * @field name {string} the attribute name
- * @field value {string} the attribute value (escaped on render)
+ * @field value {string} the attribute value (escaped on render; empty for a boolean attribute)
+ * @field boolean {bool} true for a valueless boolean attribute (rendered as the bare name)
  */
 export def struct Attr {
     name as string,
-    value as string
+    value as string,
+    boolean as bool
 };
 
 # The HTML5 void elements: they never have a closing tag or children.
@@ -96,7 +100,20 @@ export func raw(s as string) {
  */
 export func attr(name as string, value as string) {
     checkName($name, "attribute");
-    return Attr{name: $name, value: $value};
+    return Attr{name: $name, value: $value, boolean: false};
+}
+
+/**
+ * Build a boolean (valueless) HTML attribute - `disabled`, `checked`,
+ * `selected`, `required`, `readonly`, `multiple`, `autofocus`, and the like.
+ * It renders as the bare name (`<input disabled>`), not `name=""`. The name is
+ * validated exactly as `attr` validates it.
+ * @param name {string} the attribute name
+ * @return {Attr} the boolean attribute
+ */
+export func boolAttr(name as string) {
+    checkName($name, "attribute");
+    return Attr{name: $name, value: "", boolean: true};
 }
 
 # --- escaping (private + one public helper) ------------------------
@@ -226,7 +243,11 @@ func isVoid(tag as string) {
 func renderAttrs(attrs as list of Attr) {
     def out as string init "";
     for (def a in $attrs) {
-        $out = $out + " " + $a.name + "=\"" + escapeAttr($a.value) + "\"";
+        if ($a.boolean) {
+            $out = $out + " " + $a.name;
+        } else {
+            $out = $out + " " + $a.name + "=\"" + escapeAttr($a.value) + "\"";
+        }
     }
     return $out;
 }

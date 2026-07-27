@@ -36,6 +36,63 @@ first can compute a different signature and reject a valid delivery.
 how many leading characters of the signature were correct. It returns `false`
 (never throws) for a wrong secret, a tampered payload, or a malformed signature.
 
+## Timestamped, replay-protected schemes
+
+The GitHub-style `sign` / `verify` above authenticate the body but carry no
+timestamp, so a captured request can be replayed forever. The schemes below
+fold a **unix timestamp** into the signed data and reject a delivery whose
+timestamp drifts more than `toleranceSeconds` from `now` - the timestamp
+tolerance **is** the replay defence. All of them constant-time compare, run on
+**both** binaries, and are pure: pass `now` and `timestamp` as explicit `int`
+unix seconds (a script reads the clock from `time` and passes it in), which
+keeps the functions testable and deterministic.
+
+| Call | Returns | Notes |
+| ---- | ------- | ----- |
+| `webhook.stripeSign(secret, body, timestamp)` | `string` | Stripe `t=<ts>,v1=<hexsig>` header; signs `<ts>.<body>` HMAC-SHA256, hex. |
+| `webhook.stripeVerify(secret, body, header, toleranceSeconds, now)` | `bool` | Parse `t` + the `v1=` sig(s), recompute, constant-time compare; true only if a sig matches **and** `\|now - t\| <= tolerance`. |
+| `webhook.slackSign(secret, body, timestamp)` | `string` | Slack `v0=<hexsig>`; signs `"v0:" + <ts> + ":" + <body>` HMAC-SHA256, hex. |
+| `webhook.slackVerify(secret, body, timestamp, signature, toleranceSeconds, now)` | `bool` | Recompute over the `X-Slack-Request-Timestamp` value; true only if it matches **and** the timestamp is fresh (e.g. 300s). |
+| `webhook.timestampedSign(secret, body, timestamp, algo, encoding)` | `string` | Generic: sign `<ts>.<body>` with `algo` (`"sha1"`/`"sha256"`) and `encoding` (`"hex"`/`"base64"`). |
+| `webhook.timestampedVerify(secret, body, timestamp, signature, algo, encoding, toleranceSeconds, now)` | `bool` | Constant-time compare + freshness check for the generic scheme. |
+
+```jennifer
+import "webhook.j" as webhook;
+use time;
+
+def body as string init "{\"event\":\"payment\"}";
+def secret as string init "whsec_...";
+def now as int init time.unix(time.now());
+
+# Sign (sender side): stamp with the current time.
+def header as string init webhook.stripeSign($secret, $body, $now);
+# -> "t=...,v1=..."  (put this in the Stripe-Signature header)
+
+# Verify (receiver side): recompute, constant-time compare, reject stale.
+def ok as bool init webhook.stripeVerify($secret, $body, $header, 300, $now);
+```
+
+**Stripe** (`t=,v1=`): the signed payload is `<timestamp> + "." + <body>`,
+HMAC-SHA256, hex. A header may carry several `v1=` values (a signing-secret
+rotation); `stripeVerify` accepts the delivery if **any** matches and the `t`
+value is fresh. A missing `t=` or `v0=`/`v1=` part, or a non-numeric timestamp,
+yields `false` rather than throwing.
+
+**Slack** (`v0=`): the base string is `"v0:" + <timestamp> + ":" + <body>`,
+HMAC-SHA256, hex; the timestamp travels separately in
+`X-Slack-Request-Timestamp` (parse it to an `int` and pass it in). Slack's own
+guidance is a 5-minute (`300`) tolerance.
+
+**Generic** (`timestampedSign` / `timestampedVerify`): the small composable core
+- sign `<timestamp> + "." + <body>` with any supported digest and encoding, so
+a GitHub-style `sha1`/`sha256` scheme or a base64 scheme is one call. Hex is
+case-folded on the built-in schemes; base64 is compared exactly.
+
+Every verify does a **constant-time** compare (via `crypto.hmacEqual`), so no
+scheme leaks through timing how many leading bytes of the signature matched, and
+the freshness window is checked independently so a replayed-but-correctly-signed
+request is still rejected.
+
 ## Sending
 
 `webhook.send` posts the payload as `application/json` with the

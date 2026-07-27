@@ -298,7 +298,11 @@ func hasHeaderCI(headers as map of string to string, lname as string) {
     return false;
 }
 
-func buildRequest(method as string, u as Url, headers as map of string to string, body as string) {
+# buildHead builds the request line + headers + the terminating blank line (no
+# body). `contentLen` is the byte length of the body the caller will send (0 for
+# none), emitted as Content-Length. The head is pure ASCII, so it is safe to
+# UTF-8-encode for the wire even when the body that follows is raw binary.
+func buildHead(method as string, u as Url, headers as map of string to string, contentLen as int) {
     rejectInjection($u, $headers);
     # The method goes onto the request line verbatim, so a CR / LF / NUL in it
     # would smuggle extra headers or a second request just like the target does.
@@ -321,11 +325,18 @@ func buildRequest(method as string, u as Url, headers as map of string to string
         }
         $out = $out + $k + ": " + $headers[$k] + "\r\n";
     }
-    if (len($body) > 0) {
-        def blen as int init len(convert.bytesFromString($body, "utf-8"));
-        $out = $out + "Content-Length: " + convert.toString($blen) + "\r\n";
+    if ($contentLen > 0) {
+        $out = $out + "Content-Length: " + convert.toString($contentLen) + "\r\n";
     }
-    return $out + "\r\n" + $body;
+    return $out + "\r\n";
+}
+
+func buildRequest(method as string, u as Url, headers as map of string to string, body as string) {
+    def blen as int init 0;
+    if (len($body) > 0) {
+        $blen = len(convert.bytesFromString($body, "utf-8"));
+    }
+    return buildHead($method, $u, $headers, $blen) + $body;
 }
 
 # parseHeaders parses the header lines (after the status line) into a lowercased
@@ -517,6 +528,66 @@ func sendCore(method as string, url as string, headers as map of string to strin
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
     return readToEOF($conn, $timeoutMs, $maxBytes);
+}
+
+# sendCoreRaw is sendCore for a **bytes** request body: it writes the ASCII head
+# and the raw body as two separate socket writes, so an arbitrary-binary body (a
+# multipart file upload, a protobuf) reaches the wire byte-for-byte instead of
+# being mangled by a UTF-8 string round-trip. Returns the raw response bytes.
+func sendCoreRaw(method as string, url as string, headers as map of string to string,
+    body as bytes, timeoutMs as int, maxBytes as int, tls as TlsOptions) {
+    def u as Url init parseUrl($url);
+    def head as string init buildHead($method, $u, $headers, len($body));
+    def conn as net.Conn init dial($u, $tls);
+    defer net.close($conn);
+    if ($timeoutMs > 0) {
+        net.setDeadline($conn, $timeoutMs);
+    }
+    net.writeBytes($conn, convert.bytesFromString($head, "utf-8"));
+    if (len($body) > 0) {
+        net.writeBytes($conn, $body);
+    }
+    return readToEOF($conn, $timeoutMs, $maxBytes);
+}
+
+/**
+ * Send one request with a **raw `bytes` body** and return the text `Response`.
+ * Unlike `requestWith` (whose string body is UTF-8-encoded onto the wire), the
+ * body here is written byte-for-byte, so a binary payload - a `multipart/form-data`
+ * file upload, a protobuf - is transmitted intact. The response is still parsed
+ * as text (use `requestWithBytes` if the *response* may be non-UTF-8).
+ * @param method {string} the HTTP method (e.g. "POST")
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers (set your own Content-Type)
+ * @param body {bytes} the raw request body
+ * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited)
+ * @return {Response} the parsed response
+ * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
+ */
+export func requestRawBody(method as string, url as string,
+    headers as map of string to string, body as bytes, timeoutMs as int, maxBytes as int) {
+    def t as TlsOptions;   # zero value: full certificate verification
+    return parseResponse(sendCoreRaw($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t));
+}
+
+/**
+ * `requestRawBody` with explicit TLS options for an `https://` server (a
+ * self-signed or private-CA host). For `http://` the options are ignored.
+ * @param method {string} the HTTP method
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers
+ * @param body {bytes} the raw request body
+ * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param maxBytes {int} the response-body cap (0 = default, negative = unlimited)
+ * @param tls {TlsOptions} certificate-verification options for the TLS handshake
+ * @return {Response} the parsed response
+ * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
+ */
+export func requestRawBodyTls(method as string, url as string,
+    headers as map of string to string, body as bytes, timeoutMs as int,
+    maxBytes as int, tls as TlsOptions) {
+    return parseResponse(sendCoreRaw($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
 }
 
 /**

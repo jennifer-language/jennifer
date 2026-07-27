@@ -84,6 +84,56 @@ func testConst() {
     testing.assertFalse($doc.consts[0].exported);
 }
 
+# --- digit-inclusive identifiers --------------------------------------------
+
+# A func name with an interior/trailing digit (uuid.v4-style) parses.
+func testFuncNameWithDigit() {
+    def doc as FileDoc init parse("/**\n * Make a v4 UUID.\n * @return {string} the uuid\n */\nexport func v4() { return \"x\"; }");
+    testing.assertEqual(len($doc.funcs), 1);
+    testing.assertEqual($doc.funcs[0].name, "v4");
+    testing.assertTrue($doc.funcs[0].exported);
+}
+
+# A @param name with a trailing digit binds to a real parameter (no diagnostic).
+func testParamNameWithDigit() {
+    def doc as FileDoc init parse("/**\n * F.\n * @param x2 {int} second x\n */\nfunc f(x2 as int) { return; }");
+    testing.assertEqual(len($doc.funcs), 1);
+    testing.assertEqual($doc.funcs[0].params[0].name, "x2");
+    testing.assertEqual($doc.funcs[0].params[0].type, "int");
+    testing.assertEqual(len($doc.diagnostics), 0);
+}
+
+# A struct field name with a trailing digit (md5) parses and matches (no diag).
+func testStructFieldWithDigit() {
+    def doc as FileDoc init parse("/**\n * Hashes.\n * @field md5 {string} the md5 hex\n */\nexport def struct Hashes { md5 as string };");
+    testing.assertEqual(len($doc.structs), 1);
+    testing.assertEqual($doc.structs[0].fields[0].name, "md5");
+    testing.assertEqual(len($doc.diagnostics), 0);
+}
+
+# A constant name with an in-chunk digit (SHA256) parses.
+func testConstNameWithDigit() {
+    def doc as FileDoc init parse("/** sha256 block size */\ndef const SHA256 as int init 64;");
+    testing.assertEqual(len($doc.consts), 1);
+    testing.assertEqual($doc.consts[0].name, "SHA256");
+    testing.assertEqual($doc.consts[0].type, "int");
+}
+
+# A multi-chunk constant with a digit chunk (SCRAM_SHA256) parses.
+func testConstNameMultiChunkDigit() {
+    def doc as FileDoc init parse("/** scram mechanism */\nexport def const SCRAM_SHA256 as string init \"x\";");
+    testing.assertEqual(len($doc.consts), 1);
+    testing.assertEqual($doc.consts[0].name, "SCRAM_SHA256");
+    testing.assertTrue($doc.consts[0].exported);
+}
+
+# A digit-initial @param name is not a legal identifier: parseParam falls back
+# to firstWord (no {type} capture), so the type stays empty.
+func testDigitInitialParamNotIdent() {
+    def p as ParamDoc init parseParam("2x {int} bogus");
+    testing.assertEqual($p.type, "");
+}
+
 # --- diagnostics ------------------------------------------------------------
 
 func testBadParamDiagnostic() {

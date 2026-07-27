@@ -37,3 +37,40 @@ func testFormBody() {
     testing.assertEqual(formBody("Hi there", "a&b", 5),
         "title=Hi+there&message=a%26b&priority=5");
 }
+
+# --- JSON body + extras (gotify.j's `use json;` is in scope after the splice) ---
+
+func testJsonBodyBase() {
+    # No extras set: title / message / priority present, no `extras` object.
+    def e as Extras init Extras{markdown: false, clickUrl: ""};
+    def doc as json.Value init json.decode(jsonBody("Deploy", "build 1234 is live", 5, $e));
+    testing.assertEqual(json.asString($doc, "/title"), "Deploy");
+    testing.assertEqual(json.asString($doc, "/message"), "build 1234 is live");
+    testing.assertEqual(json.asInt($doc, "/priority"), 5);
+    testing.assertEqual(json.has($doc, "/extras"), false);
+}
+
+func testJsonBodyMarkdown() {
+    def e as Extras init Extras{markdown: true, clickUrl: ""};
+    def doc as json.Value init json.decode(jsonBody("T", "M", 5, $e));
+    testing.assertEqual(json.asString($doc, "/extras/client::display/contentType"), "text/markdown");
+    # click extras absent when no URL is given
+    testing.assertEqual(json.has($doc, "/extras/client::notification"), false);
+}
+
+func testJsonBodyClick() {
+    def e as Extras init Extras{markdown: false, clickUrl: "https://x.example/go"};
+    def doc as json.Value init json.decode(jsonBody("T", "M", 4, $e));
+    testing.assertEqual(json.asString($doc, "/extras/client::notification/click/url"),
+        "https://x.example/go");
+    # markdown display extras absent when markdown is false
+    testing.assertEqual(json.has($doc, "/extras/client::display"), false);
+}
+
+func testJsonBodyBoth() {
+    def e as Extras init Extras{markdown: true, clickUrl: "https://x.example/go"};
+    def doc as json.Value init json.decode(jsonBody("Deploy", "done", 8, $e));
+    testing.assertEqual(json.asString($doc, "/extras/client::display/contentType"), "text/markdown");
+    testing.assertEqual(json.asString($doc, "/extras/client::notification/click/url"),
+        "https://x.example/go");
+}

@@ -40,6 +40,8 @@ string (`""` for none).
 | `http.requestWithTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestWith`, with explicit `TlsOptions`. |
 | `http.requestBytes(method, url, headers, body)` | Byte-safe request: returns a `BytesResponse` (raw `bytes` body) - for binary content. |
 | `http.requestWithBytes(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestBytes`, with explicit timeout / cap / `TlsOptions` (pass negative `maxBytes` for a large download). |
+| `http.requestRawBody(method, url, headers, body, timeoutMs, maxBytes)` | Send a **raw `bytes` body** byte-for-byte (a `multipart/form-data` file upload, a protobuf), not UTF-8-encoded; returns a text `Response`. Set your own `Content-Type`. |
+| `http.requestRawBodyTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestRawBody`, with explicit `TlsOptions`. |
 | `http.getBytes(url, headers)`               | GET returning a raw-`bytes` body (the download shortcut). |
 | `http.get(url, headers)`                    | GET.                                                               |
 | `http.post(url, contentType, body, headers)`| POST; sets `Content-Type`.                                         |

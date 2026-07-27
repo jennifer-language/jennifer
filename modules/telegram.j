@@ -24,7 +24,10 @@ use json;
 use strings;
 use convert;
 use lists;
+use fs;
+use path;
 import "./http.j" as http;
+import "./multipart.j" as multipart;
 
 # The public Telegram Bot API base (overridable for a self-hosted API server or
 # tests via `botWith`).
@@ -82,8 +85,56 @@ export def struct Update {
     message as Message
 };
 
+/**
+ * One inline-keyboard button. Exactly one action is set: a `url` (opens a link)
+ * or a `callbackData` (fires a `callback_query` back to the bot). Build with
+ * `urlButton` / `inlineButton` rather than the raw literal.
+ * @field text {string} the button label
+ * @field url {string} the URL to open ("" when this is a callback button)
+ * @field callbackData {string} the callback payload ("" when this is a URL button)
+ */
+export def struct Button {
+    text as string,
+    url as string,
+    callbackData as string
+};
+
+/**
+ * An incoming button press (a Telegram `callback_query`). Acknowledge it with
+ * `answerCallbackQuery` so the client stops its loading spinner.
+ * @field id {string} the callback query id (pass to `answerCallbackQuery`)
+ * @field from {User} the user who pressed the button
+ * @field data {string} the button's `callbackData` ("" if none)
+ * @field messageId {int} the id of the message the button is attached to (0 if absent)
+ */
+export def struct CallbackQuery {
+    id as string,
+    from as User,
+    data as string,
+    messageId as int
+};
+
 func fail(msg as string) {
     throw Error{ kind: "telegram", message: "telegram: " + $msg, file: "", line: 0, col: 0 };
+}
+
+/**
+ * Redact a bot token from a string (an error message, a log line). The token is
+ * a secret that rides in the request URL path (`/bot<TOKEN>/<method>`), so an
+ * error carrying the URL would otherwise leak it. Replaces the `bot<TOKEN>` path
+ * segment with `bot<redacted>` and any bare token occurrence with `<redacted>`.
+ * Applied to every error message this module rethrows from the HTTP layer.
+ * @param s {string} the string to scrub
+ * @param token {string} the bot token to remove
+ * @return {string} the string with the token removed
+ */
+export func redactToken(s as string, token as string) {
+    def out as string init $s;
+    if (len($token) > 0) {
+        $out = strings.replace($out, "bot" + $token, "bot<redacted>");
+        $out = strings.replace($out, $token, "<redacted>");
+    }
+    return $out;
 }
 
 # --- clients (exported) -----------------------------------------------------
@@ -184,9 +235,45 @@ func checkResponse(node as json.Value) {
 func call(b as Bot, method as string, params as map of string to string, timeoutMs as int) {
     def url as string init $b.baseUrl + "/bot" + $b.token + "/" + $method;
     def headers as map of string to string init {"Content-Type": "application/x-www-form-urlencoded"};
-    def resp as http.Response init http.requestWith("POST", $url, $headers, formEncode($params), $timeoutMs, 0);
+    # A transport error from the http layer can carry the request URL - and thus
+    # the token - in its message. Rethrow it with the token redacted so a leaked
+    # log or a caught Error never exposes the secret.
+    def resp as http.Response;
+    try {
+        $resp = http.requestWith("POST", $url, $headers, formEncode($params), $timeoutMs, 0);
+    } catch (e) {
+        fail(redactToken($e.message, $b.token));
+    }
     # A proxy error page (502 HTML, auth portal) isn't JSON: decode under a
     # guard and rethrow as a telegram-kind error rather than a raw json one.
+    def node as json.Value;
+    try {
+        $node = json.decode($resp.body);
+    } catch (e) {
+        fail("non-JSON response (HTTP " + convert.toString($resp.status) + ")");
+    }
+    if (not json.has($node, "/ok")) {
+        fail("malformed response: missing 'ok' field (HTTP " + convert.toString($resp.status) + ")");
+    }
+    checkResponse($node);
+    return $node;
+}
+
+# callMultipart POSTs a `multipart/form-data` body (a file upload) and returns
+# the decoded, ok-verified response node. Mirrors `call` but sends a built form
+# instead of urlencoded params; the token is redacted from any rethrown
+# transport error the same way.
+func callMultipart(b as Bot, method as string, form as multipart.Built, timeoutMs as int) {
+    def url as string init $b.baseUrl + "/bot" + $b.token + "/" + $method;
+    def headers as map of string to string init {"Content-Type": $form.contentType};
+    # Send the multipart body as raw bytes so a binary file (a photo, a document)
+    # reaches the wire intact - a UTF-8 string round-trip would corrupt it.
+    def resp as http.Response;
+    try {
+        $resp = http.requestRawBody("POST", $url, $headers, $form.body, $timeoutMs, 0);
+    } catch (e) {
+        fail(redactToken($e.message, $b.token));
+    }
     def node as json.Value;
     try {
         $node = json.decode($resp.body);
@@ -261,6 +348,120 @@ func parseUpdates(node as json.Value) {
         $i = $i + 1;
     }
     return $updates;
+}
+
+/**
+ * Parse an incoming update's `callback_query` into a `CallbackQuery`. The
+ * `update` is the raw decoded JSON of one update object (a `json.Value`). Pure:
+ * no network. Reads `/callback_query/{id,from,data,message/message_id}`; a field
+ * that is absent lands as its zero value, and a field present but of the wrong
+ * JSON type raises a `telegram` error (rather than a raw `json` one), so callers
+ * catch malformed updates by the module's own error kind.
+ * @param update {json.Value} the decoded update object
+ * @return {CallbackQuery} the parsed callback query (zero-valued fields when absent)
+ * @throws {Error} kind "telegram" when a present sub-field has the wrong type
+ */
+export func parseCallbackQuery(update as json.Value) {
+    def base as string init "/callback_query";
+    def id as string init "";
+    def data as string init "";
+    def from as User;
+    def messageId as int init 0;
+    # Wrap the field reads so a wrong-typed field surfaces as a telegram error,
+    # matching how the request path wraps a json.decode failure.
+    try {
+        if (json.has($update, $base + "/id")) {
+            $id = json.asString($update, $base + "/id");
+        }
+        if (json.has($update, $base + "/from")) {
+            $from = parseUser($update, $base + "/from");
+        }
+        if (json.has($update, $base + "/data")) {
+            $data = json.asString($update, $base + "/data");
+        }
+        if (json.has($update, $base + "/message/message_id")) {
+            $messageId = json.asInt($update, $base + "/message/message_id");
+        }
+    } catch (e) {
+        fail("parseCallbackQuery: malformed callback_query: " + $e.message);
+    }
+    return CallbackQuery{ id: $id, from: $from, data: $data, messageId: $messageId };
+}
+
+# --- inline keyboards (exported) --------------------------------------------
+
+/**
+ * A URL button: pressing it opens `url` in the client.
+ * @param text {string} the button label
+ * @param url {string} the URL to open
+ * @return {Button} the button
+ */
+export func urlButton(text as string, url as string) {
+    return Button{ text: $text, url: $url, callbackData: "" };
+}
+
+/**
+ * A callback button: pressing it sends a `callback_query` carrying
+ * `callbackData` back to the bot (observe it via `getUpdates` +
+ * `parseCallbackQuery`, ack it with `answerCallbackQuery`).
+ * @param text {string} the button label
+ * @param callbackData {string} the callback payload (<= 64 bytes)
+ * @return {Button} the button
+ */
+export func inlineButton(text as string, callbackData as string) {
+    return Button{ text: $text, url: "", callbackData: $callbackData };
+}
+
+/**
+ * Render an inline-keyboard `reply_markup` to its JSON string. `rows` is a list
+ * of rows, each row a list of `Button`s. Pure - the exact JSON `sendMessageWith`
+ * variants attach as the `reply_markup` form parameter. A URL button emits
+ * `{"text":...,"url":...}`; a callback button `{"text":...,"callback_data":...}`.
+ * @param rows {list of list of Button} the keyboard rows
+ * @return {string} the `reply_markup` JSON (a `{"inline_keyboard":[...]}` object)
+ */
+export func renderInlineKeyboard(rows as list of list of Button) {
+    def markup as json.Value init json.map();
+    $markup = json.set($markup, "/inline_keyboard", json.list());
+    def r as int init 0;
+    for (def row in $rows) {
+        $markup = json.append($markup, "/inline_keyboard", json.list());
+        def rowPtr as string init "/inline_keyboard/" + convert.toString($r);
+        for (def btn in $row) {
+            def b as json.Value init json.map();
+            $b = json.set($b, "/text", $btn.text);
+            if (len($btn.url) > 0) {
+                $b = json.set($b, "/url", $btn.url);
+            } else {
+                $b = json.set($b, "/callback_data", $btn.callbackData);
+            }
+            $markup = json.append($markup, $rowPtr, $b);
+        }
+        $r = $r + 1;
+    }
+    return json.encode($markup);
+}
+
+# --- multipart upload builders (exported) -----------------------------------
+
+/**
+ * Assemble the `multipart/form-data` parts for a file upload: a `chat_id` field
+ * plus the file itself under `field` (`"photo"` for `sendPhoto`, `"document"`
+ * for `sendDocument`). Pure - takes the file bytes, so it is testable with no
+ * disk or network. Feed the result's `contentType` / `body` to the API POST.
+ * @param field {string} the file's form-field name ("photo" or "document")
+ * @param chatId {int} the target chat id
+ * @param filename {string} the file name reported to Telegram
+ * @param contentType {string} the file's MIME type ("" lets Telegram sniff)
+ * @param data {bytes} the file content
+ * @return {multipart.Built} the built form (Content-Type header + body)
+ */
+export func buildUpload(field as string, chatId as int, filename as string, contentType as string, data as bytes) {
+    def parts as list of multipart.Part init [
+        multipart.field("chat_id", convert.toString($chatId)),
+        multipart.file($field, $filename, $contentType, $data)
+    ];
+    return multipart.build($parts);
 }
 
 # --- API methods (exported) -------------------------------------------------
@@ -343,6 +544,77 @@ export func sendChatAction(b as Bot, chatId as int, action as string) {
     $params["chat_id"] = convert.toString($chatId);
     $params["action"] = $action;
     return json.asBool(call($b, "sendChatAction", $params, DEFAULT_TIMEOUT_MS), "/result");
+}
+
+/**
+ * Send a text message with an inline keyboard attached. `rows` is a list of
+ * button rows (see `urlButton` / `inlineButton`); it is rendered to the
+ * `reply_markup` form parameter via `renderInlineKeyboard`.
+ * @param b {Bot} the bot
+ * @param chatId {int} the target chat id
+ * @param text {string} the message text
+ * @param rows {list of list of Button} the inline-keyboard rows
+ * @return {Message} the sent message
+ * @throws {Error} kind "telegram" on an API error
+ */
+export func sendMessageWithKeyboard(b as Bot, chatId as int, text as string, rows as list of list of Button) {
+    def params as map of string to string init {};
+    $params["chat_id"] = convert.toString($chatId);
+    $params["text"] = $text;
+    $params["reply_markup"] = renderInlineKeyboard($rows);
+    return parseMessage(call($b, "sendMessage", $params, DEFAULT_TIMEOUT_MS), "/result");
+}
+
+/**
+ * Acknowledge a button press (`answerCallbackQuery`). Stops the client's loading
+ * spinner; the optional `text` shows a brief notification to the user.
+ * @param b {Bot} the bot
+ * @param callbackId {string} the `CallbackQuery.id` to answer
+ * @param text {string} a short notification ("" for none)
+ * @return {bool} true on success
+ * @throws {Error} kind "telegram" on an API error
+ */
+export func answerCallbackQuery(b as Bot, callbackId as string, text as string) {
+    def params as map of string to string init {};
+    $params["callback_query_id"] = $callbackId;
+    if (len($text) > 0) {
+        $params["text"] = $text;
+    }
+    return json.asBool(call($b, "answerCallbackQuery", $params, DEFAULT_TIMEOUT_MS), "/result");
+}
+
+/**
+ * Upload a photo from a local file path via `multipart/form-data`. Reads the
+ * file with `fs.readBytes`, names the part from the path's basename, and POSTs
+ * it as `sendPhoto`. The complement to `sendPhoto`, which takes a URL or file
+ * id. `contentType` may be "" to let Telegram sniff the format.
+ * @param b {Bot} the bot
+ * @param chatId {int} the target chat id
+ * @param filePath {string} the local file path
+ * @param contentType {string} the file's MIME type ("" to let Telegram sniff)
+ * @return {Message} the sent message
+ * @throws {Error} kind "telegram" on an API error (token-redacted)
+ */
+export func sendPhotoFile(b as Bot, chatId as int, filePath as string, contentType as string) {
+    def data as bytes init fs.readBytes($filePath);
+    def form as multipart.Built init buildUpload("photo", $chatId, path.base($filePath), $contentType, $data);
+    return parseMessage(callMultipart($b, "sendPhoto", $form, DEFAULT_TIMEOUT_MS), "/result");
+}
+
+/**
+ * Upload a document from a local file path via `multipart/form-data`. Like
+ * `sendPhotoFile` but under the `document` field (any file type).
+ * @param b {Bot} the bot
+ * @param chatId {int} the target chat id
+ * @param filePath {string} the local file path
+ * @param contentType {string} the file's MIME type ("" to let Telegram sniff)
+ * @return {Message} the sent message
+ * @throws {Error} kind "telegram" on an API error (token-redacted)
+ */
+export func sendDocumentFile(b as Bot, chatId as int, filePath as string, contentType as string) {
+    def data as bytes init fs.readBytes($filePath);
+    def form as multipart.Built init buildUpload("document", $chatId, path.base($filePath), $contentType, $data);
+    return parseMessage(callMultipart($b, "sendDocument", $form, DEFAULT_TIMEOUT_MS), "/result");
 }
 
 /**

@@ -107,13 +107,26 @@ func counterBytes(counter as int) {
     return $out;
 }
 
-# hotp is the RFC 4226 HMAC-based one-time password for a counter: HMAC the
+# hotpKey is the RFC 4226 HMAC-based one-time password for a counter: HMAC the
 # counter with the key, then dynamic-truncate to a `digits`-wide number.
-func hotp(key as bytes, counter as int, digits as int, algorithm as string) {
+func hotpKey(key as bytes, counter as int, digits as int, algorithm as string) {
     def mac as bytes init hash.hmac($key, counterBytes($counter), $algorithm);
     def offset as int init $mac[len($mac) - 1] & 0x0F;
     def bin as int init ((($mac[$offset] & 0x7F) << 24) | ($mac[$offset + 1] << 16) | ($mac[$offset + 2] << 8) | $mac[$offset + 3]);
     return padCode($bin % powTen($digits), $digits);
+}
+
+/**
+ * The raw RFC 4226 HOTP: the six-digit HMAC-SHA1 code for an explicit counter,
+ * the counter-based building block TOTP layers a clock over. Use it directly
+ * for HOTP (event-based OTP) or to pin against the RFC 4226 test vectors; TOTP
+ * itself is just this over `unixSeconds // period`.
+ * @param secret {string} the base32 shared secret
+ * @param counter {int} the RFC 4226 moving-factor counter
+ * @return {string} the six-digit zero-padded numeric code
+ */
+export func hotp(secret as string, counter as int) {
+    return hotpKey(decodeSecret($secret), $counter, 6, "sha1");
 }
 
 # --- generate / verify ------------------------------------------------------
@@ -127,7 +140,34 @@ func hotp(key as bytes, counter as int, digits as int, algorithm as string) {
  */
 export func generateAt(secret as string, unixSeconds as int, opts as Options) {
     def counter as int init $unixSeconds // periodOf($opts);
-    return hotp(decodeSecret($secret), $counter, digitsOf($opts), algorithmOf($opts));
+    return hotpKey(decodeSecret($secret), $counter, digitsOf($opts), algorithmOf($opts));
+}
+
+# --- secret generation ------------------------------------------------------
+
+/**
+ * Generate a fresh random shared secret of an explicit byte length, as a
+ * base32 string (unpadded, the authenticator format `decodeSecret` accepts).
+ * Randomness is crypto-grade (`crypto.randBytes`), so the secret is
+ * unguessable. Round-trips: the result works with `generate` / `verify`.
+ * @param nbytes {int} the number of random bytes (RFC 6238 recommends >= 20 for SHA-1)
+ * @return {string} the base32-encoded secret
+ */
+export func generateSecretN(nbytes as int) {
+    if ($nbytes <= 0) {
+        throw Error{ kind: "totp", message: "totp: secret byte length must be positive", file: "", line: 0, col: 0 };
+    }
+    def raw as bytes init crypto.randBytes($nbytes);
+    return strings.replace(encoding.toText($raw, "base32"), "=", "");
+}
+
+/**
+ * Generate a fresh random shared secret with the RFC 6238-recommended length
+ * for SHA-1 TOTP (20 bytes / 160 bits), as an unpadded base32 string.
+ * @return {string} the base32-encoded secret
+ */
+export func generateSecret() {
+    return generateSecretN(20);
 }
 
 /**
@@ -141,15 +181,18 @@ export func generate(secret as string, opts as Options) {
 }
 
 /**
- * Verify a code against an explicit Unix time, allowing a +/-1-step skew (so a
- * code from the previous or next window still passes). Deterministic.
+ * Verify a code against an explicit Unix time, allowing a `window`-step skew on
+ * each side of now (so `window` steps of clock drift in either direction still
+ * pass). `window` 0 checks only the current step; `window` 1 is the +/-1-step
+ * default `verifyAt` uses. Deterministic.
  * @param secret {string} the base32 shared secret
  * @param code {string} the code to check
  * @param unixSeconds {int} the Unix time in seconds
+ * @param window {int} the number of period-steps to accept on each side of now
  * @param opts {Options} digits / period / algorithm (zero-value = defaults)
- * @return {bool} true if the code matches this step or an adjacent one
+ * @return {bool} true if the code matches any step within the window
  */
-export func verifyAt(secret as string, code as string, unixSeconds as int, opts as Options) {
+export func verifyWindowAt(secret as string, code as string, unixSeconds as int, window as int, opts as Options) {
     def key as bytes init decodeSecret($secret);
     def digits as int init digitsOf($opts);
     def algorithm as string init algorithmOf($opts);
@@ -161,15 +204,41 @@ export func verifyAt(secret as string, code as string, unixSeconds as int, opts 
     # against a 2FA endpoint. crypto.hmacEqual runs in time independent of the
     # contents.
     def matched as bool init false;
-    def step as int init -1;
-    while ($step <= 1) {
-        def computed as bytes init convert.bytesFromString(hotp($key, $counter + $step, $digits, $algorithm), "utf-8");
+    def step as int init -$window;
+    while ($step <= $window) {
+        def computed as bytes init convert.bytesFromString(hotpKey($key, $counter + $step, $digits, $algorithm), "utf-8");
         if (crypto.hmacEqual($computed, $codeBytes)) {
             $matched = true;
         }
         $step = $step + 1;
     }
     return $matched;
+}
+
+/**
+ * Verify a code against the current time, allowing a `window`-step skew on each
+ * side of now.
+ * @param secret {string} the base32 shared secret
+ * @param code {string} the code to check
+ * @param window {int} the number of period-steps to accept on each side of now
+ * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @return {bool} true if the code matches any step within the window
+ */
+export func verifyWindow(secret as string, code as string, window as int, opts as Options) {
+    return verifyWindowAt($secret, $code, time.unix(time.now()), $window, $opts);
+}
+
+/**
+ * Verify a code against an explicit Unix time, allowing a +/-1-step skew (so a
+ * code from the previous or next window still passes). Deterministic.
+ * @param secret {string} the base32 shared secret
+ * @param code {string} the code to check
+ * @param unixSeconds {int} the Unix time in seconds
+ * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @return {bool} true if the code matches this step or an adjacent one
+ */
+export func verifyAt(secret as string, code as string, unixSeconds as int, opts as Options) {
+    return verifyWindowAt($secret, $code, $unixSeconds, 1, $opts);
 }
 
 /**

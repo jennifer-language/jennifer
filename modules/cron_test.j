@@ -103,6 +103,71 @@ func testErrors() {
     testing.assertThrows("badStep", "cron");
 }
 
+func testNamedMonths() {
+    # names anywhere a number works: single, list, range - case-insensitive
+    testing.assertEqual(parse("0 0 1 JAN *").months[0], 1);
+    testing.assertEqual(parse("0 0 1 dec *").months[0], 12);
+    def lst as Schedule init parse("0 0 1 JAN,JUL *");
+    testing.assertEqual(len($lst.months), 2);
+    testing.assertEqual($lst.months[1], 7);
+    def rng as Schedule init parse("0 0 1 Mar-May *");
+    testing.assertEqual(len($rng.months), 3);          # 3,4,5
+    testing.assertEqual($rng.months[2], 5);
+}
+
+func testNamedWeekdays() {
+    # SUN=0 folds to ISO 7 like the numeric 0
+    testing.assertEqual(parse("0 0 * * SUN").weekdays[0], 7);
+    testing.assertEqual(parse("0 0 * * mon").weekdays[0], 1);
+    # MON-FRI range works via names
+    def wk as Schedule init parse("0 0 * * MON-FRI");
+    testing.assertEqual(len($wk.weekdays), 5);
+    testing.assertEqual($wk.weekdays[0], 1);
+    testing.assertEqual($wk.weekdays[4], 5);
+    # matches with named weekdays behaves like the numeric form
+    testing.assertTrue(matches(parse("30 9 * * MON-FRI"), at("2026-03-16T09:30:00+00:00")));
+}
+
+func badMonthName() {
+    parse("0 0 1 FOO *");    # not a real month name
+}
+
+func testNamedErrors() {
+    testing.assertThrows("badMonthName", "cron");
+}
+
+func testMacros() {
+    testing.assertEqual(time.iso(next(parse("@yearly"), at("2026-03-14T10:30:00+00:00"))), "2027-01-01T00:00:00Z");
+    testing.assertEqual(time.iso(next(parse("@annually"), at("2026-03-14T10:30:00+00:00"))), "2027-01-01T00:00:00Z");
+    testing.assertEqual(time.iso(next(parse("@monthly"), at("2026-03-14T10:30:00+00:00"))), "2026-04-01T00:00:00Z");
+    testing.assertEqual(time.iso(next(parse("@daily"), at("2026-03-14T10:30:00+00:00"))), "2026-03-15T00:00:00Z");
+    testing.assertEqual(time.iso(next(parse("@midnight"), at("2026-03-14T10:30:00+00:00"))), "2026-03-15T00:00:00Z");
+    testing.assertEqual(time.iso(next(parse("@hourly"), at("2026-03-14T10:30:00+00:00"))), "2026-03-14T11:00:00Z");
+    # @weekly fires Sunday 00:00
+    testing.assertTrue(matches(parse("@weekly"), at("2026-03-15T00:00:00+00:00")));   # a Sunday
+}
+
+func testRebootSchedule() {
+    def r as Schedule init parse("@reboot");
+    testing.assertTrue($r.reboot);
+    # a @reboot schedule never matches a clock time
+    testing.assertFalse(matches($r, at("2026-03-16T09:30:00+00:00")));
+    testing.assertFalse(matches($r, at("2026-01-01T00:00:00+00:00")));
+}
+
+func rebootNext() {
+    next(parse("@reboot"), at("2026-03-14T10:30:00+00:00"));   # no scheduled time
+}
+
+func badMacro() {
+    parse("@nope");    # unknown nickname
+}
+
+func testMacroErrors() {
+    testing.assertThrows("rebootNext", "cron");
+    testing.assertThrows("badMacro", "cron");
+}
+
 func testHelpers() {
     testing.assertEqual(len(fields("  30   9 * * 1  ")), 5);       # collapses whitespace
     testing.assertEqual(len(parseTerm("1-5", 0, 59, "minute")), 5);

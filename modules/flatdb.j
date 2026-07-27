@@ -192,7 +192,7 @@ func writeAtomic(path as string, data as json.Value) {
     } catch (err) {
         try {
             fs.remove($tmp);
-        } catch (rmErr) {
+        } catch (rmErr) {  # lint-disable: L103
             # best-effort cleanup; the rename failure below is what matters
         }
         throw $err;

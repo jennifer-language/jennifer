@@ -1017,36 +1017,33 @@ sub-numbering as pieces land):
 - **`influxdb`** - 2.x / 3.x support (token auth, org / bucket params,
   `/api/v2/write`, Flux) alongside the current 1.x.
 
-### M23.8 - ergonomic papercuts + notifier richness
+### M23.8 - ergonomic papercuts + notifier richness (compacted)
 
-**Planned.** A sweep of cheap, high-value-per-effort wins across many modules:
-- **`log`** - a child / context logger (`with(fields)` binding persistent fields)
-  and a `fatal` level (log-then-exit).
-- **`cron`** - named months / weekdays (`JAN`-`DEC`, `MON`-`SUN`) and the
-  `@daily` / `@hourly` / `@reboot` / ... nickname macros.
-- **`docblock`** - update the identifier regexes for the M22.2 digit rule (so a
-  `func v4` / a `@param x2` / a const `SHA256` parse).
-- **`jwt`** - JWKS / `kid`-based key resolution and clock-skew leeway.
-- **`totp`** - a secret-generation helper and a configurable skew window; export
-  the internal HOTP; and document that replay defence (single-use tracking) and
-  brute-force rate limiting are the caller's responsibility (RFC 6238 5.2).
-- **`bloom`** - an optimal-sizing constructor (`bloom.optimal(n, fpr)`),
-  serialize / deserialize, and union / merge.
-- **`csv` / `jsonl`** - streaming reader / writer handles; `csv` dialect options
-  (quote char, comment prefix, trim); plus CSV formula-injection (CWE-1236)
-  mitigation - a `formatSafe` that prefixes a leading `= + - @` / tab / CR field
-  with `'`, and a doc note that plain export is unsafe for spreadsheet targets.
-- **`gotify`** - `extras` (markdown content-type, click actions).
-- **`htmlwriter`** - boolean / valueless attributes (`disabled`, `checked`).
-- **`flatdb`** - clear the two residual lint warnings (a `lint-disable: L103` with
-  a reason on the best-effort cleanup catch; drop the unused test local).
-- **`webhook`** - replay-protected timestamped signing schemes (Stripe `t=,v1=`,
-  Slack `v0=`) + base64 / SHA-1 variants.
-- **notifier richness** (the meatier end of the bundle) - `discord` embed fields /
-  footer / author + username / avatar override; `telegram` inline keyboards +
-  `callback_query` handling + local-file upload (and redact the bot token, which
-  the API forces into the URL path, from logs / error messages); `slack`
-  `context` / `fields` / `actions` blocks.
+**Done.** A sweep of cheap, high-value wins across fifteen `.j` modules, each
+shipping its enhanced `*_test.j` overlay at 100% and an updated `docs/modules/`
+doc (per-module surface detail lives there; this table is the index). One core
+addition fell out of dogfooding: telegram's binary file upload needed a raw
+request body, so `http` gained `requestRawBody` / `requestRawBodyTls` (a `bytes`
+body written byte-for-byte - the request-side counterpart to M22.10's byte-safe
+response path, `buildRequest` refactored onto a head-only `buildHead`), pinned by
+an all-256-byte-values round-trip.
+
+| Module | Shipped |
+| ------ | ------- |
+| `log` | `with(logger, fields)` child / context logger (persistent, composing fields) + a `fatal` level (log then `exit 1`). |
+| `cron` | Named months (`JAN`-`DEC`) / weekdays (`SUN`-`SAT`) anywhere a number goes, and `@`-nickname macros (`@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` / `@midnight` / `@reboot`; `@reboot` is startup-only, never a clock match). |
+| `docblock` | Identifier / constant regexes updated for the M22.2 digit rule, so `func v4` / `@param x2` / const `SHA256` parse. |
+| `jwt` | `verifyLeeway` (clock-skew, overflow-safe), `verifyWithKeys` (kid -> secret / PEM / JWK map), and `verifyJwks` (resolve a JWKS by kid via `crypto.jwkToPem`); the expected `alg` is still enforced (no algorithm-confusion). |
+| `totp` | `generateSecret` / `generateSecretN` (crypto-grade base32), an exported RFC 4226 `hotp`, and a configurable `verifyWindow`; docs the RFC 6238 5.2 replay / rate-limit caller duties. |
+| `bloom` | `optimal(n, fpr)` sizing (in-module `ln`), `serialize` / `deserialize` (invariant-checked - a degenerate blob is rejected, never a universal-yes oracle), `union` / `merge`. |
+| `csv` / `jsonl` | `csv.formatSafe` (CWE-1236 spreadsheet-formula neutraliser), a `Dialect` (delimiter / quote / comment / trim), and streaming reader / writer handles over `fs.File` (linear multi-line-field reassembly); `jsonl` streaming reader / writer. |
+| `gotify` | `pushMarkdown` / `pushWith` / `pushExtras` - markdown content-type and a click action via Gotify's nested `extras`. |
+| `htmlwriter` | `boolAttr` - valueless boolean attributes (`disabled`, `checked`) render as the bare name, still name-validated. |
+| `flatdb` | Cleared the two residual lint warnings (an `L103` suppression on the best-effort cleanup catch, an unused test local dropped). |
+| `webhook` | Replay-protected timestamped signing: Stripe (`t=,v1=`), Slack (`v0=`), and a generic digest / encoding variant - constant-time compare, timestamp-freshness replay defence. |
+| `discord` | Full embeds (`embedField` / `embedFooter` / `embedAuthor`) + per-message `username` / `avatar` identity override. |
+| `telegram` | Inline keyboards, `parseCallbackQuery` / `answerCallbackQuery`, local-file upload (`sendPhotoFile` / `sendDocumentFile` via multipart + `http.requestRawBody`), and bot-token redaction from every raised error. |
+| `slack` | Block Kit `contextBlock` / `fieldsSection` / `actionsBlock` (URL buttons). |
 
 ---
 

@@ -33,6 +33,7 @@ use encoding;
 use time;
 use strings;
 use lists;
+use maps;
 use convert;
 
 # The algorithms this module accepts, by JOSE `alg` name.
@@ -183,6 +184,28 @@ export func sign(claims as json.Value, key as bytes, alg as string) {
  * @throws {Error} on a malformed token, an algorithm mismatch, a bad signature, or an expired / not-yet-valid token
  */
 export func verify(token as string, key as bytes, alg as string) {
+    return verifyLeeway($token, $key, $alg, 0);
+}
+
+/**
+ * Verify a JWT exactly like `verify`, but widen the `exp` / `nbf` time-claim
+ * checks by `leeway` seconds on each side, tolerating a small clock difference
+ * between the token's issuer and this verifier. A token is accepted while
+ * `now < exp + leeway` and `now >= nbf - leeway`; the signature, the header
+ * algorithm, and the `crit` check are enforced exactly as in `verify`. `leeway`
+ * must be non-negative. `verify(token, key, alg)` is `verifyLeeway(token, key,
+ * alg, 0)`.
+ * @param token {string} the compact JWT
+ * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
+ * @param leeway {int} clock-skew tolerance in seconds (must be >= 0)
+ * @return {json.Value} the verified claims
+ * @throws {Error} on a malformed token, an algorithm mismatch, a bad signature, an out-of-window token, or a negative leeway
+ */
+export func verifyLeeway(token as string, key as bytes, alg as string, leeway as int) {
+    if ($leeway < 0) {
+        throw Error{kind: "value", message: "jwt.verifyLeeway: leeway must be non-negative", file: "", line: 0, col: 0};
+    }
     requireAlg($alg);
     def parts as list of string init strings.split($token, ".");
     if (len($parts) != 3) {
@@ -205,10 +228,16 @@ export func verify(token as string, key as bytes, alg as string) {
     }
     def claims as json.Value init json.decode(convert.stringFromBytes(decodeSegment($parts[1]), "utf-8"));
     def now as int init time.unix(time.now());
-    if (json.has($claims, "/exp") and $now >= json.asInt($claims, "/exp")) {
+    # Widen each bound by `leeway`: still-expired only past `exp + leeway`, and
+    # not-yet-valid only before `nbf - leeway`. The `leeway` is moved to the `now`
+    # side (`now - leeway >= exp`, `now + leeway < nbf`) rather than added to the
+    # token-supplied `exp` / `nbf`, so a hostile far-future `exp` (near int64 max)
+    # cannot trigger an integer-overflow error instead of a clean rejection - the
+    # arithmetic is on `now` (~1.7e9) and the caller's small non-negative leeway.
+    if (json.has($claims, "/exp") and $now - $leeway >= json.asInt($claims, "/exp")) {
         throw Error{kind: "value", message: "jwt.verify: token has expired", file: "", line: 0, col: 0};
     }
-    if (json.has($claims, "/nbf") and $now < json.asInt($claims, "/nbf")) {
+    if (json.has($claims, "/nbf") and $now + $leeway < json.asInt($claims, "/nbf")) {
         throw Error{kind: "value", message: "jwt.verify: token is not yet valid", file: "", line: 0, col: 0};
     }
     return $claims;
@@ -263,6 +292,109 @@ export func verifyWith(token as string, key as bytes, alg as string, policy as P
         }
     }
     return $claims;
+}
+
+/**
+ * Verify a JWT, selecting the verification key by the header's `kid` (key id).
+ * Reads `kid` from the (unverified) header, looks it up in `keysByKid`, and
+ * verifies with the matching value - a shared secret for HS\*, or, for RS\* /
+ * ES\*, either a PEM public key **or a JWK** (a JSON object with a `"kty"`
+ * member, converted to a PEM via `crypto.jwkToPem`). A token with no `kid`
+ * header, or a `kid` absent from the map, is a `jwt` error (never a silent skip).
+ * The map value is **text** (decoded UTF-8), so it holds an HS\* secret, PEM, or
+ * JWK - a raw binary Ed25519 key (from `crypto.signKeypair`) is not
+ * text-representable, so `EdDSA` is not supported on this kid-based path; pass its
+ * key to `verify` directly.
+ *
+ * `alg` is **still required** and enforced against the header, exactly as in
+ * `verify`: selecting the key by `kid` does not select the algorithm, so this
+ * keeps the algorithm-confusion protection (an attacker cannot swap in `HS256`
+ * and have your RSA public PEM read as an HMAC secret). Pin `alg` to what the
+ * issuer uses.
+ *
+ * For a raw **JWKS** (a JSON set of `{"kty","kid","n","e"|"x","y"}` keys), use
+ * `verifyJwks`, which resolves the `kid` and converts the JWK to a key via
+ * `crypto.jwkToPem`. This `keysByKid` form stays useful for a `kid -> secret`
+ * (HMAC) map, or when you have already resolved keys to PEM out of band.
+ * @param token {string} the compact JWT
+ * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / ES\*)
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
+ * @return {json.Value} the verified claims
+ * @throws {Error} on a missing / unknown `kid`, or any `verify` failure
+ */
+export func verifyWithKeys(token as string, keysByKid as map of string to string, alg as string) {
+    def head as json.Value init header($token);
+    if (not json.has($head, "/kid")) {
+        throw Error{kind: "value", message: "jwt.verifyWithKeys: token header has no \"kid\"", file: "", line: 0, col: 0};
+    }
+    def kid as string init json.asString($head, "/kid");
+    if (not maps.has($keysByKid, $kid)) {
+        throw Error{kind: "value", message: "jwt.verifyWithKeys: no key registered for kid " + $kid, file: "", line: 0, col: 0};
+    }
+    def key as bytes init convert.bytesFromString(keyMaterialFor($alg, $keysByKid[$kid]), "utf-8");
+    return verify($token, $key, $alg);
+}
+
+# keyMaterialFor turns a kid-map value into the key text verify() needs. For an
+# asymmetric alg (RS* / ES*), a value that is a JWK (a JSON object carrying a
+# "kty" member) is converted to a PEM public key via crypto.jwkToPem, so the map
+# may hold JWKs directly rather than pre-converted PEMs; a PEM passes through
+# unchanged. For an HMAC alg the value is the shared secret, always verbatim.
+func keyMaterialFor(alg as string, value as string) {
+    if (strings.startsWith($alg, "HS")) {
+        return $value;
+    }
+    def t as string init strings.trim($value);
+    if (strings.startsWith($t, "{") and strings.contains($t, "\"kty\"")) {
+        return crypto.jwkToPem($t);
+    }
+    return $value;
+}
+
+/**
+ * Verify a JWT against a **JWKS** (a JSON Web Key Set), selecting the key by the
+ * header's `kid`. Reads `kid` from the (unverified) header, finds the matching
+ * JWK in the set's `keys` array, converts it to a PEM public key with
+ * `crypto.jwkToPem`, and verifies. For asymmetric algorithms only (RS\* / ES\*):
+ * a JWKS carries public keys, so an HMAC `alg` is a `jwt` error (use
+ * `verifyWithKeys` with the shared secret instead).
+ *
+ * `alg` is **required** and enforced against the header, exactly as `verify` /
+ * `verifyWithKeys` - selecting the key by `kid` does not select the algorithm, so
+ * the algorithm-confusion protection stays. Needs the default `jennifer` binary
+ * (`crypto.jwkToPem` is net-of-`crypto/x509`, off the TinyGo build).
+ * @param token {string} the compact JWT
+ * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
+ * @param alg {string} the algorithm the caller requires (e.g. "RS256", "ES256")
+ * @return {json.Value} the verified claims
+ * @throws {Error} on a missing / unknown `kid`, an HMAC `alg`, a malformed JWK, or any verify failure
+ */
+export func verifyJwks(token as string, jwksJson as string, alg as string) {
+    requireAlg($alg);
+    if (strings.startsWith($alg, "HS")) {
+        throw Error{kind: "value", message: "jwt.verifyJwks: an HMAC algorithm (" + $alg + ") has no JWKS public key; use verifyWithKeys with the shared secret", file: "", line: 0, col: 0};
+    }
+    def head as json.Value init header($token);
+    if (not json.has($head, "/kid")) {
+        throw Error{kind: "value", message: "jwt.verifyJwks: token header has no \"kid\"", file: "", line: 0, col: 0};
+    }
+    def kid as string init json.asString($head, "/kid");
+    def set as json.Value init json.decode($jwksJson);
+    if (not json.has($set, "/keys") or not (json.typeOf($set, "/keys") == "list")) {
+        throw Error{kind: "value", message: "jwt.verifyJwks: JWKS has no \"keys\" array", file: "", line: 0, col: 0};
+    }
+    def n as int init json.length($set, "/keys");
+    def i as int init 0;
+    while ($i < $n) {
+        def kp as string init "/keys/" + convert.toString($i);
+        if (json.has($set, $kp + "/kid") and json.asString($set, $kp + "/kid") == $kid) {
+            def jwk as json.Value init json.get($set, $kp);
+            def pem as string init crypto.jwkToPem(json.encode($jwk));
+            return verify($token, convert.bytesFromString($pem, "utf-8"), $alg);
+        }
+        $i = $i + 1;
+    }
+    throw Error{kind: "value", message: "jwt.verifyJwks: no key in the JWKS matches kid " + $kid, file: "", line: 0, col: 0};
 }
 
 /**

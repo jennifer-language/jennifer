@@ -38,6 +38,34 @@ func testTextAndBlocks() {
         "{\"text\":\"fallback\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"body\"}}]}");
 }
 
+func testContextBlock() {
+    def m as Message init contextBlock(message(), "posted by ci");
+    testing.assertEqual(render($m),
+        "{\"blocks\":[{\"type\":\"context\",\"elements\":[" +
+        "{\"type\":\"mrkdwn\",\"text\":\"posted by ci\"}]}]}");
+}
+
+func testFieldsSection() {
+    def fields as list of string init ["*Env:*\nprod", "*Build:*\n1234"];
+    def m as Message init fieldsSection(message(), $fields);
+    testing.assertEqual(render($m),
+        "{\"blocks\":[{\"type\":\"section\",\"fields\":[" +
+        "{\"type\":\"mrkdwn\",\"text\":\"*Env:*\\nprod\"}," +
+        "{\"type\":\"mrkdwn\",\"text\":\"*Build:*\\n1234\"}]}]}");
+}
+
+func testActionsBlock() {
+    def buttons as list of string init [
+        button("View build", "https://example.com/build"),
+        button("Logs", "https://example.com/logs")
+    ];
+    def m as Message init actionsBlock(message(), $buttons);
+    testing.assertEqual(render($m),
+        "{\"blocks\":[{\"type\":\"actions\",\"elements\":[" +
+        "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"View build\"},\"url\":\"https://example.com/build\"}," +
+        "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"Logs\"},\"url\":\"https://example.com/logs\"}]}]}");
+}
+
 func testSectionEscaping() {
     def m as Message init section(message(), "a \"quote\" & <tag>\nnl");
     # json.encode is HTML-safe: `&` `<` `>` become & < > (still

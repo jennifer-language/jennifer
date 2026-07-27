@@ -9,7 +9,10 @@
  * `a-b` ranges, `a,b,c` lists, and `/n` steps (`a-b/n`, or a wildcard with a
  * step). Day-of-week is `0-7` (both `0` and `7` are Sunday). When both
  * day-of-month and day-of-week are restricted, a day matching **either** fires
- * (the standard cron rule).
+ * (the standard cron rule). The month field also accepts the three-letter names
+ * `JAN`-`DEC` and the weekday field `SUN`-`SAT` (case-insensitive), anywhere a
+ * number works. A whole expression may be a nickname macro (`@daily`,
+ * `@hourly`, ...); `@reboot` parses to a Schedule that never fires (startup only).
  *
  * A pure calculator over `time` - no clock, no sleeping. A scheduler is the
  * caller's loop (`spawn` + `time.sleep` until `cron.next`). Both binaries.
@@ -40,6 +43,9 @@ def const HORIZON_DAYS as int init 366 * 9;
  * @field weekdays {list of int} allowed ISO weekdays (1-7, Monday = 1)
  * @field domStar {bool} whether the day-of-month field was "*"
  * @field dowStar {bool} whether the day-of-week field was "*"
+ * @field reboot {bool} true only for the `@reboot` macro (a startup-only
+ *   schedule that never fires a time: `matches` is always false and `next`
+ *   throws)
  */
 export def struct Schedule {
     minutes as list of int,
@@ -48,7 +54,8 @@ export def struct Schedule {
     months as list of int,
     weekdays as list of int,
     domStar as bool,
-    dowStar as bool
+    dowStar as bool,
+    reboot as bool
 };
 
 # --- field parsing (private) ------------------------------------------------
@@ -58,12 +65,47 @@ func fail(message as string) {
     throw Error{ kind: "cron", message: "cron: " + $message, file: "", line: 0, col: 0 };
 }
 
+# nameToNumber translates a three-letter month (`JAN`-`DEC` -> 1-12) or weekday
+# (`SUN`-`SAT` -> 0-6) name to its number, case-insensitively, returning -1 when
+# the field takes no names or the token is not a known name. Only the month and
+# day-of-week fields carry names; every field's numbers still parse as before.
+func nameToNumber(s as string, field as string) {
+    def up as string init strings.upper($s);
+    if ($field == "month") {
+        def months as list of string init ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+        def i as int init 0;
+        for (def m in $months) {
+            if ($m == $up) {
+                return $i + 1;
+            }
+            $i = $i + 1;
+        }
+    }
+    if ($field == "day-of-week") {
+        def days as list of string init ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+        def j as int init 0;
+        for (def d in $days) {
+            if ($d == $up) {
+                return $j;
+            }
+            $j = $j + 1;
+        }
+    }
+    return 0 - 1;
+}
+
 # toIntChecked parses a bare decimal, throwing a "cron"-kind error (not
 # convert's generic one) when the substring isn't a digit run, so a caller
 # catching kind == "cron" doesn't crash on malformed input like "a * * * *".
+# A month or weekday name is first translated to its number, so names work
+# anywhere a number does (single values, `a-b` ranges, `a,b,c` lists).
 func toIntChecked(s as string, field as string, term as string) {
     if (len($s) == 0) {
         fail("empty number in " + $field + " field: " + $term);
+    }
+    def named as int init nameToNumber($s, $field);
+    if ($named >= 0) {
+        return $named;
     }
     for (def ch in strings.chars($s)) {
         if (strings.indexOf("0123456789", $ch) < 0) {
@@ -140,13 +182,67 @@ func fields(expr as string) {
 
 # --- parse (exported) -------------------------------------------------------
 
+# macroExpansion maps a nickname macro (lowercased, leading `@`) to its standard
+# five-field expression, or "" when the name is not a known time-based macro.
+# `@reboot` is not here - it has no time schedule and is handled in parse.
+func macroExpansion(name as string) {
+    if ($name == "@yearly" or $name == "@annually") {
+        return "0 0 1 1 *";
+    }
+    if ($name == "@monthly") {
+        return "0 0 1 * *";
+    }
+    if ($name == "@weekly") {
+        return "0 0 * * 0";
+    }
+    if ($name == "@daily" or $name == "@midnight") {
+        return "0 0 * * *";
+    }
+    if ($name == "@hourly") {
+        return "0 * * * *";
+    }
+    return "";
+}
+
+# parseNickname handles a whole-expression `@macro`. `@reboot` yields a
+# startup-only Schedule (reboot true, empty fields) that never fires; the other
+# macros expand to a standard expression and re-enter parse.
+func parseNickname(spec as string) {
+    def low as string init strings.lower($spec);
+    if ($low == "@reboot") {
+        return Schedule{
+            minutes: [],
+            hours: [],
+            daysOfMonth: [],
+            months: [],
+            weekdays: [],
+            domStar: false,
+            dowStar: false,
+            reboot: true
+        };
+    }
+    def expanded as string init macroExpansion($low);
+    if ($expanded == "") {
+        fail("unknown nickname macro: " + $spec);
+    }
+    return parse($expanded);
+}
+
 /**
- * Parse a five-field cron expression into a Schedule.
- * @param expr {string} `minute hour day-of-month month day-of-week`
+ * Parse a five-field cron expression into a Schedule. The whole expression may
+ * instead be a nickname macro (`@yearly` / `@annually`, `@monthly`, `@weekly`,
+ * `@daily` / `@midnight`, `@hourly`, `@reboot`). The month field accepts
+ * `JAN`-`DEC` and the weekday field `SUN`-`SAT` (case-insensitive) anywhere a
+ * number works.
+ * @param expr {string} `minute hour day-of-month month day-of-week`, or a `@macro`
  * @return {Schedule} the parsed schedule
  * @throws {Error} kind "cron" on the wrong field count or an out-of-range value
  */
 export func parse(expr as string) {
+    def trimmed as string init strings.trim($expr);
+    if (strings.startsWith($trimmed, "@")) {
+        return parseNickname($trimmed);
+    }
     def parts as list of string init fields($expr);
     if (not (len($parts) == 5)) {
         fail("expression needs 5 fields (minute hour day month weekday), got " + convert.toString(len($parts)));
@@ -170,7 +266,8 @@ export func parse(expr as string) {
         # A `*/n` field is unrestricted for the DOM-OR-DOW rule, matching
         # Vixie/cronie: treat any field starting with `*` as a star.
         domStar: strings.startsWith($parts[2], "*"),
-        dowStar: strings.startsWith($parts[4], "*")
+        dowStar: strings.startsWith($parts[4], "*"),
+        reboot: false
     };
 }
 
@@ -204,6 +301,10 @@ func dayMatches(schedule as Schedule, t as time.Time) {
  * @return {bool} true if the schedule fires at `t`
  */
 export func matches(schedule as Schedule, t as time.Time) {
+    # a @reboot schedule has no time-based fire: it never matches a clock time.
+    if ($schedule.reboot) {
+        return false;
+    }
     if (not lists.contains($schedule.minutes, time.minute($t))) {
         return false;
     }
@@ -236,6 +337,10 @@ func nextMidnight(t as time.Time) {
  * @throws {Error} kind "cron" if nothing matches within the horizon
  */
 export func next(schedule as Schedule, after as time.Time) {
+    # a @reboot schedule fires only at startup, never at a clock time.
+    if ($schedule.reboot) {
+        fail("@reboot has no scheduled time (it fires only at startup)");
+    }
     def t as time.Time init truncateMinute($after);
     if (time.unixNanos($t) < time.unixNanos($after)) {
         $t = time.add($t, time.fromMinutes(1));

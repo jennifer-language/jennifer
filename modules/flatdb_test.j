@@ -127,7 +127,7 @@ func testSaveAsForksIndependently() {
 
 # saveAsEmpty is a helper for testSaveAsEmptyPathThrows (not a test itself).
 func saveAsEmpty() {
-    def x as DB init saveAs(openString("{}"), "");
+    saveAs(openString("{}"), "");
 }
 func testSaveAsEmptyPathThrows() {
     testing.assertThrows("saveAsEmpty", "flatdb");

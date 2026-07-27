@@ -45,10 +45,34 @@ Each level has a method taking the logger, a message, and a
 | `log.info(logger, message, fields)` | normal operation |
 | `log.warn(logger, message, fields)` | something unexpected but handled |
 | `log.error(logger, message, fields)` | a failure |
+| `log.fatal(logger, message, fields)` | an unrecoverable failure - **logs then exits** |
 | `log.at(logger, level, message, fields)` | emit at a level chosen at runtime |
 
+The level ordering is `"debug"` < `"info"` < `"warn"` < `"error"` < `"fatal"`.
 A record below the logger's level is dropped before rendering, so guarded
-`log.debug` calls in hot paths cost only the level comparison.
+`log.debug` calls in hot paths cost only the level comparison. `log.fatal` ranks
+above every other level, so it is **always** emitted regardless of the logger's
+minimum level, and then terminates the whole program with exit code `1` - the
+statement after a `log.fatal` call never runs.
+
+## Context loggers
+
+`log.with(logger, fields)` returns a **new** logger that carries `fields` as
+persistent context: every record emitted through it includes those fields,
+merged with any per-call fields (a per-call key of the same name wins). The
+parent logger is unchanged (value semantics), and `with` **composes** - calling
+it again merges the new fields on top of the carried ones:
+
+```jennifer
+def base as log.Logger init log.new("info", "logfmt");
+def req as log.Logger init log.with($base, {"svc": "api", "reqId": "abc"});
+log.info($req, "handling", {"port": "8080"});
+# time=... level=info msg=handling svc=api reqId=abc port=8080
+```
+
+| Function | |
+| -------- | - |
+| `log.with(logger, fields)` | derive a child logger carrying persistent `fields` |
 
 ## Formats
 

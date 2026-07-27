@@ -39,6 +39,37 @@ func testAttributes() {
     testing.assertEqual($out, "<div class=\"box\" title=\"a &quot;b&quot; &lt;c&gt;\"></div>");
 }
 
+func testBoolAttrBareName() {
+    def attrs as list of Attr init [];
+    $attrs[] = boolAttr("disabled");
+    testing.assertEqual(render(element("input", $attrs, [])), "<input disabled>");
+    # The Attr carries the boolean flag and no value.
+    testing.assertTrue(boolAttr("checked").boolean);
+    testing.assertEqual(boolAttr("checked").value, "");
+    # A normal attribute is unaffected and still renders name="value".
+    testing.assertFalse(attr("id", "x").boolean);
+    testing.assertEqual(renderAttrs([attr("id", "x")]), " id=\"x\"");
+}
+
+func testBoolAttrMixed() {
+    # A boolean and a normal attribute on one element render side by side.
+    def attrs as list of Attr init [];
+    $attrs[] = attr("type", "checkbox");
+    $attrs[] = boolAttr("checked");
+    $attrs[] = boolAttr("required");
+    $attrs[] = attr("name", "agree");
+    testing.assertEqual(render(element("input", $attrs, [])), "<input type=\"checkbox\" checked required name=\"agree\">");
+}
+
+func injectBoolAttrName() {
+    boolAttr("x onclick=alert(1)");
+}
+func testBoolAttrNameValidated() {
+    # An invalid boolean-attribute name still throws, like attr.
+    testing.assertThrows("injectBoolAttrName", "htmlwriter");
+    testing.assertEqual(boolAttr("data-x2").name, "data-x2");
+}
+
 func testNestedTree() {
     def a as list of Node init [];
     $a[] = text("one");

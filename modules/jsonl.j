@@ -167,3 +167,69 @@ export func closeReader(reader as Reader) {
     fs.close($reader.file);
     return null;
 }
+
+# --- file-handle streaming (exported) ---------------------------------------
+
+/**
+ * Wrap an already-open, read-mode `fs.File` as a streaming reader. Use this when
+ * the caller owns the file handle (openReader opens the path for you). The file
+ * is a handle, so successive `readValue` calls advance the same stream.
+ * @param file {fs.File} an open read-mode file handle
+ * @return {Reader} the reader
+ */
+export func reader(file as fs.File) {
+    return Reader{ file: $file };
+}
+
+/**
+ * Read and decode the next record, skipping blank lines, and return the
+ * `json.Value` directly. At end-of-stream this returns a JSON `null`; guard the
+ * loop with `not fs.eof(...)` (JSONL written by `writeValue` has one value per
+ * line and no trailing blanks) or use `readRecord` when you need the explicit
+ * `done` flag to distinguish end-of-stream from a genuine `null` record.
+ * @param reader {Reader} the reader
+ * @return {json.Value} the next record, or a JSON `null` at end
+ */
+export func readValue(reader as Reader) {
+    def rec as Record init readRecord($reader);
+    return $rec.value;
+}
+
+/**
+ * A streaming JSONL writer over an open `fs.File`. Each `writeValue` call appends
+ * one compact JSON value terminated by a newline, so a growing log is written
+ * without building the whole text in memory.
+ * @field file {fs.File} the underlying open write/append-mode file handle
+ */
+export def struct Writer {
+    file as fs.File
+};
+
+/**
+ * Wrap an open write/append-mode `fs.File` as a streaming JSONL writer.
+ * @param file {fs.File} an open write- or append-mode file handle
+ * @return {Writer} the writer
+ */
+export func writer(file as fs.File) {
+    return Writer{ file: $file };
+}
+
+/**
+ * Append one record to the writer: the compact JSON encoding followed by a
+ * newline.
+ * @param writer {Writer} the writer
+ * @param value {json.Value} the record to append
+ */
+export func writeValue(writer as Writer, value as json.Value) {
+    fs.writeString($writer.file, json.encode($value) + "\n");
+    return null;
+}
+
+/**
+ * Close a streaming writer (closes the underlying file handle).
+ * @param writer {Writer} the writer
+ */
+export func closeWriter(writer as Writer) {
+    fs.close($writer.file);
+    return null;
+}

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,5 +70,55 @@ testing.assertEqual($threw, true);`,
 	}
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("http getBytes binary-download program failed with code %d", code)
+	}
+}
+
+// TestHttpRequestRawBodyUploadsBinary proves the http module's raw-body request
+// path (requestRawBody) transmits a genuinely-binary request body byte-for-byte:
+// the server echoes the sha256 of what it received, which must match the sha256
+// of every-byte-value payload the client sent. A UTF-8 string round-trip would
+// have corrupted the non-UTF-8 bytes.
+func TestHttpRequestRawBodyUploadsBinary(t *testing.T) {
+	var got []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = b
+		sum := sha256.Sum256(b)
+		fmt.Fprint(w, hex.EncodeToString(sum[:]))
+	}))
+	defer srv.Close()
+
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use hash;
+use encoding;
+import %q as http;
+def body as bytes;
+def i as int init 0;
+while ($i < 256) { $body[] = $i; $i = $i + 1; }
+def want as string init encoding.toText(hash.compute($body, "sha256"), "hex");
+def r as http.Response init http.requestRawBody("POST", %q, {"Content-Type": "application/octet-stream"}, $body, 5000, 0);
+testing.assertEqual($r.status, 200);
+testing.assertEqual($r.body, $want);
+`, httpMod, srv.URL)
+	progPath := filepath.Join(dir, "raw.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("http raw-body program failed with code %d", code)
+	}
+	// The 256-byte all-values payload arrived intact (not UTF-8-mangled).
+	if len(got) != 256 {
+		t.Fatalf("server received %d bytes, want 256", len(got))
+	}
+	for i := range got {
+		if got[i] != byte(i) {
+			t.Fatalf("byte %d = %d, want %d (body was corrupted)", i, got[i], i)
+		}
 	}
 }

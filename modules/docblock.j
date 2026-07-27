@@ -184,9 +184,9 @@ export func parse(source as string) {
             # construct rather than the comment's closing line.
             def gap as int init len($rawTail) - len($tail);
             def line as int init $raw.line + countNewlines(strings.substring($rawTail, 0, $gap));
-            def fm as regex.Match init regex.find("^(export\\s+)?func\\s+([A-Za-z]+)\\s*\\(([^)]*)\\)", $tail);
-            def sm as regex.Match init regex.find("^(export\\s+)?def\\s+struct\\s+([A-Za-z]+)\\s*\\{([^}]*)\\}", $tail);
-            def cm as regex.Match init regex.find("^(export\\s+)?def\\s+const\\s+([A-Za-z][A-Za-z_]*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init", $tail);
+            def fm as regex.Match init regex.find("^(export\\s+)?func\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\(([^)]*)\\)", $tail);
+            def sm as regex.Match init regex.find("^(export\\s+)?def\\s+struct\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\{([^}]*)\\}", $tail);
+            def cm as regex.Match init regex.find("^(export\\s+)?def\\s+const\\s+([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init", $tail);
             if (not ($fm.start == -1)) {
                 $funcs[] = buildFunc($p, $fm.groups[1], not ($fm.groups[0] == ""));
                 $diags = lists.concat($diags, crossCheck("param", $fm.groups[1], $line, $p.params, declNames($fm.groups[2])));
@@ -436,7 +436,7 @@ func isTag(line as string) {
 
 # parseParam parses `name {type} desc`.
 func parseParam(rest as string) {
-    def m as regex.Match init regex.find("^([A-Za-z]+)\\s+\\{([^}]*)\\}\\s*(.*)$", $rest);
+    def m as regex.Match init regex.find("^([A-Za-z][A-Za-z0-9]*)\\s+\\{([^}]*)\\}\\s*(.*)$", $rest);
     if ($m.start == -1) {
         return ParamDoc{ name: firstWord($rest), type: "", description: "" };
     }

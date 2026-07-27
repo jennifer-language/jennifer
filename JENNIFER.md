@@ -466,6 +466,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`csv`** - RFC 4180: `csv.parse(s)` / `format(rows)` (`parseWith` /
   `formatWith` for any single-character delimiter, e.g. TSV), plus `toRecords` /
   `fromRecords` for header-keyed `map of string to string`. Quoting-aware.
+  `csv.formatSafe(rows)` neutralises spreadsheet-formula injection (CWE-1236) for
+  the export path; a `csv.Dialect` (`dialect(delim)` -> `parseDialect` /
+  `formatDialect`) groups delimiter / quote / comment / trim knobs; streaming
+  `csv.reader` / `writer` handles wrap an open `fs.File`.
 - **`docblock`** - the Jennifer doc-comment format (`/**` ... `*/` with a
   summary, description, and `@param`/`@field`/`@return`/`@throws`/`@since`/
   `@deprecated`/`@see`/`@example`/`@internal`/`@module` tags; types in `{...}`)
@@ -525,12 +529,18 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   the next `time.Time` at or after a time (keeps its offset). Five fields
   (minute / hour / day-of-month / month / day-of-week 0-7) with `*` / `,` / `-`
   and `/n` steps; when both day fields are restricted a day matching either
-  fires. A pure calculator over `time` (no clock) - a scheduler is your own
+  fires. The month / day-of-week fields also take three-letter names (`JAN`-`DEC`,
+  `SUN`-`SAT`, case-insensitive), and `@`-nickname macros
+  (`@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` / `@midnight` /
+  `@reboot`) expand to a schedule - `@reboot` is startup-only and never matches a
+  clock time. A pure calculator over `time` (no clock) - a scheduler is your own
   `spawn` + `time.sleep` loop. Both binaries.
 - **`htmlwriter`** - build an HTML element tree and render escaped HTML5:
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
   constructors, `render` / `renderAll`, `escape`, `safeUrl(url)` (an
-  `http`/`https`/`mailto` allowlist for `href`/`src`, else `"#"`). A writer, not
+  `http`/`https`/`mailto` allowlist for `href`/`src`, else `"#"`), and
+  `boolAttr(name)` for a valueless boolean attribute (renders `disabled`, not
+  `disabled=""`). A writer, not
   a parser. `element` / `attr` reject a tag / attribute name outside
   `[A-Za-z][A-Za-z0-9-]*` (a name is structure, not escapable data).
 - **`tengine`** - a lightweight-CMS text template engine (a subset of Go
@@ -558,7 +568,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Content-Length and chunked framing; text (UTF-8) bodies. For **binary**
   downloads (a `.tar.gz`, an image) use `http.getBytes(url, headers)` /
   `requestBytes` / `requestWithBytes` -> `http.BytesResponse` with a raw `bytes`
-  `body` (the string `Response` throws on non-UTF-8). Redirects returned,
+  `body` (the string `Response` throws on non-UTF-8). To **upload** a raw `bytes`
+  body byte-for-byte (a multipart file upload, a protobuf) use
+  `http.requestRawBody(method, url, headers, body, timeoutMs, maxBytes)` /
+  `requestRawBodyTls` (set your own `Content-Type`). Redirects returned,
   not followed. For a self-signed / private-CA `https://` server pass
   `http.TlsOptions{skipVerify, caCert}` through `http.requestTls(method, url,
   headers, body, tls)` (or `requestWithTls(..., timeoutMs, maxBytes, tls)`); the
@@ -567,7 +580,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`gotify`** - push a notification to a [Gotify](https://gotify.net) server,
   on top of `http`: `gotify.push(cfg, title, message, priority)` POSTs the
   message form (`X-Gotify-Key` header) to `cfg.url + "/message"` and returns the
-  `http.Response` (a bad token is a `4xx` value, not a crash). Value-semantic
+  `http.Response` (a bad token is a `4xx` value, not a crash).
+  `gotify.pushMarkdown(...)` renders the body as markdown, `pushWith(..., url)`
+  adds a tap/click action, and `pushExtras(..., ex)` attaches an arbitrary
+  `Extras`. Value-semantic
   `gotify.Config{url, token}`, caller-supplied. **Default `jennifer` binary
   only** (`net`).
 - **`gpio`** - Raspberry-Pi / Linux-SBC GPIO over sysfs (`fs` backend).
@@ -796,7 +812,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);
   `generateAt` / `verifyAt` take an explicit Unix time (deterministic).
   `totp.uri(issuer, account, secret, opts)` builds the `otpauth://` provisioning
-  string a QR code encodes. `secret` is base32; a zero-value `totp.Options` is 6
+  string a QR code encodes. `totp.generateSecret()` / `generateSecretN(nbytes)`
+  mint a fresh crypto-grade base32 secret (default 20-byte / 160-bit);
+  `totp.hotp(secret, counter)` is the raw RFC 4226 HOTP building block;
+  `totp.verifyWindow(secret, code, window, opts)` accepts a configurable
+  `window`-step skew each side. `secret` is base32; a zero-value `totp.Options` is 6
   digits / 30 s / SHA-1, else set `digits` / `period` / `algorithm` (`"sha256"` /
   `"sha512"`). `verify` compares codes constant-time (`crypto.hmacEqual`) so it
   leaks nothing via timing. Over `hash.hmac` + `crypto` + `encoding` + `time`;
@@ -804,7 +824,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`webhook`** - HMAC-signed webhooks (the GitHub `X-Hub-Signature-256`
   convention). `webhook.sign(payload, secret)` -> `"sha256=" + hex HMAC-SHA256`;
   `webhook.verify(payload, signature, secret)` -> bool (constant-time compare,
-  never throws) - both pure, both binaries. `webhook.send(url, payload, secret)`
+  never throws) - both pure, both binaries. Replay-protected timestamped signing
+  schemes: `stripeSign` / `stripeVerify` (Stripe `t=,v1=`), `slackSign` /
+  `slackVerify` (Slack `v0=`), and a generic `timestampedSign` / `timestampedVerify`
+  over a caller-chosen digest / encoding - each verify recomputes, constant-time
+  compares, and rejects a stale timestamp. `webhook.send(url, payload, secret)`
   POSTs the payload as `application/json` with the signature header and returns
   an `http.Response` (**default `jennifer` binary only**, over `http`). Sign /
   verify the raw body bytes, before any parsing. Over `hash.hmac` + `encoding`.
@@ -865,7 +889,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   runtime level) render one record - RFC 3339 timestamp, level, message, and a
   `map of string to string` of `fields` - and write it, dropping records below
   the logger's level; values with a space / quote / `=` are quoted in the text /
-  logfmt forms. The syslog sink frames each record as an RFC 5424 datagram over
+  logfmt forms. `log.with(logger, fields)` returns a child logger that stamps
+  those persistent fields onto every record; `log.fatal(logger, message, fields)`
+  logs at a fatal level and then exits 1. The syslog sink frames each record as an RFC 5424 datagram over
   UDP (facility `user`); console and file sinks work on both binaries, the
   **syslog sink needs the default `jennifer` binary** (`net`). Over `io` / `fs`
   + `json` + `strings` + `time` + `os` (+ `net` for syslog).
@@ -902,7 +928,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   and compares HMACs in constant time; `decode` / `header` read without
   verifying (never authorize on them). `verifyWith(token, key, alg,
   jwt.Policy{iss, aud})` additionally enforces the expected issuer / audience
-  (empty string skips a check). Over `crypto` + `hash` + `encoding` +
+  (empty string skips a check); `verifyLeeway(token, key, alg, leeway)` widens the
+  `exp` / `nbf` checks by `leeway` seconds each way for clock skew; and
+  `verifyWithKeys(token, keysByKid, alg)` selects the key by the header's `kid`
+  from a caller-supplied `map of string to string`; and `verifyJwks(token,
+  jwksJson, alg)` resolves the `kid` against a JWKS, converting the JWK to a key
+  with `crypto.jwkToPem` (RS\* / ES\* only). Over `crypto` + `hash` + `encoding` +
   `json` + `time`. HS\* / EdDSA on both binaries; RS\* / ES\* need the default
   binary. JWT auth is this module used as a `web.before` middleware, not a
   separate module.
@@ -912,9 +943,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   json.Value` parses each non-blank line (blank / whitespace lines skipped,
   trailing `\r` trimmed), so `decode(encode(rows))` round-trips. Whole-file
   `readFile` / `writeFile` / `appendFile` (append is the growing-log pattern),
-  plus a streaming `jsonl.Reader` (`openReader` / `hasMore` / `readRecord` /
-  `closeReader`) that reads one record at a time for files too large for memory
-  (`readRecord` throws `Error{kind: "jsonl"}` at end - guard with `hasMore`). A
+  plus streaming handles over an open `fs.File` - a `jsonl.Reader` (`openReader` /
+  `hasMore` / `readRecord` / `closeReader`) that reads one record at a time for
+  files too large for memory (`readRecord` throws `Error{kind: "jsonl"}` at end -
+  guard with `hasMore`), and a `jsonl.Writer` (`writer` / `writeRecord` /
+  `closeWriter`) that appends records incrementally. A
   thin framing layer over `json` + `fs`; **both binaries**.
 - **`ipnet`** - IP addresses and CIDR networks, IPv4 and IPv6. `ipnet.parseAddress(s)
   -> Address` (dotted-quad or IPv6 with `::` compression + embedded IPv4),
@@ -1004,7 +1037,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`slack`** - post to a Slack Incoming Webhook over the `http` module (sibling of
   `gotify` / `discord`). `slack.send(webhookUrl, text)` posts a plain `{"text": ...}`
   message. For a rich message, build a `Message` with `message()` then
-  `text(m, s)` / `section(m, markdown)` / `header(m, heading)` / `divider(m)` (each
+  `text(m, s)` / `section(m, markdown)` / `header(m, heading)` / `divider(m)`, plus
+  `contextBlock(m, text)` (small muted context), `fieldsSection(m, fields)`
+  (two-column fields), and `actionsBlock(m, buttons)` with `button(text, url)` (each
   returns a fresh `Message`; blocks held as pre-rendered Block Kit JSON fragments),
   and post it with `sendMessage(webhookUrl, m)` (`render(m) -> string` gives the JSON
   payload). All text is JSON-escaped for you. Both `send` / `sendMessage` return the
@@ -1013,7 +1048,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`discord`** - post to a Discord channel Webhook over the `http` module (sibling of
   `gotify` / `slack`). `discord.send(webhookUrl, content)` posts a plain
   `{"content": ...}` message. For a rich message, build a `Message` with `message()`
-  then `content(m, s)` / `embed(m, title, description, color)` (each returns a fresh
+  then `content(m, s)` / `embed(m, title, description, color)`, decorate the latest
+  embed with `embedField(m, name, value, inline)` / `embedFooter(m, text)` /
+  `embedAuthor(m, name)`, and override the webhook identity per message with
+  `username(m, name)` / `avatar(m, url)` (each returns a fresh
   `Message`; `color` is a decimal RGB int; embeds held as pre-rendered JSON
   fragments), and post it with `sendMessage(webhookUrl, m)` (`render(m) -> string`
   gives the JSON). All text is JSON-escaped for you. `send` / `sendMessage` return the
@@ -1030,8 +1068,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   of Update` (long-poll `timeout` seconds); it is the stateful loop - advance `offset`
   to the last `updateId + 1` each pass, and check `Update.hasMessage` before reading
   `Update.message`. `chatId` is a 64-bit `int` (channel ids are large / negative).
-  Params are form-encoded to `baseUrl/bot<token>/<method>`. **Default `jennifer`
-  binary only** (`net`).
+  Inline keyboards attach via `sendMessageWithKeyboard(bot, chatId, text, rows)`;
+  handle button presses with `parseCallbackQuery(update)` (pure) +
+  `answerCallbackQuery(bot, callbackId, text)`; upload a local file with
+  `sendPhotoFile` / `sendDocumentFile` (multipart). The bot token is redacted from
+  error messages. Params are form-encoded to `baseUrl/bot<token>/<method>`.
+  **Default `jennifer` binary only** (`net`).
 - **`websocket`** - an RFC 6455 WebSocket client over `net`. `websocket.connect(url)`
   (or `connectWith(url, timeoutMs)`) does the HTTP Upgrade handshake to a `ws://`
   (plain TCP) or `wss://` (TLS) URL and verifies the server's `Sec-WebSocket-Accept`
@@ -1083,10 +1125,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   of bool`. `barcode.defaults()` gives an `Options` (scale / height / quiet / ecLevel /
   foreground / background). The GF(256) / Reed-Solomon math is a private, `include`d
   `barcode_ecc.j`. Pure `.j`; **both binaries**.
-- **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) -> Filter`;
+- **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) -> Filter`
+  (or `bloom.optimal(n, fpr)` to size for `n` items at a target false-positive rate);
   `bloom.add(f, item)` / `bloom.addAll(f, items)` return a fresh filter (value-semantic,
   so `$f = bloom.add($f, x)`); `bloom.mightContain(f, item) -> bool` has no false
-  negatives (a member always reports true) but possible false positives. Bits are
+  negatives (a member always reports true) but possible false positives.
+  `bloom.serialize(f) -> bytes` / `deserialize(b) -> Filter` round-trip a filter, and
+  `bloom.union(a, b)` / `merge` combine two same-shape filters. Bits are
   packed into `bytes`; the k positions per item come from double-hashing one SHA-256
   digest (`pos_i = (h1 + i*h2) mod size`). Strings only. Over `hash` + `bytes`;
   **both binaries**.
