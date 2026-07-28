@@ -9,11 +9,12 @@
  */
 use io;
 import "../../modules/redis.j" as redis;
+import "../../modules/transport.j" as transport;
 
 def opts as redis.Options init redis.Options{
     host: "127.0.0.1",
     port: 6379,
-    security: "none",
+    security: transport.Security.None,
     user: "",
     password: "",
     db: 0

@@ -34,12 +34,13 @@ The dial is bounded by a connection-establishment timeout, so a slow or
 unreachable broker fails with a catchable error instead of blocking forever.
 
 ```jennifer
-def struct amqp.Options { host as string, port as int, user as string, password as string, vhost as string, security as string };
+def struct amqp.Options { host as string, port as int, user as string, password as string, vhost as string, security as transport.Security };
 ```
 
-`security` is `"none"` (plaintext AMQP, the default) or `"tls"` (AMQPS - TLS on
-connect, verifying the broker certificate). `amqp.options(...)` defaults it to
-`"none"`; set it to `"tls"` on the returned `Options` for a broker that requires
+`security` is a [`transport.Security`](transport.md): `.None` (plaintext AMQP, the
+default) or `.Tls` (AMQPS - TLS on connect, verifying the broker certificate);
+`.Starttls` is rejected (AMQP has no in-band upgrade). `amqp.options(...)` defaults it to
+`.None`; set it to `transport.Security.Tls` on the returned `Options` for a broker that requires
 TLS so credentials do not cross the wire in the clear.
 
 | Call | Returns | |

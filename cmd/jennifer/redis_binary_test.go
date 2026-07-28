@@ -203,7 +203,8 @@ func TestRedisBinaryAndTyped(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as redis;
-def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: "none", user: "", password: "", db: 0};
+import %q as transport;
+def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "", password: "", db: 0};
 def s as redis.Session init redis.connect($o);
 
 # byte-exact round-trip: a value with NUL, CR, LF, 0xFF
@@ -250,7 +251,7 @@ testing.assertTrue(redis.sismember($s, "st", "m1"));
 testing.assertFalse(redis.sismember($s, "st", "zzz"));
 testing.assertEqual(len(redis.smembers($s, "st")), 2);
 testing.assertEqual(redis.srem($s, "st", "m1"), 1);
-redis.quit($s);`, redisMod, port)
+redis.quit($s);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "binary.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

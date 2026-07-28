@@ -15,8 +15,9 @@
  * @example
  * import "resque.j" as resque;
  * import "redis.j" as redis;
+ * import "transport.j" as transport;
  * def db as redis.Session init redis.connect(redis.Options{
- *     host: "127.0.0.1", port: 6379, security: "none", user: "", password: "", db: 0});
+ *     host: "127.0.0.1", port: 6379, security: transport.Security.None, user: "", password: "", db: 0});
  * resque.enqueue($db, "email", "SendWelcome", ["user@example.com", "en"]);
  * def job as resque.Job init resque.reserve($db, ["high", "email"]);
  */

@@ -109,7 +109,8 @@ func TestImapReceive(t *testing.T) {
 use time;
 use lists;
 import %q as imap;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
+import %q as transport;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 def nums as list of int init imap.search($s, imap.criteria());
@@ -149,7 +150,7 @@ imap.appendWith($s, "Drafts", "\\Draft", "Subject: draft\r\n\r\nunfinished\r\n")
 def body as string init imap.fetch($s, 1);
 testing.assertContains($body, "Subject: Café");
 testing.assertContains($body, "the café résumé body");
-imap.logout($s);`, imapMod, port)
+imap.logout($s);`, imapMod, filepath.Join(filepath.Dir(imapMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "recv.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
@@ -235,7 +236,8 @@ func TestImapIdle(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as imap;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
+import %q as transport;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 # CAPABILITY gate: the server advertises IDLE.
@@ -252,7 +254,7 @@ testing.assertEqual($b.kind, "expunge");
 testing.assertEqual($b.number, 1);
 # Leave IDLE cleanly and log out.
 imap.done($s);
-imap.logout($s);`, imapMod, port)
+imap.logout($s);`, imapMod, filepath.Join(filepath.Dir(imapMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "idle.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

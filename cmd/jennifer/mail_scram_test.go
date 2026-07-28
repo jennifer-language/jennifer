@@ -199,7 +199,7 @@ func runMailAuthTest(t *testing.T, module, prog string, serve func(*testing.T, n
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.j")
-	full := fmt.Sprintf(prog, mod, ln.Addr().(*net.TCPAddr).Port)
+	full := fmt.Sprintf(prog, mod, filepath.Join(filepath.Dir(mod), "transport.j"), ln.Addr().(*net.TCPAddr).Port)
 	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,8 @@ func smtpServe(chosen chan<- string) func(*testing.T, net.Conn) {
 }
 
 const smtpAuthProg = `import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "user", pass: "pencil", auth: "MECHNAME", allowInsecureAuth: true};
+import %q as transport;
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, clientName: "t", user: "user", pass: "pencil", auth: "MECHNAME", allowInsecureAuth: true};
 smtp.send($o, "user@example.com", ["you@example.com"], "Subject: Hi\r\n\r\nbody");`
 
 func TestSmtpSaslMechanisms(t *testing.T) {
@@ -386,7 +387,8 @@ func popServe(chosen chan<- string) func(*testing.T, net.Conn) {
 }
 
 const popAuthProg = `import %q as pop;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: "none", user: "user", pass: "pencil", auth: "MECHNAME"};
+import %q as transport;
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "user", pass: "pencil", auth: "MECHNAME"};
 def s as pop.Session init pop.connect($o);
 def n as int init pop.count($s);
 pop.quit($s);`
@@ -491,7 +493,8 @@ func imapServe(chosen chan<- string) func(*testing.T, net.Conn) {
 }
 
 const imapAuthProg = `import %q as imap;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "user", pass: "pencil", auth: "MECHNAME"};
+import %q as transport;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "user", pass: "pencil", auth: "MECHNAME"};
 def s as imap.Session init imap.connect($o);
 def n as int init imap.selectFolder($s, "INBOX");
 imap.logout($s);`

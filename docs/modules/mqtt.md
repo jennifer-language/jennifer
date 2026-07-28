@@ -62,8 +62,10 @@ A client is stateful: `connect`, subscribe / publish / receive, `disconnect`.
 | `mqtt.ping(client)`                  | Send a PINGREQ keepalive (fire and forget).                            |
 | `mqtt.disconnect(client)`            | Send DISCONNECT and close.                                             |
 
-`Options.security` is `"none"` (plaintext, port 1883) or `"tls"` (implicit
-TLS, `mqtts`, port 8883). `username` / `password` `""` omit the CONNECT
+`Options.security` is a [`transport.Security`](transport.md): `.None` (plaintext,
+port 1883) or `.Tls` (implicit TLS, `mqtts`, port 8883); `.Starttls` is rejected
+(MQTT has no in-band upgrade). Needs `import "transport.j" as transport;`.
+`username` / `password` `""` omit the CONNECT
 credentials. A non-empty `clientId` identifies the session to the broker.
 
 ## QoS 1: the PUBACK handshake

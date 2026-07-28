@@ -50,7 +50,7 @@ func testBuildConnectBytes() {
         port: 1883,
         clientId: "a",
         keepalive: 60,
-        security: "none",
+        security: transport.Security.None,
         username: "",
         password: ""
     };
@@ -65,7 +65,7 @@ func testBuildConnectSetsCredentialFlags() {
         port: 1883,
         clientId: "a",
         keepalive: 0,
-        security: "none",
+        security: transport.Security.None,
         username: "u",
         password: "p"
     };
@@ -166,7 +166,7 @@ func testBuildConnectFullWithWill() {
         port: 1883,
         clientId: "a",
         keepalive: 60,
-        security: "none",
+        security: transport.Security.None,
         username: "",
         password: ""
     };
@@ -206,7 +206,7 @@ func testBuildConnectFullCleanSessionFlag() {
         port: 1883,
         clientId: "a",
         keepalive: 0,
-        security: "none",
+        security: transport.Security.None,
         username: "",
         password: ""
     };
@@ -222,7 +222,7 @@ func testBuildConnectFullWillFlagsCombine() {
         port: 1883,
         clientId: "a",
         keepalive: 0,
-        security: "none",
+        security: transport.Security.None,
         username: "",
         password: ""
     };

@@ -51,7 +51,7 @@ func runXoauth2Test(t *testing.T, module, prefix, prog string, serve func(net.Co
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	full := fmt.Sprintf(prog, mod, ln.Addr().(*net.TCPAddr).Port)
+	full := fmt.Sprintf(prog, mod, filepath.Join(filepath.Dir(mod), "transport.j"), ln.Addr().(*net.TCPAddr).Port)
 	path := filepath.Join(dir, "xo.j")
 	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
 		t.Fatal(err)
@@ -106,7 +106,8 @@ func TestSmtpXoauth2(t *testing.T) {
 		}
 	}
 	prog := `import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2", allowInsecureAuth: true};
+import %q as transport;
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, clientName: "t", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2", allowInsecureAuth: true};
 smtp.send($o, "me@gmail.com", ["you@example.com"], "Subject: Hi\r\n\r\nbody");`
 	runXoauth2Test(t, "smtp.j", "AUTH XOAUTH2 ", prog, serve)
 }
@@ -136,7 +137,8 @@ func TestPopXoauth2(t *testing.T) {
 		}
 	}
 	prog := `import %q as pop;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: "none", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
+import %q as transport;
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
 def s as pop.Session init pop.connect($o);
 def n as int init pop.count($s);
 pop.quit($s);`
@@ -173,7 +175,8 @@ func TestImapXoauth2(t *testing.T) {
 		}
 	}
 	prog := `import %q as imap;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
+import %q as transport;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
 def s as imap.Session init imap.connect($o);
 def n as int init imap.selectFolder($s, "INBOX");
 imap.logout($s);`

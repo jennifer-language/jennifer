@@ -64,7 +64,7 @@ func testClientNameDefault() {
     def bare as Options init Options{
         host: "h",
         port: 25,
-        security: "none",
+        security: transport.Security.None,
         clientName: "",
         user: "",
         pass: "",
@@ -75,7 +75,7 @@ func testClientNameDefault() {
     def named as Options init Options{
         host: "h",
         port: 25,
-        security: "none",
+        security: transport.Security.None,
         clientName: "me.example",
         user: "",
         pass: "",
@@ -145,7 +145,7 @@ func testAuthRefusedOverCleartext() {
 }
 func cleartextAuth() {
     def o as Options;
-    $o.security = "none";
+    $o.security = transport.Security.None;
     $o.user = "me@example.com";
     $o.pass = "secret";
     $o.auth = "plain";
@@ -155,7 +155,7 @@ func cleartextAuth() {
 
 func testAuthForcedSkipsCleartextRefusal() {
     def o as Options;
-    $o.security = "none";
+    $o.security = transport.Security.None;
     $o.user = "me@example.com";
     $o.pass = "secret";
     $o.auth = "plain";

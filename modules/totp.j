@@ -32,12 +32,14 @@ use convert;
  * common defaults: 6 digits, a 30-second step, and HMAC-SHA1.
  * @field digits {int} the code length; 0 means 6
  * @field period {int} the time step in seconds; 0 means 30
- * @field algorithm {string} the HMAC digest: "sha1" (default), "sha256", or "sha512"; "" means "sha1"
+ * @field algorithm {Algorithm} the HMAC digest: `totp.Algorithm.Sha1` (the zero-value default), `.Sha256`, or `.Sha512`
  */
+export def enum Algorithm { Sha1, Sha256, Sha512 };
+
 export def struct Options {
     digits as int,
     period as int,
-    algorithm as string
+    algorithm as Algorithm
 };
 
 # --- option resolution ------------------------------------------------------
@@ -56,11 +58,16 @@ func periodOf(opts as Options) {
     return 30;
 }
 
+# algorithmOf returns the wire name ("sha1" / "sha256" / "sha512") of an Options'
+# digest, for hash.hmac and the otpauth URL. The zero-value Options defaults to
+# Sha1 (the enum's first variant), so no "" sentinel is needed. A Security-style
+# `match` over the Algorithm parameter is exhaustiveness-checked.
 func algorithmOf(opts as Options) {
-    if (not ($opts.algorithm == "")) {
-        return $opts.algorithm;
+    match ($opts.algorithm) {
+        when Sha1 { return "sha1"; }
+        when Sha256 { return "sha256"; }
+        when Sha512 { return "sha512"; }
     }
-    return "sha1";
 }
 
 # --- core HOTP --------------------------------------------------------------

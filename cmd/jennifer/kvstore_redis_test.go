@@ -123,7 +123,8 @@ import %q as session;
 import %q as ratelimit;
 import %q as kvstore;
 import %q as redis;
-def rc as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: %d, security: "none", user: "", password: "", db: 0});
+import %q as transport;
+def rc as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "", password: "", db: 0});
 def st as kvstore.Store init kvstore.redisStore($rc);
 
 # session over redis
@@ -142,7 +143,7 @@ def b as ratelimit.Result init ratelimit.check($lim, "ip:a");
 testing.assertTrue($b.allowed);
 def c as ratelimit.Result init ratelimit.check($lim, "ip:a");
 testing.assertFalse($c.allowed);
-redis.quit($rc);`, abs("session.j"), abs("ratelimit.j"), abs("kvstore.j"), abs("redis.j"), port)
+redis.quit($rc);`, abs("session.j"), abs("ratelimit.j"), abs("kvstore.j"), abs("redis.j"), abs("transport.j"), port)
 	progPath := filepath.Join(dir, "redisbackend.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

@@ -15,7 +15,8 @@
  * out of scope. Needs the default `jennifer` binary (uses `net`).
  * @module mqtt
  * @example
- * def c as mqtt.Client init mqtt.connect(mqtt.Options{host: "127.0.0.1", port: 1883, clientId: "demo", keepalive: 30, security: "none", username: "", password: ""});
+ * import "transport.j" as transport;
+ * def c as mqtt.Client init mqtt.connect(mqtt.Options{host: "127.0.0.1", port: 1883, clientId: "demo", keepalive: 30, security: transport.Security.None, username: "", password: ""});
  * $c = mqtt.subscribe($c, "sensors/temp");
  * mqtt.publish($c, "sensors/temp", "21.5");
  * def m as mqtt.Message init mqtt.receive($c);
@@ -26,6 +27,7 @@ use binary;
 use convert;
 use strings;
 use lists;
+import "./transport.j" as transport;
 
 # --- types ------------------------------------------------------------------
 
@@ -35,7 +37,7 @@ use lists;
  * @field port {int} the broker port (1883 plaintext, 8883 TLS by convention)
  * @field clientId {string} the client identifier the broker sees
  * @field keepalive {int} the keepalive interval in seconds (0 disables)
- * @field security {string} "none" (plaintext) or "tls" (mqtts)
+ * @field security {transport.Security} `transport.Security.None` (plaintext) or `.Tls` (mqtts); `.Starttls` is rejected (MQTT has no in-band upgrade)
  * @field username {string} the CONNECT username ("" to omit)
  * @field password {string} the CONNECT password ("" to omit)
  */
@@ -44,7 +46,7 @@ export def struct Options {
     port as int,
     clientId as string,
     keepalive as int,
-    security as string,
+    security as transport.Security,
     username as string,
     password as string
 };
@@ -456,10 +458,12 @@ export func connect(opts as Options) {
 export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
     def conn as net.Conn;
-    if ($opts.security == "tls") {
-        $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS);
-    } else {
-        $conn = net.connect($addr, HANDSHAKE_TIMEOUT_MS);
+    match ($opts.security) {
+        when Tls { $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS); }
+        when None { $conn = net.connect($addr, HANDSHAKE_TIMEOUT_MS); }
+        when Starttls {
+            throw Error{kind: "mqtt", message: "mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None", file: "", line: 0, col: 0};
+        }
     }
     # A refused / malformed CONNACK must not leak the socket; on success the
     # caller owns the open client.

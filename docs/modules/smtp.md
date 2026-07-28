@@ -47,7 +47,7 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 | ------------ | ---------------------------------------------------------------------- |
 | `host`       | Server hostname.                                                       |
 | `port`       | Server port (25 / 587 plaintext or STARTTLS, 465 implicit TLS).        |
-| `security`   | `"none"` (plaintext), `"starttls"` (upgrade after EHLO), `"tls"` (implicit TLS on connect). |
+| `security`   | A [`transport.Security`](transport.md): `.None` (plaintext), `.Starttls` (upgrade after EHLO), or `.Tls` (implicit TLS on connect). Needs `import "transport.j" as transport;`. |
 | `clientName` | The `EHLO` identity; defaults to `"localhost"` when empty.             |
 | `auth`       | SASL mechanism: `""` (none when `user` is empty, else PLAIN), `"auto"` (negotiate the strongest mechanism `EHLO` advertises, falling back to PLAIN), `"plain"`, `"login"`, `"xoauth2"`, `"cram"` (CRAM-MD5), `"scram-sha-1"`, or `"scram-sha-256"`. |
 | `user`       | SASL username; `""` with `auth: ""` skips authentication.              |

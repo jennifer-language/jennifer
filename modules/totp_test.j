@@ -36,7 +36,7 @@ func testRfcSha() {
 func testRfcShaTwoFiftySix() {
     def s as string init seed("12345678901234567890123456789012");
     def o as Options init eight();
-    $o.algorithm = "sha256";
+    $o.algorithm = Algorithm.Sha256;
     testing.assertEqual(generateAt($s, 59, $o), "46119246");
     testing.assertEqual(generateAt($s, 1111111109, $o), "68084774");
     testing.assertEqual(generateAt($s, 20000000000, $o), "77737706");
@@ -45,7 +45,7 @@ func testRfcShaTwoFiftySix() {
 func testRfcShaFiveTwelve() {
     def s as string init seed("1234567890123456789012345678901234567890123456789012345678901234");
     def o as Options init eight();
-    $o.algorithm = "sha512";
+    $o.algorithm = Algorithm.Sha512;
     testing.assertEqual(generateAt($s, 59, $o), "90693936");
     testing.assertEqual(generateAt($s, 1111111111, $o), "99943326");
     testing.assertEqual(generateAt($s, 20000000000, $o), "47863826");
@@ -160,7 +160,7 @@ func testUriCustom() {
     def o as Options;
     $o.digits = 8;
     $o.period = 60;
-    $o.algorithm = "sha256";
+    $o.algorithm = Algorithm.Sha256;
     testing.assertEqual(
         uri("A B", "u", "S", $o),
         "otpauth://totp/A%20B:u?secret=S&issuer=A%20B&algorithm=SHA256&digits=8&period=60");

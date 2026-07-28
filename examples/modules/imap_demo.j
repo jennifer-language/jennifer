@@ -8,12 +8,13 @@
  */
 use io;
 import "../../modules/imap.j" as imap;
+import "../../modules/transport.j" as transport;
 import "../../modules/mime.j" as mime;
 
 def opts as imap.Options init imap.Options{
     host: "127.0.0.1",
     port: 2143,
-    security: "none",
+    security: transport.Security.None,
     user: "demo",
     pass: "demo",
     auth: ""

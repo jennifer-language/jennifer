@@ -66,8 +66,10 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.lpush` / `rpush` / `lrange` / `llen` / `lpop` | List: push (new length), `LRANGE start stop` (`list of string`, `0, -1` = all), `LLEN`, `LPOP` (string). |
 | `redis.sadd` / `srem` / `smembers` / `sismember` / `scard` | Set: add / remove (count), `SMEMBERS` (`list of string`), `SISMEMBER` (`bool`), `SCARD` (`int`). |
 
-`Options.security` is `"none"` (plaintext, port 6379) or `"tls"` (implicit
-TLS, `rediss`). `password` `""` skips `AUTH`; `db` `0` skips `SELECT`. When a
+`Options.security` is a [`transport.Security`](transport.md): `.None` (plaintext,
+port 6379) or `.Tls` (implicit TLS, `rediss`); `.Starttls` is rejected (Redis has
+no in-band upgrade). Needs `import "transport.j" as transport;`. `password` `""`
+skips `AUTH`; `db` `0` skips `SELECT`. When a
 `user` is set alongside `password`, `AUTH user password` (ACL) is sent;
 otherwise `AUTH password`.
 

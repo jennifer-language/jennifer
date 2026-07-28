@@ -141,7 +141,8 @@ func TestResqueJobs(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as resque;
 import %q as redis;
-def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: %d, security: "none", user: "", password: "", db: 0});
+import %q as transport;
+def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "", password: "", db: 0});
 resque.enqueue($db, "email", "SendWelcome", ["user@example.com", "en"]);
 resque.enqueue($db, "email", "SendReceipt", ["order-42"]);
 resque.enqueue($db, "high", "Ping", []);
@@ -169,7 +170,7 @@ testing.assertEqual($got.args[0], "x");
 def miss as resque.Job init resque.reserveBlocking($db, ["blk"], 1);
 testing.assertEqual(len($miss.class), 0);
 testing.assertEqual(len(resque.reserveBlocking($db, [], 1).class), 0);
-redis.quit($db);`, resqueMod, redisMod, port)
+redis.quit($db);`, resqueMod, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "jobs.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

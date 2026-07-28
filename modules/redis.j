@@ -13,7 +13,8 @@
  * byte-exact. Needs the default `jennifer` binary (uses `net`).
  * @module redis
  * @example
- * def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: 6379, security: "none", user: "", password: "", db: 0});
+ * import "transport.j" as transport;
+ * def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: 6379, security: transport.Security.None, user: "", password: "", db: 0});
  * redis.set($db, "greeting", "hello");
  * io.printf("%s\n", redis.get($db, "greeting"));
  * redis.quit($db);
@@ -22,12 +23,13 @@ use net;
 use binary;
 use strings;
 use convert;
+import "./transport.j" as transport;
 
 /**
  * Connection settings.
  * @field host {string} the server host
  * @field port {int} the server port
- * @field security {string} "none" (plaintext) or "tls" (rediss)
+ * @field security {transport.Security} `transport.Security.None` (plaintext) or `.Tls` (rediss); `.Starttls` is rejected (Redis has no in-band upgrade)
  * @field user {string} the AUTH username ("" for password-only or no auth)
  * @field password {string} the AUTH password; "" skips AUTH
  * @field db {int} the database to SELECT (0 is the default)
@@ -35,7 +37,7 @@ use convert;
 export def struct Options {
     host as string,
     port as int,
-    security as string,
+    security as transport.Security,
     user as string,
     password as string,
     db as int
@@ -483,10 +485,13 @@ func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
 
 func dial(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
-    if ($opts.security == "tls") {
-        return net.connectTLS($addr, DEFAULT_TIMEOUT_MS);
+    match ($opts.security) {
+        when Tls { return net.connectTLS($addr, DEFAULT_TIMEOUT_MS); }
+        when None { return net.connect($addr, DEFAULT_TIMEOUT_MS); }
+        when Starttls {
+            throw Error{kind: "redis", message: "redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None", file: "", line: 0, col: 0};
+        }
     }
-    return net.connect($addr, DEFAULT_TIMEOUT_MS);
 }
 
 # --- commands (exported) -------------------------------------------

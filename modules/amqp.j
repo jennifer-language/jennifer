@@ -28,6 +28,7 @@
 use net;
 use binary;
 use convert;
+import "./transport.j" as transport;
 
 # Frame types and the frame-end sentinel.
 def const FRAME_METHOD as int init 1;
@@ -110,7 +111,7 @@ def const DELIVERY_PERSISTENT as int init 2;
  * @field user {string} the username
  * @field password {string} the password
  * @field vhost {string} the virtual host ("/" by default)
- * @field security {string} "none" (plaintext AMQP, the default) or "tls" (AMQPS - TLS on connect, verifying the broker certificate)
+ * @field security {transport.Security} `transport.Security.None` (plaintext AMQP, the default) or `.Tls` (AMQPS - TLS on connect, verifying the broker certificate); `.Starttls` is rejected (AMQP has no in-band upgrade)
  */
 export def struct Options {
     host as string,
@@ -118,7 +119,7 @@ export def struct Options {
     user as string,
     password as string,
     vhost as string,
-    security as string
+    security as transport.Security
 };
 
 /**
@@ -242,7 +243,7 @@ export func options(host as string, user as string, password as string) {
         user: $user,
         password: $password,
         vhost: "/",
-        security: "none"
+        security: transport.Security.None
     };
 }
 
@@ -728,10 +729,13 @@ func handshake(socket as net.Conn, opts as Options) {
 # connect, broker certificate verified). A connection timeout bounds the dial.
 func dial(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
-    if ($opts.security == "tls") {
-        return net.connectTLS($addr, CONNECT_TIMEOUT_MS);
+    match ($opts.security) {
+        when Tls { return net.connectTLS($addr, CONNECT_TIMEOUT_MS); }
+        when None { return net.connect($addr, CONNECT_TIMEOUT_MS); }
+        when Starttls {
+            fail("STARTTLS is not supported; use transport.Security.Tls (AMQPS) or .None");
+        }
     }
-    return net.connect($addr, CONNECT_TIMEOUT_MS);
 }
 
 /**

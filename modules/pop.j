@@ -13,8 +13,9 @@
  * "-ERR" throws a catchable `Error` (kind "pop3").
  * @module pop
  * @example
+ * import "transport.j" as transport;
  * def opts as pop.Options init pop.Options{host: "mail.example.com",
- *     port: 995, security: "tls", user: "me", pass: "secret", auth: ""};
+ *     port: 995, security: transport.Security.Tls, user: "me", pass: "secret", auth: ""};
  * for (def raw in pop.fetchAll($opts)) {
  *     def msg as mime.Part init mime.parse($raw);
  *     io.printf("subject: %s\n", mime.headerValue($msg, "Subject"));
@@ -28,6 +29,7 @@ use hash;
 use encoding;
 import "./idna.j" as idna;
 import "./sasl.j" as sasl;
+import "./transport.j" as transport;
 
 /**
  * Connection settings. `security` is "none", "tls" (implicit TLS on connect,
@@ -35,7 +37,7 @@ import "./sasl.j" as sasl;
  * PASS) or "xoauth2" (SASL bearer token, where `pass` holds the access token).
  * @field host {string} the server hostname
  * @field port {int} the server port (110 plaintext / STLS, 995 implicit TLS)
- * @field security {string} "none", "tls", or "starttls"
+ * @field security {transport.Security} `transport.Security.None`, `.Tls`, or `.Starttls`
  * @field user {string} the account username
  * @field pass {string} the password (or access token for xoauth2)
  * @field auth {string} "" (default - USER / PASS), "auto" (pick the strongest mechanism the server offers, falling back to USER / PASS), "apop" (RFC 1939 APOP), "xoauth2", "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
@@ -43,7 +45,7 @@ import "./sasl.j" as sasl;
 export def struct Options {
     host as string,
     port as int,
-    security as string,
+    security as transport.Security,
     user as string,
     pass as string,
     auth as string
@@ -344,7 +346,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
 
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
-    if ($opts.security == "tls") {
+    if ($opts.security == transport.Security.Tls) {
         return net.connectTLS($addr, TIMEOUT_MS);
     }
     return net.connect($addr, TIMEOUT_MS);
@@ -365,7 +367,7 @@ export func connect(opts as Options) {
     errdefer net.close($conn);
     def greeting as string init readLine($conn);
     expectOK($greeting, "greeting");
-    if ($opts.security == "starttls") {
+    if ($opts.security == transport.Security.Starttls) {
         expectOK(command($conn, "STLS"), "STLS");
         $conn = net.startTLS($conn, TIMEOUT_MS);
     }

@@ -73,7 +73,8 @@ func TestPop3Receive(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as pop;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
+import %q as transport;
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
 def s as pop.Session init pop.connect($o);
 testing.assertEqual(pop.count($s), 2);
 def msgA as string init pop.retrieve($s, 1);
@@ -86,7 +87,7 @@ testing.assertContains($msgC, "café résumé");
 def szs as list of int init pop.sizes($s);
 testing.assertEqual(len($szs), 2);
 testing.assertEqual($szs[0], 20);
-pop.quit($s);`, popMod, port)
+pop.quit($s);`, popMod, filepath.Join(filepath.Dir(popMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "recv.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
@@ -147,7 +148,8 @@ func TestPop3StableVerbs(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as pop;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
+import %q as transport;
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
 def s as pop.Session init pop.connect($o);
 
 # UIDL: every message's stable id
@@ -167,7 +169,7 @@ testing.assertContains($preview, "Subject: Preview");
 # RSET / NOOP: no throw = +OK
 pop.reset($s);
 pop.noop($s);
-pop.quit($s);`, popMod, port)
+pop.quit($s);`, popMod, filepath.Join(filepath.Dir(popMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "stable.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

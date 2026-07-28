@@ -125,7 +125,8 @@ func TestRedisCommands(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as redis;
-def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", password: "p", db: 1};
+import %q as transport;
+def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", password: "p", db: 1};
 def s as redis.Session init redis.connect($o);
 testing.assertEqual(redis.ping($s), "PONG");
 redis.set($s, "greeting", "hello");
@@ -138,7 +139,7 @@ testing.assertFalse(redis.exists($s, "nope"));
 testing.assertEqual(len(redis.keys($s, "*")), 2);
 testing.assertEqual(redis.del($s, "greeting"), 1);
 testing.assertEqual(redis.del($s, "greeting"), 0);
-redis.quit($s);`, redisMod, port)
+redis.quit($s);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "cmds.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
@@ -244,7 +245,8 @@ func TestRedisPubSubAndScan(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as redis;
-def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: "none", user: "", password: "", db: 0};
+import %q as transport;
+def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "", password: "", db: 0};
 def s as redis.Session init redis.connect($o);
 
 redis.subscribe($s, ["chan1"]);
@@ -264,7 +266,7 @@ testing.assertEqual(len($sr.keys), 2);
 testing.assertEqual($sr.keys[0], "alpha");
 testing.assertEqual($sr.keys[1], "beta");
 
-redis.quit($s);`, redisMod, port)
+redis.quit($s);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "pubsub.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

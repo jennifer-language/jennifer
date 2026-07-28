@@ -50,7 +50,8 @@ func TestRedisTimeout(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as redis;
-def opts as redis.Options init redis.Options{host: %q, port: %d, security: "", user: "", password: "", db: 0};
+import %q as transport;
+def opts as redis.Options init redis.Options{host: %q, port: %d, security: transport.Security.None, user: "", password: "", db: 0};
 def s as redis.Session init redis.connect($opts);
 $s.timeout = 250;
 def caught as bool init false;
@@ -59,7 +60,7 @@ try {
 } catch (e) {
     $caught = true;
 }
-testing.assertTrue($caught);`, redisMod, host, port)
+testing.assertTrue($caught);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j"), host, port)
 	progPath := filepath.Join(dir, "timeout.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

@@ -57,8 +57,9 @@ the common "get every message" case.
 | `pop.quit(session)`               | End the session (commit deletions) and close.                |
 | `pop.fetchAll(opts)`              | Connect, retrieve every message (no delete), quit; `list of string`. |
 
-`Options.security` is `"none"` (plaintext, port 110), `"tls"` (implicit TLS
-on connect, port 995), or `"starttls"` (STLS upgrade on 110).
+`Options.security` is a [`transport.Security`](transport.md): `.None` (plaintext,
+port 110), `.Tls` (implicit TLS on connect, port 995), or `.Starttls` (STLS
+upgrade on 110). Build it with `import "transport.j" as transport;`.
 
 ## Retrieval and dot-stuffing
 

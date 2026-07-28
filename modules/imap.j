@@ -21,8 +21,9 @@
  * @example
  * import "imap.j" as imap;
  * import "mime.j" as mime;
+ * import "transport.j" as transport;
  * def opts as imap.Options init imap.Options{host: "mail.example.com",
- *     port: 993, security: "tls", user: "me", pass: "secret"};
+ *     port: 993, security: transport.Security.Tls, user: "me", pass: "secret"};
  * for (def raw in imap.fetchAll($opts, "INBOX")) {
  *     def msg as mime.Part init mime.parse($raw);
  *     io.printf("subject: %s\n", mime.headerValue($msg, "Subject"));
@@ -37,12 +38,13 @@ use time;
 import "./sasl.j" as sasl;
 import "./idna.j" as idna;
 import "./mime.j" as mime;
+import "./transport.j" as transport;
 
 /**
  * The parameters for opening an IMAP session.
  * @field host {string} the server hostname
  * @field port {int} the server port (e.g. 993 for implicit TLS)
- * @field security {string} the transport, "none" (plaintext) / "tls" (implicit) / "starttls"
+ * @field security {transport.Security} the transport: `transport.Security.None` (plaintext) / `.Tls` (implicit) / `.Starttls`
  * @field user {string} the login username
  * @field pass {string} the login password, or the OAuth2 access token when auth is "xoauth2"
  * @field auth {string} the auth mechanism: "" (default - LOGIN), "auto" (probe CAPABILITY and pick the strongest mechanism, falling back to LOGIN), "xoauth2", "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
@@ -50,7 +52,7 @@ import "./mime.j" as mime;
 export def struct Options {
     host as string,
     port as int,
-    security as string,
+    security as transport.Security,
     user as string,
     pass as string,
     auth as string
@@ -371,7 +373,7 @@ func readGreeting(conn as net.Conn) {
 
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
-    if ($opts.security == "tls") {
+    if ($opts.security == transport.Security.Tls) {
         return net.connectTLS($addr, TIMEOUT_MS);
     }
     return net.connect($addr, TIMEOUT_MS);
@@ -391,7 +393,7 @@ export func connect(opts as Options) {
     # the caller owns the open connection. (The handle id survives net.startTLS.)
     errdefer net.close($conn);
     readGreeting($conn);
-    if ($opts.security == "starttls") {
+    if ($opts.security == transport.Security.Starttls) {
         command($conn, "STARTTLS");
         $conn = net.startTLS($conn, TIMEOUT_MS);
     }

@@ -770,6 +770,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (SCRAM-SHA-1 / SCRAM-SHA-256, over `hash` + `crypto`). `sasl.negotiate(advertised)`
   picks the strongest of a server's advertised mechanisms (what the mail clients
   use for `auth: "auto"`; `auth: ""` keeps the plain default). No net; both binaries.
+- **`transport`** - the shared connection-security mode for every socket client
+  (`smtp` / `pop` / `imap` / `redis` / `amqp` / `mqtt`): one enum
+  `transport.Security { None, Tls, Starttls }` (zero value `None`), used as the
+  `security` field of each client's `Options` (build it with `import
+  "transport.j" as transport;` alongside the client module, e.g.
+  `smtp.Options{security: transport.Security.Starttls, ...}`). `redis` / `amqp` /
+  `mqtt` have no in-band upgrade and reject `Starttls`. Helper
+  `transport.encrypted(s)` -> bool (`Tls` / `Starttls` true). No net; both binaries.
 - **`screen`** - terminal user interfaces (an explicit `screen`, not a GUI).
   Output-only layer (both binaries): a value-semantic cell `screen.Buffer`
   (`screen.newScreen(rows, cols)`) drawn with `screen.text` / `textColor` /
@@ -867,10 +875,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `jennifer` binary only** (`net`).
 - **`smtp`** - send mail (SMTP client) over `net`: `smtp.send(opts, from,
   recipients, message)` runs the dialogue (EHLO, optional STARTTLS / implicit
-  TLS via `smtp.Options.security`, SASL auth per `Options.auth` - PLAIN / LOGIN /
+  TLS via `smtp.Options.security` (a `transport.Security` - `.None` / `.Tls` /
+  `.Starttls`), SASL auth per `Options.auth` - PLAIN / LOGIN /
   XOAUTH2 / CRAM-MD5 / SCRAM-SHA-1 / SCRAM-SHA-256, `MAIL FROM` / `RCPT TO` /
   `DATA`), with `message` built by `mime`. Throws `Error` (kind `"smtp"`) on
-  rejection. Hardened: SASL auth over a cleartext (`security: "none"`) connection
+  rejection. Hardened: SASL auth over a cleartext (`transport.Security.None`) connection
   is refused unless `Options.allowInsecureAuth` is true; STARTTLS is only issued
   if the server advertised it (anti-downgrade); envelope addresses are validated
   (`local@domain`, RFC 5321). For a **queue** of messages, `smtp.open(opts) ->

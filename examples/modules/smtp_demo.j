@@ -8,6 +8,7 @@
  */
 use io;
 import "../../modules/mime.j" as mime;
+import "../../modules/transport.j" as transport;
 import "../../modules/smtp.j" as smtp;
 
 # Build the message with mime.
@@ -23,7 +24,7 @@ io.printf("=== message ===\n%s\n\n", $wire);
 def opts as smtp.Options init smtp.Options{
     host: "127.0.0.1",
     port: 2525,
-    security: "none",
+    security: transport.Security.None,
     clientName: "jennifer.demo",
     user: "",
     pass: "",

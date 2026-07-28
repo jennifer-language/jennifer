@@ -9,6 +9,7 @@
  */
 use io;
 import "../../modules/resque.j" as resque;
+import "../../modules/transport.j" as transport;
 import "../../modules/redis.j" as redis;
 
 # handle dispatches one reserved job on its class (a worker's job table).
@@ -27,7 +28,7 @@ func handle(db as redis.Session, job as resque.Job) {
 def opts as redis.Options init redis.Options{
     host: "127.0.0.1",
     port: 6379,
-    security: "none",
+    security: transport.Security.None,
     user: "",
     password: "",
     db: 0

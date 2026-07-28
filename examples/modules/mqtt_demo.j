@@ -10,13 +10,14 @@
 use io;
 use convert;
 import "../../modules/mqtt.j" as mqtt;
+import "../../modules/transport.j" as transport;
 
 def opts as mqtt.Options init mqtt.Options{
     host: "127.0.0.1",
     port: 1883,
     clientId: "jennifer-demo",
     keepalive: 30,
-    security: "none",
+    security: transport.Security.None,
     username: "",
     password: ""
 };

@@ -9,12 +9,13 @@
 use io;
 use maps;
 import "../../modules/pop.j" as pop;
+import "../../modules/transport.j" as transport;
 import "../../modules/mime.j" as mime;
 
 def opts as pop.Options init pop.Options{
     host: "127.0.0.1",
     port: 2110,
-    security: "none",
+    security: transport.Security.None,
     user: "demo",
     pass: "demo",
     auth: ""

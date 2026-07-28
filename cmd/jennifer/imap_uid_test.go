@@ -91,7 +91,8 @@ func TestImapUidVerbs(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as imap;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "none", user: "u", pass: "p", auth: ""};
+import %q as transport;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 
@@ -120,7 +121,7 @@ imap.addFlags($s, 101, "\\Deleted");
 imap.removeFlags($s, 101, "$cl_1");
 imap.copy($s, 101, "Archive");
 imap.move($s, 102, "Archive");
-imap.logout($s);`, imapMod, port)
+imap.logout($s);`, imapMod, filepath.Join(filepath.Dir(imapMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "uid.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

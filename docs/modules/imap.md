@@ -73,8 +73,9 @@ returns UIDs, and every message verb takes one.
 | `imap.pollNotification(session, timeoutMs)` | Like `receiveNotification`, but wait at most `timeoutMs` ms (`net.setDeadline`), then the empty sentinel. |
 | `imap.done(session)`                 | Leave IDLE (`DONE` + tagged completion), back to command mode.   |
 
-`Options.security` is `"none"` (143), `"tls"` (implicit TLS on connect, 993),
-or `"starttls"`. `fetch` uses `BODY.PEEK[]`, so retrieving does **not** set the
+`Options.security` is a [`transport.Security`](transport.md): `.None` (143),
+`.Tls` (implicit TLS on connect, 993), or `.Starttls` (needs
+`import "transport.j" as transport;`). `fetch` uses `BODY.PEEK[]`, so retrieving does **not** set the
 `\Seen` flag. An internationalized (IDN) host is IDNA-encoded to its `xn--` form
 automatically (via [`idna`](idna.md)).
 

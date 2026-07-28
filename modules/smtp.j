@@ -16,8 +16,9 @@
  * module); a non-ASCII address local part still throws (it needs SMTPUTF8).
  * @module smtp
  * @example
+ * import "transport.j" as transport;
  * def opts as smtp.Options init smtp.Options{host: "mail.example.com",
- *     port: 587, security: "starttls", clientName: "me.example.com",
+ *     port: 587, security: transport.Security.Starttls, clientName: "me.example.com",
  *     user: "me@example.com", pass: "secret"};
  * def msg as mime.Part init mime.text("text/plain", "Hello!");
  * $msg = mime.withHeader($msg, "Subject", "Hi");
@@ -30,12 +31,13 @@ use strings;
 use convert;
 import "./sasl.j" as sasl;
 import "./idna.j" as idna;
+import "./transport.j" as transport;
 
 /**
  * Connection settings for an SMTP session.
  * @field host {string} the mail server hostname (IDNA-encoded when non-ASCII)
  * @field port {int} the server port (e.g. 25, 465, 587)
- * @field security {string} "none" (plaintext), "tls" (implicit TLS on connect), or "starttls" (upgrade after EHLO)
+ * @field security {transport.Security} `transport.Security.None` (plaintext), `.Tls` (implicit TLS on connect), or `.Starttls` (upgrade after EHLO)
  * @field clientName {string} the EHLO identity (defaults to "localhost" when empty)
  * @field user {string} the SASL username (empty means no auth)
  * @field pass {string} the SASL password, or the OAuth2 access token for xoauth2
@@ -45,7 +47,7 @@ import "./idna.j" as idna;
 export def struct Options {
     host as string,
     port as int,
-    security as string,
+    security as transport.Security,
     clientName as string,
     user as string,
     pass as string,
@@ -338,7 +340,7 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
     # A mechanism will run (the no-auth cases returned above). Refuse to hand
     # SASL credentials to the server over an unencrypted connection - "tls" and
     # a completed "starttls" upgrade are encrypted; "none" is plaintext.
-    if ($opts.security == "none" and not $opts.allowInsecureAuth) {
+    if (not transport.encrypted($opts.security) and not $opts.allowInsecureAuth) {
         throw Error{
             kind: "smtp",
             message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force",
@@ -429,7 +431,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
 
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
-    if ($opts.security == "tls") {
+    if ($opts.security == transport.Security.Tls) {
         return net.connectTLS($addr, CONNECT_TIMEOUT_MS);
     }
     return net.connect($addr, CONNECT_TIMEOUT_MS);
@@ -468,7 +470,7 @@ export func open(opts as Options) {
     try {
         expect(readReply($conn), 220, 220, "greeting");
         def caps as Reply init greet($conn, $opts);
-        if ($opts.security == "starttls") {
+        if ($opts.security == transport.Security.Starttls) {
             # Anti-downgrade: only issue STARTTLS if the server actually
             # advertised it. A MITM stripping the capability to keep the session
             # in plaintext is refused here rather than silently continuing.

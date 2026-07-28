@@ -116,7 +116,8 @@ func TestMqttPubSub(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 use convert;
 import %q as mqtt;
-def o as mqtt.Options init mqtt.Options{host: "127.0.0.1", port: %d, clientId: "t", keepalive: 30, security: "none", username: "", password: ""};
+import %q as transport;
+def o as mqtt.Options init mqtt.Options{host: "127.0.0.1", port: %d, clientId: "t", keepalive: 30, security: transport.Security.None, username: "", password: ""};
 def c as mqtt.Client init mqtt.connect($o);
 mqtt.subscribe($c, "test/topic");
 mqtt.publish($c, "test/topic", "hello");
@@ -130,7 +131,7 @@ testing.assertEqual(convert.stringFromBytes($msgs[0].payload, "utf-8"), "world")
 def empty as list of mqtt.Message init mqtt.poll($c, 100);
 testing.assertEqual(len($empty), 0);
 mqtt.ping($c);
-mqtt.disconnect($c);`, mqttMod, port)
+mqtt.disconnect($c);`, mqttMod, filepath.Join(filepath.Dir(mqttMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "pubsub.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
@@ -225,7 +226,8 @@ func TestMqttQos1(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 use convert;
 import %q as mqtt;
-def o as mqtt.Options init mqtt.Options{host: "127.0.0.1", port: %d, clientId: "t", keepalive: 30, security: "none", username: "", password: ""};
+import %q as transport;
+def o as mqtt.Options init mqtt.Options{host: "127.0.0.1", port: %d, clientId: "t", keepalive: 30, security: transport.Security.None, username: "", password: ""};
 def c as mqtt.Client init mqtt.connect($o);
 def pl as bytes init convert.bytesFromString("q1payload", "utf-8");
 mqtt.publishQos1($c, "q1/pub", $pl, false);
@@ -233,7 +235,7 @@ $c = mqtt.subscribeQos1($c, "q1/sub");
 def m as mqtt.Message init mqtt.receive($c);
 testing.assertEqual($m.topic, "q1/sub");
 testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "pushed");
-mqtt.disconnect($c);`, mqttMod, port)
+mqtt.disconnect($c);`, mqttMod, filepath.Join(filepath.Dir(mqttMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "qos1.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

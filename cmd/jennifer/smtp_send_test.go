@@ -84,9 +84,10 @@ func TestSmtpSendDialogue(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "", pass: "", auth: "", allowInsecureAuth: true};
+import %q as transport;
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, clientName: "t", user: "", pass: "", auth: "", allowInsecureAuth: true};
 def rcpts as list of string init ["to@example.com"];
-smtp.send($o, "from@example.com", $rcpts, "Subject: Hi\r\n\r\nthe body\r\n.hidden dotline");`, smtpMod, port)
+smtp.send($o, "from@example.com", $rcpts, "Subject: Hi\r\n\r\nthe body\r\n.hidden dotline");`, smtpMod, filepath.Join(filepath.Dir(smtpMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "send.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
@@ -131,11 +132,12 @@ func TestSmtpSessionReuse(t *testing.T) {
 	}
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`import %q as smtp;
-def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "", pass: "", auth: "", allowInsecureAuth: true};
+import %q as transport;
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, clientName: "t", user: "", pass: "", auth: "", allowInsecureAuth: true};
 def s as smtp.Session init smtp.open($o);
 smtp.sendOn($s, "from@example.com", ["a@example.com"], "Subject: One\r\n\r\nfirst body");
 smtp.sendOn($s, "from@example.com", ["b@example.com"], "Subject: Two\r\n\r\nsecond body");
-smtp.close($s);`, smtpMod, port)
+smtp.close($s);`, smtpMod, filepath.Join(filepath.Dir(smtpMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "session.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

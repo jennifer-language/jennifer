@@ -30,7 +30,7 @@ A `totp.Options` carries the parameters; a zero-value struct
 | ----- | ------ |
 | `digits` (int) | Code length; `0` means 6. |
 | `period` (int) | Time step in seconds; `0` means 30. |
-| `algorithm` (string) | HMAC digest: `"sha1"` (default), `"sha256"`, or `"sha512"`; `""` means `"sha1"`. |
+| `algorithm` (`totp.Algorithm`) | HMAC digest: `totp.Algorithm.Sha1` (the zero-value default), `.Sha256`, or `.Sha512`. |
 
 The `secret` is a **base32** string - the same value an authenticator app
 stores. Spaces are ignored, letters are upper-cased, and missing `=` padding is
