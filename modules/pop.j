@@ -458,38 +458,42 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
             $mech = "apop";
         }
     }
-    if ($mech == "apop") {
-        apopAuth($conn, $opts, $greeting);
-        return;
-    }
-    if ($mech == "xoauth2") {
-        expectOK(
-            command($conn, "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass)),
-            "AUTH XOAUTH2");
-        return;
-    }
-    if ($mech == "cram") {
-        def chal as string init command($conn, "AUTH CRAM-MD5");
-        if (not strings.startsWith(strings.trim($chal), "+ ")) {
-            throw Error{
-                kind: "pop3",
-                message: "AUTH CRAM-MD5: " + strings.trim($chal),
-                file: "",
-                line: 0,
-                col: 0
-            };
+    match ($mech) {
+        when "apop" {
+            apopAuth($conn, $opts, $greeting);
+            return;
         }
-        expectOK(
-            command($conn, sasl.cram($opts.user, $opts.pass, popChallenge($chal))),
-            "CRAM-MD5 response");
-        return;
+        when "xoauth2" {
+            expectOK(
+                command($conn, "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass)),
+                "AUTH XOAUTH2");
+            return;
+        }
+        when "cram" {
+            def chal as string init command($conn, "AUTH CRAM-MD5");
+            if (not strings.startsWith(strings.trim($chal), "+ ")) {
+                throw Error{
+                    kind: "pop3",
+                    message: "AUTH CRAM-MD5: " + strings.trim($chal),
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
+            }
+            expectOK(
+                command($conn, sasl.cram($opts.user, $opts.pass, popChallenge($chal))),
+                "CRAM-MD5 response");
+            return;
+        }
+        when "scram-sha-1", "scram-sha-256" {
+            scramAuth($conn, $opts, $mech);
+            return;
+        }
+        else {
+            expectOK(command($conn, "USER " + $opts.user), "USER");
+            expectOK(command($conn, "PASS " + $opts.pass), "PASS");
+        }
     }
-    if ($mech == "scram-sha-1" or $mech == "scram-sha-256") {
-        scramAuth($conn, $opts, $mech);
-        return;
-    }
-    expectOK(command($conn, "USER " + $opts.user), "USER");
-    expectOK(command($conn, "PASS " + $opts.pass), "PASS");
 }
 
 # scramAuth runs the SCRAM exchange (RFC 5802) over POP3: the server-first and

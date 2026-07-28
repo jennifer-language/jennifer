@@ -10,12 +10,12 @@
 use io;
 import "../../modules/orm.j" as orm;
 
-# Declare the table mapping once (no reflection). The dialect - "postgres" here -
+# Declare the table mapping once (no reflection). The dialect - Postgres here -
 # selects the placeholder and DDL spelling.
 def users as orm.Schema init orm.column(
-    orm.column(orm.column(orm.schema("users", "id", "postgres"), "id", "int"), "name", "string"),
+    orm.column(orm.column(orm.schema("users", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String),
     "age",
-    "int");
+    orm.ColumnKind.Int);
 
 io.printf("DDL:\n  %s\n\n", orm.createTable($users));
 
@@ -33,7 +33,7 @@ io.printf(
     len($rendered.params));
 
 # The same schema in MySQL renders `?` placeholders instead of `$1` / `$2`.
-def mysqlUsers as orm.Schema init orm.column(orm.schema("users", "id", "mysql"), "name", "string");
+def mysqlUsers as orm.Schema init orm.column(orm.schema("users", "id", orm.Dialect.Mysql), "name", orm.ColumnKind.String);
 io.printf("mysql:\n  %s\n", orm.toSql(orm.where(orm.from($mysqlUsers), "name", "=", "ada")).sql);
 
 # runCrud shows the Data-Mapper CRUD shape against a live connection: you pass a

@@ -87,19 +87,13 @@ func encodePayload(class as string, args as list of string) {
 func argAt(node as json.Value, i as int) {
     def ptr as string init "/args/" + convert.toString($i);
     def t as string init json.typeOf($node, $ptr);
-    if ($t == "string") {
-        return json.asString($node, $ptr);
+    match ($t) {
+        when "string" { return json.asString($node, $ptr); }
+        when "int" { return convert.toString(json.asInt($node, $ptr)); }
+        when "float" { return convert.toString(json.asFloat($node, $ptr)); }
+        when "bool" { return convert.toString(json.asBool($node, $ptr)); }
+        else { return json.encode(json.get($node, $ptr)); }
     }
-    if ($t == "int") {
-        return convert.toString(json.asInt($node, $ptr));
-    }
-    if ($t == "float") {
-        return convert.toString(json.asFloat($node, $ptr));
-    }
-    if ($t == "bool") {
-        return convert.toString(json.asBool($node, $ptr));
-    }
-    return json.encode(json.get($node, $ptr));
 }
 
 # decodeJob parses a reserved envelope into a Job tagged with its origin queue.

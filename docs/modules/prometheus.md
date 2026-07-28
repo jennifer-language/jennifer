@@ -35,7 +35,7 @@ reassignment.
 
 | Call / type                          | Notes                                                                 |
 | ------------------------------------ | --------------------------------------------------------------------- |
-| `prometheus.Metric`                  | `name`, `help`, `type` ("counter"/"gauge"), `samples`.                |
+| `prometheus.Metric`                  | `name`, `help`, `type` (`MetricType.Counter` / `MetricType.Gauge`), `samples`. |
 | `prometheus.Sample`                  | `labels` (map), `value` (float) - one rendered line.                 |
 | `prometheus.counter(name, help)`     | A new counter metric; throws on an invalid name.                      |
 | `prometheus.gauge(name, help)`       | A new gauge metric; throws on an invalid name.                        |

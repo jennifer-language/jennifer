@@ -33,8 +33,9 @@ Runnable: [`examples/modules/barcode_demo.j`](https://github.com/jennifer-langua
 | `itf` | 1D | Interleaved 2 of 5, even digit count |
 
 ```jennifer
+def enum barcode.SymbolKind { Matrix, Linear };
 def struct barcode.Symbol {
-    kind as string,                    # "matrix" (2D) or "linear" (1D)
+    kind as SymbolKind,                # SymbolKind.Matrix (2D) or SymbolKind.Linear (1D)
     size as int,                       # matrix dimension (2D; 0 for 1D)
     matrix as list of list of bool,    # the 2D module grid (true = dark)
     bars as list of int,               # 1D bar/space run widths, starting with a bar

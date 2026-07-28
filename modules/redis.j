@@ -235,24 +235,28 @@ func parseAt(buf as bytes, pos as int) {
     def typ as int init $buf[$pos];
     def payload as string init convert.stringFromBytes(byteSlice($buf, $pos + 1, $nl), "utf-8");
     def after as int init $nl + 2;
-    if ($typ == 43) { # '+'
-        return done(replyStr("string", $payload), $after);
+    match ($typ) {
+        when 43 { # '+'
+            return done(replyStr("string", $payload), $after);
+        }
+        when 45 { # '-'
+            return done(replyStr("error", $payload), $after);
+        }
+        when 58 { # ':'
+            return done(replyInt(convert.toInt($payload)), $after);
+        }
+        when 36 { # '$'
+            return parseBulkAt($payload, $buf, $after);
+        }
+        when 42 { # '*'
+            return parseArrayAt($payload, $buf, $after);
+        }
+        else {
+            # Unknown type byte: surface the whole line as a string.
+            def line as string init convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8");
+            return done(replyStr("string", $line), $after);
+        }
     }
-    if ($typ == 45) { # '-'
-        return done(replyStr("error", $payload), $after);
-    }
-    if ($typ == 58) { # ':'
-        return done(replyInt(convert.toInt($payload)), $after);
-    }
-    if ($typ == 36) { # '$'
-        return parseBulkAt($payload, $buf, $after);
-    }
-    if ($typ == 42) { # '*'
-        return parseArrayAt($payload, $buf, $after);
-    }
-    # Unknown type byte: surface the whole line as a string.
-    def line as string init convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8");
-    return done(replyStr("string", $line), $after);
 }
 
 # parseComplete parses one RESP value from the front of `buf` (offset 0).

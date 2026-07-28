@@ -10,8 +10,8 @@
  *
  * There is no reflection, so you declare the table mapping once as an
  * `orm.Schema` (built with `orm.schema` + `orm.column`), which also carries the
- * SQL **dialect** (`"mysql"` or `"postgres"`) - a backend selector on one module,
- * not parallel modules. The query builder is functional (like the `json` write
+ * SQL **dialect** (`orm.Dialect.Mysql` or `orm.Dialect.Postgres`) - a backend
+ * selector on one module, not parallel modules. The query builder is functional (like the `json` write
  * surface): `orm.where(orm.from($schema), "age", ">", "18")` returns a fresh
  * `orm.Query`, rendered to **parameterized** SQL by `orm.toSql`. Values bind
  * only through placeholders (injection safety inherited from `sql`); the tokens
@@ -30,7 +30,7 @@
  * @example
  * import "orm.j" as orm;
  * def s as orm.Schema init orm.column(orm.column(
- *     orm.schema("users", "id", "postgres"), "id", "int"), "name", "string");
+ *     orm.schema("users", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String);
  * def q as orm.Query init orm.limit(orm.where(orm.from($s), "name", "=", "ada"), 10);
  * def sql as orm.Rendered init orm.toSql($q);       # SELECT * FROM users WHERE name = $1 LIMIT 10
  */
@@ -42,14 +42,26 @@ use maps;
 # ---- schema ----
 
 /**
+ * The SQL dialect: the backend selector that governs placeholder syntax and DDL
+ * spelling. `orm.Dialect.Mysql` or `orm.Dialect.Postgres`.
+ */
+export def enum Dialect { Mysql, Postgres };
+
+/**
+ * A column's value kind: the SQL type family `createTable` renders. One of
+ * `orm.ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`.
+ */
+export def enum ColumnKind { Int, String, Float, Bool, Bytes };
+
+/**
  * One column in a schema: its name and value kind (informational for the
  * string-row form; the guide for a future typed form).
  * @field name {string} the column name
- * @field kind {string} the value kind (`int` / `string` / `float` / `bool` / `bytes`)
+ * @field kind {ColumnKind} the value kind
  */
 export def struct Column {
     name as string,
-    kind as string
+    kind as ColumnKind
 };
 
 /**
@@ -58,13 +70,13 @@ export def struct Column {
  * @field table {string} the table name
  * @field columns {list of Column} the columns
  * @field primaryKey {string} the primary-key column name
- * @field dialect {string} `"mysql"` or `"postgres"` (placeholder + DDL spelling)
+ * @field dialect {Dialect} the SQL dialect (placeholder + DDL spelling)
  */
 export def struct Schema {
     table as string,
     columns as list of Column,
     primaryKey as string,
-    dialect as string
+    dialect as Dialect
 };
 
 /**
@@ -92,7 +104,7 @@ export def struct Condition {
  * A composable, non-mutating SELECT query. Build it with `from` / `where` /
  * `orderBy` / `limit` / `offset` / `join`, then render with `toSql`.
  * @field table {string} the base table
- * @field dialect {string} the SQL dialect
+ * @field dialect {Dialect} the SQL dialect
  * @field wheres {list of Condition} the WHERE conditions (AND-joined)
  * @field params {list of string} the bind values for the conditions
  * @field joins {list of string} rendered JOIN clauses
@@ -104,7 +116,7 @@ export def struct Condition {
  */
 export def struct Query {
     table as string,
-    dialect as string,
+    dialect as Dialect,
     wheres as list of Condition,
     params as list of string,
     joins as list of string,
@@ -114,18 +126,6 @@ export def struct Query {
     hasOffset as bool,
     offsetN as int
 };
-
-func checkDialect(dialect as string) {
-    if ($dialect != "mysql" and $dialect != "postgres") {
-        throw Error{
-            kind: "orm",
-            message: "orm: dialect must be \"mysql\" or \"postgres\", got " + $dialect,
-            file: "",
-            line: 0,
-            col: 0
-        };
-    }
-}
 
 func fail(message as string) {
     throw Error{kind: "orm", message: "orm: " + $message, file: "", line: 0, col: 0};
@@ -180,11 +180,14 @@ func checkIdent(name as string, what as string) {
 # because they do not fit the module's single-bound-value-per-condition shape.
 func checkOp(op as string) {
     def norm as string init strings.upper(strings.trim($op));
-    if ($norm == "=" or $norm == "!=" or $norm == "<>" or $norm == "<" or $norm == ">" or
-        $norm == "<=" or $norm == ">=" or $norm == "LIKE" or $norm == "NOT LIKE") {
-        return $norm;
+    match ($norm) {
+        when "=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "NOT LIKE" {
+            return $norm;
+        }
+        else {
+            fail("operator not allowed: \"" + $op + "\" (use = != <> < > <= >= LIKE or \"NOT LIKE\")");
+        }
     }
-    fail("operator not allowed: \"" + $op + "\" (use = != <> < > <= >= LIKE or \"NOT LIKE\")");
 }
 
 /**
@@ -192,12 +195,10 @@ func checkOp(op as string) {
  * columns with `orm.column`.
  * @param table {string} the table name
  * @param primaryKey {string} the primary-key column
- * @param dialect {string} `"mysql"` or `"postgres"`
+ * @param dialect {Dialect} `orm.Dialect.Mysql` or `orm.Dialect.Postgres`
  * @return {Schema} the schema (no columns yet)
- * @throws {Error} on an unknown dialect
  */
-export func schema(table as string, primaryKey as string, dialect as string) {
-    checkDialect($dialect);
+export func schema(table as string, primaryKey as string, dialect as Dialect) {
     checkIdent($table, "table name");
     checkIdent($primaryKey, "primary-key column");
     return Schema{table: $table, columns: [], primaryKey: $primaryKey, dialect: $dialect};
@@ -207,10 +208,10 @@ export func schema(table as string, primaryKey as string, dialect as string) {
  * A copy of `s` with a column appended.
  * @param s {Schema} the source schema
  * @param name {string} the column name
- * @param kind {string} the value kind (`int` / `string` / `float` / `bool` / `bytes`)
+ * @param kind {ColumnKind} the value kind (`orm.ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`)
  * @return {Schema} the extended schema
  */
-export func column(s as Schema, name as string, kind as string) {
+export func column(s as Schema, name as string, kind as ColumnKind) {
     checkIdent($name, "column name");
     def out as Schema init $s;
     def cols as list of Column init $out.columns;
@@ -222,34 +223,34 @@ export func column(s as Schema, name as string, kind as string) {
 # ---- placeholder / dialect helpers ----
 
 # ph renders the n-th placeholder for the dialect: `?` (mysql) or `$n` (postgres).
-func ph(dialect as string, n as int) {
-    if ($dialect == "postgres") {
-        return "$" + convert.toString($n);
+func ph(dialect as Dialect, n as int) {
+    match ($dialect) {
+        when Postgres { return "$" + convert.toString($n); }
+        when Mysql { return "?"; }
     }
-    return "?";
 }
 
-# sqlType maps a column kind to a dialect SQL type for createTable.
-func sqlType(kind as string, dialect as string) {
-    if ($kind == "int") {
-        return "INTEGER";
-    }
-    if ($kind == "float") {
-        if ($dialect == "postgres") {
-            return "DOUBLE PRECISION";
+# sqlType maps a column kind to a dialect SQL type for createTable. Both the kind
+# and the dialect are enum parameters, so each `match` is exhaustiveness-checked:
+# a new ColumnKind or Dialect must be handled here before it compiles.
+func sqlType(kind as ColumnKind, dialect as Dialect) {
+    match ($kind) {
+        when Int { return "INTEGER"; }
+        when Bool { return "BOOLEAN"; }
+        when String { return "TEXT"; }
+        when Float {
+            match ($dialect) {
+                when Postgres { return "DOUBLE PRECISION"; }
+                when Mysql { return "DOUBLE"; }
+            }
         }
-        return "DOUBLE";
-    }
-    if ($kind == "bool") {
-        return "BOOLEAN";
-    }
-    if ($kind == "bytes") {
-        if ($dialect == "postgres") {
-            return "BYTEA";
+        when Bytes {
+            match ($dialect) {
+                when Postgres { return "BYTEA"; }
+                when Mysql { return "BLOB"; }
+            }
         }
-        return "BLOB";
     }
-    return "TEXT";
 }
 
 # ---- query builder (pure) ----

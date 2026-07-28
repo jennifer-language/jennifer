@@ -1223,6 +1223,42 @@ concat); and the docs call out that `handle` exposes the whole top-level method
 namespace (no route allow-list) with authentication left to the transport.
 Client-side batch and custom per-handler error codes are noted follow-ups.
 
+### M23.12 - `match` / `enum` adoption across modules
+
+**Done.** `match` and `enum` were barely used in `modules/` (2 of 66 files had an
+enum, 3 a `match`). A survey found the genuine improvements - closed variant sets
+that were dispatched on with `if`/`elseif` chains or carried in stringly-typed
+`kind` fields - and applied them where they improve the code (open sets like HTTP
+methods, wire-protocol strings, and config-supplied mechanism names were left as
+strings deliberately).
+
+- **Non-breaking `match` conversions.** Internal single-value `if`/`elseif`
+  dispatch chains became `match`: `screen` (key decode), `redis` (RESP type
+  byte), `docblock` (doc tags), `barcode` (symbology), `jwt` (signature family),
+  `smtp` / `pop` / `imap` (auth mechanism), `imap` (STATUS keys), `memcache`
+  (reply lines), `orm` (operator allow-list), `influxdb` / `resque` (JSON cell
+  kind), `vcard` / `ical` (property names), `markdown` (`style`).
+- **Non-breaking `enum` (private structs).** `markdown`'s `Span.kind` and
+  `Block.kind` became `SpanKind` / `BlockKind`; the per-span and per-block
+  renderers were factored so each `match` is over a **parameter**, giving
+  compile-time exhaustiveness across both the HTML and ANSI paths.
+- **Breaking `enum` (public discriminant fields) - pre-1.0 API changes.**
+  `htmlwriter` `Node.kind` -> `NodeKind{Element,Text,Raw}`; `prometheus`
+  `Metric.type` -> `MetricType{Counter,Gauge}`; `barcode` `Symbol.kind` ->
+  `SymbolKind{Matrix,Linear}`; and `orm` gained `Dialect{Mysql,Postgres}` +
+  `ColumnKind{Int,String,Float,Bool,Bytes}`, so `orm.schema(t, pk, dialect)` and
+  `orm.column(s, name, kind)` now take enum values (e.g. `orm.Dialect.Postgres`,
+  `orm.ColumnKind.Int`), an invalid dialect / kind is unrepresentable, and
+  `orm`'s `checkDialect` guard is gone. Each `match` over an enum-typed parameter
+  is exhaustiveness-checked, so a new variant fails to compile until every
+  renderer / builder handles it. Overlays, demos, docs, and the `orm` Go
+  integration test were updated; all module overlays and `go test ./...` stay
+  green on both binaries. Deferred (needing a design call): the shared
+  `Options.security` field (`none`/`tls`/`starttls`, an idiom across ~6 network
+  modules - a uniform enum would be a large cross-module break) and `totp`'s
+  `Options.algorithm` (a `""`-sentinel default that does not map cleanly to a
+  variant).
+
 ---
 
 ## Requirements for 1.0.0 stable

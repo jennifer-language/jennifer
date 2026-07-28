@@ -34,14 +34,16 @@ include "./barcode_ecc.j";
 
 /**
  * A device-independent encoded symbol.
- * @field kind {string} "matrix" (2D) or "linear" (1D)
+ * @field kind {SymbolKind} `Matrix` (2D) or `Linear` (1D)
  * @field size {int} the matrix dimension (2D; 0 for 1D)
  * @field matrix {list of list of bool} the 2D module grid (true = dark)
  * @field bars {list of int} 1D bar/space run widths, starting with a bar
  * @field text {string} the encoded data
  */
+export def enum SymbolKind { Matrix, Linear };
+
 export def struct Symbol {
-    kind as string,
+    kind as SymbolKind,
     size as int,
     matrix as list of list of bool,
     bars as list of int,
@@ -753,33 +755,25 @@ func boolGrid(grid as list of list of int, size as int) {
  * @throws {Error} kind "barcode" on an unknown symbology or invalid data
  */
 export func encode(data as string, symbology as string, opts as Options) {
-    if ($symbology == "qr") {
-        def raw as bytes init convert.bytesFromString($data, "utf-8");
-        def m as list of list of bool init qrMatrix($raw, $opts.ecLevel);
-        def noBars as list of int init [];
-        return Symbol{ kind: "matrix", size: len($m), matrix: $m, bars: $noBars, text: $data };
+    match ($symbology) {
+        when "qr" {
+            def raw as bytes init convert.bytesFromString($data, "utf-8");
+            def m as list of list of bool init qrMatrix($raw, $opts.ecLevel);
+            def noBars as list of int init [];
+            return Symbol{ kind: SymbolKind.Matrix, size: len($m), matrix: $m, bars: $noBars, text: $data };
+        }
+        when "code128" { return linearSymbol($data, code128Bars($data)); }
+        when "code39" { return linearSymbol($data, code39Bars($data)); }
+        when "ean13" { return linearSymbol($data, ean13Bars($data)); }
+        when "ean8" { return linearSymbol($data, ean8Bars($data)); }
+        when "itf" { return linearSymbol($data, itfBars($data)); }
+        else { fail("unknown symbology: " + $symbology); }
     }
-    if ($symbology == "code128") {
-        return linearSymbol($data, code128Bars($data));
-    }
-    if ($symbology == "code39") {
-        return linearSymbol($data, code39Bars($data));
-    }
-    if ($symbology == "ean13") {
-        return linearSymbol($data, ean13Bars($data));
-    }
-    if ($symbology == "ean8") {
-        return linearSymbol($data, ean8Bars($data));
-    }
-    if ($symbology == "itf") {
-        return linearSymbol($data, itfBars($data));
-    }
-    fail("unknown symbology: " + $symbology);
 }
 
 func linearSymbol(data as string, bars as list of int) {
     def empty as list of list of bool init [];
-    return Symbol{ kind: "linear", size: 0, matrix: $empty, bars: $bars, text: $data };
+    return Symbol{ kind: SymbolKind.Linear, size: 0, matrix: $empty, bars: $bars, text: $data };
 }
 
 # --- 1D symbologies (private) -----------------------------------------------
@@ -1073,7 +1067,7 @@ func code128Patterns() {
  * @return {list of list of bool} the module grid (true = dark)
  */
 export func matrix(symbol as Symbol) {
-    if (not ($symbol.kind == "matrix")) {
+    if (not ($symbol.kind == SymbolKind.Matrix)) {
         fail("matrix: not a 2D symbol");
     }
     return $symbol.matrix;
@@ -1085,7 +1079,7 @@ export func matrix(symbol as Symbol) {
  * @return {string} the terminal rendering
  */
 export func terminal(symbol as Symbol) {
-    if (not ($symbol.kind == "matrix")) {
+    if (not ($symbol.kind == SymbolKind.Matrix)) {
         fail("terminal: 1D symbols are better viewed as an image");
     }
     def m as list of list of bool init $symbol.matrix;
@@ -1132,10 +1126,10 @@ func halfBlock(top as bool, bot as bool) {
  * @return {string} the SVG document
  */
 export func svg(symbol as Symbol, opts as Options) {
-    if ($symbol.kind == "matrix") {
-        return svgMatrix($symbol, $opts);
+    match ($symbol.kind) {
+        when Matrix { return svgMatrix($symbol, $opts); }
+        when Linear { return svgLinear($symbol, $opts); }
     }
-    return svgLinear($symbol, $opts);
 }
 
 func svgMatrix(symbol as Symbol, opts as Options) {
@@ -1238,7 +1232,7 @@ export func png(symbol as Symbol, opts as Options) {
 func rasterize(symbol as Symbol, opts as Options) {
     def s as int init $opts.scale;
     def q as int init $opts.quiet;
-    if ($symbol.kind == "matrix") {
+    if ($symbol.kind == SymbolKind.Matrix) {
         def m as list of list of bool init $symbol.matrix;
         def n as int init len($m);
         def dim as int init ($n + 2 * $q) * $s;

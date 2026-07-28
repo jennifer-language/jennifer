@@ -444,23 +444,27 @@ func authenticate(conn as net.Conn, opts as Options) {
     if ($mech == "auto") {
         $mech = sasl.negotiate(imapCapaMechs($conn));
     }
-    if ($mech == "xoauth2") {
-        command($conn, "AUTHENTICATE XOAUTH2 " + sasl.bearer($opts.user, $opts.pass));
-        return;
+    match ($mech) {
+        when "xoauth2" {
+            command($conn, "AUTHENTICATE XOAUTH2 " + sasl.bearer($opts.user, $opts.pass));
+            return;
+        }
+        when "cram" {
+            writeLine($conn, TAG + " AUTHENTICATE CRAM-MD5");
+            def chal as string init readLine($conn);
+            requirePlus($chal, "AUTHENTICATE CRAM-MD5");
+            writeLine($conn, sasl.cram($opts.user, $opts.pass, imapChallenge($chal)));
+            expectTaggedOK(readLine($conn), TAG);
+            return;
+        }
+        when "scram-sha-1", "scram-sha-256" {
+            scramAuth($conn, $opts, $mech);
+            return;
+        }
+        else {
+            command($conn, "LOGIN " + quoteArg($opts.user) + " " + quoteArg($opts.pass));
+        }
     }
-    if ($mech == "cram") {
-        writeLine($conn, TAG + " AUTHENTICATE CRAM-MD5");
-        def chal as string init readLine($conn);
-        requirePlus($chal, "AUTHENTICATE CRAM-MD5");
-        writeLine($conn, sasl.cram($opts.user, $opts.pass, imapChallenge($chal)));
-        expectTaggedOK(readLine($conn), TAG);
-        return;
-    }
-    if ($mech == "scram-sha-1" or $mech == "scram-sha-256") {
-        scramAuth($conn, $opts, $mech);
-        return;
-    }
-    command($conn, "LOGIN " + quoteArg($opts.user) + " " + quoteArg($opts.pass));
 }
 
 # scramAuth runs the SCRAM exchange (RFC 5802) over IMAP AUTHENTICATE in the
@@ -610,16 +614,12 @@ func parseStatus(resp as string) {
     while ($i + 1 < len($toks)) {
         def key as string init strings.upper(strings.trim($toks[$i]));
         def val as int init convert.toInt(strings.trim($toks[$i + 1]));
-        if ($key == "MESSAGES") {
-            $s.messages = $val;
-        } elseif ($key == "RECENT") {
-            $s.recent = $val;
-        } elseif ($key == "UNSEEN") {
-            $s.unseen = $val;
-        } elseif ($key == "UIDNEXT") {
-            $s.uidnext = $val;
-        } elseif ($key == "UIDVALIDITY") {
-            $s.uidvalidity = $val;
+        match ($key) {
+            when "MESSAGES" { $s.messages = $val; }
+            when "RECENT" { $s.recent = $val; }
+            when "UNSEEN" { $s.unseen = $val; }
+            when "UIDNEXT" { $s.uidnext = $val; }
+            when "UIDVALIDITY" { $s.uidvalidity = $val; }
         }
         $i = $i + 2;
     }

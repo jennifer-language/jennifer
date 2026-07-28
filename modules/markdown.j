@@ -24,20 +24,26 @@ use regex;
 use convert;
 use lists;
 
-# An inline span: a run of "text", or an emphasised / code / link span. Link
+# The inline span kinds and block kinds, as sum types: the renderers `match` on
+# them, so adding a kind surfaces every place that must handle it (both the HTML
+# and the ANSI path) instead of silently falling through a string compare.
+def enum SpanKind { Text, Code, Strong, Em, Link };
+def enum BlockKind { Paragraph, Heading, Code, List, Table };
+
+# An inline span: a run of Text, or an emphasised / code / link span. Link
 # spans carry the target in `url`; the others leave it "".
 def struct Span {
-    kind as string,
+    kind as SpanKind,
     text as string,
     url as string,
     title as string
 };
 
-# A block: a heading (with `level`), a paragraph or code block (in `text`), a
-# list (`ordered` plus `items`), or a table (`headings` + `aligns` + `rows`,
+# A block: a Heading (with `level`), a Paragraph or Code block (in `text`), a
+# List (`ordered` plus `items`), or a Table (`headings` + `aligns` + `rows`,
 # each cell an inline-text string).
 def struct Block {
-    kind as string,
+    kind as BlockKind,
     level as int,
     text as string,
     ordered as bool,
@@ -69,19 +75,19 @@ def struct TablePretty {
 
 # --- span + block constructors (private) ---------------------------
 
-func span(kind as string, text as string, url as string) {
+func span(kind as SpanKind, text as string, url as string) {
     return Span{kind: $kind, text: $text, url: $url, title: ""};
 }
 
 # linkSpan builds a link span carrying an optional title (from `[t](url "t")`).
 func linkSpan(text as string, url as string, title as string) {
-    return Span{kind: "link", text: $text, url: $url, title: $title};
+    return Span{kind: SpanKind.Link, text: $text, url: $url, title: $title};
 }
 
 func paraBlock(lines as list of string) {
     def joined as string init strings.join($lines, " ");
     return Block{
-        kind: "paragraph",
+        kind: BlockKind.Paragraph,
         level: 0,
         text: $joined,
         ordered: false,
@@ -94,7 +100,7 @@ func paraBlock(lines as list of string) {
 
 func listBlock(items as list of string, ordered as bool) {
     return Block{
-        kind: "list",
+        kind: BlockKind.List,
         level: 0,
         text: "",
         ordered: $ordered,
@@ -110,7 +116,7 @@ func tableBlock(
     aligns as list of string,
     rows as list of list of string) {
     return Block{
-        kind: "table",
+        kind: BlockKind.Table,
         level: 0,
         text: "",
         ordered: false,
@@ -123,7 +129,7 @@ func tableBlock(
 
 func codeBlockNode(text as string) {
     return Block{
-        kind: "code",
+        kind: BlockKind.Code,
         level: 0,
         text: $text,
         ordered: false,
@@ -227,9 +233,9 @@ func parseInline(s as string) {
         }
         if ($bt >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = span("code", strings.join(lists.slice($cs, $i + 1, $bt), ""), "");
+            $spans[] = span(SpanKind.Code, strings.join(lists.slice($cs, $i + 1, $bt), ""), "");
             $i = $bt + 1;
             $bufStart = $i;
             continue;
@@ -246,9 +252,9 @@ func parseInline(s as string) {
         }
         if ($dbl >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = span("strong", strings.join(lists.slice($cs, $i + 2, $dbl), ""), "");
+            $spans[] = span(SpanKind.Strong, strings.join(lists.slice($cs, $i + 2, $dbl), ""), "");
             $i = $dbl + 2;
             $bufStart = $i;
             continue;
@@ -265,9 +271,9 @@ func parseInline(s as string) {
         }
         if ($em >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = span("em", strings.join(lists.slice($cs, $i + 1, $em), ""), "");
+            $spans[] = span(SpanKind.Em, strings.join(lists.slice($cs, $i + 1, $em), ""), "");
             $i = $em + 1;
             $bufStart = $i;
             continue;
@@ -290,7 +296,7 @@ func parseInline(s as string) {
         }
         if ($linkEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
             # Slice the (short) text and destination here - lists.slice on the
             # rune list is O(slice length) regardless of position, unlike
@@ -306,7 +312,7 @@ func parseInline(s as string) {
         $i = $i + 1;
     }
     if ($n > $bufStart) {
-        $spans[] = span("text", strings.join(lists.slice($cs, $bufStart, $n), ""), "");
+        $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $n), ""), "");
     }
     return $spans;
 }
@@ -537,7 +543,7 @@ func parseBlocks(md as string) {
 
 func headingBlock(level as int, text as string) {
     return Block{
-        kind: "heading",
+        kind: BlockKind.Heading,
         level: $level,
         text: $text,
         ordered: false,
@@ -590,20 +596,23 @@ func fenceLen(trimmed as string) {
 
 # inlineToNodes maps spans to htmlwriter nodes; html.text escapes text content
 # and html.attr escapes the link target.
+# spanToNode renders one span to an htmlwriter node. The `match` is over a Span
+# parameter, so the resolver checks it covers every SpanKind - add a kind and
+# this fails to compile until it is handled.
+func spanToNode(sp as Span) {
+    match ($sp.kind) {
+        when Text { return html.text($sp.text); }
+        when Code { return wrapEl("code", $sp.text); }
+        when Strong { return wrapEl("strong", $sp.text); }
+        when Em { return wrapEl("em", $sp.text); }
+        when Link { return linkNode($sp.text, $sp.url, $sp.title); }
+    }
+}
+
 func inlineToNodes(spans as list of Span) {
     def nodes as list of html.Node init [];
     for (def sp in $spans) {
-        if ($sp.kind == "text") {
-            $nodes[] = html.text($sp.text);
-        } elseif ($sp.kind == "code") {
-            $nodes[] = wrapEl("code", $sp.text);
-        } elseif ($sp.kind == "strong") {
-            $nodes[] = wrapEl("strong", $sp.text);
-        } elseif ($sp.kind == "em") {
-            $nodes[] = wrapEl("em", $sp.text);
-        } elseif ($sp.kind == "link") {
-            $nodes[] = linkNode($sp.text, $sp.url, $sp.title);
-        }
+        $nodes[] = spanToNode($sp);
     }
     return $nodes;
 }
@@ -691,31 +700,35 @@ func tableNode(b as Block) {
 
 # blockToNode renders one block to an htmlwriter node.
 func blockToNode(b as Block) {
-    if ($b.kind == "table") {
-        return tableNode($b);
-    }
-    if ($b.kind == "heading") {
-        def tag as string init "h" + convert.toString($b.level);
-        return html.element($tag, [], inlineToNodes(parseInline($b.text)));
-    }
-    if ($b.kind == "code") {
-        def codeKids as list of html.Node init [];
-        $codeKids[] = html.text($b.text);
-        def pre as list of html.Node init [];
-        $pre[] = html.element("code", [], $codeKids);
-        return html.element("pre", [], $pre);
-    }
-    if ($b.kind == "list") {
-        def lis as list of html.Node init [];
-        for (def item in $b.items) {
-            $lis[] = html.element("li", [], inlineToNodes(parseInline($item)));
+    match ($b.kind) {
+        when Table {
+            return tableNode($b);
         }
-        if ($b.ordered) {
-            return html.element("ol", [], $lis);
+        when Heading {
+            def tag as string init "h" + convert.toString($b.level);
+            return html.element($tag, [], inlineToNodes(parseInline($b.text)));
         }
-        return html.element("ul", [], $lis);
+        when Code {
+            def codeKids as list of html.Node init [];
+            $codeKids[] = html.text($b.text);
+            def pre as list of html.Node init [];
+            $pre[] = html.element("code", [], $codeKids);
+            return html.element("pre", [], $pre);
+        }
+        when List {
+            def lis as list of html.Node init [];
+            for (def item in $b.items) {
+                $lis[] = html.element("li", [], inlineToNodes(parseInline($item)));
+            }
+            if ($b.ordered) {
+                return html.element("ol", [], $lis);
+            }
+            return html.element("ul", [], $lis);
+        }
+        when Paragraph {
+            return html.element("p", [], inlineToNodes(parseInline($b.text)));
+        }
     }
-    return html.element("p", [], inlineToNodes(parseInline($b.text)));
 }
 
 /**
@@ -736,20 +749,22 @@ export func toHtml(md as string) {
 
 # inlineToAnsi maps spans to terminal-styled text (styling suppresses itself
 # when stdout is not a TTY, so piped output is plain).
+# spanToAnsi renders one span to terminal text (a Span parameter, so the `match`
+# is exhaustiveness-checked over SpanKind, like spanToNode).
+func spanToAnsi(sp as Span) {
+    match ($sp.kind) {
+        when Text { return $sp.text; }
+        when Code { return ansi.cyan($sp.text); }
+        when Strong { return ansi.bold($sp.text); }
+        when Em { return ansi.italic($sp.text); }
+        when Link { return ansi.underline($sp.text) + " (" + $sp.url + ")"; }
+    }
+}
+
 func inlineToAnsi(spans as list of Span) {
     def out as string init "";
     for (def sp in $spans) {
-        if ($sp.kind == "text") {
-            $out = $out + $sp.text;
-        } elseif ($sp.kind == "code") {
-            $out = $out + ansi.cyan($sp.text);
-        } elseif ($sp.kind == "strong") {
-            $out = $out + ansi.bold($sp.text);
-        } elseif ($sp.kind == "em") {
-            $out = $out + ansi.italic($sp.text);
-        } elseif ($sp.kind == "link") {
-            $out = $out + ansi.underline($sp.text) + " (" + $sp.url + ")";
-        }
+        $out = $out + spanToAnsi($sp);
     }
     return $out;
 }
@@ -895,34 +910,38 @@ func tableToAnsi(b as Block) {
 
 # blockToAnsi renders one block to terminal text.
 func blockToAnsi(b as Block) {
-    if ($b.kind == "table") {
-        return tableToAnsi($b);
-    }
-    if ($b.kind == "heading") {
-        return ansi.bold(inlineToAnsi(parseInline($b.text)));
-    }
-    if ($b.kind == "code") {
-        return ansi.dim(indentLines($b.text, "    "));
-    }
-    if ($b.kind == "list") {
-        def out as string init "";
-        def idx as int init 1;
-        def first as bool init true;
-        for (def item in $b.items) {
-            if (not $first) {
-                $out = $out + "\n";
-            }
-            $first = false;
-            def marker as string init "- ";
-            if ($b.ordered) {
-                $marker = convert.toString($idx) + ". ";
-            }
-            $out = $out + "  " + $marker + inlineToAnsi(parseInline($item));
-            $idx = $idx + 1;
+    match ($b.kind) {
+        when Table {
+            return tableToAnsi($b);
         }
-        return $out;
+        when Heading {
+            return ansi.bold(inlineToAnsi(parseInline($b.text)));
+        }
+        when Code {
+            return ansi.dim(indentLines($b.text, "    "));
+        }
+        when List {
+            def out as string init "";
+            def idx as int init 1;
+            def first as bool init true;
+            for (def item in $b.items) {
+                if (not $first) {
+                    $out = $out + "\n";
+                }
+                $first = false;
+                def marker as string init "- ";
+                if ($b.ordered) {
+                    $marker = convert.toString($idx) + ". ";
+                }
+                $out = $out + "  " + $marker + inlineToAnsi(parseInline($item));
+                $idx = $idx + 1;
+            }
+            return $out;
+        }
+        when Paragraph {
+            return inlineToAnsi(parseInline($b.text));
+        }
     }
-    return inlineToAnsi(parseInline($b.text));
 }
 
 /**
@@ -997,16 +1016,12 @@ export func header(level as string, text as string) {
  * @throws {Error} when kind is not "bold" / "italic" / "code"
  */
 export func style(kind as string, text as string) {
-    if ($kind == "bold") {
-        return "**" + $text + "**";
+    match ($kind) {
+        when "bold" { return "**" + $text + "**"; }
+        when "italic" { return "*" + $text + "*"; }
+        when "code" { return "`" + $text + "`"; }
+        else { fail("markdown.style: kind must be bold|italic|code, got " + $kind); }
     }
-    if ($kind == "italic") {
-        return "*" + $text + "*";
-    }
-    if ($kind == "code") {
-        return "`" + $text + "`";
-    }
-    fail("markdown.style: kind must be bold|italic|code, got " + $kind);
 }
 
 /**

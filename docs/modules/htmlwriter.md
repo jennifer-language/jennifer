@@ -23,21 +23,26 @@ Runnable: [`examples/modules/htmlwriter_demo.j`](https://github.com/jennifer-lan
 ## The node model
 
 An HTML tree is `Node` values. A node is one of three kinds, tagged by its
-`kind` field, and is built with a constructor rather than a literal:
+`kind` field (a `NodeKind` enum), and is built with a constructor rather than a
+literal:
 
-| Kind        | Built with                       | Renders as                                   |
-| ----------- | -------------------------------- | -------------------------------------------- |
-| `"element"` | `element(tag, attrs, children)`  | `<tag ...>children</tag>` (or a void tag)    |
-| `"text"`    | `text(s)`                        | `s`, HTML-escaped                            |
-| `"raw"`     | `raw(s)`                         | `s`, verbatim (already-trusted markup only)  |
+| Kind              | Built with                       | Renders as                                   |
+| ----------------- | -------------------------------- | -------------------------------------------- |
+| `NodeKind.Element` | `element(tag, attrs, children)`  | `<tag ...>children</tag>` (or a void tag)    |
+| `NodeKind.Text`    | `text(s)`                        | `s`, HTML-escaped                            |
+| `NodeKind.Raw`     | `raw(s)`                         | `s`, verbatim (already-trusted markup only)  |
 
 ```jennifer
+export def enum NodeKind { Element, Text, Raw };
 export def struct Node {
-    kind as string, tag as string,
+    kind as NodeKind, tag as string,
     attrs as list of Attr, children as list of Node, text as string
 };
 export def struct Attr { name as string, value as string, boolean as bool };
 ```
+
+`render` dispatches over `NodeKind` with an exhaustive `match`, so a new node
+kind cannot be added without handling it in the renderer.
 
 Children are supplied to `element` as a `list of Node` you build first (the
 append sugar does not chain into a struct field, so build the list in a

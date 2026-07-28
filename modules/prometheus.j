@@ -40,15 +40,27 @@ export def struct Sample {
  * A metric family: a name, help text, a type, and its samples.
  * @field name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
  * @field help {string} the HELP text (empty to omit the HELP line)
- * @field type {string} the metric type ("counter" or "gauge")
+ * @field type {MetricType} the metric type (`Counter` or `Gauge`)
  * @field samples {list of Sample} the sample lines
  */
+export def enum MetricType { Counter, Gauge };
+
 export def struct Metric {
     name as string,
     help as string,
-    type as string,
+    type as MetricType,
     samples as list of Sample
 };
+
+# typeName renders a metric type to its Prometheus text-exposition token. A
+# MetricType parameter, so the `match` is exhaustiveness-checked: a new metric
+# type must be given a token here before it compiles.
+func typeName(t as MetricType) {
+    match ($t) {
+        when Counter { return "counter"; }
+        when Gauge { return "gauge"; }
+    }
+}
 
 # --- retrieval types --------------------------------------------------------
 
@@ -180,7 +192,7 @@ export func counter(name as string, help as string) {
         };
     }
     def s as list of Sample init [];
-    return Metric{name: $name, help: $help, type: "counter", samples: $s};
+    return Metric{name: $name, help: $help, type: MetricType.Counter, samples: $s};
 }
 
 /**
@@ -201,7 +213,7 @@ export func gauge(name as string, help as string) {
         };
     }
     def s as list of Sample init [];
-    return Metric{name: $name, help: $help, type: "gauge", samples: $s};
+    return Metric{name: $name, help: $help, type: MetricType.Gauge, samples: $s};
 }
 
 # labelsEqual reports whether two label sets have identical keys and values.
@@ -285,7 +297,7 @@ export func render(metrics as list of Metric) {
         if (len($m.help) > 0) {
             $lines[] = "# HELP " + $m.name + " " + escapeHelp($m.help);
         }
-        $lines[] = "# TYPE " + $m.name + " " + $m.type;
+        $lines[] = "# TYPE " + $m.name + " " + typeName($m.type);
         for (def s in $m.samples) {
             $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value);
         }

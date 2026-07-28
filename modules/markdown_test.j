@@ -17,26 +17,26 @@ use testing;
 func testInlinePlain() {
     def spans as list of Span init parseInline("just words");
     testing.assertEqual(len($spans), 1);
-    testing.assertEqual($spans[0].kind, "text");
+    testing.assertEqual($spans[0].kind, SpanKind.Text);
     testing.assertEqual($spans[0].text, "just words");
 }
 
 func testInlineMixed() {
     def spans as list of Span init parseInline("a **b** c `d` [e](u)");
     testing.assertEqual(len($spans), 6);
-    testing.assertEqual($spans[0].kind, "text");
-    testing.assertEqual($spans[1].kind, "strong");
+    testing.assertEqual($spans[0].kind, SpanKind.Text);
+    testing.assertEqual($spans[1].kind, SpanKind.Strong);
     testing.assertEqual($spans[1].text, "b");
-    testing.assertEqual($spans[3].kind, "code");
+    testing.assertEqual($spans[3].kind, SpanKind.Code);
     testing.assertEqual($spans[3].text, "d");
-    testing.assertEqual($spans[5].kind, "link");
+    testing.assertEqual($spans[5].kind, SpanKind.Link);
     testing.assertEqual($spans[5].text, "e");
     testing.assertEqual($spans[5].url, "u");
 }
 
 func testInlineEmphasis() {
     def spans as list of Span init parseInline("*it*");
-    testing.assertEqual($spans[0].kind, "em");
+    testing.assertEqual($spans[0].kind, SpanKind.Em);
     testing.assertEqual($spans[0].text, "it");
 }
 
@@ -45,11 +45,11 @@ func testInlineEmphasis() {
 func testInlineSpaceFlankedStarIsLiteral() {
     def spans as list of Span init parseInline("compute 3 * 4 * 5 fast");
     testing.assertEqual(len($spans), 1);
-    testing.assertEqual($spans[0].kind, "text");
+    testing.assertEqual($spans[0].kind, SpanKind.Text);
     testing.assertEqual($spans[0].text, "compute 3 * 4 * 5 fast");
     # But a tight `*x*` still emphasizes.
     def em as list of Span init parseInline("a *x* b");
-    testing.assertEqual($em[1].kind, "em");
+    testing.assertEqual($em[1].kind, SpanKind.Em);
     testing.assertEqual($em[1].text, "x");
 }
 
@@ -57,7 +57,7 @@ func testInlineUnterminatedIsText() {
     # A lone marker with no closer stays literal text.
     def spans as list of Span init parseInline("a * b ` c");
     testing.assertEqual(len($spans), 1);
-    testing.assertEqual($spans[0].kind, "text");
+    testing.assertEqual($spans[0].kind, SpanKind.Text);
     testing.assertEqual($spans[0].text, "a * b ` c");
 }
 
@@ -75,10 +75,10 @@ func testLineType() {
 func testParseBlocksMixed() {
     def blocks as list of Block init parseBlocks("# Title\n\npara text\n\n- a\n- b");
     testing.assertEqual(len($blocks), 3);
-    testing.assertEqual($blocks[0].kind, "heading");
+    testing.assertEqual($blocks[0].kind, BlockKind.Heading);
     testing.assertEqual($blocks[0].level, 1);
-    testing.assertEqual($blocks[1].kind, "paragraph");
-    testing.assertEqual($blocks[2].kind, "list");
+    testing.assertEqual($blocks[1].kind, BlockKind.Paragraph);
+    testing.assertEqual($blocks[2].kind, BlockKind.List);
     testing.assertFalse($blocks[2].ordered);
     testing.assertEqual(len($blocks[2].items), 2);
 }
@@ -100,7 +100,7 @@ func testOrderedThenUnorderedSplit() {
 func testFenceContent() {
     def blocks as list of Block init parseBlocks("```\nl1\nl2\n```");
     testing.assertEqual(len($blocks), 1);
-    testing.assertEqual($blocks[0].kind, "code");
+    testing.assertEqual($blocks[0].kind, BlockKind.Code);
     testing.assertEqual($blocks[0].text, "l1\nl2");
 }
 
@@ -109,7 +109,7 @@ func testFenceContent() {
 func testFenceLongerFenceContainsShorter() {
     def blocks as list of Block init parseBlocks("````\ncode with ``` inside\n````");
     testing.assertEqual(len($blocks), 1);
-    testing.assertEqual($blocks[0].kind, "code");
+    testing.assertEqual($blocks[0].kind, BlockKind.Code);
     testing.assertEqual($blocks[0].text, "code with ``` inside");
 }
 
@@ -286,7 +286,7 @@ func testParseAligns() {
 func testParseBlocksTable() {
     def blocks as list of Block init parseBlocks("| A | B |\n| --- | ---: |\n| 1 | 2 |\n| 3 | 4 |");
     testing.assertEqual(len($blocks), 1);
-    testing.assertEqual($blocks[0].kind, "table");
+    testing.assertEqual($blocks[0].kind, BlockKind.Table);
     testing.assertEqual(len($blocks[0].headings), 2);
     testing.assertEqual($blocks[0].aligns[1], "right");
     testing.assertEqual(len($blocks[0].rows), 2);
@@ -296,15 +296,15 @@ func testParseBlocksTable() {
 func testTableInterruptsParagraph() {
     def blocks as list of Block init parseBlocks("intro\n| a | b |\n| --- | --- |\n| 1 | 2 |");
     testing.assertEqual(len($blocks), 2);
-    testing.assertEqual($blocks[0].kind, "paragraph");
-    testing.assertEqual($blocks[1].kind, "table");
+    testing.assertEqual($blocks[0].kind, BlockKind.Paragraph);
+    testing.assertEqual($blocks[1].kind, BlockKind.Table);
 }
 
 # A pipe line with no delimiter row underneath is an ordinary paragraph.
 func testPipeLineWithoutDelimiterIsParagraph() {
     def blocks as list of Block init parseBlocks("a | b | c");
     testing.assertEqual(len($blocks), 1);
-    testing.assertEqual($blocks[0].kind, "paragraph");
+    testing.assertEqual($blocks[0].kind, BlockKind.Paragraph);
 }
 
 func testHtmlTable() {

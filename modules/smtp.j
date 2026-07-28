@@ -347,35 +347,39 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
             col: 0
         };
     }
-    if ($mech == "plain") {
-        def resp as string init "AUTH PLAIN " + sasl.plain($opts.user, $opts.pass);
-        expect(command($conn, $resp), 235, 235, "AUTH PLAIN");
-        return;
+    match ($mech) {
+        when "plain" {
+            def resp as string init "AUTH PLAIN " + sasl.plain($opts.user, $opts.pass);
+            expect(command($conn, $resp), 235, 235, "AUTH PLAIN");
+            return;
+        }
+        when "login" {
+            expect(command($conn, "AUTH LOGIN"), 334, 334, "AUTH LOGIN");
+            expect(command($conn, sasl.loginUser($opts.user)), 334, 334, "AUTH LOGIN user");
+            expect(command($conn, sasl.loginPass($opts.pass)), 235, 235, "AUTH LOGIN pass");
+            return;
+        }
+        when "xoauth2" {
+            def resp as string init "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass);
+            expect(command($conn, $resp), 235, 235, "AUTH XOAUTH2");
+            return;
+        }
+        when "cram" {
+            def r as Reply init command($conn, "AUTH CRAM-MD5");
+            expect($r, 334, 334, "AUTH CRAM-MD5");
+            def resp as string init sasl.cram($opts.user, $opts.pass, saslChallenge($r.text));
+            expect(command($conn, $resp), 235, 235, "CRAM-MD5 response");
+            return;
+        }
+        when "scram-sha-1", "scram-sha-256" {
+            scramAuth($conn, $opts, $mech);
+            return;
+        }
+        else {
+            def msg as string init "unknown auth mechanism: " + $mech;
+            throw Error{kind: "smtp", message: $msg, file: "", line: 0, col: 0};
+        }
     }
-    if ($mech == "login") {
-        expect(command($conn, "AUTH LOGIN"), 334, 334, "AUTH LOGIN");
-        expect(command($conn, sasl.loginUser($opts.user)), 334, 334, "AUTH LOGIN user");
-        expect(command($conn, sasl.loginPass($opts.pass)), 235, 235, "AUTH LOGIN pass");
-        return;
-    }
-    if ($mech == "xoauth2") {
-        def resp as string init "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass);
-        expect(command($conn, $resp), 235, 235, "AUTH XOAUTH2");
-        return;
-    }
-    if ($mech == "cram") {
-        def r as Reply init command($conn, "AUTH CRAM-MD5");
-        expect($r, 334, 334, "AUTH CRAM-MD5");
-        def resp as string init sasl.cram($opts.user, $opts.pass, saslChallenge($r.text));
-        expect(command($conn, $resp), 235, 235, "CRAM-MD5 response");
-        return;
-    }
-    if ($mech == "scram-sha-1" or $mech == "scram-sha-256") {
-        scramAuth($conn, $opts, $mech);
-        return;
-    }
-    def msg as string init "unknown auth mechanism: " + $mech;
-    throw Error{kind: "smtp", message: $msg, file: "", line: 0, col: 0};
 }
 
 # saslChallenge extracts the base64 payload from a SASL continuation reply

@@ -460,84 +460,40 @@ func csiParam(seq as list of int) {
 
 # tildeKey maps a CSI "<n>~" parameter to its key name.
 func tildeKey(param as int) {
-    if ($param == 1) {
-        return "home";
+    match ($param) {
+        when 1 { return "home"; }
+        when 2 { return "insert"; }
+        when 3 { return "delete"; }
+        when 4 { return "end"; }
+        when 5 { return "pageup"; }
+        when 6 { return "pagedown"; }
+        when 15 { return "f5"; }
+        when 17 { return "f6"; }
+        when 18 { return "f7"; }
+        when 19 { return "f8"; }
+        when 20 { return "f9"; }
+        when 21 { return "f10"; }
+        when 23 { return "f11"; }
+        when 24 { return "f12"; }
+        else { return "unknown"; }
     }
-    if ($param == 2) {
-        return "insert";
-    }
-    if ($param == 3) {
-        return "delete";
-    }
-    if ($param == 4) {
-        return "end";
-    }
-    if ($param == 5) {
-        return "pageup";
-    }
-    if ($param == 6) {
-        return "pagedown";
-    }
-    if ($param == 15) {
-        return "f5";
-    }
-    if ($param == 17) {
-        return "f6";
-    }
-    if ($param == 18) {
-        return "f7";
-    }
-    if ($param == 19) {
-        return "f8";
-    }
-    if ($param == 20) {
-        return "f9";
-    }
-    if ($param == 21) {
-        return "f10";
-    }
-    if ($param == 23) {
-        return "f11";
-    }
-    if ($param == 24) {
-        return "f12";
-    }
-    return "unknown";
 }
 
 # finalKey maps a CSI / SS3 final byte (arrows, home/end, F1-F4) to a name.
 func finalKey(b as int) {
-    if ($b == 65) {
-        return "up";
+    match ($b) {
+        when 65 { return "up"; }
+        when 66 { return "down"; }
+        when 67 { return "right"; }
+        when 68 { return "left"; }
+        when 72 { return "home"; }
+        when 70 { return "end"; }
+        when 80 { return "f1"; }
+        when 81 { return "f2"; }
+        when 82 { return "f3"; }
+        when 83 { return "f4"; }
+        else { return "unknown"; }
     }
-    if ($b == 66) {
-        return "down";
-    }
-    if ($b == 67) {
-        return "right";
-    }
-    if ($b == 68) {
-        return "left";
-    }
-    if ($b == 72) {
-        return "home";
-    }
-    if ($b == 70) {
-        return "end";
-    }
-    if ($b == 80) {
-        return "f1";
-    }
-    if ($b == 81) {
-        return "f2";
-    }
-    if ($b == 82) {
-        return "f3";
-    }
-    if ($b == 83) {
-        return "f4";
-    }
-    return "unknown";
 }
 
 /**

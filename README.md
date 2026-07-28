@@ -27,7 +27,7 @@ to serve. Email is a complete stack - [SMTP](docs/modules/smtp.md) to send,
 [POP3](docs/modules/pop.md) / [IMAP](docs/modules/imap.md) to receive; caches
 and stores come through [Redis](docs/modules/redis.md) and
 [memcached](docs/modules/memcache.md) clients. Security is the real thing, not a
-stub: [AES-256-GCM, Ed25519, HKDF / PBKDF2, and JWT](docs/libraries/crypto.md).
+stub: [AES-256-GCM, Ed25519, HKDF / PBKDF2](docs/libraries/crypto.md), and [JWT](docs/modules/jwt.md).
 And lightweight [concurrency](docs/user-guide/concurrency.md) is built into the
 language via `spawn` and the [task](docs/libraries/task.md) library. It all
 ships in **one self-contained static binary** - about 21 MB with everything,

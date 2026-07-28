@@ -138,32 +138,24 @@ func family(alg as string) {
 # computeSig produces the signature over the signing input for the algorithm.
 func computeSig(alg as string, input as bytes, key as bytes) {
     def fam as string init family($alg);
-    if ($fam == "hmac") {
-        return hash.hmac($key, $input, algHash($alg));
+    match ($fam) {
+        when "hmac" { return hash.hmac($key, $input, algHash($alg)); }
+        when "rsa" { return crypto.rsaSign($key, $input, algHash($alg)); }
+        when "ecdsa" { return crypto.ecdsaSign($key, $input, algHash($alg)); }
+        else { return crypto.sign($key, $input); }
     }
-    if ($fam == "rsa") {
-        return crypto.rsaSign($key, $input, algHash($alg));
-    }
-    if ($fam == "ecdsa") {
-        return crypto.ecdsaSign($key, $input, algHash($alg));
-    }
-    return crypto.sign($key, $input);
 }
 
 # checkSig verifies a signature over the signing input. HMAC uses a constant-time
 # compare so a bad MAC leaks nothing through timing.
 func checkSig(alg as string, input as bytes, sig as bytes, key as bytes) {
     def fam as string init family($alg);
-    if ($fam == "hmac") {
-        return crypto.hmacEqual(hash.hmac($key, $input, algHash($alg)), $sig);
+    match ($fam) {
+        when "hmac" { return crypto.hmacEqual(hash.hmac($key, $input, algHash($alg)), $sig); }
+        when "rsa" { return crypto.rsaVerify($key, $input, $sig, algHash($alg)); }
+        when "ecdsa" { return crypto.ecdsaVerify($key, $input, $sig, algHash($alg)); }
+        else { return crypto.verify($key, $input, $sig); }
     }
-    if ($fam == "rsa") {
-        return crypto.rsaVerify($key, $input, $sig, algHash($alg));
-    }
-    if ($fam == "ecdsa") {
-        return crypto.ecdsaVerify($key, $input, $sig, algHash($alg));
-    }
-    return crypto.verify($key, $input, $sig);
 }
 
 # ---- public surface ----

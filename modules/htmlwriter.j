@@ -27,14 +27,16 @@ use convert;
  * A node is one of three kinds, tagged by `kind`: "element" (tag + attrs +
  * children), "text" (escaped content), or "raw" (verbatim content). The
  * constructors below are the intended way to build one.
- * @field kind {string} the node kind ("element", "text", or "raw")
+ * @field kind {NodeKind} the node kind (`Element`, `Text`, or `Raw`)
  * @field tag {string} the element tag name (element nodes only)
  * @field attrs {list of Attr} the element's attributes (element nodes only)
  * @field children {list of Node} the element's child nodes (element nodes only)
  * @field text {string} the content of a text or raw node
  */
+export def enum NodeKind { Element, Text, Raw };
+
 export def struct Node {
-    kind as string,
+    kind as NodeKind,
     tag as string,
     attrs as list of Attr,
     children as list of Node,
@@ -85,7 +87,7 @@ def const VOID as list of string init [
  */
 export func element(tag as string, attrs as list of Attr, children as list of Node) {
     checkName($tag, "tag");
-    return Node{kind: "element", tag: $tag, attrs: $attrs, children: $children, text: ""};
+    return Node{kind: NodeKind.Element, tag: $tag, attrs: $attrs, children: $children, text: ""};
 }
 
 /**
@@ -94,7 +96,7 @@ export func element(tag as string, attrs as list of Attr, children as list of No
  * @return {Node} the text node
  */
 export func text(s as string) {
-    return Node{kind: "text", tag: "", attrs: [], children: [], text: $s};
+    return Node{kind: NodeKind.Text, tag: "", attrs: [], children: [], text: $s};
 }
 
 /**
@@ -104,7 +106,7 @@ export func text(s as string) {
  * @return {Node} the raw node
  */
 export func raw(s as string) {
-    return Node{kind: "raw", tag: "", attrs: [], children: [], text: $s};
+    return Node{kind: NodeKind.Raw, tag: "", attrs: [], children: [], text: $s};
 }
 
 /**
@@ -280,25 +282,29 @@ func renderAttrs(attrs as list of Attr) {
  * @return {string} the rendered HTML
  */
 export func render(node as Node) {
-    if ($node.kind == "text") {
-        return escape($node.text);
+    match ($node.kind) {
+        when Text {
+            return escape($node.text);
+        }
+        when Raw {
+            return $node.text;
+        }
+        when Element {
+            def open as string init "<" + $node.tag + renderAttrs($node.attrs);
+            if (isVoid($node.tag)) {
+                return $open + ">";
+            }
+            # Collect the pieces and join once. Growing a string with `+` per
+            # child is O(output^2), so a node with many children (a paragraph
+            # full of links) would otherwise be quadratic in its rendered size.
+            def parts as list of string init [$open + ">"];
+            for (def child in $node.children) {
+                $parts[] = render($child);
+            }
+            $parts[] = "</" + $node.tag + ">";
+            return strings.join($parts, "");
+        }
     }
-    if ($node.kind == "raw") {
-        return $node.text;
-    }
-    def open as string init "<" + $node.tag + renderAttrs($node.attrs);
-    if (isVoid($node.tag)) {
-        return $open + ">";
-    }
-    # Collect the pieces and join once. Growing a string with `+` per child is
-    # O(output^2), so a node with many children (a paragraph full of links)
-    # would otherwise be quadratic in its rendered size.
-    def parts as list of string init [$open + ">"];
-    for (def child in $node.children) {
-        $parts[] = render($child);
-    }
-    $parts[] = "</" + $node.tag + ">";
-    return strings.join($parts, "");
 }
 
 /**

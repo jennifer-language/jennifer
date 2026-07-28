@@ -359,13 +359,11 @@ export func setBytes(session as Session, key as string, value as bytes, exptime 
  */
 export func add(session as Session, key as string, value as string, exptime as int) {
     def r as string init store($session, "add", $key, $value, $exptime);
-    if ($r == "STORED") {
-        return true;
+    match ($r) {
+        when "STORED" { return true; }
+        when "NOT_STORED" { return false; }
+        else { fail($r); }
     }
-    if ($r == "NOT_STORED") {
-        return false;
-    }
-    fail($r);
 }
 
 /**
@@ -457,16 +455,12 @@ export func cas(session as Session, key as string, value as string, exptime as i
         convert.bytesFromString($value, "utf-8"),
         $exptime,
         " " + convert.toString($casId));
-    if ($r == "STORED") {
-        return "stored";
+    match ($r) {
+        when "STORED" { return "stored"; }
+        when "EXISTS" { return "exists"; }
+        when "NOT_FOUND" { return "not_found"; }
+        else { fail($r); }
     }
-    if ($r == "EXISTS") {
-        return "exists";
-    }
-    if ($r == "NOT_FOUND") {
-        return "not_found";
-    }
-    fail($r);
 }
 
 /**
@@ -481,13 +475,11 @@ export func delete(session as Session, key as string) {
     writeCmd($session, "delete " + $key + "\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
-    if ($r.text == "DELETED") {
-        return true;
+    match ($r.text) {
+        when "DELETED" { return true; }
+        when "NOT_FOUND" { return false; }
+        else { fail($r.text); }
     }
-    if ($r.text == "NOT_FOUND") {
-        return false;
-    }
-    fail($r.text);
 }
 
 /**
@@ -503,13 +495,11 @@ export func touch(session as Session, key as string, exptime as int) {
     writeCmd($session, "touch " + $key + " " + convert.toString($exptime) + "\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
-    if ($r.text == "TOUCHED") {
-        return true;
+    match ($r.text) {
+        when "TOUCHED" { return true; }
+        when "NOT_FOUND" { return false; }
+        else { fail($r.text); }
     }
-    if ($r.text == "NOT_FOUND") {
-        return false;
-    }
-    fail($r.text);
 }
 
 # counter runs incr / decr and returns the new value, or -1 when the key is
@@ -519,10 +509,10 @@ func counter(session as Session, verb as string, key as string, delta as int) {
     writeCmd($session, $verb + " " + $key + " " + convert.toString($delta) + "\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
-    if ($r.text == "NOT_FOUND") {
-        return -1;
+    match ($r.text) {
+        when "NOT_FOUND" { return -1; }
+        else { return convert.toInt($r.text); }
     }
-    return convert.toInt($r.text);
 }
 
 /**

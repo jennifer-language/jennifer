@@ -8,19 +8,9 @@
 
 # Jennifer
 
-Jennifer is an interpreted programming language
-written in (Tiny)Go and ships as two binaries:
+Jennifer is an interpreted programming language written in (Tiny)Go.
 
-- **`jennifer`** - standard Go build, full host-feature surface.
-  This is the default binary you install and reach for.
-- **`jennifer-tiny`** - TinyGo build, smaller and embeddable.
-  Missing `os/exec` and the network stack (TinyGo runtime gaps);
-  calls into those surfaces return a friendly runtime error
-  pointing back at `jennifer`. Use this variant when binary size
-  or embeddability matters (embedded systems, minimal containers,
-  small-footprint scripting hosts).
-
-Jennifer is batteries-included, and not just in name:
+It is batteries-included, and not just in name:
 **[36 built-in libraries](libraries/index.md) and
 [62 distributable modules](modules/index.md) - over 450 functions and
 constants** cover what real programs actually need, so you build genuine tools,
@@ -36,7 +26,7 @@ and [web framework](modules/web.md) to serve. Email is a complete stack -
 [SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) / [IMAP](modules/imap.md)
 to receive; caches and stores come through [Redis](modules/redis.md) and
 [memcached](modules/memcache.md) clients. Security is the real thing, not a stub:
-[AES-256-GCM, Ed25519, HKDF / PBKDF2, and JWT](libraries/crypto.md). And
+[AES-256-GCM, Ed25519, HKDF / PBKDF2](libraries/crypto.md), and [JWT](modules/jwt.md). And
 lightweight [concurrency](user-guide/concurrency.md) is built into the language
 via `spawn` and the [task](libraries/task.md) library. It all ships in **one
 self-contained static binary** - about 21 MB with everything, ~9 MB for the
@@ -66,6 +56,19 @@ io.printf("hello, world\n");
 def gap as time.Duration init time.sub(time.now(), $start);
 io.printf("ran for %d ms\n", time.milliseconds($gap));
 ```
+
+## Two binaries: `jennifer` and `jennifer-tiny`
+
+Jennifer ships as two binaries built from the same source:
+
+- **`jennifer`** - standard Go build, full host-feature surface.
+  This is the default binary you install and reach for.
+- **`jennifer-tiny`** - TinyGo build, smaller and embeddable.
+  Missing `os/exec` and the network stack (TinyGo runtime gaps);
+  calls into those surfaces return a friendly runtime error
+  pointing back at `jennifer`. Use this variant when binary size
+  or embeddability matters (embedded systems, minimal containers,
+  small-footprint scripting hosts).
 
 ## Write Jennifer with your editor and an AI assistant
 

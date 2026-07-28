@@ -284,20 +284,14 @@ export func parse(text as string) {
             continue;
         }
         if ($inEvent and $skipDepth == 0) {
-            if ($name == "UID") {
-                $uid = unescapeText($value);
-            } elseif ($name == "SUMMARY") {
-                $summary = unescapeText($value);
-            } elseif ($name == "DESCRIPTION") {
-                $description = unescapeText($value);
-            } elseif ($name == "LOCATION") {
-                $location = unescapeText($value);
-            } elseif ($name == "DTSTART") {
-                $startStr = $value;
-            } elseif ($name == "DTEND") {
-                $endStr = $value;
-            } elseif ($name == "DTSTAMP") {
-                $stampStr = $value;
+            match ($name) {
+                when "UID" { $uid = unescapeText($value); }
+                when "SUMMARY" { $summary = unescapeText($value); }
+                when "DESCRIPTION" { $description = unescapeText($value); }
+                when "LOCATION" { $location = unescapeText($value); }
+                when "DTSTART" { $startStr = $value; }
+                when "DTEND" { $endStr = $value; }
+                when "DTSTAMP" { $stampStr = $value; }
             }
         } elseif ($name == "PRODID") {
             $cal.prodid = unescapeText($value);

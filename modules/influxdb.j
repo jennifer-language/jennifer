@@ -394,25 +394,18 @@ export func write(c as Client, points as list of Point) {
 # cellString stringifies one JSON scalar cell (null -> "").
 func cellString(node as json.Value, ptr as string) {
     def t as string init json.typeOf($node, $ptr);
-    if ($t == "null") {
-        return "";
-    }
-    if ($t == "string") {
-        return json.asString($node, $ptr);
-    }
-    if ($t == "bool") {
-        if (json.asBool($node, $ptr)) {
-            return "true";
+    match ($t) {
+        when "string" { return json.asString($node, $ptr); }
+        when "bool" {
+            if (json.asBool($node, $ptr)) {
+                return "true";
+            }
+            return "false";
         }
-        return "false";
+        when "int" { return convert.toString(json.asInt($node, $ptr)); }
+        when "float" { return convert.toString(json.asFloat($node, $ptr)); }
+        else { return ""; } # null and anything else -> ""
     }
-    if ($t == "int") {
-        return convert.toString(json.asInt($node, $ptr));
-    }
-    if ($t == "float") {
-        return convert.toString(json.asFloat($node, $ptr));
-    }
-    return "";
 }
 
 # parseSeries reads one series object at `base` into a Series.

@@ -366,34 +366,44 @@ export func parse(text as string) {
         if (not $inCard) {
             continue;
         }
-        if ($name == "FN") {
-            $cur.formattedName = unescapeText($value);
-        } elseif ($name == "N") {
-            def parts as list of string init splitStructured($value);
-            $cur.family = component($parts, 0);
-            $cur.given = component($parts, 1);
-        } elseif ($name == "ORG") {
-            # ORG is itself structured (org;unit;...); take the first component.
-            $cur.organization = component(splitStructured($value), 0);
-        } elseif ($name == "TITLE") {
-            $cur.title = unescapeText($value);
-        } elseif ($name == "EMAIL") {
-            $cur.emails = lists.push($cur.emails, unescapeText($value));
-        } elseif ($name == "TEL") {
-            $cur.phones = lists.push($cur.phones, unescapeText($value));
-        } elseif ($name == "ADR") {
-            def parts as list of string init splitStructured($value);
-            def a as Address init address(
-                component($parts, 2),
-                component($parts, 3),
-                component($parts, 4),
-                component($parts, 5),
-                component($parts, 6));
-            $cur.addresses = lists.push($cur.addresses, $a);
-        } elseif ($name == "URL") {
-            $cur.url = unescapeText($value);
-        } elseif ($name == "NOTE") {
-            $cur.note = unescapeText($value);
+        match ($name) {
+            when "FN" {
+                $cur.formattedName = unescapeText($value);
+            }
+            when "N" {
+                def parts as list of string init splitStructured($value);
+                $cur.family = component($parts, 0);
+                $cur.given = component($parts, 1);
+            }
+            when "ORG" {
+                # ORG is itself structured (org;unit;...); take the first component.
+                $cur.organization = component(splitStructured($value), 0);
+            }
+            when "TITLE" {
+                $cur.title = unescapeText($value);
+            }
+            when "EMAIL" {
+                $cur.emails = lists.push($cur.emails, unescapeText($value));
+            }
+            when "TEL" {
+                $cur.phones = lists.push($cur.phones, unescapeText($value));
+            }
+            when "ADR" {
+                def parts as list of string init splitStructured($value);
+                def a as Address init address(
+                    component($parts, 2),
+                    component($parts, 3),
+                    component($parts, 4),
+                    component($parts, 5),
+                    component($parts, 6));
+                $cur.addresses = lists.push($cur.addresses, $a);
+            }
+            when "URL" {
+                $cur.url = unescapeText($value);
+            }
+            when "NOTE" {
+                $cur.note = unescapeText($value);
+            }
         }
     }
     return $cards;

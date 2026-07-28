@@ -8,14 +8,16 @@ repository functions - `orm.insert` / `find` / `update` / `delete`, and
 `orm.all` over a query.
 
 There is no reflection, so you declare the table mapping once as an `orm.Schema`,
-which also carries the SQL **dialect** (`"mysql"` or `"postgres"`) - a backend
-selector on one module, not parallel modules.
+which also carries the SQL **dialect** (`orm.Dialect.Mysql` or
+`orm.Dialect.Postgres`) - a backend selector on one module, not parallel modules.
+The dialect and each column's kind are closed **enums** (`orm.Dialect`,
+`orm.ColumnKind`), so an invalid value is a compile-time error, not a runtime one.
 
 ```jennifer
 import "orm.j" as orm;
 
 def users as orm.Schema init orm.column(orm.column(
-    orm.schema("users", "id", "postgres"), "id", "int"), "name", "string");
+    orm.schema("users", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String);
 
 def ada as map of string to string init {};
 $ada["id"] = "1";
@@ -42,8 +44,8 @@ returns a fresh schema):
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `orm.schema(table, primaryKey, dialect)` | `Schema` | Start a schema; `dialect` is `"mysql"` or `"postgres"`. |
-| `orm.column(schema, name, kind)` | `Schema` | Append a column; `kind` is `int` / `string` / `float` / `bool` / `bytes`. |
+| `orm.schema(table, primaryKey, dialect)` | `Schema` | Start a schema; `dialect` is `orm.Dialect.Mysql` or `orm.Dialect.Postgres`. |
+| `orm.column(schema, name, kind)` | `Schema` | Append a column; `kind` is `orm.ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`. |
 | `orm.createTable(schema)` | `string` | The `CREATE TABLE` DDL for the dialect (a convenience emitter, not a migration tool). |
 
 ## The query builder (functional, pure)

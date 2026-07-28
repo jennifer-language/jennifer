@@ -63,7 +63,7 @@ func testCodeThirtyNinePattern() {
 func testQrStructure() {
     def o as Options init defaults();
     def qr as Symbol init encode("HI", "qr", $o);
-    testing.assertEqual($qr.kind, "matrix");
+    testing.assertEqual($qr.kind, SymbolKind.Matrix);
     testing.assertEqual($qr.size, 21);   # version 1
     def m as list of list of bool init matrix($qr);
     # top-left finder: solid dark border row, then a light separator at col 7
@@ -81,7 +81,7 @@ func testQrStructure() {
 func testLinearSymbol() {
     def o as Options init defaults();
     def sym as Symbol init encode("ABC", "code128", $o);
-    testing.assertEqual($sym.kind, "linear");
+    testing.assertEqual($sym.kind, SymbolKind.Linear);
     testing.assertTrue(len($sym.bars) > 0);
     # bar widths start with a bar and are all positive
     for (def w in $sym.bars) {

@@ -25,9 +25,9 @@ func TestOrmCRUD(t *testing.T) {
 	if driver == "" || dsn == "" {
 		t.Skip("set ORM_TEST_DRIVER and ORM_TEST_DSN to run the orm CRUD integration test")
 	}
-	dialect := "postgres"
+	dialect := "orm.Dialect.Postgres"
 	if driver == "mysql" || driver == "mariadb" {
-		dialect = "mysql"
+		dialect = "orm.Dialect.Mysql"
 	}
 
 	ormMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "orm.j"))
@@ -43,7 +43,7 @@ defer sql.close($conn);
 
 # A schema; a fresh table (drop first so the test is repeatable).
 def s as orm.Schema init orm.column(orm.column(
-    orm.schema("orm_users", "id", %q), "id", "int"), "name", "string");
+    orm.schema("orm_users", "id", %s), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String);
 sql.exec($conn, "DROP TABLE IF EXISTS orm_users");
 sql.exec($conn, orm.createTable($s));
 

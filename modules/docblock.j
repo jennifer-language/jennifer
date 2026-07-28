@@ -510,61 +510,75 @@ func parseBody(body as string) {
             } else {
                 def tag as string init $tm.groups[0];
                 def rest as string init $tm.groups[1];
-                if ($tag == "param" or $tag == "field") {
-                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
-                    $params[] = parseParam($tb.text);
-                    $i = $tb.next;
-                } elseif ($tag == "return" or $tag == "returns") {
-                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
-                    $returns = parseTyped($tb.text);
-                    $i = $tb.next;
-                } elseif ($tag == "throws") {
-                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
-                    def t as ReturnDoc init parseTyped($tb.text);
-                    $throws[] = ThrowDoc{type: $t.type, description: $t.description};
-                    $i = $tb.next;
-                } elseif ($tag == "example") {
-                    def exLines as list of string init [];
-                    if (not ($rest == "")) {
-                        $exLines[] = $rest;
+                match ($tag) {
+                    when "param", "field" {
+                        def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                        $params[] = parseParam($tb.text);
+                        $i = $tb.next;
                     }
-                    def j as int init $i + 1;
-                    while ($j < $cnt and not isTag($lines[$j])) {
-                        $exLines[] = $lines[$j];
-                        $j = $j + 1;
+                    when "return", "returns" {
+                        def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                        $returns = parseTyped($tb.text);
+                        $i = $tb.next;
                     }
-                    $examples[] = strings.trimRight(strings.join($exLines, "\n"));
-                    $i = $j;
-                } elseif ($tag == "since") {
-                    $since = $rest;
-                    $i = $i + 1;
-                } elseif ($tag == "deprecated") {
-                    $deprecated = $rest;
-                    if ($rest == "") {
-                        $deprecated = "deprecated";
+                    when "throws" {
+                        def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                        def t as ReturnDoc init parseTyped($tb.text);
+                        $throws[] = ThrowDoc{type: $t.type, description: $t.description};
+                        $i = $tb.next;
                     }
-                    $i = $i + 1;
-                } elseif ($tag == "see") {
-                    def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
-                    $see[] = $tb.text;
-                    $i = $tb.next;
-                } elseif ($tag == "internal") {
-                    $internal = true;
-                    $i = $i + 1;
-                } elseif ($tag == "module") {
-                    $isModule = true;
-                    $i = $i + 1;
-                } elseif ($tag == "author") {
-                    $author = $rest;
-                    $i = $i + 1;
-                } elseif ($tag == "version") {
-                    $version = $rest;
-                    $i = $i + 1;
-                } elseif ($tag == "license") {
-                    $license = $rest;
-                    $i = $i + 1;
-                } else {
-                    $i = $i + 1;
+                    when "example" {
+                        def exLines as list of string init [];
+                        if (not ($rest == "")) {
+                            $exLines[] = $rest;
+                        }
+                        def j as int init $i + 1;
+                        while ($j < $cnt and not isTag($lines[$j])) {
+                            $exLines[] = $lines[$j];
+                            $j = $j + 1;
+                        }
+                        $examples[] = strings.trimRight(strings.join($exLines, "\n"));
+                        $i = $j;
+                    }
+                    when "since" {
+                        $since = $rest;
+                        $i = $i + 1;
+                    }
+                    when "deprecated" {
+                        $deprecated = $rest;
+                        if ($rest == "") {
+                            $deprecated = "deprecated";
+                        }
+                        $i = $i + 1;
+                    }
+                    when "see" {
+                        def tb as TagBody init tagBody($lines, $rest, $i + 1, $cnt);
+                        $see[] = $tb.text;
+                        $i = $tb.next;
+                    }
+                    when "internal" {
+                        $internal = true;
+                        $i = $i + 1;
+                    }
+                    when "module" {
+                        $isModule = true;
+                        $i = $i + 1;
+                    }
+                    when "author" {
+                        $author = $rest;
+                        $i = $i + 1;
+                    }
+                    when "version" {
+                        $version = $rest;
+                        $i = $i + 1;
+                    }
+                    when "license" {
+                        $license = $rest;
+                        $i = $i + 1;
+                    }
+                    else {
+                        $i = $i + 1;
+                    }
                 }
             }
         }
