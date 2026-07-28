@@ -1030,7 +1030,6 @@ sub-numbering as pieces land (M23.6.1 done; the rest planned):
   UTF-8), and RFC 2231 extended / continued filenames (`filename*=`).
 - **`vcard`** - `TYPE` parameters (work / home), a full `N` (prefix / middle /
   suffix), and common fields (PHOTO / BDAY / NICKNAME / ...).
-- **`markdown`** - blockquotes, images, and nested lists.
 
 #### M23.6.1 - ipnet subnet math + classification
 
@@ -1088,6 +1087,31 @@ ordinary queries; filled it out and closed a validation gap.
   existing `from`/`where`/`orderBy`/`join`/CRUD callers; the `Query` struct shape
   changed (structural fields), which only affects code that hand-built a `Query`
   literal (a pre-1.0 break). `docblock`-clean (27 func / 9 struct / 2 enum).
+
+#### M23.6.3 - markdown blockquotes, images, nested lists
+
+**Done.** Filled the deepest `markdown` gaps.
+- **Images** `![alt](url "title")`: a new `SpanKind.Image` (the scanner opens on
+  `!` before `[`, reusing the link `]` / `)` index arrays and the shared
+  `splitDest` URL/title splitter). Renders `<img src alt title>` (a void element)
+  with the `src` run through the same `htmlwriter.safeUrl` scheme allowlist as a
+  link href, so `![x](javascript:...)` neutralizes to `#`; ANSI shows
+  `[image] alt (url)`.
+- **Blockquotes** `> x` (recursive `> >`): a new `BlockKind.Quote`. `collectQuote`
+  gathers the `>`-run, strips the marker, and **parses the inner text as blocks**
+  (`parseLines`), so a quote holds real paragraphs / lists / nested quotes.
+  Renders `<blockquote>`; ANSI prefixes each line with `> `.
+- **Nested lists** by indentation: a recursive `collectList` replaces the old flat
+  list state machine. Flat lists keep their exact `items` shape and byte-for-byte
+  output (the overlay pins this); a more-indented run becomes a sub-`List` attached
+  to the preceding item's new parallel `children` slot, rendered as a child
+  `<ul>` / `<ol>` inside the `<li>` (ANSI indents 2 spaces per level).
+- Mechanics: `Block` gained a recursive `children as list of Block` (a `list`
+  field, so its zero is finite); the `SpanKind` / `BlockKind` enums' parameter-
+  level exhaustiveness forced the new `Image` / `Quote` arms into **both** the HTML
+  and ANSI renderers. Pure `.j`, both binaries; overlay 56 -> 68, `docblock`-clean.
+  Remaining non-goals: thematic breaks, setext headings, reference links, and a
+  balanced-paren URL (the scanner still closes a link / image URL on the first `)`).
 
 ### M23.7 - observability completeness
 

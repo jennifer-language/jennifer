@@ -113,6 +113,106 @@ func testFenceLongerFenceContainsShorter() {
     testing.assertEqual($blocks[0].text, "code with ``` inside");
 }
 
+# --- images, blockquotes, nested lists ---
+
+func testInlineImage() {
+    def spans as list of Span init parseInline("![a cat](/cat.png)");
+    testing.assertEqual(len($spans), 1);
+    testing.assertEqual($spans[0].kind, SpanKind.Image);
+    testing.assertEqual($spans[0].text, "a cat");
+    testing.assertEqual($spans[0].url, "/cat.png");
+    # an image mixed with surrounding text and a title
+    def mixed as list of Span init parseInline("see ![x](/u.png \"t\") end");
+    testing.assertEqual($mixed[1].kind, SpanKind.Image);
+    testing.assertEqual($mixed[1].title, "t");
+}
+
+func testHtmlImage() {
+    testing.assertEqual(
+        toHtml("![a cat](/cat.png \"kitty\")"),
+        "<p><img src=\"/cat.png\" alt=\"a cat\" title=\"kitty\"></p>");
+}
+
+# An image src runs through the same scheme allowlist as a link href.
+func testHtmlImageNeutralizesScriptSrc() {
+    def out as string init toHtml("![x](javascript:alert(1))");
+    testing.assertContains($out, "src=\"#\"");
+    testing.assertFalse(strings.contains($out, "src=\"javascript"));
+}
+
+func testBlockquoteParse() {
+    def blocks as list of Block init parseBlocks("> hello\n> world");
+    testing.assertEqual(len($blocks), 1);
+    testing.assertEqual($blocks[0].kind, BlockKind.Quote);
+    testing.assertEqual(len($blocks[0].children), 1);
+    testing.assertEqual($blocks[0].children[0].kind, BlockKind.Paragraph);
+}
+
+func testHtmlBlockquote() {
+    testing.assertEqual(
+        toHtml("> quoted **text**"),
+        "<blockquote><p>quoted <strong>text</strong></p></blockquote>");
+}
+
+# A `> >` line nests one blockquote inside another (parsed recursively).
+func testHtmlNestedBlockquote() {
+    testing.assertEqual(
+        toHtml("> a\n>\n> > b"),
+        "<blockquote><p>a</p><blockquote><p>b</p></blockquote></blockquote>");
+}
+
+# A blockquote can hold a list.
+func testHtmlBlockquoteWithList() {
+    testing.assertEqual(
+        toHtml("> - a\n> - b"),
+        "<blockquote><ul><li>a</li><li>b</li></ul></blockquote>");
+}
+
+func testNestedListParse() {
+    def blocks as list of Block init parseBlocks("- a\n  - b\n  - c\n- d");
+    testing.assertEqual(len($blocks), 1);
+    testing.assertEqual($blocks[0].kind, BlockKind.List);
+    testing.assertEqual(len($blocks[0].items), 2); # a, d at the top level
+    testing.assertEqual($blocks[0].items[0], "a");
+    testing.assertEqual(len($blocks[0].children[0].items), 2); # b, c nested under a
+    testing.assertEqual(len($blocks[0].children[1].items), 0); # d has no nesting
+}
+
+func testHtmlNestedList() {
+    testing.assertEqual(
+        toHtml("- a\n  - b\n  - c\n- d"),
+        "<ul><li>a<ul><li>b</li><li>c</li></ul></li><li>d</li></ul>");
+}
+
+func testHtmlNestedOrderedUnderUnordered() {
+    testing.assertEqual(
+        toHtml("- top\n  1. one\n  2. two"),
+        "<ul><li>top<ol><li>one</li><li>two</li></ol></li></ul>");
+}
+
+func testAnsiNestedList() {
+    testing.assertEqual(ansi.strip(toAnsi("- a\n  - b\n- c")), "  - a\n    - b\n  - c");
+}
+
+# Inconsistently indented deeper items (4 then 2 spaces, both under `a`) must not
+# drop content: the second deeper run merges into the first item's sub-list.
+func testNestedListInconsistentIndentKeepsAll() {
+    testing.assertEqual(
+        toHtml("- a\n    - b\n  - c"),
+        "<ul><li>a<ul><li>b</li><li>c</li></ul></li></ul>");
+}
+
+# A three-level list nests to three depths.
+func testNestedListThreeLevels() {
+    testing.assertEqual(
+        toHtml("- a\n  - b\n    - c\n- d"),
+        "<ul><li>a<ul><li>b<ul><li>c</li></ul></li></ul></li><li>d</li></ul>");
+}
+
+func testAnsiBlockquote() {
+    testing.assertEqual(ansi.strip(toAnsi("> hello\n> world")), "> hello world");
+}
+
 # --- HTML rendering (public) ---
 
 func testHtmlHeading() {

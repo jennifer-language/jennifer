@@ -50,6 +50,8 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Paragraph            | consecutive text lines          | `<p>` (lines joined by ` `) |
 | Unordered list       | `- x` / `* x` / `+ x`           | `<ul><li>`                  |
 | Ordered list         | `1. x`                          | `<ol><li>`                  |
+| Nested list          | indent a sub-list under an item | a child `<ul>` / `<ol>` inside the parent `<li>` |
+| Blockquote           | `> x` (recursive: `> > y`)      | `<blockquote>` (inner text parsed as blocks) |
 | Fenced code block    | ` ``` ` ... ` ``` `             | `<pre><code>`               |
 | Table (GFM)          | `\| a \| b \|` + `\| --- \| --- \|` row | `<table>` (aligned terminal columns in ANSI) |
 
@@ -59,6 +61,13 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Italic    | `*text*`        | `<em>`                | italic          |
 | Code      | `` `text` ``    | `<code>`              | cyan            |
 | Link      | `[text](url)`   | `<a href="url">`      | underline + ` (url)` |
+| Image     | `![alt](url)`   | `<img src alt>`       | `[image] alt (url)`  |
+
+A nested list is a more-indented list under a parent item; a blockquote's inner
+lines are parsed as blocks, so a quote can hold paragraphs, lists, or nested
+quotes. A link's `href` and an image's `src` both pass through the same scheme
+allowlist ([`htmlwriter.safeUrl`](htmlwriter.md)), so `javascript:` and other
+script schemes render as `#`.
 
 ## HTML output
 

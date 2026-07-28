@@ -3,19 +3,22 @@
 
 /**
  * A lightweight Markdown renderer for a small CommonMark subset: ATX headings,
- * bold / italic emphasis, inline code, links, fenced code blocks, unordered /
- * ordered lists, and GFM tables. Renders to HTML (through the `htmlwriter`
+ * bold / italic emphasis, inline code, links, images, fenced code blocks,
+ * unordered / ordered lists (**nested** by indentation), blockquotes (nesting
+ * recursively), and GFM tables. Renders to HTML (through the `htmlwriter`
  * module, so escaping is handled for you) and to styled terminal text (through
  * the `ansi` module). It also authors Markdown text (header / style / link /
  * list / codeBlock / table). Pure Jennifer; line-oriented block parsing with a
  * small inline scanner. Not full CommonMark: inline spans do not nest (the
- * content of `**...**`, `` `...` ``, and a link is plain text), and there is no
- * blockquote, thematic break, image, or reference-link support.
+ * content of `**...**`, `` `...` ``, a link, or an image alt is plain text), and
+ * there is no thematic break, setext heading, or reference-link support. A
+ * link / image URL cannot contain an unescaped `)` (the scanner closes on the
+ * first one).
  * @module markdown
  * @example
  * import "markdown.j" as markdown;
- * io.printf("%s\n", markdown.toHtml("# Hi\n\nA **bold** word."));
- * io.printf("%s\n", markdown.toAnsi("- one\n- two"));
+ * io.printf("%s\n", markdown.toHtml("# Hi\n\nA **bold** word.\n\n> a quote"));
+ * io.printf("%s\n", markdown.toAnsi("- one\n  - nested\n- two"));
  */
 import "./htmlwriter.j" as html;
 import "./ansi.j" as ansi;
@@ -27,11 +30,12 @@ use lists;
 # The inline span kinds and block kinds, as sum types: the renderers `match` on
 # them, so adding a kind surfaces every place that must handle it (both the HTML
 # and the ANSI path) instead of silently falling through a string compare.
-def enum SpanKind { Text, Code, Strong, Em, Link };
-def enum BlockKind { Paragraph, Heading, Code, List, Table };
+def enum SpanKind { Text, Code, Strong, Em, Link, Image };
+def enum BlockKind { Paragraph, Heading, Code, List, Table, Quote };
 
-# An inline span: a run of Text, or an emphasised / code / link span. Link
-# spans carry the target in `url`; the others leave it "".
+# An inline span: a run of Text, or an emphasised / code / link / image span.
+# Link and Image spans carry the target in `url` (and an optional `title`); the
+# others leave both "".
 def struct Span {
     kind as SpanKind,
     text as string,
@@ -40,8 +44,11 @@ def struct Span {
 };
 
 # A block: a Heading (with `level`), a Paragraph or Code block (in `text`), a
-# List (`ordered` plus `items`), or a Table (`headings` + `aligns` + `rows`,
-# each cell an inline-text string).
+# List (`ordered` plus `items`, and a parallel `children` sub-list per item for
+# nesting), a Table (`headings` + `aligns` + `rows`), or a Quote (its inner
+# blocks in `children`). `children` is a `list of Block` (recursive - allowed
+# because a `list` field has a finite zero), holding a List's nested sub-lists
+# or a Quote's inner blocks.
 def struct Block {
     kind as BlockKind,
     level as int,
@@ -50,7 +57,15 @@ def struct Block {
     items as list of string,
     headings as list of string,
     aligns as list of string,
-    rows as list of list of string
+    rows as list of list of string,
+    children as list of Block
+};
+
+# A parsed block plus the line index to resume scanning at (the collect helpers'
+# return, since a Jennifer function returns a single value).
+def struct BlockScan {
+    block as Block,
+    next as int
 };
 
 # A parsed fenced code block plus the line index to resume scanning at
@@ -94,11 +109,15 @@ func paraBlock(lines as list of string) {
         items: [],
         headings: [],
         aligns: [],
-        rows: []
+        rows: [],
+        children: []
     };
 }
 
-func listBlock(items as list of string, ordered as bool) {
+# listBlockFull builds a List block with its item texts and a parallel
+# `children` list (one entry per item: a nested sub-list block, or an empty List
+# when the item has no nesting).
+func listBlockFull(items as list of string, children as list of Block, ordered as bool) {
     return Block{
         kind: BlockKind.List,
         level: 0,
@@ -107,7 +126,31 @@ func listBlock(items as list of string, ordered as bool) {
         items: $items,
         headings: [],
         aligns: [],
-        rows: []
+        rows: [],
+        children: $children
+    };
+}
+
+# emptyListFor is the "no nested list" placeholder attached to an item until (and
+# unless) a more-indented sub-list replaces it. Its empty `items` marks it absent.
+func emptyListFor(ordered as bool) {
+    def none as list of Block init [];
+    def noItems as list of string init [];
+    return listBlockFull($noItems, $none, $ordered);
+}
+
+# quoteBlock wraps the inner blocks of a blockquote.
+func quoteBlock(children as list of Block) {
+    return Block{
+        kind: BlockKind.Quote,
+        level: 0,
+        text: "",
+        ordered: false,
+        items: [],
+        headings: [],
+        aligns: [],
+        rows: [],
+        children: $children
     };
 }
 
@@ -123,7 +166,8 @@ func tableBlock(
         items: [],
         headings: $headings,
         aligns: $aligns,
-        rows: $rows
+        rows: $rows,
+        children: []
     };
 }
 
@@ -136,7 +180,8 @@ func codeBlockNode(text as string) {
         items: [],
         headings: [],
         aligns: [],
-        rows: []
+        rows: [],
+        children: []
     };
 }
 
@@ -278,6 +323,33 @@ func parseInline(s as string) {
             $bufStart = $i;
             continue;
         }
+        # image: ![alt](url) - like a link, but opened by `!` before the `[`.
+        def imgEnd as int init -1;
+        def irb as int init -1;
+        def irp as int init -1;
+        if ($c == "!" and $i + 1 < $n and $cs[$i + 1] == "[") {
+            def kb as int init $nRbrack[$i + 2];
+            def kp as int init -1;
+            if ($kb < $n and $kb + 1 < $n and $cs[$kb + 1] == "(") {
+                $kp = $nRparen[$kb + 2];
+            }
+            if ($kp >= 0 and $kp < $n) {
+                $irb = $kb;
+                $irp = $kp;
+                $imgEnd = $kp + 1;
+            }
+        }
+        if ($imgEnd >= 0) {
+            if ($i > $bufStart) {
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+            }
+            def altText as string init strings.join(lists.slice($cs, $i + 2, $irb), "");
+            def imgDest as string init strings.join(lists.slice($cs, $irb + 2, $irp), "");
+            $spans[] = imageSpanFrom($altText, $imgDest);
+            $i = $imgEnd;
+            $bufStart = $i;
+            continue;
+        }
         # link: [text](url) - resolved via the precomputed `]` and `)` arrays.
         def linkEnd as int init -1;
         def rb as int init -1;
@@ -317,30 +389,53 @@ func parseInline(s as string) {
     return $spans;
 }
 
-# linkSpanFrom builds the link span for a `[text](url)` from the already-sliced
-# (short) link text and destination. The destination is split into a URL and an
-# optional quoted title on the first space, so `[t](http://x "title")` yields a
-# clean href plus a title attribute rather than dumping the title into the URL.
-func linkSpanFrom(text as string, rawDest as string) {
+# A link / image destination split into a URL and an optional title.
+def struct Dest {
+    url as string,
+    title as string
+};
+
+# splitDest parses a `[...](url "title")` destination: the URL, then an optional
+# space-separated quoted title (a single pair of surrounding `"` or `'` stripped),
+# so the title lands in its own attribute rather than in the href / src.
+func splitDest(rawDest as string) {
     def dest as string init strings.trim($rawDest);
     def sp as int init strings.indexOf($dest, " ");
     if ($sp < 0) {
-        return linkSpan($text, $dest, "");
+        return Dest{url: $dest, title: ""};
     }
     def url as string init strings.substring($dest, 0, $sp);
     def rawTitle as string init strings.trim(strings.substring($dest, $sp + 1, len($dest)));
-    # Strip a single pair of surrounding double or single quotes.
     if (len($rawTitle) >= 2 and
         (strings.startsWith($rawTitle, "\"") and strings.endsWith($rawTitle, "\"") or
         strings.startsWith($rawTitle, "'") and strings.endsWith($rawTitle, "'"))) {
         $rawTitle = strings.substring($rawTitle, 1, len($rawTitle) - 1);
     }
-    return linkSpan($text, $url, $rawTitle);
+    return Dest{url: $url, title: $rawTitle};
+}
+
+# linkSpanFrom builds the link span for a `[text](url)` from the already-sliced
+# (short) link text and destination.
+func linkSpanFrom(text as string, rawDest as string) {
+    def d as Dest init splitDest($rawDest);
+    return linkSpan($text, $d.url, $d.title);
+}
+
+# imageSpan builds an image span carrying alt text, a URL, and an optional title.
+func imageSpan(alt as string, url as string, title as string) {
+    return Span{kind: SpanKind.Image, text: $alt, url: $url, title: $title};
+}
+
+# imageSpanFrom builds the image span for `![alt](url "title")`, splitting the
+# destination exactly like a link.
+func imageSpanFrom(alt as string, rawDest as string) {
+    def d as Dest init splitDest($rawDest);
+    return imageSpan($alt, $d.url, $d.title);
 }
 
 # --- block parser (private) ----------------------------------------
 
-# lineType classifies a source line: "blank", "fence", "heading", "ul"
+# lineType classifies a source line: "blank", "fence", "quote", "heading", "ul"
 # (unordered item), "ol" (ordered item), or "plain".
 func lineType(trimmed as string, line as string) {
     if (len($trimmed) == 0) {
@@ -348,6 +443,9 @@ func lineType(trimmed as string, line as string) {
     }
     if (strings.startsWith($trimmed, "```")) {
         return "fence";
+    }
+    if (strings.startsWith($trimmed, ">")) {
+        return "quote";
     }
     if (regex.matches("^(#{1,6})[ \t]+", $line)) {
         return "heading";
@@ -469,17 +567,162 @@ func tableFrom(lines as list of string, i as int) {
     return TableScan{block: tableBlock($headings, $aligns, $rows), next: $j};
 }
 
-# parseBlocks splits Markdown text into a list of blocks, line by line. The two
-# flush guards at the top close an open paragraph or list before a line that
-# does not continue it, so each block type's handler only appends.
+# One list line parsed into its indent (columns; -1 = not a list line), its
+# ordered flag, and its content text.
+def struct ItemInfo {
+    indent as int,
+    ordered as bool,
+    text as string
+};
+
+# leadingWidth counts a line's leading indentation in columns (a tab is 4).
+func leadingWidth(line as string) {
+    def w as int init 0;
+    for (def ch in strings.chars($line)) {
+        if ($ch == " ") {
+            $w = $w + 1;
+        } elseif ($ch == "\t") {
+            $w = $w + 4;
+        } else {
+            return $w;
+        }
+    }
+    return $w;
+}
+
+# listItemAt parses a list line into its indent / ordered flag / content; an
+# indent of -1 marks a non-list line.
+func listItemAt(line as string) {
+    def m as regex.Match init regex.find("^([ \t]*)([-*+]|[0-9]+\\.)[ \t]+(.*)$", $line);
+    if ($m.start < 0) {
+        return ItemInfo{indent: -1, ordered: false, text: ""};
+    }
+    return ItemInfo{
+        indent: leadingWidth($line),
+        ordered: strings.endsWith($m.groups[1], "."),
+        text: $m.groups[2]
+    };
+}
+
+# mergeLists concatenates two List blocks into one (items + parallel children),
+# keeping the first list's ordered flag. Used only to fold a second, inconsistently
+# indented nested run into an item's existing sub-list instead of dropping it.
+func mergeLists(a as Block, b as Block) {
+    def items as list of string init [];
+    def children as list of Block init [];
+    for (def it in $a.items) {
+        $items[] = $it;
+    }
+    for (def it in $b.items) {
+        $items[] = $it;
+    }
+    for (def ch in $a.children) {
+        $children[] = $ch;
+    }
+    for (def ch in $b.children) {
+        $children[] = $ch;
+    }
+    return listBlockFull($items, $children, $a.ordered);
+}
+
+# collectList parses a whole (possibly nested) list starting at line `start`. It
+# gathers sibling items at the first item's indent; a more-indented run becomes a
+# nested list attached to the preceding item's `children` slot; a less-indented
+# line or a marker-type flip ends the list. Returns the List block + resume index.
+func collectList(lines as list of string, start as int) {
+    def base as ItemInfo init listItemAt($lines[$start]);
+    def items as list of string init [];
+    def children as list of Block init [];
+    def n as int init len($lines);
+    def j as int init $start;
+    while ($j < $n) {
+        def info as ItemInfo init listItemAt($lines[$j]);
+        if ($info.indent < 0) {
+            # Not a list line. A blank line is interior (loose list, or a gap
+            # before a nested list) only if a list item at >= base indent follows.
+            if (len(strings.trim($lines[$j])) == 0) {
+                def k as int init $j + 1;
+                while ($k < $n and len(strings.trim($lines[$k])) == 0) {
+                    $k = $k + 1;
+                }
+                if ($k < $n and listItemAt($lines[$k]).indent >= $base.indent) {
+                    $j = $k;
+                    continue;
+                }
+            }
+            break;
+        }
+        if ($info.indent < $base.indent) {
+            break;
+        }
+        if ($info.indent > $base.indent) {
+            # A deeper run nests under the last item. Normally it replaces the
+            # placeholder; if the item already has a nested list (inconsistent
+            # sub-indentation put a second deeper run under it), merge rather than
+            # overwrite, so no items are silently dropped.
+            def sub as BlockScan init collectList($lines, $j);
+            if (len($children) > 0) {
+                def last as int init len($children) - 1;
+                if (len($children[$last].items) == 0) {
+                    $children[$last] = $sub.block;
+                } else {
+                    $children[$last] = mergeLists($children[$last], $sub.block);
+                }
+            }
+            $j = $sub.next;
+            continue;
+        }
+        # Same level: a sibling. A marker-type flip ends this list.
+        if (not ($info.ordered == $base.ordered)) {
+            break;
+        }
+        $items[] = $info.text;
+        $children[] = emptyListFor($base.ordered);
+        $j = $j + 1;
+    }
+    return BlockScan{block: listBlockFull($items, $children, $base.ordered), next: $j};
+}
+
+# stripQuoteMarker removes one leading `>` (and an optional following space) from
+# a blockquote line, after trimming up to three leading spaces.
+func stripQuoteMarker(line as string) {
+    def t as string init strings.trimLeft($line);
+    if (strings.startsWith($t, "> ")) {
+        return strings.substring($t, 2, len($t));
+    }
+    if (strings.startsWith($t, ">")) {
+        return strings.substring($t, 1, len($t));
+    }
+    return $t;
+}
+
+# collectQuote gathers a run of `>`-prefixed lines, strips the marker, and parses
+# the inner text recursively - so a blockquote holds real blocks (paragraphs,
+# lists, nested quotes). Returns the Quote block + resume index.
+func collectQuote(lines as list of string, start as int) {
+    def inner as list of string init [];
+    def n as int init len($lines);
+    def j as int init $start;
+    while ($j < $n and strings.startsWith(strings.trim($lines[$j]), ">")) {
+        $inner[] = stripQuoteMarker($lines[$j]);
+        $j = $j + 1;
+    }
+    return BlockScan{block: quoteBlock(parseLines($inner)), next: $j};
+}
+
+# parseBlocks splits Markdown text into a list of blocks, line by line.
 func parseBlocks(md as string) {
+    return parseLines(strings.split($md, "\n"));
+}
+
+# parseLines is parseBlocks over an already-split line list, so a blockquote can
+# recurse on its stripped inner lines without re-splitting. The paragraph-flush
+# guard closes an open paragraph before a line that does not continue it; list
+# and quote runs are consumed whole by their collectors.
+func parseLines(lines as list of string) {
     def blocks as list of Block init [];
-    def lines as list of string init strings.split($md, "\n");
     def n as int init len($lines);
     def para as list of string init [];
-    def items as list of string init [];
-    def ordered as bool init false;
-    def inList as bool init false;
     def i as int init 0;
     while ($i < $n) {
         def line as string init $lines[$i];
@@ -492,13 +735,6 @@ func parseBlocks(md as string) {
             $blocks[] = paraBlock($para);
             $para = [];
         }
-        # A list continues only across a same-type item.
-        def cont as bool init ($lt == "ul" and not $ordered) or ($lt == "ol" and $ordered);
-        if ($inList and not $cont) {
-            $blocks[] = listBlock($items, $ordered);
-            $items = [];
-            $inList = false;
-        }
         if ($lt == "blank") {
             $i = $i + 1;
             continue;
@@ -509,6 +745,12 @@ func parseBlocks(md as string) {
             $i = $f.next;
             continue;
         }
+        if ($lt == "quote") {
+            def qs as BlockScan init collectQuote($lines, $i);
+            $blocks[] = $qs.block;
+            $i = $qs.next;
+            continue;
+        }
         if ($lt == "heading") {
             def hm as regex.Match init regex.find("^(#{1,6})[ \t]+(.*)$", $line);
             $blocks[] = headingBlock(len($hm.groups[0]), $hm.groups[1]);
@@ -516,11 +758,9 @@ func parseBlocks(md as string) {
             continue;
         }
         if ($lt == "ul" or $lt == "ol") {
-            def m as regex.Match init regex.find("^[ \t]*(?:[-*+]|[0-9]+\\.)[ \t]+(.*)$", $line);
-            $ordered = $lt == "ol";
-            $inList = true;
-            $items[] = $m.groups[0];
-            $i = $i + 1;
+            def ls as BlockScan init collectList($lines, $i);
+            $blocks[] = $ls.block;
+            $i = $ls.next;
             continue;
         }
         if ($isTable) {
@@ -535,9 +775,6 @@ func parseBlocks(md as string) {
     if (len($para) > 0) {
         $blocks[] = paraBlock($para);
     }
-    if ($inList) {
-        $blocks[] = listBlock($items, $ordered);
-    }
     return $blocks;
 }
 
@@ -550,7 +787,8 @@ func headingBlock(level as int, text as string) {
         items: [],
         headings: [],
         aligns: [],
-        rows: []
+        rows: [],
+        children: []
     };
 }
 
@@ -606,6 +844,7 @@ func spanToNode(sp as Span) {
         when Strong { return wrapEl("strong", $sp.text); }
         when Em { return wrapEl("em", $sp.text); }
         when Link { return linkNode($sp.text, $sp.url, $sp.title); }
+        when Image { return imageNode($sp.text, $sp.url, $sp.title); }
     }
 }
 
@@ -646,6 +885,20 @@ func linkNode(text as string, url as string, title as string) {
     def kids as list of html.Node init [];
     $kids[] = html.text($text);
     return html.element("a", $attrs, $kids);
+}
+
+# imageNode builds an `<img>` void element. The src runs through the same
+# scheme allowlist as a link href (so `![x](javascript:...)` is neutralized),
+# and the alt text is an escaped attribute.
+func imageNode(alt as string, url as string, title as string) {
+    def attrs as list of html.Attr init [];
+    $attrs[] = html.attr("src", safeHref($url));
+    $attrs[] = html.attr("alt", $alt);
+    if (not ($title == "")) {
+        $attrs[] = html.attr("title", $title);
+    }
+    def noKids as list of html.Node init [];
+    return html.element("img", $attrs, $noKids);
 }
 
 # alignOf returns the alignment for column `i`, or "none" past the list end.
@@ -698,6 +951,25 @@ func tableNode(b as Block) {
     return html.element("table", [], $parts);
 }
 
+# listNode renders a List block, recursing into each item's nested sub-list (its
+# `children` slot, when non-empty) as a child `<ul>` / `<ol>` inside the `<li>`.
+func listNode(b as Block) {
+    def lis as list of html.Node init [];
+    def k as int init 0;
+    while ($k < len($b.items)) {
+        def kids as list of html.Node init inlineToNodes(parseInline($b.items[$k]));
+        if ($k < len($b.children) and len($b.children[$k].items) > 0) {
+            $kids[] = blockToNode($b.children[$k]);
+        }
+        $lis[] = html.element("li", [], $kids);
+        $k = $k + 1;
+    }
+    if ($b.ordered) {
+        return html.element("ol", [], $lis);
+    }
+    return html.element("ul", [], $lis);
+}
+
 # blockToNode renders one block to an htmlwriter node.
 func blockToNode(b as Block) {
     match ($b.kind) {
@@ -716,14 +988,14 @@ func blockToNode(b as Block) {
             return html.element("pre", [], $pre);
         }
         when List {
-            def lis as list of html.Node init [];
-            for (def item in $b.items) {
-                $lis[] = html.element("li", [], inlineToNodes(parseInline($item)));
+            return listNode($b);
+        }
+        when Quote {
+            def kids as list of html.Node init [];
+            for (def cb in $b.children) {
+                $kids[] = blockToNode($cb);
             }
-            if ($b.ordered) {
-                return html.element("ol", [], $lis);
-            }
-            return html.element("ul", [], $lis);
+            return html.element("blockquote", [], $kids);
         }
         when Paragraph {
             return html.element("p", [], inlineToNodes(parseInline($b.text)));
@@ -758,6 +1030,7 @@ func spanToAnsi(sp as Span) {
         when Strong { return ansi.bold($sp.text); }
         when Em { return ansi.italic($sp.text); }
         when Link { return ansi.underline($sp.text) + " (" + $sp.url + ")"; }
+        when Image { return ansi.dim("[image] ") + $sp.text + " (" + $sp.url + ")"; }
     }
 }
 
@@ -908,6 +1181,33 @@ func tableToAnsi(b as Block) {
     return $out;
 }
 
+# listToAnsi renders a List block at nesting `depth` (2 spaces of indent per
+# level), recursing into each item's nested sub-list under it.
+func listToAnsi(b as Block, depth as int) {
+    def out as string init "";
+    def idx as int init 1;
+    def first as bool init true;
+    def pad as string init strings.repeat("  ", $depth + 1);
+    def k as int init 0;
+    while ($k < len($b.items)) {
+        if (not $first) {
+            $out = $out + "\n";
+        }
+        $first = false;
+        def marker as string init "- ";
+        if ($b.ordered) {
+            $marker = convert.toString($idx) + ". ";
+        }
+        $out = $out + $pad + $marker + inlineToAnsi(parseInline($b.items[$k]));
+        $idx = $idx + 1;
+        if ($k < len($b.children) and len($b.children[$k].items) > 0) {
+            $out = $out + "\n" + listToAnsi($b.children[$k], $depth + 1);
+        }
+        $k = $k + 1;
+    }
+    return $out;
+}
+
 # blockToAnsi renders one block to terminal text.
 func blockToAnsi(b as Block) {
     match ($b.kind) {
@@ -921,22 +1221,19 @@ func blockToAnsi(b as Block) {
             return ansi.dim(indentLines($b.text, "    "));
         }
         when List {
-            def out as string init "";
-            def idx as int init 1;
+            return listToAnsi($b, 0);
+        }
+        when Quote {
+            def inner as string init "";
             def first as bool init true;
-            for (def item in $b.items) {
+            for (def cb in $b.children) {
                 if (not $first) {
-                    $out = $out + "\n";
+                    $inner = $inner + "\n";
                 }
                 $first = false;
-                def marker as string init "- ";
-                if ($b.ordered) {
-                    $marker = convert.toString($idx) + ". ";
-                }
-                $out = $out + "  " + $marker + inlineToAnsi(parseInline($item));
-                $idx = $idx + 1;
+                $inner = $inner + blockToAnsi($cb);
             }
-            return $out;
+            return indentLines($inner, ansi.dim("> "));
         }
         when Paragraph {
             return inlineToAnsi(parseInline($b.text));

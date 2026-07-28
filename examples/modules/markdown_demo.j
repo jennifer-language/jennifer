@@ -12,8 +12,12 @@ def doc as string init "# Shopping list\n";
 $doc = $doc + "\n";
 $doc = $doc + "Buy **fresh** fruit and a *little* `bread`.\n";
 $doc = $doc + "\n";
-$doc = $doc + "- apples & pears\n";
-$doc = $doc + "- figs\n";
+$doc = $doc + "- fruit\n";           # a nested list under an item
+$doc = $doc + "  - apples & pears\n";
+$doc = $doc + "  - figs\n";
+$doc = $doc + "- bread\n";
+$doc = $doc + "\n";
+$doc = $doc + "> Tip: shop the ![market](http://example/market.png) early.\n";  # blockquote + image
 $doc = $doc + "\n";
 $doc = $doc + "See [the recipe](http://example/recipe?id=1&v=2).\n";
 $doc = $doc + "\n";
