@@ -9,7 +9,23 @@
  * @module ipnet_demo
  */
 use io;
+use strings;
 import "../../modules/ipnet.j" as ipnet;
+
+# scopeLabel names an address's scope by matching the total Scope enum the
+# ipnet module returns (a payload-less variant match over a module enum).
+func scopeLabel(a as ipnet.Address) {
+    match (ipnet.scope($a)) {
+        when Global { return "global"; }
+        when Private { return "private"; }
+        when Loopback { return "loopback"; }
+        when LinkLocal { return "link-local"; }
+        when Multicast { return "multicast"; }
+        when Unspecified { return "unspecified"; }
+        when Reserved { return "reserved"; }
+    }
+    return "?";
+}
 
 # Canonical formatting (RFC 5952 for IPv6).
 io.printf("=== canonical addresses ===\n");
@@ -49,4 +65,30 @@ for (def client in ["10.4.5.6", "192.168.1.42", "8.8.8.8", "2001:db8:abcd::1"]) 
         }
     }
     io.printf("  %s -> %t\n", $client, $ok);
+}
+
+# Subnetting: split a /24 into /26s, then aggregate the halves back.
+io.printf("=== split / aggregate ===\n");
+def block as ipnet.Network init ipnet.parse("192.168.1.0/24");
+io.printf("  %s has %d addresses; usable %s .. %s\n",
+    ipnet.networkString($block),
+    ipnet.hostCount($block),
+    ipnet.toString(ipnet.firstUsable($block)),
+    ipnet.toString(ipnet.lastUsable($block)));
+def subs as list of ipnet.Network init ipnet.split($block, 26);
+def parts as list of string init [];
+for (def s in $subs) {
+    $parts[] = ipnet.networkString($s);
+}
+io.printf("  split /24 -> /26: %s\n", strings.join($parts, ", "));
+def merged as list of ipnet.Network init ipnet.aggregate([
+    ipnet.parse("10.0.0.0/9"),
+    ipnet.parse("10.128.0.0/9")
+]);
+io.printf("  aggregate 10.0.0.0/9 + 10.128.0.0/9 -> %s\n", ipnet.networkString($merged[0]));
+
+# Classification: one match over the total Scope enum.
+io.printf("=== scope ===\n");
+for (def a in ["8.8.8.8", "10.0.0.1", "127.0.0.1", "169.254.1.1", "192.0.2.5", "fe80::1", "::1"]) {
+    io.printf("  %s -> %s\n", $a, scopeLabel(ipnet.parseAddress($a)));
 }

@@ -994,54 +994,52 @@ RESP encoder + a count-framed, never-decoded reply reader) and typed hash / list
 `TestMemcacheBinaryCasMulti` (NUL / CR / LF / 0xFF round-trip, byte-count-framed)
 and the `encodeCommandBytes` overlay test.
 
-### M23.5 - selectable backends
+### M23.5 - selectable backends (compacted)
 
-**Done.** `session` and `ratelimit` were memcache-only, against the "one module,
-one selectable backend" stance. Introduced a shared backend layer and refactored
-both onto it:
-- **`kv` (new system library)** - an in-process key/value store with per-key TTL,
-  the no-server local backend a pure `.j` module cannot be (value semantics have
-  no shared-mutable-state handle). `kv.open()` (in-memory) / `kv.openFile(path)`
-  (persisted across `jennifer run` invocations - a whole-file flush per mutation)
-  -> `kv.Store`, then `set` / `add` / `get` / `has` / `delete` / `touch` / `incr`
-  (memcache-shape) / `close`. A `kv.Store` is an integer handle into a
-  per-interpreter registry, so it shares its backing map across value-copies and
-  `spawn`ed tasks (per-store mutex; `incr` atomic - pinned under `-race`).
-  Expired entries are swept periodically (active expiry, not just lazy-on-access),
-  so a rate limiter keyed by an untrusted IP cannot pile up expired entries
-  unbounded; no hard cap on unexpired live data (a distributed backend's
-  server-side `maxmemory` is the answer for an adversarial working set). Pure Go
-  stdlib, TinyGo-clean (both binaries).
-- **`kvstore` (new module)** - the backend selector. `Store` is a **sum-type
-  enum** (`Memcache` / `Redis` / `Local`), not a `kind`-string struct, so the
-  dispatch is an exhaustiveness-checked `match` with no invalid state - the
-  stance-#1 choice. `memcacheStore` / `redisStore` / `inProcessStore` /
-  `fileStore` constructors; uniform `set` / `get` / `delete` / `touch` /
+**Done.** `session` / `ratelimit` were memcache-only (against the "one module,
+one selectable backend" stance); added a shared backend layer and moved both onto
+it.
+- **`kv` (new system library)** - in-process key/value store with per-key TTL, the
+  no-server local backend a pure `.j` module cannot be (no shared-mutable-state
+  handle under value semantics). `kv.open()` (in-memory) / `openFile(path)`
+  (persisted across runs, whole-file flush per mutation) -> `kv.Store`, then
+  `set` / `add` / `get` / `has` / `delete` / `touch` / `incr` (memcache-shape,
+  signed delta) / `close`. An integer handle into a per-interpreter registry, so
+  it shares its map across value-copies and `spawn` (per-store mutex; `incr`
+  atomic, overflow-checked). Active periodic expiry sweep bounds a rate limiter
+  keyed by an untrusted IP; no hard cap on unexpired live data (that's a
+  distributed backend's `maxmemory` job). Pure Go stdlib, TinyGo-clean.
+- **`kvstore` (new module)** - the selector. `Store` is a **sum-type enum**
+  (`Memcache` / `Redis` / `Local`), not a `kind`-string struct, so the dispatch is
+  an exhaustiveness-checked `match` (stance #1). `memcacheStore` / `redisStore` /
+  `inProcessStore` / `fileStore`; uniform `set` / `get` / `delete` / `touch` /
   `incrWindow` (the atomic-counter-plus-TTL primitive, portable across all three).
-- **`session`** - refactored onto `kvstore.Store`; values are now a **`json.Value`**
-  (nested / structured, not a flat `map of string to string`). **Pre-1.0 break**
-  (the store argument and value type changed).
-- **`ratelimit`** - refactored onto `kvstore.Store`; a `Limiter` (`fixedWindow` /
-  `slidingWindow`) and `check` / `peek` returning a `Result{allowed, remaining,
-  retryAfter, resetSeconds}` for a compliant `429`. The **sliding window** blends
-  current + previous window counts (weighted by elapsed) to smooth the
-  fixed-window boundary burst; both are clock-driven with window-aligned keys.
+- **`session`** - onto `kvstore.Store`; values now a **`json.Value`** (nested, not
+  a flat map). **Pre-1.0 break**.
+- **`ratelimit`** - onto `kvstore.Store`; a `Limiter` (`fixedWindow` /
+  `slidingWindow`) + `check` / `peek` -> `Result{allowed, remaining, retryAfter,
+  resetSeconds}` for a compliant 429. Sliding window blends current + previous
+  window counts to smooth the boundary burst; both clock-driven, window-aligned.
   **Pre-1.0 break** (`allow(mc, ...)` -> `check(limiter, ...)`).
-- **Interpreter fix** - an enum used as a *struct field* type across a module
-  boundary now type-checks (`retagFieldType` stamped only struct field types with
-  the module identity, not enum field types - the M22.9 gap for enums). Needed for
-  `Limiter{store as kvstore.Store}`; pinned by `TestModuleEnumAsStructField`.
+- **Interpreter fix** - an enum used as a *struct-field* type across a module
+  boundary now type-checks (`retagFieldType` stamped struct field types but not
+  enum ones - the M22.9 gap); needed for `Limiter{store as kvstore.Store}`, pinned
+  by `TestModuleEnumAsStructField`.
+- **Audit hardening** - `kv.incr` rejects int64 overflow (matches the language
+  stance); `kvstore.touch` with `ttl <= 0` on redis `PERSIST`s instead of letting
+  `EXPIRE 0` delete the key (uniform with memcache / kv); `fixedWindow` /
+  `slidingWindow` reject a non-positive limit / window up front.
 
-Pinned by the `kv` Go tests (`TestFilePersistence`, `TestConcurrentIncr`), the
-`kvstore` / `session` / `ratelimit` overlays (in-process, deterministic, incl. the
-sliding-window boundary), and the Go suite over the memcache / redis backends
+Pinned by the `kv` Go tests (persistence, `-race` concurrency, overflow, active
+sweep), the `kvstore` / `session` / `ratelimit` overlays (deterministic, in-process,
+incl. the sliding boundary), and the Go suite over memcache / redis
 (`TestSessionLifecycle`, `TestRatelimit`, `TestKvstoreRedisBackend`).
 
 ### M23.6 - format & coverage completeness
 
-**Planned.** The deepest per-module gaps, where a module handles the easy case
-but not the real one. The broadest sub-milestone (likely to grow its own
-sub-numbering as pieces land):
+**In progress.** The deepest per-module gaps, where a module handles the easy
+case but not the real one. The broadest sub-milestone, growing its own
+sub-numbering as pieces land (M23.6.1 done; the rest planned):
 - **`barcode`** - DataMatrix, UPC-A/E, Code93, GS1-128 symbologies; QR numeric /
   alphanumeric modes + versions 11-40; a human-readable text line under 1D
   barcodes. Reconcile the mismatch where `label` advertises `datamatrix` that the
@@ -1059,13 +1057,6 @@ sub-numbering as pieces land):
 - **`s3`** - presigned URL generation (SigV4 query-signing), multipart +
   `bytes` bodies (currently `string`, capped at 5 GB in memory), and content-type
   / metadata / `HEAD` / copy.
-- **`ipnet`** - subnet math (split / aggregate / iterate / host-count / next-IP /
-  first-last-usable), classification predicates (isPrivate / isLoopback /
-  isMulticast / isLinkLocal / isGlobal), and network-in-network overlap; and fix
-  the regression that now rejects every IPv4-mapped CIDR (`::ffff:0:0/96`) - derive
-  the max prefix from the literal and translate the prefix on the v4 fold. (The
-  regression breaks existing deny-lists at startup, so it wants fixing ahead of
-  the rest of the `ipnet` work.)
 - **`font`** - CFF / OpenType (`OTTO`) outlines, kerning + `OS/2` metrics
   (cap-height, ascender/descender/line-gap).
 - **`feed`** - `<enclosure>` (podcast media, its advertised use case), author +
@@ -1075,6 +1066,35 @@ sub-numbering as pieces land):
 - **`vcard`** - `TYPE` parameters (work / home), a full `N` (prefix / middle /
   suffix), and common fields (PHOTO / BDAY / NICKNAME / ...).
 - **`markdown`** - blockquotes, images, and nested lists.
+
+#### M23.6.1 - ipnet subnet math + classification
+
+**Done.** Filled out the `ipnet` module and fixed the flagged regression.
+- **Regression fix (v4-mapped CIDR).** `parse("::ffff:0:0/96")` (and every
+  v4-mapped CIDR) had started to fail: `parseAddress` folds a v4-mapped literal
+  to a v4 `Address`, so the /96 was then range-checked against the v4 max of 32
+  and rejected - breaking deny-lists at startup. `parse` now parses through a new
+  private `parseRaw` (no fold), takes the max prefix from the **literal** version
+  (128 for a v6 literal), and folds to v4 only when the block lies wholly inside
+  `::ffff:0:0/96` (prefix >= 96), translating the prefix down by the 96-bit
+  offset (`::ffff:0:0/96` -> `0.0.0.0/0`, `::ffff:192.168.1.0/120` ->
+  `192.168.1.0/24`). A shorter prefix stays a genuine v6 network.
+- **Subnet math.** `hostCount` (int-overflow-checked for large v6 blocks),
+  `firstUsable` / `lastUsable` (IPv4 network/broadcast + RFC 3021 `/31` + `/32`
+  conventions; IPv6 no-broadcast), `hosts` (materialize the usable range, capped
+  at 65536 to bound memory), `split(net, newPrefix)` (equal subnets, capped at
+  65536), `aggregate(nets)` (drop contained blocks + fold sibling pairs into
+  their parent, cascading; v4 / v6 independent), `overlaps` / `subnetOf`
+  (network-in-network), and `next` / `prev` / `compare` for a total address
+  order.
+- **Classification via a `Scope` enum.** A total, disjoint `scope(addr) -> Scope`
+  (`{Global, Private, Loopback, LinkLocal, Multicast, Unspecified, Reserved}`,
+  v4-mapped folded first), with `isGlobal` / `isPrivate` / `isLoopback` /
+  `isLinkLocal` / `isMulticast` / `isUnspecified` as thin wrappers over it - one
+  classification table a caller can `match`, rather than six independent range
+  checks (the sum-type choice, stance #1). Pure `.j`, both binaries; the doc's
+  stale "leading zeros accepted" / "v4-mapped renders as hex" notes were
+  corrected to match the code.
 
 ### M23.7 - observability completeness
 

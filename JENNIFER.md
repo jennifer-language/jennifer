@@ -1040,13 +1040,23 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `-32601`, a thrown handler `-32603`). Needs the default binary (`net` via
   `http`).
 - **`ipnet`** - IP addresses and CIDR networks, IPv4 and IPv6. `ipnet.parseAddress(s)
-  -> Address` (dotted-quad or IPv6 with `::` compression + embedded IPv4),
-  `toString(addr)` (canonical, RFC 5952 for IPv6), `version(addr)`,
-  `equal(a, b)`; and `ipnet.parse(cidr) -> Network` (host bits zeroed),
-  `contains(net, addr) -> bool` (version mismatch is false), `netmask(net)` /
-  `broadcast(net)` -> `Address`, `networkString(net)`. An `ipnet.Address` holds
-  its raw `octets as bytes` (4 or 16) and `version`; a `Network` pairs a base
-  `addr` with a `prefix`. Bitwise subnet math for allow-lists and membership;
+  -> Address` (dotted-quad or IPv6 with `::` compression + embedded IPv4; a
+  v4-mapped `::ffff:a.b.c.d` folds to a v4 `Address`), `toString(addr)`
+  (canonical, RFC 5952 for IPv6), `version(addr)`, `equal(a, b)`, `unmap(addr)`,
+  `next(addr)` / `prev(addr)` / `compare(a, b)` (a total order for walking /
+  sorting). CIDR: `ipnet.parse(cidr) -> Network` (host bits zeroed; a v4-mapped
+  CIDR folds, prefix translated), `contains(net, addr) -> bool` (version mismatch
+  is false), `netmask(net)` / `broadcast(net)` -> `Address`, `networkString(net)`.
+  Subnet math: `hostCount(net)`, `firstUsable(net)` / `lastUsable(net)`,
+  `hosts(net) -> list of Address` (capped 65536), `split(net, newPrefix) -> list
+  of Network` (capped 65536), `aggregate(nets) -> list of Network` (drop
+  contained + merge sibling pairs), `overlaps(a, b)` / `subnetOf(child, parent)`.
+  Classification: `scope(addr) -> Scope` (a total, disjoint enum `{Global,
+  Private, Loopback, LinkLocal, Multicast, Unspecified, Reserved}` you can
+  `match`), with `isGlobal` / `isPrivate` / `isLoopback` / `isLinkLocal` /
+  `isMulticast` / `isUnspecified` predicates over it. An `ipnet.Address` holds its
+  raw `octets as bytes` (4 or 16) and `version`; a `Network` pairs a base `addr`
+  with a `prefix`. Bitwise math for allow-lists, subnetting, and membership;
   malformed input throws `Error{kind: "ipnet"}`. Pure `.j` over `strings` +
   `convert`; **both binaries**.
 - **`ntp`** - a simple SNTP network-time client (RFC 4330 / 5905). `ntp.query(host)
