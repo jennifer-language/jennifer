@@ -169,3 +169,13 @@ func testAuthForcedSkipsCleartextRefusal() {
     }
     testing.assertFalse($refused);
 }
+
+# sendOn on a closed session fails fast (before touching the wire).
+func sendOnClosed() {
+    def s as Session init Session{conn: net.Conn{id: -1}, open: false};
+    sendOn($s, "from@example.com", ["to@example.com"], "hi");
+}
+
+func testSendOnClosedSessionThrows() {
+    testing.assertThrows("sendOnClosed", "smtp");
+}

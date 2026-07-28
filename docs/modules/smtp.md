@@ -35,7 +35,11 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 | Call / type                              | Notes                                                              |
 | ---------------------------------------- | ------------------------------------------------------------------ |
 | `smtp.Options`                           | `host`, `port`, `security`, `clientName`, `user`, `pass`, `auth`, `allowInsecureAuth`. |
-| `smtp.send(opts, from, recipients, message)` | Deliver `message` to every recipient; throws on a server rejection. |
+| `smtp.send(opts, from, recipients, message)` | One-shot: open a session, deliver `message`, close. Throws on a server rejection. |
+| `smtp.Session`                           | A live, authenticated connection (`conn`, `open`) for delivering many messages over one handshake. |
+| `smtp.open(opts)`                         | Connect, greet, STARTTLS, and authenticate once; returns a ready `Session`. |
+| `smtp.sendOn(session, from, recipients, message)` | Deliver one message over an open session (RSET + MAIL / RCPT / DATA); reusable afterwards. |
+| `smtp.close(session)`                     | QUIT (best-effort) and close the session's socket. |
 
 `Options` fields:
 
@@ -86,6 +90,29 @@ and unaffected.
 
 Certificate verification for `"tls"` / `"starttls"` is the `net` default (on;
 see [net.md](../libraries/net.md) for the opt-out).
+
+## Persistent session (many messages, one handshake)
+
+`smtp.send` is the one-shot convenience: it `open`s a session, delivers one
+message, and `close`s. To send a **queue** of messages, do the handshake
+(connect + STARTTLS + AUTH) once with `smtp.open`, then `smtp.sendOn` each
+message, and `smtp.close` at the end - so N messages pay one TLS + auth
+round-trip instead of N:
+
+```jennifer
+def s as smtp.Session init smtp.open($opts);
+for (def m in $queue) {
+    smtp.sendOn($s, $m.from, $m.recipients, $m.message);
+}
+smtp.close($s);
+```
+
+The `Session` is value-semantic, but its `conn` is a shared `net.Conn` handle,
+so passing `$s` to each `sendOn` reuses the same socket. Each `sendOn` issues a
+`RSET` first, so a rejected message cannot bleed into the next. `sendOn` on a
+closed session throws `kind "smtp"`; `close` sends a best-effort `QUIT` (a dead
+connection is closed regardless). A rejected `sendOn` leaves the session open -
+`close` it (or keep sending) as you choose.
 
 ## Errors
 

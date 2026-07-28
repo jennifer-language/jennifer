@@ -929,8 +929,8 @@ still drop a frame - a buffered `net` reader is the general fix.
 
 ### M23.2 - connection reuse / persistent sessions
 
-**In progress.** Every call currently pays a fresh handshake. Add persistent,
-reusable connections. Delivered per module (http first):
+**Done.** Every call used to pay a fresh handshake. Added persistent, reusable
+connections, delivered per module (http, then rest, then smtp):
 - **`http`** (done) - keep-alive / connection reuse via a threaded, value-semantic
   `http.Session` (holding the reused `net.Conn` handle + a cookie jar) with
   `connect` / `exchange` (returns `Exchange{response, session}`) / `close`; a new
@@ -957,8 +957,16 @@ reusable connections. Delivered per module (http first):
   builder / absolute-join / `parseNextLink` cases; Go `TestRestPaginateAndPolicy`
   (link + cursor walks, maxPages cap, inherited retry). Keep-alive across
   separate `rest` calls stays on the `http.connect` / `exchange` side.
-- **`smtp`** (planned) - a persistent `Session` (connect + EHLO + auth once,
-  `send` many), so a queue of N messages pays one TLS+auth handshake instead of N.
+- **`smtp`** (done) - the one-shot `send` refactored into a persistent
+  `Session`: `open(opts)` does the connect + greeting + EHLO + STARTTLS + auth
+  handshake once (closing the socket if any step throws - never returns a
+  half-built session), `sendOn(session, from, recipients, message)` delivers each
+  message (RSET + MAIL / RCPT / DATA, over the shared `net.Conn` handle), and
+  `close(session)` sends a best-effort QUIT and closes. `send` is now the
+  open / sendOn / close convenience, so a queue of N messages pays one TLS + auth
+  handshake instead of N. Overlay adds a closed-session guard test; Go
+  `TestSmtpSessionReuse` delivers two messages over a single-accept fake server
+  (proving reuse - a reconnect would block the second `sendOn`).
 
 ### M23.3 - stable-identity verbs (cross-session correctness)
 

@@ -8,8 +8,10 @@
  * The message body is any string,
  * typically built by the `mime` module. Because it uses `net`, this module runs
  * on the default `jennifer` binary only (`jennifer-tiny` stubs the network
- * stack). `send` throws a catchable `Error` (kind "smtp") when the server
- * rejects a command. TLS certificate verification is the `net` default. An IDN
+ * stack). `send` (the one-shot convenience) throws a catchable `Error` (kind
+ * "smtp") when the server rejects a command. To deliver a queue of messages over
+ * a single TLS + auth handshake, `open` a persistent `Session`, `sendOn` each
+ * message, and `close`. TLS certificate verification is the `net` default. An IDN
  * host or envelope domain is IDNA-encoded to its `xn--` form (via the `idna`
  * module); a non-ASCII address local part still throws (it needs SMTPUTF8).
  * @module smtp
@@ -429,52 +431,96 @@ func dial(opts as Options) {
     return net.connect($addr, CONNECT_TIMEOUT_MS);
 }
 
-# --- send (exported) -----------------------------------------------
+# --- persistent session (exported) ---------------------------------
 
 /**
- * Deliver `message` (a full RFC 5322 message, e.g. from mime.encode) to every
- * recipient, with `from` as the envelope sender. Opens the connection per
- * `opts.security`, greets, upgrades with STARTTLS when asked, authenticates when
- * credentials are present, then runs MAIL FROM / RCPT TO / DATA / QUIT.
+ * A live, authenticated SMTP connection: the handshake (greeting, EHLO,
+ * STARTTLS, and AUTH) has run once, so `sendOn` can deliver many messages over
+ * it. Value-semantic, but the `conn` handle is shared across copies (a
+ * `net.Conn`), so the socket survives being passed to `sendOn`. Build with
+ * `open`; retire with `close`.
+ * @field conn {net.Conn} the underlying (possibly TLS-upgraded) socket, shared across copies
+ * @field open {bool} whether the session is usable (false after `close`)
+ */
+export def struct Session {
+    conn as net.Conn,
+    open as bool
+};
+
+/**
+ * Open an authenticated SMTP session: connect per `opts.security`, read the
+ * greeting, EHLO, upgrade with STARTTLS when asked (refusing a server that did
+ * not advertise it - anti-downgrade), and authenticate when credentials are
+ * present. The returned `Session` is ready for one or more `sendOn` calls, so a
+ * queue of N messages pays this TLS + auth handshake once instead of N times.
  * @param opts {Options} the connection and auth settings
+ * @return {Session} an authenticated, ready session
+ * @throws {Error} kind "smtp" if the connection, greeting, STARTTLS, or auth fails
+ */
+export func open(opts as Options) {
+    def conn as net.Conn init dial($opts);
+    # If any handshake step throws, close the socket rather than leak it - `open`
+    # never returns a half-built session.
+    try {
+        expect(readReply($conn), 220, 220, "greeting");
+        def caps as Reply init greet($conn, $opts);
+        if ($opts.security == "starttls") {
+            # Anti-downgrade: only issue STARTTLS if the server actually
+            # advertised it. A MITM stripping the capability to keep the session
+            # in plaintext is refused here rather than silently continuing.
+            if (not ehloAdvertises($caps.text, "STARTTLS")) {
+                throw Error{
+                    kind: "smtp",
+                    message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)",
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
+            }
+            expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
+            # The handle id survives net.startTLS (the upgrade swaps the registry
+            # entry in place), so the Session keeps referring to the same conn.
+            $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);
+            $caps = greet($conn, $opts);
+        }
+        authenticate($conn, $opts, $caps.text);
+    } catch (e) {
+        net.close($conn);
+        throw $e;
+    }
+    return Session{conn: $conn, open: true};
+}
+
+/**
+ * Deliver one `message` (a full RFC 5322 message, e.g. from mime.encode) over an
+ * open session: RSET, MAIL FROM / RCPT TO / DATA. The session is reusable
+ * afterwards (call `sendOn` again for the next message; `close` when done).
+ * @param session {Session} an open session (from `open`)
  * @param from {string} the envelope sender address
  * @param recipients {list of string} the envelope recipient addresses
  * @param message {string} the full RFC 5322 message body
- * @throws {Error} kind "smtp" when the server rejects a command or an address is not ASCII-safe
+ * @throws {Error} kind "smtp" when the session is closed, the server rejects a command, or an address is not ASCII-safe
  */
-export func send(opts as Options, from as string, recipients as list of string, message as string) {
+export func sendOn(
+    session as Session,
+    from as string,
+    recipients as list of string,
+    message as string) {
+    if (not $session.open) {
+        throw Error{kind: "smtp", message: "smtp: session is closed", file: "", line: 0, col: 0};
+    }
     # IDNA-encode envelope domains (and reject a non-ASCII local part) before
-    # opening a connection.
+    # touching the wire.
     def sender as string init asciiEnvelope($from);
     def rcpts as list of string init [];
     for (def r in $recipients) {
         $rcpts[] = asciiEnvelope($r);
     }
-    def conn as net.Conn init dial($opts);
-    # Closed however send exits, so a rejected command mid-dialogue does not
-    # leak the socket. The handle id survives net.startTLS (the upgrade swaps
-    # the registry entry in place), so this also closes the TLS connection.
-    defer net.close($conn);
-    expect(readReply($conn), 220, 220, "greeting");
-    def caps as Reply init greet($conn, $opts);
-    if ($opts.security == "starttls") {
-        # Anti-downgrade: only issue STARTTLS if the server actually advertised
-        # it. A MITM stripping the capability to keep the session in plaintext
-        # is refused here rather than silently continuing unencrypted.
-        if (not ehloAdvertises($caps.text, "STARTTLS")) {
-            throw Error{
-                kind: "smtp",
-                message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
-        expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
-        $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);
-        $caps = greet($conn, $opts);
-    }
-    authenticate($conn, $opts, $caps.text);
+    def conn as net.Conn init $session.conn;
+    # Reset any prior transaction state so a reused session starts each message
+    # clean (a previous aborted DATA cannot bleed into this one). Valid, and a
+    # no-op, when no transaction is in progress.
+    expect(command($conn, "RSET"), 250, 259, "RSET");
     expect(command($conn, "MAIL FROM:<" + $sender + ">"), 250, 259, "MAIL FROM");
     for (def rcpt in $rcpts) {
         expect(command($conn, "RCPT TO:<" + $rcpt + ">"), 250, 259, "RCPT TO");
@@ -483,5 +529,45 @@ export func send(opts as Options, from as string, recipients as list of string, 
     def payload as string init dotStuff(crlf($message)) + "\r\n.\r\n";
     net.writeBytes($conn, convert.bytesFromString($payload, "utf-8"));
     expect(readReply($conn), 250, 259, "end of DATA");
-    command($conn, "QUIT");
+    return;
+}
+
+/**
+ * Close a session: send QUIT (best-effort) and close the socket. Idempotent-safe
+ * to call once; do not use the session afterwards.
+ * @param session {Session} the session to close
+ */
+export func close(session as Session) {
+    if ($session.open) {
+        # QUIT is courtesy: a dead connection must not turn cleanup into a throw,
+        # so swallow its failure and close the socket regardless.
+        try {
+            command($session.conn, "QUIT");
+        } catch (e) {
+        }
+        net.close($session.conn);
+    }
+    return;
+}
+
+# --- send (exported) -----------------------------------------------
+
+/**
+ * Deliver `message` (a full RFC 5322 message, e.g. from mime.encode) to every
+ * recipient, with `from` as the envelope sender - the one-shot convenience:
+ * `open` a session, `sendOn` this one message, and `close`. To send several
+ * messages over one handshake, call `open` / `sendOn` / `close` yourself.
+ * @param opts {Options} the connection and auth settings
+ * @param from {string} the envelope sender address
+ * @param recipients {list of string} the envelope recipient addresses
+ * @param message {string} the full RFC 5322 message body
+ * @throws {Error} kind "smtp" when the server rejects a command or an address is not ASCII-safe
+ */
+export func send(opts as Options, from as string, recipients as list of string, message as string) {
+    def s as Session init open($opts);
+    # Closed (QUIT + socket) however send exits, so a rejected command mid-DATA
+    # does not leak the connection.
+    defer close($s);
+    sendOn($s, $from, $recipients, $message);
+    return;
 }

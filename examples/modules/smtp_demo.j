@@ -33,8 +33,12 @@ def opts as smtp.Options init smtp.Options{
 def rcpts as list of string init ["you@example.com"];
 
 try {
-    smtp.send($opts, "claudine@example.com", $rcpts, $wire);
-    io.printf("delivered to %s:%d\n", $opts.host, $opts.port);
+    # a persistent session: one handshake, several messages
+    def s as smtp.Session init smtp.open($opts);
+    smtp.sendOn($s, "claudine@example.com", $rcpts, $wire);
+    smtp.sendOn($s, "claudine@example.com", ["also@example.com"], $wire);
+    smtp.close($s);
+    io.printf("delivered 2 messages to %s:%d over one connection\n", $opts.host, $opts.port);
 } catch (e) {
     io.printf("no SMTP server at %s:%d (%s)\n", $opts.host, $opts.port, $e.message);
 }

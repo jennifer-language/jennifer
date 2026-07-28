@@ -109,3 +109,51 @@ smtp.send($o, "from@example.com", $rcpts, "Subject: Hi\r\n\r\nthe body\r\n.hidde
 		t.Fatal("timed out waiting for the SMTP server to capture the message")
 	}
 }
+
+// A .j program driving a persistent smtp.Session delivers two messages over one
+// connection. fakeSMTP accepts exactly one connection and accumulates every DATA
+// block across it, so both bodies arriving proves reuse: had the session
+// reconnected per message, the second sendOn would block on a connect nothing
+// accepts (and the test would time out).
+func TestSmtpSessionReuse(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	captured := make(chan string, 1)
+	go fakeSMTP(ln, captured)
+
+	smtpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "smtp.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`import %q as smtp;
+def o as smtp.Options init smtp.Options{host: "127.0.0.1", port: %d, security: "none", clientName: "t", user: "", pass: "", auth: "", allowInsecureAuth: true};
+def s as smtp.Session init smtp.open($o);
+smtp.sendOn($s, "from@example.com", ["a@example.com"], "Subject: One\r\n\r\nfirst body");
+smtp.sendOn($s, "from@example.com", ["b@example.com"], "Subject: Two\r\n\r\nsecond body");
+smtp.close($s);`, smtpMod, port)
+	progPath := filepath.Join(dir, "session.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, code := loadForTest(progPath)
+	if code != testExitPass {
+		t.Fatalf("smtp session program failed with code %d", code)
+	}
+
+	select {
+	case got := <-captured:
+		for _, want := range []string{"first body", "second body"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("captured payload missing %q; got:\n%s", want, got)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for the SMTP server to capture both messages")
+	}
+}

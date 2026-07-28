@@ -831,7 +831,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   rejection. Hardened: SASL auth over a cleartext (`security: "none"`) connection
   is refused unless `Options.allowInsecureAuth` is true; STARTTLS is only issued
   if the server advertised it (anti-downgrade); envelope addresses are validated
-  (`local@domain`, RFC 5321). Uses `net`, so **default `jennifer` binary only**.
+  (`local@domain`, RFC 5321). For a **queue** of messages, `smtp.open(opts) ->
+  smtp.Session` does the connect + STARTTLS + auth handshake once, then
+  `smtp.sendOn(session, from, recipients, message)` delivers each (RSET + MAIL /
+  RCPT / DATA, reusing the socket - the `Session.conn` is a shared `net.Conn`
+  handle) and `smtp.close(session)` QUITs and closes; `smtp.send` is the one-shot
+  open / sendOn / close convenience. Uses `net`, so **default `jennifer` binary
+  only**.
 - **`totp`** - time-based one-time passwords (RFC 6238 over RFC 4226 HOTP), the
   two-factor codes authenticator apps show. `totp.generate(secret, opts)` /
   `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);
