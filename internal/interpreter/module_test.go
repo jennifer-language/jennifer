@@ -421,6 +421,46 @@ io.printf("%v / %v / %s / %s / %t / %v", $a, $b, shapes.describe($a), shapes.des
 	}
 }
 
+// A module enum used as the type of a *struct field* (a Store enum held in a
+// Limiter struct, in kvstore) must type-check across the module boundary: the
+// field type is retagged to the module's (ns, path) identity just like a
+// module-struct field, so a KindEnum value satisfies it. This pins the fix for
+// the retagFieldType enum gap.
+func TestModuleEnumAsStructField(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"box.j": `
+export def enum Kind { A { n as int }, B };
+export def struct Box { kind as Kind, tag as string };
+export func kindOf(b as Box) {
+    match ($b.kind) {
+        when A(a) { return "A"; }
+        when B { return "B"; }
+    }
+    return "?";
+}
+export func kindNum(b as Box) {
+    match ($b.kind) {
+        when A(a) { return $a.n; }
+        when B { return -1; }
+    }
+    return 0;
+}`,
+		"main.j": `
+use io;
+import "./box.j" as box;
+def x as box.Box init box.Box{ kind: box.Kind.A{ n: 7 }, tag: "t" };
+def y as box.Box init box.Box{ kind: box.Kind.B, tag: "u" };
+io.printf("%s / %s / %d / %s", box.kindOf($x), box.kindOf($y), box.kindNum($x), $x.tag);`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "A / B / 7 / t"
+	if out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+}
+
 // TestModuleEnumNotExported checks an unexported enum stays private.
 func TestModuleEnumNotExported(t *testing.T) {
 	_, err := runModuleMain(t, map[string]string{

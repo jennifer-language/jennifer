@@ -135,6 +135,16 @@ flat lookup view, not authoritative.
 | [`json`](json.md)`.append(v, ptr, val)`               | Push onto the list addressed by `ptr` (sugar for insert at `/.../-`).                                                              |
 | [`json`](json.md)`.remove(v, ptr)`                    | Drop the map key or list element at `ptr`; returns a new handle.                                                                    |
 | [`json`](json.md)`.move(v, from, to)`                 | Relocate the subtree at `from` to `to` (read, remove, then `set`).                                                                  |
+| [`kv`](kv.md)`.open()`                                | A fresh in-memory `kv.Store` (reset each run).                                                                                      |
+| [`kv`](kv.md)`.openFile(path)`                        | A `kv.Store` persisted to `path` (survives across runs; flush per mutation).                                                        |
+| [`kv`](kv.md)`.set(store, key, value, ttl)`           | Store `value`, expiring in `ttl` seconds (`0` = never).                                                                            |
+| [`kv`](kv.md)`.add(store, key, value, ttl)`           | Store only if absent; whether it stored (`bool`).                                                                                   |
+| [`kv`](kv.md)`.get(store, key)`                       | The value, or `""` when absent / expired.                                                                                          |
+| [`kv`](kv.md)`.has(store, key)`                       | Whether the key is present and unexpired (`bool`).                                                                                  |
+| [`kv`](kv.md)`.delete(store, key)`                    | Remove the key; whether it existed (`bool`).                                                                                        |
+| [`kv`](kv.md)`.touch(store, key, ttl)`                | Re-arm the expiry; whether it existed (`bool`).                                                                                     |
+| [`kv`](kv.md)`.incr(store, key, delta)`               | Add signed `delta` to the numeric value; new value, or `-1` when absent (not created).                                             |
+| [`kv`](kv.md)`.close(store)`                          | Drop the store and free its handle.                                                                                                 |
 | [`lists`](lists.md)`.concat(a, b)`                    | New list with `a`'s elements followed by `b`'s.                                                                                     |
 | [`lists`](lists.md)`.contains(xs, item)`              | True if `item` appears in `xs` (haystack, needle).                                                                                  |
 | [`lists`](lists.md)`.first(xs)`                       | Element at index 0. Empty input errors.                                                                                             |

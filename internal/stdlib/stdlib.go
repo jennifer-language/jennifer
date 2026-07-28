@@ -28,6 +28,7 @@ import (
 	intllib "jennifer-lang.dev/jennifer/internal/lib/intl"
 	"jennifer-lang.dev/jennifer/internal/lib/io"
 	"jennifer-lang.dev/jennifer/internal/lib/json"
+	kvlib "jennifer-lang.dev/jennifer/internal/lib/kv"
 	"jennifer-lang.dev/jennifer/internal/lib/lists"
 	"jennifer-lang.dev/jennifer/internal/lib/maps"
 	"jennifer-lang.dev/jennifer/internal/lib/math"
@@ -89,4 +90,5 @@ func InstallAll(in *interpreter.Interpreter) {
 	i2clib.Install(in)
 	gpiolib.Install(in)
 	sqllib.Install(in)
+	kvlib.Install(in)
 }

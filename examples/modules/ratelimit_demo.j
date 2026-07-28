@@ -3,39 +3,39 @@
 # Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * Throttle requests with a fixed-window limiter on memcached.
- * Needs a memcached server on 127.0.0.1:11211 and the default `jennifer` binary (ratelimit builds on the memcache module, which uses `net`). With no server running it prints the connection error rather than failing. Not a golden test (it needs a live server); it demonstrates the surface.
+ * Throttle requests with the ratelimit module (fixed or sliding window). This
+ * demo uses the in-process backend (kvstore.inProcessStore), so it runs with no
+ * server; swap in kvstore.redisStore($rc) / memcacheStore($mc) for a distributed
+ * limiter shared across processes.
  * @module ratelimit_demo
  */
 use io;
 import "../../modules/ratelimit.j" as ratelimit;
-import "../../modules/memcache.j" as memcache;
+import "../../modules/kvstore.j" as kvstore;
 
-def opts as memcache.Options init memcache.Options{host: "127.0.0.1", port: 11211};
+def store as kvstore.Store init kvstore.inProcessStore();
 
-try {
-    def mc as memcache.Session init memcache.connect($opts);
+# Allow 3 requests per 60-second window for one client.
+def lim as ratelimit.Limiter init ratelimit.fixedWindow($store, 3, 60);
+def key as string init "ip:203.0.113.7";
 
-    # Allow 3 requests per 60-second window for one client.
-    def key as string init "demo:ip:203.0.113.7";
-    def limit as int init 3;
-
-    # Drain the key first so the demo is repeatable.
-    memcache.delete($mc, $key);
-
-    def i as int init 1;
-    while ($i <= 5) {
-        def ok as bool init ratelimit.allow($mc, $key, $limit, 60);
-        io.printf(
-            "request %d -> %t   (remaining: %d)\n",
-            $i,
-            $ok,
-            ratelimit.remaining($mc, $key, $limit));
-        $i = $i + 1;
-    }
-
-    memcache.delete($mc, $key);
-    memcache.quit($mc);
-} catch (e) {
-    io.printf("no memcached server at %s:%d (%s)\n", $opts.host, $opts.port, $e.message);
+def i as int init 1;
+while ($i <= 5) {
+    def r as ratelimit.Result init ratelimit.check($lim, $key);
+    io.printf(
+        "request %d -> allowed=%t  remaining=%d  retryAfter=%d\n",
+        $i,
+        $r.allowed,
+        $r.remaining,
+        $r.retryAfter);
+    $i = $i + 1;
 }
+
+# The Result carries everything a 429 needs: on a denied request, set
+# Retry-After: r.retryAfter and X-RateLimit-Reset: r.resetSeconds.
+def peek as ratelimit.Result init ratelimit.peek($lim, $key);
+io.printf(
+    "peek -> allowed=%t remaining=%d reset=%d\n",
+    $peek.allowed,
+    $peek.remaining,
+    $peek.resetSeconds);

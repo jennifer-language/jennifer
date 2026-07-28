@@ -3,39 +3,37 @@
 # Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * Server-side sessions on memcached with the session module.
- * Needs a memcached server on 127.0.0.1:11211 and the default jennifer binary (session builds on the memcache module, which uses net). With no server running it prints the connection error rather than failing.
+ * Server-side sessions over a selectable backend with the session module. This
+ * demo uses the in-process backend (kvstore.inProcessStore), so it runs with no
+ * server; swap in kvstore.redisStore($rc) / memcacheStore($mc) / fileStore(path)
+ * for a distributed or persistent store.
  * @module session_demo
  */
 use io;
+use json;
 import "../../modules/session.j" as session;
-import "../../modules/memcache.j" as memcache;
+import "../../modules/kvstore.j" as kvstore;
 
-def opts as memcache.Options init memcache.Options{host: "127.0.0.1", port: 11211};
+def store as kvstore.Store init kvstore.inProcessStore();
 
-try {
-    def mc as memcache.Session init memcache.connect($opts);
+# Start a session (30 minutes) and populate it with structured data.
+def id as string init session.create($store, 1800);
+io.printf("created session %s\n", $id);
 
-    # Start a session (30 minutes) and populate it.
-    def id as string init session.create($mc, 1800);
-    io.printf("created session %s\n", $id);
+def data as json.Value init session.load($store, $id);
+$data = json.set($data, "/user", "ada");
+$data = json.set($data, "/name", "José"); # non-ASCII survives (base64-wrapped)
+$data = json.set($data, "/prefs", json.map());
+$data = json.set($data, "/prefs/theme", "dark"); # nested - richer than a flat map
+session.save($store, $id, $data, 1800);
 
-    def data as map of string to string init session.load($mc, $id);
-    $data["user"] = "ada";
-    $data["name"] = "José"; # non-ASCII survives (base64-wrapped)
-    session.save($mc, $id, $data, 1800);
+# A later request loads it back.
+def back as json.Value init session.load($store, $id);
+io.printf("user  -> %s\n", json.asString($back, "/user"));
+io.printf("name  -> %s\n", json.asString($back, "/name"));
+io.printf("theme -> %s\n", json.asString($back, "/prefs/theme"));
 
-    # A later request loads it back.
-    def back as map of string to string init session.load($mc, $id);
-    io.printf("user -> %s\n", $back["user"]);
-    io.printf("name -> %s\n", $back["name"]);
-
-    # Keep it alive without rewriting, then end it.
-    io.printf("touch  -> %t\n", session.touch($mc, $id, 1800));
-    io.printf("destroy-> %t\n", session.destroy($mc, $id));
-    io.printf("gone   -> %d entries\n", len(session.load($mc, $id)));
-
-    memcache.quit($mc);
-} catch (e) {
-    io.printf("no memcached server at %s:%d (%s)\n", $opts.host, $opts.port, $e.message);
-}
+# Keep it alive without rewriting, then end it.
+io.printf("touch  -> %t\n", session.touch($store, $id, 1800));
+io.printf("destroy-> %t\n", session.destroy($store, $id));
+io.printf("gone   -> %d entries\n", json.length(session.load($store, $id), ""));

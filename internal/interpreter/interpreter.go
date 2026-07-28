@@ -3245,7 +3245,13 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		modInterp, modNS, modPath := mod.interp, mod.ns, mod.path
 		retagFieldType = func(t parser.Type) parser.Type {
 			return *retagType(&t, "", modNS, "", modPath, func(name string) bool {
-				_, ok := modInterp.structs[name]
+				// A field may name a sibling module struct OR a sibling module
+				// enum (a Store enum held in a Limiter struct, say); both take the
+				// module's (ns, path) identity at the boundary.
+				if _, ok := modInterp.structs[name]; ok {
+					return true
+				}
+				_, ok := modInterp.enums[name]
 				return ok
 			})
 		}

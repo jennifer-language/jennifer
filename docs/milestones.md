@@ -994,16 +994,48 @@ RESP encoder + a count-framed, never-decoded reply reader) and typed hash / list
 `TestMemcacheBinaryCasMulti` (NUL / CR / LF / 0xFF round-trip, byte-count-framed)
 and the `encodeCommandBytes` overlay test.
 
-### M23.5 - selectable backends (stance #1)
+### M23.5 - selectable backends
 
-**Planned.** `session` and `ratelimit` are memcache-only, which contradicts the
-"one module, one selectable backend" stance:
-- **`session`** - a backend selector (memcache / redis / in-process) behind one
-  API; richer-than-`map of string to string` values via `json.Value`.
-- **`ratelimit`** - a pluggable backend plus a **sliding-window / token-bucket**
-  algorithm option beyond the current fixed-window (which lets a 2x burst
-  straddle a window boundary), and reset-time / retry-after reporting so a caller
-  can build a compliant `429`.
+**Done.** `session` and `ratelimit` were memcache-only, against the "one module,
+one selectable backend" stance. Introduced a shared backend layer and refactored
+both onto it:
+- **`kv` (new system library)** - an in-process key/value store with per-key TTL,
+  the no-server local backend a pure `.j` module cannot be (value semantics have
+  no shared-mutable-state handle). `kv.open()` (in-memory) / `kv.openFile(path)`
+  (persisted across `jennifer run` invocations - a whole-file flush per mutation)
+  -> `kv.Store`, then `set` / `add` / `get` / `has` / `delete` / `touch` / `incr`
+  (memcache-shape) / `close`. A `kv.Store` is an integer handle into a
+  per-interpreter registry, so it shares its backing map across value-copies and
+  `spawn`ed tasks (per-store mutex; `incr` atomic - pinned under `-race`).
+  Expired entries are swept periodically (active expiry, not just lazy-on-access),
+  so a rate limiter keyed by an untrusted IP cannot pile up expired entries
+  unbounded; no hard cap on unexpired live data (a distributed backend's
+  server-side `maxmemory` is the answer for an adversarial working set). Pure Go
+  stdlib, TinyGo-clean (both binaries).
+- **`kvstore` (new module)** - the backend selector. `Store` is a **sum-type
+  enum** (`Memcache` / `Redis` / `Local`), not a `kind`-string struct, so the
+  dispatch is an exhaustiveness-checked `match` with no invalid state - the
+  stance-#1 choice. `memcacheStore` / `redisStore` / `inProcessStore` /
+  `fileStore` constructors; uniform `set` / `get` / `delete` / `touch` /
+  `incrWindow` (the atomic-counter-plus-TTL primitive, portable across all three).
+- **`session`** - refactored onto `kvstore.Store`; values are now a **`json.Value`**
+  (nested / structured, not a flat `map of string to string`). **Pre-1.0 break**
+  (the store argument and value type changed).
+- **`ratelimit`** - refactored onto `kvstore.Store`; a `Limiter` (`fixedWindow` /
+  `slidingWindow`) and `check` / `peek` returning a `Result{allowed, remaining,
+  retryAfter, resetSeconds}` for a compliant `429`. The **sliding window** blends
+  current + previous window counts (weighted by elapsed) to smooth the
+  fixed-window boundary burst; both are clock-driven with window-aligned keys.
+  **Pre-1.0 break** (`allow(mc, ...)` -> `check(limiter, ...)`).
+- **Interpreter fix** - an enum used as a *struct field* type across a module
+  boundary now type-checks (`retagFieldType` stamped only struct field types with
+  the module identity, not enum field types - the M22.9 gap for enums). Needed for
+  `Limiter{store as kvstore.Store}`; pinned by `TestModuleEnumAsStructField`.
+
+Pinned by the `kv` Go tests (`TestFilePersistence`, `TestConcurrentIncr`), the
+`kvstore` / `session` / `ratelimit` overlays (in-process, deterministic, incl. the
+sliding-window boundary), and the Go suite over the memcache / redis backends
+(`TestSessionLifecycle`, `TestRatelimit`, `TestKvstoreRedisBackend`).
 
 ### M23.6 - format & coverage completeness
 

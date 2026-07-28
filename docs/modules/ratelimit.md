@@ -1,74 +1,70 @@
-# `ratelimit` - a fixed-window rate limiter on memcached
+# `ratelimit` - rate limiter (fixed or sliding window)
 
-Import with `import "ratelimit.j" as ratelimit;`. A **fixed-window rate
-limiter** on the [`memcache`](memcache.md) module - the sharpest use of
-memcached's distinctive strength: **atomic `incr` plus a per-key TTL**. Each key
-(a client IP, a user, an API token) counts hits in a time window; the counter is
-armed with the window's expiry when it is first created, so it resets on its own
-when the window ends - there is nothing to reap. Because it builds on `memcache`
-(which uses `net`), this module needs the default **`jennifer`** binary.
-
-> **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
-> **stock** tiny build, which ships without a network driver - not a TinyGo
-> limitation. A `jennifer-tiny` rebuilt with a network stack runs this module
-> too; see the
-> [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
+Import with `import "ratelimit.j" as ratelimit;`. A rate limiter over a
+**selectable** key/value backend ([`kvstore.Store`](kvstore.md) - `memcache`,
+`redis`, or the in-process [`kv`](../libraries/kv.md)). Each key (an IP, a user,
+an API token) is counted against a limit per time window; a `check` records a hit
+and returns a `Result` with the decision **plus the metadata for a compliant
+`429`** - remaining budget, reset time, and Retry-After.
 
 ```jennifer
 import "ratelimit.j" as ratelimit;
-import "memcache.j" as memcache;
+import "kvstore.j" as kvstore;
 
-def mc as memcache.Session init memcache.connect(memcache.Options{
-    host: "127.0.0.1", port: 11211});
-
-# 100 requests per 60 seconds, per client IP
-if (ratelimit.allow($mc, "ip:203.0.113.7", 100, 60)) {
-    # ... serve the request ...
-} else {
-    # ... reject (e.g. HTTP 429) ...
+def lim as ratelimit.Limiter init ratelimit.slidingWindow(kvstore.redisStore($rc), 100, 60);
+def r as ratelimit.Result init ratelimit.check($lim, "ip:203.0.113.7");
+if (not $r.allowed) {
+    # respond 429; set Retry-After: $r.retryAfter, X-RateLimit-Remaining: $r.remaining
 }
 ```
 
-Runnable: [`examples/modules/ratelimit_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/ratelimit_demo.j).
-
 ## Surface
 
-| Call                                    | Notes                                                              |
-| --------------------------------------- | ------------------------------------------------------------------ |
-| `ratelimit.allow(mc, key, limit, window)` | Record one hit; `true` if within `limit` for the current `window` (seconds). |
-| `ratelimit.remaining(mc, key, limit)`   | Hits left in the current window (the full `limit` when untouched, `0` once exhausted). |
+| Call / type | Returns | |
+| ----------- | ------- | - |
+| `ratelimit.fixedWindow(store, limit, window)` | `Limiter` | a fixed-window limiter: `limit` hits per aligned `window` seconds |
+| `ratelimit.slidingWindow(store, limit, window)` | `Limiter` | a sliding-window limiter (smooths the boundary burst) |
+| `ratelimit.check(limiter, key)` | `Result` | **record** a hit and report the decision + metadata |
+| `ratelimit.peek(limiter, key)` | `Result` | report the current state **without** recording a hit |
+| `ratelimit.Result` | | `allowed` (bool), `remaining` (int), `retryAfter` (seconds, `0` when allowed), `resetSeconds` (seconds to the window roll) |
 
-## How the window works
+## Fixed vs sliding window
 
-`allow` does an atomic `incr` on the key. The window starts at the **first**
-hit: an absent counter is created (via `add`) carrying the window's TTL, and
-because a later `incr` does not re-arm the expiry, the counter dies exactly
-`window` seconds after that first hit - a clean fixed window with no background
-cleanup. The `incr`-then-`add` pair also closes the create race: if two callers
-both find the counter absent, only one `add` wins and the loser re-`incr`s, so
-no hit is lost.
+Both are driven by the wall clock and **window-aligned keys** (a counter per
+aligned window), so they work identically on every backend, needing only atomic
+increment.
+
+- **Fixed window** - one counter per aligned window; simplest. A burst can
+  straddle a window boundary: up to `2 * limit` requests across the seam (all of
+  one window's budget at its end, then all of the next window's at its start).
+- **Sliding window** - blends the current window's count with the previous
+  window's, weighted by how far into the current window you are. At the very
+  start of a new window the previous window still carries full weight, so a fresh
+  burst is blocked; its influence decays linearly to zero by the window's end.
+  This smooths the fixed-window boundary burst.
+
+The counter is created and armed with the window TTL on the first hit, so it
+resets on its own - nothing to reap.
+
+## Building a 429
+
+`check` returns everything a compliant response needs:
 
 ```jennifer
-def ok as bool init ratelimit.allow($mc, "user:ada", 5, 60);   # 5 per minute
-io.printf("%d left\n", ratelimit.remaining($mc, "user:ada", 5));
+def r as ratelimit.Result init ratelimit.check($lim, $key);
+if ($r.allowed) {
+    # ... serve; optionally advertise X-RateLimit-Remaining: $r.remaining ...
+} else {
+    # HTTP 429 Too Many Requests
+    #   Retry-After: $r.retryAfter
+    #   X-RateLimit-Remaining: 0
+    #   X-RateLimit-Reset: $r.resetSeconds
+}
 ```
-
-`allow` returns `true` for the first `limit` hits in a window and `false`
-afterwards; the counter keeps rising while denied, and `remaining` reports `0`,
-until the window expires and the budget refills.
-
-## Out of scope
-
-- **Fixed window only.** The count resets at the window boundary, so up to
-  `2 * limit` hits can land across two adjacent windows in the worst case.
-  A **sliding window** or **token bucket** (smoother, burst-tolerant) is a
-  later refinement.
-- **Not a distributed clock.** The window is per key in one memcached; it does
-  not coordinate wall-clock alignment across instances.
-- **Volatile.** memcached can evict a counter under memory pressure, which
-  resets that key's window early - acceptable for throttling, not for billing.
 
 ## See also
 
-- [memcache.md](memcache.md) - the `incr` / `add` / `get` primitives this uses.
+- [kvstore.md](kvstore.md) - the backend selector; [kv.md](../libraries/kv.md) -
+  the in-process backend.
+- [session.md](session.md) - the other module on the `kvstore` backend layer.
 - [modules/index.md](index.md) - the module catalog and import rules.

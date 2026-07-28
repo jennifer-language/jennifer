@@ -21,8 +21,8 @@ written in (Tiny)Go and ships as two binaries:
   small-footprint scripting hosts).
 
 Jennifer is batteries-included, and not just in name:
-**[35 built-in libraries](libraries/index.md) and
-[61 distributable modules](modules/index.md) - over 450 functions and
+**[36 built-in libraries](libraries/index.md) and
+[62 distributable modules](modules/index.md) - over 450 functions and
 constants** cover what real programs actually need, so you build genuine tools,
 not toys. Talk to a
 real database with the [SQL](libraries/sql.md) library (MySQL / MariaDB and

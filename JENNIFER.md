@@ -433,6 +433,16 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   key generation / CSR / JWK `crypto.rsaGenerateKey`/`ecGenerateKey`/`jwkPublic`/
   `csr` for ACME - the RSA / ECDSA parts default binary only), byte-stream + container compression, text/character codecs,
   UUIDs, interpreter identity, and test primitives.
+- **`kv`** - in-process key/value store with per-key TTL (the no-server local
+  counterpart to the `memcache` / `redis` modules): `kv.open()` (in-memory) /
+  `kv.openFile(path)` (persisted across `jennifer run` invocations) -> `kv.Store`,
+  then `set(store, k, v, ttl)` / `add` / `get` / `has` / `delete` / `touch` /
+  `incr(store, k, delta)` (memcache-shape: new value, `-1` when absent, does not
+  create; `delta` is signed so a negative value decrements - no separate `decr` -
+  and it does not floor at 0) / `close`. A `kv.Store` is an integer handle into a per-interpreter
+  registry, so it shares its backing map across value-copies and `spawn`ed tasks
+  (per-store mutex; `incr` atomic) - the shared mutable state a pure `.j` module
+  cannot hold. Backs `kvstore`'s in-process option. TinyGo-clean (both binaries).
 
 For the exact signature of any function, see the hosted library reference -
 the [cheatsheet](https://jennifer-lang.dev/libraries/cheatsheet.html)
@@ -713,19 +723,30 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   check-and-set (optimistic-concurrency) pair. A volatile cache for sessions /
   counters / locks. Throws `Error` (kind `"memcache"`) on a protocol error.
   **Default `jennifer` binary only** (`net`).
-- **`session`** - server-side sessions on the `memcache` module: a `map of
-  string to string` under `sess:ID` with a sliding TTL. `session.create(mc,
-  ttl)` -> id (UUID v4), `load(mc, id)` (empty map when absent / expired),
-  `save(mc, id, data, ttl)`, `touch(mc, id, ttl)`, `destroy(mc, id)`. Threads
-  `memcache` + `uuid` + `json`; data is stored base64-wrapped JSON so any UTF-8
-  value round-trips. Volatile (a cache, not a store of record). **Default
-  `jennifer` binary only** (`net`).
-- **`ratelimit`** - a fixed-window rate limiter on the `memcache` module
-  (atomic `incr` + per-key TTL): `ratelimit.allow(mc, key, limit, window)` ->
-  bool records a hit and reports whether it is within `limit` for the current
-  `window` seconds; `ratelimit.remaining(mc, key, limit)` -> int is the budget
-  left. The counter is created with the window TTL on the first hit and expires
-  on its own. **Default `jennifer` binary only** (`net`).
+- **`kvstore`** - a **selectable** key/value backend with per-key TTL behind one
+  API: a `kvstore.Store` is a sum-type enum with a variant per backend -
+  `memcacheStore(mc)` / `redisStore(rc)` (distributed) / `inProcessStore()`
+  (in-memory `kv`) / `fileStore(path)` (persisted `kv`) - and `set(store, key,
+  value, ttl)` / `get` / `delete` / `touch` / `incrWindow(store, key, ttl)`
+  dispatch via an exhaustiveness-checked `match`. The shared backend layer under
+  `session` / `ratelimit`. Local backend on both binaries; distributed needs the
+  default binary.
+- **`session`** - server-side sessions over a `kvstore.Store` backend (memcache /
+  redis / in-process): a **`json.Value`** (structured, nested - not a flat map)
+  under `sess:ID` with a sliding TTL. `session.create(store, ttl)` -> id (UUID
+  v4), `load(store, id)` (empty object when absent / expired), `save(store, id,
+  data, ttl)`, `touch(store, id, ttl)`, `destroy(store, id)`. Data is stored
+  base64-wrapped JSON; the client-supplied id is validated `[A-Za-z0-9-]`.
+  Volatile (a cache, not a store of record). Binary depends on the backend.
+- **`ratelimit`** - a rate limiter over a `kvstore.Store` backend, **fixed or
+  sliding window**: `ratelimit.fixedWindow(store, limit, window)` /
+  `slidingWindow(...)` -> `Limiter`, then `check(limiter, key)` -> `Result`
+  (records a hit) / `peek(limiter, key)` -> `Result` (no record). `Result` is
+  `{allowed, remaining, retryAfter, resetSeconds}` - everything for a compliant
+  `429`. Sliding window blends the current and previous window counts to smooth
+  the fixed-window boundary burst; both are clock-driven with window-aligned keys
+  (portable across backends via atomic `incrWindow`). Binary depends on the
+  backend.
 - **`mime`** - build and parse MIME messages (RFC 5322 headers, multipart,
   quoted-printable / base64 transfer encodings): `mime.text(contentType, body)` /
   `attachment` / `attachmentBytes(filename, contentType, data)` (binary) /

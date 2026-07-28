@@ -6,73 +6,67 @@
 #     jennifer test modules/session_test.j
 #
 # The overlay splices session.j in front of this file, so the tests reach its
-# private key builder, JSON-Pointer escaper, and base64+JSON encode / decode by
-# bare identifier. The networked lifecycle (create / load / save / touch /
-# destroy) is verified against an in-process memcached server in the Go suite
-# (TestSessionLifecycle).
+# private key builder and base64+JSON encode / decode by bare identifier. The
+# networked lifecycle (create / load / save / touch / destroy) is verified over
+# each backend in the Go suite (TestSessionLifecycle).
 use testing;
+use json;
+use strings;
+use convert;
 
-func testCacheKey() {
-    testing.assertEqual(cacheKey("abc"), "sess:abc");
-}
-
-func testPointer() {
-    testing.assertEqual(pointer("user"), "/user");
-    testing.assertEqual(pointer("a/b"), "/a~1b"); # "/" escapes to ~1
-    testing.assertEqual(pointer("x~y"), "/x~0y"); # "~" escapes to ~0
-    testing.assertEqual(pointer("~/"), "/~0~1"); # both, in the right order
+func testStoreKey() {
+    testing.assertEqual(storeKey("abc"), "sess:abc");
 }
 
 func testRoundTrip() {
-    def src as map of string to string init {"user": "ada", "role": "admin"};
-    def back as map of string to string init decodeData(encodeData($src));
-    testing.assertEqual(len($back), 2);
-    testing.assertEqual($back["user"], "ada");
-    testing.assertEqual($back["role"], "admin");
+    def src as json.Value init json.map();
+    $src = json.set($src, "/user", "ada");
+    $src = json.set($src, "/n", 42);
+    def back as json.Value init decodeData(encodeData($src));
+    testing.assertEqual(json.asString($back, "/user"), "ada");
+    testing.assertEqual(json.asInt($back, "/n"), 42);
 }
 
 func testRoundTripUnicode() {
-    # base64-wrapping is what makes a non-ASCII value survive the cache round-trip.
-    def src as map of string to string init {"name": "José", "city": "München"};
-    def back as map of string to string init decodeData(encodeData($src));
-    testing.assertEqual($back["name"], "José");
-    testing.assertEqual($back["city"], "München");
+    # base64-wrapping is what makes a non-ASCII value survive the store round-trip.
+    def src as json.Value init json.set(json.map(), "/name", "José");
+    def back as json.Value init decodeData(encodeData($src));
+    testing.assertEqual(json.asString($back, "/name"), "José");
 }
 
 func testEncodedBlobIsAscii() {
     # the stored blob (base64) has equal byte and rune length: pure ASCII.
-    def src as map of string to string init {"name": "José"};
+    def src as json.Value init json.set(json.map(), "/name", "José");
     def blob as string init encodeData($src);
     testing.assertEqual(len(convert.bytesFromString($blob, "utf-8")), len($blob));
 }
 
 func testDecodeEmptyBlob() {
-    # an absent / expired session reads back as an empty map.
-    testing.assertEqual(len(decodeData("")), 0);
+    # an absent / expired session reads back as an empty object.
+    testing.assertEqual(json.length(decodeData(""), ""), 0);
 }
 
-func testRoundTripEmptyMap() {
-    def empty as map of string to string init {};
-    testing.assertEqual(len(decodeData(encodeData($empty))), 0);
+func testRoundTripEmptyObject() {
+    testing.assertEqual(json.length(decodeData(encodeData(json.map())), ""), 0);
 }
 
 # A session id arrives from a client cookie; one carrying a space, CRLF, or any
 # character outside [A-Za-z0-9-] must be rejected before it is embedded in a
-# memcache key (otherwise it injects protocol commands).
+# store key (otherwise it injects protocol commands).
 func idWithSpace() {
-    cacheKey("abc def");
+    storeKey("abc def");
 }
 func idWithCRLF() {
-    cacheKey("abc\r\nset injected 0 0 3\r\nx");
+    storeKey("abc\r\nset injected 0 0 3\r\nx");
 }
 func idWithColon() {
-    cacheKey("a:b");
+    storeKey("a:b");
 }
 func idEmpty() {
-    cacheKey("");
+    storeKey("");
 }
 func idTooLong() {
-    cacheKey(strings.repeat("a", 251));
+    storeKey(strings.repeat("a", 251));
 }
 
 func testRejectsUnsafeIds() {
@@ -85,5 +79,26 @@ func testRejectsUnsafeIds() {
 
 func testAcceptsSafeIds() {
     # A UUID v4 (the minted shape) and a plain alnum-dash id are accepted.
-    testing.assertEqual(cacheKey("a1B2-c3D4"), "sess:a1B2-c3D4");
+    testing.assertEqual(storeKey("a1B2-c3D4"), "sess:a1B2-c3D4");
+}
+
+# The full lifecycle over the in-process backend (no server): create / load /
+# save structured json.Value / touch / destroy.
+func testLifecycleInProcess() {
+    def st as kvstore.Store init kvstore.inProcessStore();
+    def id as string init create($st, 60);
+    testing.assertEqual(json.length(load($st, $id), ""), 0); # a fresh session is empty
+    def d as json.Value init load($st, $id);
+    $d = json.set($d, "/user", "ada");
+    $d = json.set($d, "/prefs", json.map());
+    $d = json.set($d, "/prefs/theme", "dark");
+    save($st, $id, $d, 60);
+    def back as json.Value init load($st, $id);
+    testing.assertEqual(json.asString($back, "/user"), "ada");
+    testing.assertEqual(json.asString($back, "/prefs/theme"), "dark"); # nested, richer than a flat map
+    testing.assertTrue(touch($st, $id, 120));
+    testing.assertFalse(touch($st, "no-such-session", 60));
+    testing.assertTrue(destroy($st, $id));
+    testing.assertFalse(destroy($st, $id));
+    testing.assertEqual(json.length(load($st, $id), ""), 0); # gone
 }

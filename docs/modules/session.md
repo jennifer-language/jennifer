@@ -1,79 +1,59 @@
-# `session` - server-side sessions on memcached
+# `session` - server-side sessions
 
-Import with `import "session.j" as session;`. A server-side **session store** on
-the [`memcache`](memcache.md) module - the canonical memcached use. A session is
-a `map of string to string` held under a `sess:ID` key with a sliding TTL, so it
-expires on its own when idle. It threads three pieces together: `memcache`
-(store + TTL), [`uuid`](../libraries/uuid.md) (the session ID), and
-[`json`](../libraries/json.md) (encode the map). Because it builds on `memcache`
-(which uses `net`), this module needs the default **`jennifer`** binary.
-
-> **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
-> **stock** tiny build, which ships without a network driver - not a TinyGo
-> limitation. A `jennifer-tiny` rebuilt with a network stack runs this module
-> too; see the
-> [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
+Import with `import "session.j" as session;`. Server-side sessions over a
+**selectable** key/value backend: a session is a [`json.Value`](../libraries/json.md)
+held under a `sess:ID` key with a sliding TTL, so it expires on its own when
+idle. The store is a [`kvstore.Store`](kvstore.md) - back it with `memcache` or
+`redis` (distributed, shared across processes) or the in-process
+[`kv`](../libraries/kv.md) library (single process, no server), all behind one
+API. Session values are a `json.Value`, so a session holds **structured** data
+(nested objects, arrays, numbers), not just flat strings.
 
 ```jennifer
 import "session.j" as session;
-import "memcache.j" as memcache;
+import "kvstore.j" as kvstore;
+use json;
 
-def mc as memcache.Session init memcache.connect(memcache.Options{
-    host: "127.0.0.1", port: 11211});
-
-def id as string init session.create($mc, 1800);        # 30-minute session
-def data as map of string to string init session.load($mc, $id);
-$data["user"] = "ada";
-session.save($mc, $id, $data, 1800);
+def store as kvstore.Store init kvstore.redisStore($rc);   # or memcacheStore / inProcessStore / fileStore
+def id as string init session.create($store, 1800);        # a 30-minute session
+def data as json.Value init session.load($store, $id);
+$data = json.set($data, "/user", "ada");
+$data = json.set($data, "/prefs/theme", "dark");           # nested is fine
+session.save($store, $id, $data, 1800);
 ```
-
-Runnable: [`examples/modules/session_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/session_demo.j).
 
 ## Surface
 
-Each call takes a live `memcache.Session` and a session `id`; `ttl` is the
-expiry in **seconds**.
+| Call | Returns | |
+| ---- | ------- | - |
+| `session.create(store, ttl)` | `string` | mint a new session ID; store an empty session with a `ttl`-second expiry |
+| `session.load(store, id)` | `json.Value` | the session's data, or an **empty object** when absent / expired |
+| `session.save(store, id, data, ttl)` | | write the `json.Value` and re-arm the expiry |
+| `session.touch(store, id, ttl)` | `bool` | re-arm the expiry without rewriting; whether it still existed |
+| `session.destroy(store, id)` | `bool` | remove the session; whether it existed |
 
-| Call                                       | Notes                                                             |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| `session.create(mc, ttl)`                  | Mint a new ID, store an empty session; returns the `id` (string). |
-| `session.load(mc, id)`                     | The session's `map of string to string`, or an empty map when absent / expired. |
-| `session.save(mc, id, data, ttl)`          | Write the data map and re-arm the expiry to `ttl` seconds.        |
-| `session.touch(mc, id, ttl)`               | Re-arm the expiry without rewriting the data; returns whether it still existed. |
-| `session.destroy(mc, id)`                  | Remove the session; returns whether it existed.                   |
+## Session IDs and storage
 
-The typical request cycle: `load` the session at the start, read / write the
-map, `save` it at the end (which also slides the expiry). A quiet request that
-only needs to keep the session alive can `touch` instead of `save`.
-
-## Storage format
-
-The data map is stored as **base64-wrapped JSON** under `sess:ID`. The base64
-wrap keeps the cached value pure ASCII, so a session value with any UTF-8 text
-(`"name": "José"`) round-trips exactly - memcached's value read is byte-exact
-for ASCII, and base64 makes every value ASCII on the wire. The trade-off is that
-the cached blob is not human-readable and not interchangeable with another
-framework's session format; a PHP-session-compatible layout is a separate
-follow-on.
+- **IDs are UUID v4** from the [`crypto`](../libraries/crypto.md) crypto-grade
+  random source (122 unguessable bits), so an ID is safe to hand a client as the
+  session's bearer token. An ID arriving from a client cookie is **validated** (1
+  to 250 chars, `[A-Za-z0-9-]` only) before it reaches a store key, so it cannot
+  inject a backend command.
+- **Values are stored base64-wrapped JSON**, so any UTF-8 (or structured) value
+  round-trips exactly, and the store only ever holds ASCII.
 
 ## Caveats
 
-- **Volatile.** memcached evicts under memory pressure and loses everything on
-  restart, so a session can vanish before its TTL. Treat sessions as a cache of
-  soft state (a shopping cart, a wizard step), not a store of record. Anything
-  that must survive belongs in a database.
-- **Session IDs are UUID v4 from a crypto-grade RNG** (see the
-  [`uuid`](../libraries/uuid.md) module - randomness draws from the
-  [`crypto`](../libraries/crypto.md) library). The 122 random bits are
-  unguessable, so the id is safe to hand a client as the session's bearer
-  token, not just a cache key.
-- **String values only.** A session is a `map of string to string`; encode
-  richer values (numbers, nested data) yourself, e.g. via `json` or
-  `convert.toString`.
+- **Volatile.** Sessions are a cache of soft state, not a store of record: a
+  memcache / in-process backend evicts, so treat expiry as expected (re-auth, do
+  not lose money on a dropped session).
+- **Pick the backend for your topology.** More than one process (a web fleet)
+  must see the same session -> use `redis` / `memcache`. A single-process app can
+  use `inProcessStore` (in memory) or `fileStore` (persisted across runs).
 
 ## See also
 
-- [memcache.md](memcache.md) - the cache client this builds on.
-- [uuid.md](../libraries/uuid.md) - the session-ID source.
-- [json.md](../libraries/json.md) - the map serialization.
+- [kvstore.md](kvstore.md) - the backend selector; [kv.md](../libraries/kv.md) -
+  the in-process backend.
+- [json.md](../libraries/json.md) - the value type a session holds.
 - [modules/index.md](index.md) - the module catalog and import rules.
