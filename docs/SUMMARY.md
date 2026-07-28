@@ -88,6 +88,7 @@
 - [`influxdb`](modules/influxdb.md)
 - [`ipnet`](modules/ipnet.md)
 - [`jsonl`](modules/jsonl.md)
+- [`jsonrpc`](modules/jsonrpc.md)
 - [`jwt`](modules/jwt.md)
 - [`label`](modules/label.md)
 - [`log`](modules/log.md)

@@ -1110,6 +1110,32 @@ drove edge fixes: `insideForHeader` O(n^2) -> O(1) (a `forHeader` wrap-frame fla
 Left: `Token.Raw` captured on every lex (within noise). **Pre-1.0 break**
 (canonical output changed).
 
+### M23.11 - `jsonrpc` module
+
+**Done.** A JSON-RPC 2.0 client + server module, pure `.j` over `json` + `http`
+(no new dependency, default-binary-only for the transport). The **client** is a
+value-semantic `Client` with `call(client, method, params) -> json.Value` (throws
+`Error{kind: "jsonrpc"}` on an error reply or transport failure) and `notify`;
+`params` / results are `json.Value`s. The **server** is a transport-agnostic
+`handle(requestBody) -> replyBody` that runs the whole protocol - single request,
+notification (`""` reply), batch (array in / array out, notification entries
+dropped), and every reserved error code - and dispatches each `method` to a
+top-level `func NAME(params as json.Value)` in the entry program **by name via
+`meta.callMain`** (the `web` module's mechanism), accepting a `json.Value` or a
+scalar as the handler's result. Chose JSON-RPC over gRPC deliberately: gRPC needs
+protobuf + HTTP/2 + codegen and would be a heavy Go system library, not a pure
+`.j` module. Ships the usual close-out: `modules/jsonrpc_test.j` (16 white-box
+tests, 100%), a mock-server `cmd/jennifer/jsonrpc_test.go` for the live client
+round-trip, `docs/modules/jsonrpc.md`, a demo, and the catalog / `JENNIFER.md`
+entries. A validation pass hardened it: every client failure (JSON-RPC error
+reply, transport error, or malformed / mismatched-`id` reply) unifies to one
+catchable `Error{kind: "jsonrpc"}`; a thrown handler error yields a **generic**
+`-32603` (the message stays server-side, never on the wire); the client
+correlates the reply `id`; the batch reply joins via `strings.join` (not O(n^2)
+concat); and the docs call out that `handle` exposes the whole top-level method
+namespace (no route allow-list) with authentication left to the transport.
+Client-side batch and custom per-handler error codes are noted follow-ups.
+
 ---
 
 ## Requirements for 1.0.0 stable

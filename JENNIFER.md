@@ -959,6 +959,20 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   guard with `hasMore`), and a `jsonl.Writer` (`writer` / `writeRecord` /
   `closeWriter`) that appends records incrementally. A
   thin framing layer over `json` + `fs`; **both binaries**.
+- **`jsonrpc`** - JSON-RPC 2.0, client and server, over `http` + `json`.
+  `jsonrpc.client(endpoint)` / `clientWith(endpoint, headers)` -> a `Client`,
+  then `jsonrpc.call(client, method, params) -> json.Value` (throws
+  `Error{kind: "jsonrpc"}` on an error reply or transport failure) and
+  `notify(client, method, params)` (no `id`, no reply). `params` and the result
+  are `json.Value`s (built with the `json` write API, read with its accessors).
+  Server side, `jsonrpc.handle(requestBody) -> replyBody` is transport-agnostic:
+  it dispatches each request's `method` to a top-level `func NAME(params as
+  json.Value)` in the entry program by name (via `meta.callMain`), returns that
+  handler's `json.Value` or scalar result, and covers notifications, batches, and
+  the reserved error codes (`PARSE_ERROR` / `INVALID_REQUEST` /
+  `METHOD_NOT_FOUND` / `INVALID_PARAMS` / `INTERNAL_ERROR`; a missing method is
+  `-32601`, a thrown handler `-32603`). Needs the default binary (`net` via
+  `http`).
 - **`ipnet`** - IP addresses and CIDR networks, IPv4 and IPv6. `ipnet.parseAddress(s)
   -> Address` (dotted-quad or IPv6 with `::` compression + embedded IPv4),
   `toString(addr)` (canonical, RFC 5952 for IPv6), `version(addr)`,
