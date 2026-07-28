@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * The entry program. It imports db (which imports config) and also imports config directly, then reaches each module's surface with the `alias.member` syntax.

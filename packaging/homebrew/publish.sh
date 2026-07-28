@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # publish.sh - publish the Jennifer formula to the Homebrew tap from the latest
 # GitHub release. Copy this into your `homebrew-tap` clone and run it there (see

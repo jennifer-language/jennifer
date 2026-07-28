@@ -62,7 +62,7 @@ nothing here will surprise you.
   `spawn { }` block expressions. Single-line blocks are still legal source
   (the parser accepts them), but `fmt` rewrites them to the expanded form
   for consistency.
-- **Struct declarations expand to one field per line.**
+- **Struct and enum declarations expand to one member per line.**
   `def struct Point { x as int, y as int };` reflows to
 
   ```jennifer
@@ -71,6 +71,20 @@ nothing here will surprise you.
       y as int
   };
   ```
+
+  and `def enum Shape { Circle, Square };` reflows the same way, one variant
+  per line. A payload-carrying variant keeps its payload tight on the variant's
+  line (`Circle{r as int},` - the brace binds to the variant name, like a
+  struct literal):
+
+  ```jennifer
+  def enum Shape {
+      Circle{r as int},
+      Square{side as int},
+      Empty
+  };
+  ```
+
 
 - **Struct / enum literals bind the brace to the type name, tight**:
   `Point{x: 1, y: 2}` - no space before `{` (so the brace reads as bound to
@@ -302,20 +316,49 @@ export func distance(ax as float, ay as float, bx as float, by as float) { ... }
 `jennifer fmt` preserves doc comments and keeps each on its own line above its
 construct, so a formatted file is exactly what `docblock` expects to parse.
 
+## SPDX header
+
+Every committed `.j` file opens with a two-line [SPDX](https://spdx.dev/) header -
+a machine-readable license tag and a copyright line - so license-scanning and
+[REUSE](https://reuse.software/) tooling can attribute each file without parsing
+prose:
+
+```jennifer
+# SPDX-License-Identifier: LGPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+```
+
+- **`SPDX-License-Identifier`** is the [SPDX license
+  expression](https://spdx.org/licenses/) for the file. The Jennifer project
+  itself uses `LGPL-3.0-only`; your own program carries whatever license you
+  ship under.
+- **`SPDX-FileCopyrightText`** is the copyright notice, kept behind its SPDX tag
+  (`SPDX-FileCopyrightText: Copyright (C) <year> <holder> <email>`) and placed
+  **directly under** the license line - one blank line then separates the header
+  from the first code line.
+- Both are `#` line comments. If the file is executable it may open with a
+  `#!/usr/bin/env -S jennifer run` shebang on **line 1**, with the two SPDX lines
+  immediately below it.
+- The identical two-line header (written with `//`) tops every `.go` file in the
+  interpreter, so the license/copyright form is uniform across the whole repo.
+  Markdown (`.md`) files carry **no** header.
+
+`jennifer fmt` treats the header as an ordinary leading comment block and
+re-emits it verbatim - it never rewrites, reorders, or drops your SPDX lines.
+
 ## Source file conventions
 
 - **`.j` extension** for all Jennifer source. The interpreter rejects
   anything else.
-- **One SPDX header at the top** of every committed `.j` file (the
-  project uses `LGPL-3.0-only` - see existing examples).
+- **The two-line SPDX header** above tops every committed `.j` file.
 - **`use` and `import` statements come first**, before any methods or
   top-level statements. Group `use` lines together, then `import` lines,
   then a blank line, then the rest of the program.
 - **Blank line after a leading comment block.** If the file opens with
-  a header comment (SPDX line, copyright, file description, shebang),
-  leave one blank line between the comment block and the first code
-  line. Files that start directly with code (no header) start on
-  line 1 - no leading blank.
+  a header comment (the SPDX license + copyright lines, an optional file
+  description, a shebang), leave one blank line between the comment block
+  and the first code line. Files that start directly with code (no header)
+  start on line 1 - no leading blank.
 - **Trailing newline** at end of file.
 
 ## Editor configuration
@@ -358,6 +401,9 @@ insert_final_newline = true
 ## A complete example
 
 ```jennifer
+# SPDX-License-Identifier: LGPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+
 use io;
 
 /**
@@ -377,15 +423,15 @@ for (def i as int init 0; $i <= 8; $i = $i + 1) {
 }
 ```
 
-Everything in this example follows the rules above: 1TBS braces, 4-space
-indent, spaces around binary operators, double-quoted strings, expanded
-blocks, and a doc comment on the `func`. `jennifer fmt` will produce this
-output byte-for-byte from any equivalent input.
+Everything in this example follows the rules above: the two-line SPDX header,
+1TBS braces, 4-space indent, spaces around binary operators, double-quoted
+strings, expanded blocks, and a doc comment on the `func`. `jennifer fmt` will
+produce this output byte-for-byte from any equivalent input.
 
-Comments, blank lines, and the shebang on line 1 all survive a `fmt`
-round-trip. The SPDX header (`# SPDX-License-Identifier: ...`) and any
-inline `# why` notes you keep alongside the code are re-emitted at
-their original positions: leading comments stay on the line above
-their attached statement, trailing same-line comments stay on the
-same line, and runs of blank lines collapse to one (matching the
-"never more than one consecutive blank line" rule).
+Comments, blank lines, and a shebang on line 1 all survive a `fmt`
+round-trip. The two SPDX header lines (`# SPDX-License-Identifier: ...` and
+`# SPDX-FileCopyrightText: ...`) and any inline `# why` notes you keep
+alongside the code are re-emitted at their original positions: leading
+comments stay on the line above their attached statement, trailing same-line
+comments stay on the same line, and runs of blank lines collapse to one
+(matching the "never more than one consecutive blank line" rule).

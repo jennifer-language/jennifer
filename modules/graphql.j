@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * A thin GraphQL client over `http` / `rest`. Point a `graphql.Client` at one

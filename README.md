@@ -15,7 +15,7 @@ Jennifer is batteries-included, and not just in name:
 constants** cover what real programs actually need, so you build genuine tools,
 not toys. Talk to a
 real database with the [SQL](docs/libraries/sql.md) library
-(MySQL / MariaDB and PostgreSQL, parameterized and injection-safe) or map rows
+(MySQL/MariaDB/Galera and PostgreSQL, parameterized and injection-safe) or map rows
 to structs with the [ORM](docs/modules/orm.md). Read and write
 [JSON](docs/libraries/json.md), [YAML](docs/libraries/yaml.md),
 [TOML](docs/libraries/toml.md), and [XML](docs/libraries/xml.md); match text

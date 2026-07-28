@@ -15,7 +15,7 @@ It is batteries-included, and not just in name:
 [62 distributable modules](modules/index.md) - over 450 functions and
 constants** cover what real programs actually need, so you build genuine tools,
 not toys. Talk to a
-real database with the [SQL](libraries/sql.md) library (MySQL / MariaDB and
+real database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
 PostgreSQL, parameterized and injection-safe) or map rows to structs with the
 [ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
 [YAML](libraries/yaml.md), [TOML](libraries/toml.md), and [XML](libraries/xml.md);

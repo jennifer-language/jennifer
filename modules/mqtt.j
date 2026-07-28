@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
  * An MQTT 3.1.1 publish/subscribe client over the `net` system library - the

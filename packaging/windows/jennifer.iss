@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: LGPL-3.0-only
-; Copyright (C) 2026 mplx <jennifer@mplx.dev>
+; SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 ;
 ; Inno Setup script for the Windows installer (best-effort, UNSUPPORTED build).
 ; Produces jennifer-<version>-setup.exe. At runtime it offers "Install for all

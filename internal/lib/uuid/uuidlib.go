@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package uuidlib is the `uuid` library: generate (`uuid.v4()` / `uuid.v7()`)
 // and parse RFC 9562 UUIDs (v4 random, v7 time-ordered). Sixteen bytes, version

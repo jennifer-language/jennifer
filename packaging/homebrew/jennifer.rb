@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Homebrew formula for the Jennifer language interpreter (best-effort,
 # UNSUPPORTED macOS build - Linux is the only supported platform). It builds the

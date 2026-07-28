@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Recreate the Windows installer (jennifer-<version>-setup.exe) locally on Linux
 # via Wine + Inno Setup - the same artifact the release CI builds on a

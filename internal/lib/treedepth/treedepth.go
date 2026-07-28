@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package treedepth is the shared container-nesting depth guard for the
 // json / toml / yaml write surfaces. Each of those libraries used to carry an

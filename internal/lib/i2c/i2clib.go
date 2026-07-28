@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 // Package i2clib implements Jennifer's `i2c` library: the I2C (Inter-IC) bus
 // (`/dev/i2c-1`, ...). The name carries a digit, which identifiers now admit.

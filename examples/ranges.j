@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # Range syntax: `lo..hi` is half-open [lo, hi). Three uses:
 #   - list construction:  def r as list of int init 0..5;

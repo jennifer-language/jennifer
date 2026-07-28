@@ -1,14 +1,14 @@
 # sql
 
 A relational-database client over Go's `database/sql`, shipping the two
-client-server engines: **MySQL / MariaDB** and **PostgreSQL** (both pure-Go
+client-server engines: **MySQL/MariaDB/Galera** and **PostgreSQL** (both pure-Go
 drivers). SQLite (the one embedded engine) is deliberately not here. **Default
 `jennifer` binary only** - `jennifer-tiny` returns a friendly error (the drivers
 are not compiled there, and it has no network stack anyway).
 
 Values bind **only through placeholders**. String interpolation (the
 SQL-injection vector) is never how a value reaches a query. The placeholder
-spelling is the engine's own - `?` for MySQL / MariaDB, `$1`..`$n` for
+spelling is the engine's own - `?` for MySQL/MariaDB/Galera, `$1`..`$n` for
 Postgres; the SQL text goes to the driver verbatim, so write the dialect you
 are connecting to.
 
@@ -37,7 +37,7 @@ while (sql.next($rows)) {
 
 The DSN format is the driver's:
 
-- MySQL / MariaDB: `"user:pw@tcp(host:3306)/dbname"`
+- MySQL / MariaDB / Galera Cluster: `"user:pw@tcp(host:3306)/dbname"`
 - Postgres: `"postgres://user:pw@host:5432/dbname"` (`?sslmode=disable` for a
   plaintext local server)
 
