@@ -60,6 +60,9 @@ common "read every message in a folder" case.
 | `imap.append(session, folder, msg)` | `APPEND` - upload a full RFC 5322 message into `folder` (e.g. save to Sent). |
 | `imap.appendWith(session, folder, flags, msg)` | `APPEND` with initial flags, e.g. `"\Seen"` for Sent or `"\Draft"` for a draft. |
 | `imap.expunge(session)`              | `EXPUNGE` - permanently remove all `\Deleted` messages in the selected folder. |
+| `imap.move(session, n, folder)`      | `MOVE n folder` (RFC 6851) - copy + delete + expunge in one atomic step (no manual `\Deleted` + `EXPUNGE`). |
+| `imap.fetchPartial(session, n, offset, length)` | `FETCH n BODY.PEEK[]<offset.length>` - a byte range of the body, to pull a large message in bounded chunks. |
+| **UID variants** (stable ids)        | Each seq verb has a UID twin that addresses by the message's persistent UID (survives an expunge): `uidSearch`, `uidFetch`, `uidFetchMessage`, `uidFetchHeaders`, `uidFlags`, `uidAddFlags`, `uidRemoveFlags`, `uidCopy`, `uidMove`, `uidFetchPartial`. Same arguments, but the `int` is a UID. |
 | `imap.logout(session)`               | `LOGOUT` and close.                                              |
 | `imap.fetchAll(opts, folder)`       | Connect, select, retrieve every message, log out; `list of string`. |
 | `imap.Notification`                  | One server push during IDLE: `kind` (`"exists"` / `"expunge"` / `"recent"` / `""`), `number`. |
@@ -204,10 +207,18 @@ imap.addFlags($s, 3, "\\Deleted");        # mark for deletion
 imap.expunge($s);                          # permanently remove every \Deleted message
 ```
 
-**Move** a message - IMAP4rev1 has no atomic MOVE, so it is copy + delete:
+**Move** a message. The RFC 6851 `MOVE` does copy + delete + expunge atomically:
 
 ```jennifer
 imap.createFolder($s, "Archive");        # once; errors if it already exists (try/catch)
+imap.move($s, 3, "Archive");              # atomic: no manual \Deleted + expunge
+```
+
+`MOVE` is widely but not universally supported; a server lacking it answers
+`BAD`, so fall back to the classic copy + `\Deleted` + `expunge` under a
+`try`/`catch`:
+
+```jennifer
 imap.copy($s, 3, "Archive");              # copy into the target folder
 imap.addFlags($s, 3, "\\Deleted");        # then delete the original
 imap.expunge($s);
@@ -215,6 +226,31 @@ imap.expunge($s);
 
 Note `EXPUNGE` renumbers the remaining messages, so gather the sequence numbers
 you want (with `search`) **before** expunging, or expunge last.
+
+### UIDs: stable identifiers across sessions
+
+A sequence number is only valid within the current selection - an `EXPUNGE`
+renumbers every message after the removed one, so a number captured earlier can
+silently point at the wrong message. A **UID** is stable: it keeps addressing the
+same message across expunges and across sessions (paired with the folder's
+`UIDVALIDITY` from `status`). Every message-addressing verb has a `uid` twin that
+takes a UID instead of a sequence number:
+
+```jennifer
+def uids as list of int init imap.uidSearch($s, imap.criteria());  # stable ids
+def body as string init imap.uidFetch($s, $uids[0]);                # fetch by UID
+imap.uidAddFlags($s, $uids[0], "\\Seen");                            # STORE by UID
+imap.uidMove($s, $uids[0], "Archive");                               # UID MOVE
+```
+
+This is the correct basis for "process only what is new since last run": record
+the UIDs (and `UIDVALIDITY`) you have handled, then next session `uidSearch` and
+skip the ones you have already seen - immune to the renumbering a sequence-number
+loop would trip over.
+
+**Large bodies** can be pulled in ranges with `fetchPartial(session, n, offset,
+length)` (or `uidFetchPartial`), which issues `BODY.PEEK[]<offset.length>` so a
+big message is retrieved in bounded chunks instead of one huge literal.
 
 **Save a message** into a folder with `append` (e.g. keep a copy in Sent after
 sending, or store a draft). The message is a full RFC 5322 string - headers, a

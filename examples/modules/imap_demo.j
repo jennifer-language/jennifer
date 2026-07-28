@@ -20,15 +20,21 @@ def opts as imap.Options init imap.Options{
 };
 
 try {
-    def msgs as list of string init imap.fetchAll($opts, "INBOX");
-    io.printf("fetched %d message(s) from INBOX:\n", len($msgs));
-    for (def raw in $msgs) {
-        def m as mime.Part init mime.parse($raw);
+    def s as imap.Session init imap.connect($opts);
+    imap.selectFolder($s, "INBOX");
+    # Address messages by their stable UID (survives an expunge) - the basis for
+    # "process only what is new": persist these UIDs, skip them next run.
+    def uids as list of int init imap.uidSearch($s, imap.criteria());
+    io.printf("INBOX has %d message(s):\n", len($uids));
+    for (def uid in $uids) {
+        def m as mime.Part init imap.uidFetchMessage($s, $uid);
         io.printf(
-            "  from %s | subject: %s\n",
+            "  uid %d | from %s | subject: %s\n",
+            $uid,
             mime.headerValue($m, "From"),
             mime.headerValue($m, "Subject"));
     }
+    imap.logout($s);
 } catch (e) {
     io.printf("no IMAP server at %s:%d (%s)\n", $opts.host, $opts.port, $e.message);
 }

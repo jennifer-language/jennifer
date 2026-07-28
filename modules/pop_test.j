@@ -50,6 +50,15 @@ func testParseSizes() {
     testing.assertEqual($szs[2], 300);
 }
 
+func testParseUidl() {
+    def ids as list of MessageId init parseUidl("1 whqtswO00WBw418f9t5JxYwZ\r\n2 QhdPYR:00WBw1Ph7x7");
+    testing.assertEqual(len($ids), 2);
+    testing.assertEqual($ids[0].number, 1);
+    testing.assertEqual($ids[0].id, "whqtswO00WBw418f9t5JxYwZ");
+    testing.assertEqual($ids[1].number, 2);
+    testing.assertEqual($ids[1].id, "QhdPYR:00WBw1Ph7x7");
+}
+
 func testApopTimestamp() {
     testing.assertEqual(
         apopTimestamp("+OK POP3 ready <1896.697170952@dbc.mtview.ca.us>"),

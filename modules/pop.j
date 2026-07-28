@@ -67,7 +67,37 @@ export def struct Stat {
     size as int
 };
 
+/**
+ * One message's UIDL entry: its message number and its server-assigned unique id.
+ * The `id` is stable across sessions (unlike the `number`, which is per-session),
+ * so it is the key for "download only what is new": remember the ids you have
+ * seen, and on the next connection retrieve only the numbers whose id is new.
+ * @field number {int} the 1-based message number this session
+ * @field id {string} the persistent unique id (RFC 1939 UIDL)
+ */
+export def struct MessageId {
+    number as int,
+    id as string
+};
+
 # --- pure protocol helpers (private, unit-tested) ------------------
+
+# parseUidl reads a UIDL multiline body ("<number> <uid>" per line) into a list
+# of MessageId. Blank / malformed lines are skipped.
+func parseUidl(body as string) {
+    def out as list of MessageId init [];
+    for (def line in strings.split($body, "\r\n")) {
+        def t as string init strings.trim($line);
+        def sp as int init strings.indexOf($t, " ");
+        if ($sp > 0) {
+            $out[] = MessageId{
+                number: convert.toInt(strings.substring($t, 0, $sp)),
+                id: strings.trim(strings.substring($t, $sp + 1, len($t)))
+            };
+        }
+    }
+    return $out;
+}
 
 # statusOK reports whether a reply line is a "+OK" status.
 func statusOK(line as string) {
@@ -547,6 +577,78 @@ export func retrieve(session as Session, n as int) {
     def cmd as string init "RETR " + convert.toString($n);
     net.writeBytes($session.conn, convert.bytesFromString($cmd + "\r\n", "utf-8"));
     return readMultiline($session.conn, "RETR");
+}
+
+/**
+ * Return the stable unique id of every message (UIDL), as `MessageId`
+ * `{number, id}` pairs in message order. Unlike the per-session message number,
+ * a UIDL `id` persists across sessions, so this is the key to leave-on-server /
+ * skip-seen: keep the ids you have processed, and next time retrieve only the
+ * `number`s whose `id` is new.
+ * @param session {Session} the live session
+ * @return {list of MessageId} the unique id of each message
+ * @throws {Error} kind "pop3" on a server "-ERR" reply (or no UIDL support)
+ */
+export func uidl(session as Session) {
+    net.writeBytes($session.conn, convert.bytesFromString("UIDL\r\n", "utf-8"));
+    return parseUidl(readMultiline($session.conn, "UIDL"));
+}
+
+/**
+ * Return the stable unique id of one message (UIDL n).
+ * @param session {Session} the live session
+ * @param n {int} the 1-based message number
+ * @return {string} the message's persistent unique id
+ * @throws {Error} kind "pop3" on a server "-ERR" reply
+ */
+export func uidlOne(session as Session, n as int) {
+    def line as string init command($session.conn, "UIDL " + convert.toString($n));
+    expectOK($line, "UIDL");
+    # "+OK <n> <uid>": the uid is the final whitespace-separated token (a UIDL id
+    # is printable ASCII with no spaces, RFC 1939).
+    def parts as list of string init strings.split(strings.trim($line), " ");
+    return strings.trim($parts[len($parts) - 1]);
+}
+
+/**
+ * Preview message `n`: its full headers plus the first `lines` body lines (TOP).
+ * `lines` = 0 fetches headers only - a cheap way to read Subject / From / Date
+ * (parse the result with `mime.parse`) and decide whether to `retrieve` the whole
+ * body. TOP is widely but not universally supported (a server lacking it answers
+ * "-ERR").
+ * @param session {Session} the live session
+ * @param n {int} the 1-based message number
+ * @param lines {int} how many leading body lines to include (0 = headers only)
+ * @return {string} the header block plus the requested body lines
+ * @throws {Error} kind "pop3" on a server "-ERR" reply (or no TOP support)
+ */
+export func top(session as Session, n as int, lines as int) {
+    def cmd as string init "TOP " + convert.toString($n) + " " + convert.toString($lines);
+    net.writeBytes($session.conn, convert.bytesFromString($cmd + "\r\n", "utf-8"));
+    return readMultiline($session.conn, "TOP");
+}
+
+/**
+ * Unmark every message marked for deletion this session (RSET), so a QUIT after
+ * it deletes nothing. Use it to abort a batch of `deleteMessage` calls before
+ * committing.
+ * @param session {Session} the live session
+ * @throws {Error} kind "pop3" on a server "-ERR" reply
+ */
+export func reset(session as Session) {
+    expectOK(command($session.conn, "RSET"), "RSET");
+    return;
+}
+
+/**
+ * Do nothing but keep the connection alive (NOOP) - the server resets its idle
+ * timer and replies "+OK". Useful between long pauses in a session.
+ * @param session {Session} the live session
+ * @throws {Error} kind "pop3" on a server "-ERR" reply
+ */
+export func noop(session as Session) {
+    expectOK(command($session.conn, "NOOP"), "NOOP");
+    return;
 }
 
 /**

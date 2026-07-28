@@ -826,11 +826,22 @@ func bodyStructureShowsAttachment(resp as string) {
     return strings.contains(strings.lower($resp), "\"attachment\"");
 }
 
+# uidPrefix returns "UID " for a UID-addressed command, "" for a sequence number.
+# It is the one difference between every seq-addressed verb and its UID twin: a
+# UID command takes and reports stable identifiers that survive an expunge, where
+# sequence numbers renumber.
+func uidPrefix(uid as bool) {
+    if ($uid) {
+        return "UID ";
+    }
+    return "";
+}
+
 # bodyStructureHasAttachment probes message n's structure (no body download).
-func bodyStructureHasAttachment(session as Session, n as int) {
+func bodyStructureHasAttachment(session as Session, n as int, uid as bool) {
     def resp as string init command(
         $session.conn,
-        "FETCH " + convert.toString($n) + " BODYSTRUCTURE");
+        uidPrefix($uid) + "FETCH " + convert.toString($n) + " BODYSTRUCTURE");
     return bodyStructureShowsAttachment($resp);
 }
 
@@ -857,10 +868,10 @@ func parseInternalDate(resp as string) {
 
 # messageInternalDate fetches message n's INTERNALDATE (the arrival time SINCE /
 # BEFORE filter on) as a time.Time, for the exact-instant date refinement.
-func messageInternalDate(session as Session, n as int) {
+func messageInternalDate(session as Session, n as int, uid as bool) {
     def resp as string init command(
         $session.conn,
-        "FETCH " + convert.toString($n) + " INTERNALDATE");
+        uidPrefix($uid) + "FETCH " + convert.toString($n) + " INTERNALDATE");
     return parseInternalDate($resp);
 }
 
@@ -872,9 +883,10 @@ func matchesClientFilters(
     n as int,
     c as Criteria,
     refineSince as bool,
-    refineBefore as bool) {
+    refineBefore as bool,
+    uid as bool) {
     if (len($c.subjectRegex) > 0 or len($c.fromRegex) > 0) {
-        def part as mime.Part init mime.parse(fetchHeaders($session, $n, "SUBJECT FROM"));
+        def part as mime.Part init mime.parse(fetchHeadersCore($session, $n, "SUBJECT FROM", $uid));
         if (len($c.subjectRegex) > 0 and
             not regex.matches($c.subjectRegex, mime.headerValue($part, "Subject"))) {
             return false;
@@ -888,7 +900,7 @@ func matchesClientFilters(
     # day only, so when `since` / `before` carry a time-of-day, compare the
     # message's INTERNALDATE (the same clock SINCE / BEFORE use) to the full instant.
     if ($refineSince or $refineBefore) {
-        def id as time.Time init messageInternalDate($session, $n);
+        def id as time.Time init messageInternalDate($session, $n, $uid);
         if ($refineSince and time.before($id, $c.since)) {
             return false; # earlier than the inclusive lower bound
         }
@@ -896,7 +908,7 @@ func matchesClientFilters(
             return false; # not strictly before the exclusive upper bound
         }
     }
-    if ($c.hasAttachments and not bodyStructureHasAttachment($session, $n)) {
+    if ($c.hasAttachments and not bodyStructureHasAttachment($session, $n, $uid)) {
         return false;
     }
     return true;
@@ -916,7 +928,32 @@ func matchesClientFilters(
  *   range (`since` after `before`), or a control character in a substring field
  */
 export func search(session as Session, criteria as Criteria) {
-    def nums as list of int init parseSearch(command($session.conn, buildSearchCommand($criteria)));
+    return searchCore($session, $criteria, false);
+}
+
+/**
+ * Like `search`, but returns **UIDs** (via `UID SEARCH`) instead of sequence
+ * numbers. A UID is stable across an expunge, so a UID returned here still
+ * addresses the same message after other messages are removed - the correct key
+ * for "fetch only what is new since last run" and for `uidFetch` / `uidStore` /
+ * `uidCopy` / `uidMove`. Any client-side refinement fetches by UID too.
+ * @param session {Session} the open session
+ * @param criteria {Criteria} the filter (build with `imap.criteria()` + fields)
+ * @return {list of int} the matching message UIDs
+ * @throws {Error} kind "imap" as `search`
+ */
+export func uidSearch(session as Session, criteria as Criteria) {
+    return searchCore($session, $criteria, true);
+}
+
+# searchCore runs the server SEARCH (UID SEARCH when `uid`) and, when the criteria
+# carry a client-side condition, refines the candidates with matching-addressed
+# fetches. `parseSearch` reads the same `* SEARCH n...` line whether the numbers
+# are sequence numbers or UIDs.
+func searchCore(session as Session, criteria as Criteria, uid as bool) {
+    def nums as list of int init parseSearch(command(
+        $session.conn,
+        uidPrefix($uid) + buildSearchCommand($criteria)));
     if (not hasClientFilter($criteria)) {
         return $nums;
     }
@@ -925,7 +962,7 @@ export func search(session as Session, criteria as Criteria) {
     def refineBefore as bool init refineBeforeNeeded($criteria);
     def out as list of int init [];
     for (def n in $nums) {
-        if (matchesClientFilters($session, $n, $criteria, $refineSince, $refineBefore)) {
+        if (matchesClientFilters($session, $n, $criteria, $refineSince, $refineBefore, $uid)) {
             $out[] = $n;
         }
     }
@@ -940,7 +977,70 @@ export func search(session as Session, criteria as Criteria) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetch(session as Session, n as int) {
-    def cmd as string init "FETCH " + convert.toString($n) + " BODY.PEEK[]";
+    return fetchCore($session, $n, false);
+}
+
+# fetchCore retrieves a message body by sequence number or UID (BODY.PEEK[]).
+func fetchCore(session as Session, id as int, uid as bool) {
+    def cmd as string init uidPrefix($uid) + "FETCH " + convert.toString($id) + " BODY.PEEK[]";
+    return extractLiteral(command($session.conn, $cmd));
+}
+
+/**
+ * Like `fetch`, but addresses the message by its stable **UID** (`UID FETCH`), so
+ * a UID captured earlier still retrieves the same message after an expunge
+ * renumbered the sequence numbers.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @return {string} the raw message body
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidFetch(session as Session, uid as int) {
+    return fetchCore($session, $uid, true);
+}
+
+/**
+ * Retrieve a **byte range** of message `n`'s body (`BODY.PEEK[]<offset.length>`),
+ * so a large message can be pulled in bounded chunks instead of one huge literal.
+ * `offset` is the 0-based start, `length` the number of octets (the server
+ * returns fewer at end-of-body). Both must be >= 0.
+ * @param session {Session} the open session
+ * @param n {int} the message sequence number
+ * @param offset {int} the 0-based byte offset into the body
+ * @param length {int} the number of octets to retrieve
+ * @return {string} the requested byte range of the body
+ * @throws {Error} kind "imap" on a bad range or a "NO" / "BAD" completion
+ */
+export func fetchPartial(session as Session, n as int, offset as int, length as int) {
+    return fetchPartialCore($session, $n, $offset, $length, false);
+}
+
+/**
+ * Like `fetchPartial`, but addresses the message by its stable **UID**.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param offset {int} the 0-based byte offset into the body
+ * @param length {int} the number of octets to retrieve
+ * @return {string} the requested byte range of the body
+ * @throws {Error} kind "imap" on a bad range or a "NO" / "BAD" completion
+ */
+export func uidFetchPartial(session as Session, uid as int, offset as int, length as int) {
+    return fetchPartialCore($session, $uid, $offset, $length, true);
+}
+
+# fetchPartialCore retrieves BODY.PEEK[]<offset.length> by seq or UID.
+func fetchPartialCore(session as Session, id as int, offset as int, length as int, uid as bool) {
+    if ($offset < 0 or $length < 0) {
+        throw Error{
+            kind: "imap",
+            message: "imap.fetchPartial: offset and length must be >= 0",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    def cmd as string init uidPrefix($uid) + "FETCH " + convert.toString($id) +
+        " BODY.PEEK[]<" + convert.toString($offset) + "." + convert.toString($length) + ">";
     return extractLiteral(command($session.conn, $cmd));
 }
 
@@ -959,6 +1059,17 @@ export func fetchMessage(session as Session, n as int) {
 }
 
 /**
+ * Like `fetchMessage`, but addresses the message by its stable **UID**.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @return {mime.Part} the parsed message tree
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidFetchMessage(session as Session, uid as int) {
+    return mime.parse(uidFetch($session, $uid));
+}
+
+/**
  * Retrieve only the named header fields of message `n` (space-separated, e.g.
  * "SUBJECT DATE") as a raw header block for `mime.parse` - far cheaper than
  * fetching the whole body when you only need a few headers.
@@ -969,11 +1080,28 @@ export func fetchMessage(session as Session, n as int) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetchHeaders(session as Session, n as int, fields as string) {
+    return fetchHeadersCore($session, $n, $fields, false);
+}
+
+/**
+ * Like `fetchHeaders`, but addresses the message by its stable **UID**.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param fields {string} the space-separated header names, e.g. "SUBJECT DATE"
+ * @return {string} the raw header block
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidFetchHeaders(session as Session, uid as int, fields as string) {
+    return fetchHeadersCore($session, $uid, $fields, true);
+}
+
+# fetchHeadersCore retrieves named header fields by seq or UID.
+func fetchHeadersCore(session as Session, id as int, fields as string, uid as bool) {
     # `fields` is interpolated raw (not a quoted string), so it must not carry a
     # CR/LF or the `)]` that would close the fetch item and inject a command.
     rejectControl($fields, "IMAP header field list");
-    def cmd as string init "FETCH " + convert.toString($n) + " BODY.PEEK[HEADER.FIELDS (" +
-        $fields + ")]";
+    def cmd as string init uidPrefix($uid) + "FETCH " + convert.toString($id) +
+        " BODY.PEEK[HEADER.FIELDS (" + $fields + ")]";
     return extractLiteral(command($session.conn, $cmd));
 }
 
@@ -988,7 +1116,25 @@ export func fetchHeaders(session as Session, n as int, fields as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func flags(session as Session, n as int) {
-    def resp as string init command($session.conn, "FETCH " + convert.toString($n) + " (FLAGS)");
+    return flagsCore($session, $n, false);
+}
+
+/**
+ * Like `flags`, but addresses the message by its stable **UID**.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @return {string} the flags, space-separated (no surrounding parentheses)
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidFlags(session as Session, uid as int) {
+    return flagsCore($session, $uid, true);
+}
+
+# flagsCore reads a message's FLAGS by seq or UID.
+func flagsCore(session as Session, id as int, uid as bool) {
+    def resp as string init command(
+        $session.conn,
+        uidPrefix($uid) + "FETCH " + convert.toString($id) + " (FLAGS)");
     def m as regex.Match init regex.find("FLAGS \\(([^)]*)\\)", $resp);
     if ($m.start < 0) {
         return "";
@@ -1007,7 +1153,28 @@ export func flags(session as Session, n as int) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func addFlags(session as Session, n as int, flags as string) {
-    command($session.conn, "STORE " + convert.toString($n) + " +FLAGS.SILENT (" + $flags + ")");
+    storeCore($session, $n, "+", $flags, false);
+    return;
+}
+
+/**
+ * Like `addFlags`, but addresses the message by its stable **UID** (`UID STORE`).
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param flags {string} the space-separated flags, e.g. "$cl_1" or "\\Deleted"
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidAddFlags(session as Session, uid as int, flags as string) {
+    storeCore($session, $uid, "+", $flags, true);
+    return;
+}
+
+# storeCore runs STORE +/-FLAGS.SILENT by seq or UID.
+func storeCore(session as Session, id as int, sign as string, flags as string, uid as bool) {
+    command(
+        $session.conn,
+        uidPrefix($uid) + "STORE " + convert.toString($id) + " " + $sign + "FLAGS.SILENT (" +
+            $flags + ")");
     return;
 }
 
@@ -1022,7 +1189,19 @@ export func addFlags(session as Session, n as int, flags as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func removeFlags(session as Session, n as int, flags as string) {
-    command($session.conn, "STORE " + convert.toString($n) + " -FLAGS.SILENT (" + $flags + ")");
+    storeCore($session, $n, "-", $flags, false);
+    return;
+}
+
+/**
+ * Like `removeFlags`, but addresses the message by its stable **UID**.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param flags {string} the space-separated flags to clear, e.g. "$cl_1"
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidRemoveFlags(session as Session, uid as int, flags as string) {
+    storeCore($session, $uid, "-", $flags, true);
     return;
 }
 
@@ -1050,7 +1229,66 @@ export func createFolder(session as Session, folder as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func copy(session as Session, n as int, folder as string) {
-    command($session.conn, "COPY " + convert.toString($n) + " " + quoteArg($folder));
+    copyCore($session, $n, $folder, false);
+    return;
+}
+
+/**
+ * Like `copy`, but addresses the message by its stable **UID** (`UID COPY`).
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param folder {string} the destination folder name
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidCopy(session as Session, uid as int, folder as string) {
+    copyCore($session, $uid, $folder, true);
+    return;
+}
+
+# copyCore runs COPY by seq or UID.
+func copyCore(session as Session, id as int, folder as string, uid as bool) {
+    command(
+        $session.conn,
+        uidPrefix($uid) + "COPY " + convert.toString($id) + " " + quoteArg($folder));
+    return;
+}
+
+/**
+ * Move message `n` into another folder in one atomic step (`MOVE`, RFC 6851) - the
+ * server copies then removes and expunges the source, so unlike the copy +
+ * `\\Deleted` + expunge dance there is no window with a duplicate and no manual
+ * expunge. The destination folder must already exist. `MOVE` is widely but not
+ * universally supported; a server lacking it answers "BAD", so fall back to
+ * `copy` + `addFlags(..., "\\Deleted")` + `expunge` when catching that.
+ * @param session {Session} the open session
+ * @param n {int} the message sequence number
+ * @param folder {string} the destination folder name
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap"), including an unsupported MOVE
+ */
+export func move(session as Session, n as int, folder as string) {
+    moveCore($session, $n, $folder, false);
+    return;
+}
+
+/**
+ * Like `move`, but addresses the message by its stable **UID** (`UID MOVE`). The
+ * natural pairing with `uidSearch`: select the UIDs to move, then move them
+ * without a sequence-number renumber racing the operation.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param folder {string} the destination folder name
+ * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ */
+export func uidMove(session as Session, uid as int, folder as string) {
+    moveCore($session, $uid, $folder, true);
+    return;
+}
+
+# moveCore runs MOVE (RFC 6851) by seq or UID.
+func moveCore(session as Session, id as int, folder as string, uid as bool) {
+    command(
+        $session.conn,
+        uidPrefix($uid) + "MOVE " + convert.toString($id) + " " + quoteArg($folder));
     return;
 }
 

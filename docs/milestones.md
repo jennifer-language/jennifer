@@ -970,13 +970,24 @@ connections, delivered per module (http, then rest, then smtp):
 
 ### M23.3 - stable-identity verbs (cross-session correctness)
 
-**Planned.** `imap` and `pop` both key off volatile sequence numbers, silently
-breaking "fetch only what's new since last run":
-- **`imap`** - `UID FETCH` / `SEARCH` / `STORE` / `COPY` (stable identifiers that
-  survive expunge), native `MOVE` (RFC 6851), and ranged / partial `FETCH` for
-  large bodies. Pairs with the `IDLE` from M23.1.
-- **`pop`** - `UIDL` (per-message unique id -> leave-on-server / skip-seen),
-  `TOP` (headers-only preview), `RSET` / `NOOP`.
+**Done.** `imap` and `pop` both keyed off volatile sequence numbers, silently
+breaking "fetch only what's new since last run". Added stable-identifier verbs:
+- **`imap`** - a `uidPrefix(uid)` flag threaded through shared fetch / store /
+  copy / search cores gives every message-addressing verb a UID twin
+  (`uidSearch` / `uidFetch` / `uidFetchMessage` / `uidFetchHeaders` / `uidFlags` /
+  `uidAddFlags` / `uidRemoveFlags` / `uidCopy` / `uidMove` / `uidFetchPartial`),
+  which address by the persistent UID (surviving an expunge) - the client-side
+  `search` refinement threads the flag too, so a `uidSearch` with a regex /
+  attachment filter refines by UID. Plus native atomic `move` / `uidMove`
+  (`MOVE`, RFC 6851) and ranged `fetchPartial` / `uidFetchPartial`
+  (`BODY.PEEK[]<offset.length>`) for large bodies. Overlay unchanged (cores keep
+  the seq behavior); Go `TestImapUidVerbs` asserts the exact wire commands via a
+  capturing fake server.
+- **`pop`** - `uidl` -> `list of pop.MessageId` (`number` + persistent `id`) /
+  `uidlOne` for leave-on-server / skip-seen, `top` (headers-only preview when
+  `lines` = 0), and `reset` (RSET) / `noop` (NOOP). Overlay adds a `parseUidl`
+  test; Go `TestPop3StableVerbs` drives UIDL (multiline + single) / TOP / RSET /
+  NOOP against a fake server.
 
 ### M23.4 - byte-exact binary values
 

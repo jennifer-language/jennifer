@@ -42,12 +42,18 @@ the common "get every message" case.
 | `pop.Options`                     | `host`, `port`, `security`, `user`, `pass`.                  |
 | `pop.Session`                     | A live session over one connection (from `connect`).         |
 | `pop.Stat`                        | `count` and total `size`, from `stat`.                       |
+| `pop.MessageId`                   | `number` (this session) + `id` (persistent UIDL id), from `uidl`. |
 | `pop.connect(opts)`               | Open a session: greet, optional STLS, `USER` / `PASS`.       |
 | `pop.stat(session)`               | Mailbox `Stat` (`STAT`).                                     |
 | `pop.count(session)`              | Just the message count.                                      |
 | `pop.sizes(session)`              | `list of int` - each message's octet size, in order (`LIST`). |
 | `pop.retrieve(session, n)`        | Message `n` as a raw string (`RETR`), for `mime.parse`.      |
+| `pop.uidl(session)`               | `UIDL` - each message's stable id -> `list of pop.MessageId` (`number`, `id`). |
+| `pop.uidlOne(session, n)`         | `UIDL n` - one message's stable id (string).                 |
+| `pop.top(session, n, lines)`      | `TOP n lines` - the headers plus `lines` body lines (`0` = headers only), for a cheap preview. |
 | `pop.deleteMessage(session, n)`   | Mark message `n` for deletion (`DELE`); removed at `quit`.   |
+| `pop.reset(session)`              | `RSET` - unmark every message marked for deletion this session. |
+| `pop.noop(session)`               | `NOOP` - keep the connection alive (server resets its idle timer). |
 | `pop.quit(session)`               | End the session (commit deletions) and close.                |
 | `pop.fetchAll(opts)`              | Connect, retrieve every message (no delete), quit; `list of string`. |
 
@@ -72,6 +78,34 @@ pop.quit($s);                                      # deletion commits here
 A `-ERR` from the server throws a catchable `Error` (kind `"pop3"`).
 
 Certificate verification for `"tls"` / `"starttls"` is the `net` default.
+
+## Stable ids: download only what is new
+
+A message `number` is only meaningful within the current session; the `UIDL`
+`id` is **persistent** across sessions, so it is the key to leave-on-server /
+skip-seen (POP3's `RETR` does not delete, so a mailbox can be polled without
+consuming it). Keep the ids you have processed, and next time retrieve only the
+`number`s whose `id` is new:
+
+```jennifer
+def seen as map of string to bool init loadSeen();   # your persisted set
+def s as pop.Session init pop.connect($opts);
+for (def m in pop.uidl($s)) {
+    if (not maps.has($seen, $m.id)) {
+        def raw as string init pop.retrieve($s, $m.number);
+        # ... process the new message ...
+        $seen[$m.id] = true;
+    }
+}
+pop.quit($s);   # no deleteMessage -> the mailbox is left intact
+```
+
+`top(session, n, 0)` fetches only the headers of message `n` - a cheap preview
+(Subject / From / Date via `mime.parse`) before deciding whether to `retrieve`
+the whole body. `reset` unmarks any pending `deleteMessage`s (abort a batch
+before `quit` commits it); `noop` keeps an idle connection from timing out.
+`UIDL` and `TOP` are widely but not universally supported - a server lacking one
+answers `-ERR` (a catchable `"pop3"` error).
 
 ## Testing
 

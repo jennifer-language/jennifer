@@ -773,10 +773,15 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `imap.Criteria`), `fetch(session, n)` (a whole
   message as a string) or `fetchMessage(session, n)` (parsed to a `mime.Part`,
   ready for `mime.attachments` / `textBodies`); manage with
-  `addFlags`/`removeFlags`/`flags`, `copy`, `append`/`appendWith` (upload a full
-  RFC 5322 message, e.g. save to Sent), `createFolder`, and delete via
-  `\Deleted` + `expunge` (so a move is copy + delete); `logout(session)`, plus
-  `imap.fetchAll(opts, folder)`. `imap.Criteria` (build with `imap.criteria()`
+  `addFlags`/`removeFlags`/`flags`, `copy`, `move` (atomic MOVE, RFC 6851),
+  `append`/`appendWith` (upload a full RFC 5322 message, e.g. save to Sent),
+  `createFolder`, and delete via `\Deleted` + `expunge`; `fetchPartial(session,
+  n, offset, length)` pulls a byte range of a large body; `logout(session)`, plus
+  `imap.fetchAll(opts, folder)`. Every message-addressing verb has a **UID twin**
+  (`uidSearch` / `uidFetch` / `uidFetchMessage` / `uidFetchHeaders` / `uidFlags` /
+  `uidAddFlags` / `uidRemoveFlags` / `uidCopy` / `uidMove` / `uidFetchPartial`)
+  that addresses by the message's stable UID (survives an expunge) instead of a
+  sequence number - the correct key for "process only what is new since last run". `imap.Criteria` (build with `imap.criteria()`
   + fields) filters server-side (substring on `subject`/`from`/`to`/`text`, a
   `since`/`before` date range set with plain `time.Time` values (rendered to the
   IMAP date form internally; a time-of-day is refined to the exact instant
@@ -798,7 +803,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`pop`** - receive mail (POP3, RFC 1939) over `net`: `pop.connect(opts)` ->
   `pop.Session`, then `stat` / `count` / `sizes` / `retrieve(session, n)` /
   `deleteMessage(session, n)` / `quit`, plus `pop.fetchAll(opts)` (every
-  message, no delete). Retrieved messages are strings for `mime.parse`. Auth per
+  message, no delete). `uidl(session)` -> `list of pop.MessageId` (`number` +
+  persistent `id`) / `uidlOne(session, n)` give the stable ids for
+  leave-on-server / skip-seen (retrieve only the numbers whose id is new);
+  `top(session, n, lines)` previews the headers plus `lines` body lines
+  (`0` = headers only); `reset(session)` (RSET, unmark deletions) and
+  `noop(session)` (keepalive). Retrieved messages are strings for `mime.parse`. Auth per
   `Options.auth`: USER/PASS, APOP (`"apop"`), XOAUTH2, CRAM-MD5, SCRAM-SHA-1 /
   SCRAM-SHA-256, or `"auto"` (strongest offered). Named `pop` because a namespace
   is letters-only (no digit). **Default `jennifer` binary only** (`net`).
