@@ -130,17 +130,25 @@ _jennifer() {
 
 # Complete .j source files (and directories to descend into). `-` for
 # stdin is offered implicitly by the CLI, not the completion.
+#
+# `-o filenames` lets readline do the slash / space handling: it appends `/`
+# to a completed directory and withholds the trailing space, so you can keep
+# descending (`src/modules/` -> `src/modules/core/`), while a finished `.j`
+# file still gets the usual trailing space. Appending `/` by hand (`-S /`)
+# instead left the word "finished", so bash added a space and stopped the dig.
 _jennifer_files() {
     local cur="$1"
     local IFS=$'\n'
-    COMPREPLY=( $(compgen -f -X '!*.j' -- "$cur") $(compgen -d -S / -- "$cur") )
+    COMPREPLY=( $(compgen -f -X '!*.j' -- "$cur") $(compgen -d -- "$cur") )
+    compopt -o filenames 2>/dev/null
 }
 
 # Complete directories (for --sysmoddir / -I values).
 _jennifer_dirs() {
     local cur="$1"
     local IFS=$'\n'
-    COMPREPLY=( $(compgen -d -S / -- "$cur") )
+    COMPREPLY=( $(compgen -d -- "$cur") )
+    compopt -o filenames 2>/dev/null
 }
 
 complete -F _jennifer jennifer
