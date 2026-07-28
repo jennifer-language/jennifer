@@ -12,7 +12,7 @@ runs on either binary.
 
 A doc comment opens with **exactly `/**`** (a plain `/*` block comment stays
 invisible) and closes with `*/`. It **immediately precedes** the construct it
-documents - a `func`, a `def struct`, or a `def const` - or, when it carries an
+documents - a `func`, a `def struct`, a `def enum`, or a `def const` - or, when it carries an
 `@module` tag, it is the **file preamble**. Whether a construct is exported is
 read from its `export` keyword, never a tag.
 
@@ -78,10 +78,11 @@ The result is **typed data, not a tag bag** - Jennifer has no sum types, so
 heterogeneous collections are modelled as parallel typed lists plus fixed-field
 structs. All are exported:
 
-- `FileDoc { module, funcs, structs, consts, diagnostics }`
+- `FileDoc { module, funcs, structs, enums, consts, diagnostics }`
 - `ModuleDoc { summary, description, author, version, license, see }`
 - `FuncDoc { name, exported, summary, description, params, returns, throws, examples, since, deprecated, see, internal }`
 - `StructDoc { name, exported, summary, description, fields, since, deprecated, see, internal }`
+- `EnumDoc { name, exported, summary, description, since, deprecated, see, internal }` (variants are described in prose, not tags, so there is no field list)
 - `ConstDoc { name, exported, type, summary, description, since, deprecated, see, internal }`
 - `ParamDoc { name, type, description }` (also used for a struct's `fields`)
 - `ReturnDoc { type, description }`, `ThrowDoc { type, description }`
@@ -129,7 +130,7 @@ non-zero when it finds a problem - a ready-made pre-commit / CI check:
 ```sh
 scripts/docblock-check.sh modules/          # every .j under modules/
 scripts/docblock-check.sh myapp.j           # a single file
-# ok   modules/web.j  (1 module, 22 func, 3 struct, 0 const)
+# ok   modules/web.j  (1 module, 22 func, 3 struct, 0 enum, 0 const)
 # WARN app.j  (1 diagnostic)
 #        line 12: @param "nmae" is not a param of greet
 ```

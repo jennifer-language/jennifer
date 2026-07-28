@@ -33,6 +33,12 @@ use encoding;
 include "./barcode_ecc.j";
 
 /**
+ * The kind of an encoded symbol: `Matrix` (a 2D module grid, e.g. QR) or
+ * `Linear` (a 1D run of bar / space widths).
+ */
+export def enum SymbolKind { Matrix, Linear };
+
+/**
  * A device-independent encoded symbol.
  * @field kind {SymbolKind} `Matrix` (2D) or `Linear` (1D)
  * @field size {int} the matrix dimension (2D; 0 for 1D)
@@ -40,8 +46,6 @@ include "./barcode_ecc.j";
  * @field bars {list of int} 1D bar/space run widths, starting with a bar
  * @field text {string} the encoded data
  */
-export def enum SymbolKind { Matrix, Linear };
-
 export def struct Symbol {
     kind as SymbolKind,
     size as int,

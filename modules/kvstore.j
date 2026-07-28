@@ -86,6 +86,10 @@ export func fileStore(path as string) {
 /**
  * Store `value` at `key` with a `ttl`-second expiry (0 = no expiry), replacing
  * any existing value.
+ * @param store {Store} the backend store
+ * @param key {string} the key to write
+ * @param value {string} the value to store
+ * @param ttl {int} the expiry in seconds (0 = no expiry)
  */
 export func set(store as Store, key as string, value as string, ttl as int) {
     match ($store) {
@@ -104,6 +108,9 @@ export func set(store as Store, key as string, value as string, ttl as int) {
 
 /**
  * Return the value at `key`, or "" when absent / expired.
+ * @param store {Store} the backend store
+ * @param key {string} the key to read
+ * @return {string} the value, or "" when absent / expired
  */
 export func get(store as Store, key as string) {
     match ($store) {
@@ -116,6 +123,9 @@ export func get(store as Store, key as string) {
 
 /**
  * Remove `key`; returns whether it existed.
+ * @param store {Store} the backend store
+ * @param key {string} the key to remove
+ * @return {bool} whether the key existed
  */
 export func delete(store as Store, key as string) {
     match ($store) {
@@ -128,6 +138,10 @@ export func delete(store as Store, key as string) {
 
 /**
  * Re-arm `key`'s expiry to `ttl` seconds; returns whether it existed.
+ * @param store {Store} the backend store
+ * @param key {string} the key to re-arm
+ * @param ttl {int} the new expiry in seconds (0 = no expiry)
+ * @return {bool} whether the key existed
  */
 export func touch(store as Store, key as string, ttl as int) {
     match ($store) {

@@ -28,14 +28,18 @@ use strings;
 use convert;
 
 /**
+ * The HMAC digest algorithm behind a TOTP code: `Sha1` (the default), `Sha256`,
+ * or `Sha512`. Selected through `Options.algorithm`; the zero value is `Sha1`.
+ */
+export def enum Algorithm { Sha1, Sha256, Sha512 };
+
+/**
  * TOTP parameters. A zero-value struct (`def o as totp.Options;`) means the
  * common defaults: 6 digits, a 30-second step, and HMAC-SHA1.
  * @field digits {int} the code length; 0 means 6
  * @field period {int} the time step in seconds; 0 means 30
  * @field algorithm {Algorithm} the HMAC digest: `totp.Algorithm.Sha1` (the zero-value default), `.Sha256`, or `.Sha512`
  */
-export def enum Algorithm { Sha1, Sha256, Sha512 };
-
 export def struct Options {
     digits as int,
     period as int,

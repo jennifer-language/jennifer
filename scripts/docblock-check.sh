@@ -73,8 +73,8 @@ if (not (\$d.module.summary == "")) {
     \$hasmod = 1;
 }
 if (\$n == 0) {
-    io.printf("ok   %s  (%d module, %d func, %d struct, %d const)\n",
-        \$path, \$hasmod, len(\$d.funcs), len(\$d.structs), len(\$d.consts));
+    io.printf("ok   %s  (%d module, %d func, %d struct, %d enum, %d const)\n",
+        \$path, \$hasmod, len(\$d.funcs), len(\$d.structs), len(\$d.enums), len(\$d.consts));
     exit 0;
 }
 io.printf("WARN %s  (%d diagnostic)\n", \$path, \$n);

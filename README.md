@@ -34,7 +34,7 @@ ships in **one self-contained static binary** - about 21 MB with everything,
 ~9 MB for the embeddable build - with no runtime, package manager, or dependency
 tree to install.
 
-It is also a natural fit for teaching and learning: an interactive
+It is also a natural fit for **teaching and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
 [easy-to-read grammar](docs/technical/grammar.md), and
 [token and AST dumps](docs/technical/cli_inspect.md) that make it ideal for

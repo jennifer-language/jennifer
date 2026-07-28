@@ -84,6 +84,35 @@ func testConst() {
     testing.assertFalse($doc.consts[0].exported);
 }
 
+# An enum (sum type) is a documentable construct: its doc parses to an EnumDoc,
+# no orphaned-comment diagnostic, and payload-carrying variants are fine (only
+# the name is read).
+func testEnumRecognized() {
+    def doc as FileDoc init parse("/**\n * A shape.\n * A longer note.\n */\nexport def enum Shape { Circle{r as int}, Square, Empty };");
+    testing.assertEqual(len($doc.enums), 1);
+    testing.assertEqual(len($doc.diagnostics), 0);
+    def e as EnumDoc init $doc.enums[0];
+    testing.assertEqual($e.name, "Shape");
+    testing.assertTrue($e.exported);
+    testing.assertEqual($e.summary, "A shape.");
+}
+
+# A private enum is recognized too, and marked unexported.
+func testEnumUnexported() {
+    def doc as FileDoc init parse("/** private tag */\ndef enum Tag { A, B };");
+    testing.assertEqual(len($doc.enums), 1);
+    testing.assertFalse($doc.enums[0].exported);
+}
+
+# An enum documents its variants in prose, so a stray @field / @return usually
+# means a struct's doc drifted onto the enum below it - flagged as a diagnostic.
+func testEnumWithFieldTagsWarns() {
+    def doc as FileDoc init parse("/**\n * Mislabelled.\n * @field x {int} a field\n */\nexport def enum Bad { A, B };");
+    testing.assertEqual(len($doc.enums), 1);
+    testing.assertEqual(len($doc.diagnostics), 1);
+    testing.assertTrue(strings.contains($doc.diagnostics[0].message, "mis-attached"));
+}
+
 # --- digit-inclusive identifiers --------------------------------------------
 
 # A func name with an interior/trailing digit (uuid.v4-style) parses.

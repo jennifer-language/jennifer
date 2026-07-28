@@ -33,7 +33,7 @@ self-contained static binary** - about 21 MB with everything, ~9 MB for the
 embeddable build - with no runtime, package manager, or dependency tree to
 install.
 
-It is also a natural fit for teaching and learning: an interactive
+It is also a natural fit for **teaching and learning**: an interactive
 [REPL](technical/cli_repl.md), an [easy-to-read grammar](technical/grammar.md),
 and [token and AST dumps](technical/cli_inspect.md) that make it ideal for
 mastering language design, plus a built-in [linter](technical/cli_lint.md) and

@@ -24,6 +24,12 @@ use lists;
 use convert;
 
 /**
+ * The kind of an HTML node: `Element` (a tag with attributes and children),
+ * `Text` (escaped text content), or `Raw` (verbatim, already-trusted markup).
+ */
+export def enum NodeKind { Element, Text, Raw };
+
+/**
  * A node is one of three kinds, tagged by `kind`: "element" (tag + attrs +
  * children), "text" (escaped content), or "raw" (verbatim content). The
  * constructors below are the intended way to build one.
@@ -33,8 +39,6 @@ use convert;
  * @field children {list of Node} the element's child nodes (element nodes only)
  * @field text {string} the content of a text or raw node
  */
-export def enum NodeKind { Element, Text, Raw };
-
 export def struct Node {
     kind as NodeKind,
     tag as string,

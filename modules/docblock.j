@@ -7,8 +7,8 @@
  * it does not render (turning docs into HTML is a separate consumer). A doc
  * comment opens with a doc-block marker, and its body is a summary line, an
  * optional description, and tag lines; it immediately precedes the construct it
- * documents (`func`, `def struct`, `def const`) or, when it carries a module
- * tag, is the file preamble. `export` is read from the construct keyword, not a
+ * documents (`func`, `def struct`, `def enum`, `def const`) or, when it carries
+ * a module tag, is the file preamble. `export` is read from the construct keyword, not a
  * tag. Types are written verbatim in Jennifer syntax inside braces. The module
  * reports, never enforces: signature mismatches (a documented name that names
  * no real parameter, a parameter with no doc) and orphaned comments surface as
@@ -129,6 +129,29 @@ export def struct StructDoc {
     internal as bool
 };
 /**
+ * The documentation of one enum (sum type). Enum variants are described in the
+ * summary / description prose rather than with per-variant tags, so an `EnumDoc`
+ * carries no field list.
+ * @field name {string} the enum name
+ * @field exported {bool} whether the enum is exported
+ * @field summary {string} the one-line summary
+ * @field description {string} the longer description below the summary
+ * @field since {string} the documented since-version
+ * @field deprecated {string} the deprecation note, or "" if not deprecated
+ * @field see {list of string} the cross-references
+ * @field internal {bool} whether the enum is marked internal
+ */
+export def struct EnumDoc {
+    name as string,
+    exported as bool,
+    summary as string,
+    description as string,
+    since as string,
+    deprecated as string,
+    see as list of string,
+    internal as bool
+};
+/**
  * The documentation of one method.
  * @field name {string} the method name
  * @field exported {bool} whether the method is exported
@@ -162,6 +185,7 @@ export def struct FuncDoc {
  * @field module {ModuleDoc} the module preamble documentation
  * @field funcs {list of FuncDoc} the documented methods
  * @field structs {list of StructDoc} the documented structs
+ * @field enums {list of EnumDoc} the documented enums (sum types)
  * @field consts {list of ConstDoc} the documented constants
  * @field diagnostics {list of Diagnostic} the reported documentation problems
  */
@@ -169,6 +193,7 @@ export def struct FileDoc {
     module as ModuleDoc,
     funcs as list of FuncDoc,
     structs as list of StructDoc,
+    enums as list of EnumDoc,
     consts as list of ConstDoc,
     diagnostics as list of Diagnostic
 };
@@ -245,6 +270,7 @@ export func parse(source as string) {
     };
     def funcs as list of FuncDoc init [];
     def structs as list of StructDoc init [];
+    def enums as list of EnumDoc init [];
     def consts as list of ConstDoc init [];
     def diags as list of Diagnostic init [];
 
@@ -276,6 +302,11 @@ export func parse(source as string) {
             def cm as regex.Match init regex.find(
                 "^(export\\s+)?def\\s+const\\s+([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init",
                 $tail);
+            # An enum's variants (which may carry `{ ... }` payloads) are not
+            # tag-documented, so we only match the name - no field cross-check.
+            def em as regex.Match init regex.find(
+                "^(export\\s+)?def\\s+enum\\s+([A-Za-z][A-Za-z0-9]*)",
+                $tail);
             if (not ($fm.start == -1)) {
                 $funcs[] = buildFunc($p, $fm.groups[1], not ($fm.groups[0] == ""));
                 $diags = lists.concat(
@@ -286,6 +317,20 @@ export func parse(source as string) {
                 $diags = lists.concat(
                     $diags,
                     crossCheck("field", $sm.groups[1], $line, $p.params, declNames($sm.groups[2])));
+            } elseif (not ($em.start == -1)) {
+                $enums[] = buildEnum($p, $em.groups[1], not ($em.groups[0] == ""));
+                # An enum documents its variants in prose, not with `@field` /
+                # `@param` / `@return`. A stray one usually means a struct's doc
+                # comment was mis-attached to the enum below it (the construct and
+                # its doc drifted apart) - flag it rather than silently drop it.
+                if (len($p.params) > 0 or not ($p.returns.type == "")) {
+                    $diags[] = Diagnostic{
+                        severity: "warning",
+                        line: $line,
+                        message: "enum " + $em.groups[1] +
+                            " has @param/@field/@return tags (enums document variants in prose; is a struct's doc mis-attached?)"
+                    };
+                }
             } elseif (not ($cm.start == -1)) {
                 $consts[] = buildConst(
                     $p,
@@ -305,6 +350,7 @@ export func parse(source as string) {
         module: $module,
         funcs: $funcs,
         structs: $structs,
+        enums: $enums,
         consts: $consts,
         diagnostics: $diags
     };
@@ -336,6 +382,19 @@ func buildStruct(p as Parsed, name as string, exported as bool) {
         summary: $p.summary,
         description: $p.description,
         fields: $p.params,
+        since: $p.since,
+        deprecated: $p.deprecated,
+        see: $p.see,
+        internal: $p.internal
+    };
+}
+
+func buildEnum(p as Parsed, name as string, exported as bool) {
+    return EnumDoc{
+        name: $name,
+        exported: $exported,
+        summary: $p.summary,
+        description: $p.description,
         since: $p.since,
         deprecated: $p.deprecated,
         see: $p.see,

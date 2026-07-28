@@ -37,14 +37,18 @@ export def struct Sample {
 };
 
 /**
+ * A Prometheus metric type: `Counter` (a monotonically increasing total) or
+ * `Gauge` (a value that can go up and down).
+ */
+export def enum MetricType { Counter, Gauge };
+
+/**
  * A metric family: a name, help text, a type, and its samples.
  * @field name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
  * @field help {string} the HELP text (empty to omit the HELP line)
  * @field type {MetricType} the metric type (`Counter` or `Gauge`)
  * @field samples {list of Sample} the sample lines
  */
-export def enum MetricType { Counter, Gauge };
-
 export def struct Metric {
     name as string,
     help as string,
