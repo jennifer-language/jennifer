@@ -13,8 +13,12 @@
  * it. RFC 2047 encoded-words are applied automatically on encode and decoded on
  * parse, with `encodeWord` / `decodeWord` exposed for manual use. Every leaf
  * carries its raw decoded `data` (`bytes`), so binary attachments round-trip;
- * `body` is the text view, populated for text parts (UTF-8). Use `walk` /
- * `attachments` / `textBodies` to pull parts out of a received message.
+ * `body` is the text view, populated for text parts and decoded per the
+ * Content-Type `charset` (UTF-8 by default; ISO-8859 / Windows single-byte
+ * codecs are honoured, with a UTF-8 fallback for an unknown label). Attachment
+ * filenames are read and written in RFC 2231 extended form (`filename*=`) when
+ * they carry non-ASCII characters. Use `walk` / `attachments` / `textBodies` to
+ * pull parts out of a received message.
  * @module mime
  * @example
  * import "mime.j" as mime;
@@ -28,6 +32,7 @@ use strings;
 use convert;
 use encoding;
 use regex;
+use binary;
 
 /**
  * A single header field.
@@ -115,16 +120,6 @@ func encodeBody(body as string, enc as string) {
         return crlf(encoding.toText($b, "quoted-printable"));
     }
     return crlf($body);
-}
-
-func decodeBody(raw as string, enc as string) {
-    if ($enc == "base64") {
-        return convert.stringFromBytes(encoding.fromText(stripWS($raw), "base64"), "utf-8");
-    }
-    if ($enc == "quoted-printable") {
-        return convert.stringFromBytes(encoding.fromText($raw, "quoted-printable"), "utf-8");
-    }
-    return $raw;
 }
 
 # emptyBytes returns an empty `bytes` value (for the `data:` slot of a container
@@ -367,6 +362,22 @@ func decodeCharset(raw as bytes, charset as string) {
     return encoding.decode($raw, $charset);
 }
 
+# safeCharset decodes bytes to text per `charset`, never throwing: an empty or
+# UTF-8 label goes straight through, and any other label that the `encoding`
+# library does not know (or that fails to decode) falls back to UTF-8 so a
+# received message with an exotic charset is still parseable.
+func safeCharset(raw as bytes, charset as string) {
+    def cs as string init strings.lower(strings.trim($charset));
+    if (len($cs) == 0 or $cs == "utf-8" or $cs == "utf8") {
+        return convert.stringFromBytes($raw, "utf-8");
+    }
+    try {
+        return decodeCharset($raw, $cs);
+    } catch (e) {
+        return convert.stringFromBytes($raw, "utf-8");
+    }
+}
+
 # decodeOneWord decodes a single encoded-word's (charset, encoding, text) triple.
 func decodeOneWord(charset as string, enc as string, text as string) {
     def up as string init strings.upper($enc);
@@ -446,13 +457,28 @@ func autoDecodeHeaders(headers as list of Header) {
     return $out;
 }
 
-# unquote strips a surrounding quoted-string and unescapes it.
+# unquote strips a surrounding quoted-string and reverses RFC 5322 quoting: a
+# backslash escapes the following character, so `\"` -> `"` and `\\` -> `\` (the
+# inverse of the escaping `attachment` applies). A value that is not a
+# quoted-string is returned unchanged.
 func unquote(s as string) {
-    if (len($s) >= 2 and strings.startsWith($s, "\"") and strings.endsWith($s, "\"")) {
-        def inner as string init strings.substring($s, 1, len($s) - 1);
-        return strings.replace($inner, "\\\"", "\"");
+    if (not (len($s) >= 2 and strings.startsWith($s, "\"") and strings.endsWith($s, "\""))) {
+        return $s;
     }
-    return $s;
+    def cs as list of string init strings.chars(strings.substring($s, 1, len($s) - 1));
+    def n as int init len($cs);
+    def out as string init "";
+    def i as int init 0;
+    while ($i < $n) {
+        if ($cs[$i] == "\\" and $i + 1 < $n) {
+            $out = $out + $cs[$i + 1];
+            $i = $i + 2;
+        } else {
+            $out = $out + $cs[$i];
+            $i = $i + 1;
+        }
+    }
+    return $out;
 }
 
 # splitTopLevelCommas splits an address-list value on commas that are outside a
@@ -565,13 +591,7 @@ export func attachment(filename as string, contentType as string, body as string
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", $contentType);
     $hs[] = mkHeader("Content-Transfer-Encoding", "base64");
-    # Escape `\` and `"` so a filename containing a quote can't break out of the
-    # quoted-string parameter.
-    def safeName as string init strings.replace(
-        strings.replace($filename, "\\", "\\\\"),
-        "\"",
-        "\\\"");
-    $hs[] = mkHeader("Content-Disposition", "attachment; filename=\"" + $safeName + "\"");
+    $hs[] = mkHeader("Content-Disposition", "attachment; " + dispositionFilename("filename", $filename));
     return Part{
         headers: $hs,
         body: $body,
@@ -595,11 +615,7 @@ export func attachmentBytes(filename as string, contentType as string, data as b
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", $contentType);
     $hs[] = mkHeader("Content-Transfer-Encoding", "base64");
-    def safeName as string init strings.replace(
-        strings.replace($filename, "\\", "\\\\"),
-        "\"",
-        "\\\"");
-    $hs[] = mkHeader("Content-Disposition", "attachment; filename=\"" + $safeName + "\"");
+    $hs[] = mkHeader("Content-Disposition", "attachment; " + dispositionFilename("filename", $filename));
     return Part{headers: $hs, body: "", encoding: "base64", parts: [], boundary: "", data: $data};
 }
 
@@ -709,10 +725,14 @@ export func parse(text as string) {
     # text/* (or type-less) part, so a binary attachment is never forced through
     # a lossy UTF-8 decode.
     def data as bytes init decodeBytes($bodyText, $enc);
-    def ct as string init strings.lower(typeOnly(findHeader($hs, "Content-Type")));
+    def ctFull as string init findHeader($hs, "Content-Type");
+    def ct as string init strings.lower(typeOnly($ctFull));
     def bodyStr as string init "";
     if (len($ct) == 0 or strings.startsWith($ct, "text/")) {
-        $bodyStr = decodeBody($bodyText, $enc);
+        # Honour the declared charset (default UTF-8); decode from the raw
+        # transfer-decoded bytes so a Latin-1 / Windows-codepage body is not
+        # mangled by a forced UTF-8 read.
+        $bodyStr = safeCharset($data, getParam($ctFull, "charset"));
     }
     return Part{headers: $hs, body: $bodyStr, encoding: $enc, parts: [], boundary: "", data: $data};
 }
@@ -756,30 +776,234 @@ export func contentType(part as Part) {
     return typeOnly(findHeader($part.headers, "Content-Type"));
 }
 
-# paramValue reads a `key=` parameter from a header value (quoted or bare, case-
-# insensitive key), or "" when absent. Generalises extractBoundary.
-func paramValue(header as string, key as string) {
-    def idx as int init strings.indexOf(strings.lower($header), strings.lower($key) + "=");
-    if ($idx < 0) {
-        return "";
-    }
-    def rest as string init strings.trim(strings.substring(
-        $header,
-        $idx + len($key) + 1,
-        len($header)));
-    if (strings.startsWith($rest, "\"")) {
-        def tail as string init strings.substring($rest, 1, len($rest));
-        def end as int init strings.indexOf($tail, "\"");
-        if ($end >= 0) {
-            return strings.substring($tail, 0, $end);
+# splitParams tokenises a header value's `;`-separated parameters (respecting
+# quoted strings), returning each as a Header{name (lowercased), value
+# (unquoted)}. The leading segment (the media type / disposition token itself) is
+# skipped, so only the parameters remain.
+func splitParams(header as string) {
+    def segs as list of string init [];
+    def cur as string init "";
+    def inQuote as bool init false;
+    def esc as bool init false;
+    for (def ch in strings.chars($header)) {
+        if ($esc) {
+            # A backslash-escaped character stays literal (kept with its escape so
+            # unquote can reverse it), never a delimiter or a quote toggle.
+            $cur = $cur + $ch;
+            $esc = false;
+        } elseif ($ch == "\\" and $inQuote) {
+            $cur = $cur + $ch;
+            $esc = true;
+        } elseif ($ch == "\"") {
+            $inQuote = not $inQuote;
+            $cur = $cur + $ch;
+        } elseif ($ch == ";" and not $inQuote) {
+            $segs[] = $cur;
+            $cur = "";
+        } else {
+            $cur = $cur + $ch;
         }
-        return "";
     }
-    def semi as int init strings.indexOf($rest, ";");
-    if ($semi >= 0) {
-        return strings.trim(strings.substring($rest, 0, $semi));
+    $segs[] = $cur;
+    def out as list of Header init [];
+    def first as bool init true;
+    for (def s in $segs) {
+        if ($first) {
+            $first = false;
+        } else {
+            def t as string init strings.trim($s);
+            if (len($t) > 0) {
+                def eq as int init strings.indexOf($t, "=");
+                if ($eq < 0) {
+                    $out[] = mkHeader(strings.lower($t), "");
+                } else {
+                    def nm as string init strings.lower(strings.trim(strings.substring($t, 0, $eq)));
+                    def vl as string init unquote(strings.trim(strings.substring($t, $eq + 1, len($t))));
+                    $out[] = mkHeader($nm, $vl);
+                }
+            }
+        }
     }
-    return $rest;
+    return $out;
+}
+
+# getParam reads a single `key=` parameter (exact, case-insensitive name match),
+# or "" when absent. Unlike a substring scan it never confuses `name=` with the
+# `name=` inside `filename=`.
+func getParam(header as string, key as string) {
+    def want as string init strings.lower($key);
+    for (def p in splitParams($header)) {
+        if ($p.name == $want) {
+            return $p.value;
+        }
+    }
+    return "";
+}
+
+# --- RFC 2231 extended / continued parameters (private) ------------
+
+# pctDecodeBytes percent-decodes an RFC 2231 extended value (`%XX` -> a byte;
+# other characters kept verbatim) into raw bytes.
+func pctDecodeBytes(s as string) {
+    def out as bytes;
+    def cs as list of string init strings.chars($s);
+    def n as int init len($cs);
+    def i as int init 0;
+    while ($i < $n) {
+        def c as string init $cs[$i];
+        if ($c == "%" and $i + 2 < $n and hexDigit($cs[$i + 1]) >= 0 and hexDigit($cs[$i + 2]) >= 0) {
+            $out[] = hexDigit($cs[$i + 1]) * 16 + hexDigit($cs[$i + 2]);
+            $i = $i + 3;
+        } else {
+            # A literal (non-`%XX`) character keeps its UTF-8 bytes; ASCII stays
+            # 1:1, and a stray non-ASCII byte can never overflow a byte slot.
+            $out = binary.concat($out, convert.bytesFromString($c, "utf-8"));
+            $i = $i + 1;
+        }
+    }
+    return $out;
+}
+
+# stripExtPrefix removes the `charset'lang'` prefix of an RFC 2231 extended
+# value and returns [charset, percent-encoded-remainder]; a value with no prefix
+# yields ["", value].
+func stripExtPrefix(v as string) {
+    def q1 as int init strings.indexOf($v, "'");
+    if ($q1 < 0) {
+        return ["", $v];
+    }
+    def charset as string init strings.lower(strings.substring($v, 0, $q1));
+    def rest as string init strings.substring($v, $q1 + 1, len($v));
+    def q2 as int init strings.indexOf($rest, "'");
+    if ($q2 < 0) {
+        return ["", $v];
+    }
+    return [$charset, strings.substring($rest, $q2 + 1, len($rest))];
+}
+
+# rfc2231ExtValue decodes a single `charset'lang'pct-value` extended parameter.
+func rfc2231ExtValue(v as string) {
+    def parts as list of string init stripExtPrefix($v);
+    return safeCharset(pctDecodeBytes($parts[1]), $parts[0]);
+}
+
+# assembleContinued concatenates RFC 2231 continued segments `key*0`, `key*1`,
+# ... in numeric order. A `*`-suffixed segment is percent-encoded (the first also
+# carrying the `charset'lang'` prefix); a bare segment is literal text. Every
+# segment's bytes are gathered and charset-decoded once.
+func assembleContinued(params as list of Header, key as string) {
+    def charset as string init "";
+    def raw as bytes;
+    def idx as int init 0;
+    def more as bool init true;
+    while ($more) {
+        def wantPlain as string init $key + "*" + convert.toString($idx);
+        def wantExt as string init $wantPlain + "*";
+        def found as bool init false;
+        for (def p in $params) {
+            if ($p.name == $wantExt) {
+                def v as string init $p.value;
+                if ($idx == 0) {
+                    def pref as list of string init stripExtPrefix($v);
+                    $charset = $pref[0];
+                    $v = $pref[1];
+                }
+                $raw = binary.concat($raw, pctDecodeBytes($v));
+                $found = true;
+            } elseif ($p.name == $wantPlain) {
+                $raw = binary.concat($raw, convert.bytesFromString($p.value, "utf-8"));
+                $found = true;
+            }
+        }
+        if ($found) {
+            $idx = $idx + 1;
+        } else {
+            $more = false;
+        }
+    }
+    return safeCharset($raw, $charset);
+}
+
+# resolveFilename reads a `key` parameter honouring RFC 2231: a `key*=` extended
+# form (`charset'lang'pct-encoded`), `key*0`/`key*1`... continued segments (plain
+# or `*`-suffixed extended), or a plain `key=` (also RFC 2047-decoded). Returns
+# "" when the parameter is absent.
+func resolveFilename(header as string, key as string) {
+    def params as list of Header init splitParams($header);
+    def star as string init "";
+    def plain as string init "";
+    def hasStar as bool init false;
+    def hasPlain as bool init false;
+    def hasContinued as bool init false;
+    def contPrefix as string init $key + "*";
+    for (def p in $params) {
+        if ($p.name == $key) {
+            $plain = $p.value;
+            $hasPlain = true;
+        } elseif ($p.name == $contPrefix) {
+            $star = $p.value;
+            $hasStar = true;
+        } elseif (strings.startsWith($p.name, $contPrefix)) {
+            $hasContinued = true;
+        }
+    }
+    if ($hasContinued) {
+        return assembleContinued($params, $key);
+    }
+    if ($hasStar) {
+        return rfc2231ExtValue($star);
+    }
+    if ($hasPlain) {
+        return decodeWord($plain);
+    }
+    return "";
+}
+
+# hexByte renders a byte as two uppercase hex digits (for RFC 2231 pct-encoding).
+func hexByte(code as int) {
+    def digits as string init "0123456789ABCDEF";
+    def hi as int init $code // 16;
+    def lo as int init $code % 16;
+    return strings.substring($digits, $hi, $hi + 1) + strings.substring($digits, $lo, $lo + 1);
+}
+
+# pctEncode percent-encodes a string's UTF-8 bytes per RFC 2231: the attribute
+# characters (ALPHA / DIGIT and a few marks) pass through, every other byte
+# becomes `%XX`.
+func pctEncode(s as string) {
+    def safe as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$&+-.^_`|~";
+    def b as bytes init convert.bytesFromString($s, "utf-8");
+    def out as list of string init [];
+    def i as int init 0;
+    while ($i < len($b)) {
+        def code as int init $b[$i];
+        def ch as string init "";
+        if ($code < 128) {
+            $ch = convert.fromCodepoint($code);
+        }
+        if ($code < 128 and strings.indexOf($safe, $ch) >= 0) {
+            $out[] = $ch;
+        } else {
+            $out[] = "%" + hexByte($code);
+        }
+        $i = $i + 1;
+    }
+    return strings.join($out, "");
+}
+
+# dispositionFilename renders a `key` filename parameter for a header: a plain
+# quoted `key="..."` for an ASCII name (backslash / quote escaped so a quote
+# cannot break out), or an RFC 2231 extended `key*=UTF-8''<pct>` for a name that
+# carries non-ASCII characters.
+func dispositionFilename(key as string, name as string) {
+    if (isAsciiText($name)) {
+        def safe as string init strings.replace(
+            strings.replace($name, "\\", "\\\\"),
+            "\"",
+            "\\\"");
+        return $key + "=\"" + $safe + "\"";
+    }
+    return $key + "*=UTF-8''" + pctEncode($name);
 }
 
 /**
@@ -803,19 +1027,21 @@ export func disposition(part as Part) {
 }
 
 /**
- * Return a part's filename: the Content-Disposition `filename=`, else the
- * Content-Type `name=` parameter, RFC 2047-decoded; "" when neither is present.
+ * Return a part's filename: the Content-Disposition `filename` parameter, else
+ * the Content-Type `name` parameter. RFC 2231 extended / continued forms
+ * (`filename*=`, `filename*0=`...) and RFC 2047 encoded-words are both decoded;
+ * "" when neither is present.
  * @param part {Part} the part to read
  * @return {string} the filename
  */
 export func filename(part as Part) {
-    def name as string init paramValue(
+    def name as string init resolveFilename(
         findHeader($part.headers, "Content-Disposition"),
         "filename");
     if (len($name) == 0) {
-        $name = paramValue(findHeader($part.headers, "Content-Type"), "name");
+        $name = resolveFilename(findHeader($part.headers, "Content-Type"), "name");
     }
-    return decodeWord($name);
+    return $name;
 }
 
 /**

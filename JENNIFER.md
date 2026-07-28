@@ -756,8 +756,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   pull a received message apart, `mime.walk` / `attachments` / `textBodies` /
   `findParts(part, mediaType)` flatten the tree, with `mime.data(part)` (raw
   `bytes`, so binary attachments round-trip), `mime.filename` / `disposition` /
-  `isAttachment` per part. A non-ASCII `Subject` / display name is auto-encoded
-  as an RFC 2047 encoded-word on `encode` and decoded on `parse` (primitives
+  `isAttachment` per part. A text `body` is decoded per the Content-Type
+  `charset` (UTF-8 default; `iso-8859-*` / `windows-*` codepages honoured), and
+  `mime.filename` reads RFC 2231 extended / continued names (`filename*=`,
+  `filename*0=`...) - which `attachment` / `attachmentBytes` also emit for a
+  non-ASCII filename. A non-ASCII `Subject` / display name is auto-encoded as an
+  RFC 2047 encoded-word on `encode` and decoded on `parse` (primitives
   `mime.encodeWord` / `decodeWord`). No networking. The foundation the mail
   clients build on (`imap.fetchMessage` returns a parsed `mime.Part`).
 - **`sasl`** - SASL auth mechanisms shared by the mail clients: base64 encoders

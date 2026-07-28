@@ -295,3 +295,143 @@ func testFilenameNameFallback() {
     testing.assertEqual(body($p), ""); # binary part: no text view
     testing.assertEqual(convert.stringFromBytes(data($p), "utf-8"), "hi");
 }
+
+# --- M23.6: charset on decode ------------------------------------------------
+
+# A text body declaring a non-UTF-8 charset is decoded from that charset, not
+# force-read as UTF-8 (which would have mangled the high bytes).
+func testDecodeLatin1Body() {
+    def p as Part init parse(
+        "Content-Type: text/plain; charset=iso-8859-1\r\n" +
+            "Content-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 r=E9sum=E9\r\n");
+    testing.assertEqual(strings.trim(body($p)), "café résumé");
+}
+
+func testDecodeWindows1252Body() {
+    # 0x92 is a right single quote in Windows-1252 (undefined in Latin-1).
+    def p as Part init parse(
+        "Content-Type: text/plain; charset=windows-1252\r\n" +
+            "Content-Transfer-Encoding: quoted-printable\r\n\r\nit=92s\r\n");
+    testing.assertEqual(strings.trim(body($p)), "it’s");
+}
+
+func testDecodeDefaultCharsetIsUtf8() {
+    def p as Part init parse("Content-Type: text/plain\r\n\r\nplain ascii");
+    testing.assertEqual(body($p), "plain ascii");
+}
+
+# An unknown charset label must not crash parse; it falls back to UTF-8.
+func testDecodeUnknownCharsetFallsBack() {
+    def p as Part init parse("Content-Type: text/plain; charset=x-bogus-99\r\n\r\nhello");
+    testing.assertEqual(body($p), "hello");
+}
+
+# --- M23.6: RFC 2231 filenames (private helpers) -----------------------------
+
+func testSplitParams() {
+    def ps as list of Header init splitParams("attachment; filename=\"a.txt\"; size=10");
+    testing.assertEqual(len($ps), 2); # the leading token is skipped
+    testing.assertEqual($ps[0].name, "filename");
+    testing.assertEqual($ps[0].value, "a.txt"); # unquoted
+    testing.assertEqual($ps[1].name, "size");
+    testing.assertEqual($ps[1].value, "10");
+}
+
+func testGetParamExactMatch() {
+    # A substring scan would find "name=" inside "filename="; getParam must not.
+    def h as string init "image/png; filename=\"disp.png\"; name=\"real.png\"";
+    testing.assertEqual(getParam($h, "name"), "real.png");
+    testing.assertEqual(getParam($h, "charset"), "");
+}
+
+func testPctRoundTrip() {
+    testing.assertEqual(pctEncode("café.txt"), "caf%C3%A9.txt");
+    testing.assertEqual(convert.stringFromBytes(pctDecodeBytes("caf%C3%A9.txt"), "utf-8"), "café.txt");
+    testing.assertEqual(hexByte(0xE9), "E9");
+}
+
+func testStripExtPrefix() {
+    def parts as list of string init stripExtPrefix("UTF-8'en'caf%C3%A9");
+    testing.assertEqual($parts[0], "utf-8");
+    testing.assertEqual($parts[1], "caf%C3%A9"); # language segment dropped
+    # a value with no prefix comes back charset-less and untouched
+    def bare as list of string init stripExtPrefix("plain.txt");
+    testing.assertEqual($bare[0], "");
+    testing.assertEqual($bare[1], "plain.txt");
+}
+
+# --- M23.6: RFC 2231 filenames (decode) --------------------------------------
+
+func testFilenameExtended() {
+    def p as Part init parse(
+        "Content-Type: image/png\r\n" +
+            "Content-Disposition: attachment; filename*=UTF-8''caf%C3%A9.txt\r\n\r\n");
+    testing.assertEqual(filename($p), "café.txt");
+    testing.assertTrue(isAttachment($p));
+}
+
+func testFilenameContinuedPlain() {
+    def p as Part init parse(
+        "Content-Type: application/octet-stream\r\n" +
+            "Content-Disposition: attachment; filename*0=\"a very long \"; filename*1=\"name.dat\"\r\n\r\n");
+    testing.assertEqual(filename($p), "a very long name.dat");
+}
+
+func testFilenameContinuedExtended() {
+    def p as Part init parse(
+        "Content-Type: application/octet-stream\r\n" +
+            "Content-Disposition: attachment; filename*0*=UTF-8''%E2%82%AC%20; filename*1*=rates.txt\r\n\r\n");
+    testing.assertEqual(filename($p), "€ rates.txt");
+}
+
+func testFilenamePrefersDisposition() {
+    # filename in the disposition wins over a name= in the content type.
+    def p as Part init parse(
+        "Content-Type: image/png; name=\"ct.png\"\r\n" +
+            "Content-Disposition: attachment; filename=\"disp.png\"\r\n\r\n");
+    testing.assertEqual(filename($p), "disp.png");
+}
+
+# --- M23.6: RFC 2231 filenames (encode + round-trip) -------------------------
+
+func testEncodeAsciiFilenameStaysQuoted() {
+    def a as Part init attachment("plain.txt", "text/plain", "hi");
+    testing.assertContains(encode($a), "Content-Disposition: attachment; filename=\"plain.txt\"");
+}
+
+func testEncodeNonAsciiFilenameIsExtended() {
+    def raw as bytes;
+    $raw[] = 1;
+    $raw[] = 2;
+    def a as Part init attachmentBytes("café.txt", "image/png", $raw);
+    def enc as string init encode($a);
+    testing.assertContains($enc, "filename*=UTF-8''caf%C3%A9.txt");
+    testing.assertFalse(strings.contains($enc, "filename=")); # the plain form is not emitted
+    def back as Part init parse($enc);
+    testing.assertEqual(filename($back), "café.txt");
+}
+
+# A filename carrying a backslash or a quote survives the encode / parse round
+# trip: encode escapes both (`\` -> `\\`, `"` -> `\"`) and parse's unquote
+# reverses both (a plain `\"`-only unescape doubled the backslash).
+func testAsciiFilenameEscapesRoundTrip() {
+    def back as Part init parse(encode(attachment("a\\b\"c.txt", "text/plain", "hi")));
+    testing.assertEqual(filename($back), "a\\b\"c.txt");
+}
+
+# A quoted filename holding both an escaped quote and a semicolon must not be
+# split at that inner semicolon (the `;` is inside the quoted-string).
+func testQuotedFilenameWithSemicolon() {
+    def p as Part init parse(
+        "Content-Type: application/octet-stream\r\n" +
+            "Content-Disposition: attachment; filename=\"a\\\";b.txt\"; size=1\r\n\r\n");
+    testing.assertEqual(filename($p), "a\";b.txt");
+}
+
+# The extended form also decodes a non-UTF-8 charset (Latin-1 here).
+func testFilenameExtendedLatin1() {
+    def p as Part init parse(
+        "Content-Type: image/png\r\n" +
+            "Content-Disposition: attachment; filename*=iso-8859-1'en'caf%E9.txt\r\n\r\n");
+    testing.assertEqual(filename($p), "café.txt");
+}

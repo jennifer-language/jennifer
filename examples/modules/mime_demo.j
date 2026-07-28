@@ -61,3 +61,16 @@ io.printf("=== text bodies ===\n");
 for (def tb in mime.textBodies($parsed)) {
     io.printf("  %s: %s\n", mime.contentType($tb), mime.body($tb));
 }
+
+# A received message may declare a non-UTF-8 charset; parse decodes body per the
+# Content-Type charset (here Latin-1, quoted-printable) instead of forcing UTF-8.
+def latin1 as mime.Part init mime.parse(
+    "Content-Type: text/plain; charset=iso-8859-1\r\n" +
+        "Content-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 r=E9sum=E9\r\n");
+io.printf("=== charset decode ===\n  latin-1 body: %s\n", mime.body($latin1));
+
+# A non-ASCII attachment filename is written and read in RFC 2231 extended form.
+def doc as mime.Part init mime.attachment("rapport-café.txt", "text/plain", "Le résumé du café.");
+io.printf("=== rfc 2231 filename ===\n");
+io.printf("  header:     %s\n", mime.headerValue($doc, "Content-Disposition"));
+io.printf("  round-trip: %s\n", mime.filename(mime.parse(mime.encode($doc))));

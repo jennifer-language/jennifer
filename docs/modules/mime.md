@@ -37,17 +37,19 @@ export def struct Header { name as string, value as string };
 
 Every leaf carries its raw decoded content as `data` (`bytes`), so **binary
 attachments round-trip intact**. `body` is the text view: `parse` fills it for
-text parts (`text/...`, UTF-8) and leaves it `""` for binary; `data` always
-holds the exact bytes. `encode` applies the transfer encoding and `parse`
-removes it, so you always read plain content.
+text parts (`text/...`), decoding from the Content-Type `charset` (UTF-8 by
+default; `iso-8859-*` / `windows-*` codepages are honoured, with a UTF-8
+fallback for a charset the `encoding` library does not know), and leaves it `""`
+for binary; `data` always holds the exact bytes. `encode` applies the transfer
+encoding and `parse` removes it, so you always read plain content.
 
 ## Surface
 
 | Call                                    | Returns  | Notes                                                              |
 | --------------------------------------- | -------- | ------------------------------------------------------------------ |
 | `mime.text(contentType, body)`          | `Part`   | Leaf text part; 7bit if ASCII, else quoted-printable. Adds `charset=utf-8`. |
-| `mime.attachment(filename, contentType, body)` | `Part` | Base64 leaf with a `Content-Disposition` filename (text `body`).  |
-| `mime.attachmentBytes(filename, contentType, data)` | `Part` | Base64 attachment from raw `bytes` (images, PDFs, any binary). |
+| `mime.attachment(filename, contentType, body)` | `Part` | Base64 leaf with a `Content-Disposition` filename (text `body`); a non-ASCII name is written RFC 2231 `filename*=`. |
+| `mime.attachmentBytes(filename, contentType, data)` | `Part` | Base64 attachment from raw `bytes` (images, PDFs, any binary); non-ASCII name as `filename*=`. |
 | `mime.multipart(subtype, boundary, parts)` | `Part` | Container (`multipart/subtype`) over one boundary.                 |
 | `mime.withHeader(part, name, value)`    | `Part`   | Copy with a header set (case-insensitive replace, else append).    |
 | `mime.encode(part)`                     | `string` | Serialize to a CRLF MIME message with transfer encodings applied.  |
@@ -58,7 +60,7 @@ removes it, so you always read plain content.
 | `mime.parts(part)`                      | `list of Part` | A container's direct child parts.                           |
 | `mime.contentType(part)`                | `string` | Media type without parameters (e.g. `text/plain`).                 |
 | `mime.disposition(part)`                | `string` | `"attachment"` / `"inline"` / `""` (Content-Disposition).          |
-| `mime.filename(part)`                   | `string` | `filename=` (else Content-Type `name=`), RFC 2047-decoded, or `""`. |
+| `mime.filename(part)`                   | `string` | `filename` (else Content-Type `name`), RFC 2231 (`filename*=`, continued) + RFC 2047 decoded, or `""`. |
 | `mime.isAttachment(part)`               | `bool`   | Disposition is `attachment`, or a filename is set.                 |
 | `mime.walk(part)`                       | `list of Part` | Every leaf part in the subtree, depth-first.                 |
 | `mime.attachments(part)`                | `list of Part` | The attachment leaves (see `isAttachment`).                 |
@@ -167,10 +169,12 @@ B. `us-ascii` / `iso-8859-*` / `windows-*` charsets decode through
 
 Deliberately a foundation, not a full mail stack:
 
-- **Non-UTF-8 text charsets.** A text part is decoded to `body` as UTF-8; a
-  `text/*` part in another charset stays reachable as raw bytes via `data`, but
-  is not transcoded (the `convert` codec is UTF-8 only). Binary attachments are
-  fully supported via `data` / `attachmentBytes`.
+- **Legacy multibyte charsets.** A text part is decoded to `body` using its
+  Content-Type `charset` for UTF-8 and every single-byte codepage the
+  [`encoding`](../libraries/encoding.md) library ships (`us-ascii` /
+  `iso-8859-*` / `windows-*`). A multibyte legacy charset (`shift_jis`,
+  `gb2312`, `big5`, ...) has no `encoding` codec, so it falls back to a UTF-8
+  read of `body`; the exact bytes always stay reachable via `data`.
 - **Multi-address name encoding.** A comma-separated address list is left raw
   on `encode`; encode each mailbox's name with `mime.address` when building it.
 - **Networking.** This module only shapes messages; sending / fetching them is

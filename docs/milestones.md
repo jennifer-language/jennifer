@@ -1009,7 +1009,8 @@ incl. the sliding boundary), and the Go suite over memcache / redis
 
 **In progress.** The deepest per-module gaps, where a module handles the easy
 case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 done; the rest planned):
+sub-numbering as pieces land (M23.6.1 through M23.6.6 done; the modules below
+planned):
 - **`barcode`** - DataMatrix, UPC-A/E, Code93, GS1-128 symbologies; QR numeric /
   alphanumeric modes + versions 11-40; a human-readable text line under 1D
   barcodes. Reconcile the mismatch where `label` advertises `datamatrix` that the
@@ -1024,8 +1025,6 @@ sub-numbering as pieces land (M23.6.1 done; the rest planned):
   (cap-height, ascender/descender/line-gap).
 - **`feed`** - `<enclosure>` (podcast media, its advertised use case), author +
   categories.
-- **`mime`** - honour a text-body `charset` on decode (currently forced to
-  UTF-8), and RFC 2231 extended / continued filenames (`filename*=`).
 
 #### M23.6.1 - ipnet subnet math + classification
 
@@ -1143,6 +1142,34 @@ ordinary queries; filled it out and closed a validation gap.
   (`VEVENT` / `VTODO` / `VTIMEZONE` + nested `VALARM`). Overlay 20 -> 31,
   `docblock`-clean; validated (the monthly-clamp propagation bug was caught and
   fixed). Both modules share the extended content-line codec; both binaries.
+
+#### M23.6.6 - mime charset-on-decode + RFC 2231 filenames
+
+**Done.** Closed the two `mime` gaps where a real-world message diverged from
+the easy case.
+- **Charset on decode.** A text part's `body` used to be force-read as UTF-8
+  (the old `decodeBody` path); `parse` now decodes it from the Content-Type
+  `charset` off the already-transfer-decoded `data` bytes, through the existing
+  `decodeCharset` seam. A new `safeCharset` wrapper handles UTF-8 / empty
+  directly and routes `iso-8859-*` / `windows-*` through the `encoding` library,
+  falling back to a UTF-8 read for a label `encoding` doesn't know (a multibyte
+  legacy charset like `shift_jis`), so `parse` never crashes on an exotic label.
+  A `text/*` part with no declared charset stays UTF-8 (unchanged), and the
+  invalid-UTF-8-without-charset case keeps throwing exactly as before.
+- **RFC 2231 filenames.** `filename` now reads the extended `filename*=charset'lang'pct`
+  form and continued `filename*0` / `filename*1` ... segments (plain or
+  `*`-suffixed / percent-encoded), assembling and charset-decoding them, on top
+  of the existing RFC 2047 plain-value decode. A new `splitParams` tokeniser
+  (quote-aware) replaced the substring-scan `paramValue` - which also fixed a
+  latent bug where a `name=` lookup matched the `name=` inside `filename=`.
+  `attachment` / `attachmentBytes` now emit `filename*=UTF-8''<pct>` for a
+  non-ASCII name (ASCII names stay the plain quoted form). Validation caught an
+  asymmetric-escaping bug: `encode` escaped `\` -> `\\` in a quoted filename but
+  `unquote` only reversed `\"`, doubling a backslash on round-trip; `unquote` now
+  does a full char-by-char unescape and `splitParams` is backslash-aware (an
+  escaped quote can no longer mis-toggle the quote state). Overlay 35 -> 52,
+  `docblock`-clean; pure `.j` over `strings` / `convert` / `encoding` / `regex` /
+  `binary`, both binaries.
 
 ### M23.7 - observability completeness
 
@@ -1301,45 +1328,42 @@ methods, wire strings, config-supplied mechanism names - stayed strings).
   mock-server integration tests, and docs updated; `go test ./...` + every module
   overlay green on both binaries.
 
-### M23.13 - `mcp` module (Model Context Protocol)
+### M23.13 - `mcp` module (Model Context Protocol, stateless)
 
 **Planned.** A Model Context Protocol module - both a **server** (Jennifer
 exposes tools / resources / prompts to an LLM host) and a **client** (a Jennifer
-program calls another MCP server). MCP is JSON-RPC 2.0 on the wire, so `jsonrpc`
-carries the framing and `meta.callMain` dispatches a tool call to a top-level
-`func` (the same mechanism `web` / `jsonrpc` already use - registering a tool is
-just writing a documented `func`). The new work is the MCP layer on top: the
-`initialize` capability / protocol-version handshake, the tools / resources /
-prompts data models (a tool declares a JSON-Schema input; `json.Value` holds it,
-with a small schema-builder helper), and the transports.
+program calls another MCP server) - targeting the **stateless** protocol only.
+MCP is JSON-RPC 2.0 on the wire, so `jsonrpc` carries the framing and
+`meta.callMain` dispatches a tool call to a top-level `func` (the same mechanism
+`web` / `jsonrpc` already use - registering a tool is just writing a documented
+`func`). The new work is the MCP layer on top: the `initialize` capability /
+protocol-version handshake, the tools / resources / prompts data models (a tool
+declares a JSON-Schema input; `json.Value` holds it, with a small schema-builder
+helper), and the two stateless transports.
 
-**Transports and the "two versions".** What the MCP steering group shipped is one
-**Streamable HTTP** transport with two server behaviours; supporting "both"
-means:
+**Scope: the stateless protocol only.**
 - **stdio** - newline-delimited JSON-RPC over stdin / stdout, the transport an
-  LLM host launches a local server with (over `io` / `os`). In scope for .1.
-- **stateless HTTP** - client POSTs a request, server returns a single
-  `application/json` response (no session, no stream). Maps almost 1:1 onto
-  `jsonrpc.handle`; the low-risk path, in scope for .1.
-- **stateful Streamable HTTP** - a `text/event-stream` (SSE) response, an
-  `Mcp-Session-Id` session, and server-initiated messages. `httpd` has no
-  first-class SSE server-push today, so this needs a small `httpd` streaming
-  primitive first - deferred to .2.
+  LLM host launches a local server with (over `io` / `os`).
+- **stateless HTTP** - the client POSTs a request and the server returns a single
+  `application/json` response; no session, no stream. This maps almost 1:1 onto
+  `jsonrpc.handle`.
 
-Sub-milestones:
-- **M23.13.1 - stateless core, both roles.** Client + server over **stdio +
-  stateless HTTP**: `initialize` (capability + version negotiation across the
-  supported spec revisions), `tools/list` + `tools/call`, `resources/list` +
-  `resources/read`, `prompts/list` + `prompts/get`. Server tool dispatch via
-  `meta.callMain`; client wraps a launched-subprocess or HTTP endpoint. Reuses
-  `jsonrpc` / `json` / `http` / `os`; default binary only (like `jsonrpc`). The
-  usual close-out: `mcp_test.j` overlay at 100%, a `cmd/jennifer/mcp_test.go`
-  round-trip, `docs/modules/mcp.md`, a demo, and the catalog / `JENNIFER.md`
-  entries.
-- **M23.13.2 - stateful Streamable HTTP.** Add an SSE server primitive to `httpd`
-  (chunked `text/event-stream` writes), then the session-bearing streaming MCP
-  server + server-initiated messages. The reverse-direction capabilities
-  (sampling / roots / elicitation) land here or in a follow-on as demand shows.
+The surface: `initialize` (capability + protocol-version negotiation),
+`tools/list` + `tools/call`, `resources/list` + `resources/read`, `prompts/list`
++ `prompts/get`. Server tool dispatch via `meta.callMain`; the client wraps a
+launched-subprocess or an HTTP endpoint. Reuses `jsonrpc` / `json` / `http` /
+`os`; default binary only (like `jsonrpc`). The usual close-out: an `mcp_test.j`
+overlay at 100%, a `cmd/jennifer/mcp_test.go` round-trip, `docs/modules/mcp.md`, a
+demo, and the catalog / `JENNIFER.md` entries.
+
+**Not planned: the stateful transport.** The older **stateful Streamable HTTP**
+mode - a `text/event-stream` (SSE) response, an `Mcp-Session-Id` session, and
+server-initiated messages - is **out of scope, with no support planned**. It
+would require an SSE server-push primitive `httpd` does not have, and the
+stateless mode is the direction the protocol has moved to; a Jennifer MCP server
+/ client speaks stateless and does not negotiate a session. The reverse-direction
+capabilities that ride the session channel (sampling / roots / elicitation) are
+likewise out of scope.
 
 ---
 
