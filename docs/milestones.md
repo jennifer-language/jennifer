@@ -927,62 +927,55 @@ still drop a frame - a buffered `net` reader is the general fix.
 | `mikrotik` | `.tag`-correlated commands (`talkTagged`) + `/listen`-style streaming (`listen` / `receiveReply` / `cancel`); `readN` clears the read deadline it arms (block-level `defer net.setDeadline($socket, 0)`) so a later read/write cannot inherit it. |
 | `imap` | RFC 2177 `IDLE`: `idle` -> blocking `receiveNotification` / timeout-bounded `pollNotification` -> `done`, typed `EXISTS` / `EXPUNGE` / `RECENT` notifications (rest of the mail work in M23.3). |
 
-### M23.2 - connection reuse / persistent sessions
+### M23.2 - connection reuse / persistent sessions (compacted)
 
-**Done.** Every call used to pay a fresh handshake. Added persistent, reusable
-connections, delivered per module (http, then rest, then smtp):
-- **`http`** (done) - keep-alive / connection reuse via a threaded, value-semantic
-  `http.Session` (holding the reused `net.Conn` handle + a cookie jar) with
-  `connect` / `exchange` (returns `Exchange{response, session}`) / `close`; a new
-  framed reader (`readOneRaw`, Content-Length / chunked) reads one response off a
-  reused socket rather than to EOF. Plus a request-policy path `http.send(method,
-  url, headers, body, options)` over an `http.Options{timeoutMs, maxBytes,
-  maxRedirects, maxRetries, backoffMs, tls}`: automatic 3xx **redirect following**
-  (303 / POST-301 / 302 -> bodyless GET, 307 / 308 preserve), a **cookie jar**
-  (preserving multiple `Set-Cookie`, read un-folded from the raw header block),
-  and **retry / backoff** on 429 / 5xx (exponential, honours a numeric
-  `Retry-After`, clamped to 30s). `http.basic(user, pass)` is the Basic-auth
-  header helper. Additive: the one-shot verbs are unchanged (still `Connection:
-  close`, 3xx returned). Overlay `http_test.j` (pure helpers), Go
-  `TestHttpSession` (keep-alive reuse proven via a connection counter + cookie
-  replay) / `TestHttpSendPolicy` (redirect + 303 method change + retry).
-- **`rest`** (done) - every request now routes through `http.send`, so a
-  `rest.Client` inherits the whole policy: `Client.tls` folded into an
-  `http.Options` field (**pre-1.0 break**; `withCA` / `insecure` retargeted),
-  with copy-returning builders `withTimeout` / `withRedirects` / `withRetries` /
-  `withBackoff`. `joinUrl` passes an absolute URL through (so a Link-header
-  `next` feeds back), and two **pagination** walkers `paginate` (Link header
-  `rel="next"`) / `paginateCursor` (a cursor JSON Pointer resent as a query
-  param) return `list of json.Value`, each capped by `maxPages`. Overlay adds
-  builder / absolute-join / `parseNextLink` cases; Go `TestRestPaginateAndPolicy`
-  (link + cursor walks, maxPages cap, inherited retry). Keep-alive across
-  separate `rest` calls stays on the `http.connect` / `exchange` side.
-- **`smtp`** (done) - the one-shot `send` refactored into a persistent
-  `Session`: `open(opts)` does the connect + greeting + EHLO + STARTTLS + auth
-  handshake once (closing the socket if any step throws - never returns a
-  half-built session), `sendOn(session, from, recipients, message)` delivers each
-  message (RSET + MAIL / RCPT / DATA, over the shared `net.Conn` handle), and
-  `close(session)` sends a best-effort QUIT and closes. `send` is now the
-  open / sendOn / close convenience, so a queue of N messages pays one TLS + auth
-  handshake instead of N. Overlay adds a closed-session guard test; Go
-  `TestSmtpSessionReuse` delivers two messages over a single-accept fake server
-  (proving reuse - a reconnect would block the second `sendOn`).
+**Done.** Persistent, reusable connections so a request / message loop stops
+paying a fresh handshake each time. Delivered per module:
+- **`http`** - a threaded value-semantic `http.Session` (reused `net.Conn` handle
+  + cookie jar) via `connect` / `exchange` -> `Exchange{response, session}` /
+  `close`, backed by a new framed reader (`readOneRaw`, Content-Length / chunked)
+  that reads one response off a reused socket instead of to EOF. Plus a policy
+  path `http.send(method, url, headers, body, options)` over `http.Options`
+  {timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls}: 3xx redirect
+  following (303 / POST-301 / 302 -> bodyless GET, 307 / 308 preserve), a cookie
+  jar (multiple `Set-Cookie`, read un-folded), and 429 / 5xx retry / backoff
+  (exponential, honours a numeric `Retry-After`, 30s cap). `http.basic` helper.
+  Additive - the one-shot verbs stay `Connection: close`.
+- **`rest`** - every request routes through `http.send`, so `rest.Client`
+  inherits the policy: `Client.tls` folded into an `http.Options` field (pre-1.0
+  break; `withCA` / `insecure` retargeted) with `withTimeout` / `withRedirects` /
+  `withRetries` / `withBackoff` builders. `joinUrl` passes an absolute URL through,
+  and `paginate` (Link `rel="next"`) / `paginateCursor` (a cursor JSON Pointer)
+  walk every page -> `list of json.Value`, capped by `maxPages`.
+- **`smtp`** - the one-shot `send` split into `open(opts)` (connect + EHLO +
+  STARTTLS + auth once; closes on any handshake failure) / `sendOn(session, ...)`
+  (RSET + MAIL / RCPT / DATA over the shared socket) / `close` (best-effort QUIT);
+  `send` is now the open / sendOn / close convenience, so N messages pay one TLS +
+  auth handshake. `smtp.send` kept as a deliberate convenience-over-session (the
+  established `fetchAll` pattern), not a parallel API.
+
+Pinned by `TestHttpSession` (keep-alive reuse via a connection counter + cookie
+replay) / `TestHttpSendPolicy`, `TestRestPaginateAndPolicy`, and
+`TestSmtpSessionReuse` (two messages over a single-accept server), plus the
+overlays.
 
 ### M23.3 - stable-identity verbs (cross-session correctness)
 
 **Done.** `imap` and `pop` both keyed off volatile sequence numbers, silently
 breaking "fetch only what's new since last run". Added stable-identifier verbs:
-- **`imap`** - a `uidPrefix(uid)` flag threaded through shared fetch / store /
-  copy / search cores gives every message-addressing verb a UID twin
-  (`uidSearch` / `uidFetch` / `uidFetchMessage` / `uidFetchHeaders` / `uidFlags` /
-  `uidAddFlags` / `uidRemoveFlags` / `uidCopy` / `uidMove` / `uidFetchPartial`),
-  which address by the persistent UID (surviving an expunge) - the client-side
-  `search` refinement threads the flag too, so a `uidSearch` with a regex /
-  attachment filter refines by UID. Plus native atomic `move` / `uidMove`
-  (`MOVE`, RFC 6851) and ranged `fetchPartial` / `uidFetchPartial`
-  (`BODY.PEEK[]<offset.length>`) for large bodies. Overlay unchanged (cores keep
-  the seq behavior); Go `TestImapUidVerbs` asserts the exact wire commands via a
-  capturing fake server.
+- **`imap`** - **UID-only addressing** (one way, per stance #1): every message
+  verb (`search` / `fetch` / `fetchMessage` / `fetchHeaders` / `fetchPartial` /
+  `flags` / `addFlags` / `removeFlags` / `copy` / `move`) sends its `UID` form and
+  takes a persistent UID (surviving an expunge), and `search` returns UIDs via
+  `UID SEARCH` (the client-side regex / attachment / sub-day refinement fetches by
+  UID too). Sequence numbers survive only as the `selectFolder` count and IDLE
+  `EXISTS` / `EXPUNGE` push numbers (server-emitted data, never an addressing
+  input); `fetchAll` now walks `search` UIDs. Added atomic `move` (`UID MOVE`, RFC
+  6851) and ranged `fetchPartial` (`UID FETCH ... BODY.PEEK[]<offset.length>`) for
+  large bodies. **Pre-1.0 break**: the verbs' `int` argument is a UID, not a
+  sequence number (a parallel seq + UID twin set was rejected on stance #1 - see
+  `rejected.md`). Go `TestImapUidVerbs` asserts the exact `UID ...` wire commands
+  via a capturing fake server.
 - **`pop`** - `uidl` -> `list of pop.MessageId` (`number` + persistent `id`) /
   `uidlOne` for leave-on-server / skip-seen, `top` (headers-only preview when
   `lines` = 0), and `reset` (RSET) / `noop` (NOOP). Overlay adds a `parseUidl`

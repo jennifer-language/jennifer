@@ -42,7 +42,7 @@ import "./mime.j" as mime;
  * The parameters for opening an IMAP session.
  * @field host {string} the server hostname
  * @field port {int} the server port (e.g. 993 for implicit TLS)
- * @field security {string} the transport, "" / "tls" (implicit) / "starttls"
+ * @field security {string} the transport, "none" (plaintext) / "tls" (implicit) / "starttls"
  * @field user {string} the login username
  * @field pass {string} the login password, or the OAuth2 access token when auth is "xoauth2"
  * @field auth {string} the auth mechanism: "" (default - LOGIN), "auto" (probe CAPABILITY and pick the strongest mechanism, falling back to LOGIN), "xoauth2", "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
@@ -826,22 +826,18 @@ func bodyStructureShowsAttachment(resp as string) {
     return strings.contains(strings.lower($resp), "\"attachment\"");
 }
 
-# uidPrefix returns "UID " for a UID-addressed command, "" for a sequence number.
-# It is the one difference between every seq-addressed verb and its UID twin: a
-# UID command takes and reports stable identifiers that survive an expunge, where
-# sequence numbers renumber.
-func uidPrefix(uid as bool) {
-    if ($uid) {
-        return "UID ";
-    }
-    return "";
-}
+# The whole module addresses messages by their stable UID (UID FETCH / STORE /
+# COPY / MOVE / SEARCH), never by volatile sequence numbers: a UID keeps naming
+# the same message across an expunge, so a captured id is safe to reuse within
+# and across sessions. Sequence numbers appear only where the server emits them
+# as data (the selectFolder count, IDLE EXISTS / EXPUNGE numbers), never as an
+# addressing input.
 
-# bodyStructureHasAttachment probes message n's structure (no body download).
-func bodyStructureHasAttachment(session as Session, n as int, uid as bool) {
+# bodyStructureHasAttachment probes a message's structure (no body download).
+func bodyStructureHasAttachment(session as Session, uid as int) {
     def resp as string init command(
         $session.conn,
-        uidPrefix($uid) + "FETCH " + convert.toString($n) + " BODYSTRUCTURE");
+        "UID FETCH " + convert.toString($uid) + " BODYSTRUCTURE");
     return bodyStructureShowsAttachment($resp);
 }
 
@@ -866,27 +862,27 @@ func parseInternalDate(resp as string) {
     return time.parse($raw, "%d-%b-%Y %H:%M:%S %z");
 }
 
-# messageInternalDate fetches message n's INTERNALDATE (the arrival time SINCE /
+# messageInternalDate fetches a message's INTERNALDATE (the arrival time SINCE /
 # BEFORE filter on) as a time.Time, for the exact-instant date refinement.
-func messageInternalDate(session as Session, n as int, uid as bool) {
+func messageInternalDate(session as Session, uid as int) {
     def resp as string init command(
         $session.conn,
-        uidPrefix($uid) + "FETCH " + convert.toString($n) + " INTERNALDATE");
+        "UID FETCH " + convert.toString($uid) + " INTERNALDATE");
     return parseInternalDate($resp);
 }
 
-# matchesClientFilters applies the client-side criteria to one candidate message,
-# fetching only the headers / structure each needs. `refineSince` / `refineBefore`
-# are precomputed once by the caller (they depend only on the criteria, not on n).
+# matchesClientFilters applies the client-side criteria to one candidate message
+# (addressed by UID), fetching only the headers / structure each needs.
+# `refineSince` / `refineBefore` are precomputed once by the caller (they depend
+# only on the criteria, not on the message).
 func matchesClientFilters(
     session as Session,
-    n as int,
+    uid as int,
     c as Criteria,
     refineSince as bool,
-    refineBefore as bool,
-    uid as bool) {
+    refineBefore as bool) {
     if (len($c.subjectRegex) > 0 or len($c.fromRegex) > 0) {
-        def part as mime.Part init mime.parse(fetchHeadersCore($session, $n, "SUBJECT FROM", $uid));
+        def part as mime.Part init mime.parse(fetchHeaders($session, $uid, "SUBJECT FROM"));
         if (len($c.subjectRegex) > 0 and
             not regex.matches($c.subjectRegex, mime.headerValue($part, "Subject"))) {
             return false;
@@ -900,7 +896,7 @@ func matchesClientFilters(
     # day only, so when `since` / `before` carry a time-of-day, compare the
     # message's INTERNALDATE (the same clock SINCE / BEFORE use) to the full instant.
     if ($refineSince or $refineBefore) {
-        def id as time.Time init messageInternalDate($session, $n, $uid);
+        def id as time.Time init messageInternalDate($session, $uid);
         if ($refineSince and time.before($id, $c.since)) {
             return false; # earlier than the inclusive lower bound
         }
@@ -908,115 +904,65 @@ func matchesClientFilters(
             return false; # not strictly before the exclusive upper bound
         }
     }
-    if ($c.hasAttachments and not bodyStructureHasAttachment($session, $n, $uid)) {
+    if ($c.hasAttachments and not bodyStructureHasAttachment($session, $uid)) {
         return false;
     }
     return true;
 }
 
 /**
- * Return the sequence numbers of the messages in the selected folder matching
- * `criteria`. The server-side fields become one IMAP `SEARCH` (one round-trip,
- * no bodies); if any client-side condition is set - a `subjectRegex` / `fromRegex`,
- * `hasAttachments`, or a `since` / `before` carrying a time-of-day - the server's
- * candidates are then refined by fetching just their headers / structure /
- * INTERNALDATE. An empty `imap.criteria()` returns every message (`SEARCH ALL`).
+ * Return the **UIDs** of the messages in the selected folder matching `criteria`
+ * (`UID SEARCH`). A UID is stable across an expunge - it keeps addressing the
+ * same message after others are removed - so the returned ids are the correct
+ * input to every other verb here and the basis for "fetch only what is new since
+ * last run". The server-side fields become one round-trip (no bodies); if any
+ * client-side condition is set - a `subjectRegex` / `fromRegex`, `hasAttachments`,
+ * or a `since` / `before` carrying a time-of-day - the candidates are then refined
+ * by fetching just their headers / structure / INTERNALDATE. An empty
+ * `imap.criteria()` returns every message (`UID SEARCH ALL`).
  * @param session {Session} the open session
  * @param criteria {Criteria} the filter (build with `imap.criteria()` + fields)
- * @return {list of int} the matching message sequence numbers
+ * @return {list of int} the matching message UIDs
  * @throws {Error} kind "imap" on a "NO" / "BAD" completion, an inverted date
  *   range (`since` after `before`), or a control character in a substring field
  */
 export func search(session as Session, criteria as Criteria) {
-    return searchCore($session, $criteria, false);
-}
-
-/**
- * Like `search`, but returns **UIDs** (via `UID SEARCH`) instead of sequence
- * numbers. A UID is stable across an expunge, so a UID returned here still
- * addresses the same message after other messages are removed - the correct key
- * for "fetch only what is new since last run" and for `uidFetch` / `uidStore` /
- * `uidCopy` / `uidMove`. Any client-side refinement fetches by UID too.
- * @param session {Session} the open session
- * @param criteria {Criteria} the filter (build with `imap.criteria()` + fields)
- * @return {list of int} the matching message UIDs
- * @throws {Error} kind "imap" as `search`
- */
-export func uidSearch(session as Session, criteria as Criteria) {
-    return searchCore($session, $criteria, true);
-}
-
-# searchCore runs the server SEARCH (UID SEARCH when `uid`) and, when the criteria
-# carry a client-side condition, refines the candidates with matching-addressed
-# fetches. `parseSearch` reads the same `* SEARCH n...` line whether the numbers
-# are sequence numbers or UIDs.
-func searchCore(session as Session, criteria as Criteria, uid as bool) {
-    def nums as list of int init parseSearch(command(
+    def uids as list of int init parseSearch(command(
         $session.conn,
-        uidPrefix($uid) + buildSearchCommand($criteria)));
+        "UID " + buildSearchCommand($criteria)));
     if (not hasClientFilter($criteria)) {
-        return $nums;
+        return $uids;
     }
     # These depend only on the criteria; compute once, not per candidate.
     def refineSince as bool init refineSinceNeeded($criteria);
     def refineBefore as bool init refineBeforeNeeded($criteria);
     def out as list of int init [];
-    for (def n in $nums) {
-        if (matchesClientFilters($session, $n, $criteria, $refineSince, $refineBefore, $uid)) {
-            $out[] = $n;
+    for (def uid in $uids) {
+        if (matchesClientFilters($session, $uid, $criteria, $refineSince, $refineBefore)) {
+            $out[] = $uid;
         }
     }
     return $out;
 }
 
 /**
- * Retrieve message `n` (its full body) as a raw string for mime.parse.
+ * Retrieve a message (its full body) as a raw string for `mime.parse`, addressed
+ * by its stable UID (`UID FETCH ... BODY.PEEK[]`). Get a UID from `search`.
  * @param session {Session} the open session
- * @param n {int} the message sequence number
+ * @param uid {int} the message UID
  * @return {string} the raw message body
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func fetch(session as Session, n as int) {
-    return fetchCore($session, $n, false);
-}
-
-# fetchCore retrieves a message body by sequence number or UID (BODY.PEEK[]).
-func fetchCore(session as Session, id as int, uid as bool) {
-    def cmd as string init uidPrefix($uid) + "FETCH " + convert.toString($id) + " BODY.PEEK[]";
+export func fetch(session as Session, uid as int) {
+    def cmd as string init "UID FETCH " + convert.toString($uid) + " BODY.PEEK[]";
     return extractLiteral(command($session.conn, $cmd));
 }
 
 /**
- * Like `fetch`, but addresses the message by its stable **UID** (`UID FETCH`), so
- * a UID captured earlier still retrieves the same message after an expunge
- * renumbered the sequence numbers.
- * @param session {Session} the open session
- * @param uid {int} the message UID
- * @return {string} the raw message body
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func uidFetch(session as Session, uid as int) {
-    return fetchCore($session, $uid, true);
-}
-
-/**
- * Retrieve a **byte range** of message `n`'s body (`BODY.PEEK[]<offset.length>`),
- * so a large message can be pulled in bounded chunks instead of one huge literal.
- * `offset` is the 0-based start, `length` the number of octets (the server
- * returns fewer at end-of-body). Both must be >= 0.
- * @param session {Session} the open session
- * @param n {int} the message sequence number
- * @param offset {int} the 0-based byte offset into the body
- * @param length {int} the number of octets to retrieve
- * @return {string} the requested byte range of the body
- * @throws {Error} kind "imap" on a bad range or a "NO" / "BAD" completion
- */
-export func fetchPartial(session as Session, n as int, offset as int, length as int) {
-    return fetchPartialCore($session, $n, $offset, $length, false);
-}
-
-/**
- * Like `fetchPartial`, but addresses the message by its stable **UID**.
+ * Retrieve a **byte range** of a message's body (`UID FETCH ...
+ * BODY.PEEK[]<offset.length>`), so a large message can be pulled in bounded
+ * chunks instead of one huge literal. `offset` is the 0-based start, `length` the
+ * number of octets (the server returns fewer at end-of-body). Both must be >= 0.
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param offset {int} the 0-based byte offset into the body
@@ -1024,12 +970,7 @@ export func fetchPartial(session as Session, n as int, offset as int, length as 
  * @return {string} the requested byte range of the body
  * @throws {Error} kind "imap" on a bad range or a "NO" / "BAD" completion
  */
-export func uidFetchPartial(session as Session, uid as int, offset as int, length as int) {
-    return fetchPartialCore($session, $uid, $offset, $length, true);
-}
-
-# fetchPartialCore retrieves BODY.PEEK[]<offset.length> by seq or UID.
-func fetchPartialCore(session as Session, id as int, offset as int, length as int, uid as bool) {
+export func fetchPartial(session as Session, uid as int, offset as int, length as int) {
     if ($offset < 0 or $length < 0) {
         throw Error{
             kind: "imap",
@@ -1039,102 +980,58 @@ func fetchPartialCore(session as Session, id as int, offset as int, length as in
             col: 0
         };
     }
-    def cmd as string init uidPrefix($uid) + "FETCH " + convert.toString($id) +
+    def cmd as string init "UID FETCH " + convert.toString($uid) +
         " BODY.PEEK[]<" + convert.toString($offset) + "." + convert.toString($length) + ">";
     return extractLiteral(command($session.conn, $cmd));
 }
 
 /**
- * Fetch message `n` and parse it into a `mime.Part` tree, ready for
+ * Fetch a message by UID and parse it into a `mime.Part` tree, ready for
  * `mime.attachments` / `mime.textBodies` / `mime.data`. Convenience for the
  * common `mime.parse(imap.fetch(...))` pattern; import `mime` too to walk the
  * result.
  * @param session {Session} the open session
- * @param n {int} the message sequence number
- * @return {mime.Part} the parsed message tree
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func fetchMessage(session as Session, n as int) {
-    return mime.parse(fetch($session, $n));
-}
-
-/**
- * Like `fetchMessage`, but addresses the message by its stable **UID**.
- * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {mime.Part} the parsed message tree
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func uidFetchMessage(session as Session, uid as int) {
-    return mime.parse(uidFetch($session, $uid));
+export func fetchMessage(session as Session, uid as int) {
+    return mime.parse(fetch($session, $uid));
 }
 
 /**
- * Retrieve only the named header fields of message `n` (space-separated, e.g.
+ * Retrieve only the named header fields of a message (space-separated, e.g.
  * "SUBJECT DATE") as a raw header block for `mime.parse` - far cheaper than
- * fetching the whole body when you only need a few headers.
+ * fetching the whole body when you only need a few headers. Addressed by UID.
  * @param session {Session} the open session
- * @param n {int} the message sequence number
+ * @param uid {int} the message UID
  * @param fields {string} the space-separated header names, e.g. "SUBJECT DATE"
  * @return {string} the raw header block (the fields plus the terminating blank line)
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func fetchHeaders(session as Session, n as int, fields as string) {
-    return fetchHeadersCore($session, $n, $fields, false);
-}
-
-/**
- * Like `fetchHeaders`, but addresses the message by its stable **UID**.
- * @param session {Session} the open session
- * @param uid {int} the message UID
- * @param fields {string} the space-separated header names, e.g. "SUBJECT DATE"
- * @return {string} the raw header block
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func uidFetchHeaders(session as Session, uid as int, fields as string) {
-    return fetchHeadersCore($session, $uid, $fields, true);
-}
-
-# fetchHeadersCore retrieves named header fields by seq or UID.
-func fetchHeadersCore(session as Session, id as int, fields as string, uid as bool) {
+export func fetchHeaders(session as Session, uid as int, fields as string) {
     # `fields` is interpolated raw (not a quoted string), so it must not carry a
     # CR/LF or the `)]` that would close the fetch item and inject a command.
     rejectControl($fields, "IMAP header field list");
-    def cmd as string init uidPrefix($uid) + "FETCH " + convert.toString($id) +
+    def cmd as string init "UID FETCH " + convert.toString($uid) +
         " BODY.PEEK[HEADER.FIELDS (" + $fields + ")]";
     return extractLiteral(command($session.conn, $cmd));
 }
 
 /**
- * Return the flags currently set on message `n` as a space-separated string
- * (e.g. "\\Seen $cl_1"), or "" when none. Useful to confirm a STORE actually
- * persisted: a server that does not allow a custom keyword answers OK but drops
- * it, so the keyword will be absent here.
- * @param session {Session} the open session
- * @param n {int} the message sequence number
- * @return {string} the flags, space-separated (no surrounding parentheses)
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func flags(session as Session, n as int) {
-    return flagsCore($session, $n, false);
-}
-
-/**
- * Like `flags`, but addresses the message by its stable **UID**.
+ * Return the flags currently set on a message (by UID) as a space-separated
+ * string (e.g. "\\Seen $cl_1"), or "" when none. Useful to confirm a STORE
+ * actually persisted: a server that does not allow a custom keyword answers OK
+ * but drops it, so the keyword will be absent here.
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {string} the flags, space-separated (no surrounding parentheses)
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func uidFlags(session as Session, uid as int) {
-    return flagsCore($session, $uid, true);
-}
-
-# flagsCore reads a message's FLAGS by seq or UID.
-func flagsCore(session as Session, id as int, uid as bool) {
+export func flags(session as Session, uid as int) {
     def resp as string init command(
         $session.conn,
-        uidPrefix($uid) + "FETCH " + convert.toString($id) + " (FLAGS)");
+        "UID FETCH " + convert.toString($uid) + " (FLAGS)");
     def m as regex.Match init regex.find("FLAGS \\(([^)]*)\\)", $resp);
     if ($m.start < 0) {
         return "";
@@ -1142,66 +1039,41 @@ func flagsCore(session as Session, id as int, uid as bool) {
     return strings.trim($m.groups[0]);
 }
 
+# storeFlags runs UID STORE +/-FLAGS.SILENT (shared by addFlags / removeFlags).
+func storeFlags(session as Session, uid as int, sign as string, flags as string) {
+    command(
+        $session.conn,
+        "UID STORE " + convert.toString($uid) + " " + $sign + "FLAGS.SILENT (" + $flags + ")");
+    return;
+}
+
 /**
- * Add IMAP flags / keywords to message `n` (STORE +FLAGS.SILENT). Use a keyword
- * like "$cl_1" to colour the message in Thunderbird, or the system flag
+ * Add IMAP flags / keywords to a message (`UID STORE +FLAGS.SILENT`). Use a
+ * keyword like "$cl_1" to colour the message in Thunderbird, or the system flag
  * "\\Deleted" to mark it for `expunge`. The folder is selected read-write by
  * `selectFolder`, so the store is permitted.
  * @param session {Session} the open session
- * @param n {int} the message sequence number
- * @param flags {string} the space-separated flags, e.g. "$cl_1" or "\\Deleted"
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func addFlags(session as Session, n as int, flags as string) {
-    storeCore($session, $n, "+", $flags, false);
-    return;
-}
-
-/**
- * Like `addFlags`, but addresses the message by its stable **UID** (`UID STORE`).
- * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param flags {string} the space-separated flags, e.g. "$cl_1" or "\\Deleted"
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func uidAddFlags(session as Session, uid as int, flags as string) {
-    storeCore($session, $uid, "+", $flags, true);
-    return;
-}
-
-# storeCore runs STORE +/-FLAGS.SILENT by seq or UID.
-func storeCore(session as Session, id as int, sign as string, flags as string, uid as bool) {
-    command(
-        $session.conn,
-        uidPrefix($uid) + "STORE " + convert.toString($id) + " " + $sign + "FLAGS.SILENT (" +
-            $flags + ")");
+export func addFlags(session as Session, uid as int, flags as string) {
+    storeFlags($session, $uid, "+", $flags);
     return;
 }
 
 /**
- * Remove IMAP flags / keywords from message `n` (STORE -FLAGS.SILENT), the
+ * Remove IMAP flags / keywords from a message (`UID STORE -FLAGS.SILENT`), the
  * inverse of addFlags. Removing a flag that is not set is a harmless no-op, e.g.
- * removeFlags(session, n, "$cl_1") clears that tag, "\\Deleted" un-marks a
+ * removeFlags(session, uid, "$cl_1") clears that tag, "\\Deleted" un-marks a
  * pending delete.
  * @param session {Session} the open session
- * @param n {int} the message sequence number
- * @param flags {string} the space-separated flags to clear, e.g. "$cl_1"
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func removeFlags(session as Session, n as int, flags as string) {
-    storeCore($session, $n, "-", $flags, false);
-    return;
-}
-
-/**
- * Like `removeFlags`, but addresses the message by its stable **UID**.
- * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param flags {string} the space-separated flags to clear, e.g. "$cl_1"
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func uidRemoveFlags(session as Session, uid as int, flags as string) {
-    storeCore($session, $uid, "-", $flags, true);
+export func removeFlags(session as Session, uid as int, flags as string) {
+    storeFlags($session, $uid, "-", $flags);
     return;
 }
 
@@ -1219,76 +1091,34 @@ export func createFolder(session as Session, folder as string) {
 }
 
 /**
- * Copy message `n` into another folder (COPY). The source copy stays until it is
- * deleted, so the standard "move" is copy + addFlags(..., "\\Deleted") + expunge.
- * The destination folder must already exist - COPY to a missing one is a
- * "NO [TRYCREATE]" error.
- * @param session {Session} the open session
- * @param n {int} the message sequence number
- * @param folder {string} the destination folder name
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func copy(session as Session, n as int, folder as string) {
-    copyCore($session, $n, $folder, false);
-    return;
-}
-
-/**
- * Like `copy`, but addresses the message by its stable **UID** (`UID COPY`).
+ * Copy a message (by UID) into another folder (`UID COPY`). The source copy stays
+ * until it is deleted, so the standard "move" is copy + addFlags(..., "\\Deleted")
+ * + expunge - or the atomic `move` below. The destination folder must already
+ * exist - COPY to a missing one is a "NO [TRYCREATE]" error.
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param folder {string} the destination folder name
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
-export func uidCopy(session as Session, uid as int, folder as string) {
-    copyCore($session, $uid, $folder, true);
-    return;
-}
-
-# copyCore runs COPY by seq or UID.
-func copyCore(session as Session, id as int, folder as string, uid as bool) {
-    command(
-        $session.conn,
-        uidPrefix($uid) + "COPY " + convert.toString($id) + " " + quoteArg($folder));
+export func copy(session as Session, uid as int, folder as string) {
+    command($session.conn, "UID COPY " + convert.toString($uid) + " " + quoteArg($folder));
     return;
 }
 
 /**
- * Move message `n` into another folder in one atomic step (`MOVE`, RFC 6851) - the
- * server copies then removes and expunges the source, so unlike the copy +
- * `\\Deleted` + expunge dance there is no window with a duplicate and no manual
- * expunge. The destination folder must already exist. `MOVE` is widely but not
- * universally supported; a server lacking it answers "BAD", so fall back to
- * `copy` + `addFlags(..., "\\Deleted")` + `expunge` when catching that.
+ * Move a message (by UID) into another folder in one atomic step (`UID MOVE`,
+ * RFC 6851) - the server copies then removes and expunges the source, so unlike
+ * the copy + `\\Deleted` + expunge dance there is no window with a duplicate and
+ * no manual expunge. The destination folder must already exist. `MOVE` is widely
+ * but not universally supported; a server lacking it answers "BAD", so fall back
+ * to `copy` + `addFlags(..., "\\Deleted")` + `expunge` when catching that.
  * @param session {Session} the open session
- * @param n {int} the message sequence number
+ * @param uid {int} the message UID
  * @param folder {string} the destination folder name
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap"), including an unsupported MOVE
  */
-export func move(session as Session, n as int, folder as string) {
-    moveCore($session, $n, $folder, false);
-    return;
-}
-
-/**
- * Like `move`, but addresses the message by its stable **UID** (`UID MOVE`). The
- * natural pairing with `uidSearch`: select the UIDs to move, then move them
- * without a sequence-number renumber racing the operation.
- * @param session {Session} the open session
- * @param uid {int} the message UID
- * @param folder {string} the destination folder name
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
- */
-export func uidMove(session as Session, uid as int, folder as string) {
-    moveCore($session, $uid, $folder, true);
-    return;
-}
-
-# moveCore runs MOVE (RFC 6851) by seq or UID.
-func moveCore(session as Session, id as int, folder as string, uid as bool) {
-    command(
-        $session.conn,
-        uidPrefix($uid) + "MOVE " + convert.toString($id) + " " + quoteArg($folder));
+export func move(session as Session, uid as int, folder as string) {
+    command($session.conn, "UID MOVE " + convert.toString($uid) + " " + quoteArg($folder));
     return;
 }
 
@@ -1389,12 +1219,11 @@ export func logout(session as Session) {
  */
 export func fetchAll(opts as Options, folder as string) {
     def session as Session init connect($opts);
-    def n as int init selectFolder($session, $folder);
+    selectFolder($session, $folder);
     def msgs as list of string init [];
-    def i as int init 1;
-    while ($i <= $n) {
-        $msgs[] = fetch($session, $i);
-        $i = $i + 1;
+    # search(criteria()) is UID SEARCH ALL, so each id is a stable UID for fetch.
+    for (def uid in search($session, criteria())) {
+        $msgs[] = fetch($session, $uid);
     }
     logout($session);
     return $msgs;

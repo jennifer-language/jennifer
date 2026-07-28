@@ -22,12 +22,12 @@ def opts as imap.Options init imap.Options{
 try {
     def s as imap.Session init imap.connect($opts);
     imap.selectFolder($s, "INBOX");
-    # Address messages by their stable UID (survives an expunge) - the basis for
-    # "process only what is new": persist these UIDs, skip them next run.
-    def uids as list of int init imap.uidSearch($s, imap.criteria());
+    # search returns stable UIDs (survive an expunge) - the basis for "process
+    # only what is new": persist these UIDs, skip them next run.
+    def uids as list of int init imap.search($s, imap.criteria());
     io.printf("INBOX has %d message(s):\n", len($uids));
     for (def uid in $uids) {
-        def m as mime.Part init imap.uidFetchMessage($s, $uid);
+        def m as mime.Part init imap.fetchMessage($s, $uid);
         io.printf(
             "  uid %d | from %s | subject: %s\n",
             $uid,

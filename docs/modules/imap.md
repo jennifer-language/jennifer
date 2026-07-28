@@ -6,8 +6,8 @@ library, with plaintext / implicit-TLS / STARTTLS transport and auth by `LOGIN`,
 XOAUTH2, CRAM-MD5, or SCRAM-SHA-1 / SCRAM-SHA-256.
 A practical subset - not the full protocol, but covering both **reading and
 basic folder management**: select a folder, search it with criteria, fetch
-whole messages or named headers, set/clear flags, copy messages, create a
-folder, and delete (mark `\Deleted` + expunge - so a **move** is copy + delete).
+whole messages or named headers, set/clear flags, copy or atomically **move**
+messages (RFC 6851), create a folder, and delete (mark `\Deleted` + expunge).
 It is not read-only. Retrieved messages come back as strings for the
 [`mime`](mime.md) module to parse. Because it uses `net`, this module needs the
 default **`jennifer`** binary.
@@ -36,7 +36,9 @@ Runnable: [`examples/modules/imap_demo.j`](https://github.com/jennifer-language/
 
 A session is stateful: `connect`, `selectFolder`, `search` / `fetch` /
 `fetchHeaders`, optional `addFlags` / `expunge`, `logout`. `fetchAll` wraps the
-common "read every message in a folder" case.
+common "read every message in a folder" case. Messages are addressed by their
+stable **UID** throughout (see [UIDs](#uids-stable-identifiers) below) - `search`
+returns UIDs, and every message verb takes one.
 
 | Call / type                          | Notes                                                            |
 | ------------------------------------ | ---------------------------------------------------------------- |
@@ -48,21 +50,20 @@ common "read every message in a folder" case.
 | `imap.selectFolder(session, name)`  | `SELECT` a folder (e.g. `"INBOX"`); returns its message count.  |
 | `imap.Criteria`                      | A search filter (all fields optional; zero = match all). See [Searching](#searching). |
 | `imap.criteria()`                    | An empty `Criteria` (matches all). Set fields, then pass to `search`. |
-| `imap.search(session, criteria)`     | The sequence numbers matching `criteria` (`list of int`). `imap.criteria()` = every message. |
-| `imap.fetch(session, n)`             | `FETCH n BODY.PEEK[]` - message `n` as a raw string, for `mime.parse`. |
-| `imap.fetchMessage(session, n)`      | Fetch message `n` and parse it into a `mime.Part` tree (import `mime` too, then use `mime.attachments` / `mime.textBodies`). |
-| `imap.fetchHeaders(session, n, flds)`| `FETCH n BODY.PEEK[HEADER.FIELDS (flds)]` - only the named headers (e.g. `"SUBJECT DATE"`), cheaper than the whole body. |
-| `imap.flags(session, n)`             | `FETCH n (FLAGS)` - the flags set on message `n` as a space-separated string (confirm a `STORE` persisted). |
-| `imap.addFlags(session, n, flags)`   | `STORE n +FLAGS.SILENT (flags)` - add keywords / flags, e.g. `"$cl_1"` (Thunderbird tag colour) or `"\Deleted"`. A server that disallows a keyword answers OK but drops it - verify with `flags`. |
-| `imap.removeFlags(session, n, flags)`| `STORE n -FLAGS.SILENT (flags)` - clear keywords / flags (inverse of `addFlags`); removing an unset flag is a no-op. |
+| `imap.search(session, criteria)`     | The **UIDs** matching `criteria` (`list of int`, via `UID SEARCH`). `imap.criteria()` = every message. |
+| `imap.fetch(session, uid)`           | `UID FETCH uid BODY.PEEK[]` - the message as a raw string, for `mime.parse`. |
+| `imap.fetchMessage(session, uid)`    | Fetch the message and parse it into a `mime.Part` tree (import `mime` too, then use `mime.attachments` / `mime.textBodies`). |
+| `imap.fetchHeaders(session, uid, flds)`| `UID FETCH uid BODY.PEEK[HEADER.FIELDS (flds)]` - only the named headers (e.g. `"SUBJECT DATE"`), cheaper than the whole body. |
+| `imap.fetchPartial(session, uid, offset, length)` | `UID FETCH uid BODY.PEEK[]<offset.length>` - a byte range of the body, to pull a large message in bounded chunks. |
+| `imap.flags(session, uid)`           | `UID FETCH uid (FLAGS)` - the flags set on the message as a space-separated string (confirm a `STORE` persisted). |
+| `imap.addFlags(session, uid, flags)` | `UID STORE uid +FLAGS.SILENT (flags)` - add keywords / flags, e.g. `"$cl_1"` (Thunderbird tag colour) or `"\Deleted"`. A server that disallows a keyword answers OK but drops it - verify with `flags`. |
+| `imap.removeFlags(session, uid, flags)`| `UID STORE uid -FLAGS.SILENT (flags)` - clear keywords / flags (inverse of `addFlags`); removing an unset flag is a no-op. |
 | `imap.createFolder(session, name)`  | `CREATE name` - make a folder; errors if it already exists, so `try`/`catch` for a create-if-missing. |
-| `imap.copy(session, n, folder)`     | `COPY n folder` - copy message `n` into another (existing) folder. A "move" is `copy` + `addFlags(..., "\Deleted")` + `expunge`. |
+| `imap.copy(session, uid, folder)`   | `UID COPY uid folder` - copy the message into another (existing) folder. A "move" is `copy` + `addFlags(..., "\Deleted")` + `expunge`, or the atomic `move`. |
+| `imap.move(session, uid, folder)`    | `UID MOVE uid folder` (RFC 6851) - copy + delete + expunge in one atomic step (no manual `\Deleted` + `EXPUNGE`). |
 | `imap.append(session, folder, msg)` | `APPEND` - upload a full RFC 5322 message into `folder` (e.g. save to Sent). |
 | `imap.appendWith(session, folder, flags, msg)` | `APPEND` with initial flags, e.g. `"\Seen"` for Sent or `"\Draft"` for a draft. |
 | `imap.expunge(session)`              | `EXPUNGE` - permanently remove all `\Deleted` messages in the selected folder. |
-| `imap.move(session, n, folder)`      | `MOVE n folder` (RFC 6851) - copy + delete + expunge in one atomic step (no manual `\Deleted` + `EXPUNGE`). |
-| `imap.fetchPartial(session, n, offset, length)` | `FETCH n BODY.PEEK[]<offset.length>` - a byte range of the body, to pull a large message in bounded chunks. |
-| **UID variants** (stable ids)        | Each seq verb has a UID twin that addresses by the message's persistent UID (survives an expunge): `uidSearch`, `uidFetch`, `uidFetchMessage`, `uidFetchHeaders`, `uidFlags`, `uidAddFlags`, `uidRemoveFlags`, `uidCopy`, `uidMove`, `uidFetchPartial`. Same arguments, but the `int` is a UID. |
 | `imap.logout(session)`               | `LOGOUT` and close.                                              |
 | `imap.fetchAll(opts, folder)`       | Connect, select, retrieve every message, log out; `list of string`. |
 | `imap.Notification`                  | One server push during IDLE: `kind` (`"exists"` / `"expunge"` / `"recent"` / `""`), `number`. |
@@ -117,9 +118,9 @@ to scope to a subtree. `flags` carries IMAP attributes such as `\HasChildren`
 
 ## Searching
 
-`search(session, criteria)` returns the sequence numbers of the messages in the
-selected folder that match a `Criteria`, so you fetch only the mail you want
-instead of pulling the whole folder. Build one from `imap.criteria()` (which
+`search(session, criteria)` returns the **UIDs** of the messages in the
+selected folder that match a `Criteria` (via `UID SEARCH`), so you fetch only the
+mail you want instead of pulling the whole folder. Build one from `imap.criteria()` (which
 matches everything) and set the fields you need - a zero-value `Criteria` is the
 old `SEARCH ALL`.
 
@@ -163,8 +164,8 @@ $c.unseen = true;                                            # server-side flag
 $c.subjectRegex = "INV-2026-[0-9]+";                         # client-side regex on Subject
 $c.hasAttachments = true;                                    # client-side structure check
 
-for (def n in imap.search($s, $c)) {
-    def msg as mime.Part init imap.fetchMessage($s, $n);      # fetch only the matches
+for (def uid in imap.search($s, $c)) {
+    def msg as mime.Part init imap.fetchMessage($s, $uid);   # fetch only the matches
     io.printf("%s\n", mime.headerValue($msg, "Subject"));
 }
 ```
@@ -181,37 +182,51 @@ integers, so no criteria field can inject an IMAP command. An inverted range
 silent empty result; `since == before` is a valid (empty) range.
 
 Not yet covered: non-ASCII search strings over `SEARCH` (use `subjectRegex` /
-`fromRegex` meanwhile), and UID-based search.
+`fromRegex` meanwhile).
+
+## UIDs: stable identifiers
+
+Every message verb addresses by **UID**, never by a sequence number. A sequence
+number is only valid within the current selection - an `EXPUNGE` renumbers every
+message after the removed one, so a number captured earlier can silently point at
+the wrong message. A UID is stable: it keeps naming the same message across
+expunges and across sessions (paired with the folder's `UIDVALIDITY` from
+`status`). So there is one addressing scheme, and it is the correct one:
+
+```jennifer
+def uids as list of int init imap.search($s, imap.criteria());  # stable UIDs
+def body as string init imap.fetch($s, $uids[0]);               # fetch by UID
+```
+
+This is the correct basis for "process only what is new since last run": record
+the UIDs (and `UIDVALIDITY`) you have handled, then next session `search` and
+skip the ones you have already seen - immune to the renumbering a sequence-number
+loop would trip over. Sequence numbers appear only where the *server* emits them
+as data - the count from `selectFolder`, and the numbers in IDLE `EXISTS` /
+`EXPUNGE` pushes - never as an addressing input.
 
 ## Managing messages
 
-Reading is only half of it - the module also **modifies** the folder. Flags
-(`STORE`), copy, delete (`\Deleted` + `EXPUNGE`), and folder creation are all
-supported, keyed by message sequence number.
+Reading is only half of it - the module also **modifies** the folder. Given a
+UID (from `search`):
 
 **Flag a message** (mark read, tag, star). Flags are a space-separated string;
 system flags start with `\`, keywords don't. A server that disallows a keyword
 answers `OK` but silently drops it, so read it back with `flags` if it matters:
 
 ```jennifer
-imap.addFlags($s, 3, "\\Seen");           # mark message 3 read
-imap.addFlags($s, 3, "$cl_1");            # add a keyword/tag (Thunderbird colour label)
-imap.removeFlags($s, 3, "\\Flagged");     # unstar it
-io.printf("now: %s\n", imap.flags($s, 3)); # e.g. "\Seen $cl_1"
-```
-
-**Delete** a message - IMAP delete is two steps, mark then expunge:
-
-```jennifer
-imap.addFlags($s, 3, "\\Deleted");        # mark for deletion
-imap.expunge($s);                          # permanently remove every \Deleted message
+def uid as int init imap.search($s, imap.criteria())[0];
+imap.addFlags($s, $uid, "\\Seen");            # mark read
+imap.addFlags($s, $uid, "$cl_1");             # add a keyword/tag (Thunderbird colour label)
+imap.removeFlags($s, $uid, "\\Flagged");      # unstar it
+io.printf("now: %s\n", imap.flags($s, $uid)); # e.g. "\Seen $cl_1"
 ```
 
 **Move** a message. The RFC 6851 `MOVE` does copy + delete + expunge atomically:
 
 ```jennifer
 imap.createFolder($s, "Archive");        # once; errors if it already exists (try/catch)
-imap.move($s, 3, "Archive");              # atomic: no manual \Deleted + expunge
+imap.move($s, $uid, "Archive");          # atomic: no manual \Deleted + expunge
 ```
 
 `MOVE` is widely but not universally supported; a server lacking it answers
@@ -219,38 +234,14 @@ imap.move($s, 3, "Archive");              # atomic: no manual \Deleted + expunge
 `try`/`catch`:
 
 ```jennifer
-imap.copy($s, 3, "Archive");              # copy into the target folder
-imap.addFlags($s, 3, "\\Deleted");        # then delete the original
-imap.expunge($s);
+imap.copy($s, $uid, "Archive");           # copy into the target folder
+imap.addFlags($s, $uid, "\\Deleted");     # then mark the original deleted
+imap.expunge($s);                         # permanently remove every \Deleted message
 ```
 
-Note `EXPUNGE` renumbers the remaining messages, so gather the sequence numbers
-you want (with `search`) **before** expunging, or expunge last.
-
-### UIDs: stable identifiers across sessions
-
-A sequence number is only valid within the current selection - an `EXPUNGE`
-renumbers every message after the removed one, so a number captured earlier can
-silently point at the wrong message. A **UID** is stable: it keeps addressing the
-same message across expunges and across sessions (paired with the folder's
-`UIDVALIDITY` from `status`). Every message-addressing verb has a `uid` twin that
-takes a UID instead of a sequence number:
-
-```jennifer
-def uids as list of int init imap.uidSearch($s, imap.criteria());  # stable ids
-def body as string init imap.uidFetch($s, $uids[0]);                # fetch by UID
-imap.uidAddFlags($s, $uids[0], "\\Seen");                            # STORE by UID
-imap.uidMove($s, $uids[0], "Archive");                               # UID MOVE
-```
-
-This is the correct basis for "process only what is new since last run": record
-the UIDs (and `UIDVALIDITY`) you have handled, then next session `uidSearch` and
-skip the ones you have already seen - immune to the renumbering a sequence-number
-loop would trip over.
-
-**Large bodies** can be pulled in ranges with `fetchPartial(session, n, offset,
-length)` (or `uidFetchPartial`), which issues `BODY.PEEK[]<offset.length>` so a
-big message is retrieved in bounded chunks instead of one huge literal.
+**Large bodies** can be pulled in ranges with `fetchPartial(session, uid, offset,
+length)`, which issues `UID FETCH ... BODY.PEEK[]<offset.length>` so a big
+message is retrieved in bounded chunks instead of one huge literal.
 
 **Save a message** into a folder with `append` (e.g. keep a copy in Sent after
 sending, or store a draft). The message is a full RFC 5322 string - headers, a
@@ -320,7 +311,10 @@ if ($n.kind == "exists") {
     io.printf("new mail: the mailbox now has %d messages\n", $n.number);
 }
 imap.done($s);                                  # leave IDLE, back to command mode
-def latest as string init imap.fetch($s, $n.number);   # ordinary commands work again
+# Ordinary commands work again. A push carries a sequence number, not a UID, so
+# resolve the new mail's stable UID with a search before fetching it.
+def uids as list of int init imap.search($s, imap.criteria());
+def latest as string init imap.fetch($s, $uids[len($uids) - 1]);
 ```
 
 `pollNotification($s, timeoutMs)` is the non-blocking variant - it returns the
@@ -351,10 +345,10 @@ A practical subset of IMAP4rev1, not the whole protocol. What it does **not**
 cover:
 
 - **Commands.** No `RENAME` / `DELETE` of *folders* (only `CREATE` / `LIST` /
-  `STATUS`) and no atomic `MOVE` (do `COPY` + `\Deleted` + `EXPUNGE`). `IDLE` is
-  supported (see [IDLE](#idle-server-push)) for the `EXISTS` / `EXPUNGE` /
-  `RECENT` pushes. Everything works on **sequence numbers**, not UIDs, and
-  `SEARCH` sends ASCII-only criteria (no `CHARSET UTF-8`).
+  `STATUS`). `IDLE` is supported (see [IDLE](#idle-server-push)) for the `EXISTS`
+  / `EXPUNGE` / `RECENT` pushes (whose numbers are sequence numbers - the one
+  place they surface). Message operations address by **UID**; `SEARCH` sends
+  ASCII-only criteria (no `CHARSET UTF-8`).
 - **Auth.** The supported mechanisms are in [Authentication](#authentication);
   *not* covered are GSSAPI / Kerberos, NTLM, client-certificate auth, and OAuth2
   token **acquisition** / refresh - obtain the access token yourself (e.g. via

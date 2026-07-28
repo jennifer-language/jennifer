@@ -769,19 +769,19 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `imap.connect(opts)` -> `imap.Session`, then `folders(session, pattern)` (LIST
   -> `imap.Folder` name/delimiter/flags), `status(session, folder)` (`imap.Status`
   counts without selecting), `selectFolder(session, name)`
-  (count), `search(session, criteria)` (sequence numbers matching an
-  `imap.Criteria`), `fetch(session, n)` (a whole
-  message as a string) or `fetchMessage(session, n)` (parsed to a `mime.Part`,
-  ready for `mime.attachments` / `textBodies`); manage with
-  `addFlags`/`removeFlags`/`flags`, `copy`, `move` (atomic MOVE, RFC 6851),
-  `append`/`appendWith` (upload a full RFC 5322 message, e.g. save to Sent),
-  `createFolder`, and delete via `\Deleted` + `expunge`; `fetchPartial(session,
-  n, offset, length)` pulls a byte range of a large body; `logout(session)`, plus
-  `imap.fetchAll(opts, folder)`. Every message-addressing verb has a **UID twin**
-  (`uidSearch` / `uidFetch` / `uidFetchMessage` / `uidFetchHeaders` / `uidFlags` /
-  `uidAddFlags` / `uidRemoveFlags` / `uidCopy` / `uidMove` / `uidFetchPartial`)
-  that addresses by the message's stable UID (survives an expunge) instead of a
-  sequence number - the correct key for "process only what is new since last run". `imap.Criteria` (build with `imap.criteria()`
+  (count), `search(session, criteria)` (the **UIDs** matching an `imap.Criteria`,
+  via `UID SEARCH`), `fetch(session, uid)` (a whole message as a string) or
+  `fetchMessage(session, uid)` (parsed to a `mime.Part`, ready for
+  `mime.attachments` / `textBodies`); manage with `addFlags`/`removeFlags`/`flags`,
+  `copy`, `move` (atomic `UID MOVE`, RFC 6851), `append`/`appendWith` (upload a
+  full RFC 5322 message, e.g. save to Sent), `createFolder`, and delete via
+  `\Deleted` + `expunge`; `fetchPartial(session, uid, offset, length)` pulls a
+  byte range of a large body; `logout(session)`, plus `imap.fetchAll(opts,
+  folder)`. **Every message verb addresses by the stable UID** (`UID FETCH` /
+  `STORE` / `COPY` / `MOVE` / `SEARCH`), which survives an expunge - the correct
+  key for "process only what is new since last run". Sequence numbers appear only
+  as the `selectFolder` count and the IDLE `EXISTS` / `EXPUNGE` push numbers
+  (server-emitted data, never an addressing input). `imap.Criteria` (build with `imap.criteria()`
   + fields) filters server-side (substring on `subject`/`from`/`to`/`text`, a
   `since`/`before` date range set with plain `time.Time` values (rendered to the
   IMAP date form internally; a time-of-day is refined to the exact instant

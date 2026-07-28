@@ -70,10 +70,10 @@ func fakeIMAPUid(ln net.Listener, captured chan<- []string) {
 	}
 }
 
-// A .j program exercises the UID-addressed verbs and asserts both the parsed
-// results (UID SEARCH numbers, a UID-fetched body, a ranged fetch, UID flags)
-// and, via the captured command log, the exact wire commands (UID FETCH / STORE /
-// COPY / MOVE and the native seq MOVE + ranged FETCH).
+// A .j program exercises the (UID-only) message verbs and asserts both the
+// parsed results (search UIDs, a fetched body, a ranged fetch, flags) and, via
+// the captured command log, that every message command goes out in its UID form
+// (UID SEARCH / FETCH / STORE / COPY / MOVE, plus the ranged FETCH).
 func TestImapUidVerbs(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -95,32 +95,31 @@ def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: "
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 
-# UID SEARCH -> stable UIDs
-def uids as list of int init imap.uidSearch($s, imap.criteria());
+# search -> stable UIDs (UID SEARCH)
+def uids as list of int init imap.search($s, imap.criteria());
 testing.assertEqual(len($uids), 2);
 testing.assertEqual($uids[0], 101);
 testing.assertEqual($uids[1], 102);
 
-# UID FETCH -> body by stable id
-def body as string init imap.uidFetch($s, 101);
+# fetch -> body by UID
+def body as string init imap.fetch($s, 101);
 testing.assertContains($body, "the uid body");
 
-# ranged FETCH (partial body)
-def part as string init imap.fetchPartial($s, 1, 0, 5);
+# ranged fetch (partial body)
+def part as string init imap.fetchPartial($s, 101, 0, 5);
 testing.assertEqual($part, "01234");
 
-# UID FETCH headers + flags
-def hdrs as string init imap.uidFetchHeaders($s, 101, "SUBJECT");
+# header fetch + flags
+def hdrs as string init imap.fetchHeaders($s, 101, "SUBJECT");
 testing.assertContains($hdrs, "Subject: Hi");
-def fl as string init imap.uidFlags($s, 101);
+def fl as string init imap.flags($s, 101);
 testing.assertContains($fl, "\\Seen");
 
-# UID STORE / COPY / MOVE and native seq MOVE (no throw = OK)
-imap.uidAddFlags($s, 101, "\\Deleted");
-imap.uidRemoveFlags($s, 101, "$cl_1");
-imap.uidCopy($s, 101, "Archive");
-imap.uidMove($s, 102, "Archive");
-imap.move($s, 1, "Archive");
+# store / copy / move (no throw = OK)
+imap.addFlags($s, 101, "\\Deleted");
+imap.removeFlags($s, 101, "$cl_1");
+imap.copy($s, 101, "Archive");
+imap.move($s, 102, "Archive");
 imap.logout($s);`, imapMod, port)
 	progPath := filepath.Join(dir, "uid.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
@@ -135,14 +134,13 @@ imap.logout($s);`, imapMod, port)
 	for _, want := range []string{
 		"UID SEARCH",
 		"UID FETCH 101 BODY.PEEK[]",
-		"FETCH 1 BODY.PEEK[]<0.5>",
+		"UID FETCH 101 BODY.PEEK[]<0.5>",
 		"UID FETCH 101 BODY.PEEK[HEADER.FIELDS (SUBJECT)]",
 		"UID FETCH 101 (FLAGS)",
 		"UID STORE 101 +FLAGS.SILENT (\\Deleted)",
 		"UID STORE 101 -FLAGS.SILENT ($cl_1)",
 		"UID COPY 101 \"Archive\"",
 		"UID MOVE 102 \"Archive\"",
-		"MOVE 1 \"Archive\"",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected the client to send %q; commands were:\n%s", want, joined)

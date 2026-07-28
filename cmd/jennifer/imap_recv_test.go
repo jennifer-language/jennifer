@@ -41,6 +41,11 @@ func fakeIMAP(ln net.Listener) {
 			continue
 		}
 		tag, cmd := fields[0], strings.ToUpper(fields[1])
+		// The client addresses messages by UID, so real commands are "UID FETCH
+		// ...", "UID SEARCH ...": dispatch on the subcommand after the UID prefix.
+		if cmd == "UID" && len(fields) >= 3 {
+			cmd = strings.ToUpper(fields[2])
+		}
 		switch cmd {
 		case "SELECT":
 			fmt.Fprintf(conn, "* 2 EXISTS\r\n* 0 RECENT\r\n%s OK SELECT completed\r\n", tag)

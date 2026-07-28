@@ -887,3 +887,30 @@ The chosen form: the algorithm is always a value, uniformly -
 `hash.compute(b, algo)`, `hash.hmac(k, m, algo)`, `crypto.pbkdf2(..., algo)`,
 `crypto.hkdf(..., algo)` - so a fixed algorithm is a string literal and a
 negotiated one is a variable, with no new surface and no dispatch ladder.
+
+## Parallel sequence-number + UID verbs in `imap`
+
+**Rejected.** M23.3 briefly shipped a UID-addressed twin for every
+sequence-number `imap` verb (`fetch` + `uidFetch`, `search` + `uidSearch`,
+`copy` + `uidCopy`, `move` + `uidMove`, and so on - twenty verbs for ten
+operations). Collapsed to **UID-only addressing** (each verb sends its `UID`
+form and takes a UID) on **stance #1 (one way per thing)**:
+
+- **The twins are a parallel API for the same job.** `fetch(session, n)` and
+  `uidFetch(session, uid)` retrieve a message; they differ only in which
+  identifier space the `int` names. That is the two-ways redundancy the stance
+  rejects.
+- **It also violated stance #2 (explicit over implicit).** With both, a bare
+  `fetch($s, 42)` hid *which* id space `42` was in - a sequence number and a UID
+  are different numbers for the same message, so mixing them is a silent bug.
+- **Sequence-number addressing is the footgun the milestone existed to fix.** An
+  `EXPUNGE` renumbers sequence numbers, silently breaking "fetch only what's new
+  since last run" - the exact correctness problem M23.3 set out to solve. Keeping
+  it as a co-equal addressing scheme preserved the trap.
+
+The chosen form: one addressing scheme, UID, which is stable across expunges and
+sessions. Sequence numbers survive only where the server *emits* them as data -
+the `selectFolder` count and IDLE `EXISTS` / `EXPUNGE` push numbers - never as an
+addressing input a caller hands back in. A session-level `useUid` mode (the
+imapclient approach) was also considered and rejected: it fixes stance #1 but
+doubles down on stance #2's hidden-mode problem.
