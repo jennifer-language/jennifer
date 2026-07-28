@@ -704,9 +704,15 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   exptime)` / `add` (store-if-absent, `-> bool`) / `get(session, key)` (`""`
   when absent) / `delete` / `incr(session, key, delta)` (new value, `-1` when
   absent) / `decr` / `touch` / `quit`. Every store carries a TTL (`exptime`
-  seconds). A volatile cache for sessions / counters / locks. Throws `Error`
-  (kind `"memcache"`) on a protocol error. **Default `jennifer` binary only**
-  (`net`).
+  seconds). For a **binary** value, `setBytes(session, key, value, exptime)` /
+  `getBytes(session, key)` store / read raw `bytes` byte-for-byte (`get`/`set`
+  are text and throw on non-UTF-8). `getMulti(session, keys)` fetches several
+  keys in one round-trip (`-> map of string to string`, missing keys absent);
+  `gets(session, key)` -> `memcache.Item{value, cas, found}` + `cas(session, key,
+  value, exptime, casId)` -> `"stored"` / `"exists"` / `"not_found"` are the
+  check-and-set (optimistic-concurrency) pair. A volatile cache for sessions /
+  counters / locks. Throws `Error` (kind `"memcache"`) on a protocol error.
+  **Default `jennifer` binary only** (`net`).
 - **`session`** - server-side sessions on the `memcache` module: a `map of
   string to string` under `sess:ID` with a sliding TTL. `session.create(mc,
   ttl)` -> id (UUID v4), `load(mc, id)` (empty map when absent / expired),
@@ -817,11 +823,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `del` / `exists` / `incr` / `decr` / `keys(session, pattern)` / `ping`, plus
   a generic `redis.command(session, args)` returning a raw `redis.Reply`
   (`kind` / `str` / `num` / `items`, walked like a `json.Value`) for any other
-  command. RESP2 pub/sub (`subscribe` / `psubscribe` / `publish` / blocking
-  `receiveMessage`), one-round-trip `pipeline`, `multi` / `exec` / `discard`
-  transactions, and a production-safe `scan` cursor (`keys` is now flagged
-  production-unsafe). `connect` does optional `AUTH` / `SELECT`; a `-ERR` reply
-  throws `Error` (kind `"redis"`). **Default `jennifer` binary only** (`net`).
+  command. For a **binary** value, `setBytes(session, k, v as bytes)` /
+  `getBytes(session, k)` store / read raw `bytes` byte-for-byte (`get`/`set` are
+  text and throw on non-UTF-8). Typed container helpers: hash `hset` / `hget` /
+  `hgetAll` (`-> map`) / `hdel`, list `lpush` / `rpush` / `lrange` / `llen` /
+  `lpop`, set `sadd` / `srem` / `smembers` / `sismember` / `scard`. RESP2 pub/sub
+  (`subscribe` / `psubscribe` / `publish` / blocking `receiveMessage`),
+  one-round-trip `pipeline`, `multi` / `exec` / `discard` transactions, and a
+  production-safe `scan` cursor (`keys` is now flagged production-unsafe).
+  `connect` does optional `AUTH` / `SELECT`; a `-ERR` reply throws `Error` (kind
+  `"redis"`). **Default `jennifer` binary only** (`net`).
 - **`resque`** - background jobs on Redis, wire-compatible with Resque:
   `resque.enqueue(session, queue, class, args)` schedules a job (JSON envelope
   `{"class","args"}` onto `resque:queue:NAME`, queue registered in the

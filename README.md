@@ -9,9 +9,11 @@
 
 Jennifer is an interpreted programming language.
 
-Jennifer is batteries-included, and not just in name: **35 built-in libraries
-and 64 distributable modules - over 400 functions and constants** cover what
-real programs actually need, so you build genuine tools, not toys. Talk to a
+Jennifer is batteries-included, and not just in name:
+**[35 built-in libraries](docs/libraries/index.md) and
+[61 distributable modules](docs/modules/index.md) - over 450 functions and
+constants** cover what real programs actually need, so you build genuine tools,
+not toys. Talk to a
 real database with the [SQL](docs/libraries/sql.md) library
 (MySQL / MariaDB and PostgreSQL, parameterized and injection-safe) or map rows
 to structs with the [ORM](docs/modules/orm.md). Read and write
@@ -30,8 +32,7 @@ And lightweight [concurrency](docs/user-guide/concurrency.md) is built into the
 language via `spawn` and the [task](docs/libraries/task.md) library. It all
 ships in **one self-contained static binary** - about 21 MB with everything,
 ~9 MB for the embeddable build - with no runtime, package manager, or dependency
-tree to install. Browse the full [library catalog](docs/libraries/index.md) and
-[module catalog](docs/modules/index.md) - both grow with every release.
+tree to install.
 
 It is also a natural fit for teaching and learning: an interactive
 [REPL](docs/technical/cli_repl.md), an

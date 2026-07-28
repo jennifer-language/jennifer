@@ -286,6 +286,82 @@ func encodePipeline(commands as list of list of string) {
     return $out;
 }
 
+# emptyBytes returns a fresh zero-length bytes value.
+func emptyBytes() {
+    def e as bytes;
+    return $e;
+}
+
+# encodeCommandBytes renders a command whose arguments are raw `bytes` as a RESP
+# array of bulk strings, so a binary value (a serialized blob, a compressed
+# payload) reaches the wire byte-for-byte instead of through a UTF-8 string. The
+# control framing (`*`, `$`, length headers, CRLF) is ASCII; only the argument
+# payloads carry arbitrary bytes.
+func encodeCommandBytes(args as list of bytes) {
+    def out as bytes init convert.bytesFromString(
+        "*" + convert.toString(len($args)) + "\r\n",
+        "utf-8");
+    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    for (def arg in $args) {
+        def hdr as string init "$" + convert.toString(len($arg)) + "\r\n";
+        $out = binary.concat($out, convert.bytesFromString($hdr, "utf-8"));
+        $out = binary.concat($out, $arg);
+        $out = binary.concat($out, $crlf);
+    }
+    return $out;
+}
+
+# readBulkReply reads one RESP reply expecting a bulk string (a GET-style reply)
+# and returns its payload as raw `bytes` - the byte-exact counterpart to the
+# string reader, which decodes as UTF-8 and would throw on a binary value. A nil
+# (`$-1`) reply yields empty bytes; an error (`-`) reply throws; the bulk length
+# is a byte count, so the payload (which may itself contain CRLF) is framed by
+# count, not by scanning.
+func readBulkReply(conn as net.Conn, timeoutMs as int) {
+    def buf as bytes;
+    while (true) {
+        def nl as int init crlfIndex($buf, 0);
+        if ($nl >= 1) {
+            def typ as int init $buf[0];
+            def header as string init convert.stringFromBytes(byteSlice($buf, 1, $nl), "utf-8");
+            if ($typ == 45) { # '-' error
+                throw Error{kind: "redis", message: $header, file: "", line: 0, col: 0};
+            }
+            if ($typ == 36) { # '$' bulk
+                def n as int init convert.toInt($header);
+                if ($n < 0) {
+                    return emptyBytes(); # nil
+                }
+                def start as int init $nl + 2;
+                if (len($buf) >= $start + $n + 2) {
+                    return byteSlice($buf, $start, $start + $n);
+                }
+                # else: header seen but payload still arriving - read more below
+            } elseif ($typ != 36) {
+                # A '+' simple string or ':' integer reply: return the line's
+                # payload bytes (unusual for a value read, but never decode-throws).
+                return byteSlice($buf, 1, $nl);
+            }
+        }
+        if ($timeoutMs > 0) {
+            net.setDeadline($conn, $timeoutMs);
+        }
+        def chunk as bytes init net.readBytes($conn, 4096);
+        if (len($chunk) == 0) {
+            throw Error{
+                kind: "redis",
+                message: "redis: connection closed before a complete reply",
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
+        $buf = binary.concat($buf, $chunk);
+        capReply(len($buf));
+    }
+    return emptyBytes();
+}
+
 # messageFromReply classifies a pushed pub/sub array into a Message. A `message`
 # push is `[ "message", channel, payload ]`; a `pmessage` push is
 # `[ "pmessage", pattern, channel, payload ]`; a (un)subscribe confirmation is
@@ -472,6 +548,46 @@ export func set(session as Session, key as string, value as string) {
 }
 
 /**
+ * Store a raw `bytes` value at `key`, byte-for-byte. Unlike `set` (whose string
+ * value is UTF-8-encoded onto the wire), this stores arbitrary binary - a
+ * serialized blob, a compressed payload, an image - which `getBytes` reads back
+ * exactly. Read it with `getBytes`, not `get` (the string reader throws on a
+ * non-UTF-8 value).
+ * @param session {Session} the open session
+ * @param key {string} the key to write
+ * @param value {bytes} the raw value to store
+ * @throws {Error} kind "redis" on a `-ERR` reply
+ */
+export func setBytes(session as Session, key as string, value as bytes) {
+    def args as list of bytes init [
+        convert.bytesFromString("SET", "utf-8"),
+        convert.bytesFromString($key, "utf-8"),
+        $value
+    ];
+    net.writeBytes($session.conn, encodeCommandBytes($args));
+    def reply as Reply init readReply($session.conn, $session.timeout);
+    if ($reply.kind == "error") {
+        throw Error{kind: "redis", message: $reply.str, file: "", line: 0, col: 0};
+    }
+    return;
+}
+
+/**
+ * Return the raw `bytes` value of `key`, or empty `bytes` when the key is
+ * missing (use `exists` to tell an empty value from a missing key). The
+ * byte-exact counterpart to `get`: it never UTF-8-decodes, so a binary value
+ * stored with `setBytes` round-trips exactly.
+ * @param session {Session} the open session
+ * @param key {string} the key to read
+ * @return {bytes} the value, or empty bytes when missing
+ * @throws {Error} kind "redis" on a `-ERR` reply
+ */
+export func getBytes(session as Session, key as string) {
+    net.writeBytes($session.conn, convert.bytesFromString(encodeCommand(["GET", $key]), "utf-8"));
+    return readBulkReply($session.conn, $session.timeout);
+}
+
+/**
  * Delete `key` and return the number of keys removed (0 or 1).
  * @param session {Session} the open session
  * @param key {string} the key to delete
@@ -523,6 +639,186 @@ export func keys(session as Session, pattern as string) {
         $out[] = $item.str;
     }
     return $out;
+}
+
+# --- typed hash / list / set helpers (exported) --------------------
+# Thin, string-valued wrappers over `command` for the common Redis container
+# types. For a binary field / element / member, build the command yourself with
+# `command` + `encodeCommandBytes` (the `setBytes` pattern), or store the blob at
+# a plain key with `setBytes`.
+
+# arrayToStrings reads an array Reply's bulk items into a list of string.
+func arrayToStrings(reply as Reply) {
+    def out as list of string init [];
+    for (def item in $reply.items) {
+        $out[] = $item.str;
+    }
+    return $out;
+}
+
+/**
+ * Set hash `key`'s `field` to `value` (HSET); returns the number of fields newly
+ * created (0 when it already existed and was updated).
+ * @param session {Session} the open session
+ * @param key {string} the hash key
+ * @param field {string} the field name
+ * @param value {string} the field value
+ * @return {int} the number of new fields (0 or 1)
+ */
+export func hset(session as Session, key as string, field as string, value as string) {
+    return command($session, ["HSET", $key, $field, $value]).num;
+}
+
+/**
+ * Return hash `key`'s `field` (HGET), or "" when the field or key is missing.
+ * @param session {Session} the open session
+ * @param key {string} the hash key
+ * @param field {string} the field name
+ * @return {string} the value, or "" when missing
+ */
+export func hget(session as Session, key as string, field as string) {
+    return command($session, ["HGET", $key, $field]).str;
+}
+
+/**
+ * Return every field and value of hash `key` (HGETALL) as a `map of string to
+ * string` (empty when the key is missing).
+ * @param session {Session} the open session
+ * @param key {string} the hash key
+ * @return {map of string to string} the field -> value pairs
+ */
+export func hgetAll(session as Session, key as string) {
+    def out as map of string to string init {};
+    def items as list of Reply init command($session, ["HGETALL", $key]).items;
+    def i as int init 0;
+    # HGETALL is a flat array [field, value, field, value, ...].
+    while ($i + 1 < len($items)) {
+        $out[$items[$i].str] = $items[$i + 1].str;
+        $i = $i + 2;
+    }
+    return $out;
+}
+
+/**
+ * Delete `field` from hash `key` (HDEL); returns the number removed (0 or 1).
+ * @param session {Session} the open session
+ * @param key {string} the hash key
+ * @param field {string} the field to delete
+ * @return {int} the number of fields removed
+ */
+export func hdel(session as Session, key as string, field as string) {
+    return command($session, ["HDEL", $key, $field]).num;
+}
+
+/**
+ * Prepend `value` to list `key` (LPUSH); returns the list's new length.
+ * @param session {Session} the open session
+ * @param key {string} the list key
+ * @param value {string} the value to prepend
+ * @return {int} the new list length
+ */
+export func lpush(session as Session, key as string, value as string) {
+    return command($session, ["LPUSH", $key, $value]).num;
+}
+
+/**
+ * Append `value` to list `key` (RPUSH); returns the list's new length.
+ * @param session {Session} the open session
+ * @param key {string} the list key
+ * @param value {string} the value to append
+ * @return {int} the new list length
+ */
+export func rpush(session as Session, key as string, value as string) {
+    return command($session, ["RPUSH", $key, $value]).num;
+}
+
+/**
+ * Return the elements of list `key` from `start` to `stop` inclusive (LRANGE;
+ * negative indices count from the end, so `0, -1` is the whole list).
+ * @param session {Session} the open session
+ * @param key {string} the list key
+ * @param start {int} the start index
+ * @param stop {int} the stop index (inclusive)
+ * @return {list of string} the elements in range
+ */
+export func lrange(session as Session, key as string, start as int, stop as int) {
+    return arrayToStrings(command(
+        $session,
+        ["LRANGE", $key, convert.toString($start), convert.toString($stop)]));
+}
+
+/**
+ * Return the length of list `key` (LLEN); 0 when the key is missing.
+ * @param session {Session} the open session
+ * @param key {string} the list key
+ * @return {int} the list length
+ */
+export func llen(session as Session, key as string) {
+    return command($session, ["LLEN", $key]).num;
+}
+
+/**
+ * Remove and return the first element of list `key` (LPOP), or "" when empty.
+ * @param session {Session} the open session
+ * @param key {string} the list key
+ * @return {string} the popped element, or "" when the list is empty
+ */
+export func lpop(session as Session, key as string) {
+    return command($session, ["LPOP", $key]).str;
+}
+
+/**
+ * Add `member` to set `key` (SADD); returns the number newly added (0 or 1).
+ * @param session {Session} the open session
+ * @param key {string} the set key
+ * @param member {string} the member to add
+ * @return {int} the number of members added
+ */
+export func sadd(session as Session, key as string, member as string) {
+    return command($session, ["SADD", $key, $member]).num;
+}
+
+/**
+ * Remove `member` from set `key` (SREM); returns the number removed (0 or 1).
+ * @param session {Session} the open session
+ * @param key {string} the set key
+ * @param member {string} the member to remove
+ * @return {int} the number of members removed
+ */
+export func srem(session as Session, key as string, member as string) {
+    return command($session, ["SREM", $key, $member]).num;
+}
+
+/**
+ * Return every member of set `key` (SMEMBERS) as a list (empty when missing;
+ * order is unspecified).
+ * @param session {Session} the open session
+ * @param key {string} the set key
+ * @return {list of string} the members
+ */
+export func smembers(session as Session, key as string) {
+    return arrayToStrings(command($session, ["SMEMBERS", $key]));
+}
+
+/**
+ * Report whether `member` is in set `key` (SISMEMBER).
+ * @param session {Session} the open session
+ * @param key {string} the set key
+ * @param member {string} the member to test
+ * @return {bool} whether the member is present
+ */
+export func sismember(session as Session, key as string, member as string) {
+    return command($session, ["SISMEMBER", $key, $member]).num > 0;
+}
+
+/**
+ * Return the number of members in set `key` (SCARD); 0 when missing.
+ * @param session {Session} the open session
+ * @param key {string} the set key
+ * @return {int} the member count
+ */
+export func scard(session as Session, key as string) {
+    return command($session, ["SCARD", $key]).num;
 }
 
 /**

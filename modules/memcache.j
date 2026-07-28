@@ -54,6 +54,20 @@ export def struct Session {
     timeout as int
 };
 
+/**
+ * One value read by `gets`: its string value, the server's CAS token (an opaque
+ * version counter), and whether the key was found. Pass `cas` to `cas` for a
+ * check-and-set that only stores if no one else changed the value meanwhile.
+ * @field value {string} the value ("" when not found)
+ * @field cas {int} the CAS token to hand to `cas` (0 when not found)
+ * @field found {bool} whether the key was present
+ */
+export def struct Item {
+    value as string,
+    cas as int,
+    found as bool
+};
+
 # One CRLF-terminated protocol line plus the still-buffered remainder. `rest`
 # is `bytes`: a value block is framed by a byte count and the remainder after a
 # line can hold the start of one, so the buffer stays bytes and a payload is
@@ -61,6 +75,15 @@ export def struct Session {
 def struct Line {
     text as string,
     rest as bytes
+};
+
+# One raw value block parsed from a get / gets reply: the key, the value as bytes
+# (decoded to a string only by the string-returning verbs), and the CAS token
+# (0 unless the command was `gets`).
+def struct RawItem {
+    key as string,
+    value as bytes,
+    cas as int
 };
 
 # --- wire helpers (private) ----------------------------------------
@@ -213,6 +236,71 @@ func store(session as Session, verb as string, key as string, value as string, e
     return $resp.text;
 }
 
+# storeBytes runs a storage command whose value is raw `bytes`, so a binary value
+# reaches the wire byte-for-byte. `extra` is "" for set / add or " <casId>" for
+# cas (the trailing field on the storage line). Returns the reply line.
+func storeBytes(
+    session as Session,
+    verb as string,
+    key as string,
+    value as bytes,
+    exptime as int,
+    extra as string) {
+    checkKey($key);
+    def header as string init $verb + " " + $key + " 0 " + convert.toString($exptime) + " " +
+        convert.toString(len($value)) + $extra;
+    def out as bytes init convert.bytesFromString($header + "\r\n", "utf-8");
+    $out = binary.concat($out, $value);
+    $out = binary.concat($out, convert.bytesFromString("\r\n", "utf-8"));
+    net.writeBytes($session.conn, $out);
+    def resp as Line init recvLine($session, emptyBytes());
+    checkError($resp.text);
+    return $resp.text;
+}
+
+# fetchValues runs a `get` / `gets` for one or more keys and returns the value
+# blocks parsed byte-exact (each `RawItem` keeps its value as bytes and, for
+# `gets`, its CAS token). The reply is zero or more `VALUE <key> <flags> <bytes>
+# [<cas>]\r\n<data>\r\n` blocks terminated by an `END` line; a missing key simply
+# has no block. The value is framed by its byte count, so a binary value round-
+# trips exactly and a value containing CRLF is not mis-split.
+func fetchValues(session as Session, verb as string, keys as list of string, withCas as bool) {
+    def cmd as string init $verb;
+    for (def k in $keys) {
+        checkKey($k);
+        $cmd = $cmd + " " + $k;
+    }
+    writeCmd($session, $cmd + "\r\n");
+    def items as list of RawItem init [];
+    def minParts as int init 4;
+    if ($withCas) {
+        $minParts = 5;
+    }
+    def line as Line init recvLine($session, emptyBytes());
+    while (true) {
+        checkError($line.text);
+        if (strings.startsWith($line.text, "END")) {
+            return $items;
+        }
+        def parts as list of string init strings.split($line.text, " ");
+        if (len($parts) < $minParts) {
+            fail("malformed VALUE reply: " + $line.text);
+        }
+        def nbytes as int init convert.toInt($parts[3]);
+        checkValueLen($nbytes);
+        def cas as int init 0;
+        if ($withCas) {
+            $cas = convert.toInt($parts[4]);
+        }
+        # Read the value plus its trailing CRLF, framed by the byte count.
+        def data as bytes init fillBytes($session, $line.rest, $nbytes + 2);
+        $items[] = RawItem{key: $parts[1], value: byteSlice($data, 0, $nbytes), cas: $cas};
+        # The next line (another VALUE or END) starts after the value + CRLF.
+        $line = recvLine($session, byteSlice($data, $nbytes + 2, len($data)));
+    }
+    return $items;
+}
+
 # --- commands (exported) -------------------------------------------
 
 /**
@@ -236,6 +324,24 @@ export func connect(opts as Options) {
  */
 export func set(session as Session, key as string, value as string, exptime as int) {
     def r as string init store($session, "set", $key, $value, $exptime);
+    if (not ($r == "STORED")) {
+        fail($r);
+    }
+}
+
+/**
+ * Store a raw `bytes` value at `key`, byte-for-byte (the binary counterpart to
+ * `set`). A serialized blob, a compressed payload, or an image round-trips
+ * exactly; read it back with `getBytes`, not `get` (the string reader throws on a
+ * non-UTF-8 value).
+ * @param session {Session} the open session
+ * @param key {string} the key to write
+ * @param value {bytes} the raw value to store
+ * @param exptime {int} the TTL in seconds (0 = never expire, until evicted)
+ * @throws {Error} kind "memcache" on a non-STORED reply
+ */
+export func setBytes(session as Session, key as string, value as bytes, exptime as int) {
+    def r as string init storeBytes($session, "set", $key, $value, $exptime, "");
     if (not ($r == "STORED")) {
         fail($r);
     }
@@ -269,30 +375,98 @@ export func add(session as Session, key as string, value as string, exptime as i
  * @return {string} the value, or "" when absent / expired
  */
 export func get(session as Session, key as string) {
-    checkKey($key);
-    writeCmd($session, "get " + $key + "\r\n");
-    def first as Line init recvLine($session, emptyBytes());
-    checkError($first.text);
-    if (strings.startsWith($first.text, "END")) {
+    def items as list of RawItem init fetchValues($session, "get", [$key], false);
+    if (len($items) == 0) {
         return "";
     }
-    def parts as list of string init strings.split($first.text, " ");
-    # A well-formed VALUE line is `VALUE <key> <flags> <bytes>`; anything shorter
-    # is a truncated or desynchronised reply (OM-015) - report it as a protocol
-    # error, not a bare interpreter index-out-of-bounds.
-    if (len($parts) < 4) {
-        fail("malformed VALUE reply: " + $first.text);
+    return convert.stringFromBytes($items[0].value, "utf-8");
+}
+
+/**
+ * Return the raw `bytes` value of `key`, or empty `bytes` when absent / expired
+ * (the binary counterpart to `get`). It never UTF-8-decodes, so a value stored
+ * with `setBytes` round-trips exactly.
+ * @param session {Session} the open session
+ * @param key {string} the key to read
+ * @return {bytes} the value, or empty bytes when absent / expired
+ */
+export func getBytes(session as Session, key as string) {
+    def items as list of RawItem init fetchValues($session, "get", [$key], false);
+    if (len($items) == 0) {
+        return emptyBytes();
     }
-    def nbytes as int init convert.toInt($parts[3]);
-    checkValueLen($nbytes);
-    # `nbytes` is the value's byte length; frame and slice over bytes so a
-    # multi-byte value round-trips exactly, decoding to a string only once the
-    # whole value is in hand.
-    def data as bytes init fillBytes($session, $first.rest, $nbytes + 2);
-    def value as string init convert.stringFromBytes(byteSlice($data, 0, $nbytes), "utf-8");
-    # consume the value's trailing CRLF and the END line
-    recvLine($session, byteSlice($data, $nbytes + 2, len($data)));
-    return $value;
+    return $items[0].value;
+}
+
+/**
+ * Fetch several keys in one round-trip (multi-key `get`) as a `map of string to
+ * string`; a missing / expired key is simply absent from the map, so `maps.has`
+ * distinguishes it. Cheaper than N separate `get`s.
+ * @param session {Session} the open session
+ * @param keys {list of string} the keys to read
+ * @return {map of string to string} the found key -> value pairs
+ */
+export func getMulti(session as Session, keys as list of string) {
+    def out as map of string to string init {};
+    for (def item in fetchValues($session, "get", $keys, false)) {
+        $out[$item.key] = convert.stringFromBytes($item.value, "utf-8");
+    }
+    return $out;
+}
+
+/**
+ * Read `key` with its CAS token (`gets`), for a check-and-set update. The
+ * returned `Item` carries the `value`, the `cas` token, and whether the key was
+ * `found`; pass its `cas` to `cas` so the store only succeeds if no one else
+ * changed the value meanwhile.
+ * @param session {Session} the open session
+ * @param key {string} the key to read
+ * @return {Item} the value, CAS token, and found flag
+ */
+export func gets(session as Session, key as string) {
+    def items as list of RawItem init fetchValues($session, "gets", [$key], true);
+    if (len($items) == 0) {
+        return Item{value: "", cas: 0, found: false};
+    }
+    return Item{
+        value: convert.stringFromBytes($items[0].value, "utf-8"),
+        cas: $items[0].cas,
+        found: true
+    };
+}
+
+/**
+ * Check-and-set: store `value` at `key` only if its CAS token still matches
+ * `casId` (from a prior `gets`) - i.e. only if no one else changed it meanwhile.
+ * The optimistic-concurrency primitive: `gets`, compute a new value, `cas`, and
+ * retry on `"exists"`. Returns `"stored"` (success), `"exists"` (someone else
+ * changed it - retry), or `"not_found"` (the key is gone / expired).
+ * @param session {Session} the open session
+ * @param key {string} the key to write
+ * @param value {string} the new value
+ * @param exptime {int} the TTL in seconds (0 = never expire, until evicted)
+ * @param casId {int} the CAS token from a prior `gets`
+ * @return {string} "stored", "exists", or "not_found"
+ * @throws {Error} kind "memcache" on an unexpected reply
+ */
+export func cas(session as Session, key as string, value as string, exptime as int, casId as int) {
+    def r as string init storeBytes(
+        $session,
+        "cas",
+        $key,
+        convert.bytesFromString($value, "utf-8"),
+        $exptime,
+        " " + convert.toString($casId));
+    if ($r == "STORED") {
+        return "stored";
+    }
+    if ($r == "EXISTS") {
+        return "exists";
+    }
+    if ($r == "NOT_FOUND") {
+        return "not_found";
+    }
+    fail($r);
 }
 
 /**

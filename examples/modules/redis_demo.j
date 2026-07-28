@@ -37,13 +37,25 @@ try {
     }
     io.printf("counter  -> %d\n", $n);
 
-    # The generic command / Reply for anything without a typed helper.
-    redis.command($db, ["RPUSH", "demo:queue", "one", "two", "three"]);
-    def range as redis.Reply init redis.command($db, ["LRANGE", "demo:queue", "0", "-1"]);
-    io.printf("queue    -> %d items\n", len($range.items));
-    for (def item in $range.items) {
-        io.printf("           %s\n", $item.str);
+    # Typed list helpers.
+    redis.rpush($db, "demo:queue", "one");
+    redis.rpush($db, "demo:queue", "two");
+    redis.rpush($db, "demo:queue", "three");
+    def items as list of string init redis.lrange($db, "demo:queue", 0, -1);
+    io.printf("queue    -> %d items\n", len($items));
+    for (def item in $items) {
+        io.printf("           %s\n", $item);
     }
+
+    # A binary value round-trips byte-for-byte via setBytes / getBytes.
+    def blob as bytes;
+    $blob[] = 0;
+    $blob[] = 255;
+    $blob[] = 13;
+    $blob[] = 10;
+    redis.setBytes($db, "demo:blob", $blob);
+    io.printf("blob     -> %d bytes back\n", len(redis.getBytes($db, "demo:blob")));
+    redis.del($db, "demo:blob");
 
     # An error reply is catchable.
     try {

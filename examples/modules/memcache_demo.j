@@ -30,6 +30,24 @@ try {
     io.printf("incr     -> %d\n", memcache.incr($mc, "hits", 4));
     io.printf("decr     -> %d\n", memcache.decr($mc, "hits", 2));
 
+    # Multi-key get in one round-trip (missing keys are simply absent).
+    memcache.set($mc, "a", "1", 60);
+    memcache.set($mc, "b", "2", 60);
+    def many as map of string to string init memcache.getMulti($mc, ["a", "b", "absent"]);
+    io.printf("getMulti -> %d found\n", len($many));
+
+    # gets + cas: optimistic concurrency (store only if unchanged).
+    def item as memcache.Item init memcache.gets($mc, "hits");
+    io.printf("cas      -> %s\n", memcache.cas($mc, "hits", "99", 0, $item.cas));
+
+    # A binary value round-trips byte-for-byte via setBytes / getBytes.
+    def blob as bytes;
+    $blob[] = 0;
+    $blob[] = 255;
+    $blob[] = 13;
+    memcache.setBytes($mc, "blob", $blob, 60);
+    io.printf("blob     -> %d bytes back\n", len(memcache.getBytes($mc, "blob")));
+
     # touch re-arms the TTL; delete removes.
     io.printf("touch    -> %t\n", memcache.touch($mc, "greeting", 120));
     io.printf("delete   -> %t\n", memcache.delete($mc, "greeting"));
@@ -37,6 +55,9 @@ try {
     # clean up.
     memcache.delete($mc, "once");
     memcache.delete($mc, "hits");
+    memcache.delete($mc, "a");
+    memcache.delete($mc, "b");
+    memcache.delete($mc, "blob");
     memcache.quit($mc);
 } catch (e) {
     io.printf("no memcached server at %s:%d (%s)\n", $opts.host, $opts.port, $e.message);

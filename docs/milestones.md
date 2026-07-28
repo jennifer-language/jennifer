@@ -959,37 +959,40 @@ replay) / `TestHttpSendPolicy`, `TestRestPaginateAndPolicy`, and
 `TestSmtpSessionReuse` (two messages over a single-accept server), plus the
 overlays.
 
-### M23.3 - stable-identity verbs (cross-session correctness)
+### M23.3 - stable-identity verbs (cross-session correctness) (compacted)
 
-**Done.** `imap` and `pop` both keyed off volatile sequence numbers, silently
-breaking "fetch only what's new since last run". Added stable-identifier verbs:
-- **`imap`** - **UID-only addressing** (one way, per stance #1): every message
-  verb (`search` / `fetch` / `fetchMessage` / `fetchHeaders` / `fetchPartial` /
-  `flags` / `addFlags` / `removeFlags` / `copy` / `move`) sends its `UID` form and
-  takes a persistent UID (surviving an expunge), and `search` returns UIDs via
-  `UID SEARCH` (the client-side regex / attachment / sub-day refinement fetches by
-  UID too). Sequence numbers survive only as the `selectFolder` count and IDLE
-  `EXISTS` / `EXPUNGE` push numbers (server-emitted data, never an addressing
-  input); `fetchAll` now walks `search` UIDs. Added atomic `move` (`UID MOVE`, RFC
-  6851) and ranged `fetchPartial` (`UID FETCH ... BODY.PEEK[]<offset.length>`) for
-  large bodies. **Pre-1.0 break**: the verbs' `int` argument is a UID, not a
-  sequence number (a parallel seq + UID twin set was rejected on stance #1 - see
-  `rejected.md`). Go `TestImapUidVerbs` asserts the exact `UID ...` wire commands
-  via a capturing fake server.
+**Done.** Volatile sequence numbers silently broke "fetch only what's new since
+last run"; both mail-receive modules gained stable-identifier addressing.
+- **`imap`** - went **UID-only** (stance #1): every message verb (`search` /
+  `fetch` / `fetchMessage` / `fetchHeaders` / `fetchPartial` / `flags` /
+  `addFlags` / `removeFlags` / `copy` / `move`) sends its `UID` form and takes a
+  UID (stable across an expunge), `search` returns UIDs (`UID SEARCH`, refinement
+  included), and `fetchAll` walks them. Added atomic `move` (`UID MOVE`, RFC 6851)
+  and ranged `fetchPartial` (`BODY.PEEK[]<offset.length>`). Sequence numbers
+  survive only as the `selectFolder` count and IDLE `EXISTS` / `EXPUNGE` push
+  numbers (server data, never addressing). **Pre-1.0 break** - the verbs' `int` is
+  a UID; a parallel seq + UID twin set was rejected on stance #1 (`rejected.md`).
 - **`pop`** - `uidl` -> `list of pop.MessageId` (`number` + persistent `id`) /
-  `uidlOne` for leave-on-server / skip-seen, `top` (headers-only preview when
-  `lines` = 0), and `reset` (RSET) / `noop` (NOOP). Overlay adds a `parseUidl`
-  test; Go `TestPop3StableVerbs` drives UIDL (multiline + single) / TOP / RSET /
-  NOOP against a fake server.
+  `uidlOne` for leave-on-server / skip-seen, `top` (headers-only when `lines` = 0),
+  `reset` (RSET) / `noop` (NOOP). POP3 addresses only by message number (no
+  UID-addressed command), so this is additive, not an addressing change.
 
-### M23.4 - byte-exact binary values
+Pinned by `TestImapUidVerbs` (exact `UID ...` wire commands via a capturing fake
+server) and `TestPop3StableVerbs`, plus the overlays.
 
-**Planned.** `redis` and `memcache` decode bulk values as UTF-8, so an arbitrary
-binary value (a serialized blob, a compressed payload) is not round-tripped. One
-shared design across both: `bytes`-valued get/set variants (or make the existing
-verbs byte-safe) so a non-UTF-8 value stores and loads exactly. Fold in the
-adjacent low-cost verbs while here - `memcache` `gets` / `cas` + multi-key `get`,
-and `redis` typed hash / list / set helpers.
+### M23.4 - byte-exact binary values (compacted)
+
+**Done.** `redis` / `memcache` decoded bulk values as UTF-8 (throwing on a
+non-UTF-8 value); added `bytes`-valued get/set (text `get`/`set` unchanged, still
+strict-throw), plus adjacent verbs. `redis`: `setBytes` / `getBytes` (a byte-arg
+RESP encoder + a count-framed, never-decoded reply reader) and typed hash / list
+/ set helpers (`hset`/`hget`/`hgetAll`/`hdel`, `lpush`/`rpush`/`lrange`/`llen`/
+`lpop`, `sadd`/`srem`/`smembers`/`sismember`/`scard`). `memcache`: `setBytes` /
+`getBytes` plus a shared `VALUE`-block reader powering multi-key `getMulti`,
+`gets` (`-> Item{value, cas, found}`), and `cas` (`-> "stored"`/`"exists"`/
+`"not_found"`). Pinned by `TestRedisBinaryAndTyped` /
+`TestMemcacheBinaryCasMulti` (NUL / CR / LF / 0xFF round-trip, byte-count-framed)
+and the `encodeCommandBytes` overlay test.
 
 ### M23.5 - selectable backends (stance #1)
 

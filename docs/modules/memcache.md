@@ -38,8 +38,13 @@ an `exptime` in **seconds** (`0` = never expire, until evicted).
 | `memcache.Session`                           | A live session over one connection (from `connect`).               |
 | `memcache.connect(opts)`                     | Open a session.                                                    |
 | `memcache.set(session, key, value, exptime)` | Store `value` (replacing any existing), TTL `exptime` seconds.     |
+| `memcache.setBytes(session, key, value, exptime)` | Store a raw `bytes` value byte-for-byte (binary counterpart to `set`). |
 | `memcache.add(session, key, value, exptime)` | Store only if the key is **absent**; returns whether it stored.    |
 | `memcache.get(session, key)`                 | The string value, or `""` when the key is absent / expired.        |
+| `memcache.getBytes(session, key)`            | The raw `bytes` value (byte-exact; empty when absent) - for a binary value. |
+| `memcache.getMulti(session, keys)`           | Fetch several keys in one round-trip -> `map of string to string` (missing keys absent). |
+| `memcache.gets(session, key)`                | Read with a CAS token -> `memcache.Item` (`value`, `cas`, `found`), for a check-and-set. |
+| `memcache.cas(session, key, value, exptime, casId)` | Store only if the CAS token still matches -> `"stored"` / `"exists"` / `"not_found"`. |
 | `memcache.delete(session, key)`              | Remove the key; returns whether it existed.                        |
 | `memcache.incr(session, key, delta)`         | Atomically add `delta`; the new value, or `-1` if the key is absent. |
 | `memcache.decr(session, key, delta)`         | Atomically subtract `delta` (not below 0); `-1` if absent.         |
@@ -72,21 +77,35 @@ A protocol error reply (`ERROR` / `CLIENT_ERROR` / `SERVER_ERROR`) throws a
 catchable `Error` (kind `"memcache"`); `set` also throws if the server does not
 answer `STORED`. A network failure surfaces as the underlying `net` error.
 
-## Values are read as UTF-8 text
+## Binary values and check-and-set
 
-The stored byte count is exact on the wire, but the parser reads a value back
-as UTF-8 text, so `get` is byte-exact for ASCII and UTF-8 values whose byte
-length equals their rune length - the common case (JSON, numbers, identifiers).
-A binary value, or one whose multi-byte runes make byte length differ from rune
-length, is not yet byte-exact; store such values base64-encoded (via
-[`encoding`](../libraries/encoding.md)) until a byte-native read lands. This is
-the same limitation as [`redis`](redis.md).
+`get` / `set` speak **text**: a value is decoded as UTF-8, which is exact for
+JSON, numbers, and identifiers, and **throws** on a non-UTF-8 value (strict). For
+an arbitrary **binary** value, use `setBytes` (a `bytes` value stored
+byte-for-byte) and `getBytes` (`bytes`, never decoded); `getBytes` returns empty
+`bytes` for a missing key.
+
+`gets` + `cas` are the optimistic-concurrency primitive: `gets` returns the value
+with a **CAS token**, and `cas` stores only if that token still matches (nobody
+else changed the value meanwhile). The loop is `gets` -> compute -> `cas`, retry
+on `"exists"`:
+
+```jennifer
+def it as memcache.Item init memcache.gets($mc, "counter");
+def next as string init convert.toString(convert.toInt($it.value) + 1);
+def r as string init memcache.cas($mc, "counter", $next, 0, $it.cas);
+# r is "stored" (done), "exists" (someone else won - re-gets and retry), or
+# "not_found" (the key expired).
+```
+
+`getMulti(session, keys)` fetches several keys in one round-trip as a `map of
+string to string`, with missing keys simply absent (test with `maps.has`).
 
 ## Out of scope
 
-- **A working subset**, not the full command set: `gets` / `cas`,
-  `append` / `prepend`, `stats`, and multi-key `get` are reachable later; the
-  basics cover caches, sessions, counters, and locks.
+- **A working subset**, not the full command set: `append` / `prepend` and
+  `stats` are reachable later; the basics plus `gets` / `cas` and multi-key `get`
+  cover caches, sessions, counters, and locks.
 - **No binary protocol and no SASL auth.** Classic text protocol only.
 - **No connection pool.** One `Session` is one connection.
 

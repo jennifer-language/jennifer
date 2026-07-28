@@ -201,3 +201,25 @@ func testScanResultTerminalCursor() {
     testing.assertEqual($sr.cursor, 0);
     testing.assertEqual(len($sr.keys), 0);
 }
+
+# ---- byte-exact command encoding ----
+func testEncodeCommandBytesBinary() {
+    # A value carrying NUL, CR, LF, and 0xFF must be framed by its byte count
+    # (3 args, value length 4) and reach the wire verbatim.
+    def val as bytes;
+    $val[] = 0;
+    $val[] = 13;
+    $val[] = 10;
+    $val[] = 255;
+    def enc as bytes init encodeCommandBytes([
+        convert.bytesFromString("SET", "utf-8"),
+        convert.bytesFromString("k", "utf-8"),
+        $val
+    ]);
+    def expected as bytes init convert.bytesFromString(
+        "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\n",
+        "utf-8");
+    $expected = binary.concat($expected, $val);
+    $expected = binary.concat($expected, convert.bytesFromString("\r\n", "utf-8"));
+    testing.assertEqual($enc, $expected);
+}

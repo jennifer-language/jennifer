@@ -42,6 +42,8 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.command(session, args)`       | Send any command (`list of string`); returns the raw `Reply`.         |
 | `redis.get(session, key)`            | `GET` - the string value, or `""` when the key is missing.            |
 | `redis.set(session, key, value)`     | `SET`.                                                                 |
+| `redis.getBytes(session, key)`       | `GET` returning raw `bytes` (byte-exact; empty when missing) - for a binary value. |
+| `redis.setBytes(session, key, value)`| `SET` a raw `bytes` value byte-for-byte (a blob / compressed payload). |
 | `redis.del(session, key)`            | `DEL` - number of keys removed (0 or 1).                              |
 | `redis.exists(session, key)`         | `EXISTS` - `bool`.                                                    |
 | `redis.incr(session, key)`           | `INCR` - the new value (`int`).                                       |
@@ -60,6 +62,9 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.multi(session)`               | `MULTI` - begin a transaction.                                        |
 | `redis.exec(session)`                | `EXEC` - run the queued commands; `list of Reply` (empty if aborted). |
 | `redis.discard(session)`             | `DISCARD` - drop the queued transaction.                              |
+| `redis.hset` / `hget` / `hgetAll` / `hdel` | Hash: `HSET` (new-field count), `HGET` (string), `HGETALL` (`map of string to string`), `HDEL` (removed count). |
+| `redis.lpush` / `rpush` / `lrange` / `llen` / `lpop` | List: push (new length), `LRANGE start stop` (`list of string`, `0, -1` = all), `LLEN`, `LPOP` (string). |
+| `redis.sadd` / `srem` / `smembers` / `sismember` / `scard` | Set: add / remove (count), `SMEMBERS` (`list of string`), `SISMEMBER` (`bool`), `SCARD` (`int`). |
 
 `Options.security` is `"none"` (plaintext, port 6379) or `"tls"` (implicit
 TLS, `rediss`). `password` `""` skips `AUTH`; `db` `0` skips `SELECT`. When a
@@ -217,14 +222,37 @@ Pass `pattern` `""` to skip the `MATCH` filter and `count` `0` to skip the
 `COUNT` per-page hint (`COUNT` is advisory - a page may hold more or fewer
 keys, and an empty page with a non-zero cursor is normal).
 
-## Bulk strings are read as UTF-8 text
+## Binary values: `setBytes` / `getBytes`
 
-RESP bulk-string lengths are byte counts, but the parser reads values as
-UTF-8 text. This is byte-exact for ASCII and UTF-8 string values - the common
-case (keys, JSON payloads, counters). A binary value whose byte length
-differs from its rune length is not yet byte-exact; store such values
-base64-encoded (via [`encoding`](../libraries/encoding.md)) until a
-byte-native read lands.
+`get` / `set` speak **text**: RESP bulk lengths are byte counts, but the string
+verbs decode a value as UTF-8, which is exact for keys, JSON payloads, and
+counters, and **throws** on a non-UTF-8 value (strict, by design). For an
+arbitrary **binary** value - a serialized blob, a compressed payload, an image -
+use `setBytes(session, key, value)` (a `bytes` value sent byte-for-byte) and
+`getBytes(session, key)` (`bytes`, never decoded):
+
+```jennifer
+redis.setBytes($s, "blob", $rawBytes);         # any bytes, exact
+def back as bytes init redis.getBytes($s, "blob");   # round-trips byte-for-byte
+```
+
+`getBytes` returns empty `bytes` for a missing key (use `exists` to tell that
+from an empty value). The typed hash / list / set helpers are string-valued; for
+a binary field / element / member, build the command with `command` and the same
+byte-encoding the `setBytes` path uses, or store the blob at a plain key.
+
+## Testing
+
+The pure protocol logic - the RESP command encoder (text and the byte-exact
+`encodeCommandBytes`) and the simple-string / error / integer / bulk / nil /
+array decoder (including the incomplete-buffer and leftover-buffer cases), the
+pub/sub command builders, the `message` / `pmessage` push classifier, the
+pipeline encoder, and the SCAN reply reader - is unit-tested in the overlay
+(`modules/redis_test.j`). The networked session, pub/sub delivery, pipelining,
+transactions, SCAN, the binary `setBytes` / `getBytes` round-trip, and the typed
+hash / list / set helpers are covered end to end by in-process RESP servers in
+the Go test suite (`TestRedisCommands`, `TestRedisBinaryAndTyped`), so they run
+in CI without a Redis install.
 
 ## Testing
 
