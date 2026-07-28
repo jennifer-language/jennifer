@@ -189,14 +189,15 @@ func run(
     def req as json.Value init buildRequest($query, $variables, $operationName);
     def headers as map of string to string init $c.rest.headers;
     $headers["Content-Type"] = "application/json";
-    # POST to the endpoint URL verbatim (no path joining), via the same TLS-aware
-    # send rest uses - so a self-signed host configured with withCA / insecure works.
-    def r as http.Response init http.requestTls(
+    # POST to the endpoint URL verbatim (no path joining), through the same
+    # policy-aware send rest uses - so the wrapped client's TLS (withCA /
+    # insecure) and any redirect / retry / timeout policy apply here too.
+    def r as http.Response init http.send(
         "POST",
         $c.rest.baseUrl,
         $headers,
         json.encode($req),
-        $c.rest.tls);
+        $c.rest.options);
     if ($r.status < 200 or $r.status >= 300) {
         throw Error{
             kind: "graphql",

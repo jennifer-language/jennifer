@@ -11,10 +11,15 @@ use io;
 use json;
 import "../../modules/rest.j" as rest;
 
-def api as rest.Client init rest.withHeader(
-    rest.client("http://127.0.0.1:8080"),
-    "Authorization",
-    rest.bearer("demo-token"));
+# a client with auth plus a request policy: follow redirects, retry a 429 / 5xx
+def api as rest.Client init rest.withRetries(
+    rest.withRedirects(
+        rest.withHeader(
+            rest.client("http://127.0.0.1:8080"),
+            "Authorization",
+            rest.bearer("demo-token")),
+        5),
+    3);
 
 try {
     # create a resource from a JSON value
@@ -31,6 +36,10 @@ try {
     # a GET with a query string
     def hits as json.Value init rest.getJson($api, "/search", {"q": "ada lovelace"});
     io.printf("search echoed -> %s\n", json.asString($hits, "/q"));
+
+    # walk a Link-header paginated collection (all pages)
+    def pages as list of json.Value init rest.paginate($api, "/users", {}, 20);
+    io.printf("fetched %d page(s)\n", len($pages));
 } catch (e) {
     io.printf("no REST server at %s (%s)\n", $api.baseUrl, $e.message);
 }

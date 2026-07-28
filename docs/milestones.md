@@ -946,8 +946,17 @@ reusable connections. Delivered per module (http first):
   close`, 3xx returned). Overlay `http_test.j` (pure helpers), Go
   `TestHttpSession` (keep-alive reuse proven via a connection counter + cookie
   replay) / `TestHttpSendPolicy` (redirect + 303 method change + retry).
-- **`rest`** (planned) - inherits the http session + policy, adds a per-request
-  timeout + a Link-header / cursor **pagination** iterator.
+- **`rest`** (done) - every request now routes through `http.send`, so a
+  `rest.Client` inherits the whole policy: `Client.tls` folded into an
+  `http.Options` field (**pre-1.0 break**; `withCA` / `insecure` retargeted),
+  with copy-returning builders `withTimeout` / `withRedirects` / `withRetries` /
+  `withBackoff`. `joinUrl` passes an absolute URL through (so a Link-header
+  `next` feeds back), and two **pagination** walkers `paginate` (Link header
+  `rel="next"`) / `paginateCursor` (a cursor JSON Pointer resent as a query
+  param) return `list of json.Value`, each capped by `maxPages`. Overlay adds
+  builder / absolute-join / `parseNextLink` cases; Go `TestRestPaginateAndPolicy`
+  (link + cursor walks, maxPages cap, inherited retry). Keep-alive across
+  separate `rest` calls stays on the `http.connect` / `exchange` side.
 - **`smtp`** (planned) - a persistent `Session` (connect + EHLO + auth once,
   `send` many), so a queue of N messages pays one TLS+auth handshake instead of N.
 

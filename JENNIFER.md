@@ -604,14 +604,21 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   GPIO-capable host, calls throw `Error{kind: "gpio"}` clearly. Both binaries.
 - **`rest`** - an ergonomic REST layer over `http` + `json`: build a
   value-semantic client with `rest.client(baseUrl)` (`Client{baseUrl, headers,
-  tls}`), then `rest.get(c, path, query)` / `post(c, path, contentType, body)` /
-  `put` / `patch` / `delete` -> `rest.Response` (`status` / `headers` / `body`),
-  plus `getJson` (-> `json.Value`) / `postJson` / `putJson` / `patchJson`.
-  Base-URL joining, percent-encoded query strings, `rest.bearer` / `rest.basic` /
-  `rest.withHeader` for auth. For a self-signed / private-CA host: `rest.withCA(c,
-  pem)` (trust a PEM cert, preferred) or `rest.insecure(c)` (skip verification -
-  trusted-LAN only). A 4xx/5xx is a `Response` value, not a crash. **Default
-  `jennifer` binary only** (`net`).
+  options}`, where `options` is an `http.Options` request policy), then
+  `rest.get(c, path, query)` / `post(c, path, contentType, body)` / `put` /
+  `patch` / `delete` -> `rest.Response` (`status` / `headers` / `body`), plus
+  `getJson` (-> `json.Value`) / `postJson` / `putJson` / `patchJson`. Base-URL
+  joining, percent-encoded query strings, `rest.bearer` / `rest.basic` /
+  `rest.withHeader` for auth. Every request routes through `http.send`, so the
+  client **inherits the http policy** via copy-returning builders:
+  `rest.withTimeout(c, ms)`, `rest.withRedirects(c, n)`, `rest.withRetries(c, n)`
+  / `rest.withBackoff(c, ms)`, plus TLS `rest.withCA(c, pem)` (trust a PEM cert,
+  preferred) / `rest.insecure(c)` (skip verification - trusted-LAN only). For
+  **paginated** collections, `rest.paginate(c, path, query, maxPages)` walks a
+  Link-header (`rel="next"`) collection and `rest.paginateCursor(c, path, query,
+  cursorPointer, cursorParam, maxPages)` walks a cursor collection, each
+  returning `list of json.Value` (one per page). A 4xx/5xx is a `Response` value,
+  not a crash. **Default `jennifer` binary only** (`net`).
 - **`graphql`** - a thin GraphQL client over `http` / `rest`. Build a client with
   `graphql.client(endpoint)` (the full GraphQL URL, POSTed verbatim), layer auth /
   TLS with `graphql.bearer(c, token)` / `basic` / `header(c, name, value)` /

@@ -59,22 +59,52 @@ func testClientDefaults() {
     def cli as Client init client("http://api");
     testing.assertEqual($cli.baseUrl, "http://api");
     testing.assertEqual(len($cli.headers), 0);
-    testing.assertEqual($cli.tls.skipVerify, false); # verify on by default
-    testing.assertEqual(len($cli.tls.caCert), 0);
+    testing.assertEqual($cli.options.tls.skipVerify, false); # verify on by default
+    testing.assertEqual(len($cli.options.tls.caCert), 0);
+    testing.assertEqual($cli.options.maxRedirects, 0); # no redirects by default
+    testing.assertEqual($cli.options.maxRetries, 0); # no retries by default
+    testing.assertEqual($cli.options.timeoutMs, 0); # default timeout
 }
 
 func testInsecure() {
     def cli as Client init client("https://appliance");
     def open as Client init insecure($cli);
-    testing.assertEqual($open.tls.skipVerify, true);
-    testing.assertEqual($cli.tls.skipVerify, false); # original unchanged (value semantics)
+    testing.assertEqual($open.options.tls.skipVerify, true);
+    testing.assertEqual($cli.options.tls.skipVerify, false); # original unchanged (value semantics)
 }
 
 func testWithCA() {
     def cli as Client init client("https://appliance");
     def pem as bytes init convert.bytesFromString("-----BEGIN CERTIFICATE-----", "utf-8");
     def pinned as Client init withCA($cli, $pem);
-    testing.assertEqual(len($pinned.tls.caCert), len($pem));
-    testing.assertEqual($pinned.tls.skipVerify, false); # withCA still authenticates
-    testing.assertEqual(len($cli.tls.caCert), 0); # original unchanged
+    testing.assertEqual(len($pinned.options.tls.caCert), len($pem));
+    testing.assertEqual($pinned.options.tls.skipVerify, false); # withCA still authenticates
+    testing.assertEqual(len($cli.options.tls.caCert), 0); # original unchanged
+}
+
+func testPolicyBuilders() {
+    def cli as Client init client("http://api");
+    def tuned as Client init withRetries(withRedirects(withTimeout($cli, 5000), 3), 2);
+    testing.assertEqual($tuned.options.timeoutMs, 5000);
+    testing.assertEqual($tuned.options.maxRedirects, 3);
+    testing.assertEqual($tuned.options.maxRetries, 2);
+    # original unchanged (value semantics)
+    testing.assertEqual($cli.options.timeoutMs, 0);
+    testing.assertEqual($cli.options.maxRedirects, 0);
+}
+
+func testJoinUrlAbsolutePassthrough() {
+    # a Link-header "next" is an absolute URL: it must not be re-prefixed
+    testing.assertEqual(
+        joinUrl("http://api/v1", "https://api.example.com/items?page=2"),
+        "https://api.example.com/items?page=2");
+    testing.assertEqual(joinUrl("http://api", "http://other/x"), "http://other/x");
+}
+
+func testParseNextLink() {
+    def link as string init "<https://api/items?page=2>; rel=\"next\", <https://api/items?page=9>; rel=\"last\"";
+    testing.assertEqual(parseNextLink($link), "https://api/items?page=2");
+    # no next relation -> ""
+    testing.assertEqual(parseNextLink("<https://api/items?page=1>; rel=\"prev\""), "");
+    testing.assertEqual(parseNextLink(""), "");
 }

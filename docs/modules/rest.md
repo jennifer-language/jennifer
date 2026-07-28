@@ -37,7 +37,7 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 
 | Call / type                                   | Notes                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------- |
-| `rest.Client`                                 | `baseUrl`, default `headers`, and `tls` options sent with every request. |
+| `rest.Client`                                 | `baseUrl`, default `headers`, and an `http.Options` request policy (`options`) applied to every request. |
 | `rest.Response`                               | `status`, `headers`, `body`.                                     |
 | `rest.client(baseUrl)`                        | Build a client: no default headers, full TLS verification.       |
 | `rest.get(c, path, query)`                    | GET; `query` is a `map of string to string` ({} for none).       |
@@ -54,6 +54,12 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 | `rest.withHeader(c, name, value)`             | A copy of the client with one default header set.                |
 | `rest.withCA(c, pem)`                         | A copy trusting a private-CA / self-signed PEM cert (`bytes`) for `https://`. The safer TLS opt-out: the server is still authenticated. |
 | `rest.insecure(c)`                            | A copy that skips TLS certificate verification (accepts any cert). Disables authentication - trusted-LAN endpoints only; prefer `withCA`. |
+| `rest.withTimeout(c, timeoutMs)`              | A copy with a per-request idle timeout (ms; 0 = 30s default).     |
+| `rest.withRedirects(c, maxRedirects)`         | A copy that follows up to `maxRedirects` 3xx (0 = none). Inherits `http.send`'s rules. |
+| `rest.withRetries(c, maxRetries)`             | A copy that retries a 429 / 5xx up to `maxRetries` with backoff.  |
+| `rest.withBackoff(c, backoffMs)`              | A copy with a base retry backoff (ms; 0 = 250ms default).         |
+| `rest.paginate(c, path, query, maxPages)`     | Walk a **Link-header** collection (`rel="next"`); returns `list of json.Value` (one per page). |
+| `rest.paginateCursor(c, path, query, cursorPointer, cursorParam, maxPages)` | Walk a **cursor** collection: read the next cursor at `cursorPointer`, resend it as `cursorParam`; returns `list of json.Value`. |
 
 ## URLs, queries, and auth
 
@@ -88,21 +94,57 @@ def api as rest.Client init rest.withCA(rest.client("https://192.168.1.10"), $ca
 def loose as rest.Client init rest.insecure(rest.client("https://192.168.1.10"));
 ```
 
+## Request policy (redirects, retries, timeout)
+
+A `Client` carries an `http.Options` request policy applied to every call,
+configured by copy-returning builders (like `withHeader`):
+
+```jennifer
+def api as rest.Client init rest.withRetries(
+    rest.withRedirects(rest.withTimeout(rest.client("https://api.example.com"), 5000), 5), 3);
+```
+
+- `rest.withTimeout(c, ms)` - per-request idle timeout.
+- `rest.withRedirects(c, n)` - follow up to `n` 3xx redirects (inherits
+  `http.send`'s method rules; `0` returns the 3xx).
+- `rest.withRetries(c, n)` / `rest.withBackoff(c, ms)` - retry a 429 / 5xx `n`
+  times with exponential backoff (honouring a numeric `Retry-After`).
+
+Use the builders rather than reaching into `$c.options.*` directly - the nested
+`http.Options` type is only in scope for a program that also imports `http`.
+
+## Pagination
+
+Two walkers fetch every page of a collection and return the list of decoded page
+bodies (`list of json.Value`), each capped by `maxPages`:
+
+```jennifer
+# Link-header (GitHub / GitLab): follows Link: <url>; rel="next"
+def pages as list of json.Value init rest.paginate($api, "/repos/x/y/issues", {"state": "open"}, 20);
+
+# cursor: reads the next cursor from the body, resends it as a query param
+def all as list of json.Value init rest.paginateCursor($api, "/v2/records", {}, "/meta/next_cursor", "cursor", 50);
+```
+
+`paginate` follows each response's `Link` header until there is no `rel="next"`;
+`paginateCursor` reads the cursor at a JSON Pointer (string or integer) and stops
+when it is absent, null, or empty. Both throw `kind "rest"` on a non-2xx page.
+
 ## Errors
 
 A non-2xx **status is a value, not a crash**: a 404 or 500 comes back as a
-normal `Response` with that `status` for you to branch on. `getJson` will,
-however, `throw` if the body is not valid JSON (e.g. an HTML error page) - guard
-with `get` + a status check when a server may return non-JSON errors.
+normal `Response` with that `status` for you to branch on. `getJson` (and the
+pagination walkers) will, however, `throw` `kind "rest"` on a non-2xx or a body
+that is not valid JSON (e.g. an HTML error page) - guard with `get` + a status
+check when a server may return non-JSON errors.
 
 ## Out of scope
 
-- **No cookie jar / stateful session.** A `Client` is a value threaded per call
-  (a module has no mutable state); a stateful session that remembers cookies
-  belongs on the `http` side (a system library may hold stateful handles; a
-  module may not) and is deferred there.
-- **No retry / backoff, no pagination helper, no auto-redirect** (redirects come
-  back as their 3xx `Response`, from `http`).
+- **No stateful keep-alive session.** A `Client` is a value threaded per call;
+  connection reuse across calls lives on the `http` side
+  (`http.connect` / `exchange`). `rest` inherits per-request policy (redirects,
+  retries, timeout) and per-redirect-chain cookies from `http.send`, but keeps no
+  cookies across separate `rest` calls.
 
 ## See also
 
