@@ -1110,11 +1110,15 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `String` / `Float` / `Bool` / `Bytes` - both closed enums), then repository CRUD `orm.insert(conn, schema,
   record)` / `find(conn, schema, id)` / `update` / `delete`, and `orm.all(conn,
   query)`. Records are `map of string to string`. Non-mutating **functional
-  query builder**: `orm.where(orm.from($schema), "age", ">", "18")` ->
-  `orm.orderBy` / `limit` / `offset` / `join` -> `orm.toSql($q)` ->
-  `Rendered{sql, params}`, placeholders per dialect (`?` / `$1`); values bind
-  only through placeholders. Plus `orm.createTable(schema)` DDL. Needs the
-  default binary.
+  query builder** (each step returns a fresh `orm.Query`): `orm.from($schema)` ->
+  `select` (projection) / `count` / `aggregate` (COUNT/SUM/AVG/MIN/MAX) ->
+  `where` / `orWhere` / `whereIn` / `orWhereIn` / `whereNotIn` (AND / OR / IN) ->
+  `join` / `leftJoin` / `rightJoin` -> `groupBy` + `having` / `orHaving` ->
+  `orderBy` / `limit` / `offset` -> `orm.toSql($q)` -> `Rendered{sql, params}`,
+  placeholders per dialect (`?` / `$1`); values bind only through placeholders.
+  Identifiers / operators / aggregate-functions / join-kinds are allowlist-checked
+  at **build and render** time, so a hand-built `orm.Query` / `orm.Schema` literal
+  cannot inject either. Plus `orm.createTable(schema)` DDL. Needs the default binary.
 - **`password`** - generate, validate, and score passwords against a policy schema.
   `password.schema()` is a strong default (16 chars, all four classes, min 1 each);
   copy-on-write builders `withLength(s, lo, hi)` / `withClasses(s, lo, up, dig, sym)`

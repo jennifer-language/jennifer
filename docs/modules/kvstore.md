@@ -33,12 +33,6 @@ export def enum Store {
     Local { local as kv.Store }
 };
 ```
-
-That rules out an invalid "the tag says memcache but the handle is empty" state,
-and a new backend cannot be silently forgotten in one verb. (This is the design
-[stance #1](../design-stances.md) choice over a `kind` string + three fields, one
-of which is always dead.)
-
 ## Surface
 
 | Call | Backend | |

@@ -34,7 +34,22 @@ io.printf(
 
 # The same schema in MySQL renders `?` placeholders instead of `$1` / `$2`.
 def mysqlUsers as orm.Schema init orm.column(orm.schema("users", "id", orm.Dialect.Mysql), "name", orm.ColumnKind.String);
-io.printf("mysql:\n  %s\n", orm.toSql(orm.where(orm.from($mysqlUsers), "name", "=", "ada")).sql);
+io.printf("mysql:\n  %s\n\n", orm.toSql(orm.where(orm.from($mysqlUsers), "name", "=", "ada")).sql);
+
+# Column projection + aggregate + GROUP BY + HAVING: "age brackets with 5+ users".
+def report as orm.Query init orm.having(
+    orm.groupBy(orm.count(orm.select(orm.from($users), ["age"]), "n"), ["age"]),
+    "COUNT", "*", ">", "5");
+io.printf("report:\n  %s\n\n", orm.toSql($report).sql);
+
+# OR + IN conditions, and a LEFT JOIN.
+def filtered as orm.Query init orm.whereIn(
+    orm.orWhere(orm.where(orm.from($users), "age", ">=", "18"), "name", "=", "ada"),
+    "id",
+    ["1", "2", "3"]);
+io.printf("or + in:\n  %s\n\n", orm.toSql($filtered).sql);
+io.printf("left join:\n  %s\n", orm.toSql(
+    orm.leftJoin(orm.from($users), "orders", "users.id", "orders.userId")).sql);
 
 # runCrud shows the Data-Mapper CRUD shape against a live connection: you pass a
 # record (a `map of string to string`) and the schema to the repository

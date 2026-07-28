@@ -844,44 +844,14 @@ those docs; this table is the milestone-number index.
 | M22.8 | self-referential struct guard | A struct containing itself **by value** (direct or mutual) has no finite zero value and used to fatally stack-overflow when its zero / a literal was built; `Interpreter.checkStructCycles` (a gray/black DFS over direct struct-typed fields, run after hoisting at both `Run` and `EvalInteractive`) now rejects it at hoist time with a positioned error pointing at `list of Self`. Recursion through a `list` / `map` / `task` field and ordinary nesting stay legal. |
 | M22.9 | module structs as struct fields | A module struct used as a **struct field type** now type-checks (was rejected "expects geo.Point, got struct" though it worked as a variable type). `resolveDeclaredTypesOnce` now also stamps struct **field** types with the module's `(stem, path)` identity (recursing into `list` / `map` elements), and a module struct's own sibling-struct field types retag to the module identity at the boundary check (construction + field assignment, via `retagType`). Value semantics + chained lvalues into a nested module-struct field work. |
 | M22.10 | byte-capable `http` download | `http` could not fetch a binary body (the response was always `convert.stringFromBytes(_, "utf-8")`, which throws on non-UTF-8). Added a byte path reusing the already byte-exact framing: `http.BytesResponse` (`body as bytes`) + `requestBytes` / `requestWithBytes` / `getBytes` (`parseResponse` split into a `parseRaw` byte core + a text decoder). Text verbs unchanged (still throw on non-UTF-8, by design); `rest` stays text / JSON. Pinned by `http_bytes_test.go` (a gzip round-trips with matching sha256). |
+| M22.11 | hardening: injection & output-encoding | From two security / robustness audits (`internal/` + `modules/`; per-finding detail - severity, reproducer, sites - in the two report files). orm identifier / operator allowlists; imap / pop CRLF rejection; statsd metric validation; htmlwriter tag / attr checks + exported `safeUrl`; `json.encode` HTML-escaping (`< > & U+2028 U+2029`); a new constant-time `hash.equal`; `http.parseUrl` authority split; dotenv env-name validation (`OM-021`); `ipnet` v4-mapped `::ffff:0:0/96` fold (`unmap`). **Reasoned non-literal:** a tengine no-auto-escape SECURITY **warning**, not an auto-escape mode (`OM-012`, keeps `text/template` semantics); `OM-010` folds only the well-defined `::ffff:0:0/96` mapped form. |
+| M22.12 | hardening: network / resource / path robustness | 64 MiB caps on server-declared lengths; connect / read timeouts + cleartext warnings; a `net.readAll` default cap; `net.startTLS` locking; bounded handle registries + a `sql` query deadline + DSN-password redaction; `archive` per-entry budget; `httpd.serveDir` traversal rejection + `unix:`-socket perms; the json / toml / yaml write-API depth guard. **Reasoned non-literal:** `OF-007` applied full bounds + deadline + teardown to `sql` (the worst instance) and registry bounds to `fs` / `os` / `compress` / `net`. |
+| M22.13 | hardening: web framework | `web.sessionId` trusts only a minted-UUID-shaped cookie + `web.renewSession`; the `web.onError` hook (else stderr); lenient form / percent decoding + csrf content-type gate; a `HEAD` served by the matching `GET` route; httpd per-request timer cleanup. **Reasoned non-literal:** `OM-003` shipped **serial** for v1 with loud docs because concurrent dispatch raced shared interpreter state - **later removed properly in M22.17**; `OF-006` (unrestricted `meta.call`) shipped a docs allowlist pattern + `meta.md` example, not a new primitive (a two-line `.j` allowlist suffices; `web` only dispatches author-registered handler names). |
 | M22.14 | `imap` criteria-based search | `imap.search(session)` -> `imap.search(session, criteria)` (breaking; an empty `imap.criteria()` = the old `SEARCH ALL`). `imap.Criteria` filters **hybrid**: server-side fields map to one IMAP `SEARCH` (substring on subject/from/to/text, a `since` / `before` day-range as `time.Time`, flags, size - all ANDed, one round-trip), client-side fields refine the candidates by fetching only headers / `BODYSTRUCTURE` (`subjectRegex` / `fromRegex`, `hasAttachments` heuristic). Injection-safe (`quoteArg` + control-checked line); a time-of-day bound is transparently refined client-side against each candidate's `INTERNALDATE`. Pure `.j`. |
 | M22.15 | `imap` browse / APPEND / rename | Rounded `imap` into a full read / browse / manage / **save** client: `folders` (`LIST`) + `status` (`STATUS`, no select), `append` / `appendWith` (`APPEND` via the synchronizing-literal continuation flow). Terminology rename (pre-1.0 breaking): mailbox -> **folder** (`selectFolder` / `createFolder` / the `Folder` struct); the LIST verb is `folders` (`list` is a reserved type keyword). |
 | M22.16 | core hardening sweep | Small `internal/` correctness / resource / performance residuals, one reviewed pass: `sql` cursor deadline split from the acquire / statement deadline (caller-settable `sql.setQueryTimeout`); `httpd` registry `maxServers` bound + catchable "too many open"; md5 / sha1 labelled **non-cryptographic**; the json / toml / yaml write-depth guard checks only the touched node (not a full re-scan) and folds three `exceedsDepth` copies into a shared helper; an `include` total-token cap (a diamond that re-includes the previous file expands 2^n); the `printf` field cap lowered from `1<<20` + closed-form padding; incremental json / xml decoder error positions. |
 | M22.17 | web hardening (concurrent dispatch) | Turned `web` from strictly-serial into **safely-concurrent**, interpreter-first (four ordered steps, each with a gating test; reasoning in `design-decisions.md`). (1) `Error` crosses `meta.callMain` intact - track a module's *declared* structs separately from the auto-injected `Error`, retag only the former. (2) Race-safe dispatch - the call-depth counter became a per-chain `*int` threaded down the frames (fresh at each goroutine root, incremented at `evalCall` **and** every cross-boundary dispatch), fixing both the `-race` data race and a fatal re-entry Go-stack overflow; the rest of the reachable shared state (map hash-index reads, resolver caches, profiler, diag) audited clean. (3) spawn-per-request in `web` (errors caught inside; `task.discard` prunes; concurrency bounded by `httpd`). (4) `web.onError` fail-safe - always stderr **and** the hook, which now binds `as Error`. The 1700 ms -> 3 ms latency probe is the regression gate. Supersedes the M22.13 `OM-003` "web stays serial" note. |
 | M22.18 | `dotenv` layering, profiles, interpolation | Grew `dotenv` into a layered loader: `readCascade` / `resolve` / `loadCascade` / `autoload` merge `.env` -> `.env.local` -> `.env.<profile>` -> `.env.<profile>.local` from one fixed `dir` (no walk-up, closing the file-hijack class), with a **real OS env var always winning** over a file value; profile from `JENNIFER_ENV` (empty = base files only). Enhanced `parse`: **backward-reference** `${VAR}` (unquoted + double-quoted, resolving earlier keys -> real OS env -> "", so cycles are impossible; no `$(...)` command substitution), multi-line double-quoted values (positioned unterminated-quote error). Strict profile validation `^[A-Za-z0-9_-]{1,64}$` (no traversal). Single-file `load` keeps unconditional-override (the primitive); the cascade loaders are real-env-wins. `os.getEnv(k) != ""` is the "already set" test (no `os.hasEnv`; `""` counts as unset). Consolidated the `${VAR}` / multi-line items parked in M23.8. |
-
-**M22.11-M22.13 - hardening (two audits).** Three grouped milestones from two
-security / robustness audits (`internal/` and `modules/`), each fix shipping a
-test. **Per-finding detail (severity, reproducer, code sites) lives in the two
-report files;** the themes:
-
-- **M22.11 - injection & output-encoding:** orm identifier / operator allowlists;
-  imap / pop CRLF rejection; statsd metric validation; htmlwriter tag / attr
-  checks + exported `safeUrl`; a tengine no-auto-escape SECURITY warning;
-  `json.encode` HTML-escaping (`< > & U+2028 U+2029`); a new constant-time
-  `hash.equal`; `http.parseUrl` authority split; dotenv env-name validation
-  (`OM-021`); `ipnet` v4-mapped `::ffff:0:0/96` fold (`unmap`).
-- **M22.12 - network / resource / path robustness:** 64 MiB caps on
-  server-declared lengths; connect / read timeouts + cleartext warnings; a
-  `net.readAll` default cap; `net.startTLS` locking; bounded handle registries +
-  a `sql` query deadline + DSN-password redaction; `archive` per-entry budget;
-  `httpd.serveDir` traversal rejection + `unix:`-socket perms; the json / toml /
-  yaml write-API depth guard.
-- **M22.13 - web framework:** `web.sessionId` trusts only a minted-UUID-shaped
-  cookie + `web.renewSession`; the `web.onError` hook (else stderr); lenient
-  form / percent decoding + csrf content-type gate; a `HEAD` served by the
-  matching `GET` route; httpd per-request timer cleanup.
-
-**Reasoned non-literal choices** (the fix chosen over the literal one): `OM-003`
-(web) shipped **serial** for v1 with loud docs because concurrent dispatch raced
-shared interpreter state - **later removed properly in M22.17**; `OF-006`
-(unrestricted `meta.call`) shipped a docs allowlist pattern + `meta.md` example,
-not a new primitive (a two-line `.j` allowlist suffices; `web` only dispatches
-author-registered handler names); `OM-012` a tengine warning, not an auto-escape
-mode (keeps `text/template` semantics); `OM-010` folds only the well-defined
-`::ffff:0:0/96` mapped form; `OF-007` applied full bounds + deadline + teardown
-to `sql` (the worst instance) and registry bounds to `fs` / `os` / `compress` /
-`net`.
 
 ## M23 - module improvements
 
@@ -1049,11 +1019,6 @@ sub-numbering as pieces land (M23.6.1 done; the rest planned):
   width measurement, alignment).
 - **`ical`** - recurrence (`RRULE` / `RDATE` / `EXDATE`), all-day `DATE` +
   `TZID` / `VTIMEZONE`, and VTODO / VALARM / ORGANIZER / ATTENDEE.
-- **`orm`** - `OR` / `IN` / aggregates / `GROUP BY`, column projection, and
-  relations / joins as first-class (the SELECT-only, AND-only builder blocks
-  ordinary queries). Re-validate identifiers where the SQL is *rendered*
-  (`toSql` / `createTable` / insert / update), not only in the constructors, so a
-  raw `Schema` / `Query` struct literal cannot inject.
 - **`s3`** - presigned URL generation (SigV4 query-signing), multipart +
   `bytes` bodies (currently `string`, capped at 5 GB in memory), and content-type
   / metadata / `HEAD` / copy.
@@ -1095,6 +1060,34 @@ sub-numbering as pieces land (M23.6.1 done; the rest planned):
   checks (the sum-type choice, stance #1). Pure `.j`, both binaries; the doc's
   stale "leading zeros accepted" / "v4-mapped renders as hex" notes were
   corrected to match the code.
+
+#### M23.6.2 - orm ordinary-query surface + render-time validation
+
+**Done.** The `orm` query builder was SELECT-`*`-only and AND-only, which blocked
+ordinary queries; filled it out and closed a validation gap.
+- **Projection + aggregates.** `select(q, cols)` projects named columns instead of
+  `*`; `count(q, alias)` and `aggregate(q, fn, col, alias)` add
+  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` items (`fn(col) AS alias`).
+- **OR / IN.** `orWhere` OR-joins a condition; `whereIn` / `orWhereIn` /
+  `whereNotIn` render `col IN (...)` binding one placeholder per value (empty list
+  rejected). A per-`Condition` `connector` + `valueCount` drives placeholder
+  numbering, so an `IN (...)` followed by an `AND` numbers correctly.
+- **GROUP BY / HAVING.** `groupBy(q, cols)` + `having` / `orHaving` (an aggregate
+  condition, its value parameterized; HAVING params ordered after WHERE params).
+- **First-class joins.** `join` / `leftJoin` / `rightJoin` store a typed `Join`
+  (kind + columns) instead of a pre-rendered string.
+- **Render-time validation (the security fix).** WHERE / ORDER / JOIN / GROUP BY /
+  projection are now stored **structurally** (new `SelectItem` / `Order` / `Join` /
+  `Having` structs, richer `Condition`), so `toSql` re-runs the identifier /
+  operator / aggregate-function / join-kind / sort-direction allowlists via
+  `validateQuery`, and `createTable` / the CRUD builders via `validateSchema`.
+  Validation now happens at **both** build time (early, friendly) and render time,
+  so a hand-built `orm.Query` / `orm.Schema` struct literal that skipped the
+  builder guards is still re-checked and cannot inject. Pinned by the overlay's
+  `renderInjectedWhere` / `renderInjectedTable` cases. Backward-compatible for the
+  existing `from`/`where`/`orderBy`/`join`/CRUD callers; the `Query` struct shape
+  changed (structural fields), which only affects code that hand-built a `Query`
+  literal (a pre-1.0 break). `docblock`-clean (27 func / 9 struct / 2 enum).
 
 ### M23.7 - observability completeness
 

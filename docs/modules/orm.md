@@ -56,10 +56,17 @@ Like the [`json`](../libraries/json.md) write surface, each step returns a fresh
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `orm.from(schema)` | `Query` | Select all rows of the schema's table. |
-| `orm.where(query, col, op, value)` | `Query` | Add a `col op value` condition (AND-joined); `value` binds as a parameter. |
+| `orm.select(query, cols)` | `Query` | Project only `cols` (a `list of string`) instead of `SELECT *`. |
+| `orm.count(query, alias)` | `Query` | Add `COUNT(*) AS alias` to the projection. |
+| `orm.aggregate(query, fn, col, alias)` | `Query` | Add `fn(col) AS alias`; `fn` is `COUNT` / `SUM` / `AVG` / `MIN` / `MAX`. |
+| `orm.where(query, col, op, value)` | `Query` | A `col op value` condition, AND-joined; `value` binds as a parameter. |
+| `orm.orWhere(query, col, op, value)` | `Query` | Like `where`, but OR-joined to the previous condition. |
+| `orm.whereIn(query, col, values)` / `orm.orWhereIn` / `orm.whereNotIn` | `Query` | `col IN (...)` / `NOT IN`, one placeholder bound per value (non-empty). |
+| `orm.join` / `orm.leftJoin` / `orm.rightJoin` `(query, table, leftCol, rightCol)` | `Query` | An `INNER` / `LEFT` / `RIGHT JOIN`. |
+| `orm.groupBy(query, cols)` | `Query` | Add a `GROUP BY`. |
+| `orm.having(query, fn, col, op, value)` / `orm.orHaving` | `Query` | A `HAVING fn(col) op value` condition over an aggregate. |
 | `orm.orderBy(query, col, dir)` | `Query` | Add an `ORDER BY` term (`"asc"` / `"desc"`). |
 | `orm.limit(query, n)` / `orm.offset(query, n)` | `Query` | Add `LIMIT` / `OFFSET`. |
-| `orm.join(query, table, leftCol, rightCol)` | `Query` | Add an `INNER JOIN`. |
 | `orm.toSql(query)` | `Rendered` | Render to parameterized SQL: `Rendered{sql, params}`. |
 
 `toSql` spells placeholders per dialect - `?` for MySQL, `$1` / `$2` … for
@@ -67,13 +74,33 @@ Postgres - and **values only ever reach the query through those placeholders**,
 so the injection safety is inherited from `sql`. The whole builder is pure, so it
 is fully testable without a database.
 
+Note the SQL precedence of `orWhere`: SQL binds `AND` tighter than `OR`, so
+`where(...)` then `orWhere(...)` reads `a AND b OR c` as `(a AND b) OR c`.
+
 ```jennifer
-def q as orm.Query init orm.limit(
-    orm.where(orm.from($users), "age", ">=", "18"), 25);
+# projection + aggregate + GROUP BY + HAVING
+def q as orm.Query init orm.having(
+    orm.groupBy(orm.count(orm.select(orm.from($users), ["age"]), "n"), ["age"]),
+    "COUNT", "*", ">", "5");
 def r as orm.Rendered init orm.toSql($q);
-# r.sql    = SELECT * FROM users WHERE age >= $1 LIMIT 25
-# r.params = ["18"]
+# r.sql    = SELECT age, COUNT(*) AS n FROM users GROUP BY age HAVING COUNT(*) > $1
+# r.params = ["5"]
+
+# OR + IN
+def q2 as orm.Query init orm.whereIn(
+    orm.orWhere(orm.where(orm.from($users), "age", ">=", "18"), "name", "=", "ada"),
+    "id", ["1", "2", "3"]);
+# SELECT * FROM users WHERE age >= $1 OR name = $2 AND id IN ($3, $4, $5)
 ```
+
+### Render-time validation
+
+Identifiers, operators, aggregate functions, join kinds, and sort directions are
+validated against fixed allowlists **twice**: once in the builder (an early,
+friendly error) and again inside `toSql` / `createTable` / the CRUD builders. So
+even a hand-built `orm.Query{...}` or `orm.Schema{...}` struct literal that
+skipped the builder is re-checked before it renders - an injected column name
+throws `Error{kind: "orm"}` at render time rather than reaching the database.
 
 ## CRUD
 
