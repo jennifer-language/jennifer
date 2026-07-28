@@ -929,16 +929,27 @@ still drop a frame - a buffered `net` reader is the general fix.
 
 ### M23.2 - connection reuse / persistent sessions
 
-**Planned.** Every call currently pays a fresh handshake. Add persistent,
-reusable connections:
-- **`http`** - keep-alive / connection reuse (a `Client` holding a persistent
-  socket per host) so a request loop to one host reconnects once, not N times;
-  automatic 3xx **redirect following**; a **cookie jar** (preserving multiple
-  `Set-Cookie`); a Basic-auth helper; and **retry / backoff** on 429 / 5xx.
-  `rest` inherits all of it and adds a per-request timeout + Link-header / cursor
-  **pagination** iterator.
-- **`smtp`** - a persistent `Session` (connect + EHLO + auth once, `send` many),
-  so a queue of N messages pays one TLS+auth handshake instead of N.
+**In progress.** Every call currently pays a fresh handshake. Add persistent,
+reusable connections. Delivered per module (http first):
+- **`http`** (done) - keep-alive / connection reuse via a threaded, value-semantic
+  `http.Session` (holding the reused `net.Conn` handle + a cookie jar) with
+  `connect` / `exchange` (returns `Exchange{response, session}`) / `close`; a new
+  framed reader (`readOneRaw`, Content-Length / chunked) reads one response off a
+  reused socket rather than to EOF. Plus a request-policy path `http.send(method,
+  url, headers, body, options)` over an `http.Options{timeoutMs, maxBytes,
+  maxRedirects, maxRetries, backoffMs, tls}`: automatic 3xx **redirect following**
+  (303 / POST-301 / 302 -> bodyless GET, 307 / 308 preserve), a **cookie jar**
+  (preserving multiple `Set-Cookie`, read un-folded from the raw header block),
+  and **retry / backoff** on 429 / 5xx (exponential, honours a numeric
+  `Retry-After`, clamped to 30s). `http.basic(user, pass)` is the Basic-auth
+  header helper. Additive: the one-shot verbs are unchanged (still `Connection:
+  close`, 3xx returned). Overlay `http_test.j` (pure helpers), Go
+  `TestHttpSession` (keep-alive reuse proven via a connection counter + cookie
+  replay) / `TestHttpSendPolicy` (redirect + 303 method change + retry).
+- **`rest`** (planned) - inherits the http session + policy, adds a per-request
+  timeout + a Link-header / cursor **pagination** iterator.
+- **`smtp`** (planned) - a persistent `Session` (connect + EHLO + auth once,
+  `send` many), so a queue of N messages pays one TLS+auth handshake instead of N.
 
 ### M23.3 - stable-identity verbs (cross-session correctness)
 

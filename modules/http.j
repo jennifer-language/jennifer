@@ -5,13 +5,15 @@
  * An HTTP/1.1 client over the `net` system library. Build a request (method,
  * URL, headers, body), send it, and read the response back into a `Response`
  * (status, headers, body). `http://` connects in the clear; `https://`
- * connects with TLS (`net.connectTLS`). One request per connection (the client
- * sends `Connection: close`). Because it uses `net`, this module needs the
- * default `jennifer` binary. The response body is decoded as text: a JSON /
- * HTML / XML body (valid UTF-8) round-trips exactly; a binary body (an image)
- * is not decodable to a string and raises an error - a `bytes` body accessor is
- * a planned follow-on. Chunked and Content-Length framing are both handled;
- * redirects are returned (3xx), not followed automatically.
+ * connects with TLS (`net.connectTLS`). The one-shot verbs (`get` / `post` /
+ * `request` / ...) use one connection per request (`Connection: close`);
+ * `connect` / `exchange` reuse a persistent connection to one origin (keep-alive)
+ * so a request loop pays a single handshake. `send` adds a request policy on top
+ * of the one-shot path: automatic 3xx redirect-following, retry / backoff on
+ * 429 / 5xx, and a cookie jar across the redirect chain. Because it uses `net`,
+ * this module needs the default `jennifer` binary. A text `Response` body is
+ * decoded as UTF-8 (a binary body raises an error; use `requestBytes` /
+ * `getBytes` for that). Chunked and Content-Length framing are both handled.
  * @module http
  * @example
  * def r as http.Response init http.get("http://example.com/", {});
@@ -24,6 +26,8 @@ use binary;
 use strings;
 use convert;
 use maps;
+use encoding;
+use time;
 
 # A parsed request URL.
 def struct Url {
@@ -339,6 +343,20 @@ func hasHeaderCI(headers as map of string to string, lname as string) {
 # none), emitted as Content-Length. The head is pure ASCII, so it is safe to
 # UTF-8-encode for the wire even when the body that follows is raw binary.
 func buildHead(method as string, u as Url, headers as map of string to string, contentLen as int) {
+    return buildHeadConn($method, $u, $headers, $contentLen, false);
+}
+
+# buildHeadConn is buildHead with an explicit connection disposition: `keepAlive`
+# true emits `Connection: keep-alive` (the persistent-session path reuses the
+# socket), false emits `Connection: close` (the one-shot path, so the server ends
+# the response with EOF). Everything else - injection checks, framing-header
+# ownership, default User-Agent - is identical.
+func buildHeadConn(
+    method as string,
+    u as Url,
+    headers as map of string to string,
+    contentLen as int,
+    keepAlive as bool) {
     rejectInjection($u, $headers);
     # The method goes onto the request line verbatim, so a CR / LF / NUL in it
     # would smuggle extra headers or a second request just like the target does.
@@ -353,7 +371,11 @@ func buildHead(method as string, u as Url, headers as map of string to string, c
     }
     def out as string init $method + " " + $u.path + " HTTP/1.1\r\n";
     $out = $out + "Host: " + hostHeader($u) + "\r\n";
-    $out = $out + "Connection: close\r\n";
+    def conndisp as string init "close";
+    if ($keepAlive) {
+        $conndisp = "keep-alive";
+    }
+    $out = $out + "Connection: " + $conndisp + "\r\n";
     if (not hasHeaderCI($headers, "user-agent")) {
         $out = $out + "User-Agent: jennifer-http\r\n";
     }
@@ -902,4 +924,601 @@ export func header(resp as Response, name as string) {
         return $resp.headers[$key];
     }
     return "";
+}
+
+# --- request policy + persistent sessions --------------------------
+
+# The default first-retry backoff (doubled per attempt) and the ceiling any
+# single backoff is clamped to, so an adversarial Retry-After can't park the
+# program for hours.
+def const DEFAULT_BACKOFF_MS as int init 250;
+def const MAX_BACKOFF_MS as int init 30000;
+
+/**
+ * Per-request policy for `send` and a persistent `Session`. The zero value (from
+ * `http.defaultOptions()` or `def o as http.Options;`) is the safe default: the standard
+ * timeout and body cap, TLS fully verified, and **no** redirect-following or
+ * retrying (so a bare `send` behaves like `request`). Opt into a behaviour by
+ * setting its field.
+ * @field timeoutMs {int} per-read idle timeout (0 = 30s default, as `request`)
+ * @field maxBytes {int} response-body cap (0 = 64 MiB default, negative = unlimited)
+ * @field maxRedirects {int} how many 3xx redirects to follow (0 = none; the 3xx is returned)
+ * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`
+ * @field backoffMs {int} base backoff for the first retry (0 = 250ms), doubled each attempt and capped at 30s
+ * @field tls {TlsOptions} TLS verification options for `https://` (zero = full verification)
+ */
+export def struct Options {
+    timeoutMs as int,
+    maxBytes as int,
+    maxRedirects as int,
+    maxRetries as int,
+    backoffMs as int,
+    tls as TlsOptions
+};
+
+/**
+ * The zero `Options` (default timeout / cap, verified TLS, no redirects, no
+ * retries), for inline use: `http.send(m, u, {}, "", http.defaultOptions())`.
+ * Set fields on the result to opt into behaviour.
+ * @return {Options} the default options
+ */
+export func defaultOptions() {
+    def o as Options;
+    return $o;
+}
+
+/**
+ * Build an `Authorization` value for HTTP Basic auth (base64 of "user:password"),
+ * to pass as a request header. Mirrors `rest.basic`.
+ * @param user {string} the username
+ * @param pass {string} the password
+ * @return {string} the "Basic <base64>" header value
+ */
+export func basic(user as string, pass as string) {
+    def creds as bytes init convert.bytesFromString($user + ":" + $pass, "utf-8");
+    return "Basic " + encoding.toText($creds, "base64");
+}
+
+# effectiveTimeout maps a 0 (unset) options timeout onto the module default,
+# matching what the one-shot verbs use.
+func effectiveTimeout(timeoutMs as int) {
+    if ($timeoutMs == 0) {
+        return DEFAULT_TIMEOUT_MS;
+    }
+    return $timeoutMs;
+}
+
+# isAllDigits reports whether s is one or more ASCII digits (a numeric header).
+func isAllDigits(s as string) {
+    if (len($s) == 0) {
+        return false;
+    }
+    for (def c in strings.chars($s)) {
+        if (strings.indexOf("0123456789", $c) < 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+# --- cookie jar (private) ------------------------------------------
+# A deliberately small, session-scoped jar: cookie name -> value, no domain /
+# path / expiry scoping. It preserves *multiple* Set-Cookie lines (read from the
+# raw header block, before parseHeaders comma-folds them) so no cookie is lost,
+# and replays them as one `Cookie` header. A full RFC 6265 store (attribute
+# scoping, expiry) is a documented follow-up.
+
+# setCookiesFromRaw returns each Set-Cookie line's value from a raw response's
+# header block, un-folded (one entry per header line).
+func setCookiesFromRaw(raw as bytes) {
+    def out as list of string init [];
+    def hend as int init headerEnd($raw);
+    if ($hend < 0) {
+        return $out;
+    }
+    def lines as list of string init strings.split(bytesToStr($raw, 0, $hend), "\r\n");
+    for (def line in $lines) {
+        def colon as int init strings.indexOf($line, ":");
+        if ($colon > 0) {
+            def name as string init strings.lower(strings.trim(strings.substring($line, 0, $colon)));
+            if ($name == "set-cookie") {
+                $out[] = strings.trim(strings.substring($line, $colon + 1, len($line)));
+            }
+        }
+    }
+    return $out;
+}
+
+# jarAdd stores one Set-Cookie line's name=value (attributes after the first ";"
+# are ignored), returning the updated jar.
+func jarAdd(jar as map of string to string, setCookie as string) {
+    def pair as string init $setCookie;
+    def semi as int init strings.indexOf($setCookie, ";");
+    if ($semi >= 0) {
+        $pair = strings.substring($setCookie, 0, $semi);
+    }
+    def eq as int init strings.indexOf($pair, "=");
+    if ($eq < 0) {
+        return $jar;
+    }
+    def name as string init strings.trim(strings.substring($pair, 0, $eq));
+    if (len($name) == 0) {
+        return $jar;
+    }
+    def out as map of string to string init $jar;
+    $out[$name] = strings.trim(strings.substring($pair, $eq + 1, len($pair)));
+    return $out;
+}
+
+# jarHeader renders the jar as a "Cookie: a=1; b=2" value ("" when empty).
+func jarHeader(jar as map of string to string) {
+    def out as string init "";
+    def first as bool init true;
+    for (def k in $jar) {
+        if (not $first) {
+            $out = $out + "; ";
+        }
+        $out = $out + $k + "=" + $jar[$k];
+        $first = false;
+    }
+    return $out;
+}
+
+# withCookies returns a copy of headers with a Cookie header set from the jar,
+# unless the caller already supplied one (their value wins).
+func withCookies(headers as map of string to string, jar as map of string to string) {
+    def out as map of string to string init $headers;
+    def cookieHdr as string init jarHeader($jar);
+    if (len($cookieHdr) > 0 and not hasHeaderCI($out, "cookie")) {
+        $out["Cookie"] = $cookieHdr;
+    }
+    return $out;
+}
+
+# --- redirect + retry (private) ------------------------------------
+
+# isRedirect reports whether a status is one this client follows.
+func isRedirect(status as int) {
+    return $status == 301 or $status == 302 or $status == 303 or
+        $status == 307 or $status == 308;
+}
+
+# isRetryable reports whether a status warrants a backoff-retry (429 or any 5xx).
+func isRetryable(status as int) {
+    return $status == 429 or ($status >= 500 and $status <= 599);
+}
+
+# retryDelayMs computes the backoff for `attempt` (0-based): base * 2^attempt,
+# raised to a numeric Retry-After (seconds) when the server sent a larger one,
+# and clamped to MAX_BACKOFF_MS.
+func retryDelayMs(resp as BytesResponse, attempt as int, baseMs as int) {
+    def base as int init $baseMs;
+    if ($base <= 0) {
+        $base = DEFAULT_BACKOFF_MS;
+    }
+    def delay as int init $base;
+    def k as int init 0;
+    while ($k < $attempt) {
+        $delay = $delay * 2;
+        $k = $k + 1;
+    }
+    if (maps.has($resp.headers, "retry-after")) {
+        def ra as string init strings.trim($resp.headers["retry-after"]);
+        if (isAllDigits($ra)) {
+            def raMs as int init convert.toInt($ra) * 1000;
+            if ($raMs > $delay) {
+                $delay = $raMs;
+            }
+        }
+    }
+    if ($delay > MAX_BACKOFF_MS) {
+        $delay = MAX_BACKOFF_MS;
+    }
+    return $delay;
+}
+
+# originOf returns the "scheme://host[:port]" of a URL (its origin).
+func originOf(url as string) {
+    def u as Url init parseUrl($url);
+    return $u.scheme + "://" + hostHeader($u);
+}
+
+# lastSlash returns the index of the last "/" in s, or -1.
+func lastSlash(s as string) {
+    def i as int init len($s) - 1;
+    while ($i >= 0) {
+        if (strings.substring($s, $i, $i + 1) == "/") {
+            return $i;
+        }
+        $i = $i - 1;
+    }
+    return -1;
+}
+
+# resolveLocation resolves a Location value against the current URL: an absolute
+# URL is used as-is, an absolute path attaches to the current origin, and a
+# relative path resolves against the current path's directory.
+func resolveLocation(curUrl as string, loc as string) {
+    if (strings.contains($loc, "://")) {
+        return $loc;
+    }
+    if (strings.startsWith($loc, "/")) {
+        return originOf($curUrl) + $loc;
+    }
+    def u as Url init parseUrl($curUrl);
+    def dir as string init $u.path;
+    def cut as int init lastSlash($dir);
+    if ($cut >= 0) {
+        $dir = strings.substring($dir, 0, $cut + 1);
+    } else {
+        $dir = "/";
+    }
+    return originOf($curUrl) + $dir + $loc;
+}
+
+# sendOnce runs one request through the retry loop (no redirects): it dials,
+# sends (Connection: close), and retries a 429 / 5xx up to opts.maxRetries with
+# backoff. Returns the raw response bytes.
+func sendOnce(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    opts as Options) {
+    def timeoutMs as int init effectiveTimeout($opts.timeoutMs);
+    def attempt as int init 0;
+    def raw as bytes;
+    while (true) {
+        $raw = sendCore($method, $url, $headers, $body, $timeoutMs, $opts.maxBytes, $opts.tls);
+        def r as BytesResponse init parseRaw($raw);
+        if (isRetryable($r.status) and $attempt < $opts.maxRetries) {
+            time.sleep(time.fromMilliseconds(retryDelayMs($r, $attempt, $opts.backoffMs)));
+            $attempt = $attempt + 1;
+        } else {
+            return $raw;
+        }
+    }
+    return $raw;
+}
+
+/**
+ * Send a request with a policy: follow up to `options.maxRedirects` 3xx
+ * redirects, retry a 429 / 5xx up to `options.maxRetries` with exponential
+ * backoff (honouring a numeric `Retry-After`), and carry cookies across the
+ * redirect chain. A `303` (and a `301`/`302` on a `POST`) becomes a bodyless
+ * `GET`; `307`/`308` preserve the method and body. With a zero `Options` it is a
+ * one-shot request, exactly like `request`.
+ * @param method {string} the HTTP method
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for none)
+ * @param options {Options} the request policy
+ * @return {Response} the final response (after any redirects / retries)
+ * @throws {Error} kind "http" on a malformed response or a body-cap breach, "read timed out" on timeout
+ */
+export func send(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    options as Options) {
+    def curMethod as string init $method;
+    def curUrl as string init $url;
+    def curBody as string init $body;
+    def redirectsLeft as int init $options.maxRedirects;
+    def jar as map of string to string init {};
+    while (true) {
+        def raw as bytes init sendOnce(
+            $curMethod,
+            $curUrl,
+            withCookies($headers, $jar),
+            $curBody,
+            $options);
+        def r as BytesResponse init parseRaw($raw);
+        for (def sc in setCookiesFromRaw($raw)) {
+            $jar = jarAdd($jar, $sc);
+        }
+        if (isRedirect($r.status) and $redirectsLeft > 0 and maps.has($r.headers, "location")) {
+            $curUrl = resolveLocation($curUrl, $r.headers["location"]);
+            if ($r.status == 303 or
+                (($r.status == 301 or $r.status == 302) and $curMethod == "POST")) {
+                $curMethod = "GET";
+                $curBody = "";
+            }
+            $redirectsLeft = $redirectsLeft - 1;
+        } else {
+            return Response{
+                status: $r.status,
+                statusText: $r.statusText,
+                headers: $r.headers,
+                body: convert.stringFromBytes($r.body, "utf-8")
+            };
+        }
+    }
+    return Response{status: 0, statusText: "", headers: {}, body: ""};
+}
+
+# --- framed read for keep-alive (private) --------------------------
+# The one-shot path reads to EOF (the server sends Connection: close). A
+# persistent connection never EOFs between responses, so a reused socket must be
+# read one response at a time, framed by Content-Length or chunked encoding.
+
+# readSock does one buffered read, re-arming the idle deadline first. Empty means
+# EOF.
+func readSock(conn as net.Conn, timeoutMs as int) {
+    if ($timeoutMs > 0) {
+        net.setDeadline($conn, $timeoutMs);
+    }
+    return net.readBytes($conn, 4096);
+}
+
+# capGuard throws when the accumulated size passes a positive cap (limit <= 0 is
+# unlimited).
+func capGuard(size as int, limit as int) {
+    if ($limit > 0 and $size > $limit) {
+        throw Error{
+            kind: "http",
+            message: "http: response body exceeds " + convert.toString($limit) + " bytes",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+}
+
+# endsWithDoubleCRLF is the cheap gate before attempting a full dechunk: a
+# complete chunked body ends with CRLFCRLF.
+func endsWithDoubleCRLF(body as bytes) {
+    def n as int init len($body);
+    if ($n < 4) {
+        return false;
+    }
+    return $body[$n - 4] == 13 and $body[$n - 3] == 10 and
+        $body[$n - 2] == 13 and $body[$n - 1] == 10;
+}
+
+# chunkedComplete reports whether buf[bodyStart:] is a complete chunked body (its
+# terminal 0-length chunk has arrived). It attempts a real dechunk only once the
+# body ends in CRLFCRLF, so accumulation stays near-linear.
+func chunkedComplete(buf as bytes, bodyStart as int) {
+    def body as bytes init sliceBytes($buf, $bodyStart, len($buf));
+    if (not endsWithDoubleCRLF($body)) {
+        return false;
+    }
+    try {
+        dechunk($body);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+# readOneRaw reads exactly one response off a (possibly reused) connection and
+# returns its raw bytes (status line + headers + body as framed), suitable for
+# parseRaw. Frames by Content-Length or chunked encoding; a response with
+# neither is read to EOF (and the caller must not reuse the socket).
+func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
+    def limit as int init $maxBytes;
+    if ($limit == 0) {
+        $limit = MAX_BODY_BYTES;
+    }
+    def buf as bytes;
+    def hend as int init -1;
+    while (true) {
+        $hend = headerEnd($buf);
+        if ($hend >= 0) {
+            break;
+        }
+        def chunk as bytes init readSock($conn, $timeoutMs);
+        if (len($chunk) == 0) {
+            throw Error{
+                kind: "http",
+                message: "connection closed before response headers",
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
+        $buf = binary.concat($buf, $chunk);
+        capGuard(len($buf), $limit);
+    }
+    def headers as map of string to string init parseHeaders(strings.split(
+        bytesToStr($buf, 0, $hend),
+        "\r\n"));
+    def bodyStart as int init $hend + 4;
+    if (isChunked($headers)) {
+        while (not chunkedComplete($buf, $bodyStart)) {
+            def chunk as bytes init readSock($conn, $timeoutMs);
+            if (len($chunk) == 0) {
+                throw Error{
+                    kind: "http",
+                    message: "connection closed mid chunked body",
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
+            }
+            $buf = binary.concat($buf, $chunk);
+            capGuard(len($buf), $limit);
+        }
+        return $buf;
+    }
+    if (maps.has($headers, "content-length")) {
+        def need as int init $bodyStart + convert.toInt($headers["content-length"]);
+        capGuard($need, $limit);
+        while (len($buf) < $need) {
+            def chunk as bytes init readSock($conn, $timeoutMs);
+            if (len($chunk) == 0) {
+                throw Error{
+                    kind: "http",
+                    message: "connection closed before Content-Length bytes",
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
+            }
+            $buf = binary.concat($buf, $chunk);
+        }
+        return sliceBytes($buf, 0, $need);
+    }
+    # No Content-Length, no chunked: the body runs to EOF, so the server has
+    # closed the connection - read the rest and let the caller retire the socket.
+    while (true) {
+        def chunk as bytes init readSock($conn, $timeoutMs);
+        if (len($chunk) == 0) {
+            return $buf;
+        }
+        $buf = binary.concat($buf, $chunk);
+        capGuard(len($buf), $limit);
+    }
+    return $buf;
+}
+
+# responseClosesConn reports whether a response ends the connection: an explicit
+# `Connection: close`, or the framing-to-EOF case (no Content-Length, no
+# chunked), which only terminates by the server closing the socket.
+func responseClosesConn(headers as map of string to string) {
+    if (maps.has($headers, "connection") and
+        strings.lower($headers["connection"]) == "close") {
+        return true;
+    }
+    return not isChunked($headers) and not maps.has($headers, "content-length");
+}
+
+# --- persistent session (exported) ---------------------------------
+
+/**
+ * A persistent HTTP connection to one origin (scheme + host + port), holding the
+ * reused socket, a cookie jar, and the request options. Value-semantic, but the
+ * `conn` handle is shared across copies (a `net.Conn`), so the live socket
+ * survives being threaded through `exchange`. Build with `connect`; retire with
+ * `close`.
+ * @field conn {net.Conn} the underlying socket (shared across copies)
+ * @field scheme {string} "http" or "https"
+ * @field host {string} the origin host
+ * @field port {int} the origin port
+ * @field open {bool} whether `conn` is currently usable (false after the server closed it)
+ * @field jar {map of string to string} the accumulated cookies (name -> value)
+ * @field options {Options} the request options (timeout, cap, tls)
+ */
+export def struct Session {
+    conn as net.Conn,
+    scheme as string,
+    host as string,
+    port as int,
+    open as bool,
+    jar as map of string to string,
+    options as Options
+};
+
+/**
+ * The result of an `exchange`: the response, and the updated session to thread
+ * into the next `exchange` (it carries the reused socket and any new cookies).
+ * @field response {Response} the response
+ * @field session {Session} the session to use for the next request
+ */
+export def struct Exchange {
+    response as Response,
+    session as Session
+};
+
+/**
+ * Open a persistent connection to the origin of `url` (its scheme / host / port;
+ * the path is ignored - `exchange` supplies per-request paths). The socket is
+ * reused across `exchange` calls to the same origin, so a request loop pays one
+ * handshake instead of N.
+ * @param url {string} a URL whose origin to connect to
+ * @param options {Options} the request options (timeout, cap, tls)
+ * @return {Session} an open session
+ * @throws {Error} kind "http" (or a net error) if the connection cannot be opened
+ */
+export func connect(url as string, options as Options) {
+    def u as Url init parseUrl($url);
+    def conn as net.Conn init dial($u, $options.tls);
+    def emptyJar as map of string to string init {};
+    return Session{
+        conn: $conn,
+        scheme: $u.scheme,
+        host: $u.host,
+        port: $u.port,
+        open: true,
+        jar: $emptyJar,
+        options: $options
+    };
+}
+
+/**
+ * Send one request over a session's reused connection and return the response
+ * plus the updated session (reassign it: `def x as http.Exchange init
+ * http.exchange($s, ...); $s = $x.session;`). `path` is a request target on the
+ * session's origin (e.g. "/items?page=2"). Cookies from the response are folded
+ * into the session jar and replayed on later requests. If the connection was
+ * closed (by a prior `Connection: close` or a to-EOF response), it is transparently
+ * reopened. Redirects are **not** followed here (that can cross origins and break
+ * the socket) - use `send` for redirect-following; `exchange` returns the 3xx.
+ * @param session {Session} the session (from `connect` or a prior `exchange`)
+ * @param method {string} the HTTP method
+ * @param path {string} the request path on the session's origin
+ * @param headers {map of string to string} request headers ({} for none)
+ * @param body {string} the request body ("" for none)
+ * @return {Exchange} the response and the session to thread onward
+ * @throws {Error} kind "http" on a malformed response or a cap breach, "read timed out" on timeout
+ */
+export func exchange(
+    session as Session,
+    method as string,
+    path as string,
+    headers as map of string to string,
+    body as string) {
+    def s as Session init $session;
+    def u as Url init Url{scheme: $s.scheme, host: $s.host, port: $s.port, path: $path};
+    if (not $s.open) {
+        $s.conn = dial($u, $s.options.tls);
+        $s.open = true;
+    }
+    def timeoutMs as int init effectiveTimeout($s.options.timeoutMs);
+    def reqHeaders as map of string to string init withCookies($headers, $s.jar);
+    def blen as int init 0;
+    if (len($body) > 0) {
+        $blen = len(convert.bytesFromString($body, "utf-8"));
+    }
+    def wire as string init buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body;
+    # Arm the deadline for this write: a deadline left over from the previous
+    # exchange's last read would otherwise expire the write if time passed
+    # between exchanges (setDeadline covers read and write). readSock re-arms it
+    # before each read of the response.
+    if ($timeoutMs > 0) {
+        net.setDeadline($s.conn, $timeoutMs);
+    }
+    net.writeBytes($s.conn, convert.bytesFromString($wire, "utf-8"));
+    def raw as bytes init readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes);
+    def r as BytesResponse init parseRaw($raw);
+    for (def sc in setCookiesFromRaw($raw)) {
+        $s.jar = jarAdd($s.jar, $sc);
+    }
+    if (responseClosesConn($r.headers)) {
+        net.close($s.conn);
+        $s.open = false;
+    }
+    return Exchange{
+        response: Response{
+            status: $r.status,
+            statusText: $r.statusText,
+            headers: $r.headers,
+            body: convert.stringFromBytes($r.body, "utf-8")
+        },
+        session: $s
+    };
+}
+
+/**
+ * Close a session's connection. Idempotent-safe to call once; do not use the
+ * session afterwards.
+ * @param session {Session} the session to close
+ */
+export func close(session as Session) {
+    if ($session.open) {
+        net.close($session.conn);
+    }
+    return;
 }

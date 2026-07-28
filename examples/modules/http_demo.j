@@ -19,13 +19,29 @@ try {
     io.printf("content-type: %s\n", http.header($r, "Content-Type"));
     io.printf("body (%d bytes):\n%s\n", len($r.body), $r.body);
 
-    # a POST with a JSON body and an auth header
+    # a POST with a JSON body and a Basic-auth header
     def sent as http.Response init http.post(
         $base + "/items",
         "application/json",
         "{\"name\":\"ada\"}",
-        {"Authorization": "Bearer demo-token"});
+        {"Authorization": http.basic("ada", "s3cret")});
     io.printf("POST /items -> %d\n", $sent.status);
+
+    # a request with a policy: follow up to 5 redirects, retry a 429 / 5xx thrice
+    def opts as http.Options;
+    $opts.maxRedirects = 5;
+    $opts.maxRetries = 3;
+    def r2 as http.Response init http.send("GET", $base + "/", {}, "", $opts);
+    io.printf("send GET / (redirects+retries) -> %d\n", $r2.status);
+
+    # a persistent connection: two requests reuse one socket, cookies carried
+    def s as http.Session init http.connect($base, http.defaultOptions());
+    def x1 as http.Exchange init http.exchange($s, "GET", "/", {}, "");
+    $s = $x1.session;
+    def x2 as http.Exchange init http.exchange($s, "GET", "/", {}, "");
+    $s = $x2.session;
+    io.printf("keep-alive two GETs -> %d, %d\n", $x1.response.status, $x2.response.status);
+    http.close($s);
 } catch (e) {
     io.printf("no HTTP server at %s (%s)\n", $base, $e.message);
 }

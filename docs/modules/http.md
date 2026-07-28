@@ -51,6 +51,15 @@ string (`""` for none).
 | `http.head(url, headers)`                   | HEAD (status + headers, no body).                                  |
 | `http.options(url, headers)`                | OPTIONS (capability probe; read the `Allow` header).              |
 | `http.header(resp, name)`                   | Read a response header case-insensitively, or `""` if absent.      |
+| `http.basic(user, pass)`                    | Build a `Basic <base64>` `Authorization` value (mirrors `rest.basic`). |
+| `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`. Zero value = defaults, no redirects, no retries. |
+| `http.defaultOptions()`                     | The zero `Options`, for inline use. |
+| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. Returns a `Response`. |
+| `http.Session`                              | A persistent (keep-alive) connection to one origin, with a cookie jar. |
+| `http.Exchange`                             | `response` (`Response`) + `session` (`Session`) to thread onward. |
+| `http.connect(url, options)`                | Open a persistent `Session` to the origin of `url`. |
+| `http.exchange(session, method, path, headers, body)` | One request over the reused socket; returns an `Exchange`. |
+| `http.close(session)`                       | Close a `Session`'s connection. |
 
 The response body is bounded by default: `http` reads at most **64 MiB**
 (`MAX_BODY_BYTES`) and raises a catchable error beyond it. The per-read timeout
@@ -68,6 +77,59 @@ works: `http.request("TRACE", url, {}, "")` and the like. The one method that is
 **not** supported is `CONNECT`: it is the HTTP tunneling primitive (after a
 `200` the socket becomes a raw bidirectional tunnel), which needs a connection
 hand-off this request/response-then-close client does not do.
+
+## Request policy: redirects, retries, cookies
+
+`http.send` is the one-shot verbs plus a policy, configured by an `http.Options`.
+The zero `Options` (`http.defaultOptions()`) behaves exactly like `request`; set
+a field to opt in:
+
+```jennifer
+def o as http.Options;
+$o.maxRedirects = 5;   # follow up to 5 3xx redirects
+$o.maxRetries = 3;     # retry a 429 / 5xx up to 3 times
+$o.backoffMs = 250;    # first backoff (doubles per attempt), honours Retry-After
+def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o);
+```
+
+- **Redirects.** A `301` / `302` / `303` / `307` / `308` with a `Location` is
+  followed up to `maxRedirects` hops (`0` returns the 3xx as-is). A `303` (and a
+  `301`/`302` on a `POST`) becomes a bodyless `GET`; `307` / `308` preserve the
+  method and body. Cookies set along the chain are replayed on later hops.
+- **Retries.** A `429` or `5xx` is retried up to `maxRetries` with exponential
+  backoff (`backoffMs * 2^attempt`), raised to a numeric `Retry-After` when the
+  server sends a larger one, and clamped to 30s.
+
+For **Basic auth**, `http.basic(user, pass)` builds the header value:
+
+```jennifer
+def r as http.Response init http.get(url, {"Authorization": http.basic("ada", "s3cret")});
+```
+
+## Persistent connections (keep-alive)
+
+`http.connect` opens a `Session` to one origin (scheme + host + port) and reuses
+the socket across `exchange` calls, so a request loop pays a single handshake
+instead of one per request. The `Session` is value-semantic, but its underlying
+`net.Conn` is a shared handle - thread the returned session forward:
+
+```jennifer
+def s as http.Session init http.connect("https://api.example.com", http.defaultOptions());
+def x1 as http.Exchange init http.exchange($s, "GET", "/items?page=1", {}, "");
+$s = $x1.session;                 # carry the reused socket + any cookies
+def x2 as http.Exchange init http.exchange($s, "GET", "/items?page=2", {}, "");
+$s = $x2.session;
+http.close($s);
+```
+
+`exchange` maintains a small **cookie jar** on the session (name -> value; it
+preserves multiple `Set-Cookie` lines and replays them as one `Cookie` header)
+and reconnects transparently if the server closed the connection. It does **not**
+follow redirects (a redirect can cross origins and break the socket) - use
+`http.send` for that; `exchange` returns the 3xx.
+
+The jar is deliberately small: no domain / path scoping and no expiry (a
+session-scoped `name -> value` store). A full RFC 6265 jar is a follow-up.
 
 ## URLs and headers
 
@@ -172,13 +234,18 @@ to branch on.
 
 ## Out of scope
 
-- **Redirects are returned, not followed.** A 3xx comes back with its
-  `Location` header; follow it yourself (auto-follow with a hop limit is a later
-  add).
-- **One request per connection.** No keep-alive, no connection pool.
-- **No cookie jar, no automatic decompression, no multipart builder.** Set the
-  headers and body you need directly.
-- **Text bodies.** Binary responses need the planned `bytes` accessor.
+- **Redirects.** The one-shot verbs return a 3xx as-is; `http.send` follows them
+  (with a hop limit). No auto-follow on the persistent `exchange` path (it can
+  cross origins).
+- **Connection reuse is per-origin and single-request.** `connect` / `exchange`
+  keep one socket alive to one origin; there is no cross-origin connection pool
+  and no request pipelining.
+- **Cookie jar is session-scoped.** `Session` keeps a `name -> value` jar with no
+  domain / path scoping or expiry (a full RFC 6265 store is a follow-up); the
+  one-shot verbs keep no cookies. No automatic decompression, no multipart
+  builder - set the headers and body you need directly.
+- **Binary bodies** use the byte verbs (`getBytes` / `requestBytes`); the text
+  path decodes UTF-8.
 
 ## See also
 

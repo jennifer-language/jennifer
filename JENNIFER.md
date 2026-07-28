@@ -571,8 +571,19 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `body` (the string `Response` throws on non-UTF-8). To **upload** a raw `bytes`
   body byte-for-byte (a multipart file upload, a protobuf) use
   `http.requestRawBody(method, url, headers, body, timeoutMs, maxBytes)` /
-  `requestRawBodyTls` (set your own `Content-Type`). Redirects returned,
-  not followed. For a self-signed / private-CA `https://` server pass
+  `requestRawBodyTls` (set your own `Content-Type`). For a request **with a
+  policy** use `http.send(method, url, headers, body, options)` with an
+  `http.Options{timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls}`
+  (zero value = one-shot, like `request`): it follows up to `maxRedirects` 3xx
+  redirects, retries a 429 / 5xx up to `maxRetries` with exponential backoff
+  (honouring `Retry-After`), and carries cookies across the redirect chain.
+  `http.basic(user, pass)` builds a `Basic <base64>` `Authorization` value. For a
+  **persistent (keep-alive) connection**, `http.connect(url, options)` opens an
+  `http.Session` to one origin and `http.exchange(session, method, path, headers,
+  body)` reuses the socket, returning an `http.Exchange{response, session}` (thread
+  the returned session forward: `$s = $x.session;`) with a session cookie jar;
+  `http.close(session)` closes it. The one-shot verbs still return a 3xx as-is.
+  For a self-signed / private-CA `https://` server pass
   `http.TlsOptions{skipVerify, caCert}` through `http.requestTls(method, url,
   headers, body, tls)` (or `requestWithTls(..., timeoutMs, maxBytes, tls)`); the
   zero `TlsOptions` full-verifies, so `request` and the shortcuts are unchanged.

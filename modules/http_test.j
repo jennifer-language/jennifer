@@ -216,3 +216,140 @@ func testParseUrlQueryOnly() { # OM-020
     testing.assertEqual($u2.port, 8080);
     testing.assertEqual($u2.path, "/p?x=1");
 }
+
+# ---- Basic-auth helper ----
+
+func testBasicAuth() {
+    # base64("aladdin:opensesame")
+    testing.assertEqual(basic("aladdin", "opensesame"), "Basic YWxhZGRpbjpvcGVuc2VzYW1l");
+}
+
+# ---- keep-alive request line: Connection header ----
+
+func testBuildHeadKeepAlive() {
+    def head as string init buildHeadConn("GET", parseUrl("http://h/p"), {}, 0, true);
+    testing.assertEqual(strings.contains($head, "Connection: keep-alive"), true);
+    def headClose as string init buildHeadConn("GET", parseUrl("http://h/p"), {}, 0, false);
+    testing.assertEqual(strings.contains($headClose, "Connection: close"), true);
+}
+
+# ---- cookie jar ----
+
+func testSetCookiesFromRawUnfolds() {
+    # two Set-Cookie lines must survive as two entries (not comma-folded into one)
+    def raw as bytes init convert.bytesFromString(
+        "HTTP/1.1 200 OK\r\n" +
+            "Set-Cookie: a=1; Path=/\r\n" +
+            "Set-Cookie: b=2; HttpOnly\r\n" +
+            "Content-Length: 0\r\n\r\n",
+        "utf-8");
+    def cs as list of string init setCookiesFromRaw($raw);
+    testing.assertEqual(len($cs), 2);
+    testing.assertEqual($cs[0], "a=1; Path=/");
+    testing.assertEqual($cs[1], "b=2; HttpOnly");
+}
+
+func testJarAddAndHeader() {
+    def jar as map of string to string init {};
+    $jar = jarAdd($jar, "a=1; Path=/");
+    $jar = jarAdd($jar, "b=2; HttpOnly");
+    $jar = jarAdd($jar, "a=9"); # replaces a
+    testing.assertEqual($jar["a"], "9");
+    testing.assertEqual($jar["b"], "2");
+    # jarHeader joins name=value with "; " (insertion order: a then b)
+    testing.assertEqual(jarHeader($jar), "a=9; b=2");
+}
+
+func testJarAddIgnoresMalformed() {
+    def jar as map of string to string init {};
+    $jar = jarAdd($jar, "novalue"); # no "=" -> ignored
+    testing.assertEqual(len($jar), 0);
+}
+
+# ---- redirect classification + Location resolution ----
+
+func testIsRedirect() {
+    testing.assertEqual(isRedirect(301), true);
+    testing.assertEqual(isRedirect(308), true);
+    testing.assertEqual(isRedirect(200), false);
+    testing.assertEqual(isRedirect(404), false);
+}
+
+func testResolveLocationAbsolute() {
+    testing.assertEqual(resolveLocation("http://a.com/x", "https://b.com/y"), "https://b.com/y");
+}
+
+func testResolveLocationAbsolutePath() {
+    testing.assertEqual(resolveLocation("http://a.com:8080/x/y", "/z"), "http://a.com:8080/z");
+}
+
+func testResolveLocationRelativePath() {
+    testing.assertEqual(resolveLocation("http://a.com/x/y", "z"), "http://a.com/x/z");
+}
+
+# ---- retry classification + backoff ----
+
+func testIsRetryable() {
+    testing.assertEqual(isRetryable(429), true);
+    testing.assertEqual(isRetryable(503), true);
+    testing.assertEqual(isRetryable(500), true);
+    testing.assertEqual(isRetryable(404), false);
+    testing.assertEqual(isRetryable(200), false);
+}
+
+func testRetryDelayExponential() {
+    def eb as bytes;
+    def r as BytesResponse init BytesResponse{status: 503, statusText: "x", headers: {}, body: $eb};
+    # base 100ms doubles per attempt: 100, 200, 400
+    testing.assertEqual(retryDelayMs($r, 0, 100), 100);
+    testing.assertEqual(retryDelayMs($r, 1, 100), 200);
+    testing.assertEqual(retryDelayMs($r, 2, 100), 400);
+}
+
+func testRetryDelayHonoursRetryAfter() {
+    def eb as bytes;
+    def r as BytesResponse init BytesResponse{
+        status: 429,
+        statusText: "x",
+        headers: {"retry-after": "2"},
+        body: $eb
+    };
+    # Retry-After 2s (2000ms) beats the 100ms base
+    testing.assertEqual(retryDelayMs($r, 0, 100), 2000);
+}
+
+func testRetryDelayClamped() {
+    def eb as bytes;
+    def r as BytesResponse init BytesResponse{
+        status: 429,
+        statusText: "x",
+        headers: {"retry-after": "99999"},
+        body: $eb
+    };
+    testing.assertEqual(retryDelayMs($r, 0, 100), MAX_BACKOFF_MS);
+}
+
+# ---- framed-read completeness helpers ----
+
+func testEndsWithDoubleCRLF() {
+    testing.assertEqual(endsWithDoubleCRLF(convert.bytesFromString("x\r\n\r\n", "utf-8")), true);
+    testing.assertEqual(endsWithDoubleCRLF(convert.bytesFromString("x\r\n", "utf-8")), false);
+}
+
+func testChunkedComplete() {
+    # a full chunked body (with terminal 0-chunk) is complete; a partial one isn't
+    def full as bytes init convert.bytesFromString("hh\r\n\r\n5\r\nhello\r\n0\r\n\r\n", "utf-8");
+    # bodyStart = 4 (after the leading "hh\r\n\r\n" header terminator at index 2)
+    def hdrEnd as int init headerEnd($full);
+    testing.assertEqual(chunkedComplete($full, $hdrEnd + 4), true);
+    def partial as bytes init convert.bytesFromString("hh\r\n\r\n5\r\nhel", "utf-8");
+    testing.assertEqual(chunkedComplete($partial, headerEnd($partial) + 4), false);
+}
+
+func testResponseClosesConn() {
+    testing.assertEqual(responseClosesConn({"connection": "close"}), true);
+    testing.assertEqual(responseClosesConn({"content-length": "5"}), false);
+    testing.assertEqual(responseClosesConn({"transfer-encoding": "chunked"}), false);
+    # no framing header at all -> body ran to EOF -> connection is closed
+    testing.assertEqual(responseClosesConn({}), true);
+}
