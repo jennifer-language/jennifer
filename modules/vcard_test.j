@@ -101,8 +101,8 @@ func testRoundTrip() {
     testing.assertEqual($c.organization, "Analytical Engines, Ltd.");
     testing.assertEqual($c.title, "Mathematician");
     testing.assertEqual(len($c.emails), 2);
-    testing.assertEqual($c.emails[1], "countess@example.org");
-    testing.assertEqual($c.phones[0], "+44-20-7946-0000");
+    testing.assertEqual($c.emails[1].value, "countess@example.org");
+    testing.assertEqual($c.phones[0].value, "+44-20-7946-0000");
     testing.assertEqual(len($c.addresses), 1);
     testing.assertEqual($c.addresses[0].locality, "London");
     testing.assertEqual($c.addresses[0].postalCode, "SW1Y 4LE");
@@ -121,12 +121,70 @@ func testEncodeAllAndParseMany() {
     testing.assertEqual($back[1].family, "Second");
 }
 
-func testParseIgnoresParameters() {
+func testParseReadsTypeParameters() {
     def src as string init "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Param User\r\nEMAIL;TYPE=work:work@x.com\r\nTEL;TYPE=cell:+15550000\r\nEND:VCARD\r\n";
     def cards as list of Card init parse($src);
     testing.assertEqual(len($cards), 1);
-    testing.assertEqual($cards[0].emails[0], "work@x.com");
-    testing.assertEqual($cards[0].phones[0], "+15550000");
+    testing.assertEqual($cards[0].emails[0].value, "work@x.com");
+    testing.assertEqual($cards[0].emails[0].type, "work");
+    testing.assertEqual($cards[0].phones[0].value, "+15550000");
+    testing.assertEqual($cards[0].phones[0].type, "cell");
+}
+
+# --- M23.6: full N, TYPE round-trip, common fields ---
+
+func testFullNameRoundTrip() {
+    def c as Card init withFullName(card("Dr. Pat O'Brien Jr."), "O'Brien", "Pat", "Q", "Dr.", "Jr.");
+    def back as Card init parse(encode($c))[0];
+    testing.assertEqual($back.family, "O'Brien");
+    testing.assertEqual($back.given, "Pat");
+    testing.assertEqual($back.additional, "Q");
+    testing.assertEqual($back.prefixes, "Dr.");
+    testing.assertEqual($back.suffixes, "Jr.");
+}
+
+func testTypedContactsRoundTrip() {
+    def c as Card init addPhoneTyped(
+        addEmailTyped(addEmailTyped(card("T"), "w@x.com", "work"), "h@x.com", "home"),
+        "+15551234", "cell");
+    $c = addAddress($c, addressTyped("1 St", "Town", "ST", "00000", "US", "home"));
+    def text as string init encode($c);
+    testing.assertContains($text, "EMAIL;TYPE=work:w@x.com\r\n");
+    testing.assertContains($text, "ADR;TYPE=home:;;1 St;Town;ST;00000;US\r\n");
+    def back as Card init parse($text)[0];
+    testing.assertEqual($back.emails[0].type, "work");
+    testing.assertEqual($back.emails[1].type, "home");
+    testing.assertEqual($back.phones[0].type, "cell");
+    testing.assertEqual($back.addresses[0].type, "home");
+}
+
+# A TYPE value containing a `;` / `:` / `,` is quoted so it cannot inject a
+# spurious parameter or truncate the value.
+func testTypeParameterQuotedWhenSpecial() {
+    def c as Card init card("Z");
+    $c = addEmailTyped($c, "e@x.com", "work;X=1");
+    def text as string init encode($c);
+    testing.assertContains($text, "EMAIL;TYPE=\"work;X=1\":e@x.com\r\n");
+    def back as Card init parse($text)[0];
+    testing.assertEqual($back.emails[0].value, "e@x.com");
+    testing.assertEqual($back.emails[0].type, "work;X=1");
+}
+
+func testCommonFieldsRoundTrip() {
+    def c as Card init withPhoto(withBday(withNickname(card("Ada"), "The Countess"), "18151210"), "https://x/ada.jpg");
+    $c = addCategory(addCategory($c, "vip"), "math, science");
+    def text as string init encode($c);
+    testing.assertContains($text, "NICKNAME:The Countess\r\n");
+    testing.assertContains($text, "BDAY:18151210\r\n");
+    testing.assertContains($text, "PHOTO:https://x/ada.jpg\r\n");
+    # the comma inside a category value is escaped; the list separator is not
+    testing.assertContains($text, "CATEGORIES:vip,math\\, science\r\n");
+    def back as Card init parse($text)[0];
+    testing.assertEqual($back.nickname, "The Countess");
+    testing.assertEqual($back.bday, "18151210");
+    testing.assertEqual($back.photo, "https://x/ada.jpg");
+    testing.assertEqual(len($back.categories), 2);
+    testing.assertEqual($back.categories[1], "math, science");
 }
 
 func testParseOrgTakesFirstComponent() {

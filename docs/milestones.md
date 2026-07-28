@@ -1017,8 +1017,6 @@ sub-numbering as pieces land (M23.6.1 done; the rest planned):
 - **`pdfwriter`** - raster image embedding (PNG / JPEG XObjects), embedded /
   subset TrueType fonts (Unicode / CJK body text), and text layout (word-wrap,
   width measurement, alignment).
-- **`ical`** - recurrence (`RRULE` / `RDATE` / `EXDATE`), all-day `DATE` +
-  `TZID` / `VTIMEZONE`, and VTODO / VALARM / ORGANIZER / ATTENDEE.
 - **`s3`** - presigned URL generation (SigV4 query-signing), multipart +
   `bytes` bodies (currently `string`, capped at 5 GB in memory), and content-type
   / metadata / `HEAD` / copy.
@@ -1028,8 +1026,6 @@ sub-numbering as pieces land (M23.6.1 done; the rest planned):
   categories.
 - **`mime`** - honour a text-body `charset` on decode (currently forced to
   UTF-8), and RFC 2231 extended / continued filenames (`filename*=`).
-- **`vcard`** - `TYPE` parameters (work / home), a full `N` (prefix / middle /
-  suffix), and common fields (PHOTO / BDAY / NICKNAME / ...).
 
 #### M23.6.1 - ipnet subnet math + classification
 
@@ -1112,6 +1108,41 @@ ordinary queries; filled it out and closed a validation gap.
   and ANSI renderers. Pure `.j`, both binaries; overlay 56 -> 68, `docblock`-clean.
   Remaining non-goals: thematic breaks, setext headings, reference links, and a
   balanced-paren URL (the scanner still closes a link / image URL on the first `)`).
+
+#### M23.6.4 - vcard TYPE parameters, full N, common fields
+
+**Done.** Filled out the `vcard` contact model.
+- **Full `N`.** Added the additional (middle) name and honorific prefixes /
+  suffixes; `withFullName` sets all five components, `withName` the common two.
+- **`TYPE` parameters.** Emails / phones / addresses are now `Typed{value, type}`
+  (a pre-1.0 break: `.emails` was `list of string`); `addEmailTyped` /
+  `addPhoneTyped` / `addressTyped` set `work` / `home` / etc., and `parse` now
+  **reads** the `TYPE` parameter (a new shared `paramValue` helper in the
+  content-line codec walks the `;`-separated params, quote-aware).
+- **Common fields.** `NICKNAME`, `BDAY`, `PHOTO` URI, and `CATEGORIES` (a
+  comma-list, each tag escaped, the separator not), with builders. `parse(encode())`
+  round-trips all of them. Overlay 14 -> 17, `docblock`-clean.
+
+#### M23.6.5 - ical recurrence, all-day / TZID, VTODO / VALARM / organizer / attendee
+
+**Done.** Grew `ical` from a `VEVENT`-only UTC surface into a real calendar.
+- **Recurrence.** `RRULE` (a raw string, built with `ical.rule(freq, interval,
+  count)`), `RDATE`, `EXDATE`, and an **`occurrences(ev, max)` expander** -
+  `FREQ` / `INTERVAL` / `COUNT` / `UNTIL` from `DTSTART` + `RDATE`s - `EXDATE`s;
+  `MONTHLY` / `YEARLY` day-clamp is computed **from `DTSTART`** (not the previous
+  clamped instant), so Jan 31 -> Feb 29 -> Mar 31 -> Apr 30. `BY*` parts are
+  round-tripped but not expanded.
+- **All-day + TZID.** `withAllDay` (`VALUE=DATE`) and `withZone` (a named `TZID`);
+  because `time` is fixed-offset, a TZID event stores its wall clock as a floating
+  value paired with the zone name (round-trips exactly). A `VTIMEZONE` is
+  parsed-and-skipped.
+- **VTODO / VALARM / ORGANIZER / ATTENDEE.** A `Todo` component (`addTodo`, with
+  `DUE` / `STATUS`), `VALARM`s parsed into an event's `alarms` (an `Alarm` struct,
+  no longer clobbering the event's fields), and `ORGANIZER` / `ATTENDEE` (an
+  `Attendee` with `CN` / `ROLE`). The parser became a component state machine
+  (`VEVENT` / `VTODO` / `VTIMEZONE` + nested `VALARM`). Overlay 20 -> 31,
+  `docblock`-clean; validated (the monthly-clamp propagation bug was caught and
+  fixed). Both modules share the extended content-line codec; both binaries.
 
 ### M23.7 - observability completeness
 
@@ -1269,6 +1300,46 @@ methods, wire strings, config-supplied mechanism names - stayed strings).
 - All overlays, demos, header examples, the twelve `cmd/jennifer/*_test.go`
   mock-server integration tests, and docs updated; `go test ./...` + every module
   overlay green on both binaries.
+
+### M23.13 - `mcp` module (Model Context Protocol)
+
+**Planned.** A Model Context Protocol module - both a **server** (Jennifer
+exposes tools / resources / prompts to an LLM host) and a **client** (a Jennifer
+program calls another MCP server). MCP is JSON-RPC 2.0 on the wire, so `jsonrpc`
+carries the framing and `meta.callMain` dispatches a tool call to a top-level
+`func` (the same mechanism `web` / `jsonrpc` already use - registering a tool is
+just writing a documented `func`). The new work is the MCP layer on top: the
+`initialize` capability / protocol-version handshake, the tools / resources /
+prompts data models (a tool declares a JSON-Schema input; `json.Value` holds it,
+with a small schema-builder helper), and the transports.
+
+**Transports and the "two versions".** What the MCP steering group shipped is one
+**Streamable HTTP** transport with two server behaviours; supporting "both"
+means:
+- **stdio** - newline-delimited JSON-RPC over stdin / stdout, the transport an
+  LLM host launches a local server with (over `io` / `os`). In scope for .1.
+- **stateless HTTP** - client POSTs a request, server returns a single
+  `application/json` response (no session, no stream). Maps almost 1:1 onto
+  `jsonrpc.handle`; the low-risk path, in scope for .1.
+- **stateful Streamable HTTP** - a `text/event-stream` (SSE) response, an
+  `Mcp-Session-Id` session, and server-initiated messages. `httpd` has no
+  first-class SSE server-push today, so this needs a small `httpd` streaming
+  primitive first - deferred to .2.
+
+Sub-milestones:
+- **M23.13.1 - stateless core, both roles.** Client + server over **stdio +
+  stateless HTTP**: `initialize` (capability + version negotiation across the
+  supported spec revisions), `tools/list` + `tools/call`, `resources/list` +
+  `resources/read`, `prompts/list` + `prompts/get`. Server tool dispatch via
+  `meta.callMain`; client wraps a launched-subprocess or HTTP endpoint. Reuses
+  `jsonrpc` / `json` / `http` / `os`; default binary only (like `jsonrpc`). The
+  usual close-out: `mcp_test.j` overlay at 100%, a `cmd/jennifer/mcp_test.go`
+  round-trip, `docs/modules/mcp.md`, a demo, and the catalog / `JENNIFER.md`
+  entries.
+- **M23.13.2 - stateful Streamable HTTP.** Add an SSE server primitive to `httpd`
+  (chunked `text/event-stream` writes), then the session-bearing streaming MCP
+  server + server-initiated messages. The reverse-direction capabilities
+  (sampling / roots / elicitation) land here or in a follow-on as demand shows.
 
 ---
 

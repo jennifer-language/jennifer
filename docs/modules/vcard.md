@@ -25,19 +25,25 @@ the builder functions are the conventional way to construct them.
 ```jennifer
 def struct vcard.Card {
     formattedName as string,          # FN (required by vCard 4.0)
-    family as string,                 # N family (last) name
-    given as string,                  # N given (first) name
+    family as string, given as string,          # N family / given
+    additional as string,             # N additional (middle) name(s)
+    prefixes as string, suffixes as string,     # N honorific prefixes / suffixes
+    nickname as string,               # NICKNAME ("" when unset)
     organization as string,           # ORG ("" when unset)
     title as string,                  # TITLE ("" when unset)
-    emails as list of string,         # EMAIL (0..n)
-    phones as list of string,         # TEL (0..n)
+    emails as list of Typed,          # EMAIL (0..n, each with an optional TYPE)
+    phones as list of Typed,          # TEL (0..n, each with an optional TYPE)
     addresses as list of Address,     # ADR (0..n)
     url as string,                    # URL ("" when unset)
+    bday as string,                   # BDAY ("" when unset)
+    photo as string,                  # PHOTO URI ("" when unset)
+    categories as list of string,     # CATEGORIES tags
     note as string                    # NOTE ("" when unset)
 };
+def struct vcard.Typed { value as string, type as string };   # a value + optional TYPE ("work" / "home" / ...)
 def struct vcard.Address {
     street as string, locality as string, region as string,
-    postalCode as string, country as string
+    postalCode as string, country as string, type as string
 };
 ```
 
@@ -49,12 +55,16 @@ mutates its argument, so you thread them:
 | Call | Returns | |
 | ---- | ------- | - |
 | `vcard.card(formattedName)` | `Card` | a card with just its `FN` display name |
-| `vcard.withName(c, family, given)` | `Card` | set the structured `N` name |
+| `vcard.withName(c, family, given)` | `Card` | set the `N` family / given |
+| `vcard.withFullName(c, family, given, additional, prefixes, suffixes)` | `Card` | set all five `N` components |
+| `vcard.withNickname(c, nickname)` | `Card` | set the `NICKNAME` |
 | `vcard.withOrg(c, organization, title)` | `Card` | set `ORG` and `TITLE` |
-| `vcard.addEmail(c, email)` | `Card` | append an `EMAIL` |
-| `vcard.addPhone(c, phone)` | `Card` | append a `TEL` |
-| `vcard.address(street, locality, region, postalCode, country)` | `Address` | build an address |
+| `vcard.addEmail(c, email)` / `addEmailTyped(c, email, type)` | `Card` | append an `EMAIL` (with optional `TYPE`) |
+| `vcard.addPhone(c, phone)` / `addPhoneTyped(c, phone, type)` | `Card` | append a `TEL` (with optional `TYPE`) |
+| `vcard.address(...)` / `addressTyped(..., type)` | `Address` | build an address (with optional `TYPE`) |
 | `vcard.addAddress(c, address)` | `Card` | append an `ADR` |
+| `vcard.withBday(c, bday)` / `withPhoto(c, uri)` | `Card` | set `BDAY` / `PHOTO` |
+| `vcard.addCategory(c, tag)` | `Card` | append a `CATEGORIES` tag |
 | `vcard.withUrl(c, url)` | `Card` | set the `URL` |
 | `vcard.withNote(c, note)` | `Card` | set the `NOTE` |
 

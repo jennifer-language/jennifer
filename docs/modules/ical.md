@@ -26,15 +26,25 @@ Both structs have public fields (read them directly - `$cal.events`,
 `$ev.summary`); the builder functions are the conventional way to construct them.
 
 ```jennifer
-def struct ical.Calendar { prodid as string, events as list of Event };
+def struct ical.Calendar { prodid as string, events as list of Event, todos as list of Todo };
 def struct ical.Event {
-    uid as string,
-    stamp as time.Time,      # DTSTAMP
-    start as time.Time,      # DTSTART
-    end as time.Time,        # DTEND
-    summary as string,       # SUMMARY
-    description as string,   # DESCRIPTION ("" when unset)
-    location as string       # LOCATION ("" when unset)
+    uid as string, stamp as time.Time,   # UID / DTSTAMP
+    start as time.Time, end as time.Time, # DTSTART / DTEND
+    summary as string, description as string, location as string,
+    allDay as bool,                       # VALUE=DATE all-day event
+    tzid as string,                       # TZID ("" = UTC)
+    rrule as string,                      # RRULE ("" = non-recurring)
+    rdates as list of time.Time,          # RDATE
+    exdates as list of time.Time,         # EXDATE
+    organizer as string,                  # ORGANIZER
+    attendees as list of Attendee,        # ATTENDEE
+    alarms as list of Alarm               # VALARM
+};
+def struct ical.Attendee { address as string, cn as string, role as string };
+def struct ical.Alarm { action as string, trigger as string, description as string };
+def struct ical.Todo {
+    uid as string, stamp as time.Time, summary as string,
+    due as time.Time, hasDue as bool, description as string, status as string
 };
 ```
 
@@ -45,9 +55,15 @@ def struct ical.Event {
 | `ical.calendar()` | `Calendar` | an empty calendar with the default `PRODID` |
 | `ical.calendarWith(prodid)` | `Calendar` | an empty calendar with a custom `PRODID` |
 | `ical.event(uid, start, end, summary)` | `Event` | an event; `DTSTAMP` defaults to `start` |
-| `ical.describe(ev, description)` | `Event` | a copy with the description set |
-| `ical.locate(ev, location)` | `Event` | a copy with the location set |
-| `ical.add(cal, ev)` | `Calendar` | a copy with the event appended |
+| `ical.describe(ev, description)` / `locate(ev, location)` | `Event` | set the description / location |
+| `ical.withAllDay(ev, bool)` / `withZone(ev, tzid)` | `Event` | mark all-day / set a `TZID` zone |
+| `ical.recur(ev, rrule)` | `Event` | set the `RRULE` (build one with `ical.rule(freq, interval, count)`) |
+| `ical.addRdate(ev, t)` / `addExdate(ev, t)` | `Event` | add an extra / excluded instant |
+| `ical.withOrganizer(ev, addr)` / `addAttendee(ev, ical.attendee(addr, cn, role))` | `Event` | set organizer / add an attendee |
+| `ical.addAlarm(ev, ical.alarm(action, trigger, description))` | `Event` | add a `VALARM` |
+| `ical.occurrences(ev, max)` | `list of time.Time` | expand the recurrence into up to `max` instants |
+| `ical.todo(uid, stamp, summary)` + `withDue` / `withStatus` / `describeTodo` | `Todo` | build a to-do |
+| `ical.add(cal, ev)` / `addTodo(cal, td)` | `Calendar` | a copy with the event / to-do appended |
 
 The builders are **value-semantic** - `describe` / `locate` / `add` return a
 fresh copy and never mutate their argument, so you thread them:
@@ -68,9 +84,10 @@ def cal as ical.Calendar init ical.add(ical.calendar(), $ev);
 
 `parse(encode(cal))` round-trips the data. `encode` writes CRLF line endings,
 escapes text values, folds long lines, and emits `DESCRIPTION` / `LOCATION` only
-when non-empty. `parse` unfolds folded lines, ignores property parameters (the
-`;KEY=VALUE` after a name, e.g. `DTSTART;VALUE=DATE-TIME`), unescapes text,
-skips a `VEVENT` with no `DTSTART`, and defaults a missing `DTEND` to the start.
+when set. `parse` unfolds folded lines, reads the relevant property parameters
+(`VALUE=DATE`, `TZID`, `CN` / `ROLE`), reads `VEVENT` / `VTODO` (and nested
+`VALARM`) components, skips a `VTIMEZONE`, unescapes text, skips a `VEVENT` with
+no `DTSTART`, and defaults a missing `DTEND` to the start.
 
 ## Dates and times
 
@@ -87,14 +104,25 @@ and `\n`. Content lines longer than 75 characters are folded onto continuation
 lines (a CRLF followed by a space), and `parse` rejoins them - so a long
 description survives the round-trip intact.
 
+## Recurrence
+
+An event carries a raw `RRULE` string plus `RDATE` / `EXDATE` instant lists.
+`ical.rule(freq, interval, count)` builds a simple rule (`"FREQ=WEEKLY;COUNT=10"`);
+`ical.occurrences(ev, max)` expands it into concrete instants - the `RRULE` series
+from `DTSTART` (honouring `FREQ` / `INTERVAL` / `COUNT` / `UNTIL`, with `MONTHLY` /
+`YEARLY` day-clamping computed from `DTSTART`), plus `RDATE`s, minus `EXDATE`s.
+The `BY*` parts (`BYDAY`, `BYMONTH`, ...) are round-tripped in the string but not
+expanded (the base cadence is still produced).
+
 ## Scope
 
-- **`VEVENT` only.** No `VTODO` / `VJOURNAL` / `VALARM` / `VTIMEZONE`, no
-  recurrence rules (`RRULE`), no attendees / organizer. A focused calendar-of-
-  events surface; the escaping / folding / date discipline is the reusable core.
-- **UTC date-times.** Events are stored and emitted in UTC. There is no
-  per-event `TZID` timezone reference (the `time` library ships fixed-offset
-  zones only); a `TZID` parameter on input is ignored and the value read as-is.
+- **Fixed-offset time zones.** A `TZID` event stores its wall clock as a floating
+  value paired with the zone name and round-trips exactly, but the instant is not
+  converted through the named IANA zone (the `time` library ships fixed-offset
+  zones only). A `VTIMEZONE` is **parsed and skipped**, not interpreted; add one
+  yourself for a strict consumer. All-day (`VALUE=DATE`) events are supported.
+- **`VEVENT` + `VTODO`.** `VJOURNAL` / `VFREEBUSY` are not modelled. `VALARM`s are
+  read into an event's `alarms`; other nested components are skipped.
 - **Fold width in characters.** Long lines fold on rune boundaries at 75
   characters (never splitting a multi-byte character), rather than strictly on
   75 octets - valid output that every reader unfolds.

@@ -113,6 +113,61 @@ func propName(nameSection as string) {
     return strings.upper($nameSection);
 }
 
+# quoteParam wraps a parameter value in double quotes when it contains a `;`,
+# `:`, or `,` - the characters that would otherwise be read as a parameter /
+# value separator (RFC 5545 / 6350 require a quoted-string for these). A safe
+# token is returned unchanged. `paramValue` strips the quotes back off on parse.
+func quoteParam(v as string) {
+    if (strings.contains($v, ";") or strings.contains($v, ":") or strings.contains($v, ",")) {
+        return "\"" + $v + "\"";
+    }
+    return $v;
+}
+
+# paramValue returns the value of the named parameter (case-insensitive name) in
+# a content line's name section (`EMAIL;TYPE=work;PREF=1` -> "work" for "TYPE"),
+# or "" when absent. A `;`-separated parameter list is walked honouring quotes,
+# and a quoted value has its surrounding quotes stripped. The name section is the
+# part before the value colon.
+func paramValue(nameSection as string, param as string) {
+    def want as string init strings.upper($param);
+    def cs as list of string init strings.chars($nameSection);
+    def n as int init len($cs);
+    # Skip the property name (up to the first ';').
+    def i as int init 0;
+    while ($i < $n and not ($cs[$i] == ";")) {
+        $i = $i + 1;
+    }
+    while ($i < $n) {
+        $i = $i + 1; # step past the ';'
+        def keyStart as int init $i;
+        while ($i < $n and not ($cs[$i] == "=") and not ($cs[$i] == ";")) {
+            $i = $i + 1;
+        }
+        def key as string init strings.upper(strings.join(lists.slice($cs, $keyStart, $i), ""));
+        def val as string init "";
+        if ($i < $n and $cs[$i] == "=") {
+            $i = $i + 1; # step past the '='
+            def inQuote as bool init false;
+            def vs as int init $i;
+            while ($i < $n and (not ($cs[$i] == ";") or $inQuote)) {
+                if ($cs[$i] == "\"") {
+                    $inQuote = not $inQuote;
+                }
+                $i = $i + 1;
+            }
+            $val = strings.join(lists.slice($cs, $vs, $i), "");
+            if (len($val) >= 2 and strings.startsWith($val, "\"") and strings.endsWith($val, "\"")) {
+                $val = strings.substring($val, 1, len($val) - 1);
+            }
+        }
+        if ($key == $want) {
+            return $val;
+        }
+    }
+    return "";
+}
+
 # emitLine returns a folded `NAME:VALUE` content line. Callers append it
 # directly (`$lines[] = emitLine(...)`), which mutates their own list in place -
 # `emit`'s `lists.push` copied the whole growing line list on every call
