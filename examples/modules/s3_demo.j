@@ -14,6 +14,15 @@ use os;
 import "../../modules/s3.j" as s3;
 import "../../modules/http.j" as http;
 
+# Presigned URLs are pure signing (no network), so this part always runs and
+# needs no credentials - it shows the SigV4 query-signed link format.
+def demo as s3.Client init s3.connect(
+    "https://s3.us-east-1.amazonaws.com",
+    "us-east-1",
+    "AKIAIOSFODNN7EXAMPLE",
+    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+io.printf("presigned GET (1 h): %s\n\n", s3.presign($demo, "GET", "mybucket", "report.pdf", 3600));
+
 def endpoint as string init os.getEnv("S3_ENDPOINT");
 def region as string init os.getEnv("S3_REGION");
 def key as string init os.getEnv("S3_KEY");

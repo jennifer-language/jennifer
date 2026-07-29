@@ -926,13 +926,23 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`s3`** - an S3-compatible object-storage client (AWS S3 / MinIO /
   Cloudflare R2 / Backblaze B2), every request AWS Signature V4-signed.
   `s3.connect(endpoint, region, accessKey, secretKey)` -> a `Client`, then
-  `s3.get` / `put` / `delete` / `listObjects(client, bucket[, key][, body])`
-  each return an `http.Response`; `s3.objectKeys(xml)` pulls the keys out of a
-  `listObjects` body. Path-style addressing, configurable endpoint (one module,
-  every store). The list op is `listObjects` (not `list`, a reserved keyword).
-  `Client.timeout` (ms; `connect` defaults it to 30000, `0` disables) fails a
-  hung endpoint instead of blocking forever. Over `hash.hmac` + `hash.compute` +
-  `encoding` + `time` + `http`; **default `jennifer` binary only**.
+  `s3.get` / `put` / `delete` / `listObjects` each return an `http.Response`;
+  `s3.objectKeys(xml)` pulls the keys out of a `listObjects` body. Binary
+  objects use `s3.getBytes` (-> `http.BytesResponse`) / `s3.putBytes` (a raw
+  `bytes` body); `s3.putWith` / `putBytesWith(client, bucket, key, body,
+  contentType, metadata)` sign a `Content-Type` + `x-amz-meta-*` metadata;
+  `s3.head` reads object metadata; `s3.copy(client, srcBucket, srcKey,
+  dstBucket, dstKey)` copies server-side. `s3.presign(client, method, bucket,
+  key, expiresSeconds)` builds a SigV4 query-signed URL (works on both binaries,
+  no request sent). Large objects use the multipart API:
+  `createMultipartUpload` -> `uploadPart` (returns an ETag) ->
+  `completeMultipartUpload` / `abortMultipartUpload`. Path-style addressing,
+  configurable endpoint (one module, every store). The list op is `listObjects`
+  (not `list`, a reserved keyword). `Client.timeout` (ms; `connect` defaults it
+  to 30000, `0` disables) fails a hung endpoint instead of blocking forever.
+  Over `hash.hmac` + `hash.compute` + `encoding` + `time` + `http`; the
+  networked ops need the **default `jennifer` binary**, but `presign` runs on
+  both.
 - **`label`** - industrial label printing in a build / render / emit pipeline.
   Build a device-independent `label.Label` in millimetres: `label.new(w, h)`
   then value-semantic `text(label, x, y, opts, content)` (`label.TextOptions`:

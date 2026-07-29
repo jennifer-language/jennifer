@@ -1009,7 +1009,7 @@ incl. the sliding boundary), and the Go suite over memcache / redis
 
 **In progress.** The deepest per-module gaps, where a module handles the easy
 case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 through M23.6.7 done; the modules below
+sub-numbering as pieces land (M23.6.1 through M23.6.8 done; the modules below
 planned):
 - **`barcode`** - DataMatrix, UPC-A/E, Code93, GS1-128 symbologies; QR numeric /
   alphanumeric modes + versions 11-40; a human-readable text line under 1D
@@ -1018,9 +1018,6 @@ planned):
 - **`pdfwriter`** - raster image embedding (PNG / JPEG XObjects), embedded /
   subset TrueType fonts (Unicode / CJK body text), and text layout (word-wrap,
   width measurement, alignment).
-- **`s3`** - presigned URL generation (SigV4 query-signing), multipart +
-  `bytes` bodies (currently `string`, capped at 5 GB in memory), and content-type
-  / metadata / `HEAD` / copy.
 - **`font`** - CFF / OpenType (`OTTO`) outlines, kerning + `OS/2` metrics
   (cap-height, ascender/descender/line-gap).
 
@@ -1191,6 +1188,35 @@ the easy case.
   hollow `<category>` that parse then dropped), fixed by skipping empty categories
   on build. Overlay 19 -> 27, `docblock`-clean; pure `.j` over `xml` + `time`,
   both binaries (`fetch` still needs the default binary).
+
+#### M23.6.8 - s3 presign, byte bodies, metadata, copy, multipart
+
+**Done.** Grew `s3` from get/put/delete/list into a full object-storage client.
+- **Presigned URLs.** `presign(client, method, bucket, key, expiresSeconds)`
+  builds a SigV4 **query-signed** URL (`X-Amz-*` params, `UNSIGNED-PAYLOAD`) that
+  grants time-limited access without the secret key. Pure signing, so it runs on
+  both binaries; cross-checked against an independent Python SigV4 reference.
+- **Byte bodies.** `getBytes` (-> `http.BytesResponse`) and `putBytes` /
+  `putBytesWith` (raw `bytes` written byte-for-byte via `http.requestRawBody`)
+  carry binary objects a UTF-8 string body cannot; a single body is in-memory, so
+  objects past ~5 GB use multipart.
+- **Content-type + metadata + copy.** The signer generalized: `signCore` +
+  `prepareHeaders` sign the base three headers plus any extras (sorted in), so
+  `putWith` / `putBytesWith` sign `Content-Type` + `x-amz-meta-*` and `copy`
+  signs `x-amz-copy-source` (server-side copy, no download). `head` reads object
+  metadata. The existing `authorization` was refactored onto `signCore` with
+  byte-identical output (the pinned vector still passes).
+- **Multipart upload.** `createMultipartUpload` -> `uploadPart` (returns an
+  ETag) -> `completeMultipartUpload` / `abortMultipartUpload`, with a canonical
+  query builder (`canonicalizeQuery`, parameters sorted by key as SigV4
+  requires).
+- **Latent bug fixed.** `listObjectsFrom` hand-ordered its canonical query as
+  `list-type=2&continuation-token=...`, but SigV4 sorts by key
+  (`continuation-token` < `list-type`), so a real S3 / MinIO would 403 page 2;
+  it now routes through `canonicalizeQuery`. The Go integration test
+  (`TestS3Requests`) was generalized to re-derive the signature from the actual
+  signed-header set and now drives every new op (byte round-trip, metadata,
+  head, copy, full multipart flow) over the wire.
 
 ### M23.7 - observability completeness
 
