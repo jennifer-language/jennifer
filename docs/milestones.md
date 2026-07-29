@@ -1009,13 +1009,11 @@ incl. the sliding boundary), and the Go suite over memcache / redis
 
 **In progress.** The deepest per-module gaps, where a module handles the easy
 case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 through M23.6.9 done; the modules below
+sub-numbering as pieces land (M23.6.1 through M23.6.10 done; the module below
 planned):
 - **`pdfwriter`** - raster image embedding (PNG / JPEG XObjects), embedded /
   subset TrueType fonts (Unicode / CJK body text), and text layout (word-wrap,
   width measurement, alignment).
-- **`font`** - CFF / OpenType (`OTTO`) outlines, kerning + `OS/2` metrics
-  (cap-height, ascender/descender/line-gap).
 
 #### M23.6.1 - ipnet subnet math + classification
 
@@ -1247,6 +1245,32 @@ independent reference.
   ECI(26) for a byte-mode payload with non-ASCII bytes (verified round-tripping
   `café ünïçode` through `zbarimg`). Overlay 11 -> 29, `docblock`-clean; pure
   `.j`, both binaries.
+
+#### M23.6.10 - font CFF outlines, kerning, OS/2 metrics
+
+**Done.** Grew the `font` parser from TrueType-only into a full TrueType /
+OpenType parser.
+- **CFF / OTTO outlines.** A second outline backend (`modules/font_cff.j`,
+  `include`d): parses the `CFF ` table's INDEX / DICT structures, global / local
+  subroutines, and CID-keyed FDArray / FDSelect, and interprets Type2 charstrings
+  (all curve operators + the flex family) into outlines. `glyphPath` emits native
+  cubic `C` segments; the `Glyph` struct approximates each cubic as two
+  quadratics to keep one point model. Cross-checked against `fontTools` at **IoU
+  1.0** on SourceCodePro, PowerlineSymbols, and a CID-keyed CJK font (日 あ 語 人).
+- **Kerning + OS/2 metrics.** `kern(left, right)` reads the legacy `kern` table
+  (version 0, format 0, binary-searched); `ascender` / `descender` / `lineGap` /
+  `capHeight` / `xHeight` come from OS/2 (`sTypo*` + v2 cap/x-height), matching
+  fontTools exactly.
+- **Performance.** A profiling question surfaced an O(numGlyphs)-per-query cost:
+  glyph decoding re-parsed the entire CharStrings / subr INDEX (65k entries for
+  CJK) and the cmap scanned linearly. Fixed with O(1) single-INDEX-entry access,
+  on-demand subroutine fetch, and a binary-searched format-12 cmap - a CJK glyph
+  went from **34 s to 178 ms** (191x), a metric lookup from 2.5 s to 18 ms, with
+  outlines still IoU 1.0. An audit then broadened the cross-check to ~170 glyphs
+  (all-ASCII + a CJK sample, still IoU 1.0) and hardened the CFF interpreter
+  against a hostile font: runaway subroutine recursion is now bounded (a
+  catchable `font` error, not a hang), pinned by a hand-crafted recursive-subr
+  fixture. Overlay 11 -> 21, `docblock`-clean; pure `.j`, both binaries.
 
 ### M23.7 - observability completeness
 

@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
-# font_demo.j - parse a TrueType font and render a word to an SVG document,
-# outlining each glyph and laying them out by advance width. Uses the committed
-# test fixture (which contains the glyphs A, B, C); point FONT at a real .ttf and
-# change WORD to render anything.
+# font_demo.j - parse a TrueType or OpenType font and render a word to an SVG
+# document, outlining each glyph and laying them out by advance width plus pair
+# kerning. Uses the committed test fixture (glyphs A, B, C); point FONT at a real
+# .ttf / .otf (a CFF OpenType font outlines too) and change WORD to render
+# anything.
 #
 #     jennifer run examples/modules/font_demo.j > word.svg
 #
@@ -28,13 +29,19 @@ io.printf("  <g transform=\"scale(1,-1)\" fill=\"#222\">\n");
 
 def x as int init 0;
 def chars as list of string init strings.chars(WORD);
+def prev as int init -1;
 for (def i as int init 0; $i < len($chars); $i = $i + 1) {
     def cp as int init charCode($chars[$i]);
+    if ($prev >= 0) {
+        # tighten the pen by the pair kerning before placing this glyph
+        $x = $x + font.kern($f, $prev, $cp);
+    }
     def d as string init font.glyphPath($f, $cp);
     if (len($d) > 0) {
         io.printf("    <path transform=\"translate(%d,0)\" d=\"%s\"/>\n", $x, $d);
     }
     $x = $x + font.advance($f, $cp);
+    $prev = $cp;
 }
 io.printf("  </g>\n</svg>\n");
 

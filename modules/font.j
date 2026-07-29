@@ -2,17 +2,20 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * A pure-Jennifer TrueType / SFNT font parser: read a `.ttf` from `bytes` and
- * expose its metrics, character map, and glyph outlines. No Go, no dependency -
- * just the `bytes` type and the bitwise operators for the big-endian tables - so
- * it runs on **both binaries**.
+ * A pure-Jennifer TrueType / OpenType (SFNT) font parser: read a `.ttf` / `.otf`
+ * from `bytes` and expose its metrics, character map, and glyph outlines. No Go,
+ * no dependency - just the `bytes` type and the bitwise operators for the
+ * big-endian tables - so it runs on **both binaries**.
  *
- * Named `font` (not `truetype`) because the SFNT container also carries CFF /
- * PostScript outlines: v1 ships the **TrueType `glyf` backend**, and a CFF
- * backend can be added later, detected on parse. It parses the core tables -
- * `head`, `cmap` (formats 4 and 12), `maxp` / `hhea` / `hmtx`, `loca` / `glyf`
- * (simple **and** composite glyphs, quadratic curves), and `name` - enough to
- * lay out and outline a string.
+ * Both outline backends ship: the **TrueType `glyf`** backend (simple and
+ * composite glyphs, quadratic curves) and the **CFF / PostScript** backend for
+ * OpenType `OTTO` fonts (a Type2 charstring interpreter with global / local
+ * subroutines and CID-keyed FDArray / FDSelect, so CJK fonts outline too),
+ * detected on parse; a CFF glyph's cubic curves render as native `C` segments in
+ * `glyphPath` and are approximated as quadratics in the `Glyph` struct. It parses
+ * the core tables - `head`, `cmap` (formats 4 and 12), `maxp` / `hhea` / `hmtx`,
+ * `OS/2` (vertical metrics), the legacy `kern` table, `loca` / `glyf` or `CFF `,
+ * and `name`.
  *
  * @module font
  * @example
@@ -25,6 +28,8 @@ use fs;
 use convert;
 use strings;
 use maps;
+use lists;
+include "./font_cff.j";
 
 # ---- big-endian byte readers ----
 
@@ -116,6 +121,13 @@ export def struct Glyph {
  * @field cmapSub {int} the chosen cmap subtable offset
  * @field cmapFmt {int} the chosen cmap subtable format (4 or 12)
  * @field family {string} the font family name
+ * @field ascender {int} the typographic ascender (OS/2 sTypoAscender, else hhea)
+ * @field descender {int} the typographic descender (negative; OS/2 sTypoDescender, else hhea)
+ * @field lineGap {int} the typographic line gap (OS/2 sTypoLineGap, else hhea)
+ * @field capHeight {int} the capital height (OS/2 sCapHeight; 0 when unavailable)
+ * @field xHeight {int} the x-height (OS/2 sxHeight; 0 when unavailable)
+ * @field kern {int} the kern-table offset (0 when the font has no kern table)
+ * @field cff {int} the CFF-table offset (0 for a TrueType/glyf font)
  */
 export def struct Font {
     data as bytes,
@@ -128,27 +140,34 @@ export def struct Font {
     hmtx as int,
     cmapSub as int,
     cmapFmt as int,
-    family as string
+    family as string,
+    ascender as int,
+    descender as int,
+    lineGap as int,
+    capHeight as int,
+    xHeight as int,
+    kern as int,
+    cff as int
 };
 
 # ---- parse ----
 
 /**
- * Parse a TrueType / SFNT font from its bytes.
+ * Parse a TrueType / OpenType (SFNT) font from its bytes - a `glyf` (TrueType)
+ * or `CFF ` (OpenType/PostScript) outline font.
  * @param b {bytes} the font file contents
  * @return {Font} the parsed font
- * @throws {Error} on a malformed font, or a CFF / unsupported container
+ * @throws {Error} on a malformed font or an unrecognised container
  */
 export func parse(b as bytes) {
     if (len($b) < 12) {
         throw Error{kind: "font", message: "font.parse: too short to be a font", file: "", line: 0, col: 0};
     }
     def version as int init ulong($b, 0);
-    # 0x00010000 (TrueType), or "true" / "ttcf". "OTTO" is CFF (not supported).
-    if ($version == 1330926671) {
-        throw Error{kind: "font", message: "font.parse: OpenType/CFF fonts (OTTO) are not supported yet; only TrueType glyf outlines", file: "", line: 0, col: 0};
-    }
-    if ($version != 65536 and $version != 1953658213) {
+    # 0x00010000 / "true" / "ttcf" are TrueType-outline SFNTs; "OTTO" carries CFF
+    # (PostScript) outlines.
+    def isCff as bool init $version == 1330926671;   # "OTTO"
+    if (not ($isCff or $version == 65536 or $version == 1953658213)) {
         throw Error{kind: "font", message: "font.parse: unrecognised sfnt version", file: "", line: 0, col: 0};
     }
     def numTables as int init ushort($b, 4);
@@ -162,8 +181,18 @@ export func parse(b as bytes) {
     requireTable($tables, "hhea");
     requireTable($tables, "hmtx");
     requireTable($tables, "cmap");
-    requireTable($tables, "loca");
-    requireTable($tables, "glyf");
+    def cffOff as int init 0;
+    def locaOff as int init 0;
+    def glyfOff as int init 0;
+    if ($isCff) {
+        requireTable($tables, "CFF ");
+        $cffOff = $tables["CFF "];
+    } else {
+        requireTable($tables, "loca");
+        requireTable($tables, "glyf");
+        $locaOff = $tables["loca"];
+        $glyfOff = $tables["glyf"];
+    }
 
     def head as int init $tables["head"];
     def upem as int init ushort($b, $head + 18);
@@ -172,6 +201,11 @@ export func parse(b as bytes) {
     def numHMetrics as int init ushort($b, $tables["hhea"] + 34);
 
     def chosen as list of int init pickCmap($b, $tables["cmap"]);
+    def vm as list of int init verticalMetrics($b, $tables);
+    def kernOff as int init 0;
+    if (maps.has($tables, "kern")) {
+        $kernOff = $tables["kern"];
+    }
 
     return Font{
         data: $b,
@@ -179,13 +213,44 @@ export func parse(b as bytes) {
         numGlyphs: $numGlyphs,
         longLoca: $longLoca,
         numHMetrics: $numHMetrics,
-        loca: $tables["loca"],
-        glyf: $tables["glyf"],
+        loca: $locaOff,
+        glyf: $glyfOff,
         hmtx: $tables["hmtx"],
         cmapSub: $chosen[0],
         cmapFmt: $chosen[1],
-        family: readFamily($b, $tables)
+        family: readFamily($b, $tables),
+        ascender: $vm[0],
+        descender: $vm[1],
+        lineGap: $vm[2],
+        capHeight: $vm[3],
+        xHeight: $vm[4],
+        kern: $kernOff,
+        cff: $cffOff
     };
+}
+
+# verticalMetrics returns [ascender, descender, lineGap, capHeight, xHeight]. The
+# ascender / descender / lineGap come from OS/2 sTypo* when the OS/2 table is
+# present (else the hhea values); capHeight / xHeight need OS/2 version 2+.
+func verticalMetrics(b as bytes, tables as map of string to int) {
+    def hhea as int init $tables["hhea"];
+    def asc as int init sshort($b, $hhea + 4);
+    def desc as int init sshort($b, $hhea + 6);
+    def gap as int init sshort($b, $hhea + 8);
+    def cap as int init 0;
+    def xh as int init 0;
+    if (maps.has($tables, "OS/2")) {
+        def os2 as int init $tables["OS/2"];
+        def ver as int init ushort($b, $os2);
+        $asc = sshort($b, $os2 + 68);
+        $desc = sshort($b, $os2 + 70);
+        $gap = sshort($b, $os2 + 72);
+        if ($ver >= 2) {
+            $xh = sshort($b, $os2 + 86);
+            $cap = sshort($b, $os2 + 88);
+        }
+    }
+    return [$asc, $desc, $gap, $cap, $xh];
 }
 
 func requireTable(tables as map of string to int, name as string) {
@@ -281,14 +346,23 @@ func segmentLookup(b as bytes, sub as int, cp as int) {
     return 0;
 }
 
-# coverageLookup is the segmented-coverage lookup (full Unicode range).
+# coverageLookup is the segmented-coverage lookup (full Unicode range). The
+# groups are sorted by start code, so binary-search them (a CJK font has
+# thousands of groups; a linear scan per lookup is far too slow).
 func coverageLookup(b as bytes, sub as int, cp as int) {
     def nGroups as int init ulong($b, $sub + 12);
-    for (def i as int init 0; $i < $nGroups; $i = $i + 1) {
-        def g as int init $sub + 16 + $i * 12;
+    def lo as int init 0;
+    def hi as int init $nGroups - 1;
+    while ($lo <= $hi) {
+        def mid as int init ($lo + $hi) // 2;
+        def g as int init $sub + 16 + $mid * 12;
         def startc as int init ulong($b, $g);
         def endc as int init ulong($b, $g + 4);
-        if ($cp >= $startc and $cp <= $endc) {
+        if ($cp < $startc) {
+            $hi = $mid - 1;
+        } elseif ($cp > $endc) {
+            $lo = $mid + 1;
+        } else {
             return ulong($b, $g + 8) + ($cp - $startc);
         }
     }
@@ -315,6 +389,57 @@ export func name(f as Font) {
     return $f.family;
 }
 
+/**
+ * The typographic ascender in font units (OS/2 `sTypoAscender`, else the hhea
+ * ascent). The distance from the baseline to the top of the em box.
+ * @param f {Font} the font
+ * @return {int} the ascender
+ */
+export func ascender(f as Font) {
+    return $f.ascender;
+}
+
+/**
+ * The typographic descender in font units (OS/2 `sTypoDescender`, else hhea).
+ * Conventionally negative (below the baseline).
+ * @param f {Font} the font
+ * @return {int} the descender
+ */
+export func descender(f as Font) {
+    return $f.descender;
+}
+
+/**
+ * The typographic line gap in font units (OS/2 `sTypoLineGap`, else hhea): the
+ * recommended extra leading between lines. Line height = ascender - descender +
+ * lineGap.
+ * @param f {Font} the font
+ * @return {int} the line gap
+ */
+export func lineGap(f as Font) {
+    return $f.lineGap;
+}
+
+/**
+ * The capital height in font units (OS/2 `sCapHeight`): the height of a flat
+ * capital such as `H`. 0 when the font has no OS/2 v2+ table.
+ * @param f {Font} the font
+ * @return {int} the cap height, or 0 when unavailable
+ */
+export func capHeight(f as Font) {
+    return $f.capHeight;
+}
+
+/**
+ * The x-height in font units (OS/2 `sxHeight`): the height of a lowercase `x`.
+ * 0 when the font has no OS/2 v2+ table.
+ * @param f {Font} the font
+ * @return {int} the x-height, or 0 when unavailable
+ */
+export func xHeight(f as Font) {
+    return $f.xHeight;
+}
+
 # advanceOf reads the horizontal advance of a glyph id from hmtx.
 func advanceOf(f as Font, gid as int) {
     if ($gid < $f.numHMetrics) {
@@ -331,6 +456,71 @@ func advanceOf(f as Font, gid as int) {
  */
 export func advance(f as Font, cp as int) {
     return advanceOf($f, glyphIndex($f, $cp));
+}
+
+/**
+ * The kerning adjustment between two codepoints in font units (negative pulls
+ * them closer). Reads the legacy `kern` table (version 0, horizontal format-0
+ * subtables); 0 when the font has no `kern` table or no pair entry. Modern fonts
+ * carry kerning in GPOS instead, which this does not read.
+ * @param f {Font} the font
+ * @param left {int} the left codepoint
+ * @param right {int} the right codepoint
+ * @return {int} the kerning adjustment, or 0
+ */
+export func kern(f as Font, left as int, right as int) {
+    if ($f.kern == 0) {
+        return 0;
+    }
+    def g1 as int init glyphIndex($f, $left);
+    def g2 as int init glyphIndex($f, $right);
+    if ($g1 == 0 or $g2 == 0) {
+        return 0;
+    }
+    return kernPair($f.data, $f.kern, $g1, $g2);
+}
+
+# kernPair sums the horizontal format-0 kerning for a glyph pair across the kern
+# table's subtables.
+func kernPair(b as bytes, kern as int, leftGid as int, rightGid as int) {
+    if (ushort($b, $kern) != 0) {
+        return 0;   # Apple 'kern' (version 1.0) layout not supported
+    }
+    def nTables as int init ushort($b, $kern + 2);
+    def pos as int init $kern + 4;
+    def total as int init 0;
+    for (def t as int init 0; $t < $nTables; $t = $t + 1) {
+        def stLen as int init ushort($b, $pos + 2);
+        def coverage as int init ushort($b, $pos + 4);
+        if (($coverage & 1) != 0 and ($coverage >> 8) == 0) {
+            $total = $total + kernFormatZero($b, $pos + 6, $leftGid, $rightGid);
+        }
+        $pos = $pos + $stLen;
+    }
+    return $total;
+}
+
+# kernFormatZero binary-searches a format-0 subtable's sorted pair array.
+func kernFormatZero(b as bytes, p as int, leftGid as int, rightGid as int) {
+    def nPairs as int init ushort($b, $p);
+    def pairs as int init $p + 8;   # past nPairs / searchRange / entrySelector / rangeShift
+    def key as int init ($leftGid << 16) | $rightGid;
+    def lo as int init 0;
+    def hi as int init $nPairs - 1;
+    while ($lo <= $hi) {
+        def mid as int init ($lo + $hi) // 2;
+        def rec as int init $pairs + $mid * 6;
+        def k as int init (ushort($b, $rec) << 16) | ushort($b, $rec + 2);
+        if ($k == $key) {
+            return sshort($b, $rec + 4);
+        }
+        if ($k < $key) {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid - 1;
+        }
+    }
+    return 0;
 }
 
 # ---- loca / glyf ----
@@ -358,6 +548,9 @@ export func glyph(f as Font, cp as int) {
 
 # glyphById decodes glyph `gid`. `depth` guards composite recursion.
 func glyphById(f as Font, gid as int, depth as int) {
+    if ($f.cff != 0) {
+        return cffGlyphById($f, $gid);
+    }
     if ($depth > 8) {
         throw Error{kind: "font", message: "font.glyph: composite nesting too deep", file: "", line: 0, col: 0};
     }
@@ -551,6 +744,9 @@ func round(v as float) {
  * @return {string} the SVG path data
  */
 export func glyphPath(f as Font, cp as int) {
+    if ($f.cff != 0) {
+        return cffGlyphPath($f, glyphIndex($f, $cp));
+    }
     def gl as Glyph init glyph($f, $cp);
     def parts as list of string init [];
     for (def c as int init 0; $c < len($gl.contours); $c = $c + 1) {

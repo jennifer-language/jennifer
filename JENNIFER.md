@@ -502,14 +502,20 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   fallback). Over `xml` + `time` (build / parse on both binaries; `fetch` needs
   the default binary). Hardened for untrusted feeds (xml nesting cap, no
   billion-laughs, lenient dates, a 64 MiB body cap).
-- **`font`** - a pure-Jennifer TrueType / SFNT font parser (no Go; `bytes` +
+- **`font`** - a pure-Jennifer TrueType / OpenType font parser (no Go; `bytes` +
   bitwise ops + `fs`, so **both binaries**). `font.parse(b)` / `open(path)` ->
-  `font.Font`; `font.unitsPerEm(f)` / `name(f)` / `advance(f, cp)` (advance
-  width) / `glyphPath(f, cp)` -> an SVG path `d` string / `glyph(f, cp)` ->
-  `font.Glyph` (contours of on / off-curve `font.Point`s + advance + bbox).
-  Parses `head` / `cmap` (formats 4 and 12) / `maxp` / `hhea` / `hmtx` / `loca`
-  / `glyf` (simple **and** composite glyphs, quadratic curves) / `name`.
-  TrueType `glyf` backend (CFF is a later second backend, one module).
+  `font.Font` (a `.ttf` or `.otf`); `font.unitsPerEm(f)` / `name(f)` /
+  `advance(f, cp)` / `kern(f, left, right)` (legacy `kern`-table pair kerning) /
+  `ascender` / `descender` / `lineGap` / `capHeight` / `xHeight` (OS/2 vertical
+  metrics) / `glyphPath(f, cp)` -> an SVG path `d` string / `glyph(f, cp)` ->
+  `font.Glyph` (contours of on / off-curve `font.Point`s + advance + bbox). Both
+  outline backends ship: TrueType `glyf` (simple + composite, quadratic) and CFF
+  / PostScript for OpenType `OTTO` (a Type2 charstring interpreter with global /
+  local subrs and CID-keyed FDArray / FDSelect, so CJK outlines too); a CFF
+  glyph's cubic curves emit native `C` segments in `glyphPath`, approximated as
+  quadratics in the `Glyph` struct. Parses `head` / `cmap` (4 + 12) / `maxp` /
+  `hhea` / `hmtx` / `OS/2` / `kern` / `loca` / `glyf` or `CFF ` / `name`. GPOS /
+  GSUB shaping, `CFF2` / variable axes, and hinting are out of scope.
 - **`flatdb`** - a file-backed JSON store over `json` + `fs`. `flatdb.open(path)`
   -> value-semantic `DB` (empty if the file is absent), or `flatdb.openString(text)`
   for a **read-only** DB from an in-memory JSON string (a store fetched over the
