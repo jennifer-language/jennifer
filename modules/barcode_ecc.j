@@ -16,8 +16,9 @@ def struct GF {
     log as list of int
 };
 
-# buildGF constructs the GF(256) exp / log tables.
-func buildGF() {
+# buildGFPrim constructs the GF(256) exp / log tables for a primitive polynomial
+# (QR uses 0x11d; DataMatrix ECC200 uses 0x12d).
+func buildGFPrim(prim as int) {
     def exp as list of int init [];
     def log as list of int init [];
     def i as int init 0;
@@ -32,11 +33,16 @@ func buildGF() {
         $log[$x] = $i;
         $x = $x << 1;
         if (($x & 0x100) > 0) {
-            $x = $x ^ 0x11d;
+            $x = $x ^ $prim;
         }
         $i = $i + 1;
     }
     return GF{ exp: $exp, log: $log };
+}
+
+# buildGF constructs the GF(256) tables with QR's primitive polynomial (0x11d).
+func buildGF() {
+    return buildGFPrim(0x11d);
 }
 
 # gfMul multiplies two field elements.
@@ -47,9 +53,10 @@ func gfMul(gf as GF, a as int, b as int) {
     return $gf.exp[($gf.log[$a] + $gf.log[$b]) % 255];
 }
 
-# rsGenerator builds the degree-`degree` Reed-Solomon generator polynomial
-# (coefficients high-order first, length degree+1).
-func rsGenerator(gf as GF, degree as int) {
+# rsGenerator builds the degree-`degree` Reed-Solomon generator polynomial with
+# roots a^base .. a^(base+degree-1) (coefficients high-order first). QR uses
+# base 0; DataMatrix ECC200 uses base 1.
+func rsGenerator(gf as GF, degree as int, base as int) {
     # Bind the log/exp tables locally once. Passing the whole GF struct into a
     # gfMul helper per multiplication would value-copy both ~255-entry lists
     # every call (thousands per polynomial); indexing the local lists is free.
@@ -58,20 +65,21 @@ func rsGenerator(gf as GF, degree as int) {
     def g as list of int init [1];
     def i as int init 0;
     while ($i < $degree) {
-        # multiply g by (x + exp[i])
+        # multiply g by (x + exp[base + i])
         def next as list of int init [];
         def k as int init 0;
         while ($k <= len($g)) {
             $next[] = 0;
             $k = $k + 1;
         }
+        def root as int init ($base + $i) % 255;
         def j as int init 0;
         while ($j < len($g)) {
             $next[$j] = $next[$j] ^ $g[$j];
-            # inline gfMul(g[j], exp[i]); exp[i] is never zero (log[exp[i]] == i).
+            # inline gfMul(g[j], exp[root]); exp[root] is never zero.
             def prod as int init 0;
             if (not ($g[$j] == 0)) {
-                $prod = $exp[($log[$g[$j]] + $i) % 255];
+                $prod = $exp[($log[$g[$j]] + $root) % 255];
             }
             $next[$j + 1] = $next[$j + 1] ^ $prod;
             $j = $j + 1;
@@ -82,10 +90,11 @@ func rsGenerator(gf as GF, degree as int) {
     return $g;
 }
 
-# rsEncode returns the `ecCount` Reed-Solomon error-correction codewords for a
-# data codeword list.
-func rsEncode(gf as GF, data as list of int, ecCount as int) {
-    def gen as list of int init rsGenerator($gf, $ecCount);
+# rsEncodeBase returns the `ecCount` Reed-Solomon error-correction codewords for
+# a data codeword list, using a generator with the given root base (QR: 0,
+# DataMatrix: 1).
+func rsEncodeBase(gf as GF, data as list of int, ecCount as int, base as int) {
+    def gen as list of int init rsGenerator($gf, $ecCount, $base);
     def exp as list of int init $gf.exp;
     def log as list of int init $gf.log;
     def res as list of int init [];
@@ -122,4 +131,9 @@ func rsEncode(gf as GF, data as list of int, ecCount as int) {
         $m = $m + 1;
     }
     return $ec;
+}
+
+# rsEncode returns the `ecCount` EC codewords with the QR generator base (0).
+func rsEncode(gf as GF, data as list of int, ecCount as int) {
+    return rsEncodeBase($gf, $data, $ecCount, 0);
 }

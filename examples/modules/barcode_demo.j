@@ -34,4 +34,14 @@ fs.writeString("qr.svg", barcode.svg($qr, $o));
 def code as barcode.Symbol init barcode.encode("JENNIFER-2026", "code128", $o);
 fs.writeBytes("code128.png", barcode.png($code, $o));
 
-io.printf("wrote qr.png, qr.svg, code128.png\n");
+# A DataMatrix (2D, ECC200) - the square counterpart to QR, shown on the terminal.
+def dm as barcode.Symbol init barcode.encode("JENNIFER", "datamatrix", $o);
+io.printf("DataMatrix (%dx%d):\n%s\n", $dm.size, $dm.size, barcode.terminal($dm));
+
+# A retail EAN-13 and a GS1-128 (SSCC + batch); the EAN-13 SVG carries a
+# human-readable digit line below the bars.
+fs.writeString("ean13.svg", barcode.svg(barcode.encode("400638133393", "ean13", $o), $o));
+def gs1 as barcode.Symbol init barcode.encode("(01)09501101020917(10)ABC123", "gs1-128", $o);
+fs.writeBytes("gs1-128.png", barcode.png($gs1, $o));
+
+io.printf("wrote qr.png, qr.svg, code128.png, ean13.svg, gs1-128.png\n");

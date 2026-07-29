@@ -12,9 +12,13 @@
  * (the raw cells).
  *
  * Symbologies: 2D `qr` (Reed-Solomon over GF(256), EC levels L/M/Q/H, automatic
- * version selection 1-10 and data-mask scoring, byte mode); 1D `code128`,
- * `ean13`, `ean8`, `itf`, `code39`. Pure `.j` over `compress` (zlib) + `crc`
- * (CRC-32) + `encoding` + the bitwise operators; runs on both binaries.
+ * version selection 1-40, data-mask scoring, and numeric / alphanumeric / byte
+ * mode chosen for compactness) and `datamatrix` (ECC200, square symbols 10x10 to
+ * 26x26); 1D `code128`, `code93`, `ean13`, `ean8`, `upca`, `upce`, `itf`,
+ * `code39`, and `gs1-128` (FNC1 + Application Identifiers). A 1D SVG also carries
+ * a human-readable text line (Options.humanReadable). Pure `.j` over `compress`
+ * (zlib) + `crc` (CRC-32) + `encoding` + the bitwise operators; runs on both
+ * binaries.
  * @module barcode
  * @example
  * import "barcode.j" as barcode;
@@ -62,6 +66,7 @@ export def struct Symbol {
  * @field ecLevel {string} QR error-correction level: "L", "M", "Q", or "H"
  * @field foreground {string} the dark colour (SVG only; PNG is always black), e.g. "#000000"
  * @field background {string} the light colour (SVG only; PNG is always white), e.g. "#ffffff"
+ * @field humanReadable {bool} render the data as a text line under a 1D barcode (SVG only; on by default)
  */
 export def struct Options {
     scale as int,
@@ -69,7 +74,8 @@ export def struct Options {
     quiet as int,
     ecLevel as string,
     foreground as string,
-    background as string
+    background as string,
+    humanReadable as bool
 };
 
 func fail(msg as string) {
@@ -85,12 +91,14 @@ def struct Canvas {
 };
 
 /**
- * Sensible default rendering options (scale 4, quiet 4, EC level M, black on
- * white).
+ * Sensible default rendering options (scale 8, quiet 4, EC level M, black on
+ * white). Scale 8 (8 px per module / narrow bar) keeps a code comfortably
+ * scannable off a screen by a phone camera, where a smaller render invites focus
+ * and moire trouble; drop `opts.scale` for a more compact image.
  * @return {Options} the defaults
  */
 export func defaults() {
-    return Options{ scale: 4, height: 40, quiet: 4, ecLevel: "M", foreground: "#000000", background: "#ffffff" };
+    return Options{ scale: 8, height: 40, quiet: 4, ecLevel: "M", foreground: "#000000", background: "#ffffff", humanReadable: true };
 }
 
 # --- QR: tables (private) ---------------------------------------------------
@@ -105,44 +113,67 @@ func ecLevelBits(level as string) {
 }
 
 # blockTable returns the EC block structure keyed "V-L" -> [ecPerBlock,
-# g1blocks, g1data, g2blocks, g2data] for versions 1-10.
+# g1blocks, g1data, g2blocks, g2data] for versions 1-40 (all four EC levels).
 func blockTable() {
     def t as map of string to list of int init {};
-    $t["1-L"] = [7, 1, 19, 0, 0];    $t["1-M"] = [10, 1, 16, 0, 0];
-    $t["1-Q"] = [13, 1, 13, 0, 0];   $t["1-H"] = [17, 1, 9, 0, 0];
-    $t["2-L"] = [10, 1, 34, 0, 0];   $t["2-M"] = [16, 1, 28, 0, 0];
-    $t["2-Q"] = [22, 1, 22, 0, 0];   $t["2-H"] = [28, 1, 16, 0, 0];
-    $t["3-L"] = [15, 1, 55, 0, 0];   $t["3-M"] = [26, 1, 44, 0, 0];
-    $t["3-Q"] = [18, 2, 17, 0, 0];   $t["3-H"] = [22, 2, 13, 0, 0];
-    $t["4-L"] = [20, 1, 80, 0, 0];   $t["4-M"] = [18, 2, 32, 0, 0];
-    $t["4-Q"] = [26, 2, 24, 0, 0];   $t["4-H"] = [16, 4, 9, 0, 0];
-    $t["5-L"] = [26, 1, 108, 0, 0];  $t["5-M"] = [24, 2, 43, 0, 0];
-    $t["5-Q"] = [18, 2, 15, 2, 16];  $t["5-H"] = [22, 2, 11, 2, 12];
-    $t["6-L"] = [18, 2, 68, 0, 0];   $t["6-M"] = [16, 4, 27, 0, 0];
-    $t["6-Q"] = [24, 4, 19, 0, 0];   $t["6-H"] = [28, 4, 15, 0, 0];
-    $t["7-L"] = [20, 2, 78, 0, 0];   $t["7-M"] = [18, 4, 31, 0, 0];
-    $t["7-Q"] = [18, 2, 14, 4, 15];  $t["7-H"] = [26, 4, 13, 1, 14];
-    $t["8-L"] = [24, 2, 97, 0, 0];   $t["8-M"] = [22, 2, 38, 2, 39];
-    $t["8-Q"] = [22, 4, 18, 2, 19];  $t["8-H"] = [26, 4, 14, 2, 15];
-    $t["9-L"] = [30, 2, 116, 0, 0];  $t["9-M"] = [22, 3, 36, 2, 37];
-    $t["9-Q"] = [20, 4, 16, 4, 17];  $t["9-H"] = [24, 4, 12, 4, 13];
-    $t["10-L"] = [18, 2, 68, 2, 69]; $t["10-M"] = [26, 4, 43, 1, 44];
-    $t["10-Q"] = [24, 6, 19, 2, 20]; $t["10-H"] = [28, 6, 15, 2, 16];
+    $t["1-L"] = [7, 1, 19, 0, 0]; $t["1-M"] = [10, 1, 16, 0, 0]; $t["1-Q"] = [13, 1, 13, 0, 0]; $t["1-H"] = [17, 1, 9, 0, 0];
+    $t["2-L"] = [10, 1, 34, 0, 0]; $t["2-M"] = [16, 1, 28, 0, 0]; $t["2-Q"] = [22, 1, 22, 0, 0]; $t["2-H"] = [28, 1, 16, 0, 0];
+    $t["3-L"] = [15, 1, 55, 0, 0]; $t["3-M"] = [26, 1, 44, 0, 0]; $t["3-Q"] = [18, 2, 17, 0, 0]; $t["3-H"] = [22, 2, 13, 0, 0];
+    $t["4-L"] = [20, 1, 80, 0, 0]; $t["4-M"] = [18, 2, 32, 0, 0]; $t["4-Q"] = [26, 2, 24, 0, 0]; $t["4-H"] = [16, 4, 9, 0, 0];
+    $t["5-L"] = [26, 1, 108, 0, 0]; $t["5-M"] = [24, 2, 43, 0, 0]; $t["5-Q"] = [18, 2, 15, 2, 16]; $t["5-H"] = [22, 2, 11, 2, 12];
+    $t["6-L"] = [18, 2, 68, 0, 0]; $t["6-M"] = [16, 4, 27, 0, 0]; $t["6-Q"] = [24, 4, 19, 0, 0]; $t["6-H"] = [28, 4, 15, 0, 0];
+    $t["7-L"] = [20, 2, 78, 0, 0]; $t["7-M"] = [18, 4, 31, 0, 0]; $t["7-Q"] = [18, 2, 14, 4, 15]; $t["7-H"] = [26, 4, 13, 1, 14];
+    $t["8-L"] = [24, 2, 97, 0, 0]; $t["8-M"] = [22, 2, 38, 2, 39]; $t["8-Q"] = [22, 4, 18, 2, 19]; $t["8-H"] = [26, 4, 14, 2, 15];
+    $t["9-L"] = [30, 2, 116, 0, 0]; $t["9-M"] = [22, 3, 36, 2, 37]; $t["9-Q"] = [20, 4, 16, 4, 17]; $t["9-H"] = [24, 4, 12, 4, 13];
+    $t["10-L"] = [18, 2, 68, 2, 69]; $t["10-M"] = [26, 4, 43, 1, 44]; $t["10-Q"] = [24, 6, 19, 2, 20]; $t["10-H"] = [28, 6, 15, 2, 16];
+    $t["11-L"] = [20, 4, 81, 0, 0]; $t["11-M"] = [30, 1, 50, 4, 51]; $t["11-Q"] = [28, 4, 22, 4, 23]; $t["11-H"] = [24, 3, 12, 8, 13];
+    $t["12-L"] = [24, 2, 92, 2, 93]; $t["12-M"] = [22, 6, 36, 2, 37]; $t["12-Q"] = [26, 4, 20, 6, 21]; $t["12-H"] = [28, 7, 14, 4, 15];
+    $t["13-L"] = [26, 4, 107, 0, 0]; $t["13-M"] = [22, 8, 37, 1, 38]; $t["13-Q"] = [24, 8, 20, 4, 21]; $t["13-H"] = [22, 12, 11, 4, 12];
+    $t["14-L"] = [30, 3, 115, 1, 116]; $t["14-M"] = [24, 4, 40, 5, 41]; $t["14-Q"] = [20, 11, 16, 5, 17]; $t["14-H"] = [24, 11, 12, 5, 13];
+    $t["15-L"] = [22, 5, 87, 1, 88]; $t["15-M"] = [24, 5, 41, 5, 42]; $t["15-Q"] = [30, 5, 24, 7, 25]; $t["15-H"] = [24, 11, 12, 7, 13];
+    $t["16-L"] = [24, 5, 98, 1, 99]; $t["16-M"] = [28, 7, 45, 3, 46]; $t["16-Q"] = [24, 15, 19, 2, 20]; $t["16-H"] = [30, 3, 15, 13, 16];
+    $t["17-L"] = [28, 1, 107, 5, 108]; $t["17-M"] = [28, 10, 46, 1, 47]; $t["17-Q"] = [28, 1, 22, 15, 23]; $t["17-H"] = [28, 2, 14, 17, 15];
+    $t["18-L"] = [30, 5, 120, 1, 121]; $t["18-M"] = [26, 9, 43, 4, 44]; $t["18-Q"] = [28, 17, 22, 1, 23]; $t["18-H"] = [28, 2, 14, 19, 15];
+    $t["19-L"] = [28, 3, 113, 4, 114]; $t["19-M"] = [26, 3, 44, 11, 45]; $t["19-Q"] = [26, 17, 21, 4, 22]; $t["19-H"] = [26, 9, 13, 16, 14];
+    $t["20-L"] = [28, 3, 107, 5, 108]; $t["20-M"] = [26, 3, 41, 13, 42]; $t["20-Q"] = [30, 15, 24, 5, 25]; $t["20-H"] = [28, 15, 15, 10, 16];
+    $t["21-L"] = [28, 4, 116, 4, 117]; $t["21-M"] = [26, 17, 42, 0, 0]; $t["21-Q"] = [28, 17, 22, 6, 23]; $t["21-H"] = [30, 19, 16, 6, 17];
+    $t["22-L"] = [28, 2, 111, 7, 112]; $t["22-M"] = [28, 17, 46, 0, 0]; $t["22-Q"] = [30, 7, 24, 16, 25]; $t["22-H"] = [24, 34, 13, 0, 0];
+    $t["23-L"] = [30, 4, 121, 5, 122]; $t["23-M"] = [28, 4, 47, 14, 48]; $t["23-Q"] = [30, 11, 24, 14, 25]; $t["23-H"] = [30, 16, 15, 14, 16];
+    $t["24-L"] = [30, 6, 117, 4, 118]; $t["24-M"] = [28, 6, 45, 14, 46]; $t["24-Q"] = [30, 11, 24, 16, 25]; $t["24-H"] = [30, 30, 16, 2, 17];
+    $t["25-L"] = [26, 8, 106, 4, 107]; $t["25-M"] = [28, 8, 47, 13, 48]; $t["25-Q"] = [30, 7, 24, 22, 25]; $t["25-H"] = [30, 22, 15, 13, 16];
+    $t["26-L"] = [28, 10, 114, 2, 115]; $t["26-M"] = [28, 19, 46, 4, 47]; $t["26-Q"] = [28, 28, 22, 6, 23]; $t["26-H"] = [30, 33, 16, 4, 17];
+    $t["27-L"] = [30, 8, 122, 4, 123]; $t["27-M"] = [28, 22, 45, 3, 46]; $t["27-Q"] = [30, 8, 23, 26, 24]; $t["27-H"] = [30, 12, 15, 28, 16];
+    $t["28-L"] = [30, 3, 117, 10, 118]; $t["28-M"] = [28, 3, 45, 23, 46]; $t["28-Q"] = [30, 4, 24, 31, 25]; $t["28-H"] = [30, 11, 15, 31, 16];
+    $t["29-L"] = [30, 7, 116, 7, 117]; $t["29-M"] = [28, 21, 45, 7, 46]; $t["29-Q"] = [30, 1, 23, 37, 24]; $t["29-H"] = [30, 19, 15, 26, 16];
+    $t["30-L"] = [30, 5, 115, 10, 116]; $t["30-M"] = [28, 19, 47, 10, 48]; $t["30-Q"] = [30, 15, 24, 25, 25]; $t["30-H"] = [30, 23, 15, 25, 16];
+    $t["31-L"] = [30, 13, 115, 3, 116]; $t["31-M"] = [28, 2, 46, 29, 47]; $t["31-Q"] = [30, 42, 24, 1, 25]; $t["31-H"] = [30, 23, 15, 28, 16];
+    $t["32-L"] = [30, 17, 115, 0, 0]; $t["32-M"] = [28, 10, 46, 23, 47]; $t["32-Q"] = [30, 10, 24, 35, 25]; $t["32-H"] = [30, 19, 15, 35, 16];
+    $t["33-L"] = [30, 17, 115, 1, 116]; $t["33-M"] = [28, 14, 46, 21, 47]; $t["33-Q"] = [30, 29, 24, 19, 25]; $t["33-H"] = [30, 11, 15, 46, 16];
+    $t["34-L"] = [30, 13, 115, 6, 116]; $t["34-M"] = [28, 14, 46, 23, 47]; $t["34-Q"] = [30, 44, 24, 7, 25]; $t["34-H"] = [30, 59, 16, 1, 17];
+    $t["35-L"] = [30, 12, 121, 7, 122]; $t["35-M"] = [28, 12, 47, 26, 48]; $t["35-Q"] = [30, 39, 24, 14, 25]; $t["35-H"] = [30, 22, 15, 41, 16];
+    $t["36-L"] = [30, 6, 121, 14, 122]; $t["36-M"] = [28, 6, 47, 34, 48]; $t["36-Q"] = [30, 46, 24, 10, 25]; $t["36-H"] = [30, 2, 15, 64, 16];
+    $t["37-L"] = [30, 17, 122, 4, 123]; $t["37-M"] = [28, 29, 46, 14, 47]; $t["37-Q"] = [30, 49, 24, 10, 25]; $t["37-H"] = [30, 24, 15, 46, 16];
+    $t["38-L"] = [30, 4, 122, 18, 123]; $t["38-M"] = [28, 13, 46, 32, 47]; $t["38-Q"] = [30, 48, 24, 14, 25]; $t["38-H"] = [30, 42, 15, 32, 16];
+    $t["39-L"] = [30, 20, 117, 4, 118]; $t["39-M"] = [28, 40, 47, 7, 48]; $t["39-Q"] = [30, 43, 24, 22, 25]; $t["39-H"] = [30, 10, 15, 67, 16];
+    $t["40-L"] = [30, 19, 118, 6, 119]; $t["40-M"] = [28, 18, 47, 31, 48]; $t["40-Q"] = [30, 34, 24, 34, 25]; $t["40-H"] = [30, 20, 15, 61, 16];
     return $t;
 }
 
-# alignPositions returns the alignment-pattern centre coordinates for a version.
+# alignPositions returns the alignment-pattern centre coordinates for a version
+# (1-40); the row/column combinations of these give the alignment centres.
 func alignPositions(version as int) {
-    if ($version == 1) { return []; }
-    if ($version == 2) { return [6, 18]; }
-    if ($version == 3) { return [6, 22]; }
-    if ($version == 4) { return [6, 26]; }
-    if ($version == 5) { return [6, 30]; }
-    if ($version == 6) { return [6, 34]; }
-    if ($version == 7) { return [6, 22, 38]; }
-    if ($version == 8) { return [6, 24, 42]; }
-    if ($version == 9) { return [6, 26, 46]; }
-    return [6, 28, 50];
+    def t as list of list of int init [
+        [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42],
+        [6, 26, 46], [6, 28, 50], [6, 30, 54], [6, 32, 58], [6, 34, 62], [6, 26, 46, 66],
+        [6, 26, 48, 70], [6, 26, 50, 74], [6, 30, 54, 78], [6, 30, 56, 82], [6, 30, 58, 86],
+        [6, 34, 62, 90], [6, 28, 50, 72, 94], [6, 26, 50, 74, 98], [6, 30, 54, 78, 102],
+        [6, 28, 54, 80, 106], [6, 32, 58, 84, 110], [6, 30, 58, 86, 114], [6, 34, 62, 90, 118],
+        [6, 26, 50, 74, 98, 122], [6, 30, 54, 78, 102, 126], [6, 26, 52, 78, 104, 130],
+        [6, 30, 56, 82, 108, 134], [6, 34, 60, 86, 112, 138], [6, 30, 58, 86, 114, 142],
+        [6, 34, 62, 90, 118, 146], [6, 30, 54, 78, 102, 126, 150], [6, 24, 50, 76, 102, 128, 154],
+        [6, 28, 54, 80, 106, 132, 158], [6, 32, 58, 84, 110, 136, 162], [6, 26, 54, 82, 110, 138, 166],
+        [6, 30, 58, 86, 114, 142, 170]];
+    return $t[$version - 1];
 }
 
 # totalDataCodewords sums the data codewords across both groups.
@@ -152,24 +183,117 @@ func totalDataCodewords(info as list of int) {
 
 # --- QR: data encoding (private) --------------------------------------------
 
-# selectVersion picks the smallest version (1-10) holding `nbytes` in byte mode.
-func selectVersion(nbytes as int, level as string) {
-    def t as map of string to list of int init blockTable();
-    def v as int init 1;
-    while ($v <= 10) {
-        def info as list of int init $t[convert.toString($v) + "-" + $level];
-        def total as int init totalDataCodewords($info);
-        def countBits as int init 8;
-        if ($v >= 10) {
-            $countBits = 16;
+# alnumValue maps an alphanumeric-mode character (byte) to its value 0..44, or -1
+# when the character is not in the QR alphanumeric set.
+func alnumValue(b as int) {
+    if ($b >= 48 and $b <= 57) { return $b - 48; }        # 0-9
+    if ($b >= 65 and $b <= 90) { return $b - 65 + 10; }   # A-Z
+    if ($b == 32) { return 36; }   # space
+    if ($b == 36) { return 37; }   # $
+    if ($b == 37) { return 38; }   # %
+    if ($b == 42) { return 39; }   # *
+    if ($b == 43) { return 40; }   # +
+    if ($b == 45) { return 41; }   # -
+    if ($b == 46) { return 42; }   # .
+    if ($b == 47) { return 43; }   # /
+    if ($b == 58) { return 44; }   # :
+    return -1;
+}
+
+# chooseMode picks the most compact QR mode: numeric (all digits), else
+# alphanumeric (all in the alphanumeric set), else byte.
+func chooseMode(data as bytes) {
+    if (len($data) == 0) {
+        return "byte";
+    }
+    def numeric as bool init true;
+    def alnum as bool init true;
+    def i as int init 0;
+    while ($i < len($data)) {
+        def b as int init $data[$i];
+        if ($b < 48 or $b > 57) { $numeric = false; }
+        if (alnumValue($b) < 0) { $alnum = false; }
+        $i = $i + 1;
+    }
+    if ($numeric) { return "numeric"; }
+    if ($alnum) { return "alphanumeric"; }
+    return "byte";
+}
+
+# qrModeIndicator is the 4-bit mode indicator value.
+func qrModeIndicator(mode as string) {
+    if ($mode == "numeric") { return 1; }
+    if ($mode == "alphanumeric") { return 2; }
+    return 4;
+}
+
+# qrCountBits is the character-count-indicator width for a mode and version.
+func qrCountBits(mode as string, version as int) {
+    if ($mode == "numeric") {
+        if ($version <= 9) { return 10; }
+        if ($version <= 26) { return 12; }
+        return 14;
+    }
+    if ($mode == "alphanumeric") {
+        if ($version <= 9) { return 9; }
+        if ($version <= 26) { return 11; }
+        return 13;
+    }
+    if ($version <= 9) { return 8; }
+    return 16;
+}
+
+# qrDataBits is the bit count the payload itself occupies (excluding the mode
+# indicator and character count).
+func qrDataBits(mode as string, n as int) {
+    if ($mode == "numeric") {
+        def rem as int init $n % 3;
+        def extra as int init 0;
+        if ($rem == 1) { $extra = 4; } elseif ($rem == 2) { $extra = 7; }
+        return ($n // 3) * 10 + $extra;
+    }
+    if ($mode == "alphanumeric") {
+        return ($n // 2) * 11 + ($n % 2) * 6;
+    }
+    return $n * 8;
+}
+
+# qrUsesEci reports whether a byte-mode payload carries non-ASCII bytes and so
+# needs an ECI(26) UTF-8 declaration, without which a reader must guess the
+# charset (and may guess wrong).
+func qrUsesEci(mode as string, data as bytes) {
+    if (not ($mode == "byte")) {
+        return false;
+    }
+    def i as int init 0;
+    while ($i < len($data)) {
+        if ($data[$i] >= 128) {
+            return true;
         }
-        def capacity as int init ($total * 8 - 4 - $countBits) // 8;
-        if ($capacity >= $nbytes) {
+        $i = $i + 1;
+    }
+    return false;
+}
+
+# selectVersion picks the smallest version (1-40) whose data capacity in `mode`
+# holds `n` characters at the given EC level. `eci` adds the 12-bit ECI header.
+func selectVersion(mode as string, n as int, eci as bool, level as string) {
+    def t as map of string to list of int init blockTable();
+    def eciBits as int init 0;
+    if ($eci) {
+        $eciBits = 12;
+    }
+    def v as int init 1;
+    while ($v <= 40) {
+        def info as list of int init $t[convert.toString($v) + "-" + $level];
+        def totalBits as int init totalDataCodewords($info) * 8;
+        def need as int init 4 + qrCountBits($mode, $v) + qrDataBits($mode, $n) + $eciBits;
+        if ($totalBits >= $need) {
             return $v;
         }
         $v = $v + 1;
     }
-    fail("data too large for QR versions 1-10 (level " + $level + ")");
+    fail("data too large for QR (max version 40, level " + $level + ")");
 }
 
 # pushBits appends the low `count` bits of `value` (MSB first) to a bit list.
@@ -183,21 +307,65 @@ func pushBits(bitList as list of int, value as int, count as int) {
 }
 
 # encodeData builds the padded data codewords for a byte-mode payload.
-func encodeData(data as bytes, version as int, level as string) {
+# encodeNumeric appends the numeric-mode payload (groups of 3 digits -> 10 bits;
+# a trailing 2 digits -> 7 bits, 1 digit -> 4 bits).
+func encodeNumeric(bitList as list of int, data as bytes) {
+    def out as list of int init $bitList;
+    def i as int init 0;
+    def n as int init len($data);
+    while ($i + 3 <= $n) {
+        def v as int init ($data[$i] - 48) * 100 + ($data[$i + 1] - 48) * 10 + ($data[$i + 2] - 48);
+        $out = pushBits($out, $v, 10);
+        $i = $i + 3;
+    }
+    def rem as int init $n - $i;
+    if ($rem == 2) {
+        $out = pushBits($out, ($data[$i] - 48) * 10 + ($data[$i + 1] - 48), 7);
+    } elseif ($rem == 1) {
+        $out = pushBits($out, $data[$i] - 48, 4);
+    }
+    return $out;
+}
+
+# encodeAlphanumeric appends the alphanumeric-mode payload (pairs -> 11 bits, a
+# trailing single -> 6 bits).
+func encodeAlphanumeric(bitList as list of int, data as bytes) {
+    def out as list of int init $bitList;
+    def i as int init 0;
+    def n as int init len($data);
+    while ($i + 2 <= $n) {
+        $out = pushBits($out, alnumValue($data[$i]) * 45 + alnumValue($data[$i + 1]), 11);
+        $i = $i + 2;
+    }
+    if ($n - $i == 1) {
+        $out = pushBits($out, alnumValue($data[$i]), 6);
+    }
+    return $out;
+}
+
+func encodeData(data as bytes, mode as string, eci as bool, version as int, level as string) {
     def info as list of int init blockTable()[convert.toString($version) + "-" + $level];
     def total as int init totalDataCodewords($info);
     def totalBits as int init $total * 8;
     def bitList as list of int init [];
-    $bitList = pushBits($bitList, 4, 4);   # byte mode indicator 0100
-    def countBits as int init 8;
-    if ($version >= 10) {
-        $countBits = 16;
+    if ($eci) {
+        # ECI mode indicator (0111) + a one-byte designator for assignment 26
+        # (UTF-8): a strict reader then decodes the byte segment as UTF-8.
+        $bitList = pushBits($bitList, 7, 4);
+        $bitList = pushBits($bitList, 26, 8);
     }
-    $bitList = pushBits($bitList, len($data), $countBits);
-    def i as int init 0;
-    while ($i < len($data)) {
-        $bitList = pushBits($bitList, $data[$i], 8);
-        $i = $i + 1;
+    $bitList = pushBits($bitList, qrModeIndicator($mode), 4);
+    $bitList = pushBits($bitList, len($data), qrCountBits($mode, $version));
+    if ($mode == "numeric") {
+        $bitList = encodeNumeric($bitList, $data);
+    } elseif ($mode == "alphanumeric") {
+        $bitList = encodeAlphanumeric($bitList, $data);
+    } else {
+        def i as int init 0;
+        while ($i < len($data)) {
+            $bitList = pushBits($bitList, $data[$i], 8);
+            $i = $i + 1;
+        }
     }
     # terminator: up to 4 zero bits
     def term as int init 4;
@@ -672,9 +840,11 @@ func finderLike(mods as list of list of int, r as int, c as int, horizontal as b
 
 # qrMatrix builds the final masked QR module grid for a payload.
 func qrMatrix(data as bytes, level as string) {
-    def version as int init selectVersion(len($data), $level);
+    def mode as string init chooseMode($data);
+    def eci as bool init qrUsesEci($mode, $data);
+    def version as int init selectVersion($mode, len($data), $eci, $level);
     def size as int init 17 + 4 * $version;
-    def codewords as list of int init interleave(encodeData($data, $version, $level), $version, $level);
+    def codewords as list of int init interleave(encodeData($data, $mode, $eci, $version, $level), $version, $level);
 
     def reserved as list of list of bool init [];
     def r as int init 0;
@@ -747,11 +917,225 @@ func boolGrid(grid as list of list of int, size as int) {
     return $out;
 }
 
+# --- DataMatrix ECC200 (private) --------------------------------------------
+# Square symbols with a single data region (10x10 .. 26x26); larger symbols need
+# region interleaving and are out of scope. GF(256) uses the ECC200 primitive
+# polynomial 0x12d and a generator with root base 1.
+
+# dmSymbols returns the ECC200 square symbol table: [totalSize, dataCW, ecCW].
+func dmSymbols() {
+    return [[10, 3, 5], [12, 5, 7], [14, 8, 10], [16, 12, 12], [18, 18, 14],
+        [20, 22, 18], [22, 30, 20], [24, 36, 24], [26, 44, 28]];
+}
+
+# dmSymbolFor picks the smallest square symbol holding `nData` data codewords.
+func dmSymbolFor(nData as int) {
+    for (def s in dmSymbols()) {
+        if ($s[1] >= $nData) {
+            return $s;
+        }
+    }
+    fail("datamatrix: data too large for a single-region square symbol (max 44 codewords)");
+}
+
+# dmEncodeAscii encodes bytes in ASCII encodation: a digit pair -> value+130, an
+# ASCII byte -> value+1, an extended byte -> upper-shift (235) then (value-128)+1.
+func dmEncodeAscii(data as bytes) {
+    def cw as list of int init [];
+    def i as int init 0;
+    def n as int init len($data);
+    while ($i < $n) {
+        def b as int init $data[$i];
+        if ($i + 1 < $n and $b >= 48 and $b <= 57 and $data[$i + 1] >= 48 and $data[$i + 1] <= 57) {
+            $cw[] = ($b - 48) * 10 + ($data[$i + 1] - 48) + 130;
+            $i = $i + 2;
+        } elseif ($b > 127) {
+            $cw[] = 235;
+            $cw[] = ($b - 128) + 1;
+            $i = $i + 1;
+        } else {
+            $cw[] = $b + 1;
+            $i = $i + 1;
+        }
+    }
+    return $cw;
+}
+
+# dmPad pads the data codewords to capacity: a first pad 129 (end-of-message),
+# then the 253-state randomised pad for the rest.
+func dmPad(cw as list of int, capacity as int) {
+    def out as list of int init $cw;
+    if (len($out) < $capacity) {
+        $out[] = 129;
+    }
+    while (len($out) < $capacity) {
+        def pos as int init len($out) + 1;   # 1-based codeword position
+        def r as int init ((149 * $pos) % 253) + 1;
+        def v as int init 129 + $r;
+        if ($v > 254) {
+            $v = $v - 254;
+        }
+        $out[] = $v;
+    }
+    return $out;
+}
+
+# dmWrap applies the ECC200 placement wrap-around for an off-grid coordinate.
+func dmWrap(row as int, col as int, nrow as int, ncol as int) {
+    def r as int init $row;
+    def c as int init $col;
+    if ($r < 0) {
+        $r = $r + $nrow;
+        $c = $c + 4 - (($nrow + 4) % 8);
+    }
+    if ($c < 0) {
+        $c = $c + $ncol;
+        $r = $r + 4 - (($ncol + 4) % 8);
+    }
+    return [$r, $c];
+}
+
+# dmBit returns bit `bitNum` (1=MSB .. 8=LSB) of a codeword.
+func dmBit(cw as list of int, chr as int, bitNum as int) {
+    return ($cw[$chr - 1] >> (8 - $bitNum)) & 1;
+}
+
+# dmPlaceUtah places the 8 bits of codeword `chr` in the standard L (utah) shape
+# around (row, col), wrapping off-grid coordinates. Returns the updated grid.
+func dmPlaceUtah(grid as list of list of int, row as int, col as int, chr as int, cw as list of int, nrow as int, ncol as int) {
+    def g as list of list of int init $grid;
+    def off as list of list of int init [[-2, -2, 1], [-2, -1, 2], [-1, -2, 3],
+        [-1, -1, 4], [-1, 0, 5], [0, -2, 6], [0, -1, 7], [0, 0, 8]];
+    for (def o in $off) {
+        def rc as list of int init dmWrap($row + $o[0], $col + $o[1], $nrow, $ncol);
+        $g[$rc[0]][$rc[1]] = dmBit($cw, $chr, $o[2]);
+    }
+    return $g;
+}
+
+# dmPlaceCorner places codeword `chr` at the 8 absolute [row, col, bit] positions
+# of a corner special case. Returns the updated grid.
+func dmPlaceCorner(grid as list of list of int, positions as list of list of int, chr as int, cw as list of int) {
+    def g as list of list of int init $grid;
+    for (def p in $positions) {
+        $g[$p[0]][$p[1]] = dmBit($cw, $chr, $p[2]);
+    }
+    return $g;
+}
+
+# dmPlace maps the codeword stream into an nrow x ncol bit grid via the ISO 16022
+# ECC200 placement algorithm (Annex F).
+func dmPlace(cw as list of int, nrow as int, ncol as int) {
+    def grid as list of list of int init newGrid($nrow, -1);
+    def c1 as list of list of int init [[$nrow - 1, 0, 1], [$nrow - 1, 1, 2], [$nrow - 1, 2, 3],
+        [0, $ncol - 2, 4], [0, $ncol - 1, 5], [1, $ncol - 1, 6], [2, $ncol - 1, 7], [3, $ncol - 1, 8]];
+    def c2 as list of list of int init [[$nrow - 3, 0, 1], [$nrow - 2, 0, 2], [$nrow - 1, 0, 3],
+        [0, $ncol - 4, 4], [0, $ncol - 3, 5], [0, $ncol - 2, 6], [0, $ncol - 1, 7], [1, $ncol - 1, 8]];
+    def c3 as list of list of int init [[$nrow - 3, 0, 1], [$nrow - 2, 0, 2], [$nrow - 1, 0, 3],
+        [0, $ncol - 2, 4], [0, $ncol - 1, 5], [1, $ncol - 1, 6], [2, $ncol - 1, 7], [3, $ncol - 1, 8]];
+    def c4 as list of list of int init [[$nrow - 1, 0, 1], [$nrow - 1, $ncol - 1, 2], [0, $ncol - 3, 3],
+        [0, $ncol - 2, 4], [0, $ncol - 1, 5], [1, $ncol - 3, 6], [1, $ncol - 2, 7], [1, $ncol - 1, 8]];
+    def chr as int init 1;
+    def row as int init 4;
+    def col as int init 0;
+    def more as bool init true;
+    while ($more) {
+        if ($row == $nrow and $col == 0) {
+            $grid = dmPlaceCorner($grid, $c1, $chr, $cw);
+            $chr = $chr + 1;
+        } elseif ($row == $nrow - 2 and $col == 0 and not ($ncol % 4 == 0)) {
+            $grid = dmPlaceCorner($grid, $c2, $chr, $cw);
+            $chr = $chr + 1;
+        } elseif ($row == $nrow - 2 and $col == 0 and $ncol % 8 == 4) {
+            $grid = dmPlaceCorner($grid, $c3, $chr, $cw);
+            $chr = $chr + 1;
+        } elseif ($row == $nrow + 4 and $col == 2 and $ncol % 8 == 0) {
+            $grid = dmPlaceCorner($grid, $c4, $chr, $cw);
+            $chr = $chr + 1;
+        }
+        # diagonal sweep upward and to the right
+        def up as bool init true;
+        while ($up) {
+            if ($row < $nrow and $col >= 0 and $grid[$row][$col] == -1) {
+                $grid = dmPlaceUtah($grid, $row, $col, $chr, $cw, $nrow, $ncol);
+                $chr = $chr + 1;
+            }
+            $row = $row - 2;
+            $col = $col + 2;
+            $up = $row >= 0 and $col < $ncol;
+        }
+        $row = $row + 1;
+        $col = $col + 3;
+        # diagonal sweep downward and to the left
+        def down as bool init true;
+        while ($down) {
+            if ($row >= 0 and $col < $ncol and $grid[$row][$col] == -1) {
+                $grid = dmPlaceUtah($grid, $row, $col, $chr, $cw, $nrow, $ncol);
+                $chr = $chr + 1;
+            }
+            $row = $row + 2;
+            $col = $col - 2;
+            $down = $row < $nrow and $col >= 0;
+        }
+        $row = $row + 3;
+        $col = $col + 1;
+        $more = $row < $nrow or $col < $ncol;
+    }
+    # the bottom-right corner module is unused by the sweep; fix it to a known
+    # pattern (both dark) so it is deterministic.
+    if ($grid[$nrow - 1][$ncol - 1] == -1) {
+        $grid[$nrow - 1][$ncol - 1] = 1;
+        $grid[$nrow - 2][$ncol - 2] = 1;
+    }
+    return $grid;
+}
+
+# dmMatrix builds the full DataMatrix symbol: encode, RS, place, then wrap the
+# data region in the finder (solid L on left/bottom, timing on top/right).
+func dmMatrix(data as bytes) {
+    def cw as list of int init dmEncodeAscii($data);
+    def sym as list of int init dmSymbolFor(len($cw));
+    def size as int init $sym[0];
+    def padded as list of int init dmPad($cw, $sym[1]);
+    def field as GF init buildGFPrim(0x12d);
+    def ec as list of int init rsEncodeBase($field, $padded, $sym[2], 1);
+    def all as list of int init $padded;
+    for (def e in $ec) {
+        $all[] = $e;
+    }
+    def region as int init $size - 2;
+    def placed as list of list of int init dmPlace($all, $region, $region);
+    def m as list of list of bool init [];
+    def r as int init 0;
+    while ($r < $size) {
+        def rowb as list of bool init [];
+        def c as int init 0;
+        while ($c < $size) {
+            def dark as bool init false;
+            if ($c == 0 or $r == $size - 1) {
+                $dark = true;                       # left / bottom solid L
+            } elseif ($r == 0) {
+                $dark = $c % 2 == 0;                # top timing
+            } elseif ($c == $size - 1) {
+                $dark = $r % 2 == 1;                # right timing
+            } else {
+                $dark = $placed[$r - 1][$c - 1] == 1;   # data region
+            }
+            $rowb[] = $dark;
+            $c = $c + 1;
+        }
+        $m[] = $rowb;
+        $r = $r + 1;
+    }
+    return $m;
+}
+
 # --- encode dispatch (exported) ---------------------------------------------
 
 /**
- * Encode data as a symbol of the given symbology. 2D: "qr". 1D: "code128",
- * "ean13", "ean8", "itf", "code39".
+ * Encode data as a symbol of the given symbology. 2D: "qr", "datamatrix". 1D:
+ * "code128", "code93", "ean13", "ean8", "upca", "upce", "itf", "code39",
+ * "gs1-128".
  * @param data {string} the payload
  * @param symbology {string} the symbology
  * @param opts {Options} rendering / EC options (uses `ecLevel` for QR)
@@ -766,11 +1150,21 @@ export func encode(data as string, symbology as string, opts as Options) {
             def noBars as list of int init [];
             return Symbol{ kind: SymbolKind.Matrix, size: len($m), matrix: $m, bars: $noBars, text: $data };
         }
+        when "datamatrix" {
+            def raw as bytes init convert.bytesFromString($data, "utf-8");
+            def m as list of list of bool init dmMatrix($raw);
+            def noBars as list of int init [];
+            return Symbol{ kind: SymbolKind.Matrix, size: len($m), matrix: $m, bars: $noBars, text: $data };
+        }
         when "code128" { return linearSymbol($data, code128Bars($data)); }
         when "code39" { return linearSymbol($data, code39Bars($data)); }
+        when "code93" { return linearSymbol($data, code93Bars($data)); }
         when "ean13" { return linearSymbol($data, ean13Bars($data)); }
         when "ean8" { return linearSymbol($data, ean8Bars($data)); }
+        when "upca" { return linearSymbol($data, upcaBars($data)); }
+        when "upce" { return linearSymbol($data, upceBars($data)); }
         when "itf" { return linearSymbol($data, itfBars($data)); }
+        when "gs1-128" { return linearSymbol($data, gs1128Bars($data)); }
         else { fail("unknown symbology: " + $symbology); }
     }
 }
@@ -1035,6 +1429,289 @@ func code39Char(ch as string) {
     return $pats[$idx];
 }
 
+# --- UPC-A / UPC-E (private) -------------------------------------------------
+
+# upcaBars encodes UPC-A: it is exactly an EAN-13 with a leading 0, so 11 data
+# digits (check computed) or a full 12 (check verified) map straight through.
+func upcaBars(data as string) {
+    def ds as list of int init digitList($data);
+    if (not (len($ds) == 11 or len($ds) == 12)) {
+        fail("upca: expected 11 or 12 digits");
+    }
+    return eanBars("0" + $data, 13);
+}
+
+# upceExpand expands a 6-digit UPC-E body to the 11-digit UPC-A number (number
+# system + 5 manufacturer + 5 item), per the last-digit compression rules.
+func upceExpand(ns as int, six as list of int) {
+    def x1 as int init $six[0];
+    def x2 as int init $six[1];
+    def x3 as int init $six[2];
+    def x4 as int init $six[3];
+    def x5 as int init $six[4];
+    def x6 as int init $six[5];
+    def out as list of int init [$ns];
+    if ($x6 <= 2) {
+        $out[] = $x1; $out[] = $x2; $out[] = $x6;
+        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
+        $out[] = $x3; $out[] = $x4; $out[] = $x5;
+    } elseif ($x6 == 3) {
+        $out[] = $x1; $out[] = $x2; $out[] = $x3;
+        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
+        $out[] = $x4; $out[] = $x5;
+    } elseif ($x6 == 4) {
+        $out[] = $x1; $out[] = $x2; $out[] = $x3; $out[] = $x4;
+        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
+        $out[] = $x5;
+    } else {
+        $out[] = $x1; $out[] = $x2; $out[] = $x3; $out[] = $x4; $out[] = $x5;
+        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
+        $out[] = $x6;
+    }
+    return $out;
+}
+
+# upceCheck is the UPC-E check digit: the UPC-A check of the expanded number.
+func upceCheck(ns as int, six as list of int) {
+    def upca as list of int init upceExpand($ns, $six);
+    def body as list of int init [0];   # UPC-A is EAN-13 with a leading 0
+    for (def d in $upca) {
+        $body[] = $d;
+    }
+    return eanCheck($body, 13);
+}
+
+# upceParity returns the 6-character L/G parity string for a number system and
+# check digit (number system 1 is the complement of number system 0).
+func upceParity(ns as int, check as int) {
+    def zero as list of string init ["EEEOOO", "EEOEOO", "EEOOEO", "EEOOOE", "EOEEOO",
+        "EOOEEO", "EOOOEE", "EOEOEO", "EOEOOE", "EOOEOE"];
+    def p as string init $zero[$check];
+    if ($ns == 0) {
+        return $p;
+    }
+    def out as string init "";
+    for (def ch in strings.chars($p)) {
+        if ($ch == "E") {
+            $out = $out + "O";
+        } else {
+            $out = $out + "E";
+        }
+    }
+    return $out;
+}
+
+# upceBars encodes UPC-E. Input is 6 digits (number system 0, check computed),
+# 7 digits (number system + 6, check computed), or 8 digits (number system + 6 +
+# check, verified). Odd (O) parity uses the L code, even (E) parity the G code.
+func upceBars(data as string) {
+    def ds as list of int init digitList($data);
+    def ns as int init 0;
+    def six as list of int init [];
+    def check as int init -1;
+    if (len($ds) == 6) {
+        $six = $ds;
+    } elseif (len($ds) == 7) {
+        $ns = $ds[0];
+        $six = lists.slice($ds, 1, 7);
+    } elseif (len($ds) == 8) {
+        $ns = $ds[0];
+        $six = lists.slice($ds, 1, 7);
+        $check = $ds[7];
+    } else {
+        fail("upce: expected 6, 7, or 8 digits");
+    }
+    if (not ($ns == 0 or $ns == 1)) {
+        fail("upce: number system must be 0 or 1");
+    }
+    def computed as int init upceCheck($ns, $six);
+    if ($check >= 0 and not ($check == $computed)) {
+        fail("upce: check digit mismatch");
+    }
+    def parity as string init upceParity($ns, $computed);
+    def bits as string init "101";   # start guard
+    def i as int init 0;
+    while ($i < 6) {
+        if (strings.substring($parity, $i, $i + 1) == "O") {
+            $bits = $bits + eanL($six[$i]);
+        } else {
+            $bits = $bits + eanG($six[$i]);
+        }
+        $i = $i + 1;
+    }
+    $bits = $bits + "010101";   # end guard
+    return bitsToBars($bits);
+}
+
+# --- Code 93 (private) ------------------------------------------------------
+
+# code93Set is the ordered Code 93 character set (values 0..46); index in this
+# string is the character's value used for the checksum.
+func code93Set() {
+    return "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%";
+}
+
+# code93Widths returns the element-width string (bar,space,bar,space,bar,space,
+# summing to 9) for a Code 93 value 0..46, plus the start/stop `*` at index 47.
+func code93Widths() {
+    # values 0..46 (the 43 printable characters then the four shift characters
+    # ($) (%) (/) (+), which a check character may land on), then `*` at index 47.
+    return ["131112", "111213", "111312", "111411", "121113", "121212", "121311",
+        "111114", "131211", "141111", "211113", "211212", "211311", "221112",
+        "221211", "231111", "112113", "112212", "112311", "122112", "132111",
+        "111123", "111222", "111321", "121122", "131121", "212112", "212211",
+        "211122", "211221", "221121", "222111", "112122", "112221", "122121",
+        "123111", "121131", "311112", "311211", "321111", "112131", "113121",
+        "211131", "121221", "312111", "311121", "122211", "111141"];
+}
+
+# appendWidths appends a Code 93 element-width string's runs to a bar list.
+func appendWidths(bars as list of int, widths as string) {
+    def out as list of int init $bars;
+    for (def ch in strings.chars($widths)) {
+        $out[] = convert.toCodepoint($ch) - 48;
+    }
+    return $out;
+}
+
+# code93Value returns the Code 93 value of a character, or -1 if unsupported.
+func code93Value(ch as string) {
+    return strings.indexOf(code93Set(), $ch);
+}
+
+# code93Checks computes the two Code 93 check characters C and K over the data
+# values (weighted right-to-left, cycling 1..20 for C and 1..15 for K, mod 47).
+func code93Check(values as list of int, maxWeight as int) {
+    def sum as int init 0;
+    def weight as int init 1;
+    def i as int init len($values) - 1;
+    while ($i >= 0) {
+        $sum = $sum + $values[$i] * $weight;
+        $weight = $weight + 1;
+        if ($weight > $maxWeight) {
+            $weight = 1;
+        }
+        $i = $i - 1;
+    }
+    return $sum % 47;
+}
+
+# code93Bars encodes Code 93 (base 47-character set) with start/stop `*` and the
+# two check characters C and K.
+func code93Bars(data as string) {
+    def widths as list of string init code93Widths();
+    def values as list of int init [];
+    for (def ch in strings.chars(strings.upper($data))) {
+        def v as int init code93Value($ch);
+        if ($v < 0) {
+            fail("code93: unsupported character '" + $ch + "'");
+        }
+        $values[] = $v;
+    }
+    def c as int init code93Check($values, 20);
+    def withC as list of int init $values;
+    $withC[] = $c;
+    def k as int init code93Check($withC, 15);
+    def bars as list of int init [];
+    $bars = appendWidths($bars, $widths[47]);   # start *
+    for (def v in $values) {
+        $bars = appendWidths($bars, $widths[$v]);
+    }
+    $bars = appendWidths($bars, $widths[$c]);
+    $bars = appendWidths($bars, $widths[$k]);
+    $bars = appendWidths($bars, $widths[47]);   # stop *
+    $bars[] = 1;   # termination bar
+    return $bars;
+}
+
+# --- GS1-128 (private) ------------------------------------------------------
+
+# gs1FixedLength reports whether an Application Identifier's first two digits mark
+# a fixed-length element string (so no FNC1 separator is needed after its value).
+func gs1FixedLength(ai as string) {
+    if (len($ai) < 2) {
+        return false;
+    }
+    def two as string init strings.substring($ai, 0, 2);
+    def fixed as string init " 00 01 02 03 04 11 12 13 14 15 16 17 18 19 20 31 32 33 34 35 36 41 ";
+    return strings.contains($fixed, " " + $two + " ");
+}
+
+# gs1Elements parses "(AI)value(AI)value..." into a flat character list with FNC1
+# markers (code 102): a FNC1 leads the data, and separates a variable-length
+# element string from the next AI. The parentheses are display-only (not encoded).
+func gs1Elements(data as string) {
+    def out as list of int init [102];   # leading FNC1 marks a GS1 structure
+    def cs as list of string init strings.chars($data);
+    def i as int init 0;
+    def prevVariable as bool init false;
+    def started as bool init false;
+    while ($i < len($cs)) {
+        if (not ($cs[$i] == "(")) {
+            fail("gs1-128: expected '(' starting an Application Identifier");
+        }
+        # read the AI inside the parentheses
+        def ai as string init "";
+        $i = $i + 1;
+        while ($i < len($cs) and not ($cs[$i] == ")")) {
+            $ai = $ai + $cs[$i];
+            $i = $i + 1;
+        }
+        if ($i >= len($cs)) {
+            fail("gs1-128: unclosed Application Identifier");
+        }
+        $i = $i + 1;   # skip ')'
+        # a separator FNC1 precedes this AI when the previous value was variable
+        if ($started and $prevVariable) {
+            $out[] = 102;
+        }
+        $started = true;
+        # emit the AI digits then the value up to the next '('
+        for (def ch in strings.chars($ai)) {
+            def code as int init charToCode($ch);
+            if ($code < 0) {
+                fail("gs1-128: invalid AI character '" + $ch + "'");
+            }
+            $out[] = $code;
+        }
+        def valueLen as int init 0;
+        while ($i < len($cs) and not ($cs[$i] == "(")) {
+            def code as int init charToCode($cs[$i]);
+            if ($code < 0) {
+                fail("gs1-128: invalid value character '" + $cs[$i] + "'");
+            }
+            $out[] = $code;
+            $valueLen = $valueLen + 1;
+            $i = $i + 1;
+        }
+        $prevVariable = not gs1FixedLength($ai);
+    }
+    return $out;
+}
+
+# gs1128Bars encodes GS1-128: Code 128 (set B) with a leading FNC1 and FNC1
+# separators after variable-length element strings.
+func gs1128Bars(data as string) {
+    def patterns as list of string init code128Patterns();
+    def elements as list of int init gs1Elements($data);
+    def values as list of int init [104];   # Start B
+    def sum as int init 104;
+    def pos as int init 1;
+    for (def code in $elements) {
+        $values[] = $code;
+        $sum = $sum + $code * $pos;
+        $pos = $pos + 1;
+    }
+    $values[] = $sum % 103;   # checksum
+    $values[] = 106;          # Stop
+    def bits as string init "";
+    for (def v in $values) {
+        $bits = $bits + $patterns[$v];
+    }
+    $bits = $bits + "11";
+    return bitsToBars($bits);
+}
+
 # code128Patterns is the Code 128 module-pattern table (values
 # 0..106, 11 modules each; the encoder appends the 2-module termination bar
 # after the stop pattern, entry 106).
@@ -1088,15 +1765,20 @@ export func terminal(symbol as Symbol) {
     }
     def m as list of list of bool init $symbol.matrix;
     def n as int init len($m);
+    # A 4-module light quiet zone on every side: without it a camera QR scanner
+    # cannot locate the finder patterns (a terminal render is otherwise flush to
+    # the surrounding text). The grid walked below is the symbol plus this border.
+    def q as int init 4;
+    def size as int init $n + 2 * $q;
     def parts as list of string init [];
     def r as int init 0;
-    while ($r < $n) {
+    while ($r < $size) {
         def c as int init 0;
-        while ($c < $n) {
-            def top as bool init $m[$r][$c];
+        while ($c < $size) {
+            def top as bool init termCell($m, $n, $q, $r, $c);
             def bot as bool init false;
-            if ($r + 1 < $n) {
-                $bot = $m[$r + 1][$c];
+            if ($r + 1 < $size) {
+                $bot = termCell($m, $n, $q, $r + 1, $c);
             }
             $parts[] = halfBlock($top, $bot);
             $c = $c + 1;
@@ -1105,6 +1787,15 @@ export func terminal(symbol as Symbol) {
         $r = $r + 2;
     }
     return strings.join($parts, "");
+}
+
+# termCell reads a module of the quiet-zone-padded terminal grid: the symbol's
+# own cell inside the border, else light (the quiet zone).
+func termCell(m as list of list of bool, n as int, q as int, r as int, c as int) {
+    if ($r >= $q and $r < $q + $n and $c >= $q and $c < $q + $n) {
+        return $m[$r - $q][$c - $q];
+    }
+    return false;
 }
 
 # halfBlock picks the Unicode half-block glyph for a top/bottom cell pair.
@@ -1170,7 +1861,15 @@ func svgLinear(symbol as Symbol, opts as Options) {
         $totalUnits = $totalUnits + $w;
     }
     def width as int init ($totalUnits + 2 * $q) * $s;
-    def height as int init $h + 2 * $q * $s;
+    # A human-readable text line sits below the bars: reserve a band sized to the
+    # glyph height plus padding when the option is on and the symbol has text.
+    def showText as bool init $opts.humanReadable and len($symbol.text) > 0;
+    def fontSize as int init 8 * $s;
+    def textBand as int init 0;
+    if ($showText) {
+        $textBand = $fontSize + 2 * $s;
+    }
+    def height as int init $h + 2 * $q * $s + $textBand;
     def parts as list of string init [];
     $parts[] = svgHeader($width, $height, $opts.background);
     def x as int init $q * $s;
@@ -1182,8 +1881,28 @@ func svgLinear(symbol as Symbol, opts as Options) {
         $x = $x + $w * $s;
         $dark = not $dark;
     }
+    if ($showText) {
+        # baseline just below the bars, centred across the full symbol width
+        def baseline as int init $q * $s + $h + $fontSize;
+        $parts[] = svgText($width // 2, $baseline, $fontSize, $symbol.text, $opts.foreground);
+    }
     $parts[] = "</svg>\n";
     return strings.join($parts, "");
+}
+
+# svgText renders a centred monospace text line (the human-readable data).
+func svgText(cx as int, y as int, size as int, text as string, fill as string) {
+    return "<text x=\"" + convert.toString($cx) + "\" y=\"" + convert.toString($y) +
+        "\" font-family=\"monospace\" font-size=\"" + convert.toString($size) +
+        "\" text-anchor=\"middle\" fill=\"" + $fill + "\">" + escapeXmlText($text) + "</text>\n";
+}
+
+# escapeXmlText escapes the text-significant XML characters for an SVG text node.
+func escapeXmlText(s as string) {
+    def out as string init strings.replace($s, "&", "&amp;");
+    $out = strings.replace($out, "<", "&lt;");
+    $out = strings.replace($out, ">", "&gt;");
+    return $out;
 }
 
 func svgHeader(w as int, h as int, bg as string) {

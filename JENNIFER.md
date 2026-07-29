@@ -1261,15 +1261,20 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   intact. Pure `.j` over `strings` + `bytes`; **both binaries**.
 - **`barcode`** - generate scannable barcodes / QR codes as images (the complement to
   `label`, which emits printer commands). `barcode.encode(data, symbology, opts) ->
-  Symbol` encodes: `"qr"` (Reed-Solomon over GF(256), EC levels L/M/Q/H via
-  `opts.ecLevel`, automatic version 1-10, data-mask scoring, byte mode - any UTF-8) or
-  1D `"code128"` / `"code39"` / `"ean13"` / `"ean8"` / `"itf"`. Render a `Symbol` with
-  `barcode.svg(sym, opts) -> string`, `barcode.png(sym, opts) -> bytes` (a monochrome
-  PNG hand-encoded over `compress` + `crc`, no image library), `barcode.terminal(sym)
-  -> string` (Unicode half-blocks, 2D only), or `barcode.matrix(sym) -> list of list
-  of bool`. `barcode.defaults()` gives an `Options` (scale / height / quiet / ecLevel /
-  foreground / background). The GF(256) / Reed-Solomon math is a private, `include`d
-  `barcode_ecc.j`. Pure `.j`; **both binaries**.
+  Symbol` encodes 2D `"qr"` (Reed-Solomon over GF(256), EC levels L/M/Q/H via
+  `opts.ecLevel`, automatic version 1-40, data-mask scoring, numeric / alphanumeric /
+  byte mode chosen for compactness) and `"datamatrix"` (ECC200, square 10x10-26x26),
+  plus 1D `"code128"` / `"code93"` / `"ean13"` / `"ean8"` / `"upca"` / `"upce"` /
+  `"itf"` / `"code39"` / `"gs1-128"` (FNC1 + parenthesised Application Identifiers).
+  Render a `Symbol` with `barcode.svg(sym, opts) -> string` (a 1D SVG carries a
+  human-readable text line unless `opts.humanReadable = false`), `barcode.png(sym,
+  opts) -> bytes` (a monochrome PNG hand-encoded over `compress` + `crc`, no image
+  library), `barcode.terminal(sym) -> string` (Unicode half-blocks, 2D only), or
+  `barcode.matrix(sym) -> list of list of bool`. `barcode.defaults()` gives an
+  `Options` (scale / height / quiet / ecLevel / foreground / background /
+  humanReadable). The GF(256) / Reed-Solomon math is a private, `include`d
+  `barcode_ecc.j` (parameterised for QR's 0x11d and DataMatrix's 0x12d). Pure `.j`;
+  **both binaries**.
 - **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) -> Filter`
   (or `bloom.optimal(n, fpr)` to size for `n` items at a target false-positive rate);
   `bloom.add(f, item)` / `bloom.addAll(f, items)` return a fresh filter (value-semantic,

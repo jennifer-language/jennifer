@@ -1009,12 +1009,8 @@ incl. the sliding boundary), and the Go suite over memcache / redis
 
 **In progress.** The deepest per-module gaps, where a module handles the easy
 case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 through M23.6.8 done; the modules below
+sub-numbering as pieces land (M23.6.1 through M23.6.9 done; the modules below
 planned):
-- **`barcode`** - DataMatrix, UPC-A/E, Code93, GS1-128 symbologies; QR numeric /
-  alphanumeric modes + versions 11-40; a human-readable text line under 1D
-  barcodes. Reconcile the mismatch where `label` advertises `datamatrix` that the
-  image side lacks.
 - **`pdfwriter`** - raster image embedding (PNG / JPEG XObjects), embedded /
   subset TrueType fonts (Unicode / CJK body text), and text layout (word-wrap,
   width measurement, alignment).
@@ -1217,6 +1213,40 @@ the easy case.
   (`TestS3Requests`) was generalized to re-derive the signature from the actual
   signed-header set and now drives every new op (byte round-trip, metadata,
   head, copy, full multipart flow) over the wire.
+
+#### M23.6.9 - barcode symbologies, DataMatrix, QR v11-40
+
+**Done.** Filled out `barcode` across six fronts, each validated against an
+independent reference.
+- **1D symbologies.** `upca` (UPC-A = EAN-13 with a leading 0), `upce` (UPC-E
+  zero-compressed, with the expansion + parity tables), `code93` (two check
+  characters), and `gs1-128` (Code 128 with a leading FNC1 and parenthesised
+  Application Identifiers, FNC1 separators after variable-length fields). Each
+  bar pattern is pinned against an independent Python reference.
+- **Human-readable text.** A 1D SVG carries a centred monospace text line of the
+  data under the bars (`Options.humanReadable`, on by default).
+- **DataMatrix ECC200.** Square symbols 10x10 to 26x26, ASCII encodation
+  (digit-pair packing), Reed-Solomon over GF(0x12d) (the ECC helper gained a
+  primitive-polynomial + generator-base parameter, so QR and DataMatrix share
+  it), and the ISO 16022 (Annex F) module placement with all four corner cases.
+  Validated **byte-for-byte against `zint`** across every symbol size. This
+  reconciles the `label` module (which advertised `datamatrix` / `gs1-128` the
+  image side lacked).
+- **QR versions 11-40 + modes.** The EC block table and alignment-pattern
+  positions extended to all 40 versions (sourced from `segno` and cross-checked
+  to match the existing tested v1-10 exactly), plus numeric / alphanumeric /
+  byte mode chosen for compactness. Validated by **optically decoding rendered
+  PNGs with `zbarimg`** across versions and modes, plus the QR spec's numeric
+  worked example. Very large versions (v30+) are slow to render (mask-penalty
+  scoring in the tree-walker), not incorrect. Adversarial validation confirmed
+  every one of the 160 block-table entries + 40 alignment rows matches `segno`,
+  all 20 UPC-E branch/number-system combinations match a Python reference, and
+  DataMatrix is byte-exact with `zint --square` across all padding cases; it also
+  caught a non-ASCII QR gap (byte mode stored the right UTF-8 bytes but emitted no
+  ECI header, so a strict reader mis-guessed the charset), fixed by emitting
+  ECI(26) for a byte-mode payload with non-ASCII bytes (verified round-tripping
+  `café ünïçode` through `zbarimg`). Overlay 11 -> 29, `docblock`-clean; pure
+  `.j`, both binaries.
 
 ### M23.7 - observability completeness
 
