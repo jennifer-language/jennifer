@@ -24,18 +24,25 @@ def back as feed.Feed init feed.parse($rss);       # format auto-detected
 
 Runnable: [`examples/modules/feed_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/feed_demo.j).
 
-## The `Feed` and `Entry` structs
+## The `Feed`, `Entry` and `Enclosure` structs
 
-Both are value-semantic, so the builders return a fresh copy.
+All three are value-semantic, so the builders return a fresh copy.
 
-`feed.Feed { title as string, link as string, updated as time.Time, entries as list of Entry }`
+`feed.Feed { title as string, link as string, updated as time.Time, entries as list of Entry, author as string, categories as list of string }`
 
-`feed.Entry { title as string, link as string, id as string, published as time.Time, updated as time.Time, summary as string, content as string }`
+`feed.Entry { title as string, link as string, id as string, published as time.Time, updated as time.Time, summary as string, content as string, author as string, categories as list of string, enclosure as Enclosure }`
+
+`feed.Enclosure { url as string, length as int, type as string }`
 
 A field that maps to different names per format: `id` is RSS `guid` / Atom `id`;
 `summary` is RSS `description` / Atom `summary`; `content` is Atom-only (RSS
-carries the one description, kept in `summary`). An **unset date is the Unix
-epoch** and is omitted when building.
+carries the one description, kept in `summary`). `author` is RSS `<author>` /
+`<dc:creator>` (channel `<managingEditor>`) and Atom `<author><name>`;
+`categories` are RSS `<category>` / Atom `<category term>`; `enclosure` is the
+attached media file (RSS `<enclosure>` / Atom `<link rel="enclosure">`), the
+podcast episode's audio. An **unset date is the Unix epoch** and is omitted when
+building; an **empty enclosure `url`** means no enclosure and is likewise
+omitted.
 
 ## Building
 
@@ -50,11 +57,38 @@ epoch** and is omitted when building.
 | `feed.entryUpdated(e, t)`    | `Entry`   | A copy with the updated instant set.                     |
 | `feed.entrySummary(e, s)`    | `Entry`   | A copy with the summary set.                             |
 | `feed.entryContent(e, c)`    | `Entry`   | A copy with the full content set (Atom).                 |
+| `feed.entryAuthor(e, author)`| `Entry`   | A copy with the item author set.                         |
+| `feed.entryCategory(e, category)` | `Entry` | A copy with `category` appended to the item's tags.   |
+| `feed.entryEnclosure(e, url, length, type)` | `Entry` | A copy with a media enclosure (podcast file) set. |
+| `feed.feedAuthor(f, author)` | `Feed`    | A copy with the feed author set.                         |
+| `feed.feedCategory(f, category)` | `Feed` | A copy with `category` appended to the feed's tags.      |
+| `feed.hasEnclosure(e)`       | `bool`    | Whether the entry has a media enclosure (non-empty url). |
 | `feed.build(f, format)`      | `string`  | Render to `"rss"` (RSS 2.0) or `"atom"` (Atom 1.0). Unknown format errors. |
 
 RSS uses RFC 822 dates (`pubDate` / `lastBuildDate`); Atom uses RFC 3339
 (`published` / `updated`). All text is XML-escaped, so `&`, `<`, and `>` in
 titles or summaries round-trip.
+
+### Podcasts and metadata
+
+`entryEnclosure` attaches the media file that makes a feed a **podcast**: RSS
+emits `<enclosure url length type/>`, Atom `<link rel="enclosure" href length
+type/>`, and parse reads either back into the `Enclosure` struct. The item's
+own page link (Atom's alternate `<link>`) stays separate from the enclosure, so
+`entry.link` is the episode page and `entry.enclosure.url` the audio. `author`
+and `categories` round-trip on both the feed and each entry; on parse an RSS
+author falls back to `<dc:creator>` when the native `<author>` is absent, and a
+blank / non-numeric enclosure `length` degrades to `0` rather than failing.
+
+```jennifer
+def ep as feed.Entry init feed.entryEnclosure(
+    feed.entryAuthor(feed.entry("Episode 1", "https://show.example/1"), "Jane Host"),
+    "https://show.example/1.mp3", 12345678, "audio/mpeg");
+def show as feed.Feed init feed.feedCategory(
+    feed.feedAuthor(feed.feed("My Show", "https://show.example"), "Jane Host"),
+    "Technology");
+def rss as string init feed.build(feed.add($show, $ep), "rss");
+```
 
 ## Parsing
 

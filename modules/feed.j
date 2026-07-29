@@ -27,10 +27,26 @@ use convert;
 import "./http.j" as http;
 
 /**
+ * A media enclosure attached to an entry: the podcast / audio / video file. Maps
+ * to RSS `<enclosure url length type>` and Atom `<link rel="enclosure">`. An
+ * entry with an empty `url` has no enclosure (omitted on build).
+ * @field url {string} the media URL
+ * @field length {int} the media size in bytes (0 when unknown)
+ * @field type {string} the MIME type (e.g. "audio/mpeg")
+ */
+export def struct Enclosure {
+    url as string,
+    length as int,
+    type as string
+};
+
+/**
  * One feed item. `link` is the item URL, `id` its stable identifier (RSS
  * `guid` / Atom `id`), `summary` a short description (RSS `description` / Atom
  * `summary`) and `content` the full body (Atom `content`; RSS carries only the
- * one description, mapped to `summary`). An unset date is the Unix epoch.
+ * one description, mapped to `summary`). `author` is the item author, `categories`
+ * its tags, and `enclosure` an attached media file (podcast episode). An unset
+ * date is the Unix epoch.
  * @field title {string} the entry title
  * @field link {string} the entry URL
  * @field id {string} the stable identifier (RSS guid / Atom id)
@@ -38,6 +54,9 @@ import "./http.j" as http;
  * @field updated {time.Time} the last-updated instant (epoch if unset)
  * @field summary {string} a short summary / description
  * @field content {string} the full content (Atom only)
+ * @field author {string} the item author (RSS author / dc:creator, Atom author/name)
+ * @field categories {list of string} the item's category tags
+ * @field enclosure {Enclosure} an attached media file (empty url = none)
  */
 export def struct Entry {
     title as string,
@@ -46,7 +65,10 @@ export def struct Entry {
     published as time.Time,
     updated as time.Time,
     summary as string,
-    content as string
+    content as string,
+    author as string,
+    categories as list of string,
+    enclosure as Enclosure
 };
 
 /**
@@ -55,12 +77,16 @@ export def struct Entry {
  * @field link {string} the feed's site URL
  * @field updated {time.Time} the feed's last-build / updated instant (epoch if unset)
  * @field entries {list of Entry} the feed items, in document order
+ * @field author {string} the feed author (RSS managingEditor, Atom author/name)
+ * @field categories {list of string} the feed's category tags
  */
 export def struct Feed {
     title as string,
     link as string,
     updated as time.Time,
-    entries as list of Entry
+    entries as list of Entry,
+    author as string,
+    categories as list of string
 };
 
 # epoch is the "unset date" sentinel: a date equal to it is omitted on build.
@@ -70,6 +96,18 @@ func epoch() {
 # isSet reports whether a date is a real instant (not the epoch sentinel).
 func isSet(t as time.Time) {
     return time.unix($t) != 0;
+}
+# noEnclosure is the "no attached media" sentinel (empty url).
+func noEnclosure() {
+    return Enclosure{url: "", length: 0, type: ""};
+}
+/**
+ * Report whether an entry carries a media enclosure (a non-empty enclosure url).
+ * @param e {Entry} the entry to test
+ * @return {bool} true when the entry has an attached media file
+ */
+export func hasEnclosure(e as Entry) {
+    return len($e.enclosure.url) > 0;
 }
 
 # ---- value-semantic builders ----
@@ -81,7 +119,7 @@ func isSet(t as time.Time) {
  * @return {Feed} the new feed
  */
 export func feed(title as string, link as string) {
-    return Feed{title: $title, link: $link, updated: epoch(), entries: []};
+    return Feed{title: $title, link: $link, updated: epoch(), entries: [], author: "", categories: []};
 }
 /**
  * A copy of `f` with its `updated` instant set.
@@ -92,6 +130,30 @@ export func feed(title as string, link as string) {
 export func feedUpdated(f as Feed, t as time.Time) {
     def out as Feed init $f;
     $out.updated = $t;
+    return $out;
+}
+/**
+ * A copy of `f` with its author set.
+ * @param f {Feed} the source feed
+ * @param author {string} the feed author (a name or email)
+ * @return {Feed} the updated feed
+ */
+export func feedAuthor(f as Feed, author as string) {
+    def out as Feed init $f;
+    $out.author = $author;
+    return $out;
+}
+/**
+ * A copy of `f` with `category` appended to its category tags.
+ * @param f {Feed} the source feed
+ * @param category {string} the category / tag to add
+ * @return {Feed} the feed with the category added
+ */
+export func feedCategory(f as Feed, category as string) {
+    def out as Feed init $f;
+    def cs as list of string init $out.categories;
+    $cs[] = $category;
+    $out.categories = $cs;
     return $out;
 }
 /**
@@ -123,7 +185,10 @@ export func entry(title as string, link as string) {
         published: epoch(),
         updated: epoch(),
         summary: "",
-        content: ""
+        content: "",
+        author: "",
+        categories: [],
+        enclosure: noEnclosure()
     };
 }
 /**
@@ -181,6 +246,43 @@ export func entryContent(e as Entry, c as string) {
     $out.content = $c;
     return $out;
 }
+/**
+ * A copy of `e` with its author set.
+ * @param e {Entry} the source entry
+ * @param author {string} the item author (a name or email)
+ * @return {Entry} the updated entry
+ */
+export func entryAuthor(e as Entry, author as string) {
+    def out as Entry init $e;
+    $out.author = $author;
+    return $out;
+}
+/**
+ * A copy of `e` with `category` appended to its category tags.
+ * @param e {Entry} the source entry
+ * @param category {string} the category / tag to add
+ * @return {Entry} the entry with the category added
+ */
+export func entryCategory(e as Entry, category as string) {
+    def out as Entry init $e;
+    def cs as list of string init $out.categories;
+    $cs[] = $category;
+    $out.categories = $cs;
+    return $out;
+}
+/**
+ * A copy of `e` with a media enclosure set (the podcast / audio / video file).
+ * @param e {Entry} the source entry
+ * @param url {string} the media URL
+ * @param length {int} the media size in bytes (0 when unknown)
+ * @param type {string} the MIME type (e.g. "audio/mpeg")
+ * @return {Entry} the entry with the enclosure set
+ */
+export func entryEnclosure(e as Entry, url as string, length as int, type as string) {
+    def out as Entry init $e;
+    $out.enclosure = Enclosure{url: $url, length: $length, type: $type};
+    return $out;
+}
 
 # ---- dates ----
 
@@ -223,15 +325,119 @@ func textOf(node as xml.Value, path as string) {
     }
     return "";
 }
-# atomLink returns the href of the node's first <link> element, or "".
+# atomLink returns the href of the node's first alternate <link> element (one
+# without a rel, or rel="alternate"), or "". A rel="enclosure" link is a media
+# attachment, not the item URL, so it is skipped here.
 func atomLink(node as xml.Value) {
-    if (xml.has($node, "link")) {
-        def linkEl as xml.Value init xml.get($node, "link");
-        if (xml.hasAttr($linkEl, "href")) {
-            return xml.attr($linkEl, "href");
+    def links as list of xml.Value init xml.findAll($node, "link");
+    for (def i as int init 0; $i < len($links); $i = $i + 1) {
+        def l as xml.Value init $links[$i];
+        def rel as string init attrOr($l, "rel");
+        if (($rel == "" or $rel == "alternate") and xml.hasAttr($l, "href")) {
+            return xml.attr($l, "href");
         }
     }
     return "";
+}
+# attrOr returns an element's named attribute, or "" when absent.
+func attrOr(node as xml.Value, name as string) {
+    if (xml.hasAttr($node, $name)) {
+        return xml.attr($node, $name);
+    }
+    return "";
+}
+# atomAuthor builds an Atom <author><name>...</name></author> element.
+func atomAuthor(name as string) {
+    return xml.append(xml.element("author"), el("name", $name));
+}
+# atomAuthorOf reads an Atom author name (<author><name>), tolerating a feed that
+# puts the name directly in <author>; "" when absent.
+func atomAuthorOf(node as xml.Value) {
+    if (xml.has($node, "author/name")) {
+        return xml.text(xml.get($node, "author/name"));
+    }
+    if (xml.has($node, "author")) {
+        return xml.text(xml.get($node, "author"));
+    }
+    return "";
+}
+# rssAuthorOf reads an RSS author, preferring the native <author> and falling
+# back to Dublin Core <dc:creator> (the xml library keeps prefixes verbatim);
+# a channel-level <managingEditor> is a third fallback. "" when none present.
+func rssAuthorOf(node as xml.Value) {
+    if (xml.has($node, "author")) {
+        return xml.text(xml.get($node, "author"));
+    }
+    if (xml.has($node, "dc:creator")) {
+        return xml.text(xml.get($node, "dc:creator"));
+    }
+    if (xml.has($node, "managingEditor")) {
+        return xml.text(xml.get($node, "managingEditor"));
+    }
+    return "";
+}
+# categoriesText reads RSS categories (<category>text</category>) as a list.
+func categoriesText(node as xml.Value) {
+    def out as list of string init [];
+    def cats as list of xml.Value init xml.findAll($node, "category");
+    for (def i as int init 0; $i < len($cats); $i = $i + 1) {
+        def t as string init xml.text($cats[$i]);
+        if (len($t) > 0) {
+            $out[] = $t;
+        }
+    }
+    return $out;
+}
+# categoriesTerm reads Atom categories (<category term="..."/>) as a list.
+func categoriesTerm(node as xml.Value) {
+    def out as list of string init [];
+    def cats as list of xml.Value init xml.findAll($node, "category");
+    for (def i as int init 0; $i < len($cats); $i = $i + 1) {
+        def t as string init attrOr($cats[$i], "term");
+        if (len($t) > 0) {
+            $out[] = $t;
+        }
+    }
+    return $out;
+}
+# parseLength converts an enclosure length attribute to an int, or 0 when it is
+# empty or non-numeric (real feeds carry a blank or bad length).
+func parseLength(s as string) {
+    if (len($s) == 0) {
+        return 0;
+    }
+    try {
+        return convert.toInt($s);
+    } catch (e) {
+        return 0;
+    }
+}
+# readEnclosureRss reads an RSS <enclosure url length type/> from an item.
+func readEnclosureRss(item as xml.Value) {
+    if (not xml.has($item, "enclosure")) {
+        return noEnclosure();
+    }
+    def enc as xml.Value init xml.get($item, "enclosure");
+    return Enclosure{
+        url: attrOr($enc, "url"),
+        length: parseLength(attrOr($enc, "length")),
+        type: attrOr($enc, "type")
+    };
+}
+# readEnclosureAtom reads an Atom <link rel="enclosure" href length type/>.
+func readEnclosureAtom(item as xml.Value) {
+    def links as list of xml.Value init xml.findAll($item, "link");
+    for (def i as int init 0; $i < len($links); $i = $i + 1) {
+        def l as xml.Value init $links[$i];
+        if (attrOr($l, "rel") == "enclosure") {
+            return Enclosure{
+                url: attrOr($l, "href"),
+                length: parseLength(attrOr($l, "length")),
+                type: attrOr($l, "type")
+            };
+        }
+    }
+    return noEnclosure();
 }
 
 # ---- build ----
@@ -264,6 +470,14 @@ func buildRss(f as Feed) {
     def channel as xml.Value init xml.element("channel");
     $channel = xml.append($channel, el("title", $f.title));
     $channel = xml.append($channel, el("link", $f.link));
+    if (len($f.author) > 0) {
+        $channel = xml.append($channel, el("managingEditor", $f.author));
+    }
+    for (def c as int init 0; $c < len($f.categories); $c = $c + 1) {
+        if (len($f.categories[$c]) > 0) {
+            $channel = xml.append($channel, el("category", $f.categories[$c]));
+        }
+    }
     if (isSet($f.updated)) {
         $channel = xml.append($channel, el("lastBuildDate", rssDate($f.updated)));
     }
@@ -277,6 +491,14 @@ func buildRss(f as Feed) {
         if (len($e.id) > 0) {
             $item = xml.append($item, el("guid", $e.id));
         }
+        if (len($e.author) > 0) {
+            $item = xml.append($item, el("author", $e.author));
+        }
+        for (def c as int init 0; $c < len($e.categories); $c = $c + 1) {
+            if (len($e.categories[$c]) > 0) {
+                $item = xml.append($item, el("category", $e.categories[$c]));
+            }
+        }
         if (isSet($e.published)) {
             $item = xml.append($item, el("pubDate", rssDate($e.published)));
         }
@@ -286,6 +508,12 @@ func buildRss(f as Feed) {
         }
         if (len($body) > 0) {
             $item = xml.append($item, el("description", $body));
+        }
+        if (hasEnclosure($e)) {
+            def enc as xml.Value init xml.setAttr(xml.element("enclosure"), "url", $e.enclosure.url);
+            $enc = xml.setAttr($enc, "length", convert.toString($e.enclosure.length));
+            $enc = xml.setAttr($enc, "type", $e.enclosure.type);
+            $item = xml.append($item, $enc);
         }
         $channel = xml.append($channel, $item);
     }
@@ -301,6 +529,14 @@ func buildAtom(f as Feed) {
         "http://www.w3.org/2005/Atom");
     $root = xml.append($root, el("title", $f.title));
     $root = xml.append($root, xml.setAttr(xml.element("link"), "href", $f.link));
+    if (len($f.author) > 0) {
+        $root = xml.append($root, atomAuthor($f.author));
+    }
+    for (def c as int init 0; $c < len($f.categories); $c = $c + 1) {
+        if (len($f.categories[$c]) > 0) {
+            $root = xml.append($root, xml.setAttr(xml.element("category"), "term", $f.categories[$c]));
+        }
+    }
     if (isSet($f.updated)) {
         $root = xml.append($root, el("updated", time.iso($f.updated)));
     }
@@ -314,6 +550,14 @@ func buildAtom(f as Feed) {
         if (len($e.id) > 0) {
             $item = xml.append($item, el("id", $e.id));
         }
+        if (len($e.author) > 0) {
+            $item = xml.append($item, atomAuthor($e.author));
+        }
+        for (def c as int init 0; $c < len($e.categories); $c = $c + 1) {
+            if (len($e.categories[$c]) > 0) {
+                $item = xml.append($item, xml.setAttr(xml.element("category"), "term", $e.categories[$c]));
+            }
+        }
         if (isSet($e.published)) {
             $item = xml.append($item, el("published", time.iso($e.published)));
         }
@@ -325,6 +569,13 @@ func buildAtom(f as Feed) {
         }
         if (len($e.content) > 0) {
             $item = xml.append($item, el("content", $e.content));
+        }
+        if (hasEnclosure($e)) {
+            def enc as xml.Value init xml.setAttr(xml.element("link"), "rel", "enclosure");
+            $enc = xml.setAttr($enc, "href", $e.enclosure.url);
+            $enc = xml.setAttr($enc, "length", convert.toString($e.enclosure.length));
+            $enc = xml.setAttr($enc, "type", $e.enclosure.type);
+            $item = xml.append($item, $enc);
         }
         $root = xml.append($root, $item);
     }
@@ -399,7 +650,10 @@ func parseRss(root as xml.Value) {
             published: parseRssDate(textOf($it, "pubDate")),
             updated: epoch(),
             summary: textOf($it, "description"),
-            content: ""
+            content: "",
+            author: rssAuthorOf($it),
+            categories: categoriesText($it),
+            enclosure: readEnclosureRss($it)
         };
         $es[] = $e;
     }
@@ -407,7 +661,9 @@ func parseRss(root as xml.Value) {
         title: textOf($channel, "title"),
         link: textOf($channel, "link"),
         updated: $updated,
-        entries: $es
+        entries: $es,
+        author: rssAuthorOf($channel),
+        categories: categoriesText($channel)
     };
 }
 
@@ -423,7 +679,10 @@ func parseAtom(root as xml.Value) {
             published: parseAtomDate(textOf($it, "published")),
             updated: parseAtomDate(textOf($it, "updated")),
             summary: textOf($it, "summary"),
-            content: textOf($it, "content")
+            content: textOf($it, "content"),
+            author: atomAuthorOf($it),
+            categories: categoriesTerm($it),
+            enclosure: readEnclosureAtom($it)
         };
         $es[] = $e;
     }
@@ -431,7 +690,9 @@ func parseAtom(root as xml.Value) {
         title: textOf($root, "title"),
         link: atomLink($root),
         updated: parseAtomDate(textOf($root, "updated")),
-        entries: $es
+        entries: $es,
+        author: atomAuthorOf($root),
+        categories: categoriesTerm($root)
     };
 }
 

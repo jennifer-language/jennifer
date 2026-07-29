@@ -33,7 +33,20 @@ def two as feed.Entry init feed.entrySummary(
         time.fromIso("2026-07-13T10:00:00Z")),
     "RSS 2.0 and Atom 1.0, one module, format detected on parse.");
 
-$f = feed.add(feed.add($f, $one), $two);
+# A podcast episode: an audio enclosure plus author and category tags, which
+# round-trip in both formats (RSS <enclosure>, Atom <link rel="enclosure">).
+def ep as feed.Entry init feed.entryEnclosure(
+    feed.entryCategory(
+        feed.entryAuthor(
+            feed.entryId(
+                feed.entry("Podcast: designing a small language", "https://jennifer-language.dev/pod/1"),
+                "pod-1"),
+            "The Jennifer Team"),
+        "Programming"),
+    "https://jennifer-language.dev/pod/1.mp3", 18452000, "audio/mpeg");
+
+$f = feed.feedAuthor($f, "The Jennifer Team");
+$f = feed.add(feed.add(feed.add($f, $one), $two), $ep);
 
 # Emit both formats from the same feed.
 def rss as string init feed.build($f, "rss");
@@ -62,3 +75,14 @@ io.printf(
     $fromAtom.entries[0].title,
     time.format($fromAtom.entries[0].published, "%Y-%m-%d"),
     $fromAtom.entries[0].summary);
+
+# The podcast episode round-trips its author, category and audio enclosure.
+def pod as feed.Entry init $fromRss.entries[2];
+io.printf(
+    "\npodcast entry: \"%s\" by %s [%s]\n  %s (%d bytes, %s)\n",
+    $pod.title,
+    $pod.author,
+    $pod.categories[0],
+    $pod.enclosure.url,
+    $pod.enclosure.length,
+    $pod.enclosure.type);

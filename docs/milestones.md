@@ -1009,7 +1009,7 @@ incl. the sliding boundary), and the Go suite over memcache / redis
 
 **In progress.** The deepest per-module gaps, where a module handles the easy
 case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 through M23.6.6 done; the modules below
+sub-numbering as pieces land (M23.6.1 through M23.6.7 done; the modules below
 planned):
 - **`barcode`** - DataMatrix, UPC-A/E, Code93, GS1-128 symbologies; QR numeric /
   alphanumeric modes + versions 11-40; a human-readable text line under 1D
@@ -1023,8 +1023,6 @@ planned):
   / metadata / `HEAD` / copy.
 - **`font`** - CFF / OpenType (`OTTO`) outlines, kerning + `OS/2` metrics
   (cap-height, ascender/descender/line-gap).
-- **`feed`** - `<enclosure>` (podcast media, its advertised use case), author +
-  categories.
 
 #### M23.6.1 - ipnet subnet math + classification
 
@@ -1170,6 +1168,29 @@ the easy case.
   escaped quote can no longer mis-toggle the quote state). Overlay 35 -> 52,
   `docblock`-clean; pure `.j` over `strings` / `convert` / `encoding` / `regex` /
   `binary`, both binaries.
+
+#### M23.6.7 - feed enclosures, author, categories
+
+**Done.** Grew `feed` from a title/link/date reader into a podcast-capable one.
+- **Enclosures.** A new `Enclosure { url, length, type }` struct on `Entry`, set
+  by `entryEnclosure(e, url, length, type)` and tested by `hasEnclosure(e)`.
+  Build emits RSS `<enclosure url length type/>` and Atom `<link rel="enclosure"
+  href length type/>`; parse reads either back. The item's alternate `<link>`
+  (its page URL) is kept distinct from the enclosure link, and a blank /
+  non-numeric `length` degrades to `0` instead of throwing (real feeds carry
+  both). This is the advertised podcast-client use case.
+- **Author + categories.** `Feed` and `Entry` gained `author as string` and
+  `categories as list of string`, with `feedAuthor` / `feedCategory` /
+  `entryAuthor` / `entryCategory` builders. RSS writes `<author>` (channel
+  `<managingEditor>`) + `<category>` and reads `<author>` with a `<dc:creator>`
+  fallback; Atom writes / reads `<author><name>` + `<category term>`. Adding the
+  struct fields is a pre-1.0 break to the `Feed` / `Entry` literal shape.
+  Adversarial validation confirmed feed-level vs item-level metadata never leaks
+  across the nesting boundary and that an over-`int64` enclosure `length` degrades
+  to `0`; it caught one round-trip asymmetry (an empty-string category emitted a
+  hollow `<category>` that parse then dropped), fixed by skipping empty categories
+  on build. Overlay 19 -> 27, `docblock`-clean; pure `.j` over `xml` + `time`,
+  both binaries (`fetch` still needs the default binary).
 
 ### M23.7 - observability completeness
 

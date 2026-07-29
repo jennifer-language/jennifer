@@ -488,15 +488,20 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   not rendering. Over `regex` + `strings`; both binaries.
 - **`feed`** - RSS 2.0 and Atom 1.0 web syndication in one module (build and
   parse; format chosen on `build`, detected on `parse`). Value-semantic
-  `feed.Feed { title, link, updated, entries }` of
-  `feed.Entry { title, link, id, published, updated, summary, content }` with
-  builders `feed.feed(title, link)` / `entry(title, link)` / `add(f, e)` /
+  `feed.Feed { title, link, updated, entries, author, categories }` of
+  `feed.Entry { title, link, id, published, updated, summary, content, author,
+  categories, enclosure }` (an `feed.Enclosure { url, length, type }` media file)
+  with builders `feed.feed(title, link)` / `entry(title, link)` / `add(f, e)` /
   `feedUpdated(f, t)` / `entryId` / `entryPublished` / `entryUpdated` /
-  `entrySummary` / `entryContent`; `feed.build(f, "rss"|"atom")` /
-  `parse(text)` / `kind(text)`, and `feed.fetch(url)` over the `http` module.
-  Over `xml` + `time` (build / parse on both binaries; `fetch` needs the default
-  binary). Hardened for untrusted feeds (xml nesting cap, no billion-laughs,
-  lenient dates, a 64 MiB body cap).
+  `entrySummary` / `entryContent` / `entryAuthor` / `entryCategory` /
+  `entryEnclosure(e, url, length, type)` / `feedAuthor` / `feedCategory` /
+  `hasEnclosure(e)`; `feed.build(f, "rss"|"atom")` / `parse(text)` /
+  `kind(text)`, and `feed.fetch(url)` over the `http` module. Enclosures make it
+  a podcast feed (RSS `<enclosure>` / Atom `<link rel="enclosure">`); author +
+  categories round-trip on feed and entry (RSS author reads `<dc:creator>` as a
+  fallback). Over `xml` + `time` (build / parse on both binaries; `fetch` needs
+  the default binary). Hardened for untrusted feeds (xml nesting cap, no
+  billion-laughs, lenient dates, a 64 MiB body cap).
 - **`font`** - a pure-Jennifer TrueType / SFNT font parser (no Go; `bytes` +
   bitwise ops + `fs`, so **both binaries**). `font.parse(b)` / `open(path)` ->
   `font.Font`; `font.unitsPerEm(f)` / `name(f)` / `advance(f, cp)` (advance

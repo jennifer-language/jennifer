@@ -211,3 +211,106 @@ func testEmptyFeedRoundTrips() {
     testing.assertEqual(len(parse(build($f, "rss")).entries), 0);
     testing.assertEqual(len(parse(build($f, "atom")).entries), 0);
 }
+
+# ---- M23.6: enclosure, author, categories ----
+
+# A podcast-style feed with author, categories and a media enclosure.
+func podcast() {
+    def e as Entry init entryEnclosure(
+        entryCategory(
+            entryCategory(entryAuthor(entry("Ep 1", "https://p.example/1"), "Jane Host"), "Tech"),
+            "News"),
+        "https://p.example/1.mp3", 12345678, "audio/mpeg");
+    def f as Feed init feedCategory(feedAuthor(feed("Show", "https://p.example"), "Jane Host"), "Technology");
+    return add($f, $e);
+}
+
+func testPodcastRssRoundTrip() {
+    def out as string init build(podcast(), "rss");
+    testing.assertContains($out, "<managingEditor>Jane Host</managingEditor>");
+    testing.assertContains($out, "<author>Jane Host</author>");
+    testing.assertContains($out, "url=\"https://p.example/1.mp3\"");
+    testing.assertContains($out, "length=\"12345678\"");
+    def f as Feed init parse($out);
+    testing.assertEqual($f.author, "Jane Host");
+    testing.assertEqual($f.categories[0], "Technology");
+    def e as Entry init $f.entries[0];
+    testing.assertEqual($e.author, "Jane Host");
+    testing.assertEqual(len($e.categories), 2);
+    testing.assertEqual($e.categories[0], "Tech");
+    testing.assertEqual($e.enclosure.url, "https://p.example/1.mp3");
+    testing.assertEqual($e.enclosure.length, 12345678);
+    testing.assertEqual($e.enclosure.type, "audio/mpeg");
+    testing.assertTrue(hasEnclosure($e));
+}
+
+func testPodcastAtomRoundTrip() {
+    def out as string init build(podcast(), "atom");
+    testing.assertContains($out, "<name>Jane Host</name>");
+    testing.assertContains($out, "term=\"Technology\"");
+    testing.assertContains($out, "rel=\"enclosure\"");
+    def f as Feed init parse($out);
+    testing.assertEqual($f.author, "Jane Host");
+    def e as Entry init $f.entries[0];
+    testing.assertEqual($e.author, "Jane Host");
+    testing.assertEqual(len($e.categories), 2);
+    testing.assertEqual($e.enclosure.url, "https://p.example/1.mp3");
+    testing.assertEqual($e.enclosure.length, 12345678);
+    # the item's alternate link is the page URL, not the enclosure media URL
+    testing.assertEqual($e.link, "https://p.example/1");
+}
+
+# RSS author falls back to Dublin Core <dc:creator> when <author> is absent.
+func testRssAuthorDcCreatorFallback() {
+    def x as string init "<rss version=\"2.0\"><channel><title>C</title><item><title>i</title><dc:creator>Bob</dc:creator></item></channel></rss>";
+    testing.assertEqual(parse($x).entries[0].author, "Bob");
+}
+
+# A blank / missing enclosure length degrades to 0 rather than throwing.
+func testEnclosureBlankLength() {
+    def x as string init "<rss version=\"2.0\"><channel><title>C</title><item><title>i</title><enclosure url=\"http://x/a.mp3\" type=\"audio/mpeg\"/></item></channel></rss>";
+    def e as Entry init parse($x).entries[0];
+    testing.assertEqual($e.enclosure.length, 0);
+    testing.assertEqual($e.enclosure.url, "http://x/a.mp3");
+}
+
+# Unset author / categories / enclosure emit nothing and parse back empty.
+func testOptionalFieldsOmitted() {
+    def out as string init build(add(feed("F", "L"), entry("e", "l")), "rss");
+    testing.assertFalse(containsStr($out, "managingEditor"));
+    testing.assertFalse(containsStr($out, "enclosure"));
+    def e as Entry init parse($out).entries[0];
+    testing.assertEqual($e.author, "");
+    testing.assertEqual(len($e.categories), 0);
+    testing.assertFalse(hasEnclosure($e));
+}
+
+func testNewBuildersValueSemantic() {
+    def base as Entry init entry("t", "l");
+    testing.assertEqual(len(entryCategory($base, "x").categories), 1);
+    testing.assertEqual(len($base.categories), 0); # original untouched
+    testing.assertEqual(entryAuthor($base, "A").author, "A");
+    testing.assertEqual($base.author, "");
+}
+
+# An empty-string category is skipped on build (as parse drops it), so it does
+# not emit a hollow <category></category> and the round-trip count is exact.
+func testEmptyCategorySkippedOnBuild() {
+    def f as Feed init add(feed("F", "L"), entryCategory(entry("e", "l"), ""));
+    def out as string init build($f, "rss");
+    testing.assertFalse(containsStr($out, "<category>"));
+    testing.assertEqual(len(parse($out).entries[0].categories), 0);
+}
+
+# Feed-level and item-level metadata never leak across the nesting boundary.
+func testFeedItemMetadataIsolation() {
+    def x as string init "<rss version=\"2.0\"><channel><title>C</title>" +
+        "<managingEditor>Boss</managingEditor>" +
+        "<item><title>i</title><author>Writer</author><category>ItemCat</category></item>" +
+        "</channel></rss>";
+    def f as Feed init parse($x);
+    testing.assertEqual($f.author, "Boss"); # channel author, not the item's
+    testing.assertEqual(len($f.categories), 0); # item's category does not leak up
+    testing.assertEqual($f.entries[0].author, "Writer");
+    testing.assertEqual($f.entries[0].categories[0], "ItemCat");
+}
