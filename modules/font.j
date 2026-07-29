@@ -128,6 +128,10 @@ export def struct Glyph {
  * @field xHeight {int} the x-height (OS/2 sxHeight; 0 when unavailable)
  * @field kern {int} the kern-table offset (0 when the font has no kern table)
  * @field cff {int} the CFF-table offset (0 for a TrueType/glyf font)
+ * @field xMin {int} the font bounding-box minimum x (head xMin)
+ * @field yMin {int} the font bounding-box minimum y (head yMin)
+ * @field xMax {int} the font bounding-box maximum x (head xMax)
+ * @field yMax {int} the font bounding-box maximum y (head yMax)
  */
 export def struct Font {
     data as bytes,
@@ -147,7 +151,11 @@ export def struct Font {
     capHeight as int,
     xHeight as int,
     kern as int,
-    cff as int
+    cff as int,
+    xMin as int,
+    yMin as int,
+    xMax as int,
+    yMax as int
 };
 
 # ---- parse ----
@@ -225,7 +233,11 @@ export func parse(b as bytes) {
         capHeight: $vm[3],
         xHeight: $vm[4],
         kern: $kernOff,
-        cff: $cffOff
+        cff: $cffOff,
+        xMin: sshort($b, $head + 36),
+        yMin: sshort($b, $head + 38),
+        xMax: sshort($b, $head + 40),
+        yMax: sshort($b, $head + 42)
     };
 }
 
@@ -456,6 +468,68 @@ func advanceOf(f as Font, gid as int) {
  */
 export func advance(f as Font, cp as int) {
     return advanceOf($f, glyphIndex($f, $cp));
+}
+
+/**
+ * The glyph id (index) a codepoint maps to through the font's character map, or 0
+ * (`.notdef`) when the font lacks the codepoint. The identifier a PDF embeds
+ * under Identity encoding.
+ * @param f {Font} the font
+ * @param cp {int} the Unicode codepoint
+ * @return {int} the glyph id
+ */
+export func glyphId(f as Font, cp as int) {
+    return glyphIndex($f, $cp);
+}
+
+/**
+ * The horizontal advance width of a glyph id, in font units (the raw hmtx metric,
+ * for building a PDF `W` widths array keyed by glyph / CID).
+ * @param f {Font} the font
+ * @param gid {int} the glyph id
+ * @return {int} the advance width
+ */
+export func advanceGid(f as Font, gid as int) {
+    return advanceOf($f, $gid);
+}
+
+/**
+ * The number of glyphs in the font.
+ * @param f {Font} the font
+ * @return {int} the glyph count
+ */
+export func numGlyphs(f as Font) {
+    return $f.numGlyphs;
+}
+
+/**
+ * Whether the font uses CFF / PostScript outlines (an OpenType `OTTO`) rather
+ * than TrueType `glyf` outlines.
+ * @param f {Font} the font
+ * @return {bool} true for a CFF font
+ */
+export func isCff(f as Font) {
+    return $f.cff != 0;
+}
+
+/**
+ * The font bounding box in font units as [xMin, yMin, xMax, yMax] (the `head`
+ * table's global glyph bounds, for a PDF `FontBBox`).
+ * @param f {Font} the font
+ * @return {list of int} [xMin, yMin, xMax, yMax]
+ */
+export func bbox(f as Font) {
+    return [$f.xMin, $f.yMin, $f.xMax, $f.yMax];
+}
+
+/**
+ * The raw font file bytes (for embedding the font in a container such as a PDF
+ * `FontFile2`).
+ * @param f {Font} the font
+ * @return {bytes} the font file contents
+ */
+export func data(f as Font) {
+    return $f.data;
 }
 
 /**

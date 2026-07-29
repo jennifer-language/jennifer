@@ -52,9 +52,8 @@ the [`crypto`](crypto.md) library's crypto-grade source instead, so
 `randSeed` does not affect them.)
 
 The source is **not cryptographically secure** - it is Go's `math/rand`,
-seedable and predictable once observed. Don't derive long-lived secrets
-from it; a dedicated `crypto` library is the planned home for
-crypto-grade randomness.
+seedable and predictable once observed. Don't derive secrets, tokens, keys,
+or anything security-sensitive from it.
 
 ```jennifer
 use io;
@@ -64,6 +63,43 @@ math.randSeed(42);                              # reproducible from here on
 io.printf("%f\n", math.rand());                 # same value every run
 io.printf("%d\n", math.randInt(1, 6));          # die roll, seeded
 ```
+
+### For secure random numbers, use `crypto`
+
+When the value must be unpredictable - a password, a token, a nonce, a
+shuffle an adversary must not guess - use the [`crypto`](crypto.md)
+library's crypto-grade source instead of `math`. `crypto.randInt(lo, hi)`
+has the **same shape** as `math.randInt` (inclusive `[lo, hi]`), so it is a
+drop-in replacement; it is unseedable by design (there is no
+`crypto.randSeed`, since predictability is the thing you are avoiding):
+
+```jennifer
+use io;
+use crypto;
+
+io.printf("%d\n", crypto.randInt(1, 6));        # secure, unbiased die roll
+def token as bytes init crypto.randBytes(32);   # 256 bits of secure entropy
+```
+
+If you specifically want `math`'s fast, `lists.shuffle`-sharing stream but
+seeded **unpredictably** (so each run differs and the seed can't be guessed),
+draw the seed from `crypto` once at startup:
+
+```jennifer
+use math;
+use crypto;
+
+# a full-width unpredictable seed from the crypto-grade source
+math.randSeed(crypto.randInt(0 - 9223372036854775807, 9223372036854775807));
+
+# math.rand / math.randInt / lists.shuffle now run off an unguessable seed -
+# fast and non-reproducible, but still NOT cryptographically secure output.
+```
+
+Note the trade-off: seeding `math` from `crypto` only makes the *starting
+point* unpredictable. The stream itself is still `math/rand`, so once enough
+output is observed it remains predictable - for output that must stay secret,
+use `crypto.randInt` / `crypto.randBytes` directly.
 
 ## Constants
 

@@ -1122,11 +1122,30 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   date). `render` writes the PDF 1.7 object / xref structure by hand with
   FlateDecode-compressed content streams (via `compress`). Standard-14 base fonts
   (an unknown font throws `Error{kind: "pdfwriter"}`); coordinates are PDF points
-  (origin bottom-left, y up, ints), colour is 0-255 RGB. Output is **byte-identical**
-  (no auto timestamp - opt in via `info` + `pdfDate`), so a rendered PDF is safe to
-  assert against a golden; `qpdf`-clean. A writer, not a reader (no embedded fonts
-  / images yet). Pure `.j` over `strings` / `lists` / `convert` / `compress` /
-  `time`; **both binaries**.
+  (origin bottom-left, y up, ints), colour is 0-255 RGB. For non-Latin text,
+  **embed a TrueType font**: `loadFont(name, ttfBytes) -> LoadedFont` /
+  `addFont(doc, lf)` / `textUnicode(pg, x, y, lf, size, str)` writes a Type0 /
+  CIDFontType2 composite (Identity-H, embedded `FontFile2`, ToUnicode map) over
+  the `font` module, so accented Latin / Greek / Cyrillic / CJK renders and stays
+  selectable (a CFF `.otf` throws - TrueType `glyf` only; whole-font embed, glyph
+  subsetting is a follow-on). **Embed raster images** with `loadImage(name,
+  imgBytes) -> Image` / `addImage(doc, img)` / `drawImage(pg, img, x, y, width,
+  height)`: PNG (greyscale / RGB / palette embed directly via a FlateDecode
+  predictor; 8-bit greyscale+alpha / RGBA decode to a colour stream plus an
+  `/SMask` soft mask) and JPEG (embedded as-is via `DCTDecode`), drawn as an
+  image XObject scaled into the box (interlaced PNG / 16-bit alpha / palette
+  `tRNS` throw). **Text layout**: `measureText(font, size, str) -> float`
+  (standard-14 via Adobe Core-14 AFM metrics) / `measureTextUnicode(lf, size,
+  str)` (embedded-font advances) measure width in points; `wrapText(font, size,
+  str, maxWidth) -> list of string` word-wraps (honouring `\n` hard breaks);
+  `textBlock(pg, x, y, width, font, size, leading, str, align)` (and
+  `textBlockUnicode`) flow wrapped text into a column with `align` "left" /
+  "right" / "center" / "justify". Object numbers are assigned dynamically.
+  Output is **byte-identical** (no auto timestamp - opt in via `info` +
+  `pdfDate`), so a rendered PDF is safe to assert against a golden; `qpdf`-clean,
+  text extracts with `pdftotext`. Pure `.j` over `strings` / `lists` / `maps` /
+  `convert` / `compress` / `binary` / `math` / `time` / `encoding` + the `font`
+  module; **both binaries**.
 - **`statsd`** - a fire-and-forget StatsD metrics client over UDP. `statsd.client(host)`
   (default port 8125) / `statsd.clientWith(address, prefix)` open a `Client`
   (`socket` + agent `address` + a metric-name `prefix`, "" for none; copies share

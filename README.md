@@ -9,7 +9,7 @@
 
 Jennifer is an interpreted programming language.
 
-Jennifer is batteries-included, and not just in name:
+Jennifer is **batteries-included**, and not just in name:
 **[36 built-in libraries](docs/libraries/index.md) and
 [62 distributable modules](docs/modules/index.md) - over 450 functions and
 constants** cover what real programs actually need, so you build genuine tools,
@@ -29,10 +29,19 @@ and stores come through [Redis](docs/modules/redis.md) and
 [memcached](docs/modules/memcache.md) clients. Security is the real thing, not a
 stub: [AES-256-GCM, Ed25519, HKDF / PBKDF2](docs/libraries/crypto.md), and [JWT](docs/modules/jwt.md).
 And lightweight [concurrency](docs/user-guide/concurrency.md) is built into the
-language via `spawn` and the [task](docs/libraries/task.md) library. It all
-ships in **one self-contained static binary** - about 21 MB with everything,
-~9 MB for the embeddable build - with no runtime, package manager, or dependency
-tree to install.
+language via `spawn` and the [task](docs/libraries/task.md) library. Something
+more niche - [Gotify](docs/modules/gotify.md) push, strict
+[SemVer](docs/modules/semver.md), [S3](docs/modules/s3.md) object storage,
+[vCard](docs/modules/vcard.md) / [iCalendar](docs/modules/ical.md),
+[MQTT](docs/modules/mqtt.md) and [AMQP](docs/modules/amqp.md) messaging,
+[ACME](docs/modules/acme.md) certificate issuance,
+[TOTP](docs/modules/totp.md) two-factor codes - and lots of others? No need to
+ask: it is all there already. The interpreter and its built-in libraries ship
+as **one self-contained static binary** - about 21 MB with everything, ~9 MB for
+the embeddable build - with no runtime, package manager, or dependency tree to
+install; the modules ride along as plain `.j` source files (installed beside the
+binary and resolved through the module path), readable and hackable with no
+compile step.
 
 It is also a natural fit for **teaching and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an

@@ -2,13 +2,23 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * Generate simple PDF documents - text, lines, rectangles - the way
- * `htmlwriter` / `label` generate their formats. Build a `Document` of `Page`s
- * with value-semantic builders, then `render()` writes the PDF object / xref
- * structure by hand (no stdlib PDF) as `bytes`. Content streams are
- * FlateDecode-compressed via `compress`. The standard-14 Type1 fonts (Helvetica
- * / Times / Courier families + Symbol / ZapfDingbats); embedded fonts and images
- * are follow-ons. Pure Jennifer; both binaries.
+ * Generate PDF documents - text, lines, rectangles - the way `htmlwriter` /
+ * `label` generate their formats. Build a `Document` of `Page`s with
+ * value-semantic builders, then `render()` writes the PDF object / xref structure
+ * by hand (no stdlib PDF) as `bytes`. Content streams are FlateDecode-compressed
+ * via `compress`. Two font paths: the standard-14 Type1 fonts (Helvetica / Times
+ * / Courier families + Symbol / ZapfDingbats) via `text`, and **embedded
+ * TrueType fonts** via `loadFont` / `addFont` / `textUnicode` - a Type0 /
+ * CIDFontType2 composite (Identity-H) with an embedded `FontFile2` and a
+ * ToUnicode map, so any script the font covers (accented Latin, Greek, Cyrillic,
+ * CJK, ...) renders and stays selectable. Raster images embed as image XObjects
+ * via `loadImage` / `addImage` / `drawImage` - PNG (greyscale / RGB / palette,
+ * plus 8-bit alpha as a soft mask) and JPEG (DCTDecode). Text layout -
+ * `measureText` width measurement (standard-14 AFM metrics + embedded-font
+ * advances), `wrapText` word-wrap, and `textBlock` wrapped / aligned paragraphs
+ * (left / right / center / justify) - flows text into a column. Object numbers
+ * are assigned dynamically. Pure Jennifer (over the `font` module); both
+ * binaries.
  *
  * Coordinates are in PDF points (1/72 inch), origin bottom-left, y upward.
  * Common page sizes: US Letter 612 x 792, A4 595 x 842. Colours are 0-255 RGB.
@@ -22,20 +32,86 @@
  */
 use strings;
 use lists;
+use maps;
 use convert;
 use compress;
+use binary;
+use math;
 use time;
 use encoding;
+import "./font.j" as font;
+include "./pdfwriter_afm.j";
 
 /**
- * A PDF document: an ordered list of pages and the document metadata
- * (the PDF Info dictionary, keyed by PDF key name - "Title", "Author", ...).
+ * A loaded, embeddable font: a resource name (referenced in `textUnicode`) and
+ * the parsed `font.Font`. Register it in a document with `addFont`.
+ * @field name {string} the resource name (e.g. "Body")
+ * @field f {font.Font} the parsed font
+ */
+export def struct LoadedFont {
+    name as string,
+    f as font.Font
+};
+
+/**
+ * A record of one glyph used by embedded text: which font, its glyph id, and the
+ * Unicode codepoint it came from - collected so `render` can build the font's
+ * width array and ToUnicode map.
+ * @field font {string} the font resource name
+ * @field gid {int} the glyph id
+ * @field cp {int} the source Unicode codepoint
+ */
+export def struct GlyphUse {
+    font as string,
+    gid as int,
+    cp as int
+};
+
+/**
+ * A loaded raster image (from `loadImage`), ready to embed as a PDF image
+ * XObject and draw with `drawImage`. Register it in a document with `addImage`.
+ * @field name {string} the resource name (referenced in `drawImage`)
+ * @field width {int} the pixel width
+ * @field height {int} the pixel height
+ * @field bits {int} bits per colour component
+ * @field colorSpace {string} the PDF colour-space token (e.g. "/DeviceRGB")
+ * @field filter {string} the stream filter ("DCTDecode" for JPEG, "FlateDecode" for PNG)
+ * @field predictor {int} 15 when the FlateDecode stream carries PNG predictors, else 0
+ * @field colors {int} colour components per pixel (for the predictor DecodeParms)
+ * @field decode {string} an optional /Decode array token (Adobe CMYK JPEG), else ""
+ * @field data {bytes} the image stream bytes
+ * @field smask {bytes} the soft-mask (alpha) stream, empty when opaque
+ * @field hasSmask {bool} whether the image carries an alpha soft mask
+ */
+export def struct Image {
+    name as string,
+    width as int,
+    height as int,
+    bits as int,
+    colorSpace as string,
+    filter as string,
+    predictor as int,
+    colors as int,
+    decode as string,
+    data as bytes,
+    smask as bytes,
+    hasSmask as bool
+};
+
+/**
+ * A PDF document: an ordered list of pages, the document metadata (the PDF Info
+ * dictionary, keyed by PDF key name - "Title", "Author", ...), and any embedded
+ * fonts registered with `addFont`.
  * @field pages {list of Page} the document's pages
  * @field info {map of string to string} the Info-dictionary metadata
+ * @field embedded {list of LoadedFont} the embedded fonts
+ * @field images {list of Image} the embedded raster images
  */
 export def struct Document {
     pages as list of Page,
-    info as map of string to string
+    info as map of string to string,
+    embedded as list of LoadedFont,
+    images as list of Image
 };
 
 /**
@@ -43,13 +119,15 @@ export def struct Document {
  * @field width {int} the page width in points
  * @field height {int} the page height in points
  * @field content {string} the content-stream operators built so far
- * @field fonts {list of string} the distinct fonts referenced on this page
+ * @field fonts {list of string} the distinct standard-14 fonts referenced on this page
+ * @field glyphUses {list of GlyphUse} embedded-font glyphs drawn on this page
  */
 export def struct Page {
     width as int,
     height as int,
     content as string,
-    fonts as list of string
+    fonts as list of string,
+    glyphUses as list of GlyphUse
 };
 
 func fail(msg as string) {
@@ -86,7 +164,9 @@ func standardFonts() {
  */
 export func document() {
     def meta as map of string to string init {"Producer": "Jennifer pdfwriter"};
-    return Document{pages: [], info: $meta};
+    def noFonts as list of LoadedFont init [];
+    def noImages as list of Image init [];
+    return Document{pages: [], info: $meta, embedded: $noFonts, images: $noImages};
 }
 
 /**
@@ -125,7 +205,8 @@ export func pdfDate(t as time.Time) {
  * @return {Page} the page
  */
 export func page(width as int, height as int) {
-    return Page{width: $width, height: $height, content: "", fonts: []};
+    def noGlyphs as list of GlyphUse init [];
+    return Page{width: $width, height: $height, content: "", fonts: [], glyphUses: $noGlyphs};
 }
 
 # hexByte renders a byte as two uppercase hex digits.
@@ -250,6 +331,71 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
 }
 
 /**
+ * Load an embeddable font from its bytes, under a resource name used to select it
+ * in `textUnicode`. The font is embedded (and its Unicode text made selectable)
+ * when the document renders.
+ * @param name {string} the resource name (e.g. "Body"; letters / digits)
+ * @param data {bytes} the TrueType (.ttf) font file
+ * @return {LoadedFont} the loaded font
+ */
+export func loadFont(name as string, data as bytes) {
+    def parsed as font.Font init font.parse($data);
+    if (font.isCff($parsed)) {
+        fail("loadFont: only a TrueType (glyf) font can be embedded; '" + $name +
+            "' is a CFF / OpenType-PostScript font");
+    }
+    return LoadedFont{name: $name, f: $parsed};
+}
+
+/**
+ * A copy of the document with an embedded font registered, so `render` writes its
+ * font program and dictionaries.
+ * @param doc {Document} the document
+ * @param lf {LoadedFont} the loaded font (from `loadFont`)
+ * @return {Document} a fresh document with the font registered
+ */
+export func addFont(doc as Document, lf as LoadedFont) {
+    def out as Document init $doc;
+    $out.embedded = lists.push($out.embedded, $lf);
+    return $out;
+}
+
+# hexGid renders a glyph id as four uppercase hex digits (a 2-byte Identity-H
+# character code).
+func hexGid(gid as int) {
+    def b as bytes;
+    $b[] = ($gid >> 8) & 0xff;
+    $b[] = $gid & 0xff;
+    return strings.upper(encoding.toText($b, "hex"));
+}
+
+/**
+ * Draw Unicode text at (x, y) in an embedded font (from `loadFont` + `addFont`)
+ * at the given point size. Each character maps through the font's cmap to a
+ * glyph, so any script the font covers - including CJK - renders and stays
+ * selectable / copyable in a viewer.
+ * @param pg {Page} the page
+ * @param x {int} the x position (points from the left)
+ * @param y {int} the y position (points from the bottom)
+ * @param lf {LoadedFont} the embedded font
+ * @param size {int} the font size in points
+ * @param str {string} the text to draw
+ * @return {Page} a fresh page with the text added
+ */
+export func textUnicode(pg as Page, x as int, y as int, lf as LoadedFont, size as int, str as string) {
+    def hex as string init "";
+    for (def ch in strings.chars($str)) {
+        def cp as int init convert.toCodepoint($ch);
+        def gid as int init font.glyphId($lf.f, $cp);
+        $hex = $hex + hexGid($gid);
+        $pg.glyphUses = lists.push($pg.glyphUses, GlyphUse{font: $lf.name, gid: $gid, cp: $cp});
+    }
+    $pg.content = $pg.content + "BT\n/" + $lf.name + " " + convert.toString($size) + " Tf\n" +
+        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex + "> Tj\nET\n";
+    return $pg;
+}
+
+/**
  * Draw a straight line from (fromX, fromY) to (toX, toY).
  * @param pg {Page} the page
  * @param fromX {int} the start x
@@ -316,6 +462,313 @@ export func color(pg as Page, red as int, green as int, blue as int) {
     return $pg;
 }
 
+# beU16 reads a big-endian unsigned 16-bit integer at off.
+func beU16(b as bytes, off as int) {
+    return ($b[$off] << 8) | $b[$off + 1];
+}
+
+# beU32 reads a big-endian unsigned 32-bit integer at off.
+func beU32(b as bytes, off as int) {
+    return ($b[$off] << 24) | ($b[$off + 1] << 16) | ($b[$off + 2] << 8) | $b[$off + 3];
+}
+
+# paeth is the PNG Paeth predictor: pick a (left), b (above), or c (upper-left).
+func paeth(a as int, b as int, c as int) {
+    def p as int init $a + $b - $c;
+    def pa as int init $p - $a;
+    if ($pa < 0) {
+        $pa = 0 - $pa;
+    }
+    def pb as int init $p - $b;
+    if ($pb < 0) {
+        $pb = 0 - $pb;
+    }
+    def pc as int init $p - $c;
+    if ($pc < 0) {
+        $pc = 0 - $pc;
+    }
+    if ($pa <= $pb and $pa <= $pc) {
+        return $a;
+    }
+    if ($pb <= $pc) {
+        return $b;
+    }
+    return $c;
+}
+
+# pngUnfilter reverses the per-scanline PNG filters (None / Sub / Up / Average /
+# Paeth) of an inflated 8-bit-per-channel image, returning the raw pixel bytes
+# (filter bytes stripped). `bpp` is bytes-per-pixel (channels, since 8-bit).
+func pngUnfilter(raw as bytes, width as int, height as int, bpp as int) {
+    def rowBytes as int init $width * $bpp;
+    def out as bytes;
+    def y as int init 0;
+    def inPos as int init 0;
+    while ($y < $height) {
+        def ft as int init $raw[$inPos];
+        $inPos = $inPos + 1;
+        def rowStart as int init $y * $rowBytes;
+        def x as int init 0;
+        while ($x < $rowBytes) {
+            def cur as int init $raw[$inPos + $x];
+            def a as int init 0;
+            if ($x >= $bpp) {
+                $a = $out[$rowStart + $x - $bpp];
+            }
+            def b as int init 0;
+            if ($y > 0) {
+                $b = $out[$rowStart - $rowBytes + $x];
+            }
+            def c as int init 0;
+            if ($x >= $bpp and $y > 0) {
+                $c = $out[$rowStart - $rowBytes + $x - $bpp];
+            }
+            def val as int init $cur;
+            if ($ft == 1) {
+                $val = ($cur + $a) & 0xff;
+            } elseif ($ft == 2) {
+                $val = ($cur + $b) & 0xff;
+            } elseif ($ft == 3) {
+                $val = ($cur + (($a + $b) // 2)) & 0xff;
+            } elseif ($ft == 4) {
+                $val = ($cur + paeth($a, $b, $c)) & 0xff;
+            }
+            $out[] = $val;
+            $x = $x + 1;
+        }
+        $inPos = $inPos + $rowBytes;
+        $y = $y + 1;
+    }
+    return $out;
+}
+
+# parseJpeg reads a baseline / progressive JPEG's frame header for dimensions,
+# component count, and precision, and wraps the file bytes as a DCTDecode image.
+func parseJpeg(name as string, data as bytes) {
+    def n as int init len($data);
+    def i as int init 2;
+    def width as int init 0;
+    def height as int init 0;
+    def comps as int init 0;
+    def bits as int init 8;
+    def adobe as bool init false;
+    while ($i + 1 < $n) {
+        if ($data[$i] != 0xFF) {
+            $i = $i + 1;
+        } else {
+            def marker as int init $data[$i + 1];
+            if ($marker == 0xD8 or $marker == 0xD9 or ($marker >= 0xD0 and $marker <= 0xD7) or
+                $marker == 0x01 or $marker == 0xFF) {
+                $i = $i + 2;
+            } else {
+                def seg as int init beU16($data, $i + 2);
+                if (($marker >= 0xC0 and $marker <= 0xCF) and $marker != 0xC4 and $marker != 0xC8 and
+                    $marker != 0xCC) {
+                    $bits = $data[$i + 4];
+                    $height = beU16($data, $i + 5);
+                    $width = beU16($data, $i + 7);
+                    $comps = $data[$i + 9];
+                    $i = $n;
+                } else {
+                    if ($marker == 0xEE) {
+                        $adobe = true;
+                    }
+                    $i = $i + 2 + $seg;
+                }
+            }
+        }
+    }
+    if ($width == 0 or $height == 0 or $comps == 0) {
+        fail("loadImage: '" + $name + "' is not a supported JPEG (no frame header found)");
+    }
+    def cs as string init "/DeviceRGB";
+    def dec as string init "";
+    if ($comps == 1) {
+        $cs = "/DeviceGray";
+    } elseif ($comps == 3) {
+        $cs = "/DeviceRGB";
+    } elseif ($comps == 4) {
+        $cs = "/DeviceCMYK";
+        if ($adobe) {
+            $dec = " /Decode [1 0 1 0 1 0 1 0]";
+        }
+    } else {
+        fail("loadImage: '" + $name + "' JPEG has unsupported component count " +
+            convert.toString($comps));
+    }
+    def none as bytes;
+    return Image{name: $name, width: $width, height: $height, bits: $bits, colorSpace: $cs,
+        filter: "DCTDecode", predictor: 0, colors: $comps, decode: $dec, data: $data,
+        smask: $none, hasSmask: false};
+}
+
+# parsePng reads a non-interlaced PNG. Opaque colour types (grey / RGB / palette)
+# embed the raw zlib IDAT with a FlateDecode PNG predictor (no pixel decode);
+# alpha colour types (grey+alpha / RGBA, 8-bit) are inflated, de-filtered, and
+# split into a colour stream plus a grey soft-mask (SMask) stream.
+func parsePng(name as string, data as bytes) {
+    def n as int init len($data);
+    def i as int init 8;
+    def width as int init 0;
+    def height as int init 0;
+    def bitDepth as int init 0;
+    def colorType as int init 0;
+    def interlace as int init 0;
+    def haveIhdr as bool init false;
+    def idat as bytes;
+    def plte as bytes;
+    while ($i + 8 <= $n) {
+        def clen as int init beU32($data, $i);
+        def ctype as string init convert.fromCodepoint($data[$i + 4]) +
+            convert.fromCodepoint($data[$i + 5]) + convert.fromCodepoint($data[$i + 6]) +
+            convert.fromCodepoint($data[$i + 7]);
+        def body as int init $i + 8;
+        if ($ctype == "IHDR") {
+            $width = beU32($data, $body);
+            $height = beU32($data, $body + 4);
+            $bitDepth = $data[$body + 8];
+            $colorType = $data[$body + 9];
+            $interlace = $data[$body + 12];
+            $haveIhdr = true;
+        } elseif ($ctype == "PLTE") {
+            $plte = $data[$body..$body + $clen];
+        } elseif ($ctype == "IDAT") {
+            $idat = binary.concat($idat, $data[$body..$body + $clen]);
+        } elseif ($ctype == "IEND") {
+            $i = $n;
+        }
+        if ($i < $n) {
+            $i = $body + $clen + 4;
+        }
+    }
+    if (not $haveIhdr) {
+        fail("loadImage: '" + $name + "' has no PNG IHDR chunk");
+    }
+    if ($interlace != 0) {
+        fail("loadImage: '" + $name + "' is an interlaced PNG (unsupported)");
+    }
+    if (len($idat) == 0) {
+        fail("loadImage: '" + $name + "' has no PNG image data");
+    }
+    def none as bytes;
+    if ($colorType == 0) {
+        return Image{name: $name, width: $width, height: $height, bits: $bitDepth,
+            colorSpace: "/DeviceGray", filter: "FlateDecode", predictor: 15, colors: 1,
+            decode: "", data: $idat, smask: $none, hasSmask: false};
+    }
+    if ($colorType == 2) {
+        return Image{name: $name, width: $width, height: $height, bits: $bitDepth,
+            colorSpace: "/DeviceRGB", filter: "FlateDecode", predictor: 15, colors: 3,
+            decode: "", data: $idat, smask: $none, hasSmask: false};
+    }
+    if ($colorType == 3) {
+        if (len($plte) == 0) {
+            fail("loadImage: '" + $name + "' is a palette PNG with no PLTE chunk");
+        }
+        def hival as int init (len($plte) // 3) - 1;
+        def cs as string init "[/Indexed /DeviceRGB " + convert.toString($hival) + " <" +
+            encoding.toText($plte, "hex") + ">]";
+        return Image{name: $name, width: $width, height: $height, bits: $bitDepth,
+            colorSpace: $cs, filter: "FlateDecode", predictor: 15, colors: 1, decode: "",
+            data: $idat, smask: $none, hasSmask: false};
+    }
+    if ($colorType == 4 or $colorType == 6) {
+        if ($bitDepth != 8) {
+            fail("loadImage: '" + $name + "' is an alpha PNG that is not 8-bit (unsupported)");
+        }
+        def ch as int init 2;
+        if ($colorType == 6) {
+            $ch = 4;
+        }
+        def raw as bytes init compress.unpack($idat, "zlib");
+        def unf as bytes init pngUnfilter($raw, $width, $height, $ch);
+        def colorCh as int init $ch - 1;
+        def colorBytes as bytes;
+        def alphaBytes as bytes;
+        def total as int init $width * $height;
+        def px as int init 0;
+        while ($px < $total) {
+            def bo as int init $px * $ch;
+            def c as int init 0;
+            while ($c < $colorCh) {
+                $colorBytes[] = $unf[$bo + $c];
+                $c = $c + 1;
+            }
+            $alphaBytes[] = $unf[$bo + $colorCh];
+            $px = $px + 1;
+        }
+        def cs as string init "/DeviceRGB";
+        if ($colorType == 4) {
+            $cs = "/DeviceGray";
+        }
+        return Image{name: $name, width: $width, height: $height, bits: 8, colorSpace: $cs,
+            filter: "FlateDecode", predictor: 0, colors: $colorCh, decode: "",
+            data: compress.pack($colorBytes, "zlib"), smask: compress.pack($alphaBytes, "zlib"),
+            hasSmask: true};
+    }
+    fail("loadImage: '" + $name + "' has an unsupported PNG colour type " +
+        convert.toString($colorType));
+}
+
+/**
+ * Load a raster image (PNG or JPEG) from its bytes, under a resource name used to
+ * select it in `drawImage`. The format is detected from the file signature. PNG:
+ * non-interlaced greyscale / RGB / palette (embedded directly with a FlateDecode
+ * predictor) and 8-bit greyscale+alpha / RGBA (decoded to a colour stream plus an
+ * alpha soft mask). JPEG: baseline / progressive greyscale / RGB / CMYK, embedded
+ * as-is via DCTDecode.
+ * @param name {string} the resource name (e.g. "Logo"; letters / digits)
+ * @param data {bytes} the PNG or JPEG file
+ * @return {Image} the loaded image
+ * @throws {Error} kind "pdfwriter" if the data is not a supported PNG / JPEG
+ */
+export func loadImage(name as string, data as bytes) {
+    if (len($data) < 12) {
+        fail("loadImage: '" + $name + "' is too short to be an image");
+    }
+    if ($data[0] == 0xFF and $data[1] == 0xD8 and $data[2] == 0xFF) {
+        return parseJpeg($name, $data);
+    }
+    if ($data[0] == 0x89 and $data[1] == 0x50 and $data[2] == 0x4E and $data[3] == 0x47 and
+        $data[4] == 0x0D and $data[5] == 0x0A and $data[6] == 0x1A and $data[7] == 0x0A) {
+        return parsePng($name, $data);
+    }
+    fail("loadImage: '" + $name + "' is not a PNG or JPEG");
+}
+
+/**
+ * A copy of the document with an embedded image registered, so `render` writes its
+ * image XObject. Draw it on a page with `drawImage`.
+ * @param doc {Document} the document
+ * @param img {Image} the loaded image (from `loadImage`)
+ * @return {Document} a fresh document with the image registered
+ */
+export func addImage(doc as Document, img as Image) {
+    def out as Document init $doc;
+    $out.images = lists.push($out.images, $img);
+    return $out;
+}
+
+/**
+ * Draw a registered image scaled into the rectangle at (x, y) of the given width
+ * and height (points). The image keeps no aspect ratio of its own - it fills the
+ * box - so pass a width / height in the image's own proportion to avoid stretching.
+ * `addImage` the image into the document first so the resource name resolves.
+ * @param pg {Page} the page
+ * @param img {Image} the image (from `loadImage`)
+ * @param x {int} the lower-left x in points
+ * @param y {int} the lower-left y in points
+ * @param width {int} the drawn width in points
+ * @param height {int} the drawn height in points
+ * @return {Page} a fresh page with the image drawn
+ */
+export func drawImage(pg as Page, img as Image, x as int, y as int, width as int, height as int) {
+    $pg.content = $pg.content + "q\n" + convert.toString($width) + " 0 0 " +
+        convert.toString($height) + " " + convert.toString($x) + " " + convert.toString($y) +
+        " cm\n/" + $img.name + " Do\nQ\n";
+    return $pg;
+}
+
 /**
  * A copy of the document with a page appended.
  * @param doc {Document} the document
@@ -325,6 +778,304 @@ export func color(pg as Page, red as int, green as int, blue as int) {
 export func addPage(doc as Document, pg as Page) {
     $doc.pages = lists.push($doc.pages, $pg);
     return $doc;
+}
+
+# --- text layout (exported) -------------------------------------------------
+
+# measureEm sums a standard-14 font's glyph advances (1000-em units) over a
+# WinAnsi-encoded string. Courier is monospaced (600 per byte); Symbol /
+# ZapfDingbats have no layout metrics and throw.
+func measureEm(font as string, str as string) {
+    if (not lists.contains(standardFonts(), $font)) {
+        fail("measureText: unknown font '" + $font + "' (use a standard-14 base font)");
+    }
+    def raw as bytes init encoding.encode($str, "windows-1252");
+    def table as list of int init afmWidths($font);
+    if (len($table) == 0) {
+        if (strings.startsWith($font, "Courier")) {
+            return len($raw) * 600;
+        }
+        fail("measureText: font '" + $font + "' has no layout metrics (Symbol / ZapfDingbats)");
+    }
+    def total as int init 0;
+    def i as int init 0;
+    while ($i < len($raw)) {
+        $total = $total + $table[$raw[$i]];
+        $i = $i + 1;
+    }
+    return $total;
+}
+
+/**
+ * Measure the rendered width (in points) of a string in a standard-14 font at a
+ * point size, using the Adobe Core-14 AFM metrics. A character outside WinAnsi,
+ * or a Symbol / ZapfDingbats font, throws.
+ * @param font {string} a standard-14 base font name
+ * @param size {int} the font size in points
+ * @param str {string} the text to measure
+ * @return {float} the width in points
+ * @throws {Error} kind "pdfwriter" for an unknown / metric-less font
+ */
+export func measureText(font as string, size as int, str as string) {
+    return (measureEm($font, $str) * $size) / 1000;
+}
+
+/**
+ * Measure the rendered width (in points) of a string in an embedded font at a
+ * point size, using the font's own glyph advances.
+ * @param lf {LoadedFont} the embedded font
+ * @param size {int} the font size in points
+ * @param str {string} the text to measure
+ * @return {float} the width in points
+ */
+export func measureTextUnicode(lf as LoadedFont, size as int, str as string) {
+    def upem as int init font.unitsPerEm($lf.f);
+    def total as int init 0;
+    for (def ch in strings.chars($str)) {
+        def gid as int init font.glyphId($lf.f, convert.toCodepoint($ch));
+        $total = $total + font.advanceGid($lf.f, $gid);
+    }
+    return ($total * $size) / $upem;
+}
+
+# nonEmptySplit splits on spaces, dropping empty tokens (collapsing whitespace).
+func nonEmptySplit(seg as string) {
+    def out as list of string init [];
+    for (def w in strings.split($seg, " ")) {
+        if ($w != "") {
+            $out[] = $w;
+        }
+    }
+    return $out;
+}
+
+# countWords counts space-separated non-empty tokens in a line.
+func countWords(line as string) {
+    return len(nonEmptySplit($line));
+}
+
+# packSegment greedily packs words (with their point widths and the space width)
+# into lines no wider than maxWidth, returning the lines (single-spaced). A word
+# wider than maxWidth lands alone on its line (overflow).
+func packSegment(words as list of string, wordW as list of float, spaceW as float, maxWidth as int) {
+    def lines as list of string init [];
+    def cur as string init "";
+    def curW as float init 0.0;
+    def i as int init 0;
+    while ($i < len($words)) {
+        if ($cur == "") {
+            $cur = $words[$i];
+            $curW = $wordW[$i];
+        } else {
+            def withSpace as float init $curW + $spaceW + $wordW[$i];
+            if ($withSpace <= $maxWidth) {
+                $cur = $cur + " " + $words[$i];
+                $curW = $withSpace;
+            } else {
+                $lines[] = $cur;
+                $cur = $words[$i];
+                $curW = $wordW[$i];
+            }
+        }
+        $i = $i + 1;
+    }
+    $lines[] = $cur;
+    return $lines;
+}
+
+# wrapSegment wraps one paragraph (no newlines) of standard-14 text to maxWidth,
+# always returning at least one line ([""] for an empty paragraph).
+func wrapSegment(font as string, size as int, seg as string, maxWidth as int) {
+    def words as list of string init nonEmptySplit($seg);
+    if (len($words) == 0) {
+        return [""];
+    }
+    def wordW as list of float init [];
+    for (def w in $words) {
+        $wordW[] = measureText($font, $size, $w);
+    }
+    return packSegment($words, $wordW, measureText($font, $size, " "), $maxWidth);
+}
+
+# wrapSegmentUnicode is wrapSegment for an embedded font.
+func wrapSegmentUnicode(lf as LoadedFont, size as int, seg as string, maxWidth as int) {
+    def words as list of string init nonEmptySplit($seg);
+    if (len($words) == 0) {
+        return [""];
+    }
+    def wordW as list of float init [];
+    for (def w in $words) {
+        $wordW[] = measureTextUnicode($lf, $size, $w);
+    }
+    return packSegment($words, $wordW, measureTextUnicode($lf, $size, " "), $maxWidth);
+}
+
+/**
+ * Word-wrap a standard-14 string to a maximum line width (points), returning the
+ * lines. Existing newlines are honoured as hard breaks; runs of spaces collapse.
+ * @param font {string} a standard-14 base font name
+ * @param size {int} the font size in points
+ * @param str {string} the text to wrap
+ * @param maxWidth {int} the maximum line width in points
+ * @return {list of string} the wrapped lines
+ */
+export func wrapText(font as string, size as int, str as string, maxWidth as int) {
+    def out as list of string init [];
+    for (def seg in strings.split($str, "\n")) {
+        for (def ln in wrapSegment($font, $size, $seg, $maxWidth)) {
+            $out[] = $ln;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Word-wrap an embedded-font string to a maximum line width (points).
+ * @param lf {LoadedFont} the embedded font
+ * @param size {int} the font size in points
+ * @param str {string} the text to wrap
+ * @param maxWidth {int} the maximum line width in points
+ * @return {list of string} the wrapped lines
+ */
+export func wrapTextUnicode(lf as LoadedFont, size as int, str as string, maxWidth as int) {
+    def out as list of string init [];
+    for (def seg in strings.split($str, "\n")) {
+        for (def ln in wrapSegmentUnicode($lf, $size, $seg, $maxWidth)) {
+            $out[] = $ln;
+        }
+    }
+    return $out;
+}
+
+func validAlign(align as string) {
+    return $align == "left" or $align == "right" or $align == "center" or $align == "justify";
+}
+
+# alignStart returns the left x of a line of width lineW inside an x..x+width box.
+func alignStart(x as int, width as int, lineW as float, align as string) {
+    if ($align == "right") {
+        return $x + math.round($width - $lineW);
+    }
+    if ($align == "center") {
+        return $x + math.round(($width - $lineW) / 2);
+    }
+    return $x;
+}
+
+# drawJustifiedStd draws one standard-14 line justified across `width` by padding
+# the inter-word gaps evenly (word positions computed, each word placed by `text`).
+func drawJustifiedStd(pg as Page, x as int, baseline as int, width as int, font as string, size as int, line as string) {
+    def words as list of string init nonEmptySplit($line);
+    def n as int init len($words);
+    def natural as float init measureText($font, $size, $line);
+    def gap as float init ($width - $natural) / (0 + $n - 1);
+    def spaceW as float init measureText($font, $size, " ");
+    def cx as float init convert.toFloat($x);
+    def k as int init 0;
+    while ($k < $n) {
+        $pg = text($pg, math.round($cx), $baseline, $font, $size, $words[$k]);
+        $cx = $cx + measureText($font, $size, $words[$k]) + $spaceW + $gap;
+        $k = $k + 1;
+    }
+    return $pg;
+}
+
+# drawJustifiedUni is drawJustifiedStd for an embedded font.
+func drawJustifiedUni(pg as Page, x as int, baseline as int, width as int, lf as LoadedFont, size as int, line as string) {
+    def words as list of string init nonEmptySplit($line);
+    def n as int init len($words);
+    def natural as float init measureTextUnicode($lf, $size, $line);
+    def gap as float init ($width - $natural) / (0 + $n - 1);
+    def spaceW as float init measureTextUnicode($lf, $size, " ");
+    def cx as float init convert.toFloat($x);
+    def k as int init 0;
+    while ($k < $n) {
+        $pg = textUnicode($pg, math.round($cx), $baseline, $lf, $size, $words[$k]);
+        $cx = $cx + measureTextUnicode($lf, $size, $words[$k]) + $spaceW + $gap;
+        $k = $k + 1;
+    }
+    return $pg;
+}
+
+/**
+ * Flow standard-14 text into a column: word-wrap `str` to `width` points and draw
+ * each line, the first line's baseline at (x, y) and each subsequent line
+ * `leading` points lower. `align` is "left" / "right" / "center" / "justify"
+ * (justify pads inter-word gaps on every line but the last of each paragraph).
+ * The drawn block is `len(wrapText(...)) * leading` points tall.
+ * @param pg {Page} the page
+ * @param x {int} the column's left x in points
+ * @param y {int} the first line's baseline y in points
+ * @param width {int} the column width in points
+ * @param font {string} a standard-14 base font name
+ * @param size {int} the font size in points
+ * @param leading {int} the line-to-line spacing in points
+ * @param str {string} the text (newlines are hard breaks)
+ * @param align {string} "left" / "right" / "center" / "justify"
+ * @return {Page} a fresh page with the text block drawn
+ * @throws {Error} kind "pdfwriter" for an unknown align or font
+ */
+export func textBlock(pg as Page, x as int, y as int, width as int, font as string, size as int, leading as int, str as string, align as string) {
+    if (not validAlign($align)) {
+        fail("textBlock: unknown alignment '" + $align + "' (left / right / center / justify)");
+    }
+    def lineIdx as int init 0;
+    for (def seg in strings.split($str, "\n")) {
+        def plines as list of string init wrapSegment($font, $size, $seg, $width);
+        def j as int init 0;
+        while ($j < len($plines)) {
+            def line as string init $plines[$j];
+            def baseline as int init $y - $lineIdx * $leading;
+            if ($align == "justify" and $j < len($plines) - 1 and countWords($line) > 1) {
+                $pg = drawJustifiedStd($pg, $x, $baseline, $width, $font, $size, $line);
+            } elseif ($line != "") {
+                $pg = text($pg, alignStart($x, $width, measureText($font, $size, $line), $align),
+                    $baseline, $font, $size, $line);
+            }
+            $lineIdx = $lineIdx + 1;
+            $j = $j + 1;
+        }
+    }
+    return $pg;
+}
+
+/**
+ * Flow embedded-font (Unicode) text into a column - `textBlock` for a font from
+ * `loadFont` / `addFont`. Same wrapping / alignment / leading behaviour.
+ * @param pg {Page} the page
+ * @param x {int} the column's left x in points
+ * @param y {int} the first line's baseline y in points
+ * @param width {int} the column width in points
+ * @param lf {LoadedFont} the embedded font
+ * @param size {int} the font size in points
+ * @param leading {int} the line-to-line spacing in points
+ * @param str {string} the text (newlines are hard breaks)
+ * @param align {string} "left" / "right" / "center" / "justify"
+ * @return {Page} a fresh page with the text block drawn
+ * @throws {Error} kind "pdfwriter" for an unknown align
+ */
+export func textBlockUnicode(pg as Page, x as int, y as int, width as int, lf as LoadedFont, size as int, leading as int, str as string, align as string) {
+    if (not validAlign($align)) {
+        fail("textBlockUnicode: unknown alignment '" + $align + "' (left / right / center / justify)");
+    }
+    def lineIdx as int init 0;
+    for (def seg in strings.split($str, "\n")) {
+        def plines as list of string init wrapSegmentUnicode($lf, $size, $seg, $width);
+        def j as int init 0;
+        while ($j < len($plines)) {
+            def line as string init $plines[$j];
+            def baseline as int init $y - $lineIdx * $leading;
+            if ($align == "justify" and $j < len($plines) - 1 and countWords($line) > 1) {
+                $pg = drawJustifiedUni($pg, $x, $baseline, $width, $lf, $size, $line);
+            } elseif ($line != "") {
+                $pg = textUnicode($pg, alignStart($x, $width, measureTextUnicode($lf, $size, $line), $align),
+                    $baseline, $lf, $size, $line);
+            }
+            $lineIdx = $lineIdx + 1;
+            $j = $j + 1;
+        }
+    }
+    return $pg;
 }
 
 # --- render (exported) ------------------------------------------------------
@@ -386,9 +1137,103 @@ func fontObjNum(fontNames as list of string, name as string, base as int) {
     return $base;
 }
 
+# --- embedded-font helpers (private) ----------------------------------------
+
+# scaleMetric converts a value in font units to the 1000-unit em PDF text space.
+func scaleMetric(v as int, upem as int) {
+    def q as int init $v * 1000;
+    if ($q >= 0) {
+        return ($q + $upem // 2) // $upem;
+    }
+    return 0 - ((0 - $q + $upem // 2) // $upem);
+}
+
+# aggregateGlyphs collects every glyph an embedded font drew across all pages,
+# returning a map from glyph id to a representative source codepoint.
+func aggregateGlyphs(doc as Document, fontName as string) {
+    def m as map of int to int init {};
+    for (def pg in $doc.pages) {
+        for (def gu in $pg.glyphUses) {
+            if ($gu.font == $fontName and not maps.has($m, $gu.gid)) {
+                $m[$gu.gid] = $gu.cp;
+            }
+        }
+    }
+    return $m;
+}
+
+# sortedGids returns a glyph-map's ids in ascending order.
+func sortedGids(m as map of int to int) {
+    def ks as list of int init [];
+    for (def k in $m) {
+        $ks[] = $k;
+    }
+    return lists.sort($ks);
+}
+
+# buildW renders a CIDFontType2 `W` widths array for the used glyphs (each in
+# 1000-unit em space).
+func buildW(fe as font.Font, gids as list of int, upem as int) {
+    def parts as list of string init [];
+    for (def gid in $gids) {
+        def w as int init scaleMetric(font.advanceGid($fe, $gid), $upem);
+        $parts[] = convert.toString($gid) + " [" + convert.toString($w) + "]";
+    }
+    return strings.join($parts, " ");
+}
+
+# toUnicodeHex renders a codepoint as UTF-16BE hex (a surrogate pair above the BMP).
+func toUnicodeHex(cp as int) {
+    def b as bytes;
+    if ($cp < 0x10000) {
+        $b[] = ($cp >> 8) & 0xff;
+        $b[] = $cp & 0xff;
+    } else {
+        def v as int init $cp - 0x10000;
+        def hi as int init 0xD800 + (($v >> 10) & 0x3FF);
+        def lo as int init 0xDC00 + ($v & 0x3FF);
+        $b[] = ($hi >> 8) & 0xff;
+        $b[] = $hi & 0xff;
+        $b[] = ($lo >> 8) & 0xff;
+        $b[] = $lo & 0xff;
+    }
+    return strings.upper(encoding.toText($b, "hex"));
+}
+
+# buildToUnicode builds the ToUnicode CMap stream body mapping each glyph id to
+# its Unicode value, so a viewer can extract / copy the embedded text.
+func buildToUnicode(gids as list of int, m as map of int to int) {
+    def out as string init "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n" +
+        "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n" +
+        "1 begincodespacerange <0000> <FFFF> endcodespacerange\n";
+    def i as int init 0;
+    def n as int init len($gids);
+    while ($i < $n) {
+        def cnt as int init $n - $i;
+        if ($cnt > 100) {
+            $cnt = 100;
+        }
+        $out = $out + convert.toString($cnt) + " beginbfchar\n";
+        def j as int init 0;
+        while ($j < $cnt) {
+            def gid as int init $gids[$i + $j];
+            $out = $out + "<" + hexGid($gid) + "> <" + toUnicodeHex($m[$gid]) + ">\n";
+            $j = $j + 1;
+        }
+        $out = $out + "endbfchar\n";
+        $i = $i + $cnt;
+    }
+    return $out + "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+}
+
 /**
  * Render the document to PDF bytes (PDF 1.7). Content streams are
- * FlateDecode-compressed; every page's fonts become shared Type1 font objects.
+ * FlateDecode-compressed; standard-14 fonts become shared Type1 objects and each
+ * embedded font a Type0 / CIDFontType2 with an embedded FontFile2 and a ToUnicode
+ * map. Registered images become image XObjects (with a soft-mask XObject when they
+ * carry alpha). Objects are numbered dynamically, so any mix of pages, fonts,
+ * images, and future resources references correctly.
  * @param doc {Document} the document to render
  * @return {bytes} the PDF file contents
  */
@@ -396,26 +1241,64 @@ export func render(doc as Document) {
     def numPages as int init len($doc.pages);
     def fontNames as list of string init collectFonts($doc);
     def numFonts as int init len($fontNames);
-    def fontBase as int init 3 + 2 * $numPages;
-    def baseObjs as int init 2 + 2 * $numPages + $numFonts;
+    def numEmbed as int init len($doc.embedded);
+    def numImages as int init len($doc.images);
     def hasInfo as bool init len($doc.info) > 0;
-    def infoNum as int init $baseObjs + 1;
-    def totalObjs as int init $baseObjs;
-    if ($hasInfo) {
-        $totalObjs = $baseObjs + 1;
+
+    # --- assign object numbers: catalog, pages, per-page (dict + content),
+    # standard-14 fonts, embedded fonts (5 objects each), info ---
+    def next as int init 3;
+    def pageNum as list of int init [];
+    def contentNum as list of int init [];
+    def p as int init 0;
+    while ($p < $numPages) {
+        $pageNum[] = $next; $next = $next + 1;
+        $contentNum[] = $next; $next = $next + 1;
+        $p = $p + 1;
     }
+    def std14Base as int init $next;
+    $next = $next + $numFonts;
+    # per embedded font, in emission order: FontFile2, FontDescriptor,
+    # CIDFontType2, Type0, ToUnicode.
+    def embFile as list of int init [];
+    def embDesc as list of int init [];
+    def embCid as list of int init [];
+    def embType0 as list of int init [];
+    def embToUni as list of int init [];
+    def e as int init 0;
+    while ($e < $numEmbed) {
+        $embFile[] = $next; $next = $next + 1;
+        $embDesc[] = $next; $next = $next + 1;
+        $embCid[] = $next; $next = $next + 1;
+        $embType0[] = $next; $next = $next + 1;
+        $embToUni[] = $next; $next = $next + 1;
+        $e = $e + 1;
+    }
+    # per image: the image XObject, plus a soft-mask XObject when it has alpha.
+    def imgNum as list of int init [];
+    def smaskNum as list of int init [];
+    def im as int init 0;
+    while ($im < $numImages) {
+        $imgNum[] = $next; $next = $next + 1;
+        if ($doc.images[$im].hasSmask) {
+            $smaskNum[] = $next; $next = $next + 1;
+        } else {
+            $smaskNum[] = 0;
+        }
+        $im = $im + 1;
+    }
+    def infoNum as int init 0;
+    if ($hasInfo) {
+        $infoNum = $next; $next = $next + 1;
+    }
+    def totalObjs as int init $next - 1;
 
     def buf as bytes;
     def offsets as list of int init [];
 
     # header + binary marker comment (four high bytes)
     $buf = appendStr($buf, "%PDF-1.7\n");
-    $buf[] = 0x25;
-    $buf[] = 0xE2;
-    $buf[] = 0xE3;
-    $buf[] = 0xCF;
-    $buf[] = 0xD3;
-    $buf[] = 0x0A;
+    $buf[] = 0x25; $buf[] = 0xE2; $buf[] = 0xE3; $buf[] = 0xCF; $buf[] = 0xD3; $buf[] = 0x0A;
 
     # obj 1: catalog
     $offsets[] = len($buf);
@@ -423,12 +1306,12 @@ export func render(doc as Document) {
 
     # obj 2: page tree
     def kids as string init "";
-    def p as int init 0;
+    $p = 0;
     while ($p < $numPages) {
         if ($p > 0) {
             $kids = $kids + " ";
         }
-        $kids = $kids + convert.toString(3 + 2 * $p) + " 0 R";
+        $kids = $kids + convert.toString($pageNum[$p]) + " 0 R";
         $p = $p + 1;
     }
     $offsets[] = len($buf);
@@ -441,32 +1324,49 @@ export func render(doc as Document) {
     $p = 0;
     while ($p < $numPages) {
         def pg as Page init $doc.pages[$p];
-        def contentNum as int init 4 + 2 * $p;
         def fontDict as string init "";
         for (def fn in $pg.fonts) {
             $fontDict = $fontDict + "/" + $fn + " " +
-                convert.toString(fontObjNum($fontNames, $fn, $fontBase)) + " 0 R ";
+                convert.toString(fontObjNum($fontNames, $fn, $std14Base)) + " 0 R ";
+        }
+        # every embedded font is listed on every page (harmless if unused there)
+        def ei as int init 0;
+        while ($ei < $numEmbed) {
+            $fontDict = $fontDict + "/" + $doc.embedded[$ei].name + " " +
+                convert.toString($embType0[$ei]) + " 0 R ";
+            $ei = $ei + 1;
+        }
+        def res as string init "/Font << " + $fontDict + ">>";
+        if ($numImages > 0) {
+            def xobjDict as string init "";
+            def xi as int init 0;
+            while ($xi < $numImages) {
+                $xobjDict = $xobjDict + "/" + $doc.images[$xi].name + " " +
+                    convert.toString($imgNum[$xi]) + " 0 R ";
+                $xi = $xi + 1;
+            }
+            $res = $res + " /XObject << " + $xobjDict + ">>";
         }
         $offsets[] = len($buf);
         $buf = appendStr(
             $buf,
-            convert.toString(3 + 2 * $p) + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
+            convert.toString($pageNum[$p]) + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
                 convert.toString($pg.width) + " " + convert.toString($pg.height) +
-                "] /Resources << /Font << " + $fontDict +
-                ">> >> /Contents " + convert.toString($contentNum) + " 0 R >>\nendobj\n");
+                "] /Resources << " + $res + " >> /Contents " + convert.toString($contentNum[$p]) +
+                " 0 R >>\nendobj\n");
 
         def comp as bytes init compress.pack(convert.bytesFromString($pg.content, "utf-8"), "zlib");
         $offsets[] = len($buf);
         $buf = appendStr(
             $buf,
-            convert.toString($contentNum) + " 0 obj\n<< /Length " + convert.toString(len($comp)) +
+            convert.toString($contentNum[$p]) + " 0 obj\n<< /Length " + convert.toString(len($comp)) +
                 " /Filter /FlateDecode >>\nstream\n");
         $buf = appendBytes($buf, $comp);
         $buf = appendStr($buf, "\nendstream\nendobj\n");
         $p = $p + 1;
     }
 
-    # font objects (shared)
+    # standard-14 font objects (shared)
     def f as int init 0;
     while ($f < $numFonts) {
         $offsets[] = len($buf);
@@ -478,10 +1378,123 @@ export func render(doc as Document) {
         }
         $buf = appendStr(
             $buf,
-            convert.toString($fontBase + $f) +
+            convert.toString($std14Base + $f) +
                 " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /" +
                 $fontNames[$f] + $enc + " >>\nendobj\n");
         $f = $f + 1;
+    }
+
+    # embedded fonts: FontFile2, FontDescriptor, CIDFontType2, Type0, ToUnicode
+    $e = 0;
+    while ($e < $numEmbed) {
+        def lf as LoadedFont init $doc.embedded[$e];
+        def fe as font.Font init $lf.f;
+        def upem as int init font.unitsPerEm($fe);
+        def base as string init pdfName(font.name($fe));
+        def gmap as map of int to int init aggregateGlyphs($doc, $lf.name);
+        def gids as list of int init sortedGids($gmap);
+
+        # FontFile2 (the raw font program, FlateDecode-compressed)
+        def raw as bytes init font.data($fe);
+        def fcomp as bytes init compress.pack($raw, "zlib");
+        $offsets[] = len($buf);
+        $buf = appendStr(
+            $buf,
+            convert.toString($embFile[$e]) + " 0 obj\n<< /Length " + convert.toString(len($fcomp)) +
+                " /Length1 " + convert.toString(len($raw)) + " /Filter /FlateDecode >>\nstream\n");
+        $buf = appendBytes($buf, $fcomp);
+        $buf = appendStr($buf, "\nendstream\nendobj\n");
+
+        # FontDescriptor
+        def bb as list of int init font.bbox($fe);
+        def cap as int init font.capHeight($fe);
+        if ($cap == 0) {
+            $cap = font.ascender($fe);
+        }
+        $offsets[] = len($buf);
+        $buf = appendStr(
+            $buf,
+            convert.toString($embDesc[$e]) + " 0 obj\n<< /Type /FontDescriptor /FontName /" + $base +
+                " /Flags 4 /FontBBox [" + convert.toString(scaleMetric($bb[0], $upem)) + " " +
+                convert.toString(scaleMetric($bb[1], $upem)) + " " +
+                convert.toString(scaleMetric($bb[2], $upem)) + " " +
+                convert.toString(scaleMetric($bb[3], $upem)) +
+                "] /ItalicAngle 0 /Ascent " + convert.toString(scaleMetric(font.ascender($fe), $upem)) +
+                " /Descent " + convert.toString(scaleMetric(font.descender($fe), $upem)) +
+                " /CapHeight " + convert.toString(scaleMetric($cap, $upem)) +
+                " /StemV 80 /FontFile2 " + convert.toString($embFile[$e]) + " 0 R >>\nendobj\n");
+
+        # CIDFontType2 (descendant)
+        $offsets[] = len($buf);
+        $buf = appendStr(
+            $buf,
+            convert.toString($embCid[$e]) +
+                " 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" + $base +
+                " /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>" +
+                " /FontDescriptor " + convert.toString($embDesc[$e]) +
+                " 0 R /CIDToGIDMap /Identity /DW 1000 /W [" + buildW($fe, $gids, $upem) +
+                "] >>\nendobj\n");
+
+        # Type0 (composite)
+        $offsets[] = len($buf);
+        $buf = appendStr(
+            $buf,
+            convert.toString($embType0[$e]) +
+                " 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /" + $base +
+                " /Encoding /Identity-H /DescendantFonts [" + convert.toString($embCid[$e]) +
+                " 0 R] /ToUnicode " + convert.toString($embToUni[$e]) + " 0 R >>\nendobj\n");
+
+        # ToUnicode CMap
+        def cmap as bytes init convert.bytesFromString(buildToUnicode($gids, $gmap), "utf-8");
+        $offsets[] = len($buf);
+        $buf = appendStr(
+            $buf,
+            convert.toString($embToUni[$e]) + " 0 obj\n<< /Length " + convert.toString(len($cmap)) +
+                " >>\nstream\n");
+        $buf = appendBytes($buf, $cmap);
+        $buf = appendStr($buf, "\nendstream\nendobj\n");
+        $e = $e + 1;
+    }
+
+    # image XObjects: each image, plus a soft-mask XObject when it has alpha
+    $im = 0;
+    while ($im < $numImages) {
+        def img as Image init $doc.images[$im];
+        def smaskRef as string init "";
+        if ($img.hasSmask) {
+            $smaskRef = " /SMask " + convert.toString($smaskNum[$im]) + " 0 R";
+        }
+        def dp as string init "";
+        if ($img.predictor == 15) {
+            $dp = " /DecodeParms << /Predictor 15 /Colors " + convert.toString($img.colors) +
+                " /BitsPerComponent " + convert.toString($img.bits) + " /Columns " +
+                convert.toString($img.width) + " >>";
+        }
+        $offsets[] = len($buf);
+        $buf = appendStr(
+            $buf,
+            convert.toString($imgNum[$im]) +
+                " 0 obj\n<< /Type /XObject /Subtype /Image /Width " + convert.toString($img.width) +
+                " /Height " + convert.toString($img.height) + " /ColorSpace " + $img.colorSpace +
+                " /BitsPerComponent " + convert.toString($img.bits) + " /Filter /" + $img.filter +
+                $dp + $img.decode + $smaskRef + " /Length " + convert.toString(len($img.data)) +
+                " >>\nstream\n");
+        $buf = appendBytes($buf, $img.data);
+        $buf = appendStr($buf, "\nendstream\nendobj\n");
+
+        if ($img.hasSmask) {
+            $offsets[] = len($buf);
+            $buf = appendStr(
+                $buf,
+                convert.toString($smaskNum[$im]) +
+                    " 0 obj\n<< /Type /XObject /Subtype /Image /Width " +
+                    convert.toString($img.width) + " /Height " + convert.toString($img.height) +
+                    " /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length " +
+                    convert.toString(len($img.smask)) + " >>\nstream\n");
+            $buf = appendBytes($buf, $img.smask);
+            $buf = appendStr($buf, "\nendstream\nendobj\n");
+        }
+        $im = $im + 1;
     }
 
     # info dictionary (document metadata), when any field is set

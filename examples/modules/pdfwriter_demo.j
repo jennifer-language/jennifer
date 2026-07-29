@@ -5,7 +5,8 @@
 /**
  * The pdfwriter module (modules/pdfwriter.j): build a two-page PDF with text in
  * several standard-14 fonts, a filled and a stroked rectangle, a coloured line,
- * and write it to a file. Open the result in any PDF viewer.
+ * an embedded PNG image, an embedded TrueType font drawing selectable Unicode
+ * text, and write it to a file. Open the result in any PDF viewer.
  * Run: jennifer run examples/modules/pdfwriter_demo.j [out.pdf]
  * @module pdfwriter_demo
  */
@@ -37,7 +38,13 @@ $cover = pdf.rect($cover, 340, 620, 200, 48, false);
 $cover = pdf.color($cover, 200, 40, 40);
 $cover = pdf.line($cover, 72, 600, 540, 600);
 
-# Page 2: monospaced text in a second font.
+# An embedded raster image (PNG): loadImage detects PNG / JPEG, drawImage scales
+# it into the given box. Point loadImage at any .png / .jpg to embed your own.
+def logo as pdf.Image init pdf.loadImage("Logo", fs.readBytes("../../modules/testdata/img_rgba.png"));
+$cover = pdf.drawImage($cover, $logo, 72, 500, 96, 72);
+$cover = pdf.text($cover, 180, 530, "Helvetica", 10, "<- an embedded PNG (with alpha)");
+
+# Page 2: monospaced text in a second font, plus a wrapped/justified paragraph.
 def notes as pdf.Page init pdf.page(595, 842);
 $notes = pdf.text($notes, 50, 800, "Times-Roman", 16, "Page two (A4)");
 $notes = pdf.text(
@@ -48,10 +55,26 @@ $notes = pdf.text(
     10,
     "Coordinates are PDF points; origin is bottom-left.");
 
+# A wrapped, justified text block: textBlock word-wraps to the column width
+# (using standard-14 AFM metrics) and pads the gaps so every line but the last
+# fills the column.
+def para as string init "Jennifer flows wrapped and justified paragraphs into a "
+    + "column. Width measurement uses the Adobe standard-fourteen font metrics, "
+    + "so lines break where they should and justify reaches the right margin.";
+$notes = pdf.textBlock($notes, 50, 730, 495, "Helvetica", 12, 16, $para, "justify");
+
+# An embedded TrueType font: the text is drawn from the font's own glyphs and
+# stays selectable / copyable. The committed test fixture covers A/B/C; point
+# loadFont at any .ttf (DejaVuSans, a CJK font, ...) to render full Unicode.
+def body as pdf.LoadedFont init pdf.loadFont("Embedded", fs.readBytes("../../modules/testdata/font_fixture.ttf"));
+$notes = pdf.textUnicode($notes, 50, 730, $body, 24, "ABC");
+
 def doc as pdf.Document init pdf.document();
 $doc = pdf.info($doc, "Title", "Jennifer PDF demo");
 $doc = pdf.info($doc, "Author", "pdfwriter");
 $doc = pdf.info($doc, "Keywords", "jennifer, pdf, demo");
+$doc = pdf.addFont($doc, $body);
+$doc = pdf.addImage($doc, $logo);
 $doc = pdf.addPage($doc, $cover);
 $doc = pdf.addPage($doc, $notes);
 

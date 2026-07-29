@@ -1009,11 +1009,10 @@ incl. the sliding boundary), and the Go suite over memcache / redis
 
 **In progress.** The deepest per-module gaps, where a module handles the easy
 case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 through M23.6.10 done; the module below
-planned):
-- **`pdfwriter`** - raster image embedding (PNG / JPEG XObjects), embedded /
-  subset TrueType fonts (Unicode / CJK body text), and text layout (word-wrap,
-  width measurement, alignment).
+sub-numbering as pieces land (M23.6.1 through M23.6.13 done). The originally
+scoped `pdfwriter` work (embedded fonts, raster images, text layout) has all
+landed; **glyph subsetting** (smaller embedded-font files) and **CFF `.otf`
+embedding** remain as optional follow-ons, tracked but not blocking the track.
 
 #### M23.6.1 - ipnet subnet math + classification
 
@@ -1272,6 +1271,88 @@ OpenType parser.
   catchable `font` error, not a hang), pinned by a hand-crafted recursive-subr
   fixture. Overlay 11 -> 21, `docblock`-clean; pure `.j`, both binaries.
 
+#### M23.6.11 - pdfwriter embedded TrueType fonts (Unicode)
+
+**Done.** Gave `pdfwriter` real Unicode text via embedded fonts, and refactored
+the object model to make room for it.
+- **Dynamic object allocator.** `render` no longer computes object numbers by
+  fixed arithmetic (catalog=1, pages=2, page=3+2p, ...); it assigns them in a
+  planning pass, so any mix of pages, standard-14 fonts, embedded fonts (5
+  objects each), and future resources cross-references correctly. The standard-14
+  path is byte-identical, so the existing golden / determinism tests still pass.
+- **Embedded TrueType fonts.** `loadFont(name, ttfBytes)` / `addFont(doc, lf)` /
+  `textUnicode(pg, x, y, lf, size, str)` embed a TrueType font as a Type0 /
+  CIDFontType2 composite (Identity-H, `FontFile2` font program) over the `font`
+  module - each character maps through the font's cmap to a glyph id, drawn as a
+  2-byte Identity code, with a scaled `W` widths array and a **ToUnicode** CMap so
+  the text stays selectable / copyable. Any script the font covers (accented
+  Latin, Greek, Cyrillic, CJK) renders; a CFF `.otf` is rejected (TrueType `glyf`
+  only, its FontFile3 path a follow-on). The font module gained the
+  `glyphId` / `advanceGid` / `bbox` / `isCff` / `data` accessors this needs.
+  Validated end to end: the rendered PDF passes **`qpdf --check`**, its glyphs
+  rasterise, and **`pdftotext`** extracts the embedded Unicode text. Overlay 16 ->
+  22, `docblock`-clean; over `font` + `compress`, both binaries. Glyph subsetting,
+  CFF embedding, raster images, and text layout remain the pdfwriter follow-ons.
+
+#### M23.6.12 - pdfwriter raster image embedding (PNG / JPEG)
+
+**Done.** Gave `pdfwriter` raster images as PDF image XObjects, drawn scaled into
+a box. `loadImage(name, imgBytes)` detects the format from the file signature and
+reads geometry / colour space; `addImage(doc, img)` registers it (written once,
+reusable); `drawImage(pg, img, x, y, width, height)` places it (a `q ... cm /name
+Do Q` at the box's lower-left). Object numbers stay dynamically assigned, so
+images cross-reference alongside pages / fonts.
+- **JPEG** - embedded as-is via `DCTDecode` (no re-encode); greyscale / RGB / CMYK
+  (an Adobe CMYK file gets an inverting `/Decode`).
+- **PNG, opaque** (greyscale / RGB / palette) - the raw `zlib` image data is
+  embedded directly with a `FlateDecode` **PNG predictor** (`/Predictor 15`), so
+  the PDF reader undoes the scanline filters and **no pixel decode** happens in
+  `.j` (all bit depths 1 / 2 / 4 / 8 / 16; palette becomes `[/Indexed /DeviceRGB
+  hival <PLTE>]`).
+- **PNG, alpha** (8-bit greyscale+alpha / RGBA) - inflated (`compress.unpack`),
+  de-filtered (None / Sub / Up / Average / Paeth), and split into a colour stream
+  plus an 8-bit greyscale **soft mask** written as a separate `/SMask` image
+  XObject, so transparency renders.
+
+Rejected with a positioned `Error{kind: "pdfwriter"}`: interlaced (Adam7) PNG,
+16-bit alpha, palette `tRNS`. Validated end to end - the rendered PDF passes
+**`qpdf --check`**, and **`pdfimages`** extracts every image (plus the RGBA / LA
+soft masks) **pixel-exact** against the originals (a large noisy RGBA exercising
+Sub / Up / Paeth, and a hand-built PNG exercising the Average filter, both round-
+trip byte-for-byte via PIL as the reference decoder); the JPEG re-decodes
+identically. Overlay 22 -> 30, `docblock`-clean; over `binary` + `compress` +
+`encoding`, both binaries. Text layout, glyph subsetting, and CFF embedding remain
+the pdfwriter follow-ons.
+
+#### M23.6.13 - pdfwriter text layout (measure / wrap / align)
+
+**Done.** Gave `pdfwriter` column text flow on top of accurate width
+measurement, completing the originally scoped pdfwriter work.
+- **Width measurement.** `measureText(font, size, str) -> float` returns a
+  string's rendered width in points for a standard-14 font, using the **Adobe
+  Core 14 AFM** advance-width tables (spliced in via
+  `include "./pdfwriter_afm.j";` - Helvetica / Times faces keyed by WinAnsi code,
+  Courier monospaced at 600, Symbol / ZapfDingbats rejected as metric-less);
+  `measureTextUnicode(lf, size, str)` measures an embedded font from its own glyph
+  advances. Verified exact against known AFM values (Helvetica `AV` = 1334 em
+  units, space = 278, Courier = 600).
+- **Word-wrap.** `wrapText(font, size, str, maxWidth) -> list of string` greedily
+  wraps to a column width, honouring `\n` as hard breaks (so `\n\n` leaves a blank
+  line), collapsing space runs, and overflowing an over-long word onto its own
+  line rather than breaking it. `wrapTextUnicode` is the embedded-font form.
+- **Aligned flow.** `textBlock(pg, x, y, width, font, size, leading, str, align)`
+  (and `textBlockUnicode`) draw the wrapped lines down a column - `align` is
+  `left` / `right` / `center` / `justify`. Justify pads inter-word gaps so each
+  line fills the column exactly, **except** the last line of each paragraph, by
+  placing each word at a computed x. Verified via `pdftotext -bbox`: a justified
+  line's right edge lands at `x + width` (350.3 pt for a 50 + 300 column) while
+  the left-aligned and last lines end at their natural width.
+
+`qpdf --check` clean and `pdftotext` extracts the flowed text. Overlay 30 -> 41,
+`docblock`-clean; over the `font` module + `math` (rounding) + `encoding` (WinAnsi
+transcode). Both binaries. The pdfwriter follow-ons now are glyph subsetting and
+CFF embedding only.
+
 ### M23.7 - observability completeness
 
 **Planned.** The metrics story is half-built:
@@ -1465,6 +1546,261 @@ stateless mode is the direction the protocol has moved to; a Jennifer MCP server
 / client speaks stateless and does not negotiate a session. The reverse-direction
 capabilities that ride the session channel (sampling / roots / elicitation) are
 likewise out of scope.
+
+### M23.14 - raw single-quoted string literals
+
+**Planned.** A **breaking** (pre-1.0) split of the two string delimiters so each
+does one job, per design stance #1 ("one way per thing"). Today `"..."` and
+`'...'` are **redundant** - both parse the same escape sequences - which is
+exactly the duplication the stance rules out. The change gives them distinct
+roles:
+
+- **`"..."` stays the cooked form** - escape sequences (`\n \r \t \\ \" \' \0`)
+  are processed, as now.
+- **`'...'` becomes a raw form** - **no** escape processing. The literal starts
+  at the opening `'` and ends at the **next** `'`; every byte between (including
+  backslashes and **newlines**) is content verbatim. A raw literal therefore
+  spans multiple lines with no ceremony:
+
+  ```
+  def x as string init
+  'line one
+  line two
+    indented, \n stays two chars, \ is literal';
+  ```
+
+  This is a **free heredoc / nowdoc**: a multi-line raw block is just a
+  `'...'` literal, so no `<<<EOF` construct is needed (and none is planned).
+
+- **A `'` inside content** is written by switching to the cooked delimiter:
+  `"it's"` (or `"it\'s"`). There is deliberately **no** `r"..."` prefix syntax
+  (Python-style) - the delimiter *is* the mode, which is simpler and needs no
+  new lexer state. Record the `r"..."` rejection in `rejected.md`.
+
+**Why:** raw strings remove the heavy double-escaping that hurts regex patterns,
+Windows-style paths, and embedded JSON. A pattern like `"\\d+\\.\\d+"` becomes
+`'\d+\.\d+'`; the `regex` docs' examples get markedly cleaner.
+
+**Migration is essentially free.** An audit of every `.j` in `modules/` and
+`examples/` found **zero** `'`-delimited literals that rely on escape processing
+- all current single-quoted literals are escape-free (single-character strings
+like `'"'` / `'*'`, or plain text like `'hello world'`), which read identically
+raw or cooked. So the rewrite pass is a no-op in practice; any future
+`'\n'`-style literal simply moves to `"..."`.
+
+**Mechanically** the change is confined to the lexer's string scanner: the `'`
+branch reads verbatim to the next `'` (permitting embedded newlines) and skips
+escape decoding, while the `"` branch is unchanged. An **unterminated** raw
+literal (EOF before the closing `'`) is a positioned lex error like the cooked
+form.
+
+**Docs / grammar / tooling to update** (all in the same change, per the
+keep-grammar-in-sync discipline):
+- `docs/user-guide/types-and-values.md` - the string-literals section (the two
+  delimiters now differ; document raw + multi-line + the "use `"..."` for an
+  embedded `'`" rule).
+- The **grammar files** - the EBNF / lexer spec under `docs/technical/`
+  (`grammar.md` + `lexer.md`) for the two string productions, and the
+  `docs/user-guide/style-guide.md` note on when to prefer which delimiter.
+- `docs/libraries/regex.md` - rewrite the pattern examples to raw `'...'` form
+  (the headline ergonomic win) and add a one-line "prefer a raw literal for
+  patterns" note.
+- `JENNIFER.md` - the string-literal description (mirror the spec so an AI
+  assistant emits correct `.j`).
+- The **editor highlighters** under `editors/` (Vim, TextMate, highlight.js) +
+  the regenerated `theme/highlight.js` - a single-quoted string is now raw, so
+  escape sequences inside it must **not** be highlighted as escapes (they are
+  literal text); the double-quoted string keeps escape highlighting.
+
+**Close-out:** lexer unit tests for the raw path (multi-line, backslash-literal,
+unterminated error, `'` -> switch-to-`"`), the audited (no-op) `modules/` +
+`examples/` sweep re-run green, `go test ./...`, `make build` both toolchains,
+and the em-dash / gofmt guards. Called out as a pre-1.0 breaking change here per
+the pre-1.0 discipline.
+
+### M23.15 - `orm`: a batteries-included data-mapper ORM
+
+**Planned.** A major workover that lifts `orm` from a thin query-builder + CRUD
+Data Mapper to a **full, batteries-included ORM** - associations, eager loading
+that eliminates N+1, schema migrations, upsert, batch writes, and the finders a
+real data layer needs - while staying **Data Mapper, not Active Record**. This
+is a deliberately large milestone that does not fit the M23 "module coverage"
+theme cleanly; it lands here because `orm` is a keystone module and M23 is the
+pre-1.0 window where the necessary breaking changes are cheapest to make.
+
+**Architecture decisions (set once, apply throughout).**
+- **Rows stay `map of string to string`.** Jennifer has no struct reflection, so
+  a generic mapper cannot populate arbitrary user structs field-by-field; the map
+  is the row, values bind through placeholders, identifiers are allowlist-checked
+  (the existing injection guard). This keeps the Data Mapper stance intact: rows
+  are plain data, every persistence action is an explicit function call, there
+  are **no** per-row `save()` methods or Active-Record classes. Typed-struct
+  mapping is recorded as **rejected** (needs reflection) in `rejected.md`.
+- **Relations attach through a side `Result`, not by nesting into the row.** A
+  homogeneous `map of string to string` cannot hold both scalar columns and
+  child-row lists, so eager-loaded associations live in an **included-associations
+  holder** (an identity-map-style `Result`) read through accessors
+  (`rows` / `related` / `relatedOne`), rather than mutating rows into a
+  heterogeneous shape. Documented in `design-decisions.md`.
+- **Migrations are data, not closures.** Jennifer has no first-class functions,
+  so a migration is a `Migration{version, description, up, down}` value whose
+  `up` / `down` are ordered **lists of DDL statements** (built by DDL helpers).
+  The runner applies each inside a transaction and records it in a
+  `schema_migrations` tracking table.
+- **Dialect-aware throughout** (MySQL / MariaDB + PostgreSQL), reusing the
+  existing `Dialect` enum and placeholder machinery. No SQLite (the `sql` library
+  excludes it).
+- **Transactions - already at the `sql` layer, but orm can't use them yet.**
+  `sql` has full transactions: `sql.begin(conn) -> sql.Tx`, `sql.commit` /
+  `sql.rollback`, `query` / `exec` accept a Connection **or** a Tx as the target
+  (resolved in the Go builtin), and the `errdefer sql.rollback($tx)` idiom.
+  **The gap is on the orm side:** its functions declare `conn as sql.Connection`,
+  and Jennifer's object types are strict (a `sql.Tx` value does not satisfy an
+  `as sql.Connection` param - verified), so orm's CRUD **cannot** currently be
+  called with a `Tx` (the `orm.md` "or a `sql.Tx`" wording is aspirational). A
+  batteries-included ORM must run its writes inside a caller's transaction, so
+  closing this is in scope. Jennifer has **no union types**, so the target-type
+  question needs a decision (see below); it is the one genuine breaking change
+  this milestone makes to how orm is *called*.
+- **`sql`-library assessment (otherwise).** Apart from the transaction-target
+  question above, the existing `sql` surface already expresses everything through
+  parameterized raw SQL: `RETURNING` (a returning `INSERT` is a row-yielding
+  statement for `sql.query`), `ON CONFLICT` / `ON DUPLICATE KEY`, `SAVEPOINT` /
+  `ROLLBACK TO`, and multi-row `VALUES`. So **no further `sql` change is presumed
+  necessary**; the single candidate is a `sql.queryRow` fetch-one convenience,
+  added **only if** implementation shows a real need (stance #1 - do not grow the
+  API speculatively). Any `sql` change that proves necessary lands inside the
+  sub-milestone that needs it, per the request.
+
+**Transaction-target decision (settled): an `orm.Session` wrapper.** orm owns a
+small value-semantic `Session` struct holding either a `sql.Connection` or a
+`sql.Tx` (two fields plus an `inTx` flag; the unused handle stays its zero value,
+never touched). Two constructors build it - `orm.session(conn)` for
+auto-committing single statements and `orm.transaction(tx)` for work inside a
+caller's transaction - and **every orm persistence / query-executing function
+takes a `Session`** as its first argument instead of a bare `sql.Connection`.
+Chosen over unifying the `sql` handle type or adding a `sql.Executor` union
+because it is **self-contained in orm** (no `sql` change), **preserves the
+sql-level Connection/Tx distinction**, and reads as a natural unit-of-work. This
+is the milestone's one breaking change to how orm is *called* (`conn` ->
+`session` across the CRUD / finder surface), and the `Session` type is built
+**first**, in M23.15.1, since every later sub-milestone's executing functions
+take it. Transactions themselves stay `sql.begin` / `commit` / `rollback` (orm
+adds no closure-based `transaction(fn)` wrapper - Jennifer has no first-class
+functions; the idiom is `sql.begin` + `errdefer sql.rollback` + `orm.transaction`
++ `sql.commit`, shown in the demo).
+
+**Breaking changes (pre-1.0, called out here).** The `Schema` and `Column`
+structs grow fields (column attributes: nullable / unique / default /
+auto-increment / references; `Schema` gains a `relations` list), so a
+hand-built `Schema` / `Column` **literal** breaks - the `schema` / `column`
+builders stay the compatible entry point. Every orm persistence / query function
+takes an `orm.Session` first argument instead of a bare `sql.Connection` (the
+transaction fix above), so existing `orm.insert($conn, ...)` call sites become
+`orm.insert(orm.session($conn), ...)`. `createTable`'s emitted DDL changes (NOT
+NULL / DEFAULT / UNIQUE / auto-increment), so its golden assertions update. The
+`orm.md` non-goals "not a migration tool" and "a convenience emitter" are
+**reversed**. Each break is noted in the sub-milestone that makes it.
+
+Sub-milestones (each carries the standard close-out: a 100% `orm_test.j` overlay,
+a `cmd/jennifer/orm_test.go` integration test against the existing DB harness, the
+`docs/modules/orm.md` + `JENNIFER.md` + `modules/README.md` updates, and a
+runnable demo):
+
+#### M23.15.1 - session handle + richer schema + DDL + migrations
+
+**Planned.** The `Session` foundation, column attributes, and a real migration
+runner.
+- **`Session` (built first).** The value-semantic `Session` struct + `orm.session(conn)`
+  / `orm.transaction(tx)` constructors (the settled transaction-target design
+  above); the existing CRUD functions (`insert` / `find` / `update` / `delete` /
+  `all`) switch their first argument from `sql.Connection` to `Session` so they
+  can run inside a caller's transaction. This is the `conn` -> `session` break;
+  every later sub-milestone's executing function takes a `Session`.
+- **Column attributes.** `Column` gains `nullable` / `unique` / `hasDefault` +
+  `default` / `autoIncrement`. Set via fluent setters that decorate the
+  most-recently-added column and return a fresh `Schema`
+  (`notNull` / `unique` / `withDefault(s, v)` / `autoIncrement`), matching the
+  existing `$s = orm.column($s, ...)` chain.
+- **DDL builders** (dialect-aware, each returns a statement string): an enhanced
+  `createTable` (NOT NULL / DEFAULT / UNIQUE / `SERIAL` vs `AUTO_INCREMENT` / PK),
+  plus `dropTable`, `addColumn`, `dropColumn`, `renameColumn`, `createIndex`
+  (unique optional), `dropIndex`, `addForeignKey`, `dropForeignKey`. Identifiers
+  allowlist-checked like the query builder.
+- **Migrations.** `Migration{version, description, up as list of string, down as
+  list of string}`; `migrate(conn, migrations)` ensures a `schema_migrations`
+  table, applies each pending version's `up` statements in a transaction, and
+  records it (idempotent, ordered); `rollbackMigrations(conn, migrations, steps)`
+  runs `down` newest-first; `migrationStatus(conn, migrations)` reports
+  applied / pending. Reverses the "not a migration tool" non-goal.
+
+#### M23.15.2 - associations (relations)
+
+**Planned.** Declarative relations as schema metadata (no query yet).
+- **`RelationKind` enum** `{BelongsTo, HasOne, HasMany, ManyToMany}` + a
+  `Relation` struct (`name`, `kind`, `target` table, `foreignKey`, `localKey`,
+  and for many-to-many `through` join table + its two keys).
+- **Builders on `Schema`** (append to the new `relations` field, identifiers
+  checked): `belongsTo(s, name, target, foreignKey)`,
+  `hasOne(s, name, target, foreignKey)`, `hasMany(s, name, target, foreignKey)`,
+  `manyToMany(s, name, target, joinTable, localFk, targetFk)`.
+- **Relation-aware join sugar** `joinRelation(q, s, relationName)` emits the
+  correct `JOIN` from a defined relation (over the existing `join` primitive).
+  This sub only records the metadata; M23.15.3 consumes it.
+
+#### M23.15.3 - eager loading (N+1 elimination)
+
+**Planned.** The headline performance feature: load a parent set and its
+relations in a **fixed 1 + R queries** (R = relations requested), never per row.
+- **`with(q, relationName)`** marks a relation to eager-load (new `Query` field);
+  **`load(conn, schema, q) -> Result`** runs the base query (1 query), then for
+  each requested relation runs **one** batched
+  `SELECT ... WHERE fk IN ($1..$n)` (or one join-table query for many-to-many),
+  and builds a parent-key -> child-rows lookup.
+- **`Result`** holds the base `rows` plus the per-relation lookups; accessors
+  `rows(result)`, `related(result, row, name) -> list of map ...`
+  (has-many / many-to-many), `relatedOne(result, row, name) -> map ...`
+  (belongs-to / has-one). One level of nesting; relations-of-relations is a
+  documented follow-on.
+- **Guarantee + test.** The 1 + R query count is the contract, pinned by counting
+  statements through the integration harness (a wrapping / counting connection),
+  not just by output shape.
+
+#### M23.15.4 - write path: upsert, batch, bulk, save, returning
+
+**Planned.** The mutations a real data layer needs.
+- **`upsert(conn, s, record, conflictCols)`** - Postgres `INSERT ... ON CONFLICT
+  (...) DO UPDATE SET ...`, MySQL `INSERT ... ON DUPLICATE KEY UPDATE ...`.
+- **`insertMany(conn, s, records)`** - one multi-row `INSERT` (placeholder-count
+  chunked to a safe limit; the chunk boundary `log`ged, no silent cap).
+- **`insertReturning(conn, s, record) -> string`** - the generated key: Postgres
+  `RETURNING pk` via `sql.query`, MySQL via `sql.exec(...).lastId` (dialect
+  dispatch; no `sql` change).
+- **`updateWhere(conn, s, assignments, q)`** / **`deleteWhere(conn, s, q)`** -
+  bulk mutate matching a `Query`'s `WHERE` (reusing its rendering + params).
+- **`save(conn, s, record)`** - insert when the primary key is absent, else
+  update (an explicit Data-Mapper convenience, still no per-row method).
+
+#### M23.15.5 - finders + query ergonomics
+
+**Planned.** The everyday read helpers.
+- **`first(conn, s, q)`** (LIMIT 1 -> one row or empty), **`exists(conn, q) ->
+  bool`**, **`findBy(conn, s, col, value)`**, **`pluck(conn, q, col) -> list of
+  string`**, **`page(q, pageNum, pageSize)`** (limit/offset sugar).
+- **Filter completeness:** `whereNull` / `whereNotNull`, `whereBetween`,
+  `distinct(q)`. A safe `whereRaw(q, fragment, params)` escape hatch that still
+  binds every value through placeholders (the fragment is identifier/operator
+  checked, values never inlined) is considered and only added if it can keep the
+  injection guarantee; otherwise recorded in `rejected.md`.
+
+**Milestone close-out.** Beyond each sub's overlay + integration test: an
+end-to-end demo modelling a small relational domain (e.g. authors / posts /
+tags with a many-to-many) that migrates the schema, seeds via `insertMany` /
+`upsert`, and eager-loads to show the fixed query count; `go test ./...` green
+against the DB harness; `make build` both toolchains (pure `.j` over `sql`, so
+both build, though the net-backed `sql` drivers run only on the default binary);
+gofmt / em-dash / docblock guards; and the `design-decisions.md` (rows-as-maps +
+side-`Result`) and `rejected.md` (typed-struct mapping, Active Record) records.
 
 ---
 
