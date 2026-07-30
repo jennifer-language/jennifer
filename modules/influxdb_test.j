@@ -117,3 +117,86 @@ func testParseQueryEmpty() {
     def r as Result init parseQuery(json.decode("{\"results\":[{\"statement_id\":0}]}"));
     testing.assertEqual(len($r.series), 0);
 }
+
+# --- 2.x / 3.x backend: request building (no network) -----------------------
+
+func testClient2Fields() {
+    def c as Client init client2("http://localhost:8086", "myorg", "mybucket", "mytoken");
+    testing.assertEqual($c.org, "myorg");
+    testing.assertEqual($c.bucket, "mybucket");
+    testing.assertEqual($c.token, "mytoken");
+    testing.assertEqual($c.db, "");
+    match ($c.version) {
+        when V1 { testing.assertTrue(false); }
+        when V2 { testing.assertTrue(true); }
+    }
+}
+
+func testClientDefaultsV1() {
+    def c as Client init client("http://localhost:8086", "metrics");
+    match ($c.version) {
+        when V1 { testing.assertTrue(true); }
+        when V2 { testing.assertTrue(false); }
+    }
+}
+
+# The pinned v2 write request: endpoint /api/v2/write with org + bucket +
+# precision, a `Token` Authorization header, and the line-protocol body.
+func testBuildWriteV2() {
+    def c as Client init client2("http://localhost:8086", "myorg", "mybucket", "mytoken");
+    def p as Point init field(tag(point("cpu"), "host", "server01"), "value", 0.64);
+    def req as Req init buildWrite($c, line($p));
+    testing.assertEqual($req.url,
+        "http://localhost:8086/api/v2/write?org=myorg&bucket=mybucket&precision=ns");
+    testing.assertEqual($req.contentType, "text/plain; charset=utf-8");
+    testing.assertEqual($req.headers["Authorization"], "Token mytoken");
+    testing.assertEqual($req.body, "cpu,host=server01 value=0.64");
+}
+
+# A 1.x write stays byte-identical: /write?db=... and no auth header when
+# unauthenticated.
+func testBuildWriteV1() {
+    def c as Client init client("http://localhost:8086", "metrics");
+    def p as Point init field(point("cpu"), "value", 0.5);
+    def req as Req init buildWrite($c, line($p));
+    testing.assertEqual($req.url, "http://localhost:8086/write?db=metrics&precision=ns");
+    testing.assertEqual($req.contentType, "text/plain; charset=utf-8");
+    testing.assertEqual($req.body, "cpu value=0.5");
+    testing.assertEqual(len($req.headers), 0);
+}
+
+func testBuildWriteV1BasicAuth() {
+    def c as Client init clientWith("http://localhost:8086", "metrics", "user", "pass");
+    def req as Req init buildWrite($c, "cpu value=1.0");
+    # base64("user:pass") == "dXNlcjpwYXNz"
+    testing.assertEqual($req.headers["Authorization"], "Basic dXNlcjpwYXNz");
+}
+
+# The pinned Flux query request: /api/v2/query?org=... under vnd.flux with the
+# Flux script as the body.
+func testBuildFluxV2() {
+    def c as Client init client2("http://localhost:8086", "myorg", "mybucket", "mytoken");
+    def req as Req init buildFlux($c, "from(bucket:\"mybucket\") |> range(start:-1h)");
+    testing.assertEqual($req.url, "http://localhost:8086/api/v2/query?org=myorg");
+    testing.assertEqual($req.contentType, "application/vnd.flux");
+    testing.assertEqual($req.headers["Authorization"], "Token mytoken");
+    testing.assertEqual($req.body, "from(bucket:\"mybucket\") |> range(start:-1h)");
+}
+
+func testBuildQueryV1() {
+    def c as Client init client("http://localhost:8086", "metrics");
+    def req as Req init buildQuery($c, "SELECT * FROM cpu");
+    testing.assertEqual($req.url,
+        "http://localhost:8086/query?db=metrics&q=SELECT%20%2A%20FROM%20cpu");
+    testing.assertEqual($req.contentType, "application/x-www-form-urlencoded");
+    testing.assertEqual($req.body, "");
+}
+
+# The token is scrubbed from any error a 2.x request surfaces; a 1.x client
+# leaves the message untouched (its password never rides in a URL).
+func testRedactToken() {
+    def c as Client init client2("http://h", "o", "b", "sekrettoken");
+    testing.assertEqual(redact($c, "boom sekrettoken here"), "boom <redacted> here");
+    def c1 as Client init client("http://h", "db");
+    testing.assertEqual(redact($c1, "unchanged"), "unchanged");
+}

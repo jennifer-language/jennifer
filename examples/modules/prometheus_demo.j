@@ -24,4 +24,18 @@ def temp as prometheus.Metric init prometheus.gauge(
     "Current CPU temperature");
 $temp = prometheus.observe($temp, {}, 41.5);
 
-io.printf("%s", prometheus.render([$reqs, $temp]));
+# A histogram of request latencies. Each observe accumulates into the count,
+# the sum, and every cumulative bucket whose upper bound (`le`) is >= the value;
+# render emits `_bucket{le="..."}` (ascending, `+Inf` last), `_sum`, `_count`.
+def latency as prometheus.Metric init prometheus.histogram(
+    "http_request_duration_seconds",
+    "Request latency in seconds",
+    [0.1, 0.5, 1.0, 2.5]);
+$latency = prometheus.observe($latency, {"method": "get"}, 0.25);
+$latency = prometheus.observe($latency, {"method": "get"}, 0.5);
+$latency = prometheus.observe($latency, {"method": "get"}, 1.5);
+
+io.printf("%s", prometheus.render([$reqs, $temp, $latency]));
+
+# Where to push it: the Pushgateway path for a job + grouping labels.
+io.printf("\n# push to: %s\n", prometheus.pushgatewayPath("demo", {"instance": "host1"}));

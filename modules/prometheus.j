@@ -21,39 +21,65 @@ use strings;
 use convert;
 use maps;
 use lists;
+use math;
 use json;
 import "./http.j" as http;
 
 # --- exposition types -------------------------------------------------------
 
 /**
- * One sample line of a metric: a label set and a float value.
+ * One recorded series of a metric, keyed by its label set. For a `Counter` or
+ * `Gauge` only `value` is used. For a `Histogram`, `count` / `sum` accumulate
+ * and `buckets` holds the cumulative per-bucket counts (parallel to the owning
+ * `Metric.buckets`). For a `Summary`, `count` / `sum` accumulate and
+ * `observations` holds the raw observed values (quantiles are computed at
+ * render time). An optional millisecond `timestamp` is appended after the value
+ * when `hasTimestamp` is set.
  * @field labels {map of string to string} the label name/value pairs ({} for none)
- * @field value {float} the sample value
+ * @field value {float} the sample value (Counter / Gauge)
+ * @field count {float} the observation count (Histogram / Summary)
+ * @field sum {float} the observation sum (Histogram / Summary)
+ * @field buckets {list of float} cumulative per-bucket counts (Histogram; parallel to Metric.buckets)
+ * @field observations {list of float} the raw observed values (Summary; source for quantiles)
+ * @field timestamp {int} an explicit millisecond timestamp, appended after the value when set
+ * @field hasTimestamp {bool} whether `timestamp` is present and should be rendered
  */
 export def struct Sample {
     labels as map of string to string,
-    value as float
+    value as float,
+    count as float,
+    sum as float,
+    buckets as list of float,
+    observations as list of float,
+    timestamp as int,
+    hasTimestamp as bool
 };
 
 /**
- * A Prometheus metric type: `Counter` (a monotonically increasing total) or
- * `Gauge` (a value that can go up and down).
+ * A Prometheus metric type: `Counter` (a monotonically increasing total),
+ * `Gauge` (a value that can go up and down), `Histogram` (bucketed
+ * observations with `_bucket` / `_sum` / `_count` child series), or `Summary`
+ * (quantile observations with `{quantile="..."}` / `_sum` / `_count` series).
  */
-export def enum MetricType { Counter, Gauge };
+export def enum MetricType { Counter, Gauge, Histogram, Summary };
 
 /**
- * A metric family: a name, help text, a type, and its samples.
+ * A metric family: a name, help text, a type, its samples, and (for a
+ * `Histogram` / `Summary`) its bucket bounds / quantiles.
  * @field name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
  * @field help {string} the HELP text (empty to omit the HELP line)
- * @field type {MetricType} the metric type (`Counter` or `Gauge`)
- * @field samples {list of Sample} the sample lines
+ * @field type {MetricType} the metric type
+ * @field samples {list of Sample} the recorded series
+ * @field buckets {list of float} the histogram upper bounds (`le`), ascending; empty for other types
+ * @field quantiles {list of float} the summary quantiles in `[0, 1]`, ascending; empty for other types
  */
 export def struct Metric {
     name as string,
     help as string,
     type as MetricType,
-    samples as list of Sample
+    samples as list of Sample,
+    buckets as list of float,
+    quantiles as list of float
 };
 
 # typeName renders a metric type to its Prometheus text-exposition token. A
@@ -63,6 +89,8 @@ func typeName(t as MetricType) {
     match ($t) {
         when Counter { return "counter"; }
         when Gauge { return "gauge"; }
+        when Histogram { return "histogram"; }
+        when Summary { return "summary"; }
     }
 }
 
@@ -196,7 +224,9 @@ export func counter(name as string, help as string) {
         };
     }
     def s as list of Sample init [];
-    return Metric{name: $name, help: $help, type: MetricType.Counter, samples: $s};
+    def bk as list of float init [];
+    def qs as list of float init [];
+    return Metric{name: $name, help: $help, type: MetricType.Counter, samples: $s, buckets: $bk, quantiles: $qs};
 }
 
 /**
@@ -217,7 +247,73 @@ export func gauge(name as string, help as string) {
         };
     }
     def s as list of Sample init [];
-    return Metric{name: $name, help: $help, type: MetricType.Gauge, samples: $s};
+    def bk as list of float init [];
+    def qs as list of float init [];
+    return Metric{name: $name, help: $help, type: MetricType.Gauge, samples: $s, buckets: $bk, quantiles: $qs};
+}
+
+/**
+ * Build an empty histogram metric. Buckets are the cumulative upper bounds
+ * (`le`); they are sorted ascending, and an `+Inf` bucket is always rendered in
+ * addition to the given bounds. Throws on an invalid metric name.
+ * @param name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
+ * @param help {string} the HELP text (empty to omit the HELP line)
+ * @param buckets {list of float} the cumulative upper bounds (`le`); sorted ascending internally
+ * @return {Metric} the new histogram metric
+ * @throws {Error} kind "prometheus" when the name is invalid
+ */
+export func histogram(name as string, help as string, buckets as list of float) {
+    if (not isValidName($name)) {
+        throw Error{
+            kind: "prometheus",
+            message: "prometheus: invalid metric name: " + $name,
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    def s as list of Sample init [];
+    def bk as list of float init lists.sort($buckets);
+    def qs as list of float init [];
+    return Metric{name: $name, help: $help, type: MetricType.Histogram, samples: $s, buckets: $bk, quantiles: $qs};
+}
+
+/**
+ * Build an empty summary metric. Quantiles are values in `[0, 1]`; they are
+ * sorted ascending and reported as `{quantile="..."}` child series, computed
+ * from the observed values at render time. Throws on an invalid metric name or
+ * an out-of-range quantile.
+ * @param name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
+ * @param help {string} the HELP text (empty to omit the HELP line)
+ * @param quantiles {list of float} the reported quantiles, each in `[0, 1]`; sorted ascending internally
+ * @return {Metric} the new summary metric
+ * @throws {Error} kind "prometheus" when the name is invalid or a quantile is out of range
+ */
+export func summary(name as string, help as string, quantiles as list of float) {
+    if (not isValidName($name)) {
+        throw Error{
+            kind: "prometheus",
+            message: "prometheus: invalid metric name: " + $name,
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    for (def q in $quantiles) {
+        if ($q < 0.0 or $q > 1.0) {
+            throw Error{
+                kind: "prometheus",
+                message: "prometheus: quantile out of range [0,1]: " + convert.toString($q),
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
+    }
+    def s as list of Sample init [];
+    def bk as list of float init [];
+    def qs as list of float init lists.sort($quantiles);
+    return Metric{name: $name, help: $help, type: MetricType.Summary, samples: $s, buckets: $bk, quantiles: $qs};
 }
 
 # labelsEqual reports whether two label sets have identical keys and values.
@@ -236,17 +332,33 @@ func labelsEqual(a as map of string to string, b as map of string to string) {
     return true;
 }
 
-/**
- * Record a sample for a label set, returning a new Metric (value-semantic). A
- * sample with an equal label set is replaced (last write wins); otherwise the
- * sample is appended. Throws on an invalid label name.
- * @param metric {Metric} the metric to extend
- * @param labels {map of string to string} the sample's label set ({} for none)
- * @param value {float} the sample value
- * @return {Metric} a new Metric with the sample recorded
- * @throws {Error} kind "prometheus" when a label name is invalid
- */
-export func observe(metric as Metric, labels as map of string to string, value as float) {
+# freshSample builds a zeroed Sample for a label set, with `nbuckets` bucket
+# slots pre-sized to 0.0 (for a histogram; 0 for the other types).
+func freshSample(labels as map of string to string, nbuckets as int) {
+    def bk as list of float init [];
+    def i as int init 0;
+    while ($i < $nbuckets) {
+        $bk[] = 0.0;
+        $i = $i + 1;
+    }
+    def obs as list of float init [];
+    return Sample{
+        labels: $labels,
+        value: 0.0,
+        count: 0.0,
+        sum: 0.0,
+        buckets: $bk,
+        observations: $obs,
+        timestamp: 0,
+        hasTimestamp: false
+    };
+}
+
+# record is the shared observe core: it validates label names, finds (or
+# appends) the sample for the label set, and updates it per metric type -
+# Counter / Gauge upsert the value (last write wins); Histogram / Summary
+# accumulate. An optional millisecond timestamp is stamped onto the sample.
+func record(metric as Metric, labels as map of string to string, value as float, hasTs as bool, ts as int) {
     for (def k in $labels) {
         if (not isValidLabelName($k)) {
             throw Error{
@@ -259,20 +371,81 @@ export func observe(metric as Metric, labels as map of string to string, value a
         }
     }
     def out as Metric init $metric;
-    def replaced as bool init false;
+    def idx as int init -1;
     def i as int init 0;
     while ($i < len($out.samples)) {
         if (labelsEqual($out.samples[$i].labels, $labels)) {
-            $out.samples[$i].value = $value;
-            $replaced = true;
+            $idx = $i;
             break; # a label set appears once; stop scanning
         }
         $i = $i + 1;
     }
-    if (not $replaced) {
-        $out.samples = lists.push($out.samples, Sample{labels: $labels, value: $value});
+    if ($idx == -1) {
+        $out.samples = lists.push($out.samples, freshSample($labels, len($out.buckets)));
+        $idx = len($out.samples) - 1;
     }
+    match ($out.type) {
+        when Counter {
+            $out.samples[$idx].value = $value;
+        }
+        when Gauge {
+            $out.samples[$idx].value = $value;
+        }
+        when Histogram {
+            $out.samples[$idx].count = $out.samples[$idx].count + 1.0;
+            $out.samples[$idx].sum = $out.samples[$idx].sum + $value;
+            def j as int init 0;
+            while ($j < len($out.buckets)) {
+                # cumulative: an observation lands in every bucket whose upper
+                # bound (`le`) is >= the value.
+                if ($out.buckets[$j] >= $value) {
+                    $out.samples[$idx].buckets[$j] = $out.samples[$idx].buckets[$j] + 1.0;
+                }
+                $j = $j + 1;
+            }
+        }
+        when Summary {
+            $out.samples[$idx].count = $out.samples[$idx].count + 1.0;
+            $out.samples[$idx].sum = $out.samples[$idx].sum + $value;
+            $out.samples[$idx].observations = lists.push($out.samples[$idx].observations, $value);
+        }
+    }
+    $out.samples[$idx].hasTimestamp = $hasTs;
+    $out.samples[$idx].timestamp = $ts;
     return $out;
+}
+
+/**
+ * Record an observation for a label set, returning a new Metric
+ * (value-semantic). For a `Counter` / `Gauge`, a sample with an equal label set
+ * is replaced (last write wins). For a `Histogram` / `Summary`, the observation
+ * accumulates: the count and sum grow, histogram buckets increment, and summary
+ * observations are retained for quantile computation. Throws on an invalid
+ * label name.
+ * @param metric {Metric} the metric to extend
+ * @param labels {map of string to string} the sample's label set ({} for none)
+ * @param value {float} the observed value
+ * @return {Metric} a new Metric with the observation recorded
+ * @throws {Error} kind "prometheus" when a label name is invalid
+ */
+export func observe(metric as Metric, labels as map of string to string, value as float) {
+    return record($metric, $labels, $value, false, 0);
+}
+
+/**
+ * Record an observation carrying an explicit millisecond timestamp, returning a
+ * new Metric (value-semantic). Same accumulation rules as `observe`; the
+ * timestamp is appended after the value in the rendered exposition
+ * (`metric value timestamp`). Throws on an invalid label name.
+ * @param metric {Metric} the metric to extend
+ * @param labels {map of string to string} the sample's label set ({} for none)
+ * @param value {float} the observed value
+ * @param timestampMs {int} the sample timestamp in milliseconds since the Unix epoch
+ * @return {Metric} a new Metric with the timestamped observation recorded
+ * @throws {Error} kind "prometheus" when a label name is invalid
+ */
+export func observeAt(metric as Metric, labels as map of string to string, value as float, timestampMs as int) {
+    return record($metric, $labels, $value, true, $timestampMs);
 }
 
 # renderLabels renders a label set as `{k="v",...}` (sorted keys) or "" if empty.
@@ -288,8 +461,106 @@ func renderLabels(labels as map of string to string) {
     return "{" + strings.join($parts, ",") + "}";
 }
 
+# mergeLabel returns a copy of a label set with one extra key set (value
+# semantics; the input map is not mutated). Used to fold `le` / `quantile`
+# into a sample's own labels so they sort with the rest.
+func mergeLabel(labels as map of string to string, key as string, val as string) {
+    def out as map of string to string init $labels;
+    $out[$key] = $val;
+    return $out;
+}
+
+# sampleTsSuffix renders " <timestamp>" when the sample carries one, else "".
+func sampleTsSuffix(s as Sample) {
+    if ($s.hasTimestamp) {
+        return " " + convert.toString($s.timestamp);
+    }
+    return "";
+}
+
+# quantileOf returns the q-quantile of an ascending-sorted list using the
+# nearest-rank method (rank = ceil(q * n), clamped to [1, n]). Empty input
+# yields 0.0.
+func quantileOf(sorted as list of float, q as float) {
+    def n as int init len($sorted);
+    if ($n == 0) {
+        return 0.0;
+    }
+    def rank as int init math.ceil($q * convert.toFloat($n));
+    if ($rank < 1) {
+        $rank = 1;
+    }
+    if ($rank > $n) {
+        $rank = $n;
+    }
+    return $sorted[$rank - 1];
+}
+
+# simpleLines renders the sample lines of a Counter / Gauge metric.
+func simpleLines(m as Metric) {
+    def lines as list of string init [];
+    for (def s in $m.samples) {
+        $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value) + sampleTsSuffix($s);
+    }
+    return $lines;
+}
+
+# histogramLines renders the `_bucket` (cumulative, `+Inf` last), `_sum`, and
+# `_count` child series of a Histogram metric.
+func histogramLines(m as Metric) {
+    def lines as list of string init [];
+    for (def s in $m.samples) {
+        def ts as string init sampleTsSuffix($s);
+        def j as int init 0;
+        while ($j < len($m.buckets)) {
+            def le as map of string to string init mergeLabel($s.labels, "le", convert.toString($m.buckets[$j]));
+            $lines[] = $m.name + "_bucket" + renderLabels($le) + " " + convert.toString($s.buckets[$j]) + $ts;
+            $j = $j + 1;
+        }
+        def inf as map of string to string init mergeLabel($s.labels, "le", "+Inf");
+        $lines[] = $m.name + "_bucket" + renderLabels($inf) + " " + convert.toString($s.count) + $ts;
+        $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " " + convert.toString($s.sum) + $ts;
+        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) + $ts;
+    }
+    return $lines;
+}
+
+# summaryLines renders the `{quantile="..."}`, `_sum`, and `_count` child series
+# of a Summary metric. Quantiles are computed from the retained observations.
+func summaryLines(m as Metric) {
+    def lines as list of string init [];
+    for (def s in $m.samples) {
+        def ts as string init sampleTsSuffix($s);
+        def sorted as list of float init lists.sort($s.observations);
+        for (def q in $m.quantiles) {
+            def ql as map of string to string init mergeLabel($s.labels, "quantile", convert.toString($q));
+            $lines[] = $m.name + renderLabels($ql) + " " + convert.toString(quantileOf($sorted, $q)) + $ts;
+        }
+        $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " " + convert.toString($s.sum) + $ts;
+        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) + $ts;
+    }
+    return $lines;
+}
+
+# metricLines renders the sample lines of one metric, dispatched by type. The
+# `match` over the metric type is exhaustiveness-checked, so a new metric type
+# must be given a renderer here before it compiles.
+func metricLines(m as Metric) {
+    def lines as list of string init [];
+    match ($m.type) {
+        when Counter { $lines = simpleLines($m); }
+        when Gauge { $lines = simpleLines($m); }
+        when Histogram { $lines = histogramLines($m); }
+        when Summary { $lines = summaryLines($m); }
+    }
+    return $lines;
+}
+
 /**
- * Render a list of metrics as the Prometheus text exposition format.
+ * Render a list of metrics as the Prometheus text exposition format. A
+ * `Histogram` emits `_bucket{le="..."}` (cumulative, ascending, `+Inf` last),
+ * `_sum`, and `_count` series; a `Summary` emits `{quantile="..."}`, `_sum`,
+ * and `_count` series. A sample carrying a timestamp appends it after the value.
  * @param metrics {list of Metric} the metrics to render
  * @return {string} the exposition text (one trailing newline per line)
  */
@@ -302,14 +573,43 @@ export func render(metrics as list of Metric) {
             $lines[] = "# HELP " + $m.name + " " + escapeHelp($m.help);
         }
         $lines[] = "# TYPE " + $m.name + " " + typeName($m.type);
-        for (def s in $m.samples) {
-            $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value);
+        for (def ln in metricLines($m)) {
+            $lines[] = $ln;
         }
     }
     if (len($lines) == 0) {
         return "";
     }
     return strings.join($lines, "\n") + "\n";
+}
+
+/**
+ * Build the Pushgateway URL path for a job and a set of grouping labels:
+ * `/metrics/job/<job>/<k1>/<v1>/...` with the job name and label values
+ * percent-encoded and the grouping keys sorted for a deterministic path. The
+ * caller POSTs the `render` output to `base + pushgatewayPath(job, grouping)`.
+ * A pure string helper - no network. Throws on an invalid grouping label name.
+ * @param job {string} the Pushgateway job name
+ * @param grouping {map of string to string} additional grouping labels ({} for none)
+ * @return {string} the Pushgateway path segment (leading slash, no trailing slash)
+ * @throws {Error} kind "prometheus" when a grouping label name is invalid
+ */
+export func pushgatewayPath(job as string, grouping as map of string to string) {
+    def out as string init "/metrics/job/" + urlEncode($job);
+    def keys as list of string init lists.sort(maps.keys($grouping));
+    for (def k in $keys) {
+        if (not isValidLabelName($k)) {
+            throw Error{
+                kind: "prometheus",
+                message: "prometheus: invalid label name: " + $k,
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
+        $out = $out + "/" + $k + "/" + urlEncode($grouping[$k]);
+    }
+    return $out;
 }
 
 # --- retrieval (exported; needs the default binary via http) ----------------

@@ -1005,366 +1005,94 @@ sweep), the `kvstore` / `session` / `ratelimit` overlays (deterministic, in-proc
 incl. the sliding boundary), and the Go suite over memcache / redis
 (`TestSessionLifecycle`, `TestRatelimit`, `TestKvstoreRedisBackend`).
 
-### M23.6 - format & coverage completeness
+### M23.6 - format & coverage completeness (compacted)
 
-**In progress.** The deepest per-module gaps, where a module handles the easy
-case but not the real one. The broadest sub-milestone, growing its own
-sub-numbering as pieces land (M23.6.1 through M23.6.13 done). The originally
-scoped `pdfwriter` work (embedded fonts, raster images, text layout) has all
-landed; **glyph subsetting** (smaller embedded-font files) and **CFF `.otf`
-embedding** remain as optional follow-ons, tracked but not blocking the track.
+**Done.** The broadest track: the deepest per-module gaps, where a module handled
+the easy case but not the real one. Thirteen pieces (M23.6.1 - M23.6.13), each
+shipping its enhanced `*_test.j` overlay at 100%, an updated `docs/modules/` (or
+`docs/libraries/`) doc, and adversarial validation against an independent
+reference. Pure `.j`, both binaries unless noted.
 
-#### M23.6.1 - ipnet subnet math + classification
-
-**Done.** Filled out the `ipnet` module and fixed the flagged regression.
-- **Regression fix (v4-mapped CIDR).** `parse("::ffff:0:0/96")` (and every
-  v4-mapped CIDR) had started to fail: `parseAddress` folds a v4-mapped literal
-  to a v4 `Address`, so the /96 was then range-checked against the v4 max of 32
-  and rejected - breaking deny-lists at startup. `parse` now parses through a new
-  private `parseRaw` (no fold), takes the max prefix from the **literal** version
-  (128 for a v6 literal), and folds to v4 only when the block lies wholly inside
-  `::ffff:0:0/96` (prefix >= 96), translating the prefix down by the 96-bit
-  offset (`::ffff:0:0/96` -> `0.0.0.0/0`, `::ffff:192.168.1.0/120` ->
-  `192.168.1.0/24`). A shorter prefix stays a genuine v6 network.
-- **Subnet math.** `hostCount` (int-overflow-checked for large v6 blocks),
-  `firstUsable` / `lastUsable` (IPv4 network/broadcast + RFC 3021 `/31` + `/32`
-  conventions; IPv6 no-broadcast), `hosts` (materialize the usable range, capped
-  at 65536 to bound memory), `split(net, newPrefix)` (equal subnets, capped at
-  65536), `aggregate(nets)` (drop contained blocks + fold sibling pairs into
-  their parent, cascading; v4 / v6 independent), `overlaps` / `subnetOf`
-  (network-in-network), and `next` / `prev` / `compare` for a total address
-  order.
-- **Classification via a `Scope` enum.** A total, disjoint `scope(addr) -> Scope`
-  (`{Global, Private, Loopback, LinkLocal, Multicast, Unspecified, Reserved}`,
-  v4-mapped folded first), with `isGlobal` / `isPrivate` / `isLoopback` /
-  `isLinkLocal` / `isMulticast` / `isUnspecified` as thin wrappers over it - one
-  classification table a caller can `match`, rather than six independent range
-  checks (the sum-type choice, stance #1). Pure `.j`, both binaries; the doc's
-  stale "leading zeros accepted" / "v4-mapped renders as hex" notes were
-  corrected to match the code.
-
-#### M23.6.2 - orm ordinary-query surface + render-time validation
-
-**Done.** The `orm` query builder was SELECT-`*`-only and AND-only, which blocked
-ordinary queries; filled it out and closed a validation gap.
-- **Projection + aggregates.** `select(q, cols)` projects named columns instead of
-  `*`; `count(q, alias)` and `aggregate(q, fn, col, alias)` add
-  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` items (`fn(col) AS alias`).
-- **OR / IN.** `orWhere` OR-joins a condition; `whereIn` / `orWhereIn` /
-  `whereNotIn` render `col IN (...)` binding one placeholder per value (empty list
-  rejected). A per-`Condition` `connector` + `valueCount` drives placeholder
-  numbering, so an `IN (...)` followed by an `AND` numbers correctly.
-- **GROUP BY / HAVING.** `groupBy(q, cols)` + `having` / `orHaving` (an aggregate
-  condition, its value parameterized; HAVING params ordered after WHERE params).
-- **First-class joins.** `join` / `leftJoin` / `rightJoin` store a typed `Join`
-  (kind + columns) instead of a pre-rendered string.
-- **Render-time validation (the security fix).** WHERE / ORDER / JOIN / GROUP BY /
-  projection are now stored **structurally** (new `SelectItem` / `Order` / `Join` /
-  `Having` structs, richer `Condition`), so `toSql` re-runs the identifier /
-  operator / aggregate-function / join-kind / sort-direction allowlists via
-  `validateQuery`, and `createTable` / the CRUD builders via `validateSchema`.
-  Validation now happens at **both** build time (early, friendly) and render time,
-  so a hand-built `orm.Query` / `orm.Schema` struct literal that skipped the
-  builder guards is still re-checked and cannot inject. Pinned by the overlay's
-  `renderInjectedWhere` / `renderInjectedTable` cases. Backward-compatible for the
-  existing `from`/`where`/`orderBy`/`join`/CRUD callers; the `Query` struct shape
-  changed (structural fields), which only affects code that hand-built a `Query`
-  literal (a pre-1.0 break). `docblock`-clean (27 func / 9 struct / 2 enum).
-
-#### M23.6.3 - markdown blockquotes, images, nested lists
-
-**Done.** Filled the deepest `markdown` gaps.
-- **Images** `![alt](url "title")`: a new `SpanKind.Image` (the scanner opens on
-  `!` before `[`, reusing the link `]` / `)` index arrays and the shared
-  `splitDest` URL/title splitter). Renders `<img src alt title>` (a void element)
-  with the `src` run through the same `htmlwriter.safeUrl` scheme allowlist as a
-  link href, so `![x](javascript:...)` neutralizes to `#`; ANSI shows
-  `[image] alt (url)`.
-- **Blockquotes** `> x` (recursive `> >`): a new `BlockKind.Quote`. `collectQuote`
-  gathers the `>`-run, strips the marker, and **parses the inner text as blocks**
-  (`parseLines`), so a quote holds real paragraphs / lists / nested quotes.
-  Renders `<blockquote>`; ANSI prefixes each line with `> `.
-- **Nested lists** by indentation: a recursive `collectList` replaces the old flat
-  list state machine. Flat lists keep their exact `items` shape and byte-for-byte
-  output (the overlay pins this); a more-indented run becomes a sub-`List` attached
-  to the preceding item's new parallel `children` slot, rendered as a child
-  `<ul>` / `<ol>` inside the `<li>` (ANSI indents 2 spaces per level).
-- Mechanics: `Block` gained a recursive `children as list of Block` (a `list`
-  field, so its zero is finite); the `SpanKind` / `BlockKind` enums' parameter-
-  level exhaustiveness forced the new `Image` / `Quote` arms into **both** the HTML
-  and ANSI renderers. Pure `.j`, both binaries; overlay 56 -> 68, `docblock`-clean.
-  Remaining non-goals: thematic breaks, setext headings, reference links, and a
-  balanced-paren URL (the scanner still closes a link / image URL on the first `)`).
-
-#### M23.6.4 - vcard TYPE parameters, full N, common fields
-
-**Done.** Filled out the `vcard` contact model.
-- **Full `N`.** Added the additional (middle) name and honorific prefixes /
-  suffixes; `withFullName` sets all five components, `withName` the common two.
-- **`TYPE` parameters.** Emails / phones / addresses are now `Typed{value, type}`
-  (a pre-1.0 break: `.emails` was `list of string`); `addEmailTyped` /
-  `addPhoneTyped` / `addressTyped` set `work` / `home` / etc., and `parse` now
-  **reads** the `TYPE` parameter (a new shared `paramValue` helper in the
-  content-line codec walks the `;`-separated params, quote-aware).
-- **Common fields.** `NICKNAME`, `BDAY`, `PHOTO` URI, and `CATEGORIES` (a
-  comma-list, each tag escaped, the separator not), with builders. `parse(encode())`
-  round-trips all of them. Overlay 14 -> 17, `docblock`-clean.
-
-#### M23.6.5 - ical recurrence, all-day / TZID, VTODO / VALARM / organizer / attendee
-
-**Done.** Grew `ical` from a `VEVENT`-only UTC surface into a real calendar.
-- **Recurrence.** `RRULE` (a raw string, built with `ical.rule(freq, interval,
-  count)`), `RDATE`, `EXDATE`, and an **`occurrences(ev, max)` expander** -
-  `FREQ` / `INTERVAL` / `COUNT` / `UNTIL` from `DTSTART` + `RDATE`s - `EXDATE`s;
-  `MONTHLY` / `YEARLY` day-clamp is computed **from `DTSTART`** (not the previous
-  clamped instant), so Jan 31 -> Feb 29 -> Mar 31 -> Apr 30. `BY*` parts are
-  round-tripped but not expanded.
-- **All-day + TZID.** `withAllDay` (`VALUE=DATE`) and `withZone` (a named `TZID`);
-  because `time` is fixed-offset, a TZID event stores its wall clock as a floating
-  value paired with the zone name (round-trips exactly). A `VTIMEZONE` is
-  parsed-and-skipped.
-- **VTODO / VALARM / ORGANIZER / ATTENDEE.** A `Todo` component (`addTodo`, with
-  `DUE` / `STATUS`), `VALARM`s parsed into an event's `alarms` (an `Alarm` struct,
-  no longer clobbering the event's fields), and `ORGANIZER` / `ATTENDEE` (an
-  `Attendee` with `CN` / `ROLE`). The parser became a component state machine
-  (`VEVENT` / `VTODO` / `VTIMEZONE` + nested `VALARM`). Overlay 20 -> 31,
-  `docblock`-clean; validated (the monthly-clamp propagation bug was caught and
-  fixed). Both modules share the extended content-line codec; both binaries.
-
-#### M23.6.6 - mime charset-on-decode + RFC 2231 filenames
-
-**Done.** Closed the two `mime` gaps where a real-world message diverged from
-the easy case.
-- **Charset on decode.** A text part's `body` used to be force-read as UTF-8
-  (the old `decodeBody` path); `parse` now decodes it from the Content-Type
-  `charset` off the already-transfer-decoded `data` bytes, through the existing
-  `decodeCharset` seam. A new `safeCharset` wrapper handles UTF-8 / empty
-  directly and routes `iso-8859-*` / `windows-*` through the `encoding` library,
-  falling back to a UTF-8 read for a label `encoding` doesn't know (a multibyte
-  legacy charset like `shift_jis`), so `parse` never crashes on an exotic label.
-  A `text/*` part with no declared charset stays UTF-8 (unchanged), and the
-  invalid-UTF-8-without-charset case keeps throwing exactly as before.
-- **RFC 2231 filenames.** `filename` now reads the extended `filename*=charset'lang'pct`
-  form and continued `filename*0` / `filename*1` ... segments (plain or
-  `*`-suffixed / percent-encoded), assembling and charset-decoding them, on top
-  of the existing RFC 2047 plain-value decode. A new `splitParams` tokeniser
-  (quote-aware) replaced the substring-scan `paramValue` - which also fixed a
-  latent bug where a `name=` lookup matched the `name=` inside `filename=`.
-  `attachment` / `attachmentBytes` now emit `filename*=UTF-8''<pct>` for a
-  non-ASCII name (ASCII names stay the plain quoted form). Validation caught an
-  asymmetric-escaping bug: `encode` escaped `\` -> `\\` in a quoted filename but
-  `unquote` only reversed `\"`, doubling a backslash on round-trip; `unquote` now
-  does a full char-by-char unescape and `splitParams` is backslash-aware (an
-  escaped quote can no longer mis-toggle the quote state). Overlay 35 -> 52,
-  `docblock`-clean; pure `.j` over `strings` / `convert` / `encoding` / `regex` /
-  `binary`, both binaries.
-
-#### M23.6.7 - feed enclosures, author, categories
-
-**Done.** Grew `feed` from a title/link/date reader into a podcast-capable one.
-- **Enclosures.** A new `Enclosure { url, length, type }` struct on `Entry`, set
-  by `entryEnclosure(e, url, length, type)` and tested by `hasEnclosure(e)`.
-  Build emits RSS `<enclosure url length type/>` and Atom `<link rel="enclosure"
-  href length type/>`; parse reads either back. The item's alternate `<link>`
-  (its page URL) is kept distinct from the enclosure link, and a blank /
-  non-numeric `length` degrades to `0` instead of throwing (real feeds carry
-  both). This is the advertised podcast-client use case.
-- **Author + categories.** `Feed` and `Entry` gained `author as string` and
-  `categories as list of string`, with `feedAuthor` / `feedCategory` /
-  `entryAuthor` / `entryCategory` builders. RSS writes `<author>` (channel
-  `<managingEditor>`) + `<category>` and reads `<author>` with a `<dc:creator>`
-  fallback; Atom writes / reads `<author><name>` + `<category term>`. Adding the
-  struct fields is a pre-1.0 break to the `Feed` / `Entry` literal shape.
-  Adversarial validation confirmed feed-level vs item-level metadata never leaks
-  across the nesting boundary and that an over-`int64` enclosure `length` degrades
-  to `0`; it caught one round-trip asymmetry (an empty-string category emitted a
-  hollow `<category>` that parse then dropped), fixed by skipping empty categories
-  on build. Overlay 19 -> 27, `docblock`-clean; pure `.j` over `xml` + `time`,
-  both binaries (`fetch` still needs the default binary).
-
-#### M23.6.8 - s3 presign, byte bodies, metadata, copy, multipart
-
-**Done.** Grew `s3` from get/put/delete/list into a full object-storage client.
-- **Presigned URLs.** `presign(client, method, bucket, key, expiresSeconds)`
-  builds a SigV4 **query-signed** URL (`X-Amz-*` params, `UNSIGNED-PAYLOAD`) that
-  grants time-limited access without the secret key. Pure signing, so it runs on
-  both binaries; cross-checked against an independent Python SigV4 reference.
-- **Byte bodies.** `getBytes` (-> `http.BytesResponse`) and `putBytes` /
-  `putBytesWith` (raw `bytes` written byte-for-byte via `http.requestRawBody`)
-  carry binary objects a UTF-8 string body cannot; a single body is in-memory, so
-  objects past ~5 GB use multipart.
-- **Content-type + metadata + copy.** The signer generalized: `signCore` +
-  `prepareHeaders` sign the base three headers plus any extras (sorted in), so
-  `putWith` / `putBytesWith` sign `Content-Type` + `x-amz-meta-*` and `copy`
-  signs `x-amz-copy-source` (server-side copy, no download). `head` reads object
-  metadata. The existing `authorization` was refactored onto `signCore` with
-  byte-identical output (the pinned vector still passes).
-- **Multipart upload.** `createMultipartUpload` -> `uploadPart` (returns an
-  ETag) -> `completeMultipartUpload` / `abortMultipartUpload`, with a canonical
-  query builder (`canonicalizeQuery`, parameters sorted by key as SigV4
-  requires).
-- **Latent bug fixed.** `listObjectsFrom` hand-ordered its canonical query as
-  `list-type=2&continuation-token=...`, but SigV4 sorts by key
-  (`continuation-token` < `list-type`), so a real S3 / MinIO would 403 page 2;
-  it now routes through `canonicalizeQuery`. The Go integration test
-  (`TestS3Requests`) was generalized to re-derive the signature from the actual
-  signed-header set and now drives every new op (byte round-trip, metadata,
-  head, copy, full multipart flow) over the wire.
-
-#### M23.6.9 - barcode symbologies, DataMatrix, QR v11-40
-
-**Done.** Filled out `barcode` across six fronts, each validated against an
-independent reference.
-- **1D symbologies.** `upca` (UPC-A = EAN-13 with a leading 0), `upce` (UPC-E
-  zero-compressed, with the expansion + parity tables), `code93` (two check
-  characters), and `gs1-128` (Code 128 with a leading FNC1 and parenthesised
-  Application Identifiers, FNC1 separators after variable-length fields). Each
-  bar pattern is pinned against an independent Python reference.
-- **Human-readable text.** A 1D SVG carries a centred monospace text line of the
-  data under the bars (`Options.humanReadable`, on by default).
-- **DataMatrix ECC200.** Square symbols 10x10 to 26x26, ASCII encodation
-  (digit-pair packing), Reed-Solomon over GF(0x12d) (the ECC helper gained a
-  primitive-polynomial + generator-base parameter, so QR and DataMatrix share
-  it), and the ISO 16022 (Annex F) module placement with all four corner cases.
-  Validated **byte-for-byte against `zint`** across every symbol size. This
-  reconciles the `label` module (which advertised `datamatrix` / `gs1-128` the
-  image side lacked).
-- **QR versions 11-40 + modes.** The EC block table and alignment-pattern
-  positions extended to all 40 versions (sourced from `segno` and cross-checked
-  to match the existing tested v1-10 exactly), plus numeric / alphanumeric /
-  byte mode chosen for compactness. Validated by **optically decoding rendered
-  PNGs with `zbarimg`** across versions and modes, plus the QR spec's numeric
-  worked example. Very large versions (v30+) are slow to render (mask-penalty
-  scoring in the tree-walker), not incorrect. Adversarial validation confirmed
-  every one of the 160 block-table entries + 40 alignment rows matches `segno`,
-  all 20 UPC-E branch/number-system combinations match a Python reference, and
-  DataMatrix is byte-exact with `zint --square` across all padding cases; it also
-  caught a non-ASCII QR gap (byte mode stored the right UTF-8 bytes but emitted no
-  ECI header, so a strict reader mis-guessed the charset), fixed by emitting
-  ECI(26) for a byte-mode payload with non-ASCII bytes (verified round-tripping
-  `café ünïçode` through `zbarimg`). Overlay 11 -> 29, `docblock`-clean; pure
-  `.j`, both binaries.
-
-#### M23.6.10 - font CFF outlines, kerning, OS/2 metrics
-
-**Done.** Grew the `font` parser from TrueType-only into a full TrueType /
-OpenType parser.
-- **CFF / OTTO outlines.** A second outline backend (`modules/font_cff.j`,
-  `include`d): parses the `CFF ` table's INDEX / DICT structures, global / local
-  subroutines, and CID-keyed FDArray / FDSelect, and interprets Type2 charstrings
-  (all curve operators + the flex family) into outlines. `glyphPath` emits native
-  cubic `C` segments; the `Glyph` struct approximates each cubic as two
-  quadratics to keep one point model. Cross-checked against `fontTools` at **IoU
-  1.0** on SourceCodePro, PowerlineSymbols, and a CID-keyed CJK font (日 あ 語 人).
-- **Kerning + OS/2 metrics.** `kern(left, right)` reads the legacy `kern` table
-  (version 0, format 0, binary-searched); `ascender` / `descender` / `lineGap` /
-  `capHeight` / `xHeight` come from OS/2 (`sTypo*` + v2 cap/x-height), matching
-  fontTools exactly.
-- **Performance.** A profiling question surfaced an O(numGlyphs)-per-query cost:
-  glyph decoding re-parsed the entire CharStrings / subr INDEX (65k entries for
-  CJK) and the cmap scanned linearly. Fixed with O(1) single-INDEX-entry access,
-  on-demand subroutine fetch, and a binary-searched format-12 cmap - a CJK glyph
-  went from **34 s to 178 ms** (191x), a metric lookup from 2.5 s to 18 ms, with
-  outlines still IoU 1.0. An audit then broadened the cross-check to ~170 glyphs
-  (all-ASCII + a CJK sample, still IoU 1.0) and hardened the CFF interpreter
-  against a hostile font: runaway subroutine recursion is now bounded (a
-  catchable `font` error, not a hang), pinned by a hand-crafted recursive-subr
-  fixture. Overlay 11 -> 21, `docblock`-clean; pure `.j`, both binaries.
-
-#### M23.6.11 - pdfwriter embedded TrueType fonts (Unicode)
-
-**Done.** Gave `pdfwriter` real Unicode text via embedded fonts, and refactored
-the object model to make room for it.
-- **Dynamic object allocator.** `render` no longer computes object numbers by
-  fixed arithmetic (catalog=1, pages=2, page=3+2p, ...); it assigns them in a
-  planning pass, so any mix of pages, standard-14 fonts, embedded fonts (5
-  objects each), and future resources cross-references correctly. The standard-14
-  path is byte-identical, so the existing golden / determinism tests still pass.
-- **Embedded TrueType fonts.** `loadFont(name, ttfBytes)` / `addFont(doc, lf)` /
-  `textUnicode(pg, x, y, lf, size, str)` embed a TrueType font as a Type0 /
-  CIDFontType2 composite (Identity-H, `FontFile2` font program) over the `font`
-  module - each character maps through the font's cmap to a glyph id, drawn as a
-  2-byte Identity code, with a scaled `W` widths array and a **ToUnicode** CMap so
-  the text stays selectable / copyable. Any script the font covers (accented
-  Latin, Greek, Cyrillic, CJK) renders; a CFF `.otf` is rejected (TrueType `glyf`
-  only, its FontFile3 path a follow-on). The font module gained the
-  `glyphId` / `advanceGid` / `bbox` / `isCff` / `data` accessors this needs.
-  Validated end to end: the rendered PDF passes **`qpdf --check`**, its glyphs
-  rasterise, and **`pdftotext`** extracts the embedded Unicode text. Overlay 16 ->
-  22, `docblock`-clean; over `font` + `compress`, both binaries. Glyph subsetting,
-  CFF embedding, raster images, and text layout remain the pdfwriter follow-ons.
-
-#### M23.6.12 - pdfwriter raster image embedding (PNG / JPEG)
-
-**Done.** Gave `pdfwriter` raster images as PDF image XObjects, drawn scaled into
-a box. `loadImage(name, imgBytes)` detects the format from the file signature and
-reads geometry / colour space; `addImage(doc, img)` registers it (written once,
-reusable); `drawImage(pg, img, x, y, width, height)` places it (a `q ... cm /name
-Do Q` at the box's lower-left). Object numbers stay dynamically assigned, so
-images cross-reference alongside pages / fonts.
-- **JPEG** - embedded as-is via `DCTDecode` (no re-encode); greyscale / RGB / CMYK
-  (an Adobe CMYK file gets an inverting `/Decode`).
-- **PNG, opaque** (greyscale / RGB / palette) - the raw `zlib` image data is
-  embedded directly with a `FlateDecode` **PNG predictor** (`/Predictor 15`), so
-  the PDF reader undoes the scanline filters and **no pixel decode** happens in
-  `.j` (all bit depths 1 / 2 / 4 / 8 / 16; palette becomes `[/Indexed /DeviceRGB
-  hival <PLTE>]`).
-- **PNG, alpha** (8-bit greyscale+alpha / RGBA) - inflated (`compress.unpack`),
-  de-filtered (None / Sub / Up / Average / Paeth), and split into a colour stream
-  plus an 8-bit greyscale **soft mask** written as a separate `/SMask` image
-  XObject, so transparency renders.
-
-Rejected with a positioned `Error{kind: "pdfwriter"}`: interlaced (Adam7) PNG,
-16-bit alpha, palette `tRNS`. Validated end to end - the rendered PDF passes
-**`qpdf --check`**, and **`pdfimages`** extracts every image (plus the RGBA / LA
-soft masks) **pixel-exact** against the originals (a large noisy RGBA exercising
-Sub / Up / Paeth, and a hand-built PNG exercising the Average filter, both round-
-trip byte-for-byte via PIL as the reference decoder); the JPEG re-decodes
-identically. Overlay 22 -> 30, `docblock`-clean; over `binary` + `compress` +
-`encoding`, both binaries. Text layout, glyph subsetting, and CFF embedding remain
-the pdfwriter follow-ons.
-
-#### M23.6.13 - pdfwriter text layout (measure / wrap / align)
-
-**Done.** Gave `pdfwriter` column text flow on top of accurate width
-measurement, completing the originally scoped pdfwriter work.
-- **Width measurement.** `measureText(font, size, str) -> float` returns a
-  string's rendered width in points for a standard-14 font, using the **Adobe
-  Core 14 AFM** advance-width tables (spliced in via
-  `include "./pdfwriter_afm.j";` - Helvetica / Times faces keyed by WinAnsi code,
-  Courier monospaced at 600, Symbol / ZapfDingbats rejected as metric-less);
-  `measureTextUnicode(lf, size, str)` measures an embedded font from its own glyph
-  advances. Verified exact against known AFM values (Helvetica `AV` = 1334 em
-  units, space = 278, Courier = 600).
-- **Word-wrap.** `wrapText(font, size, str, maxWidth) -> list of string` greedily
-  wraps to a column width, honouring `\n` as hard breaks (so `\n\n` leaves a blank
-  line), collapsing space runs, and overflowing an over-long word onto its own
-  line rather than breaking it. `wrapTextUnicode` is the embedded-font form.
-- **Aligned flow.** `textBlock(pg, x, y, width, font, size, leading, str, align)`
-  (and `textBlockUnicode`) draw the wrapped lines down a column - `align` is
-  `left` / `right` / `center` / `justify`. Justify pads inter-word gaps so each
-  line fills the column exactly, **except** the last line of each paragraph, by
-  placing each word at a computed x. Verified via `pdftotext -bbox`: a justified
-  line's right edge lands at `x + width` (350.3 pt for a 50 + 300 column) while
-  the left-aligned and last lines end at their natural width.
-
-`qpdf --check` clean and `pdftotext` extracts the flowed text. Overlay 30 -> 41,
-`docblock`-clean; over the `font` module + `math` (rounding) + `encoding` (WinAnsi
-transcode). Both binaries. The pdfwriter follow-ons now are glyph subsetting and
-CFF embedding only.
+- **`ipnet`** (M23.6.1) - subnet math (`hostCount` / `firstUsable` / `hosts` /
+  `split` / `aggregate` / `overlaps` / `subnetOf` / `next` / `prev` / `compare`)
+  and a total, disjoint `scope(addr) -> Scope` enum classifier; fixed a
+  v4-mapped-CIDR regression (`::ffff:0:0/96` was range-checked against the v4 max).
+- **`orm`** (M23.6.2) - ordinary-query surface: `select` / `count` / `aggregate`,
+  `orWhere` / `whereIn` / `whereNotIn`, `groupBy` / `having`, typed `join` /
+  `leftJoin` / `rightJoin`; queries stored structurally so `toSql` re-runs the
+  identifier / operator allowlists at render time (a hand-built literal cannot
+  inject). `Query` shape changed (pre-1.0 break).
+- **`markdown`** (M23.6.3) - images `![alt](url)` (URL scheme-allowlisted),
+  recursive blockquotes (inner text parsed as blocks), and indentation-nested
+  lists (`Block` gained a recursive `children`). Overlay 56 -> 68.
+- **`vcard`** (M23.6.4) - full `N` (middle / prefixes / suffixes), `TYPE`
+  parameters (`Typed{value, type}`, a pre-1.0 break), and `NICKNAME` / `BDAY` /
+  `PHOTO` / `CATEGORIES`.
+- **`ical`** (M23.6.5) - recurrence (`RRULE` / `RDATE` / `EXDATE` + an
+  `occurrences` expander with DTSTART-anchored monthly/yearly day-clamp), all-day
+  + `TZID` (floating wall-clock + zone name), and `VTODO` / `VALARM` /
+  `ORGANIZER` / `ATTENDEE` via a component state machine. Overlay 20 -> 31.
+- **`mime`** (M23.6.6) - charset-on-decode (a text part decoded from its
+  Content-Type `charset` through `encoding`, exotic labels degrading to UTF-8) and
+  RFC 2231 extended / continued filenames; a quote-aware `splitParams` fixed a
+  latent `name=` / `filename=` collision and a backslash round-trip asymmetry.
+  Overlay 35 -> 52.
+- **`feed`** (M23.6.7) - podcast enclosures (`Enclosure{url, length, type}`, RSS +
+  Atom), plus `author` / `categories` (struct-shape pre-1.0 break). Overlay
+  19 -> 27.
+- **`s3`** (M23.6.8) - presigned query-signed URLs, byte bodies (`getBytes` /
+  `putBytes`), content-type / `x-amz-meta-*` / server-side `copy` (generalized
+  `signCore`), and multipart upload; fixed a `listObjectsFrom` canonical-query
+  ordering bug that 403'd page 2 on real S3.
+- **`barcode`** (M23.6.9) - `upca` / `upce` / `code93` / `gs1-128`, human-readable
+  text, DataMatrix ECC200 (byte-exact vs `zint`), and QR versions 11-40 + mode
+  selection + ECI (optically decoded via `zbarimg`). Overlay 11 -> 29.
+- **`font`** (M23.6.10) - a CFF / OTTO outline backend (`font_cff.j`: Type2
+  charstrings, CID FDArray / FDSelect; IoU 1.0 vs `fontTools`), `kern` + OS/2
+  metrics, an O(1)-per-query perf fix (a CJK glyph 34 s -> 178 ms), and a hostile-
+  font recursion guard. Overlay 11 -> 21.
+- **`pdfwriter`** (M23.6.11 through .13) - embedded TrueType fonts (Type0 /
+  CIDFontType2, Identity-H, ToUnicode, via a dynamic object allocator), raster
+  image XObjects (JPEG DCTDecode, PNG opaque via a FlateDecode predictor, RGBA via
+  an `/SMask`; `pdfimages`-pixel-exact), and text layout (`measureText` over Adobe
+  Core-14 AFM tables, `wrapText`, `textBlock` left / right / center / justify).
+  `qpdf --check` clean, `pdftotext`-extractable. Overlay 16 -> 41. Glyph subsetting
+  and CFF `.otf` embedding remain optional follow-ons, tracked but not blocking.
 
 ### M23.7 - observability completeness
 
-**Planned.** The metrics story is half-built:
-- **`prometheus`** - histogram + summary types (`_bucket` / `_sum` / `_count`,
-  quantiles), the most-used metric type, without which latency / SLO
-  instrumentation is impossible; optional per-sample timestamp + a Pushgateway
-  grouping-key helper.
-- **`statsd`** - sample rate (`|@0.1`), DogStatsD tags (`|#k:v`), float values,
-  and packet batching (newline-pack several metrics per datagram); and validate
-  the metric `prefix` on the same wire line the metric name is already checked on.
-- **`influxdb`** - 2.x / 3.x support (token auth, org / bucket params,
-  `/api/v2/write`, Flux) alongside the current 1.x.
+**Done.** The metrics story was half-built; filled the three biggest gaps, each
+shipping its enhanced `*_test.j` overlay at 100%, an updated `docs/modules/` doc +
+demo, and the catalog rows. Pure `.j`; the format / request-building side stays
+network-free and TinyGo-clean (only the live send / query needs the default
+binary).
+- **`prometheus`** - histogram + summary metric types, the type latency / SLO
+  instrumentation needs. `MetricType` grew to `{Counter, Gauge, Histogram,
+  Summary}`; `histogram(name, help, buckets)` / `summary(name, help, quantiles)`
+  construct them, `observe` accumulates count / sum + cumulative buckets (a
+  summary retains observations for nearest-rank quantiles), and `render` emits the
+  exact text format - `x_bucket{le="..."}` (ascending, `+Inf` last) / `x_sum` /
+  `x_count` for a histogram, `x{quantile="..."}` for a summary. Plus
+  `observeAt(...)` for an optional per-sample millisecond timestamp and
+  `pushgatewayPath(job, grouping)` (percent-encoded `/metrics/job/.../k/v` path).
+  Overlay 11 -> 21; the histogram / summary render pinned exactly.
+- **`statsd`** - the line builder was refactored into a pure, network-free
+  `buildLine(prefix, name, value, kind, rate, tags)` and extended: `countRate` /
+  `timingRate` (`|@rate`, omitted when >= 1), `*Tagged` verbs (DogStatsD `|#k:v`
+  tags, insertion order), `countFloat` / `gaugeFloat` (compact float values), and
+  a value-semantic `Batch` (`batch` / `add*` / `flush`) packing several metrics
+  into one datagram. The `prefix` is now control-character-validated on the same
+  wire line the name and tags are, so nothing can inject a newline / extra metric.
+  Overlay 6 -> 15; every wire line + the injection rejection pinned.
+- **`influxdb`** - 2.x / 3.x alongside 1.x via a `Version` enum `{V1, V2}` on the
+  `Client` (the line protocol is shared, so `line` / `write` are reused).
+  `client2(url, org, bucket, token)` writes `POST /api/v2/write?org=&bucket=` with
+  `Authorization: Token` auth (redacted from any raised error), and
+  `queryFlux(client, flux)` runs Flux over `/api/v2/query` (annotated-CSV body).
+  Request construction factored into pure `buildWrite` / `buildQuery` / `buildFlux`
+  builders so the endpoint / headers / body are unit-tested without a server; the
+  1.x path stays byte-identical (its Go integration test still passes). Overlay
+  13 -> 21.
 
 ### M23.8 - ergonomic papercuts + notifier richness (compacted)
 

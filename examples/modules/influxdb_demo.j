@@ -3,12 +3,13 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * The influxdb module (modules/influxdb.j): an InfluxDB 1.x client over `http`.
- * Build line-protocol points and write them, then run an InfluxQL query and
- * print the parsed rows. Needs the default `jennifer` binary (net). Point it at
- * a running InfluxDB (base URL + database as the first two arguments, default
- * http://localhost:8086 / metrics); without a server the write / query throw
- * `Error{kind: "influxdb"}`, which this demo catches and reports.
+ * The influxdb module (modules/influxdb.j): an InfluxDB client over `http` for
+ * both API generations. Build line-protocol points and write them, then query
+ * them back - InfluxQL against a 1.x client, Flux against a 2.x client. Needs
+ * the default `jennifer` binary (net). Point it at a running InfluxDB (base URL
+ * + database as the first two arguments, default http://localhost:8086 /
+ * metrics); without a server the write / query throw `Error{kind: "influxdb"}`,
+ * which this demo catches and reports.
  * Run: jennifer run examples/modules/influxdb_demo.j [url] [db]
  * @module influxdb_demo
  */
@@ -56,4 +57,21 @@ try {
     }
 } catch (e) {
     io.printf("influxdb unavailable: %s\n", $e.message);
+}
+
+# --- InfluxDB 2.x / 3.x: same points, org + bucket + token, Flux query. ------
+def client2 as influxdb.Client init influxdb.client2($url, "myorg", "mybucket", "mytoken");
+
+io.printf("\n2.x client -> %s (org myorg, bucket mybucket)\n", $url);
+io.printf("writing to %s ...\n", $url);
+try {
+    influxdb.write($client2, [$cpu, $status]);
+    io.printf("wrote 2 points\n");
+
+    def csv as string init influxdb.queryFlux($client2,
+        "from(bucket:\"mybucket\") |> range(start:-1h)");
+    io.printf("flux returned %d bytes of annotated CSV\n", len($csv));
+} catch (e) {
+    # The 2.x token never appears in this message (it is redacted from errors).
+    io.printf("influxdb 2.x unavailable: %s\n", $e.message);
 }

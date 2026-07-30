@@ -35,17 +35,69 @@ reassignment.
 
 | Call / type                          | Notes                                                                 |
 | ------------------------------------ | --------------------------------------------------------------------- |
-| `prometheus.Metric`                  | `name`, `help`, `type` (`MetricType.Counter` / `MetricType.Gauge`), `samples`. |
-| `prometheus.Sample`                  | `labels` (map), `value` (float) - one rendered line.                 |
+| `prometheus.Metric`                  | `name`, `help`, `type` (`Counter` / `Gauge` / `Histogram` / `Summary`), `samples`, `buckets`, `quantiles`. |
+| `prometheus.Sample`                  | `labels` (map), `value` (float), plus `count` / `sum` / `buckets` / `observations` / `timestamp` / `hasTimestamp` for the aggregate types. |
 | `prometheus.counter(name, help)`     | A new counter metric; throws on an invalid name.                      |
 | `prometheus.gauge(name, help)`       | A new gauge metric; throws on an invalid name.                        |
-| `prometheus.observe(metric, labels, value)` | Record a sample (upsert by label set); throws on an invalid label name. |
+| `prometheus.histogram(name, help, buckets)` | A new histogram; `buckets` is a `list of float` of upper bounds (`le`), sorted ascending. |
+| `prometheus.summary(name, help, quantiles)` | A new summary; `quantiles` is a `list of float` in `[0, 1]`, sorted ascending. |
+| `prometheus.observe(metric, labels, value)` | Record an observation; throws on an invalid label name.          |
+| `prometheus.observeAt(metric, labels, value, timestampMs)` | As `observe`, plus an explicit millisecond timestamp. |
 | `prometheus.render(metrics)`         | Render a `list of Metric` as the text exposition format.              |
+| `prometheus.pushgatewayPath(job, grouping)` | Build the `/metrics/job/<job>/<k>/<v>/...` Pushgateway path (pure string). |
 
-`observe` **upserts**: a sample with an equal label set is replaced (last write
-wins), so re-observing the same series updates its value rather than duplicating
-the line. `render` sorts label keys, so output is deterministic regardless of
-the order labels were inserted.
+For a `Counter` / `Gauge`, `observe` **upserts**: a sample with an equal label
+set is replaced (last write wins), so re-observing the same series updates its
+value rather than duplicating the line. For a `Histogram` / `Summary`, `observe`
+**accumulates** (see below). `render` sorts label keys, so output is
+deterministic regardless of the order labels were inserted.
+
+### Histograms and summaries
+
+A **histogram** buckets observations by an upper bound (`le`). Each `observe`
+increments the count, adds to the sum, and increments every cumulative bucket
+whose bound is `>=` the value; `render` emits, for a metric named `x`:
+`x_bucket{le="..."}` (cumulative counts, ascending, `le="+Inf"` last), `x_sum`,
+and `x_count`, under a `# TYPE x histogram` header.
+
+```jennifer
+def h as prometheus.Metric init prometheus.histogram(
+    "http_request_duration_seconds", "Request latency", [0.1, 0.5, 1.0]);
+$h = prometheus.observe($h, {"method": "get"}, 0.3);
+$h = prometheus.observe($h, {"method": "get"}, 0.05);
+$h = prometheus.observe($h, {"method": "get"}, 2.0);
+io.printf("%s", prometheus.render([$h]));
+# # TYPE http_request_duration_seconds histogram
+# http_request_duration_seconds_bucket{le="0.1",method="get"} 1.0
+# http_request_duration_seconds_bucket{le="0.5",method="get"} 2.0
+# http_request_duration_seconds_bucket{le="1.0",method="get"} 2.0
+# http_request_duration_seconds_bucket{le="+Inf",method="get"} 3.0
+# http_request_duration_seconds_sum{method="get"} 2.35
+# http_request_duration_seconds_count{method="get"} 3.0
+```
+
+A **summary** reports quantiles. Each `observe` increments the count, adds to
+the sum, and retains the observed value; `render` emits `x{quantile="..."}`
+(computed from the retained observations by the nearest-rank method,
+`rank = ceil(q * n)`), `x_sum`, and `x_count`, under `# TYPE x summary`. Each
+label set accumulates its own count / sum / buckets / observations
+independently.
+
+### Timestamps
+
+`observeAt(metric, labels, value, timestampMs)` records a sample carrying an
+explicit millisecond Unix timestamp; `render` appends it after the value
+(`metric value timestamp`), the optional third field the exposition format
+allows. Plain `observe` records no timestamp.
+
+### Pushing to a Pushgateway
+
+`pushgatewayPath(job, grouping)` is a pure string helper that builds the
+Pushgateway URL path from a job name and a `map of string to string` of grouping
+labels: `/metrics/job/<job>/<k1>/<v1>/...`, with the job and values
+percent-encoded and grouping keys sorted for a deterministic path. POST the
+`render` output to `base + pushgatewayPath(job, grouping)` via the
+[`http`](http.md) module. An invalid grouping label name throws.
 
 ### Strictness
 
@@ -95,7 +147,9 @@ for (def s in $r.series) {
 ## Testing
 
 The pure exposition logic - name / label validation, value and HELP escaping,
-label-key sorting, and the upsert - is unit-tested in the overlay
+label-key sorting, the counter/gauge upsert, histogram bucket accumulation
+(with pinned `_bucket` / `_sum` / `_count` output), summary quantiles,
+timestamps, and the Pushgateway path - is unit-tested in the overlay
 (`modules/prometheus_test.j`), alongside the result parser against canned
 vector / matrix / scalar / error responses. The networked `query` /
 `queryRange` path is covered end to end against an in-process fake Prometheus in
@@ -104,11 +158,11 @@ encoding round-trips.
 
 ## Out of scope
 
-- **`counter` and `gauge` only.** `histogram` and `summary` (buckets /
-  quantiles, the `_bucket` / `_sum` / `_count` child series) are a documented
-  follow-on.
 - **No registry / auto-collection.** The caller holds and assembles the metric
   set; there is no global default registry or process/Go collectors.
+- **Summary quantiles are exact over the retained observations**, not the
+  streaming, bounded-error estimators the reference clients use - simpler and
+  more accurate, at the cost of keeping every observed value per series.
 - **Query results are read-only values.** No PromQL building or evaluation - the
   server does that.
 

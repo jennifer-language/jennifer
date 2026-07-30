@@ -968,14 +968,21 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `send(host, port, rendered)` writes the stream to a printer's raw `:9100` port
   (**default `jennifer` binary only**, `net`).
 - **`prometheus`** - Prometheus metrics in two halves. **Exposition** (pure
-  text, both binaries): `prometheus.counter(name, help)` / `gauge(name, help)`
-  -> `prometheus.Metric`, `observe(metric, labels, value)` records a sample
-  (upsert by label set, value-semantic), `render(metrics)` -> the text
-  exposition format (`# HELP` / `# TYPE` / sample lines). Strict name / label
-  validation and value / HELP escaping; an invalid name throws `Error` (kind
-  `"prometheus"`). **Retrieval** (needs the default binary, over `http` +
-  `json`): `query(base, promql)` (instant) / `queryRange(base, promql, start,
-  end, step)` (range) -> `prometheus.Result` (`resultType` + `series` of
+  text, both binaries): `prometheus.counter(name, help)` / `gauge(name, help)` /
+  `histogram(name, help, buckets)` / `summary(name, help, quantiles)` ->
+  `prometheus.Metric` (a `MetricType` enum `{Counter, Gauge, Histogram,
+  Summary}`), `observe(metric, labels, value)` / `observeAt(metric, labels,
+  value, timestampMs)` records a sample (counter / gauge upsert by label set; a
+  histogram accumulates count / sum and cumulative buckets; a summary retains
+  observations for nearest-rank quantiles), `render(metrics)` -> the text
+  exposition format (`# HELP` / `# TYPE` / sample lines, incl. `x_bucket{le}` /
+  `x_sum` / `x_count` for a histogram and `x{quantile}` for a summary, with an
+  optional trailing timestamp). `pushgatewayPath(job, grouping)` builds the
+  `/metrics/job/<job>/<k>/<v>/...` Pushgateway path (percent-encoded). Strict
+  name / label validation and value / HELP escaping; an invalid name throws
+  `Error` (kind `"prometheus"`). **Retrieval** (needs the default binary, over
+  `http` + `json`): `query(base, promql)` (instant) / `queryRange(base, promql,
+  start, end, step)` (range) -> `prometheus.Result` (`resultType` + `series` of
   `metric` label maps and `values` points).
 - **`mqtt`** - an MQTT 3.1.1 pub/sub client over `net` (`mqtts` via TLS):
   `mqtt.connect(opts)` -> `mqtt.Client`, then `subscribe(client, topic)` /
@@ -1154,8 +1161,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (counter `c`), `gauge(c, name, value)` (`g`), `timing(c, name, ms)` (`ms`),
   `set(c, name, value)` (`s`); `close(c)` closes the socket. The push counterpart to
   a pull-based scrape - UDP means no reply and no error when no agent is listening
-  (metrics, not data you must not lose). Integer counter / gauge values; no sample
-  rates or Datadog tags in this version. **Default `jennifer` binary only** (`net`).
+  (metrics, not data you must not lose). Extensions: `countRate` / `timingRate`
+  (a `|@rate` sample-rate suffix), `*Tagged` verbs carrying a `map of string to
+  string` of DogStatsD `|#k:v` tags, `countFloat` / `gaugeFloat` (float values),
+  and a value-semantic `Batch` (`batch` / `add*` / `flush`) packing several
+  metrics into one datagram. Every line - name, prefix, value, tag keys /
+  values - is control-character validated. **Default `jennifer` binary only** (`net`).
 - **`orm`** - a relational mapper over the `sql` library. **Data Mapper**, not
   Active Record (structs have no methods): declare an `orm.Schema`
   (`orm.schema(table, pk, dialect)` + `orm.column(s, name, kind)`, dialect
@@ -1186,8 +1197,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   the final shuffle) is `crypto`-grade, so a generated password is unpredictable
   and safe to mint as a real credential. Pure `.j` over `crypto` / `strings` /
   `convert`; **both binaries**.
-- **`influxdb`** - an InfluxDB 1.x time-series client over the `http` module.
-  `influxdb.client(url, db)` / `clientWith(url, db, user, password)` open a `Client`.
+- **`influxdb`** - an InfluxDB time-series client over the `http` module, both
+  the 1.x and the 2.x / 3.x generation (a `Version` enum `{V1, V2}` on the
+  `Client`; `write` dispatches, the line protocol is shared).
+  `influxdb.client(url, db)` / `clientWith(url, db, user, password)` open a 1.x
+  `Client`; `client2(url, org, bucket, token)` opens a 2.x client (org / bucket +
+  `Authorization: Token` auth, writing `/api/v2/write`; the token is redacted
+  from any raised error).
   Build a `Point` with value-semantic builders: `point(measurement)`, then
   `tag(p, k, v)` / `field(p, k, floatVal)` / `intField(p, k, intVal)` /
   `stringField(p, k, strVal)` / `boolField(p, k, boolVal)` / `at(p, unixNanos)` /
@@ -1199,8 +1215,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   tabular JSON into `Result{series as list of Series}`, each `Series{name, tags as
   map of string to string, columns as list of string, values as list of list of
   string}` with every cell stringified (convert numeric columns yourself). Automatic
-  line-protocol escaping; Basic auth. Over `http` + `json` + `time` + `encoding`.
-  **Default `jennifer` binary only** (`net`).
+  line-protocol escaping; 1.x Basic auth / 2.x token. `query(client, influxql)`
+  runs InfluxQL (1.x); `queryFlux(client, flux)` runs a Flux query over
+  `/api/v2/query` (2.x), returning the raw annotated-CSV body. Over `http` +
+  `json` + `time` + `encoding`. **Default `jennifer` binary only** (`net`).
 - **`slack`** - post to a Slack Incoming Webhook over the `http` module (sibling of
   `gotify` / `discord`). `slack.send(webhookUrl, text)` posts a plain `{"text": ...}`
   message. For a rich message, build a `Message` with `message()` then

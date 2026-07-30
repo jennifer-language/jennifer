@@ -29,6 +29,28 @@ statsd.count($c, "errors", 2); # web.errors:2|c
 statsd.gauge($c, "queue.depth", 7); # web.queue.depth:7|g
 statsd.timing($c, "response", 42); # web.response:42|ms
 statsd.set($c, "users", "u123"); # web.users:u123|s
+
+# Sample rate: a "|@rate" suffix (agent scales the count back up by 1/rate).
+statsd.countRate($c, "sampled", 1, 0.1); # web.sampled:1|c|@0.1
+
+# DogStatsD tags: a "|#k:v,k2:v2" suffix, control-character validated.
+def tags as map of string to string init {"env": "prod", "host": "h1"};
+statsd.countTagged($c, "hits", 1, $tags); # web.hits:1|c|#env:prod,host:h1
+
+# Float value: StatsD accepts fractional gauges (e.g. a load average).
+statsd.gaugeFloat($c, "load", 3.5); # web.load:3.5|g
+
+# Batching: pack several metrics into ONE datagram (lines joined by "\n").
+def b as statsd.Batch init statsd.batch($c);
+$b = statsd.addCount($b, "hits", 3);
+$b = statsd.addGauge($b, "queue.depth", 9);
+$b = statsd.addIncrement($b, "errors");
+statsd.flush($c, $b);
+
 statsd.close($c);
 
-io.printf("sent: requests(+1), errors(+2), queue.depth=7, response=42ms, users<-u123\n");
+io.printf("sent single metrics, a sampled counter, a tagged counter, a float gauge,\n");
+io.printf("and a 3-metric batch packet:\n");
+for (def line in $b.lines) {
+    io.printf("  %s\n", $line);
+}

@@ -2,10 +2,18 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * An InfluxDB (1.x) client over `http`: write measurements as line-protocol
- * points and run InfluxQL queries, getting back a parsed result. The push
- * counterpart to a scrape - `write` sends points to `/write`, `query` runs an
- * InfluxQL statement against `/query` and parses the tabular JSON into `Series`.
+ * An InfluxDB client over `http` for both major API generations: write
+ * measurements as line-protocol points and run queries, getting back a parsed
+ * result. The push counterpart to a scrape.
+ *
+ * Two selectable backends under one `Client` (stance 1: one module, one
+ * version discriminator). A **1.x** client (`client` / `clientWith`) writes to
+ * `/write?db=...` with optional Basic auth and queries InfluxQL over `/query`
+ * (`query`). A **2.x / 3.x** client (`client2`) writes to
+ * `/api/v2/write?org=...&bucket=...` with `Authorization: Token <token>` auth
+ * and queries Flux over `/api/v2/query` (`queryFlux`). `write` dispatches on the
+ * client's `version`, so the same call serves both; the line protocol is
+ * identical across versions, so `line` is reused verbatim.
  *
  * A `Point` is built with value-semantic builders (`point` / `tag` / `field` /
  * `intField` / `stringField` / `boolField` / `at`), each returning a fresh
@@ -13,7 +21,7 @@
  * `write`). Field types are carried as pre-rendered fragments, so one point can
  * mix float / int / string / bool fields despite Jennifer's homogeneous maps.
  * Needs the default `jennifer` binary (`http` over `net`); a failed request
- * throws `Error{kind: "influxdb"}`.
+ * throws `Error{kind: "influxdb"}` (a 2.x client's token is redacted from it).
  * @module influxdb
  * @example
  * import "influxdb.j" as influxdb;
@@ -22,6 +30,10 @@
  *     influxdb.tag(influxdb.point("cpu"), "host", "server01"), "value", 0.64);
  * influxdb.write($db, [$p]);
  * def r as influxdb.Result init influxdb.query($db, "SELECT last(\"value\") FROM cpu");
+ * # or a 2.x client:
+ * def db2 as influxdb.Client init influxdb.client2("http://localhost:8086", "myorg", "mybucket", "mytoken");
+ * influxdb.write($db2, [$p]);
+ * def csv as string init influxdb.queryFlux($db2, "from(bucket:\"mybucket\") |> range(start:-1h)");
  */
 use json;
 use strings;
@@ -31,22 +43,39 @@ use time;
 use encoding;
 import "./http.j" as http;
 
-# The default InfluxDB 1.x HTTP endpoint.
+# The default InfluxDB HTTP endpoint (shared by 1.x and 2.x).
 def const DEFAULT_URL as string init "http://localhost:8086";
 
 /**
- * A client: the base URL, the target database, and optional Basic-auth
- * credentials ("" for none).
+ * The API generation a `Client` targets: `influxdb.Version.V1` (InfluxDB 1.x -
+ * `/write?db=...` + InfluxQL, optional Basic auth) or `influxdb.Version.V2`
+ * (InfluxDB 2.x / 3.x - `/api/v2/write?org=...&bucket=...` + Flux, token auth).
+ * The backend selector `write` dispatches on; the zero value is `V1`.
+ */
+export def enum Version { V1, V2 };
+
+/**
+ * A client for either API generation. A 1.x client carries `db` and optional
+ * Basic-auth `user` / `password`; a 2.x client carries `org` / `bucket` and a
+ * `token`. `version` selects which set is used (unused fields stay "").
  * @field url {string} the base URL (e.g. "http://localhost:8086")
- * @field db {string} the database name
- * @field user {string} the username ("" for no auth)
- * @field password {string} the password
+ * @field version {Version} the API generation (V1 or V2)
+ * @field db {string} the 1.x database name ("" for a 2.x client)
+ * @field user {string} the 1.x Basic-auth username ("" for no auth)
+ * @field password {string} the 1.x Basic-auth password
+ * @field org {string} the 2.x organization ("" for a 1.x client)
+ * @field bucket {string} the 2.x bucket ("" for a 1.x client)
+ * @field token {string} the 2.x API token ("" for a 1.x client)
  */
 export def struct Client {
     url as string,
+    version as Version,
     db as string,
     user as string,
-    password as string
+    password as string,
+    org as string,
+    bucket as string,
+    token as string
 };
 
 /**
@@ -106,7 +135,7 @@ export func client(url as string, db as string) {
 }
 
 /**
- * Open a client with HTTP Basic-auth credentials.
+ * Open a 1.x client with HTTP Basic-auth credentials.
  * @param url {string} the base URL
  * @param db {string} the database name
  * @param user {string} the username
@@ -114,7 +143,39 @@ export func client(url as string, db as string) {
  * @return {Client} a ready client
  */
 export func clientWith(url as string, db as string, user as string, password as string) {
-    return Client{url: $url, db: $db, user: $user, password: $password};
+    return Client{
+        url: $url,
+        version: Version.V1,
+        db: $db,
+        user: $user,
+        password: $password,
+        org: "",
+        bucket: "",
+        token: ""
+    };
+}
+
+/**
+ * Open an InfluxDB 2.x / 3.x client: token auth, addressing data by
+ * organization + bucket. `write` posts to `/api/v2/write` and `queryFlux` runs
+ * Flux over `/api/v2/query`.
+ * @param url {string} the base URL (e.g. "http://localhost:8086")
+ * @param org {string} the organization
+ * @param bucket {string} the target bucket
+ * @param token {string} the API token (sent as `Authorization: Token <token>`)
+ * @return {Client} a ready 2.x client
+ */
+export func client2(url as string, org as string, bucket as string, token as string) {
+    return Client{
+        url: $url,
+        version: Version.V2,
+        db: "",
+        user: "",
+        password: "",
+        org: $org,
+        bucket: $bucket,
+        token: $token
+    };
 }
 
 # --- line-protocol escaping (private) ---------------------------------------
@@ -329,16 +390,90 @@ func urlEncode(s as string) {
     return $out;
 }
 
-# authHeaders builds the Basic-auth header map for a client (empty when the
-# client carries no username).
+# A built HTTP request: the URL, the Content-Type, the header map, and the
+# body. The pure output of the request builders (buildWrite / buildQuery /
+# buildFlux), so a test can assert the endpoint / params / auth / body without a
+# live server.
+def struct Req {
+    url as string,
+    contentType as string,
+    headers as map of string to string,
+    body as string
+};
+
+# authHeaders builds the auth header map for a client: Basic auth from
+# user/password for a 1.x client (empty when no username), a `Token` header for
+# a 2.x client (empty when no token).
 func authHeaders(c as Client) {
     def h as map of string to string init {};
-    if (len($c.user) > 0) {
-        def creds as string init $c.user + ":" + $c.password;
-        def enc as string init encoding.toText(convert.bytesFromString($creds, "utf-8"), "base64");
-        $h["Authorization"] = "Basic " + $enc;
+    match ($c.version) {
+        when V1 {
+            if (len($c.user) > 0) {
+                def creds as string init $c.user + ":" + $c.password;
+                def enc as string init encoding.toText(convert.bytesFromString($creds, "utf-8"), "base64");
+                $h["Authorization"] = "Basic " + $enc;
+            }
+        }
+        when V2 {
+            if (len($c.token) > 0) {
+                $h["Authorization"] = "Token " + $c.token;
+            }
+        }
     }
     return $h;
+}
+
+# redact scrubs a 2.x client's token out of an error message so a leaked
+# request line or echoed header can never expose the secret. No-op for a 1.x
+# client (its password never rides in a URL, so it does not leak).
+func redact(c as Client, msg as string) {
+    if (len($c.token) > 0) {
+        return strings.replace($msg, $c.token, "<redacted>");
+    }
+    return $msg;
+}
+
+# buildWrite builds the write request for a client and a rendered line-protocol
+# body: `/write?db=...` for a 1.x client, `/api/v2/write?org=...&bucket=...` for
+# a 2.x client, both at nanosecond precision.
+func buildWrite(c as Client, body as string) {
+    def ct as string init "text/plain; charset=utf-8";
+    match ($c.version) {
+        when V1 {
+            def url as string init joinBase($c.url, "/write") + "?db=" +
+                urlEncode($c.db) + "&precision=ns";
+            return Req{url: $url, contentType: $ct, headers: authHeaders($c), body: $body};
+        }
+        when V2 {
+            def url as string init joinBase($c.url, "/api/v2/write") + "?org=" +
+                urlEncode($c.org) + "&bucket=" + urlEncode($c.bucket) + "&precision=ns";
+            return Req{url: $url, contentType: $ct, headers: authHeaders($c), body: $body};
+        }
+    }
+}
+
+# buildQuery builds the 1.x InfluxQL request (`/query?db=...&q=...`, empty body).
+func buildQuery(c as Client, influxql as string) {
+    def url as string init joinBase($c.url, "/query") + "?db=" + urlEncode($c.db) +
+        "&q=" + urlEncode($influxql);
+    return Req{
+        url: $url,
+        contentType: "application/x-www-form-urlencoded",
+        headers: authHeaders($c),
+        body: ""
+    };
+}
+
+# buildFlux builds the 2.x Flux request (`/api/v2/query?org=...`, the Flux
+# script as the body under `application/vnd.flux`).
+func buildFlux(c as Client, flux as string) {
+    def url as string init joinBase($c.url, "/api/v2/query") + "?org=" + urlEncode($c.org);
+    return Req{
+        url: $url,
+        contentType: "application/vnd.flux",
+        headers: authHeaders($c),
+        body: $flux
+    };
 }
 
 # errorFrom extracts a server error message from a failed response, falling
@@ -361,10 +496,12 @@ func errorFrom(resp as http.Response) {
 # --- write (exported) -------------------------------------------------------
 
 /**
- * Write points to the client's database (line protocol, nanosecond precision).
+ * Write points to the client's target (line protocol, nanosecond precision).
+ * Dispatches on the client's `version`: a 1.x client posts to `/write?db=...`,
+ * a 2.x client to `/api/v2/write?org=...&bucket=...`.
  * @param c {Client} the client
  * @param points {list of Point} the points to write
- * @throws {Error} kind "influxdb" on a non-2xx response
+ * @throws {Error} kind "influxdb" on a non-2xx response (2.x token redacted)
  */
 export func write(c as Client, points as list of Point) {
     if (len($points) == 0) {
@@ -377,14 +514,14 @@ export func write(c as Client, points as list of Point) {
         $lines[] = line($p);
     }
     def body as string init strings.join($lines, "\n");
-    def url as string init joinBase($c.url, "/write") + "?db=" + urlEncode($c.db) + "&precision=ns";
+    def req as Req init buildWrite($c, $body);
     def resp as http.Response init http.post(
-        $url,
-        "text/plain; charset=utf-8",
-        $body,
-        authHeaders($c));
+        $req.url,
+        $req.contentType,
+        $req.body,
+        $req.headers);
     if ($resp.status >= 300) {
-        fail(errorFrom($resp));
+        fail(redact($c, errorFrom($resp)));
     }
     return null;
 }
@@ -478,22 +615,46 @@ func parseQuery(node as json.Value) {
 }
 
 /**
- * Run an InfluxQL statement against the client's database and parse the result.
+ * Run an InfluxQL statement against a 1.x client's database and parse the
+ * result. (The 2.x query language is Flux - see `queryFlux`.)
  * @param c {Client} the client
  * @param influxql {string} the InfluxQL statement (e.g. `SELECT * FROM cpu`)
  * @return {Result} the parsed series
  * @throws {Error} kind "influxdb" on a request failure or a query error
  */
 export func query(c as Client, influxql as string) {
-    def url as string init joinBase($c.url, "/query") + "?db=" + urlEncode($c.db) + "&q=" +
-        urlEncode($influxql);
+    def req as Req init buildQuery($c, $influxql);
     def resp as http.Response init http.post(
-        $url,
-        "application/x-www-form-urlencoded",
-        "",
-        authHeaders($c));
+        $req.url,
+        $req.contentType,
+        $req.body,
+        $req.headers);
     if ($resp.status >= 300) {
-        fail(errorFrom($resp));
+        fail(redact($c, errorFrom($resp)));
     }
     return parseQuery(json.decode($resp.body));
+}
+
+/**
+ * Run a Flux query against a 2.x client's organization and return the raw
+ * response body: InfluxDB answers a Flux query with annotated CSV (RFC 4180
+ * with `#datatype` / `#group` / `#default` header rows), not JSON, so this
+ * returns it verbatim - parse it with the `csv` module. Posts the script to
+ * `/api/v2/query?org=...` under `application/vnd.flux`.
+ * @param c {Client} a 2.x client (from `client2`)
+ * @param flux {string} the Flux script
+ * @return {string} the annotated-CSV response body
+ * @throws {Error} kind "influxdb" on a non-2xx response (token redacted)
+ */
+export func queryFlux(c as Client, flux as string) {
+    def req as Req init buildFlux($c, $flux);
+    def resp as http.Response init http.post(
+        $req.url,
+        $req.contentType,
+        $req.body,
+        $req.headers);
+    if ($resp.status >= 300) {
+        fail(redact($c, errorFrom($resp)));
+    }
+    return $resp.body;
 }
