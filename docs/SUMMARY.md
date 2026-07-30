@@ -95,6 +95,7 @@
 - [`label`](modules/label.md)
 - [`log`](modules/log.md)
 - [`markdown`](modules/markdown.md)
+- [`mcp`](modules/mcp.md)
 - [`memcache`](modules/memcache.md)
 - [`mikrotik`](modules/mikrotik.md)
 - [`mime`](modules/mime.md)

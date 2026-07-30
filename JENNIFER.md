@@ -720,6 +720,27 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   styled terminal text (`toAnsi`, through `ansi`); author Markdown with
   `header` / `style` / `link` / `bullets` / `numbered` / `codeBlock` / `table`;
   align handcrafted table source with `tablePretty`.
+- **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
+  client, over `jsonrpc` + `json`. Build a `Server` value-semantically:
+  `mcp.server(name, version)` then `addTool(s, name, desc, inputSchema, handler)`
+  / `addResource(s, uri, name, desc, mimeType, handler)` / `addPrompt(s, name,
+  desc, handler)`, each `handler` a top-level `func NAME(arg as json.Value)`
+  reached by name via `meta.callMain`. Declare a tool's input schema with
+  `mcp.schema()` + `mcp.property(schema, name, jsonType, desc, required)`.
+  `mcp.handle(server, requestBody) -> replyBody` is the transport-agnostic
+  router - `initialize` / `ping`, `tools/list` / `tools/call`, `resources/list`
+  / `resources/read`, `prompts/list` / `prompts/get`, a notification yielding
+  `""`. It is an **allow-list**: only a **registered** item's handler runs (an
+  unknown tool is a tool-result error, not an arbitrary-name dispatch), and a
+  thrown handler message never reaches the wire. `mcp.serveStdio(server)` runs
+  the primary stdio transport (newline-delimited JSON-RPC over the program's own
+  stdin/stdout). Client: `mcp.connect(endpoint)` / `connectWith(endpoint,
+  headers)` -> `Client`, then `initialize` / `listTools` / `callTool(client,
+  name, arguments)` / `listResources` / `readResource(client, uri)` /
+  `listPrompts` / `getPrompt(client, name, arguments)`. Targets the stateless
+  protocol only (no SSE, no sessions); the stdio *subprocess* client is deferred
+  (it needs an `os` subprocess-stdin primitive). Default `jennifer` binary only
+  (`jsonrpc` / `http` use `net`).
 - **`memcache`** - a memcached client over `net` (classic text protocol):
   `memcache.connect(opts)` -> `memcache.Session`, then `set(session, key, value,
   exptime)` / `add` (store-if-absent, `-> bool`) / `get(session, key)` (`""`

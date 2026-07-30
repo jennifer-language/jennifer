@@ -26,7 +26,11 @@ and [web framework](modules/web.md) to serve. Email is a complete stack -
 [SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) / [IMAP](modules/imap.md)
 to receive; caches and stores come through [Redis](modules/redis.md) and
 [memcached](modules/memcache.md) clients. Security is the real thing, not a stub:
-[AES-256-GCM, Ed25519, HKDF / PBKDF2](libraries/crypto.md), and [JWT](modules/jwt.md). And
+[AES-256-GCM, Ed25519, HKDF / PBKDF2](libraries/crypto.md), and [JWT](modules/jwt.md).
+Wire your program into AI agents with the
+[Model Context Protocol](modules/mcp.md): expose your own functions as tools /
+resources / prompts to a host (Claude, an IDE, ...), or call another MCP server
+as a client - validated end to end against the official MCP SDK. And
 lightweight [concurrency](user-guide/concurrency.md) is built into the language
 via `spawn` and the [task](libraries/task.md) library. Something more niche -
 [Gotify](modules/gotify.md) push, strict [SemVer](modules/semver.md),

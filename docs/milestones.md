@@ -1059,40 +1059,35 @@ reference. Pure `.j`, both binaries unless noted.
   `qpdf --check` clean, `pdftotext`-extractable. Overlay 16 -> 41. Glyph subsetting
   and CFF `.otf` embedding remain optional follow-ons, tracked but not blocking.
 
-### M23.7 - observability completeness
+### M23.7 - observability completeness (compacted)
 
-**Done.** The metrics story was half-built; filled the three biggest gaps, each
-shipping its enhanced `*_test.j` overlay at 100%, an updated `docs/modules/` doc +
-demo, and the catalog rows. Pure `.j`; the format / request-building side stays
+**Done.** Filled the three biggest metrics gaps, each with its enhanced overlay at
+100%, updated `docs/modules/` doc + demo + catalog rows, and validation against an
+independent reference. Pure `.j`; the format / request-building side stays
 network-free and TinyGo-clean (only the live send / query needs the default
 binary).
-- **`prometheus`** - histogram + summary metric types, the type latency / SLO
-  instrumentation needs. `MetricType` grew to `{Counter, Gauge, Histogram,
-  Summary}`; `histogram(name, help, buckets)` / `summary(name, help, quantiles)`
-  construct them, `observe` accumulates count / sum + cumulative buckets (a
-  summary retains observations for nearest-rank quantiles), and `render` emits the
-  exact text format - `x_bucket{le="..."}` (ascending, `+Inf` last) / `x_sum` /
-  `x_count` for a histogram, `x{quantile="..."}` for a summary. Plus
-  `observeAt(...)` for an optional per-sample millisecond timestamp and
-  `pushgatewayPath(job, grouping)` (percent-encoded `/metrics/job/.../k/v` path).
-  Overlay 11 -> 21; the histogram / summary render pinned exactly.
-- **`statsd`** - the line builder was refactored into a pure, network-free
-  `buildLine(prefix, name, value, kind, rate, tags)` and extended: `countRate` /
-  `timingRate` (`|@rate`, omitted when >= 1), `*Tagged` verbs (DogStatsD `|#k:v`
-  tags, insertion order), `countFloat` / `gaugeFloat` (compact float values), and
-  a value-semantic `Batch` (`batch` / `add*` / `flush`) packing several metrics
-  into one datagram. The `prefix` is now control-character-validated on the same
-  wire line the name and tags are, so nothing can inject a newline / extra metric.
-  Overlay 6 -> 15; every wire line + the injection rejection pinned.
-- **`influxdb`** - 2.x / 3.x alongside 1.x via a `Version` enum `{V1, V2}` on the
-  `Client` (the line protocol is shared, so `line` / `write` are reused).
-  `client2(url, org, bucket, token)` writes `POST /api/v2/write?org=&bucket=` with
-  `Authorization: Token` auth (redacted from any raised error), and
-  `queryFlux(client, flux)` runs Flux over `/api/v2/query` (annotated-CSV body).
-  Request construction factored into pure `buildWrite` / `buildQuery` / `buildFlux`
-  builders so the endpoint / headers / body are unit-tested without a server; the
-  1.x path stays byte-identical (its Go integration test still passes). Overlay
-  13 -> 21.
+- **`prometheus`** (overlay 11 -> 21) - histogram + summary types (`MetricType` ->
+  `{Counter, Gauge, Histogram, Summary}`): `histogram(name, help, buckets)` /
+  `summary(name, help, quantiles)`, `observe` accumulating count / sum + cumulative
+  buckets (nearest-rank quantiles for summaries), `render` emitting the exact text
+  format (`x_bucket{le}` ascending / `+Inf` last, `x_sum` / `x_count`;
+  `x{quantile}`), plus `observeAt` (per-sample ms timestamp) and `pushgatewayPath`.
+  Validated against the official `prometheus_client` parser (buckets, q=0/q=1
+  edges, label / HELP escaping).
+- **`statsd`** (overlay 6 -> 15) - a pure network-free line builder + `countRate` /
+  `timingRate` (`|@rate`, omitted when >= 1), `*Tagged` DogStatsD `|#k:v` verbs,
+  `countFloat` / `gaugeFloat`, and a value-semantic `Batch` (`batch` / `add*` /
+  `flush`) packing several metrics into one datagram. The `prefix` is now
+  control-character-validated on the same wire line as the name / tags (no
+  newline / extra-metric injection). Validated against the DogStatsD grammar over
+  captured UDP datagrams (injection 4/4 rejected).
+- **`influxdb`** (overlay 13 -> 21) - 2.x / 3.x alongside 1.x via a `Version` enum
+  `{V1, V2}` on the `Client` (shared line protocol): `client2(url, org, bucket,
+  token)` writes `POST /api/v2/write?org=&bucket=` with `Authorization: Token`
+  (redacted from errors), `queryFlux` runs Flux over `/api/v2/query`. Request
+  construction factored into pure `buildWrite` / `buildQuery` / `buildFlux`; the
+  1.x path stays byte-identical. Validated against a captured HTTP request + an
+  independent line-protocol parser.
 
 ### M23.8 - ergonomic papercuts + notifier richness (compacted)
 
@@ -1182,6 +1177,42 @@ drove edge fixes: `insideForHeader` O(n^2) -> O(1) (a `forHeader` wrap-frame fla
 Left: `Token.Raw` captured on every lex (within noise). **Pre-1.0 break**
 (canonical output changed).
 
+### M23.10 - interactive stdin for `os.run` / `os.spawn`
+
+**Planned.** `os.run(argv)` captures a child's stdout / stderr but cannot feed its
+**stdin**, and `os.spawn` -> `os.Process` exposes no stdin pipe. So a Jennifer
+program cannot drive a subprocess that reads standard input - `sort` / `jq` /
+`gzip` as a filter, or an MCP server's stdio transport (the M23.13 `mcp` module's
+stdio subprocess client is blocked on exactly this).
+
+- **`os.run(argv, stdin)` (one-shot, the primary deliverable).** An optional
+  trailing argument - a `string` (or `bytes`) written to the child's standard
+  input, which is then **closed** (the child sees EOF). The child runs to
+  completion; `stdout` / `stderr` are captured into `os.Result` exactly as today.
+  **Deadlock-free by construction**: the whole input is buffered up front and the
+  output drained after the child exits (both streams already capped at 16 MiB per
+  the existing `os.run` contract). `os.run(argv)` (one argument) is unchanged - a
+  variadic builtin accepting 1 or 2 args (Jennifer has no optional parameters), so
+  the Go layer validates the count. This is the form that unblocks a **stateless
+  subprocess exchange** (feed all input, read all output), including the M23.13
+  MCP stdio client: write `initialize` + `notifications/initialized` + the call as
+  newline-delimited JSON, close stdin, read the newline-delimited replies and
+  correlate by id.
+- **Follow-on (harder, not in this milestone): interactive streaming pipes on a
+  spawned `Process`.** A persistent, interleaved session - write a request, read
+  its reply, write another - needs `os.writeStdin(p, data)` / `os.closeStdin(p)` /
+  `os.readStdout(p)` over goroutine-managed pipe buffers, with real deadlock
+  avoidance (a child that fills its stdout pipe while the parent is still writing
+  stdin blocks both). The one-shot form above covers every stateless case, so the
+  streaming form is parked as a later piece / horizon draft, not scoped here.
+
+Build-tag inherited: `os/exec` is default-binary-only already (`jennifer-tiny`
+stubs `os.run` / `spawn`), so the stdin addition rides the same split with no
+TinyGo concern. Close-out: `internal/lib/os/exec.go` + Go tests (a child that
+echoes / transforms its stdin, the empty-input and over-16-MiB-input cases), the
+`os.md` doc + the `os.Result` example, and then M23.13 can add its stdio
+subprocess client (`mcp.connectStdio`) on top.
+
 ### M23.11 - `jsonrpc` module
 
 **Done.** A JSON-RPC 2.0 client + server module, pure `.j` over `json` + `http`
@@ -1240,31 +1271,49 @@ methods, wire strings, config-supplied mechanism names - stayed strings).
 
 ### M23.13 - `mcp` module (Model Context Protocol, stateless)
 
-**Planned.** A Model Context Protocol module - both a **server** (Jennifer
-exposes tools / resources / prompts to an LLM host) and a **client** (a Jennifer
-program calls another MCP server) - targeting the **stateless** protocol only.
-MCP is JSON-RPC 2.0 on the wire, so `jsonrpc` carries the framing and
-`meta.callMain` dispatches a tool call to a top-level `func` (the same mechanism
-`web` / `jsonrpc` already use - registering a tool is just writing a documented
-`func`). The new work is the MCP layer on top: the `initialize` capability /
-protocol-version handshake, the tools / resources / prompts data models (a tool
-declares a JSON-Schema input; `json.Value` holds it, with a small schema-builder
-helper), and the two stateless transports.
+**Done.** A Model Context Protocol module - a **server** (Jennifer exposes tools /
+resources / prompts to an LLM host) and an HTTP **client** (a Jennifer program
+calls another MCP server) - stateless only. MCP is JSON-RPC 2.0, so the client
+reuses `jsonrpc.call`; the server needs its own dispatcher (`tools/list` etc. are
+not valid `func` names and each protocol method wants MCP-specific handling).
+- **Server.** `server(name, version)` + value-semantic `addTool` / `addResource` /
+  `addPrompt` build a `Server`; each tool declares a JSON-Schema input built with
+  `schema()` / `property(...)`. `handle(server, requestBody) -> replyBody` is the
+  transport-agnostic router (`initialize` capability / protocol-version handshake,
+  `ping`, `tools`/`resources`/`prompts` `list` + `call` / `read` / `get`, a
+  notification -> `""`, an unknown method -> JSON-RPC -32601). `serveStdio(server)`
+  runs the primary transport - newline-delimited JSON-RPC on the program's own
+  stdin / stdout (over `io`), stdout flushed per reply so an interactive host does
+  not deadlock. Wire `handle` to `httpd` for the stateless-HTTP server.
+- **Client (HTTP).** `connect(endpoint)` / `connectWith` wrap a `jsonrpc.Client`;
+  `initialize` / `listTools` / `callTool` / `listResources` / `readResource` /
+  `listPrompts` / `getPrompt`.
+- **Security: an allow-list, safer than `jsonrpc`'s open dispatch.** `tools/call`
+  looks the tool up by *registered* name and only then `meta.callMain`s its
+  handler - an unregistered name is a tool-result error, never arbitrary-method
+  dispatch; a throwing handler yields a generic message, never the thrown detail.
+- **Deferred: the stdio (subprocess) client.** `os.run` / `os.spawn` expose no
+  interactive child-stdin pipe, so a Jennifer program cannot launch and drive an
+  MCP server subprocess; it waits on **M23.10** (`os.run` stdin), then
+  `mcp.connectStdio` slots on top.
 
-**Scope: the stateless protocol only.**
-- **stdio** - newline-delimited JSON-RPC over stdin / stdout, the transport an
-  LLM host launches a local server with (over `io` / `os`).
-- **stateless HTTP** - the client POSTs a request and the server returns a single
-  `application/json` response; no session, no stream. This maps almost 1:1 onto
-  `jsonrpc.handle`.
-
-The surface: `initialize` (capability + protocol-version negotiation),
-`tools/list` + `tools/call`, `resources/list` + `resources/read`, `prompts/list`
-+ `prompts/get`. Server tool dispatch via `meta.callMain`; the client wraps a
-launched-subprocess or an HTTP endpoint. Reuses `jsonrpc` / `json` / `http` /
-`os`; default binary only (like `jsonrpc`). The usual close-out: an `mcp_test.j`
-overlay at 100%, a `cmd/jennifer/mcp_test.go` round-trip, `docs/modules/mcp.md`, a
-demo, and the catalog / `JENNIFER.md` entries.
+Overlay 27/27; a hermetic `cmd/jennifer/mcp_test.go` httpd round-trip; both
+binaries. **Validated against the real protocol**: the official MCP Python SDK,
+as a host, launched Jennifer's `serveStdio` server over stdio and completed
+`initialize` (protocol `2025-06-18`) -> `list_tools` (valid JSON Schema) ->
+`call_tool` (echo / add) -> and the unregistered-tool allow-list rejection. An
+audit then hardened the untrusted-request path: a non-string `name` / `uri` (a
+peer sends `{"name": 123}`) used to make `json.asString` throw uncaught and crash
+the `serveStdio` loop; the param reads are now type-guarded and `handle` wraps the
+router in a defensive catch, so no malformed request can take the server down
+(pinned by the hostile-input overlay cases + a serveStdio survives-and-continues
+check). A completeness pass then closed two lifecycle gaps: **prompts now declare
+their `arguments`** (a `PromptArg` + `promptArg` builder, surfaced by
+`prompts/list` so a host can collect them), and the **client sends the required
+`notifications/initialized`** after a successful `initialize`. Both re-validated
+against the official SDK (it reads the declared prompt arguments and a
+spec-compliant `get_prompt`), and the example prompt handlers were corrected to
+emit a content **block** (`{type, text}`), not a bare string.
 
 **Not planned: the stateful transport.** The older **stateful Streamable HTTP**
 mode - a `text/event-stream` (SSE) response, an `Mcp-Session-Id` session, and

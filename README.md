@@ -28,6 +28,10 @@ to serve. Email is a complete stack - [SMTP](docs/modules/smtp.md) to send,
 and stores come through [Redis](docs/modules/redis.md) and
 [memcached](docs/modules/memcache.md) clients. Security is the real thing, not a
 stub: [AES-256-GCM, Ed25519, HKDF / PBKDF2](docs/libraries/crypto.md), and [JWT](docs/modules/jwt.md).
+Wire your program into AI agents with the
+[Model Context Protocol](docs/modules/mcp.md): expose your own functions as tools
+/ resources / prompts to a host (Claude, an IDE, ...), or call another MCP server
+as a client - validated end to end against the official MCP SDK.
 And lightweight [concurrency](docs/user-guide/concurrency.md) is built into the
 language via `spawn` and the [task](docs/libraries/task.md) library. Something
 more niche - [Gotify](docs/modules/gotify.md) push, strict
