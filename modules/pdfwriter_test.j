@@ -234,6 +234,37 @@ func bytesSlice(b as bytes, lo as int, hi as int) {
     return $out;
 }
 
+# A resource name that could break out of the PDF /Font or /XObject dictionary
+# must be rejected (injection guard), for both fonts and images.
+func testLoadFontRejectsInjectingName() {
+    def threw as bool init false;
+    try {
+        loadFont("Evil>> /OpenAction << /S /JavaScript >>", ttfBytes());
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "pdfwriter");
+    }
+    testing.assertTrue($threw);
+}
+
+func testLoadImageRejectsInjectingName() {
+    def threw as bool init false;
+    try {
+        loadImage("A B", rgbPng());       # a space is not a legal resource name
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}
+
+func testResourceNameAcceptsLettersDigits() {
+    # a legal letters-then-digits name is accepted (no false positive)
+    def lf as LoadedFont init loadFont("Body2", ttfBytes());
+    testing.assertEqual($lf.name, "Body2");
+    def img as Image init loadImage("Logo1", rgbPng());
+    testing.assertEqual($img.name, "Logo1");
+}
+
 func testLoadFontRejectsCff() {
     def threw as bool init false;
     try {
@@ -308,6 +339,32 @@ func testLoadImageRejectsGarbage() {
     }
     try {
         loadImage("bad", $junk);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "pdfwriter");
+    }
+    testing.assertTrue($threw);
+}
+
+# A glyph id past 0xFFFF cannot be a 2-byte Identity-H code; hexGid must reject
+# it, not silently truncate to the low 16 bits.
+func testHexGidRejectsOverflow() {
+    def threw as bool init false;
+    try {
+        hexGid(0x10000);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "pdfwriter");
+    }
+    testing.assertTrue($threw);
+}
+
+# A PNG whose chunk length runs past the buffer (truncated / hostile) is a clean
+# pdfwriter error, not a raw index-out-of-range abort.
+func testLoadImageRejectsTruncated() {
+    def threw as bool init false;
+    try {
+        loadImage("T", bytesSlice(rgbPng(), 0, 40));
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "pdfwriter");

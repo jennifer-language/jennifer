@@ -316,6 +316,16 @@ func appendCubicAsQuads(pts as list of Point, p0x as int, p0y as int, c1x as int
     return $out;
 }
 
+# Work budgets for the Type2 interpreter. The frame-DEPTH guard (>= 64) bounds
+# recursion but NOT total work: a charstring whose subroutines each call the next
+# one twice stays shallow yet runs exponentially many operations, and unbounded
+# operand pushes without an operator grow the stack without limit. These two caps
+# bound total work and memory so a hostile font is a fast catchable error, not a
+# hang / OOM. CFF_MAX_OPS is generous (a complex CJK glyph is well under it);
+# CFF_MAX_STACK is the Type2 operand-stack limit (48).
+def const CFF_MAX_OPS as int init 200000;
+def const CFF_MAX_STACK as int init 48;
+
 # runCharstring interprets a glyph's Type2 charstring, returning its contours as
 # a list of command lists ([0,x,y]=moveto, [1,x,y]=lineto, [2,..]=curveto).
 func runCharstring(f as Font, ctx as Cff, gid as int) {
@@ -346,10 +356,18 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
     def haveWidth as bool init false;
     def done as bool init false;
     def frames as list of list of int init [[$csRange[1], $csRange[0]]];
+    def ops as int init 0;
 
     repeat {
         if (len($frames) == 0 or $done) {
             break;
+        }
+        $ops = $ops + 1;
+        if ($ops > CFF_MAX_OPS) {
+            throw Error{kind: "font", message: "font.glyph: charstring exceeds operation budget (malformed / hostile font)", file: "", line: 0, col: 0};
+        }
+        if (len($stack) > CFF_MAX_STACK) {
+            throw Error{kind: "font", message: "font.glyph: charstring operand stack overflow", file: "", line: 0, col: 0};
         }
         def ti as int init len($frames) - 1;
         def fend as int init $frames[$ti][0];

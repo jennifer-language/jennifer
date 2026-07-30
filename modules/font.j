@@ -494,6 +494,131 @@ export func advanceGid(f as Font, gid as int) {
 }
 
 /**
+ * Batch glyph-id lookup: map a list of codepoints to their glyph ids in one call.
+ * Prefer this over calling `glyphId` per character - the font is value-semantic
+ * (its raw bytes are copied on every call), so a per-character loop copies the
+ * whole font each time; this copies it once for the whole batch.
+ * @param f {Font} the font
+ * @param cps {list of int} the codepoints
+ * @return {list of int} the glyph ids, in order
+ */
+export func glyphIds(f as Font, cps as list of int) {
+    # Copy the font bytes ONCE into cmapBatch, which reads them with direct
+    # indexing - so the whole batch pays a single font copy, not one per
+    # codepoint (each helper call that takes the bytes copies the whole font).
+    return cmapBatch($f.data, $f.cmapFmt, $f.cmapSub, $cps);
+}
+
+# cmapBatch maps a list of codepoints to glyph ids in one pass, indexing the
+# font bytes `d` directly (the format-4 / format-12 lookups inlined so no
+# per-codepoint call re-copies the font). Semantics match glyphIndex.
+func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
+    def out as list of int init [];
+    if ($fmt == 4) {
+        def segBytes as int init ($d[$sub + 6] << 8) | $d[$sub + 7];
+        def segCount as int init $segBytes // 2;
+        def endCodes as int init $sub + 14;
+        def startCodes as int init $endCodes + $segBytes + 2;
+        def idDeltas as int init $startCodes + $segBytes;
+        def idRangeOffsets as int init $idDeltas + $segBytes;
+        for (def cp in $cps) {
+            def gid as int init 0;
+            if ($cp <= 65535) {
+                def i as int init 0;
+                while ($i < $segCount) {
+                    def eo as int init $endCodes + $i * 2;
+                    def endc as int init ($d[$eo] << 8) | $d[$eo + 1];
+                    if ($cp <= $endc) {
+                        def so as int init $startCodes + $i * 2;
+                        def startc as int init ($d[$so] << 8) | $d[$so + 1];
+                        if ($cp >= $startc) {
+                            def roAddr as int init $idRangeOffsets + $i * 2;
+                            def ro as int init ($d[$roAddr] << 8) | $d[$roAddr + 1];
+                            def dAddr as int init $idDeltas + $i * 2;
+                            def delta as int init ($d[$dAddr] << 8) | $d[$dAddr + 1];
+                            if ($delta >= 32768) {
+                                $delta = $delta - 65536;
+                            }
+                            if ($ro == 0) {
+                                $gid = ($cp + $delta) % 65536;
+                            } else {
+                                def gAddr as int init $roAddr + $ro + ($cp - $startc) * 2;
+                                def raw as int init ($d[$gAddr] << 8) | $d[$gAddr + 1];
+                                if ($raw != 0) {
+                                    $gid = ($raw + $delta) % 65536;
+                                }
+                            }
+                        }
+                        $i = $segCount;
+                    } else {
+                        $i = $i + 1;
+                    }
+                }
+            }
+            $out[] = $gid;
+        }
+    } elseif ($fmt == 12) {
+        def nGroups as int init ($d[$sub + 12] << 24) | ($d[$sub + 13] << 16) |
+            ($d[$sub + 14] << 8) | $d[$sub + 15];
+        for (def cp in $cps) {
+            def gid as int init 0;
+            def lo as int init 0;
+            def hi as int init $nGroups - 1;
+            while ($lo <= $hi) {
+                def mid as int init ($lo + $hi) // 2;
+                def g as int init $sub + 16 + $mid * 12;
+                def startc as int init ($d[$g] << 24) | ($d[$g + 1] << 16) |
+                    ($d[$g + 2] << 8) | $d[$g + 3];
+                def endc as int init ($d[$g + 4] << 24) | ($d[$g + 5] << 16) |
+                    ($d[$g + 6] << 8) | $d[$g + 7];
+                if ($cp < $startc) {
+                    $hi = $mid - 1;
+                } elseif ($cp > $endc) {
+                    $lo = $mid + 1;
+                } else {
+                    $gid = (($d[$g + 8] << 24) | ($d[$g + 9] << 16) | ($d[$g + 10] << 8) |
+                        $d[$g + 11]) + ($cp - $startc);
+                    $lo = $hi + 1;
+                }
+            }
+            $out[] = $gid;
+        }
+    } else {
+        for (def cp in $cps) {
+            $out[] = 0;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Batch advance-width lookup: the advances (font units) for a list of glyph ids,
+ * in one call. Prefer this over `advanceGid` per glyph (see `glyphIds`).
+ * @param f {Font} the font
+ * @param gids {list of int} the glyph ids
+ * @return {list of int} the advance widths, in order
+ */
+export func advances(f as Font, gids as list of int) {
+    return hmtxBatch($f.data, $f.hmtx, $f.numHMetrics, $gids);
+}
+
+# hmtxBatch reads advances for a list of glyph ids in one pass, indexing the font
+# bytes `d` directly so the batch pays a single font copy. Semantics match
+# advanceOf (a gid past numHMetrics shares the last long metric's advance).
+func hmtxBatch(d as bytes, hmtx as int, nh as int, gids as list of int) {
+    def out as list of int init [];
+    for (def gid in $gids) {
+        def g as int init $gid;
+        if ($g >= $nh) {
+            $g = $nh - 1;
+        }
+        def o as int init $hmtx + $g * 4;
+        $out[] = ($d[$o] << 8) | $d[$o + 1];
+    }
+    return $out;
+}
+
+/**
  * The number of glyphs in the font.
  * @param f {Font} the font
  * @return {int} the glyph count
@@ -620,10 +745,38 @@ export func glyph(f as Font, cp as int) {
     return glyphById($f, $gid, 0);
 }
 
-# glyphById decodes glyph `gid`. `depth` guards composite recursion.
+# Composite glyphs recurse (a component may itself be composite). The depth cap
+# (> 8) bounds nesting but NOT fan-out: a chain of composites each referencing the
+# next many times decodes exponentially many components. COMPOSITE_BUDGET caps the
+# cumulative component count across one glyph decode - threaded through the
+# recursion - so a hostile font is a fast catchable error, not a hang. Real fonts
+# use a handful of components a few levels deep, far under this.
+def const COMPOSITE_BUDGET as int init 4096;
+
+# DecodeResult / CompResult thread the remaining component budget back out of the
+# recursion alongside the decoded value (Jennifer is value-semantic, so a shared
+# mutable counter is not available).
+def struct DecodeResult {
+    glyph as Glyph,
+    budget as int
+};
+def struct CompResult {
+    contours as list of Contour,
+    budget as int
+};
+
+# glyphById decodes glyph `gid`. `depth` guards composite nesting; a fresh
+# component budget is seeded here, one per top-level glyph decode.
 func glyphById(f as Font, gid as int, depth as int) {
+    def r as DecodeResult init decodeGlyphB($f, $gid, $depth, COMPOSITE_BUDGET);
+    return $r.glyph;
+}
+
+# decodeGlyphB is glyphById's budget-threading worker: it returns the decoded
+# glyph plus the component budget left after decoding it.
+func decodeGlyphB(f as Font, gid as int, depth as int, budget as int) {
     if ($f.cff != 0) {
-        return cffGlyphById($f, $gid);
+        return DecodeResult{glyph: cffGlyphById($f, $gid), budget: $budget};
     }
     if ($depth > 8) {
         throw Error{kind: "font", message: "font.glyph: composite nesting too deep", file: "", line: 0, col: 0};
@@ -632,7 +785,7 @@ func glyphById(f as Font, gid as int, depth as int) {
     def rng as list of int init glyfRange($f, $gid);
     if ($rng[1] <= $rng[0]) {
         # empty glyph (no outline), e.g. a space
-        return Glyph{advance: $adv, xMin: 0, yMin: 0, xMax: 0, yMax: 0, contours: []};
+        return DecodeResult{glyph: Glyph{advance: $adv, xMin: 0, yMin: 0, xMax: 0, yMax: 0, contours: []}, budget: $budget};
     }
     def g as int init $f.glyf + $rng[0];
     def numContours as int init sshort($f.data, $g);
@@ -641,11 +794,11 @@ func glyphById(f as Font, gid as int, depth as int) {
     def xMax as int init sshort($f.data, $g + 6);
     def yMax as int init sshort($f.data, $g + 8);
     if ($numContours < 0) {
-        def cs as list of Contour init composite($f, $g + 10, $depth);
-        return Glyph{advance: $adv, xMin: $xMin, yMin: $yMin, xMax: $xMax, yMax: $yMax, contours: $cs};
+        def cr as CompResult init compositeB($f, $g + 10, $depth, $budget);
+        return DecodeResult{glyph: Glyph{advance: $adv, xMin: $xMin, yMin: $yMin, xMax: $xMax, yMax: $yMax, contours: $cr.contours}, budget: $cr.budget};
     }
     def cs as list of Contour init simpleGlyph($f.data, $g + 10, $numContours);
-    return Glyph{advance: $adv, xMin: $xMin, yMin: $yMin, xMax: $xMax, yMax: $yMax, contours: $cs};
+    return DecodeResult{glyph: Glyph{advance: $adv, xMin: $xMin, yMin: $yMin, xMax: $xMax, yMax: $yMax, contours: $cs}, budget: $budget};
 }
 
 # simpleGlyph decodes a simple glyph's contours starting at `p` (just past the
@@ -733,15 +886,22 @@ func simpleGlyph(b as bytes, p as int, numContours as int) {
     return $out;
 }
 
-# composite decodes a composite glyph's components, translating (and scaling)
-# each referenced glyph's contours into place.
-func composite(f as Font, p as int, depth as int) {
+# compositeB decodes a composite glyph's components, translating (and scaling)
+# each referenced glyph's contours into place. It threads the component budget:
+# each component decrements it and a sub-decode continues from the remainder, so
+# the cumulative component count across the whole recursion is bounded.
+func compositeB(f as Font, p as int, depth as int, budget as int) {
     def out as list of Contour init [];
     def pos as int init $p;
+    def bud as int init $budget;
     repeat {
         def flags as int init ushort($f.data, $pos);
         def compGid as int init ushort($f.data, $pos + 2);
         $pos = $pos + 4;
+        $bud = $bud - 1;
+        if ($bud < 0) {
+            throw Error{kind: "font", message: "font.glyph: composite exceeds component budget (malformed / hostile font)", file: "", line: 0, col: 0};
+        }
         def dx as int init 0;
         def dy as int init 0;
         if (($flags & 1) != 0) {
@@ -777,7 +937,9 @@ func composite(f as Font, p as int, depth as int) {
             $d = scaleAt($f.data, $pos + 6);
             $pos = $pos + 8;
         }
-        def sub as Glyph init glyphById($f, $compGid, $depth + 1);
+        def subr as DecodeResult init decodeGlyphB($f, $compGid, $depth + 1, $bud);
+        $bud = $subr.budget;
+        def sub as Glyph init $subr.glyph;
         for (def ci as int init 0; $ci < len($sub.contours); $ci = $ci + 1) {
             def src as list of Point init $sub.contours[$ci].points;
             def moved as list of Point init [];
@@ -794,7 +956,7 @@ func composite(f as Font, p as int, depth as int) {
             break;
         }
     } until (false);
-    return $out;
+    return CompResult{contours: $out, budget: $bud};
 }
 
 func scaleAt(b as bytes, o as int) {

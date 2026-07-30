@@ -33,6 +33,16 @@ func loadCff() {
 # itself forever - it must be rejected (a bounded, catchable error), not hang.
 def const FIXTURE_EVIL as string init "T1RUTwAJAIAAAwAQQ0ZGIOlJdlUAAAIMAAAANU9TLzJBOEHdAAABAAAAAGBjbWFwAAwAlAAAAbgAAAA0aGVhZCw2JtgAAACcAAAANmhoZWEDIf86AAAA1AAAACRobXR4AlgAAAAAAkQAAAAGbWF4cAACUAAAAAD4AAAABm5hbWVgRFF7AAABYAAAAFdwb3N0AAMAAAAAAewAAAAgAAEAAAABAABtzOCLXw889QADA+gAAAAA5o/y/AAAAADmj/L8AAAAAAAAAAAAAAADAAIAAAAAAAAAAQAAAyD/OAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAFAAAAIAAAADAlgBkAAFAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAA/Pz8/AAAAQQBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAQANgABAAAAAAABAAQAAAABAAAAAAACAAcABAADAAEECQABAAgACwADAAEECQACAA4AE0V2aWxSZWd1bGFyAEUAdgBpAGwAUgBlAGcAdQBsAGEAcgAAAAACAAAAAwAAABQAAwABAAAAFAAEACAAAAAEAAQAAQAAAEH//wAAAEH////AAAEAAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAQBAAEBAQVFdmlsAAEBAQitD4vAErARAAAAAQEBAyAdAAAiAAIBAQYL+OyLFg6LixUgHQAAAAJYAAAAAAAA";
 
+# A TrueType font whose composite glyph 'C0' (mapped to 'A') expands 16^4 = 65536
+# components nested only 4 deep - a fan-out bomb the depth cap does not catch,
+# rejected by the cumulative component budget (from scripts, via fontTools).
+def const FIXTURE_COMPBOMB as string init "AAEAAAAKAIAAAwAgT1MvMkE4QXkAAAEoAAAAYGNtYXAADQCUAAABmAAAADRnbHlmoHCdDAAAAdwAAAI+aGVhZF8WQOAAAACsAAAANmhoZWEDIf86AAAA5AAAACRobXR4AfQAAAAAAYgAAAAObG9jYQG/ASoAAAHMAAAADm1heHAABwACAAABCAAAACBuYW1ln79C7wAABBwAAABjcG9zdNr84+EAAASAAAAAPwABAAAAAQAAINAHn18PPPUAAwPoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwACAAAAAAAAAAEAAAMg/zgAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAEAAAAGAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwH0AZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAPz8/PwAAAEEAQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAB9AAAAAAAAAAAAAAAAAAAAAAAAgAAAAMAAAAUAAMAAQAAABQABAAgAAAABAAEAAEAAABB//8AAABB////wQABAAAAAAAAAAAACwBQAJUA2gEfAAAAAQAAAAAAZABkAAMAADEzNSNkZGQA//8AAAAAAGQAZAAqAAMAAEAAACoAAwAAQAAAKgADAABAAAAqAAMAAEAAACoAAwAAQAAAKgADAABAAAAqAAMAAEAAACoAAwAAQAAAKgADAABAAAAqAAMAAEAAACoAAwAAQAAAKgADAABAAAAqAAMAAEAAACoAAwAAQAAAKgADAABAAAAKAAMAAEAA//8AAAAAAGQAZAAqAAQAAEAAACoABAAAQAAAKgAEAABAAAAqAAQAAEAAACoABAAAQAAAKgAEAABAAAAqAAQAAEAAACoABAAAQAAAKgAEAABAAAAqAAQAAEAAACoABAAAQAAAKgAEAABAAAAqAAQAAEAAACoABAAAQAAAKgAEAABAAAAKAAQAAEAA//8AAAAAAGQAZAAqAAUAAEAAACoABQAAQAAAKgAFAABAAAAqAAUAAEAAACoABQAAQAAAKgAFAABAAAAqAAUAAEAAACoABQAAQAAAKgAFAABAAAAqAAUAAEAAACoABQAAQAAAKgAFAABAAAAqAAUAAEAAACoABQAAQAAAKgAFAABAAAAKAAUAAEAA//8AAAAAAGQAZAAqAAEAAEAAACoAAQAAQAAAKgABAABAAAAqAAEAAEAAACoAAQAAQAAAKgABAABAAAAqAAEAAEAAACoAAQAAQAAAKgABAABAAAAqAAEAAEAAACoAAQAAQAAAKgABAABAAAAqAAEAAEAAACoAAQAAQAAAKgABAABAAAAKAAEAAEAAAAAAAAAEADYAAQAAAAAAAQAIAAAAAQAAAAAAAgAHAAgAAwABBAkAAQAQAA8AAwABBAkAAgAOAB9Db21wQm9tYlJlZ3VsYXIAQwBvAG0AcABCAG8AbQBiAFIAZQBnAHUAbABhAHIAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgAAAQIBAwEEAQUBBgRiYXNlAkMwAkMxAkMyAkMzAA==";
+
+# A CFF font whose glyph (codepoint 66) charstring pushes 58 operands with no
+# consuming operator - it overflows the 48-entry Type2 operand stack and is
+# rejected (from scripts: byte-surgery on the CFF fixture's CharStrings INDEX).
+def const FIXTURE_CFFBOMB as string init "T1RUTwAJAIAAAwAQQ0ZGIGUglzAAAAIoAAAAl09TLzJHZEL2AAABAAAAAGBjbWFwAAwAlQAAAdQAAAA0aGVhZC6OHlgAAACcAAAANmhoZWEF1AH2AAAA1AAAACRobXR4ArwAZAAAAsAAAAAIbWF4cAADUAAAAAD4AAAABm5hbWXxQu4lAAABYAAAAHJwb3N0AAMAAAAAAggAAAAgAAEAAAABAAA8620GXw889QADA+gAAAAA5o/tXgAAAADmj+1eAGQAAAH0ArwAAAADAAIAAAAAAAAAAQAAAyD/OABaAlgAZABkAfQAAQAAAAAAAAAAAAAAAAAAAAEAAFAAAAMAAAACAlgBkAAFAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAA/Pz8/AAAAQQBCAwz/JABkAAAAAAAAAAAAAAAAAfQCvAAAACAAAAAAAAQANgABAAAAAAABAA0AAAABAAAAAAACAAcADQADAAEECQABABoAFAADAAEECQACAA4ALkplbkZpeHR1cmVDRkZSZWd1bGFyAEoAZQBuAEYAaQB4AHQAdQByAGUAQwBGAEYAUgBlAGcAdQBsAGEAcgAAAAAAAgAAAAMAAAAUAAMAAQAAABQABAAgAAAABAAEAAEAAABC//8AAABB////wAABAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAEAQABAQEOSmVuRml4dHVyZUNGRgABAQET+BsC74v4iPlQBcwPi/cHEtARAAEBAQ5KZW5GaXh0dXJlQ0ZGAAABACIBAAMBAQQRTPjsDvjs7xb4JAb7XPlQBQ6Li4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLDgACWAAAAGQAZA==";
+
 func testHeaderAndName() {
     def f as Font init loadFixture();
     testing.assertEqual(unitsPerEm($f), 1000);
@@ -48,6 +58,23 @@ func testAdvances() {
     testing.assertEqual(advance($f, 67), 700);       # C
     # A codepoint the font lacks maps to glyph 0 (.notdef, advance 600).
     testing.assertEqual(advance($f, 90), 600);
+}
+
+# The batch accessors (glyphIds / advances) must return exactly what the
+# per-glyph glyphId / advanceGid return - they exist only to avoid copying the
+# whole font once per character (they index the font bytes in a single pass).
+func testBatchAccessorsMatchPerChar() {
+    def f as Font init loadFixture();
+    def cps as list of int init [65, 66, 67, 90];   # A, B, C, and an absent codepoint
+    def gids as list of int init glyphIds($f, $cps);
+    def advs as list of int init advances($f, $gids);
+    def i as int init 0;
+    while ($i < len($cps)) {
+        testing.assertEqual($gids[$i], glyphId($f, $cps[$i]));
+        testing.assertEqual($advs[$i], advanceGid($f, $gids[$i]));
+        $i = $i + 1;
+    }
+    testing.assertEqual($gids[3], 0);                # absent codepoint -> .notdef
 }
 
 func testSimpleGlyphPath() {
@@ -220,4 +247,25 @@ func testCffRecursionGuardThrows() {
 func outlineEvil() {
     def f as Font init parse(encoding.fromText(FIXTURE_EVIL, "base64"));
     glyphPath($f, 65);
+}
+
+# A composite glyph whose components expand exponentially (16^4 = 65536 here,
+# nested only 4 deep so the depth cap is not what stops it) is rejected by the
+# cumulative component budget - a fast catchable error, not a hang.
+func testCompositeBudgetThrows() {
+    testing.assertThrows("outlineCompBomb", "font");
+}
+func outlineCompBomb() {
+    def f as Font init parse(encoding.fromText(FIXTURE_COMPBOMB, "base64"));
+    glyphPath($f, 65);   # 'A' -> the bomb root glyph
+}
+
+# A CFF charstring that pushes far more operands than the Type2 stack allows is
+# rejected by the operand-stack cap, not left to grow without bound.
+func testCffOperandStackThrows() {
+    testing.assertThrows("outlineCffBomb", "font");
+}
+func outlineCffBomb() {
+    def f as Font init parse(encoding.fromText(FIXTURE_CFFBOMB, "base64"));
+    glyphPath($f, 66);   # the operand-bomb glyph
 }

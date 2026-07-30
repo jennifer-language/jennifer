@@ -134,6 +134,33 @@ func fail(msg as string) {
     throw Error{kind: "pdfwriter", message: $msg, file: "", line: 0, col: 0};
 }
 
+# checkName validates a font / image resource name: a letter, then letters or
+# digits (the documented contract). Resource names are written into the PDF
+# content stream and the /Font / /XObject resource dictionaries UNESCAPED, so
+# this is the injection guard - an unchecked name like `X>> /OpenAction <<...`
+# would otherwise break out of the dictionary and inject PDF structure.
+func checkName(name as string, what as string) {
+    def raw as bytes init convert.bytesFromString($name, "utf-8");
+    def ok as bool init len($raw) > 0;
+    def i as int init 0;
+    while ($i < len($raw)) {
+        def b as int init $raw[$i];
+        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
+        def digit as bool init $b >= 48 and $b <= 57;
+        if ($i == 0) {
+            if (not $alpha) {
+                $ok = false;
+            }
+        } elseif (not ($alpha or $digit)) {
+            $ok = false;
+        }
+        $i = $i + 1;
+    }
+    if (not $ok) {
+        fail($what + " name must be a letter then letters/digits (e.g. \"Body\"), got: " + $name);
+    }
+}
+
 # standardFonts lists the 14 base fonts every PDF viewer provides.
 func standardFonts() {
     return [
@@ -339,6 +366,7 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
  * @return {LoadedFont} the loaded font
  */
 export func loadFont(name as string, data as bytes) {
+    checkName($name, "font");
     def parsed as font.Font init font.parse($data);
     if (font.isCff($parsed)) {
         fail("loadFont: only a TrueType (glyf) font can be embedded; '" + $name +
@@ -361,8 +389,13 @@ export func addFont(doc as Document, lf as LoadedFont) {
 }
 
 # hexGid renders a glyph id as four uppercase hex digits (a 2-byte Identity-H
-# character code).
+# character code). A glyph id past 0xFFFF cannot be represented in the 2-byte
+# code and must not silently truncate, so it is rejected.
 func hexGid(gid as int) {
+    if ($gid < 0 or $gid > 0xFFFF) {
+        fail("textUnicode: glyph id " + convert.toString($gid) +
+            " is outside the 2-byte Identity-H range (font has too many glyphs to embed this way)");
+    }
     def b as bytes;
     $b[] = ($gid >> 8) & 0xff;
     $b[] = $gid & 0xff;
@@ -383,12 +416,17 @@ func hexGid(gid as int) {
  * @return {Page} a fresh page with the text added
  */
 export func textUnicode(pg as Page, x as int, y as int, lf as LoadedFont, size as int, str as string) {
-    def hex as string init "";
+    def cps as list of int init [];
     for (def ch in strings.chars($str)) {
-        def cp as int init convert.toCodepoint($ch);
-        def gid as int init font.glyphId($lf.f, $cp);
-        $hex = $hex + hexGid($gid);
-        $pg.glyphUses = lists.push($pg.glyphUses, GlyphUse{font: $lf.name, gid: $gid, cp: $cp});
+        $cps[] = convert.toCodepoint($ch);
+    }
+    def gids as list of int init font.glyphIds($lf.f, $cps);   # one font copy, not one per char
+    def hex as string init "";
+    def i as int init 0;
+    while ($i < len($cps)) {
+        $hex = $hex + hexGid($gids[$i]);
+        $pg.glyphUses = lists.push($pg.glyphUses, GlyphUse{font: $lf.name, gid: $gids[$i], cp: $cps[$i]});
+        $i = $i + 1;
     }
     $pg.content = $pg.content + "BT\n/" + $lf.name + " " + convert.toString($size) + " Tf\n" +
         convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex + "> Tj\nET\n";
@@ -623,6 +661,13 @@ func parsePng(name as string, data as bytes) {
             convert.fromCodepoint($data[$i + 5]) + convert.fromCodepoint($data[$i + 6]) +
             convert.fromCodepoint($data[$i + 7]);
         def body as int init $i + 8;
+        # a chunk whose declared length runs past the buffer is truncated / hostile
+        if ($clen < 0 or $body + $clen > $n) {
+            fail("loadImage: '" + $name + "' has a truncated or oversized PNG chunk");
+        }
+        if ($ctype == "IHDR" and $clen < 13) {
+            fail("loadImage: '" + $name + "' has a malformed PNG IHDR chunk");
+        }
         if ($ctype == "IHDR") {
             $width = beU32($data, $body);
             $height = beU32($data, $body + 4);
@@ -662,8 +707,8 @@ func parsePng(name as string, data as bytes) {
             decode: "", data: $idat, smask: $none, hasSmask: false};
     }
     if ($colorType == 3) {
-        if (len($plte) == 0) {
-            fail("loadImage: '" + $name + "' is a palette PNG with no PLTE chunk");
+        if (len($plte) < 3) {
+            fail("loadImage: '" + $name + "' is a palette PNG with no usable PLTE chunk");
         }
         def hival as int init (len($plte) // 3) - 1;
         def cs as string init "[/Indexed /DeviceRGB " + convert.toString($hival) + " <" +
@@ -681,6 +726,11 @@ func parsePng(name as string, data as bytes) {
             $ch = 4;
         }
         def raw as bytes init compress.unpack($idat, "zlib");
+        # the inflated data must hold height * (1 filter byte + width*bpp) bytes;
+        # reject a dimension / data mismatch cleanly before de-filtering
+        if (len($raw) < $height * ($width * $ch + 1)) {
+            fail("loadImage: '" + $name + "' PNG pixel data is shorter than its dimensions imply");
+        }
         def unf as bytes init pngUnfilter($raw, $width, $height, $ch);
         def colorCh as int init $ch - 1;
         def colorBytes as bytes;
@@ -723,6 +773,7 @@ func parsePng(name as string, data as bytes) {
  * @throws {Error} kind "pdfwriter" if the data is not a supported PNG / JPEG
  */
 export func loadImage(name as string, data as bytes) {
+    checkName($name, "image");
     if (len($data) < 12) {
         fail("loadImage: '" + $name + "' is too short to be an image");
     }
@@ -830,10 +881,15 @@ export func measureText(font as string, size as int, str as string) {
  */
 export func measureTextUnicode(lf as LoadedFont, size as int, str as string) {
     def upem as int init font.unitsPerEm($lf.f);
-    def total as int init 0;
+    def cps as list of int init [];
     for (def ch in strings.chars($str)) {
-        def gid as int init font.glyphId($lf.f, convert.toCodepoint($ch));
-        $total = $total + font.advanceGid($lf.f, $gid);
+        $cps[] = convert.toCodepoint($ch);
+    }
+    # two whole-font copies for the batch, not two per character
+    def advs as list of int init font.advances($lf.f, font.glyphIds($lf.f, $cps));
+    def total as int init 0;
+    for (def a in $advs) {
+        $total = $total + $a;
     }
     return ($total * $size) / $upem;
 }
@@ -1149,10 +1205,12 @@ func scaleMetric(v as int, upem as int) {
 }
 
 # aggregateGlyphs collects every glyph an embedded font drew across all pages,
-# returning a map from glyph id to a representative source codepoint.
-func aggregateGlyphs(doc as Document, fontName as string) {
+# returning a map from glyph id to a representative source codepoint. It takes the
+# pages (not the whole Document) so it does not copy every embedded font's bytes
+# on each call.
+func aggregateGlyphs(pages as list of Page, fontName as string) {
     def m as map of int to int init {};
-    for (def pg in $doc.pages) {
+    for (def pg in $pages) {
         for (def gu in $pg.glyphUses) {
             if ($gu.font == $fontName and not maps.has($m, $gu.gid)) {
                 $m[$gu.gid] = $gu.cp;
@@ -1174,10 +1232,13 @@ func sortedGids(m as map of int to int) {
 # buildW renders a CIDFontType2 `W` widths array for the used glyphs (each in
 # 1000-unit em space).
 func buildW(fe as font.Font, gids as list of int, upem as int) {
+    def advs as list of int init font.advances($fe, $gids);   # one font copy, not one per glyph
     def parts as list of string init [];
-    for (def gid in $gids) {
-        def w as int init scaleMetric(font.advanceGid($fe, $gid), $upem);
-        $parts[] = convert.toString($gid) + " [" + convert.toString($w) + "]";
+    def i as int init 0;
+    while ($i < len($gids)) {
+        def w as int init scaleMetric($advs[$i], $upem);
+        $parts[] = convert.toString($gids[$i]) + " [" + convert.toString($w) + "]";
+        $i = $i + 1;
     }
     return strings.join($parts, " ");
 }
@@ -1391,7 +1452,7 @@ export func render(doc as Document) {
         def fe as font.Font init $lf.f;
         def upem as int init font.unitsPerEm($fe);
         def base as string init pdfName(font.name($fe));
-        def gmap as map of int to int init aggregateGlyphs($doc, $lf.name);
+        def gmap as map of int to int init aggregateGlyphs($doc.pages, $lf.name);
         def gids as list of int init sortedGids($gmap);
 
         # FontFile2 (the raw font program, FlateDecode-compressed)

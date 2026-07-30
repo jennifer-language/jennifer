@@ -13,12 +13,18 @@
 use io;
 use os;
 use fs;
+use path;
 import "../../modules/pdfwriter.j" as pdf;
 
 def out as string init "pdfwriter_demo.pdf";
 if (len(os.ARGS) > 1) {
     $out = os.ARGS[1];
 }
+
+# Resolve the committed test fixtures relative to THIS script's directory, not
+# the process working directory, so the demo runs from anywhere (fs paths are
+# cwd-relative; os.ARGS[0] is this file's path).
+def testdata as string init path.join(path.dir(os.ARGS[0]), "..", "..", "modules", "testdata");
 
 # Page 1: a title, body text, and some graphics.
 def cover as pdf.Page init pdf.page(612, 792);
@@ -40,7 +46,7 @@ $cover = pdf.line($cover, 72, 600, 540, 600);
 
 # An embedded raster image (PNG): loadImage detects PNG / JPEG, drawImage scales
 # it into the given box. Point loadImage at any .png / .jpg to embed your own.
-def logo as pdf.Image init pdf.loadImage("Logo", fs.readBytes("../../modules/testdata/img_rgba.png"));
+def logo as pdf.Image init pdf.loadImage("Logo", fs.readBytes(path.join($testdata, "img_rgba.png")));
 $cover = pdf.drawImage($cover, $logo, 72, 500, 96, 72);
 $cover = pdf.text($cover, 180, 530, "Helvetica", 10, "<- an embedded PNG (with alpha)");
 
@@ -66,8 +72,8 @@ $notes = pdf.textBlock($notes, 50, 730, 495, "Helvetica", 12, 16, $para, "justif
 # An embedded TrueType font: the text is drawn from the font's own glyphs and
 # stays selectable / copyable. The committed test fixture covers A/B/C; point
 # loadFont at any .ttf (DejaVuSans, a CJK font, ...) to render full Unicode.
-def body as pdf.LoadedFont init pdf.loadFont("Embedded", fs.readBytes("../../modules/testdata/font_fixture.ttf"));
-$notes = pdf.textUnicode($notes, 50, 730, $body, 24, "ABC");
+def body as pdf.LoadedFont init pdf.loadFont("Embedded", fs.readBytes(path.join($testdata, "font_fixture.ttf")));
+$notes = pdf.textUnicode($notes, 50, 660, $body, 24, "ABC");
 
 def doc as pdf.Document init pdf.document();
 $doc = pdf.info($doc, "Title", "Jennifer PDF demo");
