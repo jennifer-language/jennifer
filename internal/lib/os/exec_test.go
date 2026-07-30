@@ -71,6 +71,107 @@ func TestRunNonZeroExitIsValue(t *testing.T) {
 	}
 }
 
+// resultStdout pulls stdout + exit code out of an os.Result value.
+func resultStdout(v interpreter.Value) (string, int64) {
+	var out string
+	var code int64
+	for _, f := range v.Fields {
+		switch f.Name {
+		case "stdout":
+			out = f.Value.Str
+		case "exitCode":
+			code = f.Value.Int
+		}
+	}
+	return out, code
+}
+
+func TestRunFeedsStringStdin(t *testing.T) {
+	skipIfNotLinux(t)
+	v, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/bin/cat"), interpreter.StringVal("hello\nworld\n")})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	out, code := resultStdout(v)
+	if out != "hello\nworld\n" {
+		t.Errorf("stdout = %q, want the fed stdin echoed back", out)
+	}
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
+func TestRunFeedsBytesStdin(t *testing.T) {
+	skipIfNotLinux(t)
+	v, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/usr/bin/tr", "a-z", "A-Z"), interpreter.BytesVal([]byte("shout"))})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out, _ := resultStdout(v); out != "SHOUT" {
+		t.Errorf("stdout = %q, want SHOUT (bytes stdin transformed)", out)
+	}
+}
+
+func TestRunEmptyStdin(t *testing.T) {
+	skipIfNotLinux(t)
+	v, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/usr/bin/wc", "-c"), interpreter.StringVal("")})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out, _ := resultStdout(v); strings.TrimSpace(out) != "0" {
+		t.Errorf("wc -c of empty stdin = %q, want 0", out)
+	}
+}
+
+func TestRunLargeStdinCountedAndOutputCapped(t *testing.T) {
+	skipIfNotLinux(t)
+	// 20 MiB of stdin: it is fed in full (wc counts every byte) and, when echoed
+	// back by cat, the OUTPUT stays capped at 16 MiB - large input does not hang
+	// or blow the output contract.
+	big := strings.Repeat("A", 20<<20)
+	v, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/usr/bin/wc", "-c"), interpreter.StringVal(big)})
+	if err != nil {
+		t.Fatalf("wc err: %v", err)
+	}
+	if out, _ := resultStdout(v); strings.TrimSpace(out) != "20971520" {
+		t.Errorf("wc -c of 20 MiB stdin = %q, want 20971520 (whole input fed)", out)
+	}
+	v2, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/bin/cat"), interpreter.StringVal(big)})
+	if err != nil {
+		t.Fatalf("cat err: %v", err)
+	}
+	out2, _ := resultStdout(v2)
+	if !strings.Contains(out2, "[output truncated at 16 MiB]") {
+		t.Errorf("echoing 20 MiB stdin should cap output at 16 MiB; got %d bytes", len(out2))
+	}
+}
+
+func TestRunStdinWrongTypeErrors(t *testing.T) {
+	skipIfNotLinux(t)
+	_, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/bin/cat"), interpreter.IntVal(5)})
+	if err == nil {
+		t.Fatal("expected an error for a non-string/bytes stdin")
+	}
+	if !strings.Contains(err.Error(), "stdin must be a string or bytes") {
+		t.Errorf("error = %v, want a stdin-type message", err)
+	}
+}
+
+func TestRunTooManyArgsErrors(t *testing.T) {
+	skipIfNotLinux(t)
+	_, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/bin/cat"), interpreter.StringVal("x"), interpreter.StringVal("y")})
+	if err == nil {
+		t.Fatal("expected an error for 3 args")
+	}
+}
+
 func TestRunSeparatesStdoutFromStderr(t *testing.T) {
 	skipIfNotLinux(t)
 	v, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{

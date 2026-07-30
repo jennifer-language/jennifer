@@ -31,7 +31,7 @@ function - see
 | `os.setEnv(name, value)` | null   | Sets an environment variable for this process (and any child it later spawns). An invalid name (empty, or containing `=` / NUL) is a positioned error. |
 | `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
 | `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
-| `os.run(argv)`     | `os.Result`  | **Blocking.** Run `argv` to completion; capture stdout/stderr. See "External programs" below. |
+| `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr. An optional `stdin` (`string` or `bytes`) is fed to the child then closed. See "External programs" below. |
 | `os.spawn(argv)`   | `os.Process` | **Non-blocking.** Start `argv`, return a handle.                                    |
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent.       |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
@@ -200,6 +200,26 @@ def r as os.Result init os.run(["echo", "hello, world"]);
 io.printf("%s", $r.stdout);
 io.printf("exit: %d\n", $r.exitCode);
 ```
+
+**Feeding stdin.** An optional second argument - a `string` or `bytes` - is
+written to the child's standard input, which is then closed (the child sees
+EOF). This drives a filter (`sort`, `jq`, `gzip`) or any program that reads
+stdin, in one call:
+
+```jennifer
+def up as os.Result init os.run(["tr", "a-z", "A-Z"], "shout");
+io.printf("%s", $up.stdout);                 # SHOUT
+
+def sorted as os.Result init os.run(["sort"], "banana\napple\ncherry\n");
+io.printf("%s", $sorted.stdout);             # apple / banana / cherry
+```
+
+It is **deadlock-free**: the whole input is buffered up front and the output is
+drained as the child runs, so neither side blocks on a full pipe. The captured
+output is still capped at 16 MiB per stream (a large input can produce a larger
+output, which truncates with the usual marker). This is the "feed all input, read
+all output" one-shot form; a persistent, interleaved stdin/stdout session on a
+spawned process is a separate future capability.
 
 `os.spawn(argv)` is the asynchronous form. It returns immediately
 with an `os.Process` handle. Drain the streams with `os.wait`

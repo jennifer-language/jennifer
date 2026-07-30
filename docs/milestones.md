@@ -1177,41 +1177,28 @@ drove edge fixes: `insideForHeader` O(n^2) -> O(1) (a `forHeader` wrap-frame fla
 Left: `Token.Raw` captured on every lex (within noise). **Pre-1.0 break**
 (canonical output changed).
 
-### M23.10 - interactive stdin for `os.run` / `os.spawn`
+### M23.10 - interactive stdin for `os.run` / `os.spawn` (compacted)
 
-**Planned.** `os.run(argv)` captures a child's stdout / stderr but cannot feed its
-**stdin**, and `os.spawn` -> `os.Process` exposes no stdin pipe. So a Jennifer
-program cannot drive a subprocess that reads standard input - `sort` / `jq` /
-`gzip` as a filter, or an MCP server's stdio transport (the M23.13 `mcp` module's
-stdio subprocess client is blocked on exactly this).
-
-- **`os.run(argv, stdin)` (one-shot, the primary deliverable).** An optional
-  trailing argument - a `string` (or `bytes`) written to the child's standard
-  input, which is then **closed** (the child sees EOF). The child runs to
-  completion; `stdout` / `stderr` are captured into `os.Result` exactly as today.
-  **Deadlock-free by construction**: the whole input is buffered up front and the
-  output drained after the child exits (both streams already capped at 16 MiB per
-  the existing `os.run` contract). `os.run(argv)` (one argument) is unchanged - a
-  variadic builtin accepting 1 or 2 args (Jennifer has no optional parameters), so
-  the Go layer validates the count. This is the form that unblocks a **stateless
-  subprocess exchange** (feed all input, read all output), including the M23.13
-  MCP stdio client: write `initialize` + `notifications/initialized` + the call as
-  newline-delimited JSON, close stdin, read the newline-delimited replies and
-  correlate by id.
-- **Follow-on (harder, not in this milestone): interactive streaming pipes on a
-  spawned `Process`.** A persistent, interleaved session - write a request, read
-  its reply, write another - needs `os.writeStdin(p, data)` / `os.closeStdin(p)` /
-  `os.readStdout(p)` over goroutine-managed pipe buffers, with real deadlock
-  avoidance (a child that fills its stdout pipe while the parent is still writing
-  stdin blocks both). The one-shot form above covers every stateless case, so the
-  streaming form is parked as a later piece / horizon draft, not scoped here.
-
-Build-tag inherited: `os/exec` is default-binary-only already (`jennifer-tiny`
-stubs `os.run` / `spawn`), so the stdin addition rides the same split with no
-TinyGo concern. Close-out: `internal/lib/os/exec.go` + Go tests (a child that
-echoes / transforms its stdin, the empty-input and over-16-MiB-input cases), the
-`os.md` doc + the `os.Result` example, and then M23.13 can add its stdio
-subprocess client (`mcp.connectStdio`) on top.
+**Done.** `os.run(argv)` captured a child's stdout / stderr but could not feed its
+**stdin** (so a Jennifer program could not drive a `sort` / `jq` / `gzip` filter
+or an MCP server's stdio transport). `os.run(argv, stdin)` adds an optional
+trailing `string` / `bytes` written to the child's stdin then closed (EOF), with
+`stdout` / `stderr` captured into `os.Result` as before - a variadic builtin, so
+one-arg calls are unchanged (a non-string/bytes stdin or a third argument is a
+typed error). **Deadlock-free by construction** (input buffered as a
+`bytes.Reader`, output drained into the 16 MiB-capped buffers as the child runs);
+a child that ignores or partially reads stdin returns a clean `Result`, not a
+broken-pipe error. This unblocks a stateless subprocess exchange (feed all input,
+read all output), including a future M23.13 `mcp.connectStdio`. In
+`internal/lib/os/exec.go` (a `stdinBytes` extractor + the 1-or-2-arg `runFn`);
+Go tests cover string/bytes/empty stdin, a 20 MiB input counted in full with the
+echoed output capped at 16 MiB, the partial-consume EPIPE case, and the
+wrong-type / arity errors (run under `-race`); `os.md` updated; both binaries
+build (`os/exec` is default-binary-only already, so the stub split is inherited).
+**Deferred:** interactive streaming pipes on a spawned `Process`
+(`writeStdin` / `closeStdin` / `readStdout`) for a persistent interleaved session
+needs real deadlock avoidance and is parked as a later piece; the one-shot form
+covers every stateless case.
 
 ### M23.11 - `jsonrpc` module
 

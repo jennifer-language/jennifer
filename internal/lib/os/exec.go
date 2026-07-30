@@ -156,24 +156,51 @@ func extractPid(fnName string, v interpreter.Value) (int64, error) {
 	return 0, fmt.Errorf("%s: os.Process has no pid field", fnName)
 }
 
-// runFn implements `os.run(argv) -> os.Result`. Blocking: runs the
-// command to completion and returns the captured streams and exit
-// code as a single result struct. A non-zero exit code is NOT an
-// error - the caller branches on `$result.exitCode`. Boundary
-// failures (program not found, not executable, fork/exec failure)
-// are typed runtime errors.
+// stdinBytes extracts the optional `stdin` argument to os.run: a string or
+// bytes value, fed to the child's standard input (which is then closed, so the
+// child sees EOF). Any other kind is a typed runtime error.
+func stdinBytes(fnName string, v interpreter.Value) ([]byte, error) {
+	switch v.Kind {
+	case interpreter.KindString:
+		return []byte(v.Str), nil
+	case interpreter.KindBytes:
+		return v.Bytes, nil
+	default:
+		return nil, fmt.Errorf("%s: stdin must be a string or bytes, got %s", fnName, v.Kind)
+	}
+}
+
+// runFn implements `os.run(argv[, stdin]) -> os.Result`. Blocking: runs the
+// command to completion and returns the captured streams and exit code as a
+// single result struct. An optional second argument (a string or bytes) is
+// written to the child's stdin, then closed. A non-zero exit code is NOT an
+// error - the caller branches on `$result.exitCode`. Boundary failures (program
+// not found, not executable, fork/exec failure) are typed runtime errors.
+//
+// Deadlock-free by construction: the whole stdin is buffered up front (a
+// bytes.Reader) and the output is drained into the capped buffers as the child
+// runs, so neither side blocks on a full pipe. Output stays capped at 16 MiB per
+// stream (capBuffer).
 func runFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if !execSupported() {
 		return interpreter.Null(), execUnsupportedErr("os.run")
 	}
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("os.run expects 1 argument (argv list), got %d", len(args))
+	if len(args) < 1 || len(args) > 2 {
+		return interpreter.Null(), fmt.Errorf(
+			"os.run expects 1 argument (argv list) or 2 (argv, stdin), got %d", len(args))
 	}
 	argv, err := argvFromList("os.run", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	if len(args) == 2 {
+		in, serr := stdinBytes("os.run", args[1])
+		if serr != nil {
+			return interpreter.Null(), serr
+		}
+		cmd.Stdin = bytes.NewReader(in)
+	}
 	var outBuf, errBuf capBuffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf

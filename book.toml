@@ -8,7 +8,7 @@
 
 [book]
 title = "Jennifer Programming Language"
-description = "Small, experimental, interpreted programming language built on a TinyGo interpreter."
+description = "A small, batteries-included interpreted programming language, written in Go and shipping as one self-contained static binary (plus a constrained, embeddable TinyGo build)."
 authors = ["mplx <jennifer@mplx.dev>"]
 language = "en"
 src = "docs"
