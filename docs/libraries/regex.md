@@ -54,6 +54,11 @@ if ($m.start == -1) {
 
 ## Worked examples
 
+**Write patterns as raw single-quoted literals** (`'\d+'`, not `"\\d+"`). A
+single-quoted string is raw - backslashes are literal - so a pattern reads exactly
+as its RE2 form, with no double-escaping. The cooked double-quoted form works too
+(every `\` doubled), but the raw form is the idiom throughout these examples.
+
 ### Match a whole string
 
 ```jennifer
@@ -65,7 +70,7 @@ if (regex.matches("^[A-Z][a-zA-Z]*$", $name)) {
 ### Extract with positional groups
 
 ```jennifer
-def m as regex.Match init regex.find("(\\d+):(\\d+)", "PORT=8080:9090");
+def m as regex.Match init regex.find('(\d+):(\d+)', "PORT=8080:9090");
 if ($m.start >= 0) {
     io.printf("first=%s second=%s\n", $m.groups[0], $m.groups[1]);
 }
@@ -95,7 +100,7 @@ named group is present without erroring on missing keys.
 ### Iterate every match
 
 ```jennifer
-def all as list of regex.Match init regex.findAll("\\d+", "a1 b22 c333");
+def all as list of regex.Match init regex.findAll('\d+', "a1 b22 c333");
 for (def m in $all) {
     io.printf("%s at %d..%d\n", $m.text, $m.start, $m.end);
 }
@@ -108,11 +113,11 @@ for (def m in $all) {
 literal `$`.
 
 ```jennifer
-def r as string init regex.replace("(\\d+)", "port 8080", "[$1]");
+def r as string init regex.replace('(\d+)', "port 8080", "[$1]");
 # $r is "port [8080]"
 
 def r2 as string init regex.replace(
-    "(?P<host>\\w+):(?P<port>\\d+)", "example.com:80",
+    '(?P<host>\w+):(?P<port>\d+)', "example.com:80",
     "host=${host} port=${port}");
 # $r2 is "host=example.com port=80"
 ```
@@ -120,7 +125,7 @@ def r2 as string init regex.replace(
 ### Split on a pattern
 
 ```jennifer
-def parts as list of string init regex.split("\\s+", "one   two  three");
+def parts as list of string init regex.split('\s+', "one   two  three");
 # $parts is ["one", "two", "three"]
 ```
 

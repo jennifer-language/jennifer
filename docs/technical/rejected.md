@@ -914,3 +914,28 @@ the `selectFolder` count and IDLE `EXISTS` / `EXPUNGE` push numbers - never as a
 addressing input a caller hands back in. A session-level `useUid` mode (the
 imapclient approach) was also considered and rejected: it fixes stance #1 but
 doubles down on stance #2's hidden-mode problem.
+
+## A `r"..."` raw-string prefix (Python-style)
+
+Considered when splitting the two string delimiters so each does one job (raw vs
+cooked, M23.14). Python spells a raw string `r"..."`; Jennifer could have kept
+both delimiters cooked and added an `r` prefix for the raw variant.
+
+Rejected in favor of **making the delimiter itself the mode** - `'...'` is raw,
+`"..."` is cooked - because:
+
+- **The delimiter is already free.** Before M23.14 the two quote characters were
+  fully redundant (both cooked the same escapes), which stance #1 rules out. Giving
+  each a distinct job spends an existing, otherwise-wasted lexical distinction
+  rather than inventing new syntax.
+- **No new lexer state.** A prefix needs the lexer (and every tool that classifies
+  a token) to look *behind* the opening quote for an `r`, and to decide what a bare
+  `r` identifier immediately before a string means. Branching on the quote
+  character (`raw := quote == '\''`) is a one-line, local change with no ambiguity.
+- **One obvious way.** A prefix would leave *three* ways to write a string
+  (`"..."`, `'...'`, `r"..."`) and a redundant `r'...'`. The delimiter-is-the-mode
+  rule gives exactly two, one per job.
+
+The one ergonomic cost - a raw literal cannot contain a `'` - is handled by
+switching to the cooked form (`"it's"`), which is rare in practice. See
+[M23.14](../milestones.md).

@@ -33,8 +33,11 @@ bare `!` is a positioned lex error whose message points at both `not` and `!=`.
 `RETURN` is the keyword behind `return [EXPR];` (see [grammar.md](grammar.md)).
 
 `VARREF` carries the variable name *without* the leading `$`.
-`STRING` carries the value *with* escape sequences already processed and *without*
-surrounding quotes.
+`STRING` carries the value *without* surrounding quotes. A **double-quoted**
+literal is **cooked** - escape sequences are already processed. A
+**single-quoted** literal is **raw** - its content is verbatim (no escape
+processing) from the opening `'` to the next `'`. The two delimiters are thus not
+interchangeable; `readString` branches on the quote (`raw := quote == '\''`).
 
 ## Whitespace handling
 
@@ -50,9 +53,10 @@ semantically identical program.
 The only place whitespace is *retained* is inside string literals -
 `readString` reads byte-by-byte until the closing quote, so a literal
 space, tab, or even a raw `\n` between the quotes becomes part of
-the string value. Escape sequences (`\n`, `\t`, ...) are the
-conventional spelling; raw multi-line literals work too but aren't
-the canonical form `fmt` produces.
+the string value (in both the cooked `"..."` and the raw `'...'` form).
+In a raw single-quoted literal a backslash is just a byte, so `'\n'` is the
+two-character string `\n`, and a multi-line block needs no escapes at all; `fmt`
+re-emits every literal in its original delimiter and spelling (via `Token.Raw`).
 
 Comments and blank lines are emitted as **trivia tokens**
 (`TOKEN_COMMENT_LINE`, `TOKEN_COMMENT_BLOCK`,

@@ -79,8 +79,12 @@ types), `task of T` (a handle to a `spawn`ed computation).
 - **int** literals: `42`, `0xff`, `0o755`, `0b1010`, with `_` digit separators
   (`1_000_000`, `0xDEAD_BEEF`).
 - **float** literals: need a `.`: `3.14`, `0.5` (and `_` separators).
-- **string** literals: `"..."` or `'...'`; both parse escapes
-  `\n \r \t \\ \" \' \0`.
+- **string** literals: two delimiters, one job each. `"..."` is **cooked** -
+  escape sequences `\n \r \t \\ \" \' \0` are processed. `'...'` is **raw** - no
+  escape processing at all: every byte to the next `'` is literal (backslashes and
+  newlines included), so `'\d+\.\d+'` is an 8-char string and a multi-line block is
+  just a `'...'` that spans newlines. To put a `'` inside a string, use the cooked
+  form: `"it's"`. There is no `r"..."` prefix.
 - **bool**: `true`, `false`. **null**: `null`.
 - **bytes** has no literal: build with `convert.bytesFromString(s, "utf-8")`
   or append into `def b as bytes;` with `$b[] = 65;`.

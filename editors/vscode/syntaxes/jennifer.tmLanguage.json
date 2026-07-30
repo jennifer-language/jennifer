@@ -46,13 +46,7 @@
         {
           "name": "string.quoted.single.jennifer",
           "begin": "'",
-          "end": "'",
-          "patterns": [
-            {
-              "name": "constant.character.escape.jennifer",
-              "match": "\\\\[nrt\\\\\"'0]"
-            }
-          ]
+          "end": "'"
         }
       ]
     },

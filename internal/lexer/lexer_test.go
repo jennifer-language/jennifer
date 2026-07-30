@@ -42,13 +42,18 @@ func TestTokenizeStringEscapes(t *testing.T) {
 		src  string
 		want string
 	}{
+		// double-quoted literals are cooked (escapes processed)
 		{`"hello"`, "hello"},
 		{`"line\nbreak"`, "line\nbreak"},
 		{`"tab\there"`, "tab\there"},
 		{`"quote\"in"`, `quote"in`},
-		{`'single'`, "single"},
-		{`'with\'apos'`, "with'apos"},
 		{`"back\\slash"`, `back\slash`},
+		{`"it's"`, "it's"}, // embed a single quote via the cooked form
+		// single-quoted literals are RAW (no escape processing)
+		{`'single'`, "single"},
+		{`'raw \n stays'`, `raw \n stays`},             // backslash-n is two literal chars
+		{`'\d+\.\d+'`, `\d+\.\d+`},                     // a regex, verbatim
+		{"'line one\nline two'", "line one\nline two"}, // multi-line raw spans a newline
 	}
 	for _, c := range cases {
 		toks, err := Tokenize(c.src)
@@ -63,6 +68,36 @@ func TestTokenizeStringEscapes(t *testing.T) {
 		if toks[0].Lexeme != c.want {
 			t.Errorf("Tokenize(%q): got lexeme %q, want %q", c.src, toks[0].Lexeme, c.want)
 		}
+	}
+}
+
+func TestRawSingleQuotedStrings(t *testing.T) {
+	// A backslash never escapes in a raw literal, so the first single quote ends
+	// it: 'a\' is the two-char string `a\`, then `x` is an identifier.
+	toks, err := Tokenize(`'a\' x`)
+	if err != nil {
+		t.Fatalf("Tokenize error: %v", err)
+	}
+	if toks[0].Type != TOKEN_STRING || toks[0].Lexeme != `a\` {
+		t.Errorf("raw 'a\\' = %q (%v), want `a\\` string", toks[0].Lexeme, toks[0].Type)
+	}
+	if toks[1].Type != TOKEN_IDENT || toks[1].Lexeme != "x" {
+		t.Errorf("token after raw string = %q (%v), want ident x", toks[1].Lexeme, toks[1].Type)
+	}
+
+	// An unterminated raw literal is a positioned lex error (like the cooked form).
+	if _, err := Tokenize(`'no closing quote`); err == nil {
+		t.Error("expected an unterminated-string error for an unclosed raw literal")
+	}
+
+	// fmt fidelity: the raw source span (with quotes) is preserved in Token.Raw,
+	// so a raw literal re-emits as-is and does not become a cooked one.
+	toks, err = Tokenize(`'raw \n'`)
+	if err != nil {
+		t.Fatalf("Tokenize error: %v", err)
+	}
+	if toks[0].Raw != `'raw \n'` {
+		t.Errorf("Token.Raw = %q, want the verbatim single-quoted source", toks[0].Raw)
 	}
 }
 

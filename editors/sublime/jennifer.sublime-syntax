@@ -59,10 +59,10 @@ contexts:
       scope: punctuation.definition.string.end.jennifer
       pop: true
 
+  # Single-quoted is raw: backslashes are literal (no escape scope), and the
+  # string ends at the next '.
   single-string:
     - meta_scope: string.quoted.single.jennifer
-    - match: '\\[nrt\\"''0]'
-      scope: constant.character.escape.jennifer
     - match: "'"
       scope: punctuation.definition.string.end.jennifer
       pop: true

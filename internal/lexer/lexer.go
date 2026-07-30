@@ -389,6 +389,13 @@ func (l *Lexer) withRaw(startPos int, tok Token, err error) (Token, error) {
 
 func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 	l.advance() // opening quote
+	// A single-quoted literal is RAW: no escape processing. Its content runs
+	// verbatim - backslashes and newlines included - to the next single quote, so
+	// `'\d+'` is a five-character string and a multi-line block needs no ceremony.
+	// A double-quoted literal is cooked (the escape switch below). To embed a
+	// single quote, use the cooked form: "it's". Both forms report an unterminated
+	// literal (EOF before the closing quote) as a positioned error.
+	raw := quote == '\''
 	var b strings.Builder
 	for {
 		if l.pos >= len(l.src) {
@@ -399,7 +406,7 @@ func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 			l.advance()
 			return Token{Type: TOKEN_STRING, Lexeme: b.String(), Line: startLine, Col: startCol}, nil
 		}
-		if ch == '\\' {
+		if !raw && ch == '\\' {
 			l.advance()
 			if l.pos >= len(l.src) {
 				return Token{}, &LexError{File: l.file, Msg: "unterminated escape in string", Line: startLine, Col: startCol}

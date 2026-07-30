@@ -12,10 +12,11 @@ endif
 syn match   jenniferComment "#.*$" contains=@Spell
 syn region  jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockComment,@Spell
 
-" Strings (single and double quoted) with escapes.
+" Strings: double-quoted is cooked (escapes processed); single-quoted is raw
+" (backslashes are literal - no escape highlighting, ends at the next ').
 syn match   jenniferEscape contained "\\[nrt\\\"'0]"
 syn region  jenniferString start=+"+ skip=+\\"+ end=+"+ contains=jenniferEscape
-syn region  jenniferString start=+'+ skip=+\\'+ end=+'+ contains=jenniferEscape
+syn region  jenniferString start=+'+ end=+'+
 
 " Numbers: hex, octal, binary, float, integer (with _ separators).
 syn match   jenniferNumber "\<0[xX][0-9a-fA-F][0-9a-fA-F_]*\>"

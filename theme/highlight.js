@@ -106,13 +106,18 @@ hljs.registerLanguage("x86asm",function(){"use strict";return function(s){return
     ],
   };
 
-  var STRING = {
+  // Double-quoted is cooked: escape sequences are highlighted. Single-quoted
+  // is raw: backslashes are literal, so it carries no escape mode.
+  var STRING_COOKED = {
     className: "string",
-    variants: [
-      { begin: /"/, end: /"/ },
-      { begin: /'/, end: /'/ },
-    ],
+    begin: /"/,
+    end: /"/,
     contains: [{ begin: /\\[nrt\\"'0]/ }],
+  };
+  var STRING_RAW = {
+    className: "string",
+    begin: /'/,
+    end: /'/,
   };
 
   // Namespace prefix in a qualified call: the `io` in `io.printf(...)`.
@@ -141,7 +146,8 @@ hljs.registerLanguage("x86asm",function(){"use strict";return function(s){return
       PROMPT,
       hljs.COMMENT("#", "$"),
       hljs.COMMENT(/\/\*/, /\*\//),
-      STRING,
+      STRING_COOKED,
+      STRING_RAW,
       NUMBER,
       VARIABLE,
       NAMESPACE,

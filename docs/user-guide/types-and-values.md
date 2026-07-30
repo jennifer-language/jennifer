@@ -6,7 +6,7 @@
 | --------------- | --------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `int`           | `42`, `0xff`, `0o755`, `0b1010_0110`, `1_000`       | `0`              | 64-bit signed; `_` may separate digits                                                                                 |
 | `float`         | `3.14`, `0.5`, `1_000.000_5`                        | `0.0`            | 64-bit; promoted from int in mixed math                                                                                |
-| `string`        | `"hello"`, `'single quotes'`                        | `""`             | Supports escape sequences                                                                                              |
+| `string`        | `"cooked \n"`, `'raw \d+'`                           | `""`             | `"..."` processes escapes; `'...'` is raw (verbatim, multi-line)                                                       |
 | `bool`          | `true`, `false`                                     | `false`          | Produced by comparison operators                                                                                       |
 | `null`          | `null`                                              | `null`           | A type with a single value (the unit)                                                                                  |
 | `bytes`         | *(no literal)*                                      | empty            | Mutable byte sequence; element = `int` in `[0, 255]`; built via `convert.bytesFromString` or grown with `$b[] = byte;` |
@@ -30,10 +30,11 @@ Note: Jennifer's `list` is an array-backed sequence (Go slice
 underneath), not a Lisp linked list. You get O(1) random access via
 `$xs[i]`, but no O(1) prepend.
 
-### String escape sequences
+### String literals: cooked (`"..."`) and raw (`'...'`)
 
-Both `"..."` and `'...'` are valid string delimiters. The following escapes
-are recognized:
+The two delimiters do different jobs.
+
+**`"..."` is cooked** - escape sequences are processed:
 
 | Escape | Meaning         |
 | ------ | --------------- |
@@ -44,6 +45,26 @@ are recognized:
 | `\"`   | double quote    |
 | `\'`   | single quote    |
 | `\0`   | null character  |
+
+**`'...'` is raw** - there is **no** escape processing. Every byte from the
+opening `'` to the next `'` is content verbatim, backslashes and newlines
+included. So `'\d+\.\d+'` is the eight-character string `\d+\.\d+` (not a broken
+escape), and a multi-line block is just a single-quoted literal that spans
+newlines - a free heredoc, no `<<<EOF` needed:
+
+```jennifer
+def sql as string init 'SELECT *
+FROM users
+WHERE name = ?';                 # three lines, verbatim
+
+def pattern as string init '\d{4}-\d{2}-\d{2}';   # a regex, no double-escaping
+```
+
+Raw literals shine for regexes, Windows-style paths, and embedded JSON, where the
+cooked form would need `\\` everywhere. To put a **single quote inside** a string,
+use the cooked form (`"it's"` or `"it\'s"`) - a raw literal ends at the first `'`,
+so it cannot contain one. There is deliberately no `r"..."` prefix; the delimiter
+*is* the mode.
 
 ## Variables and constants
 

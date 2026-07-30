@@ -1296,7 +1296,7 @@ server-initiated sampling / roots / elicitation) - it needs an SSE push primitiv
 
 ### M23.14 - raw single-quoted string literals
 
-**Planned.** A **breaking** (pre-1.0) split of the two string delimiters so each
+**Done.** A **breaking** (pre-1.0) split of the two string delimiters so each
 does one job, per design stance #1 ("one way per thing"). Today `"..."` and
 `'...'` are **redundant** - both parse the same escape sequences - which is
 exactly the duplication the stance rules out. The change gives them distinct

@@ -246,18 +246,20 @@ user-method pool even when aliasing has technically freed it.
 
 ## Strings
 
-- **Prefer double quotes**: `"hello"` over `'hello'`. Both forms parse
-  escape sequences the same way, but mixing styles in one file reads as
-  noise. Use single quotes only when the string contains a `"` you'd
-  otherwise need to escape. This is a human guideline: **`fmt` preserves a
-  string literal's exact source spelling** - its quotes, its escape choices,
-  and any line breaks inside it - rather than rewriting them, so a
-  deliberately single-quoted or multi-line string survives a format
-  untouched (a formatter must not silently alter a literal's value or shape).
-- **Escape sequences are explicit**: `"\n"`, `"\t"`, `"\\"`. A string
-  literal *may* span multiple lines (a raw newline between the quotes is
-  part of the value), which is handy for an embedded template or sample; `fmt`
-  keeps it as written rather than collapsing it to `\n`.
+- **Default to `"..."` (cooked)** for ordinary text: `"hello"`, `"line\nbreak"`.
+  The two delimiters are **not** interchangeable - `'...'` is **raw** (no escape
+  processing), so pick by intent, not taste.
+- **Reach for `'...'` (raw) when escapes would be noise**: a regex
+  (`'\d+\.\d+'` over `"\\d+\\.\\d+"`), a Windows path, embedded JSON, or a
+  multi-line block. A raw literal cannot contain a `'`, so a string with an
+  apostrophe uses the cooked form (`"it's"`).
+- **`fmt` preserves a literal's exact source spelling** - its delimiter, its
+  escapes, and any line breaks inside it - so a deliberately raw or multi-line
+  string survives a format untouched (a formatter must not alter a literal's
+  value or shape).
+- A string literal of **either** form *may* span multiple lines (a newline
+  between the quotes is part of the value), which is handy for an embedded
+  template or sample; `fmt` keeps it as written rather than collapsing it.
 
 ## Comments
 
