@@ -10,8 +10,8 @@ layer over [`jsonrpc`](jsonrpc.md) (which is over [`http`](http.md) +
 it uses `jsonrpc` / `http`, this module needs the default `jennifer` binary.
 
 This module targets the **stateless** protocol only - no SSE, no sessions. The
-stdio server (the primary transport) and the HTTP client are implemented; the
-stdio *subprocess* client is deferred (see [Scope](#scope)).
+stdio server (the primary transport), the HTTP client, and the stdio subprocess
+client are all implemented (see [Scope](#scope)).
 
 ```jennifer
 import "mcp.j" as mcp;
@@ -161,8 +161,9 @@ def struct mcp.Client { rpc as jsonrpc.Client };
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `mcp.connect(endpoint)` | `Client` | bind to an MCP endpoint URL |
-| `mcp.connectWith(endpoint, headers)` | `Client` | with extra request headers (auth, ...) |
+| `mcp.connect(endpoint)` | `Client` | bind to an MCP endpoint URL (HTTP) |
+| `mcp.connectWith(endpoint, headers)` | `Client` | HTTP, with extra request headers (auth, ...) |
+| `mcp.connectStdio(argv)` | `Client` | launch an MCP server subprocess and talk to it over stdio |
 | `mcp.initialize(client)` | `json.Value` | run the `initialize` handshake (and send the required `notifications/initialized` on success); returns the server's result |
 | `mcp.listTools(client)` | `json.Value` | the `tools` array |
 | `mcp.callTool(client, name, arguments)` | `json.Value` | call a tool; returns the whole result (check `isError`) |
@@ -188,15 +189,17 @@ io.printf("isError=%t text=%s\n",
   `notifications/` message) is accepted and answered with no reply.
 - **Transports.** The **stdio server** (`serveStdio`) and a **transport-agnostic
   `handle`** (wire to `httpd` / `net`) are implemented on the server side; the
-  **HTTP client** (`connect` + the call verbs, over `jsonrpc`) is implemented on
-  the client side.
-- **The stdio subprocess client is deferred.** A Jennifer program cannot launch
-  an MCP server as a subprocess and talk to it bidirectionally: `os.run` /
-  `os.spawn` have no interactive stdin pipe, so there is no way to write a
-  request line to a child's stdin and read its reply. It is a follow-on that
-  needs an `os` subprocess-stdin primitive (a pipe handle to a running child).
-  Use the HTTP client, or run `serveStdio` when *you* are the server a host
-  launches.
+  **HTTP client** (`connect` + the call verbs, over `jsonrpc`) and the **stdio
+  subprocess client** (`connectStdio`, over `os.run`) are implemented on the
+  client side.
+- **The stdio client is one-shot.** Because `os.run` has no persistent child pipe,
+  `connectStdio` relaunches the server per call: it writes the `initialize`
+  handshake plus the one operation as newline-delimited JSON on the child's stdin,
+  closes it, and reads the replies from stdout (correlating by `id`). A stateless
+  server therefore sees a complete short session each call; a persistent,
+  interleaved session (many calls over one launched process) would need the
+  streaming-pipe primitive noted in `os` as a follow-on. `connectStdio` needs the
+  default binary (`os.run`).
 - **Handler result shape.** A tool handler returns a `json.Value` or a scalar; a
   raw Jennifer `list` / `map` / struct is not coerced - build a `json.Value`
   result explicitly. Structured (non-text) tool content and resource

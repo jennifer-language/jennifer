@@ -4,10 +4,11 @@
 /**
  * Model Context Protocol (https://modelcontextprotocol.io) - the stateless
  * JSON-RPC 2.0 surface an LLM host and an MCP peer speak. This module is both a
- * **server** (expose tools / resources / prompts to a host) and an HTTP
- * **client** (call a remote MCP server). It is JSON-RPC 2.0 on the wire, so the
- * client is a thin layer over `jsonrpc` (which is over `http` + `json`) and the
- * server is a purpose-built router (`handle`) that dispatches only to
+ * **server** (expose tools / resources / prompts to a host) and a **client**
+ * (call a remote MCP server) over either HTTP or a launched stdio subprocess. It
+ * is JSON-RPC 2.0 on the wire, so the HTTP client is a thin layer over `jsonrpc`
+ * (which is over `http` + `json`) and the server is a purpose-built router
+ * (`handle`) that dispatches only to
  * *registered* items - unlike `jsonrpc.handle`'s open name dispatch, MCP is an
  * allow-list.
  *
@@ -20,10 +21,11 @@
  * (newline-delimited JSON-RPC on the program's own stdin/stdout).
  *
  * **Scope: the stateless protocol only.** No SSE, no sessions. The stdio server
- * and the HTTP client (over `jsonrpc`) are implemented; the stdio *subprocess*
- * client is deferred (it needs an `os` subprocess-stdin primitive Jennifer does
- * not yet expose). Because it uses `jsonrpc` / `http`, this module needs the
- * default `jennifer` binary.
+ * (`serveStdio`), the HTTP client (`connect`, over `jsonrpc`), and the stdio
+ * subprocess client (`connectStdio`, over `os.run`) are all implemented; the
+ * stdio client's exchange is one-shot (launch, handshake + op, read replies) since
+ * there is no persistent child pipe. Because it uses `jsonrpc` / `http` / `os.run`,
+ * this module needs the default `jennifer` binary.
  *
  * **Security.** A tool call is dispatched only when the tool name is in the
  * registry; an unknown tool is a tool error, not an arbitrary-name dispatch. A
@@ -43,7 +45,9 @@
 use json;
 use io;
 use strings;
+use convert;
 use meta;
+use os;
 import "./jsonrpc.j" as jsonrpc;
 
 # The MCP protocol revision this module implements, sent in the `initialize`
@@ -639,12 +643,18 @@ func encodeError(id as json.Value, code as int, message as string) {
 # --- client (exported) ---------------------------------------------
 
 /**
- * An MCP HTTP client: a `jsonrpc.Client` bound to a remote MCP endpoint. Build
- * with `connect` / `connectWith`.
- * @field rpc {jsonrpc.Client} the underlying JSON-RPC HTTP client
+ * An MCP client. Over HTTP (`connect` / `connectWith`) it wraps a
+ * `jsonrpc.Client`; over stdio (`connectStdio`) it holds the server's `argv` and
+ * drives it as a subprocess. The same call surface (`initialize` / `listTools` /
+ * `callTool` / ...) works for both transports.
+ * @field rpc {jsonrpc.Client} the underlying JSON-RPC HTTP client (HTTP transport)
+ * @field argv {list of string} the stdio server command line (stdio transport)
+ * @field isStdio {bool} true for the stdio transport, false for HTTP
  */
 export def struct Client {
-    rpc as jsonrpc.Client
+    rpc as jsonrpc.Client,
+    argv as list of string,
+    isStdio as bool
 };
 
 /**
@@ -653,7 +663,8 @@ export def struct Client {
  * @return {Client} a configured client
  */
 export func connect(endpoint as string) {
-    return Client{rpc: jsonrpc.client($endpoint)};
+    def noArgv as list of string init [];
+    return Client{rpc: jsonrpc.client($endpoint), argv: $noArgv, isStdio: false};
 }
 
 /**
@@ -663,7 +674,24 @@ export func connect(endpoint as string) {
  * @return {Client} a configured client
  */
 export func connectWith(endpoint as string, headers as map of string to string) {
-    return Client{rpc: jsonrpc.clientWith($endpoint, $headers)};
+    def noArgv as list of string init [];
+    return Client{rpc: jsonrpc.clientWith($endpoint, $headers), argv: $noArgv, isStdio: false};
+}
+
+/**
+ * Connect to an MCP server launched as a subprocess over **stdio** - the primary
+ * MCP transport (a host runs the server and speaks newline-delimited JSON-RPC on
+ * its stdin/stdout). `argv` is the server command line (program first). Because
+ * the exchange is one-shot (`os.run`, no persistent pipe), each call launches the
+ * server, sends the `initialize` handshake plus the operation as newline-delimited
+ * JSON on stdin, closes stdin, and reads the replies from stdout - so a stateless
+ * server sees a complete short session per call. Needs the default binary
+ * (`os.run`).
+ * @param argv {list of string} the server command line (`["python", "srv.py"]`, ...)
+ * @return {Client} a configured stdio client
+ */
+export func connectStdio(argv as list of string) {
+    return Client{rpc: jsonrpc.client(""), argv: $argv, isStdio: true};
 }
 
 /**
@@ -676,13 +704,12 @@ export func connectWith(endpoint as string, headers as map of string to string) 
  * @return {json.Value} the server's `initialize` result
  */
 export func initialize(client as Client) {
-    def params as json.Value init json.map();
-    $params = json.set($params, "/protocolVersion", PROTOCOL_VERSION);
-    $params = json.set($params, "/capabilities", json.map());
-    def info as json.Value init json.map();
-    $info = json.set($info, "/name", CLIENT_NAME);
-    $info = json.set($info, "/version", CLIENT_VERSION);
-    $params = json.set($params, "/clientInfo", $info);
+    def params as json.Value init initParams();
+    if ($client.isStdio) {
+        # the stdio exchange already carries the handshake (initialize + the
+        # initialized notification) in one launch
+        return stdioCall($client.argv, "initialize", $params);
+    }
     def result as json.Value init jsonrpc.call($client.rpc, "initialize", $params);
     jsonrpc.notify($client.rpc, "notifications/initialized", json.map());
     return $result;
@@ -695,7 +722,7 @@ export func initialize(client as Client) {
  * @return {json.Value} the array of tool descriptors
  */
 export func listTools(client as Client) {
-    def res as json.Value init jsonrpc.call($client.rpc, "tools/list", json.map());
+    def res as json.Value init mcpCall($client, "tools/list", json.map());
     return json.get($res, "/tools");
 }
 
@@ -711,7 +738,7 @@ export func callTool(client as Client, name as string, arguments as json.Value) 
     def params as json.Value init json.map();
     $params = json.set($params, "/name", $name);
     $params = json.set($params, "/arguments", $arguments);
-    return jsonrpc.call($client.rpc, "tools/call", $params);
+    return mcpCall($client, "tools/call", $params);
 }
 
 /**
@@ -721,7 +748,7 @@ export func callTool(client as Client, name as string, arguments as json.Value) 
  * @return {json.Value} the array of resource descriptors
  */
 export func listResources(client as Client) {
-    def res as json.Value init jsonrpc.call($client.rpc, "resources/list", json.map());
+    def res as json.Value init mcpCall($client, "resources/list", json.map());
     return json.get($res, "/resources");
 }
 
@@ -734,7 +761,7 @@ export func listResources(client as Client) {
  */
 export func readResource(client as Client, uri as string) {
     def params as json.Value init json.set(json.map(), "/uri", $uri);
-    return jsonrpc.call($client.rpc, "resources/read", $params);
+    return mcpCall($client, "resources/read", $params);
 }
 
 /**
@@ -744,7 +771,7 @@ export func readResource(client as Client, uri as string) {
  * @return {json.Value} the array of prompt descriptors
  */
 export func listPrompts(client as Client) {
-    def res as json.Value init jsonrpc.call($client.rpc, "prompts/list", json.map());
+    def res as json.Value init mcpCall($client, "prompts/list", json.map());
     return json.get($res, "/prompts");
 }
 
@@ -760,5 +787,121 @@ export func getPrompt(client as Client, name as string, arguments as json.Value)
     def params as json.Value init json.map();
     $params = json.set($params, "/name", $name);
     $params = json.set($params, "/arguments", $arguments);
-    return jsonrpc.call($client.rpc, "prompts/get", $params);
+    return mcpCall($client, "prompts/get", $params);
+}
+
+# --- client transport dispatch (private) ---------------------------
+
+# initParams builds the client's `initialize` params (protocol version, empty
+# capabilities, clientInfo). Shared by the HTTP and stdio handshakes.
+func initParams() {
+    def params as json.Value init json.map();
+    $params = json.set($params, "/protocolVersion", PROTOCOL_VERSION);
+    $params = json.set($params, "/capabilities", json.map());
+    def info as json.Value init json.map();
+    $info = json.set($info, "/name", CLIENT_NAME);
+    $info = json.set($info, "/version", CLIENT_VERSION);
+    $params = json.set($params, "/clientInfo", $info);
+    return $params;
+}
+
+# mcpCall dispatches one request/response to the client's transport: HTTP through
+# jsonrpc, or a one-shot stdio subprocess exchange. Returns the reply's result (a
+# json.Value), or throws Error{kind: "mcp"} / Error{kind: "jsonrpc"} on failure.
+func mcpCall(client as Client, method as string, params as json.Value) {
+    if ($client.isStdio) {
+        return stdioCall($client.argv, $method, $params);
+    }
+    return jsonrpc.call($client.rpc, $method, $params);
+}
+
+# stdioRequest / stdioNotification render one JSON-RPC request / notification as a
+# single line for the stdio wire.
+func stdioRequest(method as string, params as json.Value, id as int) {
+    def r as json.Value init json.map();
+    $r = json.set($r, "/jsonrpc", "2.0");
+    $r = json.set($r, "/method", $method);
+    $r = json.set($r, "/params", $params);
+    $r = json.set($r, "/id", $id);
+    return json.encode($r);
+}
+
+func stdioNotification(method as string) {
+    def r as json.Value init json.map();
+    $r = json.set($r, "/jsonrpc", "2.0");
+    $r = json.set($r, "/method", $method);
+    return json.encode($r);
+}
+
+# stdioCall runs one MCP operation over a freshly launched stdio server: it writes
+# the `initialize` handshake (initialize + the initialized notification) plus the
+# operation as newline-delimited JSON on the child's stdin, closes it, and reads
+# the operation's reply from stdout. `initialize` itself needs no extra op line,
+# so its own reply (id 1) is returned. Deadlock-free via os.run (input buffered,
+# output captured). A launch failure or non-zero exit throws Error{kind: "mcp"}.
+func stdioCall(argv as list of string, method as string, params as json.Value) {
+    def lines as list of string init [];
+    def opId as int init 2;
+    if ($method == "initialize") {
+        $opId = 1;
+        $lines[] = stdioRequest("initialize", $params, 1);
+        $lines[] = stdioNotification("notifications/initialized");
+    } else {
+        $lines[] = stdioRequest("initialize", initParams(), 1);
+        $lines[] = stdioNotification("notifications/initialized");
+        $lines[] = stdioRequest($method, $params, 2);
+    }
+    def blob as string init strings.join($lines, "\n") + "\n";
+    def res as os.Result;
+    try {
+        $res = os.run($argv, $blob);
+    } catch (e) {
+        throw Error{
+            kind: "mcp",
+            message: "mcp: cannot run the stdio server: " + $e.message,
+            file: "", line: 0, col: 0};
+    }
+    if ($res.exitCode != 0) {
+        throw Error{
+            kind: "mcp",
+            message: "mcp: stdio server exited with code " + convert.toString($res.exitCode),
+            file: "", line: 0, col: 0};
+    }
+    return stdioReply($res.stdout, $opId);
+}
+
+# stdioReply scans the server's newline-delimited stdout for the reply whose `id`
+# matches `opId`, returning its `result` (or throwing on a JSON-RPC error reply).
+# Non-JSON lines are skipped defensively; a missing reply throws Error{kind:"mcp"}.
+func stdioReply(stdout as string, opId as int) {
+    for (def line in strings.split($stdout, "\n")) {
+        def t as string init strings.trim($line);
+        if (len($t) == 0) {
+            continue;
+        }
+        def reply as json.Value init NULL_VALUE;
+        def ok as bool init true;
+        try {
+            $reply = json.decode($t);
+        } catch (e) {
+            $ok = false;
+        }
+        if ($ok and json.has($reply, "/id") and json.typeOf($reply, "/id") == "int" and
+            json.asInt($reply, "/id") == $opId) {
+            if (json.has($reply, "/error")) {
+                def code as int init json.asInt($reply, "/error/code");
+                def msg as string init json.asString($reply, "/error/message");
+                throw Error{
+                    kind: "mcp",
+                    message: "mcp error " + convert.toString($code) + ": " + $msg,
+                    file: "", line: 0, col: 0};
+            }
+            return json.get($reply, "/result");
+        }
+    }
+    throw Error{
+        kind: "mcp",
+        message: "mcp: no reply for request id " + convert.toString($opId) +
+            " from the stdio server",
+        file: "", line: 0, col: 0};
 }

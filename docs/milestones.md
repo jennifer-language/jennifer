@@ -1189,7 +1189,7 @@ typed error). **Deadlock-free by construction** (input buffered as a
 `bytes.Reader`, output drained into the 16 MiB-capped buffers as the child runs);
 a child that ignores or partially reads stdin returns a clean `Result`, not a
 broken-pipe error. This unblocks a stateless subprocess exchange (feed all input,
-read all output), including a future M23.13 `mcp.connectStdio`. In
+read all output), and M23.13's `mcp.connectStdio` was then built on it. In
 `internal/lib/os/exec.go` (a `stdinBytes` extractor + the 1-or-2-arg `runFn`);
 Go tests cover string/bytes/empty stdin, a 20 MiB input counted in full with the
 echoed output capped at 16 MiB, the partial-consume EPIPE case, and the
@@ -1256,60 +1256,43 @@ methods, wire strings, config-supplied mechanism names - stayed strings).
   mock-server integration tests, and docs updated; `go test ./...` + every module
   overlay green on both binaries.
 
-### M23.13 - `mcp` module (Model Context Protocol, stateless)
+### M23.13 - `mcp` module (Model Context Protocol, stateless) (compacted)
 
-**Done.** A Model Context Protocol module - a **server** (Jennifer exposes tools /
-resources / prompts to an LLM host) and an HTTP **client** (a Jennifer program
-calls another MCP server) - stateless only. MCP is JSON-RPC 2.0, so the client
-reuses `jsonrpc.call`; the server needs its own dispatcher (`tools/list` etc. are
-not valid `func` names and each protocol method wants MCP-specific handling).
+**Done.** A Model Context Protocol module (stateless only): a **server** exposing
+tools / resources / prompts to an LLM host, and a **client** (HTTP or launched
+stdio subprocess) that calls one. MCP is JSON-RPC 2.0, so the client reuses
+`jsonrpc.call`; the server is a purpose-built router (`tools/list` etc. are not
+valid `func` names).
 - **Server.** `server(name, version)` + value-semantic `addTool` / `addResource` /
-  `addPrompt` build a `Server`; each tool declares a JSON-Schema input built with
-  `schema()` / `property(...)`. `handle(server, requestBody) -> replyBody` is the
-  transport-agnostic router (`initialize` capability / protocol-version handshake,
-  `ping`, `tools`/`resources`/`prompts` `list` + `call` / `read` / `get`, a
-  notification -> `""`, an unknown method -> JSON-RPC -32601). `serveStdio(server)`
-  runs the primary transport - newline-delimited JSON-RPC on the program's own
-  stdin / stdout (over `io`), stdout flushed per reply so an interactive host does
-  not deadlock. Wire `handle` to `httpd` for the stateless-HTTP server.
-- **Client (HTTP).** `connect(endpoint)` / `connectWith` wrap a `jsonrpc.Client`;
-  `initialize` / `listTools` / `callTool` / `listResources` / `readResource` /
-  `listPrompts` / `getPrompt`.
-- **Security: an allow-list, safer than `jsonrpc`'s open dispatch.** `tools/call`
-  looks the tool up by *registered* name and only then `meta.callMain`s its
-  handler - an unregistered name is a tool-result error, never arbitrary-method
-  dispatch; a throwing handler yields a generic message, never the thrown detail.
-- **Deferred: the stdio (subprocess) client.** `os.run` / `os.spawn` expose no
-  interactive child-stdin pipe, so a Jennifer program cannot launch and drive an
-  MCP server subprocess; it waits on **M23.10** (`os.run` stdin), then
-  `mcp.connectStdio` slots on top.
+  `addPrompt` (a tool declares a JSON Schema via `schema` / `property`; a prompt
+  declares its `arguments` via `promptArg`, surfaced by `prompts/list`).
+  `handle(server, requestBody) -> replyBody` routes `initialize` / `ping` /
+  `tools`/`resources`/`prompts` list+call, a notification -> `""`, unknown ->
+  -32601. `serveStdio(server)` runs the primary transport (newline-delimited
+  JSON-RPC on the program's own stdin/stdout, flushed per reply so a host does not
+  deadlock); wire `handle` to `httpd` for HTTP.
+- **Client.** `connect` / `connectWith` (HTTP) and `connectStdio(argv)` (launches a
+  server subprocess over `os.run`, one-shot per call - handshake + op in, replies
+  out, correlated by `id`) share one call surface (`initialize` sends the required
+  `notifications/initialized`; `listTools` / `callTool` / `listResources` /
+  `readResource` / `listPrompts` / `getPrompt`).
+- **Security: an allow-list** (safer than `jsonrpc`'s open dispatch). `tools/call`
+  dispatches only a *registered* tool's handler; an unknown name is a tool error,
+  a throwing handler yields a generic message (never the thrown detail).
+- **Robustness (audit).** A non-string `name` / `uri` in an untrusted request used
+  to throw uncaught and crash the `serveStdio` loop; the param reads are
+  type-guarded and `handle` wraps the router in a defensive catch, so no malformed
+  request takes the server down.
 
-Overlay 27/27; a hermetic `cmd/jennifer/mcp_test.go` httpd round-trip; both
-binaries. **Validated against the real protocol**: the official MCP Python SDK,
-as a host, launched Jennifer's `serveStdio` server over stdio and completed
-`initialize` (protocol `2025-06-18`) -> `list_tools` (valid JSON Schema) ->
-`call_tool` (echo / add) -> and the unregistered-tool allow-list rejection. An
-audit then hardened the untrusted-request path: a non-string `name` / `uri` (a
-peer sends `{"name": 123}`) used to make `json.asString` throw uncaught and crash
-the `serveStdio` loop; the param reads are now type-guarded and `handle` wraps the
-router in a defensive catch, so no malformed request can take the server down
-(pinned by the hostile-input overlay cases + a serveStdio survives-and-continues
-check). A completeness pass then closed two lifecycle gaps: **prompts now declare
-their `arguments`** (a `PromptArg` + `promptArg` builder, surfaced by
-`prompts/list` so a host can collect them), and the **client sends the required
-`notifications/initialized`** after a successful `initialize`. Both re-validated
-against the official SDK (it reads the declared prompt arguments and a
-spec-compliant `get_prompt`), and the example prompt handlers were corrected to
-emit a content **block** (`{type, text}`), not a bare string.
-
-**Not planned: the stateful transport.** The older **stateful Streamable HTTP**
-mode - a `text/event-stream` (SSE) response, an `Mcp-Session-Id` session, and
-server-initiated messages - is **out of scope, with no support planned**. It
-would require an SSE server-push primitive `httpd` does not have, and the
-stateless mode is the direction the protocol has moved to; a Jennifer MCP server
-/ client speaks stateless and does not negotiate a session. The reverse-direction
-capabilities that ride the session channel (sampling / roots / elicitation) are
-likewise out of scope.
+Overlay 35/35; a hermetic `cmd/jennifer/mcp_test.go` httpd round-trip; both
+binaries. **Validated against the real protocol** end to end: the official MCP
+Python SDK, as a host, drove Jennifer's `serveStdio` server through `initialize`
+(protocol `2025-06-18`), `list_tools` (valid JSON Schema), `call_tool`,
+`list_prompts` (declared arguments), a spec-compliant `get_prompt`, and the
+allow-list rejection; the stdio client was dogfooded Jennifer-to-Jennifer. **Not
+planned:** the stateful Streamable-HTTP transport (SSE, `Mcp-Session-Id` sessions,
+server-initiated sampling / roots / elicitation) - it needs an SSE push primitive
+`httpd` lacks, and stateless is the protocol's direction.
 
 ### M23.14 - raw single-quoted string literals
 

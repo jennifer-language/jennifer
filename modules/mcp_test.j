@@ -272,3 +272,58 @@ func testConstants() {
     testing.assertEqual(METHOD_NOT_FOUND, -32601);
     testing.assertEqual(PARSE_ERROR, -32700);
 }
+
+# --- stdio client transport (pure request/reply plumbing) ---------------------
+# The end-to-end connectStdio path (launch a server, handshake, call) is exercised
+# by the demo / manual dogfood; these pin the transport-independent plumbing.
+
+func testStdioRequestFormat() {
+    def p as json.Value init json.set(json.map(), "/x", 1);
+    testing.assertEqual(
+        stdioRequest("tools/list", $p, 7),
+        "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"params\":{\"x\":1},\"id\":7}");
+}
+
+func testStdioNotificationFormat() {
+    testing.assertEqual(
+        stdioNotification("notifications/initialized"),
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+}
+
+func testStdioReplyFindsMatchingId() {
+    # stdout carries the initialize reply (id 1) and the op reply (id 2); the op's
+    # result is returned, correlated by id regardless of line order
+    def out as string init "{\"jsonrpc\":\"2.0\",\"result\":{\"a\":1},\"id\":1}\n{\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true},\"id\":2}\n";
+    testing.assertTrue(json.asBool(stdioReply($out, 2), "/ok"));
+}
+
+func testStdioReplyErrorThrows() {
+    def out as string init "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32601,\"message\":\"nope\"},\"id\":2}\n";
+    def threw as bool init false;
+    try {
+        stdioReply($out, 2);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "mcp");
+    }
+    testing.assertTrue($threw);
+}
+
+func testStdioReplyMissingThrows() {
+    def out as string init "{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":1}\n";
+    def threw as bool init false;
+    try {
+        stdioReply($out, 2);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "mcp");
+    }
+    testing.assertTrue($threw);
+}
+
+func testStdioReplySkipsNonJsonLines() {
+    # a stray non-JSON line (a server writing a log to stdout) is skipped, the real
+    # reply is still found
+    def out as string init "starting up...\n{\"jsonrpc\":\"2.0\",\"result\":{\"v\":9},\"id\":2}\n";
+    testing.assertEqual(json.asInt(stdioReply($out, 2), "/v"), 9);
+}
