@@ -77,8 +77,8 @@ single, self-contained language reference written for exactly this: drop it into
 your project and point your assistant at it.
 
 ```text
-We're coding in Jennifer, a small interpreted language. Read JENNIFER.md
-for the syntax and standard library, then let's build ...
+We're coding in Jennifer, a batteries-included interpreted language. Read
+JENNIFER.md for the syntax and standard library, then let's build ...
 ```
 
 It covers the lexical rules (the `$` sigil, letters-only identifiers,

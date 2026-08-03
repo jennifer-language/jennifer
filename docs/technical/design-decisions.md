@@ -313,3 +313,31 @@ globals (no per-goroutine snapshot across `meta.callMain`). That is the
 threads-sharing-memory hazard every language has; the guidance is to keep
 per-request mutable state in the request/response or a synchronized store, not a
 bare global a handler assigns.
+
+## The `orm` module maps rows as `map of string to string`, relations via a side `Result`
+
+The `orm` module is a **Data Mapper**: a row is a `map of string to string` keyed
+by column name, not a user struct, and `orm.load` returns eager-loaded relations
+in a separate `Result` holder rather than nesting them into the row map. Both look,
+at first glance, like they fight stance #4 (rich, honest types) - why hand back
+stringly-typed maps instead of typed records?
+
+Because the language has **no struct reflection**. A generic mapper cannot
+populate an arbitrary user struct field-by-field at runtime (there is no way to
+enumerate a struct's fields or set one by name), so a typed-row API would have to
+be hand-written per table by the caller - which is exactly what the caller does
+today by reading `row["name"]` and rebuilding a typed value explicitly. The map is
+the honest shape for "a row of unknown-at-compile-time columns": the database
+coerces the string values to column types, and values bind only through
+placeholders, so the safety story is intact. A typed-struct row form is recorded
+as [rejected](rejected.md) (it needs the missing reflection), to revisit if the
+language ever grows field reflection.
+
+The **side `Result`** falls out of the same constraint. A `map of string to
+string` is homogeneous - it cannot hold both scalar columns *and* child-row lists
+without becoming a heterogeneous `map of string to any`, and Jennifer has no `any`
+(that is the [json.Value](../libraries/json.md) opaque-tree decision restated). So
+eager-loaded associations live in an identity-map-style `Result` read through
+`orm.related` / `relatedOne`, keeping the row map a clean scalar record. It is the
+same "no language-level top type; walk heterogeneous data with explicit
+accessors" stance the `json` / `toml` / `yaml` libraries take.

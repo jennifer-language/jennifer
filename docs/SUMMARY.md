@@ -120,6 +120,7 @@
 - [`session`](modules/session.md)
 - [`slack`](modules/slack.md)
 - [`smtp`](modules/smtp.md)
+- [`sqlmigrate`](modules/sqlmigrate.md)
 - [`statsd`](modules/statsd.md)
 - [`telegram`](modules/telegram.md)
 - [`tengine`](modules/tengine.md)

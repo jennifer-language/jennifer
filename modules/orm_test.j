@@ -10,6 +10,7 @@
 # DB-gated integration test (cmd/jennifer/orm_test.go), not the unit overlay.
 use testing;
 use strings;
+use sql;
 
 # A three-column schema in a chosen dialect.
 func usersSchema(dialect as Dialect) {
@@ -267,12 +268,14 @@ func renderInjectedWhere() {
         hasLimit: false,
         limitN: 0,
         hasOffset: false,
-        offsetN: 0
+        offsetN: 0,
+        withRelations: [],
+        distinctSelect: false
     };
     toSql($bad);
 }
 func renderInjectedTable() {
-    createTable(Schema{table: "u; DROP TABLE x", columns: [], primaryKey: "id", dialect: Dialect.Mysql});
+    createTable(Schema{table: "u; DROP TABLE x", columns: [], primaryKey: "id", dialect: Dialect.Mysql, relations: []});
 }
 func testRenderTimeValidationBlocksInjection() {
     testing.assertThrows("renderInjectedWhere", "orm");
@@ -295,3 +298,513 @@ func testBadInputsRejected() {
     testing.assertThrows("badAggFunc", "orm");
     testing.assertThrows("inViaWhere", "orm");
 }
+
+# ---- session, column attributes, DDL, migrations ----
+
+func testSessionConstructors() {
+    def c as sql.Connection;
+    def s as Session init session($c);
+    testing.assertEqual($s.inTx, false);
+    def t as sql.Tx;
+    def s2 as Session init transaction($t);
+    testing.assertEqual($s2.inTx, true);
+}
+
+# users(id SERIAL pk, email TEXT NOT NULL UNIQUE, active BOOLEAN DEFAULT TRUE,
+# score INTEGER DEFAULT 0) - exercises every column attribute.
+func attrSchema() {
+    def s as Schema init schema("users", "id", Dialect.Postgres);
+    $s = autoIncrement(column($s, "id", ColumnKind.Int));
+    $s = notNull(unique(column($s, "email", ColumnKind.String)));
+    $s = withDefault(column($s, "active", ColumnKind.Bool), "true");
+    $s = withDefault(column($s, "score", ColumnKind.Int), "0");
+    return $s;
+}
+
+func testColumnAttributes() {
+    def s as Schema init attrSchema();
+    testing.assertEqual($s.columns[0].autoIncrement, true);
+    testing.assertEqual($s.columns[1].unique, true);
+    testing.assertEqual($s.columns[1].nullable, false);
+    testing.assertEqual($s.columns[2].hasDefault, true);
+    testing.assertEqual($s.columns[2].default, "true");
+}
+
+func testCreateTableWithAttributesPostgres() {
+    testing.assertEqual(
+        createTable(attrSchema()),
+        "CREATE TABLE users (id SERIAL, email TEXT NOT NULL UNIQUE, active BOOLEAN DEFAULT TRUE, score INTEGER DEFAULT 0, PRIMARY KEY (id))");
+}
+
+func testCreateTableWithAttributesMysql() {
+    def s as Schema init schema("users", "id", Dialect.Mysql);
+    $s = autoIncrement(column($s, "id", ColumnKind.Int));
+    $s = notNull(column($s, "name", ColumnKind.String));
+    testing.assertEqual(
+        createTable($s),
+        "CREATE TABLE users (id INTEGER AUTO_INCREMENT, name TEXT NOT NULL, PRIMARY KEY (id))");
+}
+
+func testStringDefaultEscaping() {
+    def s as Schema init withDefault(
+        column(schema("t", "id", Dialect.Postgres), "note", ColumnKind.String), "it's ok");
+    testing.assertContains(createTable($s), "note TEXT DEFAULT 'it''s ok'");
+}
+
+func badIntDefault() {
+    createTable(withDefault(column(schema("t", "id", Dialect.Postgres), "n", ColumnKind.Int),
+        "1; DROP TABLE x"));
+}
+func badStringDefaultBackslash() {
+    createTable(withDefault(column(schema("t", "id", Dialect.Postgres), "n", ColumnKind.String),
+        "a\\b"));
+}
+func setterNoColumn() {
+    notNull(schema("t", "id", Dialect.Postgres));
+}
+func testDefaultInjectionAndSetterGuards() {
+    testing.assertThrows("badIntDefault", "orm");
+    testing.assertThrows("badStringDefaultBackslash", "orm");
+    testing.assertThrows("setterNoColumn", "orm");
+}
+
+func testDdlBuilders() {
+    testing.assertEqual(dropTable("users"), "DROP TABLE users");
+    testing.assertEqual(addColumn("users", "age", ColumnKind.Int, Dialect.Postgres),
+        "ALTER TABLE users ADD COLUMN age INTEGER");
+    testing.assertEqual(dropColumn("users", "age"), "ALTER TABLE users DROP COLUMN age");
+    testing.assertEqual(renameColumn("users", "name", "fullName"),
+        "ALTER TABLE users RENAME COLUMN name TO fullName");
+    testing.assertEqual(createIndex("idxEmail", "users", ["email"], true),
+        "CREATE UNIQUE INDEX idxEmail ON users (email)");
+    testing.assertEqual(createIndex("idxName", "users", ["last", "first"], false),
+        "CREATE INDEX idxName ON users (last, first)");
+    testing.assertEqual(dropIndex("idxEmail", "users", Dialect.Postgres), "DROP INDEX idxEmail");
+    testing.assertEqual(dropIndex("idxEmail", "users", Dialect.Mysql), "DROP INDEX idxEmail ON users");
+    testing.assertEqual(addForeignKey("posts", "fkAuthor", "authorId", "authors", "id"),
+        "ALTER TABLE posts ADD CONSTRAINT fkAuthor FOREIGN KEY (authorId) REFERENCES authors (id)");
+    testing.assertEqual(dropForeignKey("posts", "fkAuthor", Dialect.Postgres),
+        "ALTER TABLE posts DROP CONSTRAINT fkAuthor");
+    testing.assertEqual(dropForeignKey("posts", "fkAuthor", Dialect.Mysql),
+        "ALTER TABLE posts DROP FOREIGN KEY fkAuthor");
+}
+
+func ddlInjectTable() {
+    dropTable("t; DROP TABLE x");
+}
+func ddlInjectIndexCol() {
+    createIndex("i", "t", ["a; DROP"], false);
+}
+func testDdlInjectionBlocked() {
+    testing.assertThrows("ddlInjectTable", "orm");
+    testing.assertThrows("ddlInjectIndexCol", "orm");
+}
+
+# ---- relations ----
+
+func testRelationBuilders() {
+    def authors as Schema init schema("authors", "id", Dialect.Postgres);
+    $authors = hasMany($authors, "posts", "posts", "authorId");
+    testing.assertEqual(len($authors.relations), 1);
+    def r as Relation init $authors.relations[0];
+    testing.assertEqual($r.name, "posts");
+    testing.assertEqual($r.kind, RelationKind.HasMany);
+    testing.assertEqual($r.target, "posts");
+    testing.assertEqual($r.foreignKey, "authorId");
+    testing.assertEqual($r.localKey, "id");           # authors' primary key
+
+    def posts as Schema init belongsTo(schema("posts", "id", Dialect.Postgres),
+        "author", "authors", "authorId");
+    def b as Relation init $posts.relations[0];
+    testing.assertEqual($b.kind, RelationKind.BelongsTo);
+    testing.assertEqual($b.foreignKey, "authorId");   # on this (posts) table
+    testing.assertEqual($b.localKey, "id");           # target's key by convention
+
+    def m2m as Schema init manyToMany(schema("posts", "id", Dialect.Postgres),
+        "tags", "tags", "postTags", "postId", "tagId");
+    def mm as Relation init $m2m.relations[0];
+    testing.assertEqual($mm.kind, RelationKind.ManyToMany);
+    testing.assertEqual($mm.through, "postTags");
+    testing.assertEqual($mm.throughLocalKey, "postId");
+    testing.assertEqual($mm.throughTargetKey, "tagId");
+}
+
+func testJoinRelationHasMany() {
+    def authors as Schema init hasMany(schema("authors", "id", Dialect.Postgres),
+        "posts", "posts", "authorId");
+    def q as Query init joinRelation(from($authors), $authors, "posts");
+    testing.assertEqual(toSql($q).sql,
+        "SELECT * FROM authors INNER JOIN posts ON posts.authorId = authors.id");
+}
+
+func testJoinRelationBelongsTo() {
+    def posts as Schema init belongsTo(schema("posts", "id", Dialect.Postgres),
+        "author", "authors", "authorId");
+    def q as Query init joinRelation(from($posts), $posts, "author");
+    testing.assertEqual(toSql($q).sql,
+        "SELECT * FROM posts INNER JOIN authors ON posts.authorId = authors.id");
+}
+
+func testJoinRelationManyToMany() {
+    def posts as Schema init manyToMany(schema("posts", "id", Dialect.Postgres),
+        "tags", "tags", "postTags", "postId", "tagId");
+    def q as Query init joinRelation(from($posts), $posts, "tags");
+    testing.assertEqual(toSql($q).sql,
+        "SELECT * FROM posts INNER JOIN postTags ON postTags.postId = posts.id INNER JOIN tags ON postTags.tagId = tags.id");
+}
+
+func unknownRelation() {
+    def s as Schema init schema("authors", "id", Dialect.Postgres);
+    joinRelation(from($s), $s, "nope");
+}
+func relationInjection() {
+    hasMany(schema("authors", "id", Dialect.Postgres), "posts", "posts; DROP TABLE x", "authorId");
+}
+func testRelationGuards() {
+    testing.assertThrows("unknownRelation", "orm");
+    testing.assertThrows("relationInjection", "orm");
+}
+
+# ---- eager loading (pure logic; a hand-built Result needs no DB) ----
+
+func testWithMarksRelations() {
+    def authors as Schema init hasMany(schema("authors", "id", Dialect.Postgres),
+        "posts", "posts", "authorId");
+    def q as Query init with(from($authors), "posts");
+    testing.assertEqual(len($q.withRelations), 1);
+    testing.assertEqual($q.withRelations[0], "posts");
+    testing.assertEqual(toSql($q).sql, "SELECT * FROM authors"); # with is ignored by toSql
+}
+
+func testDistinctKeys() {
+    def rows as list of map of string to string init [];
+    def a as map of string to string init {};
+    $a["id"] = "1";
+    $rows[] = $a;
+    def b as map of string to string init {};
+    $b["id"] = "2";
+    $rows[] = $b;
+    def c as map of string to string init {};
+    $c["id"] = "1";
+    $rows[] = $c;
+    def d as map of string to string init {};
+    $d["id"] = "";
+    $rows[] = $d;
+    def keys as list of string init distinctKeys($rows, "id");
+    testing.assertEqual(len($keys), 2); # deduped, empty dropped
+    testing.assertEqual($keys[0], "1");
+    testing.assertEqual($keys[1], "2");
+}
+
+func testGroupRows() {
+    def rows as list of map of string to string init [];
+    def a as map of string to string init {};
+    $a["authorId"] = "1";
+    $a["title"] = "x";
+    $rows[] = $a;
+    def b as map of string to string init {};
+    $b["authorId"] = "1";
+    $b["title"] = "y";
+    $rows[] = $b;
+    def c as map of string to string init {};
+    $c["authorId"] = "2";
+    $c["title"] = "z";
+    $rows[] = $c;
+    def g as map of string to list of map of string to string init groupRows($rows, "authorId");
+    testing.assertEqual(len($g["1"]), 2);
+    testing.assertEqual(len($g["2"]), 1);
+    testing.assertEqual($g["2"][0]["title"], "z");
+}
+
+func aRelation(kind as RelationKind, fk as string, lk as string) {
+    return Relation{
+        name: "r",
+        kind: $kind,
+        target: "t",
+        foreignKey: $fk,
+        localKey: $lk,
+        through: "",
+        throughLocalKey: "",
+        throughTargetKey: ""
+    };
+}
+
+func testKeyColumns() {
+    def belongs as Relation init aRelation(RelationKind.BelongsTo, "authorId", "id");
+    testing.assertEqual(baseKeyColumn($belongs), "authorId"); # the parent row's FK
+    testing.assertEqual(childKeyColumn($belongs), "id"); # the target's key
+    def many as Relation init aRelation(RelationKind.HasMany, "authorId", "id");
+    testing.assertEqual(baseKeyColumn($many), "id"); # the parent PK
+    testing.assertEqual(childKeyColumn($many), "authorId"); # the target's FK
+}
+
+# The 1 + R query-count contract, pinned on the real key logic load runs.
+func testPlannedQueryCountIs1PlusR() {
+    def authors as Schema init hasMany(
+        hasMany(schema("authors", "id", Dialect.Postgres), "posts", "posts", "authorId"),
+        "comments", "comments", "authorId");
+    def q as Query init with(with(from($authors), "posts"), "comments");
+    def rows as list of map of string to string init [];
+    def a as map of string to string init {};
+    $a["id"] = "1";
+    $rows[] = $a;
+    def b as map of string to string init {};
+    $b["id"] = "2";
+    $rows[] = $b;
+    testing.assertEqual(plannedQueryCount($authors, $q, $rows), 3); # 1 base + 2 relations
+    def empty as list of map of string to string init [];
+    testing.assertEqual(plannedQueryCount($authors, $q, $empty), 1); # no keys -> base only
+}
+
+# A large key set is split into bounded IN-batches (so eager loading never emits
+# an over-limit `WHERE fk IN (...)`); an empty set yields no chunks (no query).
+func testChunkKeys() {
+    def c as list of list of string init chunkKeys(["a", "b", "c", "d", "e"], 2);
+    testing.assertEqual(len($c), 3);
+    testing.assertEqual(len($c[0]), 2);
+    testing.assertEqual(len($c[2]), 1);
+    testing.assertEqual($c[2][0], "e");
+    def none as list of string init [];
+    testing.assertEqual(len(chunkKeys($none, 2)), 0);
+}
+
+# related / relatedOne walk a Result; build one by hand so no DB is needed.
+func handBuiltResult() {
+    def authors as list of map of string to string init [];
+    def a1 as map of string to string init {};
+    $a1["id"] = "1";
+    $a1["name"] = "ada";
+    $authors[] = $a1;
+    def a2 as map of string to string init {};
+    $a2["id"] = "2";
+    $a2["name"] = "bob";
+    $authors[] = $a2;
+    def p1 as map of string to string init {};
+    $p1["authorId"] = "1";
+    $p1["title"] = "hello";
+    def p2 as map of string to string init {};
+    $p2["authorId"] = "1";
+    $p2["title"] = "world";
+    def lookup as map of string to list of map of string to string init {};
+    $lookup["1"] = [$p1, $p2];
+    def rd as RelationData init RelationData{name: "posts", parentKeyColumn: "id", byParentKey: $lookup};
+    return Result{rows: $authors, relations: [$rd]};
+}
+
+func testRelatedAccessor() {
+    def r as Result init handBuiltResult();
+    testing.assertEqual(len(rows($r)), 2);
+    testing.assertEqual(len(related($r, rows($r)[0], "posts")), 2); # ada: 2 posts
+    testing.assertEqual(related($r, rows($r)[0], "posts")[0]["title"], "hello");
+    testing.assertEqual(len(related($r, rows($r)[1], "posts")), 0); # bob: none -> []
+}
+
+func testRelatedOneAccessor() {
+    def posts as list of map of string to string init [];
+    def post1 as map of string to string init {};
+    $post1["id"] = "10";
+    $post1["authorId"] = "1";
+    $posts[] = $post1;
+    def post2 as map of string to string init {};
+    $post2["id"] = "11";
+    $post2["authorId"] = "9"; # no such author
+    $posts[] = $post2;
+    def author1 as map of string to string init {};
+    $author1["id"] = "1";
+    $author1["name"] = "ada";
+    def lookup as map of string to list of map of string to string init {};
+    $lookup["1"] = [$author1];
+    def rd as RelationData init RelationData{name: "author", parentKeyColumn: "authorId", byParentKey: $lookup};
+    def r as Result init Result{rows: $posts, relations: [$rd]};
+    testing.assertEqual(relatedOne($r, $posts[0], "author")["name"], "ada"); # matched
+    testing.assertEqual(len(relatedOne($r, $posts[1], "author")), 0); # unmatched -> {}
+}
+
+func unknownEagerRelation() {
+    def r as Result init handBuiltResult();
+    related($r, rows($r)[0], "nope");
+}
+func testEagerAccessorGuards() {
+    testing.assertThrows("unknownEagerRelation", "orm");
+}
+
+# ---- write path (pure builders) ----
+
+func upsertSchema(dialect as Dialect) {
+    return column(column(column(schema("users", "id", $dialect), "id", ColumnKind.Int),
+        "email", ColumnKind.String), "name", ColumnKind.String);
+}
+
+func upsertRecord() {
+    def rec as map of string to string init {};
+    $rec["id"] = "1";
+    $rec["email"] = "a@b.c";
+    $rec["name"] = "ada";
+    return $rec;
+}
+
+func testBuildUpsertPostgres() {
+    def r as Rendered init buildUpsert(upsertSchema(Dialect.Postgres), upsertRecord(), ["id"]);
+    testing.assertEqual($r.sql,
+        "INSERT INTO users (id, email, name) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name");
+    testing.assertEqual(len($r.params), 3);
+}
+
+func testBuildUpsertMysql() {
+    def r as Rendered init buildUpsert(upsertSchema(Dialect.Mysql), upsertRecord(), ["id"]);
+    testing.assertEqual($r.sql,
+        "INSERT INTO users (id, email, name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE email = VALUES(email), name = VALUES(name)");
+}
+
+func testBuildUpsertNoUpdateColumns() {
+    def rec as map of string to string init {};
+    $rec["id"] = "1"; # only the conflict column is present
+    testing.assertContains(buildUpsert(upsertSchema(Dialect.Postgres), $rec, ["id"]).sql,
+        "ON CONFLICT (id) DO NOTHING");
+    testing.assertContains(buildUpsert(upsertSchema(Dialect.Mysql), $rec, ["id"]).sql,
+        "ON DUPLICATE KEY UPDATE id = id");
+}
+
+func testBuildInsertMany() {
+    def r1 as map of string to string init {};
+    $r1["id"] = "1";
+    $r1["name"] = "a";
+    def r2 as map of string to string init {};
+    $r2["id"] = "2";
+    $r2["name"] = "b";
+    def cols as list of string init presentColumns(usersSchema(Dialect.Postgres), $r1);
+    testing.assertEqual(len($cols), 2); # id, name (age absent)
+    def r as Rendered init buildInsertManyChunk(usersSchema(Dialect.Postgres), $cols, [$r1, $r2]);
+    testing.assertEqual($r.sql, "INSERT INTO users (id, name) VALUES ($1, $2), ($3, $4)");
+    testing.assertEqual(len($r.params), 4);
+    testing.assertEqual($r.params[2], "2");
+}
+
+func insertManyExtraCol() {
+    def r1 as map of string to string init {};
+    $r1["id"] = "1";
+    $r1["name"] = "a";
+    def r2 as map of string to string init {};
+    $r2["id"] = "2";
+    $r2["name"] = "b";
+    $r2["age"] = "30"; # an extra schema column the first record lacks
+    buildInsertManyChunk(usersSchema(Dialect.Postgres),
+        presentColumns(usersSchema(Dialect.Postgres), $r1), [$r1, $r2]);
+}
+func testInsertManyRejectsExtraColumns() {
+    testing.assertThrows("insertManyExtraCol", "orm"); # no silent column drop
+}
+
+func testBuildUpdateWhere() {
+    def assign as map of string to string init {};
+    $assign["name"] = "alice";
+    def q as Query init where(from(usersSchema(Dialect.Postgres)), "age", ">", "18");
+    def r as Rendered init buildUpdateWhere(usersSchema(Dialect.Postgres), $assign, $q);
+    # SET placeholders first, then WHERE placeholders.
+    testing.assertEqual($r.sql, "UPDATE users SET name = $1 WHERE age > $2");
+    testing.assertEqual($r.params[0], "alice");
+    testing.assertEqual($r.params[1], "18");
+}
+
+func testBuildDeleteWhere() {
+    def q as Query init whereIn(from(usersSchema(Dialect.Mysql)), "id", ["1", "2"]);
+    def r as Rendered init buildDeleteWhere(usersSchema(Dialect.Mysql), $q);
+    testing.assertEqual($r.sql, "DELETE FROM users WHERE id IN (?, ?)");
+    testing.assertEqual(len($r.params), 2);
+}
+
+func updateWhereNoCond() {
+    def assign as map of string to string init {};
+    $assign["name"] = "x";
+    buildUpdateWhere(usersSchema(Dialect.Postgres), $assign, from(usersSchema(Dialect.Postgres)));
+}
+func deleteWhereNoCond() {
+    buildDeleteWhere(usersSchema(Dialect.Postgres), from(usersSchema(Dialect.Postgres)));
+}
+func upsertNoConflict() {
+    def empty as list of string init [];
+    buildUpsert(upsertSchema(Dialect.Postgres), upsertRecord(), $empty);
+}
+func updateWhereInjection() {
+    def bad as map of string to string init {};
+    $bad["name; DROP TABLE x"] = "v";
+    buildUpdateWhere(usersSchema(Dialect.Postgres), $bad,
+        where(from(usersSchema(Dialect.Postgres)), "id", "=", "1"));
+}
+func testWritePathGuards() {
+    testing.assertThrows("updateWhereNoCond", "orm"); # refuses WHERE-less update
+    testing.assertThrows("deleteWhereNoCond", "orm"); # refuses WHERE-less delete
+    testing.assertThrows("upsertNoConflict", "orm"); # needs a conflict column
+    testing.assertThrows("updateWhereInjection", "orm"); # assignment column is checked
+}
+
+# ---- filter completeness + pagination ----
+
+func testWhereNullAndNotNull() {
+    testing.assertEqual(toSql(whereNull(from(usersSchema(Dialect.Postgres)), "age")).sql,
+        "SELECT * FROM users WHERE age IS NULL");
+    testing.assertEqual(toSql(whereNotNull(from(usersSchema(Dialect.Mysql)), "name")).sql,
+        "SELECT * FROM users WHERE name IS NOT NULL");
+    # an IS NULL consumes no placeholder, so a following valued condition is still $1.
+    def r as Rendered init toSql(
+        where(whereNull(from(usersSchema(Dialect.Postgres)), "age"), "name", "=", "ada"));
+    testing.assertEqual($r.sql, "SELECT * FROM users WHERE age IS NULL AND name = $1");
+    testing.assertEqual(len($r.params), 1);
+}
+
+func testWhereBetween() {
+    def r as Rendered init toSql(whereBetween(from(usersSchema(Dialect.Postgres)), "age", "18", "65"));
+    testing.assertEqual($r.sql, "SELECT * FROM users WHERE age BETWEEN $1 AND $2");
+    testing.assertEqual($r.params[1], "65");
+    testing.assertEqual(toSql(whereBetween(from(usersSchema(Dialect.Mysql)), "age", "1", "9")).sql,
+        "SELECT * FROM users WHERE age BETWEEN ? AND ?");
+    # BETWEEN consumes two placeholders; a following condition continues at $3.
+    testing.assertEqual(toSql(
+        where(whereBetween(from(usersSchema(Dialect.Postgres)), "age", "1", "9"), "name", "=", "x")).sql,
+        "SELECT * FROM users WHERE age BETWEEN $1 AND $2 AND name = $3");
+}
+
+func testDistinct() {
+    testing.assertEqual(toSql(distinct(select(from(usersSchema(Dialect.Postgres)), ["name"]))).sql,
+        "SELECT DISTINCT name FROM users");
+}
+
+func testPage() {
+    testing.assertEqual(toSql(page(from(usersSchema(Dialect.Postgres)), 1, 10)).sql,
+        "SELECT * FROM users LIMIT 10 OFFSET 0");
+    testing.assertEqual(toSql(page(from(usersSchema(Dialect.Mysql)), 3, 10)).sql,
+        "SELECT * FROM users LIMIT 10 OFFSET 20");
+}
+
+func pageBadNum() {
+    page(from(usersSchema(Dialect.Postgres)), 0, 10);
+}
+func pageBadSize() {
+    page(from(usersSchema(Dialect.Postgres)), 1, 0);
+}
+func testPageGuards() {
+    testing.assertThrows("pageBadNum", "orm");
+    testing.assertThrows("pageBadSize", "orm");
+}
+
+# Regression: HAVING placeholders still number after the WHERE ones once the WHERE
+# rendering moved into the shared renderWhereClause (a BETWEEN uses two).
+func testHavingNumbersAfterBetween() {
+    def q as Query init having(
+        groupBy(whereBetween(from(usersSchema(Dialect.Postgres)), "age", "18", "65"), ["name"]),
+        "COUNT", "*", ">", "2");
+    def r as Rendered init toSql($q);
+    testing.assertEqual($r.sql,
+        "SELECT * FROM users WHERE age BETWEEN $1 AND $2 GROUP BY name HAVING COUNT(*) > $3");
+    testing.assertEqual($r.params[2], "2");
+}
+
+func testNumericLiteralGuards() {
+    testing.assertEqual(isIntLiteral("-42"), true);
+    testing.assertEqual(isIntLiteral("4x"), false);
+    testing.assertEqual(isIntLiteral(""), false);
+    testing.assertEqual(isFloatLiteral("3.14"), true);
+    testing.assertEqual(isFloatLiteral(".5"), true);
+    testing.assertEqual(isFloatLiteral("3.1.4"), false);
+}
+

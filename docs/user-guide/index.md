@@ -1,9 +1,13 @@
 # Jennifer - User Guide
 
-Jennifer is a small, experimental, interpreted programming language. This
-guide covers everything you can do in Jennifer. Run
-`jennifer version` to see which build you're on; the language history
-lives in [docs/milestones.md](../milestones.md).
+Jennifer is an interpreted programming language with a rich type system
+(structs, enums, value semantics), lightweight concurrency, a broad
+topic-based standard library, and a large ecosystem of Jennifer-coded
+modules.
+
+This guide covers everything you can do in
+Jennifer. Run `jennifer version` to see which build you're on; the
+language history lives in [docs/milestones.md](../milestones.md).
 
 ## Design stances
 

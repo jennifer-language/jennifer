@@ -6,8 +6,8 @@ It is a self-contained reference to the language so an assistant with no prior
 knowledge of Jennifer can write correct code. It describes the *language*, not
 the interpreter's internals.
 
-Jennifer is a small, interpreted language (tree-walking interpreter written in
-Go/TinyGo). Source files use the `.j` extension. Run a program with
+Jennifer is a batteries-included, interpreted language (tree-walking interpreter
+written in Go/TinyGo). Source files use the `.j` extension. Run a program with
 `jennifer run program.j`, start a REPL with `jennifer repl`.
 
 **Full documentation** - guides, the complete library reference, and an
@@ -1196,9 +1196,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Active Record (structs have no methods): declare an `orm.Schema`
   (`orm.schema(table, pk, dialect)` + `orm.column(s, name, kind)`, dialect
   `orm.Dialect.Mysql` / `orm.Dialect.Postgres`, kind `orm.ColumnKind.Int` /
-  `String` / `Float` / `Bool` / `Bytes` - both closed enums), then repository CRUD `orm.insert(conn, schema,
-  record)` / `find(conn, schema, id)` / `update` / `delete`, and `orm.all(conn,
-  query)`. Records are `map of string to string`. Non-mutating **functional
+  `String` / `Float` / `Bool` / `Bytes` - both closed enums; column attributes via
+  fluent setters `orm.notNull` / `unique` / `autoIncrement` / `withDefault(s, v)`
+  decorating the last-added column), then CRUD through an `orm.Session`
+  (`orm.session(conn)` auto-commit / `orm.transaction(tx)` inside a caller's
+  transaction): `orm.insert(session, schema, record)` / `find(session, schema, id)`
+  / `update` / `delete`, and `orm.all(session, query)`. Records are `map of string
+  to string`. Non-mutating **functional
   query builder** (each step returns a fresh `orm.Query`): `orm.from($schema)` ->
   `select` (projection) / `count` / `aggregate` (COUNT/SUM/AVG/MIN/MAX) ->
   `where` / `orWhere` / `whereIn` / `orWhereIn` / `whereNotIn` (AND / OR / IN) ->
@@ -1207,7 +1211,35 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   placeholders per dialect (`?` / `$1`); values bind only through placeholders.
   Identifiers / operators / aggregate-functions / join-kinds are allowlist-checked
   at **build and render** time, so a hand-built `orm.Query` / `orm.Schema` literal
-  cannot inject either. Plus `orm.createTable(schema)` DDL. Needs the default binary.
+  cannot inject either. Plus DDL builders: `orm.createTable(schema)` (with
+  attributes) / `dropTable` / `addColumn` / `dropColumn` / `renameColumn` /
+  `createIndex` / `dropIndex` / `addForeignKey` / `dropForeignKey`. Relations
+  (metadata on the schema): `orm.belongsTo` / `hasOne` / `hasMany` / `manyToMany`
+  declare an association, `orm.joinRelation(q, schema, name)` emits its JOIN.
+  **Eager loading** (N+1 elimination): `orm.with(q, name)` marks a relation,
+  `orm.load(session, schema, q) -> Result` fetches parents + relations in a fixed
+  1 + R queries; walk it with `orm.rows` / `related` (has-many / many-to-many) /
+  `relatedOne` (belongs-to / has-one, `{}` if none). **Write path**:
+  `orm.upsert(session, s, record, conflictCols)` (ON CONFLICT / ON DUPLICATE KEY),
+  `insertMany` (multi-row, auto-chunked), `insertReturning -> string` (generated
+  key), `updateWhere(session, s, assignments, q)` / `deleteWhere(session, s, q)`
+  (bulk by a query's WHERE; refuse a WHERE-less query), `save` (insert if no PK
+  else update). **Finders**: `first(session, q)` / `exists(session, q) -> bool` /
+  `findBy(session, s, col, value)` / `pluck(session, q, col) -> list of string`.
+  **Filters**: `whereNull` / `whereNotNull` / `whereBetween(q, col, lo, hi)` /
+  `distinct(q)` / `page(q, pageNum, pageSize)`. Schema migrations are the separate
+  `sqlmigrate` module. Needs the default binary.
+- **`sqlmigrate`** - version-tracked schema migrations over the `sql` library,
+  decoupled from `orm`: `sqlmigrate.Migration{version, description, up as list of
+  string, down as list of string}` whose `up` / `down` are plain DDL strings
+  (built with `orm`'s DDL helpers or hand-written). `sqlmigrate.migrate(conn,
+  migrations)` applies pending versions in lexical order (each in its own
+  transaction, recorded in a `schema_migrations` table; idempotent),
+  `rollbackMigrations(conn, migrations, steps)` reverses the newest N,
+  `migrationStatus(conn, migrations) -> list of MigrationStatus{version,
+  description, applied}`. Takes a raw `sql.Connection` (it owns transaction
+  control). Version allowlisted + description escaped (injection-safe). Needs the
+  default binary.
 - **`password`** - generate, validate, and score passwords against a policy schema.
   `password.schema()` is a strong default (16 chars, all four classes, min 1 each);
   copy-on-write builders `withLength(s, lo, hi)` / `withClasses(s, lo, up, dig, sym)`

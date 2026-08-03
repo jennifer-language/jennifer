@@ -939,3 +939,36 @@ Rejected in favor of **making the delimiter itself the mode** - `'...'` is raw,
 The one ergonomic cost - a raw literal cannot contain a `'` - is handled by
 switching to the cooked form (`"it's"`), which is rare in practice. See
 [M23.14](../milestones.md).
+
+## `orm` typed-struct row mapping, Active Record, and `whereRaw`
+
+Three `orm` shapes were considered during its M23.15 workover and turned down.
+
+**Typed-struct row mapping** (`orm.find(...) -> User` populating a user struct)
+was rejected because Jennifer has **no struct reflection**: a generic mapper
+cannot enumerate a struct's fields or set one by runtime name, so it cannot fill
+an arbitrary target. Rows stay `map of string to string` (the honest shape for
+compile-time-unknown columns); the caller rebuilds a typed value explicitly when
+it wants one. Reasoned in [design-decisions.md](design-decisions.md); revisit only
+if the language grows field reflection.
+
+**Active Record** (a row that carries `save()` / `delete()` methods, mutating
+itself) was rejected on two counts: Jennifer values are **value-semantic and
+method-free** (a struct cannot carry behaviour, and a `map` row certainly cannot),
+and a module holds **no state** (there is nowhere for a row to remember "its"
+connection). Persistence is therefore always an explicit `orm.insert(session, s,
+record)` call - Data Mapper, not Active Record - which also keeps the
+which-connection and which-transaction questions in the caller's hands.
+
+**`orm.whereRaw(q, fragment, params)`** - a raw-SQL WHERE escape hatch - was
+rejected because it cannot keep orm's core guarantee. Every other token orm puts
+into SQL unparameterized (identifiers, operators, aggregate functions, join kinds)
+is checked against a fixed allowlist, so even a hand-built `Query` literal cannot
+inject. A raw fragment is arbitrary SQL: validating it would mean parsing SQL, and
+not validating it makes `whereRaw` the one place a caller's string reaches the
+database unchecked. The structured builders (`where` / `whereIn` / `whereNull` /
+`whereBetween` / ...) cover the common cases; genuinely bespoke SQL belongs one
+layer down in the [`sql`](../libraries/sql.md) library, which is explicitly the
+"you write the statement, values bind through placeholders" surface. Keeping raw
+SQL out of orm is what lets orm promise "no injection, even from a hand-built
+query".

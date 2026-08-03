@@ -870,7 +870,7 @@ here while it needed interpreter-level work; that work landed in M22.17, so `web
 now handles requests concurrently.) Sub-milestones may grow their own
 sub-numbering as they land.
 
-### M23.1 - streaming / server-push read loops (compacted)
+### M23.1 - streaming / server-push read loops
 
 **Done.** The biggest structural theme: several protocol clients were
 one-request/one-reply and could not express an unsolicited server message. Shipped
@@ -897,7 +897,7 @@ still drop a frame - a buffered `net` reader is the general fix.
 | `mikrotik` | `.tag`-correlated commands (`talkTagged`) + `/listen`-style streaming (`listen` / `receiveReply` / `cancel`); `readN` clears the read deadline it arms (block-level `defer net.setDeadline($socket, 0)`) so a later read/write cannot inherit it. |
 | `imap` | RFC 2177 `IDLE`: `idle` -> blocking `receiveNotification` / timeout-bounded `pollNotification` -> `done`, typed `EXISTS` / `EXPUNGE` / `RECENT` notifications (rest of the mail work in M23.3). |
 
-### M23.2 - connection reuse / persistent sessions (compacted)
+### M23.2 - connection reuse / persistent sessions
 
 **Done.** Persistent, reusable connections so a request / message loop stops
 paying a fresh handshake each time. Delivered per module:
@@ -929,7 +929,7 @@ replay) / `TestHttpSendPolicy`, `TestRestPaginateAndPolicy`, and
 `TestSmtpSessionReuse` (two messages over a single-accept server), plus the
 overlays.
 
-### M23.3 - stable-identity verbs (cross-session correctness) (compacted)
+### M23.3 - stable-identity verbs (cross-session correctness)
 
 **Done.** Volatile sequence numbers silently broke "fetch only what's new since
 last run"; both mail-receive modules gained stable-identifier addressing.
@@ -950,7 +950,7 @@ last run"; both mail-receive modules gained stable-identifier addressing.
 Pinned by `TestImapUidVerbs` (exact `UID ...` wire commands via a capturing fake
 server) and `TestPop3StableVerbs`, plus the overlays.
 
-### M23.4 - byte-exact binary values (compacted)
+### M23.4 - byte-exact binary values
 
 **Done.** `redis` / `memcache` decoded bulk values as UTF-8 (throwing on a
 non-UTF-8 value); added `bytes`-valued get/set (text `get`/`set` unchanged, still
@@ -964,7 +964,7 @@ RESP encoder + a count-framed, never-decoded reply reader) and typed hash / list
 `TestMemcacheBinaryCasMulti` (NUL / CR / LF / 0xFF round-trip, byte-count-framed)
 and the `encodeCommandBytes` overlay test.
 
-### M23.5 - selectable backends (compacted)
+### M23.5 - selectable backends
 
 **Done.** `session` / `ratelimit` were memcache-only (against the "one module,
 one selectable backend" stance); added a shared backend layer and moved both onto
@@ -1005,7 +1005,7 @@ sweep), the `kvstore` / `session` / `ratelimit` overlays (deterministic, in-proc
 incl. the sliding boundary), and the Go suite over memcache / redis
 (`TestSessionLifecycle`, `TestRatelimit`, `TestKvstoreRedisBackend`).
 
-### M23.6 - format & coverage completeness (compacted)
+### M23.6 - format & coverage completeness
 
 **Done.** The broadest track: the deepest per-module gaps, where a module handled
 the easy case but not the real one. Thirteen pieces (M23.6.1 - M23.6.13), each
@@ -1059,7 +1059,7 @@ reference. Pure `.j`, both binaries unless noted.
   `qpdf --check` clean, `pdftotext`-extractable. Overlay 16 -> 41. Glyph subsetting
   and CFF `.otf` embedding remain optional follow-ons, tracked but not blocking.
 
-### M23.7 - observability completeness (compacted)
+### M23.7 - observability completeness
 
 **Done.** Filled the three biggest metrics gaps, each with its enhanced overlay at
 100%, updated `docs/modules/` doc + demo + catalog rows, and validation against an
@@ -1089,7 +1089,7 @@ binary).
   1.x path stays byte-identical. Validated against a captured HTTP request + an
   independent line-protocol parser.
 
-### M23.8 - ergonomic papercuts + notifier richness (compacted)
+### M23.8 - ergonomic papercuts + notifier richness
 
 **Done.** A sweep of cheap, high-value wins across fifteen `.j` modules, each
 shipping its enhanced `*_test.j` overlay at 100% and an updated `docs/modules/`
@@ -1117,7 +1117,7 @@ an all-256-byte-values round-trip.
 | `telegram` | Inline keyboards, `parseCallbackQuery` / `answerCallbackQuery`, local-file upload (`sendPhotoFile` / `sendDocumentFile` via multipart + `http.requestRawBody`), and bot-token redaction from every raised error. |
 | `slack` | Block Kit `contextBlock` / `fieldsSection` / `actionsBlock` (URL buttons). |
 
-### M23.9 - `fmt`: shape-aware wrapping + raw-literal fidelity (compacted)
+### M23.9 - `fmt`: shape-aware wrapping + raw-literal fidelity
 
 **Done.** `jennifer fmt` (a token-stream machine, implementation-note 8) had no
 notion of width or raw-literal fidelity - it collapsed every struct / map / list
@@ -1177,7 +1177,7 @@ drove edge fixes: `insideForHeader` O(n^2) -> O(1) (a `forHeader` wrap-frame fla
 Left: `Token.Raw` captured on every lex (within noise). **Pre-1.0 break**
 (canonical output changed).
 
-### M23.10 - interactive stdin for `os.run` / `os.spawn` (compacted)
+### M23.10 - interactive stdin for `os.run` / `os.spawn`
 
 **Done.** `os.run(argv)` captured a child's stdout / stderr but could not feed its
 **stdin** (so a Jennifer program could not drive a `sort` / `jq` / `gzip` filter
@@ -1226,7 +1226,7 @@ concat); and the docs call out that `handle` exposes the whole top-level method
 namespace (no route allow-list) with authentication left to the transport.
 Client-side batch and custom per-handler error codes are noted follow-ups.
 
-### M23.12 - `match` / `enum` adoption across modules (compacted)
+### M23.12 - `match` / `enum` adoption across modules
 
 **Done.** `match` / `enum` were barely used in `modules/` (2 of 66 files); a
 survey applied them to the genuine closed-variant-set cases (open sets - HTTP
@@ -1256,7 +1256,7 @@ methods, wire strings, config-supplied mechanism names - stayed strings).
   mock-server integration tests, and docs updated; `go test ./...` + every module
   overlay green on both binaries.
 
-### M23.13 - `mcp` module (Model Context Protocol, stateless) (compacted)
+### M23.13 - `mcp` module (Model Context Protocol, stateless)
 
 **Done.** A Model Context Protocol module (stateless only): a **server** exposing
 tools / resources / prompts to an LLM host, and a **client** (HTTP or launched
@@ -1296,258 +1296,96 @@ server-initiated sampling / roots / elicitation) - it needs an SSE push primitiv
 
 ### M23.14 - raw single-quoted string literals
 
-**Done.** A **breaking** (pre-1.0) split of the two string delimiters so each
-does one job, per design stance #1 ("one way per thing"). Today `"..."` and
-`'...'` are **redundant** - both parse the same escape sequences - which is
-exactly the duplication the stance rules out. The change gives them distinct
-roles:
+**Done.** A **breaking** (pre-1.0) split of the two, formerly-redundant string
+delimiters so each does one job (stance #1): **`"..."` stays cooked** (escapes
+`\n \r \t \\ \" \' \0` processed), **`'...'` becomes raw** - no escape
+processing, content verbatim (backslashes and newlines included) from the
+opening `'` to the next `'`. So `'\d+\.\d+'` is a literal regex (no
+double-escaping) and a multi-line `'...'` block is a **free heredoc** (no
+`<<<EOF` needed). A `'` inside content switches to the cooked form (`"it's"`).
+Deliberately **no** `r"..."` prefix - the delimiter *is* the mode (simpler, no
+new lexer state); rejection recorded in `rejected.md`.
 
-- **`"..."` stays the cooked form** - escape sequences (`\n \r \t \\ \" \' \0`)
-  are processed, as now.
-- **`'...'` becomes a raw form** - **no** escape processing. The literal starts
-  at the opening `'` and ends at the **next** `'`; every byte between (including
-  backslashes and **newlines**) is content verbatim. A raw literal therefore
-  spans multiple lines with no ceremony:
-
-  ```
-  def x as string init
-  'line one
-  line two
-    indented, \n stays two chars, \ is literal';
-  ```
-
-  This is a **free heredoc / nowdoc**: a multi-line raw block is just a
-  `'...'` literal, so no `<<<EOF` construct is needed (and none is planned).
-
-- **A `'` inside content** is written by switching to the cooked delimiter:
-  `"it's"` (or `"it\'s"`). There is deliberately **no** `r"..."` prefix syntax
-  (Python-style) - the delimiter *is* the mode, which is simpler and needs no
-  new lexer state. Record the `r"..."` rejection in `rejected.md`.
-
-**Why:** raw strings remove the heavy double-escaping that hurts regex patterns,
-Windows-style paths, and embedded JSON. A pattern like `"\\d+\\.\\d+"` becomes
-`'\d+\.\d+'`; the `regex` docs' examples get markedly cleaner.
-
-**Migration is essentially free.** An audit of every `.j` in `modules/` and
-`examples/` found **zero** `'`-delimited literals that rely on escape processing
-- all current single-quoted literals are escape-free (single-character strings
-like `'"'` / `'*'`, or plain text like `'hello world'`), which read identically
-raw or cooked. So the rewrite pass is a no-op in practice; any future
-`'\n'`-style literal simply moves to `"..."`.
-
-**Mechanically** the change is confined to the lexer's string scanner: the `'`
-branch reads verbatim to the next `'` (permitting embedded newlines) and skips
-escape decoding, while the `"` branch is unchanged. An **unterminated** raw
-literal (EOF before the closing `'`) is a positioned lex error like the cooked
-form.
-
-**Docs / grammar / tooling to update** (all in the same change, per the
-keep-grammar-in-sync discipline):
-- `docs/user-guide/types-and-values.md` - the string-literals section (the two
-  delimiters now differ; document raw + multi-line + the "use `"..."` for an
-  embedded `'`" rule).
-- The **grammar files** - the EBNF / lexer spec under `docs/technical/`
-  (`grammar.md` + `lexer.md`) for the two string productions, and the
-  `docs/user-guide/style-guide.md` note on when to prefer which delimiter.
-- `docs/libraries/regex.md` - rewrite the pattern examples to raw `'...'` form
-  (the headline ergonomic win) and add a one-line "prefer a raw literal for
-  patterns" note.
-- `JENNIFER.md` - the string-literal description (mirror the spec so an AI
-  assistant emits correct `.j`).
-- The **editor highlighters** under `editors/` (Vim, TextMate, highlight.js) +
-  the regenerated `theme/highlight.js` - a single-quoted string is now raw, so
-  escape sequences inside it must **not** be highlighted as escapes (they are
-  literal text); the double-quoted string keeps escape highlighting.
-
-**Close-out:** lexer unit tests for the raw path (multi-line, backslash-literal,
-unterminated error, `'` -> switch-to-`"`), the audited (no-op) `modules/` +
-`examples/` sweep re-run green, `go test ./...`, `make build` both toolchains,
-and the em-dash / gofmt guards. Called out as a pre-1.0 breaking change here per
-the pre-1.0 discipline.
+Mechanically confined to the lexer's string scanner (`readString` branches on
+`raw := quote == '\''`; the `'` path skips the escape switch, the `"` path is
+unchanged); `src` is `[]rune` so multibyte content is rune-exact,
+`advance` tracks lines through embedded newlines, an unterminated raw literal is
+a positioned error at the opening quote, and `Token.Raw` captures the span
+verbatim so `fmt` round-trips a raw (incl. multi-line) literal unchanged.
+Migration was a **no-op**: an audit of `modules/` + `examples/` found zero
+single-quoted literals relying on escape processing. Docs / grammar
+(`types-and-values`, `style-guide`, `lexer.md`), `regex.md` examples (rewritten
+to raw), `JENNIFER.md`, and the four editor highlighters + regenerated
+`theme/highlight.js` (single-quoted no longer highlights escapes) all updated in
+the same change. Lexer unit tests for the raw path; `go test ./...` (+ `-race`),
+both toolchains, gofmt / em-dash guards green.
 
 ### M23.15 - `orm`: a batteries-included data-mapper ORM
 
-**Planned.** A major workover that lifts `orm` from a thin query-builder + CRUD
-Data Mapper to a **full, batteries-included ORM** - associations, eager loading
-that eliminates N+1, schema migrations, upsert, batch writes, and the finders a
-real data layer needs - while staying **Data Mapper, not Active Record**. This
-is a deliberately large milestone that does not fit the M23 "module coverage"
-theme cleanly; it lands here because `orm` is a keystone module and M23 is the
-pre-1.0 window where the necessary breaking changes are cheapest to make.
+**Done.** A major workover lifting `orm` from a thin query-builder + CRUD Data
+Mapper to a **full, batteries-included ORM** - associations, N+1-eliminating eager
+loading, upsert / batch writes, and finders - while staying **Data Mapper, not
+Active Record** (rows are data, persistence is always an explicit call).
+Dialect-aware throughout (MySQL / MariaDB + PostgreSQL); no `sql`-library change
+proved necessary.
 
-**Architecture decisions (set once, apply throughout).**
-- **Rows stay `map of string to string`.** Jennifer has no struct reflection, so
-  a generic mapper cannot populate arbitrary user structs field-by-field; the map
-  is the row, values bind through placeholders, identifiers are allowlist-checked
-  (the existing injection guard). This keeps the Data Mapper stance intact: rows
-  are plain data, every persistence action is an explicit function call, there
-  are **no** per-row `save()` methods or Active-Record classes. Typed-struct
-  mapping is recorded as **rejected** (needs reflection) in `rejected.md`.
-- **Relations attach through a side `Result`, not by nesting into the row.** A
-  homogeneous `map of string to string` cannot hold both scalar columns and
-  child-row lists, so eager-loaded associations live in an **included-associations
-  holder** (an identity-map-style `Result`) read through accessors
-  (`rows` / `related` / `relatedOne`), rather than mutating rows into a
-  heterogeneous shape. Documented in `design-decisions.md`.
-- **Migrations are data, not closures.** Jennifer has no first-class functions,
-  so a migration is a `Migration{version, description, up, down}` value whose
-  `up` / `down` are ordered **lists of DDL statements** (built by DDL helpers).
-  The runner applies each inside a transaction and records it in a
-  `schema_migrations` tracking table.
-- **Dialect-aware throughout** (MySQL / MariaDB + PostgreSQL), reusing the
-  existing `Dialect` enum and placeholder machinery. No SQLite (the `sql` library
-  excludes it).
-- **Transactions - already at the `sql` layer, but orm can't use them yet.**
-  `sql` has full transactions: `sql.begin(conn) -> sql.Tx`, `sql.commit` /
-  `sql.rollback`, `query` / `exec` accept a Connection **or** a Tx as the target
-  (resolved in the Go builtin), and the `errdefer sql.rollback($tx)` idiom.
-  **The gap is on the orm side:** its functions declare `conn as sql.Connection`,
-  and Jennifer's object types are strict (a `sql.Tx` value does not satisfy an
-  `as sql.Connection` param - verified), so orm's CRUD **cannot** currently be
-  called with a `Tx` (the `orm.md` "or a `sql.Tx`" wording is aspirational). A
-  batteries-included ORM must run its writes inside a caller's transaction, so
-  closing this is in scope. Jennifer has **no union types**, so the target-type
-  question needs a decision (see below); it is the one genuine breaking change
-  this milestone makes to how orm is *called*.
-- **`sql`-library assessment (otherwise).** Apart from the transaction-target
-  question above, the existing `sql` surface already expresses everything through
-  parameterized raw SQL: `RETURNING` (a returning `INSERT` is a row-yielding
-  statement for `sql.query`), `ON CONFLICT` / `ON DUPLICATE KEY`, `SAVEPOINT` /
-  `ROLLBACK TO`, and multi-row `VALUES`. So **no further `sql` change is presumed
-  necessary**; the single candidate is a `sql.queryRow` fetch-one convenience,
-  added **only if** implementation shows a real need (stance #1 - do not grow the
-  API speculatively). Any `sql` change that proves necessary lands inside the
-  sub-milestone that needs it, per the request.
+**Two data-model decisions** (reasoned in `design-decisions.md`, both forced by
+the language): rows stay **`map of string to string`** because there is no struct
+reflection to populate a typed target; eager-loaded relations attach through a
+**side `Result`** holder (read via `rows` / `related` / `relatedOne`) because a
+homogeneous map can't hold scalars *and* child lists and there is no `any`.
+**Transactions** stay in `sql`; orm's CRUD takes a value-semantic **`orm.Session`**
+(`orm.session(conn)` auto-commit / `orm.transaction(tx)`) since a strict `sql.Tx`
+can't satisfy an `as sql.Connection` slot and there are no union types.
 
-**Transaction-target decision (settled): an `orm.Session` wrapper.** orm owns a
-small value-semantic `Session` struct holding either a `sql.Connection` or a
-`sql.Tx` (two fields plus an `inTx` flag; the unused handle stays its zero value,
-never touched). Two constructors build it - `orm.session(conn)` for
-auto-committing single statements and `orm.transaction(tx)` for work inside a
-caller's transaction - and **every orm persistence / query-executing function
-takes a `Session`** as its first argument instead of a bare `sql.Connection`.
-Chosen over unifying the `sql` handle type or adding a `sql.Executor` union
-because it is **self-contained in orm** (no `sql` change), **preserves the
-sql-level Connection/Tx distinction**, and reads as a natural unit-of-work. This
-is the milestone's one breaking change to how orm is *called* (`conn` ->
-`session` across the CRUD / finder surface), and the `Session` type is built
-**first**, in M23.15.1, since every later sub-milestone's executing functions
-take it. Transactions themselves stay `sql.begin` / `commit` / `rollback` (orm
-adds no closure-based `transaction(fn)` wrapper - Jennifer has no first-class
-functions; the idiom is `sql.begin` + `errdefer sql.rollback` + `orm.transaction`
-+ `sql.commit`, shown in the demo).
+**Breaking changes (pre-1.0):** `Schema` / `Column` grew fields (attributes +
+`relations` + query `withRelations` / `distinctSelect`), so hand-built literals
+break - the builders stay the compatible entry point; every executing function
+takes an `orm.Session` first argument (`orm.insert($conn, ...)` ->
+`orm.insert(orm.session($conn), ...)`); `createTable`'s DDL changed.
 
-**Breaking changes (pre-1.0, called out here).** The `Schema` and `Column`
-structs grow fields (column attributes: nullable / unique / default /
-auto-increment / references; `Schema` gains a `relations` list), so a
-hand-built `Schema` / `Column` **literal** breaks - the `schema` / `column`
-builders stay the compatible entry point. Every orm persistence / query function
-takes an `orm.Session` first argument instead of a bare `sql.Connection` (the
-transaction fix above), so existing `orm.insert($conn, ...)` call sites become
-`orm.insert(orm.session($conn), ...)`. `createTable`'s emitted DDL changes (NOT
-NULL / DEFAULT / UNIQUE / auto-increment), so its golden assertions update. The
-`orm.md` non-goals "not a migration tool" and "a convenience emitter" are
-**reversed**. Each break is noted in the sub-milestone that makes it.
+Sub-milestones (each: 100% `orm_test.j` overlay + DB-gated
+`cmd/jennifer/orm_test.go` + docs + demo):
+- **M23.15.1** - `orm.Session` unit-of-work (CRUD switches `conn` -> `session`);
+  `Column` attributes (`notNull` / `unique` / `autoIncrement` / `withDefault`,
+  kind-rendered injection-safe DEFAULT); dialect-aware DDL builders (`createTable`
+  with attributes, `dropTable` / `addColumn` / `dropColumn` / `renameColumn` /
+  `createIndex` / `dropIndex` / `addForeignKey` / `dropForeignKey`).
+- **M23.15.1b** - migrations split into a **separate `sqlmigrate` module** (a
+  maintainer decision): the runner has zero dependency on the mapper (only `sql` +
+  plain DDL strings), so it sits below it, reusable by any `sql` program.
+  `Migration{version, description, up, down}`; `migrate` / `rollbackMigrations` /
+  `migrationStatus` over a `schema_migrations` table, one transaction per step,
+  idempotent, version-allowlisted + description-escaped. Own overlay / integration
+  / doc / demo.
+- **M23.15.2** - associations as schema metadata: `RelationKind` enum + `Relation`
+  struct; `belongsTo` / `hasOne` / `hasMany` / `manyToMany` builders;
+  `joinRelation(q, s, name)` emits the right JOIN. (`belongsTo` / `manyToMany`
+  reference the target's key by the `id` convention.)
+- **M23.15.3** - eager loading: `with(q, name)` + `load(session, schema, q) ->
+  Result` in a **fixed 1 + R queries** (base once, then one batched `WHERE fk IN
+  (...)` per relation); `rows` / `related` (list) / `relatedOne` (`{}` if none)
+  accessors. One level deep. m2m child rows keep the joined columns. The 1+R count
+  is pinned offline by a `plannedQueryCount` test (a live counting connection isn't
+  feasible - `sql.open` hardcodes the driver, opaque handle, no module state - so
+  correctness is verified live instead).
+- **M23.15.4** - write path: `upsert` (ON CONFLICT / ON DUPLICATE KEY),
+  `insertMany` (multi-row, transparently split past 60000 placeholders - never
+  silently capped; the spec's runtime log dropped, no stderr sink),
+  `insertReturning -> string` (Postgres RETURNING / MySQL `lastId`),
+  `updateWhere` / `deleteWhere` (bulk by a query's WHERE, refuse a WHERE-less
+  query), `save` (insert if no PK else update).
+- **M23.15.5** - finders `first` / `exists` / `findBy` / `pluck` (`first` takes a
+  query, not the sketch's unused schema); filters `whereNull` / `whereNotNull` /
+  `whereBetween` / `distinct` / `page` (per-condition WHERE rendering unified into
+  one `renderWhereClause`). **`whereRaw` rejected** (`rejected.md`): an arbitrary
+  fragment can't be allowlist-checked, the one thing that would break orm's
+  no-injection guarantee; bespoke SQL belongs in `sql`.
 
-Sub-milestones (each carries the standard close-out: a 100% `orm_test.j` overlay,
-a `cmd/jennifer/orm_test.go` integration test against the existing DB harness, the
-`docs/modules/orm.md` + `JENNIFER.md` + `modules/README.md` updates, and a
-runnable demo):
-
-#### M23.15.1 - session handle + richer schema + DDL + migrations
-
-**Planned.** The `Session` foundation, column attributes, and a real migration
-runner.
-- **`Session` (built first).** The value-semantic `Session` struct + `orm.session(conn)`
-  / `orm.transaction(tx)` constructors (the settled transaction-target design
-  above); the existing CRUD functions (`insert` / `find` / `update` / `delete` /
-  `all`) switch their first argument from `sql.Connection` to `Session` so they
-  can run inside a caller's transaction. This is the `conn` -> `session` break;
-  every later sub-milestone's executing function takes a `Session`.
-- **Column attributes.** `Column` gains `nullable` / `unique` / `hasDefault` +
-  `default` / `autoIncrement`. Set via fluent setters that decorate the
-  most-recently-added column and return a fresh `Schema`
-  (`notNull` / `unique` / `withDefault(s, v)` / `autoIncrement`), matching the
-  existing `$s = orm.column($s, ...)` chain.
-- **DDL builders** (dialect-aware, each returns a statement string): an enhanced
-  `createTable` (NOT NULL / DEFAULT / UNIQUE / `SERIAL` vs `AUTO_INCREMENT` / PK),
-  plus `dropTable`, `addColumn`, `dropColumn`, `renameColumn`, `createIndex`
-  (unique optional), `dropIndex`, `addForeignKey`, `dropForeignKey`. Identifiers
-  allowlist-checked like the query builder.
-- **Migrations.** `Migration{version, description, up as list of string, down as
-  list of string}`; `migrate(conn, migrations)` ensures a `schema_migrations`
-  table, applies each pending version's `up` statements in a transaction, and
-  records it (idempotent, ordered); `rollbackMigrations(conn, migrations, steps)`
-  runs `down` newest-first; `migrationStatus(conn, migrations)` reports
-  applied / pending. Reverses the "not a migration tool" non-goal.
-
-#### M23.15.2 - associations (relations)
-
-**Planned.** Declarative relations as schema metadata (no query yet).
-- **`RelationKind` enum** `{BelongsTo, HasOne, HasMany, ManyToMany}` + a
-  `Relation` struct (`name`, `kind`, `target` table, `foreignKey`, `localKey`,
-  and for many-to-many `through` join table + its two keys).
-- **Builders on `Schema`** (append to the new `relations` field, identifiers
-  checked): `belongsTo(s, name, target, foreignKey)`,
-  `hasOne(s, name, target, foreignKey)`, `hasMany(s, name, target, foreignKey)`,
-  `manyToMany(s, name, target, joinTable, localFk, targetFk)`.
-- **Relation-aware join sugar** `joinRelation(q, s, relationName)` emits the
-  correct `JOIN` from a defined relation (over the existing `join` primitive).
-  This sub only records the metadata; M23.15.3 consumes it.
-
-#### M23.15.3 - eager loading (N+1 elimination)
-
-**Planned.** The headline performance feature: load a parent set and its
-relations in a **fixed 1 + R queries** (R = relations requested), never per row.
-- **`with(q, relationName)`** marks a relation to eager-load (new `Query` field);
-  **`load(conn, schema, q) -> Result`** runs the base query (1 query), then for
-  each requested relation runs **one** batched
-  `SELECT ... WHERE fk IN ($1..$n)` (or one join-table query for many-to-many),
-  and builds a parent-key -> child-rows lookup.
-- **`Result`** holds the base `rows` plus the per-relation lookups; accessors
-  `rows(result)`, `related(result, row, name) -> list of map ...`
-  (has-many / many-to-many), `relatedOne(result, row, name) -> map ...`
-  (belongs-to / has-one). One level of nesting; relations-of-relations is a
-  documented follow-on.
-- **Guarantee + test.** The 1 + R query count is the contract, pinned by counting
-  statements through the integration harness (a wrapping / counting connection),
-  not just by output shape.
-
-#### M23.15.4 - write path: upsert, batch, bulk, save, returning
-
-**Planned.** The mutations a real data layer needs.
-- **`upsert(conn, s, record, conflictCols)`** - Postgres `INSERT ... ON CONFLICT
-  (...) DO UPDATE SET ...`, MySQL `INSERT ... ON DUPLICATE KEY UPDATE ...`.
-- **`insertMany(conn, s, records)`** - one multi-row `INSERT` (placeholder-count
-  chunked to a safe limit; the chunk boundary `log`ged, no silent cap).
-- **`insertReturning(conn, s, record) -> string`** - the generated key: Postgres
-  `RETURNING pk` via `sql.query`, MySQL via `sql.exec(...).lastId` (dialect
-  dispatch; no `sql` change).
-- **`updateWhere(conn, s, assignments, q)`** / **`deleteWhere(conn, s, q)`** -
-  bulk mutate matching a `Query`'s `WHERE` (reusing its rendering + params).
-- **`save(conn, s, record)`** - insert when the primary key is absent, else
-  update (an explicit Data-Mapper convenience, still no per-row method).
-
-#### M23.15.5 - finders + query ergonomics
-
-**Planned.** The everyday read helpers.
-- **`first(conn, s, q)`** (LIMIT 1 -> one row or empty), **`exists(conn, q) ->
-  bool`**, **`findBy(conn, s, col, value)`**, **`pluck(conn, q, col) -> list of
-  string`**, **`page(q, pageNum, pageSize)`** (limit/offset sugar).
-- **Filter completeness:** `whereNull` / `whereNotNull`, `whereBetween`,
-  `distinct(q)`. A safe `whereRaw(q, fragment, params)` escape hatch that still
-  binds every value through placeholders (the fragment is identifier/operator
-  checked, values never inlined) is considered and only added if it can keep the
-  injection guarantee; otherwise recorded in `rejected.md`.
-
-**Milestone close-out.** Beyond each sub's overlay + integration test: an
-end-to-end demo modelling a small relational domain (e.g. authors / posts /
-tags with a many-to-many) that migrates the schema, seeds via `insertMany` /
-`upsert`, and eager-loads to show the fixed query count; `go test ./...` green
-against the DB harness; `make build` both toolchains (pure `.j` over `sql`, so
-both build, though the net-backed `sql` drivers run only on the default binary);
-gofmt / em-dash / docblock guards; and the `design-decisions.md` (rows-as-maps +
-side-`Result`) and `rejected.md` (typed-struct mapping, Active Record) records.
+Close-out: end-to-end `examples/modules/orm_blog_demo.j` (authors / posts / tags
+many-to-many, migrate + seed + eager-load, env-gated); `design-decisions.md`
+(rows-as-maps + side-`Result`) and `rejected.md` (typed-struct mapping, Active
+Record, `whereRaw`) records; `go test ./...` + both toolchains green.
 
 ---
 

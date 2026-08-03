@@ -12,7 +12,7 @@ Jennifer is an interpreted programming language written in (Tiny)Go.
 
 It is **batteries-included**, and not just in name:
 **[36 built-in libraries](libraries/index.md) and
-[62 distributable modules](modules/index.md) - over 450 functions and
+[65 distributable modules](modules/index.md) - over 450 functions and
 constants** cover what real programs actually need, so you build genuine tools,
 not toys. Talk to a
 real database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
