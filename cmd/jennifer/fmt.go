@@ -1112,15 +1112,19 @@ func isOperandToken(t lexer.Token) bool {
 }
 
 // noSpaceBeforeLParen lists the token types that hug a following `(`:
-// function calls, type-conversion casts, and the `len` built-in (a
-// keyword-shaped primary expression that syntactically behaves like
-// a call).
+// function calls, type-conversion casts, the `len` built-in (a keyword-shaped
+// primary expression that behaves like a call), and a call through a function
+// value - `$f(x)` (VARREF), `getFn()(x)` (RPAREN), `$fns[0](x)` (RBRACKET).
+// Those three only precede a `(` as a first-class-function call (any such
+// juxtaposition was a parse error before), so hugging them changes no existing
+// program's formatting.
 func noSpaceBeforeLParen(tt lexer.TokenType) bool {
 	switch tt {
 	case lexer.TOKEN_IDENT,
 		lexer.TOKEN_INT_TYPE, lexer.TOKEN_FLOAT_TYPE,
 		lexer.TOKEN_STRING_TYPE, lexer.TOKEN_BOOL_TYPE,
-		lexer.TOKEN_LEN:
+		lexer.TOKEN_LEN,
+		lexer.TOKEN_VARREF, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
 		return true
 	}
 	return false

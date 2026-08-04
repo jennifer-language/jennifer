@@ -1393,6 +1393,13 @@ func (p *parser) parseType() (Type, error) {
 			return Type{}, err
 		}
 		return TaskType(elem), nil
+	case lexer.TOKEN_FUNC:
+		// `func` as a type: a first-class function value. It carries no
+		// parameter / return signature in the type (a function value is dispatched
+		// with arity + kind checked at the call site, exactly as a named method
+		// call is), so the bare keyword is the whole type.
+		p.advance()
+		return PrimitiveType(TypeFunc), nil
 	case lexer.TOKEN_IDENT:
 		// Struct type reference. Bare IDENT (`def x as Name;`) names a
 		// top-level user struct; `IDENT.IDENT` (`def x as os.Result;`)
@@ -1847,6 +1854,17 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 	if callee.Type == lexer.TOKEN_IDENT && containsUnderscore(callee.Lexeme) {
 		return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", callee.Lexeme), File: callee.File, Line: callee.Line, Col: callee.Col}
 	}
+	args, err := p.parseParenArgs()
+	if err != nil {
+		return nil, err
+	}
+	return &CallExpr{pos: pos{File: callee.File, Line: callee.Line, Col: callee.Col}, Callee: callee.Lexeme, Args: args}, nil
+}
+
+// parseParenArgs parses a `(arg, arg, ...)` argument list, with the opening `(`
+// as the current token. Shared by parseCallTail (a named call) and the postfix
+// `(` on a function value (parsePrimary's CallValueExpr case).
+func (p *parser) parseParenArgs() ([]Expr, error) {
 	p.advance()                // consume LPAREN
 	defer p.allowStructLit()() // inside args, a `{` is a struct literal, not a block
 	var args []Expr
@@ -1865,7 +1883,7 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 	if _, err := p.expect(lexer.TOKEN_RPAREN, "to close call argument list"); err != nil {
 		return nil, err
 	}
-	return &CallExpr{pos: pos{File: callee.File, Line: callee.Line, Col: callee.Col}, Callee: callee.Lexeme, Args: args}, nil
+	return args, nil
 }
 
 // parseStructLitTail parses the `{ field: expr, ... }` portion of a
@@ -2161,6 +2179,18 @@ func (p *parser) parsePrimary() (Expr, error) {
 				Target: e,
 				Field:  name.Lexeme,
 			}
+		case lexer.TOKEN_LPAREN:
+			// A postfix `(...)` on a value expression is a call through a function
+			// value: `$f(x)`, `$fns[0](x)`, `makeAdder(1)(2)`. A named-method call
+			// `name(...)` never reaches here - parsePrimaryAtom consumes it via
+			// parseCallTail - so this fires only when the callee is a runtime
+			// function value.
+			lp := p.peek()
+			args, err := p.parseParenArgs()
+			if err != nil {
+				return nil, err
+			}
+			e = &CallValueExpr{pos: pos{File: lp.File, Line: lp.Line, Col: lp.Col}, Callee: e, Args: args}
 		default:
 			return e, nil
 		}

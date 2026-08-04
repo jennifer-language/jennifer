@@ -145,18 +145,25 @@ flat lookup view, not authoritative.
 | [`kv`](kv.md)`.touch(store, key, ttl)`                | Re-arm the expiry; whether it existed (`bool`).                                                                                     |
 | [`kv`](kv.md)`.incr(store, key, delta)`               | Add signed `delta` to the numeric value; new value, or `-1` when absent (not created).                                             |
 | [`kv`](kv.md)`.close(store)`                          | Drop the store and free its handle.                                                                                                 |
+| [`lists`](lists.md)`.all(xs, fn)`                     | True if the `func` `fn(x)` is true for every element (true for empty). Short-circuits.                                              |
+| [`lists`](lists.md)`.any(xs, fn)`                     | True if the `func` `fn(x)` is true for any element. Short-circuits.                                                                 |
 | [`lists`](lists.md)`.concat(a, b)`                    | New list with `a`'s elements followed by `b`'s.                                                                                     |
 | [`lists`](lists.md)`.contains(xs, item)`              | True if `item` appears in `xs` (haystack, needle).                                                                                  |
+| [`lists`](lists.md)`.filter(xs, fn)`                  | New list of the elements where the `func` `fn(x)` returns true.                                                                     |
+| [`lists`](lists.md)`.find(xs, fn)`                    | First element where the `func` `fn(x)` is true; errors (catchable) if none.                                                          |
 | [`lists`](lists.md)`.first(xs)`                       | Element at index 0. Empty input errors.                                                                                             |
 | [`lists`](lists.md)`.head(xs, n)`                     | New list of the first `n` elements.                                                                                                 |
 | [`lists`](lists.md)`.last(xs)`                        | Element at the last index. Empty input errors.                                                                                      |
+| [`lists`](lists.md)`.map(xs, fn)`                     | New list of `fn(x)` for each element (`fn` a `func`); result type checked at the binding.                                            |
 | [`lists`](lists.md)`.pop(xs)`                         | New list without the last element. Empty input errors.                                                                              |
 | [`lists`](lists.md)`.push(xs, item)`                  | New list with `item` appended.                                                                                                      |
 | [`lists`](lists.md)`.range(start, end[, step])`       | Half-open list of consecutive ints; `end` excluded; `step` must match direction.                                                    |
+| [`lists`](lists.md)`.reduce(xs, fn, init)`            | Fold left with the `func` `fn(acc, x)`, starting from `init`.                                                                        |
 | [`lists`](lists.md)`.reverse(xs)`                     | New list with elements reversed.                                                                                                    |
 | [`lists`](lists.md)`.shuffle(xs)`                     | Fisher-Yates; respects `math.randSeed`. Non-mutating.                                                                               |
 | [`lists`](lists.md)`.slice(xs, start[, end])`         | New sublist `[start, end)`; `end` defaults to `len(xs)`.                                                                            |
 | [`lists`](lists.md)`.sort(xs)`                        | New ascending-sorted list. Numeric / string / bool elements; mixed errors.                                                          |
+| [`lists`](lists.md)`.sortBy(xs, keyFn)`               | New list sorted ascending by the key the `func` `keyFn(x)` returns (a comparable scalar).                                            |
 | [`lists`](lists.md)`.tail(xs, n)`                     | New list of the last `n` elements.                                                                                                  |
 | [`maps`](maps.md)`.delete(m, key)`                    | New map without `key`. Missing key errors (strict at boundaries).                                                                   |
 | [`maps`](maps.md)`.has(m, key)`                       | True if map `m` contains `key`. The non-erroring companion to `$m[key]`.                                                            |

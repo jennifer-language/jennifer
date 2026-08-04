@@ -74,8 +74,15 @@ The semantic rules no grammar can express follow here.
   `null` for a bare `return;` or a body that falls off the end).
 - A bare `IDENT` in expression position is parsed as a `CallExpr` if
   immediately followed by `(`, otherwise as a `ConstRefExpr`. At runtime
-  the latter must resolve to a constant in scope; a name that resolves to
-  a variable produces a helpful error ("use `$name`").
+  the latter resolves to a constant in scope, else to a **first-class
+  function value** if the name is a top-level method (the `func` type), else
+  a name that resolves to a variable produces a helpful error ("use
+  `$name`"); anything else is an undefined-name error.
+- A postfix `(...)` on any value expression (not a bare method-name call,
+  which parseCallTail consumes) is a **`CallValueExpr`** - a call through a
+  function value: `$f(x)`, `$fns[0](x)`, `makeAdder(1)(2)`. The callee must
+  evaluate to a non-null `func`; arity and argument kinds are checked at the
+  call site exactly as for a named call.
 - **Lists are array-backed sequences, not Lisp-style linked lists**:
   `def xs as list of int init [1, 2, 3]`. Element access is `$xs[i]`,
   0-indexed, in-bounds-checked. Out-of-bounds reads and writes are
@@ -156,6 +163,7 @@ below.
 | `VarExpr`               | expr | `Name` (no `$`), `Depth`, `Slot` (both -1 = unresolved, use name lookup) - mutable-variable reference |
 | `ConstRefExpr`          | expr | `Name`, `Depth`, `Slot` (-1 = unresolved) - bare-IDENT reference; interpreter expects it to resolve to a constant |
 | `CallExpr`              | expr | `Callee`, `Args []Expr`, `Method *MethodDef` (pre-resolved pointer for hoisted user methods; nil for builtins and resolver-less paths) |
+| `CallValueExpr`         | expr | `Callee Expr`, `Args []Expr` (a call through a function value: `$f(x)`; the callee evaluates to a `func` at run time)                |
 | `LenExpr`               | expr | `Operand Expr` - `len(EXPR)` language built-in                                                     |
 | `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr`, `Fn any` (pre-resolved `Builtin`; nil for resolver-less paths)     |
 | `QualifiedConstRefExpr` | expr | `Prefix`, `Name`, `Const any` (pre-resolved `Value`; nil for resolver-less paths)                    |

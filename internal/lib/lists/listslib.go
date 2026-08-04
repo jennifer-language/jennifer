@@ -43,6 +43,245 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "shuffle", shuffleFn)
 	in.RegisterNamespaced(LibraryName, "range", rangeFn)
+	// Higher-order functions - each takes a first-class `func` value and calls
+	// it back through ctx.Invoke.
+	in.RegisterNamespaced(LibraryName, "map", mapFn)
+	in.RegisterNamespaced(LibraryName, "filter", filterFn)
+	in.RegisterNamespaced(LibraryName, "reduce", reduceFn)
+	in.RegisterNamespaced(LibraryName, "find", findFn)
+	in.RegisterNamespaced(LibraryName, "any", anyFn)
+	in.RegisterNamespaced(LibraryName, "all", allFn)
+	in.RegisterNamespaced(LibraryName, "sortBy", sortByFn)
+}
+
+// requireFunc checks that v is a callable `func` value.
+func requireFunc(name string, v interpreter.Value, argpos string) error {
+	if v.Kind != interpreter.KindFunc {
+		return fmt.Errorf("lists.%s: %s must be a func, got %s", name, argpos, v.Kind)
+	}
+	return nil
+}
+
+// requireBool checks that a callback returned a bool (for filter / any / all).
+func requireBool(name string, v interpreter.Value) (bool, error) {
+	if v.Kind != interpreter.KindBool {
+		return false, fmt.Errorf("lists.%s: the callback must return bool, got %s", name, v.Kind)
+	}
+	return v.Bool, nil
+}
+
+// genericList builds a list value with no recorded element type, so it is
+// validated element-by-element at the binding site (like a fresh list literal or
+// a json.decode result). Used for `map`, whose result element type is whatever
+// the callback returns.
+func genericList(elems []interpreter.Value) interpreter.Value {
+	return interpreter.Value{Kind: interpreter.KindList, List: elems}
+}
+
+// mapFn: lists.map(xs, fn) -> a new list of fn(x) for each x. The result is a
+// generic list (element type checked at the binding site).
+func mapFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.map expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("map", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("map", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	src := args[0].List
+	out := make([]interpreter.Value, len(src))
+	for idx, x := range src {
+		r, err := ctx.Invoke(args[1], x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		out[idx] = r.Copy()
+	}
+	return genericList(out), nil
+}
+
+// filterFn: lists.filter(xs, fn) -> the elements where fn(x) is true. The result
+// keeps the input's element type (it is a subset of the same elements).
+func filterFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.filter expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("filter", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("filter", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	src := args[0].List
+	out := args[0]
+	out.List = make([]interpreter.Value, 0, len(src))
+	for _, x := range src {
+		r, err := ctx.Invoke(args[1], x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		keep, err := requireBool("filter", r)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if keep {
+			out.List = append(out.List, x.Copy())
+		}
+	}
+	return out, nil
+}
+
+// reduceFn: lists.reduce(xs, fn, init) -> fold left, acc = fn(acc, x).
+func reduceFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("lists.reduce expects 3 arguments (list, func, init), got %d", len(args))
+	}
+	if err := requireList("reduce", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("reduce", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	acc := args[2].Copy()
+	for _, x := range args[0].List {
+		r, err := ctx.Invoke(args[1], acc, x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		acc = r.Copy()
+	}
+	return acc, nil
+}
+
+// findFn: lists.find(xs, fn) -> the first element where fn(x) is true; throws a
+// catchable error if none matches (guard with lists.any, or catch it).
+func findFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.find expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("find", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("find", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	for _, x := range args[0].List {
+		r, err := ctx.Invoke(args[1], x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		match, err := requireBool("find", r)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if match {
+			return x.Copy(), nil
+		}
+	}
+	return interpreter.Null(), fmt.Errorf("lists.find: no element matched (use lists.any to test first, or catch this)")
+}
+
+// anyFn: lists.any(xs, fn) -> true if any element satisfies fn (short-circuits).
+func anyFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.any expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("any", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("any", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	for _, x := range args[0].List {
+		r, err := ctx.Invoke(args[1], x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		ok, err := requireBool("any", r)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if ok {
+			return interpreter.BoolVal(true), nil
+		}
+	}
+	return interpreter.BoolVal(false), nil
+}
+
+// allFn: lists.all(xs, fn) -> true if every element satisfies fn (short-circuits
+// on the first false; true for an empty list).
+func allFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.all expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("all", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("all", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	for _, x := range args[0].List {
+		r, err := ctx.Invoke(args[1], x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		ok, err := requireBool("all", r)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if !ok {
+			return interpreter.BoolVal(false), nil
+		}
+	}
+	return interpreter.BoolVal(true), nil
+}
+
+// sortByFn: lists.sortBy(xs, keyFn) -> a new list sorted ascending by the key
+// keyFn(x) returns (a comparable scalar: int / float / string / bool). The key
+// is extracted once per element (decorate-sort-undecorate), so keyFn runs O(n)
+// times, not O(n log n), and a keyFn error propagates cleanly.
+func sortByFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.sortBy expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("sortBy", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("sortBy", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	src := args[0].List
+	// An empty or single-element list is already sorted - return it without
+	// invoking the key function or validateSortable (which dereferences keys[0]).
+	if len(src) < 2 {
+		return args[0], nil
+	}
+	// Decorate: extract the sort key for each element once.
+	keys := make([]interpreter.Value, len(src))
+	idxs := make([]int, len(src))
+	for i, x := range src {
+		k, err := ctx.Invoke(args[1], x.Copy())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		keys[i] = k
+		idxs[i] = i
+	}
+	if err := validateSortable(keys); err != nil {
+		return interpreter.Null(), fmt.Errorf("lists.sortBy: %v", err)
+	}
+	// Sort indices by their key, stably, then materialize the reordered list.
+	sort.SliceStable(idxs, func(a, b int) bool {
+		return less(keys[idxs[a]], keys[idxs[b]])
+	})
+	out := args[0]
+	out.List = make([]interpreter.Value, len(src))
+	for pos, srcIdx := range idxs {
+		out.List[pos] = src[srcIdx].Copy()
+	}
+	return out, nil
 }
 
 func requireList(name string, v interpreter.Value, argpos string) error {

@@ -74,7 +74,8 @@ an assistant usually guesses wrong:
 
 Primitive: `null`, `int`, `float`, `string`, `bool`, `bytes`.
 Compound: `list of T`, `map of K to V`, user `struct`s, user `enum`s (sum
-types), `task of T` (a handle to a `spawn`ed computation).
+types), `task of T` (a handle to a `spawn`ed computation), `func` (a first-class
+function value).
 
 - **int** literals: `42`, `0xff`, `0o755`, `0b1010`, with `_` digit separators
   (`1_000_000`, `0xDEAD_BEEF`).
@@ -100,6 +101,27 @@ types), `task of T` (a handle to a `spawn`ed computation).
   **first** variant, payload zeroed. Read the payload only through `match` (no
   `$enum.field`). Names may be any case (an all-`UPPERCASE` name is a constant,
   so don't name a type all-caps).
+- **func** (first-class function value): a bare method name in expression
+  position **is** the value; a name followed by `(` is a call.
+  `def f as func init greet;` binds the method `greet` into a value; call it
+  through a variable or any function-valued expression: `$f(args)`,
+  `$fns[0](x)`, `makeAdder(1)(2)`. Pass and return them like any value
+  (`func apply(fn as func, x as int) { return $fn($x); }`). Arity + argument
+  types are checked at the call site (the `func` type has no signature).
+  Immutable (copies share the method; value semantics hold). Zero value
+  (`def f as func;`) is a **null** function - calling it errors. No `&NAME`
+  sigil and no anonymous-function / closure literal (yet). Powers the
+  higher-order `lists` layer (`map` / `filter` / `reduce` / `find` / `any` /
+  `all` / `sortBy`).
+
+  ```jennifer
+  use lists;
+  func dbl(n as int) { return $n * 2; }
+  func isEven(n as int) { return $n % 2 == 0; }
+  def xs as list of int init [1, 2, 3, 4];
+  def doubled as list of int init lists.map($xs, dbl);      # [2, 4, 6, 8]
+  def evens as list of int init lists.filter($xs, isEven);  # [2, 4]
+  ```
 
 ## Variables and constants
 
@@ -347,7 +369,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`strings`** - `upper lower contains startsWith endsWith indexOf trim
   replace repeat substring split chars join`. Rune-indexed.
 - **`lists`** - `push pop first last head tail reverse sort contains concat
-  slice shuffle range`. Non-mutating (they return new lists).
+  slice shuffle range`, plus higher-order `map filter reduce find any all sortBy`
+  (each takes a `func` value). Non-mutating (they return new lists).
 - **`binary`** - bulk operations on `bytes` (the byte-data counterpart to
   `strings`/`lists`): `concat slice find split startsWith endsWith`.
   Non-mutating, value-semantic; each pushes a per-byte loop into Go for

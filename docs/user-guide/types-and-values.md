@@ -15,6 +15,7 @@
 | user struct     | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs)                                                               |
 | user enum       | `Shape.Circle{r: 2.0}` (after `def enum Shape ...;`) | first variant, payload zeroed | One of a fixed set of variants (a sum type); consumed with `match`; see [Enums](#enums-sum-types)                       |
 | `task of T`     | *(no literal - produced by `spawn { ... }`)*         | *(cannot be defaulted; must be initialised)* | Handle to a concurrent computation; observed via the [`task`](../libraries/task.md) library. See [Concurrency](concurrency.md)     |
+| `func`          | a bare method name: `greet` (after `func greet() {...}`) | null function (calling it errors) | A first-class function value; call via `$f(args)`. See [Function values](#function-values)                            |
 
 The **Default** column is the value an uninitialized variable receives
 (`def x as int;` produces `0`). For compound types the default is an
@@ -126,6 +127,58 @@ Assignment uses `=`:
 def x as int init 0;
 $x = 42;          # ok
 $x = "string";    # error: cannot assign string to int variable
+```
+
+## Function values
+
+A **function value** (type `func`) is a first-class handle to a top-level
+method. The rule is the one the parser already uses to tell a call from a name:
+**a bare method name in expression position is the function value; a name
+followed by `(` is a call.**
+
+```jennifer
+func greet(name as string) { return "hi " + $name; }
+
+def f as func init greet;   # `greet` (no parens) is the function value
+io.printf("%s\n", $f("ada"));   # call it through the variable -> "hi ada"
+```
+
+Function values are ordinary values: pass them to methods, store them in a
+`list of func` or a struct field, and return them.
+
+```jennifer
+func applyTo(fn as func, x as int) { return $fn($x); }
+func double(n as int) { return $n * 2; }
+io.printf("%d\n", applyTo(double, 21));   # 42
+```
+
+Call one through any function-valued expression, not just a variable:
+`$fns[0](x)` (a `func` in a list), `makeAdder(1)(2)` (a returned `func`).
+
+Key properties:
+
+- **Immutable.** Holding a function in a value aliases nothing and can never
+  become a write-through handle, so the value-semantics rule is untouched -
+  copying a `func` shares the underlying method, and there is nothing to mutate.
+- **Checked at the call site.** The `func` type carries no parameter or return
+  signature; arity and argument kinds are checked when you *call* the value,
+  exactly as for a named method call. Wrong count or wrong kind is a positioned
+  runtime error.
+- **The zero is a null function.** `def f as func;` with no `init` is a null
+  handle; calling it is a positioned error until you assign a method.
+- **No `&name` and no closures (yet).** There is no reference sigil (it would read
+  as a pointer the language does not have), and no anonymous-function / closure
+  literal - that is a later, additive step. For now a function value always names
+  a top-level `func`.
+
+The payoff is the higher-order [`lists`](../libraries/lists.md) layer, which takes
+a `func` per element: `lists.map` / `filter` / `reduce` / `find` / `any` / `all` /
+`sortBy`.
+
+```jennifer
+use lists;
+func isEven(n as int) { return $n % 2 == 0; }
+def evens as list of int init lists.filter([1, 2, 3, 4, 5], isEven);   # [2, 4]
 ```
 
 ## Scoping

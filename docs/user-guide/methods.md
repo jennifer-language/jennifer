@@ -55,3 +55,11 @@ rename it or remove `use io;`
 
 Without the `use io;`, the name is yours to define. This is the same
 no-shadowing discipline Jennifer applies to variables.
+
+## Methods as values
+
+A method name is also a **function value**: written bare (no `(`), it evaluates
+to a `func` you can store, pass, and call later - `def f as func init greet;`
+then `$f(args)`. This is what powers the higher-order `lists` helpers
+(`lists.map` / `filter` / `reduce` / ...). See
+[Function values](types-and-values.md#function-values) for the full rules.

@@ -45,6 +45,7 @@ const (
 	KindTask   // a pending or completed `spawn { ... }` computation
 	KindObject // opaque, library-owned value (e.g. json.Value); wraps an inner tree in Obj
 	KindEnum   // sum-type value: one variant of a `def enum`; StructName is the enum type, Variant the active variant, Fields its payload
+	KindFunc   // first-class function value: an immutable handle to a top-level method (Fn); copies share the pointer
 )
 
 func (k ValueKind) String() string {
@@ -73,6 +74,8 @@ func (k ValueKind) String() string {
 		return "object"
 	case KindEnum:
 		return "enum"
+	case KindFunc:
+		return "func"
 	}
 	return "?"
 }
@@ -157,19 +160,20 @@ type Value struct {
 	Float      float64
 	Str        string
 	Bool       bool
-	List       []Value       // KindList: element data
-	Map        []MapEntry    // KindMap:  insertion-ordered entries
-	Bytes      []byte        // KindBytes: byte data
-	Fields     []StructField // KindStruct / KindEnum: declaration-ordered field values (the variant payload for KindEnum)
-	Variant    string        // KindEnum: the active variant name (StructName holds the enum type name)
-	StructName string        // KindStruct: name of the struct definition this value belongs to
-	StructNS   string        // KindStruct: display namespace prefix (library name, or a module's file stem); empty for user-defined structs
-	ModPath    string        // KindStruct: module identity - the module's canonical path; empty for library / user structs. Two module files that share a stem stay distinct types because their ModPath differs, while StructNS keeps the readable stem for display.
-	ElemTyp    *parser.Type  // KindList: element type
-	KeyTyp     *parser.Type  // KindMap:  key type
-	ValTyp     *parser.Type  // KindMap:  value type
-	Task       *TaskState    // KindTask: shared handle - copying a task copies the pointer
-	Obj        *Value        // KindObject: wrapped opaque payload (e.g. json.Value's decoded tree); StructNS/StructName carry the owning type
+	List       []Value           // KindList: element data
+	Map        []MapEntry        // KindMap:  insertion-ordered entries
+	Bytes      []byte            // KindBytes: byte data
+	Fields     []StructField     // KindStruct / KindEnum: declaration-ordered field values (the variant payload for KindEnum)
+	Variant    string            // KindEnum: the active variant name (StructName holds the enum type name)
+	StructName string            // KindStruct: name of the struct definition this value belongs to
+	StructNS   string            // KindStruct: display namespace prefix (library name, or a module's file stem); empty for user-defined structs
+	ModPath    string            // KindStruct: module identity - the module's canonical path; empty for library / user structs. Two module files that share a stem stay distinct types because their ModPath differs, while StructNS keeps the readable stem for display.
+	ElemTyp    *parser.Type      // KindList: element type
+	KeyTyp     *parser.Type      // KindMap:  key type
+	ValTyp     *parser.Type      // KindMap:  value type
+	Task       *TaskState        // KindTask: shared handle - copying a task copies the pointer
+	Obj        *Value            // KindObject: wrapped opaque payload (e.g. json.Value's decoded tree); StructNS/StructName carry the owning type
+	Fn         *parser.MethodDef // KindFunc: the referenced top-level method (immutable); a copy shares this pointer, nil is the uninitialized zero
 
 	// mapIdx is an unexported acceleration cache for KindMap: encoded scalar
 	// key -> position in Map. It turns the O(n) linear scan in indexInto /
@@ -321,6 +325,15 @@ func BytesVal(data []byte) Value { return Value{Kind: KindBytes, Bytes: data} }
 // StructVal constructs a user-defined struct value.
 func StructVal(name string, fields []StructField) Value {
 	return Value{Kind: KindStruct, StructName: name, Fields: fields}
+}
+
+// FuncVal constructs a first-class function value referencing a top-level
+// method. The *MethodDef is immutable, so a copy of the value shares the pointer
+// (no deep copy) - the value-semantics stance holds because a function value
+// aliases nothing mutable. A nil m is the uninitialized zero (`def f as func;`),
+// which errors if called.
+func FuncVal(m *parser.MethodDef) Value {
+	return Value{Kind: KindFunc, Fn: m}
 }
 
 // NamespacedStructVal constructs a library-provided struct value
@@ -526,6 +539,10 @@ func ZeroFor(t parser.Type) Value {
 			vt = *t.ValType
 		}
 		return MapVal(kt, vt, []MapEntry{})
+	case parser.TypeFunc:
+		// The zero function value is a null handle - calling it is a positioned
+		// runtime error until it is assigned a real method.
+		return FuncVal(nil)
 	}
 	return Null()
 }
@@ -664,6 +681,14 @@ func (v Value) Display() string {
 			return d(inner)
 		}
 		return "<" + v.StructNS + "." + v.StructName + ">"
+	case KindFunc:
+		// A function value is opaque; display the referenced method name so a
+		// printed value is recognizable (`<func greet>`), or `<func null>` for the
+		// uninitialized zero.
+		if v.Fn == nil {
+			return "<func null>"
+		}
+		return "<func " + v.Fn.Name + ">"
 	}
 	return "<unknown>"
 }
@@ -757,6 +782,12 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 			return true
 		}
 		return t.Element.Equal(*v.Task.ElemTyp)
+	case parser.TypeFunc:
+		// Any function value matches the untyped `func` slot; the parameter /
+		// return signature is checked at the call site (like a named method call),
+		// so there is no per-signature type here. The null zero also matches, so
+		// `def f as func;` then a later assignment type-checks.
+		return v.Kind == KindFunc
 	}
 	return false
 }

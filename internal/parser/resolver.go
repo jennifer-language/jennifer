@@ -1212,6 +1212,20 @@ func (r *resolver) resolveExpr(e Expr) error {
 			}
 		}
 		return nil
+	case *CallValueExpr:
+		// A call through a function-valued expression (`$f(args)`): resolve the
+		// callee expression and each argument. The callee is resolved as an
+		// ordinary read (a bare method name lands as a ConstRefExpr the
+		// interpreter turns into a function value; a `$var` as a VarExpr).
+		if err := r.resolveExpr(ex.Callee); err != nil {
+			return err
+		}
+		for _, a := range ex.Args {
+			if err := r.resolveExpr(a); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *QualifiedCallExpr:
 		for _, a := range ex.Args {
 			if err := r.resolveExpr(a); err != nil {

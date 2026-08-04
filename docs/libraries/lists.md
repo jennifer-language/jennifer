@@ -46,6 +46,47 @@ original.
 | `lists.shuffle(xs)`             | list         | New list, elements in uniformly random order. See "Shuffle" below. |
 | `lists.range(start, end)`       | list of int  | Half-open: `[start, start+1, ..., end-1]`. See "Range" below.      |
 | `lists.range(start, end, step)` | list of int  | Walks by `step` while staying strictly before `end`. See "Range".  |
+| `lists.map(xs, fn)`             | list         | New list of `fn(x)` for each `x`. See "Higher-order functions".     |
+| `lists.filter(xs, fn)`          | list         | The elements where `fn(x)` returns `true`.                          |
+| `lists.reduce(xs, fn, init)`    | element kind | Fold left: `acc = fn(acc, x)`, starting from `init`.                |
+| `lists.find(xs, fn)`            | element kind | The first `x` where `fn(x)` is `true`; errors (catchable) if none.  |
+| `lists.any(xs, fn)`             | bool         | True if `fn(x)` is `true` for any element (short-circuits).         |
+| `lists.all(xs, fn)`             | bool         | True if `fn(x)` is `true` for every element (true for empty).       |
+| `lists.sortBy(xs, keyFn)`       | list         | New list sorted ascending by the key `keyFn(x)` returns.           |
+
+### Higher-order functions
+
+`map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy` each take a
+first-class **`func`** value (see the language guide) and call it back per
+element. A bare method name in expression position is the function value, so you
+pass a method by name:
+
+```jennifer
+use lists;
+func dbl(n as int) { return $n * 2; }
+func isEven(n as int) { return $n % 2 == 0; }
+
+def xs as list of int init [1, 2, 3, 4, 5];
+lists.map($xs, dbl);            # [2, 4, 6, 8, 10]
+lists.filter($xs, isEven);     # [2, 4]
+lists.reduce($xs, add, 0);     # sum, with func add(a as int, b as int) {...}
+lists.any($xs, isEven);        # true
+lists.all($xs, isEven);        # false
+```
+
+- **`map`** returns a **generic** list - its element type is whatever the
+  callback returns, checked against the declared type at the binding site, so
+  `def names as list of string init lists.map($people, nameOf);` type-checks only
+  when every result is a string.
+- **`filter`** / **`find`** / **`any`** / **`all`**: the callback must return a
+  `bool`, else a positioned error. `find` errors (catchably) when nothing matches
+  - guard with `lists.any` first, or wrap it in `try` / `catch`.
+- **`sortBy`** takes a **key extractor** `keyFn(x) -> K` (a comparable scalar:
+  `int` / `float` / `string` / `bool`) and sorts ascending by that key, stably.
+  The key is extracted once per element, so `keyFn` runs O(n) times, not
+  O(n log n). Sort descending by negating a numeric key (`func neg(n as int) {
+  return 0 - $n; }`) or reversing the result. Sort structs by a field with a
+  one-line accessor (`func ageOf(p as Person) { return $p.age; }`).
 
 ### Sort
 
@@ -59,8 +100,8 @@ original.
 
 A list mixing strings with numbers, or containing `null`, `list`, or
 `map` elements, errors at runtime rather than silently producing
-nonsense. Comparator-based sort (`lists.sortBy`) is deferred until
-methods are first-class values.
+nonsense. For a custom order, `lists.sortBy(xs, keyFn)` sorts by the key a
+`func` value extracts (see "Higher-order functions" above).
 
 ### `first`/`last` versus `head`/`tail`
 

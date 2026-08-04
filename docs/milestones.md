@@ -929,7 +929,7 @@ program arg). Both binaries honor it. Pinned by `main_test.go`; documented in
 
 ### M24.2 - first-class functions
 
-**Planned.** Close the **single largest expressiveness gap**: today a function
+**Done.** Closed the **single largest expressiveness gap**: a function
 cannot be held in a value, so every callback is string-name dispatch (`web` routes
 via `meta.callMain`, `testing.run(name)`, `meta.call`) and `lists` ships no `map` /
 `filter` / `reduce` because there is nothing to pass. A function value is
@@ -960,6 +960,24 @@ Cost (Tier 1): a `Value` kind + `MatchesDeclared` / `Copy` / `DeepCopy` cases
 library layer, and grammar / spec / docs. Graduated `DRAFT#18`. **Requires:** none
 hard; relates to a future bytecode VM (`DRAFT#17`) and the embedding API
 (`DRAFT#1`).
+
+**Shipped (Tier 1).** `KindFunc` Value (`Fn *parser.MethodDef`, immutable - copies
+share the pointer, `DeepCopy`'s default handles it) + `TypeFunc` (`func` keyword in
+`parseType`); a bare method name lands as a `ConstRefExpr` the interpreter turns
+into a function value (the resolver already deferred such names to runtime); a new
+`CallValueExpr` postfix-`(` node dispatches `$f(x)` / `$fns[0](x)` /
+`makeAdder(1)(2)` through the shared `callUserMethod` core extracted from
+`evalCall`, so arity / kind checks, value-semantics arg copies, and the call-depth
+guard are identical to a named call (recursion through a function value still trips
+the catchable guard). `BuiltinCtx.Invoke` is the callback bridge for the
+higher-order **`lists`** layer - `map` (generic result), `filter` / `find` / `any`
+/ `all` (bool callback), `reduce`, and `sortBy` (key extractor, decorate-sort-
+undecorate so the key runs O(n)). `fmt` hugs `(` after `$var` / `)` / `]` (all
+prior parse errors, so no existing program reflows). **Deferred:** Tier 2
+(closures) and migrating the existing string-name dispatch in `web` / `testing` /
+`meta` onto function values (a separate refactor - the *capability* is delivered).
+Pinned by `internal/interpreter/funcvalue_test.go`; `examples/functions.j` +
+golden; both toolchains.
 
 ### M24.3 - concurrency coordination: cancellation, timeouts, channels
 

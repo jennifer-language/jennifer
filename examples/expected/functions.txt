@@ -1,0 +1,9 @@
+call through a variable: 42
+passed as an argument: 40
+map double:  [2, 4, 6, 8, 10]
+filter even: [2, 4]
+reduce sum:  15
+find even:   2
+any/all even: true false
+sortBy desc: [5, 4, 3, 2, 1]
+al(25) cy(30) bo(40) 

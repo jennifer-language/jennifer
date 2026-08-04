@@ -52,6 +52,7 @@ const (
 	TypeMap
 	TypeStruct // user-defined record; carries the struct's name in Type.StructName
 	TypeTask   // `task of T` - a pending or completed spawned computation
+	TypeFunc   // `func` - a first-class function value (an immutable handle to a top-level method)
 )
 
 func (k TypeKind) String() string {
@@ -76,6 +77,8 @@ func (k TypeKind) String() string {
 		return "struct"
 	case TypeTask:
 		return "task"
+	case TypeFunc:
+		return "func"
 	default:
 		return "<invalid>"
 	}
@@ -800,6 +803,20 @@ type CallExpr struct {
 }
 
 func (*CallExpr) exprNode() {}
+
+// CallValueExpr is a call through an arbitrary function-valued expression:
+// `$f(args)` (a variable holding a `func`), or any postfix `(...)` on a value
+// that evaluates to a function - `makeAdder(1)(2)`, `$fns[0](x)`. The static
+// call `name(args)` naming a top-level method stays a CallExpr (resolved to a
+// *MethodDef); CallValueExpr is the dynamic path where the callee is only known
+// at run time to be a KindFunc value.
+type CallValueExpr struct {
+	pos
+	Callee Expr // the function-valued expression
+	Args   []Expr
+}
+
+func (*CallValueExpr) exprNode() {}
 
 // LenExpr is the `len(EXPR)` language built-in. Polymorphic
 // over string (rune count), list (element count), map (entry count),

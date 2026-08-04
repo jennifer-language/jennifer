@@ -209,8 +209,12 @@ patternArm  = IDENT [ "(" IDENT ")" ] ; (* an enum-variant pattern: a variant
 
 exprStmt    = expr ";" ;
 
-type        = primType | listType | mapType | taskType | structType ;
+type        = primType | listType | mapType | taskType | funcType | structType ;
 primType    = "int" | "float" | "string" | "bool" | "null" | "bytes" ;
+funcType    = "func" ;                 (* a first-class function value; the
+                                          type carries no signature - arity
+                                          and argument kinds are checked at
+                                          the call site *)
 listType    = "list" "of" type ;
 mapType     = "map" "of" type "to" type ;
 taskType    = "task" "of" type ;       (* `task of T` - handle to
@@ -262,11 +266,16 @@ primary     = ( INT | FLOAT | STRING | "true" | "false" | "null"
               | VARREF | qualifiedCall | qualifiedConstRef | taskCall
               | call | structLit | constRef | "(" expr ")"
               | listLit | mapLit | lenExpr | spawnExpr )
-              { "[" ( expr | sliceTail ) "]" | "." wordName } ;
+              { "[" ( expr | sliceTail ) "]" | "." wordName | callArgs } ;
                                        (* any primary can be index-,
-                                          slice-, or field-chained. A `[...]`
-                                          holds either an index `expr` or a
-                                          `sliceTail` (contains a `..`). *)
+                                          slice-, field-, or call-chained. A
+                                          `[...]` holds either an index `expr`
+                                          or a `sliceTail` (contains a `..`);
+                                          a trailing `callArgs` is a call
+                                          through a function value
+                                          (CallValueExpr): `$f(x)`,
+                                          `$fns[0](x)`, `makeAdder(1)(2)`. *)
+callArgs    = "(" [ expr { "," expr } ] ")" ;
 sliceTail   = orExpr ".." [ orExpr ]   (* `[a..]`, `[a..b]` *)
             | ".." [ orExpr ] ;        (* `[..]`, `[..b]` - endpoints parse at
                                           orExpr so a bool-keyed comparison

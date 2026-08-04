@@ -127,10 +127,11 @@ ExprStmt     <- Expr ";"
 # distinct tokens, so this choice never backtracks; StructType last catches
 # the bare / namespaced IDENT forms.
 
-Type         <- ListType / MapType / TaskType / PrimType / StructType
+Type         <- ListType / MapType / TaskType / FuncType / PrimType / StructType
 ListType     <- "list" "of" Type
 MapType      <- "map" "of" Type "to" Type
 TaskType     <- "task" "of" Type
+FuncType     <- "func"                # first-class function value (no signature)
 PrimType     <- "int" / "float" / "string" / "bool" / "null" / "bytes"
 StructType   <- IDENT ("." IDENT)?
 
@@ -158,11 +159,16 @@ AddExpr      <- MulExpr (("+" / "-") MulExpr)*
 MulExpr      <- Unary (("*" / "/" / "//" / "%") Unary)*
 Unary        <- ("-" / "~") Unary / Primary
 
-# Any primary can be postfix-chained with indexing and field access. The
-# chain belongs to Primary, not Atom, so `f()[0].x` parses as expected.
+# Any primary can be postfix-chained with indexing, field access, and a call
+# through a function value. The chain belongs to Primary, not Atom, so
+# `f()[0].x` and `$fns[0](x)` parse as expected.
 
 Primary      <- Atom Postfix*
-Postfix      <- "[" (SliceTail / Expr) "]" / "." WordName
+Postfix      <- "[" (SliceTail / Expr) "]" / "." WordName / CallArgs
+CallArgs     <- "(" (Expr ("," Expr)*)? ")"
+                                        # a call through a function value
+                                        # (CallValueExpr): `$f(x)`, `$fns[0](x)`,
+                                        # `makeAdder(1)(2)`
 SliceTail    <- OrExpr ".." OrExpr? / ".." OrExpr?
                                         # `$xs[a..b]`, `$xs[a..]`, `$xs[..b]`,
                                         # `$xs[..]`. Endpoints parse at OrExpr so

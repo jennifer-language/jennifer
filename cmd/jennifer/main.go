@@ -142,7 +142,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  jennifer run <file.j>    run a Jennifer program")
-	fmt.Fprintln(os.Stderr, "  jennifer run --env=P f.j run with profile P (sets JENNIFER_ENV)")
+	fmt.Fprintln(os.Stderr, "  jennifer run --env=P <file.j>   (run profile P; sets JENNIFER_ENV)")
 	fmt.Fprintln(os.Stderr, "  jennifer run -           read source from stdin")
 	fmt.Fprintln(os.Stderr, "  jennifer repl            interactive REPL")
 	// The development subcommands are build-tag split: the default binary
@@ -158,8 +158,9 @@ func usage() {
 // the source file, and the user program's argv. Flags precede the file; the
 // first non-flag token (or `-` for stdin) is the file, and everything after it
 // is passed through to the program untouched. `--env=X` is the run-profile
-// sugar: main sets JENNIFER_ENV=X in the process environment before Run, so it
-// is identical to `JENNIFER_ENV=X jennifer run ...` (see runProfileEnv).
+// sugar: the caller (main) validates the label with validRunProfile and sets
+// JENNIFER_ENV=X in the process environment before Run, so it is identical to
+// `JENNIFER_ENV=X jennifer run ...`.
 func parseRunArgs(args []string) (file, sysmoddir, vendor, env string, includes, userArgs []string, err error) {
 	fail := func(format string, a ...any) (string, string, string, string, []string, []string, error) {
 		return "", "", "", "", nil, nil, fmt.Errorf(format, a...)

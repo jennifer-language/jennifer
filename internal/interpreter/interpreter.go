@@ -44,6 +44,28 @@ type BuiltinCtx struct {
 	// overflowing the Go stack fatally. nil when unknown (the counter then starts
 	// fresh, as at a true root entry).
 	Depth *int
+	// interp is the owning interpreter, set at the call site. It backs Invoke so a
+	// higher-order builtin (lists.map / filter / reduce / ...) can call back a
+	// function-value argument without every library importing the dispatch core.
+	// Unexported: libraries receive a BuiltinCtx, they never construct one.
+	interp *Interpreter
+}
+
+// Invoke calls a first-class function value with args, threading the caller's
+// call-depth counter so recursion through the callback still trips the catchable
+// depth guard. It is the callback bridge for higher-order builtins (lists.map /
+// filter / reduce / ...). Errors if fn is not a callable `func` value.
+func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
+	if fn.Kind != KindFunc {
+		return Value{}, fmt.Errorf("expected a `func` value, got %s", fn.Kind)
+	}
+	if fn.Fn == nil {
+		return Value{}, fmt.Errorf("call of an uninitialized `func` value")
+	}
+	if c.interp == nil {
+		return Value{}, fmt.Errorf("no interpreter bound to this call context")
+	}
+	return c.interp.callMethodWithDepth(fn.Fn, c.Depth, args...)
 }
 
 // Builtin is a Go-implemented library function callable from Jennifer source.
@@ -1732,10 +1754,13 @@ func stampDeclaredType(v Value, declType parser.Type) Value {
 // bytes / struct / task) still go through the copy + stamp path so
 // value-semantics + declared-type propagation stay correct. Strings
 // count as scalar here because Go strings are immutable at the host
-// level; Jennifer never mutates a string in place.
+// level; Jennifer never mutates a string in place. A func value is
+// likewise immutable (Copy shares the *MethodDef pointer and
+// stampDeclaredType is a no-op for the signature-less `func` type), so
+// it takes the same no-copy path.
 func bindParamValue(v Value, declType parser.Type) Value {
 	switch v.Kind {
-	case KindInt, KindFloat, KindBool, KindNull, KindString:
+	case KindInt, KindFloat, KindBool, KindNull, KindString, KindFunc:
 		return v
 	}
 	return stampDeclaredType(v.Copy(), declType)
@@ -3092,6 +3117,13 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 			}
 			return c.Value, nil
 		}
+		// 3. A bare top-level method name used in expression position (not
+		// followed by `(`) is a first-class function value. Since a method name
+		// can never collide with a variable / constant (the def/func namespace is
+		// shared), reaching here unambiguously means the function value.
+		if m, ok := i.methods[ex.Name]; ok {
+			return FuncVal(m), nil
+		}
 		file, line, col := posFor(ex)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("undefined name %q", ex.Name), File: file, Line: line, Col: col}
 	case *parser.BinaryExpr:
@@ -3100,6 +3132,8 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		return i.evalUnary(ex, env)
 	case *parser.CallExpr:
 		return i.evalCall(ex, env)
+	case *parser.CallValueExpr:
+		return i.evalCallValue(ex, env)
 	case *parser.LenExpr:
 		return i.evalLen(ex, env)
 	case *parser.SpawnExpr:
@@ -4557,6 +4591,139 @@ func wrapTask(state *TaskState) Value {
 	return Value{Kind: KindTask, Task: state}
 }
 
+// callUserMethod runs a resolved top-level method `m` with argument expressions
+// `argExprs` evaluated in the caller's env. It backs the dynamic function-value
+// call (evalCallValue); the static named-call path (evalCall) keeps a
+// byte-identical copy of this body inline for hot-path inlining (see the note
+// there - keep the two in lock-step). It checks arity, evaluates + type-checks +
+// value-copies each argument into a fresh pooled call frame parented at the
+// caller's effective globals, threads the caller's call-depth counter onto the
+// callee frame (so the chain shares one counter and trips the catchable depth
+// guard while concurrent chains stay isolated), runs the body, and maps the block
+// result to a return value. `calleeName` and `node` supply the display name and
+// positions for errors / the profiler.
+func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr, env *Environment, calleeName string, node parser.Expr) (Value, error) {
+	if len(argExprs) != len(m.Params) {
+		file, line, col := posFor(node)
+		return Value{}, &runtimeError{
+			Msg:  fmt.Sprintf("method %q takes %d argument(s), got %d", calleeName, len(m.Params), len(argExprs)),
+			File: file, Line: line, Col: col,
+		}
+	}
+	// Evaluate each argument in the caller's env and bind it straight into the
+	// fresh call frame, interleaved so no intermediate []Value is allocated per
+	// call. The call frame is borrowed from the pool and pre-sized to hold the N
+	// parameter slots; its parent is globals - not the caller env - so a
+	// partially-bound frame is never visible to arg evaluation.
+	numParams := len(m.Params)
+	callFrame := borrowBlockEnv(effectiveGlobal(env), numParams)
+	for idx, p := range m.Params {
+		a := argExprs[idx]
+		v, err := i.evalExpr(a, env)
+		if err != nil {
+			releaseBlockEnv(callFrame)
+			return Value{}, err
+		}
+		if !v.MatchesDeclared(p.Type) {
+			releaseBlockEnv(callFrame)
+			file, line, col := posFor(a)
+			return Value{}, &runtimeError{
+				Msg:  fmt.Sprintf("argument %d to %q must be %s, got %s", idx+1, calleeName, p.Type, v.Kind),
+				File: file, Line: line, Col: col,
+			}
+		}
+		// Value semantics: arguments copy into the call frame, so callee
+		// mutations don't leak back to the caller. bindParamValue stamps the
+		// declared parameter type (so compound params know their element /
+		// key+value type for index-write checks) and skips Copy for scalar
+		// kinds, where it is a no-op.
+		bound := bindParamValue(v, p.Type)
+		if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+			pf, pl, pcol := posFor(a)
+			i.prof.RecordEagerCopy(pf, pl, pcol)
+		}
+		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
+			releaseBlockEnv(callFrame)
+			return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
+		}
+	}
+	// Call-depth guard. The counter is threaded from the caller frame onto the
+	// callee frame (rather than read off effectiveGlobal's shared root), so a
+	// chain shares one counter while concurrent chains stay isolated: parallel
+	// `spawn` bodies and handlers dispatched into the shared host via
+	// meta.callMain each track their own depth without racing. Raise a
+	// positioned, catchable error before the Go goroutine stack overflows into a
+	// fatal, unrecoverable crash - the analogue of a RecursionError.
+	dc := env.depth
+	callFrame.depth = dc
+	*dc++
+	if *dc > limits.MaxCallDepth {
+		*dc--
+		releaseBlockEnv(callFrame)
+		file, line, col := posFor(node)
+		return Value{}, &runtimeError{
+			Msg:  fmt.Sprintf("call stack too deep: exceeded %d nested method calls (possible infinite recursion)", limits.MaxCallDepth),
+			File: file, Line: line, Col: col,
+		}
+	}
+	if i.prof != nil && i.profStmts {
+		pf, pl, pc := posFor(node)
+		i.prof.RecordCallDepth(pf, pl, pc, *dc)
+	}
+	var res blockResult
+	var err error
+	if i.prof != nil && i.profCalls {
+		start := time.Now()
+		res, err = i.execBlock(m.Body, callFrame)
+		pf, pl, pc := posFor(node)
+		i.prof.RecordCall(m.Name, pf, pl, pc, start, time.Now())
+	} else {
+		res, err = i.execBlock(m.Body, callFrame)
+	}
+	*dc--
+	releaseBlockEnv(callFrame)
+	if err != nil {
+		return Value{}, err
+	}
+	if res.hasBreak || res.hasContinue {
+		// A `break` or `continue` in the method body that wasn't caught by an
+		// inner loop is a misuse - they don't cross the method-call boundary into
+		// the caller's loop.
+		return Value{}, unhandledLoopFlowError(res)
+	}
+	if res.hasReturn {
+		return res.value, nil
+	}
+	return Null(), nil
+}
+
+// evalCallValue runs a call through a function-valued expression (`$f(args)`,
+// `$fns[0](x)`, `makeAdder(1)(2)`). The callee is evaluated to a value that must
+// be a non-null KindFunc; dispatch then reuses callUserMethod, so arity / type
+// checks, value-semantics arg copies, and the call-depth guard are identical to
+// a named method call.
+func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (Value, error) {
+	fv, err := i.evalExpr(c.Callee, env)
+	if err != nil {
+		return Value{}, err
+	}
+	if fv.Kind != KindFunc {
+		file, line, col := posFor(c)
+		return Value{}, &runtimeError{
+			Msg:  fmt.Sprintf("cannot call a %s value; only a `func` value is callable", fv.Kind),
+			File: file, Line: line, Col: col,
+		}
+	}
+	if fv.Fn == nil {
+		file, line, col := posFor(c)
+		return Value{}, &runtimeError{
+			Msg:  "call of an uninitialized `func` value (it was never assigned a method)",
+			File: file, Line: line, Col: col,
+		}
+	}
+	return i.callUserMethod(fv.Fn, c.Args, env, fv.Fn.Name, c)
+}
+
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {
 	// User method? Prefer the pre-resolved pointer the
 	// resolver pass stamped onto the CallExpr; fall back to the
@@ -4569,6 +4736,14 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 	}
 	if m != nil {
+		// The named-method dispatch body is kept INLINE here (rather than
+		// delegating to callUserMethod) because evalCall is the hot path: the
+		// helper is far too large for Go to inline, so routing every user-method
+		// call through it adds a non-inlinable multi-argument call boundary that
+		// measurably slows recursion-heavy code. The logic below is byte-identical
+		// to callUserMethod (which serves the rarer dynamic `$f(args)` path); the
+		// deliberate duplication trades a little repetition for the inlined hot
+		// path. Keep the two in lock-step if either changes.
 		if len(c.Args) != len(m.Params) {
 			file, line, col := posFor(c)
 			return Value{}, &runtimeError{
@@ -4576,19 +4751,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				File: file, Line: line, Col: col,
 			}
 		}
-		// Evaluate args in the caller's env, then bind them in a fresh
-		// call frame that inherits from globals. Each arg is type-checked
-		// against the parameter's declared type. The call
-		// frame is borrowed from the pool and pre-sized to hold the
-		// N parameter slots the resolver assigned (slots 0..N-1).
 		numParams := len(m.Params)
-		// Evaluate each argument in the caller's env and bind it straight into
-		// the fresh call frame, interleaved so no intermediate []Value is
-		// allocated per call. The arity was already checked above, so
-		// c.Args[idx] is in range for every parameter. Arg evaluation may nest
-		// further calls (which borrow their own frames); callFrame is held out
-		// of the pool meanwhile, and its parent is globals - not the caller env
-		// - so a partially-bound frame is never visible to arg evaluation.
 		callFrame := borrowBlockEnv(effectiveGlobal(env), numParams)
 		for idx, p := range m.Params {
 			a := c.Args[idx]
@@ -4605,11 +4768,6 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 					File: file, Line: line, Col: col,
 				}
 			}
-			// Value semantics: arguments copy into the call frame, so callee
-			// mutations don't leak back to the caller. bindParamValue stamps the
-			// declared parameter type (so compound params know their element /
-			// key+value type for index-write checks) and skips Copy for scalar
-			// kinds, where it is a no-op.
 			bound := bindParamValue(v, p.Type)
 			if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 				pf, pl, pcol := posFor(a)
@@ -4620,13 +4778,6 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
 			}
 		}
-		// Call-depth guard. The counter is threaded from the caller frame onto
-		// the callee frame (rather than read off effectiveGlobal's shared root),
-		// so a chain shares one counter while concurrent chains stay isolated:
-		// parallel `spawn` bodies and handlers dispatched into the shared host
-		// via meta.callMain each track their own depth without racing. Raise a
-		// positioned, catchable error before the Go goroutine stack overflows
-		// into a fatal, unrecoverable crash - the analogue of a RecursionError.
 		dc := env.depth
 		callFrame.depth = dc
 		*dc++
@@ -4659,9 +4810,6 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			return Value{}, err
 		}
 		if res.hasBreak || res.hasContinue {
-			// A `break` or `continue` in the method body that wasn't
-			// caught by an inner loop is a misuse - they don't cross
-			// the method-call boundary into the caller's loop.
 			return Value{}, unhandledLoopFlowError(res)
 		}
 		if res.hasReturn {
@@ -4684,7 +4832,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			args = append(args, v)
 		}
 		pf, pl, pc := posFor(c)
-		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth}
+		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i}
 		v, err := b.Fn(ctx, args)
 		if err != nil {
 			return Value{}, builtinError(err, pf, pl, pc)
@@ -4788,7 +4936,7 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 		args = append(args, v)
 	}
 	pf, pl, pc := posFor(c)
-	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth}
+	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i}
 	v, err := fn(ctx, args)
 	if err != nil {
 		return Value{}, builtinError(err, pf, pl, pc)
