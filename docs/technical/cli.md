@@ -63,6 +63,16 @@ after the file is the program's own `os.ARGS`.
   expands to `<vendorRoot>/scope/package/package.j` (see the import spec);
   wired via `in.SetVendorRoot(module.FindVendorRoot(vendorFlag, baseDir))`.
   `repl` / `test` use the upward walk (no flag).
+- `--env PROFILE` (or `--env=PROFILE`) - a **run profile**, pure sugar that
+  sets `JENNIFER_ENV=PROFILE` in the process environment before `Run`, so
+  `jennifer run --env=prod app.j` is identical to `JENNIFER_ENV=prod jennifer
+  run app.j`. No interpreter change - the program reads the profile from the
+  one env var (the [`dotenv`](../modules/dotenv.md) module's `.env.<profile>`
+  selection is the first consumer). The label is validated
+  (`[A-Za-z0-9_-]`, 1-64 chars, mirroring dotenv's own `validProfile`), which
+  also blocks a `.env.<profile>` path traversal; an explicit `--env` overrides
+  any inherited `JENNIFER_ENV`. Parsed in `main.go`'s `parseRunArgs` /
+  `validRunProfile`.
 
 `jennifer version -v` reports every system directory the resolver uses - the
 system module dir and the vendor root - each with the layers (compile default /

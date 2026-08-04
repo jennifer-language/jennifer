@@ -912,19 +912,20 @@ highlighters where a language feature lands, a Go package +
 `internal/stdlib.InstallAll` line + `docs/libraries/` reference + cheatsheet where
 a library lands, both binaries build, and the full test close-out).
 
-### M24.1 - run profiles / `--env` CLI flag
+### M24.1 - run profiles / `--env` CLI flag (compacted)
 
-**Planned.** An optional **run profile** the CLI carries and hands to the program.
-`jennifer run --env=prod script.j` is sugar that **sets `JENNIFER_ENV=prod` in the
-process environment before `Run`** - identical to `JENNIFER_ENV=prod jennifer run
-script.j` - so the module side stays pure `.j` (it reads one env var; the `dotenv`
-`.env.<profile>` selection shipped in `M22.18` is the first consumer) and there is
-no bespoke `meta` / `os` API to maintain. A small `cmd/jennifer` change: parse
-`--env=X` as an interpreter flag ahead of the script path, validate the label the
-same way `dotenv` does (`^[A-Za-z0-9_-]{1,64}$`), set the env var; plus a note in
-`docs/user-guide/tooling.md`. The bare env var stays the honest MVP; the flag is
-pure ergonomics. Graduated `DRAFT#26`. **Requires:** `M22.18` (the `dotenv`
-profile consumer); no interpreter dependency.
+**Done.** `jennifer run --env=prod script.j` (or `--env prod`) is a run-profile
+flag that **sets `JENNIFER_ENV=prod` before `Run`** - identical to `JENNIFER_ENV=prod
+jennifer run script.j`, no interpreter change, so the module side stays pure `.j`
+(the `dotenv` `.env.<profile>` selection from `M22.18` is the first consumer, dogfood-
+verified end to end). A `cmd/jennifer`-only change: `parseRunArgs` takes the flag
+ahead of the script path, `validRunProfile` allowlists the label
+(`[A-Za-z0-9_-]`, 1-64, hand-rolled to stay TinyGo-clean, mirroring dotenv's
+`validProfile` and blocking a `.env.<profile>` traversal), then `os.Setenv` (an
+explicit flag overrides an inherited `JENNIFER_ENV`; a token after the file stays a
+program arg). Both binaries honor it. Pinned by `main_test.go`; documented in
+`tooling.md` + `cli.md` + a `dotenv.md` cross-link. Graduated `DRAFT#26`.
+**Requires:** `M22.18`; no interpreter dependency.
 
 ### M24.2 - first-class functions
 

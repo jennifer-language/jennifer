@@ -68,6 +68,34 @@ Swap `json` for any other decode / re-encode pair to get, for example, a
 `jennifer run -` is in the
 [CLI reference](../technical/cli.md#shell-pipelines-and-aliases).
 
+## Run profiles (`--env`)
+
+`jennifer run --env=<profile> app.j` selects a **run profile** for a program -
+`prod`, `dev`, `staging`, or whatever names you use. It is pure sugar: the flag
+sets the `JENNIFER_ENV` environment variable before the program runs, so
+
+```sh
+jennifer run --env=prod app.j
+```
+
+is identical to
+
+```sh
+JENNIFER_ENV=prod jennifer run app.j
+```
+
+The program reads the profile from that one environment variable; nothing about
+the language changes. The main consumer is the [`dotenv`](../modules/dotenv.md)
+module, whose `autoload` / cascade loaders pick the `.env.<profile>` file to layer
+on top of `.env` - so `--env=prod` loads `.env.prod`, `--env=dev` loads
+`.env.dev`, and no profile loads only the base files.
+
+The profile label is validated (`[A-Za-z0-9_-]`, 1 to 64 characters), which is
+also what stops a hostile value from steering `.env.<profile>` at another path.
+The flag goes **before** the script file (like `-I` and `--sysmoddir`); anything
+after the file is passed to the program as its own arguments. An explicit
+`--env=X` overrides any `JENNIFER_ENV` already in the environment.
+
 ## AI-assisted coding with `JENNIFER.md`
 
 Jennifer is new and small, so a general-purpose AI assistant has no built-in

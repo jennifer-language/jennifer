@@ -43,7 +43,11 @@ base directory** (no search, no walk-up):
 
 The `<profile>` comes from the `profile` argument (or `JENNIFER_ENV` for
 `autoload`); an empty profile loads only the two base files (there is no
-`.env.default`).
+`.env.default`). At the command line, `jennifer run --env=prod app.j` sets
+`JENNIFER_ENV=prod` before the program runs (identical to `JENNIFER_ENV=prod
+jennifer run app.j`), so `--env` is the ergonomic way to pick the profile
+`autoload` reads - see
+[Run profiles](../user-guide/tooling.md#run-profiles---env).
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |

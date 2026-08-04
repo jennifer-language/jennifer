@@ -45,11 +45,25 @@ func main() {
 		// (matches Python sys.argv, Go os.Args): index 0 of the
 		// user-visible `os.ARGS` is the script path, the rest are the
 		// user-supplied args.
-		file, sysmoddirFlag, vendorFlag, includes, userArgs, perr := parseRunArgs(os.Args[2:])
+		file, sysmoddirFlag, vendorFlag, envFlag, includes, userArgs, perr := parseRunArgs(os.Args[2:])
 		if perr != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", perr)
 			usage()
 			os.Exit(2)
+		}
+		// The run profile (--env=X) is pure sugar for setting JENNIFER_ENV before
+		// Run: identical to `JENNIFER_ENV=X jennifer run ...`, so the module side
+		// (dotenv's `.env.<profile>` selection) stays plain `.j` reading one env
+		// var. The explicit flag overrides any inherited JENNIFER_ENV.
+		if envFlag != "" {
+			if !validRunProfile(envFlag) {
+				fmt.Fprintf(os.Stderr, "jennifer run: invalid --env profile %q (allowed: letters, digits, `_`, `-`, 1-64 chars)\n", envFlag)
+				os.Exit(2)
+			}
+			if err := os.Setenv("JENNIFER_ENV", envFlag); err != nil {
+				fmt.Fprintf(os.Stderr, "jennifer run: could not set JENNIFER_ENV: %v\n", err)
+				os.Exit(2)
+			}
 		}
 		sm, err := setupSysmoddir(sysmoddirFlag)
 		if err != nil {
@@ -128,6 +142,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  jennifer run <file.j>    run a Jennifer program")
+	fmt.Fprintln(os.Stderr, "  jennifer run --env=P f.j run with profile P (sets JENNIFER_ENV)")
 	fmt.Fprintln(os.Stderr, "  jennifer run -           read source from stdin")
 	fmt.Fprintln(os.Stderr, "  jennifer repl            interactive REPL")
 	// The development subcommands are build-tag split: the default binary
@@ -139,16 +154,21 @@ func usage() {
 }
 
 // parseRunArgs splits `run`'s arguments into the interpreter flags
-// (--sysmoddir, and -I which extends the module search path), the source
-// file, and the user program's argv. Flags precede the file; the first
-// non-flag token (or `-` for stdin) is the file, and everything after it
-// is passed through to the program untouched.
-func parseRunArgs(args []string) (file, sysmoddir, vendor string, includes, userArgs []string, err error) {
+// (--sysmoddir, --vendor, --env, and -I which extends the module search path),
+// the source file, and the user program's argv. Flags precede the file; the
+// first non-flag token (or `-` for stdin) is the file, and everything after it
+// is passed through to the program untouched. `--env=X` is the run-profile
+// sugar: main sets JENNIFER_ENV=X in the process environment before Run, so it
+// is identical to `JENNIFER_ENV=X jennifer run ...` (see runProfileEnv).
+func parseRunArgs(args []string) (file, sysmoddir, vendor, env string, includes, userArgs []string, err error) {
+	fail := func(format string, a ...any) (string, string, string, string, []string, []string, error) {
+		return "", "", "", "", nil, nil, fmt.Errorf(format, a...)
+	}
 	i := 0
 	for i < len(args) {
 		a := args[i]
 		if a == "-" || !strings.HasPrefix(a, "-") {
-			return a, sysmoddir, vendor, includes, args[i+1:], nil
+			return a, sysmoddir, vendor, env, includes, args[i+1:], nil
 		}
 		switch {
 		case strings.HasPrefix(a, "--sysmoddir="):
@@ -156,7 +176,7 @@ func parseRunArgs(args []string) (file, sysmoddir, vendor string, includes, user
 			i++
 		case a == "--sysmoddir":
 			if i+1 >= len(args) {
-				return "", "", "", nil, nil, fmt.Errorf("jennifer run: --sysmoddir needs a directory argument")
+				return fail("jennifer run: --sysmoddir needs a directory argument")
 			}
 			sysmoddir, i = args[i+1], i+2
 		case strings.HasPrefix(a, "--vendor="):
@@ -164,22 +184,50 @@ func parseRunArgs(args []string) (file, sysmoddir, vendor string, includes, user
 			i++
 		case a == "--vendor":
 			if i+1 >= len(args) {
-				return "", "", "", nil, nil, fmt.Errorf("jennifer run: --vendor needs a directory argument")
+				return fail("jennifer run: --vendor needs a directory argument")
 			}
 			vendor, i = args[i+1], i+2
+		case strings.HasPrefix(a, "--env="):
+			env = strings.TrimPrefix(a, "--env=")
+			i++
+		case a == "--env":
+			if i+1 >= len(args) {
+				return fail("jennifer run: --env needs a profile argument")
+			}
+			env, i = args[i+1], i+2
 		case strings.HasPrefix(a, "-I="):
 			includes = append(includes, strings.TrimPrefix(a, "-I="))
 			i++
 		case a == "-I":
 			if i+1 >= len(args) {
-				return "", "", "", nil, nil, fmt.Errorf("jennifer run: -I needs a directory argument")
+				return fail("jennifer run: -I needs a directory argument")
 			}
 			includes, i = append(includes, args[i+1]), i+2
 		default:
-			return "", "", "", nil, nil, fmt.Errorf("jennifer run: unknown flag %q", a)
+			return fail("jennifer run: unknown flag %q", a)
 		}
 	}
-	return "", "", "", nil, nil, fmt.Errorf("jennifer run: no source file given")
+	return fail("jennifer run: no source file given")
+}
+
+// validRunProfile reports whether an --env profile label is safe: `[A-Za-z0-9_-]`,
+// 1 to 64 characters. It mirrors dotenv's own `validProfile`
+// (`^[A-Za-z0-9_-]{1,64}$`), the first consumer of JENNIFER_ENV, so the flag and
+// the module agree on what a profile may be spelled - and the strict shape blocks
+// a `.env.<profile>` path-traversal from a hostile profile name.
+func validRunProfile(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		ok := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // setupSysmoddir resolves the system module directory from the layer
