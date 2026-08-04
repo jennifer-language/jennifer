@@ -855,537 +855,167 @@ those docs; this table is the milestone-number index.
 
 ## M23 - module improvements
 
-**Planned.** M22 lifted a handful of modules (notably `imap` and `http`); M23
-generalizes that across the module ecosystem. A survey of all 63 `.j` modules
-found the gaps **cluster into cross-cutting themes** rather than scattering per
-module, so the sub-milestones are organized by theme: a shared pattern (a
-receive loop, a persistent connection, a backend selector) is built once and
-applied to every module that needs it. Rough priority is value x
-how-many-users-hit-it. Each sub-milestone ships the usual per-module close-out (a
-100%-passing `*_test.j` overlay, updated `docs/modules/` + `JENNIFER.md`, both
-binaries build). **Deliberate non-goals** (not module bugs): `password` hashing
-(needs `x/crypto`) and fully-typed `orm` rows (awaits a language feature; the
-query-builder half is in scope). (`web` per-request concurrency was a non-goal
-here while it needed interpreter-level work; that work landed in M22.17, so `web`
-now handles requests concurrently.) Sub-milestones may grow their own
-sub-numbering as they land.
+**Done.** M22 lifted a handful of modules (`imap`, `http`); M23 generalized that
+across the module ecosystem. A survey of all 63 `.j` modules found the gaps
+**cluster into cross-cutting themes** rather than scattering per module, so the
+work was organized by theme - a shared pattern (a receive loop, a persistent
+connection, a backend selector) built once and applied to every module that needs
+it. Fifteen sub-milestones. Each shipped the standard per-module discipline (a
+100%-passing `*_test.j` overlay, a `cmd/jennifer/*_test.go` integration test where
+a live server applies, `docs/modules/` + catalog + `JENNIFER.md` entries, a demo,
+both binaries build); per-item surface detail lives in those docs, and the biggest
+sub-milestones keep their own reference docs. This table is the milestone-number
+index. **Deliberate non-goals:** `password` hashing (needs `x/crypto`) and
+fully-typed `orm` rows (awaits struct reflection).
 
-### M23.1 - streaming / server-push read loops
+| M#     | Topic | Summary |
+| ------ | ----- | ------- |
+| M23.1  | streaming / server-push read loops | One cooperative receive-loop-over-`net` shape - a blocking `receive*` (+ timeout-bounded `poll`), no callbacks, the app opting into concurrency via `spawn` - across `redis` (pub/sub + one-round-trip `pipeline` + `multi`/`exec` + `scan`), `amqp` (`Basic.Consume` + exchanges + publisher confirms), `mqtt` (QoS-1 + retained + Last-Will + `reconnect`), `mikrotik` (`.tag`-correlated + `/listen`), `imap` (RFC 2177 `IDLE`). Wire framing factored into pure encode/parse (100% overlay); live loops on mock-server Go tests. Fixed `redis` coalesced-frame buffering and `imap` stale-deadline. Residual: a value-semantic `Session` can't retain a cross-call buffer (a buffered `net` reader is the general fix). |
+| M23.2  | connection reuse / persistent sessions | Reusable connections so a loop stops re-handshaking: `http.Session` (reused `net.Conn` + cookie jar, framed one-response reader) + a policy `http.send` over `http.Options` (3xx redirects, cookie jar, 429/5xx retry+backoff); `rest.Client` routes through it (`tls` folded into `Options`, pre-1.0 break; `paginate` / `paginateCursor` walk every page); `smtp` split into `open` / `sendOn` / `close` so N messages pay one TLS+auth handshake. Pinned by keep-alive / cookie / pagination / session-reuse Go tests. |
+| M23.3  | stable-identity verbs | Volatile sequence numbers broke "fetch only what's new": `imap` went **UID-only** (every verb sends its `UID` form + `search` returns UIDs + atomic `move` + ranged `fetchPartial`; pre-1.0 break, a seq+UID twin set rejected on stance #1), `pop` added `uidl` -> `MessageId` + `top` / `reset` / `noop` (additive). Pinned by exact-wire-command fake-server tests. |
+| M23.4  | byte-exact binary values | `redis` / `memcache` threw on a non-UTF-8 bulk value; added `bytes`-valued `setBytes` / `getBytes` (text verbs unchanged, still strict-throw) plus typed `redis` hash/list/set helpers and `memcache` `getMulti` / `gets` / `cas`. NUL/CR/LF/0xFF byte-count-framed round-trip tests. |
+| M23.5  | selectable backends | `session` / `ratelimit` were memcache-only; added the **`kv`** system library (in-process per-key-TTL store, integer handle shared across `spawn`, `openFile` persisted) and the **`kvstore`** module selector (`Store` a sum-type enum `Memcache`/`Redis`/`Local`, exhaustiveness-matched), and moved `session` (values now a `json.Value`) and `ratelimit` (`fixedWindow` / `slidingWindow` -> `Result`) onto it (both pre-1.0 break). Interpreter fix: a module enum as a struct-field type across a boundary. |
+| M23.6  | format & coverage completeness | The broadest track (13 pieces) - the deepest per-module gaps. `ipnet` subnet math + `scope` classifier; `orm` ordinary-query surface (`select` / aggregate / `join` / `groupBy`+`having`, render-time allowlist re-check); `markdown` images / blockquotes / nested lists; `vcard` full `N` / `TYPE`; `ical` recurrence + `TZID` + `VTODO`/`VALARM`; `mime` charset-on-decode + RFC 2231; `feed` enclosures + author/categories; `s3` presign + byte bodies + multipart; `barcode` UPC / code93 / DataMatrix + QR 11-40; `font` a CFF/OTTO backend + an O(1)-per-query fix; `pdfwriter` embedded TrueType fonts + image XObjects + text layout. Several pre-1.0 struct-shape breaks; each validated against an independent reference. |
+| M23.7  | observability completeness | `prometheus` histogram + summary types (cumulative buckets, nearest-rank quantiles, exact text format, `observeAt` / `pushgatewayPath`); `statsd` `*Rate` / `*Tagged` / `*Float` verbs + a `Batch` datagram packer + a control-char-validated `prefix`; `influxdb` 2.x / 3.x via a `Version` enum (Flux `queryFlux`, token redaction). Each validated against an independent reference parser. |
+| M23.8  | ergonomic papercuts + notifier richness | Cheap high-value wins across 15 modules: `log` child logger + `fatal`; `cron` named months/weekdays + `@`-macros; `jwt` `verifyLeeway` / `verifyWithKeys` / `verifyJwks`; `totp` `generateSecret` / `hotp` / `verifyWindow`; `bloom` `optimal` / serialize; `csv` `formatSafe` + `Dialect` + streaming; richer `discord` / `telegram` / `slack` / `gotify` messages; `webhook` replay-protected signing; and more. Core fall-out: `http.requestRawBody` / `requestRawBodyTls` (a byte request body, for telegram uploads). |
+| M23.9  | `fmt`: shape-aware wrapping + raw-literal fidelity | Rebuilt `jennifer fmt` (token-stream, no AST): width-aware wrapping (one element/arg per line past 100 cols, struct/map over 6 members, calls hug `)`, inline single-statement `when` arms, operator-chain fill-break), tight Go-style literal spacing, and **raw-literal fidelity** via a lexer `Token.Raw` (digit separators / base prefix / quote style / embedded newlines survive verbatim). `-w` is atomic + self-verifying (re-lexes its output, refuses to corrupt). Corpus reflowed (~700 -> ~215 over-limit lines). Pre-1.0 break (canonical output changed); `TestFmtPreservesTokenStream` proves a format changes only whitespace. |
+| M23.10 | interactive stdin for `os.run` / `os.spawn` | `os.run(argv, stdin)` feeds an optional trailing `string` / `bytes` to the child's stdin then closes it (variadic - one-arg calls unchanged), output drained into the 16 MiB-capped buffers - **deadlock-free by construction**. Unblocks a stateless filter / subprocess exchange (M23.13's `mcp.connectStdio` built on it). Deferred: interactive streaming pipes on a spawned `Process`. |
+| M23.11 | `jsonrpc` module | JSON-RPC 2.0 client + server, pure `.j` over `json` + `http`. Client `call` / `notify` (`json.Value` params/results, every failure a unified catchable `Error`); a transport-agnostic `handle(requestBody)` runs the whole protocol (single / notification / batch / reserved codes) dispatching each `method` to a top-level `func` by name via `meta.callMain`; a thrown handler yields a generic `-32603` (detail stays server-side). Chosen over gRPC (protobuf + HTTP/2 + codegen would be a heavy Go library, not a `.j` module). |
+| M23.12 | `match` / `enum` adoption | Applied `match` / `enum` to the genuine closed-variant-set cases (open sets stayed strings): non-breaking `match` in 14 modules; a non-breaking private enum (`markdown`); breaking API enums (`htmlwriter.NodeKind`, `prometheus.MetricType`, `barcode.SymbolKind`, `orm.Dialect` / `ColumnKind`, `totp.Algorithm`); and a shared `transport.Security{None,Tls,Starttls}` replacing the stringly-typed `security` field on six socket clients (the mail three accept all modes, the other three reject `Starttls`). Exhaustiveness-checked. |
+| M23.13 | `mcp` module (Model Context Protocol, stateless) | A server exposing tools / resources / prompts (`server` / `addTool` / `addResource` / `addPrompt`, `handle` / `serveStdio`) plus a client (HTTP `connect` / stdio `connectStdio` over `os.run`) sharing one call surface; MCP is JSON-RPC 2.0 so the client reuses `jsonrpc.call`. `tools/call` is **allow-listed** (only a registered handler; a thrown handler yields a generic message). Validated end-to-end against the official MCP Python SDK. Not planned: the stateful Streamable-HTTP transport (needs an SSE push primitive `httpd` lacks). |
+| M23.14 | raw single-quoted string literals | Breaking split so each delimiter does one job: `"..."` stays cooked (escapes processed), `'...'` becomes **raw** (verbatim to the next `'`, spanning newlines - a free heredoc); embed a `'` via the cooked form (`"it's"`). No `r"..."` prefix (rejected - the delimiter is the mode). Lexer-confined (`raw := quote == '\''`); `src` is `[]rune` so multibyte content is exact; `Token.Raw` round-trips (incl. multi-line). Migration a no-op; docs / grammar / four editor highlighters updated. |
+| M23.15 | `orm`: a batteries-included data-mapper ORM | Lifted `orm` from a thin query builder to a full ORM (still Data Mapper): a `Session` unit-of-work + column-attribute DDL builders (.1); migrations split into the sibling **`sqlmigrate`** module (.1b); associations + `joinRelation` (.2); eager loading in a fixed 1+R queries (.3); a write path - `upsert` / `insertMany` / `insertReturning` / `updateWhere` / `deleteWhere` / `save` (.4); finders + `whereNull` / `whereBetween` / `distinct` / `page` (.5). Rows stay `map of string to string` (no reflection), relations attach via a side `Result` (no `any`); `whereRaw` / typed-struct mapping / Active Record rejected. Keeps its own `docs/modules/orm.md` + `sqlmigrate.md`. |
 
-**Done.** The biggest structural theme: several protocol clients were
-one-request/one-reply and could not express an unsolicited server message. Shipped
-one cooperative receive-loop-over-`net` shape across all five - a **blocking
-`receive*`** (+ a timeout-bounded `poll`) reading the next push at a safe point,
-**no callbacks**, the app opting into concurrency via its own `spawn`. Each module
-factored its wire framing into pure encode/parse helpers at 100% overlay coverage,
-with the live loops driven by a mock-server `cmd/jennifer/*_test.go`. Review fixed
-two read-path bugs the streaming exposed: `redis`'s per-reply reader dropped
-server-coalesced frames, so `pipeline` and the pub/sub confirmation-then-message
-path are now **buffered** (parse every reply out of one read via
-`ParseResult.pos`, pinned by a coalesced-frame Go test); and `imap`'s `IDLE` poll
-left an expired `net.setDeadline` breaking the next write, fixed with the same
-block-level `defer net.setDeadline(_, 0)` as `mikrotik`'s `readN`. Residual
-(follow-up `net`-level): a value-semantic `Session` cannot retain a leftover
-buffer across calls, so pushes coalescing *across* separate `receive*` calls can
-still drop a frame - a buffered `net` reader is the general fix.
+Cross-cutting threads:
 
-| Module | Shipped |
-| ------ | ------- |
-| `redis` | Pub/sub (`subscribe` / `psubscribe` / `publish`, blocking `receiveMessage` draining interleaved subscribe confirmations), one-round-trip `pipeline`, `multi` / `exec` / `discard`, a `scan` cursor; `keys` flagged production-unsafe. |
-| `amqp` | `Basic.Consume` (server-pushed `receiveDelivery`) beside the pull `get`; `declareExchange` / `bindQueue` (direct/topic/fanout); message `Properties` + `nack`/requeue; publisher confirms (`confirmSelect` / `waitConfirm`). |
-| `mqtt` | QoS-1 publish/subscribe with the PUBACK handshake (`publishQos1` / `subscribeQos1`, `receive`/`poll`), retained messages, a CONNECT Last-Will (`connectWith`), and `reconnect` session resumption (re-subscribes tracked subs). |
-| `mikrotik` | `.tag`-correlated commands (`talkTagged`) + `/listen`-style streaming (`listen` / `receiveReply` / `cancel`); `readN` clears the read deadline it arms (block-level `defer net.setDeadline($socket, 0)`) so a later read/write cannot inherit it. |
-| `imap` | RFC 2177 `IDLE`: `idle` -> blocking `receiveNotification` / timeout-bounded `pollNotification` -> `done`, typed `EXISTS` / `EXPUNGE` / `RECENT` notifications (rest of the mail work in M23.3). |
+- **Not all of M23 is modules.** M23.9 (`fmt`), M23.10 (`os.run` stdin), and
+  M23.14 (raw single-quoted strings) are tooling / interpreter / language work; the
+  rest is the module ecosystem.
+- **Build once, apply everywhere** was the payoff of organizing by theme: a shared
+  receive-loop shape (M23.1) and a shared backend selector (the `kv` library +
+  `kvstore` enum, M23.5), each built once and threaded through every module that
+  needs it.
+- **`match` / `enum`** (M22.4 / M22.5) landed across the ecosystem in M23.12, and
+  the largest sub-milestone - M23.15's `orm` + the new `sqlmigrate` - is a full
+  batteries-included ORM in its own right.
 
-### M23.2 - connection reuse / persistent sessions
+---
 
-**Done.** Persistent, reusable connections so a request / message loop stops
-paying a fresh handshake each time. Delivered per module:
-- **`http`** - a threaded value-semantic `http.Session` (reused `net.Conn` handle
-  + cookie jar) via `connect` / `exchange` -> `Exchange{response, session}` /
-  `close`, backed by a new framed reader (`readOneRaw`, Content-Length / chunked)
-  that reads one response off a reused socket instead of to EOF. Plus a policy
-  path `http.send(method, url, headers, body, options)` over `http.Options`
-  {timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls}: 3xx redirect
-  following (303 / POST-301 / 302 -> bodyless GET, 307 / 308 preserve), a cookie
-  jar (multiple `Set-Cookie`, read un-folded), and 429 / 5xx retry / backoff
-  (exponential, honours a numeric `Retry-After`, 30s cap). `http.basic` helper.
-  Additive - the one-shot verbs stay `Connection: close`.
-- **`rest`** - every request routes through `http.send`, so `rest.Client`
-  inherits the policy: `Client.tls` folded into an `http.Options` field (pre-1.0
-  break; `withCA` / `insecure` retargeted) with `withTimeout` / `withRedirects` /
-  `withRetries` / `withBackoff` builders. `joinUrl` passes an absolute URL through,
-  and `paginate` (Link `rel="next"`) / `paginateCursor` (a cursor JSON Pointer)
-  walk every page -> `list of json.Value`, capped by `maxPages`.
-- **`smtp`** - the one-shot `send` split into `open(opts)` (connect + EHLO +
-  STARTTLS + auth once; closes on any handshake failure) / `sendOn(session, ...)`
-  (RSET + MAIL / RCPT / DATA over the shared socket) / `close` (best-effort QUIT);
-  `send` is now the open / sendOn / close convenience, so N messages pay one TLS +
-  auth handshake. `smtp.send` kept as a deliberate convenience-over-session (the
-  established `fetchAll` pattern), not a parallel API.
+## M24 - language, concurrency, and platform maturity
 
-Pinned by `TestHttpSession` (keep-alive reuse via a connection counter + cookie
-replay) / `TestHttpSendPolicy`, `TestRestPaginateAndPolicy`, and
-`TestSmtpSessionReuse` (two messages over a single-accept server), plus the
-overlays.
+**Planned.** The first batch of [horizon](horizon.md) drafts graduated into a
+scheduled track: a CLI ergonomic, the language's biggest expressiveness feature, a
+concurrency-coordination layer, a library, and platform promotion - each already
+design-shaped in the horizon collection and now committed. Five sub-milestones.
+Each carries the standard discipline (spec + grammar EBNF / PEG + editor
+highlighters where a language feature lands, a Go package +
+`internal/stdlib.InstallAll` line + `docs/libraries/` reference + cheatsheet where
+a library lands, both binaries build, and the full test close-out).
 
-### M23.3 - stable-identity verbs (cross-session correctness)
+### M24.1 - run profiles / `--env` CLI flag
 
-**Done.** Volatile sequence numbers silently broke "fetch only what's new since
-last run"; both mail-receive modules gained stable-identifier addressing.
-- **`imap`** - went **UID-only** (stance #1): every message verb (`search` /
-  `fetch` / `fetchMessage` / `fetchHeaders` / `fetchPartial` / `flags` /
-  `addFlags` / `removeFlags` / `copy` / `move`) sends its `UID` form and takes a
-  UID (stable across an expunge), `search` returns UIDs (`UID SEARCH`, refinement
-  included), and `fetchAll` walks them. Added atomic `move` (`UID MOVE`, RFC 6851)
-  and ranged `fetchPartial` (`BODY.PEEK[]<offset.length>`). Sequence numbers
-  survive only as the `selectFolder` count and IDLE `EXISTS` / `EXPUNGE` push
-  numbers (server data, never addressing). **Pre-1.0 break** - the verbs' `int` is
-  a UID; a parallel seq + UID twin set was rejected on stance #1 (`rejected.md`).
-- **`pop`** - `uidl` -> `list of pop.MessageId` (`number` + persistent `id`) /
-  `uidlOne` for leave-on-server / skip-seen, `top` (headers-only when `lines` = 0),
-  `reset` (RSET) / `noop` (NOOP). POP3 addresses only by message number (no
-  UID-addressed command), so this is additive, not an addressing change.
+**Planned.** An optional **run profile** the CLI carries and hands to the program.
+`jennifer run --env=prod script.j` is sugar that **sets `JENNIFER_ENV=prod` in the
+process environment before `Run`** - identical to `JENNIFER_ENV=prod jennifer run
+script.j` - so the module side stays pure `.j` (it reads one env var; the `dotenv`
+`.env.<profile>` selection shipped in `M22.18` is the first consumer) and there is
+no bespoke `meta` / `os` API to maintain. A small `cmd/jennifer` change: parse
+`--env=X` as an interpreter flag ahead of the script path, validate the label the
+same way `dotenv` does (`^[A-Za-z0-9_-]{1,64}$`), set the env var; plus a note in
+`docs/user-guide/tooling.md`. The bare env var stays the honest MVP; the flag is
+pure ergonomics. Graduated `DRAFT#26`. **Requires:** `M22.18` (the `dotenv`
+profile consumer); no interpreter dependency.
 
-Pinned by `TestImapUidVerbs` (exact `UID ...` wire commands via a capturing fake
-server) and `TestPop3StableVerbs`, plus the overlays.
+### M24.2 - first-class functions
 
-### M23.4 - byte-exact binary values
+**Planned.** Close the **single largest expressiveness gap**: today a function
+cannot be held in a value, so every callback is string-name dispatch (`web` routes
+via `meta.callMain`, `testing.run(name)`, `meta.call`) and `lists` ships no `map` /
+`filter` / `reduce` because there is nothing to pass. A function value is
+**immutable, not a pointer** (holding one aliases nothing and can never become a
+write-through handle), so it does **not** touch the value-semantics stance; the
+syntax reuses the call-vs-name shape the parser already peeks for - a **bare method
+name** in expression position *is* the function value, a name followed by `(` is a
+call (the `&NAME` pointer sigil stays rejected).
+- **Tier 1 (this milestone) - function values without capture.** A new `Value`
+  kind `KindFunc` wrapping the immutable `*parser.MethodDef` (a copy shares the
+  pointer - nothing to deep-copy). `def f as func init greet;` binds one, and
+  `$f(args)` dispatches through the existing `CallMethodWith` with arity / kind
+  checked at the call site. Frame-pool-safe (no captured environment, so
+  implementation-note 14's invariant holds). Unlocks the higher-order layer -
+  `lists.map` / `filter` / `reduce` / `sort(by)` / `find` / `any` / `all`, typed
+  comparators, and function-valued callbacks that **replace** the stringly-typed
+  dispatch in `web` / `testing` / `meta`.
+- **Tier 2 (deferred, additive) - closures with by-value capture.** Anonymous
+  `func(x){...}` closing over their environment **by copy** (the `spawn` snapshot
+  re-pointed), so a closure carries its own detached copy - no aliased mutation
+  (capture-by-reference stays rejected) and it does not extend the pooled frame's
+  lifetime, so the `sync.Pool` frame recycling keeps working. Shipped only after
+  Tier 1.
 
-**Done.** `redis` / `memcache` decoded bulk values as UTF-8 (throwing on a
-non-UTF-8 value); added `bytes`-valued get/set (text `get`/`set` unchanged, still
-strict-throw), plus adjacent verbs. `redis`: `setBytes` / `getBytes` (a byte-arg
-RESP encoder + a count-framed, never-decoded reply reader) and typed hash / list
-/ set helpers (`hset`/`hget`/`hgetAll`/`hdel`, `lpush`/`rpush`/`lrange`/`llen`/
-`lpop`, `sadd`/`srem`/`smembers`/`sismember`/`scard`). `memcache`: `setBytes` /
-`getBytes` plus a shared `VALUE`-block reader powering multi-key `getMulti`,
-`gets` (`-> Item{value, cas, found}`), and `cas` (`-> "stored"`/`"exists"`/
-`"not_found"`). Pinned by `TestRedisBinaryAndTyped` /
-`TestMemcacheBinaryCasMulti` (NUL / CR / LF / 0xFF round-trip, byte-count-framed)
-and the `encodeCommandBytes` overlay test.
+Cost (Tier 1): a `Value` kind + `MatchesDeclared` / `Copy` / `DeepCopy` cases
+(cheap - immutable, shares the pointer), the bare-name-as-value resolution, the
+`$var(args)` grammar, a `func` type keyword, the `evalCall` path, the higher-order
+library layer, and grammar / spec / docs. Graduated `DRAFT#18`. **Requires:** none
+hard; relates to a future bytecode VM (`DRAFT#17`) and the embedding API
+(`DRAFT#1`).
 
-### M23.5 - selectable backends
+### M24.3 - concurrency coordination: cancellation, timeouts, channels
 
-**Done.** `session` / `ratelimit` were memcache-only (against the "one module,
-one selectable backend" stance); added a shared backend layer and moved both onto
-it.
-- **`kv` (new system library)** - in-process key/value store with per-key TTL, the
-  no-server local backend a pure `.j` module cannot be (no shared-mutable-state
-  handle under value semantics). `kv.open()` (in-memory) / `openFile(path)`
-  (persisted across runs, whole-file flush per mutation) -> `kv.Store`, then
-  `set` / `add` / `get` / `has` / `delete` / `touch` / `incr` (memcache-shape,
-  signed delta) / `close`. An integer handle into a per-interpreter registry, so
-  it shares its map across value-copies and `spawn` (per-store mutex; `incr`
-  atomic, overflow-checked). Active periodic expiry sweep bounds a rate limiter
-  keyed by an untrusted IP; no hard cap on unexpired live data (that's a
-  distributed backend's `maxmemory` job). Pure Go stdlib, TinyGo-clean.
-- **`kvstore` (new module)** - the selector. `Store` is a **sum-type enum**
-  (`Memcache` / `Redis` / `Local`), not a `kind`-string struct, so the dispatch is
-  an exhaustiveness-checked `match` (stance #1). `memcacheStore` / `redisStore` /
-  `inProcessStore` / `fileStore`; uniform `set` / `get` / `delete` / `touch` /
-  `incrWindow` (the atomic-counter-plus-TTL primitive, portable across all three).
-- **`session`** - onto `kvstore.Store`; values now a **`json.Value`** (nested, not
-  a flat map). **Pre-1.0 break**.
-- **`ratelimit`** - onto `kvstore.Store`; a `Limiter` (`fixedWindow` /
-  `slidingWindow`) + `check` / `peek` -> `Result{allowed, remaining, retryAfter,
-  resetSeconds}` for a compliant 429. Sliding window blends current + previous
-  window counts to smooth the boundary burst; both clock-driven, window-aligned.
-  **Pre-1.0 break** (`allow(mc, ...)` -> `check(limiter, ...)`).
-- **Interpreter fix** - an enum used as a *struct-field* type across a module
-  boundary now type-checks (`retagFieldType` stamped struct field types but not
-  enum ones - the M22.9 gap); needed for `Limiter{store as kvstore.Store}`, pinned
-  by `TestModuleEnumAsStructField`.
-- **Audit hardening** - `kv.incr` rejects int64 overflow (matches the language
-  stance); `kvstore.touch` with `ttl <= 0` on redis `PERSIST`s instead of letting
-  `EXPIRE 0` delete the key (uniform with memcache / kv); `fixedWindow` /
-  `slidingWindow` reject a non-positive limit / window up front.
+**Planned.** `spawn` / `task` is race-free by construction but offers no way to
+**cancel** a task, **bound** a wait, or **coordinate** producers / consumers - and
+an unobserved non-terminating `spawn` *hangs the program at exit* (a documented
+sharp edge). Two tiers.
+- **Tier 1 (this milestone) - cancellation + timeouts.** `task.cancel($t)` sets a
+  flag on the shared `TaskState` (already pointer-shared across handles); the
+  spawned body observes it **cooperatively** at the eval loop's existing safe
+  points (the `i.diagReq.Load()` diagnostic / signal-poll checkpoint shape, so it
+  is near-free and needs no preemption a tree-walker cannot do), reading
+  `task.cancelled()` or the runtime raising a catchable "cancelled".
+  `task.waitTimeout($t, ms)` + a timeout on `waitAny` give bounded waits (Go
+  `select` + `time.After`) and the escape hatch for the exit-time hang.
+  TinyGo-clean.
+- **Tier 2 (deferred) - channels.** A `channel of T` type + a `channel` library
+  (`make` / `send` / `recv` / `close`, integer-handle-into-a-registry over a Go
+  `chan Value`) where a **send copies the value in** (value-semantic, like the
+  spawn snapshot), so channels carry copies and the no-shared-mutable-state
+  guarantee holds - which is why channels, not mutexes / atomics, are the right
+  primitive (shared locks stay rejected). `select` generalizes today's
+  `task.waitAny` (which already uses `reflect.Select`, verified TinyGo-clean), as a
+  language construct or a `channel.select` form.
 
-Pinned by the `kv` Go tests (persistence, `-race` concurrency, overflow, active
-sweep), the `kvstore` / `session` / `ratelimit` overlays (deterministic, in-process,
-incl. the sliding boundary), and the Go suite over memcache / redis
-(`TestSessionLifecycle`, `TestRatelimit`, `TestKvstoreRedisBackend`).
+Graduated `DRAFT#21`. **Requires:** none hard (builds on the shipped `spawn` /
+`task`); Tier 1 is independent and small and directly retires the exit-hang
+footgun.
 
-### M23.6 - format & coverage completeness
+### M24.4 - `stats` library
 
-**Done.** The broadest track: the deepest per-module gaps, where a module handled
-the easy case but not the real one. Thirteen pieces (M23.6.1 - M23.6.13), each
-shipping its enhanced `*_test.j` overlay at 100%, an updated `docs/modules/` (or
-`docs/libraries/`) doc, and adversarial validation against an independent
-reference. Pure `.j`, both binaries unless noted.
+**Planned.** A `stats` system library: descriptive statistics over `list of int`
+/ `list of float` - `mean` / `median` / `mode` / `variance` / `stddev` /
+`percentile` / `min` / `max` / `sum` / `correlation`. Pure-value, dependency-free,
+TinyGo-clean (both binaries); the highest-value, simplest piece of the horizon ML
+group, so first. Follows the standard library discipline (a Go package +
+`internal/stdlib.InstallAll` line + `docs/libraries/stats.md` + cheatsheet rows).
+Graduated `DRAFT#5`. **Requires:** none. (The companion `linalg` and ML-primitives
+pieces stay in the [horizon](horizon.md) collection, `DRAFT#6` / `DRAFT#7`.)
 
-- **`ipnet`** (M23.6.1) - subnet math (`hostCount` / `firstUsable` / `hosts` /
-  `split` / `aggregate` / `overlaps` / `subnetOf` / `next` / `prev` / `compare`)
-  and a total, disjoint `scope(addr) -> Scope` enum classifier; fixed a
-  v4-mapped-CIDR regression (`::ffff:0:0/96` was range-checked against the v4 max).
-- **`orm`** (M23.6.2) - ordinary-query surface: `select` / `count` / `aggregate`,
-  `orWhere` / `whereIn` / `whereNotIn`, `groupBy` / `having`, typed `join` /
-  `leftJoin` / `rightJoin`; queries stored structurally so `toSql` re-runs the
-  identifier / operator allowlists at render time (a hand-built literal cannot
-  inject). `Query` shape changed (pre-1.0 break).
-- **`markdown`** (M23.6.3) - images `![alt](url)` (URL scheme-allowlisted),
-  recursive blockquotes (inner text parsed as blocks), and indentation-nested
-  lists (`Block` gained a recursive `children`). Overlay 56 -> 68.
-- **`vcard`** (M23.6.4) - full `N` (middle / prefixes / suffixes), `TYPE`
-  parameters (`Typed{value, type}`, a pre-1.0 break), and `NICKNAME` / `BDAY` /
-  `PHOTO` / `CATEGORIES`.
-- **`ical`** (M23.6.5) - recurrence (`RRULE` / `RDATE` / `EXDATE` + an
-  `occurrences` expander with DTSTART-anchored monthly/yearly day-clamp), all-day
-  + `TZID` (floating wall-clock + zone name), and `VTODO` / `VALARM` /
-  `ORGANIZER` / `ATTENDEE` via a component state machine. Overlay 20 -> 31.
-- **`mime`** (M23.6.6) - charset-on-decode (a text part decoded from its
-  Content-Type `charset` through `encoding`, exotic labels degrading to UTF-8) and
-  RFC 2231 extended / continued filenames; a quote-aware `splitParams` fixed a
-  latent `name=` / `filename=` collision and a backslash round-trip asymmetry.
-  Overlay 35 -> 52.
-- **`feed`** (M23.6.7) - podcast enclosures (`Enclosure{url, length, type}`, RSS +
-  Atom), plus `author` / `categories` (struct-shape pre-1.0 break). Overlay
-  19 -> 27.
-- **`s3`** (M23.6.8) - presigned query-signed URLs, byte bodies (`getBytes` /
-  `putBytes`), content-type / `x-amz-meta-*` / server-side `copy` (generalized
-  `signCore`), and multipart upload; fixed a `listObjectsFrom` canonical-query
-  ordering bug that 403'd page 2 on real S3.
-- **`barcode`** (M23.6.9) - `upca` / `upce` / `code93` / `gs1-128`, human-readable
-  text, DataMatrix ECC200 (byte-exact vs `zint`), and QR versions 11-40 + mode
-  selection + ECI (optically decoded via `zbarimg`). Overlay 11 -> 29.
-- **`font`** (M23.6.10) - a CFF / OTTO outline backend (`font_cff.j`: Type2
-  charstrings, CID FDArray / FDSelect; IoU 1.0 vs `fontTools`), `kern` + OS/2
-  metrics, an O(1)-per-query perf fix (a CJK glyph 34 s -> 178 ms), and a hostile-
-  font recursion guard. Overlay 11 -> 21.
-- **`pdfwriter`** (M23.6.11 through .13) - embedded TrueType fonts (Type0 /
-  CIDFontType2, Identity-H, ToUnicode, via a dynamic object allocator), raster
-  image XObjects (JPEG DCTDecode, PNG opaque via a FlateDecode predictor, RGBA via
-  an `/SMask`; `pdfimages`-pixel-exact), and text layout (`measureText` over Adobe
-  Core-14 AFM tables, `wrapText`, `textBlock` left / right / center / justify).
-  `qpdf --check` clean, `pdftotext`-extractable. Overlay 16 -> 41. Glyph subsetting
-  and CFF `.otf` embedding remain optional follow-ons, tracked but not blocking.
+### M24.5 - multiplatform: promote macOS / Windows to supported
 
-### M23.7 - observability completeness
-
-**Done.** Filled the three biggest metrics gaps, each with its enhanced overlay at
-100%, updated `docs/modules/` doc + demo + catalog rows, and validation against an
-independent reference. Pure `.j`; the format / request-building side stays
-network-free and TinyGo-clean (only the live send / query needs the default
-binary).
-- **`prometheus`** (overlay 11 -> 21) - histogram + summary types (`MetricType` ->
-  `{Counter, Gauge, Histogram, Summary}`): `histogram(name, help, buckets)` /
-  `summary(name, help, quantiles)`, `observe` accumulating count / sum + cumulative
-  buckets (nearest-rank quantiles for summaries), `render` emitting the exact text
-  format (`x_bucket{le}` ascending / `+Inf` last, `x_sum` / `x_count`;
-  `x{quantile}`), plus `observeAt` (per-sample ms timestamp) and `pushgatewayPath`.
-  Validated against the official `prometheus_client` parser (buckets, q=0/q=1
-  edges, label / HELP escaping).
-- **`statsd`** (overlay 6 -> 15) - a pure network-free line builder + `countRate` /
-  `timingRate` (`|@rate`, omitted when >= 1), `*Tagged` DogStatsD `|#k:v` verbs,
-  `countFloat` / `gaugeFloat`, and a value-semantic `Batch` (`batch` / `add*` /
-  `flush`) packing several metrics into one datagram. The `prefix` is now
-  control-character-validated on the same wire line as the name / tags (no
-  newline / extra-metric injection). Validated against the DogStatsD grammar over
-  captured UDP datagrams (injection 4/4 rejected).
-- **`influxdb`** (overlay 13 -> 21) - 2.x / 3.x alongside 1.x via a `Version` enum
-  `{V1, V2}` on the `Client` (shared line protocol): `client2(url, org, bucket,
-  token)` writes `POST /api/v2/write?org=&bucket=` with `Authorization: Token`
-  (redacted from errors), `queryFlux` runs Flux over `/api/v2/query`. Request
-  construction factored into pure `buildWrite` / `buildQuery` / `buildFlux`; the
-  1.x path stays byte-identical. Validated against a captured HTTP request + an
-  independent line-protocol parser.
-
-### M23.8 - ergonomic papercuts + notifier richness
-
-**Done.** A sweep of cheap, high-value wins across fifteen `.j` modules, each
-shipping its enhanced `*_test.j` overlay at 100% and an updated `docs/modules/`
-doc (per-module surface detail lives there; this table is the index). One core
-addition fell out of dogfooding: telegram's binary file upload needed a raw
-request body, so `http` gained `requestRawBody` / `requestRawBodyTls` (a `bytes`
-body written byte-for-byte - the request-side counterpart to M22.10's byte-safe
-response path, `buildRequest` refactored onto a head-only `buildHead`), pinned by
-an all-256-byte-values round-trip.
-
-| Module | Shipped |
-| ------ | ------- |
-| `log` | `with(logger, fields)` child / context logger (persistent, composing fields) + a `fatal` level (log then `exit 1`). |
-| `cron` | Named months (`JAN`-`DEC`) / weekdays (`SUN`-`SAT`) anywhere a number goes, and `@`-nickname macros (`@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` / `@midnight` / `@reboot`; `@reboot` is startup-only, never a clock match). |
-| `docblock` | Identifier / constant regexes updated for the M22.2 digit rule, so `func v4` / `@param x2` / const `SHA256` parse. |
-| `jwt` | `verifyLeeway` (clock-skew, overflow-safe), `verifyWithKeys` (kid -> secret / PEM / JWK map), and `verifyJwks` (resolve a JWKS by kid via `crypto.jwkToPem`); the expected `alg` is still enforced (no algorithm-confusion). |
-| `totp` | `generateSecret` / `generateSecretN` (crypto-grade base32), an exported RFC 4226 `hotp`, and a configurable `verifyWindow`; docs the RFC 6238 5.2 replay / rate-limit caller duties. |
-| `bloom` | `optimal(n, fpr)` sizing (in-module `ln`), `serialize` / `deserialize` (invariant-checked - a degenerate blob is rejected, never a universal-yes oracle), `union` / `merge`. |
-| `csv` / `jsonl` | `csv.formatSafe` (CWE-1236 spreadsheet-formula neutraliser), a `Dialect` (delimiter / quote / comment / trim), and streaming reader / writer handles over `fs.File` (linear multi-line-field reassembly); `jsonl` streaming reader / writer. |
-| `gotify` | `pushMarkdown` / `pushWith` / `pushExtras` - markdown content-type and a click action via Gotify's nested `extras`. |
-| `htmlwriter` | `boolAttr` - valueless boolean attributes (`disabled`, `checked`) render as the bare name, still name-validated. |
-| `flatdb` | Cleared the two residual lint warnings (an `L103` suppression on the best-effort cleanup catch, an unused test local dropped). |
-| `webhook` | Replay-protected timestamped signing: Stripe (`t=,v1=`), Slack (`v0=`), and a generic digest / encoding variant - constant-time compare, timestamp-freshness replay defence. |
-| `discord` | Full embeds (`embedField` / `embedFooter` / `embedAuthor`) + per-message `username` / `avatar` identity override. |
-| `telegram` | Inline keyboards, `parseCallbackQuery` / `answerCallbackQuery`, local-file upload (`sendPhotoFile` / `sendDocumentFile` via multipart + `http.requestRawBody`), and bot-token redaction from every raised error. |
-| `slack` | Block Kit `contextBlock` / `fieldsSection` / `actionsBlock` (URL buttons). |
-
-### M23.9 - `fmt`: shape-aware wrapping + raw-literal fidelity
-
-**Done.** `jennifer fmt` (a token-stream machine, implementation-note 8) had no
-notion of width or raw-literal fidelity - it collapsed every struct / map / list
-literal and long call onto one line (16-field `FirewallRule{...}` -> ~700 cols),
-expanded every `when` arm, stripped digit separators, and flattened multi-line
-strings. Rebuilt:
-
-- **Wrapping.** A literal wraps one element per line past 100 columns (open
-  bracket at line end, elements indented, close on its own line); struct / map
-  literals also wrap over `maxInlineElements` (6) members (lists on width alone),
-  and a `spawn` block or embedded comment forces it. A **call** with >=2 args
-  wraps one arg per line when long, `)` hugging the last arg (`foo(\n    a,\n
-  b)`); a single-arg / empty / control-flow / grouping `(` never wraps. A
-  **single-statement `when` / `else` arm** stays inline; longer ones expand.
-  **Operator chains** fill then break after the last `+` / `and` / `or` whose
-  next operand would overflow. Nested containers decide independently.
-- **Spacing:** all literal bodies tight, Go-style (`Point{x: 1}`, `{k: v}`,
-  `[1, 2]`); a struct / enum literal only binds the brace to its type name
-  (`Point{`); decls stay multi-line.
-- **Raw-literal fidelity.** A lexer `Token.Raw` field (captured by `withRaw` in
-  `readString` / `readNumber`) carries a literal's exact source spelling; `fmt`
-  re-emits it for numbers / strings, so digit separators (`1_000_000`), base
-  prefix, quote style (`'single'`), escapes, and embedded newlines survive
-  verbatim. "Prefer double quotes" stays a human guideline `fmt` respects.
-
-**Approach (token-level, no AST).** A bounded lookahead (`spanEnd` /
-`inlineContainerWidth` / `topLevelElements`) decides each container at its open
-bracket; `effectiveStartCol` makes it layout-exact; a unified `wrapStack` +
-`prevContainerWraps` resolve which container a comma belongs to; indent is driven
-off the wrap frame. Linear in tokens.
-
-**`fmt` / `lint` contract - verified.** `fmt` never authors an over-long line (so
-it never hands `lint` an `L203` the source lacked), and `TestFmtPreservesTokenStream`
-proves across the whole corpus that a format changes **only whitespace** - the
-non-trivia token stream is byte-identical. Also pinned by
-`TestFmtNeverAuthorsLongLine` / `PreservesLiteralLexemes` / `WrapsLongCall`.
-
-**`jennifer fmt -w`** - atomic (temp + rename) in-place rewrite of the named
-files, mode-preserving, skipping already-canonical ones. `fmt` takes files only
-(a directory errors): file selection - globs, `**` recursion - is the shell's job
-(stance #1), so no `-r` / `-i`. The write **follows symlinks** (rewrites the
-target), **refuses a read-only file** (exit 1, like `gofmt`), and **self-verifies**
-(re-lexes its output, refuses to write if the non-trivia tokens - values *and*
-`Raw` - changed): a per-file runtime guarantee `-w` can never corrupt or
-de-fidelity a source.
-
-**Corpus reflow.** `modules/` + `examples/` reflowed: over-limit lines ~700 ->
-~215 (the rest irreducible - a lone long string or comment has no safe break),
-idempotent, all overlays green. Hand-crafted exclusions (manual, no
-fmt-the-corpus target): `examples/linting.j` and the `barcode` / `font` modules.
-
-**Resolved / audited.** `maxInlineElements = 6` (struct / map only); the
-`fmt` / `lint` `100`s stay two constants guarded by the invariant test. An
-independent audit (`fmt-report.md`) re-proved **0 token-stream differences** and
-drove edge fixes: `insideForHeader` O(n^2) -> O(1) (a `forHeader` wrap-frame flag;
-40k statements 26 s -> 0.17 s, plus a `waitfor` word-boundary false match gone).
-Left: `Token.Raw` captured on every lex (within noise). **Pre-1.0 break**
-(canonical output changed).
-
-### M23.10 - interactive stdin for `os.run` / `os.spawn`
-
-**Done.** `os.run(argv)` captured a child's stdout / stderr but could not feed its
-**stdin** (so a Jennifer program could not drive a `sort` / `jq` / `gzip` filter
-or an MCP server's stdio transport). `os.run(argv, stdin)` adds an optional
-trailing `string` / `bytes` written to the child's stdin then closed (EOF), with
-`stdout` / `stderr` captured into `os.Result` as before - a variadic builtin, so
-one-arg calls are unchanged (a non-string/bytes stdin or a third argument is a
-typed error). **Deadlock-free by construction** (input buffered as a
-`bytes.Reader`, output drained into the 16 MiB-capped buffers as the child runs);
-a child that ignores or partially reads stdin returns a clean `Result`, not a
-broken-pipe error. This unblocks a stateless subprocess exchange (feed all input,
-read all output), and M23.13's `mcp.connectStdio` was then built on it. In
-`internal/lib/os/exec.go` (a `stdinBytes` extractor + the 1-or-2-arg `runFn`);
-Go tests cover string/bytes/empty stdin, a 20 MiB input counted in full with the
-echoed output capped at 16 MiB, the partial-consume EPIPE case, and the
-wrong-type / arity errors (run under `-race`); `os.md` updated; both binaries
-build (`os/exec` is default-binary-only already, so the stub split is inherited).
-**Deferred:** interactive streaming pipes on a spawned `Process`
-(`writeStdin` / `closeStdin` / `readStdout`) for a persistent interleaved session
-needs real deadlock avoidance and is parked as a later piece; the one-shot form
-covers every stateless case.
-
-### M23.11 - `jsonrpc` module
-
-**Done.** A JSON-RPC 2.0 client + server module, pure `.j` over `json` + `http`
-(no new dependency, default-binary-only for the transport). The **client** is a
-value-semantic `Client` with `call(client, method, params) -> json.Value` (throws
-`Error{kind: "jsonrpc"}` on an error reply or transport failure) and `notify`;
-`params` / results are `json.Value`s. The **server** is a transport-agnostic
-`handle(requestBody) -> replyBody` that runs the whole protocol - single request,
-notification (`""` reply), batch (array in / array out, notification entries
-dropped), and every reserved error code - and dispatches each `method` to a
-top-level `func NAME(params as json.Value)` in the entry program **by name via
-`meta.callMain`** (the `web` module's mechanism), accepting a `json.Value` or a
-scalar as the handler's result. Chose JSON-RPC over gRPC deliberately: gRPC needs
-protobuf + HTTP/2 + codegen and would be a heavy Go system library, not a pure
-`.j` module. Ships the usual close-out: `modules/jsonrpc_test.j` (16 white-box
-tests, 100%), a mock-server `cmd/jennifer/jsonrpc_test.go` for the live client
-round-trip, `docs/modules/jsonrpc.md`, a demo, and the catalog / `JENNIFER.md`
-entries. A validation pass hardened it: every client failure (JSON-RPC error
-reply, transport error, or malformed / mismatched-`id` reply) unifies to one
-catchable `Error{kind: "jsonrpc"}`; a thrown handler error yields a **generic**
-`-32603` (the message stays server-side, never on the wire); the client
-correlates the reply `id`; the batch reply joins via `strings.join` (not O(n^2)
-concat); and the docs call out that `handle` exposes the whole top-level method
-namespace (no route allow-list) with authentication left to the transport.
-Client-side batch and custom per-handler error codes are noted follow-ups.
-
-### M23.12 - `match` / `enum` adoption across modules
-
-**Done.** `match` / `enum` were barely used in `modules/` (2 of 66 files); a
-survey applied them to the genuine closed-variant-set cases (open sets - HTTP
-methods, wire strings, config-supplied mechanism names - stayed strings).
-
-- **Non-breaking `match`** for internal single-value `if`/`elseif` dispatch in
-  `screen`, `redis`, `docblock`, `barcode`, `jwt`, `smtp` / `pop` / `imap`,
-  `memcache`, `orm`, `influxdb`, `resque`, `vcard`, `ical`, `markdown`.
-- **Non-breaking `enum`** (private structs): `markdown`'s `SpanKind` / `BlockKind`,
-  with the renderers factored so each `match` is over a **parameter** (compile-time
-  exhaustiveness across the HTML + ANSI paths).
-- **Breaking `enum` (pre-1.0 API changes).** `htmlwriter.NodeKind{Element,Text,Raw}`;
-  `prometheus.MetricType{Counter,Gauge}`; `barcode.SymbolKind{Matrix,Linear}`;
-  `orm.Dialect{Mysql,Postgres}` + `ColumnKind{Int,String,Float,Bool,Bytes}` (so
-  `orm.schema` / `orm.column` take enum values, `checkDialect` is gone, invalid
-  values unrepresentable); `totp.Algorithm{Sha1,Sha256,Sha512}` (the zero value
-  `Sha1` replaces the old `""` sentinel). Match over an enum-typed parameter is
-  exhaustiveness-checked, so a new variant fails to compile until handled.
-- **Shared `transport.Security{None,Tls,Starttls}` (breaking, cross-module).** A
-  new tiny `transport` module replaces the stringly-typed `security` field on six
-  socket clients (`smtp` / `pop` / `imap` / `redis` / `amqp` / `mqtt`); the three
-  mail clients accept all modes, the other three **reject** `Starttls` explicitly
-  (no silent plaintext downgrade). No re-export, so a client `Options` imports
-  `transport` too (accepted cost of one shared type over six sibling enums,
-  stance #1); `transport.encrypted(s)` is the protected-connection helper.
-- All overlays, demos, header examples, the twelve `cmd/jennifer/*_test.go`
-  mock-server integration tests, and docs updated; `go test ./...` + every module
-  overlay green on both binaries.
-
-### M23.13 - `mcp` module (Model Context Protocol, stateless)
-
-**Done.** A Model Context Protocol module (stateless only): a **server** exposing
-tools / resources / prompts to an LLM host, and a **client** (HTTP or launched
-stdio subprocess) that calls one. MCP is JSON-RPC 2.0, so the client reuses
-`jsonrpc.call`; the server is a purpose-built router (`tools/list` etc. are not
-valid `func` names).
-- **Server.** `server(name, version)` + value-semantic `addTool` / `addResource` /
-  `addPrompt` (a tool declares a JSON Schema via `schema` / `property`; a prompt
-  declares its `arguments` via `promptArg`, surfaced by `prompts/list`).
-  `handle(server, requestBody) -> replyBody` routes `initialize` / `ping` /
-  `tools`/`resources`/`prompts` list+call, a notification -> `""`, unknown ->
-  -32601. `serveStdio(server)` runs the primary transport (newline-delimited
-  JSON-RPC on the program's own stdin/stdout, flushed per reply so a host does not
-  deadlock); wire `handle` to `httpd` for HTTP.
-- **Client.** `connect` / `connectWith` (HTTP) and `connectStdio(argv)` (launches a
-  server subprocess over `os.run`, one-shot per call - handshake + op in, replies
-  out, correlated by `id`) share one call surface (`initialize` sends the required
-  `notifications/initialized`; `listTools` / `callTool` / `listResources` /
-  `readResource` / `listPrompts` / `getPrompt`).
-- **Security: an allow-list** (safer than `jsonrpc`'s open dispatch). `tools/call`
-  dispatches only a *registered* tool's handler; an unknown name is a tool error,
-  a throwing handler yields a generic message (never the thrown detail).
-- **Robustness (audit).** A non-string `name` / `uri` in an untrusted request used
-  to throw uncaught and crash the `serveStdio` loop; the param reads are
-  type-guarded and `handle` wraps the router in a defensive catch, so no malformed
-  request takes the server down.
-
-Overlay 35/35; a hermetic `cmd/jennifer/mcp_test.go` httpd round-trip; both
-binaries. **Validated against the real protocol** end to end: the official MCP
-Python SDK, as a host, drove Jennifer's `serveStdio` server through `initialize`
-(protocol `2025-06-18`), `list_tools` (valid JSON Schema), `call_tool`,
-`list_prompts` (declared arguments), a spec-compliant `get_prompt`, and the
-allow-list rejection; the stdio client was dogfooded Jennifer-to-Jennifer. **Not
-planned:** the stateful Streamable-HTTP transport (SSE, `Mcp-Session-Id` sessions,
-server-initiated sampling / roots / elicitation) - it needs an SSE push primitive
-`httpd` lacks, and stateless is the protocol's direction.
-
-### M23.14 - raw single-quoted string literals
-
-**Done.** A **breaking** (pre-1.0) split of the two, formerly-redundant string
-delimiters so each does one job (stance #1): **`"..."` stays cooked** (escapes
-`\n \r \t \\ \" \' \0` processed), **`'...'` becomes raw** - no escape
-processing, content verbatim (backslashes and newlines included) from the
-opening `'` to the next `'`. So `'\d+\.\d+'` is a literal regex (no
-double-escaping) and a multi-line `'...'` block is a **free heredoc** (no
-`<<<EOF` needed). A `'` inside content switches to the cooked form (`"it's"`).
-Deliberately **no** `r"..."` prefix - the delimiter *is* the mode (simpler, no
-new lexer state); rejection recorded in `rejected.md`.
-
-Mechanically confined to the lexer's string scanner (`readString` branches on
-`raw := quote == '\''`; the `'` path skips the escape switch, the `"` path is
-unchanged); `src` is `[]rune` so multibyte content is rune-exact,
-`advance` tracks lines through embedded newlines, an unterminated raw literal is
-a positioned error at the opening quote, and `Token.Raw` captures the span
-verbatim so `fmt` round-trips a raw (incl. multi-line) literal unchanged.
-Migration was a **no-op**: an audit of `modules/` + `examples/` found zero
-single-quoted literals relying on escape processing. Docs / grammar
-(`types-and-values`, `style-guide`, `lexer.md`), `regex.md` examples (rewritten
-to raw), `JENNIFER.md`, and the four editor highlighters + regenerated
-`theme/highlight.js` (single-quoted no longer highlights escapes) all updated in
-the same change. Lexer unit tests for the raw path; `go test ./...` (+ `-race`),
-both toolchains, gofmt / em-dash guards green.
-
-### M23.15 - `orm`: a batteries-included data-mapper ORM
-
-**Done.** A major workover lifting `orm` from a thin query-builder + CRUD Data
-Mapper to a **full, batteries-included ORM** - associations, N+1-eliminating eager
-loading, upsert / batch writes, and finders - while staying **Data Mapper, not
-Active Record** (rows are data, persistence is always an explicit call).
-Dialect-aware throughout (MySQL / MariaDB + PostgreSQL); no `sql`-library change
-proved necessary.
-
-**Two data-model decisions** (reasoned in `design-decisions.md`, both forced by
-the language): rows stay **`map of string to string`** because there is no struct
-reflection to populate a typed target; eager-loaded relations attach through a
-**side `Result`** holder (read via `rows` / `related` / `relatedOne`) because a
-homogeneous map can't hold scalars *and* child lists and there is no `any`.
-**Transactions** stay in `sql`; orm's CRUD takes a value-semantic **`orm.Session`**
-(`orm.session(conn)` auto-commit / `orm.transaction(tx)`) since a strict `sql.Tx`
-can't satisfy an `as sql.Connection` slot and there are no union types.
-
-**Breaking changes (pre-1.0):** `Schema` / `Column` grew fields (attributes +
-`relations` + query `withRelations` / `distinctSelect`), so hand-built literals
-break - the builders stay the compatible entry point; every executing function
-takes an `orm.Session` first argument (`orm.insert($conn, ...)` ->
-`orm.insert(orm.session($conn), ...)`); `createTable`'s DDL changed.
-
-Sub-milestones (each: 100% `orm_test.j` overlay + DB-gated
-`cmd/jennifer/orm_test.go` + docs + demo):
-- **M23.15.1** - `orm.Session` unit-of-work (CRUD switches `conn` -> `session`);
-  `Column` attributes (`notNull` / `unique` / `autoIncrement` / `withDefault`,
-  kind-rendered injection-safe DEFAULT); dialect-aware DDL builders (`createTable`
-  with attributes, `dropTable` / `addColumn` / `dropColumn` / `renameColumn` /
-  `createIndex` / `dropIndex` / `addForeignKey` / `dropForeignKey`).
-- **M23.15.1b** - migrations split into a **separate `sqlmigrate` module** (a
-  maintainer decision): the runner has zero dependency on the mapper (only `sql` +
-  plain DDL strings), so it sits below it, reusable by any `sql` program.
-  `Migration{version, description, up, down}`; `migrate` / `rollbackMigrations` /
-  `migrationStatus` over a `schema_migrations` table, one transaction per step,
-  idempotent, version-allowlisted + description-escaped. Own overlay / integration
-  / doc / demo.
-- **M23.15.2** - associations as schema metadata: `RelationKind` enum + `Relation`
-  struct; `belongsTo` / `hasOne` / `hasMany` / `manyToMany` builders;
-  `joinRelation(q, s, name)` emits the right JOIN. (`belongsTo` / `manyToMany`
-  reference the target's key by the `id` convention.)
-- **M23.15.3** - eager loading: `with(q, name)` + `load(session, schema, q) ->
-  Result` in a **fixed 1 + R queries** (base once, then one batched `WHERE fk IN
-  (...)` per relation); `rows` / `related` (list) / `relatedOne` (`{}` if none)
-  accessors. One level deep. m2m child rows keep the joined columns. The 1+R count
-  is pinned offline by a `plannedQueryCount` test (a live counting connection isn't
-  feasible - `sql.open` hardcodes the driver, opaque handle, no module state - so
-  correctness is verified live instead).
-- **M23.15.4** - write path: `upsert` (ON CONFLICT / ON DUPLICATE KEY),
-  `insertMany` (multi-row, transparently split past 60000 placeholders - never
-  silently capped; the spec's runtime log dropped, no stderr sink),
-  `insertReturning -> string` (Postgres RETURNING / MySQL `lastId`),
-  `updateWhere` / `deleteWhere` (bulk by a query's WHERE, refuse a WHERE-less
-  query), `save` (insert if no PK else update).
-- **M23.15.5** - finders `first` / `exists` / `findBy` / `pluck` (`first` takes a
-  query, not the sketch's unused schema); filters `whereNull` / `whereNotNull` /
-  `whereBetween` / `distinct` / `page` (per-condition WHERE rendering unified into
-  one `renderWhereClause`). **`whereRaw` rejected** (`rejected.md`): an arbitrary
-  fragment can't be allowlist-checked, the one thing that would break orm's
-  no-injection guarantee; bespoke SQL belongs in `sql`.
-
-Close-out: end-to-end `examples/modules/orm_blog_demo.j` (authors / posts / tags
-many-to-many, migrate + seed + eager-load, env-gated); `design-decisions.md`
-(rows-as-maps + side-`Result`) and `rejected.md` (typed-struct mapping, Active
-Record, `whereRaw`) records; `go test ./...` + both toolchains green.
+**Planned.** Linux is the only *supported* platform, but best-effort **unsupported**
+macOS / Windows binaries (the standard-Go `jennifer`, via cross-compile) already
+ship each release - so the work is not "add the ports" but **promoting them to
+supported**: real CI coverage, a per-OS golden strategy, and the platform-specific
+edge cases. Graduates the "cross-build for macOS / Windows" 1.0.0 distribution
+requirement. The concrete Windows track, with the exact remaining gaps
+(exe-relative module default, per-OS golden selection for
+`examples/expected/osinfo.txt`, `fs.chmod` / `chown` Windows behaviour, a
+`windows-latest` CI test job), is detailed in `DRAFT#22`; macOS is the parallel
+case (same "already ships unsupported, promote it" shape, and it lacks even the
+module-path blocker Windows has). **Extra distribution packaging** (a Homebrew tap,
+Snap, Nix flake, Flatpak / AppImage) stays a per-format nice-to-have, shipped only
+when a user asks and a maintainer keeps it green - none blocks a release. Graduated
+`DRAFT#16`. **Requires:** none hard (all in-tree); builds on the shipped `M21.13`
+installer.
 
 ---
 

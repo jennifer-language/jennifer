@@ -36,128 +36,7 @@ Each draft also states its **Requires** - the `DRAFT#` handles and/or milestones
 (`M`-numbers) that must land first, or *none* - so its blockers are explicit
 before it is scheduled.
 
-### Language
-
-#### DRAFT#20 - Relax the letters-only identifier rule
-
-**Graduated to `M22.2`** (`docs/milestones.md`). Regular identifiers become
-letter-initial `[A-Za-z][A-Za-z0-9]*` (interior / trailing digits, still no `_`);
-constants stay ALLCAPS with underscore separators and gain in-chunk digits
-(`SHA256`, `SCRAM_SHA256`). The batched pre-1.0 renames it enables (`iic` ->
-`i2c`, `uuid.generate("v4")` -> `uuid.v4()`, `pbkdf` -> `pbkdf2`, ...) live with
-the milestone. Handle retired.
-
-#### DRAFT#19 - Sum types (enums) + `match`
-
-**Graduated to `M22.5`** (`docs/milestones.md`). `def enum` variant types
-(payload-less or named-field variants, constructed `Name.Variant{...}`) plus
-pattern arms extending `M22.4`'s `match` / `when` - payload binding into a fresh
-arm scope, resolve-time exhaustiveness for enum subjects - backed by a new
-`KindEnum` Value mirroring `KindStruct`. Handle retired.
-
-#### DRAFT#18 - First-class functions
-
-Today a function cannot be held in a value: the `Value` kinds run `KindBool` ...
-`KindTask` with nothing callable, so every callback is **string-name dispatch**
-(`web` routes handlers by name via `meta.callMain`, `testing.run(name)`,
-`meta.call`) and `lists` ships no `map` / `filter` / `reduce` because there is
-nothing to pass. This is the single largest expressiveness gap.
-
-**A function value is immutable, not a pointer.** Holding a function in a value
-aliases nothing and can never become a write-through handle, so it does *not*
-touch the value-semantics stance. That has to show in the *syntax*: the obvious
-`&NAME` instinct is out, because `&` is exactly the mutable-reference sigil
-rejected under "References, interior mutability, shared mutable state"
-([rejected.md](technical/rejected.md)) and would read as a pointer this language
-does not have. Instead reuse the shape the language already uses to tell a call
-from a name: a **bare method name** in expression position *is* the function
-value; a name followed by `(` is a call (Go's `f := greet` vs `greet()`). The
-parser already peeks for `(` after an IDENT to separate a call from a constant
-reference; extend that so a bare IDENT naming a `func` resolves to a function
-value - and since a def / func name can't collide, the name picks out exactly one.
-
-- **Tier 1 - function values without capture.** A new `Value` kind `KindFunc`
-  wraps the `*parser.MethodDef`. It is immutable and value-semantic: a copy
-  shares the (immutable) `*MethodDef` the same way an immutable scalar copies -
-  no aliasing, no deep copy, nothing to mutate. `def f as func init greet;` binds
-  one; call-through-a-variable `$f(args)` is new call syntax that dispatches
-  through **`CallMethodWith`** - the pre-resolved-`*MethodDef` entry point that
-  already exists (built for module-method stamping) - with arity / kind checked
-  at the call site exactly as user-method calls already are. Frame-pool safe (no
-  captured environment, so implementation-note 14's invariant holds). This tier
-  alone unlocks the higher-order layer - `lists.map` / `filter` / `reduce` /
-  `sort(by)` / `find` / `any` / `all`, typed comparators, and function-valued
-  callbacks that *replace* the stringly-typed dispatch in `web` / `testing` /
-  `meta`.
-- **Tier 2 - closures with *by-value* capture.** Anonymous `func(x){...}` that
-  close over their environment - but the capture is **by copy**, deep-copying the
-  captured bindings at closure creation exactly the way the `spawn` snapshot
-  already detaches a goroutine's scope. That is the value-semantic answer to the
-  "closures break the model" worry, twice over: (1) a closure carries its own
-  copy, so it can never be a backdoor to aliased mutation - the no-aliasing
-  guarantee holds (capture-*by-reference* stays rejected, since it is the `&xs`
-  shape); and (2) because it owns a detached copy rather than pointing at the
-  frame it was created in, it does **not** extend that frame's lifetime, so the
-  `sync.Pool` frame recycling (which "no closures" currently guarantees) keeps
-  working - the pooled frame is still returned normally. The cost just moves to a
-  deep copy at closure creation, the same cost model as `spawn`.
-
-**Cost.** Tier 1: a `Value` kind + `MatchesDeclared` / `Copy` / `DeepCopy` cases
-(cheap - immutable, shares the pointer), the bare-name-as-value resolution and
-`$var(args)` grammar, a `func` type keyword, the `evalCall` path (reusing
-`CallMethodWith`), the higher-order library layer, and grammar / spec / docs.
-Tier 2 adds the closure literal and a `snapshotForSpawn`-style by-value capture at
-creation (the machinery exists - it is the spawn snapshot, re-pointed). Ship
-Tier 1 first; Tier 2 is additive and, framed as by-value capture, needs no retreat
-from the allocation model `M21.12` tightened.
-
-**Requires:** none hard. Relates to `DRAFT#17` (a bytecode VM changes how calls
-and closures are represented) and `DRAFT#1` (a function-value surface is part of a
-clean embedding API).
-
 ### Concurrency
-
-#### DRAFT#21 - Concurrency coordination: cancellation, timeouts, channels
-
-`spawn` / `task` is elegant and race-free by construction (value-semantics
-capture removes shared state), but there is no way to **cancel** a task,
-**bound** a wait, or **coordinate** producers and consumers - and an unobserved
-non-terminating `spawn` *hangs the program at exit* (documented, but a sharp
-edge). Two tiers.
-
-**Tier 1 - cancellation + timeouts (cheap, high-value).** `task.cancel($t)` sets
-a cancel flag on the shared `TaskState` (already a pointer shared across
-handles); the spawned body observes it cooperatively at the eval loop's existing
-safe points - the same checkpoint shape as the `i.diagReq.Load()` diagnostic poll
-and the signal poll, so it is near-free and needs no preemption (which a
-tree-walker cannot do anyway). A body reads `task.cancelled()` or the runtime
-raises a catchable "cancelled" at the next checkpoint. `task.waitTimeout($t, ms)`
-and a timeout on `waitAny` give bounded waits, backed by Go `select` +
-`time.After`; this is also the escape hatch for the exit-time hang. TinyGo-clean
-(its cooperative scheduler already yields at these points). Ship this first.
-
-**Tier 2 - channels (larger).** A `channel of T` type + a `channel` library
-(`make(cap)` / `send` / `recv` / `close`) using the integer-handle-into-a-registry
-pattern the other shared resources use (`task` / `fs` / `net`), wrapping a Go
-`chan Value`. Crucially, a **send copies the value in** (value-semantic, exactly
-like the spawn snapshot), so channels carry copies and the "no shared mutable
-state" guarantee is preserved - which is why channels, not mutexes / atomics, are
-the right coordination primitive for this language (shared locks would violate
-the invariant and stay rejected). A `select` multi-wait generalizes today's
-`task.waitAny`, which **already uses `reflect.Select`** (verified TinyGo-clean),
-so the core machinery exists; `select` can be a language construct or a
-`channel.select` library form to avoid new grammar.
-
-**Cost.** Tier 1: a flag on `TaskState`, one checkpoint in `evalCall` / the loop
-headers (reusing the diag-poll shape), and timeout wait variants - small, and it
-directly retires the documented exit-hang footgun. Tier 2: a `KindChannel` Value
-+ registry, the `channel` library, the copy-on-send path, and `select` (grammar
-or library) over the existing `reflect.Select` - plus spec / docs. No
-shared-memory primitives; that stance stays.
-
-**Requires:** none hard (builds on the shipped `spawn` / `task`). Tier 1 is
-independent and small; Tier 2 is the follow-on. Relates to `DRAFT#17` (a VM
-relocates the cooperative checkpoints Tier 1 rides on).
 
 #### DRAFT#25 - Go-side concurrent HTTP serve loop
 
@@ -181,18 +60,14 @@ always a by-name entry method, so a Go rewrite of the router would buy little an
 lose test surface.
 
 **Requires:** [M22.17](milestones.md) (race-safe concurrent host dispatch - the
-serve loop is unsafe without it). Relates to `DRAFT#21` (task cancellation /
+serve loop is unsafe without it). Relates to `M24.3` (task cancellation /
 timeouts, which a per-request worker would use to bound a slow handler).
 
 ### Libraries (specialised domains)
 
 Each domain its own effort with sub-pieces as needed:
 
-- **ML.**
-  - **`DRAFT#5` `stats`** - descriptive statistics over `list of
-    int|float`: mean, median, mode, variance, stddev, percentile, min / max
-    / sum, correlation. Pure-value, TinyGo-clean; the highest-value,
-    simplest piece, so first. **Requires:** none.
+- **ML.** (The `stats` piece graduated to `M24.4`.)
   - **`DRAFT#6` `linalg`** - vectors as `list of float` (dot, norm, cross,
     scale, add / sub) and matrices as `list of list of float` (matmul,
     transpose, determinant, inverse, solve, identity). Algorithms
@@ -201,7 +76,7 @@ Each domain its own effort with sub-pieces as needed:
     Go-backed matrix handle is the noted future escape hatch when big-matrix
     performance demands it. **Requires:** none.
   - **`DRAFT#7` ML primitives** - atop `stats` / `linalg`, when demand
-    surfaces. **Requires:** `DRAFT#5` + `DRAFT#6`.
+    surfaces. **Requires:** `M24.4` (`stats`) + `DRAFT#6` (`linalg`).
 - **`DRAFT#8` Bioinformatics.** Sequence alignment (Smith-Waterman,
   Needleman-Wunsch), FASTA/FASTQ parsers, molecule structures.
   **Requires:** none.
@@ -234,50 +109,25 @@ some of this space first.
 
 ### Higher-level modules
 
-#### DRAFT#13 - Higher-level PDF: font metrics, layout, and Markdown -> PDF
+#### DRAFT#13 - Markdown -> PDF
 
-A three-phase build on top of the shipped `pdfwriter` module (M18.35), taking it
-from "place text and shapes at coordinates" to "flow a document". The phases are
-strictly ordered because each depends on the one before; they land as separate
-milestones when graduated, but share one draft handle because they are one arc.
+The font-metrics and flow-layout foundation this needs **shipped in `M23.6`**:
+`pdfwriter` gained `measureText` over the standard-14 Adobe AFM width tables,
+`wrapText`, and `textBlock` (left / center / right / justify). What remains is the
+markup-driven document story - and the reason it is Markdown rather than HTML:
+Jennifer ships a `markdown` parser (GFM tables, headings, lists, emphasis) but no
+HTML *parser* (`htmlwriter` only builds HTML), so the cheap, ergonomic path to
+"write markup, get a PDF" is to drive that layout layer from the existing Markdown
+parse rather than write a quirky HTML-subset parser (Markdown tables are also
+easier to author than HTML tables). A prerequisite to verify first: whether the
+`markdown` module exposes a reusable parse tree or only renders straight to a
+string - if the latter, a small refactor to surface the intermediate document
+model. An HTML-subset front-end (TCPDF-style) stays a *later* option, only worth
+it for consuming pre-existing HTML, and it would sit on the same layout
+foundation. Stays pure `.j`, both binaries.
 
-**Phase 1 - font metrics (the keystone).** Today `pdfwriter` can place text but
-cannot **measure** it, so there is no way to wrap a paragraph, auto-size a table
-column, or align text - all of which need the rendered width of a string. Add
-the **standard-14 AFM width tables** (public Adobe Font Metrics: per-glyph
-advance widths, in 1/1000 em, for WinAnsiEncoding) and a
-`pdfwriter.stringWidth(font, size, text) -> int` that sums them. Courier is
-monospace (600 units/glyph, trivial); Helvetica and Times need the real
-per-character tables, generated into an included `.j` data file the way the
-`encoding` codecs were generated from the Unicode mapping files
-(`gen_*.go` -> `*_gen.j`). First payoff: `textAligned(pg, x, y, font, size,
-align, str)` for left / center / right placement. Nothing in the later phases is
-expressible without this.
-
-**Phase 2 - table and flow layout.** The layer that removes the manual
-cell-positioning pain (the ergonomic win people reach for TCPDF's `writeHTML`
-tables to get - but as a typed API, not an HTML subset). On top of `stringWidth`:
-`table(columns, rows, options)` (auto column sizing, in-cell word wrap, borders,
-a header row, page-break across rows); `paragraph(pg, text, x, y, width, font,
-size) -> int` (wrapped flowing text that returns the y it ended at, so callers
-stack blocks); and `heading` / list helpers.
-
-**Phase 3 - Markdown -> PDF.** The markup-driven document story, and the reason
-it is Markdown rather than HTML: Jennifer ships a `markdown` parser (GFM tables,
-headings, lists, emphasis) but no HTML *parser* (`htmlwriter` only builds HTML),
-so the cheap, ergonomic path to "write markup, get a PDF" is to drive the Phase-2
-layout layer from the existing Markdown parse rather than write a quirky
-HTML-subset parser (Markdown tables are also easier to author than HTML tables).
-A prerequisite to verify first: whether the `markdown` module exposes a reusable
-parse tree or only renders straight to a string - if the latter, it needs a small
-refactor to surface the intermediate document model. An HTML-subset front-end
-(TCPDF-style) stays a *later* option, only worth it for consuming pre-existing
-HTML, and it would sit on the same layout foundation.
-
-Stays pure `.j` (static data + lookups + layout math), both binaries.
-**Requires:** none hard for Phase 1 (builds on the shipped `pdfwriter` module,
-M18.35); Phase 2 requires Phase 1; Phase 3 requires Phase 2 and the shipped
-`markdown` module (plus possibly a parse-tree surface on it).
+**Requires:** the shipped `pdfwriter` (`M23.6` metrics + layout) and `markdown`
+modules (plus possibly a parse-tree surface on `markdown`).
 
 ### Platform and distribution
 
@@ -285,8 +135,8 @@ M18.35); Phase 2 requires Phase 1; Phase 3 requires Phase 2 and the shipped
 
 Windows ships today as a best-effort **unsupported** build (a cross-compiled
 `jennifer.exe`, plus the `M21.13` installer that wraps it). Promoting it to
-*supported* is the concrete instance of `DRAFT#16`'s general "cross-platform
-support" bullet, and it graduates the "Cross-build for macOS / Windows" 1.0.0
+*supported* is the concrete Windows instance of the `M24.5` multiplatform
+milestone, and it graduates the "Cross-build for macOS / Windows" 1.0.0
 distribution requirement. A portability audit found the surface small - most of
 the OS-touching code is already `runtime.GOOS`-derived or cleanly build-tag
 stubbed - so this is a handful of concrete gaps, not a rewrite.
@@ -326,29 +176,9 @@ already stub cleanly on non-Linux (`*_other.go`).
 shape) but out of scope here - a separate effort, and it lacks even the
 module-path blocker Windows has.
 
-**Requires:** none hard (all in-tree). Relates to `DRAFT#16` (the umbrella
-multiplatform idea - this is its concrete Windows track) and builds on the shipped
-`M21.13` installer.
-#### DRAFT#16 - Multiplatform
-
-- **Extra distribution packaging.** Beyond the Linux `.deb` (shipped in
-  M15.8) and the two distribution *requirements* for 1.0.0 stable
-  (cross-build for macOS / Windows, a real apt repository), the additional
-  package formats are nice-to-haves, each shipped only when a user asks and a
-  maintainer will keep it green: a **Homebrew tap** (macOS), a **Snap**
-  package, a **Nix flake** / Nix package, and **Flatpak** / **AppImage** or
-  any other Linux distribution format. None blocks a release; none is a 1.0.0
-  requirement.
-- **Cross-platform support.** Linux is the only *supported* platform, but
-  best-effort **unsupported** macOS and Windows binaries (the standard-Go
-  `jennifer`, via cross-compile) already ship with each release - so the work
-  here is not "add the ports" but *promoting them to supported* (real CI
-  coverage, per-OS golden strategy, the platform-specific edge cases). When
-  touching filesystem, paths, line endings, or process behavior, prefer
-  portable stdlib helpers (`path/filepath`, not hardcoded `/`); avoid
-  Linux-only assumptions so those binaries stay genuinely portable, not just
-  compile-clean. The concrete Windows track, with the exact remaining gaps, is
-  `DRAFT#22`.
+**Requires:** none hard (all in-tree). Relates to `M24.5` (the umbrella
+multiplatform milestone this Windows track is the concrete instance of) and builds
+on the shipped `M21.13` installer.
 
 #### DRAFT#12 - `jvc` package manager (decks)
 
@@ -491,25 +321,6 @@ the order, not the vendor:
 in `M22.6` (self-signed certs), and the GraphQL ones (`unraid`, `gitlab`,
 `github`) pull in `M22.7` (`graphql`). Demand-driven: build the deck for the
 box / service you run, not all of them speculatively.
-
-#### DRAFT#26 - Run profiles / `--env` CLI flag
-
-An optional **run profile** the CLI carries and hands to the program, of which
-`dotenv`'s `.env.<profile>` selection (`M22.18`) is the first consumer. The whole
-point is that a profile is one mechanism with two entry points:
-`jennifer run --env=prod script.j` is sugar that simply **sets `JENNIFER_ENV=prod`
-in the process environment before `Run`** - identical to
-`JENNIFER_ENV=prod jennifer run script.j` - so the module side stays pure `.j`
-(it reads one env var) and there is no bespoke `meta` / `os` API to maintain.
-Parking it here (not in `M22.18`) keeps that milestone interpreter-free: the env
-var alone delivers profiles; the flag is pure ergonomics. If it graduates it is a
-small `cmd/jennifer` change (parse `--env=X` as an interpreter flag ahead of the
-script path, validate the label the same way `dotenv` does, set the env var), plus
-a note in `docs/user-guide/tooling.md`. Only worth doing once profiles see real
-use; a bare env var is the honest MVP.
-
-**Requires:** `M22.18` (the `dotenv` profile consumer that motivates it). No hard
-interpreter dependency - a self-contained CLI arg-parse addition.
 
 ### Embedding, WASM, and sandboxing
 
