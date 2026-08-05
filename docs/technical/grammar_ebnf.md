@@ -209,12 +209,18 @@ patternArm  = IDENT [ "(" IDENT ")" ] ; (* an enum-variant pattern: a variant
 
 exprStmt    = expr ";" ;
 
-type        = primType | listType | mapType | taskType | funcType | structType ;
+type        = primType | listType | mapType | taskType | channelType | funcType | structType ;
 primType    = "int" | "float" | "string" | "bool" | "null" | "bytes" ;
 funcType    = "func" ;                 (* a first-class function value; the
                                           type carries no signature - arity
                                           and argument kinds are checked at
                                           the call site *)
+channelType = "channel" "of" type ;    (* a CSP channel. `channel` is a
+                                          CONTEXTUAL keyword - a type only in
+                                          this `channel of T` position; the `of`
+                                          disambiguates it from a struct name, so
+                                          `channel` stays an ordinary identifier
+                                          everywhere else *)
 listType    = "list" "of" type ;
 mapType     = "map" "of" type "to" type ;
 taskType    = "task" "of" type ;       (* `task of T` - handle to

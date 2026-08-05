@@ -16,6 +16,7 @@
 | user enum       | `Shape.Circle{r: 2.0}` (after `def enum Shape ...;`) | first variant, payload zeroed | One of a fixed set of variants (a sum type); consumed with `match`; see [Enums](#enums-sum-types)                       |
 | `task of T`     | *(no literal - produced by `spawn { ... }`)*         | *(cannot be defaulted; must be initialised)* | Handle to a concurrent computation; observed via the [`task`](../libraries/task.md) library. See [Concurrency](concurrency.md)     |
 | `func`          | a bare method name: `greet` (after `func greet() {...}`) | null function (calling it errors) | A first-class function value; call via `$f(args)`. See [Function values](#function-values)                            |
+| `channel of T`  | *(no literal - produced by `channel.make(capacity)`)* | *(must be initialised)* | A CSP channel between goroutines; a shared conduit that copies the values sent through it. See [`channel`](../libraries/channel.md) |
 
 The **Default** column is the value an uninitialized variable receives
 (`def x as int;` produces `0`). For compound types the default is an

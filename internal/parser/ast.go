@@ -50,9 +50,10 @@ const (
 	TypeBytes // mutable byte sequence; elements are int in [0, 255]
 	TypeList
 	TypeMap
-	TypeStruct // user-defined record; carries the struct's name in Type.StructName
-	TypeTask   // `task of T` - a pending or completed spawned computation
-	TypeFunc   // `func` - a first-class function value (an immutable handle to a top-level method)
+	TypeStruct  // user-defined record; carries the struct's name in Type.StructName
+	TypeTask    // `task of T` - a pending or completed spawned computation
+	TypeFunc    // `func` - a first-class function value (an immutable handle to a top-level method)
+	TypeChannel // `channel of T` - a CSP channel carrying values of type T between goroutines
 )
 
 func (k TypeKind) String() string {
@@ -79,6 +80,8 @@ func (k TypeKind) String() string {
 		return "task"
 	case TypeFunc:
 		return "func"
+	case TypeChannel:
+		return "channel"
 	default:
 		return "<invalid>"
 	}
@@ -139,6 +142,11 @@ func (t Type) String() string {
 			return "task of <?>"
 		}
 		return "task of " + t.Element.String()
+	case TypeChannel:
+		if t.Element == nil {
+			return "channel of <?>"
+		}
+		return "channel of " + t.Element.String()
 	}
 	return t.Kind.String()
 }
@@ -169,7 +177,7 @@ func (t Type) Equal(o Type) bool {
 		return t.KeyType.Equal(*o.KeyType) && t.ValType.Equal(*o.ValType)
 	case TypeStruct:
 		return t.StructName == o.StructName && t.StructNS == o.StructNS && t.ModPath == o.ModPath
-	case TypeTask:
+	case TypeTask, TypeChannel:
 		if (t.Element == nil) != (o.Element == nil) {
 			return false
 		}
@@ -189,6 +197,7 @@ func ListType(elem Type) Type       { return Type{Kind: TypeList, Element: &elem
 func MapType(k, v Type) Type        { return Type{Kind: TypeMap, KeyType: &k, ValType: &v} }
 func StructType(name string) Type   { return Type{Kind: TypeStruct, StructName: name} }
 func TaskType(elem Type) Type       { return Type{Kind: TypeTask, Element: &elem} }
+func ChannelType(elem Type) Type    { return Type{Kind: TypeChannel, Element: &elem} }
 
 // NamespacedStructType is a struct type registered by a
 // library and reachable behind that library's namespace prefix

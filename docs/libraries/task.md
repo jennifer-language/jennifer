@@ -28,6 +28,10 @@ io.printf("%d\n", $n);                      # 2
 | `task.discard($t)`              | `null`          | Mark `$t` fire-and-forget so the exit-time loud-fail skips it. Does not block.                 |
 | `task.waitAll($ts)`             | `list of T`     | Wait for every task in `$ts`; results in list order; re-raises the first error if any.         |
 | `task.waitAny($ts)`             | `int`           | Block until any task in `$ts` is done; return its index. Caller follows up with `task.wait`.   |
+| `task.cancel($t)`               | `null`          | Request cooperative cancellation of `$t` (see "Cancellation"). Does not block.                  |
+| `task.cancelled()`              | `bool`          | Non-raising poll: true if the **current** spawn body has been cancelled (always false on main). |
+| `task.waitTimeout($t, ms)`      | `T`             | Like `task.wait`, but throws a catchable "timed out" error if `$t` doesn't finish in `ms` (`ms` up to ~9.2e12; a larger value is a catchable error, not a silent instant timeout). |
+| `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable "timed out" error if none finishes in `ms`.         |
 
 `task.wait` is the workhorse - everything else is a convenience or
 a non-blocking variant. The full surface is intentionally small;
@@ -150,6 +154,76 @@ task.discard($candidates[1 - $winner]);     # release the loser
 
 `task.waitAny([])` is a positioned runtime error - there's nothing
 to wait on.
+
+## Cancellation
+
+`task.cancel($t)` requests **cooperative** cancellation: it sets a flag the
+spawned body observes at its next **loop checkpoint** (the start of any `while` /
+`for` / for-each / `repeat` iteration), where the runtime raises a **catchable
+"task cancelled"** error. That stops the loop - and the spawn - at a safe point.
+The tree-walker cannot preempt a goroutine, so a body makes progress toward a
+checkpoint by looping; a tight non-loop computation is instead bounded by the
+call-depth guard.
+
+This directly retires the exit-time hang: a non-terminating `spawn` that would
+otherwise block the program at exit can be cancelled and it stops.
+
+```jennifer
+def t as task of int init spawn {
+    def n as int init 0;
+    while (true) { $n = $n + 1; }
+    return $n;
+};
+task.cancel($t);
+task.discard($t);          # cancel + discard: stop and forget
+```
+
+**Clean partial results** use `try` / `catch`: catch the raised "task cancelled"
+inside the body and return what you have.
+
+```jennifer
+def t as task of int init spawn {
+    def n as int init 0;
+    try {
+        while (true) { $n = $n + 1; }
+    } catch (e) {
+        # cancelled - fall through with the partial count
+    }
+    return $n;
+};
+task.cancel($t);
+def partial as int init task.wait($t);   # a clean value, not an error
+```
+
+`task.cancelled()` is a **non-raising** poll of the current body's cancel flag -
+useful at an arbitrary point (e.g. before starting an expensive step). It does
+**not** suppress the loop-checkpoint raise, so inside a loop the raise still fires;
+the `try` / `catch` idiom above is the way to exit a loop cleanly.
+
+Notes:
+- `task.cancel` does **not** wait and does **not** mark the task observed. The
+  idiom to stop-and-forget is `task.cancel($t); task.discard($t);`. If you instead
+  `task.wait` a cancelled task whose body didn't catch the error, the "task
+  cancelled" error is re-raised at the wait site (catchable).
+- Cancelling an already-finished task is a harmless no-op.
+
+## Timeouts
+
+`task.waitTimeout($t, ms)` is `task.wait` bounded by a millisecond deadline: it
+returns the result (re-raising a body error, exactly like `wait`) if `$t`
+completes within `ms`, and otherwise throws a **catchable** "timed out" error.
+`task.waitAnyTimeout($ts, ms)` is the multi-task form, returning the first
+finisher's index or throwing on timeout. On a timeout the task(s) stay live and
+unobserved, so follow up with a retry, or `task.cancel` + `task.discard`.
+
+```jennifer
+try {
+    def v as int init task.waitTimeout($t, 500);   # up to 500 ms
+} catch (e) {
+    task.cancel($t);
+    task.discard($t);
+}
+```
 
 ## Errors
 

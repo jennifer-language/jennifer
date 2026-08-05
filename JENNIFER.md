@@ -75,7 +75,7 @@ an assistant usually guesses wrong:
 Primitive: `null`, `int`, `float`, `string`, `bool`, `bytes`.
 Compound: `list of T`, `map of K to V`, user `struct`s, user `enum`s (sum
 types), `task of T` (a handle to a `spawn`ed computation), `func` (a first-class
-function value).
+function value), `channel of T` (a CSP channel between goroutines).
 
 - **int** literals: `42`, `0xff`, `0o755`, `0b1010`, with `_` digit separators
   (`1_000_000`, `0xDEAD_BEEF`).
@@ -322,6 +322,24 @@ def result as int init task.wait($t);   # also poll / discard / waitAll / waitAn
 
 `spawn { ... }` runs concurrently and evaluates to a `task of T`. It deep-copies
 its enclosing scope at launch, so there are no shared-memory data races.
+
+**Cancellation + timeouts.** `task.cancel($t)` requests cooperative cancellation:
+the body observes it at its next loop checkpoint, where the runtime raises a
+catchable "task cancelled" (so a runaway `spawn` can be stopped - this retires the
+exit-time hang). Catch it inside the body for a clean partial result; `task.cancel
++ task.discard` is stop-and-forget. `task.cancelled()` is a non-raising poll.
+`task.waitTimeout($t, ms)` / `task.waitAnyTimeout($ts, ms)` are bounded waits that
+throw a catchable "timed out" error.
+
+**Channels.** `channel of T` streams values between goroutines (the counterpart to
+`task`'s single result). `channel.make(capacity)` (0 = unbuffered), `send`
+(deep-copies the value in - the receiver gets its own copy), `recv` (blocks; throws
+a catchable error on a closed+drained channel - drain with `try { while (true) {
+process(channel.recv($ch)); } } catch (e) { }`), `close`, `select([...])` (fan-in:
+next value from any open channel), `len` / `capacity`. A channel is a shared
+handle but the values through it are copied, so no-shared-mutable-state holds.
+`channel` is a contextual keyword (a type only in `channel of T`; a valid
+identifier elsewhere).
 
 ## Imports
 

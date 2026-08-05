@@ -278,7 +278,8 @@ func (p *parser) parseImport() (*ImportStmt, error) {
 	// `use task;` activates the task library. `task` is a type
 	// keyword so it doesn't land in the IDENT bucket; accept it here
 	// as a one-off so the library name matches the namespace prefix
-	// (`task.wait` at call sites).
+	// (`task.wait` at call sites). (`channel` is a contextual keyword,
+	// lexed as IDENT, so `use channel;` needs no special case.)
 	if t, ok := p.match(lexer.TOKEN_TASK); ok {
 		imp := &ImportStmt{pos: pos{File: use.File, Line: use.Line, Col: use.Col}, Name: "task"}
 		if _, ok := p.match(lexer.TOKEN_AS); ok {
@@ -1401,12 +1402,25 @@ func (p *parser) parseType() (Type, error) {
 		p.advance()
 		return PrimitiveType(TypeFunc), nil
 	case lexer.TOKEN_IDENT:
+		p.advance()
+		// `channel` is a **contextual** keyword: in type position, `channel of T`
+		// is the channel type, but everywhere else `channel` stays an ordinary
+		// identifier (so a field / param named `channel` keeps working). The `of`
+		// disambiguates from a struct named `channel` (a struct type takes no
+		// `of`). This is why `channel` is lexed as an IDENT, not reserved.
+		if t.Lexeme == "channel" && p.check(lexer.TOKEN_OF) {
+			p.advance() // of
+			elem, err := p.parseType()
+			if err != nil {
+				return Type{}, err
+			}
+			return ChannelType(elem), nil
+		}
 		// Struct type reference. Bare IDENT (`def x as Name;`) names a
 		// top-level user struct; `IDENT.IDENT` (`def x as os.Result;`)
 		// names a library-registered namespaced struct. Both
 		// resolve at run time against their respective hoisted tables,
 		// producing a positioned error if the name isn't known.
-		p.advance()
 		if p.check(lexer.TOKEN_DOT) && p.peekN(1).Type == lexer.TOKEN_IDENT {
 			p.advance() // .
 			name := p.advance()

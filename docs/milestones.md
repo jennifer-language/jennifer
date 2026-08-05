@@ -927,85 +927,98 @@ program arg). Both binaries honor it. Pinned by `main_test.go`; documented in
 `tooling.md` + `cli.md` + a `dotenv.md` cross-link. Graduated `DRAFT#26`.
 **Requires:** `M22.18`; no interpreter dependency.
 
-### M24.2 - first-class functions
+### M24.2 - first-class functions (compacted)
 
-**Done.** Closed the **single largest expressiveness gap**: a function
-cannot be held in a value, so every callback is string-name dispatch (`web` routes
-via `meta.callMain`, `testing.run(name)`, `meta.call`) and `lists` ships no `map` /
-`filter` / `reduce` because there is nothing to pass. A function value is
-**immutable, not a pointer** (holding one aliases nothing and can never become a
-write-through handle), so it does **not** touch the value-semantics stance; the
-syntax reuses the call-vs-name shape the parser already peeks for - a **bare method
-name** in expression position *is* the function value, a name followed by `(` is a
-call (the `&NAME` pointer sigil stays rejected).
-- **Tier 1 (this milestone) - function values without capture.** A new `Value`
-  kind `KindFunc` wrapping the immutable `*parser.MethodDef` (a copy shares the
-  pointer - nothing to deep-copy). `def f as func init greet;` binds one, and
-  `$f(args)` dispatches through the existing `CallMethodWith` with arity / kind
-  checked at the call site. Frame-pool-safe (no captured environment, so
-  implementation-note 14's invariant holds). Unlocks the higher-order layer -
-  `lists.map` / `filter` / `reduce` / `sort(by)` / `find` / `any` / `all`, typed
-  comparators, and function-valued callbacks that **replace** the stringly-typed
-  dispatch in `web` / `testing` / `meta`.
-- **Tier 2 (deferred, additive) - closures with by-value capture.** Anonymous
-  `func(x){...}` closing over their environment **by copy** (the `spawn` snapshot
-  re-pointed), so a closure carries its own detached copy - no aliased mutation
-  (capture-by-reference stays rejected) and it does not extend the pooled frame's
-  lifetime, so the `sync.Pool` frame recycling keeps working. Shipped only after
-  Tier 1.
-
-Cost (Tier 1): a `Value` kind + `MatchesDeclared` / `Copy` / `DeepCopy` cases
-(cheap - immutable, shares the pointer), the bare-name-as-value resolution, the
-`$var(args)` grammar, a `func` type keyword, the `evalCall` path, the higher-order
-library layer, and grammar / spec / docs. Graduated `DRAFT#18`. **Requires:** none
-hard; relates to a future bytecode VM (`DRAFT#17`) and the embedding API
-(`DRAFT#1`).
-
-**Shipped (Tier 1).** `KindFunc` Value (`Fn *parser.MethodDef`, immutable - copies
-share the pointer, `DeepCopy`'s default handles it) + `TypeFunc` (`func` keyword in
-`parseType`); a bare method name lands as a `ConstRefExpr` the interpreter turns
+**Done (Tier 1).** Closed the **single largest expressiveness gap**: a function
+can now be held in a value (type `func`), so callbacks stop being string-name
+dispatch and `lists` gets a higher-order layer. A function value is **immutable,
+not a pointer** (holding one aliases nothing mutable), so it does not touch the
+value-semantics stance; the syntax reuses the call-vs-name shape the parser
+already peeks for - a **bare method name** in expression position *is* the value,
+a name followed by `(` is a call (no `&NAME` sigil). New `KindFunc` Value
+(`Fn *parser.MethodDef`; `DeepCopy`'s default shares the immutable pointer;
+`bindParamValue` treats it as a no-copy scalar) + `TypeFunc` (the `func` keyword in
+`parseType`). A bare method name lands as a `ConstRefExpr` the interpreter turns
 into a function value (the resolver already deferred such names to runtime); a new
-`CallValueExpr` postfix-`(` node dispatches `$f(x)` / `$fns[0](x)` /
-`makeAdder(1)(2)` through the shared `callUserMethod` core extracted from
-`evalCall`, so arity / kind checks, value-semantics arg copies, and the call-depth
-guard are identical to a named call (recursion through a function value still trips
-the catchable guard). `BuiltinCtx.Invoke` is the callback bridge for the
-higher-order **`lists`** layer - `map` (generic result), `filter` / `find` / `any`
-/ `all` (bool callback), `reduce`, and `sortBy` (key extractor, decorate-sort-
-undecorate so the key runs O(n)). `fmt` hugs `(` after `$var` / `)` / `]` (all
+`CallValueExpr` postfix-`(` node calls through any function-valued expression
+(`$f(x)`, `$fns[0](x)`, `makeAdder(1)(2)`). The named-call dispatch stays **inline**
+in `evalCall` (the hot path - the helper is too large for Go to inline, so routing
+every call through it measurably slowed recursion); the byte-identical logic lives
+in a `callUserMethod` helper the dynamic path uses, kept in lock-step. Arity /
+kind checks, value-semantics arg copies, and the catchable call-depth guard are
+identical whether a call is static or through a value (recursion through a function
+value still trips the guard). `BuiltinCtx.Invoke` (backed by an unexported `interp`
+ref, threading the caller's depth counter) is the callback bridge for the
+higher-order **`lists`** layer: `map` (generic result, element-typed at the bind),
+`filter` / `find` / `any` / `all` (bool callback; `find` errors catchably on no
+match), `reduce`, `sortBy` (key extractor, decorate-sort-undecorate so the key runs
+O(n); guarded against an empty list). `fmt` hugs `(` after `$var` / `)` / `]` (all
 prior parse errors, so no existing program reflows). **Deferred:** Tier 2
-(closures) and migrating the existing string-name dispatch in `web` / `testing` /
-`meta` onto function values (a separate refactor - the *capability* is delivered).
-Pinned by `internal/interpreter/funcvalue_test.go`; `examples/functions.j` +
-golden; both toolchains.
+(anonymous closures with by-value capture) and migrating the existing string-name
+dispatch in `web` / `testing` / `meta` onto function values - a separate refactor;
+the *capability* is delivered. Graduated `DRAFT#18`. **Requires:** none hard;
+relates to a future bytecode VM (`DRAFT#17`) and the embedding API (`DRAFT#1`).
+Pinned by `internal/interpreter/funcvalue_test.go` (incl. the empty-list crash
+regression an audit surfaced); `examples/functions.j` + golden; both toolchains.
 
-### M24.3 - concurrency coordination: cancellation, timeouts, channels
+### M24.3 - concurrency coordination: cancellation, timeouts, channels (compacted)
 
-**Planned.** `spawn` / `task` is race-free by construction but offers no way to
-**cancel** a task, **bound** a wait, or **coordinate** producers / consumers - and
-an unobserved non-terminating `spawn` *hangs the program at exit* (a documented
-sharp edge). Two tiers.
-- **Tier 1 (this milestone) - cancellation + timeouts.** `task.cancel($t)` sets a
-  flag on the shared `TaskState` (already pointer-shared across handles); the
-  spawned body observes it **cooperatively** at the eval loop's existing safe
-  points (the `i.diagReq.Load()` diagnostic / signal-poll checkpoint shape, so it
-  is near-free and needs no preemption a tree-walker cannot do), reading
-  `task.cancelled()` or the runtime raising a catchable "cancelled".
-  `task.waitTimeout($t, ms)` + a timeout on `waitAny` give bounded waits (Go
-  `select` + `time.After`) and the escape hatch for the exit-time hang.
-  TinyGo-clean.
-- **Tier 2 (deferred) - channels.** A `channel of T` type + a `channel` library
-  (`make` / `send` / `recv` / `close`, integer-handle-into-a-registry over a Go
-  `chan Value`) where a **send copies the value in** (value-semantic, like the
-  spawn snapshot), so channels carry copies and the no-shared-mutable-state
-  guarantee holds - which is why channels, not mutexes / atomics, are the right
-  primitive (shared locks stay rejected). `select` generalizes today's
-  `task.waitAny` (which already uses `reflect.Select`, verified TinyGo-clean), as a
-  language construct or a `channel.select` form.
+**Done.** Gave `spawn` / `task` the coordination it lacked - cancel a task, bound
+a wait, and stream between goroutines - and retired the exit-time hang from an
+unobserved non-terminating `spawn`. Graduated `DRAFT#21`. **Requires:** none hard
+(builds on `spawn` / `task`).
 
-Graduated `DRAFT#21`. **Requires:** none hard (builds on the shipped `spawn` /
-`task`); Tier 1 is independent and small and directly retires the exit-hang
-footgun.
+**Cancellation + timeouts.** `TaskState.Cancelled` (atomic) + an
+`Environment.cancel *TaskState` set on the spawn snapshot root, reached by every
+frame via `env.root`. A shared `loopCheckpoint(env, node)` replaced the five
+per-loop `diagReq` polls (while / C-for / for-each / range-for / repeat): it
+services the SIGUSR1 diagnostic poll and, inside a cancelled spawn, raises a
+**catchable** "task cancelled" so the loop stops at a safe point - one atomic-nil
+check per iteration, nil (never fires) on the main goroutine, loop-only so the
+`evalCall` hot path is untouched. `task.cancel($t)`; `task.cancelled()` is a
+**non-raising** poll (threaded via `BuiltinCtx.Cancel *TaskState`);
+`task.waitTimeout` / `task.waitAnyTimeout` are throw-on-timeout bounded waits (a
+too-large `ms` that would overflow the ns `time.Duration` is a catchable error,
+not a silent instant timeout). A clean partial result uses `try` / `catch` inside
+the body. **Rejected** (racy): a `CancelAcked` "poll suppresses the auto-raise"
+scheme - a parent `task.cancel` can land before the body's first poll, so the
+top-of-loop checkpoint fires before any ack; the auto-raise-is-the-mechanism model
+is race-free instead.
+
+**Channels.** `channel of T` + the `channel` library (`internal/lib/channel`):
+`make(capacity)` / `send` / `recv` / `close` / `select` (fan-in) / `len` /
+`capacity`. A `KindChannel` Value shares a `*ChannelState` pointer (like `task`,
+not the spec's integer-registry - simpler, same sharing), so a copy (incl. the
+spawn snapshot's `DeepCopy`) refers to the one Go `chan Value` while **`send`
+deep-copies the value in** - conduit shared, data copied (no-shared-mutable-state
+holds) - and validates the value against the channel's `T` at the send site.
+`send`-on-closed / double-`close` are **catchable** errors, not Go panics
+(atomic-CAS `CloseOnce`; `recover` on the send/close race); `recv` on a
+closed+drained channel throws catchably (drain via `try` / `catch`). `select`
+returns the received **value** (not an index - a receive is destructive, no
+multiple-return), over the `reflect.Select` `task.waitAny` uses. `channel` is a
+**contextual keyword**: lexed as an IDENT, a type only in `channel of T` (the `of`
+disambiguates from a struct name). Reserving it broke `modules/amqp.j` (which uses
+`channel` as a field / param); the contextual form keeps every program valid *and*
+is simpler (`channel.send` / `use channel;` route through the IDENT paths). A
+blocked channel op is not at a loop checkpoint, so it is not cancellable and a
+channel with no counterpart **hangs** (Go's deadlock detector never fires - the
+SIGUSR1 goroutine stays live); close the channel to unblock.
+
+**Concurrency hardening** (post-audit). `channel.make` caps the buffer at
+`limits.MaxChannelCapacity` (1<<20 std / 1<<16 tiny) with a catchable error - a
+`chan Value` (272 B/slot) allocates eagerly, so an unbounded capacity was a
+multi-GB OOM below Go's recoverable `makechan` panic (same class as
+`MaxRangeElements`); a `recover` stays as backstop. `TaskState`/`ChannelState`
+`ElemTyp` became `atomic.Pointer[parser.Type]` stamped set-once via CompareAndSwap
+- a generic channel held in a `list` and bound by two spawns concurrently
+otherwise raced on the plain field (confirmed under `-race`).
+
+Pinned by `channel_test.go` (8 tests incl. value-semantics, concurrent-bind
+`-race` guard, capacity-ceiling + huge-capacity regressions, identifier-still-works)
++ `task_cancel_test.go` (8 tests incl. the ms-overflow guard);
+`examples/cancellation.j` / `channels.j` + goldens; both toolchains.
+**Deferred:** cancellable channel ops and index-returning `select`.
 
 ### M24.4 - `stats` library
 

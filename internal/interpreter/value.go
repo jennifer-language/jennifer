@@ -38,14 +38,15 @@ const (
 	KindFloat
 	KindString
 	KindBool
-	KindBytes  // mutable byte sequence; elements are int in [0, 255]
-	KindList   // ordered, mutable sequence (Go slice underneath)
-	KindMap    // ordered key-value map; iteration is insertion order
-	KindStruct // user-defined record; fields are an ordered list of (name, value)
-	KindTask   // a pending or completed `spawn { ... }` computation
-	KindObject // opaque, library-owned value (e.g. json.Value); wraps an inner tree in Obj
-	KindEnum   // sum-type value: one variant of a `def enum`; StructName is the enum type, Variant the active variant, Fields its payload
-	KindFunc   // first-class function value: an immutable handle to a top-level method (Fn); copies share the pointer
+	KindBytes   // mutable byte sequence; elements are int in [0, 255]
+	KindList    // ordered, mutable sequence (Go slice underneath)
+	KindMap     // ordered key-value map; iteration is insertion order
+	KindStruct  // user-defined record; fields are an ordered list of (name, value)
+	KindTask    // a pending or completed `spawn { ... }` computation
+	KindObject  // opaque, library-owned value (e.g. json.Value); wraps an inner tree in Obj
+	KindEnum    // sum-type value: one variant of a `def enum`; StructName is the enum type, Variant the active variant, Fields its payload
+	KindFunc    // first-class function value: an immutable handle to a top-level method (Fn); copies share the pointer
+	KindChannel // a `channel of T`: a shared CSP channel handle (Chan); copies share the pointer, values sent through it are copied
 )
 
 func (k ValueKind) String() string {
@@ -76,6 +77,8 @@ func (k ValueKind) String() string {
 		return "enum"
 	case KindFunc:
 		return "func"
+	case KindChannel:
+		return "channel"
 	}
 	return "?"
 }
@@ -121,7 +124,53 @@ type TaskState struct {
 	Err      error         // any error thrown / surfaced by the body
 	Done     chan struct{} // closed by the spawned goroutine after Result / Err are written
 	Observed atomic.Bool   // flipped by task.wait (success or rethrow) and task.discard from whatever goroutine runs them (incl. spawn bodies); the exit-time registry scan reads it, so it must be atomic. Set: Done && Err != nil && !Observed.Load() reports.
-	ElemTyp  *parser.Type  // the task's declared element type T (in `task of T`); used by Value.MatchesDeclared
+	// Cancelled is set by task.cancel from any goroutine; the spawned body observes
+	// it at its next loop checkpoint (via env.root.cancel), where the runtime
+	// raises a catchable "task cancelled" so the loop - and the spawn - stops at a
+	// safe point. A body catches that error to exit cleanly with a partial result;
+	// task.cancelled() also exposes the flag as a non-raising poll. Atomic: written
+	// by the canceller, read by the spawn body.
+	Cancelled atomic.Bool
+	// ElemTyp is the task's declared element type T (in `task of T`), used by
+	// Value.MatchesDeclared. It is stamped set-once (CAS) at the first typed
+	// binding and read from any goroutine, so it is an atomic pointer: a generic
+	// task shared into two spawns that bind it concurrently would otherwise race
+	// on a plain field.
+	ElemTyp atomic.Pointer[parser.Type]
+}
+
+// ChannelState is the payload of a Value of kind KindChannel: a CSP channel
+// carrying copies of values between goroutines. The pointer is shared by every
+// Value referring to the same channel - copying a `channel of T` Value copies the
+// pointer, not the underlying channel - so a spawn body and its parent operate on
+// the one channel. The VALUES sent through it are deep-copied at the send site, so
+// the no-shared-mutable-state guarantee holds: sharing the conduit never aliases
+// the data. This is the same handle-sharing carve-out to value semantics that
+// `task` (and fs / net) use.
+type ChannelState struct {
+	Ch       chan Value  // the underlying Go channel of copied values
+	Capacity int         // the buffer capacity (0 = unbuffered / synchronous)
+	closed   atomic.Bool // set once by channel.close via CompareAndSwap; guards against double-close and send-on-closed
+	// ElemTyp is the channel's declared element type T (in `channel of T`), used
+	// by Value.MatchesDeclared and channel.send's type check. Stamped set-once
+	// (CAS) at the first typed binding and read from any goroutine, so it is an
+	// atomic pointer: a generic channel (e.g. one held in a list) bound by two
+	// spawns concurrently would otherwise race on a plain field.
+	ElemTyp atomic.Pointer[parser.Type]
+}
+
+// IsClosed reports whether the channel has been closed.
+func (c *ChannelState) IsClosed() bool { return c != nil && c.closed.Load() }
+
+// CloseOnce closes the channel exactly once, reporting whether this call did the
+// close (false = it was already closed). Used by channel.close to make a
+// double-close a catchable error instead of a Go panic.
+func (c *ChannelState) CloseOnce() bool {
+	if c == nil || !c.closed.CompareAndSwap(false, true) {
+		return false
+	}
+	close(c.Ch)
+	return true
 }
 
 // IsDone reports whether the spawned body has finished (Result / Err
@@ -174,6 +223,7 @@ type Value struct {
 	Task       *TaskState        // KindTask: shared handle - copying a task copies the pointer
 	Obj        *Value            // KindObject: wrapped opaque payload (e.g. json.Value's decoded tree); StructNS/StructName carry the owning type
 	Fn         *parser.MethodDef // KindFunc: the referenced top-level method (immutable); a copy shares this pointer, nil is the uninitialized zero
+	Chan       *ChannelState     // KindChannel: shared channel handle - copying a channel copies the pointer (values sent through it are copied)
 
 	// mapIdx is an unexported acceleration cache for KindMap: encoded scalar
 	// key -> position in Map. It turns the O(n) linear scan in indexInto /
@@ -414,8 +464,16 @@ func ListVal(elemT parser.Type, data []Value) Value {
 // the same underlying task (see TaskState).
 func TaskVal(elemT parser.Type, state *TaskState) Value {
 	t := elemT
-	state.ElemTyp = &t
+	state.ElemTyp.Store(&t)
 	return Value{Kind: KindTask, Task: state}
+}
+
+// ChannelVal wraps a ChannelState in a Value of kind KindChannel. The state
+// pointer is shared, so copies of this Value refer to the same channel (values
+// sent through it are copied). The element type is recorded onto the shared state
+// by stampDeclaredType at the first typed binding, like a task.
+func ChannelVal(state *ChannelState) Value {
+	return Value{Kind: KindChannel, Chan: state}
 }
 
 // MapVal constructs a map value with the given key + value types and
@@ -471,6 +529,14 @@ func (v Value) DeepCopy() Value {
 		// waiters see the same result and the observed bit is global to
 		// the handle.
 		return Value{Kind: KindTask, Task: v.Task}
+	case KindChannel:
+		// channels are a shared-handle carve-out to value semantics, like tasks:
+		// a copy (including the spawn snapshot's deep copy) shares the same
+		// ChannelState pointer, so a spawn body and its parent operate on the one
+		// channel. The no-shared-mutable-state guarantee is preserved by copying
+		// the VALUES that pass through the channel (at the send site), not the
+		// channel itself.
+		return Value{Kind: KindChannel, Chan: v.Chan}
 	case KindStruct:
 		// deep copy fields so a struct passed into a method or
 		// returned from it can't surprise its caller.
@@ -689,6 +755,16 @@ func (v Value) Display() string {
 			return "<func null>"
 		}
 		return "<func " + v.Fn.Name + ">"
+	case KindChannel:
+		// A channel is an opaque handle; label it open / closed rather than
+		// exposing the buffered contents.
+		if v.Chan == nil {
+			return "channel<?>"
+		}
+		if v.Chan.IsClosed() {
+			return "channel<closed>"
+		}
+		return "channel<open>"
 	}
 	return "<unknown>"
 }
@@ -778,10 +854,30 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 		if v.Kind != KindTask {
 			return false
 		}
-		if t.Element == nil || v.Task == nil || v.Task.ElemTyp == nil {
+		var et *parser.Type
+		if v.Task != nil {
+			et = v.Task.ElemTyp.Load()
+		}
+		if t.Element == nil || et == nil {
 			return true
 		}
-		return t.Element.Equal(*v.Task.ElemTyp)
+		return t.Element.Equal(*et)
+	case parser.TypeChannel:
+		// `channel of T` matches a KindChannel whose recorded element type equals
+		// T. A channel without a recorded element type (a fresh channel.make result
+		// before its first typed binding) is compatible with any channel type, so
+		// the binding stamps T via stampDeclaredType.
+		if v.Kind != KindChannel {
+			return false
+		}
+		var et *parser.Type
+		if v.Chan != nil {
+			et = v.Chan.ElemTyp.Load()
+		}
+		if t.Element == nil || et == nil {
+			return true
+		}
+		return t.Element.Equal(*et)
 	case parser.TypeFunc:
 		// Any function value matches the untyped `func` slot; the parameter /
 		// return signature is checked at the call site (like a named method call),

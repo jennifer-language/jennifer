@@ -127,10 +127,13 @@ ExprStmt     <- Expr ";"
 # distinct tokens, so this choice never backtracks; StructType last catches
 # the bare / namespaced IDENT forms.
 
-Type         <- ListType / MapType / TaskType / FuncType / PrimType / StructType
+Type         <- ListType / MapType / TaskType / ChannelType / FuncType / PrimType / StructType
 ListType     <- "list" "of" Type
 MapType      <- "map" "of" Type "to" Type
 TaskType     <- "task" "of" Type
+ChannelType  <- "channel" "of" Type   # contextual keyword: `channel` is a type
+                                      # only here (in `channel of T`); elsewhere it
+                                      # is an ordinary identifier
 FuncType     <- "func"                # first-class function value (no signature)
 PrimType     <- "int" / "float" / "string" / "bool" / "null" / "bytes"
 StructType   <- IDENT ("." IDENT)?

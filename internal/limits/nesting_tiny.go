@@ -35,3 +35,10 @@ const MaxCallDepth = 48
 // larger spans should use the lazy `for (def i in 0..n)` form, which allocates
 // nothing. See the std-build note for the full rationale.
 const MaxRangeElements = 1 << 20
+
+// MaxChannelCapacity caps a single channel.make buffer on jennifer-tiny, whose
+// heap is far smaller than the default binary's, so the ceiling is lower: 1<<16
+// elements of a ~272-byte Value is ~17 MiB, generous for a constrained target yet
+// well below an allocation that would exhaust it. A larger capacity is a catchable
+// error. See the std-build note for the full rationale.
+const MaxChannelCapacity = 1 << 16

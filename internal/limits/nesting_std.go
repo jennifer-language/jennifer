@@ -44,3 +44,14 @@ const MaxCallDepth = 10000
 // materialised range yet well below the allocation cliff; a larger span should
 // iterate lazily.
 const MaxRangeElements = 1 << 24
+
+// MaxChannelCapacity caps the buffer a single channel.make can allocate, in the
+// same spirit as MaxRangeElements: a buffered `chan Value` (Value is ~272 bytes)
+// allocates its whole buffer eagerly, so an unbounded capacity gives program-
+// (or attacker-)controlled input a fresh multi-gigabyte single-allocation path -
+// which, below Go's makechan "size out of range" panic, is a real commit that
+// OOM-kills the process (a fatal, unrecoverable failure the makeFn recover cannot
+// catch). At 1<<20 elements a buffer is ~285 MiB on the default binary - far past
+// any real channel use, yet well below the multi-GB allocation cliff. A larger
+// capacity is a catchable error.
+const MaxChannelCapacity = 1 << 20

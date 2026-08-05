@@ -22,6 +22,12 @@ flat lookup view, not authoritative.
 | [`binary`](binary.md)`.slice(b, start [, end])`      | Half-open byte range `[start, end)`; `end` defaults to `len(b)`. Out-of-range / `start>end` errors.                                |
 | [`binary`](binary.md)`.split(b, sep)`                | Split `bytes` on a non-empty `sep` -> `list of bytes` (e.g. a MIME body on its boundary, one Go pass).                             |
 | [`binary`](binary.md)`.startsWith(b, prefix)`        | True iff `bytes` `b` begins with `prefix`.                                                                                         |
+| [`channel`](channel.md)`.make(capacity)`             | New `channel of T`; capacity 0 = unbuffered, n = buffered. Type from the binding.                                                   |
+| [`channel`](channel.md)`.send(ch, value)`            | Deep-copy `value` in and send (blocks per capacity); send on a closed channel is a catchable error.                                 |
+| [`channel`](channel.md)`.recv(ch)`                   | Block and return the next value; throws (catchable) on a closed and drained channel.                                                |
+| [`channel`](channel.md)`.close(ch)`                  | Close the channel; double-close is a catchable error. Buffered values still drain.                                                  |
+| [`channel`](channel.md)`.select(chs)`                | Fan-in: next value from any open channel; throws when all are closed and drained.                                                   |
+| [`channel`](channel.md)`.len(ch)` / `.capacity(ch)`  | Buffered value count / buffer capacity.                                                                                             |
 | [`compress`](compress.md)`.discard(stream)`          | Drop a streaming compressor without returning output; releases its state.                                                          |
 | [`compress`](compress.md)`.finalize(stream)`         | Close a streaming compressor; returns all compressed `bytes`.                                                                      |
 | [`compress`](compress.md)`.pack(b, algo [, level])`  | Compress `bytes`; `algo` `"gzip"`/`"zlib"`/`"deflate"`, optional level `"fast"`/`"default"`/`"best"`.                                |
@@ -270,11 +276,15 @@ flat lookup view, not authoritative.
 | [`strings`](strings.md)`.trimLeft(s)`                 | Strip leading whitespace.                                                                                                           |
 | [`strings`](strings.md)`.trimRight(s)`                | Strip trailing whitespace.                                                                                                          |
 | [`strings`](strings.md)`.upper(s)`                    | Uppercase `s` (Unicode-aware).                                                                                                      |
+| [`task`](task.md)`.cancel($t)`                        | Request cooperative cancellation of `$t`; the body stops at its next loop checkpoint. Non-blocking.                                 |
+| [`task`](task.md)`.cancelled()`                       | Non-raising poll: true if the current spawn body has been cancelled (false on main).                                                |
 | [`task`](task.md)`.discard($t)`                       | Mark a `task of T` fire-and-forget; suppresses exit-time loud-fail. Returns null.                                                   |
 | [`task`](task.md)`.poll($t)`                          | True if `$t` has finished (non-blocking).                                                                                           |
 | [`task`](task.md)`.wait($t)`                          | Block until `$t` finishes; return its value or re-raise its error.                                                                  |
 | [`task`](task.md)`.waitAll($ts)`                      | Block for all tasks in `$ts`; results in list order; re-raises the first error if any.                                              |
 | [`task`](task.md)`.waitAny($ts)`                      | Block until any task in `$ts` is done; return its index.                                                                            |
+| [`task`](task.md)`.waitAnyTimeout($ts, ms)`           | Like `waitAny`, but throws a catchable "timed out" error if none finishes within `ms`.                                              |
+| [`task`](task.md)`.waitTimeout($t, ms)`               | Like `wait`, but throws a catchable "timed out" error if `$t` doesn't finish within `ms`.                                           |
 | [`time`](time.md)`.add($t, $d)`                       | `time.Time` shifted by duration `$d`.                                                                                               |
 | [`time`](time.md)`.after($a, $b)`                     | True if `$a` is strictly later than `$b`.                                                                                           |
 | [`time`](time.md)`.before($a, $b)`                    | True if `$a` is strictly earlier than `$b`.                                                                                         |

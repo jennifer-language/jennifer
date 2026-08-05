@@ -74,6 +74,7 @@ func releaseBlockEnv(e *Environment) {
 	e.root = nil
 	e.depth = nil
 	e.profChild = 0
+	e.cancel = nil
 	e.slots = e.slots[:0]
 	// Drop any deferred calls so a pooled frame never carries a stale one into
 	// its next use. finishFrame runs them before release, so this is normally
@@ -153,6 +154,24 @@ type Environment struct {
 	// (see execDefer / finishFrame). nil for the overwhelming majority of
 	// frames (no defer), so the frame-exit check is a cheap len == 0 test.
 	deferred []deferredCall
+	// cancel points at the running spawn task's state (for its Cancelled flag), and
+	// is set (non-nil) only on a spawn snapshot's root frame - every frame in that
+	// goroutine reaches it via env.root, so a loop checkpoint reads env.root.cancel
+	// to observe cooperative cancellation. nil on the main goroutine's root
+	// (i.global) and on pooled block frames (they read through env.root, never
+	// carry their own).
+	cancel *TaskState
+}
+
+// rootCancel returns this frame's goroutine-local task state (the running spawn's
+// Cancelled flag), or nil when the frame is not inside a cancellable spawn. Read
+// at loop checkpoints and threaded into BuiltinCtx so task.cancelled() can poll
+// it.
+func (e *Environment) rootCancel() *TaskState {
+	if e == nil || e.root == nil {
+		return nil
+	}
+	return e.root.cancel
 }
 
 // rootFor computes the root marker for a fresh Environment. When

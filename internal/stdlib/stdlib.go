@@ -15,6 +15,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/archive"
 	binarylib "jennifer-lang.dev/jennifer/internal/lib/binary"
+	channellib "jennifer-lang.dev/jennifer/internal/lib/channel"
 	"jennifer-lang.dev/jennifer/internal/lib/compress"
 	"jennifer-lang.dev/jennifer/internal/lib/convert"
 	"jennifer-lang.dev/jennifer/internal/lib/crc"
@@ -78,6 +79,7 @@ func InstallAll(in *interpreter.Interpreter) {
 	yamllib.Install(in)
 	intllib.Install(in)
 	tasklib.Install(in)
+	channellib.Install(in)
 	fslib.Install(in)
 	netlib.Install(in)
 	httpdlib.Install(in)

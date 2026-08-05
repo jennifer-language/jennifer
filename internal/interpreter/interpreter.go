@@ -49,6 +49,12 @@ type BuiltinCtx struct {
 	// function-value argument without every library importing the dispatch core.
 	// Unexported: libraries receive a BuiltinCtx, they never construct one.
 	interp *Interpreter
+	// Cancel is the caller goroutine's running task state (env.root.cancel):
+	// non-nil inside a spawn body, nil on the main goroutine. task.cancelled()
+	// reads its Cancelled flag as a non-raising poll, so a spawn body can check for
+	// cooperative cancellation at an arbitrary point (the loop-checkpoint raise
+	// stays the mechanism for stopping a loop).
+	Cancel *TaskState
 }
 
 // Invoke calls a first-class function value with args, threading the caller's
@@ -1732,16 +1738,28 @@ func stampDeclaredType(v Value, declType parser.Type) Value {
 			}
 		}
 	case parser.TypeTask:
-		// stamp the declared element type onto the task's
-		// shared state if it doesn't already have one. The shared
-		// pointer means every Value referring to the same task sees
-		// the same element type from now on.
+		// Stamp the declared element type onto the task's shared state if it
+		// doesn't already have one. The shared pointer means every Value referring
+		// to the same task sees the same element type from now on. CompareAndSwap
+		// makes the first-stamp set-once and race-free: a generic task bound by two
+		// spawns concurrently deterministically keeps the first binder's type.
 		if v.Kind != KindTask || v.Task == nil {
 			return v
 		}
-		if v.Task.ElemTyp == nil && declType.Element != nil {
+		if declType.Element != nil {
 			et := *declType.Element
-			v.Task.ElemTyp = &et
+			v.Task.ElemTyp.CompareAndSwap(nil, &et)
+		}
+	case parser.TypeChannel:
+		// Mirror the task arm: stamp the channel's element type onto its shared
+		// state (set-once via CompareAndSwap) so every Value referring to the same
+		// channel agrees on T without racing on the stamp.
+		if v.Kind != KindChannel || v.Chan == nil {
+			return v
+		}
+		if declType.Element != nil {
+			et := *declType.Element
+			v.Chan.ElemTyp.CompareAndSwap(nil, &et)
 		}
 	}
 	return v
@@ -2481,8 +2499,8 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 	}
 
 	emit := func(iter Value) (blockResult, error) {
-		if i.diagReq.Load() {
-			i.dumpDiagnostics(st)
+		if err := i.loopCheckpoint(env, st); err != nil {
+			return blockResult{}, err
 		}
 		// Each iteration opens its own scope so the binding is fresh. The
 		// iterator and the body's defs share this one frame (matching the
@@ -2705,8 +2723,8 @@ func (i *Interpreter) runPatternArm(arm *parser.MatchArm, bind string, subject V
 
 func (i *Interpreter) execWhile(st *parser.WhileStmt, env *Environment) (blockResult, error) {
 	for {
-		if i.diagReq.Load() {
-			i.dumpDiagnostics(st)
+		if err := i.loopCheckpoint(env, st); err != nil {
+			return blockResult{}, err
 		}
 		cond, err := i.evalBool(st.Cond, env, "`while` condition")
 		if err != nil {
@@ -2744,8 +2762,8 @@ func (i *Interpreter) execFor(st *parser.ForStmt, env *Environment) (blockResult
 		}
 	}
 	for {
-		if i.diagReq.Load() {
-			i.dumpDiagnostics(st)
+		if err := i.loopCheckpoint(env, st); err != nil {
+			return blockResult{}, err
 		}
 		if st.Cond != nil {
 			cond, err := i.evalBool(st.Cond, forEnv, "`for` condition")
@@ -2783,8 +2801,8 @@ func (i *Interpreter) execFor(st *parser.ForStmt, env *Environment) (blockResult
 // !cond`). Same break/continue handling as the other loops.
 func (i *Interpreter) execRepeat(st *parser.RepeatStmt, env *Environment) (blockResult, error) {
 	for {
-		if i.diagReq.Load() {
-			i.dumpDiagnostics(st)
+		if err := i.loopCheckpoint(env, st); err != nil {
+			return blockResult{}, err
 		}
 		res, err := i.execBlock(st.Body, env)
 		if err != nil {
@@ -3796,8 +3814,8 @@ func (i *Interpreter) execForEachRange(st *parser.ForEachStmt, rng *parser.Range
 	}
 	iterType := parser.PrimitiveType(parser.TypeInt)
 	for n := lo; n < hi; n++ {
-		if i.diagReq.Load() {
-			i.dumpDiagnostics(st)
+		if err := i.loopCheckpoint(env, st); err != nil {
+			return blockResult{}, err
 		}
 		iterEnv := borrowBlockEnv(env, st.Body.NumSlots)
 		if err := iterEnv.DefineAt(st.IterSlot, st.VarName, IntVal(n), iterType, false); err != nil {
@@ -4379,6 +4397,14 @@ func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, 
 	state := &TaskState{Done: make(chan struct{})}
 	i.registerTask(state)
 
+	// Point the spawn root's cancel flag at this task's Cancelled bit. Every
+	// frame in the spawned goroutine reaches it via env.root, so a loop
+	// checkpoint (loopCheckpoint) observes task.cancel cooperatively. spawnEnv is
+	// the locals snapshot; its root is the globals snapshot both frames share.
+	if spawnEnv.root != nil {
+		spawnEnv.root.cancel = state
+	}
+
 	go i.runSpawn(state, ex, spawnEnv)
 	return wrapTask(state), nil
 }
@@ -4457,6 +4483,32 @@ func (i *Interpreter) RequestDiagnostics() { i.diagReq.Store(true) }
 //	goroutines: 6
 //	memory:     heap 12.4 MiB (sys 68.0 MiB), 14 GCs
 //	======================================
+//
+// loopCheckpoint is the per-iteration cooperative checkpoint shared by every
+// loop kind (while / C-for / for-each / range-for / repeat). It services a
+// pending diagnostics request (SIGUSR1) and observes task cancellation: inside a
+// spawn body whose task has been cancelled it returns a catchable "task
+// cancelled" runtime error so the loop - and the spawn - stops at this safe
+// point. On the main goroutine env.root.cancel is nil, so this is one atomic-nil
+// check per iteration and never fires. Placing the check only at loop
+// checkpoints (not evalCall) keeps the call hot path untouched, matching where
+// the diagnostics poll already lives; a non-terminating recursion with no loop is
+// still bounded by the call-depth guard.
+func (i *Interpreter) loopCheckpoint(env *Environment, node positioned) error {
+	if i.diagReq.Load() {
+		i.dumpDiagnostics(node)
+	}
+	// Inside a cancelled spawn body, raise a catchable "task cancelled" so the loop
+	// stops at this safe point. The body catches it to exit cleanly with a partial
+	// result; uncaught, it becomes the task's error (surfaced by task.wait). On the
+	// main goroutine env.rootCancel() is nil, so this never fires.
+	if ts := env.rootCancel(); ts != nil && ts.Cancelled.Load() {
+		file, line, col := posOf(node)
+		return &runtimeError{Msg: "task cancelled", File: file, Line: line, Col: col}
+	}
+	return nil
+}
+
 func (i *Interpreter) dumpDiagnostics(node positioned) {
 	i.diagReq.Store(false)
 	w := i.Err
@@ -4832,7 +4884,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			args = append(args, v)
 		}
 		pf, pl, pc := posFor(c)
-		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i}
+		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel()}
 		v, err := b.Fn(ctx, args)
 		if err != nil {
 			return Value{}, builtinError(err, pf, pl, pc)
@@ -4936,7 +4988,7 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 		args = append(args, v)
 	}
 	pf, pl, pc := posFor(c)
-	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i}
+	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel()}
 	v, err := fn(ctx, args)
 	if err != nil {
 		return Value{}, builtinError(err, pf, pl, pc)

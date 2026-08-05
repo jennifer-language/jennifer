@@ -38,9 +38,27 @@ Reading the result is a separate, explicit step:
 | Fire and forget                   | `task.discard($t)`                 |
 | Wait for a list of tasks          | `task.waitAll($ts)`                |
 | First-to-finish from a list       | `task.waitAny($ts)`                |
+| Stop a task                       | `task.cancel($t)` + `task.discard($t)` |
+| Wait with a deadline              | `task.waitTimeout($t, ms)`         |
 
 See the [`task`](../libraries/task.md) library reference for the
 full surface and worked examples per builtin.
+
+**Cancellation is cooperative.** `task.cancel($t)` sets a flag the spawned body
+observes at its next loop checkpoint, where the runtime raises a catchable "task
+cancelled" - so a runaway `spawn` can be stopped (retiring the exit-time hang
+below), and a body that catches it inside a `try` / `catch` exits cleanly with a
+partial result. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
+a catchable "timed out" error. Full detail in the
+[`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
+
+**Channels stream values.** Where a `task` observes one result, a
+[`channel of T`](../libraries/channel.md) carries many values between goroutines:
+`channel.make(capacity)`, `channel.send` (which copies the value in, so the
+receiver gets its own copy), `channel.recv`, `channel.close`, and a fan-in
+`channel.select`. A channel is a shared conduit, but the data through it is copied,
+so the value-semantics guarantee below still holds. Producer / consumer, worker
+pools, and pipelines are the usual shapes.
 
 ## Why value-semantics capture matters
 

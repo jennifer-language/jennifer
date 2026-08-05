@@ -1,0 +1,3 @@
+producer/consumer sum = 100
+sent copy = [1, 2, 3] (sender mutated to [999, 2, 3])
+fan-in select total = 300

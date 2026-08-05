@@ -1,0 +1,3 @@
+cancelled a runaway spawn
+clean partial count computed: true
+waitTimeout got 42

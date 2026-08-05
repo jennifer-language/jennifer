@@ -18,7 +18,9 @@ package tasklib
 
 import (
 	"fmt"
+	"math"
 	"reflect"
+	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -27,13 +29,39 @@ import (
 // LibraryName is the namespace prefix and `use` name.
 const LibraryName = "task"
 
-// Install registers the five task builtins.
+// Install registers the task builtins.
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "wait", makeWait(in))
 	in.RegisterNamespaced(LibraryName, "poll", pollFn)
 	in.RegisterNamespaced(LibraryName, "discard", makeDiscard(in))
 	in.RegisterNamespaced(LibraryName, "waitAll", makeWaitAll(in))
 	in.RegisterNamespaced(LibraryName, "waitAny", waitAnyFn)
+	// Cooperative cancellation + bounded waits.
+	in.RegisterNamespaced(LibraryName, "cancel", cancelFn)
+	in.RegisterNamespaced(LibraryName, "cancelled", cancelledFn)
+	in.RegisterNamespaced(LibraryName, "waitTimeout", makeWaitTimeout(in))
+	in.RegisterNamespaced(LibraryName, "waitAnyTimeout", waitAnyTimeoutFn)
+}
+
+// maxTimeoutMillis is the largest ms value that fits in a time.Duration (int64
+// nanoseconds) without overflow. A larger value would wrap `ms * 1e6` negative
+// and make time.NewTimer fire immediately - a huge "wait forever" silently
+// becoming an instant timeout.
+const maxTimeoutMillis = int64(math.MaxInt64) / int64(time.Millisecond)
+
+// requireMillis reads a non-negative millisecond duration argument, rejecting a
+// value so large it would overflow the nanosecond time.Duration.
+func requireMillis(fnName string, v interpreter.Value) (time.Duration, error) {
+	if v.Kind != interpreter.KindInt {
+		return 0, fmt.Errorf("%s: timeout (ms) must be int, got %s", fnName, v.Kind)
+	}
+	if v.Int < 0 {
+		return 0, fmt.Errorf("%s: timeout (ms) must be >= 0, got %d", fnName, v.Int)
+	}
+	if v.Int > maxTimeoutMillis {
+		return 0, fmt.Errorf("%s: timeout (ms) %d is too large (max %d)", fnName, v.Int, maxTimeoutMillis)
+	}
+	return time.Duration(v.Int) * time.Millisecond, nil
 }
 
 // extractTask pulls the *TaskState out of a KindTask Value. Errors
@@ -193,5 +221,107 @@ func waitAnyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.Done)}
 	}
 	chosen, _, _ := reflect.Select(cases)
+	return interpreter.IntVal(int64(chosen)), nil
+}
+
+// cancelFn requests cooperative cancellation of a task: it sets the shared
+// Cancelled flag, which the spawned body observes at its next loop checkpoint
+// (raising a catchable "task cancelled") or by calling task.cancelled(). It does
+// not wait, and does not mark the task observed - the idiom to stop and forget is
+// `task.cancel($t); task.discard($t);`. Cancelling an already-finished task is a
+// harmless no-op.
+func cancelFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("task.cancel expects 1 argument (task), got %d", len(args))
+	}
+	state, err := extractTask("task.cancel", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	state.Cancelled.Store(true)
+	return interpreter.Null(), nil
+}
+
+// cancelledFn reports whether the CURRENT spawn body has been cancelled, as a
+// NON-raising poll: a body can check it at an arbitrary (e.g. non-loop) point and
+// bail before starting expensive work. It does not suppress the loop-checkpoint
+// auto-raise - inside a loop the runtime still raises "task cancelled" at the next
+// iteration, so the clean-partial-result idiom is `try { loop } catch (e) { ... }`.
+// Called on the main goroutine (never a spawn body) it is always false.
+func cancelledFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 0 {
+		return interpreter.Null(), fmt.Errorf("task.cancelled expects 0 arguments, got %d", len(args))
+	}
+	if ctx.Cancel == nil {
+		return interpreter.BoolVal(false), nil
+	}
+	return interpreter.BoolVal(ctx.Cancel.Cancelled.Load()), nil
+}
+
+// makeWaitTimeout is task.wait bounded by a millisecond deadline: it returns the
+// task's result if it completes within the timeout (re-raising a body error, and
+// marking observed, exactly like task.wait), and otherwise throws a catchable
+// "timed out" error. On timeout the task stays live and unobserved - the caller
+// can retry, cancel + discard, or wait again.
+func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
+	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		if len(args) != 2 {
+			return interpreter.Null(), fmt.Errorf("task.waitTimeout expects 2 arguments (task, ms), got %d", len(args))
+		}
+		state, err := extractTask("task.waitTimeout", args[0])
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		d, err := requireMillis("task.waitTimeout", args[1])
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-state.Done:
+			in.MarkObserved(state)
+			if state.Err != nil {
+				return interpreter.Null(), state.Err
+			}
+			return state.Result, nil
+		case <-timer.C:
+			return interpreter.Null(), fmt.Errorf("task.waitTimeout: timed out after %d ms", args[1].Int)
+		}
+	}
+}
+
+// waitAnyTimeoutFn is task.waitAny bounded by a millisecond deadline: it returns
+// the zero-based index of the first task to complete within the timeout, or
+// throws a catchable "timed out" error. Like task.waitAny it does not mark any
+// task observed (the caller observes the returned index).
+func waitAnyTimeoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("task.waitAnyTimeout expects 2 arguments (list of task, ms), got %d", len(args))
+	}
+	states, _, err := extractTaskList("task.waitAnyTimeout", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if len(states) == 0 {
+		return interpreter.Null(), fmt.Errorf("task.waitAnyTimeout: list is empty (no tasks to wait on)")
+	}
+	d, err := requireMillis("task.waitAnyTimeout", args[1])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	// reflect.Select over each task's Done channel plus one timeout case. The
+	// timeout occupies the last index; any lower index is a completed task.
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	cases := make([]reflect.SelectCase, len(states)+1)
+	for i, s := range states {
+		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.Done)}
+	}
+	cases[len(states)] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(timer.C)}
+	chosen, _, _ := reflect.Select(cases)
+	if chosen == len(states) {
+		return interpreter.Null(), fmt.Errorf("task.waitAnyTimeout: timed out after %d ms", args[1].Int)
+	}
 	return interpreter.IntVal(int64(chosen)), nil
 }
