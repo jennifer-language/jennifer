@@ -151,6 +151,15 @@ flat lookup view, not authoritative.
 | [`kv`](kv.md)`.touch(store, key, ttl)`                | Re-arm the expiry; whether it existed (`bool`).                                                                                     |
 | [`kv`](kv.md)`.incr(store, key, delta)`               | Add signed `delta` to the numeric value; new value, or `-1` when absent (not created).                                             |
 | [`kv`](kv.md)`.close(store)`                          | Drop the store and free its handle.                                                                                                 |
+| [`linalg`](linalg.md)`.dot(a, b)` / `.distance(a, b)` | Dot product / Euclidean distance of vectors (`list of float`) -> `float`. Length-checked.                                          |
+| [`linalg`](linalg.md)`.cross(a, b)` / `.normalize(v)` | 3-D cross product of length-3 vectors / the unit vector `v / norm(v)` (zero vector errors) -> `list of float`.                      |
+| [`linalg`](linalg.md)`.norm(x)`                       | L2 norm of a vector, or the Frobenius norm of a matrix -> `float` (polymorphic).                                                    |
+| [`linalg`](linalg.md)`.scale(x, s)` / `.add(a, b)` / `.sub(a, b)` | Scalar multiply / element-wise sum / difference of a vector **or** a matrix (same shape).                              |
+| [`linalg`](linalg.md)`.matmul(a, b)`                  | General product: matrix*matrix -> matrix; matrix*vector or vector*matrix -> vector; vector*vector errors (use `dot`).               |
+| [`linalg`](linalg.md)`.transpose(m)` / `.trace(m)`    | Transpose of a `list of list of float` / trace (diagonal sum, square) -> `float`.                                                   |
+| [`linalg`](linalg.md)`.determinant(m)`                | Determinant of a square matrix -> `float` (singular is `0`).                                                                        |
+| [`linalg`](linalg.md)`.inverse(m)` / `.solve(a, b)`   | Matrix inverse / solve `a x = b`; a singular matrix is a catchable error.                                                            |
+| [`linalg`](linalg.md)`.identity(n)` / `.zeros(r, c)` / `.shape(m)` | The `n x n` identity / an `r x c` zero matrix / `[rows, cols]` of a matrix (`list of int`).                            |
 | [`lists`](lists.md)`.all(xs, fn)`                     | True if the `func` `fn(x)` is true for every element (true for empty). Short-circuits.                                              |
 | [`lists`](lists.md)`.any(xs, fn)`                     | True if the `func` `fn(x)` is true for any element. Short-circuits.                                                                 |
 | [`lists`](lists.md)`.concat(a, b)`                    | New list with `a`'s elements followed by `b`'s.                                                                                     |

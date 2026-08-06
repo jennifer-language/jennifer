@@ -70,8 +70,9 @@ treated as the whole data set, matching NumPy's default. `sampleVariance` /
 inferential use, and need at least two elements. `covariance` follows the
 population convention (`÷ n`) to match `variance`; the normalized `correlation`
 divides out the standard deviations, so its `n` factor cancels and the
-population/sample distinction does not matter there. A companion `linalg` library
-and further ML primitives are on the [horizon](../horizon.md).
+population/sample distinction does not matter there. The companion
+[`linalg`](linalg.md) library does linear algebra over the same value types;
+further ML primitives atop the two are on the [horizon](../horizon.md).
 
 ## Percentile
 

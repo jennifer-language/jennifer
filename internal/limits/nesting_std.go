@@ -55,3 +55,23 @@ const MaxRangeElements = 1 << 24
 // any real channel use, yet well below the multi-GB allocation cliff. A larger
 // capacity is a catchable error.
 const MaxChannelCapacity = 1 << 20
+
+// MaxMatrixElements caps how many elements a single `linalg` vector or matrix
+// may hold - enforced both where a constructor (`identity(n)`, `zeros(rows,
+// cols)`) sizes its allocation from an integer argument and where the `vector` /
+// `matrix` readers accept an operation's input, so every entry point is bounded.
+// Its sibling is MaxChannelCapacity, not MaxRangeElements: a `linalg` value is
+// *always fully materialised* as a tree of interpreter Values (each 272 bytes),
+// exactly like a channel buffer and unlike a range, whose common form is lazy and
+// allocates nothing. So the budget is sized in Value cells, not raw float64s:
+// `identity(100000)` would otherwise reach `make` for a ~10^10-cell matrix (~2.7
+// TB of Value, a fatal uncatchable OOM the interpreter has no recover() to trap),
+// and even a 4096x4096 matrix is ~4.5 GiB of Value (~9 GiB after the value-
+// semantics store-boundary copy), not the ~128 MiB a float64-per-cell reading
+// would suggest. At 1<<20 the materialised tree is ~285 MiB (matching
+// MaxChannelCapacity's budget), a 1024x1024 matrix sits at the ceiling - far past
+// any real dense-matrix use in a tree-walker - and a larger vector or matrix is a
+// catchable error. The cap also transitively bounds the O(n^3) routines (matmul /
+// inverse / solve): with n <= 1024 the worst case is ~1e9 operations, seconds of
+// CPU, not an unbounded stall.
+const MaxMatrixElements = 1 << 20

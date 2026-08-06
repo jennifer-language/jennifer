@@ -39,6 +39,7 @@
 - [`io`](libraries/io.md)
 - [`json`](libraries/json.md)
 - [`kv`](libraries/kv.md)
+- [`linalg`](libraries/linalg.md)
 - [`lists`](libraries/lists.md)
 - [`maps`](libraries/maps.md)
 - [`math`](libraries/math.md)

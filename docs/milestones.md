@@ -1082,23 +1082,30 @@ blocks a release. Graduated `DRAFT#16` (the multiplatform umbrella) + `DRAFT#22`
 (the concrete Windows track). **Requires:** none hard (all in-tree); builds on the
 shipped `M21.13` installer.
 
-### M24.6 - `linalg` library
+### M24.6 - `linalg` library (compacted)
 
-**Planned.** A `linalg` system library: linear algebra over Jennifer's own value
-types, the companion to `stats` (`M24.4`). **Vectors** are
-`list of float` - `dot`, `norm`, `scale`, `add` / `sub`, `cross` (3-vectors),
-`distance`; **matrices** are `list of list of float` - `matmul`, `transpose`,
-`determinant`, `inverse`, `solve` (linear systems), `identity`, and shape helpers.
-Algorithms are implemented directly (Gaussian elimination / LU for solve /
-determinant / inverse) - no `gonum`, too large a dependency - so it stays pure Go
-stdlib and TinyGo-clean, both binaries. Matrices are a plain `list of list of
-float` for v1: idiomatic, value-semantic, and consistent with the rest of the
-language; a Go-backed opaque matrix handle is the noted future escape hatch if
-big-matrix throughput ever demands it. Strict like `math` / `stats`: a dimension
-mismatch, a non-rectangular matrix, a singular `inverse` / `solve`, or a
-non-finite result is a catchable error, not a NaN. Follows the standard-library
-discipline (a Go package + `internal/stdlib.InstallAll` line +
-`docs/libraries/linalg.md` + cheatsheet rows + `JENNIFER.md` entries).
+**Done.** A `linalg` system library (`internal/lib/linalg`): linear algebra over
+Jennifer's own value types, the companion to `stats`. **Vectors** are
+`list of float` - `dot`, `distance`, `cross` (3-vectors), `normalize`;
+**matrices** are `list of list of float` - `transpose`, `trace`, `determinant`,
+`inverse`, `solve`, `identity`, `zeros`, `shape`. Four ops are **polymorphic**
+over a vector or a matrix (`norm` = L2 / Frobenius, `scale`, `add`, `sub`); and
+`matmul` dispatches on operand shape (matrix*matrix -> matrix; matrix*vector or
+vector*matrix -> vector; vector*vector errors, `dot` is the tool for that).
+Algorithms are direct (Gaussian / Gauss-Jordan for solve / determinant /
+inverse) - no `gonum` - so pure Go stdlib, TinyGo-clean, both binaries. A matrix
+is a plain nested list for v1 (idiomatic, value-semantic; a Go-backed opaque
+handle is the noted future escape hatch for big-matrix throughput). Strict like
+`math` / `stats`: a dimension mismatch, a non-rectangular matrix, a singular
+`inverse` / `solve`, the zero vector to `normalize`, or a non-finite (overflow)
+result is a catchable error, not a NaN; every vector / matrix (the `identity` /
+`zeros` constructors and the operation inputs alike) is bounded by
+`limits.MaxMatrixElements` - sized in 272-byte Value cells like MaxChannelCapacity,
+since a `linalg` value is always fully materialised - so an oversize dimension is a
+catchable error rather than an uncatchable OOM, which also bounds the O(n^3)
+routines. Eigenvalues / decompositions (LU / QR / Cholesky) / rank stay with the
+ML-primitives companion on the horizon (`DRAFT#7`). Pinned by `linalglib_test.go`;
+`examples/linalg.j` + golden. Graduated `DRAFT#6`. **Requires:** none.
 
 ### M24.7 - `asn1` library
 

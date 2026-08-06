@@ -30,6 +30,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lib/io"
 	"jennifer-lang.dev/jennifer/internal/lib/json"
 	kvlib "jennifer-lang.dev/jennifer/internal/lib/kv"
+	linalglib "jennifer-lang.dev/jennifer/internal/lib/linalg"
 	"jennifer-lang.dev/jennifer/internal/lib/lists"
 	"jennifer-lang.dev/jennifer/internal/lib/maps"
 	"jennifer-lang.dev/jennifer/internal/lib/math"
@@ -95,4 +96,5 @@ func InstallAll(in *interpreter.Interpreter) {
 	gpiolib.Install(in)
 	sqllib.Install(in)
 	kvlib.Install(in)
+	linalglib.Install(in)
 }

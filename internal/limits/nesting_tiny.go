@@ -42,3 +42,14 @@ const MaxRangeElements = 1 << 20
 // well below an allocation that would exhaust it. A larger capacity is a catchable
 // error. See the std-build note for the full rationale.
 const MaxChannelCapacity = 1 << 16
+
+// MaxMatrixElements caps how many elements a single `linalg` vector or matrix may
+// hold on jennifer-tiny, whose heap is far smaller than the default binary's, so
+// the ceiling is lower. Like its std sibling it is enforced at both the
+// constructors and the readers, and sized in 272-byte Value cells (a `linalg`
+// value is always fully materialised, like a channel buffer): 1<<16 elements is
+// ~17 MiB of Value, matching MaxChannelCapacity's tiny budget, generous for a
+// constrained target yet well below an allocation that would exhaust it. A larger
+// vector or matrix is a catchable error. See the std-build note for the full
+// rationale.
+const MaxMatrixElements = 1 << 16

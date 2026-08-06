@@ -393,6 +393,17 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   struct. Population (`variance`/`stddev`/`covariance`/moments) vs sample (`sample*`,
   `n-1`); `kurtosis` is excess. Undefined results (empty list, bad percentile,
   zero-variance, non-positive geometric/harmonic input) are catchable errors.
+- **`linalg`** - linear algebra, the companion to `stats`. Vectors are a
+  `list of float`: `dot distance cross normalize`. Matrices are a
+  `list of list of float`: `transpose trace determinant inverse solve identity
+  zeros shape`. `norm`/`scale`/`add`/`sub` are polymorphic over a vector or a
+  matrix (`norm` = L2 / Frobenius), and `matmul` covers matrix*matrix,
+  matrix*vector, and vector*matrix (vector*vector errors - use `dot`).
+  `dot`/`distance`/`norm`/`trace`/`determinant` return `float`; `shape` a
+  `list of int`; the rest a vector or matrix. Strict like `math`/`stats`: a
+  dimension mismatch, a non-rectangular matrix, a singular `inverse`/`solve`, the
+  zero vector to `normalize`, or a non-finite (overflow) result is a catchable
+  error, not a NaN.
 - **`strings`** - `upper lower contains startsWith endsWith indexOf trim
   replace repeat substring split chars join`. Rune-indexed.
 - **`lists`** - `push pop first last head tail reverse sort contains concat
