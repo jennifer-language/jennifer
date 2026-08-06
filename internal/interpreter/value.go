@@ -1049,6 +1049,11 @@ func (v Value) Equal(o Value) bool {
 	return false
 }
 
+// isNaN reports whether f is a NaN, without importing "math" (kept out of this
+// file for TinyGo binary size, like the overflow helpers). NaN is the only value
+// that is not equal to itself.
+func isNaN(f float64) bool { return f != f }
+
 // mapContainsEntry reports whether m holds an entry with an equal key AND an
 // equal value. Linear; only used by Equal's degenerate-map fallback.
 func mapContainsEntry(m Value, e MapEntry) bool {
@@ -1061,9 +1066,18 @@ func mapContainsEntry(m Value, e MapEntry) bool {
 }
 
 // compareIntFloat returns the sign of (n - f) exactly: -1 if n < f, 0 if equal,
-// +1 if n > f. It avoids converting n to float64 (lossy above 2^53). f is
-// assumed finite (Jennifer forbids NaN / Inf floats).
+// +1 if n > f. It avoids converting n to float64 (lossy above 2^53).
+//
+// NaN is unordered: it is never equal to, less than, or greater than any integer.
+// A 3-way sign cannot express "unordered", so callers handle it: Value.Equal reads
+// only `== 0` (so any non-zero return means "not equal", which is correct for
+// NaN), and evalComparison pre-checks NaN before the ordering path. The guard here
+// is what makes that safe - without it, `int64(NaN)` truncates (to MinInt64 on
+// amd64) and a NaN would compare as an ordinary integer.
 func compareIntFloat(n int64, f float64) int {
+	if isNaN(f) {
+		return 1 // "not equal / unordered"; ordering callers pre-check NaN
+	}
 	// f beyond the int64 range decides by magnitude alone.
 	if f >= 9223372036854775808.0 { // >= 2^63, above MaxInt64
 		return -1

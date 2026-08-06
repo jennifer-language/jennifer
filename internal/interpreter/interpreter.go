@@ -4135,10 +4135,20 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file stri
 	// Mixed int/float: compare exactly. Converting the int to float64 would
 	// lose precision above 2^53 (e.g. 9007199254740993 > 9007199254740992.0
 	// must be true), so route through compareIntFloat.
+	// A NaN operand is unordered: every ordering comparison (< > <= >=) is false,
+	// per IEEE - matching the pure-float fast path above. (== / != already returned
+	// via Equal.) Without this, the NaN would route through compareIntFloat and
+	// compare as a truncated integer.
 	if lv.Kind == KindInt && rv.Kind == KindFloat {
+		if isNaN(rv.Float) {
+			return BoolVal(false), nil
+		}
 		return i.orderResult(op, compareIntFloat(lv.Int, rv.Float), file, line, col)
 	}
 	if lv.Kind == KindFloat && rv.Kind == KindInt {
+		if isNaN(lv.Float) {
+			return BoolVal(false), nil
+		}
 		return i.orderResult(op, -compareIntFloat(rv.Int, lv.Float), file, line, col)
 	}
 	if !lv.isNumeric() || !rv.isNumeric() {

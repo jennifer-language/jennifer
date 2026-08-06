@@ -21,10 +21,10 @@ def producer as task of int init spawn {
 };
 def sum as int init 0;
 try {
-    while (true) {
+    while (true) {   # lint-disable: L105
         $sum = $sum + channel.recv($ch);
     }
-} catch (e) {
+} catch (e) {   # lint-disable: L103
     # channel closed and drained
 }
 task.wait($producer);
@@ -46,10 +46,10 @@ def pa as task of int init spawn { channel.send($a, 100); channel.close($a); ret
 def pb as task of int init spawn { channel.send($b, 200); channel.close($b); return 0; };
 def total as int init 0;
 try {
-    while (true) {
+    while (true) {   # lint-disable: L105
         $total = $total + channel.select([$a, $b]);
     }
-} catch (e) {
+} catch (e) {   # lint-disable: L103
     # both inputs closed
 }
 task.wait($pa);

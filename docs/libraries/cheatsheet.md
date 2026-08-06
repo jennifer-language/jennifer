@@ -246,6 +246,22 @@ flat lookup view, not authoritative.
 | [`path`](path.md)`.clean(p)`                          | Shortest path equivalent to `p` (collapses `.`, `..`, repeated separators). `""` -> `"."`.                                          |
 | [`path`](path.md)`.isAbs(p)`                          | Whether `p` is absolute (`bool`).                                                                                                   |
 | [`path`](path.md)`.split(p)`                          | `[dir, file]` where `dir` keeps its trailing separator, so `dir + file == p`.                                                       |
+| [`stats`](stats.md)`.mean(xs)` / `.median(xs)`        | Arithmetic mean / median of a `list of int`\|`float` -> `float`. Empty errors.                                                       |
+| [`stats`](stats.md)`.variance(xs)` / `.stddev(xs)`    | Population variance / standard deviation -> `float`.                                                                                |
+| [`stats`](stats.md)`.sampleVariance(xs)` / `.sampleStddev(xs)` | Sample (Bessel `n-1`) variance / stddev -> `float`. Needs >= 2 elements.                                                   |
+| [`stats`](stats.md)`.mad(xs)`                         | Median absolute deviation - robust spread -> `float`.                                                                              |
+| [`stats`](stats.md)`.skewness(xs)` / `.kurtosis(xs)`  | Shape: population skewness / excess kurtosis (normal -> 0) -> `float`. Non-constant, >= 2.                                          |
+| [`stats`](stats.md)`.percentile(xs, p)`               | The `p`-th percentile (`p` in `[0,100]`, linear interpolation) -> `float`.                                                          |
+| [`stats`](stats.md)`.quartiles(xs)` / `.iqr(xs)`      | `[Q1,Q2,Q3]` (`list of float`) / interquartile range `p75-p25` (`float`).                                                          |
+| [`stats`](stats.md)`.min(xs)` / `.max(xs)` / `.range(xs)` | Smallest / largest element / spread `max-min`; all preserve int/float kind. Empty errors.                                       |
+| [`stats`](stats.md)`.sum(xs)`                         | Sum: `int` for an all-int list (overflow-checked), `float` otherwise; `sum([])` is `0`.                                            |
+| [`stats`](stats.md)`.geometricMean(xs)` / `.harmonicMean(xs)` | Geometric / harmonic mean -> `float`. Every element must be `> 0`.                                                          |
+| [`stats`](stats.md)`.weightedMean(xs, ws)`            | Weighted mean `sum(x*w)/sum(w)` -> `float`. Equal length; weights not summing to 0.                                                |
+| [`stats`](stats.md)`.zscore(xs)`                      | Each element standardized `(x-mean)/stddev` -> `list of float`. Constant list errors.                                              |
+| [`stats`](stats.md)`.mode(xs)` (elem) / `.modes(xs)` (list) | Most frequent element / every tied modal value; both preserve kind.                                                          |
+| [`stats`](stats.md)`.correlation(xs, ys)` / `.covariance(xs, ys)` | Pearson correlation (`[-1,1]`) / population covariance of two equal-length lists -> `float`.                            |
+| [`stats`](stats.md)`.sampleCovariance(xs, ys)`        | Sample (`n-1`) covariance -> `float`. Needs >= 2 elements.                                                                         |
+| [`stats`](stats.md)`.describe(xs)`                    | One-call `stats.Summary{count, min, q1, median, mean, q3, max, stddev}`.                                                           |
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
 | [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`).                                                                          |

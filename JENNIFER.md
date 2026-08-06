@@ -384,6 +384,15 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   keywords (they appear only after `as`).
 - **`math`** - `abs min max sqrt pow floor ceil round rand randInt randSeed`;
   constants `PI`, `E`. Undefined results error (no NaN).
+- **`stats`** - 26 descriptive statistics over `list of int`/`float`: `mean median
+  mode modes geometricMean harmonicMean weightedMean variance stddev sampleVariance
+  sampleStddev range iqr mad skewness kurtosis percentile quartiles min max sum
+  zscore correlation covariance sampleCovariance describe`. Real-valued reductions
+  return `float`; `min`/`max`/`mode`/`modes`/`range`/`sum` keep the input kind;
+  `quartiles`/`zscore` return `list of float`; `describe` returns a `stats.Summary`
+  struct. Population (`variance`/`stddev`/`covariance`/moments) vs sample (`sample*`,
+  `n-1`); `kurtosis` is excess. Undefined results (empty list, bad percentile,
+  zero-variance, non-positive geometric/harmonic input) are catchable errors.
 - **`strings`** - `upper lower contains startsWith endsWith indexOf trim
   replace repeat substring split chars join`. Rune-indexed.
 - **`lists`** - `push pop first last head tail reverse sort contains concat

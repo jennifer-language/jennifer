@@ -41,6 +41,7 @@ import (
 	seriallib "jennifer-lang.dev/jennifer/internal/lib/serial"
 	spilib "jennifer-lang.dev/jennifer/internal/lib/spi"
 	sqllib "jennifer-lang.dev/jennifer/internal/lib/sql"
+	statslib "jennifer-lang.dev/jennifer/internal/lib/stats"
 	"jennifer-lang.dev/jennifer/internal/lib/strings"
 	"jennifer-lang.dev/jennifer/internal/lib/task"
 	termlib "jennifer-lang.dev/jennifer/internal/lib/term"
@@ -59,6 +60,7 @@ func InstallAll(in *interpreter.Interpreter) {
 	iolib.Install(in)
 	convert.Install(in)
 	mathlib.Install(in)
+	statslib.Install(in)
 	stringslib.Install(in)
 	listslib.Install(in)
 	binarylib.Install(in)

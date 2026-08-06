@@ -1020,16 +1020,24 @@ Pinned by `channel_test.go` (8 tests incl. value-semantics, concurrent-bind
 `examples/cancellation.j` / `channels.j` + goldens; both toolchains.
 **Deferred:** cancellable channel ops and index-returning `select`.
 
-### M24.4 - `stats` library
+### M24.4 - `stats` library (compacted)
 
-**Planned.** A `stats` system library: descriptive statistics over `list of int`
-/ `list of float` - `mean` / `median` / `mode` / `variance` / `stddev` /
-`percentile` / `min` / `max` / `sum` / `correlation`. Pure-value, dependency-free,
-TinyGo-clean (both binaries); the highest-value, simplest piece of the horizon ML
-group, so first. Follows the standard library discipline (a Go package +
-`internal/stdlib.InstallAll` line + `docs/libraries/stats.md` + cheatsheet rows).
-Graduated `DRAFT#5`. **Requires:** none. (The companion `linalg` and ML-primitives
-pieces stay in the [horizon](horizon.md) collection, `DRAFT#6` / `DRAFT#7`.)
+**Done.** A `stats` system library (`internal/lib/stats`): 26 descriptive
+statistics over `list of int` / `list of float` - central tendency (incl.
+geometric / harmonic / weighted means, `modes`), spread (population + `sample*`
+Bessel n-1, `range`, `iqr`, `mad`), shape (`skewness`, excess `kurtosis`), order
+statistics (`percentile` / `quartiles` / `min` / `max`), `sum`, `zscore`, bivariate
+`correlation` / `covariance` / `sampleCovariance`, and `describe` -> a
+`stats.Summary` struct. Real-valued reductions return `float`; the selections and
+`sum` / `range` preserve the input kind (overflow-checked); `quartiles` / `zscore`
+return `list of float`. `variance` / `stddev` / `covariance` and the moments are
+population (÷ n, NumPy default), `sample*` ÷ n-1, `kurtosis` excess. Strict like
+`math`: any undefined result (empty list, bad percentile, zero-variance
+bivariate/shape input, int-sum overflow, non-positive geo/harmonic input,
+constant `zscore`) is a catchable error, not a NaN. Pure Go stdlib, TinyGo-clean.
+Pinned by `statslib_test.go`; `examples/stats.j` + golden. Graduated `DRAFT#5`.
+**Requires:** none. `linalg` (`DRAFT#6`) and ML-primitives (`DRAFT#7`) stay on the
+[horizon](horizon.md).
 
 ### M24.5 - multiplatform: promote macOS / Windows to supported
 

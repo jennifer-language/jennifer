@@ -1,0 +1,6 @@
+n=10  mean=82.4  median=88.0  mode=88
+min=65  max=95  sum=824
+range=30  variance=93.44  stddev=9.666436778875658
+sample variance=103.82222222222222  sample stddev=10.189319026422826
+quartiles=[73.75, 88.0, 88.0]  iqr=14.25  p90=91.4
+study-vs-score correlation = 0.9838699100999074
