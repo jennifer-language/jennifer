@@ -25,9 +25,10 @@ runtime and ecosystem restructures near the bottom. Each has a design; it just
 has no schedule.
 
 Each carries a stable **`DRAFT#`** handle so it can be referenced and later
-graduated into a numbered milestone (e.g. "shift `DRAFT#9` to `M21.9`"). Handles
-are **assigned once and retired on graduation** - never reused, and **never
-renumbered when the list is reordered** - so a reference stays valid for the life
+graduated into a numbered milestone (graduating a `DRAFT#` gives it an `M`-number
+in `milestones.md`). Handles are **assigned once and retired on graduation** -
+never reused, and **never renumbered when the list is reordered** - so a reference
+stays valid for the life
 of the idea (which is why the numbers below run out of sequence). `DRAFT#` is
 deliberately *not* a milestone number; an idea only gets an `M`-number when it
 graduates into [milestones.md](milestones.md).
@@ -67,42 +68,11 @@ timeouts, which a per-request worker would use to bound a slow handler).
 
 Each domain its own effort with sub-pieces as needed:
 
-- **ML.** (The `stats` piece graduated to `M24.4`.)
-  - **`DRAFT#6` `linalg`** - vectors as `list of float` (dot, norm, cross,
-    scale, add / sub) and matrices as `list of list of float` (matmul,
-    transpose, determinant, inverse, solve, identity). Algorithms
-    implemented directly - no `gonum`, too large a dependency. Matrices stay
-    `list of list of float` for v1 (idiomatic and value-semantic); a
-    Go-backed matrix handle is the noted future escape hatch when big-matrix
-    performance demands it. **Requires:** none.
-  - **`DRAFT#7` ML primitives** - atop `stats` / `linalg`, when demand
-    surfaces. **Requires:** `M24.4` (`stats`) + `DRAFT#6` (`linalg`).
+- **`DRAFT#7` ML primitives** - atop `stats` / `linalg`, when demand
+    surfaces. **Requires:** `M24.4` (`stats`) + `M24.6` (`linalg`).
 - **`DRAFT#8` Bioinformatics.** Sequence alignment (Smith-Waterman,
   Needleman-Wunsch), FASTA/FASTQ parsers, molecule structures.
   **Requires:** none.
-- **Encoding / binary protocols.**
-  - **`DRAFT#9` `asn1`** - ASN.1 BER/DER encode/decode, as a **Go system
-    library**.
-    Byte-level binary parsing belongs in Go, not `.j` (the `json` lesson: a
-    char-by-char parser in the interpreter pays overhead per byte). This is
-    the *enabler* for a family of binary protocols and PKI formats - LDAP,
-    SNMP, X.509, PKCS. Go's stdlib `encoding/asn1` is DER-only, so the full
-    BER that LDAP / SNMP use (indefinite lengths, alternative encodings)
-    needs either a BER dependency (e.g. `go-asn1-ber`) or a hand-rolled BER
-    codec in Go. **Requires:** none (it is the enabler for the rest of this
-    group).
-  - **`DRAFT#10` `ldap` / `snmp` (layered on `asn1` + `net`).** With `asn1` doing the
-    byte crunching in Go and `net` providing TCP/UDP + TLS (`connectTLS` /
-    `startTLS` already cover LDAPS / StartTLS), the protocol orchestration
-    (bind, build request, iterate results) is not per-byte hot and can live
-    in a `.j` module or a thin Go library. SNMP is the natural first client
-    (simpler PDUs, UDP, no SASL); LDAP adds controls + SASL (SCRAM builds on
-    the `crypto` library). A pure-`.j` implementation of the BER layer
-    itself is explicitly *not* the plan. Existing pure implementations (e.g.
-    PHP FreeDSx) are a protocol reference, not a port target - their heavy
-    OO shape does not map to Jennifer's value-semantic structs.
-    **Requires:** `DRAFT#9` (`asn1`) and the shipped `net` library; LDAP's
-    SASL / SCRAM path additionally needs `crypto` (`M20.1`).
 
 Ordered when demand surfaces. The WASM libraries idea (`DRAFT#3`) may cover
 some of this space first.
@@ -130,55 +100,6 @@ foundation. Stays pure `.j`, both binaries.
 modules (plus possibly a parse-tree surface on `markdown`).
 
 ### Platform and distribution
-
-#### DRAFT#22 - Promote Windows to a supported platform
-
-Windows ships today as a best-effort **unsupported** build (a cross-compiled
-`jennifer.exe`, plus the `M21.13` installer that wraps it). Promoting it to
-*supported* is the concrete Windows instance of the `M24.5` multiplatform
-milestone, and it graduates the "Cross-build for macOS / Windows" 1.0.0
-distribution requirement. A portability audit found the surface small - most of
-the OS-touching code is already `runtime.GOOS`-derived or cleanly build-tag
-stubbed - so this is a handful of concrete gaps, not a rewrite.
-
-**What's already fine.** Separators / EOL / `$HOME` / temp are
-`runtime.GOOS`-derived (`internal/lib/os/oslib.go`), `os/exec` is enabled on
-Windows (the exec gate keys on `runtime.Compiler != "tinygo"`, not GOOS), and
-signals plus the four Linux-only hardware libs (`serial` / `spi` / `i2c` / `gpio`)
-already stub cleanly on non-Linux (`*_other.go`).
-
-**Fixes:**
-
-- **Windows-native module default.** `compileDefaultSysmoddir` is the one
-  hardcoded POSIX path baked into a Windows binary
-  (`/usr/share/jennifer/modules`, `internal/module/sysmoddir.go`). Give it a
-  Windows-native, **exe-relative** default
-  (`<dir(os.Executable())>\share\jennifer\modules`) via a build-tag split
-  (`sysmoddir_windows.go` / `_unix.go`), so a portable-zip user's
-  `import "name.j";` resolves with no env var. The `M21.13` installer's
-  `JENNIFER_SYSMODDIR` stays the explicit override; precedence is unchanged.
-- **Per-OS golden strategy.** `examples/expected/osinfo.txt` pins
-  `linux` / `amd64` / `/` / `:`, and `cmd/jennifer/examples_test.go` compares
-  byte-exact with no GOOS handling - the sole platform-pinned golden. Add a
-  per-OS expected-file selection (or a `runtime.GOOS`-gated skip for the osinfo
-  canary; the source already flags this at `examples/osinfo.j`).
-- **`fs.chmod` / `fs.chown` on Windows.** Currently Unix-oriented; define the
-  Windows behaviour (a friendly catchable error is acceptable - the `chown` test
-  is already Linux-gated). Document that signal-based graceful shutdown is limited
-  on Windows (`signal_other.go` stubs `os.catchSignal`).
-- **A real Windows CI test job.** `windows-latest` running `go test ./...` so
-  Windows correctness is actually verified (the exec suite self-skips off Linux;
-  the osinfo golden is the known failure the item above resolves). Once green,
-  move windows/amd64 out of the `build-unsupported` matrix into the supported set
-  and drop the "unsupported" labelling for that arch.
-
-**macOS** is the parallel case (same "already ships unsupported, promote it"
-shape) but out of scope here - a separate effort, and it lacks even the
-module-path blocker Windows has.
-
-**Requires:** none hard (all in-tree). Relates to `M24.5` (the umbrella
-multiplatform milestone this Windows track is the concrete instance of) and builds
-on the shipped `M21.13` installer.
 
 #### DRAFT#12 - `jvc` package manager (decks)
 

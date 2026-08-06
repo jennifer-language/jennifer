@@ -795,7 +795,7 @@ docs - this table is the milestone-number index.
 | M21.10 | byte-oriented throughput | The `binary` library (`concat` / `slice` / `indexOf` / `contains` / `split` / `startsWith` / `endsWith` - the byte counterpart to `strings`, value-semantic, TinyGo-clean) plus `net.readAll` / `readN` (bulk reads with catchable size / close-mid-frame caps). Reworked `http` / `mqtt` / `imap` onto bulk reads; a `binary.indexOf` benchmark fixture. |
 | M21.11 | range syntax (`..`) | Half-open `lo..hi` (int bounds), three materializing / value-semantic uses: list construction (`0..n`), lazy for-each (`for i in 0..n`, no list built), and slicing (`$xs[a..b]` + open forms, over list / bytes / string). `lo > hi` a positioned error; materialisation bounded by a catchable `limits.MaxRangeElements` (int64-span-overflow-safe, not the uncatchable `makeslice` panic). New `RangeExpr` / `SliceExpr` AST; `fmt` emits `..` tight. |
 | M21.12 | per-frame allocation elimination | A call / block frame now does **no** per-binding or per-call heap allocation: a slot-backed binding (`Slot >= 0`) writes only the pooled `slots` slice (the identifier travels in `Binding.Name`; the rare name-based readers scan the small slot slice via `lookupLocal`), and `evalCall` binds args interleaved with no intermediate `[]Value`. Recursive fib ~300k -> ~59 allocs/op; Go's minor page faults fell ~7x. Value semantics and the `vars` fallback (REPL) intact; guarded by `TestFrameAllocationsStayLow`. |
-| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, horizon `DRAFT#22`. |
+| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M24.5`. |
 
 Cross-cutting threads:
 
@@ -1036,26 +1036,109 @@ population (÷ n, NumPy default), `sample*` ÷ n-1, `kurtosis` excess. Strict li
 bivariate/shape input, int-sum overflow, non-positive geo/harmonic input,
 constant `zscore`) is a catchable error, not a NaN. Pure Go stdlib, TinyGo-clean.
 Pinned by `statslib_test.go`; `examples/stats.j` + golden. Graduated `DRAFT#5`.
-**Requires:** none. `linalg` (`DRAFT#6`) and ML-primitives (`DRAFT#7`) stay on the
-[horizon](horizon.md).
+**Requires:** none. Its `linalg` companion is `M24.6`; the ML-primitives
+(`DRAFT#7`) piece stays on the [horizon](horizon.md).
 
 ### M24.5 - multiplatform: promote macOS / Windows to supported
 
 **Planned.** Linux is the only *supported* platform, but best-effort **unsupported**
 macOS / Windows binaries (the standard-Go `jennifer`, via cross-compile) already
 ship each release - so the work is not "add the ports" but **promoting them to
-supported**: real CI coverage, a per-OS golden strategy, and the platform-specific
-edge cases. Graduates the "cross-build for macOS / Windows" 1.0.0 distribution
-requirement. The concrete Windows track, with the exact remaining gaps
-(exe-relative module default, per-OS golden selection for
-`examples/expected/osinfo.txt`, `fs.chmod` / `chown` Windows behaviour, a
-`windows-latest` CI test job), is detailed in `DRAFT#22`; macOS is the parallel
-case (same "already ships unsupported, promote it" shape, and it lacks even the
-module-path blocker Windows has). **Extra distribution packaging** (a Homebrew tap,
-Snap, Nix flake, Flatpak / AppImage) stays a per-format nice-to-have, shipped only
-when a user asks and a maintainer keeps it green - none blocks a release. Graduated
-`DRAFT#16`. **Requires:** none hard (all in-tree); builds on the shipped `M21.13`
-installer.
+supported**. Graduates the "cross-build for macOS / Windows" 1.0.0 distribution
+requirement. A portability audit found the surface small: separators / EOL /
+`$HOME` / temp are already `runtime.GOOS`-derived (`internal/lib/os/oslib.go`),
+`os/exec` keys on `runtime.Compiler != "tinygo"` (not GOOS, so it is enabled on
+Windows), and signals + the four Linux-only hardware libs (`serial` / `spi` /
+`i2c` / `gpio`) stub cleanly on non-Linux (`*_other.go`). So the **Windows** track
+is a handful of concrete gaps, not a rewrite:
+
+- **Exe-relative module default.** `compileDefaultSysmoddir` bakes one hardcoded
+  POSIX path (`/usr/share/jennifer/modules`, `internal/module/sysmoddir.go`) into a
+  Windows binary; give it a Windows-native, exe-relative default
+  (`<dir(os.Executable())>\share\jennifer\modules`) via a build-tag split
+  (`sysmoddir_windows.go` / `_unix.go`), so a portable-zip user's `import "name.j";`
+  resolves with no env var (the `M21.13` installer's `JENNIFER_SYSMODDIR` stays the
+  explicit override; precedence unchanged).
+- **Per-OS golden strategy.** `examples/expected/osinfo.txt` is the sole
+  platform-pinned golden (pins `linux` / `amd64` / `/` / `:`, compared byte-exact in
+  `cmd/jennifer/examples_test.go`); add per-OS expected-file selection or a
+  `runtime.GOOS`-gated skip for the osinfo canary (already flagged at
+  `examples/osinfo.j`).
+- **`fs.chmod` / `fs.chown` on Windows.** Define the Windows behaviour (a friendly
+  catchable error is acceptable; the `chown` test is already Linux-gated), and
+  document that signal-based graceful shutdown is limited on Windows
+  (`signal_other.go` stubs `os.catchSignal`).
+- **A `windows-latest` CI test job** running `go test ./...` so Windows correctness
+  is actually verified (the exec suite self-skips off Linux; the osinfo golden is
+  the known failure the item above resolves); once green, move windows/amd64 out of
+  the `build-unsupported` matrix into the supported set and drop the "unsupported"
+  labelling for that arch.
+
+**macOS** is the parallel case (same "already ships unsupported, promote it" shape,
+and it lacks even the module-path blocker Windows has). **Extra distribution
+packaging** (a Homebrew tap, Snap, Nix flake, Flatpak / AppImage) stays a per-format
+nice-to-have, shipped only when a user asks and a maintainer keeps it green - none
+blocks a release. Graduated `DRAFT#16` (the multiplatform umbrella) + `DRAFT#22`
+(the concrete Windows track). **Requires:** none hard (all in-tree); builds on the
+shipped `M21.13` installer.
+
+### M24.6 - `linalg` library
+
+**Planned.** A `linalg` system library: linear algebra over Jennifer's own value
+types, the companion to `stats` (`M24.4`). **Vectors** are
+`list of float` - `dot`, `norm`, `scale`, `add` / `sub`, `cross` (3-vectors),
+`distance`; **matrices** are `list of list of float` - `matmul`, `transpose`,
+`determinant`, `inverse`, `solve` (linear systems), `identity`, and shape helpers.
+Algorithms are implemented directly (Gaussian elimination / LU for solve /
+determinant / inverse) - no `gonum`, too large a dependency - so it stays pure Go
+stdlib and TinyGo-clean, both binaries. Matrices are a plain `list of list of
+float` for v1: idiomatic, value-semantic, and consistent with the rest of the
+language; a Go-backed opaque matrix handle is the noted future escape hatch if
+big-matrix throughput ever demands it. Strict like `math` / `stats`: a dimension
+mismatch, a non-rectangular matrix, a singular `inverse` / `solve`, or a
+non-finite result is a catchable error, not a NaN. Follows the standard-library
+discipline (a Go package + `internal/stdlib.InstallAll` line +
+`docs/libraries/linalg.md` + cheatsheet rows + `JENNIFER.md` entries).
+
+### M24.7 - `asn1` library
+
+**Planned.** An `asn1` system library: ASN.1 BER/DER encode/decode as a **Go**
+system library (not a `.j` module). Byte-level binary parsing belongs in Go, not
+the tree-walker - the `json` lesson: a char-by-char parser in the interpreter pays
+overhead per byte. This is the **enabler** for a family of binary protocols and PKI
+formats (LDAP, SNMP, and, later, X.509 / PKCS surfaces). Go's stdlib
+`encoding/asn1` is DER-only, so the full **BER** that LDAP / SNMP need (indefinite
+lengths, alternative encodings) requires either a vetted BER dependency (e.g.
+`go-asn1-ber`) or a hand-rolled BER codec in Go; the decode surface mirrors the
+opaque-value `KindObject` shape the `json` / `toml` / `xml` / `yaml` libraries use
+(a walked tree, not map-to-struct coercion). Follows the standard-library
+discipline (Go package + `internal/stdlib.InstallAll` line + `docs/libraries/asn1.md`
++ cheatsheet + `JENNIFER.md`).
+
+### M24.8 - `snmp` client
+
+**Planned.** An SNMP client - the **simpler** of the two canonical
+ASN.1-over-the-wire protocols and the natural first: compact PDUs, UDP transport,
+no SASL. Layered on `asn1` (`M24.7`) for the BER byte crunching and `net` for UDP;
+the orchestration (build a PDU, send, decode the response varbinds) is not per-byte
+hot, so it can live in a `.j` module or a thin Go library. The pure-`.j` BER layer
+is explicitly *not* the plan - that is what `M24.7` is for. Ships with the module
+discipline where `.j` (test overlay + doc + demo). Graduated `DRAFT#10` (the
+ASN.1-protocol pair; the `ldap` half is `M24.9`). **Requires:** `M24.7` (`asn1`)
+and the shipped `net` library.
+
+### M24.9 - `ldap` client
+
+**Planned.** An LDAP client, layered on `asn1` (`M24.7`) + `net` (`connectTLS` /
+`startTLS` already cover LDAPS / StartTLS). Beyond the simpler `snmp` (`M24.8`) it
+adds bind, controls, paged results, and **SASL** - the SCRAM mechanism builds on
+the `crypto` library. As with `snmp`, the per-byte BER work stays in `asn1`
+(`M24.7`), not a pure-`.j` codec; existing pure implementations (e.g. PHP FreeDSx)
+are a protocol reference, not a port target - their heavy-OO shape does not map to
+Jennifer's value-semantic structs. Ships with the module discipline where `.j`
+(test overlay + doc + demo). Graduated `DRAFT#10` (with `M24.8`). **Requires:**
+`M24.7` (`asn1`) and the shipped `net` library, plus `crypto` (`M20.1`) for the
+SASL / SCRAM path.
 
 ---
 
