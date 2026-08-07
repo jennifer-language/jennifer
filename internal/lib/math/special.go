@@ -38,6 +38,22 @@ func lgammaVal(x float64) float64 {
 	return v
 }
 
+// RegularizedGammaP exposes the regularized lower incomplete gamma P(a, x) to
+// sibling Go libraries (the `stats` distribution layer builds the gamma /
+// chi-square / Poisson CDFs on it). Requires a > 0 and x >= 0. The second
+// return reports whether the internal series / continued fraction converged;
+// the caller turns a false into a catchable error, mirroring regGammaP.
+func RegularizedGammaP(a, x float64) (float64, bool) { return regularizedGammaP(a, x) }
+
+// RegularizedIncBeta exposes the regularized incomplete beta I_x(a, b) to
+// sibling Go libraries (the CDF engine for `stats`' t / F / beta / binomial).
+// Requires 0 <= x <= 1, a > 0, b > 0. The second return reports convergence.
+func RegularizedIncBeta(x, a, b float64) (float64, bool) { return regularizedIncBeta(x, a, b) }
+
+// LgammaVal exposes ln|gamma(x)| (Go's sign dropped) for sibling libraries that
+// build log-densities (Poisson / binomial pmf) without overflowing gamma.
+func LgammaVal(x float64) float64 { return lgammaVal(x) }
+
 // lgammaFn returns ln|gamma(x)|. At the poles (x a non-positive integer) the
 // value is +Inf, which the strict check rejects.
 func lgammaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

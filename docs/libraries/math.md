@@ -27,7 +27,7 @@ io.printf("%d\n", math.round(2.5));            # 3 (half away from zero)
 
 | Call             | Returns          | Notes                                         |
 | ---------------- | ---------------- | --------------------------------------------- |
-| `math.abs(x)`    | same type as `x` | int → int, float → float; errors on `math.abs(MinInt64)` (no representable result) |
+| `math.abs(x)`    | same type as `x` | \|x\|; int → int, float → float; errors on `math.abs(MinInt64)` (no representable result) |
 | `math.min(a, b)` | int or float     | int+int → int; mixed → float                  |
 | `math.max(a, b)` | int or float     | same rule as `min`                            |
 | `math.sqrt(x)`   | float            | errors on negative input                      |
@@ -105,10 +105,10 @@ the rest of the library keeps.
 | Call                    | Returns | Notes                                        |
 | ----------------------- | ------- | -------------------------------------------- |
 | `math.erf(x)` / `math.erfc(x)` | float | Error function and its complement (`erf + erfc = 1`). |
-| `math.gamma(x)`         | float   | Gamma function; errors at the poles (`0`, negative integers) and on overflow. |
-| `math.lgamma(x)`        | float   | `ln|gamma(x)|`, for range; errors at the poles. |
-| `math.beta(a, b)`       | float   | Beta function `B(a, b) = gamma(a)*gamma(b)/gamma(a+b)`; `a, b > 0`. |
-| `math.lbeta(a, b)`      | float   | `ln B(a, b)`, the stable log form; `a, b > 0`. |
+| `math.gamma(x)`         | float   | Gamma function Γ(x); errors at the poles (`0`, negative integers) and on overflow. |
+| `math.lgamma(x)`        | float   | ln\|Γ(x)\|, for range; errors at the poles. |
+| `math.beta(a, b)`       | float   | Beta function B(a, b) = Γ(a)Γ(b) / Γ(a+b); `a, b > 0`. |
+| `math.lbeta(a, b)`      | float   | ln B(a, b), the stable log form; `a, b > 0`. |
 | `math.regGammaP(a, x)`  | float   | Regularized lower incomplete gamma `P(a, x)` in `[0, 1]` (the gamma / chi-square CDF); `a > 0`, `x >= 0`. |
 | `math.regGammaQ(a, x)`  | float   | Upper complement `Q(a, x) = 1 - P(a, x)`.    |
 | `math.regBetaI(x, a, b)`| float   | Regularized incomplete beta `I_x(a, b)` in `[0, 1]` (the CDF engine for the beta, Student's t, F, and binomial); `0 <= x <= 1`, `a, b > 0`. |

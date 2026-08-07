@@ -321,6 +321,16 @@ func randSeedFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	return interpreter.Null(), nil
 }
 
+// SharedFloat64 returns a uniformly-distributed float64 in [0, 1) from the
+// shared `math.rand` source (respecting `math.randSeed`). Exposed so sibling
+// libraries (the `stats` distribution samplers) draw from the same stream as
+// `math.rand`. Goroutine-safe via the same mutex.
+func SharedFloat64() float64 {
+	randMu.Lock()
+	defer randMu.Unlock()
+	return randSrc.Float64()
+}
+
 // SharedIntN returns a uniformly-distributed int64 in [0, n) using the
 // shared random source. n must be positive. Exposed so sibling
 // libraries (e.g. lists.shuffle) can draw from the same `math.randSeed`

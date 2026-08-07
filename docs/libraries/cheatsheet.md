@@ -317,6 +317,21 @@ flat lookup view, not authoritative.
 | [`stats`](stats.md)`.correlation(xs, ys)` / `.covariance(xs, ys)` | Pearson correlation (`[-1,1]`) / population covariance of two equal-length lists -> `float`.                            |
 | [`stats`](stats.md)`.sampleCovariance(xs, ys)`        | Sample (`n-1`) covariance -> `float`. Needs >= 2 elements.                                                                         |
 | [`stats`](stats.md)`.describe(xs)`                    | One-call `stats.Summary{count, min, q1, median, mean, q3, max, stddev}`.                                                           |
+| [`stats`](stats.md)`.normalPdf/normalCdf/normalQuantile(p,mean,sd)` | Normal density / CDF / inverse-CDF; `sd>0`, quantile `p` in (0,1). |
+| [`stats`](stats.md)`.normalSample(mean, sd)` | One Normal(mean, sd) draw (uses `math.randSeed`). |
+| [`stats`](stats.md)`.tCdf(x, df)` / `.tQuantile(p, df)` / `.tPdf(x, df)` | Student's t CDF / inverse / density; `df>0`. |
+| [`stats`](stats.md)`.chiSquareCdf(x, df)` / `.chiSquareQuantile(p, df)` | Chi-square CDF / inverse; `x>=0`, `df>0`. |
+| [`stats`](stats.md)`.fCdf(x, df1, df2)` / `.fQuantile(p, df1, df2)` | F CDF / inverse; `x>=0`, dfs `>0`. |
+| [`stats`](stats.md)`.binomialPmf(k, n, p)` / `.binomialCdf(k, n, p)` | Binomial mass / CDF; `k`,`n` ints, `0<=p<=1`. |
+| [`stats`](stats.md)`.poissonPmf(k, lambda)` / `.poissonCdf(k, lambda)` | Poisson mass / CDF; `k` int, `lambda>0`. |
+| [`stats`](stats.md)`.linearRegression(xs, ys)` | Simple OLS -> `stats.Regression{slope, intercept, r, r2, stdErr, pValue, n}`. |
+| [`stats`](stats.md)`.multipleRegression(X, ys)` | Multiple OLS coefficients `[intercept, b1, ...]` (`list of float`). |
+| [`stats`](stats.md)`.confidenceInterval(data, level)` | t-based CI for the mean -> `stats.Interval{lower, upper}`; `level` in (0,1). |
+| [`stats`](stats.md)`.proportionCi(successes, n, level, method)` | Binomial-proportion CI; method `"wald"`/`"wilson"`/`"clopper-pearson"` -> `stats.Interval`. |
+| [`stats`](stats.md)`.tTest(data, mu)` / `.tTest2(a, b)` | One-sample / two-sample (Welch) t-test -> `stats.Test{statistic, df1, df2, pValue}`. |
+| [`stats`](stats.md)`.chiSquareTest(observed, expected)` | Chi-square goodness of fit -> `stats.Test`; expected counts `>0`. |
+| [`stats`](stats.md)`.fTest(a, b)` / `.anova(groups)` | Two-sided F-test of variances / one-way ANOVA -> `stats.Test`. |
+| [`stats`](stats.md)`.histogram(data, binEdges)` | Bin counts (Excel `FREQUENCY`); `k+1` ascending edges -> `k` counts (`list of int`). |
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
 | [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`).                                                                          |

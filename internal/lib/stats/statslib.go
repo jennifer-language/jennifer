@@ -140,6 +140,37 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "modes", modesFn)
 	in.RegisterNamespaced(LibraryName, "describe", describeFn)
 
+	// Distributions (pdf / pmf, cdf, quantile, sample) - the probability layer,
+	// built on `math`'s regularized incomplete gamma / beta. Flat R-style names.
+	in.RegisterNamespaced(LibraryName, "normalPdf", normalPdfFn)
+	in.RegisterNamespaced(LibraryName, "normalCdf", normalCdfFn)
+	in.RegisterNamespaced(LibraryName, "normalQuantile", normalQuantileFn)
+	in.RegisterNamespaced(LibraryName, "normalSample", normalSampleFn)
+	in.RegisterNamespaced(LibraryName, "tPdf", tPdfFn)
+	in.RegisterNamespaced(LibraryName, "tCdf", tCdfFn)
+	in.RegisterNamespaced(LibraryName, "tQuantile", tQuantileFn)
+	in.RegisterNamespaced(LibraryName, "chiSquareCdf", chiSquareCdfFn)
+	in.RegisterNamespaced(LibraryName, "chiSquareQuantile", chiSquareQuantileFn)
+	in.RegisterNamespaced(LibraryName, "fCdf", fCdfFn)
+	in.RegisterNamespaced(LibraryName, "fQuantile", fQuantileFn)
+	in.RegisterNamespaced(LibraryName, "binomialPmf", binomialPmfFn)
+	in.RegisterNamespaced(LibraryName, "binomialCdf", binomialCdfFn)
+	in.RegisterNamespaced(LibraryName, "poissonPmf", poissonPmfFn)
+	in.RegisterNamespaced(LibraryName, "poissonCdf", poissonCdfFn)
+
+	// Inference: regression, confidence intervals, hypothesis tests, histogram.
+	in.RegisterNamespaced(LibraryName, "linearRegression", linearRegressionFn)
+	in.RegisterNamespaced(LibraryName, "multipleRegression", multipleRegressionFn)
+	in.RegisterNamespaced(LibraryName, "confidenceInterval", confidenceIntervalFn)
+	in.RegisterNamespaced(LibraryName, "proportionCi", proportionCiFn)
+	in.RegisterNamespaced(LibraryName, "tTest", tTestFn)
+	in.RegisterNamespaced(LibraryName, "tTest2", tTest2Fn)
+	in.RegisterNamespaced(LibraryName, "chiSquareTest", chiSquareTestFn)
+	in.RegisterNamespaced(LibraryName, "fTest", fTestFn)
+	in.RegisterNamespaced(LibraryName, "anova", anovaFn)
+	in.RegisterNamespaced(LibraryName, "histogram", histogramFn)
+	registerInferenceStructs(in)
+
 	// stats.Summary is the struct describe() returns: the count plus the
 	// five-number summary, the mean, and the population standard deviation.
 	fl := parser.PrimitiveType(parser.TypeFloat)

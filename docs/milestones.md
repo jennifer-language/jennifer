@@ -1166,54 +1166,43 @@ catchable error, never a NaN (the CDF builtins guard the hand-rolled results and
 clamp into `[0, 1]`). Go stdlib for the base functions; TinyGo-clean, both
 binaries.
 
-### M24.11 - distributions + inferential `stats`
+### M24.11 - distributions + inferential `stats` (compacted)
 
-**Planned.** The classical numerical-inference layer - the `scipy.stats` / Excel
-statistical surface - extending the shipped `stats` library, built on `M24.10`'s
-`math` special functions and `linalg`. There is **no separate `prob` library**:
-distributions live with the descriptive stats and inference they are always used
-with (as in `scipy.stats`, or R's base `dnorm` / `pnorm` / `qnorm`), so
-`use stats;` gives the whole statistical toolkit. Two parts, both new `stats`
-rows:
-- **Distributions** - continuous normal, t, chi-square, F (later uniform /
-  exponential / gamma / beta) and discrete binomial / Poisson, each with flat
-  R-style names: `normalPdf` / `normalCdf` / `normalQuantile` / `normalSample`,
-  `tCdf` / `tQuantile`, `binomialPmf`, and so on. The `quantile` (inverse CDF) is
-  the incomplete gamma / beta of `M24.10` inverted numerically; sampling draws on
-  `math`'s random source. Strict: an out-of-domain parameter or a quantile
-  probability outside `[0, 1]` is a catchable error, not a NaN.
-- **Inference** - linear regression (`linearRegression` simple,
-  `multipleRegression` via `linalg`'s `solve`), `confidenceInterval` (t-based),
-  binomial-proportion intervals (`proportionCi` - Wald / Wilson / exact
-  **Clopper-Pearson** over the `beta` distribution), hypothesis tests (`tTest`,
-  `chiSquareTest`, `fTest`, `anova`), and `histogram` (Excel `FREQUENCY`). The
-  point-estimate regression and `histogram` need only what ships today; the
-  p-values and intervals use the distributions above.
+**Done.** The classical numerical-inference layer (the `scipy.stats` / Excel
+surface) folded into `stats`, built on `M24.10`'s `math` special functions.
+**No separate `prob` library** - distributions live with the descriptive stats
+and inference they are used with (as in `scipy.stats` / R's `dnorm` / `pnorm`),
+so `use stats;` gives the whole toolkit. Two new `stats` layers:
+- **Distributions** (`distributions.go`) - normal / t / chi-square / F /
+  binomial / Poisson, flat R-style names (`normalCdf` / `normalQuantile` /
+  `tCdf` / `binomialPmf` / ...): pdf/pmf, cdf (reusing `math`'s exported
+  `RegularizedGammaP` / `RegularizedIncBeta`), quantile (Acklam probit +
+  bracketed bisection), and Box-Muller `normalSample` on `math`'s random source.
+- **Inference** (`inference.go`) - `linearRegression` / `multipleRegression`
+  (self-contained Gauss-Jordan solve, no `linalg` dependency), `confidenceInterval`,
+  `proportionCi` (Wald / Wilson / exact **Clopper-Pearson**), `tTest` / `tTest2`
+  / `chiSquareTest` / `fTest` / `anova`, and `histogram` (Excel `FREQUENCY`).
+  Results are `stats.Regression` / `Interval` / `Test` structs.
 
-A big, cohesive statistics workhorse (like `scipy.stats` - all pure functions).
+Strict throughout: every p-value / CDF is finite-guarded and clamped to
+`[0, 1]`, and a degenerate / out-of-domain / overflowing input (zero variance,
+singular design, negative observed count, magnitudes past the float64 ceiling)
+is a catchable error, never a NaN. Pinned against scipy reference values;
+pure-value, TinyGo-clean, both binaries.
 
-### M24.12 - scientific-notation float literals
+### M24.12 - scientific-notation float literals (compacted)
 
 **Done.** Float literals accept an `[eE][+-]?digits` exponent (`6.022e23`,
-`1.6e-19`, `2.5E8`, `1e10`), the notation every scientific magnitude and small
-probability is written in. The exponent makes the literal a **float** even with
-no fractional part (`1e10` is a float; `1e` a positioned lex error), takes no `_`
-separators (the mantissa still does: `1_000.5e3`), and is decimal-only - `0xe5`
-keeps `e` as a hex digit. Purely a lexer change (`readNumber` gains the exponent
-scan; the parser's existing `strconv.ParseFloat` reads the lexeme, so an
-overflowing `1e400` is a positioned parse error, not an `Inf`; an underflowing
-`1e-400` rounds to a finite `0.0`, since the strict check bans the non-finite,
-not a finite zero). **Additive /
-non-breaking** - `1e10` was a juxtaposition parse error before, so no valid
-program changes.
-
-On stance #1 (**one way per thing**): scientific notation *appears* to add a
-second spelling for a value that already has a decimal form, but it is admitted
-for the same reason `0xff` / `0o755` / `0b1010` are - a notation that carries
-domain intent is not a parallel API, and for extreme magnitudes (`1e-300`) there
-is no practical decimal form at all. Decisively, the interpreter already *prints*
-exponent form (`1e+21`) but could not read it back - the literal closes that
-round-trip gap rather than opening a new one. Reasoning recorded in
+`1.6e-19`, `2.5E8`, `1e10`) - the exponent makes a literal a **float** even with
+no fraction (`1e10` is a float; `1e` a positioned lex error), takes no `_`
+separators (the mantissa still does), and is decimal-only (`0xe5` keeps `e` as a
+hex digit). A lexer-only change (`readNumber` scans the exponent; the parser's
+`strconv.ParseFloat` reads the lexeme); additive / non-breaking. Strict at the
+magnitude edge: overflow (`1e400`) is a positioned parse error, never `Inf`;
+underflow (`1e-400`) rounds to a finite `0.0` (the check bans the non-finite, not
+a finite zero). On stance #1 it is admitted for the same reason `0xff` / `0o755`
+carry domain intent (not a parallel API), and it closes a round-trip gap - the
+interpreter already prints `1e+21` but could not read it back. Reasoning in
 `design-decisions.md`.
 
 ## M25 - multiplatform: promote macOS / Windows to supported

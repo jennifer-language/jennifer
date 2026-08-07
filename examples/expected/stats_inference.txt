@@ -1,0 +1,13 @@
+normalCdf(1.96)      = 0.975002
+normalQuantile(.975) = 1.959964
+tQuantile(.975, 10)  = 2.228139
+chiSqQuantile(.95,1) = 3.841459
+binomialPmf(5,10,.5) = 0.246094
+poissonCdf(2, 3)     = 0.423190
+regression: slope=2.0 intercept=1.0 r2=1.000 n=5
+mean 95pct CI: lower=3.2125 upper=6.7875
+proportion 8/10 Clopper-Pearson: lower=0.4439 upper=0.9748
+tTest vs 3: t=2.6458 df=7 p=0.0331
+chiSquareTest: stat=20.0 df=3 p=0.000170
+anova: F=13.0 df1=2 df2=6 p=0.006592
+histogram: [2, 2, 3]

@@ -401,6 +401,14 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   struct. Population (`variance`/`stddev`/`covariance`/moments) vs sample (`sample*`,
   `n-1`); `kurtosis` is excess. Undefined results (empty list, bad percentile,
   zero-variance, non-positive geometric/harmonic input) are catchable errors.
+  Also **distributions** (flat R-style names, `float`): normal
+  `normalPdf/normalCdf/normalQuantile/normalSample`, `tPdf/tCdf/tQuantile`,
+  `chiSquareCdf/chiSquareQuantile`, `fCdf/fQuantile`, `binomialPmf/binomialCdf`,
+  `poissonPmf/poissonCdf` (quantile `p` in `(0,1)`); and **inference**:
+  `linearRegression`/`multipleRegression`, `confidenceInterval`, `proportionCi`
+  (wald/wilson/clopper-pearson), `tTest`/`tTest2`, `chiSquareTest`, `fTest`,
+  `anova`, `histogram`. Results are `stats.Regression`/`Interval`/`Test` structs.
+  No separate `prob` library - distributions live in `stats` (like `scipy.stats`).
 - **`linalg`** - linear algebra, the companion to `stats`. Vectors are a
   `list of float`: `dot distance cross normalize`. Matrices are a
   `list of list of float`: `transpose trace determinant inverse solve identity
