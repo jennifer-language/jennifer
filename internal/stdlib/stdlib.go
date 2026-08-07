@@ -14,6 +14,7 @@ package stdlib
 import (
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/archive"
+	asn1lib "jennifer-lang.dev/jennifer/internal/lib/asn1"
 	binarylib "jennifer-lang.dev/jennifer/internal/lib/binary"
 	channellib "jennifer-lang.dev/jennifer/internal/lib/channel"
 	"jennifer-lang.dev/jennifer/internal/lib/compress"
@@ -97,4 +98,5 @@ func InstallAll(in *interpreter.Interpreter) {
 	sqllib.Install(in)
 	kvlib.Install(in)
 	linalglib.Install(in)
+	asn1lib.Install(in)
 }

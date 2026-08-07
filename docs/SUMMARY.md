@@ -26,6 +26,7 @@
 - [Catalog](libraries/index.md)
 - [Cheatsheet](libraries/cheatsheet.md)
 - [`archive`](libraries/archive.md)
+- [`asn1`](libraries/asn1.md)
 - [`binary`](libraries/binary.md)
 - [`channel`](libraries/channel.md)
 - [`compress`](libraries/compress.md)

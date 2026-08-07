@@ -431,6 +431,15 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `json.Value` walked by JSON Pointer accessors (`get`/`asInt`/`asString`/
   `typeOf`/`has`/`keys`/`length`/...) and edited by non-mutating writers
   (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`).
+- **`asn1`** - ASN.1 BER decode / DER encode (the byte layer under LDAP / SNMP /
+  PKI), designed like `json`. `decode(bytes)` returns an opaque `asn1.Value`
+  walked by `(node, pointer)` accessors where the pointer's tokens are child
+  indices (`typeOf`/`tagClass`/`tagNumber`/`isConstructed`/`get`/`has`/`length`/
+  `asInt`/`asBool`/`asString`/`asBytes`/`asOid`/`isNull`). Build with typed
+  constructors (`integer`/`enumerated`/`boolean`/`null`/`octetString`/
+  `utf8String`/`printableString`/`ia5String`/`oid`/`sequence`/`set`, plus
+  `tagged` EXPLICIT / `retag` IMPLICIT context tags) and `encode(v)` -> DER
+  `bytes`. Malformed input and wrong-type leaf reads are catchable errors.
 - **`toml`** - RFC-conformant TOML 1.0 `encode`/`encodePretty`/`decode` with
   the **same opaque-value, read / walk / write surface as `json`, name for
   name** (JSON Pointer addressing), plus `asDatetime` (backed by `time.Time`)

@@ -1,0 +1,10 @@
+value: sequence { integer 42, octetString (5 bytes), oid 1.2.840.113549.1.1.11, boolean true, context[0] { integer 7 } }
+DER:   301d02012a040568656c6c6f06092a864886f70d01010b0101ffa003020107
+root:  sequence with 5 children
+[0]    integer = 42
+[1]    string  = hello
+[2]    oid     = 1.2.840.113549.1.1.11
+[3]    bool    = true
+[4]    context tag 0, inner = 7
+stable round-trip: true
+bad input: asn1.decode: element length 5 exceeds the 0 available bytes

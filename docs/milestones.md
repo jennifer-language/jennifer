@@ -1107,20 +1107,29 @@ routines. Eigenvalues / decompositions (LU / QR / Cholesky) / rank stay with the
 ML-primitives companion on the horizon (`DRAFT#7`). Pinned by `linalglib_test.go`;
 `examples/linalg.j` + golden. Graduated `DRAFT#6`. **Requires:** none.
 
-### M24.7 - `asn1` library
+### M24.7 - `asn1` library (compacted)
 
-**Planned.** An `asn1` system library: ASN.1 BER/DER encode/decode as a **Go**
-system library (not a `.j` module). Byte-level binary parsing belongs in Go, not
-the tree-walker - the `json` lesson: a char-by-char parser in the interpreter pays
-overhead per byte. This is the **enabler** for a family of binary protocols and PKI
-formats (LDAP, SNMP, and, later, X.509 / PKCS surfaces). Go's stdlib
-`encoding/asn1` is DER-only, so the full **BER** that LDAP / SNMP need (indefinite
-lengths, alternative encodings) requires either a vetted BER dependency (e.g.
-`go-asn1-ber`) or a hand-rolled BER codec in Go; the decode surface mirrors the
-opaque-value `KindObject` shape the `json` / `toml` / `xml` / `yaml` libraries use
-(a walked tree, not map-to-struct coercion). Follows the standard-library
-discipline (Go package + `internal/stdlib.InstallAll` line + `docs/libraries/asn1.md`
-+ cheatsheet + `JENNIFER.md`).
+**Done.** An `asn1` system library (`internal/lib/asn1`): ASN.1 BER decode / DER
+encode, the byte-level enabler for the LDAP / SNMP clients (later X.509 / PKCS).
+Hand-rolled in Go - Go's `encoding/asn1` is DER-only + reflect-bound - so no
+dependency: `decode` reads full **BER** (indefinite lengths, high-tag-number
+identifiers), `encode` emits canonical **DER**. Mirrors the opaque-value
+`KindObject` shape (`json` / `toml` / `xml` / `yaml`): `decode` yields an opaque
+`asn1.Value` (element tree - class / tag / constructed / content / children)
+walked by `(node, pointer)` accessors whose pointer tokens are **child indices**
+(`typeOf` / `tagClass` / `tagNumber` / `isConstructed` / `get` / `has` / `length`
+/ `asInt` / `asBool` / `asString` / `asBytes` / `asOid` / `isNull`); built with
+typed constructors (`integer` / `enumerated` / `boolean` / `null` / `octetString`
+/ `utf8String` / `printableString` / `ia5String` / `oid` / `sequence` / `set`,
+plus `tagged` EXPLICIT / `retag` IMPLICIT context tagging) and serialised by
+`encode`. Strict: malformed input and wrong-type leaf reads are catchable errors;
+a decode-node budget (sized in ~1.5 KB Value cells) + nesting cap turn a decode
+bomb into a catchable error, not an OOM / stack overflow; long-form lengths
+accumulate width-independently and tag numbers are bounded so build / decode stay
+symmetric. Encoder output byte-verified against Go's `encoding/asn1`; pinned by
+`asn1_test.go`; `examples/asn1.j` + golden. Pure Go stdlib, TinyGo-clean, both
+binaries. Graduated `DRAFT#9`. **Requires:** none (it is itself the enabler for
+`M24.8` / `M24.9`).
 
 ### M24.8 - `snmp` client
 

@@ -15,6 +15,14 @@ flat lookup view, not authoritative.
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [`archive`](archive.md)`.pack(entries, format)`      | Bundle a `list of archive.Entry` into `bytes`; `format` `"tar"`/`"zip"`/`"tar.gz"`.                                              |
 | [`archive`](archive.md)`.unpack(b, format)`          | Read a bundle back into a `list of archive.Entry`.                                                                                 |
+| [`asn1`](asn1.md)`.decode(b)` / `.encode(v)`         | Parse BER `bytes` into an opaque `asn1.Value` / serialise one back to DER `bytes`.                                                 |
+| [`asn1`](asn1.md)`.typeOf/tagClass/tagNumber/isConstructed(v[, ptr])` | Element type name / class / numeric tag / constructed-ness; pointer tokens are child indices (`"/0/2"`).       |
+| [`asn1`](asn1.md)`.get(v[, ptr])` / `.has(v, ptr)` / `.length(v[, ptr])` | Sub-element as `asn1.Value` / whether a pointer resolves / child count of a constructed node.               |
+| [`asn1`](asn1.md)`.asInt/asBool/asString/asBytes/asOid/isNull(v[, ptr])` | Read a leaf: integer/enum, boolean, string type or octets, raw octets, dotted OID, or whether `NULL`.       |
+| [`asn1`](asn1.md)`.integer/enumerated/boolean/null/octetString(...)` | Build a primitive element.                                                                                       |
+| [`asn1`](asn1.md)`.utf8String/printableString/ia5String/oid(s)` | Build a string / OID element.                                                                                         |
+| [`asn1`](asn1.md)`.sequence(items)` / `.set(items)`  | Build a constructed element from a `list of asn1.Value`.                                                                           |
+| [`asn1`](asn1.md)`.tagged(class, n, v)` / `.retag(class, n, v)` | EXPLICIT (wrap) / IMPLICIT (overwrite tag) context/application tagging; `class` `"context"`/`"application"`/... |
 | [`binary`](binary.md)`.concat(a, b)`                 | Join two `bytes` into a fresh `bytes` (O(len a + len b); avoid in an accumulation loop - use `net.readAll`/`readN`).                |
 | [`binary`](binary.md)`.contains(haystack, needle)`   | Whether `needle` occurs in `bytes` `haystack` (boolean sibling of `indexOf`).                                                       |
 | [`binary`](binary.md)`.endsWith(b, suffix)`          | True iff `bytes` `b` ends with `suffix`.                                                                                            |
