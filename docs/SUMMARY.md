@@ -124,6 +124,7 @@
 - [`session`](modules/session.md)
 - [`slack`](modules/slack.md)
 - [`smtp`](modules/smtp.md)
+- [`snmp`](modules/snmp.md)
 - [`sqlmigrate`](modules/sqlmigrate.md)
 - [`statsd`](modules/statsd.md)
 - [`telegram`](modules/telegram.md)

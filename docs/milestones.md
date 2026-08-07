@@ -1131,17 +1131,33 @@ symmetric. Encoder output byte-verified against Go's `encoding/asn1`; pinned by
 binaries. Graduated `DRAFT#9`. **Requires:** none (it is itself the enabler for
 `M24.8` / `M24.9`).
 
-### M24.8 - `snmp` client
+### M24.8 - `snmp` client + agent
 
-**Planned.** An SNMP client - the **simpler** of the two canonical
-ASN.1-over-the-wire protocols and the natural first: compact PDUs, UDP transport,
-no SASL. Layered on `asn1` (`M24.7`) for the BER byte crunching and `net` for UDP;
-the orchestration (build a PDU, send, decode the response varbinds) is not per-byte
-hot, so it can live in a `.j` module or a thin Go library. The pure-`.j` BER layer
-is explicitly *not* the plan - that is what `M24.7` is for. Ships with the module
-discipline where `.j` (test overlay + doc + demo). Graduated `DRAFT#10` (the
-ASN.1-protocol pair; the `ldap` half is `M24.9`). **Requires:** `M24.7` (`asn1`)
-and the shipped `net` library.
+**Done.** An SNMP v1 / v2c **client and agent** (`modules/snmp.j`) - the simpler
+of the two ASN.1-over-the-wire protocols and the natural first: compact PDUs, UDP
+transport, community-string auth, no SASL. A `.j` module (the orchestration is not
+per-byte hot): the BER byte-crunching stays in `asn1` (`M24.7`), the transport in
+`net` UDP. *Client:* `client` / `clientWith` -> `Client`, then `get` / `getNext` /
+`set` / subtree `walk` return a `list of Varbind` `{oid, type, value, number}`
+typed by SNMP value type (universal integer / octetString / oid / null;
+`[APPLICATION]` counter32 / gauge32 / timeTicks / ipAddress / counter64 / opaque
+via `asn1.retag`; and the `[CONTEXT]` noSuchObject / noSuchInstance / endOfMibView
+exceptions). `intVar` / `stringVar` / `oidVar` / `varbind` build bindings; each
+exchange checks the request-id and bounds the wait with a receive deadline +
+retries; malformed responses normalise to one `snmp`-kind error. *Agent (server /
+hardware simulator):* `agent(community, version, bindings)` + `serve` / `serveOn`
+answer GET / GETNEXT / SET for a MIB, GETNEXT in numeric OID order (so a client
+`walk` traverses it), wrong-community / malformed datagrams dropped. The message
+codec and request-dispatch are factored pure (network-free) so the overlay
+round-trips every value type and every agent path without a socket; the live
+send/recv and a self-contained client<->agent loop are driven over loopback UDP in
+the Go suite, and the client was verified end-to-end against real hardware. No
+SNMPv3 / USM, traps, or GETBULK. Module discipline: `modules/snmp_test.j` (100%),
+`docs/modules/snmp.md`, `examples/modules/snmp_demo.j` +
+`examples/modules/snmp_agent_demo.j`, `cmd/jennifer/snmp_test.go`, catalog rows.
+Default `jennifer` binary only (`net`). Graduated `DRAFT#10` (the ASN.1-protocol
+pair; the `ldap` half is `M24.9`). **Requires:** `M24.7` (`asn1`) and the shipped
+`net` library.
 
 ### M24.9 - `ldap` client
 

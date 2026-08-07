@@ -165,6 +165,29 @@ func (s *scoped) doStmt(st parser.Stmt) {
 			s.block(n.ElseIfBodies[i])
 		}
 		s.block(n.Else)
+	case *parser.MatchStmt:
+		// The subject is evaluated once (a real read of any $var in it),
+		// then each arm: its values, and its body in a fresh frame. Without
+		// this case a variable used only as a match subject looks unused
+		// (L101), and a throw inside an arm would be missed (L104).
+		s.doExpr(n.Subject)
+		for i := range n.Arms {
+			arm := &n.Arms[i]
+			for _, v := range arm.Values {
+				s.doExpr(v)
+			}
+			s.push(false)
+			if arm.Bind != "" {
+				// A variant-pattern binder (`when V(bind)`), non-reportable
+				// like a catch / for-each variable.
+				s.declare(&binding{name: arm.Bind})
+			}
+			if arm.Body != nil {
+				s.stmts(arm.Body.Stmts)
+			}
+			s.pop()
+		}
+		s.block(n.Else)
 	case *parser.WhileStmt:
 		s.doExpr(n.Cond)
 		s.block(n.Body)

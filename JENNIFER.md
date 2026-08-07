@@ -999,6 +999,23 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   handle) and `smtp.close(session)` QUITs and closes; `smtp.send` is the one-shot
   open / sendOn / close convenience. Uses `net`, so **default `jennifer` binary
   only**.
+- **`snmp`** - an SNMP v1 / v2c **client and agent** over UDP, built on the `asn1`
+  BER codec and `net`. *Client:* `snmp.client(host, community)` (port 161, v2c, 2s
+  timeout) / `snmp.clientWith(address, community, version, timeoutMs, retries)` ->
+  `snmp.Client`; then `snmp.get(c, oids)` / `getNext(c, oids)` / `set(c, varbinds)`
+  / `walk(c, rootOid)` return a `list of snmp.Varbind` `{oid, type, value, number}`
+  typed by SNMP value type (`integer` / `octetString` / `oid` / `null` /
+  `counter32` / `gauge32` / `timeTicks` / `ipAddress` / `counter64` / `opaque` /
+  the `noSuchObject` / `noSuchInstance` / `endOfMibView` exceptions). *Agent
+  (server / hardware simulator):* `snmp.agent(community, version, bindings)` ->
+  `snmp.Agent`, then `snmp.serve(a, address)` (forever) or `snmp.serveOn(a,
+  socket, stop)` (until `channel.send(stop, true)`, for a graceful `task.wait`
+  join) answer GET / GETNEXT / SET for the MIB (GETNEXT walks OIDs in numeric
+  order, wrong community / malformed datagrams dropped). `snmp.intVar` / `stringVar` / `oidVar`
+  / `varbind` build bindings; constants `snmp.VERSION1` / `VERSION2C`.
+  Community-string auth only (no SNMPv3 / USM / traps); each client exchange
+  checks the request-id and times out. Throws `Error` (kind `"snmp"`). **Default
+  `jennifer` binary only** (`net`).
 - **`totp`** - time-based one-time passwords (RFC 6238 over RFC 4226 HOTP), the
   two-factor codes authenticator apps show. `totp.generate(secret, opts)` /
   `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);

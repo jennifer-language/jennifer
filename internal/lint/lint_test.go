@@ -61,6 +61,10 @@ func TestUnusedLocal(t *testing.T) {
 		{"spawn-local not flagged", `func f() { def t as task of int init spawn { def inner as int init 5; return 0; }; return task.wait($t); }`, 0},
 		{"outer used only in spawn", `func f() { def outer as int init 5; def t as task of int init spawn { return $outer; }; return task.wait($t); }`, 0},
 		{"global not flagged", `def top as int init 1;`, 0},
+		{"used only as match subject", `func f(x as int) { def n as int init $x; match ($n) { when 1 { return 1; } else { return 0; } } return 0; }`, 0},
+		{"used only in a match arm value", `func f(x as int) { def lim as int init $x; match (2) { when $lim { return 1; } else { return 0; } } return 0; }`, 0},
+		{"used only in a match arm body", `func f(x as int) { def y as int init $x; match (1) { when 1 { return $y; } else { return 0; } } return 0; }`, 0},
+		{"unused inside a match arm still flagged", `func f() { match (1) { when 1 { def dead as int init 2; return 0; } else { return 0; } } return 0; }`, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
