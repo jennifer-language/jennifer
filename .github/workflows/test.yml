@@ -216,13 +216,15 @@ jobs:
         timeout-minutes: 30
         # Runs examples/benchmark.j on both binaries as a smoke / regression
         # signal: it catches a performance-path change that hangs or crashes.
-        # The numbers themselves are NOT authoritative - a shared CI runner
-        # is too noisy for that, and published figures come from the
-        # reference machine - so nothing is captured; a non-zero exit (or a
-        # timeout) is what fails the build.
+        # `--suite all` exercises both the v1 interpreter-throughput workload
+        # and the v2 numeric-library workload (stats / linalg / math / ml), so a
+        # hang / crash in either path fails the build. The numbers themselves
+        # are NOT authoritative - a shared CI runner is too noisy for that, and
+        # published figures come from the reference machine - so nothing is
+        # captured; a non-zero exit (or a timeout) is what fails the build.
         run: |
-          ./jennifer run examples/benchmark.j
-          ./jennifer-tiny run examples/benchmark.j
+          ./jennifer run examples/benchmark.j --suite all
+          ./jennifer-tiny run examples/benchmark.j --suite all
 
       - name: em-dash scan (project rule)
         run: |

@@ -9,6 +9,16 @@
  * (TinyGo). `--format text` (default) prints the human table; `--format json`
  * emits one JSON object. Not part of the golden-file test suite (output is
  * timing- and host-dependent).
+ *
+ * VERSIONING DISCIPLINE. The suite is versioned so reference numbers stay
+ * comparable over time and across machines. `--suite v1` (the default) runs
+ * the original interpreter-throughput workload; `--suite v2` runs the
+ * numeric-library workload (stats / linalg / math / ml); `--suite all` runs
+ * both. A suite's workloads and tunables are FROZEN once it has published
+ * reference numbers - never change a v1 (or v2) workload's operations or
+ * sizing, or its historical series breaks. New workloads go in a NEW suite
+ * version (v3, v4, ...), never into a frozen one. The harness / output around
+ * the workloads may evolve, but the timed code inside each `benchX` must not.
  * @module benchmark
  */
 
@@ -29,6 +39,9 @@ use os;
 use fs;
 use json;
 use binary;
+use stats;
+use linalg;
+use ml;
 
 # --- Tunables ------------------------------------------------------
 # Bump these if the suite runs too fast to see meaningful numbers, or
@@ -46,6 +59,20 @@ def const MAP_CHURN_SIZE as int init 10000;
 def const PARALLEL_WORKERS as int init 4;
 def const BYTE_BUF_SIZE as int init 500000;
 def const BYTE_SCAN_REPS as int init 10;
+
+# --- Suite v2 tunables (numeric libraries) -------------------------
+# FROZEN together with the v2 workloads once v2 has reference numbers.
+# These exercise the stats / linalg / math / ml surface: the Go-side
+# compute plus the Jennifer<->Go marshaling of lists / matrices.
+def const DIST_ITERS as int init 50000; # stats distribution calls
+def const SPECIAL_ITERS as int init 50000; # math special-function calls
+def const MATRIX_N as int init 30; # square-matrix dimension
+def const MATMUL_REPS as int init 300; # linalg.matmul repetitions
+def const SOLVE_REPS as int init 300; # linalg.solve repetitions
+def const ML_ROWS as int init 500; # ml training rows
+def const ML_FEATS as int init 5; # ml feature columns
+def const ML_REPS as int init 200; # fit+predict repetitions
+def const KMEANS_REPS as int init 40; # ml.kMeans repetitions
 
 # --- Helpers -------------------------------------------------------
 
@@ -563,29 +590,31 @@ func emitText(r as Report) {
         "",
         $r.totalMs);
 
-    io.printf("\n");
-    printDivider();
-    io.printf("Parallel comparison (workers = %d, scheduler = %s)\n", $r.workers, $r.build);
-    if (strings.startsWith($r.virt, "VIRTUALIZED")) {
-        io.printf("NOTE: virtualized / containerized host - these parallel numbers may not reflect bare-metal scaling.\n");
-    }
-    printDivider();
-    io.printf(
-        "%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n", # lint-disable: L203
-        "Workload",
-        "serial_ms",
-        "par_ms",
-        "speedup");
-    printDivider();
-    for (def p in $r.parallel) {
+    if (len($r.parallel) > 0) {
+        io.printf("\n");
+        printDivider();
+        io.printf("Parallel comparison (workers = %d, scheduler = %s)\n", $r.workers, $r.build);
+        if (strings.startsWith($r.virt, "VIRTUALIZED")) {
+            io.printf("NOTE: virtualized / containerized host - these parallel numbers may not reflect bare-metal scaling.\n");
+        }
+        printDivider();
         io.printf(
-            "%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n", # lint-disable: L203
-            $p.name,
-            $p.serialMs,
-            $p.parMs,
-            $p.speedup);
+            "%s|pad=30|align=left %s|pad=12|align=right %s|pad=12|align=right %s|pad=12|align=right\n", # lint-disable: L203
+            "Workload",
+            "serial_ms",
+            "par_ms",
+            "speedup");
+        printDivider();
+        for (def p in $r.parallel) {
+            io.printf(
+                "%s|pad=30|align=left %d|pad=12|align=right %d|pad=12|align=right %f|prec=2|pad=12|align=right\n", # lint-disable: L203
+                $p.name,
+                $p.serialMs,
+                $p.parMs,
+                $p.speedup);
+        }
+        printDivider();
     }
-    printDivider();
     return;
 }
 
@@ -642,6 +671,245 @@ func byteScanFast() {
     return time.milliseconds($gap);
 }
 
+# --- Suite v2 workloads (numeric libraries) ------------------------
+# FROZEN with the v2 tunables once v2 has reference numbers. Data
+# (matrices / datasets) is built OUTSIDE the timed region so a
+# measurement isolates the library call + marshaling, not the setup.
+
+# buildSquare returns an N x N matrix of pseudo-random floats, made
+# diagonally dominant so linalg.solve stays non-singular. Seeded.
+func buildSquare(n as int, seed as int) {
+    math.randSeed($seed);
+    def m as list of list of float init [];
+    def i as int init 0;
+    while ($i < $n) {
+        def row as list of float init [];
+        def j as int init 0;
+        while ($j < $n) {
+            $row[] = math.rand();
+            $j = $j + 1;
+        }
+        $row[$i] = $row[$i] + convert.toFloat($n);
+        $m[] = $row;
+        $i = $i + 1;
+    }
+    return $m;
+}
+
+# buildDataset returns a rows x cols matrix of pseudo-random floats.
+func buildDataset(rows as int, cols as int, seed as int) {
+    math.randSeed($seed);
+    def m as list of list of float init [];
+    def i as int init 0;
+    while ($i < $rows) {
+        def row as list of float init [];
+        def j as int init 0;
+        while ($j < $cols) {
+            $row[] = math.rand();
+            $j = $j + 1;
+        }
+        $m[] = $row;
+        $i = $i + 1;
+    }
+    return $m;
+}
+
+func buildVector(n as int, seed as int) {
+    math.randSeed($seed);
+    def v as list of float init [];
+    def i as int init 0;
+    while ($i < $n) {
+        $v[] = math.rand();
+        $i = $i + 1;
+    }
+    return $v;
+}
+
+# stats distributions: the normal CDF over many scalars (erfc + marshal).
+func benchNormalDist() {
+    def start as time.Time init time.now();
+    def i as int init 0;
+    def acc as float init 0.0;
+    while ($i < DIST_ITERS) {
+        def x as float init convert.toFloat($i % 400) / 100.0 - 2.0;
+        $acc = $acc + stats.normalCdf($x, 0.0, 1.0);
+        $i = $i + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    return time.milliseconds($gap);
+}
+
+# math special functions: the hand-rolled regularized incomplete gamma.
+func benchSpecialFn() {
+    def start as time.Time init time.now();
+    def i as int init 0;
+    def acc as float init 0.0;
+    while ($i < SPECIAL_ITERS) {
+        def x as float init convert.toFloat($i % 100) / 10.0 + 0.1;
+        $acc = $acc + math.regGammaP(2.5, $x);
+        $i = $i + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    return time.milliseconds($gap);
+}
+
+# linalg matmul: repeated N x N products (Go compute + list marshaling).
+func benchMatmul() {
+    def a as list of list of float init buildSquare(MATRIX_N, 1);
+    def b as list of list of float init buildSquare(MATRIX_N, 2);
+    def start as time.Time init time.now();
+    def r as int init 0;
+    while ($r < MATMUL_REPS) {
+        linalg.matmul($a, $b);
+        $r = $r + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    return time.milliseconds($gap);
+}
+
+# linalg solve: repeated dense Gaussian elimination on an N x N system.
+func benchSolve() {
+    def a as list of list of float init buildSquare(MATRIX_N, 3);
+    def b as list of float init buildVector(MATRIX_N, 4);
+    def start as time.Time init time.now();
+    def r as int init 0;
+    while ($r < SOLVE_REPS) {
+        linalg.solve($a, $b);
+        $r = $r + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    return time.milliseconds($gap);
+}
+
+# ml fit/predict: repeated linear regression (normal equations) + predict,
+# freeing each model so the registry does not grow.
+func benchMLFit() {
+    def x as list of list of float init buildDataset(ML_ROWS, ML_FEATS, 5);
+    def y as list of float init [];
+    def i as int init 0;
+    while ($i < ML_ROWS) {
+        def t as float init 1.0;
+        def j as int init 0;
+        while ($j < ML_FEATS) {
+            $t = $t + convert.toFloat($j + 1) * $x[$i][$j];
+            $j = $j + 1;
+        }
+        $y[] = $t;
+        $i = $i + 1;
+    }
+    def start as time.Time init time.now();
+    def r as int init 0;
+    while ($r < ML_REPS) {
+        def m as ml.Model init ml.linearRegression($x, $y);
+        ml.predict($m, $x);
+        ml.free($m);
+        $r = $r + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    return time.milliseconds($gap);
+}
+
+# ml clustering: repeated k-means (seeded for stable work).
+func benchKMeans() {
+    def x as list of list of float init buildDataset(ML_ROWS, ML_FEATS, 7);
+    def start as time.Time init time.now();
+    def r as int init 0;
+    while ($r < KMEANS_REPS) {
+        math.randSeed(8);
+        def m as ml.Model init ml.kMeans($x, 4);
+        ml.free($m);
+        $r = $r + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    return time.milliseconds($gap);
+}
+
+# runV2 runs the numeric-library suite, emitting the same report shape as v1.
+func runV2() {
+    def msDist as int init benchNormalDist();
+    def msSpecial as int init benchSpecialFn();
+    def msMatmul as int init benchMatmul();
+    def msSolve as int init benchSolve();
+    def msML as int init benchMLFit();
+    def msKMeans as int init benchKMeans();
+
+    def benches as list of Bench init [];
+    $benches[] = Bench{
+        name: "stats normal cdf",
+        base: DIST_ITERS,
+        iters: DIST_ITERS,
+        timeMs: $msDist
+    };
+    $benches[] = Bench{
+        name: "math regGammaP",
+        base: SPECIAL_ITERS,
+        iters: SPECIAL_ITERS,
+        timeMs: $msSpecial
+    };
+    $benches[] = Bench{
+        name: "linalg matmul NxN",
+        base: MATRIX_N,
+        iters: MATMUL_REPS,
+        timeMs: $msMatmul
+    };
+    $benches[] = Bench{
+        name: "linalg solve NxN",
+        base: MATRIX_N,
+        iters: SOLVE_REPS,
+        timeMs: $msSolve
+    };
+    $benches[] = Bench{name: "ml linreg fit+predict", base: ML_ROWS, iters: ML_REPS, timeMs: $msML};
+    $benches[] = Bench{
+        name: "ml kMeans cluster",
+        base: ML_ROWS,
+        iters: KMEANS_REPS,
+        timeMs: $msKMeans
+    };
+
+    def sumMs as int init 0;
+    for (def w in $benches) {
+        $sumMs = $sumMs + $w.timeMs;
+    }
+    def noPar as list of Par init [];
+    def rep as Report init Report{
+        schema: "jennifer-benchmark/2",
+        build: meta.BUILD,
+        version: meta.VERSION,
+        cpu: cpuModel(),
+        ncpu: os.NCPU,
+        platform: os.PLATFORM,
+        arch: os.ARCH,
+        virt: detectVirt(),
+        workers: PARALLEL_WORKERS,
+        totalMs: $sumMs,
+        workloads: $benches,
+        parallel: $noPar
+    };
+    if (os.flag("--format") == "json") {
+        emitJson($rep);
+    } else {
+        emitText($rep);
+    }
+}
+
+# --- Suite dispatch ------------------------------------------------
+# --suite v1 (default) / v2 / all. A suite's workloads are frozen; new
+# numeric coverage goes in a new suite version, never into an old one.
+def suite as string init os.flag("--suite");
+if ($suite == "") {
+    $suite = "v1";
+}
+if ($suite != "v1" and $suite != "v2" and $suite != "all") {
+    io.printf("unknown --suite %s (use v1, v2, or all)\n", $suite);
+    exit 1;
+}
+
+if ($suite == "v2") {
+    runV2();
+    exit 0;
+}
+
+# --- Suite v1 (interpreter throughput) -----------------------------
 def msByteScanNaive as int init byteScanNaive();
 def msByteScanFast as int init byteScanFast();
 def msFib as int init benchFib();
@@ -772,4 +1040,9 @@ if (os.flag("--format") == "json") {
     emitJson($report);
 } else {
     emitText($report);
+}
+
+# --suite all runs the v2 numeric suite after the v1 suite above.
+if ($suite == "all") {
+    runV2();
 }
