@@ -12,9 +12,9 @@ backend without duplicating the plumbing.
 import "kvstore.j" as kvstore;
 
 # pick one backend:
-def store as kvstore.Store init kvstore.redisStore($rc);        # distributed (redis)
-# def store as kvstore.Store init kvstore.memcacheStore($mc);  # distributed (memcache)
-# def store as kvstore.Store init kvstore.inProcessStore();    # local, in memory
+def store as kvstore.Store init kvstore.redisStore($rc);         # distributed (redis)
+# def store as kvstore.Store init kvstore.memcacheStore($mc);    # distributed (memcache)
+# def store as kvstore.Store init kvstore.inProcessStore();      # local, in memory
 # def store as kvstore.Store init kvstore.fileStore("state.kv"); # local, persisted
 
 kvstore.set($store, "greeting", "hello", 60);   # expires in 60 s

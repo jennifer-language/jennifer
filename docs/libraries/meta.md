@@ -87,7 +87,7 @@ use meta;
 func greet(name as string) { return "hi " + $name; }
 
 io.printf("%s\n", meta.call("greet", "ada"));   # hi ada
-io.printf("%t\n", meta.defined("nope"));         # false
+io.printf("%t\n", meta.defined("nope"));        # false
 ```
 
 Unlike `testing.run`, `meta.call` is transparent: it does not catch

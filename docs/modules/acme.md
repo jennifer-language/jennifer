@@ -82,6 +82,19 @@ The structs (`Client`, `Order`, `Authorization`, `Challenge`) are value-semantic
 account key and the CA endpoints. Every signed request draws a fresh anti-replay
 nonce from the CA before it is sent.
 
+```jennifer
+def struct acme.Order { url as string, status as string, authorizations as list of string, finalize as string, certificate as string };
+def struct acme.Authorization { domain as string, status as string, challenges as list of Challenge };
+def struct acme.Challenge { kind as string, url as string, token as string, status as string };
+```
+
+An `Order`'s `status` moves `pending` -> `ready` -> `processing` -> `valid`, its
+`authorizations` are the per-domain authorization URLs, `finalize` takes the CSR,
+and `certificate` is the download URL once issued. An `Authorization` carries the
+`domain`, its `status`, and the offered `challenges`; each `Challenge` carries its
+`kind` (`http-01` / `dns-01` / `tls-alpn-01`), the `url` to `accept`, the `token`,
+and its `status`.
+
 ## Keys and algorithms
 
 - **Account key**: `crypto.ecGenerateKey("p256")` (→ `ES256`) or

@@ -89,8 +89,8 @@ are fire-and-forget, and a QoS-0 PUBLISH is returned without any acknowledgement
 ```jennifer
 $c = mqtt.subscribeQos1($c, "commands/#");
 mqtt.publishQos1($c, "commands/reboot",
-    convert.bytesFromString("now", "utf-8"), false);   # blocks for the PUBACK
-def m as mqtt.Message init mqtt.receive($c);            # PUBACKs it, then returns
+    convert.bytesFromString("now", "utf-8"), false); # blocks for the PUBACK
+def m as mqtt.Message init mqtt.receive($c);         # PUBACKs it, then returns
 ```
 
 ## Retained messages and the Last-Will
@@ -108,7 +108,7 @@ will (what plain `connect` does).
 ```jennifer
 def will as mqtt.Will init mqtt.Will{topic: "clients/demo/status",
     payload: convert.bytesFromString("offline", "utf-8"), qos: 1, retain: true};
-def c as mqtt.Client init mqtt.connectWith($opts, $will, false);  # persistent session
+def c as mqtt.Client init mqtt.connectWith($opts, $will, false); # persistent session
 mqtt.publishRetain($c, "clients/demo/status", "online", true);   # clear on clean exit
 ```
 

@@ -38,13 +38,13 @@ separators yourself and reject `.` / `..`, rather than reaching for `path.base`.
 use path;
 use io;
 
-io.printf("%s\n", path.base("/var/log/app.txt"));   # app.txt
-io.printf("%s\n", path.dir("/var/log/app.txt"));    # /var/log
-io.printf("%s\n", path.ext("/var/log/app.txt"));    # .txt
-io.printf("%s\n", path.stem("/var/log/app.txt"));   # app
-io.printf("%s\n", path.join("var", "log", "app.txt"));   # var/log/app.txt
-io.printf("%s\n", path.clean("a//b/../c"));         # a/c
-io.printf("%t\n", path.isAbs("/etc"));              # true
+io.printf("%s\n", path.base("/var/log/app.txt"));      # app.txt
+io.printf("%s\n", path.dir("/var/log/app.txt"));       # /var/log
+io.printf("%s\n", path.ext("/var/log/app.txt"));       # .txt
+io.printf("%s\n", path.stem("/var/log/app.txt"));      # app
+io.printf("%s\n", path.join("var", "log", "app.txt")); # var/log/app.txt
+io.printf("%s\n", path.clean("a//b/../c"));            # a/c
+io.printf("%t\n", path.isAbs("/etc"));                 # true
 
 def parts as list of string init path.split("/var/log/app.txt");
 io.printf("[%s][%s]\n", $parts[0], $parts[1]);      # [/var/log/][app.txt]

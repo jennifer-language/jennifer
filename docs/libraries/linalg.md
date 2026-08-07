@@ -13,7 +13,7 @@ def a as list of list of float init [[4.0, 7.0], [2.0, 6.0]];
 linalg.determinant($a);              # 10.0
 linalg.inverse($a);                  # [[0.6, -0.7], [-0.2, 0.4]]
 linalg.solve([[1.0, 1.0], [1.0, -1.0]], [3.0, 1.0]);  # [2.0, 1.0]  (x+y=3, x-y=1)
-linalg.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);          # 32.0
+linalg.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);         # 32.0
 ```
 
 ## Vectors (`list of float`)

@@ -39,7 +39,7 @@ via `spawn` and the [task](libraries/task.md) library. Something more niche -
 messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
 two-factor codes - and lots of others? No need to ask: it is all there already.
 The interpreter and its built-in libraries ship as **one self-contained static
-binary** - about 21 MB with everything, ~9 MB for the embeddable build - with no
+binary** - about 23 MB with everything, ~10 MB for the embeddable build - with no
 runtime, package manager, or dependency tree to install; the modules ride along
 as plain `.j` source files (installed beside the binary and resolved through the
 module path), readable and hackable with no compile step.
@@ -128,6 +128,8 @@ License: LGPL-3.0-only.
 
 ## Manual
 
-> **[Download the whole manual as a single PDF](jennifer-manual.pdf).**
+> **[Download the whole manual as a single PDF](jennifer-manual.pdf).** It ships
+> with a clickable outline (the H1/H2/H3 headings) in your PDF reader's bookmark
+> panel, so you can jump straight to any section.
 > The entire documentation in one file, regenerated from these pages on every
 > build - handy for reading or searching offline.

@@ -193,8 +193,8 @@ The first matching route wins, so register specific routes **before** a wildcard
 special as the last pattern segment.
 
 ```jennifer
-$app = web.get($app, "/static/*path", "serveStatic");   # nested static files
-$app = web.get($app, "/*page", "spaIndex");              # fallback, registered last
+$app = web.get($app, "/static/*path", "serveStatic"); # nested static files
+$app = web.get($app, "/*page", "spaIndex");           # fallback, registered last
 ```
 
 ## Middleware

@@ -17,7 +17,7 @@ use xml;
 
 def root as xml.Value init xml.decode(
     "<library><book id=\"1\"><title>Go</title></book></library>");
-io.printf("%s\n", xml.tag($root));                       # library
+io.printf("%s\n", xml.tag($root));                         # library
 io.printf("%s\n", xml.attr(xml.get($root, "book"), "id")); # 1
 io.printf("%s\n", xml.text(xml.get($root, "book/title"))); # Go
 ```

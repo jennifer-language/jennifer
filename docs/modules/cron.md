@@ -25,6 +25,20 @@ Runnable: [`examples/modules/cron_demo.j`](https://github.com/jennifer-language/
 | `cron.matches(schedule, t)` | `bool` | Does the schedule fire at `t`? (minute granularity - seconds are ignored). |
 | `cron.next(schedule, after)` | `time.Time` | The next fire at or after `after`, keeping its zone offset. |
 
+`parse` returns a `Schedule`:
+
+```jennifer
+def struct cron.Schedule {
+    minutes as list of int, hours as list of int, daysOfMonth as list of int,
+    months as list of int, weekdays as list of int,
+    domStar as bool, dowStar as bool, reboot as bool
+};
+```
+
+The five list fields hold the matching values for each cron field; `domStar` /
+`dowStar` record whether the day-of-month / day-of-week field was `*` (driving the
+either/both rule below), and `reboot` is `true` for an `@reboot` schedule.
+
 ## Fields
 
 Five whitespace-separated fields, each with the usual operators:

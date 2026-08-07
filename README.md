@@ -41,7 +41,7 @@ more niche - [Gotify](docs/modules/gotify.md) push, strict
 [ACME](docs/modules/acme.md) certificate issuance,
 [TOTP](docs/modules/totp.md) two-factor codes - and lots of others? No need to
 ask: it is all there already. The interpreter and its built-in libraries ship
-as **one self-contained static binary** - about 21 MB with everything, ~9 MB for
+as **one self-contained static binary** - about 23 MB with everything, ~10 MB for
 the embeddable build - with no runtime, package manager, or dependency tree to
 install; the modules ride along as plain `.j` source files (installed beside the
 binary and resolved through the module path), readable and hackable with no

@@ -71,9 +71,9 @@ the string you get back is the exact message:
 ```jennifer
 def s as pop.Session init pop.connect($opts);
 io.printf("%d messages\n", pop.count($s));
-def raw as string init pop.retrieve($s, 1);      # RFC 5322 message text
-pop.deleteMessage($s, 1);                          # optional
-pop.quit($s);                                      # deletion commits here
+def raw as string init pop.retrieve($s, 1); # RFC 5322 message text
+pop.deleteMessage($s, 1);                   # optional
+pop.quit($s);                               # deletion commits here
 ```
 
 A `-ERR` from the server throws a catchable `Error` (kind `"pop3"`).

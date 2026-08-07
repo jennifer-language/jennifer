@@ -20,8 +20,8 @@ import "memcache.j" as memcache;
 
 def mc as memcache.Session init memcache.connect(memcache.Options{
     host: "127.0.0.1", port: 11211});
-memcache.set($mc, "greeting", "hello", 60);        # 60-second TTL
-io.printf("%s\n", memcache.get($mc, "greeting"));   # hello
+memcache.set($mc, "greeting", "hello", 60);       # 60-second TTL
+io.printf("%s\n", memcache.get($mc, "greeting")); # hello
 memcache.quit($mc);
 ```
 

@@ -67,7 +67,7 @@ name = \"banana\"
 ";
 
 def doc as toml.Value init toml.decode($src);
-io.printf("%s\n", toml.asString($doc, "/title"));         # Jennifer
+io.printf("%s\n", toml.asString($doc, "/title"));          # Jennifer
 io.printf("%d\n", toml.asInt($doc, "/server/ports/0"));    # 8000
 io.printf("%s\n", toml.asString($doc, "/fruit/1/name"));   # banana
 ```

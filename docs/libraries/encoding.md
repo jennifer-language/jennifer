@@ -18,7 +18,7 @@ use convert;
 use encoding;
 
 def src as bytes init convert.bytesFromString("café", "utf-8");
-io.printf("%s\n", encoding.toText($src, "hex"));            # 636166c3a9
+io.printf("%s\n", encoding.toText($src, "hex"));           # 636166c3a9
 io.printf("%t\n", encoding.isAscii($src));                 # false
 io.printf("%x\n", encoding.encode("café", "iso-8859-1"));  # 63 61 66 e9
 ```
@@ -163,7 +163,7 @@ step:
 use fs;
 use encoding;
 
-def raw as bytes init fs.readBytes("legacy.txt");               # Windows-1252 bytes
+def raw as bytes init fs.readBytes("legacy.txt");              # Windows-1252 bytes
 def text as string init encoding.decode($raw, "windows-1252"); # -> a UTF-8 string
 fs.writeString("utf8.txt", $text);                             # written as UTF-8
 ```

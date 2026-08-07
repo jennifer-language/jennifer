@@ -67,7 +67,7 @@ func dbl(n as int) { return $n * 2; }
 func isEven(n as int) { return $n % 2 == 0; }
 
 def xs as list of int init [1, 2, 3, 4, 5];
-lists.map($xs, dbl);            # [2, 4, 6, 8, 10]
+lists.map($xs, dbl);           # [2, 4, 6, 8, 10]
 lists.filter($xs, isEven);     # [2, 4]
 lists.reduce($xs, add, 0);     # sum, with func add(a as int, b as int) {...}
 lists.any($xs, isEven);        # true

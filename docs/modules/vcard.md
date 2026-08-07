@@ -24,21 +24,21 @@ the builder functions are the conventional way to construct them.
 
 ```jennifer
 def struct vcard.Card {
-    formattedName as string,          # FN (required by vCard 4.0)
-    family as string, given as string,          # N family / given
-    additional as string,             # N additional (middle) name(s)
-    prefixes as string, suffixes as string,     # N honorific prefixes / suffixes
-    nickname as string,               # NICKNAME ("" when unset)
-    organization as string,           # ORG ("" when unset)
-    title as string,                  # TITLE ("" when unset)
-    emails as list of Typed,          # EMAIL (0..n, each with an optional TYPE)
-    phones as list of Typed,          # TEL (0..n, each with an optional TYPE)
-    addresses as list of Address,     # ADR (0..n)
-    url as string,                    # URL ("" when unset)
-    bday as string,                   # BDAY ("" when unset)
-    photo as string,                  # PHOTO URI ("" when unset)
-    categories as list of string,     # CATEGORIES tags
-    note as string                    # NOTE ("" when unset)
+    formattedName as string,                # FN (required by vCard 4.0)
+    family as string, given as string,      # N family / given
+    additional as string,                   # N additional (middle) name(s)
+    prefixes as string, suffixes as string, # N honorific prefixes / suffixes
+    nickname as string,                     # NICKNAME ("" when unset)
+    organization as string,                 # ORG ("" when unset)
+    title as string,                        # TITLE ("" when unset)
+    emails as list of Typed,                # EMAIL (0..n, each with an optional TYPE)
+    phones as list of Typed,                # TEL (0..n, each with an optional TYPE)
+    addresses as list of Address,           # ADR (0..n)
+    url as string,                          # URL ("" when unset)
+    bday as string,                         # BDAY ("" when unset)
+    photo as string,                        # PHOTO URI ("" when unset)
+    categories as list of string,           # CATEGORIES tags
+    note as string                          # NOTE ("" when unset)
 };
 def struct vcard.Typed { value as string, type as string };   # a value + optional TYPE ("work" / "home" / ...)
 def struct vcard.Address {

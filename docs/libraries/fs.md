@@ -271,7 +271,7 @@ rule:
 
 ```jennifer
 def a as fs.File init fs.open("x.txt", "read");
-def b as fs.File init $a;             # `b` and `a` reference the same file
+def b as fs.File init $a;              # `b` and `a` reference the same file
 fs.close($a);                          # closes for both
 def s as string init fs.readLine($b);  # errors: id is not open
 ```

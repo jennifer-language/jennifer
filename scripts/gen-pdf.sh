@@ -45,7 +45,15 @@ sed \
 
 # --headless=new: current headless mode. --no-sandbox: required as root in CI.
 # --no-pdf-header-footer: no browser-added date/URL chrome on each page.
+# --generate-pdf-document-outline: emit a clickable PDF outline (bookmarks) from
+# the H1/H2/H3 heading structure, so the manual has a navigable table of contents
+# in every PDF reader. (Chrome ignores the flag if too old, degrading to no
+# outline rather than failing.) A page-numbered TOC *page* is not possible from
+# Chrome's print engine - it cannot resolve cross-page numbers - so the outline
+# is the navigation; switching to a paged-media renderer would be the only way to
+# get printed page numbers.
 "$CHROME" --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer \
+	--generate-pdf-document-outline \
 	--print-to-pdf="$OUT" "file://$(pwd)/$LIGHT_HTML" >/dev/null 2>&1
 
 rm -f "$LIGHT_HTML"

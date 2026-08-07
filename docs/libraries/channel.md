@@ -67,7 +67,7 @@ def ch as channel of list of int init channel.make(1);
 def xs as list of int init [1, 2, 3];
 channel.send($ch, $xs);
 $xs[0] = 999;                                  # mutate after send
-def got as list of int init channel.recv($ch);  # still [1, 2, 3]
+def got as list of int init channel.recv($ch); # still [1, 2, 3]
 ```
 
 The element type is enforced at **both** ends. `channel.send` validates the value

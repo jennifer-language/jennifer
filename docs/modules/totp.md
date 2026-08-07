@@ -72,7 +72,7 @@ round-trips: the result works directly with `generate` / `verify`. Use
 `generateSecretN(nbytes)` for a different key length.
 
 ```jennifer
-def secret as string init totp.generateSecret();   # e.g. "JBSWY3DPEHPK3PXP..."
+def secret as string init totp.generateSecret();    # e.g. "JBSWY3DPEHPK3PXP..."
 def code as string init totp.generate($secret, $o); # both sides now agree
 ```
 

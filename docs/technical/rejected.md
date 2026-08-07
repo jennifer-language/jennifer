@@ -888,6 +888,34 @@ The chosen form: the algorithm is always a value, uniformly -
 `crypto.hkdf(..., algo)` - so a fixed algorithm is a string literal and a
 negotiated one is a variable, with no new surface and no dispatch ladder.
 
+## Version-suffixing the mail protocol modules (`pop` -> `pop3`, `imap` -> `imap4`)
+
+Considered after digit-bearing identifiers (M22.2) enabled the digit renames
+(`iic` -> `i2c`, `storage` -> `s3`, `uuid.v4()` / `v7()`, `pbkdf2`): rename the
+POP3 client module `pop` to `pop3` for wire-protocol precision.
+
+**Rejected**; the mail suite stays `pop` / `imap` / `smtp`. The digit renames all
+fixed a name where the digit is the **canonical identity or disambiguates a live
+variant**: I2C is literally the bus name, S3 the product name, and `sha256` /
+`sha512` / `uuid.v4` / `pbkdf2` distinguish co-existing variants - dropping the
+digit was wrong or ambiguous. `pop` / `imap` are the opposite case: POP3 and
+IMAP4 are the **sole living versions** of their protocols (POP1/POP2 and IMAP1-3
+are dead), so the bare name disambiguates nothing and the digit is noise, not
+identity.
+
+The tell is `imap`: renaming `pop` -> `pop3` for completeness would force
+`imap` -> `imap4` for consistency (nobody writes `imap4`), while `smtp` has no
+version at all - yielding the inconsistent trio `pop3` / `imap4` / `smtp`.
+Keeping `pop` / `imap` / `smtp` is the internally consistent choice (all bare,
+colloquial, single-live-version protocol names) and matches the universal
+convention (Python's `poplib` / `imaplib` / `smtplib` are POP3 / IMAP4 clients,
+named bare).
+
+The rule: include the digit when it is the canonical identity or disambiguates a
+live variant (`s3`, `i2c`, `sha256`, `uuid.v4`, `pbkdf2`); omit it - bare name -
+when a single living version makes the bare name unambiguous and colloquial
+(`pop`, `imap`, `smtp`).
+
 ## Parallel sequence-number + UID verbs in `imap`
 
 **Rejected.** M23.3 briefly shipped a UID-addressed twin for every

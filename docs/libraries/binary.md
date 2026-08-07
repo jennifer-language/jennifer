@@ -27,7 +27,7 @@ def b as bytes init convert.bytesFromString("World", "utf-8");
 def c as bytes init binary.concat($a, $b);
 
 io.printf("%s\n", convert.stringFromBytes($c, "utf-8"));         # "Hello, World"
-io.printf("%d\n", binary.indexOf($c, $b));                          # 7
+io.printf("%d\n", binary.indexOf($c, $b));                       # 7
 io.printf("%s\n", convert.stringFromBytes(binary.slice($c, 7, 12), "utf-8")); # "World"
 io.printf("%t\n", binary.startsWith($c, $a));                    # true
 ```

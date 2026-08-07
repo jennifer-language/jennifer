@@ -110,8 +110,8 @@ $doc = $doc + "It is " + markdown.style("bold", "great") + ". Features:\n\n";
 $doc = $doc + markdown.bullets($items) + "\n\n";
 $doc = $doc + "See " + markdown.link("the docs", "https://example/docs") + ".";
 
-io.printf("%s\n", $doc);          # Markdown source
-io.printf("%s\n", markdown.toHtml($doc));   # ... or rendered
+io.printf("%s\n", $doc);                  # Markdown source
+io.printf("%s\n", markdown.toHtml($doc)); # ... or rendered
 ```
 
 The text is inserted literally: a caller passing Markdown metacharacters

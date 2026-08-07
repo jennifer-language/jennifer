@@ -13,8 +13,8 @@ import "semver.j" as semver;
 
 def v as semver.Version init semver.parse("1.4.2-rc.1+build.9");
 io.printf("%d.%d.%d pre=%s\n", $v.major, $v.minor, $v.patch, $v.prerelease);
-io.printf("rc < release: %t\n", semver.lt($v, semver.parse("1.4.2")));   # true
-io.printf("next minor: %s\n", semver.toString(semver.incMinor($v)));      # 1.5.0
+io.printf("rc < release: %t\n", semver.lt($v, semver.parse("1.4.2"))); # true
+io.printf("next minor: %s\n", semver.toString(semver.incMinor($v)));   # 1.5.0
 ```
 
 Runnable: [`examples/modules/semver_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/semver_demo.j).

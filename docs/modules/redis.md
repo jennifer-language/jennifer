@@ -192,8 +192,8 @@ them atomically and returns one `Reply` per queued command, in order:
 
 ```jennifer
 redis.multi($db);
-redis.command($db, ["SET", "counter", "10"]);   # +QUEUED
-redis.command($db, ["INCR", "counter"]);         # +QUEUED
+redis.command($db, ["SET", "counter", "10"]); # +QUEUED
+redis.command($db, ["INCR", "counter"]);      # +QUEUED
 def results as list of redis.Reply init redis.exec($db);
 io.printf("counter is %d\n", $results[1].num);   # 11
 ```
@@ -234,8 +234,8 @@ use `setBytes(session, key, value)` (a `bytes` value sent byte-for-byte) and
 `getBytes(session, key)` (`bytes`, never decoded):
 
 ```jennifer
-redis.setBytes($s, "blob", $rawBytes);         # any bytes, exact
-def back as bytes init redis.getBytes($s, "blob");   # round-trips byte-for-byte
+redis.setBytes($s, "blob", $rawBytes);             # any bytes, exact
+def back as bytes init redis.getBytes($s, "blob"); # round-trips byte-for-byte
 ```
 
 `getBytes` returns empty `bytes` for a missing key (use `exists` to tell that

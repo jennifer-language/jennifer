@@ -13,9 +13,9 @@ or R's base `dnorm` / `pnorm` / `qnorm`.
 use stats;
 def xs as list of int init [2, 4, 4, 4, 5, 5, 7, 9];
 stats.mean($xs);              # 5.0
-stats.median($xs);           # 4.5
-stats.stddev($xs);           # 2.0
-stats.percentile($xs, 90);   # 7.6
+stats.median($xs);            # 4.5
+stats.stddev($xs);            # 2.0
+stats.percentile($xs, 90);    # 7.6
 ```
 
 ## Functions
@@ -173,7 +173,20 @@ stats.binomialPmf(5, 10, 0.5);      # 0.2461
 ## Inference
 
 Regression, confidence intervals, and hypothesis tests. Results come back as
-small structs (`stats.Regression`, `stats.Interval`, `stats.Test`).
+small structs whose fields are:
+
+```jennifer
+def struct Regression { n as int, slope as float, intercept as float, r as float, r2 as float, stdErr as float, pValue as float };
+def struct Interval { lower as float, upper as float };
+def struct Test { statistic as float, df1 as float, df2 as float, pValue as float };
+```
+
+`Regression` is a simple-OLS fit: `slope` / `intercept`, the correlation `r` and
+its square `r2`, the slope's standard error `stdErr`, its two-sided `pValue`, and
+the point count `n`. `Interval` is a `[lower, upper]` confidence interval. `Test`
+carries the test `statistic`, its degrees of freedom `df1` / `df2` (`df2` is `0`
+for a single-df test like the t or chi-square; both are set for an F / ANOVA),
+and the `pValue`.
 
 | Call | Returns | Meaning |
 | ---- | ------- | ------- |
@@ -188,11 +201,9 @@ small structs (`stats.Regression`, `stats.Interval`, `stats.Test`).
 | `stats.anova(groups)` | `Test` | One-way ANOVA over a `list of` groups. |
 | `stats.histogram(data, binEdges)` | `list of int` | Bin counts (Excel `FREQUENCY`); `k+1` ascending edges give `k` bins, the last closed on the right. |
 
-A `stats.Test` carries `statistic`, `df1`, `df2` (0 for a single-df test like the
-t or chi-square; both set for an F / ANOVA), and `pValue`. A degenerate input
-(zero variance, a singular design, a non-positive expected count, a negative
-observed count, or magnitudes that overflow the computation) is a catchable
-error.
+A degenerate input (zero variance, a singular design, a non-positive expected
+count, a negative observed count, or magnitudes that overflow the computation) is
+a catchable error.
 
 A few boundary and numerical notes:
 

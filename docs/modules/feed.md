@@ -18,8 +18,8 @@ import "feed.j" as feed;
 def f as feed.Feed init feed.add(
     feed.feed("My Blog", "https://example.org"),
     feed.entry("Hello", "https://example.org/1"));
-def rss as string init feed.build($f, "rss");     # or "atom"
-def back as feed.Feed init feed.parse($rss);       # format auto-detected
+def rss as string init feed.build($f, "rss"); # or "atom"
+def back as feed.Feed init feed.parse($rss);  # format auto-detected
 ```
 
 Runnable: [`examples/modules/feed_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/feed_demo.j).

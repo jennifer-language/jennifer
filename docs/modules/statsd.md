@@ -72,7 +72,7 @@ sends no suffix.
 | `statsd.timingRate(c, name, ms, rate)` | `name:ms\|ms\|@rate` |
 
 ```jennifer
-statsd.countRate($c, "hits", 1, 0.1);      # web.hits:1|c|@0.1
+statsd.countRate($c, "hits", 1, 0.1);       # web.hits:1|c|@0.1
 statsd.timingRate($c, "response", 42, 0.5); # web.response:42|ms|@0.5
 ```
 
@@ -127,10 +127,10 @@ at `batch` time.
 
 ```jennifer
 def b as statsd.Batch init statsd.batch($c);
-$b = statsd.addCount($b, "hits", 3);       # web.hits:3|c
-$b = statsd.addGauge($b, "queue", 7);      # web.queue:7|g
-$b = statsd.addIncrement($b, "errors");    # web.errors:1|c
-statsd.flush($c, $b);                       # one datagram, three lines
+$b = statsd.addCount($b, "hits", 3);    # web.hits:3|c
+$b = statsd.addGauge($b, "queue", 7);   # web.queue:7|g
+$b = statsd.addIncrement($b, "errors"); # web.errors:1|c
+statsd.flush($c, $b);                   # one datagram, three lines
 ```
 
 | Call | Returns | |

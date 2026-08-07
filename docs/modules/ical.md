@@ -28,7 +28,7 @@ Both structs have public fields (read them directly - `$cal.events`,
 ```jennifer
 def struct ical.Calendar { prodid as string, events as list of Event, todos as list of Todo };
 def struct ical.Event {
-    uid as string, stamp as time.Time,   # UID / DTSTAMP
+    uid as string, stamp as time.Time,    # UID / DTSTAMP
     start as time.Time, end as time.Time, # DTSTART / DTEND
     summary as string, description as string, location as string,
     allDay as bool,                       # VALUE=DATE all-day event
