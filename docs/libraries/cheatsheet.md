@@ -230,16 +230,54 @@ flat lookup view, not authoritative.
 | [`sql`](sql.md)`.begin($c)` / `.commit($tx)` / `.rollback($tx)` | Transaction: begin -> sql.Tx (a query/exec target), then commit / rollback. |
 | [`sql`](sql.md)`.setQueryTimeout(ms)` | Set the client query/read deadline (ms); `0` disables it for a long cursor read. Default 30 000, process-wide. |
 | [`sql`](sql.md)`.prepare($c, sql)` / `.queryStmt($s, ...)` / `.execStmt($s, ...)` / `.closeStmt($s)` | Prepared-statement lifecycle. |
-| [`math`](math.md)`.ceil(x)`                           | Smallest int ≥ `x`. Accepts int (identity) or float.                                                                                |
-| [`math`](math.md)`.floor(x)`                          | Largest int ≤ `x`. Accepts int (identity) or float.                                                                                 |
-| [`math`](math.md)`.max(a, b)`                         | Larger of two numbers; mixed int/float promotes to float.                                                                           |
-| [`math`](math.md)`.min(a, b)`                         | Smaller of two numbers; mixed int/float promotes to float.                                                                          |
-| [`math`](math.md)`.pow(x, y)`                         | `x` raised to `y`; always float. Errors on NaN/Inf-producing inputs.                                                                |
-| [`math`](math.md)`.rand()`                            | Float in `[0, 1)` from the shared seedable (non-crypto) source.                                                                     |
-| [`math`](math.md)`.randInt(lo, hi)`                   | Int in `[lo, hi]` inclusive; errors if `lo > hi`.                                                                                   |
-| [`math`](math.md)`.randSeed(n)`                       | Reseed the shared source for reproducible runs (also drives `lists.shuffle`; `uuid` / `password` use `crypto` instead).             |
-| [`math`](math.md)`.round(x)`                          | Round to nearest int (half away from zero).                                                                                         |
-| [`math`](math.md)`.sqrt(x)`                           | Square root; always float. Errors on negative input.                                                                                |
+| [`math`](math.md)`.acos(x)` | Arccosine (radians); errors outside [-1, 1]. |
+| [`math`](math.md)`.acosh(x)` | Inverse hyperbolic cosine; errors for x < 1. |
+| [`math`](math.md)`.asin(x)` | Arcsine (radians); errors outside [-1, 1]. |
+| [`math`](math.md)`.asinh(x)` | Inverse hyperbolic sine. |
+| [`math`](math.md)`.atan(x)` | Arctangent (radians). |
+| [`math`](math.md)`.atan2(y, x)` | Two-argument arctangent, quadrant-aware (radians). |
+| [`math`](math.md)`.atanh(x)` | Inverse hyperbolic tangent; errors outside (-1, 1). |
+| [`math`](math.md)`.beta(a, b)` | Beta function B(a,b)=gamma(a)gamma(b)/gamma(a+b); a, b > 0. |
+| [`math`](math.md)`.cbrt(x)` | Real cube root (handles negatives). |
+| [`math`](math.md)`.ceil(x)` | Smallest int >= `x`. Accepts int (identity) or float. |
+| [`math`](math.md)`.comb(n, k)` | Binomial coefficient nCr (exact int); k>n is 0; errors on overflow. |
+| [`math`](math.md)`.cos(x)` | Cosine (radians). |
+| [`math`](math.md)`.cosh(x)` | Hyperbolic cosine; errors on overflow. |
+| [`math`](math.md)`.erf(x)` | Error function. |
+| [`math`](math.md)`.erfc(x)` | Complementary error function (1 - erf). |
+| [`math`](math.md)`.exp(x)` | e^x; errors on overflow. |
+| [`math`](math.md)`.expm1(x)` | e^x - 1, accurate for small x. |
+| [`math`](math.md)`.factorial(n)` | n! (exact int); errors on negative n or overflow (n > 20). |
+| [`math`](math.md)`.floor(x)` | Largest int <= `x`. Accepts int (identity) or float. |
+| [`math`](math.md)`.gamma(x)` | Gamma function; errors at the poles (0, negative ints) and on overflow. |
+| [`math`](math.md)`.gcd(a, b)` | Greatest common divisor (non-negative; gcd(0,0)=0). |
+| [`math`](math.md)`.hypot(x, y)` | sqrt(x^2 + y^2) without intermediate overflow. |
+| [`math`](math.md)`.lbeta(a, b)` | Natural log of the beta function, ln B(a,b); a, b > 0. |
+| [`math`](math.md)`.lcm(a, b)` | Least common multiple (lcm(x,0)=0); errors on overflow. |
+| [`math`](math.md)`.lgamma(x)` | ln|gamma(x)|; errors at the poles. |
+| [`math`](math.md)`.ln(x)` | Natural logarithm; errors for x <= 0. |
+| [`math`](math.md)`.log(x, base)` | Logarithm of x to an arbitrary base; errors for non-positive x/base or base 1. |
+| [`math`](math.md)`.log10(x)` | Base-10 logarithm; errors for x <= 0. |
+| [`math`](math.md)`.log1p(x)` | ln(1 + x), accurate for small x; errors for x <= -1. |
+| [`math`](math.md)`.log2(x)` | Base-2 logarithm; errors for x <= 0. |
+| [`math`](math.md)`.max(a, b)` | Larger of two numbers; mixed int/float promotes to float. |
+| [`math`](math.md)`.min(a, b)` | Smaller of two numbers; mixed int/float promotes to float. |
+| [`math`](math.md)`.perm(n, k)` | k-permutations of n (nPr, exact int); k>n is 0; errors on overflow. |
+| [`math`](math.md)`.pow(x, y)` | `x` raised to `y`; always float. Errors on NaN/Inf-producing inputs. |
+| [`math`](math.md)`.rand()` | Float in `[0, 1)` from the shared seedable (non-crypto) source. |
+| [`math`](math.md)`.randInt(lo, hi)` | Int in `[lo, hi]` inclusive; errors if `lo > hi`. |
+| [`math`](math.md)`.randSeed(n)` | Reseed the shared source for reproducible runs (also drives `lists.shuffle`; `uuid` / `password` use `crypto` instead). |
+| [`math`](math.md)`.regBetaI(x, a, b)` | Regularized incomplete beta I_x(a,b) in [0,1] (CDF engine for beta / t / F / binomial); 0<=x<=1, a,b>0. |
+| [`math`](math.md)`.regGammaP(a, x)` | Regularized lower incomplete gamma P(a,x) in [0,1] (gamma / chi-square CDF); a>0, x>=0. |
+| [`math`](math.md)`.regGammaQ(a, x)` | Regularized upper incomplete gamma Q(a,x) = 1 - P(a,x). |
+| [`math`](math.md)`.round(x)` | Round to nearest int (half away from zero). |
+| [`math`](math.md)`.sign(x)` | -1 / 0 / 1 with the sign of x, preserving its type (int -> int, float -> float). |
+| [`math`](math.md)`.sin(x)` | Sine (radians). |
+| [`math`](math.md)`.sinh(x)` | Hyperbolic sine; errors on overflow. |
+| [`math`](math.md)`.sqrt(x)` | Square root; always float. Errors on negative input. |
+| [`math`](math.md)`.tan(x)` | Tangent (radians). |
+| [`math`](math.md)`.tanh(x)` | Hyperbolic tangent. |
+| [`math`](math.md)`.trunc(x)` | Round toward zero -> int; int argument is the identity. |
 | [`os`](os.md)`.flag(name)`                            | Value following `name` in `os.ARGS`, or `""` if absent / at end. Exact-match (no `--foo=bar` parsing).                              |
 | [`os`](os.md)`.getEnv(name)`                          | Read environment variable `name`. Unset → empty string, no error.                                                                   |
 | [`os`](os.md)`.setEnv(name, value)`                   | Set environment variable `name` for this process (and children it spawns). Invalid name errors.                                     |
@@ -400,6 +438,7 @@ flat lookup view, not authoritative.
 | ------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------ |
 | [`math`](math.md)`.E`                      | `float`        | Euler's number, 2.718281828459045.                                                               |
 | [`math`](math.md)`.PI`                     | `float`        | π, 3.141592653589793.                                                                            |
+| [`math`](math.md)`.TAU`                    | `float`        | τ = 2π, the full-turn constant, 6.283185307179586. |
 | [`meta`](meta.md)`.BUILD`                  | `string`       | Which Go toolchain compiled the interpreter: `"go"` / `"tinygo"`.                                |
 | [`meta`](meta.md)`.VERSION`                | `string`       | The interpreter's build version (e.g. `"0.14.0"`).                                               |
 | [`meta`](meta.md)`.SYSMODDIR`              | `string`       | Resolved system module directory (`--sysmoddir` > `JENNIFER_SYSMODDIR` > compile default).       |

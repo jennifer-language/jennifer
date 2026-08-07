@@ -382,8 +382,13 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `bytesFromString` / `stringFromBytes` (utf-8). Note: the callees are
   `toInt` etc. because `int`/`float`/`string`/`bool`/`bytes` are reserved type
   keywords (they appear only after `as`).
-- **`math`** - `abs min max sqrt pow floor ceil round rand randInt randSeed`;
-  constants `PI`, `E`. Undefined results error (no NaN).
+- **`math`** - arithmetic `abs min max sqrt pow floor ceil round trunc sign
+  cbrt hypot`; trig `sin cos tan asin acos atan atan2` + hyperbolic `sinh cosh
+  tanh asinh acosh atanh`; exp/log `exp expm1 ln log10 log2 log1p log`(x, base);
+  combinatorics `factorial comb perm gcd lcm`; random `rand randInt randSeed`;
+  special functions `erf erfc gamma lgamma beta lbeta regGammaP regGammaQ
+  regBetaI` (the distribution-CDF engine); constants `PI`, `E`, `TAU`. Angles in
+  radians; floor/ceil/round/trunc return int; undefined results error (no NaN).
 - **`stats`** - 26 descriptive statistics over `list of int`/`float`: `mean median
   mode modes geometricMean harmonicMean weightedMean variance stddev sampleVariance
   sampleStddev range iqr mad skewness kurtosis percentile quartiles min max sum

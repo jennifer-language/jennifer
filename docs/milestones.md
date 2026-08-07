@@ -1039,9 +1039,34 @@ Pinned by `statslib_test.go`; `examples/stats.j` + golden. Graduated `DRAFT#5`.
 **Requires:** none. Its `linalg` companion is `M24.6`; the numerical-inference
 piece (probability / regression / confidence intervals) is `M24.11`.
 
-### M24.5
+### M24.5 - `ml` predictive / classical machine learning
 
-void.
+**Planned.** A `ml` system library for **classical / predictive** machine learning
+on tabular data - the scikit-learn-lite core and practical companion to `stats` /
+`linalg`. Deliberately a **core** library, not a deck: classical ML
+algorithms are stable general primitives (a `kMeans` does not churn),
+native-numeric, and useful to many - the same reasoning that keeps numerical
+inference in core. And explicitly **not** a deep-learning framework: tensors /
+autodiff / training real deep nets are native GPU / C++ (PyTorch / JAX) a
+tree-walker cannot usefully replace (at most a micrograd-style autograd ships as a
+teaching *example*, not this library), and "run a pre-trained model" is already
+`http` / `mcp` / `os.run`. Two halves:
+- **Models** - clustering (`kMeans`), classification (`kNN`, `naiveBayes`,
+  `logisticRegression`, decision trees / small random forests), predictive
+  regression (`linear` / `ridge`, over `linalg`'s `solve`), and dimensionality
+  reduction (`pca`). A fit / predict shape (train a model, apply it), distinct from
+  `stats`'s estimate / test shape.
+- **Model selection & evaluation** - feature scaling, train / test split, k-fold
+  cross-validation, and metrics (accuracy / precision / recall / F1, confusion
+  matrix, ROC-AUC).
+
+A Go system library (native loops over modest tabular data; large datasets stay a
+native-tool job), TinyGo-clean, following the standard-library discipline (Go
+package + `internal/stdlib` line + `docs/libraries/ml.md` + cheatsheet +
+`JENNIFER.md`). It reuses the `M24.5` slot the multiplatform track vacated for
+`M25`, so despite the lower number it builds after its dependencies. **Requires:**
+`M24.6` (`linalg`), `M24.10` (`math` foundations, for `exp` / `log` / softmax), and
+`M24.11` (distributions + inference in `stats`, the shared regression machinery).
 
 ### M24.6 - `linalg` library (compacted)
 
@@ -1091,31 +1116,27 @@ symmetric. Encoder output byte-verified against Go's `encoding/asn1`; pinned by
 `asn1_test.go`; `examples/asn1.j` + golden. Pure Go stdlib, TinyGo-clean, both
 binaries.
 
-### M24.8 - `snmp` client + agent
+### M24.8 - `snmp` client + agent (compacted)
 
-**Done.** An SNMP v1 / v2c **client and agent** (`modules/snmp.j`) - the simpler
-of the two ASN.1-over-the-wire protocols and the natural first: compact PDUs, UDP
-transport, community-string auth, no SASL. A `.j` module (the orchestration is not
-per-byte hot): the BER byte-crunching stays in `asn1` (`M24.7`), the transport in
+**Done.** An SNMP v1 / v2c **client and agent** (`modules/snmp.j`), the simpler
+ASN.1-over-the-wire protocol: compact PDUs, UDP, community-string auth, no SASL. A
+`.j` module - the BER byte-crunching stays in `asn1` (`M24.7`), the transport in
 `net` UDP. *Client:* `client` / `clientWith` -> `Client`, then `get` / `getNext` /
 `set` / subtree `walk` return a `list of Varbind` `{oid, type, value, number}`
 typed by SNMP value type (universal integer / octetString / oid / null;
 `[APPLICATION]` counter32 / gauge32 / timeTicks / ipAddress / counter64 / opaque
-via `asn1.retag`; and the `[CONTEXT]` noSuchObject / noSuchInstance / endOfMibView
-exceptions). `intVar` / `stringVar` / `oidVar` / `varbind` build bindings; each
-exchange checks the request-id and bounds the wait with a receive deadline +
-retries; malformed responses normalise to one `snmp`-kind error. *Agent (server /
-hardware simulator):* `agent(community, version, bindings)` + `serve` / `serveOn`
-answer GET / GETNEXT / SET for a MIB, GETNEXT in numeric OID order (so a client
-`walk` traverses it), wrong-community / malformed datagrams dropped. The message
-codec and request-dispatch are factored pure (network-free) so the overlay
-round-trips every value type and every agent path without a socket; the live
-send/recv and a self-contained client<->agent loop are driven over loopback UDP in
-the Go suite, and the client was verified end-to-end against real hardware. No
-SNMPv3 / USM, traps, or GETBULK. Module discipline: `modules/snmp_test.j` (100%),
-`docs/modules/snmp.md`, `examples/modules/snmp_demo.j` +
-`examples/modules/snmp_agent_demo.j`, `cmd/jennifer/snmp_test.go`, catalog rows.
-Default `jennifer` binary only (`net`).
+via `asn1.retag`; `[CONTEXT]` noSuchObject / noSuchInstance / endOfMibView); each
+exchange checks the request-id, bounds the wait with a deadline + retries, and
+normalises any failure to one `snmp`-kind error. *Agent (server / hardware
+simulator):* `agent(community, version, bindings)` + `serve` / `serveOn` answer
+GET / GETNEXT / SET for a MIB (GETNEXT in numeric OID order so a client `walk`
+traverses it; wrong-community / malformed datagrams dropped). The codec and
+dispatch are factored pure (network-free), so the overlay round-trips every value
+type and agent path without a socket; the live send/recv and a self-contained
+client<->agent loop run over loopback UDP in the Go suite, and the client was
+verified against real hardware. No SNMPv3 / USM, traps, or GETBULK. Module
+discipline (`snmp_test.j` 100%, doc, two demos, `cmd/jennifer/snmp_test.go`,
+catalog rows); default `jennifer` binary only (`net`).
 
 ### M24.9 - `ldap` client
 
@@ -1130,7 +1151,7 @@ Jennifer's value-semantic structs. Ships with the module discipline where `.j`
 
 ### M24.10 - `math` foundations + special functions
 
-**Planned.** Fill the two `math` gaps a batteries-included language should not
+**Done.** Fill the two `math` gaps a batteries-included language should not
 carry into 1.0 - the everyday functions and the special functions a probability
 layer is built on - both folded into the existing `math` library. **Everyday:**
 trigonometry (`sin` / `cos` / `tan` / `asin` / `acos` / `atan` / `atan2`),
@@ -1147,29 +1168,31 @@ algorithms. Strict like the rest of `math`: a domain error (`ln(0)`, `asin(2)`,
 `sqrt(-1)`, an overflowing `factorial`) is a catchable error, not a NaN. Pure Go
 stdlib, TinyGo-clean, both binaries.
 
-### M24.11 - `prob` distributions + inferential `stats`
+### M24.11 - distributions + inferential `stats`
 
 **Planned.** The classical numerical-inference layer - the `scipy.stats` / Excel
-statistical surface - in two pieces built on `M24.10`'s special functions and the
-shipped `stats` / `linalg`:
-- **`prob`** - a new probability / distributions system library. Continuous
-  normal, t, chi-square, F (later uniform / exponential / gamma / beta) and
-  discrete binomial / Poisson, each with `pdf` / `pmf`, `cdf`, `quantile` (inverse
-  CDF - the incomplete gamma / beta of `M24.10` inverted numerically), and
-  sampling (drawing on `math`'s random source). Strict: an out-of-domain parameter
-  or a quantile probability outside `[0, 1]` is a catchable error, not a NaN. A Go
-  system library (native-speed float work over many samples), TinyGo-clean.
-- **inferential `stats`** - extend the `stats` library with the inference tier:
-  linear regression (`linearRegression` simple, `multipleRegression` via `linalg`'s
-  `solve`), `confidenceInterval` (t-based), hypothesis tests (`tTest`,
+statistical surface - extending the shipped `stats` library, built on `M24.10`'s
+`math` special functions and `linalg`. There is **no separate `prob` library**:
+distributions live with the descriptive stats and inference they are always used
+with (as in `scipy.stats`, or R's base `dnorm` / `pnorm` / `qnorm`), so
+`use stats;` gives the whole statistical toolkit. Two parts, both new `stats`
+rows:
+- **Distributions** - continuous normal, t, chi-square, F (later uniform /
+  exponential / gamma / beta) and discrete binomial / Poisson, each with flat
+  R-style names: `normalPdf` / `normalCdf` / `normalQuantile` / `normalSample`,
+  `tCdf` / `tQuantile`, `binomialPmf`, and so on. The `quantile` (inverse CDF) is
+  the incomplete gamma / beta of `M24.10` inverted numerically; sampling draws on
+  `math`'s random source. Strict: an out-of-domain parameter or a quantile
+  probability outside `[0, 1]` is a catchable error, not a NaN.
+- **Inference** - linear regression (`linearRegression` simple,
+  `multipleRegression` via `linalg`'s `solve`), `confidenceInterval` (t-based),
+  binomial-proportion intervals (`proportionCi` - Wald / Wilson / exact
+  **Clopper-Pearson** over the `beta` distribution), hypothesis tests (`tTest`,
   `chiSquareTest`, `fTest`, `anova`), and `histogram` (Excel `FREQUENCY`). The
   point-estimate regression and `histogram` need only what ships today; the
-  inference (p-values, confidence intervals) uses `prob`.
+  p-values and intervals use the distributions above.
 
-Both follow the standard-library discipline (Go package + `internal/stdlib` line +
-`docs/libraries/` doc + cheatsheet rows + `JENNIFER.md` for `prob`; new `stats`
-rows). Graduated the `prob` / inference layers of `DRAFT#7`. **Requires:**
-`M24.10` (special functions) + `M24.4` (`stats`) + `M24.6` (`linalg`).
+A big, cohesive statistics workhorse (like `scipy.stats` - all pure functions).
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 

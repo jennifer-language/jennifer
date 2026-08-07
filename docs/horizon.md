@@ -212,35 +212,9 @@ Per-vendor maturity differs and should set the order, not the vendor:
   community-reverse-engineered, which is exactly why it belongs in a deck, not core.
 - **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
 
-##### DRAFT#24.3 **ML**
+##### DRAFT#24.3
 
-ML hits the tree-walker's compute wall: real deep-net training (big tensors,
-backprop, many epochs) is BLAS / GPU C++ (PyTorch / JAX) a `.j` interpreter
-is orders of magnitude too slow to replace, so this is not a PyTorch clone.
-It is three feasible things, on the core numerical stack (`linalg`, `math` foundations,
-`prob` / inference):
-
-- **Classical ML on tabular data** - the practical core: clustering (`kMeans`),
-  classification (`kNN`, `naiveBayes`, `logisticRegression`, decision trees /
-  small random forests), regression (`linear` / `ridge`, over `linalg`'s `solve`),
-  dimensionality reduction (`pca` via eigen), plus the plumbing - feature scaling,
-  train / test split, k-fold cross-validation, and metrics (accuracy / precision /
-  recall / F1, confusion matrix, ROC-AUC). Algorithmically light and usable at the
-  sizes a scripting language handles.
-- **A teaching autograd engine** - a micrograd / tinygrad-spirit reverse-mode
-  autodiff (a `Value` graph with `backward()`) plus a minimal layer / optimizer
-  API (`dense`, `relu`, `sgd` / `adam`, MSE / cross-entropy) - enough to build a
-  toy MLP and *watch backprop work*. Squarely for Jennifer's teaching mission, not
-  production scale.
-- **Inference + orchestration** - the wrap-and-pipe path: run a small trained
-  model forward, or drive an external runtime (ONNX / llama.cpp / a model server)
-  via `os.run` / `http` and consume its output - the same "let the native tool do
-  the heavy lifting" stance as the NGS deck, and a sibling of the `mcp` module.
-
-Posture: the tensor / matmul hot loops want Go backing - an n-D array primitive
-extending `linalg` from 2-D to n-D - with the algorithms in `.j` on top. Out of
-scope: training real deep nets (CNN / transformer), GPU support, and large-tensor
-throughput - native-framework territory.
+void
 
 ##### DRAFT#24.4 **Bioinformatics**
 
@@ -303,7 +277,7 @@ and on `xml` / text parsing to ingest a published frequency table.
   haploid, non-recombining, and uniparentally inherited, so match probability is
   **not** Hardy-Weinberg but a direct **haplotype count**: frequency `k / N` in a
   reference database, with a **Clopper-Pearson** exact-binomial upper bound as the
-  conservative estimate (which pulls in the `beta` distribution of `M24.11`).
+  conservative estimate (which pulls in the `beta` distribution `M24.11` adds to `stats`).
   Deliberately **database-independent**, so the deck supplies the estimator
   (`haplotypeFrequency(k, N)` / `lineageMatchProbability`) and the caller feeds the
   count from whatever database they queried. mtDNA adds a haplotype coded as

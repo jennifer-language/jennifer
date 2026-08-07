@@ -43,6 +43,12 @@ func Install(in *interpreter.Interpreter) {
 
 	in.RegisterNamespacedConst(LibraryName, "PI", interpreter.FloatVal(math.Pi))
 	in.RegisterNamespacedConst(LibraryName, "E", interpreter.FloatVal(math.E))
+
+	// Everyday (trig / hyperbolic / exp / log / combinatorics + TAU) and the
+	// special functions the probability layer is built on (erf / gamma / beta
+	// + regularized incomplete forms).
+	installElementary(in)
+	installSpecial(in)
 }
 
 func arityOne(name string, args []interpreter.Value) error {

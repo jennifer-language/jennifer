@@ -1,9 +1,13 @@
 # `math` - numeric functions and constants
 
-Enable with `use math;`. A small set of frequently-needed numeric functions
-plus the constants `math.PI` and `math.E`. The library is strict on undefined
-inputs - anything that would produce `NaN` or `Infinity` in IEEE arithmetic
-instead produces a positioned runtime error.
+Enable with `use math;`. The numeric toolbox: the everyday functions
+(arithmetic helpers, trigonometry, hyperbolics, exponentials and logarithms,
+combinatorics) plus the special functions a probability layer is built on
+(the error, gamma and beta functions and their regularized incomplete forms),
+and the constants `math.PI`, `math.E`, and `math.TAU`. The library is strict
+on undefined inputs - anything that would produce `NaN` or `Infinity` in IEEE
+arithmetic instead produces a positioned runtime error, so a domain slip
+(`math.ln(0)`, `math.asin(2)`) is a catchable error, never a silent NaN.
 
 ```jennifer
 use io;
@@ -34,6 +38,80 @@ io.printf("%d\n", math.round(2.5));            # 3 (half away from zero)
 
 `min`/`max` follow the same numeric-promotion rule as `+`: same-type
 arguments return that type; any `float` involved produces a `float`.
+
+## Trigonometry and hyperbolics
+
+Angles are in **radians**. Every function returns a `float`; the inverse
+functions error outside their domain (via the strict-NaN rule), and `sinh` /
+`cosh` error when they overflow to infinity.
+
+| Call              | Returns | Notes                                              |
+| ----------------- | ------- | -------------------------------------------------- |
+| `math.sin(x)` / `math.cos(x)` / `math.tan(x)`     | float | Basic trig. |
+| `math.asin(x)` / `math.acos(x)`                   | float | Inverse; error outside `[-1, 1]`. |
+| `math.atan(x)`                                    | float | Inverse tangent. |
+| `math.atan2(y, x)`                                | float | Quadrant-aware arctangent of `y/x`. |
+| `math.sinh(x)` / `math.cosh(x)` / `math.tanh(x)`  | float | Hyperbolic; `sinh`/`cosh` error on overflow. |
+| `math.asinh(x)`                                   | float | Inverse hyperbolic sine (all reals). |
+| `math.acosh(x)`                                   | float | Inverse; error for `x < 1`. |
+| `math.atanh(x)`                                   | float | Inverse; error outside `(-1, 1)`. |
+
+## Exponentials and logarithms
+
+| Call             | Returns | Notes                                               |
+| ---------------- | ------- | --------------------------------------------------- |
+| `math.exp(x)`    | float   | `e^x`; errors on overflow.                          |
+| `math.expm1(x)`  | float   | `e^x - 1`, accurate for small `x`.                  |
+| `math.ln(x)`     | float   | Natural log; errors for `x <= 0`.                   |
+| `math.log10(x)`  | float   | Base-10 log; errors for `x <= 0`.                   |
+| `math.log2(x)`   | float   | Base-2 log; errors for `x <= 0`.                    |
+| `math.log1p(x)`  | float   | `ln(1 + x)`, accurate for small `x`; errors for `x <= -1`. |
+| `math.log(x, base)` | float | Log of `x` to an arbitrary `base`; errors for non-positive `x` / `base` or `base` 1. |
+
+## Roots, magnitude, and sign
+
+| Call             | Returns          | Notes                                       |
+| ---------------- | ---------------- | ------------------------------------------- |
+| `math.cbrt(x)`   | float            | Real cube root (handles negative `x`).      |
+| `math.hypot(x, y)` | float          | `sqrt(x*x + y*y)` without intermediate overflow. |
+| `math.sign(x)`   | same type as `x` | `-1` / `0` / `1` with the sign of `x` (int → int, float → float). |
+| `math.trunc(x)`  | int              | Round toward zero; int argument is the identity. |
+
+## Combinatorics
+
+Integer in, integer out; a result past `int64` is a catchable overflow error
+(not a silent wrap), consistent with the language's integer arithmetic.
+
+| Call                | Returns | Notes                                            |
+| ------------------- | ------- | ------------------------------------------------ |
+| `math.factorial(n)` | int     | `n!`; errors on negative `n` or overflow (`n > 20`). |
+| `math.comb(n, k)`   | int     | Binomial coefficient `nCr` (exact); `k > n` is `0`; errors negative `n`/`k`. |
+| `math.perm(n, k)`   | int     | `k`-permutations of `n` (`nPr`, exact); `k > n` is `0`. |
+| `math.gcd(a, b)`    | int     | Greatest common divisor (non-negative; `gcd(0, 0) = 0`). |
+| `math.lcm(a, b)`    | int     | Least common multiple (`lcm(x, 0) = 0`); errors on overflow. |
+
+## Special functions
+
+The functions a statistics / probability layer needs. All return a `float`.
+The error and gamma functions come from Go's standard library; the
+**regularized incomplete** gamma and beta - the engine every distribution CDF
+is built on - are computed by the standard series / continued-fraction
+algorithms, verified to machine precision on their convergent domain. Their
+results are pinned into `[0, 1]` (a CDF by definition), and an extreme argument
+that drives the series to a non-finite or non-converged result is a catchable
+error, not a silently-wrong value or a leaked `NaN` - the same strict contract
+the rest of the library keeps.
+
+| Call                    | Returns | Notes                                        |
+| ----------------------- | ------- | -------------------------------------------- |
+| `math.erf(x)` / `math.erfc(x)` | float | Error function and its complement (`erf + erfc = 1`). |
+| `math.gamma(x)`         | float   | Gamma function; errors at the poles (`0`, negative integers) and on overflow. |
+| `math.lgamma(x)`        | float   | `ln|gamma(x)|`, for range; errors at the poles. |
+| `math.beta(a, b)`       | float   | Beta function `B(a, b) = gamma(a)*gamma(b)/gamma(a+b)`; `a, b > 0`. |
+| `math.lbeta(a, b)`      | float   | `ln B(a, b)`, the stable log form; `a, b > 0`. |
+| `math.regGammaP(a, x)`  | float   | Regularized lower incomplete gamma `P(a, x)` in `[0, 1]` (the gamma / chi-square CDF); `a > 0`, `x >= 0`. |
+| `math.regGammaQ(a, x)`  | float   | Upper complement `Q(a, x) = 1 - P(a, x)`.    |
+| `math.regBetaI(x, a, b)`| float   | Regularized incomplete beta `I_x(a, b)` in `[0, 1]` (the CDF engine for the beta, Student's t, F, and binomial); `0 <= x <= 1`, `a, b > 0`. |
 
 ## Randomness
 
@@ -105,8 +183,9 @@ use `crypto.randInt` / `crypto.randBytes` directly.
 
 | Name      | Kind  | Value                |
 | --------- | ----- | -------------------- |
-| `math.PI` | float | 3.141592653589793... |
-| `math.E`  | float | 2.718281828459045... |
+| `math.PI`  | float | 3.141592653589793... |
+| `math.E`   | float | 2.718281828459045... |
+| `math.TAU` | float | 6.283185307179586... (`2*PI`, the full-turn constant) |
 
 Constants are referenced through the `math.` namespace prefix like
 every other library name; the bare identifiers `PI` and `E`
