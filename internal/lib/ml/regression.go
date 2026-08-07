@@ -129,6 +129,109 @@ func (r *registry) linearRegressionFn(_ interpreter.BuiltinCtx, args []interpret
 	return r.store(m), nil
 }
 
+// softThreshold is the L1 proximal operator sign(x)*max(|x|-lambda, 0).
+func softThreshold(x, lambda float64) float64 {
+	switch {
+	case x > lambda:
+		return x - lambda
+	case x < -lambda:
+		return x + lambda
+	default:
+		return 0
+	}
+}
+
+// fitLasso solves L1-regularized regression by cyclic coordinate descent on the
+// centered data (so the intercept is handled by centering, unpenalized).
+// The objective is (1/2)||y - Xb||^2 + alpha*||b||_1.
+func fitLasso(x [][]float64, y []float64, alpha float64) (*linearModel, error) {
+	n, d := len(x), len(x[0])
+	xbar := make([]float64, d)
+	ybar := 0.0
+	for i := range x {
+		ybar += y[i]
+		for j := 0; j < d; j++ {
+			xbar[j] += x[i][j]
+		}
+	}
+	ybar /= float64(n)
+	for j := range xbar {
+		xbar[j] /= float64(n)
+	}
+	xc := make([][]float64, n)
+	r := make([]float64, n) // residual = yc - Xc*beta (beta starts at 0)
+	for i := range x {
+		xc[i] = make([]float64, d)
+		for j := 0; j < d; j++ {
+			xc[i][j] = x[i][j] - xbar[j]
+		}
+		r[i] = y[i] - ybar
+	}
+	xnorm := make([]float64, d)
+	for j := 0; j < d; j++ {
+		for i := 0; i < n; i++ {
+			xnorm[j] += xc[i][j] * xc[i][j]
+		}
+	}
+	beta := make([]float64, d)
+	for iter := 0; iter < 1000; iter++ {
+		maxChange := 0.0
+		for j := 0; j < d; j++ {
+			if xnorm[j] == 0 {
+				continue
+			}
+			rho := 0.0
+			for i := 0; i < n; i++ {
+				rho += xc[i][j] * (r[i] + beta[j]*xc[i][j])
+			}
+			nb := softThreshold(rho, alpha) / xnorm[j]
+			if nb != beta[j] {
+				diff := beta[j] - nb
+				for i := 0; i < n; i++ {
+					r[i] += diff * xc[i][j]
+				}
+				if a := math.Abs(diff); a > maxChange {
+					maxChange = a
+				}
+				beta[j] = nb
+			}
+		}
+		if maxChange < 1e-9 {
+			break
+		}
+	}
+	intercept := ybar
+	for j := 0; j < d; j++ {
+		intercept -= beta[j] * xbar[j]
+		if !isFinite(beta[j]) {
+			return nil, fmt.Errorf("input magnitudes overflow the computation")
+		}
+	}
+	if !isFinite(intercept) {
+		return nil, fmt.Errorf("input magnitudes overflow the computation")
+	}
+	return &linearModel{coef: beta, intercept: intercept, nf: d}, nil
+}
+
+func (r *registry) lassoFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("ml.lasso expects 3 arguments (X, y, alpha), got %d", len(args))
+	}
+	x, y, err := fitData("lasso", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	alpha, ok := args[2].AsFloat()
+	if !ok || alpha < 0 {
+		return interpreter.Null(), fmt.Errorf("ml.lasso: alpha must be a non-negative number")
+	}
+	m, err := fitLasso(x, y, alpha)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("ml.lasso: %v", err)
+	}
+	return r.store(m), nil
+}
+
 func (r *registry) ridgeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("ml.ridge expects 3 arguments (X, y, alpha), got %d", len(args))

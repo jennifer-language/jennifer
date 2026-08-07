@@ -227,6 +227,48 @@ func rmseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	return floatResult("rmse", math.Sqrt(s/float64(len(yt))))
 }
 
+func mseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	yt, yp, err := twoVectors("mse", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	s := 0.0
+	for i := range yt {
+		d := yt[i] - yp[i]
+		s += d * d
+	}
+	return floatResult("mse", s/float64(len(yt)))
+}
+
+// logLossFn is the binary cross-entropy between 0/1 labels and predicted
+// probabilities, with the probabilities clipped away from 0 and 1 so the log
+// stays finite.
+func logLossFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	yt, p, err := twoVectors("logLoss", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	const eps = 1e-15
+	s := 0.0
+	for i := range yt {
+		if yt[i] != 0 && yt[i] != 1 {
+			return interpreter.Null(), fmt.Errorf("ml.logLoss: true labels must be 0 or 1, got %s", interpreter.DisplayFloat(yt[i]))
+		}
+		pi := p[i]
+		if pi < 0 || pi > 1 {
+			return interpreter.Null(), fmt.Errorf("ml.logLoss: probability %d must be in [0, 1], got %s", i, interpreter.DisplayFloat(pi))
+		}
+		// Clip away from the exact endpoints so log(0) / log(1) stay finite.
+		if pi < eps {
+			pi = eps
+		} else if pi > 1-eps {
+			pi = 1 - eps
+		}
+		s += yt[i]*math.Log(pi) + (1-yt[i])*math.Log(1-pi)
+	}
+	return floatResult("logLoss", -s/float64(len(yt)))
+}
+
 func maeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	yt, yp, err := twoVectors("mae", args)
 	if err != nil {

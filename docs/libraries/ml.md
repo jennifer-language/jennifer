@@ -39,15 +39,39 @@ handle is safe to share across value-copies and `spawn`ed tasks (read-only).
 | -------- | ---- | ----- |
 | `ml.linearRegression(X, y)` | regression | Ordinary least squares (normal equations). |
 | `ml.ridge(X, y, alpha)` | regression | L2-regularized OLS; `alpha >= 0` shrinks the coefficients (not the intercept). |
+| `ml.lasso(X, y, alpha)` | regression | L1-regularized (coordinate descent); drives small coefficients to exactly `0`. |
 | `ml.kNN(X, y, k)` | classifier | k-nearest-neighbours majority vote (Euclidean). |
-| `ml.naiveBayes(X, y)` | classifier | Gaussian naive Bayes. |
-| `ml.logisticRegression(X, y [, lr [, epochs]])` | classifier | Binary (labels `0` / `1`); gradient descent (`lr` default `0.1`, `epochs` `1000`). |
+| `ml.kNNRegressor(X, y, k)` | regression | k-NN averaging the `k` nearest targets. |
+| `ml.naiveBayes(X, y)` | classifier | Gaussian naive Bayes (multiclass). |
+| `ml.logisticRegression(X, y [, lr [, epochs]])` | classifier | Binary or **multiclass** (one-vs-rest); gradient descent (`lr` default `0.1`, `epochs` `1000`). Only the binary case has `predictProba`. |
 | `ml.decisionTree(X, y [, maxDepth])` | classifier | CART with Gini impurity (`maxDepth` default `8`). |
+| `ml.decisionTreeRegressor(X, y [, maxDepth])` | regression | CART with variance-reduction splits, leaf = mean target. |
 | `ml.randomForest(X, y [, nTrees [, maxDepth]])` | classifier | Bagged trees with per-split feature subsampling (`nTrees` `10`). |
+| `ml.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | regression | Bagged regression trees (mean of tree predictions). |
 | `ml.kMeans(X, k [, maxIter])` | clustering | Lloyd's algorithm, k-means++ seeding. |
 | `ml.pca(X, nComponents)` | transform | Principal component analysis (covariance eigendecomposition). |
 | `ml.standardScaler(X)` | transform | Fit a z-score scaler (per-feature mean / stddev). |
 | `ml.minMaxScaler(X)` | transform | Fit a `[0, 1]` min-max scaler. |
+
+## Inspecting a fitted model
+
+A model is opaque, but you can read the parameters it learned:
+
+| Call | Applies to | Returns |
+| ---- | ---------- | ------- |
+| `ml.coefficients(model)` | linear / ridge / lasso / logistic | `list of float` (per feature), or `list of list of float` (per class) for multiclass logistic. |
+| `ml.intercept(model)` | linear / ridge / lasso / logistic | `float`, or `list of float` per class for multiclass logistic. |
+| `ml.centroids(model)` | kMeans | `list of list of float` (cluster centres). |
+| `ml.components(model)` | pca | `list of list of float` (principal axes, one row per component). |
+| `ml.explainedVariance(model)` | pca | `list of float` - the variance ratio each component captures (choose `nComponents` from these). |
+| `ml.featureImportances(model)` | decisionTree / randomForest | `list of float` (Gini importances, summing to `1`). |
+
+```jennifer
+use ml;
+use io;
+def m as ml.Model init ml.linearRegression([[1.0, 1.0], [2.0, 1.0], [1.0, 2.0], [3.0, 2.0]], [6.0, 8.0, 9.0, 13.0]);
+io.printf("y = %v . x + %v\n", ml.coefficients($m), ml.intercept($m));   # [2, 3], 1
+```
 
 ## Applying a model
 
@@ -69,7 +93,17 @@ ends. When you fit **many** models in a loop (e.g. a large cross-validation),
 call `ml.free(model)` on the ones you are done with so the registry does not grow
 unbounded. The cost-driving hyper-parameters are bounded (tree `maxDepth` <= 64,
 forest `nTrees` <= 1000, `kMeans` `maxIter` <= 10000, logistic `epochs` <= 1e6,
-`kFold` `nSamples * k` <= 1e8); a value above the ceiling is a catchable error.
+`kFold` `nSamples * k` <= 1e8, multiclass logistic <= 100 classes,
+`polynomialFeatures` degree <= 8, output width <= 1e5, and total cells
+(rows x columns) <= 2e7); a value above the ceiling is a catchable error, as is a
+`polynomialFeatures` product that overflows to a non-finite value.
+
+`ml.lasso`, unlike ordinary least squares, is fine with more features than rows
+(p > n) - that is its feature-selection use case, so it does **not** require
+`rows > features`. Feeding it a very wide `polynomialFeatures` design is allowed
+but does dense O(sweeps x features x rows) work; keep the expansion modest.
+`ml.logLoss` requires each probability in `[0, 1]` (an out-of-range value errors,
+rather than being silently clamped).
 
 ```jennifer
 use ml;
@@ -92,6 +126,7 @@ def scaled as list of list of float init ml.transform($scaler, $data);
 | ---- | ------- | - |
 | `ml.trainTestSplit(X, y, testFraction)` | `ml.Split` | Shuffle and split into `{trainX, trainY, testX, testY}`; `testFraction` in `(0, 1)`. |
 | `ml.kFold(nSamples, k)` | `list of ml.Fold` | `k` contiguous folds, each `{trainIdx, testIdx}` (index lists into your data). |
+| `ml.polynomialFeatures(X, degree)` | `list of list of float` | Expand to all monomials up to `degree` (with a leading bias column); stateless, so the same call fits train and test. |
 
 ```jennifer
 export def struct Split { trainX as list of list of float, trainY as list of float, testX as list of list of float, testY as list of float };
@@ -112,7 +147,8 @@ positive-label argument (default `1`).
 | `ml.f1(yTrue, yPred [, positive])` | Harmonic mean of precision and recall. |
 | `ml.confusionMatrix(yTrue, yPred)` | `ml.Confusion{labels, matrix}` (rows = true, columns = predicted). |
 | `ml.rocAuc(yTrue, scores)` | Binary ROC-AUC from `0` / `1` labels and predicted scores (tie-aware). |
-| `ml.rmse(yTrue, yPred)` / `ml.mae` | Root-mean-square / mean-absolute error (regression). |
+| `ml.logLoss(yTrue, probas)` | Binary cross-entropy of `0` / `1` labels against predicted probabilities. |
+| `ml.rmse(yTrue, yPred)` / `ml.mse` / `ml.mae` | Root-mean-square / mean-square / mean-absolute error (regression). |
 | `ml.r2(yTrue, yPred)` | Coefficient of determination R^2 (zero-variance targets error). |
 
 ```jennifer
@@ -132,8 +168,8 @@ that overflow the computation all raise a positioned error.
 
 `ml` targets the modest tabular data a tree-walker handles - native loops over
 thousands of rows, not millions. Large-scale training stays a native-tool job.
-Multiclass logistic regression, model serialization, and gradient-boosted trees
-are out of scope for this tier.
+Support-vector machines, gradient-boosted trees, density-based clustering
+(DBSCAN), and model serialization are out of scope for this tier.
 
 ## See also
 

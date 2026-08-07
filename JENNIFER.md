@@ -413,12 +413,16 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   (scikit-learn-lite), over `stats`/`linalg`. **Fit/predict shape**: a fit
   function returns an opaque `ml.Model` handle, applied with `ml.predict`
   (labels for a classifier/cluster, values for a regressor) / `ml.transform`
-  (scalers, PCA) / `ml.predictProba` (logistic). Models: `linearRegression`
-  `ridge` `kNN` `naiveBayes` `logisticRegression`(binary) `decisionTree`
-  `randomForest` `kMeans` `pca` `standardScaler` `minMaxScaler`. Selection:
-  `trainTestSplit` -> `ml.Split`, `kFold` -> list of `ml.Fold`. Metrics:
-  `accuracy` `precision` `recall` `f1`(+ positive label) `confusionMatrix`
-  `rocAuc` `rmse` `mae` `r2`. X is `list of list of float/int` (rows), y a
+  (scalers, PCA) / `ml.predictProba` (binary logistic). Models: regression
+  `linearRegression` `ridge` `lasso` `kNNRegressor` `decisionTreeRegressor`
+  `randomForestRegressor`; classifiers `kNN` `naiveBayes` `logisticRegression`
+  (binary or multiclass one-vs-rest) `decisionTree` `randomForest`; `kMeans`
+  `pca` `standardScaler` `minMaxScaler`. Introspection: `coefficients`
+  `intercept` `centroids` `components` `explainedVariance` `featureImportances`.
+  Selection / preprocessing: `trainTestSplit` -> `ml.Split`, `kFold` -> list of
+  `ml.Fold`, `polynomialFeatures`. Metrics: `accuracy` `precision` `recall`
+  `f1`(+ positive label) `confusionMatrix` `rocAuc` `logLoss` `rmse` `mse` `mae`
+  `r2`. X is `list of list of float/int` (rows), y a
   `list of float/int`. Random models honor `math.randSeed`; a degenerate input
   is a catchable error. Not a deep-learning framework.
 - **`linalg`** - linear algebra, the companion to `stats`. Vectors are a

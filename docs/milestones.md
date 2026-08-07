@@ -1049,20 +1049,24 @@ primitives), and explicitly **not** a deep-learning framework (tensors / autodif
 `http` / `os.run`). A **fit / predict** shape: a fit function returns an opaque
 `ml.Model` handle (registry-backed, immutable, read-only-shareable), applied with
 `predict` / `transform` / `predictProba` / `free`. Models: regression
-(`linearRegression` / `ridge`), classifiers (`kNN`, `naiveBayes`,
-`logisticRegression`, `decisionTree` CART/Gini, `randomForest`), `kMeans`
-(k-means++), `pca` (Jacobi eigendecomposition), and `standardScaler` /
-`minMaxScaler`. Selection: `trainTestSplit` -> `ml.Split`, `kFold` -> list of
-`ml.Fold`. Metrics: `accuracy` / `precision` / `recall` / `f1` (+ positive label)
-/ `confusionMatrix` / `rocAuc` (tie-aware) / `rmse` / `mae` / `r2`. X is a
-`list of list of float/int`, y a `list of float/int`. Random models draw from
+(`linearRegression` / `ridge` / `lasso` coordinate-descent, plus `kNNRegressor` /
+`decisionTreeRegressor` / `randomForestRegressor`), classifiers (`kNN`,
+`naiveBayes`, `logisticRegression` binary + multiclass one-vs-rest, `decisionTree`
+CART/Gini, `randomForest`), `kMeans` (k-means++), `pca` (Jacobi
+eigendecomposition), and `standardScaler` / `minMaxScaler`. Introspection reads
+the learned parameters (`coefficients` / `intercept` / `centroids` / `components`
+/ `explainedVariance` / `featureImportances`). Selection / preprocessing:
+`trainTestSplit` -> `ml.Split`, `kFold` -> list of `ml.Fold`,
+`polynomialFeatures`. Metrics: `accuracy` / `precision` / `recall` / `f1` (+
+positive label) / `confusionMatrix` / `rocAuc` (tie-aware) / `logLoss` / `rmse` /
+`mse` / `mae` / `r2`. X is a `list of list of float/int`, y a
+`list of float/int`. Random models draw from
 `math`'s `randSeed`-able source (reproducibility, not secrecy - a seed is not a
 secret, so not `crypto`). Strict: a degenerate input is a catchable error, and
 the cost-driving hyper-parameters are bounded (tree depth / forest size / iters /
 epochs / kFold work) so a runaway value errors instead of a stack overflow /
 hang / OOM. Pure Go stdlib, TinyGo-clean, both binaries; pinned against known
-results. It reuses the `M24.5` slot the multiplatform track vacated for `M25`.
-**Requires:** `M24.6` (`linalg`), `M24.10` (`math`), `M24.11` (`stats`).
+results.
 
 ### M24.6 - `linalg` library (compacted)
 

@@ -15,6 +15,8 @@ def y as list of float init [6.0, 8.0, 9.0, 13.0, 14.0, 12.0];
 def reg as ml.Model init ml.linearRegression($X, $y);
 io.printf("linreg predict [5,5] = %f|prec=1\n", ml.predict($reg, [[5.0, 5.0]])[0]);
 io.printf("linreg r2 on train  = %f|prec=3\n", ml.r2($y, ml.predict($reg, $X)));
+# Introspection: read the learned coefficients / intercept (y = 2*x1 + 3*x2 + 1).
+io.printf("linreg coefficients  = %v intercept = %f|prec=0\n", ml.coefficients($reg), ml.intercept($reg));
 
 # --- Ridge regularization shrinks the fit (higher alpha, smaller coefficients). ---
 def rdg as ml.Model init ml.ridge($X, $y, 5.0);

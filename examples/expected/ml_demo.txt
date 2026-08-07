@@ -1,5 +1,6 @@
 linreg predict [5,5] = 26.0
 linreg r2 on train  = 1.000
+linreg coefficients  = [1.9999999999999998, 2.9999999999999956] intercept = 1
 ridge  predict [5,5] = 17.05
 kNN(k=3) predict     = [0, 1]
 decisionTree predict = [0, 1]

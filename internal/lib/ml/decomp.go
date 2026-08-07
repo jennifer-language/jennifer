@@ -15,6 +15,7 @@ import (
 type pcaModel struct {
 	mean       []float64
 	components [][]float64 // [component][feature]
+	explained  []float64   // variance explained ratio per kept component
 	nf         int
 }
 
@@ -84,7 +85,17 @@ func (r *registry) pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 		idx[i] = i
 	}
 	sort.Slice(idx, func(a, b int) bool { return vals[idx[a]] > vals[idx[b]] })
+	totalVar := 0.0
+	for _, v := range vals {
+		if v > 0 {
+			totalVar += v
+		}
+	}
+	if totalVar == 0 {
+		totalVar = 1
+	}
 	comps := make([][]float64, nc)
+	explained := make([]float64, nc)
 	for c := 0; c < nc; c++ {
 		col := idx[c]
 		comps[c] = make([]float64, d)
@@ -94,8 +105,13 @@ func (r *registry) pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 				return interpreter.Null(), fmt.Errorf("ml.pca: eigendecomposition failed (non-finite result)")
 			}
 		}
+		ev := vals[col]
+		if ev < 0 {
+			ev = 0 // tiny negative eigenvalue from rounding
+		}
+		explained[c] = ev / totalVar
 	}
-	return r.store(&pcaModel{mean: mu, components: comps, nf: d}), nil
+	return r.store(&pcaModel{mean: mu, components: comps, explained: explained, nf: d}), nil
 }
 
 // jacobiEigen returns the eigenvalues and eigenvectors of a symmetric matrix by

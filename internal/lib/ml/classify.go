@@ -14,14 +14,15 @@ import (
 // --- k-nearest-neighbours (classifier) ---
 
 type knnModel struct {
-	x  [][]float64
-	y  []float64 // class labels
-	k  int
-	nf int
+	x       [][]float64
+	y       []float64 // class labels, or targets for a regressor
+	k       int
+	nf      int
+	regress bool
 }
 
 func (m *knnModel) numFeatures() int { return m.nf }
-func (m *knnModel) intLabels() bool  { return true }
+func (m *knnModel) intLabels() bool  { return !m.regress }
 func (m *knnModel) predictOne(x []float64) float64 {
 	type nb struct {
 		d float64
@@ -32,9 +33,20 @@ func (m *knnModel) predictOne(x []float64) float64 {
 		nbs[i] = nb{euclid2(x, m.x[i]), m.y[i]}
 	}
 	sort.Slice(nbs, func(a, b int) bool { return nbs[a].d < nbs[b].d })
+	kk := m.k
+	if kk > len(nbs) {
+		kk = len(nbs)
+	}
+	if m.regress {
+		s := 0.0
+		for i := 0; i < kk; i++ {
+			s += nbs[i].y
+		}
+		return s / float64(kk)
+	}
 	votes := map[float64]int{}
 	best, bestN := nbs[0].y, 0
-	for i := 0; i < m.k && i < len(nbs); i++ {
+	for i := 0; i < kk; i++ {
 		votes[nbs[i].y]++
 		if v := votes[nbs[i].y]; v > bestN {
 			bestN, best = v, nbs[i].y
@@ -44,21 +56,28 @@ func (m *knnModel) predictOne(x []float64) float64 {
 }
 
 func (r *registry) kNNFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return r.fitKNN("kNN", args, false)
+}
+func (r *registry) kNNRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return r.fitKNN("kNNRegressor", args, true)
+}
+
+func (r *registry) fitKNN(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
 	if len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("ml.kNN expects 3 arguments (X, y, k), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("ml.%s expects 3 arguments (X, y, k), got %d", name, len(args))
 	}
-	x, y, err := fitData("kNN", args)
+	x, y, err := fitData(name, args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if args[2].Kind != interpreter.KindInt || args[2].Int < 1 {
-		return interpreter.Null(), fmt.Errorf("ml.kNN: k must be a positive int")
+		return interpreter.Null(), fmt.Errorf("ml.%s: k must be a positive int", name)
 	}
 	k := int(args[2].Int)
 	if k > len(x) {
-		return interpreter.Null(), fmt.Errorf("ml.kNN: k=%d exceeds the %d training rows", k, len(x))
+		return interpreter.Null(), fmt.Errorf("ml.%s: k=%d exceeds the %d training rows", name, k, len(x))
 	}
-	return r.store(&knnModel{x: x, y: y, k: k, nf: len(x[0])}), nil
+	return r.store(&knnModel{x: x, y: y, k: k, nf: len(x[0]), regress: regress}), nil
 }
 
 // --- Gaussian naive Bayes ---
@@ -139,12 +158,15 @@ func (r *registry) naiveBayesFn(_ interpreter.BuiltinCtx, args []interpreter.Val
 	return r.store(m), nil
 }
 
-// --- logistic regression (binary) ---
+// --- logistic regression (binary + multiclass one-vs-rest) ---
 
+// logisticModel is a binary logistic classifier over two classes. It is the
+// only classifier that also produces probabilities (`ml.predictProba`).
 type logisticModel struct {
-	w  []float64
-	b  float64
-	nf int
+	classes [2]float64 // [negative, positive]
+	w       []float64
+	b       float64
+	nf      int
 }
 
 func (m *logisticModel) numFeatures() int { return m.nf }
@@ -158,9 +180,35 @@ func (m *logisticModel) probaOne(x []float64) float64 {
 }
 func (m *logisticModel) predictOne(x []float64) float64 {
 	if m.probaOne(x) >= 0.5 {
-		return 1
+		return m.classes[1]
 	}
-	return 0
+	return m.classes[0]
+}
+
+// logisticMultiModel is one-vs-rest multiclass logistic regression: one binary
+// classifier per class, predicting the arg-max score. It does not produce a
+// single positive-class probability, so it is not a `prober`.
+type logisticMultiModel struct {
+	classes []float64
+	w       [][]float64
+	b       []float64
+	nf      int
+}
+
+func (m *logisticMultiModel) numFeatures() int { return m.nf }
+func (m *logisticMultiModel) intLabels() bool  { return true }
+func (m *logisticMultiModel) predictOne(x []float64) float64 {
+	best, bestScore := m.classes[0], math.Inf(-1)
+	for c := range m.classes {
+		z := m.b[c]
+		for i, wi := range m.w[c] {
+			z += wi * x[i]
+		}
+		if z > bestScore {
+			bestScore, best = z, m.classes[c]
+		}
+	}
+	return best
 }
 
 func sigmoid(z float64) float64 {
@@ -171,6 +219,40 @@ func sigmoid(z float64) float64 {
 	return e / (1 + e)
 }
 
+// fitBinaryLogistic runs batch gradient descent on the log-loss for 0/1 targets,
+// returning the weights and bias (or an error if it diverges).
+func fitBinaryLogistic(x [][]float64, t []float64, lr float64, epochs int) ([]float64, float64, error) {
+	nf := len(x[0])
+	w := make([]float64, nf)
+	b := 0.0
+	n := float64(len(x))
+	for e := 0; e < epochs; e++ {
+		gw := make([]float64, nf)
+		gb := 0.0
+		for i := range x {
+			z := b
+			for j := 0; j < nf; j++ {
+				z += w[j] * x[i][j]
+			}
+			err := sigmoid(z) - t[i]
+			gb += err
+			for j := 0; j < nf; j++ {
+				gw[j] += err * x[i][j]
+			}
+		}
+		b -= lr * gb / n
+		for j := 0; j < nf; j++ {
+			w[j] -= lr * gw[j] / n
+		}
+	}
+	for _, wj := range w {
+		if !isFinite(wj) || !isFinite(b) {
+			return nil, 0, fmt.Errorf("training diverged (try a smaller lr or scaled features)")
+		}
+	}
+	return w, b, nil
+}
+
 func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) < 2 || len(args) > 4 {
 		return interpreter.Null(), fmt.Errorf("ml.logisticRegression expects 2 to 4 arguments (X, y [, lr [, epochs]]), got %d", len(args))
@@ -178,11 +260,6 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 	x, y, err := fitData("logisticRegression", args)
 	if err != nil {
 		return interpreter.Null(), err
-	}
-	for _, v := range y {
-		if v != 0 && v != 1 {
-			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: labels must be 0 or 1 (binary), got %s", interpreter.DisplayFloat(v))
-		}
 	}
 	lr := 0.1
 	epochs := 1000
@@ -199,35 +276,47 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 		}
 		epochs = int(args[3].Int)
 	}
+	classes := uniqueSorted(y)
+	if len(classes) < 2 {
+		return interpreter.Null(), fmt.Errorf("ml.logisticRegression: need at least 2 classes, got %d", len(classes))
+	}
+	// One-vs-rest trains one classifier per class; an unbounded class count
+	// (e.g. continuous y mistaken for labels) would train that many models.
+	if len(classes) > maxClasses {
+		return interpreter.Null(), fmt.Errorf("ml.logisticRegression: %d distinct labels exceed the %d-class limit (is y continuous? use a regressor)", len(classes), maxClasses)
+	}
 	nf := len(x[0])
-	w := make([]float64, nf)
-	b := 0.0
-	n := float64(len(x))
-	for e := 0; e < epochs; e++ {
-		gw := make([]float64, nf)
-		gb := 0.0
-		for i := range x {
-			z := b
-			for j := 0; j < nf; j++ {
-				z += w[j] * x[i][j]
-			}
-			err := sigmoid(z) - y[i]
-			gb += err
-			for j := 0; j < nf; j++ {
-				gw[j] += err * x[i][j]
+	if len(classes) == 2 {
+		// Binary: positive = the larger label.
+		t := make([]float64, len(y))
+		for i, v := range y {
+			if v == classes[1] {
+				t[i] = 1
 			}
 		}
-		b -= lr * gb / n
-		for j := 0; j < nf; j++ {
-			w[j] -= lr * gw[j] / n
+		w, b, err := fitBinaryLogistic(x, t, lr, epochs)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: %v", err)
 		}
+		return r.store(&logisticModel{classes: [2]float64{classes[0], classes[1]}, w: w, b: b, nf: nf}), nil
 	}
-	for _, wj := range w {
-		if !isFinite(wj) {
-			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: training diverged (try a smaller lr or scaled features)")
+	// Multiclass: one-vs-rest, one binary classifier per class.
+	ws := make([][]float64, len(classes))
+	bs := make([]float64, len(classes))
+	for c, cls := range classes {
+		t := make([]float64, len(y))
+		for i, v := range y {
+			if v == cls {
+				t[i] = 1
+			}
 		}
+		w, b, err := fitBinaryLogistic(x, t, lr, epochs)
+		if err != nil {
+			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: %v", err)
+		}
+		ws[c], bs[c] = w, b
 	}
-	return r.store(&logisticModel{w: w, b: b, nf: nf}), nil
+	return r.store(&logisticMultiModel{classes: classes, w: ws, b: bs, nf: nf}), nil
 }
 
 // --- shared helpers ---

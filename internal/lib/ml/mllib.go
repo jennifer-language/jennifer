@@ -38,6 +38,10 @@ const (
 	maxKMeansIter     = 10000       // Lloyd iterations (converges in << 100)
 	maxLogisticEpochs = 1_000_000   // gradient-descent passes
 	maxFoldWork       = 100_000_000 // kFold: cap nSamples*k index storage (bare ints -> huge output)
+	maxPolyDegree     = 8           // polynomialFeatures degree
+	maxPolyFeatures   = 100_000     // polynomialFeatures output width (small input * high degree -> huge output)
+	maxPolyCells      = 20_000_000  // polynomialFeatures total output cells rows*cols (few cols but many rows -> OOM)
+	maxClasses        = 100         // one-vs-rest logistic classes (guards continuous y mistaken for labels)
 )
 
 // predictor is a fitted model that maps a feature row to a scalar prediction.
@@ -53,6 +57,7 @@ type predictor interface {
 // a probability / score for the positive class (used by ROC-AUC).
 type prober interface {
 	probaOne(x []float64) float64
+	numFeatures() int
 }
 
 // transformer is a fitted model that maps a feature row to a new feature row
@@ -111,13 +116,17 @@ func Install(in *interpreter.Interpreter) {
 	// Fit functions - each trains and returns an ml.Model handle.
 	in.RegisterNamespaced(LibraryName, "linearRegression", r.linearRegressionFn)
 	in.RegisterNamespaced(LibraryName, "ridge", r.ridgeFn)
+	in.RegisterNamespaced(LibraryName, "lasso", r.lassoFn)
 	in.RegisterNamespaced(LibraryName, "kNN", r.kNNFn)
+	in.RegisterNamespaced(LibraryName, "kNNRegressor", r.kNNRegressorFn)
 	in.RegisterNamespaced(LibraryName, "naiveBayes", r.naiveBayesFn)
 	in.RegisterNamespaced(LibraryName, "logisticRegression", r.logisticRegressionFn)
 	in.RegisterNamespaced(LibraryName, "kMeans", r.kMeansFn)
 	in.RegisterNamespaced(LibraryName, "pca", r.pcaFn)
 	in.RegisterNamespaced(LibraryName, "decisionTree", r.decisionTreeFn)
+	in.RegisterNamespaced(LibraryName, "decisionTreeRegressor", r.decisionTreeRegressorFn)
 	in.RegisterNamespaced(LibraryName, "randomForest", r.randomForestFn)
+	in.RegisterNamespaced(LibraryName, "randomForestRegressor", r.randomForestRegressorFn)
 	in.RegisterNamespaced(LibraryName, "standardScaler", r.standardScalerFn)
 	in.RegisterNamespaced(LibraryName, "minMaxScaler", r.minMaxScalerFn)
 
@@ -127,9 +136,18 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "predictProba", r.predictProbaFn)
 	in.RegisterNamespaced(LibraryName, "free", r.freeFn)
 
+	// Introspection - read the learned parameters.
+	in.RegisterNamespaced(LibraryName, "coefficients", r.coefficientsFn)
+	in.RegisterNamespaced(LibraryName, "intercept", r.interceptFn)
+	in.RegisterNamespaced(LibraryName, "centroids", r.centroidsFn)
+	in.RegisterNamespaced(LibraryName, "components", r.componentsFn)
+	in.RegisterNamespaced(LibraryName, "explainedVariance", r.explainedVarianceFn)
+	in.RegisterNamespaced(LibraryName, "featureImportances", r.featureImportancesFn)
+
 	// Model selection / preprocessing.
 	in.RegisterNamespaced(LibraryName, "trainTestSplit", r.trainTestSplitFn)
 	in.RegisterNamespaced(LibraryName, "kFold", kFoldFn)
+	in.RegisterNamespaced(LibraryName, "polynomialFeatures", polynomialFeaturesFn)
 
 	// Metrics (pure functions over label / value lists).
 	in.RegisterNamespaced(LibraryName, "accuracy", accuracyFn)
@@ -139,8 +157,10 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "confusionMatrix", confusionMatrixFn)
 	in.RegisterNamespaced(LibraryName, "rocAuc", rocAucFn)
 	in.RegisterNamespaced(LibraryName, "rmse", rmseFn)
+	in.RegisterNamespaced(LibraryName, "mse", mseFn)
 	in.RegisterNamespaced(LibraryName, "mae", maeFn)
 	in.RegisterNamespaced(LibraryName, "r2", r2Fn)
+	in.RegisterNamespaced(LibraryName, "logLoss", logLossFn)
 
 	registerStructs(in)
 }
@@ -367,9 +387,16 @@ func (r *registry) predictProbaFn(_ interpreter.BuiltinCtx, args []interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if len(x[0]) != pb.numFeatures() {
+		return interpreter.Null(), fmt.Errorf("ml.predictProba: X has %d features, the model was fit on %d", len(x[0]), pb.numFeatures())
+	}
 	out := make([]float64, len(x))
 	for i, row := range x {
-		out[i] = pb.probaOne(row)
+		v := pb.probaOne(row)
+		if !isFinite(v) {
+			return interpreter.Null(), fmt.Errorf("ml.predictProba: probability is undefined or infinite")
+		}
+		out[i] = v
 	}
 	return floatVec(out), nil
 }

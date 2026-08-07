@@ -71,6 +71,90 @@ func (r *registry) fitScaler(name string, args []interpreter.Value, standard boo
 	return r.store(&scalerModel{center: center, scale: scale, nf: d}), nil
 }
 
+// --- polynomial feature expansion ---
+
+// cappedBinom returns C(n, k), capped: it stops and returns a value above
+// maxPolyFeatures as soon as the running product exceeds it, so a huge count
+// never overflows or allocates.
+func cappedBinom(n, k int) int64 {
+	if k < 0 || k > n {
+		return 0
+	}
+	if k > n-k {
+		k = n - k
+	}
+	res := int64(1)
+	for i := 1; i <= k; i++ {
+		res = res * int64(n-k+i) / int64(i)
+		if res > maxPolyFeatures {
+			return res
+		}
+	}
+	return res
+}
+
+// polynomialFeaturesFn expands X to all monomials up to `degree` (combinations
+// with replacement), with a leading bias column of 1 - the same shape as
+// scikit's PolynomialFeatures. It is stateless (the expansion depends only on
+// the column count and degree), so the same call applies to train and test.
+func polynomialFeaturesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures expects 2 arguments (X, degree), got %d", len(args))
+	}
+	x, err := matrix("polynomialFeatures", args, 0)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt || args[1].Int < 1 || args[1].Int > maxPolyDegree {
+		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: degree must be in [1, %d]", maxPolyDegree)
+	}
+	degree := int(args[1].Int)
+	d := len(x[0])
+	// Output width = C(d+degree, degree) (all monomials incl. the bias). Reject
+	// a tiny input that would explode into a huge matrix - both by column count
+	// and by total cells (rows * columns), so many rows of a moderate width
+	// cannot OOM under the column cap alone.
+	width := cappedBinom(d+degree, degree)
+	if width > maxPolyFeatures {
+		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: %d features at degree %d exceed the %d output-column limit", d, degree, maxPolyFeatures)
+	}
+	if int64(len(x))*width > maxPolyCells {
+		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: %d rows x %d columns exceed the %d output-cell limit", len(x), width, maxPolyCells)
+	}
+	// Enumerate non-decreasing feature-index multisets of each size 1..degree.
+	var combos [][]int
+	for deg := 1; deg <= degree; deg++ {
+		var gen func(start int, cur []int)
+		gen = func(start int, cur []int) {
+			if len(cur) == deg {
+				combos = append(combos, append([]int{}, cur...))
+				return
+			}
+			for f := start; f < d; f++ {
+				gen(f, append(cur, f))
+			}
+		}
+		gen(0, nil)
+	}
+	out := make([][]float64, len(x))
+	for i, row := range x {
+		r := make([]float64, 1+len(combos))
+		r[0] = 1 // bias
+		for c, combo := range combos {
+			p := 1.0
+			for _, f := range combo {
+				p *= row[f]
+			}
+			if !isFinite(p) {
+				return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: a product overflows to a non-finite value (feature magnitudes too large for degree %d)", degree)
+			}
+			r[1+c] = p
+		}
+		out[i] = r
+	}
+	return floatMat(out), nil
+}
+
 // --- train/test split ---
 
 func (r *registry) trainTestSplitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

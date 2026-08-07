@@ -210,6 +210,14 @@ flat lookup view, not authoritative.
 | [`ml`](ml.md)`.confusionMatrix(yTrue, yPred)` | ml.Confusion{labels, matrix} (rows=true, cols=predicted). |
 | [`ml`](ml.md)`.rocAuc(yTrue, scores)` | Binary ROC-AUC from 0/1 labels and predicted scores (tie-aware). |
 | [`ml`](ml.md)`.rmse/mae/r2(yTrue, yPred)` | Regression error metrics (r2 = coefficient of determination). |
+| [`ml`](ml.md)`.lasso(X, y, alpha)` | Fit L1-regularized regression (coordinate descent; sparse coefficients) -> ml.Model. |
+| [`ml`](ml.md)`.kNNRegressor(X, y, k)` / `.decisionTreeRegressor(X, y [, maxDepth])` | Regression variants of k-NN / CART (predict a continuous value). |
+| [`ml`](ml.md)`.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | Bagged regression trees -> ml.Model (regressor). |
+| [`ml`](ml.md)`.coefficients(model)` / `.intercept(model)` | Read a linear/logistic model's learned weights / bias. |
+| [`ml`](ml.md)`.centroids(model)` / `.components(model)` / `.explainedVariance(model)` | k-means centres / PCA axes / PCA per-component variance ratios. |
+| [`ml`](ml.md)`.featureImportances(model)` | Gini feature importances of a tree / forest (sum to 1). |
+| [`ml`](ml.md)`.polynomialFeatures(X, degree)` | Expand X to all monomials up to `degree` (+ bias); stateless. Degree in [1,8]. |
+| [`ml`](ml.md)`.mse(yTrue, yPred)` / `.logLoss(yTrue, probas)` | Mean-squared error / binary cross-entropy. |
 | [`math`](math.md)`.abs(x)`                            | Absolute value of `x` (int→int, float→float).                                                                                       |
 | [`net`](net.md)`.accept($listener)`                   | Block until a client connects to `$listener`; return the new `net.Conn`.                                                            |
 | [`net`](net.md)`.address($h)`                         | Polymorphic. Conn -> peer address; Listener / UDPSocket -> local bound address.                                                     |
