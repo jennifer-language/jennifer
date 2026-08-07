@@ -1,0 +1,8 @@
+Avogadro       = 6.022e+23
+electron charge= 1.6e-19
+Planck         = 6.626e-34
+1e10 is a float = 1e+10
+2.5E8 = 2.5e+08, 1e+6 = 1e+06, 1_000.5e3 = 1.0005e+06
+1.5e3 + 500.0 = 2000.0
+2e-3 < 3e-3 ? true
+tiny = 1e-300

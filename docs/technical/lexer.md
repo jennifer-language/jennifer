@@ -108,6 +108,28 @@ half-open range operator `a..b`), a single `.` stays `DOT`. Number
 scanning already requires a digit after `.` for a fraction, so `1..5`
 lexes as `INT DOTDOT INT` (not `1.` `.5`) with no special-casing.
 
+A decimal number may carry a scientific-notation exponent, `[eE][+-]?`
+followed by one or more digits (`6.022e23`, `1.6e-19`, `1e10`). An
+exponent makes the literal a `FLOAT` even with no fractional part, so
+`1e10` is a float where a bare `1` is an int; the exponent takes no `_`
+separators (the mantissa still does, `1_000.5e3`), and a digit followed
+by `e`/`E` with no exponent digit (`1e`, `1e+`) is a positioned lex
+error, since it has no other valid reading. Only the decimal path scans
+an exponent - `0x`/`0o`/`0b` literals return earlier, so `0xe5`'s `e`
+stays a hex digit. The stored `Lexeme` keeps the exponent's source case
+(`2.5E8` stays `2.5E8`, which `strconv.ParseFloat` accepts) and strips
+only the mantissa's `_`; `Raw` keeps the exact source so `fmt` re-emits
+`6.022e23` / `1.6E-19` verbatim.
+
+The parser's `strconv.ParseFloat` governs the magnitude boundaries. An
+**overflowing** exponent (`1e400`) is a positioned parse error, never an
+`Infinity` (the strict stance rejects non-finite results). An
+**underflowing** one (`1e-400`, below the smallest denormal ~`5e-324`)
+rounds to `0.0` with no error - `0.0` is a finite, correctly-rounded
+value, unlike the non-finite `Infinity` overflow would give, so it is the
+same value every IEEE-754 language yields there. The asymmetry is
+deliberate: the strict check bans the non-finite, not a finite zero.
+
 ## Identifier rule
 
 Every identifier is **letter-initial** (a token that starts with a digit is

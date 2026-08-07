@@ -79,7 +79,10 @@ function value), `channel of T` (a CSP channel between goroutines).
 
 - **int** literals: `42`, `0xff`, `0o755`, `0b1010`, with `_` digit separators
   (`1_000_000`, `0xDEAD_BEEF`).
-- **float** literals: need a `.`: `3.14`, `0.5` (and `_` separators).
+- **float** literals: a `.` (`3.14`, `0.5`) or an `[eE][+-]?` exponent
+  (`6.022e23`, `1.6e-19`, `1e10` - the exponent alone makes it a float); `_`
+  separators in the mantissa only. Overflow (`1e400`) is an error, not `Infinity`;
+  underflow (`1e-400`) rounds to `0.0` (a finite value; only the non-finite is banned).
 - **string** literals: two delimiters, one job each. `"..."` is **cooked** -
   escape sequences `\n \r \t \\ \" \' \0` are processed. `'...'` is **raw** - no
   escape processing at all: every byte to the next `'` is literal (backslashes and

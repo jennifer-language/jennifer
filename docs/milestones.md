@@ -1149,24 +1149,22 @@ are a protocol reference, not a port target - their heavy-OO shape does not map 
 Jennifer's value-semantic structs. Ships with the module discipline where `.j`
 (test overlay + doc + demo).
 
-### M24.10 - `math` foundations + special functions
+### M24.10 - `math` foundations + special functions (compacted)
 
-**Done.** Fill the two `math` gaps a batteries-included language should not
-carry into 1.0 - the everyday functions and the special functions a probability
-layer is built on - both folded into the existing `math` library. **Everyday:**
-trigonometry (`sin` / `cos` / `tan` / `asin` / `acos` / `atan` / `atan2`),
-hyperbolic (`sinh` / `cosh` / `tanh` + `asinh` / `acosh` / `atanh`), exponentials
-and logarithms (`exp` / `expm1` / `ln` / `log10` / `log2` / `log1p` + an
-arbitrary-base `log`), `cbrt` / `hypot` / `sign` / `trunc`, and combinatorics
-(`factorial` / `comb` (nCr) / `perm` (nPr) / `gcd` / `lcm`), plus the `TAU`
-constant. **Special:** `erf` / `erfc`, `gamma` / `lgamma`, `beta` / `lbeta`, and
-the regularized incomplete gamma (`regGammaP` / `regGammaQ`) and beta (`regBetaI`)
-- the engine every distribution CDF needs (`M24.11`). Go stdlib supplies the base
-functions (`math.Sin` / `Erf` / `Gamma` / `Lgamma` ...); the regularized
-incomplete forms are hand-rolled by the standard series / continued-fraction
-algorithms. Strict like the rest of `math`: a domain error (`ln(0)`, `asin(2)`,
-`sqrt(-1)`, an overflowing `factorial`) is a catchable error, not a NaN. Pure Go
-stdlib, TinyGo-clean, both binaries.
+**Done.** Fill the two `math` gaps a batteries-included language should not carry
+into 1.0, both folded into the existing `math`. **Everyday:** trigonometry (`sin`
+/ `cos` / `tan` + inverses + `atan2`), hyperbolic (`sinh` / `cosh` / `tanh` +
+inverses), exponentials / logarithms (`exp` / `expm1` / `ln` / `log10` / `log2` /
+`log1p` + arbitrary-base `log`), `cbrt` / `hypot` / `sign` / `trunc`, and
+combinatorics (`factorial` / `comb` / `perm` / `gcd` / `lcm`, exact-int with
+overflow errors), plus `TAU`. **Special:** `erf` / `erfc`, `gamma` / `lgamma`,
+`beta` / `lbeta`, and the regularized incomplete gamma (`regGammaP` / `regGammaQ`)
+and beta (`regBetaI`) - the CDF engine `M24.11` needs, hand-rolled by the standard
+series / continued-fraction algorithms and verified to machine precision. Strict
+throughout: a domain error, an overflow, or a non-converged / non-finite CDF is a
+catchable error, never a NaN (the CDF builtins guard the hand-rolled results and
+clamp into `[0, 1]`). Go stdlib for the base functions; TinyGo-clean, both
+binaries.
 
 ### M24.11 - distributions + inferential `stats`
 
@@ -1193,6 +1191,30 @@ rows:
   p-values and intervals use the distributions above.
 
 A big, cohesive statistics workhorse (like `scipy.stats` - all pure functions).
+
+### M24.12 - scientific-notation float literals
+
+**Done.** Float literals accept an `[eE][+-]?digits` exponent (`6.022e23`,
+`1.6e-19`, `2.5E8`, `1e10`), the notation every scientific magnitude and small
+probability is written in. The exponent makes the literal a **float** even with
+no fractional part (`1e10` is a float; `1e` a positioned lex error), takes no `_`
+separators (the mantissa still does: `1_000.5e3`), and is decimal-only - `0xe5`
+keeps `e` as a hex digit. Purely a lexer change (`readNumber` gains the exponent
+scan; the parser's existing `strconv.ParseFloat` reads the lexeme, so an
+overflowing `1e400` is a positioned parse error, not an `Inf`; an underflowing
+`1e-400` rounds to a finite `0.0`, since the strict check bans the non-finite,
+not a finite zero). **Additive /
+non-breaking** - `1e10` was a juxtaposition parse error before, so no valid
+program changes.
+
+On stance #1 (**one way per thing**): scientific notation *appears* to add a
+second spelling for a value that already has a decimal form, but it is admitted
+for the same reason `0xff` / `0o755` / `0b1010` are - a notation that carries
+domain intent is not a parallel API, and for extreme magnitudes (`1e-300`) there
+is no practical decimal form at all. Decisively, the interpreter already *prints*
+exponent form (`1e+21`) but could not read it back - the literal closes that
+round-trip gap rather than opening a new one. Reasoning recorded in
+`design-decisions.md`.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 

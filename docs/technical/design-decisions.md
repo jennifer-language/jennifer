@@ -341,3 +341,50 @@ eager-loaded associations live in an identity-map-style `Result` read through
 `orm.related` / `relatedOne`, keeping the row map a clean scalar record. It is the
 same "no language-level top type; walk heterogeneous data with explicit
 accessors" stance the `json` / `toml` / `yaml` libraries take.
+
+## Scientific-notation float literals
+
+Stance #1 ("one way per thing") normally rejects a second spelling for a value
+that already has a canonical form, and `1.5e3` / `1500.0` are, on their face,
+exactly that. Scientific notation ships anyway, for the same three reasons the
+hex / octal / binary integer literals do (which stance #1 also let through):
+
+1. **A notation that carries domain intent is not a parallel API.** `0o755` says
+   "permission bits", `0xDEAD_BEEF` says "bit pattern", and `6.022e23` says
+   "physical magnitude" - each communicates something the plain-decimal form
+   does not. Stance #1 rejects parallel APIs for the *same job* (`$i++` vs
+   `$i = $i + 1`), not multiple notations that each read as a different kind of
+   quantity. If hex-for-ints passes, exponent-for-floats passes by the identical
+   argument.
+2. **For a whole class of values there is no other practical form.** `1e-300`
+   cannot be written with a decimal point (300 zeros), and tiny p-values /
+   physical constants are everyday values once the `math` special functions and
+   the `stats` distribution / inference layer land. So the notation is
+   *enabling*, not merely convenient - the redundant-looking mid-range
+   (`1.5e3`) is the minority case.
+3. **It closes a round-trip gap rather than opening one.** The interpreter
+   already *prints* exponent form for extreme magnitudes (`math.pow(10, 21)`
+   displays as `1e+21`, `1e-08`, `...e-301`) but, before this, could not parse
+   that spelling back - a literal it emits was a syntax error on input. Adding
+   the literal makes output readable back as source, which serves the
+   "strict / no surprises at boundaries" stance (#4), not undermines it.
+
+Mechanically it is a lexer-only change (`readNumber` scans an optional
+`[eE][+-]?digits` suffix; the exponent alone makes the token a `FLOAT`), additive
+and non-breaking (`1e10` was a juxtaposition parse error before), and strict at
+the edge: an overflowing exponent (`1e400`) is a positioned parse error via the
+parser's existing `strconv.ParseFloat`, never an `Infinity`.
+
+The magnitude boundaries are deliberately **asymmetric**, and this is not an
+oversight in the strictness. Overflow (`1e400`) errors because it produces
+`Infinity`, a non-finite value stance #4 bans outright (the same reason
+`math.pow` rejects an infinite result). Underflow (`1e-400`, below the smallest
+denormal ~`5e-324`) rounds to `0.0` with no error, because `0.0` is a *finite,
+correctly-rounded* value - a real number that behaves normally downstream, not
+the "NaN / silent garbage" the stance is written against. Erroring on it would
+misapply the stance (a finite zero is not non-finite), diverge from every
+IEEE-754 language (Python / C / Go / JS all yield `0.0` there, none error), and
+buy nothing: a program that then divides by the underflowed `0.0` hits the
+existing division-by-zero error anyway. So the rule is precisely "reject the
+non-finite (`Inf` / `NaN`), accept a finite result" - applied consistently, the
+tiny side stays a value and the huge side is the error.

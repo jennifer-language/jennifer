@@ -22,7 +22,7 @@ syn region  jenniferString start=+'+ end=+'+
 syn match   jenniferNumber "\<0[xX][0-9a-fA-F][0-9a-fA-F_]*\>"
 syn match   jenniferNumber "\<0[oO][0-7][0-7_]*\>"
 syn match   jenniferNumber "\<0[bB][01][01_]*\>"
-syn match   jenniferFloat  "\<[0-9][0-9_]*\.[0-9][0-9_]*\>"
+syn match   jenniferFloat  "\<[0-9][0-9_]*\(\.[0-9][0-9_]*\([eE][+-]\=[0-9]\+\)\=\|[eE][+-]\=[0-9]\+\)\>"
 syn match   jenniferNumber "\<[0-9][0-9_]*\>"
 
 " Keywords.

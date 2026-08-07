@@ -74,7 +74,7 @@ contexts:
       scope: constant.numeric.octal.jennifer
     - match: '\b0[bB][01][01_]*\b'
       scope: constant.numeric.binary.jennifer
-    - match: '\b[0-9][0-9_]*\.[0-9][0-9_]*\b'
+    - match: '\b[0-9][0-9_]*(\.[0-9][0-9_]*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\b'
       scope: constant.numeric.float.jennifer
     - match: '\b[0-9][0-9_]*\b'
       scope: constant.numeric.integer.jennifer

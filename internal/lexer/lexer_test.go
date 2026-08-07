@@ -416,6 +416,62 @@ func TestTokenizeFloatLiterals(t *testing.T) {
 	}
 }
 
+// Scientific-notation float literals: an `[eE][+-]?digits` exponent makes the
+// literal a float even with no fractional part. The exponent keeps its source
+// spelling (strconv.ParseFloat accepts either case); only the mantissa's `_`
+// separators are stripped. `Raw` always preserves the exact source.
+func TestTokenizeScientificFloats(t *testing.T) {
+	cases := []struct {
+		src    string
+		want   TokenType
+		lexeme string
+		raw    string
+	}{
+		{"1e10", TOKEN_FLOAT, "1e10", "1e10"},
+		{"6.022e23", TOKEN_FLOAT, "6.022e23", "6.022e23"},
+		{"1.6e-19", TOKEN_FLOAT, "1.6e-19", "1.6e-19"},
+		{"2.5E8", TOKEN_FLOAT, "2.5E8", "2.5E8"},            // uppercase E kept (ParseFloat accepts it)
+		{"1e+5", TOKEN_FLOAT, "1e+5", "1e+5"},               // explicit + sign kept
+		{"1_000.5e3", TOKEN_FLOAT, "1000.5e3", "1_000.5e3"}, // mantissa separators stripped, raw kept
+		{"0e0", TOKEN_FLOAT, "0e0", "0e0"},
+	}
+	for _, c := range cases {
+		toks, err := Tokenize(c.src)
+		if err != nil {
+			t.Errorf("Tokenize(%q): %v", c.src, err)
+			continue
+		}
+		if toks[0].Type != c.want || toks[0].Lexeme != c.lexeme {
+			t.Errorf("Tokenize(%q): first token = %s(%q), want %s(%q)", c.src, toks[0].Type, toks[0].Lexeme, c.want, c.lexeme)
+		}
+		if toks[0].Raw != c.raw {
+			t.Errorf("Tokenize(%q): Raw = %q, want %q (fmt round-trip)", c.src, toks[0].Raw, c.raw)
+		}
+	}
+	// `0xe5`: the `e` is a hex digit, never an exponent - stays an INT.
+	if toks, err := Tokenize("0xe5"); err != nil || toks[0].Type != TOKEN_INT || toks[0].Lexeme != "0xe5" {
+		t.Errorf("Tokenize(0xe5): got %v (%v), want INT 0xe5", toks[0], err)
+	}
+	// A missing exponent digit is a positioned lex error, not a silent split.
+	for _, bad := range []string{"1e", "1e+", "1.5e-"} {
+		if _, err := Tokenize(bad); err == nil {
+			t.Errorf("Tokenize(%q): expected a lex error for a digitless exponent", bad)
+		}
+	}
+	// A huge exponent must scan in linear time: the exponent is sliced from the
+	// source in one shot, not grown character by character (which would be
+	// O(n^2) and let a large literal wedge the lexer). `1e<20000 zeros>` is a
+	// valid literal (== 1.0); it must tokenize to a single FLOAT, fast.
+	big := "1e" + strings.Repeat("0", 20000)
+	toks, err := Tokenize(big)
+	if err != nil {
+		t.Fatalf("Tokenize(1e<20000 zeros>): unexpected error %v", err)
+	}
+	if toks[0].Type != TOKEN_FLOAT || len(toks[0].Lexeme) != len(big) {
+		t.Errorf("Tokenize(1e<20000 zeros>): got %s len %d, want FLOAT len %d", toks[0].Type, len(toks[0].Lexeme), len(big))
+	}
+}
+
 func TestTokenizeComparisonOperators(t *testing.T) {
 	toks, err := Tokenize("< > <= >= == != =")
 	if err != nil {

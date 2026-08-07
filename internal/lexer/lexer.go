@@ -478,15 +478,47 @@ func (l *Lexer) readNumber(startLine, startCol int) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
+	lexeme := digits
+	isFloat := false
 	if l.pos+1 < len(l.src) && l.src[l.pos] == '.' && isASCIIDigit(l.src[l.pos+1]) {
 		l.advance() // consume the `.`
 		fraction, err := l.readSeparatedDigits(startLine, startCol, isASCIIDigit, "decimal")
 		if err != nil {
 			return Token{}, err
 		}
-		return Token{Type: TOKEN_FLOAT, Lexeme: digits + "." + fraction, Line: startLine, Col: startCol}, nil
+		lexeme += "." + fraction
+		isFloat = true
 	}
-	return Token{Type: TOKEN_INT, Lexeme: digits, Line: startLine, Col: startCol}, nil
+	// Optional decimal exponent: `[eE][+-]?digits`. Its presence makes the
+	// literal a float even without a fractional part (`1e10`), the scientific-
+	// notation form (`6.022e23`, `1.6e-19`). A digit followed by `e`/`E` has no
+	// other valid reading, so a missing exponent digit is a positioned lex error
+	// rather than a downstream juxtaposition surprise. The exponent takes no `_`
+	// separators. Hex / octal / binary literals return earlier, so `e` there
+	// stays a base digit, never an exponent marker.
+	if l.pos < len(l.src) && (l.src[l.pos] == 'e' || l.src[l.pos] == 'E') {
+		expStart := l.pos
+		l.advance() // consume e / E
+		if l.pos < len(l.src) && (l.src[l.pos] == '+' || l.src[l.pos] == '-') {
+			l.advance()
+		}
+		if l.pos >= len(l.src) || !isASCIIDigit(l.src[l.pos]) {
+			return Token{}, &LexError{File: l.file, Msg: "exponent in float literal requires at least one digit", Line: startLine, Col: startCol}
+		}
+		for l.pos < len(l.src) && isASCIIDigit(l.src[l.pos]) {
+			l.advance()
+		}
+		// Slice the scanned exponent in one shot (O(1)) rather than growing a
+		// string char by char - a giant exponent must not be quadratic. The
+		// source spelling (`e`/`E`, sign) is kept verbatim; strconv.ParseFloat
+		// in the parser accepts either case.
+		lexeme += string(l.src[expStart:l.pos])
+		isFloat = true
+	}
+	if isFloat {
+		return Token{Type: TOKEN_FLOAT, Lexeme: lexeme, Line: startLine, Col: startCol}, nil
+	}
+	return Token{Type: TOKEN_INT, Lexeme: lexeme, Line: startLine, Col: startCol}, nil
 }
 
 // readBasedInt reads a `0x...` / `0o...` / `0b...` integer literal. The
