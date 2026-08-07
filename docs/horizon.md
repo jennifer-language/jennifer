@@ -60,28 +60,10 @@ either way: dogfooding is a first-class goal, and with no closures a handler is
 always a by-name entry method, so a Go rewrite of the router would buy little and
 lose test surface.
 
-**Requires:** [M22.17](milestones.md) (race-safe concurrent host dispatch - the
-serve loop is unsafe without it). Relates to `M24.3` (task cancellation /
-timeouts, which a per-request worker would use to bound a slow handler).
-
-### Libraries (specialised domains)
-
-Each domain its own effort with sub-pieces as needed:
-
-- **`DRAFT#7` ML primitives** - atop `stats` / `linalg`, when demand
-    surfaces. **Requires:** `M24.4` (`stats`) + `M24.6` (`linalg`).
-- **`DRAFT#8` Bioinformatics.** Sequence alignment (Smith-Waterman,
-  Needleman-Wunsch), FASTA/FASTQ parsers, molecule structures.
-  **Requires:** none.
-
-Ordered when demand surfaces. The WASM libraries idea (`DRAFT#3`) may cover
-some of this space first.
-
 ### Higher-level modules
 
 #### DRAFT#13 - Markdown -> PDF
 
-The font-metrics and flow-layout foundation this needs **shipped in `M23.6`**:
 `pdfwriter` gained `measureText` over the standard-14 Adobe AFM width tables,
 `wrapText`, and `textBlock` (left / center / right / justify). What remains is the
 markup-driven document story - and the reason it is Markdown rather than HTML:
@@ -95,9 +77,6 @@ string - if the latter, a small refactor to surface the intermediate document
 model. An HTML-subset front-end (TCPDF-style) stays a *later* option, only worth
 it for consuming pre-existing HTML, and it would sit on the same layout
 foundation. Stays pure `.j`, both binaries.
-
-**Requires:** the shipped `pdfwriter` (`M23.6` metrics + layout) and `markdown`
-modules (plus possibly a parse-tree surface on `markdown`).
 
 ### Platform and distribution
 
@@ -176,13 +155,10 @@ stays general primitives; specific-vendor clients live in the ecosystem) -
 `DRAFT#24` collects the candidate list (GitLab, GitHub, Steam, TheMovieDB,
 Jellyfin, Frigate, RouterOS, ...).
 
-A whole track of its own. **Requires:** [M19.7](milestones.md) (the
-`@scope/package` resolver + vendor root the scheme rests on); the `toml` library
-(M18.8, for `deck.toml`); the shipped module system and the `semver` module
-(constraint solving - its `satisfies` / `maxSatisfying` / `minSatisfying` /
-`validRange` range surface is the resolver primitive); and `http` / git
-(fetching). The public deck **registry** is separate infrastructure, provided
-later.
+A whole track of its own. **Requires:** `DRAFT#12` (`jvc` / decks) and the public
+deck **registry** (separate infrastructure, provided later); its other
+prerequisites - the `@scope/package` resolver + vendor root (`M19.7`), `toml`, the
+module system, and `semver`'s range surface - have shipped.
 
 #### DRAFT#24 - Candidate decks (deck ecosystem)
 
@@ -195,14 +171,13 @@ community-maintainable, so vendor API churn never touches the core). This list i
 demand-driven and open-ended, a collection not a commitment.
 
 Most are thin clients over `http` / `rest` + `json` (plus `xml` where a vendor
-returns XML, and the `M22.7` `graphql` module where the API is GraphQL). Each is a
+returns XML, and the `graphql` module where the API is GraphQL). Each is a
 login / token step, a generic `call(path, params) -> json.Value`, and a handful of
 conveniences; a fat typed wrapper is explicitly **not** the plan - these APIs are
 enormous and firmware-versioned, so a thin client ages far better.
 
-**Self-hosted infrastructure** (a LAN appliance, usually a **self-signed** cert,
-so these want the `M22.6` TLS options). Per-vendor maturity differs and should set
-the order, not the vendor:
+##### DRAFT#24.1 **Self-hosted infrastructure** (a LAN appliance, usually a **self-signed** cert).
+Per-vendor maturity differs and should set the order, not the vendor:
 
 - **`routeros`** - a *full* RouterOS abstraction layer (MikroTik), well beyond the
   small bundled `mikrotik.j` API client. Already in progress; the likely **first
@@ -216,8 +191,7 @@ the order, not the vendor:
   a bare ESXi host best-effort.
 - **`synology`** - DSM: the cleanest NAS API - a documented Web API
   (`SYNO.API.Auth` login -> session `sid`, JSON responses).
-- **`unraid`** - the newer official API is **GraphQL** over HTTP with an API key;
-  consumes the `M22.7` `graphql` module.
+- **`unraid`** - the newer official API is **GraphQL** over HTTP with an API key.
 - **`qnap`** - QTS: the messiest - much of the useful surface is undocumented,
   reverse-engineered CGI with XML responses and a legacy hashed-password auth;
   firmware-fragile and hard to keep green. Lowest priority, on real need only.
@@ -230,18 +204,162 @@ the order, not the vendor:
 - **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
   paired with its MQTT feed (the `mqtt` module).
 
-**Public / SaaS APIs** (valid certs, so no `M22.6` needed):
+##### DRAFT#24.2 **Public / SaaS APIs**:
 
 - **`gitlab`** / **`github`** - dev-platform clients; both expose REST **and**
-  GraphQL (the `M22.7` `graphql` module covers the GraphQL side), token auth.
+  GraphQL, token auth.
 - **`steam`** - the Steam Web API (JSON, `?key=` auth); parts of the surface are
   community-reverse-engineered, which is exactly why it belongs in a deck, not core.
 - **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
 
-**Requires:** `DRAFT#12` (`jvc` / decks) for delivery; the self-hosted group pulls
-in `M22.6` (self-signed certs), and the GraphQL ones (`unraid`, `gitlab`,
-`github`) pull in `M22.7` (`graphql`). Demand-driven: build the deck for the
-box / service you run, not all of them speculatively.
+##### DRAFT#24.3 **ML**
+
+ML hits the tree-walker's compute wall: real deep-net training (big tensors,
+backprop, many epochs) is BLAS / GPU C++ (PyTorch / JAX) a `.j` interpreter
+is orders of magnitude too slow to replace, so this is not a PyTorch clone.
+It is three feasible things, on the core numerical stack (`linalg`, `math` foundations,
+`prob` / inference):
+
+- **Classical ML on tabular data** - the practical core: clustering (`kMeans`),
+  classification (`kNN`, `naiveBayes`, `logisticRegression`, decision trees /
+  small random forests), regression (`linear` / `ridge`, over `linalg`'s `solve`),
+  dimensionality reduction (`pca` via eigen), plus the plumbing - feature scaling,
+  train / test split, k-fold cross-validation, and metrics (accuracy / precision /
+  recall / F1, confusion matrix, ROC-AUC). Algorithmically light and usable at the
+  sizes a scripting language handles.
+- **A teaching autograd engine** - a micrograd / tinygrad-spirit reverse-mode
+  autodiff (a `Value` graph with `backward()`) plus a minimal layer / optimizer
+  API (`dense`, `relu`, `sgd` / `adam`, MSE / cross-entropy) - enough to build a
+  toy MLP and *watch backprop work*. Squarely for Jennifer's teaching mission, not
+  production scale.
+- **Inference + orchestration** - the wrap-and-pipe path: run a small trained
+  model forward, or drive an external runtime (ONNX / llama.cpp / a model server)
+  via `os.run` / `http` and consume its output - the same "let the native tool do
+  the heavy lifting" stance as the NGS deck, and a sibling of the `mcp` module.
+
+Posture: the tensor / matmul hot loops want Go backing - an n-D array primitive
+extending `linalg` from 2-D to n-D - with the algorithms in `.j` on top. Out of
+scope: training real deep nets (CNN / transformer), GPU support, and large-tensor
+throughput - native-framework territory.
+
+##### DRAFT#24.4 **Bioinformatics**
+
+A sequence-manipulation deck for DNA / RNA / protein, modelled on the
+[Sequence Manipulation Suite](https://stothardresearch.ca/sequence-manipulation-suite/)
+(SMS) tool catalogue - the classic, comprehensive reference for this surface.
+Almost all of it is pure string / list / map work, so it is a natural
+**pure-`.j` deck** (leaning on `strings`, `regex`, `lists`, `maps`, `math`, and
+`stats`, no Go), dogfooding the language and community-maintainable as tables and
+algorithms are added. Grouped SMS-style:
+
+- **Transforms** - `complement`, `reverseComplement`, `reverse`, `transcribe`
+  (DNA <-> RNA), `translate` (codon table), six-frame translation, `splitCodons`,
+  amino-acid `oneToThree` / `threeToOne`.
+- **Composition & properties** - `gcContent`, base / amino-acid composition,
+  `dnaStats` / `proteinStats` summaries, `molecularWeight` (DNA / RNA / protein),
+  `meltingTemp` (Wallace + nearest-neighbour), `isoelectricPoint` (pI), `gravy`
+  (hydropathy), `codonUsage`. The thermodynamic / pI / nearest-neighbour formulas
+  want `exp` / `ln` / `log`, so they pull in `M24.10` (`math` foundations).
+- **Search** - exact and IUPAC-ambiguity pattern find (via `regex` character
+  classes), fuzzy search (n mismatches), ORF finder (six frames), CpG islands,
+  restriction-site search and `restrictionDigest` (fragments) over a bundled
+  enzyme table.
+- **Formats** - FASTA parse / write (a `Record{id, description, sequence}` list),
+  FASTQ reads (sequence + quality), format conversion, `filterDna` /
+  `filterProtein` (strip non-sequence characters).
+- **Manipulation** - `randomDna` / `randomProtein` (length + optional
+  composition), composition-preserving `shuffle`, point `mutate` (rate), range /
+  sliding-window extraction.
+- **Comparison** - pairwise `alignGlobal` (Needleman-Wunsch) / `alignLocal`
+  (Smith-Waterman) with percent `identity` / `similarity`, plus `hammingDistance`
+  / `editDistance`. Alignment is the one `O(nm)` hot loop - fine in `.j` for the
+  small sequences a deck user handles; a candidate Go primitive only if
+  whole-genome throughput is ever needed.
+- **Reference data** - the standard genetic code + alternative codon tables, IUPAC
+  ambiguity codes, per-residue property tables (MW / pKa / hydropathy), and a
+  common-enzyme table - all plain `.j` maps a community can extend.
+
+FASTA / FASTQ I/O and alignment cover the "molecule structures" the original note
+gestured at; PDB / 3-D structure parsing stays out of v1 (a much larger, separate
+effort).
+
+##### DRAFT#24.5 **Forensic / statistical genetics**
+
+The statistical-genetics sibling of the sequence deck (`DRAFT#24.4`): it works on
+**profiles** (an unordered allele pair per autosomal STR locus, plus uniparental
+**haplotypes** for mtDNA / Y-STR) and reference frequency / count data, not on
+sequences, so it shares no code and no audience with SMS. Pure `.j` (probability
+arithmetic over allele-frequency maps, no Go, TinyGo-clean), leaning on `math`
+and on `xml` / text parsing to ingest a published frequency table.
+
+- **Match probabilities** - Hardy-Weinberg single-locus genotype frequencies
+  (homozygote `p^2`, heterozygote `2 pa pb`), with the NRC II theta / Fst
+  sub-population correction (Balding-Nichols), multiplied across loci:
+  `randomMatchProbability` (RMP), the single-source match `LR = 1 / RMP`, and
+  `cpi` / `cpe` (combined probability of inclusion / exclusion) for mixtures. A
+  minimum-allele-frequency floor (`5 / 2N`, so the table keeps each locus's `N`)
+  handles rare or unobserved alleles.
+- **Lineage markers (mtDNA / Y-STR)** - mitochondrial and Y-chromosome markers are
+  haploid, non-recombining, and uniparentally inherited, so match probability is
+  **not** Hardy-Weinberg but a direct **haplotype count**: frequency `k / N` in a
+  reference database, with a **Clopper-Pearson** exact-binomial upper bound as the
+  conservative estimate (which pulls in the `beta` distribution of `M24.11`).
+  Deliberately **database-independent**, so the deck supplies the estimator
+  (`haplotypeFrequency(k, N)` / `lineageMatchProbability`) and the caller feeds the
+  count from whatever database they queried. mtDNA adds a haplotype coded as
+  differences from the **rCRS** (e.g. `263G 315.1C`) plus the substantive `align`
+  step that renders a raw sequence into that standard nomenclature; Y-STR is a
+  per-locus repeat-count vector with exact / single-step comparison.
+- **Kinship likelihood ratios** - relationships encoded as IBD coefficients
+  (kappa0 / kappa1 / kappa2: parent-child `(0, 1, 0)`, full sibs
+  `(1/4, 1/2, 1/4)`, half-sib / avuncular / grandparent `(1/2, 1/2, 0)`, first
+  cousins `(3/4, 1/4, 0)`, ...). `kinshipLR(a, b, relationship, db)` tests one
+  relationship against another; `paternityIndex(mother, child, allegedFather,
+  db)` gives a combined paternity index (CPI) and `probabilityOfPaternity`
+  (`W = CPI / (CPI + 1)`), with a stepwise STR mutation model to survive a lone
+  inconsistency. General pedigrees (beyond pairs / trios) need a peeling engine -
+  **Elston-Stewart** - the one substantial algorithm, the Familias / `forrel`-style
+  capability.
+
+Mixture deconvolution (multi-contributor, drop-in / drop-out - the EuroForMix
+space) is a larger, later effort layered on this base.
+
+A concrete frequency source to wire in first, as a sample: the ENFSI STR reference
+database **[STRidER](https://strider.online/frequencies)** - a
+`loadFrequencies(xml, "strider")` over the `xml` library, with its
+[formulae page](https://strider.online/formulae) and online calculator as the
+exact-conventions spec and a validation target.
+
+##### DRAFT#24.6 **NGS / high-throughput sequencing**
+
+Unlike the pure-`.j` decks above, NGS breaks the model on two axes - **scale**
+(FASTQ.gz files run 10s of GB, BAM 100s, so everything **streams**, never
+load-into-memory) and **compute** (alignment / assembly / variant calling are
+heavily SIMD-optimised C a tree-walker is ~100-1000x too slow to replace). So the
+deck is deliberately the **glue and light-I/O layer**, not the heavy engine, with
+a different posture from the pure-`.j` decks: **Go-backed streaming parsers** (the
+decompress-and-parse hot loop in Go, the `net.readAll` / `binary` pattern) with
+the per-record logic in `.j`. In scope:
+
+- **Streaming format I/O** - FASTQ (gzipped, over `compress` + `fs` handles) and
+  the tab-delimited **SAM** / **VCF** / **BED** / **GFF** / **GTF** text formats:
+  parse / filter / convert as a stream, so a 50 GB file never lands in memory.
+- **QC + preprocessing** (FastQC / fastp-lite) - per-base quality and read-length
+  / GC distributions, adapter detection, quality / adapter trimming, length
+  filtering, subsampling: one streaming pass over FASTQ.
+- **Interval ops** (bedtools-lite) - overlap / intersect / merge over BED / GFF
+  features.
+- **Pipeline orchestration** - the real sweet spot: NGS is fundamentally
+  `bwa | samtools | gatk` glued together, and Jennifer already has `os.run` /
+  `os.spawn` + `spawn` concurrency, so it can drive the standard tools, parse
+  their output, manage intermediate files, fan out over samples in parallel, and
+  handle errors - a Snakemake-lite in a real language.
+
+Out of scope (wrap and pipe the native tool, do not reimplement): read
+**alignment** (BWA / Bowtie2 / minimap2), de-novo **assembly** (SPAdes), **variant
+calling** (GATK), and heavy **BAM / CRAM** handling - which additionally needs
+**BGZF** (blocked gzip for random access), a `compress` gap and a Go addition
+whose standalone value is limited without the downstream compute the deck omits.
 
 ### Embedding, WASM, and sandboxing
 
@@ -384,12 +502,11 @@ re-walking the tree. This is the big structural lever, and the big effort.
   current evaluator, and to strict behaviour parity: the `spawn` snapshot,
   `defer` order, positioned errors, and the call-depth guard must all survive the
   rewrite, with the existing test suite as the conformance oracle.
-- **Sequenced after the cheap win.** `M21.10`'s bulk-byte primitives take byte
-  accumulation / scanning off the interpreted path first; what remains for a VM
+- **Sequenced after the cheap win.** what remains for a VM
   is the residual CPU-bound `.j` (recursion, business-logic loops) no Go
-  primitive covers. Pursued only when `M21.10`'s benchmark shows that residual is
+  primitive covers. Pursued only when benchmark shows that residual is
   a real workload's bottleneck - not on spec.
-- **Composes with M21.12's arena.** The per-frame arena allocator (`M21.12`) is
+- **Composes with arena.** The per-frame arena allocator is
   an independent memory-side optimization that pairs naturally here, since a
   bytecode VM restructures allocation anyway - but neither depends on the other.
 
@@ -397,10 +514,6 @@ Copy-on-write for compound Values is **not** part of this: it was tried
 (shared-marker COW, reverted as inert) and the write-through variant is rejected
 for reintroducing shared mutable state - see
 [technical/rejected.md](technical/rejected.md).
-
-**Requires:** `M21.10` (its throughput benchmark, to justify the effort and
-measure parity + speedup). Relates to `DRAFT#1` - a compiled core is an easier
-stable embedding surface than a tree-walker.
 
 ### Project and governance
 
@@ -500,6 +613,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   shape `json.Value` uses) - exact money arithmetic with no float rounding, kept
   a **library handle** rather than a new primitive so the core `int` / `float`
   model is untouched.
+
 ### Library completions
 
 - **`io.lines() -> list of string`.** Slurp the whole stdin into a list.
@@ -548,30 +662,27 @@ A grab-bag, loosely grouped and recorded when it comes up.
   pure-text `.j` the rest of the module is, so it is a separate piece of work
   rather than another encoder branch. Until then, `label.image` (by reference)
   covers the stored-logo case.
-- **SQLite (`sql` engine backend).** The client-server half of relational
-  support - MySQL / MariaDB + PostgreSQL - is committed as
-  [M20.9](milestones.md) (a `sql` system library over Go's `database/sql`,
-  pure-Go drivers). SQLite stays parked here, and it is worth being precise
-  about *why*, because it is not the reason it first looks like. SQLite is
-  **also** just a pure-Go `database/sql` driver - `modernc.org/sqlite`,
+- **SQLite (`sql` engine backend).** SQLite stays parked here, and it is 
+  worth being precise about *why*, because it is not the reason it first looks like.
+  SQLite is **also** just a pure-Go `database/sql` driver - `modernc.org/sqlite`,
   registered with the same one-line `import _` as `go-sql-driver/mysql` or
   `pgx`, cross-compiling cleanly like any pure-Go package (the cgo
   `mattn/go-sqlite3`, which *does* break static / cross-compile / TinyGo and
   needs a C toolchain, is rejected in its favor). So integration effort and
-  API are identical to M20.9's two drivers; SQLite is in every practical
+  API are identical to the shipped drivers; SQLite is in every practical
   sense "just a third driver" for the same library, sharing its surface and
   opaque `sql.Row` result shape.
   The one real difference is **weight**. `modernc.org/sqlite` is the entire
   SQLite C source transpiled to Go plus `modernc.org/libc` (a Go libc
   reimplementation) - multiple MB of generated code, versus the
-  hand-written, few-hundred-KB protocol clients M20.9 ships. Baking that into
+  hand-written, few-hundred-KB protocol clients already shipped. Baking that into
   every default `jennifer` bloats the binary for the many users who only ever
   touch a network database. That, and only that, is why SQLite is gated as a
   **build-tag opt-in** (`-tags sqlite`), surfaced as a `jennifer-full`
   release artifact - a build *variant* of the default binary, not a third
   supported brand. The binary ladder becomes `jennifer-tiny` (DBs stubbed) ⊂
   `jennifer` (MySQL + Postgres) ⊂ `jennifer-full` (+ SQLite). The dependency
-  break from "libraries stay dependency-free" is already accepted at M20.9;
+  break from "libraries stay dependency-free" is already accepted;
   SQLite adds size, not a new principle.
   **TinyGo** is the one place SQLite is categorically worse, and it is
   architectural, not a build choice: `modernc.org/sqlite`'s libc emulation
@@ -582,11 +693,6 @@ A grab-bag, loosely grouped and recorded when it comes up.
   reach the embeddable binary. That is the genuinely ironic gap: a local,
   file-based store is exactly what a minimal embedded target would most want,
   and it is the one database that binary can't have with current tooling.
-  Because SQLite is really just another driver, the only open call is timing:
-  fold it into M20.9 behind the `-tags sqlite` gate, or keep it deferred here
-  until the `jennifer-full` variant earns its place in the release / CI /
-  packaging matrix. Contrast the text-protocol stores `redis` / `memcache`,
-  pure Jennifer over `net`, which need none of this.
 - **FCGI.** `use FCGI as web;` library when `net` and `httpd` mature. Lets
   Jennifer host CGI / FastCGI workloads end-to-end.
 - **i18n (CLDR formatting).** Locale-aware case folding, collation, number /
@@ -595,6 +701,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   library (`M20.4`). Gated on the CLDR-data binary-size question (likely an
   optional library after the WASM runtime, so locale tables aren't baked into
   every build).
+
 ### Runtime and tooling
 
 - **`tinygo_devtools` build tag.** The dev subcommands (`tokens` / `ast` /
@@ -658,8 +765,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   handles every workload we've imagined so far).
 - **Profiler: heap-per-position metric.** Out of scope for now: `--allocs`
   already proxies value-copy churn, and true per-position RSS needs
-  `runtime.ReadMemStats` sampling, which is coarse under TinyGo. (Its paired
-  idea, the max-call-depth metric, graduated to `M21.8`.)
+  `runtime.ReadMemStats` sampling, which is coarse under TinyGo.
 
 ### Wild ideas
 

@@ -109,7 +109,17 @@ jobs:
         # (warning) fails the build. --format=github surfaces findings as
         # inline PR annotations. Lint is a default-binary-only dev feature,
         # so this uses ./jennifer (built by `make build` above).
-        run: ./jennifer lint --format=github examples/*.j
+        run: |
+          # Top-level examples are curated golden tests, kept within the line
+          # limit, so every check runs.
+          ./jennifer lint --format=github examples/*.j
+          # The module demos under examples/modules/ also illustrate real usage:
+          # their docblocks fully describe the module, and they embed realistic
+          # data (JSON payloads, HTML/template strings, URLs) that reads worse if
+          # broken, so they legitimately run long. Exclude only the cosmetic
+          # line-length check (L203) for them - every correctness / lifecycle /
+          # other-style check still runs and still gates.
+          ./jennifer lint --format=github --checks='!L203' examples/modules/*.j
 
       - name: Check doc comments (docblock)
         # Gate on the docblock parser: a doc comment that drifts from its code
