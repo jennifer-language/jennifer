@@ -51,6 +51,7 @@
 - [`path`](libraries/path.md)
 - [`regex`](libraries/regex.md)
 - [`stats`](libraries/stats.md)
+- [`ml`](libraries/ml.md)
 - [`strings`](libraries/strings.md)
 - [`task`](libraries/task.md)
 - [`term`](libraries/term.md)

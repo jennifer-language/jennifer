@@ -1,0 +1,8 @@
+linreg predict [5,5] = 26.0
+linreg r2 on train  = 1.000
+ridge  predict [5,5] = 17.05
+kNN(k=3) predict     = [0, 1]
+decisionTree predict = [0, 1]
+standardized [1,1]   = [[-1.1351610476169651, -1.08543710982092]]
+accuracy=0.833 precision=1.000 recall=0.750 f1=0.857
+rocAuc(perfect)      = 1.0

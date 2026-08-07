@@ -193,6 +193,23 @@ flat lookup view, not authoritative.
 | [`maps`](maps.md)`.keys(m)`                           | List of keys in insertion order.                                                                                                    |
 | [`maps`](maps.md)`.merge(a, b)`                       | New map; `b`'s entries layered on top of `a`.                                                                                       |
 | [`maps`](maps.md)`.values(m)`                         | List of values in insertion order.                                                                                                  |
+| [`ml`](ml.md)`.linearRegression(X, y)` / `.ridge(X, y, alpha)` | Fit OLS / L2-ridge regression -> ml.Model (regressor). |
+| [`ml`](ml.md)`.kNN(X, y, k)` / `.naiveBayes(X, y)` | Fit a k-NN / Gaussian naive-Bayes classifier -> ml.Model. |
+| [`ml`](ml.md)`.logisticRegression(X, y [, lr [, epochs]])` | Fit a binary (0/1) logistic classifier (gradient descent) -> ml.Model. |
+| [`ml`](ml.md)`.decisionTree(X, y [, maxDepth])` / `.randomForest(X, y [, nTrees [, maxDepth]])` | Fit a CART tree / bagged forest classifier -> ml.Model. |
+| [`ml`](ml.md)`.kMeans(X, k [, maxIter])` | Fit k-means clustering (k-means++ seed) -> ml.Model. Uses `math.randSeed`. |
+| [`ml`](ml.md)`.pca(X, nComponents)` | Fit PCA (covariance eigendecomposition) -> ml.Model (transform). |
+| [`ml`](ml.md)`.standardScaler(X)` / `.minMaxScaler(X)` | Fit a z-score / [0,1] feature scaler -> ml.Model (transform). |
+| [`ml`](ml.md)`.predict(model, X)` | Predicted labels (int, classifier/cluster) or values (float, regressor) per row. |
+| [`ml`](ml.md)`.transform(model, X)` / `.predictProba(model, X)` | Transform features (scaler/PCA) / positive-class probability (logistic). |
+| [`ml`](ml.md)`.free(model)` | Drop a fitted model from the registry to free memory. |
+| [`ml`](ml.md)`.trainTestSplit(X, y, testFraction)` | Shuffle + split -> ml.Split{trainX,trainY,testX,testY}. Uses `math.randSeed`. |
+| [`ml`](ml.md)`.kFold(nSamples, k)` | `k` contiguous CV folds -> list of ml.Fold{trainIdx, testIdx}. |
+| [`ml`](ml.md)`.accuracy(yTrue, yPred)` | Fraction of exact matches. |
+| [`ml`](ml.md)`.precision/recall/f1(yTrue, yPred [, positive])` | Binary classification metrics for the positive label (default 1). |
+| [`ml`](ml.md)`.confusionMatrix(yTrue, yPred)` | ml.Confusion{labels, matrix} (rows=true, cols=predicted). |
+| [`ml`](ml.md)`.rocAuc(yTrue, scores)` | Binary ROC-AUC from 0/1 labels and predicted scores (tie-aware). |
+| [`ml`](ml.md)`.rmse/mae/r2(yTrue, yPred)` | Regression error metrics (r2 = coefficient of determination). |
 | [`math`](math.md)`.abs(x)`                            | Absolute value of `x` (int→int, float→float).                                                                                       |
 | [`net`](net.md)`.accept($listener)`                   | Block until a client connects to `$listener`; return the new `net.Conn`.                                                            |
 | [`net`](net.md)`.address($h)`                         | Polymorphic. Conn -> peer address; Listener / UDPSocket -> local bound address.                                                     |

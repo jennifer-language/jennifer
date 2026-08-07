@@ -409,6 +409,18 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   (wald/wilson/clopper-pearson), `tTest`/`tTest2`, `chiSquareTest`, `fTest`,
   `anova`, `histogram`. Results are `stats.Regression`/`Interval`/`Test` structs.
   No separate `prob` library - distributions live in `stats` (like `scipy.stats`).
+- **`ml`** - classical / predictive machine learning on tabular data
+  (scikit-learn-lite), over `stats`/`linalg`. **Fit/predict shape**: a fit
+  function returns an opaque `ml.Model` handle, applied with `ml.predict`
+  (labels for a classifier/cluster, values for a regressor) / `ml.transform`
+  (scalers, PCA) / `ml.predictProba` (logistic). Models: `linearRegression`
+  `ridge` `kNN` `naiveBayes` `logisticRegression`(binary) `decisionTree`
+  `randomForest` `kMeans` `pca` `standardScaler` `minMaxScaler`. Selection:
+  `trainTestSplit` -> `ml.Split`, `kFold` -> list of `ml.Fold`. Metrics:
+  `accuracy` `precision` `recall` `f1`(+ positive label) `confusionMatrix`
+  `rocAuc` `rmse` `mae` `r2`. X is `list of list of float/int` (rows), y a
+  `list of float/int`. Random models honor `math.randSeed`; a degenerate input
+  is a catchable error. Not a deep-learning framework.
 - **`linalg`** - linear algebra, the companion to `stats`. Vectors are a
   `list of float`: `dot distance cross normalize`. Matrices are a
   `list of list of float`: `transpose trace determinant inverse solve identity

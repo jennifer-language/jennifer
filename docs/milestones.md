@@ -1039,34 +1039,30 @@ Pinned by `statslib_test.go`; `examples/stats.j` + golden. Graduated `DRAFT#5`.
 **Requires:** none. Its `linalg` companion is `M24.6`; the numerical-inference
 piece (probability / regression / confidence intervals) is `M24.11`.
 
-### M24.5 - `ml` predictive / classical machine learning
+### M24.5 - `ml` predictive / classical machine learning (compacted)
 
-**Planned.** A `ml` system library for **classical / predictive** machine learning
-on tabular data - the scikit-learn-lite core and practical companion to `stats` /
-`linalg`. Deliberately a **core** library, not a deck: classical ML
-algorithms are stable general primitives (a `kMeans` does not churn),
-native-numeric, and useful to many - the same reasoning that keeps numerical
-inference in core. And explicitly **not** a deep-learning framework: tensors /
-autodiff / training real deep nets are native GPU / C++ (PyTorch / JAX) a
-tree-walker cannot usefully replace (at most a micrograd-style autograd ships as a
-teaching *example*, not this library), and "run a pre-trained model" is already
-`http` / `mcp` / `os.run`. Two halves:
-- **Models** - clustering (`kMeans`), classification (`kNN`, `naiveBayes`,
-  `logisticRegression`, decision trees / small random forests), predictive
-  regression (`linear` / `ridge`, over `linalg`'s `solve`), and dimensionality
-  reduction (`pca`). A fit / predict shape (train a model, apply it), distinct from
-  `stats`'s estimate / test shape.
-- **Model selection & evaluation** - feature scaling, train / test split, k-fold
-  cross-validation, and metrics (accuracy / precision / recall / F1, confusion
-  matrix, ROC-AUC).
-
-A Go system library (native loops over modest tabular data; large datasets stay a
-native-tool job), TinyGo-clean, following the standard-library discipline (Go
-package + `internal/stdlib` line + `docs/libraries/ml.md` + cheatsheet +
-`JENNIFER.md`). It reuses the `M24.5` slot the multiplatform track vacated for
-`M25`, so despite the lower number it builds after its dependencies. **Requires:**
-`M24.6` (`linalg`), `M24.10` (`math` foundations, for `exp` / `log` / softmax), and
-`M24.11` (distributions + inference in `stats`, the shared regression machinery).
+**Done.** A `ml` **core** system library for classical / predictive machine
+learning on tabular data (scikit-learn-lite), over `stats` / `linalg`.
+Deliberately core, not a deck (classical algorithms are stable native-numeric
+primitives), and explicitly **not** a deep-learning framework (tensors / autodiff
+/ deep-net training are native GPU / C++; "run a pre-trained model" is already
+`http` / `os.run`). A **fit / predict** shape: a fit function returns an opaque
+`ml.Model` handle (registry-backed, immutable, read-only-shareable), applied with
+`predict` / `transform` / `predictProba` / `free`. Models: regression
+(`linearRegression` / `ridge`), classifiers (`kNN`, `naiveBayes`,
+`logisticRegression`, `decisionTree` CART/Gini, `randomForest`), `kMeans`
+(k-means++), `pca` (Jacobi eigendecomposition), and `standardScaler` /
+`minMaxScaler`. Selection: `trainTestSplit` -> `ml.Split`, `kFold` -> list of
+`ml.Fold`. Metrics: `accuracy` / `precision` / `recall` / `f1` (+ positive label)
+/ `confusionMatrix` / `rocAuc` (tie-aware) / `rmse` / `mae` / `r2`. X is a
+`list of list of float/int`, y a `list of float/int`. Random models draw from
+`math`'s `randSeed`-able source (reproducibility, not secrecy - a seed is not a
+secret, so not `crypto`). Strict: a degenerate input is a catchable error, and
+the cost-driving hyper-parameters are bounded (tree depth / forest size / iters /
+epochs / kFold work) so a runaway value errors instead of a stack overflow /
+hang / OOM. Pure Go stdlib, TinyGo-clean, both binaries; pinned against known
+results. It reuses the `M24.5` slot the multiplatform track vacated for `M25`.
+**Requires:** `M24.6` (`linalg`), `M24.10` (`math`), `M24.11` (`stats`).
 
 ### M24.6 - `linalg` library (compacted)
 

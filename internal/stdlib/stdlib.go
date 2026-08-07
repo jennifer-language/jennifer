@@ -36,6 +36,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lib/maps"
 	"jennifer-lang.dev/jennifer/internal/lib/math"
 	"jennifer-lang.dev/jennifer/internal/lib/meta"
+	mllib "jennifer-lang.dev/jennifer/internal/lib/ml"
 	"jennifer-lang.dev/jennifer/internal/lib/net"
 	"jennifer-lang.dev/jennifer/internal/lib/os"
 	pathlib "jennifer-lang.dev/jennifer/internal/lib/path"
@@ -63,6 +64,7 @@ func InstallAll(in *interpreter.Interpreter) {
 	convert.Install(in)
 	mathlib.Install(in)
 	statslib.Install(in)
+	mllib.Install(in)
 	stringslib.Install(in)
 	listslib.Install(in)
 	binarylib.Install(in)
