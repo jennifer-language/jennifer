@@ -1048,6 +1048,28 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Community-string auth only (no SNMPv3 / USM / traps); each client exchange
   checks the request-id and times out. Throws `Error` (kind `"snmp"`). **Default
   `jennifer` binary only** (`net`).
+- **`ldap`** - an LDAP v3 **client and directory server** (RFC 4511), built on the
+  `asn1` BER codec and `net` (LDAPS / StartTLS via `transport.Security`). *Client:*
+  `ldap.connect(address, security)` -> `ldap.Conn`; then `ldap.bind(c, dn, password)`
+  (simple) / `ldap.bindSasl(c, user, password, algo)` (SASL SCRAM) return an
+  `ldap.Result` `{code, matchedDn, message}` (`ldap.SUCCESS` / `INVALID_CREDENTIALS`);
+  `ldap.search(c, baseDn, scope, filter, attributes)` (scopes `ldap.SCOPE_BASE` /
+  `SCOPE_ONE` / `SCOPE_SUB`) / `ldap.searchPaged(...)` return a `list of ldap.Entry`
+  `{dn, attributes}` (read values with `ldap.values` / `firstValue`; a binary value
+  such as AD `objectGUID` comes back base64). Filters:
+  `ldap.parseFilter("(&(objectClass=person)(uid=x))")` or the constructors `equals` /
+  `present` / `greaterOrEqual` / `lessOrEqual` / `substrings` / `allOf` / `anyOf` /
+  `negate`. *Writes:* `ldap.add` / `modify` (with `ldap.change(op, name, values)`,
+  ops `ldap.MOD_ADD` / `MOD_DELETE` / `MOD_REPLACE`) / `delete` / `modifyDn` /
+  `passwordModify` (RFC 3062). `ldap.unbind` / `close`. *Server:*
+  `ldap.directory(entries)` (in-memory) or `ldap.openDirectory(path)` (file-backed,
+  persistent) -> `ldap.Directory`; build entries with `ldap.entry(dn, attrs)` /
+  `ldap.group(dn, members)` / `ldap.password(plain, scheme)`; mutate a live directory
+  with `ldap.addEntry` / `modifyEntry` / `deleteEntry` / `setAttribute` / `getEntry`
+  / `hasEntry` / `listEntries`; `ldap.serve(dir, address)` or `ldap.listen` +
+  `ldap.serveOn(dir, listener)` answer simple bind + filtered search (read-only over
+  LDAP, mutable from code - enough to back an auth portal like Authelia). Throws
+  `Error` (kind `"ldap"`). **Default `jennifer` binary only** (`net`).
 - **`totp`** - time-based one-time passwords (RFC 6238 over RFC 4226 HOTP), the
   two-factor codes authenticator apps show. `totp.generate(secret, opts)` /
   `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);

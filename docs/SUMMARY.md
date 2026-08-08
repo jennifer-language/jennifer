@@ -98,6 +98,7 @@
 - [`jwt`](modules/jwt.md)
 - [`kvstore`](modules/kvstore.md)
 - [`label`](modules/label.md)
+- [`ldap`](modules/ldap.md)
 - [`log`](modules/log.md)
 - [`markdown`](modules/markdown.md)
 - [`mcp`](modules/mcp.md)

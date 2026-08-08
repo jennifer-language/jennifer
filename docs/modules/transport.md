@@ -60,5 +60,6 @@ small cost of a single shared type.
 
 - [smtp.md](smtp.md) / [pop.md](pop.md) / [imap.md](imap.md) - the mail clients (support all three modes).
 - [redis.md](redis.md) / [amqp.md](amqp.md) / [mqtt.md](mqtt.md) - the store / broker clients (None / Tls).
+- [ldap.md](ldap.md) - the LDAP client (None / Tls / Starttls).
 - [net.md](../libraries/net.md) - the TLS transport underneath.
 - [modules/index.md](index.md) - the module catalog and import rules.

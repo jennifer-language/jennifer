@@ -1138,16 +1138,33 @@ verified against real hardware. No SNMPv3 / USM, traps, or GETBULK. Module
 discipline (`snmp_test.j` 100%, doc, two demos, `cmd/jennifer/snmp_test.go`,
 catalog rows); default `jennifer` binary only (`net`).
 
-### M24.9 - `ldap` client
+### M24.9 - `ldap` client and directory server (compacted)
 
-**Planned.** An LDAP client, layered on `asn1` (`M24.7`) + `net` (`connectTLS` /
-`startTLS` already cover LDAPS / StartTLS). Beyond the simpler `snmp` (`M24.8`) it
-adds bind, controls, paged results, and **SASL** - the SCRAM mechanism builds on
-the `crypto` library. As with `snmp`, the per-byte BER work stays in `asn1`
-(`M24.7`), not a pure-`.j` codec; existing pure implementations (e.g. PHP FreeDSx)
-are a protocol reference, not a port target - their heavy-OO shape does not map to
-Jennifer's value-semantic structs. Ships with the module discipline where `.j`
-(test overlay + doc + demo).
+**Done.** An LDAP v3 client and lightweight directory server (RFC 4511)
+(`modules/ldap.j`) on `asn1` BER + `net`, LDAPS / StartTLS via the shared
+`transport.Security` enum; client and server share the private codec, so both
+live in one module (the `snmp` `M24.8` precedent). *Client:* `connect(address,
+security)` -> `Conn`, then simple `bind` / SASL-SCRAM `bindSasl` (via `sasl`)
+returning `Result{code, matchedDn, message}`; `search` (`SCOPE_BASE` / `ONE` /
+`SUB`) with an RFC 4515 `parseFilter` or the constructors (`equals` / `present` /
+`greaterOrEqual` / `lessOrEqual` / `substrings` / `allOf` / `anyOf` / `negate`),
+`searchPaged` (Active Directory's paged control); writes `add` / `modify` (`change`
++ `MOD_ADD` / `MOD_DELETE` / `MOD_REPLACE`) / `delete` / `modifyDn` /
+`passwordModify` (RFC 3062); a non-UTF-8 attribute value (AD `objectGUID`) comes
+back base64. *Server:* a directory of `entry` / `group` records answers simple bind
+(`userPassword` via `password`'s `ssha` / `sha` / `ssha256` / `sha256` / `pbkdf2` /
+plaintext schemes) and filtered search (an evaluator over the same `asn1` tree,
+`userPassword` withheld unless requested) - read-only over the wire but mutable
+from code (`addEntry` / `modifyEntry` / `deleteEntry` / `setAttribute`) through a
+shared `kv` store (`directory` in-memory, `openDirectory` file-backed and
+persistent), enough to back an auth portal such as Authelia (worked config in the
+doc). The codec + filter + directory logic is factored pure, so the overlay
+(`ldap_test.j`) round-trips requests / responses without a socket; the live path
+plus a Go fake for the writes the read-only server rejects run in the Go suite
+(`TestLdapDirectory` / `TestLdapWriteOps`, plus `TestLdapServerRobustness` for
+malformed-request handling). AD Kerberos / GSSAPI SASL is out of scope (simple
+bind over TLS); referrals are avoided by binding a specific DC / Global Catalog.
+Default `jennifer` binary only (`net`).
 
 ### M24.10 - `math` foundations + special functions (compacted)
 
