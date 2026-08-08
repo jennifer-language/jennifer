@@ -56,6 +56,21 @@ jobs:
           # matches what we pinned.
           "$HOME/.local/bin/mdbook" --version
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate the module API reference
+        # docs/api/ and the "Module API Reference" region of docs/SUMMARY.md are
+        # generated from each module's doc comments (via the docblock module) and
+        # are NOT committed (see .gitignore). Regenerate them here, before the
+        # book build, so the published API reference is always in step with the
+        # code. `go run` compiles the interpreter and runs the generator in one
+        # step - no separate binary build needed for this one program.
+        run: go run ./cmd/jennifer run scripts/gen-module-docs.j
+
       - name: Build the book
         run: mdbook build
 

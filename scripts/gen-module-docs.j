@@ -12,12 +12,13 @@
  * Run from the repository root:
  *   jennifer run scripts/gen-module-docs.j
  *
- * The output is committed; CI regenerates and fails on any diff, so the API
- * reference can never drift from the code - the same guarantee docblock-check
- * gives for the doc comments themselves. The set of documented modules mirrors
- * the module lint step: every module source file that is not a *_test.j overlay
- * and not an include-partial (those are documented through the parent that
- * splices them in).
+ * The output is NOT committed (docs/api/ and the SUMMARY region are gitignored):
+ * the docs workflow (.github/workflows/docs.yml) runs this generator before
+ * every mdBook build, so the published API reference is always in step with the
+ * code without any regenerate-and-commit dance. The PR test workflow runs it too,
+ * as a smoke-check. The set of documented modules mirrors the module lint step:
+ * every module source file that is not a *_test.j overlay and not an
+ * include-partial (those are documented through the parent that splices them in).
  */
 
 use io;
