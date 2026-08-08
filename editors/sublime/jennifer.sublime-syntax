@@ -53,7 +53,7 @@ contexts:
 
   double-string:
     - meta_scope: string.quoted.double.jennifer
-    - match: '\\[nrt\\"''0]'
+    - match: '\\([nrt\\"''0]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
       scope: constant.character.escape.jennifer
     - match: '"'
       scope: punctuation.definition.string.end.jennifer

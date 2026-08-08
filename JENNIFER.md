@@ -84,7 +84,10 @@ function value), `channel of T` (a CSP channel between goroutines).
   separators in the mantissa only. Overflow (`1e400`) is an error, not `Infinity`;
   underflow (`1e-400`) rounds to `0.0` (a finite value; only the non-finite is banned).
 - **string** literals: two delimiters, one job each. `"..."` is **cooked** -
-  escape sequences `\n \r \t \\ \" \' \0` are processed. `'...'` is **raw** - no
+  escape sequences `\n \r \t \\ \" \' \0`, plus Unicode `\uXXXX` (exactly 4 hex,
+  the BMP) and `\UXXXXXXXX` (exactly 8 hex, any plane, e.g. `\U0001F600`), are
+  processed; a surrogate, an out-of-range code point, or the wrong digit count is
+  a lex error. `'...'` is **raw** - no
   escape processing at all: every byte to the next `'` is literal (backslashes and
   newlines included), so `'\d+\.\d+'` is an 8-char string and a multi-line block is
   just a `'...'` that spans newlines. To put a `'` inside a string, use the cooked

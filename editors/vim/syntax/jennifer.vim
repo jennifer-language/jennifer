@@ -14,7 +14,7 @@ syn region  jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockCom
 
 " Strings: double-quoted is cooked (escapes processed); single-quoted is raw
 " (backslashes are literal - no escape highlighting, ends at the next ').
-syn match   jenniferEscape contained "\\[nrt\\\"'0]"
+syn match   jenniferEscape contained "\\\%([nrt\\\"'0]\|u\x\{4}\|U\x\{8}\)"
 syn region  jenniferString start=+"+ skip=+\\"+ end=+"+ contains=jenniferEscape
 syn region  jenniferString start=+'+ end=+'+
 

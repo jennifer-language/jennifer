@@ -50,7 +50,7 @@
     className: "string",
     begin: /"/,
     end: /"/,
-    contains: [{ begin: /\\[nrt\\"'0]/ }],
+    contains: [{ begin: /\\([nrt\\"'0]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/ }],
   };
   var STRING_RAW = {
     className: "string",

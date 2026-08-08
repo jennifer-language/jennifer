@@ -427,6 +427,20 @@ func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 				b.WriteRune('\'')
 			case '0':
 				b.WriteRune(0)
+			case 'u':
+				r, err := l.readUnicodeEscape(4)
+				if err != nil {
+					return Token{}, err
+				}
+				b.WriteRune(r)
+				continue // helper consumed 'u' + the 4 hex digits
+			case 'U':
+				r, err := l.readUnicodeEscape(8)
+				if err != nil {
+					return Token{}, err
+				}
+				b.WriteRune(r)
+				continue // helper consumed 'U' + the 8 hex digits
 			default:
 				return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("unknown escape sequence \\%c", esc), Line: l.line, Col: l.col}
 			}
@@ -576,6 +590,56 @@ func (l *Lexer) readSeparatedDigits(startLine, startCol int, isDigit func(rune) 
 
 func isHexDigit(r rune) bool {
 	return isASCIIDigit(r) || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+}
+
+// hexDigitValue returns the numeric value of a hex digit. The caller must have
+// verified isHexDigit(r).
+func hexDigitValue(r rune) int {
+	switch {
+	case r >= '0' && r <= '9':
+		return int(r - '0')
+	case r >= 'a' && r <= 'f':
+		return int(r-'a') + 10
+	default: // 'A'-'F'
+		return int(r-'A') + 10
+	}
+}
+
+// readUnicodeEscape reads a fixed-width hex Unicode escape inside a cooked
+// string. On entry l.pos is at the escape letter ('u' or 'U'); it consumes that
+// letter and exactly `width` hex digits and returns the code point. A short /
+// non-hex digit run, a surrogate (U+D800..U+DFFF), or a value above U+10FFFF is
+// a positioned lex error - matching convert.fromCodepoint's strict, canonical
+// contract (no silent replacement character). `\u` takes 4 digits (the Basic
+// Multilingual Plane); `\U` takes 8 (any plane, e.g. `\U0001F600`).
+func (l *Lexer) readUnicodeEscape(width int) (rune, error) {
+	letter := l.src[l.pos]
+	escLine, escCol := l.line, l.col
+	l.advance() // past 'u' / 'U'
+	// Accumulate in int64, not rune (int32): a `\U` value can reach 0xFFFFFFFF,
+	// which overflows int32 to a negative rune and would slip past the range
+	// check below (silently becoming U+FFFD). int64 holds the true value so the
+	// bound is checked before any narrowing to rune.
+	var v int64
+	for i := 0; i < width; i++ {
+		if l.pos >= len(l.src) || !isHexDigit(l.src[l.pos]) {
+			return 0, &LexError{
+				File: l.file,
+				Msg:  fmt.Sprintf("\\%c escape needs exactly %d hex digits", letter, width),
+				Line: escLine, Col: escCol,
+			}
+		}
+		v = v*16 + int64(hexDigitValue(l.src[l.pos]))
+		l.advance()
+	}
+	if v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF) {
+		return 0, &LexError{
+			File: l.file,
+			Msg:  fmt.Sprintf("\\%c escape U+%04X is not a valid Unicode code point", letter, v),
+			Line: escLine, Col: escCol,
+		}
+	}
+	return rune(v), nil
 }
 
 func isOctDigit(r rune) bool {

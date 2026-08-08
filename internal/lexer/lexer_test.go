@@ -101,6 +101,65 @@ func TestRawSingleQuotedStrings(t *testing.T) {
 	}
 }
 
+// TestUnicodeEscapes covers the \u (4 hex, BMP) and \U (8 hex, any plane)
+// escapes. The backslash and every escaped source is built from rune values
+// rather than written as a literal \u, so an editor / tool that normalises a
+// literal backslash-u sequence into its character cannot silently defeat the
+// test (the escaped input must reach the lexer intact).
+func TestUnicodeEscapes(t *testing.T) {
+	bs := string(rune(0x5C)) // a single backslash
+
+	pos := []struct {
+		src  string
+		want string
+	}{
+		{`"` + bs + `u0041"`, "A"},                             // A -> A
+		{`"caf` + bs + `u00e9"`, "caf" + string(rune(0x00E9))}, // café (lowercase hex)
+		{`"` + bs + `u20AC"`, string(rune(0x20AC))},            // € (uppercase hex)
+		{`"` + bs + `U0001F600"`, string(rune(0x1F600))},       // astral plane, via \U
+		{`"` + bs + `U0010FFFF"`, string(rune(0x10FFFF))},      // the maximum valid code point (boundary)
+		{`"e` + bs + `u0301"`, "e" + string(rune(0x0301))},     // NFD: base + combining acute
+	}
+	for _, c := range pos {
+		toks, err := Tokenize(c.src)
+		if err != nil {
+			t.Errorf("Tokenize(%q): %v", c.src, err)
+			continue
+		}
+		if len(toks) < 1 || toks[0].Type != TOKEN_STRING || toks[0].Lexeme != c.want {
+			t.Errorf("Tokenize(%q): lexeme = %q, want %q", c.src, toks[0].Lexeme, c.want)
+		}
+	}
+
+	// A raw single-quoted string does NOT process \u - it stays literal.
+	raw := `'` + bs + `u0041'`
+	toks, err := Tokenize(raw)
+	if err != nil {
+		t.Fatalf("Tokenize(%q): %v", raw, err)
+	}
+	if toks[0].Lexeme != bs+"u0041" {
+		t.Errorf("raw %q: lexeme = %q, want a literal backslash-u sequence", raw, toks[0].Lexeme)
+	}
+
+	// Invalid escapes are positioned lex errors, not a silent replacement char.
+	bad := []string{
+		`"` + bs + `uD800"`,     // low surrogate
+		`"` + bs + `uDFFF"`,     // high surrogate
+		`"` + bs + `U00110000"`, // above U+10FFFF
+		`"` + bs + `U80000000"`, // high bit set: overflows int32 rune to negative
+		`"` + bs + `UFFFFFFFF"`, // max 8-hex value: must not slip through as U+FFFD
+		`"` + bs + `u12"`,       // too few hex digits (needs 4)
+		`"` + bs + `uZZZZ"`,     // non-hex digits
+		`"` + bs + `U0001F60"`,  // 7 digits (needs 8)
+		`"` + bs + `u"`,         // no digits at all
+	}
+	for _, src := range bad {
+		if _, err := Tokenize(src); err == nil {
+			t.Errorf("Tokenize(%q) should be a lex error", src)
+		}
+	}
+}
+
 func TestTokenizeNumbersAndOperators(t *testing.T) {
 	toks, err := Tokenize("1 + 2 * 3 - 4 / 5 % 6;")
 	if err != nil {

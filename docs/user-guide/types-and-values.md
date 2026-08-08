@@ -66,6 +66,15 @@ The two delimiters do different jobs.
 | `\"`   | double quote    |
 | `\'`   | single quote    |
 | `\0`   | null character  |
+| `\uXXXX` | A Unicode code point, exactly 4 hex digits (the Basic Multilingual Plane, `U+0000`-`U+FFFF`). |
+| `\UXXXXXXXX` | Unicode code point, exactly 8 hex digits (any plane), e.g. `"\U0001F600"` is `😀` |
+
+The `\u` / `\U` forms are strict: a surrogate (`\uD800`-`\uDFFF`), a value above
+`U+10FFFF`, or the wrong number of hex digits is a positioned lex error, not a
+silent replacement character - the same canonical contract as
+`convert.fromCodepoint`. Use `\u` for the common case and `\U` for astral code
+points (emoji, rarer scripts). The brace-free forms deliberately leave `{...}`
+free for a future interpolation syntax.
 
 **`'...'` is raw** - there is **no** escape processing. Every byte from the
 opening `'` to the next `'` is content verbatim, backslashes and newlines

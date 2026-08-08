@@ -34,10 +34,15 @@ bare `!` is a positioned lex error whose message points at both `not` and `!=`.
 
 `VARREF` carries the variable name *without* the leading `$`.
 `STRING` carries the value *without* surrounding quotes. A **double-quoted**
-literal is **cooked** - escape sequences are already processed. A
-**single-quoted** literal is **raw** - its content is verbatim (no escape
-processing) from the opening `'` to the next `'`. The two delimiters are thus not
-interchangeable; `readString` branches on the quote (`raw := quote == '\''`).
+literal is **cooked** - escape sequences are already processed: `\n \r \t \\ \"
+\' \0`, plus the Unicode escapes `\uXXXX` (exactly 4 hex digits, the BMP) and
+`\UXXXXXXXX` (exactly 8 hex digits, any plane). `readUnicodeEscape` rejects a
+surrogate, a value above `U+10FFFF`, and a short / non-hex digit run as a
+positioned lex error (matching `convert.fromCodepoint`); the brace-free forms
+keep `{...}` free for a future interpolation syntax. A **single-quoted** literal
+is **raw** - its content is verbatim (no escape processing) from the opening `'`
+to the next `'`. The two delimiters are thus not interchangeable; `readString`
+branches on the quote (`raw := quote == '\''`).
 
 ## Whitespace handling
 
