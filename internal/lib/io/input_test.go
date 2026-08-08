@@ -24,6 +24,76 @@ func callEof(in *interpreter.Interpreter, ctx interpreter.BuiltinCtx) (interpret
 	return in.LookupNamespacedBuiltin("io", "eof")(ctx, nil)
 }
 
+func callReadLines(in *interpreter.Interpreter, ctx interpreter.BuiltinCtx) (interpreter.Value, error) {
+	return in.LookupNamespacedBuiltin("io", "readLines")(ctx, nil)
+}
+
+func TestReadLines(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"trailing newline", "alpha\nbeta\n\ngamma\n", []string{"alpha", "beta", "", "gamma"}},
+		{"final unterminated", "x\ny", []string{"x", "y"}},
+		{"crlf", "a\r\nb\r\n", []string{"a", "b"}},
+		// A bare trailing CR on the unterminated final line is data, not a
+		// CRLF terminator, so it is preserved (F-io-2).
+		{"bare CR final preserved", "a\r\nb\r", []string{"a", "b\r"}},
+		{"empty", "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetInputForTest()
+			in := interpreter.New()
+			Install(in)
+			ctx := interpreter.BuiltinCtx{Out: &bytes.Buffer{}, In: strings.NewReader(tc.input)}
+			v, err := callReadLines(in, ctx)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if v.Kind != interpreter.KindList {
+				t.Fatalf("got %s, want List", v.Kind)
+			}
+			if len(v.List) != len(tc.want) {
+				t.Fatalf("got %d lines, want %d", len(v.List), len(tc.want))
+			}
+			for i, w := range tc.want {
+				if v.List[i].Kind != interpreter.KindString || v.List[i].Str != w {
+					t.Errorf("line %d: got %s(%q), want %q", i, v.List[i].Kind, v.List[i].Str, w)
+				}
+			}
+		})
+	}
+}
+
+// TestReadLineBareCRPreserved covers F-io-2 for the single-line reader: a final
+// line ending in a bare `\r` (no `\n`) keeps the `\r` as data instead of
+// stripping it as if it were a CRLF terminator.
+func TestReadLineBareCRPreserved(t *testing.T) {
+	resetInputForTest()
+	in := interpreter.New()
+	Install(in)
+	ctx := interpreter.BuiltinCtx{Out: &bytes.Buffer{}, In: strings.NewReader("x\r")}
+	v, err := callReadLine(in, ctx, nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if v.Str != "x\r" {
+		t.Errorf("got %q, want %q (bare trailing CR must be preserved)", v.Str, "x\r")
+	}
+}
+
+func TestReadLinesREPLGuard(t *testing.T) {
+	resetInputForTest()
+	in := interpreter.New()
+	Install(in)
+	ctx := interpreter.BuiltinCtx{Out: &bytes.Buffer{}, In: strings.NewReader("x\n"), InREPL: true}
+	if _, err := callReadLines(in, ctx); err == nil {
+		t.Fatal("expected readLines to refuse in the REPL")
+	}
+}
+
 func TestReadLineSingleLine(t *testing.T) {
 	resetInputForTest()
 	in := interpreter.New()

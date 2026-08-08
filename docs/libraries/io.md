@@ -2,8 +2,8 @@
 
 Enable with `use io;`. It provides formatted output - `printf` (stdout),
 `eprintf` (stderr), and `sprintf` (to a string), which share a Go-style
-format-string mini-language - and stdin input: `readLine` / `eof` for lines,
-`readBytes` / `readChars` for binary.
+format-string mini-language - and stdin input: `readLine` / `readLines` / `eof`
+for lines, `readBytes` / `readChars` for binary.
 
 ## `printf`
 
@@ -275,6 +275,34 @@ must be a non-negative `int`.
 use io;
 def first as bytes init io.readBytes(8);   # exactly 8 bytes or less at EOF
 io.printf("got %d bytes\n", len($first));
+```
+
+### `io.readLines() -> list of string`
+
+Reads every remaining line from stdin and returns them as a
+`list of string`, each with its trailing newline stripped - the
+slurp counterpart to the streaming `readLine()` + `eof()` loop, for
+tiny filter scripts over bounded input. Line splitting is **OS-independent**:
+it breaks on `\n` and strips a `\r` only when it precedes that `\n` (a CRLF
+terminator), so LF and CRLF input read the same on any platform, while a bare
+`\r` that is not part of a CRLF is kept as data (exactly like `readLine`). Empty
+stdin yields an empty list; a blank line is preserved as `""`; a final line with
+no trailing newline is included.
+
+It reads the **whole input into memory with no cap**, at roughly **1 KB of heap
+per line** (one value per line), so a few hundred thousand lines is already
+hundreds of MB - a ~20 MB line-oriented file is closer to ~2 GB of heap.
+Budget `readLines()` for small inputs (low single-digit MB); for large or
+untrusted streams keep the streaming `readLine()` loop, which stays flat in
+memory. Shares one buffered stdin reader with `readLine` / `readBytes` /
+`readChars`, so it returns only the lines not already consumed - and, like them,
+must not be called from concurrent `spawn` tasks (the shared reader is
+unsynchronized). Refused inside the REPL.
+
+```jennifer
+use io;
+def lines as list of string init io.readLines();
+io.printf("read %d line(s)\n", len($lines));
 ```
 
 ### `io.readChars(n) -> string`

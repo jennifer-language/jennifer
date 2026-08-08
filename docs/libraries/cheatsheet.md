@@ -130,6 +130,7 @@ flat lookup view, not authoritative.
 | [`io`](io.md)`.eprintf(format, args...)`              | Like `printf`, but writes to **stderr** (diagnostics / logs that must not mix into stdout).                                        |
 | [`io`](io.md)`.readLine()`                            | Read one line from stdin (trailing newline stripped). Errors at EOF - check `io.eof()` first.                                       |
 | [`io`](io.md)`.readLine(prompt)`                      | Same as `io.readLine()` but writes `prompt` to stdout first.                                                                        |
+| [`io`](io.md)`.readLines()`                           | Slurp all remaining stdin lines into a `list of string` (newlines stripped, LF/CRLF, OS-independent). Use the `readLine` loop for large streams. |
 | [`io`](io.md)`.sprintf(format, args...)`              | Format-string version of `sprintf`. Same verbs and `\|key=value` modifiers as `printf`.                                             |
 | [`io`](io.md)`.sprintf(value)`                        | Display-form of a value, returned as a string (doesn't write).                                                                      |
 | `len(v)` *(language built-in)*                        | Structural length: rune count (string), element count (list), entry count (map), byte count (bytes).                                |

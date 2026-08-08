@@ -590,9 +590,6 @@ A grab-bag, loosely grouped and recorded when it comes up.
 
 ### Library completions
 
-- **`io.lines() -> list of string`.** Slurp the whole stdin into a list.
-  Additive on top of the streaming `readLine()` + `eof()` idiom; nice-to-have
-  for tiny scripts, not blocking.
 - **`encoding` - the harder codecs.** The single-byte character codecs and
   binary-to-text formats all shipped; the deferred remainder, picked up only
   when a real program needs one: variable-width Asian encodings

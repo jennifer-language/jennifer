@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // Package-level stdin state. The interpreter is single-instance per
@@ -52,6 +53,18 @@ func getReader(in io.Reader) *bufio.Reader {
 	return bufIn
 }
 
+// stripLineEnding removes the trailing line terminator, treating `\r` as part
+// of it only when it precedes an `\n` (matching Go's bufio.ScanLines). A bare
+// trailing `\r` on an unterminated final line is data, not a terminator, so it
+// is preserved rather than silently dropped.
+func stripLineEnding(line string) string {
+	if strings.HasSuffix(line, "\n") {
+		line = line[:len(line)-1]
+		line = strings.TrimSuffix(line, "\r")
+	}
+	return line
+}
+
 // readLine reads one line from stdin and returns it with the trailing
 // newline (`\r\n` or `\n`) stripped. With one string argument the prompt
 // is written to stdout first. Calling at end-of-input is a positioned
@@ -91,9 +104,7 @@ func readLine(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 			return interpreter.Null(), fmt.Errorf("readLine: end of input")
 		}
 	}
-	line = strings.TrimSuffix(line, "\n")
-	line = strings.TrimSuffix(line, "\r")
-	return interpreter.StringVal(line), nil
+	return interpreter.StringVal(stripLineEnding(line)), nil
 }
 
 // readBytes reads exactly `n` bytes from stdin and returns them as a
@@ -191,6 +202,44 @@ func readChars(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		b.WriteRune(ch)
 	}
 	return interpreter.StringVal(b.String()), nil
+}
+
+// readLines reads every remaining line from stdin and returns them as a
+// `list of string`, each with its trailing newline stripped - the slurp
+// counterpart to the streaming `readLine()` + `eof()` loop, for tiny filter
+// scripts over bounded input. Splitting is OS-independent, exactly like
+// readLine: it breaks on `\n` and strips a trailing `\r`, so LF and CRLF input
+// read identically on any platform. Empty stdin yields an empty list; a blank
+// line is preserved as ""; a final line without a trailing newline is included.
+// It reads the whole input into memory, so use the `readLine()` loop for large
+// or unbounded streams. Shares stdin state with `readLine`/`readBytes`, so it
+// returns only the lines not already consumed.
+func readLines(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if ctx.InREPL {
+		return interpreter.Null(), fmt.Errorf("readLines: stdin is owned by the REPL editor")
+	}
+	if len(args) != 0 {
+		return interpreter.Null(), fmt.Errorf("`readLines` takes no arguments, got %d", len(args))
+	}
+	r := getReader(ctx.In)
+	if r == nil {
+		return interpreter.Null(), fmt.Errorf("readLines: no input source")
+	}
+	var out []interpreter.Value
+	for !eofState {
+		line, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return interpreter.Null(), fmt.Errorf("readLines: %v", err)
+		}
+		if err == io.EOF {
+			eofState = true
+			if line == "" {
+				break
+			}
+		}
+		out = append(out, interpreter.StringVal(stripLineEnding(line)))
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), out), nil
 }
 
 // eofFn reports whether the next `readLine()` would error. Implementation
