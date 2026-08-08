@@ -83,6 +83,17 @@ jobs:
         # step - no separate binary build needed for this one program.
         run: go run ./cmd/jennifer run scripts/gen-module-docs.j
 
+      - name: Generate the test coverage report
+        # docs/technical/coverage.md and the SUMMARY "coverage" region are
+        # generated from `go test -cover` (system libraries) and `jennifer test
+        # --coverage` (modules); they are NOT committed (gitignored) and are
+        # excluded from the PDF (rendered earlier from the report-less book).
+        # Build the interpreter once so the ~67 per-module coverage runs reuse it
+        # rather than each recompiling under `go run`.
+        run: |
+          go build -o jennifer ./cmd/jennifer
+          JENNIFER=./jennifer sh scripts/gen-coverage-docs.sh
+
       - name: Build the book
         run: mdbook build
 
