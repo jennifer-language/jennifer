@@ -26,6 +26,7 @@ use encoding;
 use time;
 use strings;
 use convert;
+import "./uri.j" as urilib;
 
 /**
  * The HMAC digest algorithm behind a TOTP code: `Sha1` (the default), `Sha256`,
@@ -279,44 +280,6 @@ export func verify(secret as string, code as string, opts as Options) {
 
 # --- provisioning URI -------------------------------------------------------
 
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $b // 16, $b // 16 + 1) +
-        strings.substring($digits, $b % 16, $b % 16 + 1);
-}
-
-# isUnreserved reports whether a byte is an RFC 3986 unreserved character.
-func isUnreserved(b as int) {
-    if ($b >= 65 and $b <= 90) {
-        return true;
-    }
-    if ($b >= 97 and $b <= 122) {
-        return true;
-    }
-    if ($b >= 48 and $b <= 57) {
-        return true;
-    }
-    return ($b == 45 or $b == 46 or $b == 95 or $b == 126);
-}
-
-# urlEncode percent-encodes a string for use in a URI component.
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        if (isUnreserved($b)) {
-            $out = $out + convert.fromCodepoint($b);
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
-}
-
 # normalizedSecret canonicalizes a secret for the otpauth URI: strip spaces,
 # upper-case, and drop `=` padding, so a secret an authenticator would accept
 # (via decodeSecret) produces a scannable, matching URI.
@@ -335,9 +298,9 @@ func normalizedSecret(secret as string) {
  * @return {string} the otpauth provisioning URI
  */
 export func uri(issuer as string, account as string, secret as string, opts as Options) {
-    def label as string init urlEncode($issuer) + ":" + urlEncode($account);
+    def label as string init urilib.encode($issuer) + ":" + urilib.encode($account);
     def query as string init "secret=" + normalizedSecret($secret) +
-        "&issuer=" + urlEncode($issuer) +
+        "&issuer=" + urilib.encode($issuer) +
         "&algorithm=" + strings.upper(algorithmOf($opts)) +
         "&digits=" + convert.toString(digitsOf($opts)) +
         "&period=" + convert.toString(periodOf($opts));

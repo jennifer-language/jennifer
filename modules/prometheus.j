@@ -24,6 +24,7 @@ use lists;
 use math;
 use json;
 import "./http.j" as http;
+import "./uri.j" as uri;
 
 # --- exposition types -------------------------------------------------------
 
@@ -595,7 +596,7 @@ export func render(metrics as list of Metric) {
  * @throws {Error} kind "prometheus" when a grouping label name is invalid
  */
 export func pushgatewayPath(job as string, grouping as map of string to string) {
-    def out as string init "/metrics/job/" + urlEncode($job);
+    def out as string init "/metrics/job/" + uri.encode($job);
     def keys as list of string init lists.sort(maps.keys($grouping));
     for (def k in $keys) {
         if (not isValidLabelName($k)) {
@@ -607,7 +608,7 @@ export func pushgatewayPath(job as string, grouping as map of string to string) 
                 col: 0
             };
         }
-        $out = $out + "/" + $k + "/" + urlEncode($grouping[$k]);
+        $out = $out + "/" + $k + "/" + uri.encode($grouping[$k]);
     }
     return $out;
 }
@@ -620,33 +621,6 @@ func joinBase(base as string, path as string) {
         return strings.substring($base, 0, len($base) - 1) + $path;
     }
     return $base + $path;
-}
-
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $b // 16, $b // 16 + 1) +
-        strings.substring($digits, $b % 16, $b % 16 + 1);
-}
-
-# urlEncode percent-encodes a URL query component (unreserved bytes stay).
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def unreserved as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
-        $unreserved = $unreserved or ($b >= 48 and $b <= 57);
-        $unreserved = $unreserved or $b == 45 or $b == 95 or $b == 46 or $b == 126;
-        if ($unreserved) {
-            $out = $out + convert.fromCodepoint($b);
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
 }
 
 # parseLabels reads the object at `pointer` into a string/string map.
@@ -736,7 +710,7 @@ func decodeBody(resp as http.Response) {
  * @throws {Error} kind "prometheus" when the server reports a query error
  */
 export func query(base as string, promql as string) {
-    def url as string init joinBase($base, "/api/v1/query") + "?query=" + urlEncode($promql);
+    def url as string init joinBase($base, "/api/v1/query") + "?query=" + uri.encode($promql);
     def resp as http.Response init http.get($url, {});
     return parseResult(decodeBody($resp));
 }
@@ -759,8 +733,8 @@ export func queryRange(
     start as string,
     end as string,
     step as string) {
-    def url as string init joinBase($base, "/api/v1/query_range") + "?query=" + urlEncode($promql) +
-        "&start=" + urlEncode($start) + "&end=" + urlEncode($end) + "&step=" + urlEncode($step);
+    def url as string init joinBase($base, "/api/v1/query_range") + "?query=" + uri.encode($promql) +
+        "&start=" + uri.encode($start) + "&end=" + uri.encode($end) + "&step=" + uri.encode($step);
     def resp as http.Response init http.get($url, {});
     return parseResult(decodeBody($resp));
 }

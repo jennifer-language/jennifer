@@ -24,7 +24,7 @@ func testQueryStringEmpty() {
 }
 
 func testQueryStringEncodes() {
-    testing.assertEqual(queryString({"q": "a b"}), "?q=a%20b");
+    testing.assertEqual(queryString({"q": "a b"}), "?q=a+b");
     testing.assertEqual(queryString({"x": "a&b=c"}), "?x=a%26b%3Dc");
 }
 
@@ -33,11 +33,8 @@ func testQueryStringMulti() {
     testing.assertEqual(queryString({"a": "1", "b": "2"}), "?a=1&b=2");
 }
 
-func testUrlEncode() {
-    testing.assertEqual(urlEncode("hello world"), "hello%20world"); # space -> %20
-    testing.assertEqual(urlEncode("café"), "caf%C3%A9"); # per-byte UTF-8
-    testing.assertEqual(urlEncode("A-Z_a.z~0"), "A-Z_a.z~0"); # unreserved literal
-}
+# Percent-encoding now lives in the `url` module (tested in url_test.j); rest's
+# query building is covered by the testQueryString* cases below.
 
 func testBearer() {
     testing.assertEqual(bearer("my-token"), "Bearer my-token");

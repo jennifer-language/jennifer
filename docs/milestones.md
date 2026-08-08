@@ -1222,6 +1222,52 @@ carry domain intent (not a parallel API), and it closes a round-trip gap - the
 interpreter already prints `1e+21` but could not read it back. Reasoning in
 `design-decisions.md`.
 
+### M24.13 - `uri` module + `encoding` percent / form codecs (compacted)
+
+**Done.** URL handling, factored so the byte-level encoding lives in the
+`encoding` system library and the URL semantics live in a shared `.j` module,
+and every module that reinvented query-string building routes through them.
+
+- **`encoding` gains two binary-to-text codecs.** `"uri-percent"` is RFC 3986
+  percent-encoding (unreserved set `A-Za-z0-9-._~` literal, space `%20`,
+  uppercase hex, strict on a malformed `%` escape); `"uri-form"` is the
+  `application/x-www-form-urlencoded` variant (identical but space `+`, so a
+  literal `+` encodes `%2B`). Both plug into the existing `toText` / `fromText`
+  format table (hand-written, no `net/url`), so they inherit the exact-name,
+  catchable-error contract of the rest of the library. Named `uri-*` (not a bare
+  `percent` / `form`) so the codec table keeps the genuine binary-to-text
+  encodings distinct from the web ones, and to match RFC 3986's own vocabulary -
+  percent-encoding is defined by the URI RFC, which standardises on "URI", not
+  "URL".
+- **`uri` module (`modules/uri.j`).** Pure Jennifer over `strings` + `encoding` +
+  `convert` (no Go, no network -> **both binaries**). `parse(raw)` -> `Uri`
+  (`scheme` / `user` / `host` / `port` / `path` / `query` / `fragment`, absent =
+  ""; IPv6 literal keeps its brackets with the port split out) and `build(u)`
+  back (verbatim, no re-encode, so `parse` -> `build` round-trips); `encode` /
+  `decode` (`uri-percent`) and `encodeForm` / `decodeForm` (`uri-form`);
+  `buildQuery` / `parseQuery` between a `map of string to string` and a query
+  string (form-encoded, the query-string convention); and `resolve(base, ref)`
+  applying RFC 3986 section 5 relative-reference resolution (with the section
+  5.2.4 `remove_dot_segments` algorithm). 100% `uri_test.j` overlay.
+- **Consumers de-duplicated.** Seven modules hand-rolled a percent / form
+  byte-loop; all now delegate. `influxdb`, `totp`, and `prometheus` use
+  `uri.encode` (RFC 3986, their bytes - incl. `%20` for a space - unchanged);
+  `rest.queryString`, `gotify.formBody`, `oauth.formBody`, and `telegram.formEncode`
+  use `uri.encodeForm` / `uri.buildQuery`. Two encoders are deliberately **not**
+  folded in: `s3`'s AWS SigV4 encoder (byte-critical to the signature, a different
+  reserved set), and `web`'s request-body `percentDecode` (intentionally *lenient*
+  per OM-013 - it must not throw a 500 on a client's malformed `%` escape or
+  non-UTF-8 field, whereas the `uri` / `encoding` path is strict).
+- **Pre-1.0 break.** `rest`'s query strings now form-encode a space as `+`
+  (was `%20`), matching Go `url.Values` / JS `URLSearchParams` / Python
+  `urlencode`; both are decoded identically by any conformant server. The
+  affected overlay assertions were updated in the same change.
+- Deliverables: `docs/modules/uri.md` + index / `SUMMARY.md` rows,
+  `examples/modules/uri_demo.j`, a `JENNIFER.md` bullet, the `encoding.md` +
+  cheatsheet codec rows, and the four consumers' updated overlays. On stance #1
+  (one obvious way): a single percent/form implementation in `encoding`, one URL
+  module over it, no per-module reinvention.
+
 ## M25 - multiplatform: promote macOS / Windows to supported
 
 Linux is the only *supported* platform, but best-effort **unsupported** macOS /

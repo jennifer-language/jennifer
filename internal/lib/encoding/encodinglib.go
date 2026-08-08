@@ -109,7 +109,7 @@ func lenRunesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 //     and `convert.bytesFromString` carries over (stance #1).
 
 // textFormatList is the rendered known-format string for error messages.
-const textFormatList = `"hex", "base32", "base32-hex", "base64", "base64-url", "ascii85", "z85", "quoted-printable"`
+const textFormatList = `"hex", "base32", "base32-hex", "base64", "base64-url", "ascii85", "z85", "quoted-printable", "uri-percent", "uri-form"`
 
 // The format names are exact (strict): unlike the charset codec names
 // (encode / decode), which normalise because they mirror external standards
@@ -143,6 +143,10 @@ func textEncode(format string, b []byte) (string, error) {
 			return "", err
 		}
 		return buf.String(), nil
+	case "uri-percent":
+		return percentEncode(b), nil
+	case "uri-form":
+		return formEncode(b), nil
 	}
 	return "", fmt.Errorf("unknown text format %q; known: %s", format, textFormatList)
 }
@@ -178,8 +182,129 @@ func textDecode(format string, s string) ([]byte, error) {
 			return nil, err
 		}
 		return out, nil
+	case "uri-percent":
+		return percentDecode(s)
+	case "uri-form":
+		return formDecode(s)
 	}
 	return nil, fmt.Errorf("unknown text format %q; known: %s", format, textFormatList)
+}
+
+// ----- percent (RFC 3986 URL) encoding --------------------------------
+//
+// Component encoding: every byte that is not unreserved (A-Za-z0-9-._~) is
+// escaped as %XX (uppercase hex, space -> %20), which is safe in any URL
+// position. The `url` module builds its parse / query surface on top of this.
+
+const upperHexDigits = "0123456789ABCDEF"
+
+// isUnreserved reports whether c is an RFC 3986 unreserved character (left
+// literal by percent-encoding).
+func isUnreserved(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		(c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~'
+}
+
+func percentEncode(b []byte) string {
+	var sb strings.Builder
+	for _, c := range b {
+		if isUnreserved(c) {
+			sb.WriteByte(c)
+			continue
+		}
+		sb.WriteByte('%')
+		sb.WriteByte(upperHexDigits[c>>4])
+		sb.WriteByte(upperHexDigits[c&0x0f])
+	}
+	return sb.String()
+}
+
+// percentDecode reverses percent-encoding: a %XX triple decodes to one byte,
+// every other byte passes through. `+` stays literal (RFC 3986, not form
+// encoding). A malformed % escape is an error - strict, like the codec family.
+func percentDecode(s string) ([]byte, error) {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); {
+		if s[i] != '%' {
+			out = append(out, s[i])
+			i++
+			continue
+		}
+		if i+2 >= len(s) {
+			return nil, fmt.Errorf("percent decode: truncated %% escape at offset %d", i)
+		}
+		hi, ok1 := pctHexVal(s[i+1])
+		lo, ok2 := pctHexVal(s[i+2])
+		if !ok1 || !ok2 {
+			return nil, fmt.Errorf("percent decode: invalid %% escape %q", s[i:i+3])
+		}
+		out = append(out, hi<<4|lo)
+		i += 3
+	}
+	return out, nil
+}
+
+func pctHexVal(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
+}
+
+// ----- form (application/x-www-form-urlencoded) -----------------------
+//
+// Like percent, but a space becomes "+" (and decodes back from "+"), matching
+// how query strings are serialized by URLSearchParams / urlencode / url.Values.
+
+func formEncode(b []byte) string {
+	var sb strings.Builder
+	for _, c := range b {
+		switch {
+		case c == ' ':
+			sb.WriteByte('+')
+		case isUnreserved(c):
+			sb.WriteByte(c)
+		default:
+			sb.WriteByte('%')
+			sb.WriteByte(upperHexDigits[c>>4])
+			sb.WriteByte(upperHexDigits[c&0x0f])
+		}
+	}
+	return sb.String()
+}
+
+// formDecode reverses form encoding: "+" is a space, "%XX" a byte, everything
+// else literal. A literal "+" that was itself encoded arrives as "%2B" and so
+// decodes to "+", not a space.
+func formDecode(s string) ([]byte, error) {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); {
+		switch {
+		case s[i] == '+':
+			out = append(out, ' ')
+			i++
+		case s[i] != '%':
+			out = append(out, s[i])
+			i++
+		default:
+			if i+2 >= len(s) {
+				return nil, fmt.Errorf("form decode: truncated %% escape at offset %d", i)
+			}
+			hi, ok1 := pctHexVal(s[i+1])
+			lo, ok2 := pctHexVal(s[i+2])
+			if !ok1 || !ok2 {
+				return nil, fmt.Errorf("form decode: invalid %% escape %q", s[i:i+3])
+			}
+			out = append(out, hi<<4|lo)
+			i += 3
+		}
+	}
+	return out, nil
 }
 
 // ----- z85 (ZeroMQ Base85, RFC 32) -----------------------------------

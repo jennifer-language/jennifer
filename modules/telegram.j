@@ -28,6 +28,7 @@ use fs;
 use path;
 import "./http.j" as http;
 import "./multipart.j" as multipart;
+import "./uri.j" as uri;
 
 # The public Telegram Bot API base (overridable for a self-hosted API server or
 # tests via `botWith`).
@@ -161,60 +162,10 @@ export func botWith(token as string, baseUrl as string) {
 
 # --- form encoding (private) ------------------------------------------------
 
-# isUnreserved reports whether a byte is an unreserved URL character.
-func isUnreserved(b as int) {
-    if ($b >= 65 and $b <= 90) {
-        return true;
-    }
-    if ($b >= 97 and $b <= 122) {
-        return true;
-    }
-    if ($b >= 48 and $b <= 57) {
-        return true;
-    }
-    return $b == 45 or $b == 95 or $b == 46 or $b == 126;
-}
-
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    def hi as int init $b // 16;
-    def lo as int init $b % 16;
-    return strings.substring($digits, $hi, $hi + 1) + strings.substring($digits, $lo, $lo + 1);
-}
-
-# urlEncode percent-encodes a form value (unreserved stay, space -> +, else %XX).
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        if (isUnreserved($b)) {
-            $out = $out + convert.fromCodepoint($b);
-        } elseif ($b == 32) {
-            $out = $out + "+";
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
-}
-
 # formEncode builds an application/x-www-form-urlencoded body from a string map
-# (keys in insertion order).
+# (keys in insertion order), via the shared `uri` module.
 func formEncode(params as map of string to string) {
-    def out as string init "";
-    def first as bool init true;
-    for (def key in $params) {
-        if (not $first) {
-            $out = $out + "&";
-        }
-        $out = $out + urlEncode($key) + "=" + urlEncode($params[$key]);
-        $first = false;
-    }
-    return $out;
+    return uri.buildQuery($params);
 }
 
 # --- request core (private) -------------------------------------------------

@@ -3,8 +3,9 @@
 Enable with `use encoding;`. Three groups of functions:
 
 1. **Introspection** - rune count vs byte count, and an ASCII test.
-2. **Binary-to-text** (`toText` / `fromText`) - hex, base64, and
-   quoted-printable, `bytes` to a printable `string` and back.
+2. **Binary-to-text** (`toText` / `fromText`) - hex, base64,
+   quoted-printable, and URI percent / form encoding, `bytes` to a printable
+   `string` and back.
 3. **Character codecs** (`encode` / `decode`) - a Jennifer `string` to and
    from a single-byte legacy encoding (ISO-8859-*, Windows-*, EBCDIC).
 
@@ -54,11 +55,24 @@ these grow or reshape the bytes, they don't reduce information (that's
 | `"ascii85"`          | Adobe / btoa  | Base-85, the `!`..`u` alphabet, with `z` for an all-zero group.               |
 | `"z85"`              | ZeroMQ RFC 32 | Base-85, a source-safe alphabet, no padding. Input must be a multiple of 4 bytes (decode input a multiple of 5 chars). |
 | `"quoted-printable"` | RFC 2045      | MIME transfer encoding (see below).                                           |
+| `"uri-percent"`      | RFC 3986      | RFC 3986 percent-encoding (see below). Space is `%20`.                         |
+| `"uri-form"`         | WHATWG URL    | `application/x-www-form-urlencoded` (see below). Space is `+`.                 |
 
 **Quoted-printable** keeps printable ASCII literal, turns `=`, control, and
 8-bit bytes into `=XX`, and soft-wraps lines to 76 columns with a trailing
 `=`. Decode reverses it, tolerant of both CRLF and LF soft breaks, and
 round-trips `bytes`.
+
+**URI percent / form.** `"uri-percent"` is RFC 3986 percent-encoding: every
+byte outside the unreserved set (`A`-`Z` `a`-`z` `0`-`9` `-` `.` `_` `~`)
+becomes `%XX` (uppercase hex), and a space becomes `%20`. `"uri-form"` is the
+`application/x-www-form-urlencoded` variant used for query strings and HTML form
+bodies - identical, except a space becomes `+` (and a literal `+` therefore
+encodes as `%2B`). Decode reverses each; a malformed `%` escape (`%`, `%2`,
+`%zz`) is a positioned error. These are the byte-level codecs; the
+[`uri`](../modules/uri.md) module builds on them for URL parsing, building, and
+query strings (its `encode` / `decode` are `uri-percent`, `encodeForm` /
+`decodeForm` and `buildQuery` / `parseQuery` are `uri-form`).
 
 Format names are **exact** (case-sensitive, no `-` / `_` normalisation) -
 they're the library's own fixed set, not external standards with variant

@@ -19,11 +19,6 @@ func testFormEncode() {
     testing.assertEqual(formEncode($p), "chat_id=12345&text=hi+there+%26+%3Cok%3E");
 }
 
-func testUrlEncodeUnicode() {
-    testing.assertEqual(urlEncode("a.b-c_d~e"), "a.b-c_d~e");
-    testing.assertEqual(urlEncode("=/?"), "%3D%2F%3F");
-}
-
 func testCheckResponseThrowsOnError() {
     def node as json.Value init json.decode("{\"ok\":false,\"error_code\":401,\"description\":\"Unauthorized\"}");
     def threw as bool init false;

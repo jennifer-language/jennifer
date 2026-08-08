@@ -22,12 +22,11 @@
  * io.printf("visit %s and enter %s\n", $dev.verificationUri, $dev.userCode);
  * def tok as oauth.Token init oauth.deviceWait($cfg, $dev);
  */
-use strings;
-use convert;
 use time;
 use json;
 use fs;
 import "./http.j" as http;
+import "./uri.j" as uri;
 
 /**
  * The OAuth2 client settings for one provider / application.
@@ -79,49 +78,11 @@ export def struct DeviceAuth {
     expiresAt as int
 };
 
-# --- form encoding (private, pure) ---------------------------------
-
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $b // 16, $b // 16 + 1) +
-        strings.substring($digits, $b % 16, $b % 16 + 1);
-}
-
-# urlEncode percent-encodes a value for an `application/x-www-form-urlencoded`
-# body (unreserved bytes literal, space to `+`, else `%XX` over UTF-8).
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def keep as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
-        $keep = $keep or ($b >= 48 and $b <= 57);
-        $keep = $keep or $b == 45 or $b == 95 or $b == 46 or $b == 126;
-        if ($keep) {
-            $out = $out + convert.fromCodepoint($b);
-        } elseif ($b == 32) {
-            $out = $out + "+";
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
-}
-
-# formBody renders a parameter map as a form-encoded request body.
+# formBody renders a parameter map as a form-encoded request body
+# (`application/x-www-form-urlencoded`, insertion order preserved) via the
+# shared `uri` module.
 func formBody(params as map of string to string) {
-    def out as string init "";
-    def first as bool init true;
-    for (def k in $params) {
-        if (not $first) {
-            $out = $out + "&";
-        }
-        $out = $out + urlEncode($k) + "=" + urlEncode($params[$k]);
-        $first = false;
-    }
-    return $out;
+    return uri.buildQuery($params);
 }
 
 # --- token parsing (private, pure) ---------------------------------

@@ -42,6 +42,7 @@ use lists;
 use time;
 use encoding;
 import "./http.j" as http;
+import "./uri.j" as uri;
 
 # The default InfluxDB HTTP endpoint (shared by 1.x and 2.x).
 def const DEFAULT_URL as string init "http://localhost:8086";
@@ -363,32 +364,7 @@ func joinBase(base as string, path as string) {
     return $base + $path;
 }
 
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $b // 16, $b // 16 + 1) +
-        strings.substring($digits, $b % 16, $b % 16 + 1);
-}
 
-# urlEncode percent-encodes a URL query component (unreserved bytes stay).
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def unreserved as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
-        $unreserved = $unreserved or ($b >= 48 and $b <= 57);
-        $unreserved = $unreserved or $b == 45 or $b == 95 or $b == 46 or $b == 126;
-        if ($unreserved) {
-            $out = $out + convert.fromCodepoint($b);
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
-}
 
 # A built HTTP request: the URL, the Content-Type, the header map, and the
 # body. The pure output of the request builders (buildWrite / buildQuery /
@@ -441,12 +417,12 @@ func buildWrite(c as Client, body as string) {
     match ($c.version) {
         when V1 {
             def url as string init joinBase($c.url, "/write") + "?db=" +
-                urlEncode($c.db) + "&precision=ns";
+                uri.encode($c.db) + "&precision=ns";
             return Req{url: $url, contentType: $ct, headers: authHeaders($c), body: $body};
         }
         when V2 {
             def url as string init joinBase($c.url, "/api/v2/write") + "?org=" +
-                urlEncode($c.org) + "&bucket=" + urlEncode($c.bucket) + "&precision=ns";
+                uri.encode($c.org) + "&bucket=" + uri.encode($c.bucket) + "&precision=ns";
             return Req{url: $url, contentType: $ct, headers: authHeaders($c), body: $body};
         }
     }
@@ -454,8 +430,8 @@ func buildWrite(c as Client, body as string) {
 
 # buildQuery builds the 1.x InfluxQL request (`/query?db=...&q=...`, empty body).
 func buildQuery(c as Client, influxql as string) {
-    def url as string init joinBase($c.url, "/query") + "?db=" + urlEncode($c.db) +
-        "&q=" + urlEncode($influxql);
+    def url as string init joinBase($c.url, "/query") + "?db=" + uri.encode($c.db) +
+        "&q=" + uri.encode($influxql);
     return Req{
         url: $url,
         contentType: "application/x-www-form-urlencoded",
@@ -467,7 +443,7 @@ func buildQuery(c as Client, influxql as string) {
 # buildFlux builds the 2.x Flux request (`/api/v2/query?org=...`, the Flux
 # script as the body under `application/vnd.flux`).
 func buildFlux(c as Client, flux as string) {
-    def url as string init joinBase($c.url, "/api/v2/query") + "?org=" + urlEncode($c.org);
+    def url as string init joinBase($c.url, "/api/v2/query") + "?org=" + uri.encode($c.org);
     return Req{
         url: $url,
         contentType: "application/vnd.flux",

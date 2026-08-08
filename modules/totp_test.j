@@ -6,7 +6,7 @@
 #     jennifer test modules/totp_test.j
 #
 # The overlay splices totp.j in first, so these tests reach its private helpers
-# (hotp, decodeSecret, urlEncode) and the exported surface by bare identifier.
+# (hotp, decodeSecret) and the exported surface by bare identifier.
 # totp.j already `use`s hash / encoding / time / strings / convert, so the
 # overlay only adds testing. The generateAt vectors are RFC 6238 Appendix B.
 use testing;

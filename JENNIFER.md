@@ -544,7 +544,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `crypto.rsaSign`/`rsaVerify`/`ecdsaSign`/`ecdsaVerify` for JWT RS\* / ES\*, and
   key generation / CSR / JWK `crypto.rsaGenerateKey`/`ecGenerateKey`/`jwkPublic`/
   `csr` for ACME - the RSA / ECDSA parts default binary only), byte-stream + container compression, text/character codecs,
-  UUIDs, interpreter identity, and test primitives.
+  UUIDs, interpreter identity, and test primitives. `encoding`'s binary-to-text
+  codecs include `"uri-percent"` (RFC 3986) and `"uri-form"`
+  (`application/x-www-form-urlencoded`); the `uri` module builds URL handling on
+  them.
 - **`kv`** - in-process key/value store with per-key TTL (the no-server local
   counterpart to the `memcache` / `redis` modules): `kv.open()` (in-memory) /
   `kv.openFile(path)` (persisted across `jennifer run` invocations) -> `kv.Store`,
@@ -741,7 +744,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `rest.get(c, path, query)` / `post(c, path, contentType, body)` / `put` /
   `patch` / `delete` -> `rest.Response` (`status` / `headers` / `body`), plus
   `getJson` (-> `json.Value`) / `postJson` / `putJson` / `patchJson`. Base-URL
-  joining, percent-encoded query strings, `rest.bearer` / `rest.basic` /
+  joining, form-encoded query strings (via the `uri` module), `rest.bearer` / `rest.basic` /
   `rest.withHeader` for auth. Every request routes through `http.send`, so the
   client **inherits the http policy** via copy-returning builders:
   `rest.withTimeout(c, ms)`, `rest.withRedirects(c, n)`, `rest.withRetries(c, n)`
@@ -752,6 +755,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   cursorPointer, cursorParam, maxPages)` walks a cursor collection, each
   returning `list of json.Value` (one per page). A 4xx/5xx is a `Response` value,
   not a crash. **Default `jennifer` binary only** (`net`).
+- **`uri`** - URL / URI parsing, building, and query strings (RFC 3986), the
+  shared URL layer the network modules build on. `uri.parse(raw)` -> `Uri`
+  (`scheme` / `user` / `host` / `port` / `path` / `query` / `fragment`) and
+  `uri.build(u)` back; `uri.encode` / `decode` (RFC 3986 percent-encoding, space
+  `%20`) and `uri.encodeForm` / `decodeForm` (`application/x-www-form-urlencoded`,
+  space `+`); `uri.buildQuery(params)` / `uri.parseQuery(q)` between a `map of
+  string to string` and a query string (form-encoded); and `uri.resolve(base,
+  ref)` for RFC 3986 relative-reference resolution (`../img.png` against a base).
+  Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
+  on `encoding`'s `uri-percent` / `uri-form` codecs.
 - **`graphql`** - a thin GraphQL client over `http` / `rest`. Build a client with
   `graphql.client(endpoint)` (the full GraphQL URL, POSTed verbatim), layer auth /
   TLS with `graphql.bearer(c, token)` / `basic` / `header(c, name, value)` /

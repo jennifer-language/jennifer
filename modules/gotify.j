@@ -13,10 +13,10 @@
  * def g as gotify.Config init gotify.Config{url: "https://push.example.com", token: "tok"};
  * def r as http.Response init gotify.push($g, "Deploy", "build 1234 is live", 5);
  */
-use strings;
 use convert;
 use json;
 import "./http.j" as http;
+import "./uri.j" as uri;
 
 /**
  * A Gotify target: value-semantic, passed to each push (no module state).
@@ -40,56 +40,11 @@ export def struct Extras {
     clickUrl as string
 };
 
-# --- form encoding (private) ---------------------------------------
-
-# isUnreserved reports whether a byte is an unreserved URL character
-# (A-Z / a-z / 0-9 / - / _ / . / ~), which is left literal in a form value.
-func isUnreserved(b as int) {
-    if ($b >= 65 and $b <= 90) {
-        return true;
-    }
-    if ($b >= 97 and $b <= 122) {
-        return true;
-    }
-    if ($b >= 48 and $b <= 57) {
-        return true;
-    }
-    return $b == 45 or $b == 95 or $b == 46 or $b == 126;
-}
-
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    def hi as int init $b // 16;
-    def lo as int init $b % 16;
-    return strings.substring($digits, $hi, $hi + 1) + strings.substring($digits, $lo, $lo + 1);
-}
-
-# urlEncode percent-encodes a string for an `application/x-www-form-urlencoded`
-# value: unreserved bytes stay, a space becomes `+`, and every other byte
-# becomes `%XX` (over the value's UTF-8 bytes).
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        if (isUnreserved($b)) {
-            $out = $out + convert.fromCodepoint($b);
-        } elseif ($b == 32) {
-            $out = $out + "+";
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
-}
-
-# formBody builds the Gotify message form (title / message / priority).
+# formBody builds the Gotify message form (title / message / priority),
+# form-encoding each value through the shared `uri` module.
 func formBody(title as string, message as string, priority as int) {
-    def body as string init "title=" + urlEncode($title);
-    $body = $body + "&message=" + urlEncode($message);
+    def body as string init "title=" + uri.encodeForm($title);
+    $body = $body + "&message=" + uri.encodeForm($message);
     return $body + "&priority=" + convert.toString($priority);
 }
 

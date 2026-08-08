@@ -26,6 +26,7 @@ use encoding;
 use maps;
 use json;
 import "./http.j" as http;
+import "./uri.j" as uri;
 
 /**
  * A REST client: a base URL every path joins onto, default headers sent with
@@ -56,33 +57,7 @@ export def struct Response {
 
 # --- pure helpers (private + exported) -----------------------------
 
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $b // 16, $b // 16 + 1) +
-        strings.substring($digits, $b % 16, $b % 16 + 1);
-}
 
-# urlEncode percent-encodes a string for a URL (query) component: unreserved
-# bytes (A-Z / a-z / 0-9 / - _ . ~) stay, every other byte becomes `%XX`.
-func urlEncode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def unreserved as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
-        $unreserved = $unreserved or ($b >= 48 and $b <= 57);
-        $unreserved = $unreserved or $b == 45 or $b == 95 or $b == 46 or $b == 126;
-        if ($unreserved) {
-            $out = $out + convert.fromCodepoint($b);
-        } else {
-            $out = $out + "%" + hexByte($b);
-        }
-        $i = $i + 1;
-    }
-    return $out;
-}
 
 # joinUrl joins a base URL and a path with exactly one slash between them. An
 # already-absolute path (a full http(s):// URL, e.g. a Link-header "next") is
@@ -101,22 +76,13 @@ func joinUrl(baseUrl as string, path as string) {
     return $base + "/" + $path;
 }
 
-# queryString builds a "?k=v&..." query from a param map (percent-encoded), or
-# "" when the map is empty.
+# queryString builds a "?k=v&..." query from a param map (percent-encoded via
+# the url module), or "" when the map is empty.
 func queryString(params as map of string to string) {
     if (len($params) == 0) {
         return "";
     }
-    def out as string init "?";
-    def first as bool init true;
-    for (def k in $params) {
-        if (not $first) {
-            $out = $out + "&";
-        }
-        $out = $out + urlEncode($k) + "=" + urlEncode($params[$k]);
-        $first = false;
-    }
-    return $out;
+    return "?" + uri.buildQuery($params);
 }
 
 /**

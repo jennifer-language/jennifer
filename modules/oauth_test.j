@@ -6,17 +6,13 @@
 #     jennifer test modules/oauth_test.j
 #
 # The overlay splices oauth.j in front of this file, so the tests reach its
-# private form encoder, token parser, poll classifier, and expiry check by bare
-# identifier (the clock is passed in as `nowUnix` so they are deterministic).
-# The networked grants (client-credentials / refresh / device flow) are verified
-# against an in-process OAuth2 token endpoint in the Go suite (TestOauthFlows).
+# private form-body builder, token parser, poll classifier, and expiry check by
+# bare identifier (the clock is passed in as `nowUnix` so they are deterministic).
+# The form encoding itself lives in the shared `uri` module (tested in
+# uri_test.j). The networked grants (client-credentials / refresh / device flow)
+# are verified against an in-process OAuth2 token endpoint in the Go suite
+# (TestOauthFlows).
 use testing;
-
-func testUrlEncode() {
-    testing.assertEqual(urlEncode("a b"), "a+b"); # form space -> +
-    testing.assertEqual(urlEncode("a&b=c"), "a%26b%3Dc");
-    testing.assertEqual(urlEncode("openid email"), "openid+email");
-}
 
 func testFormBody() {
     def p as map of string to string init {"grant_type": "client_credentials", "scope": "a b"};
