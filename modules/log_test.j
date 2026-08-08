@@ -152,3 +152,54 @@ func testConstructors() {
     testing.assertEqual($sl.target, "h:514");
     testing.assertEqual($sl.app, "app");
 }
+
+# --- emit paths via a temp file + the stdout/stderr sinks ---
+# log.j `use`s fs / strings / io, so the overlay reaches them directly. fatal()
+# is skipped here (it calls exit 1).
+
+func testFileLoggerWritesLevels() {
+    def p as string init fs.makeTempFile("", "log-", ".log");
+    def lg as Logger init toFile("debug", "text", $p);
+    def empty as map of string to string;
+    debug($lg, "tracing", $empty);
+    info($lg, "hello", $empty);
+    warn($lg, "careful", $empty);
+    error($lg, "boom", $empty);
+    def content as string init fs.readString($p);
+    fs.remove($p);
+    testing.assertTrue(strings.contains($content, "hello"));
+    testing.assertTrue(strings.contains($content, "boom"));
+}
+
+func testLevelFilteringDropsBelowThreshold() {
+    def p as string init fs.makeTempFile("", "log-lvl-", ".log");
+    def lg as Logger init toFile("error", "text", $p);
+    def empty as map of string to string;
+    info($lg, "should-drop", $empty);   # below the error threshold
+    error($lg, "should-keep", $empty);
+    def content as string init fs.readString($p);
+    fs.remove($p);
+    testing.assertFalse(strings.contains($content, "should-drop"));
+    testing.assertTrue(strings.contains($content, "should-keep"));
+}
+
+func testChildLoggerAddsFields() {
+    def p as string init fs.makeTempFile("", "log-child-", ".log");
+    def base as Logger init toFile("info", "logfmt", $p);
+    def fields as map of string to string;
+    $fields["req"] = "42";
+    def child as Logger init with($base, $fields);
+    def empty as map of string to string;
+    info($child, "handled", $empty);
+    def content as string init fs.readString($p);
+    fs.remove($p);
+    testing.assertTrue(strings.contains($content, "req"));
+    testing.assertTrue(strings.contains($content, "42"));
+}
+
+func testStdoutAndStderrSinks() {
+    def empty as map of string to string;
+    info(new("info", "text"), "to stdout", $empty);       # io.printf branch
+    info(toStderr("info", "text"), "to stderr", $empty);  # io.eprintf branch
+    testing.assertTrue(true);
+}

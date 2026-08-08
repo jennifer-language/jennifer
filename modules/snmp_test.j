@@ -292,3 +292,50 @@ func testUnsignedBeyondInt64() {
     testing.assertEqual($vbS.type, "counter32");
     testing.assertEqual($vbS.number, 256);
 }
+
+use task;
+
+# --- full client <-> agent round-trip over a loopback UDP socket ---
+# snmp.j `use`s net + channel; the agent is served in a spawned task on a
+# pre-bound socket (no bind race), driving the client's get/getNext/walk/set.
+
+func testClientAgentRoundTrip() {
+    def ag as Agent init agent("public", VERSION2C, [
+        stringVar("1.3.6.1.2.1.1.1.0", "sysdescr"),
+        stringVar("1.3.6.1.2.1.1.2.0", "middle"),
+        stringVar("1.3.6.1.2.1.1.10.0", "last")
+    ]);
+    def socket as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def addr as string init net.address($socket);
+    def stop as channel of bool init channel.make(1);
+    def server as task of null init spawn {
+        serveOn($ag, $socket, $stop);
+    };
+
+    def c as Client init clientWith($addr, "public", VERSION2C, 2000, 1);
+
+    def got as list of Varbind init get($c, ["1.3.6.1.2.1.1.1.0"]);
+    testing.assertEqual($got[0].value, "sysdescr");
+
+    def nxt as list of Varbind init getNext($c, ["1.3.6.1.2.1.1.1.0"]);
+    testing.assertEqual($nxt[0].oid, "1.3.6.1.2.1.1.2.0");
+
+    def all as list of Varbind init walk($c, "1.3.6.1.2.1.1");
+    testing.assertEqual(len($all), 3);
+
+    def sr as list of Varbind init set($c, [stringVar("1.3.6.1.2.1.1.1.0", "updated")]);
+    testing.assertEqual($sr[0].value, "updated");
+
+    channel.send($stop, true);
+    task.wait($server);
+    net.close($socket);
+}
+
+# client() convenience + oidVar builder.
+func testClientAndOidVarConstructors() {
+    def c as Client init client("127.0.0.1", "public");
+    testing.assertTrue(strings.contains($c.address, "127.0.0.1"));   # default host:port
+    def ov as Varbind init oidVar("1.3.6.1.2.1.1.2.0", "1.3.6.1.4.1.8072");
+    testing.assertEqual($ov.type, "oid");
+    testing.assertEqual($ov.value, "1.3.6.1.4.1.8072");
+}

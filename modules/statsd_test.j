@@ -131,3 +131,63 @@ func testBatchValueSemantic() {
     testing.assertEqual(len($b.lines), 0);  # original untouched
     testing.assertEqual(len($b2.lines), 1); # copy has the line
 }
+
+# --- metric verbs over a loopback UDP socket ---
+# statsd.j `use`s net + convert, so the overlay reaches them directly. One send
+# is verified end-to-end; the rest are swept for coverage (fire-and-forget, so
+# the listener's buffer just drains when the sockets close).
+
+func testMetricVerbsSendAndFormat() {
+    def listener as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def c as Client init clientWith($addr, "app");
+
+    # End-to-end: an increment reaches the listener with the right wire format.
+    increment($c, "hits");
+    net.setDeadline($listener, 2000);
+    def dg as net.Datagram init net.recvFrom($listener, 1024);
+    testing.assertEqual(convert.stringFromBytes($dg.data, "utf-8"), "app.hits:1|c");
+
+    def tags as map of string to string;
+    $tags["env"] = "prod";
+
+    count($c, "c", 5);
+    decrement($c, "d");
+    gauge($c, "g", 7);
+    gauge($c, "gneg", -3);          # negative gauge: set 0 then decrement
+    timing($c, "t", 42);
+    set($c, "s", "u1");
+
+    countRate($c, "cr", 5, 0.5);
+    timingRate($c, "tr", 42, 0.5);
+
+    countTagged($c, "ct", 5, $tags);
+    incrementTagged($c, "it", $tags);
+    decrementTagged($c, "dt", $tags);
+    gaugeTagged($c, "gt", 7, $tags);
+    timingTagged($c, "tt", 42, $tags);
+    setTagged($c, "st", "u1", $tags);
+
+    countFloat($c, "cf", 3.5);
+    gaugeFloat($c, "gf", 2.5);
+
+    def b as Batch init batch($c);
+    addCount($b, "bc", 1);
+    addIncrement($b, "bi");
+    addDecrement($b, "bd");
+    addGauge($b, "bg", 4);
+    addTiming($b, "bt", 10);
+    addSet($b, "bs", "x");
+    flush($c, $b);
+
+    close($c);
+    net.close($listener);
+}
+
+# client(host) joins the default port and sends over its own socket.
+func testDefaultPortClient() {
+    def c as Client init client("127.0.0.1");
+    increment($c, "ping");   # fire-and-forget to the default statsd port
+    close($c);
+    testing.assertTrue(true);
+}

@@ -304,3 +304,73 @@ func testSearchRequestRoundtrip() {
     testing.assertEqual(asn1.asInt($got, "/1"), SCOPE_SUB);
     testing.assertEqual(asn1.tagNumber(asn1.get($got, "/6")), 3);
 }
+
+use task;
+
+# --- full client <-> server round-trip over a loopback TCP socket ---
+# ldap.j `use`s net + imports transport; the read-only directory server runs in
+# a spawned task on a pre-bound listener (no bind race), and a real client
+# connects, binds, and searches it.
+
+func testClientServerRoundTrip() {
+    def dir as Directory init directory([
+        entry("uid=alice,ou=people,dc=example,dc=org", {
+            "objectClass": ["person"], "uid": ["alice"], "cn": ["Alice"], "mail": ["alice@example.org"]
+        }),
+        entry("uid=bob,ou=people,dc=example,dc=org", {
+            "objectClass": ["person"], "uid": ["bob"], "cn": ["Bob"]
+        })
+    ]);
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        serveOn($dir, $listener);
+    };
+
+    def conn as Conn init connect($addr, transport.Security.None);
+    def br as Result init bind($conn, "", "");   # anonymous simple bind
+    testing.assertEqual($br.code, SUCCESS);
+
+    # A single-entry match by uid, with an attribute read.
+    def found as list of Entry init search($conn, "dc=example,dc=org", SCOPE_SUB, parseFilter("(uid=alice)"), []);
+    testing.assertEqual(len($found), 1);
+    testing.assertEqual(firstValue($found[0], "mail"), "alice@example.org");
+
+    # A filter matching both entries.
+    def persons as list of Entry init search($conn, "dc=example,dc=org", SCOPE_SUB, parseFilter("(objectClass=person)"), []);
+    testing.assertEqual(len($persons), 2);
+
+    # A filter matching nothing.
+    def none as list of Entry init search($conn, "dc=example,dc=org", SCOPE_SUB, parseFilter("(uid=carol)"), []);
+    testing.assertEqual(len($none), 0);
+
+    unbind($conn);
+    net.close($listener);
+    task.wait($server);
+}
+
+# Binding as a user with a hashed userPassword exercises the server's password
+# verification, plus the INVALID_CREDENTIALS path on a wrong password.
+func testPasswordBindRoundTrip() {
+    def dir as Directory init directory([
+        entry("uid=carol,ou=people,dc=example,dc=org", {
+            "objectClass": ["person"], "uid": ["carol"],
+            "userPassword": [password("s3cret", "ssha256")]
+        })
+    ]);
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        serveOn($dir, $listener);
+    };
+
+    def conn as Conn init connect($addr, transport.Security.None);
+    def ok as Result init bind($conn, "uid=carol,ou=people,dc=example,dc=org", "s3cret");
+    testing.assertEqual($ok.code, SUCCESS);
+    def bad as Result init bind($conn, "uid=carol,ou=people,dc=example,dc=org", "wrong");
+    testing.assertTrue($bad.code != SUCCESS);
+
+    unbind($conn);
+    net.close($listener);
+    task.wait($server);
+}

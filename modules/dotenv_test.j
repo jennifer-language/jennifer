@@ -199,3 +199,66 @@ func testParseWithBaseInterpolatesBase() {
     def m as map of string to string init parseWithBase("URL=${HOST}/p", $base);
     testing.assertEqual($m["URL"], "h1/p");
 }
+
+# --- file-backed functions (read / load / cascade / autoload) via temp files ---
+# dotenv.j `use`s fs / os / path / maps, so the overlay reaches them directly.
+
+func testReadFromFile() {
+    def p as string init fs.makeTempFile("", "env-", ".env");
+    fs.writeString($p, "FOO=bar\nNUM=42\n# a comment\nEMPTY=\n");
+    def m as map of string to string init read($p);
+    fs.remove($p);
+    testing.assertEqual($m["FOO"], "bar");
+    testing.assertEqual($m["NUM"], "42");
+    testing.assertEqual($m["EMPTY"], "");
+}
+
+func testLoadSetsProcessEnv() {
+    def p as string init fs.makeTempFile("", "env-load-", ".env");
+    fs.writeString($p, "DOTENV_OVERLAY_VAR=hello\n");
+    load($p);
+    fs.remove($p);
+    testing.assertEqual(os.getEnv("DOTENV_OVERLAY_VAR"), "hello");
+    os.setEnv("DOTENV_OVERLAY_VAR", "");
+}
+
+func testCascadeResolveAndLoad() {
+    def dir as string init fs.makeTempDir("", "envdir-");
+    fs.writeString(path.join($dir, ".env"), "A=base\nB=base\n");
+    fs.writeString(path.join($dir, ".env.dev"), "B=dev\nC=dev\n");
+    # resolve / readCascade: the profile file overlays the base.
+    def m as map of string to string init resolve($dir, "dev");
+    testing.assertEqual($m["A"], "base");
+    testing.assertEqual($m["B"], "dev");
+    testing.assertEqual($m["C"], "dev");
+    def rc as map of string to string init readCascade($dir, "dev");
+    testing.assertTrue(maps.has($rc, "A"));
+    # loadCascade applies it to the environment.
+    loadCascade($dir, "dev");
+    testing.assertEqual(os.getEnv("C"), "dev");
+    os.setEnv("C", "");
+    fs.removeAll($dir);
+}
+
+func testAutoloadUsesEnvProfile() {
+    def dir as string init fs.makeTempDir("", "envauto-");
+    fs.writeString(path.join($dir, ".env"), "AUTO_A=1\n");
+    os.setEnv("JENNIFER_ENV", "prod");
+    fs.writeString(path.join($dir, ".env.prod"), "AUTO_B=2\n");
+    autoload($dir);
+    os.setEnv("JENNIFER_ENV", "");
+    fs.removeAll($dir);
+    testing.assertEqual(os.getEnv("AUTO_A"), "1");
+    testing.assertEqual(os.getEnv("AUTO_B"), "2");
+    os.setEnv("AUTO_A", "");
+    os.setEnv("AUTO_B", "");
+}
+
+# An invalid cascade profile name is rejected.
+func badProfile() {
+    def dir as string init fs.makeTempDir("", "envbad-");
+    return readCascade($dir, "has spaces!");
+}
+func testInvalidProfileThrows() {
+    testing.assertThrows("badProfile", "dotenv");
+}

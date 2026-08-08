@@ -113,3 +113,48 @@ func testStreamValueRoundTrip() {
     testing.assertEqual(json.length($got[1]), 2 + 1);
     testing.assertEqual(json.asInt($got[2]), 42);
 }
+
+# --- path-based file convenience functions (writeFile / readFile / appendFile) ---
+
+func testWriteReadFileRoundTrip() {
+    def path as string init fs.makeTempFile("", "jsonl-rt-", ".jsonl");
+    writeFile($path, rows());
+    def back as list of json.Value init readFile($path);
+    fs.remove($path);
+    testing.assertEqual(len($back), 3);
+    testing.assertEqual(json.asInt(json.get($back[0], "/id")), 1);
+    testing.assertEqual(json.asInt($back[2]), 42);
+}
+
+func testAppendFileGrowsTheFile() {
+    def path as string init fs.makeTempFile("", "jsonl-app-", ".jsonl");
+    def first as list of json.Value init [];
+    $first[] = rec("{\"a\":1}");
+    writeFile($path, $first);
+    def second as list of json.Value init [];
+    $second[] = rec("{\"a\":2}");
+    appendFile($path, $second);
+    def back as list of json.Value init readFile($path);
+    fs.remove($path);
+    testing.assertEqual(len($back), 2);
+    testing.assertEqual(json.asInt(json.get($back[0], "/a")), 1);
+    testing.assertEqual(json.asInt(json.get($back[1], "/a")), 2);
+}
+
+# --- path-based streaming reader (openReader / hasMore / readRecord / closeReader) ---
+
+func testPathReaderStreaming() {
+    def path as string init fs.makeTempFile("", "jsonl-rd-", ".jsonl");
+    writeFile($path, rows());
+    def r as Reader init openReader($path);
+    testing.assertTrue(hasMore($r));   # non-empty file
+    def count as int init 0;
+    def next as Record init readRecord($r);
+    while (not $next.done) {
+        $count = $count + 1;
+        $next = readRecord($r);
+    }
+    closeReader($r);
+    fs.remove($path);
+    testing.assertEqual($count, 3);
+}

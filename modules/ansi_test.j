@@ -37,3 +37,41 @@ func badColour() {
 func testUnknownColourThrows() {
     testing.assertThrows("badColour", "value");
 }
+
+# Reset the colour-gating env after every test so a forced setting never leaks
+# into another test (the framework runs tearDown after each test* method).
+func tearDown() {
+    os.setEnv("FORCE_COLOR", "");
+    os.setEnv("NO_COLOR", "");
+}
+
+# With colour forced on, every wrapper emits real SGR escapes (the enabled
+# path); strip() recovers the original, so the round-trip is deterministic. The
+# shortcuts are exercised as first-class func values in a list.
+func testShortcutsRoundTripWithColour() {
+    os.setEnv("NO_COLOR", "");        # NO_COLOR is checked first, so clear it
+    os.setEnv("FORCE_COLOR", "1");
+    def fns as list of func init [
+        black, red, green, yellow, blue, magenta, cyan, white, gray,
+        bold, dim, italic, underline, reverse
+    ];
+    for (def f in $fns) {
+        def wrapped as string init $f("sample");
+        testing.assertNotEqual($wrapped, "sample");   # escapes were emitted
+        testing.assertEqual(strip($wrapped), "sample");
+    }
+    testing.assertEqual(strip(bgColor("hi", "green")), "hi");
+    # rgb clamps out-of-range channels (exercises clampChannel's low/high/pass branches).
+    testing.assertEqual(strip(rgb("hi", -5, 300, 128)), "hi");
+    testing.assertEqual(strip(rgb("hi", 0, 255, 64)), "hi");
+}
+
+# Colour gating: NO_COLOR and FORCE_COLOR=0 both force the wrappers to no-op.
+func testColourGatingDisabled() {
+    os.setEnv("NO_COLOR", "1");
+    testing.assertEqual(red("x"), "x");             # unchanged when disabled
+    os.setEnv("NO_COLOR", "");
+    os.setEnv("FORCE_COLOR", "0");
+    testing.assertEqual(bold("x"), "x");
+    testing.assertEqual(bgColor("x", "red"), "x");
+}
