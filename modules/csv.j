@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled quoting-aware scanner: its parse core legitimately runs past the
+# L201 statement-count limit. Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * RFC 4180 comma-separated values: parse text into rows of fields and format
  * rows back into text, with a quoting-aware hand-written scanner. Pure Jennifer

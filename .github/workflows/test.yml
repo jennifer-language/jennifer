@@ -121,6 +121,35 @@ jobs:
           # other-style check still runs and still gates.
           ./jennifer lint --format=github --checks='!L203' examples/modules/*.j
 
+      - name: Lint the shipped modules
+        # Lint modules/ too. Two scope decisions:
+        #  - Drop only the nesting / line-length checks (L202/L203), the same
+        #    cosmetic pair examples/modules/ drops. L201 (method-size) stays on,
+        #    so it still gates every module; the handful of parser-heavy files
+        #    whose dispatch/VM methods legitimately run long opt out per file
+        #    with a named `# lint-disable-file: L201` (grep-able, self-documenting)
+        #    rather than a blanket exclusion here.
+        #  - Lint each module once. A file pulled in by `include "...";` is
+        #    spliced into its parent, so linting the parent already covers it;
+        #    listing the partial again double-reports every finding (and
+        #    ical_vcard_shared.j, shared by ical.j and vcard.j, thrice). The
+        #    exclude set is built from the actual include directives, so a new
+        #    partial is handled automatically. The *_test.j overlays are linted
+        #    too (they caught real dead code), and they never include their
+        #    module, so no module finding is double-counted through one.
+        run: |
+          set -euo pipefail
+          partials=$(grep -hoE 'include "[^"]+\.j"' modules/*.j \
+            | sed -E 's/.*"(.*)".*/\1/' | xargs -n1 basename | sort -u | tr '\n' ' ')
+          targets=()
+          for m in modules/*.j; do
+            base=$(basename "$m")
+            case " $partials " in *" $base "*) continue ;; esac
+            targets+=("$m")
+          done
+          echo "linting ${#targets[@]} module file(s); include-partials covered via parents: $partials"
+          ./jennifer lint --format=github --checks='!L202,!L203' "${targets[@]}"
+
       - name: Check doc comments (docblock)
         # Gate on the docblock parser: a doc comment that drifts from its code
         # (a @param / @field that names nothing real, an undocumented parameter)

@@ -10,6 +10,12 @@
 # `Glyph` model and renders through the same `glyphPath`. Private to the module;
 # it declares no `use` of its own and relies on font.j's imports.
 
+# A Type2 charstring interpreter (byte-code VM): runCharstring legitimately runs
+# past the L201 statement-count limit. Every other lint check stays active. This
+# directive rides along when font.j splices this file in, so it suppresses there
+# too (findings stay keyed to font_cff.j).
+# lint-disable-file: L201
+
 # The parsed CFF context: table offsets discovered once per glyph query.
 def struct Cff {
     charStrings as int,     # CharStrings INDEX offset
@@ -162,7 +168,6 @@ func cffContext(f as Font) {
     def cff as int init $f.cff;
     def p as int init $cff + $b[$cff + 2];   # skip header (hdrSize at +2)
     $p = cffIndexEnd($b, $p);                # Name INDEX
-    def topStart as int init $p;
     def topRanges as list of list of int init cffIndex($b, $p);
     $p = cffIndexEnd($b, $p);                # Top DICT INDEX
     $p = cffIndexEnd($b, $p);                # String INDEX

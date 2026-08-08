@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled barcode encoder (QR / Reed-Solomon) plus renderers: its
+# table-building methods legitimately run past the L201 statement-count limit.
+# Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * Generate scannable barcodes as images (not printer commands - the complement
  * to `label`, which emits printer-native barcode commands). `encode(data,

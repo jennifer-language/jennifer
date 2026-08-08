@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled Markdown parser: its inline scanner legitimately runs past the
+# L201 statement-count limit. Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * A lightweight Markdown renderer for a small CommonMark subset: ATX headings,
  * bold / italic emphasis, inline code, links, images, fenced code blocks,

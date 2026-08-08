@@ -896,7 +896,7 @@ func runMiddleware(app as App, ctx as Context) {
 func ensureAnswered(req as httpd.Request, status as int, body as string) {
     try {
         httpd.respond($req, $status, $body);
-    } catch (err) {
+    } catch (err) { # lint-disable: L103
         # already answered - nothing to do.
     }
 }

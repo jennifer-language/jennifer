@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled iCalendar parser: its parse dispatch legitimately runs past the
+# L201 statement-count limit. Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * Build and parse iCalendar (RFC 5545): a `Calendar` holding `Event`s
  * (`VEVENT`) and `Todo`s (`VTODO`), encoded to a `VCALENDAR` and parsed back.

@@ -549,7 +549,7 @@ export func close(session as Session) {
         # so swallow its failure and close the socket regardless.
         try {
             command($session.conn, "QUIT");
-        } catch (e) {
+        } catch (e) { # lint-disable: L103
         }
         net.close($session.conn);
     }

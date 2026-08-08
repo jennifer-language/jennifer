@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled doc-comment parser: its body parser legitimately runs past the
+# L201 statement-count limit. Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * A Jennifer doc-comment parser. Read Jennifer source and return the
  * documentation embedded in it as structured, typed values. It produces data;

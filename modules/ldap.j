@@ -258,7 +258,12 @@ func compareStr(a as string, b as string) {
 
 # --- entry accessors ---
 
-/** values returns an entry's values for an attribute (case-insensitive name), or an empty list. */
+/**
+ * values returns an entry's values for an attribute (case-insensitive name), or an empty list.
+ * @param entry {Entry} the entry to read
+ * @param name {string} the attribute name, matched case-insensitively
+ * @return {list of string} the attribute's values, or an empty list if absent
+ */
 export func values(entry as Entry, name as string) {
     for (def a in $entry.attributes) {
         if (strings.lower($a.name) == strings.lower($name)) {
@@ -269,7 +274,12 @@ export func values(entry as Entry, name as string) {
     return $empty;
 }
 
-/** firstValue returns an entry's first value for an attribute, or "" if absent. */
+/**
+ * firstValue returns an entry's first value for an attribute, or "" if absent.
+ * @param entry {Entry} the entry to read
+ * @param name {string} the attribute name, matched case-insensitively
+ * @return {string} the first value, or "" if the attribute has none
+ */
 export func firstValue(entry as Entry, name as string) {
     def vs as list of string init values($entry, $name);
     if (len($vs) == 0) {
@@ -280,27 +290,51 @@ export func firstValue(entry as Entry, name as string) {
 
 # --- filter constructors (RFC 4511 Filter, all context-tagged) ---
 
-/** equals builds an equality filter: (attr=value). */
+/**
+ * equals builds an equality filter: (attr=value).
+ * @param attr {string} the attribute name
+ * @param value {string} the value to match exactly
+ * @return {asn1.Value} the encoded filter, for search
+ */
 export func equals(attr as string, value as string) {
     return asn1.retag("context", 3, asn1.sequence([oct($attr), oct($value)]));
 }
 
-/** greaterOrEqual builds an (attr>=value) filter. */
+/**
+ * greaterOrEqual builds an (attr>=value) filter.
+ * @param attr {string} the attribute name
+ * @param value {string} the lower bound to compare against
+ * @return {asn1.Value} the encoded filter, for search
+ */
 export func greaterOrEqual(attr as string, value as string) {
     return asn1.retag("context", 5, asn1.sequence([oct($attr), oct($value)]));
 }
 
-/** lessOrEqual builds an (attr<=value) filter. */
+/**
+ * lessOrEqual builds an (attr<=value) filter.
+ * @param attr {string} the attribute name
+ * @param value {string} the upper bound to compare against
+ * @return {asn1.Value} the encoded filter, for search
+ */
 export func lessOrEqual(attr as string, value as string) {
     return asn1.retag("context", 6, asn1.sequence([oct($attr), oct($value)]));
 }
 
-/** approx builds an approximate-match (attr~=value) filter; the server treats it as equality. */
+/**
+ * approx builds an approximate-match (attr~=value) filter; the server treats it as equality.
+ * @param attr {string} the attribute name
+ * @param value {string} the value to match approximately
+ * @return {asn1.Value} the encoded filter, for search
+ */
 export func approx(attr as string, value as string) {
     return asn1.retag("context", 8, asn1.sequence([oct($attr), oct($value)]));
 }
 
-/** present builds a presence filter: (attr=*). */
+/**
+ * present builds a presence filter: (attr=*).
+ * @param attr {string} the attribute that must be present
+ * @return {asn1.Value} the encoded filter, for search
+ */
 export func present(attr as string) {
     return asn1.retag("context", 7, oct($attr));
 }
@@ -309,6 +343,11 @@ export func present(attr as string) {
  * substrings builds a substring filter, e.g. (cn=a*b*c): initial "a", any ["b"],
  * final "c". Pass "" for an absent initial or final and an empty list for no
  * interior parts.
+ * @param attr {string} the attribute name
+ * @param initial {string} the required leading substring, or "" for none
+ * @param anyParts {list of string} interior substrings in order, or empty for none
+ * @param final {string} the required trailing substring, or "" for none
+ * @return {asn1.Value} the encoded filter, for search
  */
 export func substrings(
     attr as string,
@@ -328,24 +367,41 @@ export func substrings(
     return asn1.retag("context", 4, asn1.sequence([oct($attr), asn1.sequence($subs)]));
 }
 
-/** allOf builds a conjunction: (&(f1)(f2)...). */
+/**
+ * allOf builds a conjunction: (&(f1)(f2)...).
+ * @param filters {list of asn1.Value} the sub-filters that must all match
+ * @return {asn1.Value} the combined filter, for search
+ */
 export func allOf(filters as list of asn1.Value) {
     return asn1.retag("context", 0, asn1.sequence($filters));
 }
 
-/** anyOf builds a disjunction: (|(f1)(f2)...). */
+/**
+ * anyOf builds a disjunction: (|(f1)(f2)...).
+ * @param filters {list of asn1.Value} the sub-filters, any of which may match
+ * @return {asn1.Value} the combined filter, for search
+ */
 export func anyOf(filters as list of asn1.Value) {
     return asn1.retag("context", 1, asn1.sequence($filters));
 }
 
-/** negate builds a negation: (!(f)). */
+/**
+ * negate builds a negation: (!(f)).
+ * @param f {asn1.Value} the sub-filter to invert
+ * @return {asn1.Value} the negated filter, for search
+ */
 export func negate(f as asn1.Value) {
     return asn1.tagged("context", 2, $f);
 }
 
 # --- RFC 4515 string filter parser ---
 
-/** parseFilter compiles an RFC 4515 filter string (e.g. "(&(a=1)(b=2))") into a filter value. */
+/**
+ * parseFilter compiles an RFC 4515 filter string (e.g. "(&(a=1)(b=2))") into a filter value.
+ * @param s {string} the RFC 4515 filter text
+ * @return {asn1.Value} the compiled filter, for search
+ * @throws {Error} on a malformed filter string
+ */
 export func parseFilter(s as string) {
     def r as FilterAt init parseFilterAt($s, 0);
     return $r.filter;
@@ -537,6 +593,10 @@ func resultText(r as Result) {
  * transport.Security.Tls is LDAPS / implicit TLS (port defaults to 636), and
  * transport.Security.Starttls connects in plaintext then upgrades in-band via
  * the StartTLS extended operation.
+ * @param address {string} the server "host:port" (port defaults to 389, or 636 for Tls)
+ * @param security {transport.Security} the transport: None, Tls, or Starttls
+ * @return {Conn} the open connection
+ * @throws {Error} on a connection or StartTLS failure
  */
 export func connect(address as string, security as transport.Security) {
     if ($security == transport.Security.Tls) {
@@ -558,6 +618,9 @@ export func connect(address as string, security as transport.Security) {
 /**
  * startTls upgrades a plaintext connection to TLS via the StartTLS extended
  * operation, then hands the same handle back (now encrypted).
+ * @param conn {Conn} an open plaintext connection from connect
+ * @return {Conn} the same connection, now encrypted
+ * @throws {Error} if the server refuses StartTLS
  */
 export func startTls(conn as Conn) {
     def id as int init nextId();
@@ -575,12 +638,18 @@ export func startTls(conn as Conn) {
     return $conn;
 }
 
-/** close closes the connection without sending an unbind. */
+/**
+ * close closes the connection without sending an unbind.
+ * @param conn {Conn} the connection to close
+ */
 export func close(conn as Conn) {
     net.close($conn.handle);
 }
 
-/** unbind sends an unbind request and closes the connection. */
+/**
+ * unbind sends an unbind request and closes the connection.
+ * @param conn {Conn} the connection to unbind and close
+ */
 export func unbind(conn as Conn) {
     def id as int init nextId();
     net.setDeadline($conn.handle, $conn.timeoutMs);
@@ -596,6 +665,11 @@ export func unbind(conn as Conn) {
  * bind performs a simple bind and returns the Result (check .code against
  * ldap.SUCCESS / ldap.INVALID_CREDENTIALS). An empty dn and password is an
  * anonymous bind.
+ * @param conn {Conn} an open connection
+ * @param dn {string} the bind DN ("" for anonymous)
+ * @param password {string} the password ("" for anonymous)
+ * @return {Result} the bind result (check .code)
+ * @throws {Error} on a transport or protocol error
  */
 export func bind(conn as Conn, dn as string, password as string) {
     def id as int init nextId();
@@ -620,6 +694,12 @@ func encodeBindRequest(dn as string, password as string) {
  * bindSasl performs a SASL SCRAM bind (algo "sha1" -> SCRAM-SHA-1, "sha256" ->
  * SCRAM-SHA-256), verifying the server signature. Returns the Result on success
  * or throws on a protocol / verification failure.
+ * @param conn {Conn} an open connection
+ * @param user {string} the SCRAM authentication username
+ * @param password {string} the user's password
+ * @param algo {string} the SCRAM hash: "sha1" or "sha256"
+ * @return {Result} the bind result on success
+ * @throws {Error} on a protocol or server-signature-verification failure
  */
 export func bindSasl(conn as Conn, user as string, password as string, algo as string) {
     def mech as string init "SCRAM-SHA-256";
@@ -691,6 +771,13 @@ func serverSaslCreds(op as asn1.Value) {
  * search runs a search and returns the matching entries. scope is one of
  * ldap.SCOPE_BASE / SCOPE_ONE / SCOPE_SUB; filter comes from parseFilter or the
  * filter constructors; attributes is the list to return (empty = all user attributes).
+ * @param conn {Conn} an open, bound connection
+ * @param baseDn {string} the search base DN
+ * @param scope {int} ldap.SCOPE_BASE, SCOPE_ONE, or SCOPE_SUB
+ * @param filter {asn1.Value} the filter, from parseFilter or a filter constructor
+ * @param attributes {list of string} the attributes to return (empty = all user attributes)
+ * @return {list of Entry} the matching entries
+ * @throws {Error} on a transport or protocol error
  */
 export func search(
     conn as Conn,
@@ -704,7 +791,17 @@ export func search(
     return $state.entries;
 }
 
-/** searchPaged runs a search in pages of pageSize via the simple-paged-results control. */
+/**
+ * searchPaged runs a search in pages of pageSize via the simple-paged-results control.
+ * @param conn {Conn} an open, bound connection
+ * @param baseDn {string} the search base DN
+ * @param scope {int} ldap.SCOPE_BASE, SCOPE_ONE, or SCOPE_SUB
+ * @param filter {asn1.Value} the filter, from parseFilter or a filter constructor
+ * @param attributes {list of string} the attributes to return (empty = all user attributes)
+ * @param pageSize {int} the maximum entries per page
+ * @return {list of Entry} all matching entries across every page
+ * @throws {Error} on a transport or protocol error
+ */
 export func searchPaged(
     conn as Conn,
     baseDn as string,
@@ -860,7 +957,14 @@ func doWrite(conn as Conn, op as asn1.Value) {
     return parseResult(asn1.get($resp, "/1"));
 }
 
-/** add creates an entry from a DN and an attribute map, returning the Result (check .code). */
+/**
+ * add creates an entry from a DN and an attribute map, returning the Result (check .code).
+ * @param conn {Conn} an open, bound connection
+ * @param dn {string} the DN of the entry to create
+ * @param attrs {map of string to list of string} the entry's attributes (name -> values)
+ * @return {Result} the operation result (check .code)
+ * @throws {Error} on a transport or protocol error
+ */
 export func add(conn as Conn, dn as string, attrs as map of string to list of string) {
     return doWrite($conn, encodeAddRequest($dn, $attrs));
 }
@@ -877,12 +981,25 @@ func encodeAddRequest(dn as string, attrs as map of string to list of string) {
     return asn1.retag("application", 8, asn1.sequence([oct($dn), asn1.sequence($attrElems)]));
 }
 
-/** change builds one modify change (operation is ldap.MOD_ADD / MOD_DELETE / MOD_REPLACE). */
+/**
+ * change builds one modify change (operation is ldap.MOD_ADD / MOD_DELETE / MOD_REPLACE).
+ * @param operation {int} ldap.MOD_ADD, MOD_DELETE, or MOD_REPLACE
+ * @param name {string} the attribute to change
+ * @param values {list of string} the values for the change (empty deletes the attribute)
+ * @return {Change} the change, for modify
+ */
 export func change(operation as int, name as string, values as list of string) {
     return Change{operation: $operation, name: $name, values: $values};
 }
 
-/** modify applies a list of changes to an entry, returning the Result. */
+/**
+ * modify applies a list of changes to an entry, returning the Result.
+ * @param conn {Conn} an open, bound connection
+ * @param dn {string} the DN of the entry to modify
+ * @param changes {list of Change} the changes to apply, from change
+ * @return {Result} the operation result (check .code)
+ * @throws {Error} on a transport or protocol error
+ */
 export func modify(conn as Conn, dn as string, changes as list of Change) {
     return doWrite($conn, encodeModifyRequest($dn, $changes));
 }
@@ -900,7 +1017,13 @@ func encodeModifyRequest(dn as string, changes as list of Change) {
     return asn1.retag("application", 6, asn1.sequence([oct($dn), asn1.sequence($changeElems)]));
 }
 
-/** delete removes an entry by DN, returning the Result. */
+/**
+ * delete removes an entry by DN, returning the Result.
+ * @param conn {Conn} an open, bound connection
+ * @param dn {string} the DN of the entry to remove
+ * @return {Result} the operation result (check .code)
+ * @throws {Error} on a transport or protocol error
+ */
 export func delete(conn as Conn, dn as string) {
     return doWrite($conn, encodeDeleteRequest($dn));
 }
@@ -913,6 +1036,13 @@ func encodeDeleteRequest(dn as string) {
  * modifyDn renames or moves an entry: newRdn is the new relative DN,
  * deleteOldRdn drops the old RDN attribute, and newSuperior ("" to keep the
  * parent) moves the entry under a new parent DN.
+ * @param conn {Conn} an open, bound connection
+ * @param dn {string} the DN of the entry to rename or move
+ * @param newRdn {string} the new relative DN (e.g. "cn=bob")
+ * @param deleteOldRdn {bool} whether to drop the old RDN attribute value
+ * @param newSuperior {string} the new parent DN, or "" to keep the current parent
+ * @return {Result} the operation result (check .code)
+ * @throws {Error} on a transport or protocol error
  */
 export func modifyDn(
     conn as Conn,
@@ -940,6 +1070,12 @@ func encodeModifyDnRequest(
  * userDn "" for the currently-bound user, oldPassword "" to skip the old-password
  * check (an administrative reset), and newPassword "" to have the server generate
  * one. Returns the Result.
+ * @param conn {Conn} an open, bound connection
+ * @param userDn {string} the target user DN, or "" for the currently-bound user
+ * @param oldPassword {string} the current password, or "" to skip the check (admin reset)
+ * @param newPassword {string} the new password, or "" to let the server generate one
+ * @return {Result} the operation result (check .code)
+ * @throws {Error} on a transport or protocol error
  */
 export func passwordModify(
     conn as Conn,
@@ -972,7 +1108,12 @@ func encodePasswordModifyRequest(userDn as string, oldPassword as string, newPas
 
 # --- server: directory construction ---
 
-/** entry builds a directory entry from a DN and an attribute map (name -> values). */
+/**
+ * entry builds a directory entry from a DN and an attribute map (name -> values).
+ * @param dn {string} the entry's distinguished name
+ * @param attrs {map of string to list of string} the entry's attributes (name -> values)
+ * @return {Entry} the constructed entry
+ */
 export func entry(dn as string, attrs as map of string to list of string) {
     def out as list of Attribute;
     for (def k in $attrs) {
@@ -981,7 +1122,12 @@ export func entry(dn as string, attrs as map of string to list of string) {
     return Entry{dn: $dn, attributes: $out};
 }
 
-/** group builds a groupOfNames entry (objectClass + cn from the DN's RDN + member) from members. */
+/**
+ * group builds a groupOfNames entry (objectClass + cn from the DN's RDN + member) from members.
+ * @param dn {string} the group's distinguished name (its RDN value becomes cn)
+ * @param members {list of string} the member DNs
+ * @return {Entry} the constructed groupOfNames entry
+ */
 export func group(dn as string, members as list of string) {
     def attrs as map of string to list of string;
     def oc as list of string init ["groupOfNames"];
@@ -1011,6 +1157,8 @@ func rdnValue(dn as string) {
 /**
  * directory builds a mutable in-memory directory the server answers for - the
  * lightweight, ephemeral default. Use openDirectory for one that persists.
+ * @param entries {list of Entry} the initial entries to seed the directory with
+ * @return {Directory} the in-memory directory
  */
 export func directory(entries as list of Entry) {
     def s as kv.Store init kv.open();
@@ -1023,6 +1171,8 @@ export func directory(entries as list of Entry) {
  * kv.openFile store at path). A new file starts empty; an existing one restores
  * its entries. Seed a fresh store on first run by checking listEntries and
  * addEntry-ing when it is empty. Edits (addEntry / modifyEntry / ...) persist.
+ * @param path {string} the backing file path for the kv store
+ * @return {Directory} the file-backed directory
  */
 export func openDirectory(path as string) {
     def s as kv.Store init kv.openFile($path);
@@ -1070,22 +1220,40 @@ func decodeEntries(s as string) {
     return $out;
 }
 
-/** listEntries returns a snapshot of every entry currently in the directory. */
+/**
+ * listEntries returns a snapshot of every entry currently in the directory.
+ * @param dir {Directory} the directory to read
+ * @return {list of Entry} a snapshot of all current entries
+ */
 export func listEntries(dir as Directory) {
     return loadEntries($dir);
 }
 
-/** getEntry returns the entry with the given DN, or an empty Entry (dn == "") if absent. */
+/**
+ * getEntry returns the entry with the given DN, or an empty Entry (dn == "") if absent.
+ * @param dir {Directory} the directory to read
+ * @param dn {string} the DN to look up (matched case-insensitively)
+ * @return {Entry} the matching entry, or an empty Entry (dn == "") if absent
+ */
 export func getEntry(dir as Directory, dn as string) {
     return findEntry($dir, $dn);
 }
 
-/** hasEntry reports whether an entry with the given DN exists. */
+/**
+ * hasEntry reports whether an entry with the given DN exists.
+ * @param dir {Directory} the directory to read
+ * @param dn {string} the DN to test (matched case-insensitively)
+ * @return {bool} true if an entry with that DN exists
+ */
 export func hasEntry(dir as Directory, dn as string) {
     return findEntry($dir, $dn).dn != "";
 }
 
-/** addEntry inserts an entry, replacing any existing entry with the same DN. */
+/**
+ * addEntry inserts an entry, replacing any existing entry with the same DN.
+ * @param dir {Directory} the directory to modify
+ * @param e {Entry} the entry to insert (or replace a same-DN entry with)
+ */
 export func addEntry(dir as Directory, e as Entry) {
     def entries as list of Entry init loadEntries($dir);
     def out as list of Entry;
@@ -1105,12 +1273,20 @@ export func addEntry(dir as Directory, e as Entry) {
     saveEntries($dir, $out);
 }
 
-/** modifyEntry replaces the entry with the same DN (an alias for addEntry). */
+/**
+ * modifyEntry replaces the entry with the same DN (an alias for addEntry).
+ * @param dir {Directory} the directory to modify
+ * @param e {Entry} the replacement entry, keyed by its DN
+ */
 export func modifyEntry(dir as Directory, e as Entry) {
     addEntry($dir, $e);
 }
 
-/** deleteEntry removes the entry with the given DN if present. */
+/**
+ * deleteEntry removes the entry with the given DN if present.
+ * @param dir {Directory} the directory to modify
+ * @param dn {string} the DN of the entry to remove (matched case-insensitively)
+ */
 export func deleteEntry(dir as Directory, dn as string) {
     def entries as list of Entry init loadEntries($dir);
     def out as list of Entry;
@@ -1123,7 +1299,14 @@ export func deleteEntry(dir as Directory, dn as string) {
     saveEntries($dir, $out);
 }
 
-/** setAttribute creates or replaces one attribute's values on an existing entry. */
+/**
+ * setAttribute creates or replaces one attribute's values on an existing entry.
+ * @param dir {Directory} the directory to modify
+ * @param dn {string} the DN of the entry to update
+ * @param name {string} the attribute to create or replace
+ * @param vals {list of string} the new values for the attribute
+ * @throws {Error} if no entry with dn exists
+ */
 export func setAttribute(dir as Directory, dn as string, name as string, vals as list of string) {
     def e as Entry init findEntry($dir, $dn);
     if ($e.dn == "") {
@@ -1147,8 +1330,13 @@ export func setAttribute(dir as Directory, dn as string, name as string, vals as
 
 /**
  * password hashes a plaintext password into an LDAP userPassword value. scheme
- * is "plain", "sha", "sha256", "ssha", or "ssha256" (salted variants use a
- * random 8-byte salt). Store the result as an entry's userPassword.
+ * is "plain", "sha", "sha256", "ssha", "ssha256" (salted variants use a random
+ * 8-byte salt), "pbkdf2" (PBKDF2-SHA256), or "pbkdf2-sha512". Store the result
+ * as an entry's userPassword.
+ * @param plain {string} the plaintext password to hash
+ * @param scheme {string} one of plain / sha / sha256 / ssha / ssha256 / pbkdf2 / pbkdf2-sha512
+ * @return {string} the encoded userPassword value (with its scheme prefix)
+ * @throws {Error} on an unknown scheme
  */
 export func password(plain as string, scheme as string) {
     def s as string init strings.lower($scheme);
@@ -1329,12 +1517,22 @@ func checkSimple(stored as string, prefixLen as int, algo as string, supplied as
 
 # --- server: serve loop ---
 
-/** listen opens a listening socket for the server ("host:port"; port defaults to 389). */
+/**
+ * listen opens a listening socket for the server ("host:port"; port defaults to 389).
+ * @param address {string} the listen address "host:port" (port defaults to 389)
+ * @return {net.Listener} the open listener, for serveOn
+ * @throws {Error} if the socket cannot be opened
+ */
 export func listen(address as string) {
     return net.listen(ensurePort($address, DEFAULT_PORT));
 }
 
-/** serve binds address and serves dir until the process ends (blocks). */
+/**
+ * serve binds address and serves dir until the process ends (blocks).
+ * @param dir {Directory} the directory to answer queries from
+ * @param address {string} the listen address "host:port" (port defaults to 389)
+ * @throws {Error} if the socket cannot be opened
+ */
 export func serve(dir as Directory, address as string) {
     serveOn($dir, listen($address));
 }
@@ -1343,6 +1541,8 @@ export func serve(dir as Directory, address as string) {
  * serveOn serves dir on an already-open listener, one spawn per connection,
  * until the listener is closed (which ends the accept loop). Close the listener
  * from another task for a graceful stop.
+ * @param dir {Directory} the directory to answer queries from
+ * @param listener {net.Listener} an open listener from listen
  */
 export func serveOn(dir as Directory, listener as net.Listener) {
     def running as bool init true;

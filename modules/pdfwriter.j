@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled PDF writer: its render and PNG-decode methods legitimately run
+# past the L201 statement-count limit. Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * Generate PDF documents - text, lines, rectangles - the way `htmlwriter` /
  * `label` generate their formats. Build a `Document` of `Page`s with

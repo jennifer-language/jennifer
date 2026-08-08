@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
+# A hand-rolled SFNT font parser: its glyph decoder legitimately runs past the
+# L201 statement-count limit. Every other lint check stays active.
+# lint-disable-file: L201
+
 /**
  * A pure-Jennifer TrueType / OpenType (SFNT) font parser: read a `.ttf` / `.otf`
  * from `bytes` and expose its metrics, character map, and glyph outlines. No Go,

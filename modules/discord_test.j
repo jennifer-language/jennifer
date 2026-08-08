@@ -113,7 +113,7 @@ func testEmbedFieldEscaping() {
 
 # fieldNoEmbed drives embedField on a message with no embed, which must throw.
 func fieldNoEmbed() {
-    def m as Message init embedField(message(), "k", "v", true);
+    embedField(message(), "k", "v", true);
 }
 
 func testEmbedFieldNoEmbedThrows() {

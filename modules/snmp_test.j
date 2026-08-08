@@ -91,9 +91,6 @@ func testNonPrintableOctetString() {
     $raw[] = 0x00;
     $raw[] = 0x1b;
     $raw[] = 0xff;
-    def vbs as list of Varbind init [
-        Varbind{oid: "1.1", type: "octetString", value: "", number: 0}
-    ];
     # Encode a real binary octet string directly, bypassing the string value path.
     def wire as bytes init encodeMessage(VERSION2C, "c", PDU_RESPONSE, 1, 0, 0, [
         Varbind{oid: "1.1", type: "octetString", value: convert.stringFromBytes(convert.bytesFromString("AB", "utf-8"), "utf-8"), number: 0}
@@ -117,10 +114,7 @@ func testErrorStatusDecoded() {
 
 # SNMPv2c exception variants come back as their named types.
 func testExceptionVariants() {
-    def wire as bytes init encodeMessage(VERSION2C, "c", PDU_RESPONSE, 1, 0, 0, [
-        Varbind{oid: "1.1", type: "null", value: "", number: 0}
-    ], true);
-    # Rebuild with an explicit context-1 exception in place of the value.
+    # Build a message with an explicit context-1 exception in place of the value.
     def excSeq as asn1.Value init asn1.sequence([
         asn1.sequence([asn1.oid("1.1"), asn1.retag("context", 1, asn1.null())])
     ]);
