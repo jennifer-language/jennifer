@@ -65,6 +65,11 @@ func TestUnusedLocal(t *testing.T) {
 		{"used only in a match arm value", `func f(x as int) { def lim as int init $x; match (2) { when $lim { return 1; } else { return 0; } } return 0; }`, 0},
 		{"used only in a match arm body", `func f(x as int) { def y as int init $x; match (1) { when 1 { return $y; } else { return 0; } } return 0; }`, 0},
 		{"unused inside a match arm still flagged", `func f() { match (1) { when 1 { def dead as int init 2; return 0; } else { return 0; } } return 0; }`, 1},
+		{"used only as a slice upper bound", `func f(xs as list of int) { def mid as int init 2; def s as list of int init $xs[0..$mid]; return len($s); }`, 0},
+		{"used only as a slice lower bound", `func f(xs as list of int) { def m as int init 1; def s as list of int init $xs[$m..]; return len($s); }`, 0},
+		{"used only in a range expression", `func f() { def hi as int init 3; def r as list of int init 0..$hi; return len($r); }`, 0},
+		{"used only as a func-value callee", `func g() { return; } func f() { def fn as func init g; $fn(); return 0; }`, 0},
+		{"used only as a func-value call arg", `func g(n as int) { return; } func f() { def fn as func init g; def a as int init 5; $fn($a); return 0; }`, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -139,6 +144,19 @@ func TestNestingTooDeep(t *testing.T) {
 	}
 }
 
+// TestNestingCountsMatchArm confirms a match statement adds a nesting level and
+// L202 counts blocks inside its arms (before the fix, match arms were skipped).
+func TestNestingCountsMatchArm(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cfg.MaxNesting = 1
+	// match is one level; the if inside the arm is a second -> exceeds 1.
+	src := `func f(x as int) { match ($x) { when 1 { if (true) { return 1; } } else { return 0; } } return 0; }`
+	diags := lintSrc(t, src, only("L202"), cfg)
+	if countID(diags, "L202") == 0 {
+		t.Fatalf("expected L202 for nesting inside a match arm, got %v", diags)
+	}
+}
+
 func TestConstantCondition(t *testing.T) {
 	cases := []struct {
 		name string
@@ -151,6 +169,8 @@ func TestConstantCondition(t *testing.T) {
 		{"while true no escape", `func f() { while (true) { def a as int init 1; } }`, 1},
 		{"while true with break", `func f() { while (true) { break; } }`, 0},
 		{"while true with return", `func f() { while (true) { return 1; } }`, 0},
+		{"const cond inside a match arm is flagged", `func f(x as int) { match ($x) { when 1 { if (true) { return 1; } } else { return 0; } } return 0; }`, 1},
+		{"while true escaping via a break in a match arm", `func f(x as int) { while (true) { match ($x) { when 1 { break; } else { } } } return 0; }`, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

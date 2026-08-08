@@ -270,9 +270,21 @@ func (s *scoped) doExpr(e parser.Expr) {
 	case *parser.IndexExpr:
 		s.doExpr(n.Target)
 		s.doExpr(n.Index)
+	case *parser.SliceExpr:
+		s.doExpr(n.Target)
+		s.doExpr(n.Lo)
+		s.doExpr(n.Hi)
+	case *parser.RangeExpr:
+		s.doExpr(n.Lo)
+		s.doExpr(n.Hi)
 	case *parser.FieldAccessExpr:
 		s.doExpr(n.Target)
 	case *parser.CallExpr:
+		for _, a := range n.Args {
+			s.doExpr(a)
+		}
+	case *parser.CallValueExpr:
+		s.doExpr(n.Callee)
 		for _, a := range n.Args {
 			s.doExpr(a)
 		}

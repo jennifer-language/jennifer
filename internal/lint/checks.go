@@ -213,6 +213,21 @@ func (c *checkCtx) nestStmt(st parser.Stmt, depth int) {
 		if n.CatchBody != nil {
 			c.nestStmts(n.CatchBody.Stmts, d)
 		}
+	case *parser.MatchStmt:
+		d := depth + 1
+		c.maybeReportNest(n, d)
+		c.nestExpr(n.Subject, depth)
+		for i := range n.Arms {
+			for _, v := range n.Arms[i].Values {
+				c.nestExpr(v, depth)
+			}
+			if n.Arms[i].Body != nil {
+				c.nestStmts(n.Arms[i].Body.Stmts, d)
+			}
+		}
+		if n.Else != nil {
+			c.nestStmts(n.Else.Stmts, d)
+		}
 	case *parser.DefineStmt:
 		c.nestExpr(n.InitExpr, depth)
 	case *parser.AssignStmt:
@@ -270,9 +285,21 @@ func (c *checkCtx) nestExpr(e parser.Expr, depth int) {
 	case *parser.IndexExpr:
 		c.nestExpr(n.Target, depth)
 		c.nestExpr(n.Index, depth)
+	case *parser.SliceExpr:
+		c.nestExpr(n.Target, depth)
+		c.nestExpr(n.Lo, depth)
+		c.nestExpr(n.Hi, depth)
+	case *parser.RangeExpr:
+		c.nestExpr(n.Lo, depth)
+		c.nestExpr(n.Hi, depth)
 	case *parser.FieldAccessExpr:
 		c.nestExpr(n.Target, depth)
 	case *parser.CallExpr:
+		for _, a := range n.Args {
+			c.nestExpr(a, depth)
+		}
+	case *parser.CallValueExpr:
+		c.nestExpr(n.Callee, depth)
 		for _, a := range n.Args {
 			c.nestExpr(a, depth)
 		}
@@ -465,6 +492,17 @@ func loopCanEscape(b *parser.Block) bool {
 				}
 			case *parser.RepeatStmt:
 				walk(n.Body.Stmts, true)
+			case *parser.MatchStmt:
+				// break / continue / return in a match arm act on the enclosing
+				// loop, so descend with the same nesting (match is not a loop).
+				for i := range n.Arms {
+					if n.Arms[i].Body != nil {
+						walk(n.Arms[i].Body.Stmts, inNestedLoop)
+					}
+				}
+				if n.Else != nil {
+					walk(n.Else.Stmts, inNestedLoop)
+				}
 			}
 		}
 	}

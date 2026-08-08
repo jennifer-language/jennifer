@@ -103,6 +103,15 @@ func (w walker) doStmt(s parser.Stmt) {
 	case *parser.TryStmt:
 		w.block(n.Body)
 		w.block(n.CatchBody)
+	case *parser.MatchStmt:
+		w.doExpr(n.Subject)
+		for i := range n.Arms {
+			for _, v := range n.Arms[i].Values {
+				w.doExpr(v)
+			}
+			w.block(n.Arms[i].Body)
+		}
+		w.block(n.Else)
 	case *parser.ExprStmt:
 		w.doExpr(n.Expr)
 	case *parser.BreakStmt, *parser.ContinueStmt:
@@ -134,9 +143,21 @@ func (w walker) doExpr(e parser.Expr) {
 	case *parser.IndexExpr:
 		w.doExpr(n.Target)
 		w.doExpr(n.Index)
+	case *parser.SliceExpr:
+		w.doExpr(n.Target)
+		w.doExpr(n.Lo)
+		w.doExpr(n.Hi)
+	case *parser.RangeExpr:
+		w.doExpr(n.Lo)
+		w.doExpr(n.Hi)
 	case *parser.FieldAccessExpr:
 		w.doExpr(n.Target)
 	case *parser.CallExpr:
+		for _, a := range n.Args {
+			w.doExpr(a)
+		}
+	case *parser.CallValueExpr:
+		w.doExpr(n.Callee)
 		for _, a := range n.Args {
 			w.doExpr(a)
 		}
