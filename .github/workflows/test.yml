@@ -160,6 +160,24 @@ jobs:
           scripts/docblock-check.sh examples/
           scripts/docblock-check.sh modules/
 
+      - name: Check the generated module API reference is current
+        # docs/api/ and the "Module API Reference" region of docs/SUMMARY.md are
+        # generated from each module's doc comments by scripts/gen-module-docs.j
+        # (committed, like theme/highlight.js). Regenerate and fail on any drift,
+        # so the reference can never fall out of step with the code - the same
+        # guarantee docblock-check gives for the doc comments themselves. Uses
+        # ./jennifer from `make build` above. git status (not just diff) so a new
+        # module's uncommitted, untracked API page also fails the build.
+        run: |
+          ./jennifer run scripts/gen-module-docs.j
+          if [ -n "$(git status --porcelain -- docs/api docs/SUMMARY.md)" ]; then
+            echo "::error::docs/api or SUMMARY.md is stale - run 'jennifer run scripts/gen-module-docs.j' and commit the result"
+            git --no-pager diff -- docs/api docs/SUMMARY.md
+            git status --porcelain -- docs/api docs/SUMMARY.md
+            exit 1
+          fi
+          echo "module API reference is current"
+
       - name: Run the Jennifer test suite
         # Exercises the `testing` assertion vocabulary and the `jennifer
         # test` runner end to end on a .j suite. Non-zero exit (a failing
