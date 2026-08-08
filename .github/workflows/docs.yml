@@ -62,6 +62,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Render the PDF (without the API reference)
+        # The manual PDF deliberately excludes the module API reference: it is a
+        # large, tabular, machine-generated surface (~1000 pages) that reads poorly
+        # in the prose manual's stylesheet. Build the book BEFORE generating the
+        # API pages - the committed SUMMARY.md has an empty api region, so this
+        # build has no API section - and render the PDF from that api-less book.
+        # Stash it in $RUNNER_TEMP because the second `mdbook build` below wipes
+        # book-output; it is copied back in after the api-inclusive HTML build.
+        run: |
+          mdbook build
+          sh scripts/gen-pdf.sh "$RUNNER_TEMP/jennifer-manual.pdf"
+
       - name: Generate the module API reference
         # docs/api/ and the "Module API Reference" region of docs/SUMMARY.md are
         # generated from each module's doc comments (via the docblock module) and
@@ -84,13 +96,12 @@ jobs:
           mkdir -p book-output/jennifer
           cp site/jennifer/index.html book-output/jennifer/index.html
 
-      - name: Render the PDF
-        # Print the whole book (book-output/print.html) to a single PDF via
-        # headless Chrome. GitHub's ubuntu-latest image ships Google Chrome
-        # preinstalled, which scripts/gen-pdf.sh discovers. The PDF is written
-        # into book-output/, so it deploys to the site alongside the HTML and
-        # the introduction page links to it (jennifer-manual.pdf).
-        run: sh scripts/gen-pdf.sh book-output/jennifer-manual.pdf
+      - name: Restore the manual PDF into the site
+        # The PDF was rendered earlier from the api-less book and stashed in
+        # $RUNNER_TEMP (the api-inclusive `mdbook build` above wiped book-output).
+        # Copy it back so it deploys alongside the HTML and the introduction page's
+        # link (jennifer-manual.pdf) resolves.
+        run: cp "$RUNNER_TEMP/jennifer-manual.pdf" book-output/jennifer-manual.pdf
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

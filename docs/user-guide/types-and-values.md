@@ -5,7 +5,7 @@
 | Type            | Example literals                                    | Default          | Notes                                                                                                                  |
 | --------------- | --------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `int`           | `42`, `0xff`, `0o755`, `0b1010_0110`, `1_000`       | `0`              | 64-bit signed; `_` may separate digits                                                                                 |
-| `float`         | `3.14`, `0.5`, `1_000.000_5`                        | `0.0`            | 64-bit; promoted from int in mixed math                                                                                |
+| `float`         | `3.14`, `0.5`, `6.022e23`, `1_000.000_5`            | `0.0`            | 64-bit; scientific notation with an `e`/`E` exponent (`1e10`, `1.6e-19`); promoted from int in mixed math              |
 | `string`        | `"cooked \n"`, `'raw \d+'`                           | `""`             | `"..."` processes escapes; `'...'` is raw (verbatim, multi-line)                                                       |
 | `bool`          | `true`, `false`                                     | `false`          | Produced by comparison operators                                                                                       |
 | `null`          | `null`                                              | `null`           | A type with a single value (the unit)                                                                                  |
@@ -31,6 +31,25 @@ mutate the contents of a `const` list or map).
 Note: Jennifer's `list` is an array-backed sequence (Go slice
 underneath), not a Lisp linked list. You get O(1) random access via
 `$xs[i]`, but no O(1) prepend.
+
+### Numeric literals
+
+`int` literals come in four bases - decimal `42`, hex `0xff`, octal
+`0o755`, and binary `0b1010_0110` - and a `_` may separate digits in any
+of them for readability (`1_000_000`, `0xDEAD_BEEF`).
+
+`float` literals are written with a decimal point (`3.14`, `0.5`) or in
+**scientific notation**: a mantissa, an `e` or `E`, and an optional
+signed exponent (`6.022e23`, `1.6e-19`, `2.5E8`). The exponent makes a
+literal a `float` even with no fractional part, so `1e10` is the float
+`10000000000.0`, not an `int`. The mantissa accepts `_` separators
+(`1_000.5e3`); the exponent does not, and is always decimal - in `0xe5`
+the `e` stays a hex digit, so that is an `int`, not a float.
+
+Numeric literals are strict, matching the rest of the language: an
+exponent that overflows to infinity (`1e400`) is a positioned error
+rather than a silent `Infinity`, while one that underflows below the
+smallest representable value (`1e-400`) rounds to a finite `0.0`.
 
 ### String literals: cooked (`"..."`) and raw (`'...'`)
 
