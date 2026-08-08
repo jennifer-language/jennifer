@@ -244,30 +244,13 @@ func normDn(dn as string) {
     return strings.join($out, ",");
 }
 
-# compareStr orders two strings by UTF-8 bytes (Jennifer has no string < / >).
+# compareStr returns -1 / 0 / 1 ordering two strings lexicographically (the
+# string operators compare by UTF-8 byte, matching the old hand-rolled loop).
 func compareStr(a as string, b as string) {
-    def ab as bytes init convert.bytesFromString($a, "utf-8");
-    def bb as bytes init convert.bytesFromString($b, "utf-8");
-    def la as int init len($ab);
-    def lb as int init len($bb);
-    def n as int init $la;
-    if ($lb < $la) {
-        $n = $lb;
-    }
-    def i as int init 0;
-    while ($i < $n) {
-        if ($ab[$i] < $bb[$i]) {
-            return -1;
-        }
-        if ($ab[$i] > $bb[$i]) {
-            return 1;
-        }
-        $i = $i + 1;
-    }
-    if ($la < $lb) {
+    if ($a < $b) {
         return -1;
     }
-    if ($la > $lb) {
+    if ($a > $b) {
         return 1;
     }
     return 0;

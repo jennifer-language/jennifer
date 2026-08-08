@@ -1760,6 +1760,13 @@ func TestM2Comparisons(t *testing.T) {
 		{`"a" == "a"`, "true"}, // string equality
 		{`"a" == "b"`, "false"},
 		{"true == true", "true"},
+		{`"apple" < "banana"`, "true"}, // string ordering (lexicographic)
+		{`"banana" < "apple"`, "false"},
+		{`"a" <= "a"`, "true"},
+		{`"b" > "a"`, "true"},
+		{`"a" >= "b"`, "false"},
+		{`"Z" < "a"`, "true"}, // uppercase sorts before lowercase (byte-wise)
+		{`"" < "x"`, "true"},
 	}
 	for _, c := range cases {
 		out, err := run(t, `
@@ -1775,6 +1782,36 @@ func app() {
 		if out != c.want {
 			t.Errorf("expr %s: got %q, want %q", c.expr, out, c.want)
 		}
+	}
+}
+
+// TestStringOrderingRuntime exercises < > <= >= on string variables (the
+// runtime path, not the constant folder), and confirms a string/number mix
+// stays a type error.
+func TestStringOrderingRuntime(t *testing.T) {
+	out, err := run(t, `
+use io;
+func app() {
+    def a as string init "apple";
+    def b as string init "banana";
+    io.printf("%t %t %t %t %t", $a < $b, $b < $a, $a <= $a, $b > $a, $a >= $b);
+}`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if want := "true false true true false"; out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+
+	_, err = run(t, `
+use io;
+func app() {
+    def a as string init "x";
+    def r as bool init $a < 5;
+    io.printf($r);
+}`)
+	if err == nil || !strings.Contains(err.Error(), "two numbers or two strings") {
+		t.Errorf("string < int: expected type error, got %v", err)
 	}
 }
 

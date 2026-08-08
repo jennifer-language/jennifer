@@ -10,7 +10,7 @@
 | `//`                 | floor (integer) division; `int // int -> int`            |
 | `%`                  | modulo (`int` only); **floored**, matching `//`          |
 | unary `-`            | numeric negation (`int`/`float`)                         |
-| `<`, `>`, `<=`, `>=` | numeric comparison (exact across `int`/`float`); `bool`  |
+| `<`, `>`, `<=`, `>=` | order two numbers (exact across `int`/`float`) or two strings (lexicographic); `bool`  |
 | `==`, `!=`           | equality / inequality; same-kind plus exact `int`/`float`; `bool` |
 | `and`, `or`          | logical; both operands `bool`; short-circuit             |
 | `not`                | unary logical negation; operand `bool` (there is no `!`) |

@@ -39,6 +39,7 @@ const LibraryName = "strings"
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "upper", upperFn)
 	in.RegisterNamespaced(LibraryName, "lower", lowerFn)
+	in.RegisterNamespaced(LibraryName, "fold", foldFn)
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
 	in.RegisterNamespaced(LibraryName, "startsWith", startsWithFn)
 	in.RegisterNamespaced(LibraryName, "endsWith", endsWithFn)
@@ -135,6 +136,82 @@ func lowerFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(gostrings.ToLower(s)), nil
+}
+
+// foldMap maps common accented Latin letters to their unaccented ASCII base,
+// preserving case; a few ligatures and the sharp s expand (ß / ẞ -> ss / SS,
+// Æ -> AE). NFD combining accents are stripped separately (see isCombiningMark).
+// This is a fixed Western / Central European Latin table (Latin-1 Supplement +
+// common Latin Extended-A), not a full Unicode decomposition - dependency-free
+// and TinyGo-clean. Runes not in the table pass through unchanged.
+var foldMap = map[rune]string{
+	'À': "A", 'Á': "A", 'Â': "A", 'Ã': "A", 'Ä': "A", 'Å': "A", 'Ā': "A", 'Ă': "A", 'Ą': "A",
+	'à': "a", 'á': "a", 'â': "a", 'ã': "a", 'ä': "a", 'å': "a", 'ā': "a", 'ă': "a", 'ą': "a",
+	'Æ': "AE", 'æ': "ae",
+	'Ç': "C", 'Ć': "C", 'Ĉ': "C", 'Ċ': "C", 'Č': "C",
+	'ç': "c", 'ć': "c", 'ĉ': "c", 'ċ': "c", 'č': "c",
+	'Ð': "D", 'Ď': "D", 'Đ': "D", 'ð': "d", 'ď': "d", 'đ': "d",
+	'È': "E", 'É': "E", 'Ê': "E", 'Ë': "E", 'Ē': "E", 'Ĕ': "E", 'Ė': "E", 'Ę': "E", 'Ě': "E",
+	'è': "e", 'é': "e", 'ê': "e", 'ë': "e", 'ē': "e", 'ĕ': "e", 'ė': "e", 'ę': "e", 'ě': "e",
+	'Ĝ': "G", 'Ğ': "G", 'Ġ': "G", 'Ģ': "G", 'ĝ': "g", 'ğ': "g", 'ġ': "g", 'ģ': "g",
+	'Ĥ': "H", 'Ħ': "H", 'ĥ': "h", 'ħ': "h",
+	'Ì': "I", 'Í': "I", 'Î': "I", 'Ï': "I", 'Ĩ': "I", 'Ī': "I", 'Ĭ': "I", 'Į': "I", 'İ': "I",
+	'ì': "i", 'í': "i", 'î': "i", 'ï': "i", 'ĩ': "i", 'ī': "i", 'ĭ': "i", 'į': "i", 'ı': "i",
+	'Ĵ': "J", 'ĵ': "j",
+	'Ķ': "K", 'ķ': "k",
+	'Ĺ': "L", 'Ļ': "L", 'Ľ': "L", 'Ł': "L", 'ĺ': "l", 'ļ': "l", 'ľ': "l", 'ł': "l",
+	'Ñ': "N", 'Ń': "N", 'Ņ': "N", 'Ň': "N", 'ñ': "n", 'ń': "n", 'ņ': "n", 'ň': "n",
+	'Ò': "O", 'Ó': "O", 'Ô': "O", 'Õ': "O", 'Ö': "O", 'Ø': "O", 'Ō': "O", 'Ŏ': "O", 'Ő': "O",
+	'ò': "o", 'ó': "o", 'ô': "o", 'õ': "o", 'ö': "o", 'ø': "o", 'ō': "o", 'ŏ': "o", 'ő': "o",
+	'Œ': "OE", 'œ': "oe",
+	'Ŕ': "R", 'Ŗ': "R", 'Ř': "R", 'ŕ': "r", 'ŗ': "r", 'ř': "r",
+	'Ś': "S", 'Ŝ': "S", 'Ş': "S", 'Š': "S", 'ś': "s", 'ŝ': "s", 'ş': "s", 'š': "s", 'ß': "ss", 'ẞ': "SS",
+	'Ţ': "T", 'Ť': "T", 'Ŧ': "T", 'ţ': "t", 'ť': "t", 'ŧ': "t",
+	'Ù': "U", 'Ú': "U", 'Û': "U", 'Ü': "U", 'Ũ': "U", 'Ū': "U", 'Ŭ': "U", 'Ů': "U", 'Ű': "U", 'Ų': "U",
+	'ù': "u", 'ú': "u", 'û': "u", 'ü': "u", 'ũ': "u", 'ū': "u", 'ŭ': "u", 'ů': "u", 'ű': "u", 'ų': "u",
+	'Ŵ': "W", 'ŵ': "w",
+	'Ý': "Y", 'Ŷ': "Y", 'Ÿ': "Y", 'ý': "y", 'ŷ': "y", 'ÿ': "y",
+	'Ź': "Z", 'Ż': "Z", 'Ž': "Z", 'ź': "z", 'ż': "z", 'ž': "z",
+	'Þ': "Th", 'þ': "th",
+}
+
+// foldFn returns s with common Latin diacritics removed (accent-folding), for
+// building a locale-ish sort / search key: fold("Österreich") is "Osterreich",
+// fold("café") is "cafe". Case is preserved (pair with lower for
+// case-insensitive keys). It is not full Unicode collation - non-Latin scripts
+// and locale-specific orderings are out of scope (see the fold docs).
+func foldFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if err := arityN("fold", args, 1); err != nil {
+		return interpreter.Null(), err
+	}
+	s, err := requireString("fold", args, 0)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	var b gostrings.Builder
+	for _, r := range s {
+		if rep, ok := foldMap[r]; ok {
+			b.WriteString(rep)
+		} else if isCombiningMark(r) {
+			// Drop a stray NFD combining accent so "e"+U+0301 folds like the
+			// precomposed "é" - keeps canonically-equivalent inputs on one key.
+			continue
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return interpreter.StringVal(b.String()), nil
+}
+
+// isCombiningMark reports whether r is a Unicode combining diacritical mark -
+// the accents an NFD-decomposed string carries separately from its base letter.
+// Covers the main block plus the two supplements, so a decomposed Latin accent
+// folds away instead of surviving on a different sort/search key than its
+// precomposed form. (A cheap NFD mitigation, not full normalization.)
+func isCombiningMark(r rune) bool {
+	return (r >= 0x0300 && r <= 0x036F) || // Combining Diacritical Marks
+		(r >= 0x1AB0 && r <= 0x1AFF) || // Combining Diacritical Marks Extended
+		(r >= 0x1DC0 && r <= 0x1DFF) // Combining Diacritical Marks Supplement
 }
 
 // containsFn reports whether sub appears anywhere in s.

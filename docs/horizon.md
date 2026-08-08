@@ -590,6 +590,17 @@ A grab-bag, loosely grouped and recorded when it comes up.
 
 ### Library completions
 
+- **Locale-aware string collation.** `strings.fold(s)` ships as the lightweight
+  answer for accent-insensitive sort / search keys: strip common Latin
+  diacritics (`Österreich` -> `Osterreich`, `ß` -> `ss`), pair it with
+  `lists.sortBy` for a "good enough" locale-ish order. What it deliberately is
+  *not* is full Unicode collation - the Unicode Collation Algorithm (UCA) with
+  per-locale CLDR tailorings, where German phonebook order puts `ö` at `oe`,
+  Swedish sorts `ö` *after* `z`, and primary / secondary / tertiary weights
+  separate base letter from case and accent. That is a data-heavy `collate`
+  library (the scope of ICU / `golang.org/x/text/collate`), a real project best
+  parked here until a concrete need justifies the CLDR data or the dependency;
+  `strings.fold` covers the common Western-European case in the meantime.
 - **`encoding` - the harder codecs.** The single-byte character codecs and
   binary-to-text formats all shipped; the deferred remainder, picked up only
   when a real program needs one: variable-width Asian encodings

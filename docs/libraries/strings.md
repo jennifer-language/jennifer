@@ -53,6 +53,7 @@ io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
 | Call                                          | Returns        | Notes                                                     |
 | --------------------------------------------- | -------------- | --------------------------------------------------------- |
 | `strings.upper(s)`, `strings.lower(s)`        | string         | Case conversion (Unicode-aware)                           |
+| `strings.fold(s)`                             | string         | Remove common Latin diacritics for a sort / search key (`Österreich` -> `Osterreich`, `café` -> `cafe`, `ß` -> `ss`); case preserved, NFD combining accents dropped. Not full Unicode collation. |
 | `strings.contains(s, sub)`                    | bool           | Substring search                                          |
 | `strings.startsWith(s, prefix)`               | bool           |                                                           |
 | `strings.endsWith(s, suffix)`                 | bool           |                                                           |
@@ -185,5 +186,32 @@ def piece as string init strings.join(lists.slice($cs, $start, $end), "");
 
 Keeping the big value in one place and passing only small things into
 helpers - an index, a short piece - follows the same rule.
+
+## Accent-folding for sorting and search
+
+`strings.fold(s)` strips common Latin diacritics to build a locale-ish sort or
+search key, case preserved: `strings.fold("Österreich")` is `"Osterreich"`,
+`strings.fold("café")` is `"cafe"`, `strings.fold("Straße")` is `"Strasse"`.
+Ordering operators (`<` / `>` / `<=` / `>=`) and `lists.sort` compare strings by
+raw UTF-8 byte, so an accented word sorts *after* all of ASCII - `"Österreich"`
+lands after `"Zebra"`, not near `"Oslo"`. Fold a key to fix that:
+
+```jennifer
+use strings;
+use lists;
+
+func key(s as string) { return strings.lower(strings.fold($s)); }
+def ordered as list of string init lists.sortBy($names, key);   # Österreich sorts near O
+```
+
+It covers the common Western / Central European letters (Latin-1 Supplement plus
+common Latin Extended-A) and a few expansions (`ß` / `ẞ` -> `ss` / `SS`,
+`Æ` -> `AE`); runes outside that table pass through unchanged. A stray combining
+accent (an NFD-decomposed diaeresis, acute, etc. in the U+0300-U+036F range) is
+dropped, so the decomposed spelling of a word folds to the same key as its
+precomposed form. It is **not** full Unicode collation - no per-locale ordering
+(German phonebook `ö` = `oe`, Swedish `ö` after `z`), no non-Latin scripts. For
+those, sort by a fold key that suits your locale, or wait for a dedicated
+collation library (see the horizon notes).
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).

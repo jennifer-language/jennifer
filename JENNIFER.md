@@ -142,8 +142,11 @@ $x = 7;                       # assignment uses the $ sigil
 
 - Arithmetic: `+  -  *  /  //  %`. `/` is float division; `//` is floor.
 - Unary `-` (negation). `+` also concatenates two strings.
-- Comparison: `<  >  <=  >=  ==  !=` -> `bool`. `!=` is `not (a == b)`. There is
-  no bare `!` (logical negation is the word `not`); a lone `!` is a lex error.
+- Comparison: `<  >  <=  >=  ==  !=` -> `bool`. `!=` is `not (a == b)`. The
+  ordering operators (`<  >  <=  >=`) work on two numbers or two strings
+  (strings compare lexicographically by UTF-8 bytes); a string/number mix is a
+  type error. There is no bare `!` (logical negation is the word `not`); a lone
+  `!` is a lex error.
 - Logical (words, short-circuit): `and`, `or`, `not`. Operands must be `bool`.
 - Bitwise (int only): `&  |  ^  ~  <<  >>`.
 - Mixed int/float arithmetic promotes to `float`.

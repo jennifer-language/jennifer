@@ -4151,8 +4151,23 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file stri
 		}
 		return i.orderResult(op, -compareIntFloat(rv.Int, lv.Float), file, line, col)
 	}
+	// String ordering: lexicographic by UTF-8 bytes (which is Unicode
+	// code-point order for valid UTF-8), matching how == / != already accept
+	// strings. A mixed string/number comparison stays a type error below.
+	if lv.Kind == KindString && rv.Kind == KindString {
+		switch op {
+		case parser.OpLt:
+			return BoolVal(lv.Str < rv.Str), nil
+		case parser.OpGt:
+			return BoolVal(lv.Str > rv.Str), nil
+		case parser.OpLe:
+			return BoolVal(lv.Str <= rv.Str), nil
+		case parser.OpGe:
+			return BoolVal(lv.Str >= rv.Str), nil
+		}
+	}
 	if !lv.isNumeric() || !rv.isNumeric() {
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s requires numeric operands, got %s and %s", op, lv.Kind, rv.Kind), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s needs two numbers or two strings, got %s and %s", op, lv.Kind, rv.Kind), File: file, Line: line, Col: col}
 	}
 	// Any remaining numeric combination is same-kind (handled above) or would
 	// have matched a fast path; fall back to float compare for completeness.

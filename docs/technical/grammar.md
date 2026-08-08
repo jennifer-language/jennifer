@@ -41,7 +41,9 @@ The semantic rules no grammar can express follow here.
   the left already decides the result. Both operands must be `bool`.
 - Unary `not` requires `bool`; unary `-` requires `int` or `float`.
 - Comparison operators produce `bool`; `if`/`while`/`for` conditions **must**
-  be `bool` (no implicit truthiness).
+  be `bool` (no implicit truthiness). The ordering operators (`< > <= >=`)
+  compare two numbers or two strings (strings lexicographically by UTF-8 byte);
+  a string/number mix is a type error.
 - Mixed `int`/`float` arithmetic promotes `int` to `float`; the result is
   `float`. `%` requires int operands. `+` on two `string` values concatenates.
 - **`/` (true division) always returns `float`** (Python 3 semantics). For

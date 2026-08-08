@@ -124,6 +124,31 @@ func TestFoldLargeIntComparisonExact(t *testing.T) {
 	}
 }
 
+// String comparisons fold like numeric ones for literal operands.
+func TestFoldStringComparison(t *testing.T) {
+	cases := []struct {
+		expr string
+		want bool
+	}{
+		{`"a" < "b"`, true},
+		{`"b" < "a"`, false},
+		{`"a" <= "a"`, true},
+		{`"b" > "a"`, true},
+		{`"a" >= "b"`, false},
+	}
+	for _, c := range cases {
+		prog := mustResolve(t, `def r as bool init `+c.expr+`;`)
+		bin := firstStmtExpr(t, prog).(*BinaryExpr)
+		if bin.Folded == nil {
+			t.Fatalf("%s: expected Folded literal, got nil", c.expr)
+		}
+		lit, ok := bin.Folded.(*BoolLit)
+		if !ok || lit.Value != c.want {
+			t.Errorf("%s: Folded got %+v, want BoolLit(%v)", c.expr, bin.Folded, c.want)
+		}
+	}
+}
+
 // `!=` folds like `==` for literal operands.
 func TestFoldNotEqual(t *testing.T) {
 	for _, tc := range []struct {

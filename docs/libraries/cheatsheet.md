@@ -375,6 +375,7 @@ flat lookup view, not authoritative.
 | [`testing`](testing.md)`.runWith(name, args)`         | Like `run`, binding the `args` list to the method's parameters (arity + type checked).                                             |
 | [`strings`](strings.md)`.contains(s, sub)`            | True if `s` contains the substring `sub`.                                                                                           |
 | [`strings`](strings.md)`.endsWith(s, suffix)`         | True if `s` ends with `suffix`.                                                                                                     |
+| [`strings`](strings.md)`.fold(s)`                     | Remove common Latin diacritics for a sort / search key (`Österreich` -> `Osterreich`); case preserved. Not full Unicode collation. |
 | [`strings`](strings.md)`.indexOf(s, sub)`             | Rune index of first `sub` in `s`, or `-1` if absent.                                                                                |
 | [`strings`](strings.md)`.join(parts, sep)`            | Concatenate `list of string` `parts` separated by `sep`. Inverse of `strings.split`.                                                |
 | [`strings`](strings.md)`.lower(s)`                    | Lowercase `s` (Unicode-aware).                                                                                                      |

@@ -1,0 +1,26 @@
+=== dataset bytes (UTF-8) ===
+  Zürich  ->  5a c3 bc 72 69 63 68
+  Österreich  ->  c3 96 73 74 65 72 72 65 69 63 68
+  apple  ->  61 70 70 6c 65
+  Apple  ->  41 70 70 6c 65
+  Zebra  ->  5a 65 62 72 61
+  élan  ->  c3 a9 6c 61 6e
+  Ähre  ->  c3 84 68 72 65
+  élan  ->  65 cc 81 6c 61 6e
+
+=== byte-wise (raw) ===
+input:      Zürich, Österreich, apple, Apple, Zebra, élan, Ähre, élan
+bubblesort: Apple, Zebra, Zürich, apple, élan, Ähre, Österreich, élan
+shakersort: Apple, Zebra, Zürich, apple, élan, Ähre, Österreich, élan
+quicksort:  Apple, Zebra, Zürich, apple, élan, Ähre, Österreich, élan
+mergesort:  Apple, Zebra, Zürich, apple, élan, Ähre, Österreich, élan
+natural:    Apple, Zebra, Zürich, apple, élan, Ähre, Österreich, élan
+
+=== accent-folded (strings.fold) ===
+input:      Zurich, Osterreich, apple, Apple, Zebra, elan, Ahre, elan
+bubblesort: Ahre, Apple, Osterreich, Zebra, Zurich, apple, elan, elan
+shakersort: Ahre, Apple, Osterreich, Zebra, Zurich, apple, elan, elan
+quicksort:  Ahre, Apple, Osterreich, Zebra, Zurich, apple, elan, elan
+mergesort:  Ahre, Apple, Osterreich, Zebra, Zurich, apple, elan, elan
+natural:    Ahre, Apple, Osterreich, Zebra, Zurich, apple, elan, elan
+

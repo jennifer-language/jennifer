@@ -157,6 +157,28 @@ func tryFoldBinary(ex *BinaryExpr) Expr {
 		}
 	}
 
+	// String equality / ordering (lexicographic, matching the runtime). `+`
+	// concat on strings was already handled above.
+	if l, ok := litString(left); ok {
+		if r, ok := litString(right); ok {
+			switch ex.Op {
+			case OpEq:
+				return &BoolLit{pos: ex.pos, Value: l == r}
+			case OpNeq:
+				return &BoolLit{pos: ex.pos, Value: l != r}
+			case OpLt:
+				return &BoolLit{pos: ex.pos, Value: l < r}
+			case OpGt:
+				return &BoolLit{pos: ex.pos, Value: l > r}
+			case OpLe:
+				return &BoolLit{pos: ex.pos, Value: l <= r}
+			case OpGe:
+				return &BoolLit{pos: ex.pos, Value: l >= r}
+			}
+			return nil
+		}
+	}
+
 	// Null equality with anything only folds when both sides are
 	// null literals (matches the runtime's Value.Equal on null).
 	if litIsNull(left) && litIsNull(right) {
