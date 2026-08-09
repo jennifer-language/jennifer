@@ -24,6 +24,7 @@ style, **L3nn** API lifecycle.
 | `L103` | empty-catch                 | warning  | a `catch` block with no body                                       |
 | `L104` | throw-non-error             | warning  | a `throw` whose value isn't statically an `Error`                  |
 | `L105` | constant-condition          | warning  | `if (true)`, `while (true)` with no escape, `if ($x == $x)`, ...   |
+| `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100)                  |
@@ -42,7 +43,9 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L201/L202/L105), and a
+checks that match node shapes (L102/L103/L106/L201/L202/L105 - L106 also
+walks declared types, which the node walker does not visit, to catch a
+namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
 for the checks that need binding visibility (L101/L104). Both descend
 into `SpawnExpr.Body`, which the resolver deliberately skips: a read

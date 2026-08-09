@@ -36,6 +36,117 @@ func checkUnusedLocal(c *checkCtx) {
 	s.program(c.prog)
 }
 
+// checkUnusedImport (L106) flags a `use LIB [as ALIAS];` or `import "x.j" [as
+// NAME];` whose namespace prefix is never referenced - in a call (`LIB.fn()`), a
+// constant (`LIB.CONST`), a namespaced struct / enum value (`LIB.Type{...}`), or
+// a type annotation (`def x as LIB.Type`, a param, or a struct field). Dead
+// imports are the module analogue of L101's unused locals. Includes are spliced
+// before this runs, so an import used only inside an `include`d part is seen. A
+// vendored-deck import (`import "@scope/pkg/"`) is skipped: its namespace
+// derivation (deck name vs file stem) is subtle enough that flagging it risks a
+// false positive.
+func checkUnusedImport(c *checkCtx) {
+	if len(c.prog.Imports) == 0 && len(c.prog.ModuleImports) == 0 {
+		return
+	}
+	used := map[string]bool{}
+	var markType func(t parser.Type)
+	markType = func(t parser.Type) {
+		if t.StructNS != "" {
+			used[t.StructNS] = true
+		}
+		if t.Element != nil {
+			markType(*t.Element)
+		}
+		if t.KeyType != nil {
+			markType(*t.KeyType)
+		}
+		if t.ValType != nil {
+			markType(*t.ValType)
+		}
+	}
+	w := walker{
+		stmt: func(s parser.Stmt) {
+			if d, ok := s.(*parser.DefineStmt); ok {
+				markType(d.VarType)
+			}
+		},
+		expr: func(e parser.Expr) {
+			switch n := e.(type) {
+			case *parser.QualifiedCallExpr:
+				used[n.Prefix] = true
+			case *parser.QualifiedConstRefExpr:
+				used[n.Prefix] = true
+			case *parser.StructLit:
+				if n.NS != "" {
+					used[n.NS] = true
+				}
+			}
+		},
+	}
+	w.program(c.prog)
+	// Types that don't sit inside a statement body: method params, struct fields,
+	// and enum-variant payload fields.
+	for _, m := range c.prog.Methods {
+		for _, p := range m.Params {
+			markType(p.Type)
+		}
+	}
+	for _, sd := range c.prog.Structs {
+		for _, f := range sd.Fields {
+			markType(f.Type)
+		}
+	}
+	for _, ed := range c.prog.Enums {
+		for _, v := range ed.Variants {
+			for _, f := range v.Fields {
+				markType(f.Type)
+			}
+		}
+	}
+
+	for _, im := range c.prog.Imports {
+		prefix, form := im.Name, "use "+im.Name
+		if im.AsName != "" {
+			prefix, form = im.AsName, "use "+im.Name+" as "+im.AsName
+		}
+		if !used[prefix] {
+			c.report("L106", im, fmt.Sprintf("unused import: `%s` - the `%s` namespace is never referenced", form, prefix))
+		}
+	}
+	for _, mi := range c.prog.ModuleImports {
+		prefix, ok := moduleImportPrefix(mi)
+		if !ok {
+			continue
+		}
+		if !used[prefix] {
+			c.report("L106", mi, fmt.Sprintf("unused import: `import %q` - the `%s` namespace is never referenced", mi.Path, prefix))
+		}
+	}
+}
+
+// moduleImportPrefix returns the namespace an `import` binds and whether the
+// linter can determine it safely. The aliased form is exact; the bare form's
+// prefix is the file stem; the vendored-deck form (`@scope/pkg/`) is left
+// undetermined (ok == false) so it is never flagged on a guess.
+func moduleImportPrefix(mi *parser.ModuleImportStmt) (string, bool) {
+	if mi.AsName != "" {
+		return mi.AsName, true
+	}
+	if strings.HasPrefix(mi.Path, "@") {
+		return "", false
+	}
+	base := mi.Path
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.TrimSuffix(base, ".j")
+	if base == "" {
+		return "", false
+	}
+	return base, true
+}
+
 // checkDeadCode (L102) flags the first statement made unreachable by a
 // preceding terminator (return / throw / exit / break / continue) in the same
 // statement list. Reported once per list; nested lists are visited on their

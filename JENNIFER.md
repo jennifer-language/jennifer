@@ -39,8 +39,11 @@ an assistant usually guesses wrong:
 4. **`/` is true division and always returns `float`** (like Python 3).
    `5 / 2 == 2.5`. Use `//` for integer/floor division: `5 // 2 == 2`. `%`
    is **floored** to match `//` (`-7 % 3 == 2`, `7 % -3 == -2`). Integer
-   arithmetic that overflows `int64` is a runtime error (no silent wrap),
-   and a mixed `int`/`float` comparison is exact (no lossy promotion).
+   arithmetic that overflows `int64` is a runtime error (no silent wrap,
+   including `-(MinInt64)`), and **float arithmetic that overflows to a
+   non-finite value is an error too** (`1e308 * 10.0` raises, never
+   `+Inf`/`NaN`); a mixed `int`/`float` comparison is exact (no lossy
+   promotion).
 5. **Identifiers are letter-initial, then letters + digits, <= 64 chars.** No
    underscores in variable/method/parameter/library names. `myVar`, `var2`,
    `sha256` are fine; `my_var` is not, and a name cannot start with a digit.

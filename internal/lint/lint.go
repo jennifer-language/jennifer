@@ -101,6 +101,7 @@ func init() {
 		{id: "L103", desc: "empty-catch: a catch block with no body", severity: SeverityWarning, selectable: true, run: checkEmptyCatch},
 		{id: "L104", desc: "throw-non-error: a throw whose value is not statically an Error", severity: SeverityWarning, selectable: true, run: checkThrowNonError},
 		{id: "L105", desc: "constant-condition: a statically constant if/while condition", severity: SeverityWarning, selectable: true, run: checkConstantCondition},
+		{id: "L106", desc: "unused-import: a `use` / `import` whose namespace is never referenced", severity: SeverityWarning, selectable: true, run: checkUnusedImport},
 		// L2nn - complexity & style.
 		{id: "L201", desc: "method-too-long: method body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},

@@ -313,12 +313,45 @@ func TestResolveSelection(t *testing.T) {
 	})
 }
 
-func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 14 {
-		t.Fatalf("expected 14 known IDs (4 source + 10 checks), got %d", n)
+func TestUnusedImport(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"unused use flagged", `use io; use math; io.printf("hi");`, 1},
+		{"all used", `use io; io.printf("%d", 3);`, 0},
+		{"used only as a var type", `use time; def t as time.Time;`, 0},
+		{"used only as a param type", `use time; func f(t as time.Time) { return; }`, 0},
+		{"used only as a struct field type", `use time; def struct S { at as time.Time };`, 0},
+		{"used only nested in a list type", `use time; def xs as list of time.Time;`, 0},
+		{"used only as a namespaced value", `use json; def v as json.Value init json.map();`, 0},
+		{"alias used", `use math as m; def x as float init m.sqrt(4.0);`, 0},
+		{"alias unused flagged", `use math as m; def x as int init 1;`, 1},
+		{"two unused", `use io; use math; use strings; def x as int init 1;`, 3},
+		{"module import unused flagged", `import "./util.j" as u; def x as int init 1;`, 1},
+		{"module import used", `import "./util.j" as u; def x as int init u.f();`, 0},
+		{"module import used only as type", `import "./geo.j" as geo; func f(p as geo.Point) { return; }`, 0},
+		{"bare module import unused flagged", `import "util.j"; def x as int init 1;`, 1},
+		{"vendored deck never flagged", `import "@scope/pkg/"; def x as int init 1;`, 0},
 	}
-	if len(lint.Catalog()) != 14 {
-		t.Fatalf("catalog should list all 14 IDs")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrc(t, c.src, only("L106"), cfg)
+			if got := countID(diags, "L106"); got != c.want {
+				t.Errorf("L106 count = %d, want %d: %v", got, c.want, diags)
+			}
+		})
+	}
+}
+
+func TestKnownIDs(t *testing.T) {
+	if n := len(lint.KnownIDs()); n != 15 {
+		t.Fatalf("expected 15 known IDs (4 source + 11 checks), got %d", n)
+	}
+	if len(lint.Catalog()) != 15 {
+		t.Fatalf("catalog should list all 15 IDs")
 	}
 }
 

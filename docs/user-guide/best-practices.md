@@ -45,6 +45,7 @@ complexity and style, **L3nn** API lifecycle:
 | `L103` | an empty `catch` block (an error caught and silently thrown away)      |
 | `L104` | a `throw` of something that isn't an `Error` struct                    |
 | `L105` | a condition that is always true or always false (`if ($x == $x)`, ...) |
+| `L106` | a `use` / `import` whose namespace is never used                       |
 | `L201` | a method with too many statements (default over 60)                    |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
