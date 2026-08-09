@@ -783,6 +783,28 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   ref)` for RFC 3986 relative-reference resolution (`../img.png` against a base).
   Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
   on `encoding`'s `uri-percent` / `uri-form` codecs.
+- **`validate`** - declarative validation of a `map of string to string` (a form
+  body, query, or config) against a rule set, returning a structured failure
+  list instead of ad-hoc `if` checks. Rules compose per field as value-semantic
+  descriptors: `validate.required` / `isInt` / `isFloat` / `isBool` / `min(n)` /
+  `max(n)` / `minLen(n)` / `maxLen(n)` / `pattern(re)` / `email` / `url` /
+  `datetime(format)` (strftime, calendar-checked via `time.parse`) / `oneOf(list)` /
+  `noneOf(list)` (a blacklist, case-sensitive) / `password(policy)` (a
+  `password.Schema` passed through to the `password` module's policy engine) /
+  `custom(fn, msg)` (a first-class-`func` predicate, called exception-safely) /
+  `withMessage(r, m)`, grouped in a `map of string to list of validate.Rule`.
+  `validate.check(data, rules)` -> `list of validate.Failure` (`{field, rule,
+  param, message}`, where `rule` is a stable message id and `param` its
+  argument); `validate.ok(...)` short-circuits to a bool; `validate.messages` /
+  `validate.byField` render them, and `validate.localize(errs, templates)`
+  re-messages via a caller's `rule-id -> template` map (`{param}` / `{field}`
+  interpolation, falling back to the default for unlisted rules) - for non-English
+  messages, feed it templates from `intl.tr` per rule id. An absent or blank field
+  passes every rule except `required`; only fields named in the rule set are
+  checked. Pure `.j`
+  over `regex` + `uri` + `time` + `password` + `convert` + `lists` + `strings` +
+  `maps`; **both binaries**. (`Error` is the reserved global struct, so the failure
+  type is `validate.Failure`.)
 - **`graphql`** - a thin GraphQL client over `http` / `rest`. Build a client with
   `graphql.client(endpoint)` (the full GraphQL URL, POSTed verbatim), layer auth /
   TLS with `graphql.bearer(c, token)` / `basic` / `header(c, name, value)` /

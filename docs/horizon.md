@@ -552,21 +552,6 @@ A grab-bag, loosely grouped and recorded when it comes up.
 
 ### Language sugar
 
-- **String interpolation.** A `"...{expr}..."` interpolating string (with `{{` /
-  `}}` escapes, reusing `intl.tr`'s existing `{name}` grammar) that lexes into
-  literal chunks + embedded expressions, so `"hi {$name}, next is {$n + 1}"`
-  drops the `sprintf` ceremony. Sugar over string concatenation +
-  `convert.toString` (though not "pure": string literals stop being atomic
-  tokens - the lexer must re-enter expression parsing mid-string and brace-count
-  nested `{}` from map literals). **Kept here, not rejected**, unlike the
-  assignment-sugar cuts: f-strings are a genuinely valued ergonomic and safety
-  win (the value sits beside its position - no arg counting, no verb / type
-  mismatch), so this is *deferred*, not *declined*. It just does not pay for
-  itself while `sprintf` owns formatting and minimalism is the guiding stance
-  (it would be a third string-building path). If ever pursued, keep it minimal -
-  `{$expr}` renders via `convert.toString` with **no in-brace format specs** - so
-  `sprintf` stays the single formatter rather than growing a second one.
-
 - **Explicit map-to-struct conversion.** A spelled-out, validating way to
   turn a `json.Value` object (or a homogeneous `map of string to T`) into a
   typed struct - the sanctioned counterpart to the *rejected* implicit

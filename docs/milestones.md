@@ -1317,18 +1317,39 @@ Shipped as `modules/args.j` with a **100%** `args_test.j` overlay (32 tests),
 
 ### M24.15 - `validate` data validation module
 
-**Planned.** Declarative validation of a `map of string to ...` (or a
-`json.Value`) against a rule set, returning a structured error list instead of
-ad-hoc per-field `if` checks scattered across handlers. Rules compose as
-value-semantic descriptors: `required`, `isInt` / `isFloat` / `isBool`,
-`min` / `max` (numeric), `minLen` / `maxLen` (string / list), `pattern` (a
-`regex`), `email` / `url` (over `uri` + `regex`), `oneOf` (enum), and `custom`
-(a `func` value predicate, using the first-class-function tier). `validate.check(
-data, rules)` -> `list of validate.Error` (`{field, rule, message}`); `ok`
-short-circuits to a bool. Pairs directly with `web.bodyForm` / `rest` request
-bodies and config loading. Pure `.j` over `regex` + `uri` + `convert` + `lists`;
-**both binaries**. Weaker than `args` (some of this is done inline today), but a
-clean, general, self-contained addition.
+**Done.** Declarative validation of a `map of string to string` against a rule
+set, returning a structured failure list instead of ad-hoc per-field `if` checks
+scattered across handlers. Rules compose as value-semantic descriptors: `required`,
+`isInt` / `isFloat` / `isBool`, `min` / `max` (numeric), `minLen` / `maxLen`
+(string length), `pattern` (a `regex`), `email` / `url` (over `regex` + `uri`),
+`datetime(format)` (a `strftime` format checked with `time.parse`, so an invalid
+calendar date like month 13 fails, not just a format mismatch), `oneOf` (a
+whitelist) / `noneOf` (a blacklist - reserved usernames, banned words),
+`password(policy)` (a passthrough to the `password` module's policy engine: the
+`password.Schema` travels in the `Rule` since Jennifer has no closures, so
+`validate` imports `password` and surfaces its failed-rule reasons), and `custom`
+(a `func` value predicate, using the first-class-function tier and called
+exception-safely - a throwing predicate marks the value invalid rather than
+escaping `check`), plus a `withMessage` fluent override. Rules group per
+field in a `map of string to list of Rule`; `validate.check(data, rules)` ->
+`list of validate.Failure` (`{field, rule, param, message}` - `rule` a stable
+message id, `param` its argument) and `validate.ok` is the bool short-circuit,
+with `validate.messages` / `validate.byField` renderers and
+`validate.localize(errs, templates)` for **non-English / custom messages** (a
+`rule-id -> template` map with `{param}` / `{field}` interpolation, falling back
+to the default for unlisted rules - feed it `intl.tr` templates for full i18n).
+An absent or blank field passes every rule **except** `required` (an optional
+field left empty is valid); only fields named in the rule set are checked. The failure
+struct is `validate.Failure`, not `Error` - `Error` is the one reserved global
+struct a module may not redefine. Values are strings (the `web.bodyForm` /
+`dotenv` / query-string shape); a `json.Value` is flattened to a string map first,
+rather than validated in place. Pairs directly with `web.bodyForm` / `rest`
+request bodies and config loading. Pure `.j` over `regex` + `uri` + `time` +
+`password` + `convert` + `lists` + `strings` + `maps`; **both binaries**. Shipped as
+`modules/validate.j` with a **100%** `validate_test.j` overlay (15 tests),
+`docs/modules/validate.md` +
+index / `SUMMARY.md` / `README.md` rows, `examples/modules/validate_demo.j`, and a
+`JENNIFER.md` bullet.
 
 ### M24.16 - `html` module: rebrand `htmlwriter` + add a parser
 
@@ -1396,6 +1417,85 @@ surfacing + accessor + render-refactor job (the parser exists), so smaller than
 M24.16's from-scratch build. Ships the full module discipline: the `markdown`
 overlay extended, `docs/modules/markdown.md` + `JENNIFER.md` updated, and a demo
 of `parse` -> walk -> `render`.
+
+### M24.18 - string interpolation (`{expr}` in cooked strings)
+
+**Planned.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}"` - so a
+value sits beside its position with no `sprintf` arg-counting or verb/type
+mismatch. Sugar over string concatenation + `convert.toString`. Graduates the
+"String interpolation" language-sugar entry from `horizon.md`. The design settles
+the delimiter tension that recurs whenever a `{name}` template meets the feature:
+
+- **Cooked only; `{expr}` is any expression.** A cooked `"..."` string interpolates
+  each `{expr}` slot - a single Jennifer **expression** evaluated in the current
+  scope (`{$var}`, `{$a + 1}`, `{MAX}`, `{strings.upper($x)}`). A slot is an
+  expression, **not** a statement or block: no `import` / `use` / `def` / `if` /
+  `return` / assignment inside it (a `;` or statement keyword in a slot is a parse
+  error), and `import` / `use` are top-level preprocess/parse-time directives that
+  never exist as a runtime value - so the footgun is bounded to a side-effecting
+  *call*, never an inlined statement. A **raw** `'...'` string
+  never interpolates - it already processes nothing, so it is the literal form
+  (`'{"port": 8080}'` is literal JSON). No content heuristic: inside a cooked
+  string `{...}` always means "evaluate", so every expression form is uniform. A
+  literal brace is escaped **`\{` / `\}`** - backslash, matching the language's only
+  escape convention (`\n` / `\t` / `\"`), not Python-style `{{` doubling; `\{` is a
+  lex error today, so the escape is free and non-breaking. An `f"..."` opt-in prefix
+  was rejected (unnatural; the cooked/raw split already *is* the opt-in - a raw
+  string is the "no interpolation" form).
+- **Template placeholders move off braces.** A `{name}` marker (the kind `intl` /
+  `validate` use for named substitution) would interpolate or error inside a cooked
+  string. The two template-substitution libraries move to a brace-free **`%name%`**
+  marker, fully decoupled from interpolation and its escape - a `%name%` template
+  reads the same in a cooked or raw string. A sweep confirmed these are the **only**
+  two `{name}`-placeholder consumers (JSON / TOML / YAML braces are serialization,
+  `io`'s `%a` braces are output delimiters, `sql` binds through placeholders).
+
+Two parts:
+
+- **Part 1 - `%name%` placeholders.** `intl.tr` moves from `{name}` (with `{{` /
+  `}}` escapes) to `%name%` (with `%%` escaping a literal `%`), updating the Go
+  scanner + `intl` docs / examples / tests + the one inline caller
+  (`examples/intl.j`). `validate` is pre-migrated in its own (unreleased) window, so
+  it already speaks `%param%` / `%field%`. The `%%` escape is valid in cooked or raw
+  strings alike - the string engine owns `\` / `{}`, the module owns `%` - and
+  substitution is single-pass (a substituted value is never re-scanned). A pre-1.0
+  break to a shipped library (the language feature owns `{}`; the two template
+  libraries are secondary).
+- **Part 2 - implement interpolation + migrate literal braces.** The lexer
+  re-enters expression parsing mid cooked-string and brace-counts nested `{}` (a map
+  literal in a slot); the parser lowers a slot list to concat + `convert.toString`;
+  `\{` / `\}` unescape; raw strings unchanged. Because cooked `{` is no longer
+  literal, **every existing cooked string holding a literal brace migrates** (~665
+  in `modules/*.j`, ~572 in module tests, ~80 in `examples/` - mostly JSON fixtures
+  and format / template data - plus a user-facing break). **Migration prefers
+  converting the string to a raw `'...'`** (cleaner - JSON-in-string sheds its `\"`
+  noise) and falls back to `\{` only where the string also needs cooked escapes or
+  its own interpolation. Ships with the loud breaking-change note, updated editor
+  highlighters, `fmt` (re-emit slots verbatim), `ast`, the docs bundle, and the
+  grammar EBNF kept in sync.
+- **The whole toolchain sees a slot as real code, not an opaque string.** A slot
+  is an ordinary expression, so: the **resolver** descends into it and annotates
+  its references, making undefined-variable / shadowing **parse-time** errors
+  (`"{$typo}"` is caught like any reference, not silently shipped in a string);
+  **`lint`** applies its correctness / style checks *inside* slots; and **`profile`**
+  attributes each slot to **its own source position** (hits / wall-clock /
+  `--allocs`), so a costly `"{compute()}"` shows up as the slot, not mysteriously as
+  a plain `def` / assignment. Treating an interpolating string as opaque would be a
+  correctness hole (unresolved variables and unlinted, unprofiled code hiding in
+  strings).
+- **Slot-complexity guidance (style, not a language limit).** A slot accepts *any*
+  expression, including a method call - `"{deploy()}"` runs code inside a string
+  literal, a footgun (hidden side effects / cost in something that reads as a
+  literal). The language stays permissive (complete `{expr}`, no heuristic); the
+  guard rails are docs + lint: a **style-guide + best-practices** entry (keep slots
+  to variables, field / index access, and arithmetic; no side-effecting or expensive
+  calls) backed by a new **`L2nn` style check** flagging a call or other non-trivial
+  expression in an interpolation slot. Add these to
+  `docs/user-guide/style-guide.md` and the best-practices docs as part of the
+  milestone.
+
+Core (a language feature; both binaries). The `f"..."` rejection lands in
+`rejected.md` and the intl-break rationale in `design-decisions.md` when it ships.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 
