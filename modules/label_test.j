@@ -64,6 +64,30 @@ func testItfKeepsEvenLength() {
     testing.assertEqual($l.fields[0].data, "1234");
 }
 
+# A numeric symbology (EAN) rejects non-digit data at the boundary, so ZPL / CAB
+# metacharacters can never reach the raw ^FD / `;` field (printer-command injection).
+func testEanRejectsNonNumeric() {
+    def threw as bool init false;
+    def kind as string init "";
+    try {
+        barcode(new(40.0, 20.0), 0.0, 0.0, "ean13", noopts(), "12^XA0000");
+    } catch (e) {
+        $threw = true;
+        $kind = $e.kind;
+    }
+    testing.assertTrue($threw);
+    testing.assertEqual($kind, "label");
+}
+
+# A newline in an alphanumeric payload is flattened in the cab output, so it cannot
+# terminate the command line and inject a following command.
+func testCabFlattensNewlineInData() {
+    def l as Label init barcode(new(40.0, 20.0), 5.0, 5.0, "code128", noopts(), "AB\nCD");
+    def out as string init render($l, cab());
+    testing.assertTrue(strings.contains($out, "AB CD"));
+    testing.assertFalse(strings.contains($out, "AB\nCD"));
+}
+
 func testCabExtraBarcodes() {
     def a as Label init barcode(new(50.0, 20.0), 5.0, 5.0, "code39", noopts(), "ABC123");
     testing.assertEqual(

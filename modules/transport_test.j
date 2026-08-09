@@ -43,3 +43,36 @@ func testMatchDispatch() {
     testing.assertEqual(modeName(Security.Tls), "tls");
     testing.assertEqual(modeName(Security.Starttls), "starttls");
 }
+
+# --- received-data cap ---
+
+func testCheckReceiveSizeWithin() {
+    testing.assertEqual(MAX_RECEIVED_BYTES, 67108864);
+    # at or under the cap: no throw
+    checkReceiveSize(0, "x");
+    checkReceiveSize(1000, "x");
+    checkReceiveSize(MAX_RECEIVED_BYTES, "x");
+}
+
+func testCheckReceiveSizeOver() {
+    def threw as bool init false;
+    def kind as string init "";
+    try {
+        checkReceiveSize(MAX_RECEIVED_BYTES + 1, "amqp message body");
+    } catch (e) {
+        $threw = true;
+        $kind = $e.kind;
+    }
+    testing.assertTrue($threw);
+    testing.assertEqual($kind, "transport");
+}
+
+func testCheckReceiveSizeNegative() {
+    def threw as bool init false;
+    try {
+        checkReceiveSize(-1, "y");
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}

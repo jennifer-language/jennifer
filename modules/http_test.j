@@ -275,6 +275,25 @@ func testIsRedirect() {
     testing.assertEqual(isRedirect(404), false);
 }
 
+# Credential headers (any case) are dropped; ordinary headers are kept - the
+# sanitization applied before a cross-origin redirect hop.
+func testStripCredentialHeaders() {
+    def h as map of string to string init {"authorization": "Bearer x", "COOKIE": "a=1",
+        "Accept": "application/json", "X-Custom": "y"};
+    def s as map of string to string init stripCredentialHeaders($h);
+    testing.assertFalse(maps.has($s, "authorization"));
+    testing.assertFalse(maps.has($s, "COOKIE"));
+    testing.assertTrue(maps.has($s, "Accept"));
+    testing.assertTrue(maps.has($s, "X-Custom"));
+}
+
+# Origin comparison drives the cross-origin decision: same host/scheme = same
+# origin; a different host is cross-origin (credentials would be dropped).
+func testOriginComparison() {
+    testing.assertTrue(originOf("https://api.example.com/a") == originOf("https://api.example.com/b"));
+    testing.assertFalse(originOf("https://api.example.com/a") == originOf("https://evil.example.net/a"));
+}
+
 func testResolveLocationAbsolute() {
     testing.assertEqual(resolveLocation("http://a.com/x", "https://b.com/y"), "https://b.com/y");
 }

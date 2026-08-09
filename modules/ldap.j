@@ -874,7 +874,7 @@ func readEntries(conn as Conn, id as int) {
             $cookie = extractCookie($resp);
             $done = true;
         } elseif ($tag == APP_SEARCH_REF) {
-            $done = $done;
+            # a SearchResultReference (a continuation referral) is ignored; keep reading.
         } else {
             fail("unexpected response tag " + convert.toString($tag));
         }

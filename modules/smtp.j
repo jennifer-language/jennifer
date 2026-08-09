@@ -247,6 +247,9 @@ func readReply(conn as net.Conn) {
             return Reply{code: replyFinalCode($buf + "\n"), text: $buf};
         }
         $buf = $buf + convert.stringFromBytes($chunk, "utf-8");
+        # A hostile server can stream an endless multi-line (`250-...`) reply; cap
+        # the cumulative buffer so it fails typed instead of growing without bound.
+        transport.checkReceiveSize(len($buf), "smtp reply");
     }
     return Reply{code: -1, text: $buf};
 }

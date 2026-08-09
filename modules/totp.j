@@ -51,10 +51,19 @@ export def struct Options {
 
 func digitsOf(opts as Options) {
     if ($opts.digits > 0) {
+        # Bound the code length: outside [6, 8] is non-standard and a large value
+        # overflows powTen; reject it typed.
+        if ($opts.digits < 6 or $opts.digits > 8) {
+            throw Error{kind: "totp", message: "totp: digits must be 6, 7, or 8", file: "", line: 0, col: 0};
+        }
         return $opts.digits;
     }
     return 6;
 }
+
+# MAX_VERIFY_WINDOW caps the +/- step window `verify` scans, so a hostile or huge
+# window cannot force millions of HMAC computations on each check (CPU DoS).
+def const MAX_VERIFY_WINDOW as int init 8;
 
 func periodOf(opts as Options) {
     if ($opts.period > 0) {
@@ -217,6 +226,9 @@ export func verifyWindowAt(
     unixSeconds as int,
     window as int,
     opts as Options) {
+    if ($window > MAX_VERIFY_WINDOW) {
+        throw Error{kind: "totp", message: "totp: verify window exceeds the maximum of " + convert.toString(MAX_VERIFY_WINDOW), file: "", line: 0, col: 0};
+    }
     def key as bytes init decodeSecret($secret);
     def digits as int init digitsOf($opts);
     def algorithm as string init algorithmOf($opts);

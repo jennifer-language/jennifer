@@ -87,9 +87,12 @@ func zplBarcode(f as Field, h as int, dpi as int) {
         # ^BX: module height in dots, quality 200 = ECC200.
         return "^BXN," + $hs + ",200" + $esc + "^FS";
     }
+    # errorLevel goes raw into the ^FD data prefix, so only accept the four valid
+    # QR EC levels; anything else (including an injection attempt) falls back to M.
     def lvl as string init "M";
-    if (not ($f.errorLevel == "")) {
-        $lvl = $f.errorLevel;
+    def el as string init $f.errorLevel;
+    if ($el == "L" or $el == "M" or $el == "Q" or $el == "H") {
+        $lvl = $el;
     }
     # QR magnification (1..10) comes from the module size in dots (`h`), so the
     # symbol honours BarcodeOptions.height / DPI instead of a hard-coded 5.
@@ -139,8 +142,14 @@ func zplField(f as Field, dpi as int) {
             convert.toString(mmToDots($f.thickness, $dpi)) + "^FS";
     }
     if ($f.kind == "image") {
-        # Recall a stored graphic by name at native size.
-        return $origin + "^XG" + $f.data + ",1,1^FS";
+        # Recall a stored graphic by name at native size. The name goes raw into
+        # ^XG, so strip ZPL metacharacters (^ ~) and CR/LF: a crafted name could
+        # otherwise inject a command.
+        def nm as string init strings.replace($f.data, "^", "");
+        $nm = strings.replace($nm, "~", "");
+        $nm = strings.replace($nm, "\r", "");
+        $nm = strings.replace($nm, "\n", "");
+        return $origin + "^XG" + $nm + ",1,1^FS";
     }
     return $origin + zplBarcode($f, mmToDots($f.h, $dpi), $dpi);
 }
@@ -160,5 +169,14 @@ func renderZpl(label as Label, dpi as int) {
     for (def f in $label.fields) {
         $out = $out + zplField($f, $dpi) + "\n";
     }
-    return $out + "^PQ" + convert.toString($label.quantity) + "\n^XZ\n";
+    # Clamp the print quantity into ZPL's valid ^PQ range (1..99,999,999): a
+    # negative or huge value would otherwise make a printer reject or over-print.
+    def qty as int init $label.quantity;
+    if ($qty < 1) {
+        $qty = 1;
+    }
+    if ($qty > 99999999) {
+        $qty = 99999999;
+    }
+    return $out + "^PQ" + convert.toString($qty) + "\n^XZ\n";
 }

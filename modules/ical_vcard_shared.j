@@ -173,5 +173,11 @@ func paramValue(nameSection as string, param as string) {
 # `emit`'s `lists.push` copied the whole growing line list on every call
 # (O(L^2) over a large calendar / contact).
 func emitLine(name as string, value as string) {
-    return fold($name + ":" + $value);
+    # Strip CR / LF from the value: a bare CR / LF would terminate the folded line
+    # and inject a forged property into the .ics / .vcf stream. A text value that
+    # needs a literal newline is represented as the `\n` escape via escapeText, so a
+    # legitimate value never carries a bare CR / LF - only an injection attempt does.
+    def v as string init strings.replace($value, "\r", "");
+    $v = strings.replace($v, "\n", "");
+    return fold($name + ":" + $v);
 }

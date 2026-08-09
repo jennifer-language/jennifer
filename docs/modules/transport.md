@@ -48,6 +48,22 @@ for the TLS-on-connect port instead.
 refuse sending SASL credentials over a `None` connection unless
 `allowInsecureAuth` is set.
 
+## Received-data cap
+
+`transport.MAX_RECEIVED_BYTES` (64 MiB) is the tree-wide ceiling on a single
+received payload, and `transport.checkReceiveSize(n, what)` enforces it: it raises a
+catchable `Error{kind: "transport"}` naming `what` when `n` is negative or over the
+cap. A wire client calls it on a peer-declared body / literal size before reading,
+and on an accumulating buffer's length inside a read loop, so a hostile or desynced
+server cannot drive the recover-less interpreter to an unbounded allocation. One
+shared constant and check, so the whole client suite caps identically instead of
+each module inventing its own.
+
+```jennifer
+def bodySize as int init decodeContentBodySize($frame);
+transport.checkReceiveSize($bodySize, "amqp message body");   # throws if > 64 MiB
+```
+
 ## Why a separate module
 
 The security mode is the one field shared verbatim across every socket client, so

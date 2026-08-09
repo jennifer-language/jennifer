@@ -1268,90 +1268,94 @@ and every module that reinvented query-string building routes through them.
   (one obvious way): a single percent/form implementation in `encoding`, one URL
   module over it, no per-module reinvention.
 
-### M24.14 - `args` CLI argument parser module
+### M24.14 - `args` CLI argument parser module (compacted)
 
-**Done.** A declarative command-line
-argument parser - the one clear general-infrastructure gap in the catalog, and
-the piece a language whose own guidance is "write your scripts and tools in
-Jennifer" most conspicuously lacked (`os.hasFlag` / `os.flag` / `os.ARGS` are
-primitive string lookups: no typed conversion, defaults, required args,
-positionals, subcommands, or usage). Scoped at Python `argparse`'s common surface
-**plus** the features an argparse user misses immediately - `nargs`, `choices`,
-`count` / `append`, `--version` - and deliberately stopping short of argument
-groups, mutually-exclusive sets, parent parsers, and prefix-abbreviation matching
-(Level C: diminishing returns for a `.j` module).
+**Done.** A declarative command-line argument parser - the general-infrastructure
+gap a "write your tools in Jennifer" language conspicuously lacked (`os.flag` /
+`os.ARGS` are primitive string lookups: no typed conversion, defaults, required
+args, positionals, or subcommands). Scoped at Python `argparse`'s common surface
+plus `nargs` / `choices` / `count` / `append` / `--version`, stopping short of
+argument groups, mutually-exclusive sets, parent parsers, and prefix abbreviation
+(Level C). A value-semantic `Parser` (copy-returning builder): optional flags
+(`flag` / `intFlag` / `floatFlag` / `boolFlag`, plus `countFlag` `-vvv`->3 and
+`listFlag` append), `nargs` positionals (`"?"` / `"*"` / `"+"` / int), subcommands
+(each its own `Parser`), and `version`. `args.parse($p, os.ARGS)` -> a `Result`
+with typed accessors (`asString` / `asInt` / `asFloat` / `asBool` / `asList` /
+`count` / `has`). Normalisation covers `--flag=value`, bundled / glued shorts
+(`-abc`, `-nAda`), and `--` end-of-flags (`-5` is a negative-number positional); an
+unknown flag, missing required arg, bad type, or `choices` miss is a catchable
+`Error{kind: "args"}` (not argparse's `exit(2)`), and `-h` / `--help` / `--version`
+set the result's `done` flag with `helpText` rather than exiting. Pure `.j` over
+`strings` + `convert` + `lists` + `maps`; **both binaries**. Core infrastructure,
+not a deck. 100% `args_test.j` overlay (32 tests) + full docs / index / `SUMMARY.md`
+/ `README.md` / demo / `JENNIFER.md`.
 
-Shape - a value-semantic `Parser` built with the copy-returning builder pattern
-the modules already use (`rest.Client` / `telegram.Bot`):
+### M24.15 - `validate` data validation module (compacted)
 
-- **Optional flags** (long + optional single-char short, default, `required`,
-  per-arg `choices`, help): `args.flag` (string) / `args.intFlag` /
-  `args.floatFlag` / `args.boolFlag` (presence -> true). Plus the two action
-  builders: `args.countFlag` (repeatable, `-vvv` -> 3, the argparse `count`
-  action) and `args.listFlag` (repeatable, collects each occurrence into a list,
-  the `append` action).
-- **Positionals** with `nargs`: `args.positional(name, help)` for a single
-  required value, and an `nargs` variant for `"?"` (0 or 1), `"*"` (0+), `"+"`
-  (1+), or an exact integer count - the tail-variadic positional collects into a
-  list.
-- **Subcommands**: `args.command(p, name, help, subParser)`, each subcommand its
-  own `Parser` with its own flags / positionals (argparse subparsers). The chosen
-  path is read back with `args.command($r)`.
-- **`--version`**: `args.version(p, "1.2.0")` adds a `--version` action.
+**Done.** Declarative validation of a `map of string to string` against a rule set,
+returning a structured failure list instead of ad-hoc per-field `if` checks. Rules
+are value-semantic descriptors: `required`, `isInt` / `isFloat` / `isBool`, `min` /
+`max`, `minLen` / `maxLen`, `pattern`, `email` / `url` (over `regex` + `uri`),
+`datetime(format)` (`strftime`, calendar-checked via `time.parse`), `oneOf`
+(whitelist) / `noneOf` (blacklist), `password(policy)` (passthrough to the
+`password` module - the `password.Schema` rides in the `Rule` since there are no
+closures), and `custom` (a `func` predicate, called exception-safely), plus a
+`withMessage` override. Grouped per field in a `map of string to list of Rule`;
+`validate.check` -> `list of validate.Failure` (`{field, rule, param, message}`,
+`rule` a stable id + `param` its argument), `validate.ok` the bool short-circuit,
+`messages` / `byField` renderers, and `localize(errs, templates)` for i18n - a
+`rule-id -> template` map with brace-free `%param%` / `%field%` markers (`%%`
+escapes a literal `%`; single-pass substitution), deliberately decoupled from the
+language's `{expr}` string interpolation. An absent or blank field passes every rule
+except `required`; the failure struct is `Failure` (not the reserved `Error`).
+Values are strings (the `web.bodyForm` / `dotenv` / query-string shape). Pure `.j`
+over `regex` + `uri` + `time` + `password` + `convert` + `lists` + `strings` +
+`maps`; **both binaries**. 100% `validate_test.j` overlay (16 tests) + full docs /
+index / `SUMMARY.md` / `README.md` / demo / `JENNIFER.md`.
 
-`args.parse($p, os.ARGS)` -> a `Result` with typed accessors (`asString` /
-`asInt` / `asFloat` / `asBool` / `asList` / `count` / `has`; the `int` / `float` /
-`bool` type keywords can't be method names, hence the `as*` naming shared with
-`json` / `sql`). Normalisation covers `--flag=value`, `--flag value`, `-x value`,
-`-abc` bundled shorts, `-nAda` glued shorts, and `--` end-of-flags (a `-5` is a
-negative-number positional, not a flag); an unknown flag, a missing required arg,
-a bad-type value, or a `choices` violation is a catchable `Error{kind: "args"}`
-(not argparse's process `exit(2)` - it integrates with `try`/`catch`). `-h` /
-`--help` (and `--version`) set the result's `done` flag with `helpText` to print,
-rather than exiting; a generated usage / help string reflects flags, positionals,
-choices, defaults, and subcommands. Pure `.j` over `strings` + `convert` +
-`lists` + `maps`, so **both binaries**. Core (general infrastructure), not a deck.
-Shipped as `modules/args.j` with a **100%** `args_test.j` overlay (32 tests),
-`docs/modules/args.md` + index / `SUMMARY.md` / `README.md` rows,
-`examples/modules/args_demo.j`, and a `JENNIFER.md` bullet.
+### M24.16 - module suite hardening (security + robustness audit follow-up)
 
-### M24.15 - `validate` data validation module
+**Done.** A hardening pass over the shipped `.j` module suite closing the
+security-relevant findings from a source audit. The findings collapsed to a handful
+of **systemic** root causes; each pattern was fixed once and applied across its
+cluster, extending every touched module's `*_test.j` overlay with a regression
+(~35 fixes across ~24 modules, both binaries clean). Ordered **remotely-exploitable
+first** - a recover-less interpreter turns an unbounded read into an uncatchable OOM.
 
-**Done.** Declarative validation of a `map of string to string` against a rule
-set, returning a structured failure list instead of ad-hoc per-field `if` checks
-scattered across handlers. Rules compose as value-semantic descriptors: `required`,
-`isInt` / `isFloat` / `isBool`, `min` / `max` (numeric), `minLen` / `maxLen`
-(string length), `pattern` (a `regex`), `email` / `url` (over `regex` + `uri`),
-`datetime(format)` (a `strftime` format checked with `time.parse`, so an invalid
-calendar date like month 13 fails, not just a format mismatch), `oneOf` (a
-whitelist) / `noneOf` (a blacklist - reserved usernames, banned words),
-`password(policy)` (a passthrough to the `password` module's policy engine: the
-`password.Schema` travels in the `Rule` since Jennifer has no closures, so
-`validate` imports `password` and surfaces its failed-rule reasons), and `custom`
-(a `func` value predicate, using the first-class-function tier and called
-exception-safely - a throwing predicate marks the value invalid rather than
-escaping `check`), plus a `withMessage` fluent override. Rules group per
-field in a `map of string to list of Rule`; `validate.check(data, rules)` ->
-`list of validate.Failure` (`{field, rule, param, message}` - `rule` a stable
-message id, `param` its argument) and `validate.ok` is the bool short-circuit,
-with `validate.messages` / `validate.byField` renderers and
-`validate.localize(errs, templates)` for **non-English / custom messages** (a
-`rule-id -> template` map with `{param}` / `{field}` interpolation, falling back
-to the default for unlisted rules - feed it `intl.tr` templates for full i18n).
-An absent or blank field passes every rule **except** `required` (an optional
-field left empty is valid); only fields named in the rule set are checked. The failure
-struct is `validate.Failure`, not `Error` - `Error` is the one reserved global
-struct a module may not redefine. Values are strings (the `web.bodyForm` /
-`dotenv` / query-string shape); a `json.Value` is flattened to a string map first,
-rather than validated in place. Pairs directly with `web.bodyForm` / `rest`
-request bodies and config loading. Pure `.j` over `regex` + `uri` + `time` +
-`password` + `convert` + `lists` + `strings` + `maps`; **both binaries**. Shipped as
-`modules/validate.j` with a **100%** `validate_test.j` overlay (15 tests),
-`docs/modules/validate.md` +
-index / `SUMMARY.md` / `README.md` rows, `examples/modules/validate_demo.j`, and a
-`JENNIFER.md` bullet.
+Delivered - the whole exploitable / high / medium-security surface:
 
-### M24.16 - `html` module: rebrand `htmlwriter` + add a parser
+- **Received-data caps.** One shared `transport.checkReceiveSize(n, what)` +
+  `transport.MAX_RECEIVED_BYTES` (not a dozen divergent per-module caps), applied to
+  the genuinely uncapped aggregate reads: `amqp` body assembly (the one *critical* -
+  a broker-declared 64-bit body size), `smtp` reply, `mqtt` remaining-length varint
+  + body + a `poll` deadline-hang, and `multipart` (a torn body missing its closing
+  `--boundary--` is rejected, not accepted as complete). Modules the audit flagged
+  (`imap` / `pop` / `memcache` / `mikrotik`) already carried per-unit caps.
+- **Injection.** The label printer-command injection is closed at the boundary
+  (`label` validates every numeric symbology digits-only, so raw `^FD` / `;` data is
+  safe on both the ZPL and CAB dialects), plus `label_zpl` errorLevel / `^XG`
+  image-name / `^PQ` quantity and comprehensive `label_cab` escaping. The CRLF /
+  control class: `log` (level; message / fields were already escaped), `ical` /
+  `vcard` (one shared `emitLine` CR/LF strip), and `barcode` SVG colour validation.
+- **Cross-origin redirect credential leak.** `http.send` drops
+  `Authorization` / `Cookie` + the cookie jar on a cross-origin redirect (browser
+  rule), gated by a new `allowCrossOriginRedirect` opt-in; `rest.paginate` refuses a
+  cross-origin `Link: next` under the same flag.
+- **Typed error propagation.** The real `json.decode` sites wrapped to a
+  module-kinded error (`graphql`, `oauth`, `influxdb`; `telegram` already wrapped;
+  `totp` / `feed` / `discord` do not decode JSON).
+- **Numeric clamps.** `totp` window / digits, `bloom` bit-size, `ratelimit` window,
+  `password` (negative minimums normalized + symbol-count fixed), `barcode` scale
+  (+ `scale==0` div-by-zero), `screen` dimensions, `orm` page size.
+- **Correctness.** `semver.satisfies(v, garbage)` -> `false` (was `true`); the `ldap`
+  dead self-assignment removed.
+
+The audit over-stated in **every** cluster (per-unit caps already present, `influx`
+keys already escaped, `log` / `oauth` / `telegram` already hardened, three
+"typed-decode" modules that never decode JSON), so the real work was smaller than
+the raw finding count.
+
+### M24.17 - `html` module: rebrand `htmlwriter` + add a parser
 
 **Planned.** Fold HTML **building** and **parsing** into one bare-named `html`
 module. Two parts:
@@ -1381,13 +1385,13 @@ module. Two parts:
   `xml` hardening precedent).
 
 Pure `.j`; **both binaries**. Core (a general format primitive). The largest
-build effort here (a from-scratch tolerant parser); best done before M24.17, which
+build effort here (a from-scratch tolerant parser); best done before M24.18, which
 reuses its node / accessor shape.
 
-### M24.17 - `markdown` module: add a reader (surface the parse tree)
+### M24.18 - `markdown` module: add a reader (surface the parse tree)
 
 **Planned.** Give `markdown` the direction it lacks - **reading** - the same
-consistency move as the M24.16 `html` rebrand. Today `markdown` is a generator
+consistency move as the M24.17 `html` rebrand. Today `markdown` is a generator
 plus a renderer: authoring helpers build Markdown *text* (`header` / `style` /
 `link` / `bullets` / `numbered` / `codeBlock` / `table` / `tablePretty`), and
 `toHtml` / `toAnsi` parse Markdown and render **straight to a string**. It already
@@ -1401,7 +1405,7 @@ that `horizon.md`'s DRAFT#13 (Markdown -> PDF) names as its prerequisite.
   `markdown.Doc` / `Node` and add `markdown.parse(md) -> Doc`, walked by the same
   `xml` / `html` family vocabulary (`typeOf` / `children` / `text` / `level` for
   headings / `attr` for a link href / list-ordered / code-language, plus `get` /
-  `findAll` / `has` over a small selector). Reusing M24.16's node / accessor shape
+  `findAll` / `has` over a small selector). Reusing M24.17's node / accessor shape
   is why that milestone lands first - the whole `xml` / `html` / `markdown` family
   then walks identically.
 - **Round-trip through one model.** Refactor `toHtml` / `toAnsi` to render **from**
@@ -1414,11 +1418,11 @@ that `horizon.md`'s DRAFT#13 (Markdown -> PDF) names as its prerequisite.
 
 Pure `.j`; **both binaries**. Core (a general format primitive). Mostly a
 surfacing + accessor + render-refactor job (the parser exists), so smaller than
-M24.16's from-scratch build. Ships the full module discipline: the `markdown`
+M24.17's from-scratch build. Ships the full module discipline: the `markdown`
 overlay extended, `docs/modules/markdown.md` + `JENNIFER.md` updated, and a demo
 of `parse` -> walk -> `render`.
 
-### M24.18 - string interpolation (`{expr}` in cooked strings)
+### M24.19 - string interpolation (`{expr}` in cooked strings)
 
 **Planned.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}"` - so a
 value sits beside its position with no `sprintf` arg-counting or verb/type
@@ -1496,6 +1500,59 @@ Two parts:
 
 Core (a language feature; both binaries). The `f"..."` rejection lands in
 `rejected.md` and the intl-break rationale in `design-decisions.md` when it ships.
+
+### M24.20 - module version + capability header
+
+**Planned.** A declarative per-file header that states the minimum interpreter
+version and the host capabilities a module needs, checked at **import time** so a
+mismatch aborts with a clear error instead of failing cryptically deep in a stub or
+after a breaking change. Pre-1.0 the language breaks at milestones deliberately
+(e.g. `intl`'s `{name}` -> `%name%` in M24.19), so a module that bumps its floor in
+the same change that breaks it is guaranteed to load only against an interpreter
+that supports it. The lightweight sibling of the planned `jvc` / `deck.toml`
+constraints (`horizon.md` DRAFT#12) - it works with no package manager, and `jvc`
+can later read the same header.
+
+Two **independent** axes (a module can need `net` at any version, so folding them
+into one field is muddy):
+
+- **Minimum version** - `# jennifer: >=0.24.0`. A *minimum* compare, not a range
+  grammar (newer always satisfies; bump the floor when you break). Evaluated in Go
+  by a new `version.AtLeast(min)` (parse `major.minor.patch`, compare) - **not** the
+  `.j` `semver` module, which would bootstrap during load. `dev` bypasses the check
+  (`version.Version` defaults to `"dev"`, and every `go test` / dev build is `dev`,
+  so without the bypass they would all fail).
+- **Capabilities** - `# jennifer-needs: net` (or `exec`). The interpreter exposes
+  the capability set it was built with (`{net, exec}` on the standard `jennifer`,
+  neither on `jennifer-tiny`, derived from `runtime.Compiler != "tinygo"` + the
+  `net` build-tag split); a module naming an unavailable capability aborts at
+  import. Future-proof: a tinygo build rebuilt with a network stack simply reports
+  `net` and passes, no special-casing - and it finally gives the net / exec-backed
+  modules a clean import-time refusal instead of a runtime stub error. The same set
+  is queryable from `meta` (`meta.hasCapability("net")` / `meta.CAPABILITIES`) so a
+  script can branch.
+
+**A header pragma, not a runtime call.** A comment scanned from raw source at
+file-read time (a small regex over the first ~10 comment lines, tolerant of the
+shebang and the SPDX block), before lex / parse. A module top level is
+declarations-only (so a runtime `meta.requireVersion(...)` cannot live there), and a
+`def const` floor is known only post-parse and may be a non-literal - the pragma
+sits with the existing header block, needs no grammar change, and covers programs,
+modules, and `include`d files uniformly. A **malformed** directive is a hard error,
+never silently ignored (a typo must not disable the guard).
+
+Enforcement is one shared `checkRequirements(rawSource, path)` at each first-read
+seam: the CLI entry program (`cmd/jennifer` run path), the preprocessor for
+`include` (`internal/preproc`), and `loadModule` (`internal/interpreter/module.go`,
+each nested module checked independently). The error is positioned and actionable -
+`module "intl.j" requires jennifer >=0.24.0, but this build is 0.23.1` /
+`module "httpd.j" needs capability "net", unavailable in jennifer-tiny`.
+
+Ships with `version.AtLeast` + the capability query in `meta`, the three enforcement
+sites, a new `L3xx` lint rule flagging a shipped `modules/*.j` missing the header
+(so floors cannot silently drift), and docs. No interpreter-core or
+language-grammar change. Discipline: bump a module's floor in the same change that
+breaks it.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 

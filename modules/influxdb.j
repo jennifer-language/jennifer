@@ -608,7 +608,13 @@ export func query(c as Client, influxql as string) {
     if ($resp.status >= 300) {
         fail(redact($c, errorFrom($resp)));
     }
-    return parseQuery(json.decode($resp.body));
+    def node as json.Value;
+    try {
+        $node = json.decode($resp.body);
+    } catch (e) {
+        fail(redact($c, "non-JSON response from the query endpoint"));
+    }
+    return parseQuery($node);
 }
 
 /**

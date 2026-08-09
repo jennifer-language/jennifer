@@ -13,6 +13,19 @@
 # crc / encoding, so the overlay only adds testing.
 use testing;
 
+# An SVG colour containing a quote (an attribute-breakout attempt) is rejected;
+# a valid hex colour passes.
+func testSafeColorRejects() {
+    testing.assertEqual(safeColor("#ff0000"), "#ff0000");
+    def threw as bool init false;
+    try {
+        safeColor("#000\" onload=\"alert(1)");
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}
+
 func testReedSolomonVector() {
     # thonky "HELLO WORLD" v1-M: 16 data codewords -> 10 EC codewords.
     def field as GF init buildGF();

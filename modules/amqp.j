@@ -616,6 +616,10 @@ func expectMethod(socket as net.Conn, classId as int, methodId as int, what as s
 func readMessageBody(c as Conn) {
     def hf as Frame init readFrame($c.socket);
     def bodySize as int init decodeContentBodySize($hf.payload);
+    # A broker-declared body size is untrusted: cap it before assembling, so a
+    # hostile / desynced broker cannot drive an unbounded allocation. The
+    # per-frame MAX_FRAME_BYTES check does not bound the aggregate body.
+    transport.checkReceiveSize($bodySize, "amqp message body");
     def body as bytes;
     # Append in place to keep multi-frame body assembly O(N), not O(N^2).
     while (len($body) < $bodySize) {

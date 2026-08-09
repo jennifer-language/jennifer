@@ -52,6 +52,10 @@ use maps;
 # `WHERE fk IN (...)` batch the same way - so neither is ever silently capped.
 def const MAX_QUERY_PARAMS as int init 60000;
 
+# MAX_PAGE_SIZE caps a page's row limit so an attacker-controlled page size cannot
+# turn a paged query into an unbounded full-table SELECT.
+def const MAX_PAGE_SIZE as int init 10000;
+
 # ---- schema ----
 
 /**
@@ -1007,6 +1011,9 @@ export func page(q as Query, pageNum as int, pageSize as int) {
     }
     if ($pageSize < 1) {
         fail("page size must be >= 1");
+    }
+    if ($pageSize > MAX_PAGE_SIZE) {
+        fail("page size exceeds the maximum of " + convert.toString(MAX_PAGE_SIZE));
     }
     return limit(offset($q, ($pageNum - 1) * $pageSize), $pageSize);
 }

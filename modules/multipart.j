@@ -308,9 +308,11 @@ export func parse(contentType as string, body as bytes) {
     # real segment is "\r\n" + part; the closing "--boundary--" leaves a segment
     # that starts with "--".
     def si as int init 1;
+    def sawClosing as bool init false;
     while ($si < len($segs)) {
         def seg as bytes init $segs[$si];
         if (binary.startsWith($seg, $dashes)) {
+            $sawClosing = true;
             $si = len($segs); # closing delimiter; stop
             continue;
         }
@@ -320,6 +322,18 @@ export func parse(contentType as string, body as bytes) {
         }
         $parts[] = parsePart($pb);
         $si = $si + 1;
+    }
+    # Require the closing "--boundary--". A torn / truncated body (dropped tail)
+    # would otherwise be accepted as a complete multipart, enabling smuggling /
+    # over-read when the body is untrusted.
+    if (not $sawClosing) {
+        throw Error{
+            kind: "multipart",
+            message: "multipart: missing closing boundary (truncated body)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return $parts;
 }

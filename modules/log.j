@@ -192,7 +192,7 @@ func escapeNewlines(v as string) {
 
 # renderText: `<ts> <LEVEL> <message> k=v ...`.
 func renderText(level as string, message as string, fields as map of string to string, ts as string) {
-    def s as string init $ts + " " + strings.upper($level) + " " + escapeNewlines($message);
+    def s as string init $ts + " " + strings.upper(escapeNewlines($level)) + " " + escapeNewlines($message);
     for (def k in $fields) {
         $s = $s + " " + $k + "=" + quoteIfNeeded($fields[$k]);
     }
@@ -205,7 +205,7 @@ func renderLogfmt(
     message as string,
     fields as map of string to string,
     ts as string) {
-    def s as string init "time=" + $ts + " level=" + $level + " msg=" + quoteIfNeeded($message);
+    def s as string init "time=" + $ts + " level=" + quoteIfNeeded($level) + " msg=" + quoteIfNeeded($message);
     for (def k in $fields) {
         $s = $s + " " + $k + "=" + quoteIfNeeded($fields[$k]);
     }

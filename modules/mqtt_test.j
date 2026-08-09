@@ -39,6 +39,22 @@ func testRemLenRoundTrip() {
     }
 }
 
+# A malformed remaining-length with a 5th continuation byte (all high bits set)
+# is rejected typed, not looped / overflowed.
+func testRemLenTooLongRejected() {
+    def bad as bytes init bytesOf([0xff, 0xff, 0xff, 0xff, 0xff]);
+    def threw as bool init false;
+    def kind as string init "";
+    try {
+        decodeRemLen($bad, 0);
+    } catch (e) {
+        $threw = true;
+        $kind = $e.kind;
+    }
+    testing.assertTrue($threw);
+    testing.assertEqual($kind, "mqtt");
+}
+
 func testPutStringPrefix() {
     def b as bytes;
     testing.assertEqual(putString($b, "MQTT"), bytesOf([0, 4, 77, 81, 84, 84]));

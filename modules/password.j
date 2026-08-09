@@ -101,7 +101,9 @@ func fail(msg as string) {
 # is enabled, else 0 (a disabled class contributes nothing - the enable bool is
 # authoritative over a leftover minimum).
 func effMin(enabled as bool, m as int) {
-    if ($enabled) {
+    # A disabled class, or a negative minimum, contributes no requirement - a
+    # negative min would otherwise make the corresponding check pass vacuously.
+    if ($enabled and $m > 0) {
         return $m;
     }
     return 0;
@@ -373,7 +375,9 @@ export func validate(s as Schema, pw as string) {
     def lo as int init countIn(LOWER, $pw);
     def up as int init countIn(UPPER, $pw);
     def dig as int init countIn(DIGITS, $pw);
-    def sym as int init $n - $lo - $up - $dig;
+    # Count only real symbols (the defined set): `n - lo - up - dig` would count a
+    # space / newline / other char as a "symbol", so "   " would satisfy minSymbols.
+    def sym as int init countIn(SYMBOLS, $pw);
     if ($lo < effMin($s.lower, $s.minLower)) {
         $reasons[] = "needs at least " + convert.toString($s.minLower) + " lowercase";
     }

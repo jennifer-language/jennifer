@@ -71,11 +71,25 @@ export func fixedWindow(store as kvstore.Store, limit as int, window as int) {
 
 # requirePositive rejects a non-positive limit / window up front, with a clear
 # error - rather than a later, cryptic division-by-zero at `now // window`.
+# MAX_WINDOW bounds the window (seconds) so the aligned-index arithmetic
+# ((idx+1)*window and the 2*window TTL) cannot overflow int64 into a wrong reset
+# deadline / TTL.
+def const MAX_WINDOW as int init 2147483647;
+
 func requirePositive(limit as int, window as int) {
     if ($limit < 1 or $window < 1) {
         throw Error{
             kind: "ratelimit",
             message: "ratelimit: limit and window must both be >= 1",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    if ($window > MAX_WINDOW) {
+        throw Error{
+            kind: "ratelimit",
+            message: "ratelimit: window exceeds the maximum of " + convert.toString(MAX_WINDOW),
             file: "",
             line: 0,
             col: 0

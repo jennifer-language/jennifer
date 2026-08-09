@@ -204,3 +204,15 @@ func testUnionMismatchThrows() {
     }
     testing.assertTrue($threwK);
 }
+
+# A size past MAX_SIZE is rejected before the bitvector is allocated (memory-DoS
+# guard).
+func testSizeClamped() {
+    def threw as bool init false;
+    try {
+        new(MAX_SIZE + 1, 5);
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}

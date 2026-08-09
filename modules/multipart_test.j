@@ -15,6 +15,23 @@ func asString(b as bytes) {
     return convert.stringFromBytes($b, "utf-8");
 }
 
+# A body missing the closing "--boundary--" (a truncated / torn upload) is
+# rejected, not silently accepted as a complete multipart.
+func testTornBodyRejected() {
+    def torn as bytes init convert.bytesFromString(
+        "--Z\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n", "utf-8");
+    def threw as bool init false;
+    def kind as string init "";
+    try {
+        parse("multipart/form-data; boundary=Z", $torn);
+    } catch (e) {
+        $threw = true;
+        $kind = $e.kind;
+    }
+    testing.assertTrue($threw);
+    testing.assertEqual($kind, "multipart");
+}
+
 func testBuildExactBody() {
     def parts as list of Part init [field("title", "hi"), field("n", "42")];
     def form as Built init buildWith($parts, "B");

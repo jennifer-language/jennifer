@@ -554,7 +554,9 @@ func cmpOp(v as Version, operand as string, op as string) {
     }
     def core as Core init parseCore($o);
     if ($core.count == 0) {
-        return true;
+        # An unparseable operand (not a wildcard - those returned above) is not a
+        # match-all: an invalid range matches nothing (node-semver semantics).
+        return false;
     }
     def lo as Version init coreLower($core);
     def hi as Version init tildeUpper($core);
@@ -585,7 +587,9 @@ func eqOrRange(v as Version, operand as string) {
     }
     def core as Core init parseCore($o);
     if ($core.count == 0) {
-        return true;
+        # An unparseable operand (not a wildcard - those returned above) is not a
+        # match-all: an invalid range matches nothing (node-semver semantics).
+        return false;
     }
     if ($core.count >= 3) {
         return compare($v, coreLower($core)) == 0;

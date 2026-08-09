@@ -31,6 +31,12 @@ use math;
 # in ln and directly in the optimal bit/hash formulas.
 def const LN2 as float init 0.6931471805599453;
 
+# MAX_SIZE caps a filter's bit count so a caller (or a derived sizing) cannot
+# preallocate an unbounded bitvector; the packed array stays within the 64 MiB
+# house limit (512 Mibit / 8), which also keeps the position math clear of int64
+# overflow.
+def const MAX_SIZE as int init 536870912;
+
 /**
  * A Bloom filter.
  * @field bits {bytes} the packed bit array
@@ -115,6 +121,9 @@ func positions(item as string, size as int, hashes as int) {
 export func new(size as int, hashes as int) {
     if ($size < 1) {
         fail("size must be >= 1");
+    }
+    if ($size > MAX_SIZE) {
+        fail("size " + convert.toString($size) + " exceeds the maximum of " + convert.toString(MAX_SIZE));
     }
     if ($hashes < 1) {
         fail("hashes must be >= 1");

@@ -330,16 +330,21 @@ export func barcode(
         };
     }
     def d as string init $data;
-    if ($type == "itf") {
+    # Numeric symbologies (EAN-13 / EAN-8 / ITF) are emitted into a raw ^FD on the
+    # ZPL / CAB side, so non-digit data would be a printer-command-injection vector
+    # (`^` `~` `_`, `;`, or a newline). Reject non-numeric data here, at the boundary.
+    if ($type == "ean13" or $type == "ean8" or $type == "itf") {
         if (not isDigits($d)) {
             throw Error{
                 kind: "label",
-                message: "label: ITF barcode data must be numeric: " + $d,
+                message: "label: " + $type + " barcode data must be numeric: " + $d,
                 file: "",
                 line: 0,
                 col: 0
             };
         }
+    }
+    if ($type == "itf") {
         if (len($d) % 2 == 1) {
             $d = "0" + $d;
         }

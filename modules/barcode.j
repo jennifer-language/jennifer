@@ -85,6 +85,33 @@ func fail(msg as string) {
     throw Error{ kind: "barcode", message: "barcode: " + $msg, file: "", line: 0, col: 0 };
 }
 
+# MAX_SCALE / MAX_QUIET bound the render magnification so a caller-supplied
+# `scale` / `quiet` cannot build a gigapixel raster or SVG; `clampDim` also floors
+# scale at 1 to avoid a zero-size grid (a `scale == 0` div-by-zero / empty output).
+def const MAX_SCALE as int init 100;
+def const MAX_QUIET as int init 100;
+
+func clampDim(v as int, lo as int, hi as int) {
+    if ($v < $lo) {
+        return $lo;
+    }
+    if ($v > $hi) {
+        return $hi;
+    }
+    return $v;
+}
+
+# safeColor rejects a colour that could break out of the SVG `fill` attribute: a
+# valid hex / named CSS colour contains no quote, angle bracket, ampersand, or
+# space, so any of those is an injection attempt.
+func safeColor(c as string) {
+    if (strings.contains($c, "\"") or strings.contains($c, "<") or
+        strings.contains($c, ">") or strings.contains($c, "&") or strings.contains($c, " ")) {
+        fail("invalid SVG colour: " + $c);
+    }
+    return $c;
+}
+
 # A QR drawing surface (private): the module grid plus a reserved (function
 # pattern) mask. Threaded through the placement helpers and returned each time,
 # since lists / structs are value-semantic.
@@ -1824,17 +1851,22 @@ func halfBlock(top as bool, bot as bool) {
  * @return {string} the SVG document
  */
 export func svg(symbol as Symbol, opts as Options) {
+    # Sanitize the caller's colours once, up front, so every downstream fill=""
+    # attribute is safe.
+    def o as Options init $opts;
+    $o.foreground = safeColor($opts.foreground);
+    $o.background = safeColor($opts.background);
     match ($symbol.kind) {
-        when Matrix { return svgMatrix($symbol, $opts); }
-        when Linear { return svgLinear($symbol, $opts); }
+        when Matrix { return svgMatrix($symbol, $o); }
+        when Linear { return svgLinear($symbol, $o); }
     }
 }
 
 func svgMatrix(symbol as Symbol, opts as Options) {
     def m as list of list of bool init $symbol.matrix;
     def n as int init len($m);
-    def s as int init $opts.scale;
-    def q as int init $opts.quiet;
+    def s as int init clampDim($opts.scale, 1, MAX_SCALE);
+    def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
     def dim as int init ($n + 2 * $q) * $s;
     # Accumulate rects in a list and join once: an SVG can hold thousands of
     # rects, and a growing `string +` per rect is O(N^2) in the output size.
@@ -1856,8 +1888,8 @@ func svgMatrix(symbol as Symbol, opts as Options) {
 }
 
 func svgLinear(symbol as Symbol, opts as Options) {
-    def s as int init $opts.scale;
-    def q as int init $opts.quiet;
+    def s as int init clampDim($opts.scale, 1, MAX_SCALE);
+    def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
     def h as int init $opts.height * $s;
     def totalUnits as int init 0;
     for (def w in $symbol.bars) {
@@ -1956,8 +1988,8 @@ export func png(symbol as Symbol, opts as Options) {
 
 # rasterize produces the grayscale pixel grid (0 = dark, 255 = light).
 func rasterize(symbol as Symbol, opts as Options) {
-    def s as int init $opts.scale;
-    def q as int init $opts.quiet;
+    def s as int init clampDim($opts.scale, 1, MAX_SCALE);
+    def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
     if ($symbol.kind == SymbolKind.Matrix) {
         def m as list of list of bool init $symbol.matrix;
         def n as int init len($m);

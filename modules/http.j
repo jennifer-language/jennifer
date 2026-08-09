@@ -946,6 +946,7 @@ def const MAX_BACKOFF_MS as int init 30000;
  * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`
  * @field backoffMs {int} base backoff for the first retry (0 = 250ms), doubled each attempt and capped at 30s
  * @field tls {TlsOptions} TLS verification options for `https://` (zero = full verification)
+ * @field allowCrossOriginRedirect {bool} keep credential headers / cookies across a redirect to a different origin (default false = drop them, the browser rule)
  */
 export def struct Options {
     timeoutMs as int,
@@ -953,7 +954,8 @@ export def struct Options {
     maxRedirects as int,
     maxRetries as int,
     backoffMs as int,
-    tls as TlsOptions
+    tls as TlsOptions,
+    allowCrossOriginRedirect as bool
 };
 
 /**
@@ -1156,6 +1158,21 @@ func resolveLocation(curUrl as string, loc as string) {
     return originOf($curUrl) + $dir + $loc;
 }
 
+# stripCredentialHeaders returns a copy of headers with the credential-bearing
+# headers removed (case-insensitive). Applied before a cross-origin redirect hop so
+# a hostile server cannot redirect a credentialed request to an attacker origin and
+# harvest the token / cookie (the browser "sensitive headers" rule).
+func stripCredentialHeaders(headers as map of string to string) {
+    def out as map of string to string init {};
+    for (def k in $headers) {
+        def lk as string init strings.lower($k);
+        if ($lk != "authorization" and $lk != "cookie" and $lk != "proxy-authorization") {
+            $out[$k] = $headers[$k];
+        }
+    }
+    return $out;
+}
+
 # sendOnce runs one request through the retry loop (no redirects): it dials,
 # sends (Connection: close), and retries a 429 / 5xx up to opts.maxRetries with
 # backoff. Returns the raw response bytes.
@@ -1205,13 +1222,15 @@ export func send(
     def curMethod as string init $method;
     def curUrl as string init $url;
     def curBody as string init $body;
+    # curHeaders is sanitized (credential headers dropped) on a cross-origin hop.
+    def curHeaders as map of string to string init $headers;
     def redirectsLeft as int init $options.maxRedirects;
     def jar as map of string to string init {};
     while (true) {
         def raw as bytes init sendOnce(
             $curMethod,
             $curUrl,
-            withCookies($headers, $jar),
+            withCookies($curHeaders, $jar),
             $curBody,
             $options);
         def r as BytesResponse init parseRaw($raw);
@@ -1219,7 +1238,15 @@ export func send(
             $jar = jarAdd($jar, $sc);
         }
         if (isRedirect($r.status) and $redirectsLeft > 0 and maps.has($r.headers, "location")) {
-            $curUrl = resolveLocation($curUrl, $r.headers["location"]);
+            def nextUrl as string init resolveLocation($curUrl, $r.headers["location"]);
+            # A redirect to a different origin drops the caller's credential headers
+            # and the cookie jar (whose entries are unscoped), unless the caller
+            # explicitly opted into cross-origin credential forwarding.
+            if (not $options.allowCrossOriginRedirect and originOf($nextUrl) != originOf($curUrl)) {
+                $curHeaders = stripCredentialHeaders($curHeaders);
+                $jar = {};
+            }
+            $curUrl = $nextUrl;
             if ($r.status == 303 or
                 (($r.status == 301 or $r.status == 302) and $curMethod == "POST")) {
                 $curMethod = "GET";

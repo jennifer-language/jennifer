@@ -52,9 +52,9 @@ string (`""` for none).
 | `http.options(url, headers)`                | OPTIONS (capability probe; read the `Allow` header).              |
 | `http.header(resp, name)`                   | Read a response header case-insensitively, or `""` if absent.      |
 | `http.basic(user, pass)`                    | Build a `Basic <base64>` `Authorization` value (mirrors `rest.basic`). |
-| `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`. Zero value = defaults, no redirects, no retries. |
+| `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`. Zero value = defaults, no redirects, no retries, and credentials dropped on a cross-origin redirect. |
 | `http.defaultOptions()`                     | The zero `Options`, for inline use. |
-| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. Returns a `Response`. |
+| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin drops** `Authorization` / `Cookie` and the cookie jar (the browser "sensitive headers" rule) unless `allowCrossOriginRedirect` is set. Returns a `Response`. |
 | `http.Session`                              | A persistent (keep-alive) connection to one origin, with a cookie jar. |
 | `http.Exchange`                             | `response` (`Response`) + `session` (`Session`) to thread onward. |
 | `http.connect(url, options)`                | Open a persistent `Session` to the origin of `url`. |

@@ -200,6 +200,17 @@ export func newScreen(rows as int, cols as int) {
             col: 0
         };
     }
+    # Bound the grid so a huge rows*cols cannot overflow the product or allocate a
+    # multi-gigabyte cell list (a real terminal is far below this ceiling).
+    if ($rows > 65535 or $cols > 65535 or $rows * $cols > 16777216) {
+        throw Error{
+            kind: "value",
+            message: "screen.newScreen: dimensions too large",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
     def cells as list of string init [];
     def total as int init $rows * $cols;
     for (def i as int init 0; $i < $total; $i = $i + 1) {

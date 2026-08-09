@@ -26,6 +26,8 @@
  *     clientName: "me", user: "u", pass: "p", auth: "", allowInsecureAuth: false};
  */
 
+use convert;
+
 /**
  * A connection's transport security mode.
  * - `None` - plaintext (no encryption).
@@ -47,5 +49,37 @@ export func encrypted(s as Security) {
         when None { return false; }
         when Tls { return true; }
         when Starttls { return true; }
+    }
+}
+
+# --- received-data cap (shared across the wire-client modules) ----------------
+
+/**
+ * The tree-wide 64 MiB ceiling on a single received payload. A wire client that
+ * reads a size (or grows a buffer) from an untrusted peer checks it against this
+ * with `checkReceiveSize`, so a hostile server cannot drive the recover-less
+ * interpreter to an unbounded allocation. One shared constant instead of a
+ * per-module copy, so the whole client suite caps identically.
+ */
+export def const MAX_RECEIVED_BYTES as int init 67108864;
+
+/**
+ * Reject a received / declared size that is negative or exceeds
+ * `MAX_RECEIVED_BYTES`, raising a catchable `Error{kind: "transport"}` that names
+ * `what`. Call it on a peer-declared body / literal size before reading it, and on
+ * an accumulating buffer's length inside a read loop, so an endless or oversized
+ * stream fails typed instead of exhausting memory.
+ * @param n {int} the size to check (a declared size, or a running buffer length)
+ * @param what {string} a short label for the message (e.g. "amqp message body")
+ */
+export func checkReceiveSize(n as int, what as string) {
+    if ($n < 0 or $n > MAX_RECEIVED_BYTES) {
+        throw Error{
+            kind: "transport",
+            message: $what + " exceeds the " + convert.toString(MAX_RECEIVED_BYTES) + "-byte receive limit",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
 }

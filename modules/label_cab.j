@@ -66,7 +66,11 @@ func cabBarcodeType(btype as string) {
 # cabEscape flattens a newline to a space (a newline would terminate the command
 # line; the data runs from the final `;` to the end of the line).
 func cabEscape(s as string) {
-    return strings.replace($s, "\n", " ");
+    # Flatten CR and LF to a space: either would terminate the command line and let
+    # a field value inject a following command (the data runs from the final `;` to
+    # the end of the line).
+    def out as string init strings.replace($s, "\r", " ");
+    return strings.replace($out, "\n", " ");
 }
 
 # cabBarcodeName builds the cab type token with its options: lowercase suppresses
@@ -78,10 +82,10 @@ func cabBarcodeName(f as Field) {
         $name = strings.lower($name);
     }
     if (not ($f.checkDigit == "")) {
-        $name = $name + "+" + strings.upper($f.checkDigit);
+        $name = $name + "+" + cabEscape(strings.upper($f.checkDigit));
     }
     if (not ($f.errorLevel == "")) {
-        $name = $name + "+EL" + $f.errorLevel;
+        $name = $name + "+EL" + cabEscape($f.errorLevel);
     }
     return $name;
 }
@@ -93,7 +97,7 @@ func cabBarcode(f as Field) {
     def head as string init "B " + convert.toString($f.x) + "," + convert.toString($f.y) +
         ",0," + cabBarcodeName($f);
     if ($f.barcodeType == "qr" or $f.barcodeType == "datamatrix") {
-        return $head + "," + convert.toString($f.h) + ";" + $f.data;
+        return $head + "," + convert.toString($f.h) + ";" + cabEscape($f.data);
     }
     def ne as float init BARCODE_NARROW;
     if ($f.moduleWidth > 0.0) {
@@ -107,7 +111,7 @@ func cabBarcode(f as Field) {
         }
         $size = $size + "," + $ratioStr;
     }
-    return $head + $size + ";" + $f.data;
+    return $head + $size + ";" + cabEscape($f.data);
 }
 
 # cabField renders one field as a cab JScript command.
@@ -135,7 +139,7 @@ func cabField(f as Field) {
     }
     if ($f.kind == "image") {
         # Autoload a stored image (mag 1,1) from the printer's images/ folder.
-        return "I " + $x + "," + $y + ",0,1,1,a;" + $f.data;
+        return "I " + $x + "," + $y + ",0,1,1,a;" + cabEscape($f.data);
     }
     return cabBarcode($f);
 }
@@ -148,27 +152,27 @@ func cabField(f as Field) {
 func renderCab(label as Label, setup as CabSetup) {
     def out as string init "m m\nJ";
     if (not ($setup.jobName == "")) {
-        $out = $out + " " + $setup.jobName;
+        $out = $out + " " + cabEscape($setup.jobName);
     }
     $out = $out + "\n";
     # H (heat/speed): emitted only when something is set.
     if (not ($setup.mode == "") or not ($setup.heat == 0) or not ($setup.speed == 0)) {
         $out = $out + "H " + convert.toString($setup.heat) + "," + convert.toString($setup.speed);
         if (not ($setup.mode == "")) {
-            $out = $out + "," + $setup.mode;
+            $out = $out + "," + cabEscape($setup.mode);
         }
         $out = $out + "\n";
     }
     # O (orientation): emitted only when set.
     if (not ($setup.orientation == "")) {
-        $out = $out + "O " + $setup.orientation + "\n";
+        $out = $out + "O " + cabEscape($setup.orientation) + "\n";
     }
     # S (label geometry): an explicit width means "use these dimensions"; width 0
     # derives a single-up, gap-0 geometry from the label size. The optional column
     # pitch + count are emitted only for a multi-up die (columns > 1).
     $out = $out + "S ";
     if (not ($setup.sensor == "")) {
-        $out = $out + $setup.sensor + ";";
+        $out = $out + cabEscape($setup.sensor) + ";";
     }
     if ($setup.width == 0.0) {
         $out = $out + "0,0," + convert.toString($label.height) + "," +

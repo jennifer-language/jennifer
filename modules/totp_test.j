@@ -23,6 +23,32 @@ func eight() {
     return $o;
 }
 
+# A verify window past the cap is rejected typed (CPU-DoS guard) - fires before
+# the secret is even decoded.
+func testVerifyWindowClamped() {
+    def o as Options;
+    def threw as bool init false;
+    try {
+        verifyWindowAt("AAAA", "000000", 0, 1000000, $o);
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}
+
+# A code length outside [6, 8] is rejected (non-standard + powTen overflow guard).
+func testBadDigitsRejected() {
+    def o as Options;
+    $o.digits = 20;
+    def threw as bool init false;
+    try {
+        digitsOf($o);
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}
+
 func testRfcSha() {
     def s as string init seed("12345678901234567890");
     def o as Options init eight();

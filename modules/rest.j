@@ -76,6 +76,20 @@ func joinUrl(baseUrl as string, path as string) {
     return $base + "/" + $path;
 }
 
+# sameOrigin reports whether a candidate next-URL shares the base URL's origin
+# (scheme + host + port). A relative path (no scheme) is same-origin by definition
+# (it joins onto baseUrl). Used to refuse following a server-named cross-origin
+# `Link: rel="next"` with the client's credentials attached.
+func sameOrigin(baseUrl as string, candidate as string) {
+    if (not (strings.startsWith($candidate, "http://") or
+        strings.startsWith($candidate, "https://"))) {
+        return true;
+    }
+    def a as uri.Uri init uri.parse($baseUrl);
+    def b as uri.Uri init uri.parse($candidate);
+    return $a.scheme == $b.scheme and $a.host == $b.host and $a.port == $b.port;
+}
+
 # queryString builds a "?k=v&..." query from a param map (percent-encoded via
 # the url module), or "" when the map is empty.
 func queryString(params as map of string to string) {
@@ -418,6 +432,13 @@ export func paginate(c as Client, path as string, query as map of string to stri
             $link = $r.headers["link"];
         }
         $nextPath = parseNextLink($link);
+        # A Link "next" to a different origin would replay the client's auth headers
+        # to a server-named host; refuse it (stop paging) unless the caller opted
+        # into cross-origin credential forwarding.
+        if (len($nextPath) > 0 and not $c.options.allowCrossOriginRedirect and
+            not sameOrigin($c.baseUrl, $nextPath)) {
+            $nextPath = "";
+        }
         $nextQuery = {}; # the next URL carries its own query
     }
     return $pages;

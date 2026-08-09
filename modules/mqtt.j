@@ -178,6 +178,12 @@ func decodeRemLen(buf as bytes, start as int) {
     def i as int init $start;
     def more as bool init true;
     repeat {
+        # MQTT's remaining-length varint is at most 4 bytes; a 5th continuation
+        # byte is malformed (and would otherwise overflow the multiplier / run off
+        # the buffer). Fail typed instead.
+        if ($i - $start >= 4) {
+            throw Error{kind: "mqtt", message: "mqtt: malformed remaining-length (over 4 bytes)", file: "", line: 0, col: 0};
+        }
         def b as int init $buf[$i];
         $value = $value + ($b & 0x7f) * $mult;
         $mult = $mult * 128;
@@ -400,6 +406,9 @@ func readPacketBody(conn as net.Conn, hb as int) {
     def typ as int init ($hb >> 4) & 0x0f;
     def flags as int init $hb & 0x0f;
     def rem as int init readRemLen($conn);
+    # The remaining length is broker-declared: cap it before driving readN, so a
+    # hostile / desynced broker cannot force an unbounded read.
+    transport.checkReceiveSize($rem, "mqtt packet body");
     def body as bytes;
     if ($rem > 0) {
         $body = readN($conn, $rem);
@@ -772,8 +781,12 @@ export func poll(client as Client, timeoutMs as int) {
     if (not $gotByte) {
         return $out;
     }
-    net.setDeadline($client.conn, 0);
+    # Keep a read deadline active while reading the body: a broker that sends the
+    # fixed-header byte then stalls must not hang poll forever (the body read would
+    # block with no deadline). Cleared once the whole packet is in.
+    net.setDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
     def pkt as Packet init readPacketBody($client.conn, $hb);
+    net.setDeadline($client.conn, 0);
     if ($pkt.typ == 3) {
         ackIfQos1($client, $pkt);
         $out[] = parsePublish($pkt);

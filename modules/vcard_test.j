@@ -203,3 +203,12 @@ func testParseEmptyYieldsNoCards() {
     testing.assertEqual(len(parse("")), 0);
     testing.assertEqual(len(parse("not a vcard at all")), 0);
 }
+
+# A CR/LF in a property value is stripped, so it cannot terminate the folded line
+# and inject a forged property into the .vcf / .ics stream.
+func testEmitLineStripsCRLF() {
+    def out as string init emitLine("BDAY", "1990\r\nXEVIL:injected");
+    testing.assertFalse(strings.contains($out, "\n"));
+    testing.assertFalse(strings.contains($out, "\r"));
+    testing.assertTrue(strings.contains($out, "1990"));
+}

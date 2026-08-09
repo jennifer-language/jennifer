@@ -239,7 +239,12 @@ export func deviceStart(config as Config) {
         "client_id": $config.clientId,
         "scope": $config.scope
     };
-    def node as json.Value init json.decode(postForm($config.deviceUrl, $params).body);
+    def node as json.Value;
+    try {
+        $node = json.decode(postForm($config.deviceUrl, $params).body);
+    } catch (e) {
+        fail("non-JSON response from the device endpoint");
+    }
     if (json.has($node, "/error")) {
         fail(errorMessage($node));
     }
@@ -378,7 +383,12 @@ export func save(path as string, token as Token) {
  * @return {Token} the loaded token
  */
 export func load(path as string) {
-    def node as json.Value init json.decode(fs.readString($path));
+    def node as json.Value;
+    try {
+        $node = json.decode(fs.readString($path));
+    } catch (e) {
+        fail("saved token file is not valid JSON: " + $path);
+    }
     return Token{
         accessToken: json.asString($node, "/accessToken"),
         tokenType: json.asString($node, "/tokenType"),
