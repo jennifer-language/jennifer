@@ -1268,6 +1268,135 @@ and every module that reinvented query-string building routes through them.
   (one obvious way): a single percent/form implementation in `encoding`, one URL
   module over it, no per-module reinvention.
 
+### M24.14 - `args` CLI argument parser module
+
+**Done.** A declarative command-line
+argument parser - the one clear general-infrastructure gap in the catalog, and
+the piece a language whose own guidance is "write your scripts and tools in
+Jennifer" most conspicuously lacked (`os.hasFlag` / `os.flag` / `os.ARGS` are
+primitive string lookups: no typed conversion, defaults, required args,
+positionals, subcommands, or usage). Scoped at Python `argparse`'s common surface
+**plus** the features an argparse user misses immediately - `nargs`, `choices`,
+`count` / `append`, `--version` - and deliberately stopping short of argument
+groups, mutually-exclusive sets, parent parsers, and prefix-abbreviation matching
+(Level C: diminishing returns for a `.j` module).
+
+Shape - a value-semantic `Parser` built with the copy-returning builder pattern
+the modules already use (`rest.Client` / `telegram.Bot`):
+
+- **Optional flags** (long + optional single-char short, default, `required`,
+  per-arg `choices`, help): `args.flag` (string) / `args.intFlag` /
+  `args.floatFlag` / `args.boolFlag` (presence -> true). Plus the two action
+  builders: `args.countFlag` (repeatable, `-vvv` -> 3, the argparse `count`
+  action) and `args.listFlag` (repeatable, collects each occurrence into a list,
+  the `append` action).
+- **Positionals** with `nargs`: `args.positional(name, help)` for a single
+  required value, and an `nargs` variant for `"?"` (0 or 1), `"*"` (0+), `"+"`
+  (1+), or an exact integer count - the tail-variadic positional collects into a
+  list.
+- **Subcommands**: `args.command(p, name, help, subParser)`, each subcommand its
+  own `Parser` with its own flags / positionals (argparse subparsers). The chosen
+  path is read back with `args.command($r)`.
+- **`--version`**: `args.version(p, "1.2.0")` adds a `--version` action.
+
+`args.parse($p, os.ARGS)` -> a `Result` with typed accessors (`asString` /
+`asInt` / `asFloat` / `asBool` / `asList` / `count` / `has`; the `int` / `float` /
+`bool` type keywords can't be method names, hence the `as*` naming shared with
+`json` / `sql`). Normalisation covers `--flag=value`, `--flag value`, `-x value`,
+`-abc` bundled shorts, `-nAda` glued shorts, and `--` end-of-flags (a `-5` is a
+negative-number positional, not a flag); an unknown flag, a missing required arg,
+a bad-type value, or a `choices` violation is a catchable `Error{kind: "args"}`
+(not argparse's process `exit(2)` - it integrates with `try`/`catch`). `-h` /
+`--help` (and `--version`) set the result's `done` flag with `helpText` to print,
+rather than exiting; a generated usage / help string reflects flags, positionals,
+choices, defaults, and subcommands. Pure `.j` over `strings` + `convert` +
+`lists` + `maps`, so **both binaries**. Core (general infrastructure), not a deck.
+Shipped as `modules/args.j` with a **100%** `args_test.j` overlay (32 tests),
+`docs/modules/args.md` + index / `SUMMARY.md` / `README.md` rows,
+`examples/modules/args_demo.j`, and a `JENNIFER.md` bullet.
+
+### M24.15 - `validate` data validation module
+
+**Planned.** Declarative validation of a `map of string to ...` (or a
+`json.Value`) against a rule set, returning a structured error list instead of
+ad-hoc per-field `if` checks scattered across handlers. Rules compose as
+value-semantic descriptors: `required`, `isInt` / `isFloat` / `isBool`,
+`min` / `max` (numeric), `minLen` / `maxLen` (string / list), `pattern` (a
+`regex`), `email` / `url` (over `uri` + `regex`), `oneOf` (enum), and `custom`
+(a `func` value predicate, using the first-class-function tier). `validate.check(
+data, rules)` -> `list of validate.Error` (`{field, rule, message}`); `ok`
+short-circuits to a bool. Pairs directly with `web.bodyForm` / `rest` request
+bodies and config loading. Pure `.j` over `regex` + `uri` + `convert` + `lists`;
+**both binaries**. Weaker than `args` (some of this is done inline today), but a
+clean, general, self-contained addition.
+
+### M24.16 - `html` module: rebrand `htmlwriter` + add a parser
+
+**Planned.** Fold HTML **building** and **parsing** into one bare-named `html`
+module. Two parts:
+
+- **Rebrand `htmlwriter` -> `html`** (a pre-1.0 breaking rename). The catalog
+  names a format module for the format, not the direction: `xml` / `json` /
+  `yaml` / `toml` build *and* parse, `feed` builds *and* parses, `snmp` / `ldap`
+  are client *and* server. `htmlwriter` (build-only) is the lone `*writer`
+  outlier, so its build surface (`element` / `text` / `raw` / `attr` / `boolAttr`
+  / `render` / `renderAll` / `escape`) moves under the `html.` namespace
+  unchanged. The `htmlwriter.j` file, `docs/modules/htmlwriter.md`, its index /
+  `SUMMARY.md` / `README.md` / `JENNIFER.md` entries, its demo, and its one
+  consumer (`markdown`, which renders HTML through it) are all renamed / repointed
+  in the same change; the `htmlwriter` name is retired.
+- **Add the parser (reader).** A tolerant, hand-rolled HTML parser (no
+  `x/net/html`, to stay TinyGo-clean and reflect-free) that ingests existing HTML
+  - scraping a link / table, sanitising, an HTML front-end for the Markdown -> PDF
+  layout layer. Designed like `xml`: `parse` yields a walkable node tree with the
+  same accessor shape (`tag` / `text` / `attr` / `attrs` / `children`, plus `get`
+  / `findAll` / `has` over a small CSS-ish or XPath-ish selector). Where practical
+  the parsed node and the builder node are the **one** type (like `xml.Value` is
+  for both), so a parsed tree can be edited and re-`render`ed - build and parse
+  round-trip through one model. Unlike `xml` the parser is **tolerant**: implied
+  end tags, void elements (`<br>` / `<img>`), unquoted attributes, mismatched
+  nesting, and comments / DOCTYPE / script-CDATA are handled, not rejected; a
+  nesting cap and node budget keep a malicious document a catchable error (the
+  `xml` hardening precedent).
+
+Pure `.j`; **both binaries**. Core (a general format primitive). The largest
+build effort here (a from-scratch tolerant parser); best done before M24.17, which
+reuses its node / accessor shape.
+
+### M24.17 - `markdown` module: add a reader (surface the parse tree)
+
+**Planned.** Give `markdown` the direction it lacks - **reading** - the same
+consistency move as the M24.16 `html` rebrand. Today `markdown` is a generator
+plus a renderer: authoring helpers build Markdown *text* (`header` / `style` /
+`link` / `bullets` / `numbered` / `codeBlock` / `table` / `tablePretty`), and
+`toHtml` / `toAnsi` parse Markdown and render **straight to a string**. It already
+builds a full internal document tree (the private `struct Block`, recursive over
+`children`) - it just never surfaces it, so a caller cannot inspect or transform a
+document (pull the headings for a TOC, rewrite links, lint, convert to another
+format). This is the "small refactor to surface the intermediate document model"
+that `horizon.md`'s DRAFT#13 (Markdown -> PDF) names as its prerequisite.
+
+- **Surface the tree.** Promote the block model to a public, opaque
+  `markdown.Doc` / `Node` and add `markdown.parse(md) -> Doc`, walked by the same
+  `xml` / `html` family vocabulary (`typeOf` / `children` / `text` / `level` for
+  headings / `attr` for a link href / list-ordered / code-language, plus `get` /
+  `findAll` / `has` over a small selector). Reusing M24.16's node / accessor shape
+  is why that milestone lands first - the whole `xml` / `html` / `markdown` family
+  then walks identically.
+- **Round-trip through one model.** Refactor `toHtml` / `toAnsi` to render **from**
+  the public node type (which they already parse to internally), so
+  parse -> transform -> render works, and `render(doc, "html" / "ansi")` renders a
+  parsed *or* hand-built tree. The string authoring helpers stay for the common
+  quick-generate path.
+- Hardened like the other parsers: the nesting cap + node budget so a
+  pathological document is a catchable error, not an unbounded parse.
+
+Pure `.j`; **both binaries**. Core (a general format primitive). Mostly a
+surfacing + accessor + render-refactor job (the parser exists), so smaller than
+M24.16's from-scratch build. Ships the full module discipline: the `markdown`
+overlay extended, `docs/modules/markdown.md` + `JENNIFER.md` updated, and a demo
+of `parse` -> walk -> `render`.
+
 ## M25 - multiplatform: promote macOS / Windows to supported
 
 Linux is the only *supported* platform, but best-effort **unsupported** macOS /

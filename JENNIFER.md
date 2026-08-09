@@ -591,6 +591,21 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `rgb` / `strip`, plus per-colour and per-style shortcuts (`ansi.red(s)`,
   `ansi.bold(s)`). TTY-aware: styling suppresses itself off a terminal or under
   `NO_COLOR`, and is forced on by `FORCE_COLOR`.
+- **`args`** - a declarative CLI argument parser (argparse-style) over
+  `os.ARGS`. Build a value-semantic `Parser` with copy-returning builders:
+  `args.parser(prog, help)` then `args.flag` / `intFlag` / `floatFlag` /
+  `boolFlag` (long + short, default, help), `args.countFlag` (`-vvv` -> 3),
+  `args.listFlag` (repeatable -> list), `args.positional` / `positionalOpt` /
+  `positionalList` / `positionalList1` / `positionalN` (`nargs` `?` / `*` / `+`
+  / N), plus the post-modifiers `args.required(p)` / `args.choices(p, allowed)`,
+  `args.command(p, name, help, sub)` (subcommands), and `args.version(p, ver)`.
+  `args.parse($p, os.ARGS)` -> a `Result` read with `args.asString` / `asInt` /
+  `asFloat` / `asBool` / `asList` / `count` / `has` (and the `$r.command` /
+  `$r.done` / `$r.helpText` fields). Accepts `--flag=value` / `--flag value` /
+  `-abc` bundling / `--` end-of-flags; an unknown flag, missing required arg,
+  bad type, or bad choice throws a catchable `Error{kind: "args"}`, while `-h` /
+  `--help` / `--version` set `$r.done` with `helpText` to print (not a process
+  exit). Pure `.j` over `strings` + `convert` + `lists` + `maps`; both binaries.
 - **`csv`** - RFC 4180: `csv.parse(s)` / `format(rows)` (`parseWith` /
   `formatWith` for any single-character delimiter, e.g. TSV), plus `toRecords` /
   `fromRecords` for header-keyed `map of string to string`. Quoting-aware.

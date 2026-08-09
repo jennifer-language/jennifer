@@ -73,6 +73,7 @@
 - [`acme`](modules/acme.md)
 - [`amqp`](modules/amqp.md)
 - [`ansi`](modules/ansi.md)
+- [`args`](modules/args.md)
 - [`barcode`](modules/barcode.md)
 - [`bloom`](modules/bloom.md)
 - [`cron`](modules/cron.md)
