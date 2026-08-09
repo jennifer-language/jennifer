@@ -24,7 +24,6 @@
 use strings;
 use binary;
 use convert;
-use lists;
 use crypto;
 use encoding;
 

@@ -12,7 +12,6 @@
 use io;
 use convert;
 use strings;
-use lists;
 use hash;
 use crc;
 

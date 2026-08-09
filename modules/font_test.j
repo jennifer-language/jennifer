@@ -11,7 +11,6 @@
 # composite glyph (C = A shifted +200), with known metrics and outlines.
 use testing;
 use encoding;
-use strings;
 
 # The TrueType fixture, base64-encoded (from scripts/gen-font-fixture.py): a
 # straight-line glyph (A), a quadratic-curve glyph (B), a composite glyph (C),

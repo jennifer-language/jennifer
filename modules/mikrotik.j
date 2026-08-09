@@ -33,7 +33,6 @@
 use net;
 use strings;
 use convert;
-use lists;
 use maps;
 use hash;
 use encoding;

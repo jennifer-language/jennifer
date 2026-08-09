@@ -30,7 +30,6 @@ use io;
 use time;
 use math;
 use lists;
-use maps;
 use strings;
 use convert;
 use meta;

@@ -33,12 +33,10 @@
  * def png as bytes init barcode.png($qr, $opts);
  */
 use lists;
-use maps;
 use strings;
 use convert;
 use compress;
 use crc;
-use encoding;
 include "./barcode_ecc.j";
 
 /**

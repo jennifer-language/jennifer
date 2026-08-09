@@ -24,7 +24,6 @@
  */
 use hash;
 use convert;
-use lists;
 use math;
 
 # The math library ships no natural log, so the optimal-sizing math below uses

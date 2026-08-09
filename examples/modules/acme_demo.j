@@ -11,7 +11,6 @@
 
 use io;
 use crypto;
-use convert;
 import "../../modules/acme.j" as acme;
 
 # An account key (EC P-256 -> ES256, or crypto.rsaGenerateKey(2048) -> RS256).

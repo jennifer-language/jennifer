@@ -13,7 +13,6 @@
  */
 use io;
 use os;
-use strings;
 import "../../modules/mikrotik.j" as mikrotik;
 
 def host as string init "192.168.88.1";

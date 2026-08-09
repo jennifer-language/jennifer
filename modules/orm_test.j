@@ -9,7 +9,6 @@
 # both dialects, offline. Live CRUD against a real database is a separate,
 # DB-gated integration test (cmd/jennifer/orm_test.go), not the unit overlay.
 use testing;
-use strings;
 use sql;
 
 # A three-column schema in a chosen dialect.

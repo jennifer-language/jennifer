@@ -21,7 +21,6 @@
  */
 use net;
 use binary;
-use strings;
 use convert;
 import "./transport.j" as transport;
 
