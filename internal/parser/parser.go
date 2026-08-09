@@ -43,7 +43,9 @@ func Parse(source string) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{tokens: stripTrivia(toks)}
+	// We own toks (the lexer just produced them; nobody else holds the slice), so
+	// compact in place instead of allocating a second full-length slice.
+	p := &parser{tokens: stripTriviaInPlace(toks)}
 	return p.parseProgram()
 }
 
@@ -63,23 +65,54 @@ func ParseTokens(toks []lexer.Token) (*Program, error) {
 	return p.parseProgram()
 }
 
-// stripTrivia drops comment and blank-line tokens. The parser doesn't
-// model comments; the formatter consumes them from the raw lexer
-// stream instead.
+func isTrivia(t lexer.TokenType) bool {
+	switch t {
+	case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+		lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE:
+		return true
+	}
+	return false
+}
+
+// stripTrivia drops comment and blank-line tokens without mutating toks (the
+// ParseTokens input is caller-owned). The parser doesn't model comments; the
+// formatter consumes them from the raw lexer stream instead. A trivia-free slice
+// is returned as-is (no copy); otherwise a fresh compacted slice - `toks[:0]`
+// would compact the caller's backing array in place.
 func stripTrivia(toks []lexer.Token) []lexer.Token {
-	// Fresh slice: `toks[:0]` would compact the caller's backing array in place.
+	if !hasTrivia(toks) {
+		return toks
+	}
 	out := make([]lexer.Token, 0, len(toks))
 	for _, t := range toks {
-		switch t.Type {
-		case lexer.TOKEN_COMMENT_LINE,
-			lexer.TOKEN_COMMENT_BLOCK,
-			lexer.TOKEN_COMMENT_SHEBANG,
-			lexer.TOKEN_BLANK_LINE:
-			continue
+		if !isTrivia(t.Type) {
+			out = append(out, t)
 		}
-		out = append(out, t)
 	}
 	return out
+}
+
+// stripTriviaInPlace compacts toks in place, reusing its backing array. Safe only
+// when the caller owns toks and does not read it afterward - the Parse(source)
+// path, whose tokens the lexer just produced for us and nobody else holds. It
+// avoids a second full-length token slice per parse. ParseTokens must not use it.
+func stripTriviaInPlace(toks []lexer.Token) []lexer.Token {
+	out := toks[:0]
+	for _, t := range toks {
+		if !isTrivia(t.Type) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func hasTrivia(toks []lexer.Token) bool {
+	for _, t := range toks {
+		if isTrivia(t.Type) {
+			return true
+		}
+	}
+	return false
 }
 
 type parser struct {
@@ -142,11 +175,41 @@ func (p *parser) match(tt lexer.TokenType) (lexer.Token, bool) {
 	return lexer.Token{}, false
 }
 
+// describeLexeme bounds a token lexeme for an error diagnostic. A large string
+// or numeric literal in an error-producing position would otherwise be echoed in
+// full - a 1 MiB literal becomes a 1 MiB parse-error message the CLI then renders
+// with carets. Keeps the first ~128 runes and marks the truncation. Identifiers
+// are already 64-capped by the lexer, so this only bites string / number
+// lexemes. The rune loop stops at the cap, so it never materialises a big []rune.
+func describeLexeme(lex string) string {
+	const maxRunes = 128
+	n := 0
+	for i := range lex {
+		if n == maxRunes {
+			return lex[:i] + "..."
+		}
+		n++
+	}
+	return lex
+}
+
+// numErrReason returns a bounded reason for a strconv parse failure without the
+// offending numeral. A *strconv.NumError's Error() re-embeds the whole `Num`
+// string ("...parsing \"7777...(1 MiB)...\": value out of range"), which would
+// re-introduce the very lexeme describeLexeme just truncated; its `.Err` field is
+// the short reason ("value out of range" / "invalid syntax") with no number.
+func numErrReason(err error) string {
+	if ne, ok := err.(*strconv.NumError); ok {
+		return ne.Err.Error()
+	}
+	return describeLexeme(err.Error())
+}
+
 func (p *parser) expect(tt lexer.TokenType, ctx string) (lexer.Token, error) {
 	t := p.peek()
 	if t.Type != tt {
 		return t, &ParseError{
-			Msg:  fmt.Sprintf("expected %s %s, got %s (%q)", tt, ctx, t.Type, t.Lexeme),
+			Msg:  fmt.Sprintf("expected %s %s, got %s (%q)", tt, ctx, t.Type, describeLexeme(t.Lexeme)),
 			File: t.File, Line: t.Line, Col: t.Col,
 		}
 	}
@@ -262,7 +325,7 @@ func (p *parser) parseModuleImport() (*ModuleImportStmt, error) {
 	// slash expands to the package-named entry file at resolve time. Every other
 	// module path is a file and must end in `.j`.
 	if !strings.HasSuffix(path.Lexeme, ".j") && !strings.HasPrefix(path.Lexeme, "@") {
-		return nil, &ParseError{Msg: fmt.Sprintf("module path %q must end in `.j`", path.Lexeme), File: path.File, Line: path.Line, Col: path.Col}
+		return nil, &ParseError{Msg: fmt.Sprintf("module path %q must end in `.j`", describeLexeme(path.Lexeme)), File: path.File, Line: path.Line, Col: path.Col}
 	}
 	m := &ModuleImportStmt{pos: pos{File: imp.File, Line: imp.Line, Col: imp.Col}, Path: path.Lexeme}
 	if _, ok := p.match(lexer.TOKEN_AS); ok {
@@ -2260,14 +2323,14 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		}
 		n, err := strconv.ParseInt(lex, base, 64)
 		if err != nil {
-			return nil, &ParseError{Msg: fmt.Sprintf("invalid int literal %q: %v", t.Lexeme, err), File: t.File, Line: t.Line, Col: t.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("invalid int literal %q: %s", describeLexeme(t.Lexeme), numErrReason(err)), File: t.File, Line: t.Line, Col: t.Col}
 		}
 		return &IntLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: n}, nil
 	case lexer.TOKEN_FLOAT:
 		p.advance()
 		f, err := strconv.ParseFloat(t.Lexeme, 64)
 		if err != nil {
-			return nil, &ParseError{Msg: fmt.Sprintf("invalid float literal %q: %v", t.Lexeme, err), File: t.File, Line: t.Line, Col: t.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("invalid float literal %q: %s", describeLexeme(t.Lexeme), numErrReason(err)), File: t.File, Line: t.Line, Col: t.Col}
 		}
 		return &FloatLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: f}, nil
 	case lexer.TOKEN_STRING:

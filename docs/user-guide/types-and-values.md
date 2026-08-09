@@ -85,6 +85,14 @@ silent replacement character - the same canonical contract as
 points (emoji, rarer scripts). The brace-free forms deliberately leave `{...}`
 free for a future interpolation syntax.
 
+A Jennifer `string` is a byte string, so a literal may contain control
+characters: `\0` (as above) and any other control byte via `\uXXXX` in the cooked
+form, or written **verbatim** in a raw literal (a raw `'...'` copies every byte,
+including a literal tab, newline, or NUL). These are legal and preserved in
+memory; the boundary layers reject them where they'd be unsafe - `fs` / `os`
+refuse a NUL in a path or argument, and the network modules reject control
+characters at the wire boundary.
+
 **`'...'` is raw** - there is **no** escape processing. Every byte from the
 opening `'` to the next `'` is content verbatim, backslashes and newlines
 included. So `'\d+\.\d+'` is the eight-character string `\d+\.\d+` (not a broken

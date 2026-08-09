@@ -53,3 +53,20 @@ const MaxChannelCapacity = 1 << 16
 // vector or matrix is a catchable error. See the std-build note for the full
 // rationale.
 const MaxMatrixElements = 1 << 16
+
+// MaxTokens caps how many tokens a single source file lexes into on
+// jennifer-tiny, whose heap is far smaller than the default binary's, so the
+// ceiling is lower. 1<<18 (~262K tokens, ~18 MiB of Token) matches
+// MaxChannelCapacity's tiny budget: generous for the small scripts a constrained
+// embedded target runs, yet well below an allocation that would exhaust its heap.
+// A larger file is a positioned, catchable lex error. See the std-build note for
+// the full rationale (the token-bomb amplification and the preprocessor
+// interaction it complements).
+const MaxTokens = 1 << 18
+
+// MaxSourceBytes caps a single preprocessor-read source file on jennifer-tiny,
+// whose heap is far smaller than the default binary's, so the ceiling is lower:
+// 8 MiB is generous for the small scripts a constrained target runs yet well
+// below an allocation that would exhaust its heap. See the std-build note for the
+// full rationale.
+const MaxSourceBytes = 8 << 20

@@ -202,7 +202,7 @@ match ($shape) {
 
 break;      # exit innermost loop
 continue;   # next iteration
-exit;       # terminate the whole program (exit 0); exit EXPR sets the code
+exit;       # terminate the whole program (exit 0); exit EXPR sets the code (Unix: 0..255, masked to 8 bits)
 ```
 
 Conditions must be `bool` (there is no truthiness). `and` / `or` **short-circuit**

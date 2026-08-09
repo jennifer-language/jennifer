@@ -368,6 +368,11 @@ io.printf("error: input missing\n");
 exit 2;                 # process ends with code 2
 ```
 
+On Unix a process exit status is only 8 bits, so the code a shell or
+parent process observes is `EXPR & 0xff`: `exit 256` is seen as `0` and
+`exit 300` as `44`. Stick to the `0..255` range for an exit code a
+caller can actually read back.
+
 `exit` is **distinct from `return`**. `return` ends the current
 method's body and yields a value to the caller; `exit` ends the
 program. Use `return` when a method has done its job; use `exit` when

@@ -6,7 +6,15 @@ package lexer
 import (
 	"fmt"
 	"strings"
+
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
+
+// maxTokens is the per-file token-stream budget. It defaults to limits.MaxTokens
+// and is a package var (not the const directly) only so a test can lower it to
+// exercise the budget without generating millions of tokens; production code
+// never writes it.
+var maxTokens = limits.MaxTokens
 
 // Lexer turns a Jennifer source string into a stream of tokens.
 // It tracks line and column for error reporting; column is 1-based.
@@ -81,6 +89,16 @@ func TokenizeWithFile(source, file string) ([]Token, error) {
 		}
 		if file != "" {
 			tok.File = file
+		}
+		// Token budget: a small, dense file amplifies to millions of Token
+		// structs (~100x the input bytes), which the parser then walks again.
+		// Cap the stream so a token bomb is a catchable lex error, not an OOM.
+		if len(out) >= maxTokens {
+			return nil, &LexError{
+				File: tok.File,
+				Msg:  fmt.Sprintf("token budget exceeded (over %d tokens); the source file is too large to lex", maxTokens),
+				Line: tok.Line, Col: tok.Col,
+			}
 		}
 		out = append(out, tok)
 		if tok.Type == TOKEN_EOF {
@@ -358,6 +376,13 @@ func (l *Lexer) readBlockComment() (Token, bool, error) {
 				l.advance()
 				l.advance()
 				depth++
+				// Cap nesting like the parser's structural depth: a pathologically
+				// deep `/* /* ... */ */` nest is consumed into one giant comment
+				// token, so bound it to a catchable lex error (defense in depth
+				// alongside the token budget).
+				if depth > limits.MaxNestingDepth {
+					return Token{}, false, &LexError{File: l.file, Msg: fmt.Sprintf("block comment nesting exceeds %d levels", limits.MaxNestingDepth), Line: startLine, Col: startCol}
+				}
 				continue
 			}
 		}

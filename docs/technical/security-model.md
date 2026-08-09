@@ -45,9 +45,12 @@ where untrusted *data*, not untrusted *code*, causes harm. The clear cases:
 - **Uncatchable crashes / DoS from untrusted input.** Parsing an attacker-shaped
   document must fail with a *catchable* error, not a fatal crash. The
   `json` / `toml` / `xml` decoders and the language parser share a nesting cap;
-  the `http` client caps response-body size; and deep Jennifer recursion is
+  the `http` client caps response-body size; deep Jennifer recursion is
   bounded by a call-depth cap (`limits.MaxCallDepth`) that raises a catchable
-  "call stack too deep" error instead of overflowing the Go stack.
+  "call stack too deep" error instead of overflowing the Go stack; and the lexer
+  caps the token stream a single source file may produce (`limits.MaxTokens`), so
+  a dense "token bomb" (a few MB of tiny tokens that amplifies ~100x into Token
+  structs) is a catchable lex error rather than an out-of-memory kill.
 - **Cryptographic weakness.** Predictable "random", a timing side channel, an
   algorithm-confusion or downgrade bypass. `crypto` uses a crypto-grade random
   source, constant-time comparison, AEAD-only symmetric encryption, and

@@ -72,8 +72,21 @@ func (s *scoped) declare(b *binding) {
 }
 
 // resolve finds the innermost visible binding for name, or nil.
+//
+// Fast path for a global reference: Jennifer forbids shadowing (a resolve-time
+// invariant), so a name is a global XOR a local, never both. A hit in the global
+// frame (stack[0]) is therefore definitive without walking the local frames -
+// O(1) for the common "reference resolves to a global" case instead of O(depth)
+// down the whole stack, which on a deep method is what made L101 quadratic. Local
+// frames are still scanned innermost-first; since no name lives in two frames, the
+// order among them does not affect the result for a valid program.
 func (s *scoped) resolve(name string) *binding {
-	for i := len(s.stack) - 1; i >= 0; i-- {
+	if len(s.stack) > 0 {
+		if b, ok := s.stack[0].vars[name]; ok {
+			return b
+		}
+	}
+	for i := len(s.stack) - 1; i >= 1; i-- {
 		if b, ok := s.stack[i].vars[name]; ok {
 			return b
 		}

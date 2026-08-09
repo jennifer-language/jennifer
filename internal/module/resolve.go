@@ -16,11 +16,43 @@
 package module
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// errReason returns a filesystem error's reason without the path it operated on.
+// An *os.PathError's Error() is "op path: reason" - the path re-embeds the very
+// (attacker-controllable, possibly huge) path already shown truncated elsewhere
+// in the message, so only its `.Err` reason ("no such file or directory", "file
+// name too long") is kept. A non-PathError falls back to a bounded string.
+func errReason(err error) string {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return truncPath(err.Error())
+}
+
+// truncPath bounds a path for an error message. An import path is a source
+// string literal and can be arbitrarily long, so echoing it whole (and the
+// candidate paths derived from it) would turn a 1 MiB path into a 1 MiB
+// diagnostic the CLI renders in full. Keeps the first ~256 runes and marks the
+// truncation; the rune loop stops at the cap, so it never materialises a big
+// []rune. The full path is still used for the actual resolution and return value.
+func truncPath(p string) string {
+	const maxRunes = 256
+	n := 0
+	for i := range p {
+		if n == maxRunes {
+			return p[:i] + "..."
+		}
+		n++
+	}
+	return p
+}
 
 // Kind classifies an import path by its leading token.
 type Kind int
@@ -45,10 +77,10 @@ func Classify(importPath string) (Kind, error) {
 		return 0, fmt.Errorf("empty import path")
 	}
 	if strings.ContainsRune(importPath, '\\') {
-		return 0, fmt.Errorf("import path %q must use '/' separators, not '\\' (paths are OS-independent)", importPath)
+		return 0, fmt.Errorf("import path %q must use '/' separators, not '\\' (paths are OS-independent)", truncPath(importPath))
 	}
 	if !strings.HasSuffix(importPath, ".j") {
-		return 0, fmt.Errorf("import path %q must end in '.j'", importPath)
+		return 0, fmt.Errorf("import path %q must end in '.j'", truncPath(importPath))
 	}
 	switch {
 	case strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../"):
@@ -98,7 +130,7 @@ func Resolve(importPath, importingDir string, searchDirs []string, vendorRoot st
 		// only the bare Module form is jailed to its search dirs.
 		for _, s := range strings.Split(importPath, "/") {
 			if s == "." || s == ".." || s == "" {
-				return "", fmt.Errorf("import path %q must not contain '.' or '..' segments (use `./` for a local file relative to the importer)", importPath)
+				return "", fmt.Errorf("import path %q must not contain '.' or '..' segments (use `./` for a local file relative to the importer)", truncPath(importPath))
 			}
 		}
 		return resolveModule(importPath, native, searchDirs)
@@ -113,24 +145,24 @@ func Resolve(importPath, importingDir string, searchDirs []string, vendorRoot st
 // a `.`/`..` segment, and anything resolving outside the deck directory.
 func resolveVendor(importPath, vendorRoot string) (string, error) {
 	if vendorRoot == "" {
-		return "", fmt.Errorf("import %q needs a vendor directory, but none was found (pass --vendor DIR, set JENNIFER_VENDOR, or add a `vendor/` dir above the program)", importPath)
+		return "", fmt.Errorf("import %q needs a vendor directory, but none was found (pass --vendor DIR, set JENNIFER_VENDOR, or add a `vendor/` dir above the program)", truncPath(importPath))
 	}
 	if strings.ContainsRune(importPath, '\\') {
-		return "", fmt.Errorf("import path %q must use '/' separators, not '\\'", importPath)
+		return "", fmt.Errorf("import path %q must use '/' separators, not '\\'", truncPath(importPath))
 	}
 	rest := importPath[1:] // drop the leading '@'
 	if strings.ContainsRune(rest, '@') {
-		return "", fmt.Errorf("import path %q: '@' is only valid as the first character", importPath)
+		return "", fmt.Errorf("import path %q: '@' is only valid as the first character", truncPath(importPath))
 	}
 	explicitFile := strings.HasSuffix(rest, ".j")
 	rest = strings.TrimSuffix(rest, "/") // a trailing slash is the entry-form spelling
 	segs := strings.Split(rest, "/")
 	if len(segs) < 2 || segs[0] == "" || segs[1] == "" {
-		return "", fmt.Errorf("import path %q must be @scope/package[/file.j]", importPath)
+		return "", fmt.Errorf("import path %q must be @scope/package[/file.j]", truncPath(importPath))
 	}
 	for _, s := range segs {
 		if s == "." || s == ".." || s == "" {
-			return "", fmt.Errorf("import path %q must not contain '.' or '..' segments", importPath)
+			return "", fmt.Errorf("import path %q must not contain '.' or '..' segments", truncPath(importPath))
 		}
 	}
 	scope, pkg := segs[0], segs[1]
@@ -143,7 +175,7 @@ func resolveVendor(importPath, vendorRoot string) (string, error) {
 		target = filepath.Join(vendorRoot, filepath.FromSlash(rest))
 	} else {
 		if len(segs) != 2 {
-			return "", fmt.Errorf("import path %q: only @scope/package expands to an entry file; a subdirectory needs an explicit `.j` file", importPath)
+			return "", fmt.Errorf("import path %q: only @scope/package expands to an entry file; a subdirectory needs an explicit `.j` file", truncPath(importPath))
 		}
 		target = filepath.Join(deckRoot, pkg+".j") // package-named entry
 	}
@@ -152,7 +184,7 @@ func resolveVendor(importPath, vendorRoot string) (string, error) {
 		return "", err
 	}
 	if c != deckRoot && !strings.HasPrefix(c, deckRoot+string(filepath.Separator)) {
-		return "", fmt.Errorf("import path %q resolves outside its package directory", importPath)
+		return "", fmt.Errorf("import path %q resolves outside its package directory", truncPath(importPath))
 	}
 	return c, nil
 }
@@ -207,7 +239,7 @@ func resolveModule(importPath, native string, searchDirs []string) (string, erro
 			// other stat failure (EACCES on the candidate) is surfaced rather
 			// than swallowed as a misleading "module not found".
 			if !os.IsNotExist(err) {
-				return "", fmt.Errorf("module %q: cannot access %q: %v", importPath, cand, err)
+				return "", fmt.Errorf("module %q: cannot access a candidate on the search path: %s", truncPath(importPath), errReason(err))
 			}
 			continue
 		}
@@ -228,11 +260,11 @@ func resolveModule(importPath, native string, searchDirs []string) (string, erro
 		return matches[0], nil
 	case 0:
 		if len(searchDirs) == 0 {
-			return "", fmt.Errorf("module %q not found: the module search path is empty", importPath)
+			return "", fmt.Errorf("module %q not found: the module search path is empty", truncPath(importPath))
 		}
-		return "", fmt.Errorf("module %q not found on the search path %v", importPath, searchDirs)
+		return "", fmt.Errorf("module %q not found on the search path %v", truncPath(importPath), searchDirs)
 	default:
-		return "", fmt.Errorf("module %q is ambiguous: found in multiple search dirs: %s", importPath, strings.Join(matches, ", "))
+		return "", fmt.Errorf("module %q is ambiguous: found in multiple search dirs: %s", truncPath(importPath), strings.Join(matches, ", "))
 	}
 }
 
@@ -242,7 +274,7 @@ func resolveModule(importPath, native string, searchDirs []string) (string, erro
 func canonical(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve %q: %v", path, err)
+		return "", fmt.Errorf("cannot resolve %q: %s", truncPath(path), errReason(err))
 	}
 	cleaned := filepath.Clean(abs)
 	// Resolve symlinks so one file reached via a symlinked directory and via

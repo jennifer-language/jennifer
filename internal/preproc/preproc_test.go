@@ -219,6 +219,80 @@ func TestDeepIncludeChainRejected(t *testing.T) {
 	}
 }
 
+// An include path is a source string literal; a preprocess error must not echo
+// it whole (nor the os error that re-embeds the resolved path). The message
+// stays bounded.
+func TestPreprocErrorPathBounded(t *testing.T) {
+	if d := truncPath(strings.Repeat("a", 5000)); len(d) > 300 || !strings.HasSuffix(d, "...") {
+		t.Errorf("truncPath not bounded: len=%d", len(d))
+	}
+	src := `include "` + strings.Repeat("a", 5000) + `.txt";`
+	toks, _ := lexer.Tokenize(src)
+	_, err := Process(toks, ".", "")
+	if err == nil {
+		t.Fatal("expected a bad-extension error")
+	}
+	if n := len(err.Error()); n > 400 {
+		t.Errorf("error not bounded: %d bytes", n)
+	}
+	if c := strings.Count(err.Error(), "a"); c > 400 {
+		t.Errorf("error re-echoes the full path (%d a's)", c)
+	}
+}
+
+// The visited set and cache key on the canonical (symlink-resolved) file, so a
+// self-include reached through a symlink alias - two lexical spellings of one
+// physical file - is still caught as circular rather than read twice.
+func TestSymlinkAliasIsCanonicalized(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.j")
+	alias := filepath.Join(dir, "alias.j")
+	if err := os.WriteFile(target, []byte(`include "alias.j"; def v as int init 1;`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, alias); err != nil {
+		t.Skipf("symlinks unsupported on this host: %v", err)
+	}
+	src, _ := os.ReadFile(target)
+	toks, _ := lexer.TokenizeWithFile(string(src), target)
+	_, err := Process(toks, dir, target)
+	if err == nil || !strings.Contains(err.Error(), "circular") {
+		t.Fatalf("a self-include through a symlink alias must be circular, got %v", err)
+	}
+}
+
+// An oversized included file is rejected from its stat before the whole file is
+// read into memory. The cap is lowered here so the test needn't write a 64 MiB
+// file.
+func TestOversizedIncludeRejected(t *testing.T) {
+	saved := maxSourceBytes
+	maxSourceBytes = 64
+	defer func() { maxSourceBytes = saved }()
+
+	dir := writeTmp(t, map[string]string{
+		"main.j": `include "big.j";`,
+		"big.j":  "def v as int init 1; " + strings.Repeat("# padding\n", 50),
+	})
+	mainPath := filepath.Join(dir, "main.j")
+	src, _ := os.ReadFile(mainPath)
+	toks, _ := lexer.TokenizeWithFile(string(src), mainPath)
+	_, err := Process(toks, dir, mainPath)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected an oversized-file error, got %v", err)
+	}
+	// A small file still splices.
+	dir2 := writeTmp(t, map[string]string{
+		"a.j": `include "b.j";`,
+		"b.j": `def v as int init 1;`,
+	})
+	ap := filepath.Join(dir2, "a.j")
+	asrc, _ := os.ReadFile(ap)
+	atoks, _ := lexer.TokenizeWithFile(string(asrc), ap)
+	if _, err := Process(atoks, dir2, ap); err != nil {
+		t.Errorf("small include should splice, got %v", err)
+	}
+}
+
 func TestRejectsNonJExtension(t *testing.T) {
 	src := `func app() { include "foo.go"; }`
 	toks, _ := lexer.Tokenize(src)

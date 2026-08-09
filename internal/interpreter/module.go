@@ -21,11 +21,21 @@ import (
 // of the recursion.
 type moduleReg struct {
 	cache      map[string]*loadedModule
+	resolved   map[string]resolveResult                            // (baseDir, importPath) -> resolution, so a repeated import skips the filesystem walk
 	stack      []string                                            // canonical paths currently loading
 	search     []string                                            // module search dirs (sysmoddir, then -I dirs)
 	vendorRoot string                                              // root for `@scope/package` deck imports ("" = none)
 	load       func(canonicalPath string) (*parser.Program, error) // lex/preproc/parse a module file
 	setup      func(*Interpreter)                                  // install the standard library into a module interpreter
+}
+
+// resolveResult caches one module.Resolve outcome (a canonical path or the raw
+// error). The error is re-positioned at each call site, so caching the raw error
+// keeps a repeated failing import from re-walking the search path while still
+// reporting at the right `import` statement.
+type resolveResult struct {
+	canonical string
+	err       error
 }
 
 // loadedModule is one initialised module - its own interpreter (holding the
@@ -237,10 +247,11 @@ func collectExports(prog *parser.Program) map[string]bool {
 func (i *Interpreter) EnableModules(baseDir string, searchDirs []string, load func(string) (*parser.Program, error), setup func(*Interpreter)) {
 	i.baseDir = baseDir
 	i.modReg = &moduleReg{
-		cache:  map[string]*loadedModule{},
-		search: searchDirs,
-		load:   load,
-		setup:  setup,
+		cache:    map[string]*loadedModule{},
+		resolved: map[string]resolveResult{},
+		search:   searchDirs,
+		load:     load,
+		setup:    setup,
 	}
 }
 
@@ -904,11 +915,22 @@ func rejectExportInScript(prog *parser.Program) error {
 // resolution / cycle error at the import statement.
 func (i *Interpreter) loadModule(importPath string, at parser.Node) (*loadedModule, error) {
 	reg := i.modReg
-	canonical, err := module.Resolve(importPath, i.baseDir, reg.search, reg.vendorRoot)
-	if err != nil {
-		file, line, col := posFor(at)
-		return nil, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+	// Resolution depends on the import string and the importing file's dir (for a
+	// local `./` import); the search path and vendor root are fixed per registry.
+	// Cache by (baseDir, importPath) so the same import - the common diamond where
+	// two files import one module - skips a repeat filesystem walk.
+	rkey := i.baseDir + "\x00" + importPath
+	rr, ok := reg.resolved[rkey]
+	if !ok {
+		c, e := module.Resolve(importPath, i.baseDir, reg.search, reg.vendorRoot)
+		rr = resolveResult{canonical: c, err: e}
+		reg.resolved[rkey] = rr
 	}
+	if rr.err != nil {
+		file, line, col := posFor(at)
+		return nil, &runtimeError{Msg: rr.err.Error(), File: file, Line: line, Col: col}
+	}
+	canonical := rr.canonical
 
 	// Cycle: the module is already on the load stack.
 	for _, p := range reg.stack {

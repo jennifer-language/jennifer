@@ -19,8 +19,10 @@ import (
 )
 
 // Exit codes, mirroring gofmt -l / shellcheck: 0 clean, 1 findings at or
-// above the severity floor, 2 the linter itself failed (bad flags, IO,
-// parse error, bad config).
+// above the severity floor, 2 the linter invocation itself failed (bad flags,
+// unreadable file, bad `--checks` / config). A lex / preprocess / parse error in
+// the *target* is not a failure - it is rendered as a source-error finding (L001
+// / L002 / L003) in the chosen format, so it exits 1, not 2.
 const (
 	lintExitClean   = 0
 	lintExitFinding = 1

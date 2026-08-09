@@ -177,6 +177,32 @@ func TestDeeplyNestedStatementsAndTypesRejected(t *testing.T) {
 	}
 }
 
+// A parse error must not echo an arbitrarily long lexeme (or the underlying
+// strconv error, which re-embeds the numeral) - a 1 MiB bad literal would
+// otherwise become a 1 MiB diagnostic. describeLexeme bounds the lexeme and
+// numErrReason drops the numeral from the strconv reason.
+func TestParseErrorOutputBounded(t *testing.T) {
+	if d := describeLexeme(strings.Repeat("9", 5000)); len(d) > 200 || !strings.HasSuffix(d, "...") {
+		t.Errorf("describeLexeme not bounded: len=%d", len(d))
+	}
+	if describeLexeme("short") != "short" {
+		t.Error("a short lexeme must pass through unchanged")
+	}
+	// An overflowing int literal: the message stays small and must not re-echo
+	// the whole numeral (via either the %q lexeme or the strconv error).
+	big := strings.Repeat("9", 5000)
+	_, err := Parse("def x as int init " + big + ";")
+	if err == nil {
+		t.Fatal("expected an overflow parse error")
+	}
+	if n := len(err.Error()); n > 600 {
+		t.Errorf("error message not bounded: %d bytes", n)
+	}
+	if c := strings.Count(err.Error(), "9"); c > 400 {
+		t.Errorf("error re-echoes the full numeral (%d nines)", c)
+	}
+}
+
 func TestFuncIntroducesMethod(t *testing.T) {
 	src := `func app() { io.printf(1); }`
 	p, err := Parse(src)

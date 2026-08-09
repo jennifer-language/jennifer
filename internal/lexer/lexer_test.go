@@ -8,6 +8,51 @@ import (
 	"testing"
 )
 
+// A pathologically deep nested block comment is a catchable lex error, not one
+// giant unbounded comment token.
+func TestBlockCommentNestingCapped(t *testing.T) {
+	deep := strings.Repeat("/*", 2000) + "x" + strings.Repeat("*/", 2000)
+	_, err := Tokenize(deep)
+	if err == nil || !strings.Contains(err.Error(), "block comment nesting exceeds") {
+		t.Fatalf("expected a nesting-cap lex error, got %v", err)
+	}
+	// Ordinary nesting still lexes.
+	if _, err := Tokenize("/* outer /* inner */ back */ use io;"); err != nil {
+		t.Errorf("ordinary nested comment should lex, got %v", err)
+	}
+}
+
+// A source file that lexes into more than the token budget is a positioned,
+// catchable lex error rather than an unbounded allocation (the "token bomb": a
+// small, dense file amplifies to millions of Token structs). The budget is
+// lowered here so the test needn't generate millions of tokens.
+func TestTokenBudgetExceeded(t *testing.T) {
+	saved := maxTokens
+	maxTokens = 10
+	defer func() { maxTokens = saved }()
+
+	// 13 ';' -> 13 SEMI + EOF = 14 tokens, past the budget of 10.
+	_, err := Tokenize(strings.Repeat(";", 13))
+	if err == nil {
+		t.Fatal("expected a token-budget error, got nil")
+	}
+	le, ok := err.(*LexError)
+	if !ok {
+		t.Fatalf("expected *LexError, got %T", err)
+	}
+	if !strings.Contains(le.Msg, "token budget exceeded") {
+		t.Errorf("unexpected message: %q", le.Msg)
+	}
+	if le.Line < 1 || le.Col < 1 {
+		t.Errorf("budget error must be positioned, got line=%d col=%d", le.Line, le.Col)
+	}
+
+	// Comfortably under the budget still lexes.
+	if _, err := Tokenize(strings.Repeat(";", 5)); err != nil {
+		t.Errorf("under-budget source should lex, got %v", err)
+	}
+}
+
 // An over-long identifier / variable name is rejected, and neither the scan nor
 // the error message retains the whole (potentially megabyte-long) run: the scan
 // stops just past the 64-char cap and the message is truncated.

@@ -313,6 +313,36 @@ func TestResolveSelection(t *testing.T) {
 	})
 }
 
+// Deep-nesting resolution: a global read only deep inside nested blocks (the
+// O(1) global fast path) and a local read deep both resolve correctly, so
+// neither is falsely flagged; an actually-unused local deep is still flagged.
+func TestScopeResolutionDeepNesting(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	used := `def g as int init 1;
+func f() {
+    def loc as int init 2;
+    if (true) { if (true) { if (true) {
+        def r as int init $g + $loc;
+        return $r;
+    } } }
+    return 0;
+}`
+	if n := countID(lintSrc(t, used, only("L101"), cfg), "L101"); n != 0 {
+		t.Errorf("all locals are used; expected 0 L101, got %d", n)
+	}
+	unused := `def g as int init 1;
+func f() {
+    if (true) { if (true) {
+        def dead as int init $g;
+        return 0;
+    } }
+    return 0;
+}`
+	if n := countID(lintSrc(t, unused, only("L101"), cfg), "L101"); n != 1 {
+		t.Errorf("deep unused local should be flagged once, got %d", n)
+	}
+}
+
 func TestUnusedImport(t *testing.T) {
 	cfg := lint.DefaultConfig()
 	cases := []struct {

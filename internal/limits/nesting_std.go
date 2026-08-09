@@ -75,3 +75,27 @@ const MaxChannelCapacity = 1 << 20
 // inverse / solve): with n <= 1024 the worst case is ~1e9 operations, seconds of
 // CPU, not an unbounded stall.
 const MaxMatrixElements = 1 << 20
+
+// MaxTokens caps how many tokens a single source file lexes into, bounding the
+// front of the pipeline against a "token bomb": a small, dense file (a few MB of
+// `1+1+1+1;`) tokenises to millions of ~72-byte Token structs, ~100x the input
+// byte count, before the parser then walks that same array and multiplies the
+// footprint again. The sibling caps (MaxNestingDepth, MaxRangeElements) bound
+// depth and single allocations; this bounds the token *stream*. It complements
+// the preprocessor's 2M spliced-token budget, which counts tokens across
+// `include` splices but does NOT count the entry file's own tokens - so a giant
+// root program with no includes would otherwise be lexed (and parsed) unbounded.
+// 1<<22 (~4.2M tokens, ~300 MiB of Token) is generous for any real or generated
+// program (a 1 MB source is well under 1M tokens) yet well below the multi-GB
+// territory a bomb reaches; a larger file is a positioned, catchable lex error.
+const MaxTokens = 1 << 22
+
+// MaxSourceBytes caps how many bytes a single source file the preprocessor reads
+// (an `include`d file) may hold, checked with a stat before the whole file is
+// read into memory. MaxTokens bounds the token stream, but a file that is huge
+// yet not token-dense (megabytes of one string literal or comment) would still be
+// slurped whole by os.ReadFile before tokenising; this bounds that raw read. At
+// 64 MiB it never rejects a real source file (a `.j` file is KB to low MB) yet
+// stops an accidental gigabyte include from committing its bytes; a larger file
+// is a positioned, catchable preprocess error.
+const MaxSourceBytes = 64 << 20

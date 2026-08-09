@@ -139,6 +139,30 @@ func TestResolveModuleRejectsDotSegments(t *testing.T) {
 	}
 }
 
+// An import path is a source string literal and can be arbitrarily long, so a
+// resolution error must not echo it whole (nor the derived candidate path, nor
+// the os error that re-embeds it) - the message must stay bounded.
+func TestResolveErrorPathBounded(t *testing.T) {
+	if d := truncPath(strings.Repeat("a", 5000)); len(d) > 300 || !strings.HasSuffix(d, "...") {
+		t.Errorf("truncPath not bounded: len=%d", len(d))
+	}
+	if truncPath("short/path.j") != "short/path.j" {
+		t.Error("a short path must pass through unchanged")
+	}
+	// A huge bare-module path that resolves nowhere: bounded error, no full echo.
+	big := strings.Repeat("a", 5000) + "/x.j"
+	_, err := Resolve(big, "/irrelevant", []string{t.TempDir()}, "")
+	if err == nil {
+		t.Fatal("expected a resolution error")
+	}
+	if n := len(err.Error()); n > 800 {
+		t.Errorf("error not bounded: %d bytes", n)
+	}
+	if c := strings.Count(err.Error(), "a"); c > 600 {
+		t.Errorf("error re-echoes the full path (%d a's)", c)
+	}
+}
+
 func TestResolveModuleDuplicateIsError(t *testing.T) {
 	root := t.TempDir()
 	a := filepath.Join(root, "a")
