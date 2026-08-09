@@ -94,6 +94,14 @@ type parser struct {
 	// input that would overflow the Go stack (the interpreter has no recover();
 	// a stack overflow is a fatal, uncatchable crash). See parseExpr.
 	exprDepth int
+	// stmtDepth and typeDepth are the statement-block and compound-type analogues
+	// of exprDepth: nested `if`/`while`/`for`/`match`/`try` bodies recurse through
+	// parseBlock, and `list of`/`map of` recurse through parseType, each with no
+	// natural bound. Both descents (and the resolver + interpreter that rewalk the
+	// same trees) would overflow the fixed TinyGo goroutine stack on deeply nested
+	// generated input; the counters cap them at limits.MaxNestingDepth.
+	stmtDepth int
+	typeDepth int
 	// noStructLit suppresses parsing a trailing `Name{...}` as a struct literal in
 	// a header position where the `{` must instead open a block - specifically a
 	// `match` subject and a `when` value. Zero value (false) = struct literals
@@ -595,6 +603,14 @@ func (p *parser) parseBlock() (*Block, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.stmtDepth >= limits.MaxNestingDepth {
+		return nil, &ParseError{
+			Msg:  fmt.Sprintf("block nesting exceeds %d levels", limits.MaxNestingDepth),
+			File: lb.File, Line: lb.Line, Col: lb.Col,
+		}
+	}
+	p.stmtDepth++
+	defer func() { p.stmtDepth-- }()
 	block := &Block{pos: pos{File: lb.File, Line: lb.Line, Col: lb.Col}}
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		st, err := p.parseStatement()
@@ -1334,10 +1350,20 @@ func (p *parser) parseParenCond(ctx string) (Expr, error) {
 //	list of <TYPE>
 //	map  of <TYPE> to <TYPE>
 //
-// Nesting falls out naturally because each recursive call reads one
-// fresh <TYPE>; there is no depth cap.
+// Nesting recurses one level per compound (`list of` / `map of`), bounded by
+// typeDepth against limits.MaxNestingDepth so a deeply nested generated type
+// cannot overflow the parser's, resolver's, or interpreter's Go stack (the
+// resolver and the zero-value / MatchesDeclared logic rewalk this same tree).
 func (p *parser) parseType() (Type, error) {
 	t := p.peek()
+	if p.typeDepth >= limits.MaxNestingDepth {
+		return Type{}, &ParseError{
+			Msg:  fmt.Sprintf("compound type nesting exceeds %d levels", limits.MaxNestingDepth),
+			File: t.File, Line: t.Line, Col: t.Col,
+		}
+	}
+	p.typeDepth++
+	defer func() { p.typeDepth-- }()
 	switch t.Type {
 	case lexer.TOKEN_INT_TYPE:
 		p.advance()

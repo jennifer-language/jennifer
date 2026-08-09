@@ -4,12 +4,14 @@
 package preproc
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // tokenTypes returns the type slice for comparison.
@@ -179,6 +181,41 @@ func TestDetectsCircularImport(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "circular import") {
 		t.Errorf("error doesn't mention circular import: %v", err)
+	}
+}
+
+// A deep *linear* include chain (a -> b -> c -> ...) stays under the token
+// budget (each file adds only its own few tokens) but recurses one Go frame per
+// level; uncapped it overflows the fixed TinyGo stack. The depth guard turns it
+// into a catchable positioned error.
+func TestDeepIncludeChainRejected(t *testing.T) {
+	files := map[string]string{}
+	n := limits.MaxNestingDepth + 5
+	for i := 0; i < n; i++ {
+		if i < n-1 {
+			files[fmt.Sprintf("f%d.j", i)] = fmt.Sprintf("include \"f%d.j\";", i+1)
+		} else {
+			files[fmt.Sprintf("f%d.j", i)] = "def x as int init 1;"
+		}
+	}
+	dir := writeTmp(t, files)
+	mainPath := filepath.Join(dir, "f0.j")
+	src, _ := os.ReadFile(mainPath)
+	toks, _ := lexer.TokenizeWithFile(string(src), mainPath)
+	_, err := Process(toks, dir, mainPath)
+	if err == nil || !strings.Contains(err.Error(), "include nesting exceeds") {
+		t.Fatalf("expected include-nesting error, got %v", err)
+	}
+	// A shallow chain still splices fine.
+	shallow := writeTmp(t, map[string]string{
+		"a.j": `include "b.j";`,
+		"b.j": `def v as int init 1;`,
+	})
+	ap := filepath.Join(shallow, "a.j")
+	asrc, _ := os.ReadFile(ap)
+	atoks, _ := lexer.TokenizeWithFile(string(asrc), ap)
+	if _, err := Process(atoks, shallow, ap); err != nil {
+		t.Errorf("shallow include chain should splice, got %v", err)
 	}
 }
 

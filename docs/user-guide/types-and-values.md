@@ -51,6 +51,15 @@ exponent that overflows to infinity (`1e400`) is a positioned error
 rather than a silent `Infinity`, while one that underflows below the
 smallest representable value (`1e-400`) rounds to a finite `0.0`.
 
+Arithmetic is strict the same way. Integer arithmetic that overflows
+`int64` is a positioned runtime error, not a silent wraparound
+(`9223372036854775807 + 1` errors, and so does negating the most
+negative int). Float arithmetic that overflows to a non-finite value is
+an error too: `1e308 * 10.0` raises `float overflow`, never yielding
+`+Inf` or `NaN`. So no computation puts an `Infinity` or `NaN` into a
+value - the strict boundary is the operator itself, not just the
+literal.
+
 ### String literals: cooked (`"..."`) and raw (`'...'`)
 
 The two delimiters do different jobs.

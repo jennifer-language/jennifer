@@ -461,11 +461,14 @@ func (l *Lexer) readVarRef(startLine, startCol int) (Token, error) {
 	for l.pos < len(l.src) && isIdentPart(l.src[l.pos]) {
 		b.WriteRune(l.src[l.pos])
 		l.advance()
+		// Stop the moment the run passes the 64-char cap: keep the message and
+		// the retained lexeme bounded instead of building (and %q-ing) a
+		// megabyte-long name only to reject it.
+		if b.Len() > 64 {
+			return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("variable name \"%.40s...\" exceeds 64 characters", b.String()), Line: startLine, Col: startCol}
+		}
 	}
 	name := b.String()
-	if len(name) > 64 {
-		return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("variable name %q exceeds 64 characters", name), Line: startLine, Col: startCol}
-	}
 	return Token{Type: TOKEN_VARREF, Lexeme: name, Line: startLine, Col: startCol}, nil
 }
 
@@ -671,13 +674,16 @@ func (l *Lexer) readIdentifierOrKeyword(startLine, startCol int) (Token, error) 
 	for l.pos < len(l.src) && isIdentPartLoose(l.src[l.pos]) {
 		b.WriteRune(l.src[l.pos])
 		l.advance()
+		// No keyword is longer than 64 chars, so a run past the cap is an
+		// over-long identifier: stop now rather than scan (and later %q) an
+		// arbitrarily long lexeme just to reject it. The message is truncated.
+		if b.Len() > 64 {
+			return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("identifier \"%.40s...\" exceeds 64 characters", b.String()), Line: startLine, Col: startCol}
+		}
 	}
 	name := b.String()
 	if tt, ok := lookupKeyword(name); ok {
 		return Token{Type: tt, Lexeme: name, Line: startLine, Col: startCol}, nil
-	}
-	if len(name) > 64 {
-		return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("identifier %q exceeds 64 characters", name), Line: startLine, Col: startCol}
 	}
 	// Trailing `_` is never legal in any identifier kind.
 	if name[len(name)-1] == '_' {

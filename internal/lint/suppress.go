@@ -96,11 +96,16 @@ func applySuppressions(diags []Diagnostic, tokens []lexer.Token) []Diagnostic {
 
 	out := make([]Diagnostic, 0, len(diags)+len(bad))
 	for _, d := range diags {
-		if fileSup[d.File][d.ID] {
-			continue
-		}
-		if lineSup[d.File][d.Line][d.ID] {
-			continue
+		// L0nn source errors are "always active" and not user-selectable; a
+		// directive can never silence a lex/preproc/parse failure (parseDirective
+		// already rejects an unknown ID, but an L0nn ID is known-yet-unsuppressible).
+		if isSelectable(d.ID) {
+			if fileSup[d.File][d.ID] {
+				continue
+			}
+			if lineSup[d.File][d.Line][d.ID] {
+				continue
+			}
 		}
 		out = append(out, d)
 	}

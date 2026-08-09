@@ -20,8 +20,15 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// DefaultMaxCallEvents is the call-timeline cap NewCollector applies when it is
+// asked for 0 (the zero value): a library caller that forgets to size the trace
+// stays bounded instead of growing the timeline without limit. Pass a negative
+// value for a genuinely unlimited timeline.
+const DefaultMaxCallEvents = 10_000_000
 
 // Mode selects what a run records.
 type Mode int
@@ -80,20 +87,26 @@ type Collector struct {
 	mode     Mode
 	runStart time.Time
 
-	stmts   map[posKey]*stmtSample
-	eager   map[posKey]*eventSample
-	spawn   map[posKey]*eventSample
-	calls   []callEvent
-	maxCall int // cap on recorded call events (trace); 0 = unlimited
+	stmts     map[posKey]*stmtSample
+	eager     map[posKey]*eventSample
+	spawn     map[posKey]*eventSample
+	calls     []callEvent
+	maxCall   int   // cap on recorded call events (trace); < 0 = unlimited
+	callCount int64 // atomic mirror of len(calls) for a lock-free past-cap fast-drop
+	started   bool  // whether Start has fixed runStart (else it is lazily set)
 
 	depths   map[posKey]int // max nested method-call depth observed per call site
 	maxDepth int            // deepest nested method-call chain reached in the run
 }
 
 // NewCollector returns a Collector for the given mode. maxCallEvents bounds the
-// call timeline recorded for the trace format (0 = unlimited); it is ignored
-// outside ModeStatement.
+// call timeline recorded for the trace format: 0 applies DefaultMaxCallEvents (so
+// a forgetful caller stays bounded), a positive value is the explicit cap, and a
+// negative value is unlimited. It matters only for the call timeline (trace).
 func NewCollector(mode Mode, maxCallEvents int) *Collector {
+	if maxCallEvents == 0 {
+		maxCallEvents = DefaultMaxCallEvents
+	}
 	return &Collector{
 		mode:    mode,
 		stmts:   map[posKey]*stmtSample{},
@@ -134,6 +147,7 @@ func (c *Collector) StatementHits() map[Position]int64 {
 func (c *Collector) Start(t time.Time) {
 	c.mu.Lock()
 	c.runStart = t
+	c.started = true
 	c.mu.Unlock()
 }
 
@@ -155,10 +169,30 @@ func (c *Collector) RecordStmt(file string, line, col int, self, cum time.Durati
 // RecordCall appends one method-call span to the trace timeline (bounded by
 // maxCall). start/end are absolute times; they are stored relative to runStart.
 func (c *Collector) RecordCall(name, file string, line, col int, start, end time.Time) {
+	// Fast past-cap drop, lock-free: once the timeline is full every further call
+	// is discarded, and it must not pay for the goroutine-id stack walk below. The
+	// atomic mirror of len(calls) makes this an int load with no mutex; the
+	// authoritative bound is re-checked under the lock.
+	if c.maxCall > 0 && atomic.LoadInt64(&c.callCount) >= int64(c.maxCall) {
+		return
+	}
+	// goroutineID() runs runtime.Stack, which is slow (microseconds). Do it
+	// OUTSIDE the mutex so a `spawn` recording concurrently is not serialized
+	// behind another goroutine's stack walk. end is already captured by the
+	// caller, so this never inflates the recorded span.
+	gid := goroutineID()
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.maxCall > 0 && len(c.calls) >= c.maxCall {
 		return
+	}
+	// If Start was never called, anchor runStart to the first recorded call so
+	// timestamps stay small and relative rather than a nonsensical year-1-to-now
+	// span (which can overflow to a negative duration).
+	if !c.started {
+		c.runStart = start
+		c.started = true
 	}
 	c.calls = append(c.calls, callEvent{
 		name:  name,
@@ -167,15 +201,17 @@ func (c *Collector) RecordCall(name, file string, line, col int, start, end time
 		col:   col,
 		start: start.Sub(c.runStart),
 		end:   end.Sub(c.runStart),
-		gid:   goroutineID(),
+		gid:   gid,
 	})
+	atomic.AddInt64(&c.callCount, 1)
 }
 
 // goroutineID returns the current goroutine's id by parsing the header of a
-// single-goroutine stack dump. It is only called from RecordCall (bounded by
-// maxCall, and only while profiling), so the cost is acceptable; it lets the
-// Chrome trace put each spawn goroutine's spans on its own track instead of
-// overlapping them all on tid 1.
+// single-goroutine stack dump. RecordCall calls it outside the collector mutex
+// (and skips it entirely once the timeline is full), so its microsecond cost
+// neither serializes concurrent spawn recording nor is paid per dropped call; it
+// lets the Chrome trace put each spawn goroutine's spans on its own track instead
+// of overlapping them all on tid 1.
 func goroutineID() int {
 	var buf [64]byte
 	n := runtime.Stack(buf[:], false)

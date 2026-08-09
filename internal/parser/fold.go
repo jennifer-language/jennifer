@@ -3,9 +3,23 @@
 
 package parser
 
+import "math"
+
 // foldMinInt64 mirrors the interpreter's minInt64: the one int64 value with no
 // positive image, so `MinInt64 // -1` and `MinInt64 * -1` are left unfolded.
 const foldMinInt64 = -1 << 63
+
+// foldFloat builds a folded FloatLit, but leaves the node UNFOLDED (returns nil)
+// when the result is non-finite (+/-Inf or NaN), so the runtime raises the strict
+// "float overflow" error at the original position - the exact discipline the int
+// overflow folds use, and mirroring evalArithmetic.finiteFloatResult. A folded
+// and an unfolded overflow must behave identically.
+func foldFloat(p pos, v float64) Expr {
+	if math.IsInf(v, 0) || math.IsNaN(v) {
+		return nil
+	}
+	return &FloatLit{pos: p, Value: v}
+}
 
 // Constant folding at parse time.
 //
@@ -331,19 +345,20 @@ func tryFoldBinary(ex *BinaryExpr) Expr {
 		}
 	}
 
-	// Mixed / pure-float arithmetic (Python 3: `/` always float).
+	// Mixed / pure-float arithmetic (Python 3: `/` always float). A non-finite
+	// result is left unfolded so the runtime raises the strict overflow error.
 	switch ex.Op {
 	case OpAdd:
-		return &FloatLit{pos: ex.pos, Value: lf + rf}
+		return foldFloat(ex.pos, lf+rf)
 	case OpSub:
-		return &FloatLit{pos: ex.pos, Value: lf - rf}
+		return foldFloat(ex.pos, lf-rf)
 	case OpMul:
-		return &FloatLit{pos: ex.pos, Value: lf * rf}
+		return foldFloat(ex.pos, lf*rf)
 	case OpDiv:
 		if rf == 0 {
 			return nil
 		}
-		return &FloatLit{pos: ex.pos, Value: lf / rf}
+		return foldFloat(ex.pos, lf/rf)
 	}
 	return nil
 }

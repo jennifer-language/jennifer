@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+// An over-long identifier / variable name is rejected, and neither the scan nor
+// the error message retains the whole (potentially megabyte-long) run: the scan
+// stops just past the 64-char cap and the message is truncated.
+func TestOverlongIdentifierIsBoundedError(t *testing.T) {
+	long := strings.Repeat("a", 200000)
+	for _, c := range []struct{ src, want string }{
+		{"def " + long + " as int init 1;", "identifier"},
+		{"$" + long, "variable name"},
+	} {
+		_, err := Tokenize(c.src)
+		if err == nil {
+			t.Fatalf("expected an over-long error for %q...", c.src[:16])
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "exceeds 64 characters") || !strings.Contains(msg, c.want) {
+			t.Errorf("unexpected message: %q", msg)
+		}
+		// The message must be bounded (truncated), not carry the whole run.
+		if len(msg) > 256 {
+			t.Errorf("error message not truncated: %d bytes", len(msg))
+		}
+	}
+}
+
 func TestTokenizeSimpleProgram(t *testing.T) {
 	src := `use io;
 func app() {

@@ -112,6 +112,33 @@ func TestResolveModuleSearchPath(t *testing.T) {
 	}
 }
 
+// A bare (Module-kind) import is jailed to the search path: a `.`/`..` segment
+// must be rejected so it cannot climb above a search dir and load a file the
+// search path was meant to bound. Local `./` / `../` navigation stays legal.
+func TestResolveModuleRejectsDotSegments(t *testing.T) {
+	root := t.TempDir()
+	sysdir := filepath.Join(root, "sys")
+	mustMkdir(t, sysdir)
+	mustMkdir(t, filepath.Join(sysdir, "sub"))
+	mustWrite(t, filepath.Join(sysdir, "sub", "x.j"), "")
+	mustWrite(t, filepath.Join(root, "outside.j"), "")
+
+	// These are bare Module-kind paths (no leading ./ or ../): a dot segment in
+	// them must be rejected. (A leading ../ is a Local import, handled elsewhere.)
+	for _, bad := range []string{"sub/../../outside.j", "sub/./x.j"} {
+		if _, err := Resolve(bad, "/irrelevant", []string{sysdir}, ""); err == nil {
+			t.Errorf("Resolve(%q) should reject dot/dotdot segments", bad)
+		}
+	}
+	// A local import keeps its `./` / `../` navigation.
+	importing := filepath.Join(root, "app")
+	mustMkdir(t, importing)
+	mustWrite(t, filepath.Join(root, "shared.j"), "")
+	if _, err := Resolve("../shared.j", importing, nil, ""); err != nil {
+		t.Errorf("local ../shared.j should still resolve, got %v", err)
+	}
+}
+
 func TestResolveModuleDuplicateIsError(t *testing.T) {
 	root := t.TempDir()
 	a := filepath.Join(root, "a")

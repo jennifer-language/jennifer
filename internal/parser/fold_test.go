@@ -216,6 +216,35 @@ func TestFoldSkipsDivisionByZero(t *testing.T) {
 	}
 }
 
+// A float arithmetic result that overflows to +/-Inf or NaN must be left
+// UNFOLDED, so the runtime raises the strict "float overflow" error at the
+// original position - identical to an unfolded runtime overflow. A folded Inf
+// literal would smuggle a non-finite value into the AST past every strict
+// boundary.
+func TestFoldLeavesNonFiniteUnfolded(t *testing.T) {
+	for _, src := range []string{
+		`def x as float init 1e308 * 10.0;`,                // +Inf
+		`def x as float init -1e308 * 10.0;`,               // -Inf
+		`def x as float init 1e308 * 10.0 - 1e308 * 10.0;`, // Inf - Inf = NaN
+	} {
+		prog := mustResolve(t, src)
+		root := firstStmtExpr(t, prog)
+		bin, ok := root.(*BinaryExpr)
+		if !ok {
+			continue // a nested tree; the outer op is what matters below
+		}
+		if bin.Folded != nil {
+			t.Errorf("%s: expected Folded nil (non-finite), got %+v", src, bin.Folded)
+		}
+	}
+	// A finite float result still folds.
+	prog := mustResolve(t, `def x as float init 2.0 * 3.5;`)
+	bin := firstStmtExpr(t, prog).(*BinaryExpr)
+	if bin.Folded == nil {
+		t.Error("finite float product should still fold")
+	}
+}
+
 func TestFoldSkipsNonLiteralOperand(t *testing.T) {
 	prog := mustResolve(t, `def n as int init 5; def r as int init $n + 1;`)
 	if len(prog.TopLevel) < 2 {

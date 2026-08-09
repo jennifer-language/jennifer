@@ -91,6 +91,16 @@ func Resolve(importPath, importingDir string, searchDirs []string, vendorRoot st
 	case Absolute:
 		return canonical(native)
 	default: // Module
+		// A search-path module is resolved by joining each search dir onto the
+		// path, so a `.`/`..` segment would climb above the search root and load
+		// a file the search path was meant to bound - the same escape the `@`
+		// deck form already rejects. Local (`./`, `../`) navigation stays legal;
+		// only the bare Module form is jailed to its search dirs.
+		for _, s := range strings.Split(importPath, "/") {
+			if s == "." || s == ".." || s == "" {
+				return "", fmt.Errorf("import path %q must not contain '.' or '..' segments (use `./` for a local file relative to the importer)", importPath)
+			}
+		}
 		return resolveModule(importPath, native, searchDirs)
 	}
 }

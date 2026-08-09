@@ -246,6 +246,9 @@ func TestIntegerOverflowErrors(t *testing.T) {
 		`def x as int init 9223372036854775807 * 2;`,
 		`def x as int init (0 - 9223372036854775807) - 2;`,
 		`def x as int init (0 - 9223372036854775807) * 3;`,
+		// Unary negation of MinInt64 has no positive image; it must error like
+		// every other int op, not silently wrap back to MinInt64.
+		`def m as int init (0 - 9223372036854775807) - 1; def n as int init -$m;`,
 	}
 	for _, src := range overflowing {
 		if _, err := run(t, src); err == nil {
@@ -258,6 +261,30 @@ def hi as int init 9223372036854775806 + 1;
 io.printf("%d", $hi);`)
 	if err != nil || ok != "9223372036854775807" {
 		t.Errorf("boundary add: out=%q err=%v", ok, err)
+	}
+}
+
+// Float arithmetic that overflows to a non-finite IEEE value (+/-Inf or NaN) is
+// a positioned, catchable error, matching int overflow and the math / convert
+// boundaries - not a silent Inf/NaN entering program state. The check runs at
+// runtime; the constant folder mirrors it (TestFoldLeavesNonFiniteUnfolded).
+func TestFloatOverflowErrors(t *testing.T) {
+	// A runtime value keeps the operands out of the folder, exercising
+	// evalArithmetic directly.
+	nonFinite := []string{
+		`def a as float init 1e308; def x as float init $a * 10.0;`, // +Inf
+		`def a as float init 1e308; def x as float init $a + $a;`,   // +Inf
+		`def a as float init 1e308; def b as float init $a * 10.0;`, // via a large product
+	}
+	for _, src := range nonFinite {
+		if _, err := run(t, src); err == nil {
+			t.Errorf("expected a float-overflow error for %q", src)
+		}
+	}
+	// Ordinary float math is unaffected.
+	out, err := run(t, `use io; def x as float init 2.5 * 4.0; io.printf("%v", $x);`)
+	if err != nil || out != "10.0" {
+		t.Errorf("ordinary float mul: out=%q err=%v", out, err)
 	}
 }
 

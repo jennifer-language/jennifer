@@ -6,6 +6,7 @@ package interpreter
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -4065,6 +4066,14 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 	case parser.OpNeg:
 		switch v.Kind {
 		case KindInt:
+			// MinInt64 has no positive image; negating it wraps back to
+			// itself. Every other int op errors on overflow, so this must too.
+			if v.Int == math.MinInt64 {
+				return Value{}, &runtimeError{
+					Msg:  fmt.Sprintf("integer overflow: -(%d)", v.Int),
+					File: file, Line: line, Col: col,
+				}
+			}
 			return IntVal(-v.Int), nil
 		case KindFloat:
 			return FloatVal(-v.Float), nil
@@ -4261,29 +4270,47 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, file stri
 	}
 	switch op {
 	case parser.OpAdd:
-		return FloatVal(a + b), nil
+		return finiteFloatResult(a+b, a, b, op, file, line, col)
 	case parser.OpSub:
-		return FloatVal(a - b), nil
+		return finiteFloatResult(a-b, a, b, op, file, line, col)
 	case parser.OpMul:
-		return FloatVal(a * b), nil
+		return finiteFloatResult(a*b, a, b, op, file, line, col)
 	case parser.OpDiv:
 		if b == 0 {
 			return Value{}, &runtimeError{Msg: "division by zero", File: file, Line: line, Col: col}
 		}
-		return FloatVal(a / b), nil
+		return finiteFloatResult(a/b, a, b, op, file, line, col)
 	case parser.OpFloorDiv:
 		if b == 0 {
 			return Value{}, &runtimeError{Msg: "division by zero", File: file, Line: line, Col: col}
 		}
-		return FloatVal(floorDiv(a, b)), nil
+		return finiteFloatResult(floorDiv(a, b), a, b, op, file, line, col)
 	case parser.OpMod:
 		return Value{}, &runtimeError{Msg: "operator % requires int operands, got float", File: file, Line: line, Col: col}
 	}
 	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown binary operator %s", op), File: file, Line: line, Col: col}
 }
 
-// int64 bounds as untyped constants, so the overflow helpers stay clear of a
-// `math` import (kept out for TinyGo binary size, like floorDiv).
+// finiteFloatResult wraps a computed float result and enforces the language's
+// strict "undefined results error" stance for the operator layer: an IEEE
+// overflow to +/-Inf or a NaN is a positioned, catchable error rather than a
+// value that silently enters program state (the same discipline int overflow,
+// the `1e400` literal, and the math / convert boundaries already apply). The
+// constant folder mirrors this (fold.go), so a folded and an unfolded overflow
+// behave identically.
+func finiteFloatResult(v, a, b float64, op parser.BinaryOp, file string, line, col int) (Value, error) {
+	if math.IsInf(v, 0) || math.IsNaN(v) {
+		return Value{}, &runtimeError{
+			Msg:  fmt.Sprintf("float overflow: %v %s %v produced a non-finite result", a, op, b),
+			File: file, Line: line, Col: col,
+		}
+	}
+	return FloatVal(v), nil
+}
+
+// int64 bounds as untyped constants, so the integer overflow helpers use no
+// function call (math.MinInt64 / MaxInt64 would do), keeping the int fast path
+// branch-only.
 const (
 	minInt64 = -1 << 63
 	maxInt64 = 1<<63 - 1

@@ -157,6 +157,45 @@ func TestTraceIsValidJSON(t *testing.T) {
 	}
 }
 
+// A trace recorded without calling Start must anchor its timeline to the first
+// call rather than to the zero time (year 1), which would otherwise make every
+// timestamp a nonsensical multi-century span (and overflow to a negative
+// duration). Records real wall-clock times and asserts the first event sits at 0
+// with a small, positive duration.
+func TestTraceWithoutStartHasSaneTimestamps(t *testing.T) {
+	c := profile.NewCollector(profile.ModeStatement, 0) // no Start()
+	base := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	c.RecordCall("f", "a.j", 1, 1, base, base.Add(2*time.Millisecond))
+	c.RecordCall("g", "a.j", 2, 1, base.Add(3*time.Millisecond), base.Add(4*time.Millisecond))
+
+	var buf bytes.Buffer
+	if err := c.Trace(&buf); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		TraceEvents []struct {
+			Ts  float64 `json:"ts"`
+			Dur float64 `json:"dur"`
+		} `json:"traceEvents"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("trace not valid JSON: %v", err)
+	}
+	if len(doc.TraceEvents) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(doc.TraceEvents))
+	}
+	// Anchored to the first call: ts=0, dur=2000us; nothing negative or huge.
+	for i, e := range doc.TraceEvents {
+		if e.Ts < 0 || e.Dur < 0 || e.Ts > 1e9 {
+			t.Errorf("event %d has garbage timing: ts=%v dur=%v", i, e.Ts, e.Dur)
+		}
+	}
+	if doc.TraceEvents[0].Ts != 0 || doc.TraceEvents[0].Dur != 2000 {
+		t.Errorf("first event should be anchored at 0 with 2000us dur, got ts=%v dur=%v",
+			doc.TraceEvents[0].Ts, doc.TraceEvents[0].Dur)
+	}
+}
+
 func TestCallCapDropsExcess(t *testing.T) {
 	c := profile.NewCollector(profile.ModeStatement, 2)
 	base := time.Time{}
@@ -173,6 +212,27 @@ func TestCallCapDropsExcess(t *testing.T) {
 	json.Unmarshal(buf.Bytes(), &doc)
 	if len(doc.TraceEvents) != 2 {
 		t.Fatalf("expected cap of 2 call events, got %d", len(doc.TraceEvents))
+	}
+}
+
+// A negative cap means an explicitly unlimited timeline (0 now applies the
+// bounded DefaultMaxCallEvents instead, so a forgetful caller stays bounded).
+func TestNegativeCapIsUnlimited(t *testing.T) {
+	c := profile.NewCollector(profile.ModeStatement, -1)
+	base := time.Time{}
+	for k := 0; k < 1000; k++ {
+		c.RecordCall("f", "a.j", 1, 1, base, base.Add(time.Millisecond))
+	}
+	var buf bytes.Buffer
+	if err := c.Trace(&buf); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		TraceEvents []json.RawMessage `json:"traceEvents"`
+	}
+	json.Unmarshal(buf.Bytes(), &doc)
+	if len(doc.TraceEvents) != 1000 {
+		t.Fatalf("unlimited cap should keep all 1000 events, got %d", len(doc.TraceEvents))
 	}
 }
 

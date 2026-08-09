@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // PreprocessError carries context across files.
@@ -88,6 +89,7 @@ const maxSplicedTokens = 2_000_000
 // after hundreds of thousands of re-reads.
 type expandCtx struct {
 	total int
+	depth int                      // current include-recursion depth (guards the Go stack)
 	cache map[string][]lexer.Token // absPath -> stripped raw (pre-expansion) tokens
 }
 
@@ -256,6 +258,18 @@ func spliceFile(path, baseDir string, visited map[string]bool, originTok lexer.T
 			File: originTok.File, Line: originTok.Line, Col: originTok.Col,
 		}
 	}
+	// A deep *linear* chain (a -> b -> c -> ...) slips under the token budget
+	// (each file adds only its own few tokens) but recurses one Go frame per
+	// level. Uncapped, a generated chain overflows the fixed TinyGo goroutine
+	// stack into a fatal, uncatchable crash; cap it like the parser's nesting.
+	if ctx.depth >= limits.MaxNestingDepth {
+		return nil, &PreprocessError{
+			Msg:  fmt.Sprintf("include nesting exceeds %d levels", limits.MaxNestingDepth),
+			File: originTok.File, Line: originTok.Line, Col: originTok.Col,
+		}
+	}
+	ctx.depth++
+	defer func() { ctx.depth-- }()
 	// Read + tokenize each file once, then serve every later inclusion from the
 	// cache. The file content is fixed for the run, so a cached copy is exact;
 	// this is what makes a diamond cheap and the pathological doubling chain

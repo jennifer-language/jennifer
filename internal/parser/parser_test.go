@@ -151,6 +151,32 @@ func TestDeeplyNestedExpressionRejected(t *testing.T) {
 	}
 }
 
+// Statement-block nesting (if/while/... bodies via parseBlock) and compound-type
+// nesting (list of / map of via parseType) share the expression guard's rationale:
+// unbounded, they overflow the recover-less Go stack (fatal on the fixed TinyGo
+// stack). Both must reject past the cap with a positioned parse error.
+func TestDeeplyNestedStatementsAndTypesRejected(t *testing.T) {
+	n := limits.MaxNestingDepth + 1
+	stmt := "func f() { " + strings.Repeat("if (true) { ", n) + "def x as int init 1; " +
+		strings.Repeat("} ", n) + "}"
+	if _, err := Parse(stmt); err == nil || !strings.Contains(err.Error(), "block nesting exceeds") {
+		t.Errorf("expected block-nesting parse error, got %v", err)
+	}
+	typ := "def x as " + strings.Repeat("list of ", n) + "int;"
+	if _, err := Parse(typ); err == nil || !strings.Contains(err.Error(), "compound type nesting exceeds") {
+		t.Errorf("expected type-nesting parse error, got %v", err)
+	}
+	// Modest, ordinary nesting under the cap still parses in both forms.
+	okStmt := "func f() { if (true) { while (true) { def x as int init 1; break; } } }"
+	if _, err := Parse(okStmt); err != nil {
+		t.Errorf("ordinary nested statements should parse, got %v", err)
+	}
+	okType := "def x as list of map of string to list of int;"
+	if _, err := Parse(okType); err != nil {
+		t.Errorf("ordinary nested type should parse, got %v", err)
+	}
+}
+
 func TestFuncIntroducesMethod(t *testing.T) {
 	src := `func app() { io.printf(1); }`
 	p, err := Parse(src)
