@@ -68,7 +68,7 @@ func testAllValid() {
         "even": [custom(even, "must be even")]
     };
     def data as map of string to string init {"email": "a@b.com", "age": "30", "name": "Ada",
-        "role": "admin", "site": "https://x.io", "flag": "true", "score": "1.5", "even": "4"};
+        "role": "admin", "site": "https://example.com", "flag": "true", "score": "1.5", "even": "4"};
     testing.assertTrue(ok($data, $rules));
     testing.assertEqual(len(check($data, $rules)), 0);
 }

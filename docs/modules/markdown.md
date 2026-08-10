@@ -26,6 +26,24 @@ Rendering (Markdown in, HTML / terminal text out):
 | --------------------- | -------- | --------------------------------------------------------------- |
 | `markdown.toHtml(md)` | `string` | Render to HTML: block elements concatenated, no indentation.    |
 | `markdown.toAnsi(md)` | `string` | Render to terminal text with `ansi` styling (self-suppressing). |
+| `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"ansi"`. |
+
+`toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, so build and
+parse share one document model.
+
+Reading (surface the parse tree, walked like [`xml`](xml.md) / [`html`](html.md)):
+
+| Call                          | Returns        | Notes                                                       |
+| ----------------------------- | -------------- | ----------------------------------------------------------- |
+| `markdown.parse(md)`          | `Node`         | Parse to the document root (`typeOf` `"document"`).         |
+| `markdown.typeOf(node)`       | `string`       | The node kind (`"heading"`, `"link"`, `"text"`, ...).       |
+| `markdown.children(node)`     | `list of Node` | The node's direct children.                                 |
+| `markdown.text(node)`         | `string`       | A leaf's text, else its descendants' text concatenated.     |
+| `markdown.level(node)`        | `int`          | A heading's level (1-6); 0 otherwise.                       |
+| `markdown.attr(node, name)`   | `string`       | `"href"` / `"title"` / `"lang"` / `"align"` / `"ordered"` / `"level"`, or "". |
+| `markdown.get(node, sel)`     | `Node`         | First node matching a `/`-separated selector, or an empty node. |
+| `markdown.findAll(node, sel)` | `list of Node` | Every node matching the selector.                           |
+| `markdown.has(node, sel)`     | `bool`         | Whether any node matches.                                   |
 
 Authoring (build Markdown text - the inverse):
 
@@ -93,6 +111,43 @@ and dimmed. Styling comes from the `ansi` module, which **suppresses itself
 when stdout is not a terminal** (or `NO_COLOR` is set) and is forced on by
 `FORCE_COLOR` - so piping the output gives clean plain text, and
 `ansi.strip(markdown.toAnsi(md))` gives it unconditionally.
+
+## Reading the document tree
+
+`markdown.parse(md)` returns the document as a tree of `Node`s, walked with the
+same accessor vocabulary as [`xml`](xml.md) / [`html`](html.md) - so a document
+can be inspected or transformed (pull the headings for a table of contents,
+rewrite links, lint) and then rendered, rather than going straight to a string. A
+node's `typeOf` is a block kind (`"document"`, `"heading"`, `"paragraph"`,
+`"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`) or an
+inline kind (`"text"`, `"codespan"`, `"strong"`, `"emphasis"`, `"link"`,
+`"image"`). `get` / `findAll` / `has` take a `/`-separated selector whose steps
+are kind names, `*` (any kind), or `name[k]` (the k-th such child, 1-based),
+matching direct children.
+
+```jennifer
+def doc as markdown.Node init markdown.parse("# Title\n\nSee [docs](https://example.com).\n");
+
+# Walk the headings for an outline.
+for (def h in markdown.findAll($doc, "heading")) {
+    io.printf("H{markdown.level($h)}: {markdown.text($h)}\n");   # H1: Title
+}
+
+# Pull a link's target.
+def a as markdown.Node init markdown.get($doc, "paragraph/link");
+io.printf("{markdown.text($a)} -> {markdown.attr($a, 'href')}\n");   # docs -> https://example.com
+
+# Render straight from the (possibly transformed) tree.
+io.printf("{markdown.render($doc, 'html')}\n");
+```
+
+`attr` reads a node's string attributes: `"href"` / `"title"` (a link or image),
+`"lang"` (a fenced code block's language), `"align"` (a table cell), `"ordered"`
+(`"true"` / `"false"`, a list), and `"level"` (a heading). `render(doc, format)`
+renders a `"document"` node's children (or any single node as one block); it and
+the parse are hardened with a nesting-depth cap and a total-node budget, so a
+pathological document is a catchable `"markdown"` error rather than an unbounded
+parse.
 
 ## Authoring Markdown
 

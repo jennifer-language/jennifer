@@ -521,3 +521,142 @@ func testToHtmlKeepsSafeLink() {
     def out as string init toHtml("[post](https://example.com/x)");
     testing.assertContains($out, "href=\"https://example.com/x\"");
 }
+
+# --- public document tree: reader (parse + accessors) ---
+
+func testParseDocumentRoot() {
+    def doc as Node init parse("# H\n\ntext\n");
+    testing.assertEqual(typeOf($doc), "document");
+    testing.assertEqual(len(children($doc)), 2);
+}
+
+func testReaderHeadingLevelText() {
+    def doc as Node init parse("## Hello *world*\n");
+    def h as Node init get($doc, "heading");
+    testing.assertEqual(typeOf($h), "heading");
+    testing.assertEqual(level($h), 2);
+    # text flattens the inline children (the emphasis contributes "world").
+    testing.assertEqual(text($h), "Hello world");
+}
+
+func testReaderLinkAttrs() {
+    def doc as Node init parse("see [site](https://example.com \"home\")\n");
+    def a as Node init get($doc, "paragraph/link");
+    testing.assertEqual(attr($a, "href"), "https://example.com");
+    testing.assertEqual(attr($a, "title"), "home");
+    testing.assertEqual(text($a), "site");
+}
+
+func testReaderCodeLanguage() {
+    def doc as Node init parse("```python\nprint(1)\n```\n");
+    def c as Node init get($doc, "code");
+    testing.assertEqual(attr($c, "lang"), "python");
+    testing.assertEqual(text($c), "print(1)");
+}
+
+func testReaderOrderedList() {
+    def doc as Node init parse("1. a\n2. b\n");
+    def l as Node init get($doc, "list");
+    testing.assertEqual(attr($l, "ordered"), "true");
+    testing.assertEqual(len(findAll($l, "item")), 2);
+}
+
+func testReaderUnorderedList() {
+    def doc as Node init parse("- a\n- b\n- c\n");
+    def l as Node init get($doc, "list");
+    testing.assertEqual(attr($l, "ordered"), "false");
+    testing.assertEqual(len(findAll($l, "item")), 3);
+}
+
+func testReaderTableCellAlign() {
+    def doc as Node init parse("| A | B |\n|:--|--:|\n| 1 | 2 |\n");
+    def t as Node init get($doc, "table");
+    # The header is row[1]; its second cell is right-aligned.
+    def cell as Node init get($t, "row[1]/cell[2]");
+    testing.assertEqual(attr($cell, "align"), "right");
+}
+
+func testReaderNestedListItem() {
+    def doc as Node init parse("- top\n  - nested\n");
+    def item as Node init get($doc, "list/item");
+    testing.assertTrue(has($item, "list"));
+}
+
+func testSelectorWildcardAndIndex() {
+    def doc as Node init parse("# a\n\n# b\n\n# c\n");
+    testing.assertEqual(len(findAll($doc, "*")), 3);
+    testing.assertEqual(text(get($doc, "heading[2]")), "b");
+}
+
+func testTextFlattensDescendants() {
+    def doc as Node init parse("a **bold** and `code`\n");
+    def p as Node init get($doc, "paragraph");
+    testing.assertEqual(text($p), "a bold and code");
+}
+
+func testGetMissingIsEmptyNode() {
+    def doc as Node init parse("just text\n");
+    testing.assertEqual(typeOf(get($doc, "table")), "");
+    testing.assertFalse(has($doc, "table"));
+}
+
+# --- public document tree: render (from the tree) ---
+
+func testRenderHtmlMatchesToHtml() {
+    def src as string init "# H\n\ntext with [x](http://a) and `c`\n\n- one\n- two\n";
+    testing.assertEqual(render(parse($src), "html"), toHtml($src));
+}
+
+func testRenderAnsiMatchesToAnsi() {
+    def src as string init "# H\n\n| A | B |\n|--|--|\n| 1 | 2 |\n";
+    testing.assertEqual(render(parse($src), "ansi"), toAnsi($src));
+}
+
+func testRenderRoundTripTransform() {
+    # parse -> rewrite a link's url -> render: the new url appears, the old is gone.
+    def doc as Node init parse("go [here](http://old.example)\n");
+    def docKids as list of Node init children($doc);
+    def para as Node init $docKids[0];
+    def pkids as list of Node init children($para);
+    def j as int init 0;
+    while ($j < len($pkids)) {
+        if (typeOf($pkids[$j]) == "link") {
+            $pkids[$j].url = "http://new.example";
+        }
+        $j = $j + 1;
+    }
+    $para.children = $pkids;
+    $docKids[0] = $para;
+    $doc.children = $docKids;
+    def out as string init render($doc, "html");
+    testing.assertContains($out, "http://new.example");
+    testing.assertFalse(strings.contains($out, "old.example"));
+}
+
+func renderBadFormat() {
+    def out as string init render(parse("x\n"), "pdf");
+}
+
+func testRenderUnknownFormatThrows() {
+    testing.assertThrows("renderBadFormat", "markdown");
+}
+
+func deepBlockConversion() {
+    # A depth past the cap is a catchable "markdown" error, not a stack overflow.
+    def b as Block init headingBlock(1, "x");
+    def n as Node init blockToPublic($b, 200);
+}
+
+func testDepthCapThrows() {
+    testing.assertThrows("deepBlockConversion", "markdown");
+}
+
+func testRenderEmptyTableNodeNoCrash() {
+    # A hand-built table with no rows renders empty rather than indexing past the end.
+    def t as Node;
+    $t.kind = "table";
+    def doc as Node;
+    $doc.kind = "document";
+    $doc.children = [$t];
+    testing.assertEqual(render($doc, "ansi"), "");
+}

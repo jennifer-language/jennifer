@@ -58,6 +58,7 @@ def struct Block {
     kind as BlockKind,
     level as int,
     text as string,
+    lang as string,
     ordered as bool,
     items as list of string,
     headings as list of string,
@@ -78,6 +79,7 @@ def struct BlockScan {
 # value semantics rule out appending into a caller's list).
 def struct Fence {
     code as string,
+    lang as string,
     next as int
 };
 
@@ -110,6 +112,7 @@ func paraBlock(lines as list of string) {
         kind: BlockKind.Paragraph,
         level: 0,
         text: $joined,
+        lang: "",
         ordered: false,
         items: [],
         headings: [],
@@ -127,6 +130,7 @@ func listBlockFull(items as list of string, children as list of Block, ordered a
         kind: BlockKind.List,
         level: 0,
         text: "",
+        lang: "",
         ordered: $ordered,
         items: $items,
         headings: [],
@@ -150,6 +154,7 @@ func quoteBlock(children as list of Block) {
         kind: BlockKind.Quote,
         level: 0,
         text: "",
+        lang: "",
         ordered: false,
         items: [],
         headings: [],
@@ -167,6 +172,7 @@ func tableBlock(
         kind: BlockKind.Table,
         level: 0,
         text: "",
+        lang: "",
         ordered: false,
         items: [],
         headings: $headings,
@@ -176,11 +182,12 @@ func tableBlock(
     };
 }
 
-func codeBlockNode(text as string) {
+func codeBlockNode(text as string, lang as string) {
     return Block{
         kind: BlockKind.Code,
         level: 0,
         text: $text,
+        lang: $lang,
         ordered: false,
         items: [],
         headings: [],
@@ -746,7 +753,7 @@ func parseLines(lines as list of string) {
         }
         if ($lt == "fence") {
             def f as Fence init collectFence($lines, $i);
-            $blocks[] = codeBlockNode($f.code);
+            $blocks[] = codeBlockNode($f.code, $f.lang);
             $i = $f.next;
             continue;
         }
@@ -788,6 +795,7 @@ func headingBlock(level as int, text as string) {
         kind: BlockKind.Heading,
         level: $level,
         text: $text,
+        lang: "",
         ordered: false,
         items: [],
         headings: [],
@@ -804,7 +812,16 @@ func collectFence(lines as list of string, open as int) {
     # Record the opening fence length; a shorter run of backticks inside the
     # block is content, not a terminator (only a fence of equal-or-greater
     # length closes it).
-    def openLen as int init fenceLen(strings.trim($lines[$open]));
+    def trimmedOpen as string init strings.trim($lines[$open]);
+    def openLen as int init fenceLen($trimmedOpen);
+    # The info string follows the opening backtick run; its first word is the
+    # language (```python -> "python"). The rest (rare "```python extra") is dropped.
+    def info as string init strings.trim(strings.substring($trimmedOpen, $openLen, len($trimmedOpen)));
+    def lang as string init $info;
+    def sp as int init strings.indexOf($info, " ");
+    if ($sp >= 0) {
+        $lang = strings.substring($info, 0, $sp);
+    }
     def parts as list of string init [];
     def j as int init $open + 1;
     while ($j < $n) {
@@ -816,9 +833,9 @@ func collectFence(lines as list of string, open as int) {
     }
     def code as string init strings.join($parts, "\n");
     if ($j < $n) {
-        return Fence{code: $code, next: $j + 1};
+        return Fence{code: $code, lang: $lang, next: $j + 1};
     }
-    return Fence{code: $code, next: $j};
+    return Fence{code: $code, lang: $lang, next: $j};
 }
 
 # fenceLen returns the number of leading backticks in a trimmed line when it is
@@ -835,32 +852,418 @@ func fenceLen(trimmed as string) {
     return 0;
 }
 
-# --- HTML rendering, through html (exported) -----------------
+# --- public document tree (reader) ---------------------------------
 
-# inlineToNodes maps spans to html nodes; html.text escapes text content
-# and html.attr escapes the link target.
-# spanToNode renders one span to an html node. The `match` is over a Span
-# parameter, so the resolver checks it covers every SpanKind - add a kind and
-# this fails to compile until it is handled.
-func spanToNode(sp as Span) {
+/**
+ * A node in a parsed Markdown document tree. The tree is walked with the reader
+ * accessors (`typeOf` / `children` / `text` / `level` / `attr` / `get` / `findAll` /
+ * `has`), the same family vocabulary as `xml` / `html`. A node's `kind` is one of the
+ * block kinds `"document"` / `"heading"` / `"paragraph"` / `"code"` / `"list"` /
+ * `"item"` / `"table"` / `"row"` / `"cell"` / `"quote"`, or the inline kinds
+ * `"text"` / `"codespan"` / `"strong"` / `"emphasis"` / `"link"` / `"image"`.
+ * @field kind {string} the node kind
+ * @field level {int} a heading's level (1-6); 0 otherwise
+ * @field text {string} literal text (a `text` / `codespan` / `code` node, or an
+ *   `image`'s alt); "" for a container (read its content with the `text` accessor)
+ * @field lang {string} a fenced `code` block's language ("" if none)
+ * @field ordered {bool} whether a `list` is ordered
+ * @field url {string} a `link` / `image` target
+ * @field title {string} a `link` / `image` title ("" if none)
+ * @field align {string} a table `cell`'s alignment ("left" / "right" / "center" / "")
+ * @field children {list of Node} the child nodes
+ */
+export def struct Node {
+    kind as string,
+    level as int,
+    text as string,
+    lang as string,
+    ordered as bool,
+    url as string,
+    title as string,
+    align as string,
+    children as list of Node
+};
+
+# The nesting-depth cap and total-node budget that turn a pathological document
+# (deeply nested quotes / lists, or a huge input) into a catchable "markdown" error
+# rather than an unbounded recursion or allocation.
+def const MAX_DOC_DEPTH as int init 100;
+def const MAX_DOC_NODES as int init 200000;
+
+func mdFail(msg as string) {
+    throw Error{kind: "markdown", message: $msg, file: "", line: 0, col: 0};
+}
+
+# nodeOf returns a zero-valued Node with only its kind set; callers fill the fields
+# that kind uses (value semantics - each call is a fresh node).
+func nodeOf(kind as string) {
+    def n as Node;
+    $n.kind = $kind;
+    return $n;
+}
+
+func textNode(s as string) {
+    def n as Node init nodeOf("text");
+    $n.text = $s;
+    return $n;
+}
+
+# spanToPublic maps one inline Span to a public inline Node. The `match` is over a
+# Span, so the resolver checks it covers every SpanKind.
+func spanToPublic(sp as Span) {
     match ($sp.kind) {
-        when Text { return html.text($sp.text); }
-        when Code { return wrapEl("code", $sp.text); }
-        when Strong { return wrapEl("strong", $sp.text); }
-        when Em { return wrapEl("em", $sp.text); }
-        when Link { return linkNode($sp.text, $sp.url, $sp.title); }
-        when Image { return imageNode($sp.text, $sp.url, $sp.title); }
+        when Text {
+            return textNode($sp.text);
+        }
+        when Code {
+            def n as Node init nodeOf("codespan");
+            $n.text = $sp.text;
+            return $n;
+        }
+        when Strong {
+            def n as Node init nodeOf("strong");
+            $n.children = [textNode($sp.text)];
+            return $n;
+        }
+        when Em {
+            def n as Node init nodeOf("emphasis");
+            $n.children = [textNode($sp.text)];
+            return $n;
+        }
+        when Link {
+            def n as Node init nodeOf("link");
+            $n.url = $sp.url;
+            $n.title = $sp.title;
+            $n.children = [textNode($sp.text)];
+            return $n;
+        }
+        when Image {
+            def n as Node init nodeOf("image");
+            $n.url = $sp.url;
+            $n.title = $sp.title;
+            $n.text = $sp.text;
+            return $n;
+        }
     }
 }
 
-func inlineToNodes(spans as list of Span) {
-    def nodes as list of html.Node init [];
+func inlineToPublic(spans as list of Span) {
+    def out as list of Node init [];
     for (def sp in $spans) {
-        $nodes[] = spanToNode($sp);
+        $out[] = spanToPublic($sp);
     }
-    return $nodes;
+    return $out;
 }
 
+# cellNodePublic builds a table "cell" node with its alignment and inline content.
+func cellNodePublic(text as string, align as string) {
+    def n as Node init nodeOf("cell");
+    $n.align = $align;
+    $n.children = inlineToPublic(parseInline($text));
+    return $n;
+}
+
+# rowNodePublic builds a "row" of exactly `cols` "cell" nodes (a short source row
+# pads with empty cells, a long one truncates), so every table row is rectangular
+# against the header - the shape the renderers assume.
+func rowNodePublic(cells as list of string, aligns as list of string, cols as int) {
+    def n as Node init nodeOf("row");
+    def kids as list of Node init [];
+    def i as int init 0;
+    while ($i < $cols) {
+        def cellText as string init "";
+        if ($i < len($cells)) {
+            $cellText = $cells[$i];
+        }
+        $kids[] = cellNodePublic($cellText, alignOf($aligns, $i));
+        $i = $i + 1;
+    }
+    $n.children = $kids;
+    return $n;
+}
+
+func tableToPublic(b as Block) {
+    def n as Node init nodeOf("table");
+    def cols as int init len($b.headings);
+    def kids as list of Node init [];
+    $kids[] = rowNodePublic($b.headings, $b.aligns, $cols);
+    for (def r in $b.rows) {
+        $kids[] = rowNodePublic($r, $b.aligns, $cols);
+    }
+    $n.children = $kids;
+    return $n;
+}
+
+func listToPublic(b as Block, depth as int) {
+    def n as Node init nodeOf("list");
+    $n.ordered = $b.ordered;
+    def kids as list of Node init [];
+    def i as int init 0;
+    for (def itemText in $b.items) {
+        def item as Node init nodeOf("item");
+        def ikids as list of Node init inlineToPublic(parseInline($itemText));
+        # The parallel `children` entry is a nested sub-list (an empty List when the
+        # item has no nesting); attach it as a child of the item when non-empty.
+        if ($i < len($b.children)) {
+            def sub as Block init $b.children[$i];
+            if (len($sub.items) > 0) {
+                $ikids[] = blockToPublic($sub, $depth + 1);
+            }
+        }
+        $item.children = $ikids;
+        $kids[] = $item;
+        $i = $i + 1;
+    }
+    $n.children = $kids;
+    return $n;
+}
+
+# blockToPublic maps one internal Block to a public Node, recursing (under a depth
+# cap) into a list's nested sub-lists and a quote's inner blocks. The `match` is over
+# a Block, so the resolver checks it covers every BlockKind.
+func blockToPublic(b as Block, depth as int) {
+    if ($depth > MAX_DOC_DEPTH) {
+        mdFail("document nesting too deep (over " + convert.toString(MAX_DOC_DEPTH) + " levels)");
+    }
+    match ($b.kind) {
+        when Heading {
+            def n as Node init nodeOf("heading");
+            $n.level = $b.level;
+            $n.children = inlineToPublic(parseInline($b.text));
+            return $n;
+        }
+        when Paragraph {
+            def n as Node init nodeOf("paragraph");
+            $n.children = inlineToPublic(parseInline($b.text));
+            return $n;
+        }
+        when Code {
+            def n as Node init nodeOf("code");
+            $n.text = $b.text;
+            $n.lang = $b.lang;
+            return $n;
+        }
+        when List {
+            return listToPublic($b, $depth);
+        }
+        when Table {
+            return tableToPublic($b);
+        }
+        when Quote {
+            def n as Node init nodeOf("quote");
+            def kids as list of Node init [];
+            for (def cb in $b.children) {
+                $kids[] = blockToPublic($cb, $depth + 1);
+            }
+            $n.children = $kids;
+            return $n;
+        }
+    }
+}
+
+# countNodes sums the nodes in a subtree. The depth cap already bounds recursion
+# depth, so this cannot itself overflow; it enforces the node budget.
+func countNodes(n as Node) {
+    def total as int init 1;
+    for (def c in $n.children) {
+        $total = $total + countNodes($c);
+    }
+    return $total;
+}
+
+/**
+ * Parse Markdown into a document tree, walked by the reader accessors (`typeOf` /
+ * `children` / `text` / `level` / `attr` / `get` / `findAll` / `has`) - so a caller
+ * can inspect or transform a document (pull the headings for a table of contents,
+ * rewrite links, convert to another format) before `render`ing it. The returned node
+ * is the document root (its `typeOf` is `"document"`); its children are the top-level
+ * blocks. A document that nests too deep or holds too many nodes is a catchable
+ * `"markdown"` error.
+ * @param md {string} the Markdown source
+ * @return {Node} the document root node
+ */
+export func parse(md as string) {
+    def kids as list of Node init [];
+    for (def b in parseBlocks($md)) {
+        $kids[] = blockToPublic($b, 1);
+    }
+    def doc as Node init nodeOf("document");
+    $doc.children = $kids;
+    if (countNodes($doc) > MAX_DOC_NODES) {
+        mdFail("document too large (over " + convert.toString(MAX_DOC_NODES) + " nodes)");
+    }
+    return $doc;
+}
+
+/**
+ * The kind of a node (`"document"`, `"heading"`, `"link"`, `"text"`, ...).
+ * @param node {Node} the node
+ * @return {string} the node kind
+ */
+export func typeOf(node as Node) {
+    return $node.kind;
+}
+
+/**
+ * A node's direct children.
+ * @param node {Node} the node
+ * @return {list of Node} the child nodes
+ */
+export func children(node as Node) {
+    return $node.children;
+}
+
+/**
+ * A heading's level (1-6); 0 for any other node.
+ * @param node {Node} the node
+ * @return {int} the heading level
+ */
+export func level(node as Node) {
+    return $node.level;
+}
+
+/**
+ * The text content of a node: a leaf's own literal text, else the concatenation of
+ * its descendants' text - so `text` of a heading (or any container) is its full
+ * flattened text, handy for a table of contents.
+ * @param node {Node} the node
+ * @return {string} the flattened text
+ */
+export func text(node as Node) {
+    if (len($node.children) == 0) {
+        return $node.text;
+    }
+    def out as string init "";
+    for (def c in $node.children) {
+        $out = $out + text($c);
+    }
+    return $out;
+}
+
+/**
+ * A named string attribute of a node: `"href"` / `"title"` (a `link` / `image`),
+ * `"lang"` (a `code` block), `"align"` (a table `cell`), `"ordered"` ("true" /
+ * "false", a `list`), or `"level"` (a heading, as a string). Returns "" for an
+ * absent attribute.
+ * @param node {Node} the node
+ * @param name {string} the attribute name
+ * @return {string} the attribute value, or ""
+ */
+export func attr(node as Node, name as string) {
+    match ($name) {
+        when "href", "url" {
+            return $node.url;
+        }
+        when "title" {
+            return $node.title;
+        }
+        when "lang", "language" {
+            return $node.lang;
+        }
+        when "align" {
+            return $node.align;
+        }
+        when "ordered" {
+            if ($node.ordered) {
+                return "true";
+            }
+            return "false";
+        }
+        when "level" {
+            return convert.toString($node.level);
+        }
+        else {
+            return "";
+        }
+    }
+}
+
+# An XPath-ish selector step: a kind name (or "*") plus an optional 1-based index.
+def struct MdStep {
+    name as string,
+    index as int
+};
+
+# mdParseSteps splits a "/"-separated selector ("list/item") into steps.
+func mdParseSteps(selector as string) {
+    def steps as list of MdStep init [];
+    for (def raw in strings.split($selector, "/")) {
+        def s as string init strings.trim($raw);
+        if (len($s) > 0) {
+            def name as string init $s;
+            def idx as int init 0;
+            def lb as int init strings.indexOf($s, "[");
+            if ($lb >= 0 and strings.endsWith($s, "]")) {
+                $name = strings.substring($s, 0, $lb);
+                def inner as string init strings.substring($s, $lb + 1, len($s) - 1);
+                try {
+                    $idx = convert.toInt($inner);
+                } catch (e) {
+                    $idx = 0;
+                }
+            }
+            $steps[] = MdStep{name: strings.lower($name), index: $idx};
+        }
+    }
+    return $steps;
+}
+
+/**
+ * Every node matching a `/`-separated `selector` relative to `node`: each step is a
+ * kind name, `*` (any kind), or `name[k]` (the k-th such child, 1-based). Steps match
+ * direct children.
+ * @param node {Node} the node to search under
+ * @param selector {string} the selector path (e.g. "list/item")
+ * @return {list of Node} the matching nodes (empty if none)
+ */
+export func findAll(node as Node, selector as string) {
+    def frontier as list of Node init [$node];
+    for (def step in mdParseSteps($selector)) {
+        def next as list of Node init [];
+        for (def parent in $frontier) {
+            def matchNum as int init 0;
+            for (def child in $parent.children) {
+                if ($step.name == "*" or $child.kind == $step.name) {
+                    $matchNum = $matchNum + 1;
+                    if ($step.index == 0 or $step.index == $matchNum) {
+                        $next[] = $child;
+                    }
+                }
+            }
+        }
+        $frontier = $next;
+    }
+    return $frontier;
+}
+
+/**
+ * The first node matching `selector` (see `findAll`), or an empty node (`typeOf` "")
+ * if there is no match.
+ * @param node {Node} the node to search under
+ * @param selector {string} the selector path
+ * @return {Node} the first match, or an empty node
+ */
+export func get(node as Node, selector as string) {
+    def all as list of Node init findAll($node, $selector);
+    if (len($all) > 0) {
+        return $all[0];
+    }
+    return nodeOf("");
+}
+
+/**
+ * Whether any node matches `selector` (see `findAll`).
+ * @param node {Node} the node to search under
+ * @param selector {string} the selector path
+ * @return {bool} true if at least one node matches
+ */
+export func has(node as Node, selector as string) {
+    return len(findAll($node, $selector)) > 0;
+}
+
+# --- HTML helpers shared by the node renderer ----------------------
+
+# wrapEl wraps text in a simple element (`html.text` escapes the content).
 func wrapEl(tag as string, text as string) {
     def kids as list of html.Node init [];
     $kids[] = html.text($text);
@@ -914,100 +1317,6 @@ func alignOf(aligns as list of string, i as int) {
     return "none";
 }
 
-# cellNode builds a `th` / `td` with inline-parsed content and an `align`
-# attribute (omitted for "none").
-func cellNode(tag as string, text as string, align as string) {
-    def attrs as list of html.Attr init [];
-    if (not ($align == "none")) {
-        $attrs[] = html.attr("align", $align);
-    }
-    return html.element($tag, $attrs, inlineToNodes(parseInline($text)));
-}
-
-# tableRowNode builds one `tr` of `tag` cells (`th` for the header, `td` for
-# data), exactly `cols` columns: a short row pads with empty cells, a long one
-# is truncated.
-func tableRowNode(tag as string, cells as list of string, aligns as list of string, cols as int) {
-    def tds as list of html.Node init [];
-    def i as int init 0;
-    while ($i < $cols) {
-        def text as string init "";
-        if ($i < len($cells)) {
-            $text = $cells[$i];
-        }
-        $tds[] = cellNode($tag, $text, alignOf($aligns, $i));
-        $i = $i + 1;
-    }
-    return html.element("tr", [], $tds);
-}
-
-# tableNode renders a table block as `<table><thead>...<tbody>...`.
-func tableNode(b as Block) {
-    def cols as int init len($b.headings);
-    def head as list of html.Node init [];
-    $head[] = tableRowNode("th", $b.headings, $b.aligns, $cols);
-    def body as list of html.Node init [];
-    for (def row in $b.rows) {
-        $body[] = tableRowNode("td", $row, $b.aligns, $cols);
-    }
-    def parts as list of html.Node init [];
-    $parts[] = html.element("thead", [], $head);
-    $parts[] = html.element("tbody", [], $body);
-    return html.element("table", [], $parts);
-}
-
-# listNode renders a List block, recursing into each item's nested sub-list (its
-# `children` slot, when non-empty) as a child `<ul>` / `<ol>` inside the `<li>`.
-func listNode(b as Block) {
-    def lis as list of html.Node init [];
-    def k as int init 0;
-    while ($k < len($b.items)) {
-        def kids as list of html.Node init inlineToNodes(parseInline($b.items[$k]));
-        if ($k < len($b.children) and len($b.children[$k].items) > 0) {
-            $kids[] = blockToNode($b.children[$k]);
-        }
-        $lis[] = html.element("li", [], $kids);
-        $k = $k + 1;
-    }
-    if ($b.ordered) {
-        return html.element("ol", [], $lis);
-    }
-    return html.element("ul", [], $lis);
-}
-
-# blockToNode renders one block to an html node.
-func blockToNode(b as Block) {
-    match ($b.kind) {
-        when Table {
-            return tableNode($b);
-        }
-        when Heading {
-            def tag as string init "h" + convert.toString($b.level);
-            return html.element($tag, [], inlineToNodes(parseInline($b.text)));
-        }
-        when Code {
-            def codeKids as list of html.Node init [];
-            $codeKids[] = html.text($b.text);
-            def pre as list of html.Node init [];
-            $pre[] = html.element("code", [], $codeKids);
-            return html.element("pre", [], $pre);
-        }
-        when List {
-            return listNode($b);
-        }
-        when Quote {
-            def kids as list of html.Node init [];
-            for (def cb in $b.children) {
-                $kids[] = blockToNode($cb);
-            }
-            return html.element("blockquote", [], $kids);
-        }
-        when Paragraph {
-            return html.element("p", [], inlineToNodes(parseInline($b.text)));
-        }
-    }
-}
-
 /**
  * Render Markdown to an HTML string (block elements concatenated, no
  * indentation).
@@ -1015,37 +1324,10 @@ func blockToNode(b as Block) {
  * @return {string} the rendered HTML
  */
 export func toHtml(md as string) {
-    def nodes as list of html.Node init [];
-    for (def b in parseBlocks($md)) {
-        $nodes[] = blockToNode($b);
-    }
-    return html.renderAll($nodes);
+    return render(parse($md), "html");
 }
 
-# --- ANSI rendering, through ansi (exported) -----------------------
-
-# inlineToAnsi maps spans to terminal-styled text (styling suppresses itself
-# when stdout is not a TTY, so piped output is plain).
-# spanToAnsi renders one span to terminal text (a Span parameter, so the `match`
-# is exhaustiveness-checked over SpanKind, like spanToNode).
-func spanToAnsi(sp as Span) {
-    match ($sp.kind) {
-        when Text { return $sp.text; }
-        when Code { return ansi.cyan($sp.text); }
-        when Strong { return ansi.bold($sp.text); }
-        when Em { return ansi.italic($sp.text); }
-        when Link { return ansi.underline($sp.text) + " (" + $sp.url + ")"; }
-        when Image { return ansi.dim("[image] ") + $sp.text + " (" + $sp.url + ")"; }
-    }
-}
-
-func inlineToAnsi(spans as list of Span) {
-    def out as string init "";
-    for (def sp in $spans) {
-        $out = $out + spanToAnsi($sp);
-    }
-    return $out;
-}
+# --- ANSI helpers shared by the node renderer ----------------------
 
 # indentLines prefixes every line of s with `prefix`.
 func indentLines(s as string, prefix as string) {
@@ -1088,35 +1370,11 @@ func displayWidth(s as string) {
     return $w;
 }
 
-# cellVisWidth is the visible width of a rendered cell (styling stripped, so
-# escape codes do not count), measured in terminal columns.
-func cellVisWidth(text as string) {
-    return displayWidth(ansi.strip(inlineToAnsi(parseInline($text))));
-}
-
 # widenAt grows column `c`'s width to at least `w` (columns past the header
 # count are ignored).
 func widenAt(widths as list of int, c as int, w as int) {
     if ($c < len($widths) and $w > $widths[$c]) {
         $widths[$c] = $w;
-    }
-    return $widths;
-}
-
-# colWidths is the max visible width of each column over the header and rows.
-func colWidths(b as Block) {
-    def widths as list of int init [];
-    def i as int init 0;
-    while ($i < len($b.headings)) {
-        $widths[] = cellVisWidth($b.headings[$i]);
-        $i = $i + 1;
-    }
-    for (def row in $b.rows) {
-        def c as int init 0;
-        while ($c < len($row)) {
-            $widths = widenAt($widths, $c, cellVisWidth($row[$c]));
-            $c = $c + 1;
-        }
     }
     return $widths;
 }
@@ -1138,29 +1396,6 @@ func padCell(styled as string, plain as int, width as int, align as string) {
     return $styled + strings.repeat(" ", $gap);
 }
 
-# ansiRow renders one ` | `-separated row padded to the column widths; the
-# header row is bold.
-func ansiRow(cells as list of string, aligns as list of string, widths as list of int, bold as bool) {
-    def out as string init "";
-    def i as int init 0;
-    while ($i < len($widths)) {
-        if ($i > 0) {
-            $out = $out + " | ";
-        }
-        def text as string init "";
-        if ($i < len($cells)) {
-            $text = $cells[$i];
-        }
-        def styled as string init inlineToAnsi(parseInline($text));
-        if ($bold) {
-            $styled = ansi.bold($styled);
-        }
-        $out = $out + padCell($styled, cellVisWidth($text), $widths[$i], alignOf($aligns, $i));
-        $i = $i + 1;
-    }
-    return $out;
-}
-
 # ansiDivider renders the `---+---` rule under the header row.
 func ansiDivider(widths as list of int) {
     def out as string init "";
@@ -1175,93 +1410,358 @@ func ansiDivider(widths as list of int) {
     return $out;
 }
 
-# tableToAnsi renders a table block as aligned terminal columns.
-func tableToAnsi(b as Block) {
-    def widths as list of int init colWidths($b);
-    def out as string init ansiRow($b.headings, $b.aligns, $widths, true);
-    $out = $out + "\n" + ansiDivider($widths);
-    for (def row in $b.rows) {
-        $out = $out + "\n" + ansiRow($row, $b.aligns, $widths, false);
-    }
-    return $out;
-}
-
-# listToAnsi renders a List block at nesting `depth` (2 spaces of indent per
-# level), recursing into each item's nested sub-list under it.
-func listToAnsi(b as Block, depth as int) {
-    def out as string init "";
-    def idx as int init 1;
-    def first as bool init true;
-    def pad as string init strings.repeat("  ", $depth + 1);
-    def k as int init 0;
-    while ($k < len($b.items)) {
-        if (not $first) {
-            $out = $out + "\n";
-        }
-        $first = false;
-        def marker as string init "- ";
-        if ($b.ordered) {
-            $marker = convert.toString($idx) + ". ";
-        }
-        $out = $out + $pad + $marker + inlineToAnsi(parseInline($b.items[$k]));
-        $idx = $idx + 1;
-        if ($k < len($b.children) and len($b.children[$k].items) > 0) {
-            $out = $out + "\n" + listToAnsi($b.children[$k], $depth + 1);
-        }
-        $k = $k + 1;
-    }
-    return $out;
-}
-
-# blockToAnsi renders one block to terminal text.
-func blockToAnsi(b as Block) {
-    match ($b.kind) {
-        when Table {
-            return tableToAnsi($b);
-        }
-        when Heading {
-            return ansi.bold(inlineToAnsi(parseInline($b.text)));
-        }
-        when Code {
-            return ansi.dim(indentLines($b.text, "    "));
-        }
-        when List {
-            return listToAnsi($b, 0);
-        }
-        when Quote {
-            def inner as string init "";
-            def first as bool init true;
-            for (def cb in $b.children) {
-                if (not $first) {
-                    $inner = $inner + "\n";
-                }
-                $first = false;
-                $inner = $inner + blockToAnsi($cb);
-            }
-            return indentLines($inner, ansi.dim("> "));
-        }
-        when Paragraph {
-            return inlineToAnsi(parseInline($b.text));
-        }
-    }
-}
-
 /**
  * Render Markdown to styled terminal text, blocks separated by a blank line.
  * @param md {string} the Markdown source
  * @return {string} the rendered terminal text
  */
 export func toAnsi(md as string) {
-    def out as string init "";
-    def first as bool init true;
-    for (def b in parseBlocks($md)) {
-        if (not $first) {
-            $out = $out + "\n\n";
+    return render(parse($md), "ansi");
+}
+
+# --- rendering from the public tree (exported) ---------------------
+#
+# `render` walks a public Node tree - a `parse` result or a hand-built one - so a
+# document can be inspected / transformed, then rendered. `toHtml` / `toAnsi` are
+# thin wrappers over `render(parse(md), ...)`, so build and parse share one model.
+
+# inlineNodeToHtml maps one inline Node to an html node (the inline model is flat,
+# so a `strong` / `emphasis` / `link` carries its text in a single `text` child).
+func inlineNodeToHtml(n as Node) {
+    match ($n.kind) {
+        when "text" {
+            return html.text($n.text);
         }
-        $first = false;
-        $out = $out + blockToAnsi($b);
+        when "codespan" {
+            return wrapEl("code", $n.text);
+        }
+        when "strong" {
+            return wrapEl("strong", text($n));
+        }
+        when "emphasis" {
+            return wrapEl("em", text($n));
+        }
+        when "link" {
+            return linkNode(text($n), $n.url, $n.title);
+        }
+        when "image" {
+            return imageNode($n.text, $n.url, $n.title);
+        }
+        else {
+            return html.text(text($n));
+        }
+    }
+}
+
+func inlineNodesToHtml(ns as list of Node) {
+    def out as list of html.Node init [];
+    for (def c in $ns) {
+        $out[] = inlineNodeToHtml($c);
     }
     return $out;
+}
+
+# listNodeToHtml renders a `list` node: each `item`'s children are inline nodes plus
+# an optional nested `list` (rendered as a child `<ul>` / `<ol>` inside the `<li>`).
+func listNodeToHtml(n as Node) {
+    def lis as list of html.Node init [];
+    for (def item in $n.children) {
+        def kids as list of html.Node init [];
+        for (def c in $item.children) {
+            if ($c.kind == "list") {
+                $kids[] = nodeToHtml($c);
+            } else {
+                $kids[] = inlineNodeToHtml($c);
+            }
+        }
+        $lis[] = html.element("li", [], $kids);
+    }
+    if ($n.ordered) {
+        return html.element("ol", [], $lis);
+    }
+    return html.element("ul", [], $lis);
+}
+
+# tableCellToHtml builds a `th` / `td` with the cell's inline content and an `align`
+# attribute (omitted when unset / "none").
+func tableCellToHtml(tag as string, cell as Node) {
+    def attrs as list of html.Attr init [];
+    if (not ($cell.align == "none") and not ($cell.align == "")) {
+        $attrs[] = html.attr("align", $cell.align);
+    }
+    return html.element($tag, $attrs, inlineNodesToHtml($cell.children));
+}
+
+func tableRowToHtml(tag as string, row as Node) {
+    def tds as list of html.Node init [];
+    for (def cell in $row.children) {
+        $tds[] = tableCellToHtml($tag, $cell);
+    }
+    return html.element("tr", [], $tds);
+}
+
+func tableNodeToHtml(n as Node) {
+    def head as list of html.Node init [];
+    def body as list of html.Node init [];
+    def r as int init 0;
+    for (def row in $n.children) {
+        if ($r == 0) {
+            $head[] = tableRowToHtml("th", $row);
+        } else {
+            $body[] = tableRowToHtml("td", $row);
+        }
+        $r = $r + 1;
+    }
+    def parts as list of html.Node init [];
+    $parts[] = html.element("thead", [], $head);
+    $parts[] = html.element("tbody", [], $body);
+    return html.element("table", [], $parts);
+}
+
+# nodeToHtml renders one block Node to an html node.
+func nodeToHtml(n as Node) {
+    match ($n.kind) {
+        when "heading" {
+            def tag as string init "h" + convert.toString($n.level);
+            return html.element($tag, [], inlineNodesToHtml($n.children));
+        }
+        when "paragraph" {
+            return html.element("p", [], inlineNodesToHtml($n.children));
+        }
+        when "code" {
+            def codeKids as list of html.Node init [];
+            $codeKids[] = html.text($n.text);
+            def pre as list of html.Node init [];
+            $pre[] = html.element("code", [], $codeKids);
+            return html.element("pre", [], $pre);
+        }
+        when "list" {
+            return listNodeToHtml($n);
+        }
+        when "table" {
+            return tableNodeToHtml($n);
+        }
+        when "quote" {
+            def kids as list of html.Node init [];
+            for (def cb in $n.children) {
+                $kids[] = nodeToHtml($cb);
+            }
+            return html.element("blockquote", [], $kids);
+        }
+        else {
+            return inlineNodeToHtml($n);
+        }
+    }
+}
+
+# inlineNodeToAnsi maps one inline Node to terminal-styled text (styling suppresses
+# itself when stdout is not a TTY, so piped output is plain).
+func inlineNodeToAnsi(n as Node) {
+    match ($n.kind) {
+        when "text" {
+            return $n.text;
+        }
+        when "codespan" {
+            return ansi.cyan($n.text);
+        }
+        when "strong" {
+            return ansi.bold(text($n));
+        }
+        when "emphasis" {
+            return ansi.italic(text($n));
+        }
+        when "link" {
+            return ansi.underline(text($n)) + " (" + $n.url + ")";
+        }
+        when "image" {
+            return ansi.dim("[image] ") + $n.text + " (" + $n.url + ")";
+        }
+        else {
+            return text($n);
+        }
+    }
+}
+
+func inlineChildrenToAnsi(ns as list of Node) {
+    def out as string init "";
+    for (def c in $ns) {
+        $out = $out + inlineNodeToAnsi($c);
+    }
+    return $out;
+}
+
+# cellVisWidthNode is the visible terminal width of a cell (styling stripped).
+func cellVisWidthNode(cell as Node) {
+    return displayWidth(ansi.strip(inlineChildrenToAnsi($cell.children)));
+}
+
+# colWidthsNode is the max visible width of each column over every row.
+func colWidthsNode(table as Node) {
+    def widths as list of int init [];
+    if (len($table.children) == 0) {
+        return $widths;
+    }
+    for (def cell in $table.children[0].children) {
+        $widths[] = cellVisWidthNode($cell);
+    }
+    def r as int init 1;
+    while ($r < len($table.children)) {
+        def c as int init 0;
+        for (def cell in $table.children[$r].children) {
+            $widths = widenAt($widths, $c, cellVisWidthNode($cell));
+            $c = $c + 1;
+        }
+        $r = $r + 1;
+    }
+    return $widths;
+}
+
+# ansiRowNode renders one ` | `-separated row padded to the column widths; the
+# header row is bold.
+func ansiRowNode(row as Node, widths as list of int, bold as bool) {
+    def out as string init "";
+    def i as int init 0;
+    while ($i < len($widths)) {
+        if ($i > 0) {
+            $out = $out + " | ";
+        }
+        def styled as string init "";
+        def vis as int init 0;
+        def align as string init "none";
+        if ($i < len($row.children)) {
+            def cell as Node init $row.children[$i];
+            $styled = inlineChildrenToAnsi($cell.children);
+            $vis = displayWidth(ansi.strip($styled));
+            $align = $cell.align;
+        }
+        if ($bold) {
+            $styled = ansi.bold($styled);
+        }
+        $out = $out + padCell($styled, $vis, $widths[$i], $align);
+        $i = $i + 1;
+    }
+    return $out;
+}
+
+func tableNodeToAnsi(n as Node) {
+    # A table always carries its header row from `parse`; a hand-built table with no
+    # rows renders as empty rather than indexing past the end.
+    if (len($n.children) == 0) {
+        return "";
+    }
+    def widths as list of int init colWidthsNode($n);
+    def out as string init ansiRowNode($n.children[0], $widths, true);
+    $out = $out + "\n" + ansiDivider($widths);
+    def r as int init 1;
+    while ($r < len($n.children)) {
+        $out = $out + "\n" + ansiRowNode($n.children[$r], $widths, false);
+        $r = $r + 1;
+    }
+    return $out;
+}
+
+# listNodeToAnsi renders a `list` node at nesting `depth` (2 spaces of indent per
+# level), recursing into each item's nested sub-list under it.
+func listNodeToAnsi(n as Node, depth as int) {
+    def out as string init "";
+    def idx as int init 1;
+    def first as bool init true;
+    def pad as string init strings.repeat("  ", $depth + 1);
+    for (def item in $n.children) {
+        if (not $first) {
+            $out = $out + "\n";
+        }
+        $first = false;
+        def marker as string init "- ";
+        if ($n.ordered) {
+            $marker = convert.toString($idx) + ". ";
+        }
+        def inlineStr as string init "";
+        def nested as string init "";
+        for (def c in $item.children) {
+            if ($c.kind == "list") {
+                $nested = "\n" + listNodeToAnsi($c, $depth + 1);
+            } else {
+                $inlineStr = $inlineStr + inlineNodeToAnsi($c);
+            }
+        }
+        $out = $out + $pad + $marker + $inlineStr + $nested;
+        $idx = $idx + 1;
+    }
+    return $out;
+}
+
+# nodeToAnsi renders one block Node to terminal text.
+func nodeToAnsi(n as Node) {
+    match ($n.kind) {
+        when "table" {
+            return tableNodeToAnsi($n);
+        }
+        when "heading" {
+            return ansi.bold(inlineChildrenToAnsi($n.children));
+        }
+        when "code" {
+            return ansi.dim(indentLines($n.text, "    "));
+        }
+        when "list" {
+            return listNodeToAnsi($n, 0);
+        }
+        when "quote" {
+            def inner as string init "";
+            def first as bool init true;
+            for (def cb in $n.children) {
+                if (not $first) {
+                    $inner = $inner + "\n";
+                }
+                $first = false;
+                $inner = $inner + nodeToAnsi($cb);
+            }
+            return indentLines($inner, ansi.dim("> "));
+        }
+        when "paragraph" {
+            return inlineChildrenToAnsi($n.children);
+        }
+        else {
+            return inlineChildrenToAnsi($n.children);
+        }
+    }
+}
+
+/**
+ * Render a document tree (a `parse` result, or a hand-built one) to a string.
+ * `format` is `"html"` (block elements concatenated, no indentation) or `"ansi"`
+ * (styled terminal text, blocks separated by a blank line). A `"document"` node
+ * renders its children; any other node renders as a single block. An unknown format
+ * is a catchable `"markdown"` error.
+ * @param doc {Node} the document (or block) node to render
+ * @param format {string} "html" or "ansi"
+ * @return {string} the rendered document
+ */
+export func render(doc as Node, format as string) {
+    def blocks as list of Node init $doc.children;
+    if (not ($doc.kind == "document")) {
+        $blocks = [$doc];
+    }
+    if ($format == "html") {
+        def nodes as list of html.Node init [];
+        for (def c in $blocks) {
+            $nodes[] = nodeToHtml($c);
+        }
+        return html.renderAll($nodes);
+    }
+    if ($format == "ansi") {
+        def out as string init "";
+        def first as bool init true;
+        for (def c in $blocks) {
+            if (not $first) {
+                $out = $out + "\n\n";
+            }
+            $first = false;
+            $out = $out + nodeToAnsi($c);
+        }
+        return $out;
+    }
+    mdFail("unknown render format \"" + $format + "\" (want \"html\" or \"ansi\")");
 }
 
 # --- authoring: build Markdown source (exported) -------------------

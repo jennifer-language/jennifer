@@ -48,4 +48,21 @@ io.printf("=== that table as ANSI ===\n%s\n\n", markdown.toAnsi($tbl));
 
 # tablePretty aligns the source columns of a handcrafted table.
 def messy as string init "| Name | Score |\n|:-|-:|\n| Ada | 95 |\n| Grace | 8 |";
-io.printf("=== tablePretty (source aligned) ===\n%s\n", markdown.tablePretty($messy));
+io.printf("=== tablePretty (source aligned) ===\n%s\n\n", markdown.tablePretty($messy));
+
+# The reader surfaces the parse tree, so a document can be inspected or transformed
+# and then rendered - build and parse share one model.
+def tree as markdown.Node init markdown.parse($doc);
+
+io.printf("=== outline (walk the headings for a TOC) ===\n");
+for (def h in markdown.findAll($tree, "heading")) {
+    io.printf("  H{markdown.level($h)}: {markdown.text($h)}\n");
+}
+
+io.printf("=== links (pull every link target) ===\n");
+for (def a in markdown.findAll($tree, "paragraph/link")) {
+    io.printf("  {markdown.text($a)} -> {markdown.attr($a, 'href')}\n");
+}
+
+# Render straight from the tree (a parsed or hand-built one).
+io.printf("\n=== rendered from the tree (HTML) ===\n{markdown.render($tree, 'html')}\n");

@@ -1315,45 +1315,25 @@ index / `SUMMARY.md` / `README.md` / demo / `JENNIFER.md`.
 
 ### M24.16 - module suite hardening (security + robustness audit follow-up)
 
-**Done.** A hardening pass over the shipped `.j` module suite closing the
-security-relevant findings from a source audit. The findings collapsed to a handful
-of **systemic** root causes; each pattern was fixed once and applied across its
-cluster, extending every touched module's `*_test.j` overlay with a regression
-(~35 fixes across ~24 modules, both binaries clean). Ordered **remotely-exploitable
-first** - a recover-less interpreter turns an unbounded read into an uncatchable OOM.
-
-Delivered - the whole exploitable / high / medium-security surface:
-
-- **Received-data caps.** One shared `transport.checkReceiveSize(n, what)` +
-  `transport.MAX_RECEIVED_BYTES` (not a dozen divergent per-module caps), applied to
-  the genuinely uncapped aggregate reads: `amqp` body assembly (the one *critical* -
-  a broker-declared 64-bit body size), `smtp` reply, `mqtt` remaining-length varint
-  + body + a `poll` deadline-hang, and `multipart` (a torn body missing its closing
-  `--boundary--` is rejected, not accepted as complete). Modules the audit flagged
-  (`imap` / `pop` / `memcache` / `mikrotik`) already carried per-unit caps.
-- **Injection.** The label printer-command injection is closed at the boundary
-  (`label` validates every numeric symbology digits-only, so raw `^FD` / `;` data is
-  safe on both the ZPL and CAB dialects), plus `label_zpl` errorLevel / `^XG`
-  image-name / `^PQ` quantity and comprehensive `label_cab` escaping. The CRLF /
-  control class: `log` (level; message / fields were already escaped), `ical` /
-  `vcard` (one shared `emitLine` CR/LF strip), and `barcode` SVG colour validation.
-- **Cross-origin redirect credential leak.** `http.send` drops
-  `Authorization` / `Cookie` + the cookie jar on a cross-origin redirect (browser
-  rule), gated by a new `allowCrossOriginRedirect` opt-in; `rest.paginate` refuses a
-  cross-origin `Link: next` under the same flag.
-- **Typed error propagation.** The real `json.decode` sites wrapped to a
-  module-kinded error (`graphql`, `oauth`, `influxdb`; `telegram` already wrapped;
-  `totp` / `feed` / `discord` do not decode JSON).
-- **Numeric clamps.** `totp` window / digits, `bloom` bit-size, `ratelimit` window,
-  `password` (negative minimums normalized + symbol-count fixed), `barcode` scale
-  (+ `scale==0` div-by-zero), `screen` dimensions, `orm` page size.
-- **Correctness.** `semver.satisfies(v, garbage)` -> `false` (was `true`); the `ldap`
-  dead self-assignment removed.
-
-The audit over-stated in **every** cluster (per-unit caps already present, `influx`
-keys already escaped, `log` / `oauth` / `telegram` already hardened, three
-"typed-decode" modules that never decode JSON), so the real work was smaller than
-the raw finding count.
+**Done.** A security / robustness pass over the shipped `.j` module suite from a
+source audit whose findings collapsed to a few **systemic** root causes - each fixed
+once and applied across its cluster, with a regression added to every touched
+`*_test.j` overlay (~35 fixes / ~24 modules, both binaries clean), ordered
+remotely-exploitable first (a recover-less interpreter turns an unbounded read into an
+uncatchable OOM). Delivered: **received-data caps** (one shared
+`transport.checkReceiveSize` + `MAX_RECEIVED_BYTES` on the uncapped aggregate reads -
+`amqp` body, `smtp` reply, `mqtt` varint / body / poll-hang, `multipart` unterminated
+body); **injection** (the `label` printer-command class validated digits-only across
+ZPL / CAB, plus CRLF / control stripping in `log` / `ical` / `vcard` and `barcode`
+colour validation); **cross-origin redirect credential leak** (`http.send` drops
+`Authorization` / `Cookie` + jar cross-origin behind an `allowCrossOriginRedirect`
+opt-in, `rest.paginate` matches); **typed error propagation** (the real `json.decode`
+sites wrapped to a module-kinded error); **numeric clamps** (`totp`, `bloom`,
+`ratelimit`, `password`, `barcode` scale + div-by-zero, `screen`, `orm`); and
+**correctness** (`semver.satisfies(v, garbage)` -> `false`; dead `ldap`
+self-assignment removed). The audit over-stated in every cluster (caps already
+present, keys already escaped, three "typed-decode" modules that never decode JSON),
+so the real work was smaller than the raw finding count.
 
 ### M24.17 - `html` module: rebrand `htmlwriter` + add a parser (compacted)
 
@@ -1379,153 +1359,108 @@ binaries; 23-test overlay; `M24.18` reuses this node / selector shape.
 
 ### M24.18 - `markdown` module: add a reader (surface the parse tree)
 
-**Planned.** Give `markdown` the direction it lacks - **reading** - the same
-consistency move as the M24.17 `html` rebrand. Today `markdown` is a generator
-plus a renderer: authoring helpers build Markdown *text* (`header` / `style` /
-`link` / `bullets` / `numbered` / `codeBlock` / `table` / `tablePretty`), and
-`toHtml` / `toAnsi` parse Markdown and render **straight to a string**. It already
-builds a full internal document tree (the private `struct Block`, recursive over
-`children`) - it just never surfaces it, so a caller cannot inspect or transform a
-document (pull the headings for a TOC, rewrite links, lint, convert to another
-format). This is the "small refactor to surface the intermediate document model"
-that `horizon.md`'s DRAFT#13 (Markdown -> PDF) names as its prerequisite.
+**Done.** Gave `markdown` the direction it lacked - **reading** - the consistency
+move the M24.17 `html` rebrand set up. It already built a full internal document
+tree (the private `struct Block`) but never surfaced it; now `markdown.parse(md)`
+returns a public `Node` (a string `kind` plus the fields it uses, recursive over
+`children`; the document root) walked by the same `xml` / `html` vocabulary -
+`typeOf` / `children` / `text` (a leaf's text, else its descendants' concatenated) /
+`level` / `attr` (`href` / `title` / `lang` / `align` / `ordered` / `level`) / `get`
+/ `findAll` / `has` over a `/`-separated selector (kind names, `*`, `name[k]`) - so a
+caller can pull the headings for a TOC, rewrite links, or lint before rendering (the
+prerequisite `horizon.md`'s DRAFT#13, Markdown -> PDF, names). The `Block` / `Span`
+model stays private; `parse` converts it, eagerly expanding inline spans so a link's
+`href` is walkable, and a fenced block's language is captured via a new `Block.lang`
++ `collectFence` info-string parse. The spec's `Doc` / `Node` pair collapsed to one
+`Node` (like `html`'s `parse` -> `#root`; Jennifer has no type alias). **One model:**
+new node renderers consume the public tree and `toHtml` / `toAnsi` became
+`render(parse(md), ...)` wrappers, so the old `Block`-based renderers were deleted
+and `render(doc, "html" / "ansi")` renders a parsed *or* hand-built tree -
+byte-identical output pinned by the existing overlay (public tables padded
+rectangular to match). Hardened with a nesting cap + node budget (a pathological
+document is a catchable `"markdown"` error). Pure `.j`, both binaries; the overlay
+grew 16 reader / render / round-trip / depth-cap tests (86 total, 100%), with
+`docs/modules/markdown.md` + `JENNIFER.md` + the `parse` -> walk -> `render` demo
+updated.
 
-- **Surface the tree.** Promote the block model to a public, opaque
-  `markdown.Doc` / `Node` and add `markdown.parse(md) -> Doc`, walked by the same
-  `xml` / `html` family vocabulary (`typeOf` / `children` / `text` / `level` for
-  headings / `attr` for a link href / list-ordered / code-language, plus `get` /
-  `findAll` / `has` over a small selector). Reusing M24.17's node / accessor shape
-  is why that milestone lands first - the whole `xml` / `html` / `markdown` family
-  then walks identically.
-- **Round-trip through one model.** Refactor `toHtml` / `toAnsi` to render **from**
-  the public node type (which they already parse to internally), so
-  parse -> transform -> render works, and `render(doc, "html" / "ansi")` renders a
-  parsed *or* hand-built tree. The string authoring helpers stay for the common
-  quick-generate path.
-- Hardened like the other parsers: the nesting cap + node budget so a
-  pathological document is a catchable error, not an unbounded parse.
-
-Pure `.j`; **both binaries**. Core (a general format primitive). Mostly a
-surfacing + accessor + render-refactor job (the parser exists), so smaller than
-M24.17's from-scratch build. Ships the full module discipline: the `markdown`
-overlay extended, `docs/modules/markdown.md` + `JENNIFER.md` updated, and a demo
-of `parse` -> walk -> `render`.
-
-### M24.19 - string interpolation (`{expr}` in cooked strings) (compacted)
+### M24.19 - string interpolation (`{expr}` in cooked strings)
 
 **Done.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}, up
-{strings.upper($x)}"` - a value beside its position, no `sprintf` arg-counting.
-Sugar over concat + `convert.toString`; graduates the horizon "String
-interpolation" entry. Only a **cooked** `"..."` interpolates; each `{expr}` slot is
-one Jennifer **expression** (var / arith / const / call), never a statement (a `;`
-/ statement keyword / empty `{}` / trailing token is a parse error); a **raw**
-`'...'` never interpolates (so `'{"port": 8080}'` is literal JSON - the "off"
-form); a literal brace is `\{` / `\}` (backslash, not `{{`); the `f"..."` opt-in was
-rejected (the cooked/raw split already is the opt-in - `rejected.md`). Two parts.
-**Part 1 - `%name%` placeholders:** the only two `{name}`-template consumers
-(`intl.tr`, `validate`) move to a brace-free `%name%` marker (`%%` escapes a literal
-`%`), the Go interpolator rewritten to the `validate` grammar (an unknown `%` stays
-literal, single-pass), decoupling them from the language owning `{}` (intl-break
-rationale in `design-decisions.md`). **Part 2 - the feature + migration:** the lexer
-emits `TOKEN_STRING_INTERP` whose `Parts` alternate literal chunks and slots -
-`scanInterpSlot` brace-counts nested `{}` (a map literal balances) and copies a
-nested string verbatim; each slot carries its **absolute** line/col, and the parser
-sub-lexes (`lexer.TokenizeAt`) + sub-parses it to a single `expr` inside an
-`InterpStringExpr`, evaluated by stringifying each slot via `Display` (no `use
-convert`). Because cooked `{` is no longer literal, **every literal-brace cooked
-string migrated** (`modules/*.j`, overlays, `examples/`, embedded Go-test `.j`):
-**prefer raw** (a value with no `'` / control / `\u` became `'...'`, shedding `\"`
-noise, e.g. `"{\"k\":1}"` -> `'{"k":1}'`), falling back to `\{` / `\}` only where
-cooked escapes are genuinely needed - a one-off decode-and-decide Go migrator that
-never touches an interpolated string, value-checked by the golden / overlay suite.
-**The toolchain treats a slot as real code:** the resolver descends (undefined-var /
-shadowing are parse-time errors), `lint` checks inside slots (new `L204`
-interpolation-slot-too-complex flags a call in a slot), and `profile` attributes
-each slot to its own position; landed with `fmt` (re-emits via `Raw`), `ast`
-(`InterpStringExpr`), the four editor highlighters + regenerated docs bundle, the
-grammar EBNF, and style-guide guidance. A language feature; both binaries (verified
-on `jennifer-tiny`). Follow-up `DF-strinterpol-report.md` audit closed the walker
-gaps (`walkExprForQualifiedRefs` / `declTypesExpr` now descend into slots; the
-`L204` colour + long-line caret windowing landed; `TestWalkerExhaustiveness` now
-guards the two interpreter walkers).
+{strings.upper($x)}"` - sugar over concat + `convert.toString`, graduating the
+horizon entry. Only a **cooked** `"..."` interpolates; each `{expr}` slot is one
+Jennifer **expression** (a `;` / statement keyword / empty `{}` is a parse error); a
+**raw** `'...'` never interpolates (the "off" form, so `'{"port": 8080}'` is literal
+JSON); a literal brace is `\{` / `\}`; `f"..."` was rejected (the cooked / raw split
+is the opt-in). **Part 1** moved the two `{name}`-template consumers (`intl.tr`,
+`validate`) to a brace-free `%name%` marker (`%%` escapes), freeing `{}` for the
+language. **Part 2** added the feature: the lexer emits `TOKEN_STRING_INTERP` whose
+`Parts` alternate literal chunks and slots (`scanInterpSlot` brace-counts nested `{}`,
+each slot carrying its absolute line / col); the parser sub-lexes + sub-parses each
+slot into an `InterpStringExpr`, evaluated by `Display`-stringifying each slot.
+Because cooked `{` is no longer literal, every literal-brace cooked string was
+migrated (**prefer raw** `'...'`, e.g. `"{\"k\":1}"` -> `'{"k":1}'`, falling back to
+`\{` only where cooked escapes are needed) by a one-off decode-and-decide Go migrator,
+value-checked by the golden / overlay suite. The whole toolchain treats a slot as real
+code - the resolver descends (undefined-var / shadowing are parse-time), `lint` checks
+inside it (new `L204` flags a call in a slot), `profile` attributes each slot its own
+position - landed with `fmt` / `ast` / the editor highlighters / grammar EBNF. A
+language feature, both binaries. A follow-up audit (`DF-strinterpol-report.md`) closed
+the walker gaps (`walkExprForQualifiedRefs` / `declTypesExpr` descend into slots) and
+added `TestWalkerExhaustiveness` guards.
 
 ### M24.20 - module version + capability header
 
-**Planned.** A declarative per-file header that states the minimum interpreter
-version and the host capabilities a file needs, checked at **read time** so a
-mismatch aborts with a clear error instead of failing cryptically deep in a stub or
-after a breaking change. Pre-1.0 the language breaks at milestones deliberately
-(e.g. `intl`'s `{name}` -> `%name%` in M24.19), so a module that bumps its floor in
-the same change that breaks it is guaranteed to load only against an interpreter
-that supports it. The lightweight sibling of the planned `jvc` / `deck.toml`
-constraints (`horizon.md` DRAFT#12) - it works with no package manager, and `jvc`
-can later read the same header.
+**Done.** A declarative per-file header stating the minimum interpreter version and
+the host capabilities a file needs, checked at **read time** so a mismatch aborts
+clearly instead of failing deep in a stub or after a breaking change - the lightweight
+sibling of the planned `jvc` / `deck.toml` constraints (`horizon.md` DRAFT#12), needing
+no package manager. One typed directive family, `# pragma-jennifer-<key>: <value>`
+(greppable, never prose, so new keys slot into one dispatcher), scanned from raw source
+in the leading header block (tolerant of shebang / SPDX / docblock) - it must be a
+comment run **before** lex, since a module top level is declarations-only. Two keys:
 
-**A typed `pragma` directive, not an ad-hoc comment.** One recognizable family,
-`# pragma-jennifer-<key>: <value>`, so new directive kinds slot into one parser that
-dispatches on `<key>` rather than inventing `# jennifer:` / `# jennifer-needs:` /
-`# jennifer-foo:` one-offs. `pragma-jennifer-*` is unmistakably a directive (never
-prose) and greppable. It is a **comment** by necessity: a module top level is
-declarations-only (a runtime `meta.requireVersion(...)` cannot live there) and the
-check must run **before** lex / parse, so it is scanned from raw source in the
-leading header block (tolerant of the shebang, the SPDX block, and the `/** */`
-docblock - it is a `#`-line comment among them). Two keys today:
+- **`version`** (single-valued) - `# pragma-jennifer-version: >=0.25.0`. A *minimum*
+  compare, not a range grammar; `>=` is required syntax, the value `major.minor.patch`.
+  Evaluated by a new `version.AtLeast(min)` (Go, not the `.j` `semver` which would
+  bootstrap during load). **Any dev build bypasses** (the `"dev"` default and any
+  `X.Y.Z-dev+...` are ahead of the last tag; only a clean release tag enforces - which
+  keeps `go test` / `make build` from failing their own in-tree modules).
+- **`capability`** (a set) - `# pragma-jennifer-capability: net`. The build exposes its
+  capability set (`{net, exec, sql}` on standard `jennifer`, none on `jennifer-tiny`,
+  via a build-tag split mirroring `net`'s `!tinygo` files); a file naming an
+  unavailable one aborts at read time (future-proof: a tinygo build rebuilt with a
+  network stack just adds `net`). Queryable as `meta.CAPABILITIES` /
+  `meta.hasCapability("net")`.
 
-- **`version`** (single-valued) - `# pragma-jennifer-version: >=0.25.0`. A
-  *minimum* compare, not a range grammar (newer always satisfies; bump the floor
-  when you break). The `>=` is required syntax; the value is `major.minor.patch`.
-  Evaluated in Go by a new `version.AtLeast(min)` - **not** the `.j` `semver`
-  module, which would bootstrap during load. **Any dev build bypasses** (the literal
-  `"dev"` default and any `X.Y.Z-dev+...` are ahead of the last tag, so they satisfy
-  every floor up to the next release; only a clean release tag enforces - which is
-  also what keeps `go test` / `make build` from failing their own in-tree modules).
-- **`capability`** (a set) - `# pragma-jennifer-capability: net`. The interpreter
-  exposes the capability set it was built with (`{net, exec, sql}` on the standard
-  `jennifer`, neither on `jennifer-tiny`, via a build-tag split mirroring the `net`
-  library's `!tinygo` files); a file naming an unavailable capability aborts at read
-  time. Future-proof: a tinygo build rebuilt with a network stack adds `net` to its
-  set and passes, no special-casing - and it finally gives the net / exec-backed
-  modules a clean read-time refusal instead of a runtime stub error. Queryable from
-  `meta` (`meta.hasCapability("net")` / `meta.CAPABILITIES`) so a script can branch.
+Multiplicity is per key: a duplicate `version` is a hard error (two floors is a
+contradiction), a set-valued key unions across lines. Enforcement is **per file at read
+time**, so `include` needs no merge - each spliced file self-checks before its tokens
+join, so the effective floor is the max and the capability set the union with no
+cross-file logic. A **malformed** directive (bad grammar, unknown key, unknown
+capability) is a hard error (a typo must not disable the guard), and **version is
+evaluated first** so an old interpreter reports the floor before an unrecognized newer
+key. One shared `internal/reqcheck.CheckRequirements(rawSource, path)` (importing
+`version` + the capability set) runs at the three first-read seams - the CLI entry, the
+`include` preprocessor, and `loadModule` (each nested module independently) - with a
+positioned, actionable error (`intl.j: requires jennifer >=0.25.0, but this build is
+0.24.1`). It scans line-by-line (early exit at the first code line) and bounds every
+untrusted echo (key / value / line length capped), so a pathological header is neither
+an OOM nor an oversized diagnostic. Ships an `L303` lint rule validating a present
+pragma (malformed / duplicate / bad grammar / unknown key / unknown capability, zero
+false positives), and `jennifer fmt` canonicalizes a pragma's spacing (a version
+collapses to `>=0.5.0`, a capability list to `net, exec` without merging names).
 
-**Multiplicity is per key, and `include` needs no merge.** A duplicate
-single-valued key in one file is a hard error (two `version` floors is a
-contradiction - "best wins" would hide the mistake); a set-valued key accumulates
-across lines (`capability: net` + `capability: exec` = both). Crucially, enforcement
-is **per file at read time**, so `include` is not a merge problem: each spliced file
-self-checks its own header against the running interpreter *before* its tokens join
-the stream, so the effective floor is the max and the effective capability set the
-union with no cross-file merge logic - the only "multiple values" case that needs a
-policy is within a single file. A **malformed** directive (a line that opens
-`# pragma-jennifer-*` but does not parse, a bad `version` grammar, an unknown key, an
-unknown capability) is a hard error, never silently ignored (a typo must not disable
-the guard). **Version is evaluated first**: a module using a key a newer interpreter
-adds also bumps its `version` floor, so an older interpreter fails the version check
-(clear message) before it ever reaches the unknown key.
-
-Enforcement is one shared `CheckRequirements(rawSource, path)` (a new
-`internal/reqcheck`, importing `version` + the capability set) called at each
-first-read seam: the CLI entry program (`cmd/jennifer` run path), the preprocessor
-for `include` (`internal/preproc`), and `loadModule`
-(`internal/interpreter/module.go`, each nested module checked independently). The
-error is positioned and actionable - `intl.j: requires jennifer >=0.25.0, but this
-build is 0.24.1` / `httpd.j: needs capability "net", unavailable in this build
-(jennifer-tiny)`.
-
-Ships with `version.AtLeast` + the capability set (`net` / `exec` / `sql`, all
-`!tinygo`) + its `meta` query, the three enforcement sites, a new `L303` lint rule
-that **validates a pragma that is present** (a **malformed** directive, a
-**duplicate** `version`, a bad `>=major.minor.patch` grammar, an **unknown** key, or
-an **unknown** capability name) - so `jennifer lint` catches a bad header pre-import,
-with zero false positives - and docs. **Adoption:** every shipped `modules/*.j`
-carries a `# pragma-jennifer-version: >=0.24.0` floor, and each module that directly
-uses a gated facility also declares it (`capability: net` on the 17 net / httpd
-modules, `capability: sql` on `orm` / `sqlmigrate`, `capability: exec` on `mcp`); a
-transitive user needs nothing, since the imported module self-checks when it loads.
-Discipline going forward: bump a module's floor in the same change that breaks it.
-Requiring a shipped module to *carry* a floor (an `L303` "missing" clause) is a
-follow-on, once the `_test.j` overlay case is handled. No interpreter-core or
-language-grammar change.
+**Adoption:** every `modules/*.j` carries a `>=0.24.0` floor; a module declares
+`capability:` only where the facility is **mandatory** (the net-protocol clients,
+`sql` on `orm` / `sqlmigrate`, `exec` on `mcp`). A module with an **optional** backend
+is deliberately *not* gated - `log` (console / file sinks work without net, only syslog
+needs it), `label` (build / render / emit is offline, net is just the `send`
+convenience), and `ldap` (an in-memory directory mode) all still load on
+`jennifer-tiny` for their non-net paths, letting the runtime stub gate the net calls a
+caller actually reaches. A transitive user needs nothing (the imported module
+self-checks). Discipline going forward: bump a module's floor in the same change that
+breaks it. Requiring a shipped module to *carry* a floor (an `L303` "missing" clause)
+is a follow-on. No interpreter-core or language-grammar change.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 

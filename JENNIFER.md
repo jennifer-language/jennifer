@@ -911,9 +911,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
   lists, code, GFM tables) to HTML (`markdown.toHtml`, through `html`) and
-  styled terminal text (`toAnsi`, through `ansi`); author Markdown with
-  `header` / `style` / `link` / `bullets` / `numbered` / `codeBlock` / `table`;
-  align handcrafted table source with `tablePretty`.
+  styled terminal text (`toAnsi`, through `ansi`); `parse(md)` surfaces the
+  document as a `Node` tree walked like `xml` / `html` (`typeOf` / `children` /
+  `text` / `level` / `attr` / `get` / `findAll` / `has`), and `render(doc,
+  format)` renders a parsed or hand-built tree (so parse -> transform -> render
+  works); author Markdown with `header` / `style` / `link` / `bullets` /
+  `numbered` / `codeBlock` / `table`; align handcrafted table source with
+  `tablePretty`.
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
   client, over `jsonrpc` + `json`. Build a `Server` value-semantically:
   `mcp.server(name, version)` then `addTool(s, name, desc, inputSchema, handler)`
