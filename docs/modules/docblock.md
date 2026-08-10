@@ -19,7 +19,8 @@ read from its `export` keyword, never a tag.
 ```jennifer
 /**
  * Distance between two points.
- * A longer description may follow the summary line.
+ *
+ * A longer description may follow, separated from the summary by a blank line.
  * @param ax {float} first x coordinate
  * @param ay {float} first y coordinate
  * @return {float} the Euclidean distance
@@ -28,8 +29,12 @@ read from its `export` keyword, never a tag.
 export func distance(ax as float, ay as float, bx as float, by as float) { ... }
 ```
 
-The body is a **summary** line, an optional **description** (everything up to
-the first tag), then `@`-tags.
+The body is a **summary** - the first paragraph, with wrapped lines joined, so it
+can span several source lines - then an optional **description** (the remaining
+paragraphs, separated from the summary by a blank line), then `@`-tags. Because the
+split is by paragraph and not by line, a summary that wraps across source lines stays
+one sentence rather than breaking at the line break; put a blank line where you want
+the summary to end and the description to begin.
 
 ### Types are written in Jennifer syntax, in braces
 

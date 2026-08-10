@@ -72,8 +72,8 @@ export def struct ThrowDoc {
 };
 /**
  * The module preamble documentation (the doc comment carrying a module tag).
- * @field summary {string} the one-line summary
- * @field description {string} the longer description below the summary
+ * @field summary {string} the summary (its first paragraph)
+ * @field description {string} the description (the paragraphs after the summary)
  * @field author {string} the documented author
  * @field version {string} the documented version
  * @field license {string} the documented license
@@ -92,8 +92,8 @@ export def struct ModuleDoc {
  * @field name {string} the constant name
  * @field exported {bool} whether the constant is exported
  * @field type {string} the declared type, verbatim in Jennifer syntax
- * @field summary {string} the one-line summary
- * @field description {string} the longer description below the summary
+ * @field summary {string} the summary (its first paragraph)
+ * @field description {string} the description (the paragraphs after the summary)
  * @field since {string} the documented since-version
  * @field deprecated {string} the deprecation note, or "" if not deprecated
  * @field see {list of string} the cross-references
@@ -114,8 +114,8 @@ export def struct ConstDoc {
  * The documentation of one struct.
  * @field name {string} the struct name
  * @field exported {bool} whether the struct is exported
- * @field summary {string} the one-line summary
- * @field description {string} the longer description below the summary
+ * @field summary {string} the summary (its first paragraph)
+ * @field description {string} the description (the paragraphs after the summary)
  * @field fields {list of ParamDoc} the documented fields
  * @field since {string} the documented since-version
  * @field deprecated {string} the deprecation note, or "" if not deprecated
@@ -139,8 +139,8 @@ export def struct StructDoc {
  * carries no field list.
  * @field name {string} the enum name
  * @field exported {bool} whether the enum is exported
- * @field summary {string} the one-line summary
- * @field description {string} the longer description below the summary
+ * @field summary {string} the summary (its first paragraph)
+ * @field description {string} the description (the paragraphs after the summary)
  * @field since {string} the documented since-version
  * @field deprecated {string} the deprecation note, or "" if not deprecated
  * @field see {list of string} the cross-references
@@ -160,8 +160,8 @@ export def struct EnumDoc {
  * The documentation of one method.
  * @field name {string} the method name
  * @field exported {bool} whether the method is exported
- * @field summary {string} the one-line summary
- * @field description {string} the longer description below the summary
+ * @field summary {string} the summary (its first paragraph)
+ * @field description {string} the description (the paragraphs after the summary)
  * @field params {list of ParamDoc} the documented parameters
  * @field returns {ReturnDoc} the documented return value
  * @field throws {list of ThrowDoc} the documented thrown errors
@@ -555,8 +555,19 @@ func parseBody(body as string) {
     while ($i < $cnt and $lines[$i] == "") {
         $i = $i + 1;
     }
-    if ($i < $cnt) {
-        $summary = $lines[$i];
+    # The summary is the first paragraph - consecutive non-blank, non-tag lines joined
+    # with a space - not just the first line, so a wrapped opening sentence stays whole
+    # instead of splitting at the source line break (which rendered a module / function
+    # intro as a broken line-1 paragraph plus a separate rest-paragraph). The
+    # description is the remaining paragraphs, after the blank line that ends the
+    # summary (internal blank lines are kept, so multi-paragraph descriptions survive).
+    def sumLines as list of string init [];
+    while ($i < $cnt and $lines[$i] != "" and not isTag($lines[$i])) {
+        $sumLines[] = $lines[$i];
+        $i = $i + 1;
+    }
+    $summary = strings.join($sumLines, " ");
+    while ($i < $cnt and $lines[$i] == "") {
         $i = $i + 1;
     }
     while ($i < $cnt and not isTag($lines[$i])) {

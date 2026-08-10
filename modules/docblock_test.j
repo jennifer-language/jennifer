@@ -94,7 +94,8 @@ func testEnumRecognized() {
     def e as EnumDoc init $doc.enums[0];
     testing.assertEqual($e.name, "Shape");
     testing.assertTrue($e.exported);
-    testing.assertEqual($e.summary, "A shape.");
+    # No blank line separates the two lines, so they are one paragraph (the summary).
+    testing.assertEqual($e.summary, "A shape. A longer note.");
 }
 
 # A private enum is recognized too, and marked unexported.
@@ -196,7 +197,7 @@ func testNestedBlockCommentInBody() {
     def doc as FileDoc init parse("/**\n * summary\n * nested /* c */ inside\n */\nexport func g() \{ return; \}");
     testing.assertEqual(len($doc.funcs), 1);
     testing.assertEqual($doc.funcs[0].name, "g");
-    testing.assertEqual($doc.funcs[0].summary, "summary");
+    testing.assertEqual($doc.funcs[0].summary, "summary nested /* c */ inside");
 }
 
 func testPlainBlockCommentInvisible() {
@@ -204,4 +205,12 @@ func testPlainBlockCommentInvisible() {
     # a plain /* */ is not a doc comment: no docs, so h is undocumented (absent)
     testing.assertEqual(len($doc.funcs), 0);
     testing.assertEqual(len($doc.diagnostics), 0);
+}
+
+# The summary is the first paragraph: a wrapped opening sentence stays whole (not
+# split at the source line break), and a blank line separates it from the description.
+func testSummaryIsFirstParagraph() {
+    def doc as FileDoc init parse("/**\n * A wrapped opening sentence that runs\n * across two source lines.\n *\n * A second paragraph of detail.\n * @module m\n */");
+    testing.assertEqual($doc.module.summary, "A wrapped opening sentence that runs across two source lines.");
+    testing.assertEqual($doc.module.description, "A second paragraph of detail.");
 }

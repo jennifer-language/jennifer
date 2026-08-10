@@ -85,6 +85,21 @@ func mdCell(s as string) {
     return strings.replace(mdText($s), "|", "\\|");
 }
 
+# catalogSummary shortens a module summary (now the whole first paragraph) to a
+# table-cell teaser for the index: its first sentence, hard-capped so a long run-on
+# still fits. The module's own page still shows the full summary.
+func catalogSummary(s as string) {
+    def out as string init $s;
+    def cut as int init strings.indexOf($s, ". ");
+    if ($cut >= 0) {
+        $out = strings.substring($s, 0, $cut + 1);
+    }
+    if (len($out) > 200) {
+        $out = strings.substring($out, 0, 197) + "...";
+    }
+    return $out;
+}
+
 # exportedFuncs / -Structs / -Enums / -Consts keep only the public, non-internal
 # members, sorted by name.
 func exportedFuncs(all as list of docblock.FuncDoc) {
@@ -339,7 +354,7 @@ func renderIndex(stems as list of string, summaries as map of string to string, 
     $out[] = "| Module | Summary |";
     $out[] = "| ------ | ------- |";
     for (def s in $stems) {
-        $out[] = "| [`" + $s + "`](" + $s + ".md) | " + mdCell($summaries[$s]) + " |";
+        $out[] = "| [`" + $s + "`](" + $s + ".md) | " + mdCell(catalogSummary($summaries[$s])) + " |";
     }
     $out[] = "";
     return strings.join($out, "\n");

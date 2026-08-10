@@ -87,6 +87,49 @@ doubled marker (`## lint-disable: ...`) is just a comment, not a
 directive - handy for writing *about* a directive. `examples/linting.j`
 demonstrates every check and its suppression.
 
+## Document your public surface with doc comments
+
+A `/** ... */` doc comment on every exported construct - each `func`, `def struct`,
+`def enum`, `def const`, plus the file's `@module` preamble - is what turns a module
+from "source someone can read" into "an API someone can use". These comments are not
+just prose: the [`docblock`](../modules/docblock.md) module parses them into
+structured data, so they are the single source your API reference is generated from,
+and `docblock` reports **drift** - a `@param` naming no real parameter, a parameter
+with no `@param`, a `@field` on the wrong construct - which is checked in CI, so the
+docs cannot silently rot out of sync with the code.
+
+The shape is a **summary** (the first paragraph), an optional **description** (the
+paragraphs after a blank line), then `@`-tags:
+
+```jennifer
+/**
+ * Parse a duration like "1h30m" into seconds.
+ *
+ * Accepts `h` / `m` / `s` units in any order; a bare number is seconds. A malformed
+ * string is a catchable Error, never a silent zero.
+ * @param text {string} the duration to parse
+ * @return {int} the total number of seconds
+ * @throws {Error} kind "duration" on a malformed string
+ */
+export func parseDuration(text as string) { ... }
+```
+
+Two habits pay off:
+
+- **Put a blank line between the summary and the description.** The summary is the
+  first *paragraph*, not the first line - so an opening sentence that wraps across
+  source lines stays one sentence - but a blank line is what ends the summary and
+  begins the description. Leave it out and the whole opening block becomes the
+  summary (which then reads as one long teaser in the generated catalog).
+- **Write types in Jennifer syntax, in braces** - `{int}`, `{list of string}`,
+  `{map of string to Point}`, `{json.Value}`. There is no `any` pseudo-type; an
+  opaque value documents as its named type. The braces make the type unambiguous to
+  a reader and to the parser.
+
+See the [`docblock`](../modules/docblock.md) reference for the full tag set
+(`@since` / `@deprecated` / `@example` / `@see` / `@internal` / ...) and every
+diagnostic it reports.
+
 ## Why 4+ levels of nesting is a code smell
 
 The flexibility that lets `list of list of int` hold any shape gets
@@ -131,3 +174,38 @@ without introducing a new type:
 
 As a rule of thumb: **one level is normal, two is fine, three is
 uncommon, four is almost always a sign there's a missing abstraction.**
+
+## Build strings by appending to a list, not by repeated concatenation
+
+Jennifer values are copied, not shared: `$a = $b` deep-copies, which is what makes
+aliasing bugs impossible. The flip side is that `$s = $s + piece` copies the *whole*
+string accumulated so far on every step, so growing a string with `+` inside a loop
+is **quadratic** - the total work grows with the square of the number of pieces, and
+a few thousand appends spend most of their time copying intermediate strings you
+immediately throw away:
+
+```jennifer
+# O(N^2): each `+` copies the entire accumulated string
+def out as string init "";
+for (def row in $rows) {
+    $out = $out + row + "\n";
+}
+```
+
+Collect the pieces in a `list of string` with the `$xs[] = item;` append form -
+which is amortised **O(N)** (a list grows in place, no whole-value copy) - and join
+once at the end:
+
+```jennifer
+# O(N): append is amortised constant, a single join builds the result
+def lines as list of string init [];
+for (def row in $rows) {
+    $lines[] = row;
+}
+def out as string init strings.join($lines, "\n");
+```
+
+Building up `bytes` works the same way: append with `$b[] = byte;` and use the
+result directly (there is no `+` for `bytes`). Reach for `+` only to concatenate a
+small, fixed number of pieces (`$name + ": " + $value`); the moment a concatenation
+lives inside a loop, switch to append-and-join.
