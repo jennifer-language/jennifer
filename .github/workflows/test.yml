@@ -129,25 +129,21 @@ jobs:
         #    whose dispatch/VM methods legitimately run long opt out per file
         #    with a named `# lint-disable-file: L201` (grep-able, self-documenting)
         #    rather than a blanket exclusion here.
-        #  - Lint each module once. A file pulled in by `include "...";` is
+        #  - Lint each module once. An include-partial is named `*.inc.j` and is
         #    spliced into its parent, so linting the parent already covers it;
-        #    listing the partial again double-reports every finding (and
-        #    ical_vcard_shared.j, shared by ical.j and vcard.j, thrice). The
-        #    exclude set is built from the actual include directives, so a new
-        #    partial is handled automatically. The *_test.j overlays are linted
-        #    too (they caught real dead code), and they never include their
-        #    module, so no module finding is double-counted through one.
+        #    listing the partial again would double-report every finding (and
+        #    ical_vcard_shared.inc.j, shared by ical.j and vcard.j, thrice). So the
+        #    glob simply skips `*.inc.j`. The *_test.j overlays are linted too (they
+        #    caught real dead code), and they never include their module, so no
+        #    module finding is double-counted through one.
         run: |
           set -euo pipefail
-          partials=$(grep -hoE 'include "[^"]+\.j"' modules/*.j \
-            | sed -E 's/.*"(.*)".*/\1/' | xargs -n1 basename | sort -u | tr '\n' ' ')
           targets=()
           for m in modules/*.j; do
-            base=$(basename "$m")
-            case " $partials " in *" $base "*) continue ;; esac
+            case "$m" in *.inc.j) continue ;; esac
             targets+=("$m")
           done
-          echo "linting ${#targets[@]} module file(s); include-partials covered via parents: $partials"
+          echo "linting ${#targets[@]} module file(s); *.inc.j include-partials are covered via their parents"
           ./jennifer lint --format=github --checks='!L202,!L203' "${targets[@]}"
 
       - name: Check doc comments (docblock)
@@ -205,7 +201,7 @@ jobs:
         # any of them). Guard that each packaging file installs them, that no
         # *_test.j overlay leaks in, that the count matches, and that the staged
         # set actually resolves as bare imports (ical also exercises an
-        # include-partial, ical_vcard_shared.j).
+        # include-partial, ical_vcard_shared.inc.j).
         run: |
           set -euo pipefail
           for f in packaging/arch/PKGBUILD-bin packaging/arch/PKGBUILD-git \

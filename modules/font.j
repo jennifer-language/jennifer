@@ -34,7 +34,7 @@ use convert;
 use strings;
 use maps;
 use lists;
-include "./font_cff.j";
+include "./font_cff.inc.j";
 
 # ---- big-endian byte readers ----
 

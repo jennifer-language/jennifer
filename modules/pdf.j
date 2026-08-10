@@ -45,7 +45,7 @@ use math;
 use time;
 use encoding;
 import "./font.j" as font;
-include "./pdf_afm.j";
+include "./pdf_afm.inc.j";
 
 /**
  * A loaded, embeddable font: a resource name (referenced in `textUnicode`) and

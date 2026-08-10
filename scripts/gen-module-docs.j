@@ -31,7 +31,6 @@ use os;
 use path;
 use strings;
 use lists;
-use regex;
 use time;
 
 import "../modules/docblock.j" as docblock;
@@ -61,26 +60,14 @@ func constKey(c as docblock.ConstDoc) {
 
 # includedPartials scans every module for `include "x.j"` and returns the
 # basenames spliced into another module (documented via their parent, not alone).
-func includedPartials() {
-    def out as list of string;
-    for (def name in fs.list(MODDIR)) {
-        if (strings.endsWith($name, ".j")) {
-            def src as string init fs.readString(path.join(MODDIR, $name));
-            for (def m in regex.findAll("include\\s+\"([^\"]+)\"", $src)) {
-                $out[] = path.base($m.groups[0]);
-            }
-        }
-    }
-    return $out;
-}
-
-# entryModules returns the sorted stems of the modules to document.
+# entryModules returns the sorted stems of the modules to document - every module
+# source that is not a *_test.j overlay and not a *.inc.j include-partial (a partial
+# is spliced into a parent, so it is documented through that parent).
 func entryModules() {
-    def partials as list of string init includedPartials();
     def stems as list of string;
     for (def name in fs.list(MODDIR)) {
         if (strings.endsWith($name, ".j") and not strings.endsWith($name, "_test.j") and
-            not lists.contains($partials, $name)) {
+            not strings.endsWith($name, ".inc.j")) {
             $stems[] = path.stem($name);
         }
     }

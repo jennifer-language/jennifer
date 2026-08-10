@@ -98,7 +98,7 @@ standard library (proving the hand-rolled PNG is byte-correct), and - where
   encodation. Rectangular symbols, larger sizes (region interleaving), and the
   C40 / Text / X12 / EDIFACT / Base256 encodations are follow-ons; a letter-heavy
   payload is valid but larger than an optimal-encodation encoder would produce.
-- **The GF(256) / Reed-Solomon math** lives in a private `barcode_ecc.j`
+- **The GF(256) / Reed-Solomon math** lives in a private `barcode_ecc.inc.j`
   (`include`d, parameterised by primitive polynomial and generator base, so QR
   (0x11d) and DataMatrix (0x12d) share it).
 - **No general image library** - the only raster need is a monochrome bitmap,

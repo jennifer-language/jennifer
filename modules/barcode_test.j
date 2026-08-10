@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# barcode_test.j - white-box tests for barcode.j (+ the spliced barcode_ecc.j).
+# barcode_test.j - white-box tests for barcode.j (+ the spliced barcode_ecc.inc.j).
 # Run with:
 #
 #     jennifer test modules/barcode_test.j

@@ -5,7 +5,7 @@
 #
 #     jennifer test modules/vcard_test.j
 #
-# The overlay splices vcard.j (and, through its include, ical_vcard_shared.j) in front
+# The overlay splices vcard.j (and, through its include, ical_vcard_shared.inc.j) in front
 # of this file, so the tests reach the private helpers (encodeAdr,
 # splitStructured, component, escapeText, unescapeText, fold, propName) by bare
 # identifier as well as the exported surface. vcard.j already `use`s strings /
@@ -25,7 +25,7 @@ func sample() {
     return $c;
 }
 
-# --- shared content-line codec (private, from ical_vcard_shared.j) ----------
+# --- shared content-line codec (private, from ical_vcard_shared.inc.j) ----------
 
 func testEscapeShared() {
     testing.assertEqual(escapeText("a,b;c"), "a\\,b\\;c");

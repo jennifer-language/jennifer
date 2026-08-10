@@ -36,7 +36,7 @@ use convert;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
 # name / value split, `emit`) is shared with vcard.j via this include.
-include "ical_vcard_shared.j";
+include "ical_vcard_shared.inc.j";
 
 /**
  * An event attendee (`ATTENDEE`).

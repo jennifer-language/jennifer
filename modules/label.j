@@ -11,7 +11,7 @@
  * (a file, a database, or the thin `send` convenience over `net` to a printer's
  * `:9100` raw port). Dialects: `"zpl"` (Zebra Programming Language, raster -
  * needs the target `dpi`) and `"cab"` (cab JScript, millimetre-native); each
- * dialect encoder lives in its own file (`label_zpl.j` / `label_cab.j`) spliced
+ * dialect encoder lives in its own file (`label_zpl.inc.j` / `label_cab.inc.j`) spliced
  * in via `include`, so a new dialect is a new file plus a branch in `render`.
  * Build and render are pure and run on both binaries; only `send` needs the
  * default `jennifer` binary.
@@ -493,8 +493,8 @@ export func render(label as Label, device as Device) {
 # A new printer language is a new file plus a branch in `render` above, with no
 # change to the build API. The included files declare no `use` of their own -
 # they rely on this file's imports and structs.
-include "label_zpl.j";
-include "label_cab.j";
+include "label_zpl.inc.j";
+include "label_cab.inc.j";
 
 # --- emit (exported; needs the default binary via net) ----------------------
 

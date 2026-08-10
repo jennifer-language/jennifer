@@ -38,7 +38,7 @@ use strings;
 use convert;
 use compress;
 use crc;
-include "./barcode_ecc.j";
+include "./barcode_ecc.inc.j";
 
 /**
  * The kind of an encoded symbol: `Matrix` (a 2D module grid, e.g. QR) or

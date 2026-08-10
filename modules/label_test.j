@@ -5,7 +5,7 @@
 #
 #     jennifer test modules/label_test.j
 #
-# The overlay splices label.j (and its included label_zpl.j / label_cab.j) in
+# The overlay splices label.j (and its included label_zpl.inc.j / label_cab.inc.j) in
 # front of this file, so the tests reach the private helpers (mmToDots,
 # zplEscape, cabField) by bare identifier. The networked `send` (:9100 raw port)
 # is covered against an in-process fake printer in the Go suite (TestLabelSend).

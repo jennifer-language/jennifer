@@ -1609,7 +1609,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `barcode.matrix(sym) -> list of list of bool`. `barcode.defaults()` gives an
   `Options` (scale / height / quiet / ecLevel / foreground / background /
   humanReadable). The GF(256) / Reed-Solomon math is a private, `include`d
-  `barcode_ecc.j` (parameterised for QR's 0x11d and DataMatrix's 0x12d). Pure `.j`;
+  `barcode_ecc.inc.j` (parameterised for QR's 0x11d and DataMatrix's 0x12d). Pure `.j`;
   **both binaries**.
 - **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) -> Filter`
   (or `bloom.optimal(n, fpr)` to size for `n` items at a target false-positive rate);

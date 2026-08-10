@@ -6,7 +6,7 @@
  * Build and parse vCard (RFC 6350, vCard 4.0): a `Card` of contact fields
  * encoded to a `VCARD` and parsed back. The contacts counterpart to `ical` -
  * it shares the same content-line codec (TEXT escaping, 75-char line folding)
- * through the included `ical_vcard_shared.j`. Pure Jennifer over `strings` / `lists`;
+ * through the included `ical_vcard_shared.inc.j`. Pure Jennifer over `strings` / `lists`;
  * both binaries.
  *
  * A `Card` carries a formatted name (`FN`), a full structured name (`N`:
@@ -31,7 +31,7 @@ use convert;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
 # name / value split, `emit`) is shared with ical.j via this include.
-include "ical_vcard_shared.j";
+include "ical_vcard_shared.inc.j";
 
 /**
  * A value with an optional `TYPE` parameter (e.g. an email or phone marked
