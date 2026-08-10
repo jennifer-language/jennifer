@@ -51,6 +51,14 @@ func constantCondition() {
     return 0;
 }
 
+# L107 undefined-call - an unqualified call to a name that is not a defined
+# method (a typo'd method name, which the resolver defers to runtime). The
+# variable analogue is L002; a namespaced call and a `$f()` value call are not
+# covered.
+func undefinedCall() {
+    return noSuchMethod(1);   # lint-disable: L107
+}
+
 # L201 method-too-long - a body over the 60-statement limit. The finding
 # anchors at the method, so the directive lives on the `func` line.
 func longMethod() {   # lint-disable: L201

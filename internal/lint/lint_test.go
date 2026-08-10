@@ -4,6 +4,7 @@
 package lint_test
 
 import (
+	"strings"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
@@ -427,11 +428,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 17 {
-		t.Fatalf("expected 17 known IDs (4 source + 13 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 18 {
+		t.Fatalf("expected 18 known IDs (4 source + 14 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 17 {
-		t.Fatalf("catalog should list all 17 IDs")
+	if len(lint.Catalog()) != 18 {
+		t.Fatalf("catalog should list all 18 IDs")
 	}
 }
 
@@ -463,6 +464,44 @@ func TestDeferLint(t *testing.T) {
 		diags := lintSrc(t, src, only("L202"), nestCfg)
 		if got := countID(diags, "L202"); got != 1 {
 			t.Fatalf("L202 count = %d, want 1 (spawn body nests inside the if): %v", got, diags)
+		}
+	})
+}
+
+func TestUndefinedCall(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("undefined bare call is flagged, defined one is not", func(t *testing.T) {
+		src := `use io;
+func known() { return 1; }
+func caller() { io.printf("%d %d\n", known(), nope(1)); }`
+		diags := lintSrc(t, src, only("L107"), cfg)
+		if got := countID(diags, "L107"); got != 1 {
+			t.Fatalf("L107 count = %d, want 1 (only `nope` is undefined): %v", got, diags)
+		}
+		if !strings.Contains(diags[0].Message, "nope") {
+			t.Fatalf("L107 should name `nope`, got %q", diags[0].Message)
+		}
+	})
+	t.Run("enum variant pattern in a match arm is not a call", func(t *testing.T) {
+		// Unresolved here (lintSrc skips Resolve), so the arm stays a CallExpr -
+		// the exact shape that must not be mistaken for an undefined function.
+		src := `def enum Shape { Circle { r as int }, Square { s as int } };
+func classify(sh as Shape) {
+    match ($sh) {
+        when Circle(c) { return 1; }
+        when Square(s) { return 2; }
+    }
+    return 0;
+}`
+		if got := countID(lintSrc(t, src, only("L107"), cfg), "L107"); got != 0 {
+			t.Fatalf("enum variant pattern flagged as undefined call: %d", got)
+		}
+	})
+	t.Run("calling a known top-level binding is not an undefined call", func(t *testing.T) {
+		src := `def const FOO as int init 5;
+func c() { return FOO(); }`
+		if got := countID(lintSrc(t, src, only("L107"), cfg), "L107"); got != 0 {
+			t.Fatalf("call to a known top-level binding flagged as undefined: %d", got)
 		}
 	})
 }

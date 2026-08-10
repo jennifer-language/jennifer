@@ -97,6 +97,48 @@ func TestCrossFileParseError(t *testing.T) {
 	}
 }
 
+// TestIncludeDiamondDuplicate pins the report's include finding: a shared file
+// spliced twice (a diamond) fails at PARSE time with a message that names the
+// splice, instead of a runtime "defined more than once" that only fires after
+// output has printed. Struct / func duplicates used to reach this only at
+// runtime; now the resolver catches every declaration kind uniformly.
+func TestIncludeDiamondDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	libPath := filepath.Join(dir, "lib.j")
+	mainPath := filepath.Join(dir, "main.j")
+	// A header of a pure type + function - the most natural thing to factor into
+	// a shared include, and exactly the case that used to slip to runtime.
+	libSrc := "def struct P { x as int };\nfunc twice(n as int) { return $n * 2; }\n"
+	mainSrc := "include \"lib.j\";\ninclude \"lib.j\";\nuse io;\nio.printf(\"%d\\n\", twice(21));\n"
+	if err := os.WriteFile(libPath, []byte(libSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runPipeline(mainPath, mainSrc)
+	if err == nil {
+		t.Fatal("expected a duplicate-declaration error, got nil")
+	}
+	// Parse phase, not runtime: the resolver's error is a *parser.ParseError, so it
+	// is raised before any top-level statement (and any output) runs.
+	if _, ok := err.(*parser.ParseError); !ok {
+		t.Fatalf("expected a *parser.ParseError (parse phase), got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "defined more than once") {
+		t.Fatalf("want `defined more than once`, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "spliced more than once by `include`") {
+		t.Fatalf("want the include-splice hint, got %v", err)
+	}
+	if p, ok := err.(positionedErr); ok {
+		if file, _, _ := p.Position(); !strings.HasSuffix(file, "lib.j") {
+			t.Errorf("expected error at the spliced lib.j, got %q", file)
+		}
+	}
+}
+
 // runPipeline mimics the CLI's lex+preproc+parse+run sequence and returns
 // the first error encountered (or nil on success).
 func runPipeline(mainPath, src string) error {

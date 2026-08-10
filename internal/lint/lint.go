@@ -102,6 +102,7 @@ func init() {
 		{id: "L104", desc: "throw-non-error: a throw whose value is not statically an Error", severity: SeverityWarning, selectable: true, run: checkThrowNonError},
 		{id: "L105", desc: "constant-condition: a statically constant if/while condition", severity: SeverityWarning, selectable: true, run: checkConstantCondition},
 		{id: "L106", desc: "unused-import: a `use` / `import` whose namespace is never referenced", severity: SeverityWarning, selectable: true, run: checkUnusedImport},
+		{id: "L107", desc: "undefined-call: an unqualified call to a name that is not a defined method", severity: SeverityWarning, selectable: true, run: checkUndefinedCall},
 		// L2nn - complexity & style.
 		{id: "L201", desc: "method-too-long: method body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},

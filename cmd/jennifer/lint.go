@@ -100,6 +100,24 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 	if err != nil {
 		return []lint.Diagnostic{sourceErrorDiag("L003", err, absPath)}, src, absPath, false
 	}
+	// White-box module overlay: linting `MODULE_test.j` splices the sibling
+	// `MODULE.j` in front of the test file - exactly as `jennifer test` does - so
+	// scope analysis sees the module's private consts / structs / enums / methods.
+	// Without it the resolver reports false positives that `test` never hits (e.g. a
+	// `when Variant(bind)` binder over a module-private enum goes unrecognised,
+	// leaving the bound name "undefined"). Findings anchored to a base-module file
+	// are dropped afterwards: those are reported when the module is linted directly.
+	baseFiles := map[string]bool{}
+	if base := overlayBaseFor(absPath); base != "" {
+		if baseToks, ok := tokenizeForSplice(base); ok {
+			for _, t := range baseToks {
+				if t.File != "" {
+					baseFiles[t.File] = true
+				}
+			}
+			tokens = spliceTokens(baseToks, tokens)
+		}
+	}
 	prog, err := parser.ParseTokens(tokens)
 	if err != nil {
 		return []lint.Diagnostic{sourceErrorDiag("L002", err, absPath)}, src, absPath, false
@@ -144,7 +162,19 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		return nil, src, absPath, true
 	}
 
-	return lint.Check(prog, suppressTokens, src, absPath, enabled, lint.DefaultConfig()), src, absPath, false
+	diags = lint.Check(prog, suppressTokens, src, absPath, enabled, lint.DefaultConfig())
+	if len(baseFiles) > 0 {
+		// Drop findings that landed in the spliced base module (or its includes);
+		// they belong to `lint MODULE.j`, not to linting the overlay.
+		kept := diags[:0]
+		for _, d := range diags {
+			if !baseFiles[d.File] {
+				kept = append(kept, d)
+			}
+		}
+		diags = kept
+	}
+	return diags, src, absPath, false
 }
 
 // sourceErrorDiag turns a positioned lex / preprocess / parse error into an

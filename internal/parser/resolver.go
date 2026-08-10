@@ -111,6 +111,13 @@ type slotInfo struct {
 	// (namespace + module path) stays visible, including whatever a later
 	// stamping pass fills in. Foreach / catch bindings stay untyped.
 	DeclType *Type
+	// DefFile / DefLine / DefCol record where a top-level `def` bound this name,
+	// so a duplicate binding coming from a doubly-spliced `include` can name the
+	// splice instead of blaming an innocent enclosing scope. Empty for bindings
+	// with no meaningful source position (params, foreach / catch).
+	DefFile string
+	DefLine int
+	DefCol  int
 }
 
 func (r *resolver) resolveProgram(p *Program) error {
@@ -119,17 +126,41 @@ func (r *resolver) resolveProgram(p *Program) error {
 	// appending a second copy of every entry on a re-resolve.
 	p.PendingEnumMatches = nil
 	// Hoist method + struct names so their bodies can reference each
-	// other in any order (mirrors the interpreter's Run() hoisting).
+	// other in any order (mirrors the interpreter's Run() hoisting), and reject a
+	// duplicate here - at parse time - rather than letting it fall through to a
+	// runtime "defined more than once" that only fires after arbitrary output has
+	// printed. The most common source is a shared file spliced twice through an
+	// `include` diamond, so the message names the splice (see dupDeclError). The
+	// reserved `Error` struct is injected at runtime, not in this AST, so a user
+	// redefining it still surfaces through the interpreter's hoist check.
 	r.methods = make(map[string]*MethodDef, len(p.Methods))
 	for _, m := range p.Methods {
+		if prev, dup := r.methods[m.Name]; dup {
+			return dupDeclError("method", m.Name, prev, m)
+		}
 		r.methods[m.Name] = m
 	}
 	r.structs = make(map[string]*StructDef, len(p.Structs))
 	for _, s := range p.Structs {
+		if prev, dup := r.structs[s.Name]; dup {
+			return dupDeclError("struct", s.Name, prev, s)
+		}
 		r.structs[s.Name] = s
 	}
 	r.enums = make(map[string]*EnumDef, len(p.Enums))
 	for _, e := range p.Enums {
+		// Enums and structs share the type namespace (mirrors the interpreter's
+		// hoist): an enum may not collide with a struct or another enum.
+		if _, dup := r.structs[e.Name]; dup {
+			file, line, col := posFor(e)
+			return &ParseError{
+				Msg:  fmt.Sprintf("enum %q collides with a struct of the same name", e.Name),
+				File: file, Line: line, Col: col,
+			}
+		}
+		if prev, dup := r.enums[e.Name]; dup {
+			return dupDeclError("enum", e.Name, prev, e)
+		}
 		r.enums[e.Name] = e
 	}
 	// Struct definitions themselves declare no runtime bindings, so
@@ -227,7 +258,17 @@ func (r *resolver) current() *scopeFrame { return r.scopes[len(r.scopes)-1] }
 // positioned parse error if the name already binds in any visible
 // enclosing scope (Jennifer forbids shadowing).
 func (r *resolver) define(name string, isConst bool, declType *Type, file string, line, col int) (int, error) {
-	if r.existsInChain(name) {
+	if prev, exists := r.lookupChain(name); exists {
+		// The same source position bound twice is the signature of a file spliced
+		// by `include` from two places (a diamond); name the splice instead of
+		// blaming the innocent enclosing scope. Ordinary shadowing (two distinct
+		// positions) keeps the plain message.
+		if prev.DefFile != "" && prev.DefFile == file && prev.DefLine == line && prev.DefCol == col {
+			return -1, &ParseError{
+				Msg:  fmt.Sprintf("name %q is already defined; %s:%d:%d was spliced more than once by `include` (include a shared file from exactly one place, or use `import` for run-once loading)", name, file, line, col),
+				File: file, Line: line, Col: col,
+			}
+		}
 		return -1, &ParseError{
 			Msg:  fmt.Sprintf("name %q is already defined in an enclosing scope", name),
 			File: file, Line: line, Col: col,
@@ -235,7 +276,7 @@ func (r *resolver) define(name string, isConst bool, declType *Type, file string
 	}
 	cur := r.current()
 	idx := cur.count
-	cur.slots[name] = slotInfo{Slot: idx, IsConst: isConst, DeclType: declType}
+	cur.slots[name] = slotInfo{Slot: idx, IsConst: isConst, DeclType: declType, DefFile: file, DefLine: line, DefCol: col}
 	cur.count++
 	return idx, nil
 }
@@ -246,9 +287,16 @@ func (r *resolver) define(name string, isConst bool, declType *Type, file string
 // locals. Method params + method body locals see globals; nested
 // blocks see everything up to the method's own root.
 func (r *resolver) existsInChain(name string) bool {
+	_, ok := r.lookupChain(name)
+	return ok
+}
+
+// lookupChain is existsInChain that also returns the binding it found, so a
+// collision can inspect where the name was first bound. Same walk rule.
+func (r *resolver) lookupChain(name string) (slotInfo, bool) {
 	for i := len(r.scopes) - 1; i >= 0; i-- {
-		if _, ok := r.scopes[i].slots[name]; ok {
-			return true
+		if info, ok := r.scopes[i].slots[name]; ok {
+			return info, true
 		}
 		if r.scopes[i].isRoot {
 			// Root frames terminate the walk downward (the frames
@@ -263,11 +311,11 @@ func (r *resolver) existsInChain(name string) bool {
 	// is scopes[0] when we're analysing a method body; the loop
 	// above may have short-circuited at the method's callFrame).
 	if len(r.scopes) > 0 {
-		if _, ok := r.scopes[0].slots[name]; ok {
-			return true
+		if info, ok := r.scopes[0].slots[name]; ok {
+			return info, true
 		}
 	}
-	return false
+	return slotInfo{}, false
 }
 
 // lookup finds name and returns (Depth, Slot, isConst). Depth is the
@@ -1345,4 +1393,26 @@ func (r *resolver) resolveExpr(e Expr) error {
 func posFor(n Node) (string, int, int) {
 	line, col := n.Pos()
 	return n.Filename(), line, col
+}
+
+// dupDeclError builds the parse-time "defined more than once" error for a
+// duplicate top-level struct / enum / method. When both definitions sit at the
+// identical source position the cause is a file spliced by `include` from two
+// places (a diamond), so the message names the splice; otherwise it points at
+// the first definition. The substring "defined more than once" matches the
+// interpreter's runtime hoist check so either phase reads the same.
+func dupDeclError(kind, name string, first, second Node) *ParseError {
+	f1, l1, c1 := posFor(first)
+	f2, l2, c2 := posFor(second)
+	extra := ""
+	switch {
+	case f1 != "" && f1 == f2 && l1 == l2 && c1 == c2:
+		extra = fmt.Sprintf("; %s:%d:%d was spliced more than once by `include` (include a shared file from exactly one place, or use `import` for run-once loading)", f1, l1, c1)
+	case f1 != "":
+		extra = fmt.Sprintf(" (first defined at %s:%d:%d)", f1, l1, c1)
+	}
+	return &ParseError{
+		Msg:  fmt.Sprintf("%s %q is defined more than once%s", kind, name, extra),
+		File: f2, Line: l2, Col: c2,
+	}
 }

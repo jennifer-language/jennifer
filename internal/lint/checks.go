@@ -566,6 +566,57 @@ func callInside(e parser.Expr) bool {
 	return found
 }
 
+// checkUndefinedCall (L107) flags an unqualified call `foo(...)` whose target is
+// not a defined top-level method - the call analogue of L002's undefined
+// variable. L002 catches a typo'd `$var`, but a typo'd method name is deferred to
+// runtime (a bare name could be a method-value reference), so it otherwise
+// reaches production. Only the bare-name call form is checked: its sole
+// legitimate target is a user method (`len` is its own node, and every library
+// call is namespaced). A namespaced call (`ns.fn(...)`) and a call through a
+// function value (`$f(...)`) are dispatched at runtime and left alone, as is a
+// name that is a top-level constant / global (calling a non-function is a
+// different error, not an *undefined* one). Includes and the `MODULE_test.j`
+// overlay are spliced before this runs, so a call into an included file or the
+// module under test resolves.
+func checkUndefinedCall(c *checkCtx) {
+	defined := map[string]bool{}
+	for _, m := range c.prog.Methods {
+		defined[m.Name] = true
+	}
+	for _, s := range c.prog.TopLevel {
+		if d, ok := s.(*parser.DefineStmt); ok {
+			defined[d.VarName] = true
+		}
+	}
+	// A `when Variant(bind)` enum-pattern arm parses as a CallExpr, and when the
+	// resolver cannot statically type the match subject (a method result, a spawn
+	// body, an imported enum) the arm is left as a CallExpr in its Values rather
+	// than rewritten into a pattern - so a variant name would read as an
+	// "undefined function". Skip every match-arm head value: a value-match arm
+	// whose value is a genuine call is rare, and a missed L107 there is acceptable
+	// where a false positive on every enum variant pattern is not.
+	skip := map[parser.Expr]bool{}
+	collect := walker{stmt: func(s parser.Stmt) {
+		if m, ok := s.(*parser.MatchStmt); ok {
+			for i := range m.Arms {
+				for _, v := range m.Arms[i].Values {
+					skip[v] = true
+				}
+			}
+		}
+	}}
+	collect.program(c.prog)
+
+	check := walker{expr: func(e parser.Expr) {
+		call, ok := e.(*parser.CallExpr)
+		if !ok || defined[call.Callee] || skip[e] {
+			return
+		}
+		c.report("L107", call, fmt.Sprintf("call to undefined function `%s`", call.Callee))
+	}}
+	check.program(c.prog)
+}
+
 // checkConstantCondition (L105) flags conditions a reader can see are
 // statically constant: a bool literal, or a comparison of a value with
 // itself. `while (true)` is left alone when the body can break or otherwise

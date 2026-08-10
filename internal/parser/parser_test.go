@@ -712,3 +712,28 @@ func TestParseEnumErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveRejectsDuplicateDeclarations pins that a duplicate top-level
+// struct / enum / method is a parse-time (resolve) error, not a runtime one -
+// so a diamond `include` of a shared header of types and functions fails before
+// any output prints. The message keeps the "defined more than once" phrasing the
+// interpreter's runtime hoist check uses, and names the first definition.
+func TestResolveRejectsDuplicateDeclarations(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"method", "func foo() { return 1; }\nfunc foo() { return 2; }", `method "foo" is defined more than once`},
+		{"struct", "def struct P { x as int };\ndef struct P { y as int };", `struct "P" is defined more than once`},
+		{"enum", "def enum E { A, B };\ndef enum E { C, D };", `enum "E" is defined more than once`},
+		{"enum-vs-struct", "def struct T { x as int };\ndef enum T { A, B };", `enum "T" collides with a struct of the same name`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prog, err := Parse(tc.src)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if err := Resolve(prog); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want resolve error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}

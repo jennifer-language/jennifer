@@ -25,6 +25,7 @@ style, **L3nn** API lifecycle.
 | `L104` | throw-non-error             | warning  | a `throw` whose value isn't statically an `Error`                  |
 | `L105` | constant-condition          | warning  | `if (true)`, `while (true)` with no escape, `if ($x == $x)`, ...   |
 | `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
+| `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined method (the call analogue of L002; namespaced / `$f()` calls excluded) |
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100)                  |
@@ -45,7 +46,7 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L201/L202/L105 - L106 also
+checks that match node shapes (L102/L103/L106/L107/L201/L202/L105 - L106 also
 walks declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
@@ -64,6 +65,21 @@ finding that renders in whatever `--format` was asked for, so a
 couldn't be checked. `stripPositionPrefix` peels the `FILE:LINE:COL:`
 that the pipeline errors embed, since the finding carries those as
 fields.
+
+**Module-overlay splice.** Linting a `MODULE_test.j` white-box overlay
+splices the sibling `MODULE.j` in front of the test file before parsing -
+the same splice `jennifer test` applies (`overlayBaseFor` /
+`tokenizeForSplice` / `spliceTokens`) - so the scope analysis
+`lintComputeDiags` runs (`parser.Resolve`: undefined names, shadowing,
+enum-match binding and exhaustiveness) sees the module's private consts /
+structs / enums / methods. Without it the resolver reports false positives
+the test run never hits: e.g. a `when Variant(bind)` arm over a
+module-private enum goes unrecognised, so the bound name reads as an
+undefined variable (`L002`). Findings that land in the spliced base module
+(or its own includes) are dropped from the overlay's report - they belong
+to `lint MODULE.j`, so a module's findings are never double-counted. A file
+that is not a `*_test.j` overlay, or whose sibling module is absent, is
+linted unchanged.
 
 **Severity and exit code.** A finding at or above `SeverityFloor`
 (warning) makes the run exit 1; an info-only run exits 0. Exit 2 is
