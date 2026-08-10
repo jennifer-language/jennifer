@@ -660,3 +660,178 @@ func testRenderEmptyTableNodeNoCrash() {
     $doc.children = [$t];
     testing.assertEqual(render($doc, "ansi"), "");
 }
+
+# --- PDF rendering (markdown.toPdf, white-box) ---
+
+use binary;
+
+func pdfMarker() {
+    return convert.bytesFromString("%PDF", "utf-8");
+}
+
+# --- options + metrics ---------------------------------------------
+
+func testDefaults() {
+    def o as PdfOptions init pdfDefaults();
+    testing.assertEqual($o.pageWidth, 612);
+    testing.assertEqual($o.pageHeight, 792);
+    testing.assertEqual($o.margin, 54);
+    testing.assertEqual($o.bodyFont, "Helvetica");
+    testing.assertEqual($o.boldFont, "Helvetica-Bold");
+    testing.assertEqual($o.monoFont, "Courier");
+}
+
+func testLineHeight() {
+    testing.assertEqual(lineH(11), 15);
+    testing.assertEqual(lineH(24), 33);
+}
+
+func testHeadingSizeByLevel() {
+    def o as PdfOptions init pdfDefaults();
+    testing.assertEqual(headingSize(1, $o), 22);
+    testing.assertEqual(headingSize(2, $o), 17);
+    testing.assertEqual(headingSize(6, $o), $o.bodySize);
+    # An out-of-range level falls back to the body size.
+    testing.assertEqual(headingSize(9, $o), $o.bodySize);
+}
+
+# --- inline layout --------------------------------------------------
+
+func testFontForInlineByKind() {
+    def o as PdfOptions init pdfDefaults();
+    def doc as Node init parse("x **b** *i* `c`\n");
+    def p as Node init get($doc, "paragraph");
+    for (def n in children($p)) {
+        def k as string init typeOf($n);
+        def f as string init fontForInline($n, $o);
+        if ($k == "strong") {
+            testing.assertEqual($f, $o.boldFont);
+        } elseif ($k == "emphasis") {
+            testing.assertEqual($f, $o.italicFont);
+        } elseif ($k == "codespan") {
+            testing.assertEqual($f, $o.monoFont);
+        } else {
+            testing.assertEqual($f, $o.bodyFont);
+        }
+    }
+}
+
+func testInlineWordsSplitsAndTags() {
+    def o as PdfOptions init pdfDefaults();
+    def doc as Node init parse("hello world **bold text**\n");
+    def p as Node init get($doc, "paragraph");
+    def words as list of IWord init inlineWords(children($p), $o);
+    testing.assertEqual(len($words), 4);
+    testing.assertEqual($words[0].text, "hello");
+    testing.assertEqual($words[0].font, $o.bodyFont);
+    testing.assertEqual($words[3].text, "text");
+    testing.assertEqual($words[3].font, $o.boldFont);
+}
+
+func testImageInlineRendersAlt() {
+    def o as PdfOptions init pdfDefaults();
+    def doc as Node init parse("![a cat](/c.png)\n");
+    def p as Node init get($doc, "paragraph");
+    def words as list of IWord init inlineWords(children($p), $o);
+    # "[a" and "cat]" - the alt text bracketed.
+    testing.assertEqual($words[0].text, "[a");
+    testing.assertEqual($words[1].text, "cat]");
+}
+
+func testPackLinesRespectsWidth() {
+    def o as PdfOptions init pdfDefaults();
+    def words as list of IWord init [
+        IWord{text: "aaaa", font: "Helvetica"},
+        IWord{text: "bbbb", font: "Helvetica"},
+        IWord{text: "cccc", font: "Helvetica"}
+    ];
+    # A wide column fits all three on one line.
+    testing.assertEqual(len(packLines($words, 11, 500, $o)), 1);
+    # A tiny column forces one word per line.
+    testing.assertEqual(len(packLines($words, 11, 5, $o)), 3);
+}
+
+# --- pagination mechanics ------------------------------------------
+
+func testEnsureSpaceFlushesWhenFull() {
+    def s as Layout init newLayout(pdfDefaults());
+    # Drive the pen near the bottom margin, then demand more than fits.
+    $s.y = 77;
+    $s = ensureSpace($s, 50);
+    # A flush resets the pen to the top of a fresh page (pageHeight - margin).
+    testing.assertEqual($s.y, 738);
+}
+
+func testEnsureSpaceKeepsPageWhenRoom() {
+    def s as Layout init newLayout(pdfDefaults());
+    def before as int init $s.y;
+    $s = ensureSpace($s, 20);
+    testing.assertEqual($s.y, $before);
+}
+
+# --- end-to-end rendering ------------------------------------------
+
+func testRenderProducesValidPdf() {
+    def out as bytes init toPdf("# Hi\n\nA paragraph of text.\n");
+    testing.assertTrue(len($out) > 100);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+func testRenderAllBlockTypes() {
+    def md as string init "# H\n\ntext **b** *i* `c`\n\n- a\n- b\n  - nested\n\n1. one\n2. two\n\n> quoted\n\n```\ncode\n```\n\n| A | B |\n|:--|--:|\n| 1 | 2 |\n";
+    def out as bytes init toPdf($md);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+func testEmptyDocRendersBlankPdf() {
+    def out as bytes init toPdf("");
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+func testRenderTreeOnParsedTree() {
+    def doc as Node init parse("# Tree\n\nrendered via renderPdf.\n");
+    def out as bytes init renderPdf($doc, pdfDefaults());
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+func testRenderWithA4Options() {
+    def o as PdfOptions init pdfDefaults();
+    $o.pageWidth = 595;
+    $o.pageHeight = 842;
+    def out as bytes init toPdfWith("# A4\n\nbody text\n", $o);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+# A long document overflows onto more pages, so it renders more bytes than a short
+# one (a proxy for pagination without decoding the PDF).
+func testLongDocumentPaginates() {
+    def md as string init "# Long\n\n";
+    def i as int init 0;
+    while ($i < 80) {
+        $md = $md + "Paragraph with several words that occupy a line of the body column area.\n\n";
+        $i = $i + 1;
+    }
+    def long as bytes init toPdf($md);
+    def short as bytes init toPdf("# Short\n\none line.\n");
+    testing.assertTrue(len($long) > len($short));
+}
+
+func testFillHelpers() {
+    testing.assertFalse(noFill().on);
+    def g as Fill init gray(200);
+    testing.assertTrue($g.on);
+    testing.assertEqual($g.r, 200);
+    testing.assertEqual($g.b, 200);
+    def c as Fill init rgb(10, 20, 30);
+    testing.assertEqual($c.r, 10);
+    testing.assertEqual($c.g, 20);
+    testing.assertEqual($c.b, 30);
+}
+
+func testHeadingAndTableFillRender() {
+    def o as PdfOptions init pdfDefaults();
+    $o.tableHeaderFill = gray(230);
+    $o.headingStyles = [headingStyle(gray(205)), headingStyle(gray(225))];
+    def out as bytes init toPdfWith("# H1\n\n## H2\n\n| A | B |\n|--|--|\n| 1 | 2 |\n", $o);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}

@@ -167,9 +167,11 @@ jobs:
         # crash - a module whose doc comments break docblock.parse, or a generator
         # regression - in PR CI rather than only at deploy time. The generator
         # rewrites the SUMMARY.md api region and writes the gitignored docs/api/
-        # pages, so restore SUMMARY.md afterward to leave the tree clean.
+        # pages, so restore SUMMARY.md afterward to leave the tree clean. `--pdf`
+        # also exercises the markdown.toPdf render path (the whole reference to one
+        # PDF), so a rendering regression fails PR CI too.
         run: |
-          ./jennifer run scripts/gen-module-docs.j
+          ./jennifer run scripts/gen-module-docs.j --pdf
           git checkout -- docs/SUMMARY.md
 
       - name: Run the Jennifer test suite

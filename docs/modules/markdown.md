@@ -20,16 +20,44 @@ Runnable: [`examples/modules/markdown_demo.j`](https://github.com/jennifer-langu
 
 ## Surface
 
-Rendering (Markdown in, HTML / terminal text out):
+Rendering (Markdown in, HTML / terminal text / PDF out):
 
 | Call                  | Returns  | Notes                                                            |
 | --------------------- | -------- | --------------------------------------------------------------- |
 | `markdown.toHtml(md)` | `string` | Render to HTML: block elements concatenated, no indentation.    |
 | `markdown.toAnsi(md)` | `string` | Render to terminal text with `ansi` styling (self-suppressing). |
 | `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"ansi"`. |
+| `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
+| `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts). |
+| `markdown.renderPdf(doc, opts)` | `bytes` | Lay a parsed (or transformed) tree out to a PDF.               |
 
-`toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, so build and
-parse share one document model.
+`toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, and `toPdf` over
+`renderPdf(parse(md), pdfDefaults())`, so build and parse share one document model.
+
+> **Note.** `toPdf` folds PDF rendering into `markdown` as a third output beside
+> `toHtml` / `toAnsi`, so it imports [`pdf`](pdf.md) (which pulls in `font`). That
+> makes every `markdown` import a bit heavier even for a `toHtml`-only program - a
+> deliberate trade for one unified rendering surface; see
+> [design-decisions.md](../technical/design-decisions.md). Text is best kept to the
+> Latin-1 range (standard-14 fonts). `PdfOptions` comes from `markdown.pdfDefaults()`
+> (US Letter, 54-pt margins, Helvetica / Courier); copy it and tweak the fields
+> (`pageWidth` / `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` /
+> `monoFont` / `headingFont` / `bodySize` / `tablePad`). A level-1 heading starts a
+> new page; table columns are sized to their content (a short column doesn't crowd a
+> long one), and `tablePad` tunes cell density.
+>
+> **Backgrounds.** `tableHeaderFill` (a `Fill`) shades a table's header row, and
+> `headingStyles` (a `list of HeadingStyle`, index 0 = h1, 1 = h2, ...) shades each
+> heading level. Build a colour with `markdown.gray(level)` / `markdown.rgb(r, g, b)`
+> (or `markdown.noFill()` for none) and a heading style with
+> `markdown.headingStyle(fill)`:
+>
+> ```jennifer
+> def o as markdown.PdfOptions init markdown.pdfDefaults();
+> $o.tableHeaderFill = markdown.gray(232);
+> $o.headingStyles = [markdown.headingStyle(markdown.gray(205)), markdown.headingStyle(markdown.gray(225))];
+> def out as bytes init markdown.toPdfWith($md, $o);
+> ```
 
 Reading (surface the parse tree, walked like [`xml`](xml.md) / [`html`](html.md)):
 

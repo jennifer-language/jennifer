@@ -915,9 +915,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   document as a `Node` tree walked like `xml` / `html` (`typeOf` / `children` /
   `text` / `level` / `attr` / `get` / `findAll` / `has`), and `render(doc,
   format)` renders a parsed or hand-built tree (so parse -> transform -> render
-  works); author Markdown with `header` / `style` / `link` / `bullets` /
-  `numbered` / `codeBlock` / `table`; align handcrafted table source with
-  `tablePretty`.
+  works); `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)` lay the
+  document out to a paginated PDF through `pdf` (headings, styled paragraphs,
+  nested lists, aligned GFM tables, code, blockquotes, page breaks; a `PdfOptions`
+  from `pdfDefaults()` sets page size / fonts); author Markdown with `header` /
+  `style` / `link` / `bullets` / `numbered` / `codeBlock` / `table`; align
+  handcrafted table source with `tablePretty`.
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
   client, over `jsonrpc` + `json`. Build a `Server` value-semantically:
   `mcp.server(name, version)` then `addTool(s, name, desc, inputSchema, handler)`
@@ -939,15 +942,6 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   protocol only (no SSE, no sessions); the stdio *subprocess* client is deferred
   (it needs an `os` subprocess-stdin primitive). Default `jennifer` binary only
   (`jsonrpc` / `http` use `net`).
-- **`mdpdf`** - render a Markdown document to a laid-out PDF ("write markup, get
-  a PDF"): parse with `markdown`, then flow the block tree onto paginated pages
-  with the `pdf` layout primitives. `render(md)` / `renderWith(md, opts)` /
-  `renderTree(doc, opts)` produce PDF `bytes`; a heading becomes sized bold text,
-  a paragraph word-wraps with per-run bold / italic / inline code, a list indents
-  (nested), a GFM table rules an aligned grid with a bold header, a fenced code
-  block is monospaced, and a blockquote indents - all paginated. `renderTree` takes
-  a parsed (or transformed) `markdown.Node` tree. Standard-14 fonts (Latin-1 range);
-  both binaries.
 - **`memcache`** - a memcached client over `net` (classic text protocol):
   `memcache.connect(opts)` -> `memcache.Session`, then `set(session, key, value,
   exptime)` / `add` (store-if-absent, `-> bool`) / `get(session, key)` (`""`

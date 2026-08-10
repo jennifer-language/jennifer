@@ -194,9 +194,16 @@ Per-vendor maturity differs and should set the order, not the vendor:
   community-reverse-engineered, which is exactly why it belongs in a deck, not core.
 - **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
 
-##### DRAFT#24.3
+##### DRAFT#24.3 **daily helpers**
 
-void
+A grab-bag of small, everyday helper decks - the little utilities a script reaches
+for often, each a tiny pure-`.j` deck.
+
+- **cli spinners** - a small deck of terminal progress spinners for a long-running
+  task: a catalogue of spinner styles (dots / line / bar / braille / arc / ...),
+  each individually **colourable** (through `ansi`) and driven at its **own speed**
+  (frame interval). Self-suppresses when stdout is not a TTY (`os.isTerminal`), so
+  piped output stays clean.
 
 ##### DRAFT#24.4 **Bioinformatics**
 

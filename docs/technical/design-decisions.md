@@ -421,3 +421,30 @@ confirmed these were the only two `{name}`-placeholder consumers (JSON / TOML / 
 braces are serialization, `io`'s `%a` braces are output delimiters). This is a
 pre-1.0 break to shipped libraries, taken because the language owning `{}` is worth
 more than a shipped library's marker syntax; see the M24.19 milestone.
+
+## `markdown.toPdf` is folded into `markdown`, not a separate module
+
+M24.21 added Markdown -> PDF layout. The question was where it lives: a separate
+`mdpdf` module over `markdown` + `pdf`, or folded into one of them. It is **folded
+into `markdown`** as `toPdf` / `toPdfWith` / `renderPdf`, beside the existing
+`toHtml` / `toAnsi`.
+
+The argument *against* folding is real and was measured. `markdown` gains
+`import "./pdf.j"`, which pulls in `pdf` plus the `font` TrueType parser, so
+**every** `markdown` import - even a `toHtml`-only program - now loads ~2,700 extra
+lines of `.j`. Indicative cost on one machine: import time roughly doubles
+(~24 ms -> ~48 ms) and peak RSS grows ~6 MB (+37%). It is a one-time, per-process
+**import** cost, not a per-render one (`toHtml` runs at the same speed either way) -
+but it is a permanent tax the common case pays for a feature the rare case uses.
+
+Folding into `pdf` instead was rejected outright: it inverts the layering (a
+low-level PDF writer would embed a markup parser) and would tax every `pdf` user
+with `markdown` + `html` + `ansi`.
+
+`markdown` was chosen anyway because it is **already a multi-format renderer** -
+`toHtml` and `toAnsi` set the precedent, and `toPdf` is simply the third output, so
+one import and one namespace give a caller every rendering path
+(`markdown.toHtml` / `toAnsi` / `toPdf`). The unified, discoverable surface was
+judged worth the import tax; a program that needs `markdown` without PDF and cares
+about the few-ms / few-MB cost can take the single `.j` file and strip the `pdf`
+import. See the M24.21 milestone.

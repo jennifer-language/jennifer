@@ -2,10 +2,14 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
 /**
- * The markdown module (modules/markdown.j): render a small Markdown document to HTML and to styled terminal text.
+ * The markdown module (modules/markdown.j): render a small Markdown document to HTML,
+ * to styled terminal text, and to a laid-out PDF (`toPdf`), plus walk its parse tree.
  * @module markdown_demo
  */
 use io;
+use fs;
+use os;
+use path;
 import "../../modules/markdown.j" as markdown;
 
 def doc as string init "# Shopping list\n";
@@ -56,13 +60,19 @@ def tree as markdown.Node init markdown.parse($doc);
 
 io.printf("=== outline (walk the headings for a TOC) ===\n");
 for (def h in markdown.findAll($tree, "heading")) {
-    io.printf("  H{markdown.level($h)}: {markdown.text($h)}\n");
+    io.printf("  H%d: %s\n", markdown.level($h), markdown.text($h));
 }
 
 io.printf("=== links (pull every link target) ===\n");
 for (def a in markdown.findAll($tree, "paragraph/link")) {
-    io.printf("  {markdown.text($a)} -> {markdown.attr($a, 'href')}\n");
+    io.printf("  %s -> %s\n", markdown.text($a), markdown.attr($a, "href"));
 }
 
 # Render straight from the tree (a parsed or hand-built one).
-io.printf("\n=== rendered from the tree (HTML) ===\n{markdown.render($tree, 'html')}\n");
+io.printf("\n=== rendered from the tree (HTML) ===\n%s\n", markdown.render($tree, "html"));
+
+# The same document as a laid-out PDF, through the folded pdf renderer.
+def pdfBytes as bytes init markdown.toPdf($doc);
+def pdfPath as string init path.join(os.tempDir(), "markdown_demo.pdf");
+fs.writeBytes($pdfPath, $pdfBytes);
+io.printf("\n=== PDF (markdown.toPdf) ===\nwrote %d bytes to %s\n", len($pdfBytes), $pdfPath);

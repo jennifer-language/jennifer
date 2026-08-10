@@ -1462,39 +1462,35 @@ self-checks). Discipline going forward: bump a module's floor in the same change
 breaks it. Requiring a shipped module to *carry* a floor (an `L303` "missing" clause)
 is a follow-on. No interpreter-core or language-grammar change.
 
-### M24.21 - Markdown / HTML -> PDF (document layout)
+### M24.21 - Markdown -> PDF (document layout, `markdown.toPdf`)
 
-**Done.** The markup-driven document story for `pdf`, shipped as the new `mdpdf`
-module: render a Markdown document to a laid-out PDF ("write markup, get a PDF").
-Graduated from `horizon.md`'s DRAFT#13 once its one prerequisite landed - `M24.18`
-gave `markdown` a reusable parse tree (`parse` -> a `Node` walked by `typeOf` /
-`children` / `text` / `attr` / `get` / `findAll`), so `mdpdf` consumes that
-intermediate model instead of re-parsing. It builds on the existing `pdf` layout
-foundation (`measureText` over the standard-14 Adobe AFM tables, `wrapText`).
-
-- **A flow-layout engine** threads a value-semantic `Layout` (the accumulating
-  `Document` / `Page`, the pen `y`, and the current indent) through per-block
-  renderers that place each node with the `pdf` primitives and paginate - a new page
-  when the next line would cross the bottom margin. A heading -> sized bold text; a
-  paragraph -> a word-wrapped block with **per-run fonts** (a styled-word packer
-  switches to bold / italic / mono per inline node); a list -> indented `-` / `N.`
-  markers (nested); a GFM table -> a ruled grid, bold header, per-column alignment
-  (the table row loop keeps its cell-wrap / x-placement in `Layout`-free helpers so
-  a row costs no full-state copy); a fenced code block -> a monospaced block; a
-  blockquote -> indented inner blocks.
-- **`render(md)` / `renderWith(md, opts)` / `renderTree(doc, opts)` -> PDF `bytes`**,
-  the last over a parsed (or transformed) `markdown.Node`, so parse -> walk / rewrite
-  -> render works. An `Options` value (page size, margins, standard-14 fonts, body
-  size) is copied from `defaults()`.
-
-Markdown is the ergonomic default; the `M24.17` `html` reader makes an HTML
-front-end viable on the same `pdf` foundation, left as a follow-on (its node shape
-differs). Standard-14 fonts, so text is best kept to Latin-1; an embedded Unicode
-font (via `pdf.loadFont`) is a later refinement. Pure `.j`, **both binaries**
-(verified identical output on `jennifer-tiny`); full module discipline - a 15-test
-`mdpdf_test.j` overlay (100%, output checked structurally via the `%PDF` marker),
-`docs/modules/mdpdf.md` + index / `README` / `SUMMARY` / `JENNIFER.md` entries, and a
-runnable `mdpdf_demo.j` that renders a report to PDF and walks its headings.
+**Done.** The markup-driven document story for `pdf`, **folded into `markdown`** as a
+third render target beside `toHtml` / `toAnsi`: `markdown.toPdf(md)` /
+`toPdfWith(md, opts)` / `renderPdf(doc, opts)` lay a Markdown document out to a
+paginated PDF ("write markup, get a PDF"), the last over a parsed (or transformed)
+`Node`. Graduated from `horizon.md`'s DRAFT#13 once `M24.18` surfaced the parse tree,
+built on `pdf`'s layout primitives (`measureText` over the standard-14 AFM tables,
+`wrapText`). A flow engine threads a value-semantic `Layout` (the accumulating
+`Document` / `Page`, the pen `y`, the indent) through per-block renderers that place
+each node and paginate at the bottom margin: a heading -> sized bold text; a
+paragraph -> a word-wrapped block with **per-run fonts** (a styled-word packer
+switches bold / italic / mono per inline node); a list -> indented `-` / `N.` markers
+(nested); a GFM table -> a ruled grid, bold header, per-column alignment (its row
+loop keeps cell-wrap / x-placement in `Layout`-free helpers so a row costs no
+full-state copy); code -> a monospaced block; a blockquote -> indented inner blocks.
+`PdfOptions` (from `pdfDefaults()`) sets page size / margins / standard-14 fonts.
+**Folded in, not a separate module** (reasoned in `design-decisions.md`): markdown is
+already a multi-format renderer, so `toPdf` joins `toHtml` / `toAnsi` for one unified
+surface, at the cost that every markdown import now loads `pdf` + `font` (measured
+~2x import time, +~6 MB RSS) - accepted for the single-surface ergonomics, and a
+concerned user can strip the file. Standard-14 fonts, so text is best kept to
+Latin-1 (an embedded Unicode font via `pdf.loadFont` is a later refinement); the
+`M24.17` `html` reader could feed the same layout as an HTML front-end (a follow-on,
+its node shape differs). Pure `.j`, **both binaries** (identical output on
+`jennifer-tiny`); the `markdown` overlay grew 15 PDF tests (102 total, 100%,
+structural `%PDF` checks) with the demo / docs / `JENNIFER.md` updated. Dogfooded by
+`scripts/gen-module-docs.j`, which renders the module-API reference to
+`jennifer-module-api.pdf`.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 

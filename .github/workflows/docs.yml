@@ -80,8 +80,10 @@ jobs:
         # are NOT committed (see .gitignore). Regenerate them here, before the
         # book build, so the published API reference is always in step with the
         # code. `go run` compiles the interpreter and runs the generator in one
-        # step - no separate binary build needed for this one program.
-        run: go run ./cmd/jennifer run scripts/gen-module-docs.j
+        # step - no separate binary build needed for this one program. `--pdf`
+        # also renders the single-file jennifer-module-api.pdf (linked from the API
+        # index) into docs/api/, so the published site ships it.
+        run: go run ./cmd/jennifer run scripts/gen-module-docs.j --pdf
 
       - name: Generate the test coverage report
         # docs/technical/coverage.md and the SUMMARY "coverage" region are
