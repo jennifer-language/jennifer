@@ -1413,7 +1413,7 @@ of `parse` -> walk -> `render`.
 
 ### M24.19 - string interpolation (`{expr}` in cooked strings)
 
-**Planned.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}"` - so a
+**Done.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}"` - so a
 value sits beside its position with no `sprintf` arg-counting or verb/type
 mismatch. Sugar over string concatenation + `convert.toString`. Graduates the
 "String interpolation" language-sugar entry from `horizon.md`. The design settles
@@ -1457,18 +1457,29 @@ Two parts:
   is single-pass (a substituted value is never re-scanned). A pre-1.0 break to a
   shipped library (the language feature owns `{}`; the two template libraries are
   secondary).
-- **Part 2 - implement interpolation + migrate literal braces.** The lexer
-  re-enters expression parsing mid cooked-string and brace-counts nested `{}` (a map
-  literal in a slot); the parser lowers a slot list to concat + `convert.toString`;
-  `\{` / `\}` unescape; raw strings unchanged. Because cooked `{` is no longer
-  literal, **every existing cooked string holding a literal brace migrates** (~665
-  in `modules/*.j`, ~572 in module tests, ~80 in `examples/` - mostly JSON fixtures
-  and format / template data - plus a user-facing break). **Migration prefers
-  converting the string to a raw `'...'`** (cleaner - JSON-in-string sheds its `\"`
-  noise) and falls back to `\{` only where the string also needs cooked escapes or
-  its own interpolation. Ships with the loud breaking-change note, updated editor
-  highlighters, `fmt` (re-emit slots verbatim), `ast`, the docs bundle, and the
-  grammar EBNF kept in sync.
+- **Part 2 - implement interpolation + migrate literal braces. (Done.)** The lexer
+  splits a cooked string into a `TOKEN_STRING_INTERP` whose `Parts` alternate
+  literal chunks and expression-source slots; `scanInterpSlot` brace-counts nested
+  `{}` (a map literal in a slot balances) and copies a nested string verbatim so its
+  braces / quotes never disturb the count; each slot records its **absolute**
+  line/col and the parser sub-lexes it (`lexer.TokenizeAt`) + sub-parses it to a
+  single `expr`, building an `InterpStringExpr` (`Parts []InterpPart`) the
+  interpreter evaluates by stringifying each slot via `Display` and concatenating -
+  no `use convert` needed. `\{` / `\}` unescape (added to the cooked escape set); a
+  bare `}` is a lex error; raw `'...'` strings are unchanged. Because a cooked `{`
+  is no longer literal, **every existing cooked string holding a literal brace was
+  migrated** across `modules/*.j`, the module-test overlays, `examples/`, and the
+  `.j` snippets embedded in the Go integration tests: **prefer raw** - a string
+  whose *value* has no `'`, no control char, and no `\u` escape became a raw `'...'`
+  (JSON / regex / template strings shed their `\"` noise, e.g.
+  `"{\"k\":1}"` -> `'{"k":1}'`), and only a string that genuinely needs cooked
+  escapes (an embedded `\n` / `\t`, a `'` in the value) stayed cooked with `\{` /
+  `\}` escapes. Applied by a one-off Go migrator (decode-and-decide, so it never
+  touches an interpolated string - one with an *unescaped* `{`) and value-checked by
+  the full golden / overlay suite. Landed with
+  updated editor highlighters (all four + the regenerated docs bundle), `fmt`
+  (re-emits `TOKEN_STRING_INTERP` verbatim via `Raw`), `ast` (`InterpStringExpr`
+  node), and the grammar EBNF kept in sync.
 - **The whole toolchain sees a slot as real code, not an opaque string.** A slot
   is an ordinary expression, so: the **resolver** descends into it and annotates
   its references, making undefined-variable / shadowing **parse-time** errors
@@ -1483,15 +1494,15 @@ Two parts:
   expression, including a method call - `"{deploy()}"` runs code inside a string
   literal, a footgun (hidden side effects / cost in something that reads as a
   literal). The language stays permissive (complete `{expr}`, no heuristic); the
-  guard rails are docs + lint: a **style-guide + best-practices** entry (keep slots
+  guard rails are docs + lint: a **style-guide** entry (keep slots
   to variables, field / index access, and arithmetic; no side-effecting or expensive
-  calls) backed by a new **`L2nn` style check** flagging a call or other non-trivial
-  expression in an interpolation slot. Add these to
-  `docs/user-guide/style-guide.md` and the best-practices docs as part of the
-  milestone.
+  calls) backed by the new **`L204`** style check (`interpolation-slot-too-complex`)
+  flagging a call or other non-trivial expression in an interpolation slot, added to
+  `docs/user-guide/style-guide.md`.
 
-Core (a language feature; both binaries). The `f"..."` rejection lands in
-`rejected.md` and the intl-break rationale in `design-decisions.md` when it ships.
+Core (a language feature; both binaries - verified on `jennifer-tiny`). The
+`f"..."` rejection landed in `rejected.md` and the intl-break rationale in
+`design-decisions.md`.
 
 ### M24.20 - module version + capability header
 

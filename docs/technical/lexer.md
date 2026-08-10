@@ -7,7 +7,7 @@ A hand-written, single-pass scanner.
 | Group                    | Tokens                                                                                                                                                      |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Markers                  | `EOF`, `ILLEGAL`                                                                                                                                            |
-| Literal values           | `INT`, `FLOAT`, `STRING`, `TRUE`, `FALSE`, `NULL`                                                                                                           |
+| Literal values           | `INT`, `FLOAT`, `STRING`, `STRING_INTERP`, `TRUE`, `FALSE`, `NULL`                                                                                           |
 | Identifiers              | `IDENT`, `VARREF`                                                                                                                                           |
 | Declaration keywords     | `DEFINE` (`def`), `FUNC`, `AS`, `INIT`, `CONST`, `RETURN`                                                                                                   |
 | Import keywords          | `USE`, `IMPORT`                                                                                                                                             |
@@ -35,14 +35,27 @@ bare `!` is a positioned lex error whose message points at both `not` and `!=`.
 `VARREF` carries the variable name *without* the leading `$`.
 `STRING` carries the value *without* surrounding quotes. A **double-quoted**
 literal is **cooked** - escape sequences are already processed: `\n \r \t \\ \"
-\' \0`, plus the Unicode escapes `\uXXXX` (exactly 4 hex digits, the BMP) and
-`\UXXXXXXXX` (exactly 8 hex digits, any plane). `readUnicodeEscape` rejects a
+\' \0 \{ \}`, plus the Unicode escapes `\uXXXX` (exactly 4 hex digits, the BMP)
+and `\UXXXXXXXX` (exactly 8 hex digits, any plane). `readUnicodeEscape` rejects a
 surrogate, a value above `U+10FFFF`, and a short / non-hex digit run as a
-positioned lex error (matching `convert.fromCodepoint`); the brace-free forms
-keep `{...}` free for a future interpolation syntax. A **single-quoted** literal
-is **raw** - its content is verbatim (no escape processing) from the opening `'`
-to the next `'`. The two delimiters are thus not interchangeable; `readString`
-branches on the quote (`raw := quote == '\''`).
+positioned lex error (matching `convert.fromCodepoint`). A **single-quoted**
+literal is **raw** - its content is verbatim (no escape processing, no
+interpolation) from the opening `'` to the next `'`. The two delimiters are thus
+not interchangeable; `readString` branches on the quote into `readRawString` or
+`readCookedString`.
+
+A cooked string also **interpolates**: an unescaped `{expr}` is a slot.
+`readCookedString` decomposes the literal into ordered literal chunks and
+expression slots. With no slots it returns a plain `STRING` (the decoded value);
+with one or more it returns `STRING_INTERP`, whose `Parts []StringPart` carry the
+literal chunks and the raw expression source of each slot plus that slot's
+**absolute** `Line` / `Col` (so the parser's sub-lex / sub-parse annotates
+references and reports errors at the real location - `TokenizeAt` seeds the
+position). `scanInterpSlot` brace-counts nested `{}` (a map literal in a slot
+balances) and copies a nested string literal verbatim (`copyNestedString`) so a
+brace or quote inside it never disturbs the count; `\{` / `\}` are literal braces
+and a bare unescaped `}` is a positioned lex error. A raw `'...'` string is
+returned verbatim as a plain `STRING`, never interpolated.
 
 ## Whitespace handling
 

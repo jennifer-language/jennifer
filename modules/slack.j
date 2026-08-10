@@ -82,8 +82,8 @@ export func text(m as Message, text as string) {
  */
 export func section(m as Message, markdown as string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":" +
-        json.encode($markdown) + "}}";
+    def block as string init '{"type":"section","text":{"type":"mrkdwn","text":' +
+        json.encode($markdown) + '}}';
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -96,8 +96,8 @@ export func section(m as Message, markdown as string) {
  */
 export func header(m as Message, heading as string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":" +
-        json.encode($heading) + "}}";
+    def block as string init '{"type":"header","text":{"type":"plain_text","text":' +
+        json.encode($heading) + '}}';
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -111,8 +111,8 @@ export func header(m as Message, heading as string) {
  */
 export func contextBlock(m as Message, text as string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"context\",\"elements\":[{\"type\":\"mrkdwn\",\"text\":" +
-        json.encode($text) + "}]}";
+    def block as string init '{"type":"context","elements":[{"type":"mrkdwn","text":' +
+        json.encode($text) + '}]}';
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -129,9 +129,9 @@ export func fieldsSection(m as Message, fields as list of string) {
     def out as Message init $m;
     def parts as list of string init [];
     for (def f in $fields) {
-        $parts[] = "{\"type\":\"mrkdwn\",\"text\":" + json.encode($f) + "}";
+        $parts[] = '{"type":"mrkdwn","text":' + json.encode($f) + '}';
     }
-    def block as string init "{\"type\":\"section\",\"fields\":[" + strings.join($parts, ",") + "]}";
+    def block as string init '{"type":"section","fields":[' + strings.join($parts, ",") + ']}';
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -144,8 +144,8 @@ export func fieldsSection(m as Message, fields as list of string) {
  * @return {string} the button JSON fragment
  */
 export func button(text as string, url as string) {
-    return "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":" + json.encode($text) +
-        "},\"url\":" + json.encode($url) + "}";
+    return '{"type":"button","text":{"type":"plain_text","text":' + json.encode($text) +
+        '},"url":' + json.encode($url) + '}';
 }
 
 /**
@@ -157,8 +157,8 @@ export func button(text as string, url as string) {
  */
 export func actionsBlock(m as Message, buttons as list of string) {
     def out as Message init $m;
-    def block as string init "{\"type\":\"actions\",\"elements\":[" + strings.join($buttons, ",") +
-        "]}";
+    def block as string init '{"type":"actions","elements":[' + strings.join($buttons, ",") +
+        ']}';
     $out.blocks = lists.push($out.blocks, $block);
     return $out;
 }
@@ -170,7 +170,7 @@ export func actionsBlock(m as Message, buttons as list of string) {
  */
 export func divider(m as Message) {
     def out as Message init $m;
-    $out.blocks = lists.push($out.blocks, "{\"type\":\"divider\"}");
+    $out.blocks = lists.push($out.blocks, '{"type":"divider"}');
     return $out;
 }
 
@@ -187,7 +187,7 @@ export func render(m as Message) {
     if (len($m.blocks) > 0) {
         $parts[] = "\"blocks\":[" + strings.join($m.blocks, ",") + "]";
     }
-    return "{" + strings.join($parts, ",") + "}";
+    return '{' + strings.join($parts, ",") + '}';
 }
 
 /**

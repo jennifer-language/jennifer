@@ -41,20 +41,20 @@ func posParams() {
 func testBuildRequest() {
     testing.assertEqual(
         buildRequest("add", posParams(), 1),
-        "{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[2,3],\"id\":1}");
+        '{"jsonrpc":"2.0","method":"add","params":[2,3],"id":1}');
 }
 
 func testBuildNotification() {
     # a notification omits the id member
     testing.assertEqual(
         buildNotification("ping", json.list()),
-        "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"params\":[]}");
+        '{"jsonrpc":"2.0","method":"ping","params":[]}');
 }
 
 # --- reply parsing -----------------------------------------------------------
 
 func testParseResultOk() {
-    def r as json.Value init parseResult("{\"jsonrpc\":\"2.0\",\"result\":42,\"id\":1}", 200, 1);
+    def r as json.Value init parseResult('{"jsonrpc":"2.0","result":42,"id":1}', 200, 1);
     testing.assertEqual(json.asInt($r, ""), 42);
 }
 
@@ -64,7 +64,7 @@ func testParseResultError() {
 
 func parseError() {
     parseResult(
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32601,\"message\":\"nope\"},\"id\":1}",
+        '{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":1}',
         200,
         1);
 }
@@ -83,7 +83,7 @@ func testParseResultMissingResult() {
 }
 
 func parseMissingResult() {
-    parseResult("{\"jsonrpc\":\"2.0\",\"id\":1}", 200, 1);
+    parseResult('{"jsonrpc":"2.0","id":1}', 200, 1);
 }
 
 func testParseResultIdMismatch() {
@@ -92,71 +92,71 @@ func testParseResultIdMismatch() {
 }
 
 func parseIdMismatch() {
-    parseResult("{\"jsonrpc\":\"2.0\",\"result\":42,\"id\":9}", 200, 1);
+    parseResult('{"jsonrpc":"2.0","result":42,"id":9}', 200, 1);
 }
 
 # --- server dispatch ---------------------------------------------------------
 
 func testHandleCall() {
     testing.assertEqual(
-        handle("{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[2,3],\"id\":1}"),
-        "{\"jsonrpc\":\"2.0\",\"result\":5,\"id\":1}");
+        handle('{"jsonrpc":"2.0","method":"add","params":[2,3],"id":1}'),
+        '{"jsonrpc":"2.0","result":5,"id":1}');
 }
 
 func testHandleNamedAndStringId() {
     testing.assertEqual(
-        handle("{\"jsonrpc\":\"2.0\",\"method\":\"greet\",\"params\":{\"name\":\"x\"},\"id\":\"a\"}"),
-        "{\"jsonrpc\":\"2.0\",\"result\":\"hi x\",\"id\":\"a\"}");
+        handle('{"jsonrpc":"2.0","method":"greet","params":{"name":"x"},"id":"a"}'),
+        '{"jsonrpc":"2.0","result":"hi x","id":"a"}');
 }
 
 func testHandleMethodNotFound() {
     testing.assertEqual(
-        handle("{\"jsonrpc\":\"2.0\",\"method\":\"nope\",\"id\":7}"),
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":7}");
+        handle('{"jsonrpc":"2.0","method":"nope","id":7}'),
+        '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":7}');
 }
 
 func testHandleThrowIsInternalError() {
     # the thrown handler message ("kaboom") stays server-side; the wire reply
     # carries only the generic internal-error text
     testing.assertEqual(
-        handle("{\"jsonrpc\":\"2.0\",\"method\":\"boom\",\"id\":3}"),
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"},\"id\":3}");
+        handle('{"jsonrpc":"2.0","method":"boom","id":3}'),
+        '{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error"},"id":3}');
 }
 
 func testHandleNotificationNoReply() {
-    testing.assertEqual(handle("{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[1,1]}"), "");
+    testing.assertEqual(handle('{"jsonrpc":"2.0","method":"add","params":[1,1]}'), "");
 }
 
 func testHandleParseError() {
     testing.assertEqual(
-        handle("{bad"),
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}");
+        handle('{bad'),
+        '{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":null}');
 }
 
 func testHandleInvalidRequest() {
     # a request with no method member
     testing.assertEqual(
-        handle("{\"jsonrpc\":\"2.0\",\"id\":1}"),
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"},\"id\":1}");
+        handle('{"jsonrpc":"2.0","id":1}'),
+        '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request"},"id":1}');
 }
 
 func testHandleBatch() {
     # two calls and a notification -> two replies, notification omitted
     testing.assertEqual(
-        handle("[{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[1,2],\"id\":1},{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[3,4]},{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[5,6],\"id\":2}]"),
-        "[{\"jsonrpc\":\"2.0\",\"result\":3,\"id\":1},{\"jsonrpc\":\"2.0\",\"result\":11,\"id\":2}]");
+        handle('[{"jsonrpc":"2.0","method":"add","params":[1,2],"id":1},{"jsonrpc":"2.0","method":"add","params":[3,4]},{"jsonrpc":"2.0","method":"add","params":[5,6],"id":2}]'),
+        '[{"jsonrpc":"2.0","result":3,"id":1},{"jsonrpc":"2.0","result":11,"id":2}]');
 }
 
 func testHandleAllNotificationBatchNoReply() {
     testing.assertEqual(
-        handle("[{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[1,1]},{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[2,2]}]"),
+        handle('[{"jsonrpc":"2.0","method":"add","params":[1,1]},{"jsonrpc":"2.0","method":"add","params":[2,2]}]'),
         "");
 }
 
 func testHandleEmptyBatch() {
     testing.assertEqual(
         handle("[]"),
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"},\"id\":null}");
+        '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request"},"id":null}');
 }
 
 func testConstants() {

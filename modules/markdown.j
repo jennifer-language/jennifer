@@ -451,7 +451,7 @@ func lineType(trimmed as string, line as string) {
     if (strings.startsWith($trimmed, ">")) {
         return "quote";
     }
-    if (regex.matches("^(#{1,6})[ \t]+", $line)) {
+    if (regex.matches("^(#\{1,6\})[ \t]+", $line)) {
         return "heading";
     }
     if (regex.matches("^[ \t]*[-*+][ \t]+", $line)) {
@@ -756,7 +756,7 @@ func parseLines(lines as list of string) {
             continue;
         }
         if ($lt == "heading") {
-            def hm as regex.Match init regex.find("^(#{1,6})[ \t]+(.*)$", $line);
+            def hm as regex.Match init regex.find("^(#\{1,6\})[ \t]+(.*)$", $line);
             $blocks[] = headingBlock(len($hm.groups[0]), $hm.groups[1]);
             $i = $i + 1;
             continue;

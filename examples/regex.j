@@ -50,7 +50,7 @@ io.printf("\nreplace $1   : %s\n", $r);
 def rNamed as string init regex.replace(
     "(?P<host>[\\w.]+):(?P<port>\\d+)",
     "cache.example.com:11211",
-    "host=${host} port=${port}");
+    'host=${host} port=${port}');
 io.printf("replace name : %s\n", $rNamed);
 
 # ---- split ----

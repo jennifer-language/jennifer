@@ -13,11 +13,11 @@ use testing;
 
 func testRenderTextOnly() {
     def m as Message init text(message(), "deploy done");
-    testing.assertEqual(render($m), "{\"text\":\"deploy done\"}");
+    testing.assertEqual(render($m), '{"text":"deploy done"}');
 }
 
 func testRenderEmpty() {
-    testing.assertEqual(render(message()), "{}");
+    testing.assertEqual(render(message()), '{}');
 }
 
 func testRenderBlocks() {
@@ -27,25 +27,25 @@ func testRenderBlocks() {
     $m = divider($m);
     testing.assertEqual(
         render($m),
-        "{\"blocks\":[" +
-            "{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\"Deploy\"}}," +
-            "{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"*build* live\"}}," +
-            "{\"type\":\"divider\"}]}");
+        '{"blocks":[' +
+            '{"type":"header","text":{"type":"plain_text","text":"Deploy"}},' +
+            '{"type":"section","text":{"type":"mrkdwn","text":"*build* live"}},' +
+            '{"type":"divider"}]}');
 }
 
 func testTextAndBlocks() {
     def m as Message init section(text(message(), "fallback"), "body");
     testing.assertEqual(
         render($m),
-        "{\"text\":\"fallback\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"body\"}}]}");
+        '{"text":"fallback","blocks":[{"type":"section","text":{"type":"mrkdwn","text":"body"}}]}');
 }
 
 func testContextBlock() {
     def m as Message init contextBlock(message(), "posted by ci");
     testing.assertEqual(
         render($m),
-        "{\"blocks\":[{\"type\":\"context\",\"elements\":[" +
-            "{\"type\":\"mrkdwn\",\"text\":\"posted by ci\"}]}]}");
+        '{"blocks":[{"type":"context","elements":[' +
+            '{"type":"mrkdwn","text":"posted by ci"}]}]}');
 }
 
 func testFieldsSection() {
@@ -53,9 +53,9 @@ func testFieldsSection() {
     def m as Message init fieldsSection(message(), $fields);
     testing.assertEqual(
         render($m),
-        "{\"blocks\":[{\"type\":\"section\",\"fields\":[" +
-            "{\"type\":\"mrkdwn\",\"text\":\"*Env:*\\nprod\"}," +
-            "{\"type\":\"mrkdwn\",\"text\":\"*Build:*\\n1234\"}]}]}");
+        '{"blocks":[{"type":"section","fields":[' +
+            '{"type":"mrkdwn","text":"*Env:*\nprod"},' +
+            '{"type":"mrkdwn","text":"*Build:*\n1234"}]}]}');
 }
 
 func testActionsBlock() {
@@ -66,9 +66,9 @@ func testActionsBlock() {
     def m as Message init actionsBlock(message(), $buttons);
     testing.assertEqual(
         render($m),
-        "{\"blocks\":[{\"type\":\"actions\",\"elements\":[" +
-            "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"View build\"},\"url\":\"https://example.com/build\"}," +
-            "{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"Logs\"},\"url\":\"https://example.com/logs\"}]}]}");
+        '{"blocks":[{"type":"actions","elements":[' +
+            '{"type":"button","text":{"type":"plain_text","text":"View build"},"url":"https://example.com/build"},' +
+            '{"type":"button","text":{"type":"plain_text","text":"Logs"},"url":"https://example.com/logs"}]}]}');
 }
 
 func testSectionEscaping() {
@@ -77,5 +77,5 @@ func testSectionEscaping() {
     # valid JSON, decodes identically), so the Slack payload stays intact.
     testing.assertEqual(
         render($m),
-        "{\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"a \\\"quote\\\" \\u0026 \\u003ctag\\u003e\\nnl\"}}]}");
+        '{"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"a \"quote\" \u0026 \u003ctag\u003e\nnl"}}]}');
 }

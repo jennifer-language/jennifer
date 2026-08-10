@@ -20,8 +20,8 @@ def secret as bytes init convert.bytesFromString("change-me-in-production", "utf
 
 # Claims: subject, role, and an expiry one hour out (NumericDate = Unix seconds).
 def exp as int init time.unix(time.now()) + 3600;
-def claims as json.Value init json.decode("{\"sub\":\"ada\",\"role\":\"admin\",\"exp\":" +
-    convert.toString($exp) + "}");
+def claims as json.Value init json.decode('{"sub":"ada","role":"admin","exp":' +
+    convert.toString($exp) + '}');
 
 def token as string init jwt.sign($claims, $secret, "HS256");
 io.printf("HS256 token:\n  %s\n\n", $token);

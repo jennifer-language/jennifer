@@ -384,6 +384,10 @@ func (c *checkCtx) nestExpr(e parser.Expr, depth int) {
 		for _, el := range n.Elements {
 			c.nestExpr(el, depth)
 		}
+	case *parser.InterpStringExpr:
+		for i := range n.Parts {
+			c.nestExpr(n.Parts[i].Expr, depth)
+		}
 	case *parser.MapLit:
 		for i := range n.Keys {
 			c.nestExpr(n.Keys[i], depth)
@@ -475,6 +479,47 @@ func checkLineTooLong(c *checkCtx) {
 				fmt.Sprintf("line is %d columns, over the limit of %d", n, c.cfg.MaxLineLength))
 		}
 	}
+}
+
+// checkInterpSlotComplexity (L204) flags a `{expr}` string-interpolation slot
+// that hides a call (or a spawn) inside a string literal. The style guide keeps
+// slots to variables, field / index access, and arithmetic - so a costly or
+// side-effecting call reads plainly at the call site, not buried in a string.
+// Field / index / arithmetic slots are fine and never flagged.
+func checkInterpSlotComplexity(c *checkCtx) {
+	w := walker{expr: func(e parser.Expr) {
+		interp, ok := e.(*parser.InterpStringExpr)
+		if !ok {
+			return
+		}
+		for i := range interp.Parts {
+			if interp.Parts[i].Expr == nil {
+				continue
+			}
+			if callInside(interp.Parts[i].Expr) {
+				c.report("L204", interp,
+					"an interpolation slot calls a method; compute it into a variable first so the cost / side effect is visible, then interpolate the variable")
+				return // one finding per interpolated string is enough
+			}
+		}
+	}}
+	w.program(c.prog)
+}
+
+// callInside reports whether e contains a call or spawn anywhere in its tree -
+// the "non-trivial" slot content L204 flags. Variables, constants, literals,
+// field / index / slice / range access, and arithmetic / comparison / logical
+// operators over those are all trivial.
+func callInside(e parser.Expr) bool {
+	found := false
+	w := walker{expr: func(x parser.Expr) {
+		switch x.(type) {
+		case *parser.CallExpr, *parser.QualifiedCallExpr, *parser.CallValueExpr, *parser.SpawnExpr, *parser.LenExpr:
+			found = true
+		}
+	}}
+	w.doExpr(e)
+	return found
 }
 
 // checkConstantCondition (L105) flags conditions a reader can see are

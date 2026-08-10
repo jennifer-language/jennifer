@@ -106,7 +106,7 @@ func testParseOrderReadsFields() {
         status: 200,
         statusText: "OK",
         headers: {},
-        body: "{\"status\":\"pending\",\"authorizations\":[\"https://ca/authz/1\",\"https://ca/authz/2\"],\"finalize\":\"https://ca/finalize\"}"
+        body: '{"status":"pending","authorizations":["https://ca/authz/1","https://ca/authz/2"],"finalize":"https://ca/finalize"}'
     };
     def o as Order init parseOrder("https://ca/order/1", $resp);
     testing.assertEqual($o.url, "https://ca/order/1");

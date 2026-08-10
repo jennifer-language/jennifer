@@ -6,7 +6,7 @@
 | --------------- | --------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `int`           | `42`, `0xff`, `0o755`, `0b1010_0110`, `1_000`       | `0`              | 64-bit signed; `_` may separate digits                                                                                 |
 | `float`         | `3.14`, `0.5`, `6.022e23`, `1_000.000_5`            | `0.0`            | 64-bit; scientific notation with an `e`/`E` exponent (`1e10`, `1.6e-19`); promoted from int in mixed math              |
-| `string`        | `"cooked \n"`, `'raw \d+'`                           | `""`             | `"..."` processes escapes; `'...'` is raw (verbatim, multi-line)                                                       |
+| `string`        | `"cooked \n"`, `'raw \d+'`                           | `""`             | `"..."` processes escapes + interpolates `{expr}`; `'...'` is raw (verbatim, multi-line, no interpolation)             |
 | `bool`          | `true`, `false`                                     | `false`          | Produced by comparison operators                                                                                       |
 | `null`          | `null`                                              | `null`           | A type with a single value (the unit)                                                                                  |
 | `bytes`         | *(no literal)*                                      | empty            | Mutable byte sequence; element = `int` in `[0, 255]`; built via `convert.bytesFromString` or grown with `$b[] = byte;` |
@@ -112,6 +112,41 @@ cooked form would need `\\` everywhere. To put a **single quote inside** a strin
 use the cooked form (`"it's"` or `"it\'s"`) - a raw literal ends at the first `'`,
 so it cannot contain one. There is deliberately no `r"..."` prefix; the delimiter
 *is* the mode.
+
+### String interpolation (`{expr}` in cooked strings)
+
+A **cooked** `"..."` string interpolates: each unescaped `{expr}` is a slot - one
+Jennifer **expression** evaluated in the current scope and stringified in place, so
+a value sits beside its label without `sprintf` verb / argument matching:
+
+```jennifer
+def name as string init "Ada";
+def n as int init 41;
+def xs as list of int init [1, 2, 3];
+
+io.printf("hello {$name}, next is {$n + 1}\n");   # hello Ada, next is 42
+io.printf("list {$xs}, first {$xs[0]}\n");        # list [1, 2, 3], first 1
+```
+
+A slot may be any single expression - a variable, a constant (`{MAX}`), a field or
+index access (`{$p.x}`, `{$xs[0]}`), arithmetic (`{$a + $b}`), or a call
+(`{strings.upper($s)}`). Stringification is the `convert.toString` form, so every
+value kind interpolates and **no `use convert` is required**. The rules:
+
+- A slot is **one expression**, not a statement: a `;`, `def`, `if`, `return`, or
+  assignment in a slot is a parse error, and an empty `{}` is an error.
+- A **literal brace** is written `\{` / `\}` (backslash, matching `\n` / `\"`); a
+  bare unescaped `}` is a lex error that points you at `\}`.
+- A **raw** `'...'` string never interpolates - it is the literal form. `'{$x}'`
+  is the four-character string `{$x}`, and `'{"port": 8080}'` is literal JSON.
+- There is no `f"..."` prefix - the cooked / raw split already *is* the opt-in.
+
+A slot is real code, so an undefined variable inside one (`"{$typo}"`) is caught at
+parse time, just like any reference. **Keep slots simple** - variables, field /
+index access, and arithmetic; a side-effecting or expensive call reads better
+pulled out to a variable first (the [`lint`](tooling.md) `L204` check flags a call
+in a slot). To build a string with a literal brace *and* no interpolation, prefer a
+raw string.
 
 ## Variables and constants
 

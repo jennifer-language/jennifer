@@ -20,8 +20,8 @@ func testFormBody() {
 }
 
 func testTokenFromNode() {
-    def node as json.Value init json.decode("{\"access_token\":\"abc\",\"token_type\":\"Bearer\"," +
-        "\"expires_in\":3600,\"refresh_token\":\"r1\",\"scope\":\"mail\"}");
+    def node as json.Value init json.decode('{"access_token":"abc","token_type":"Bearer",' +
+        '"expires_in":3600,"refresh_token":"r1","scope":"mail"}');
     def t as Token init tokenFromNode($node, 1000);
     testing.assertEqual($t.accessToken, "abc");
     testing.assertEqual($t.tokenType, "Bearer");
@@ -31,7 +31,7 @@ func testTokenFromNode() {
 }
 
 func testTokenFromNodeDefaults() {
-    def node as json.Value init json.decode("{\"access_token\":\"x\"}");
+    def node as json.Value init json.decode('{"access_token":"x"}');
     def t as Token init tokenFromNode($node, 1000);
     testing.assertEqual($t.tokenType, "Bearer"); # default
     testing.assertEqual($t.refreshToken, "");
@@ -41,7 +41,7 @@ func testTokenFromNodeDefaults() {
 func testParseTokenError() {
     def threw as bool init false;
     try {
-        parseTokenBody("{\"error\":\"invalid_grant\",\"error_description\":\"bad token\"}", 1000);
+        parseTokenBody('{"error":"invalid_grant","error_description":"bad token"}', 1000);
     } catch (e) {
         $threw = true;
         testing.assertContains($e.message, "invalid_grant");
@@ -51,10 +51,10 @@ func testParseTokenError() {
 }
 
 func testPollState() {
-    testing.assertEqual(pollState("{\"access_token\":\"x\"}"), "success");
-    def pending as string init pollState("{\"error\":\"authorization_pending\"}");
+    testing.assertEqual(pollState('{"access_token":"x"}'), "success");
+    def pending as string init pollState('{"error":"authorization_pending"}');
     testing.assertEqual($pending, "authorization_pending");
-    testing.assertEqual(pollState("{\"error\":\"slow_down\"}"), "slow_down");
+    testing.assertEqual(pollState('{"error":"slow_down"}'), "slow_down");
 }
 
 func testTokenExpired() {

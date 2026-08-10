@@ -459,7 +459,7 @@ func renderLabels(labels as map of string to string) {
     for (def k in $keys) {
         $parts[] = $k + "=\"" + escapeLabelValue($labels[$k]) + "\"";
     }
-    return "{" + strings.join($parts, ",") + "}";
+    return '{' + strings.join($parts, ",") + '}';
 }
 
 # mergeLabel returns a copy of a label set with one extra key set (value

@@ -12,10 +12,12 @@ endif
 syn match   jenniferComment "#.*$" contains=@Spell
 syn region  jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockComment,@Spell
 
-" Strings: double-quoted is cooked (escapes processed); single-quoted is raw
-" (backslashes are literal - no escape highlighting, ends at the next ').
-syn match   jenniferEscape contained "\\\%([nrt\\\"'0]\|u\x\{4}\|U\x\{8}\)"
-syn region  jenniferString start=+"+ skip=+\\"+ end=+"+ contains=jenniferEscape
+" Strings: double-quoted is cooked (escapes processed, `{expr}` interpolation
+" slots highlighted as embedded code); single-quoted is raw (backslashes are
+" literal, no escapes and no interpolation, ends at the next ').
+syn match   jenniferEscape contained "\\\%([nrt\\\"'0{}]\|u\x\{4}\|U\x\{8}\)"
+syn region  jenniferInterp contained matchgroup=jenniferInterpDelim start=+{+ end=+}+ contains=jenniferVariable,jenniferConstant,jenniferNumber,jenniferFloat
+syn region  jenniferString start=+"+ skip=+\\"+ end=+"+ contains=jenniferEscape,jenniferInterp
 syn region  jenniferString start=+'+ end=+'+
 
 " Numbers: hex, octal, binary, float, integer (with _ separators).
@@ -50,6 +52,7 @@ hi def link jenniferComment       Comment
 hi def link jenniferBlockComment  Comment
 hi def link jenniferString        String
 hi def link jenniferEscape        SpecialChar
+hi def link jenniferInterpDelim   Special
 hi def link jenniferNumber        Number
 hi def link jenniferFloat         Float
 hi def link jenniferControl       Statement

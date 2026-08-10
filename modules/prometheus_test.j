@@ -16,7 +16,7 @@ use testing;
 func testRenderCounterWithLabels() {
     def m as Metric init counter("http_requests_total", "Total HTTP requests");
     $m = observe($m, {"method": "get", "code": "200"}, 42.0);
-    def want as string init "# HELP http_requests_total Total HTTP requests\n# TYPE http_requests_total counter\nhttp_requests_total{code=\"200\",method=\"get\"} 42.0\n";
+    def want as string init "# HELP http_requests_total Total HTTP requests\n# TYPE http_requests_total counter\nhttp_requests_total\{code=\"200\",method=\"get\"\} 42.0\n";
     testing.assertEqual(render([$m]), $want);
 }
 
@@ -34,13 +34,13 @@ func testObserveUpsertReplacesSameLabelSet() {
     testing.assertEqual(len($m.samples), 2);
     testing.assertEqual(
         render([$m]),
-        "# TYPE temp gauge\ntemp{room=\"kitchen\"} 21.5\ntemp{room=\"hall\"} 18.0\n");
+        "# TYPE temp gauge\ntemp\{room=\"kitchen\"\} 21.5\ntemp\{room=\"hall\"\} 18.0\n");
 }
 
 func testLabelKeysSortDeterministically() {
     def m as Metric init counter("c", "");
     $m = observe($m, {"z": "1", "a": "2"}, 5.0);
-    testing.assertEqual(render([$m]), "# TYPE c counter\nc{a=\"2\",z=\"1\"} 5.0\n");
+    testing.assertEqual(render([$m]), "# TYPE c counter\nc\{a=\"2\",z=\"1\"\} 5.0\n");
 }
 
 func testEscapeLabelValueAndHelp() {
@@ -77,7 +77,7 @@ func testRenderHistogram() {
     $h = observe($h, {"method": "get"}, 0.3);
     $h = observe($h, {"method": "get"}, 0.05);
     $h = observe($h, {"method": "get"}, 2.0);
-    def want as string init "# HELP http_request_duration_seconds Request latency\n# TYPE http_request_duration_seconds histogram\nhttp_request_duration_seconds_bucket{le=\"0.1\",method=\"get\"} 1.0\nhttp_request_duration_seconds_bucket{le=\"0.5\",method=\"get\"} 2.0\nhttp_request_duration_seconds_bucket{le=\"1.0\",method=\"get\"} 2.0\nhttp_request_duration_seconds_bucket{le=\"+Inf\",method=\"get\"} 3.0\nhttp_request_duration_seconds_sum{method=\"get\"} 2.35\nhttp_request_duration_seconds_count{method=\"get\"} 3.0\n";
+    def want as string init "# HELP http_request_duration_seconds Request latency\n# TYPE http_request_duration_seconds histogram\nhttp_request_duration_seconds_bucket\{le=\"0.1\",method=\"get\"\} 1.0\nhttp_request_duration_seconds_bucket\{le=\"0.5\",method=\"get\"\} 2.0\nhttp_request_duration_seconds_bucket\{le=\"1.0\",method=\"get\"\} 2.0\nhttp_request_duration_seconds_bucket\{le=\"+Inf\",method=\"get\"\} 3.0\nhttp_request_duration_seconds_sum\{method=\"get\"\} 2.35\nhttp_request_duration_seconds_count\{method=\"get\"\} 3.0\n";
     testing.assertEqual(render([$h]), $want);
 }
 
@@ -87,7 +87,7 @@ func testHistogramBucketsSortAscending() {
     $h = observe($h, {}, 0.05);
     testing.assertEqual(
         render([$h]),
-        "# TYPE lat histogram\nlat_bucket{le=\"0.1\"} 1.0\nlat_bucket{le=\"0.5\"} 1.0\nlat_bucket{le=\"1.0\"} 1.0\nlat_bucket{le=\"+Inf\"} 1.0\nlat_sum 0.05\nlat_count 1.0\n");
+        "# TYPE lat histogram\nlat_bucket\{le=\"0.1\"\} 1.0\nlat_bucket\{le=\"0.5\"\} 1.0\nlat_bucket\{le=\"1.0\"\} 1.0\nlat_bucket\{le=\"+Inf\"\} 1.0\nlat_sum 0.05\nlat_count 1.0\n");
 }
 
 func testHistogramSeparatesLabelSets() {
@@ -112,7 +112,7 @@ func testRenderSummary() {
         $s = observe($s, {}, convert.toFloat($i));
         $i = $i + 1;
     }
-    def want as string init "# HELP rpc_duration_seconds RPC latency\n# TYPE rpc_duration_seconds summary\nrpc_duration_seconds{quantile=\"0.5\"} 5.0\nrpc_duration_seconds{quantile=\"0.9\"} 9.0\nrpc_duration_seconds{quantile=\"0.99\"} 10.0\nrpc_duration_seconds_sum 55.0\nrpc_duration_seconds_count 10.0\n";
+    def want as string init "# HELP rpc_duration_seconds RPC latency\n# TYPE rpc_duration_seconds summary\nrpc_duration_seconds\{quantile=\"0.5\"\} 5.0\nrpc_duration_seconds\{quantile=\"0.9\"\} 9.0\nrpc_duration_seconds\{quantile=\"0.99\"\} 10.0\nrpc_duration_seconds_sum 55.0\nrpc_duration_seconds_count 10.0\n";
     testing.assertEqual(render([$s]), $want);
 }
 
@@ -129,7 +129,7 @@ func testSummaryQuantileOutOfRangeThrows() {
 func testObserveAtAppendsTimestamp() {
     def g as Metric init gauge("up", "");
     $g = observeAt($g, {"job": "api"}, 1.0, 1700000000000);
-    testing.assertEqual(render([$g]), "# TYPE up gauge\nup{job=\"api\"} 1.0 1700000000000\n");
+    testing.assertEqual(render([$g]), "# TYPE up gauge\nup\{job=\"api\"\} 1.0 1700000000000\n");
 }
 
 func testObserveHasNoTimestamp() {
@@ -162,7 +162,7 @@ func testPushgatewayPathBadLabelThrows() {
 # --- retrieval parsing (canned responses) -----------------------------------
 
 func testParseVectorResult() {
-    def body as string init "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{\"__name__\":\"up\",\"job\":\"api\"},\"value\":[1700000000.5,\"1\"]}]}}";
+    def body as string init '{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"up","job":"api"},"value":[1700000000.5,"1"]}]}}';
     def r as Result init parseResult(json.decode($body));
     testing.assertEqual($r.resultType, "vector");
     testing.assertEqual(len($r.series), 1);
@@ -173,7 +173,7 @@ func testParseVectorResult() {
 }
 
 func testParseMatrixResult() {
-    def body as string init "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"job\":\"api\"},\"values\":[[1700000000,\"1\"],[1700000015,\"2\"]]}]}}";
+    def body as string init '{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"job":"api"},"values":[[1700000000,"1"],[1700000015,"2"]]}]}}';
     def r as Result init parseResult(json.decode($body));
     testing.assertEqual($r.resultType, "matrix");
     testing.assertEqual(len($r.series[0].values), 2);
@@ -181,7 +181,7 @@ func testParseMatrixResult() {
 }
 
 func testParseScalarResult() {
-    def body as string init "{\"status\":\"success\",\"data\":{\"resultType\":\"scalar\",\"result\":[1700000000,\"7\"]}}";
+    def body as string init '{"status":"success","data":{"resultType":"scalar","result":[1700000000,"7"]}}';
     def r as Result init parseResult(json.decode($body));
     testing.assertEqual($r.resultType, "scalar");
     testing.assertEqual(len($r.series), 1);
@@ -189,7 +189,7 @@ func testParseScalarResult() {
 }
 
 func parseErrorResponse() {
-    def body as string init "{\"status\":\"error\",\"error\":\"bad_data: parse error\"}";
+    def body as string init '{"status":"error","error":"bad_data: parse error"}';
     parseResult(json.decode($body));
 }
 

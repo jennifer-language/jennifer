@@ -31,8 +31,8 @@ def const PATH as string init %q;
 def const BLANKPATH as string init %q;
 
 func testWriteReadAppend() {
-    jsonl.writeFile(PATH, [json.decode("{\"a\":1}"), json.decode("{\"a\":2}")]);
-    jsonl.appendFile(PATH, [json.decode("{\"a\":3}")]);
+    jsonl.writeFile(PATH, [json.decode('{"a":1}'), json.decode('{"a":2}')]);
+    jsonl.appendFile(PATH, [json.decode('{"a":3}')]);
     def all as list of json.Value init jsonl.readFile(PATH);
     testing.assertEqual(len($all), 3);
     testing.assertEqual(json.asInt(json.get($all[0], "/a")), 1);
@@ -69,7 +69,7 @@ func testReadRecordDoneAtEnd() {
 # hasMore-guarded loop would skip the trailing blanks then throw / phantom, but
 # looping on .done stops cleanly with the right count.
 func testTrailingBlankLines() {
-    jsonl.writeFile(BLANKPATH, [json.decode("{\"a\":10}"), json.decode("{\"a\":20}")]);
+    jsonl.writeFile(BLANKPATH, [json.decode('{"a":10}'), json.decode('{"a":20}')]);
     fs.appendString(BLANKPATH, "\n\n  \n");
     def r as jsonl.Reader init jsonl.openReader(BLANKPATH);
     def n as int init 0;

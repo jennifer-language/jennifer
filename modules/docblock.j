@@ -301,7 +301,7 @@ export func parse(source as string) {
                 "^(export\\s+)?func\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\(([^)]*)\\)",
                 $tail);
             def sm as regex.Match init regex.find(
-                "^(export\\s+)?def\\s+struct\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\{([^}]*)\\}",
+                '^(export\s+)?def\s+struct\s+([A-Za-z][A-Za-z0-9]*)\s*\{([^}]*)\}',
                 $tail);
             def cm as regex.Match init regex.find(
                 "^(export\\s+)?def\\s+const\\s+([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\\s+as\\s+([A-Za-z][A-Za-z. ]*?)\\s+init",
@@ -677,7 +677,7 @@ func isTag(line as string) {
 # parseParam parses `name {type} desc`.
 func parseParam(rest as string) {
     def m as regex.Match init regex.find(
-        "^([A-Za-z][A-Za-z0-9]*)\\s+\\{([^}]*)\\}\\s*(.*)$",
+        '^([A-Za-z][A-Za-z0-9]*)\s+\{([^}]*)\}\s*(.*)$',
         $rest);
     if ($m.start == -1) {
         return ParamDoc{name: firstWord($rest), type: "", description: ""};
@@ -691,7 +691,7 @@ func parseParam(rest as string) {
 
 # parseTyped parses `{type} desc` (for @return / @throws).
 func parseTyped(rest as string) {
-    def m as regex.Match init regex.find("^\\{([^}]*)\\}\\s*(.*)$", $rest);
+    def m as regex.Match init regex.find('^\{([^}]*)\}\s*(.*)$', $rest);
     if ($m.start == -1) {
         return ReturnDoc{type: "", description: strings.trim($rest)};
     }

@@ -20,7 +20,7 @@ func secret() {
     return convert.bytesFromString("a-shared-secret-value", "utf-8");
 }
 func sampleClaims() {
-    return json.decode("{\"sub\":\"ada\",\"role\":\"admin\",\"iat\":1000}");
+    return json.decode('{"sub":"ada","role":"admin","iat":1000}');
 }
 
 func testHmacRoundTripAllSizes() {
@@ -101,7 +101,7 @@ func testExpiredRejected() {
     testing.assertThrows("verifyExpired", "value");
 }
 func verifyExpired() {
-    def claims as json.Value init json.decode("{\"sub\":\"x\",\"exp\":1}");
+    def claims as json.Value init json.decode('{"sub":"x","exp":1}');
     def tok as string init sign($claims, secret(), "HS256");
     verify($tok, secret(), "HS256");
 }
@@ -111,14 +111,14 @@ func testNotBeforeRejected() {
 }
 func verifyNotYet() {
     # nbf far in the future.
-    def claims as json.Value init json.decode("{\"sub\":\"x\",\"nbf\":9999999999}");
+    def claims as json.Value init json.decode('{"sub":"x","nbf":9999999999}');
     def tok as string init sign($claims, secret(), "HS256");
     verify($tok, secret(), "HS256");
 }
 
 func testValidExpAndNbfAccepted() {
     # exp in the far future, nbf in the past -> valid now.
-    def claims as json.Value init json.decode("{\"sub\":\"ok\",\"exp\":9999999999,\"nbf\":1}");
+    def claims as json.Value init json.decode('{"sub":"ok","exp":9999999999,"nbf":1}');
     def tok as string init sign($claims, secret(), "HS256");
     testing.assertEqual(json.asString(verify($tok, secret(), "HS256"), "/sub"), "ok");
 }
@@ -197,9 +197,9 @@ func verifyPaddedSignature() {
 
 func verifyCritToken() {
     def head as string init encodeSegment(convert.bytesFromString(
-        "{\"alg\":\"HS256\",\"typ\":\"JWT\",\"crit\":[\"exp\"]}",
+        '{"alg":"HS256","typ":"JWT","crit":["exp"]}',
         "utf-8"));
-    def payload as string init encodeSegment(convert.bytesFromString("{\"sub\":\"x\"}", "utf-8"));
+    def payload as string init encodeSegment(convert.bytesFromString('{"sub":"x"}', "utf-8"));
     verify($head + "." + $payload + ".AAAA", secret(), "HS256");
 }
 func testCritHeaderRejected() {
@@ -209,10 +209,10 @@ func testCritHeaderRejected() {
 # ---- verifyWith: issuer / audience policy ----
 
 func claimsWithIss() {
-    return json.decode("{\"sub\":\"ada\",\"iss\":\"good-iss\",\"aud\":\"good-aud\"}");
+    return json.decode('{"sub":"ada","iss":"good-iss","aud":"good-aud"}');
 }
 func claimsWithAudList() {
-    return json.decode("{\"sub\":\"ada\",\"aud\":[\"x\",\"good-aud\"]}");
+    return json.decode('{"sub":"ada","aud":["x","good-aud"]}');
 }
 
 func testVerifyWithMatchingIssAndAud() {
@@ -262,15 +262,15 @@ func verifyBadAud() {
 # expiredBy builds a token whose exp is `secondsAgo` seconds in the past.
 func expiredBy(secondsAgo as int) {
     def now as int init time.unix(time.now());
-    def claims as json.Value init json.decode("{\"sub\":\"x\",\"exp\":" +
-        convert.toString($now - $secondsAgo) + "}");
+    def claims as json.Value init json.decode('{"sub":"x","exp":' +
+        convert.toString($now - $secondsAgo) + '}');
     return sign($claims, secret(), "HS256");
 }
 # notYetBy builds a token whose nbf is `secondsAhead` seconds in the future.
 func notYetBy(secondsAhead as int) {
     def now as int init time.unix(time.now());
-    def claims as json.Value init json.decode("{\"sub\":\"y\",\"nbf\":" +
-        convert.toString($now + $secondsAhead) + "}");
+    def claims as json.Value init json.decode('{"sub":"y","nbf":' +
+        convert.toString($now + $secondsAhead) + '}');
     return sign($claims, secret(), "HS256");
 }
 
@@ -318,8 +318,8 @@ func verifyNegativeLeeway() {
 # signWithKid signs like jwt.sign but adds a "kid" to the header, so the token
 # selects a key by id. Uses the module's private encodeSegment / computeSig.
 func signWithKid(claims as json.Value, key as bytes, alg as string, kid as string) {
-    def headerJson as string init "{\"alg\":\"" + $alg + "\",\"typ\":\"JWT\",\"kid\":\"" + $kid +
-        "\"}";
+    def headerJson as string init '{"alg":"' + $alg + "\",\"typ\":\"JWT\",\"kid\":\"" + $kid +
+        '"}';
     def head as string init encodeSegment(convert.bytesFromString($headerJson, "utf-8"));
     def payload as string init encodeSegment(convert.bytesFromString(json.encode($claims), "utf-8"));
     def signingInput as string init $head + "." + $payload;
@@ -371,8 +371,8 @@ func rsaKey() {
 # Splices "kid" into crypto.jwkPublic's canonical {"e":..,"kty":..,"n":..} object.
 func jwksFor(privKey as bytes, kid as string) {
     def jwk as string init crypto.jwkPublic($privKey);
-    def withKid as string init "{\"kid\":\"" + $kid + "\"," + strings.substring($jwk, 1, len($jwk));
-    return "{\"keys\":[" + $withKid + "]}";
+    def withKid as string init '{"kid":"' + $kid + "\"," + strings.substring($jwk, 1, len($jwk));
+    return '{"keys":[' + $withKid + ']}';
 }
 
 func testVerifyJwksRoundTrip() {
@@ -406,7 +406,7 @@ func testVerifyJwksHmacRejected() {
 }
 func jwksHmac() {
     # An HMAC alg has no JWKS public key.
-    verifyJwks(signWithKid(sampleClaims(), secret(), "HS256", "k1"), "{\"keys\":[]}", "HS256");
+    verifyJwks(signWithKid(sampleClaims(), secret(), "HS256", "k1"), '{"keys":[]}', "HS256");
 }
 
 func testVerifyJwksNoKeysArrayRejected() {
@@ -415,7 +415,7 @@ func testVerifyJwksNoKeysArrayRejected() {
 func jwksNoKeys() {
     def priv as bytes init rsaKey();
     def tok as string init signWithKid(sampleClaims(), $priv, "RS256", "rk1");
-    verifyJwks($tok, "{\"notkeys\":1}", "RS256");
+    verifyJwks($tok, '{"notkeys":1}', "RS256");
 }
 
 # ---- verifyWithKeys now also accepts a JWK map value (via crypto.jwkToPem) ----

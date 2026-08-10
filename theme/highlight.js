@@ -106,13 +106,24 @@ hljs.registerLanguage("x86asm",function(){"use strict";return function(s){return
     ],
   };
 
-  // Double-quoted is cooked: escape sequences are highlighted. Single-quoted
-  // is raw: backslashes are literal, so it carries no escape mode.
+  // Double-quoted is cooked: escape sequences are highlighted and an unescaped
+  // `{expr}` is an interpolation slot (rendered as an embedded `subst`). `\{` /
+  // `\}` are literal-brace escapes (matched before the slot rule so they do not
+  // open a slot). Single-quoted is raw: backslashes are literal and there is no
+  // interpolation, so it carries neither mode.
   var STRING_COOKED = {
     className: "string",
     begin: /"/,
     end: /"/,
-    contains: [{ begin: /\\([nrt\\"'0]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/ }],
+    contains: [
+      { begin: /\\([nrt\\"'0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/ },
+      {
+        className: "subst",
+        begin: /\{/,
+        end: /\}/,
+        contains: [VARIABLE, NUMBER],
+      },
+    ],
   };
   var STRING_RAW = {
     className: "string",

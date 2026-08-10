@@ -38,7 +38,7 @@ func testModulePreamble() {
 # A wrapped @param / @return description (continuation lines) is captured, not
 # truncated to its first line.
 func testParamContinuationLines() {
-    def doc as FileDoc init parse("/**\n * F.\n * @param name {string} who to greet,\n * spanning two lines\n * @return {string} the greeting\n * also wrapped\n */\nexport func f(name as string) { return \"x\"; }");
+    def doc as FileDoc init parse("/**\n * F.\n * @param name \{string\} who to greet,\n * spanning two lines\n * @return \{string\} the greeting\n * also wrapped\n */\nexport func f(name as string) \{ return \"x\"; \}");
     def fn as FuncDoc init $doc.funcs[0];
     testing.assertEqual($fn.params[0].name, "name");
     testing.assertContains($fn.params[0].description, "spanning two lines");
@@ -46,7 +46,7 @@ func testParamContinuationLines() {
 }
 
 func testExportedFuncWithParams() {
-    def doc as FileDoc init parse("/**\n * Greet.\n * @param name {string} who\n * @return {string} greeting\n */\nexport func greet(name as string) { return \"x\"; }");
+    def doc as FileDoc init parse("/**\n * Greet.\n * @param name \{string\} who\n * @return \{string\} greeting\n */\nexport func greet(name as string) \{ return \"x\"; \}");
     testing.assertEqual(len($doc.funcs), 1);
     def f as FuncDoc init $doc.funcs[0];
     testing.assertEqual($f.name, "greet");
@@ -60,13 +60,13 @@ func testExportedFuncWithParams() {
 }
 
 func testPrivateFuncNotExported() {
-    def doc as FileDoc init parse("/** helper */\nfunc helper() { return; }");
+    def doc as FileDoc init parse("/** helper */\nfunc helper() \{ return; \}");
     testing.assertEqual(len($doc.funcs), 1);
     testing.assertFalse($doc.funcs[0].exported);
 }
 
 func testStructFields() {
-    def doc as FileDoc init parse("/**\n * A point.\n * @field x {int} the x\n * @field y {int} the y\n */\nexport def struct Point { x as int, y as int };");
+    def doc as FileDoc init parse("/**\n * A point.\n * @field x \{int\} the x\n * @field y \{int\} the y\n */\nexport def struct Point \{ x as int, y as int \};");
     testing.assertEqual(len($doc.structs), 1);
     def s as StructDoc init $doc.structs[0];
     testing.assertEqual($s.name, "Point");
@@ -88,7 +88,7 @@ func testConst() {
 # no orphaned-comment diagnostic, and payload-carrying variants are fine (only
 # the name is read).
 func testEnumRecognized() {
-    def doc as FileDoc init parse("/**\n * A shape.\n * A longer note.\n */\nexport def enum Shape { Circle{r as int}, Square, Empty };");
+    def doc as FileDoc init parse("/**\n * A shape.\n * A longer note.\n */\nexport def enum Shape \{ Circle\{r as int\}, Square, Empty \};");
     testing.assertEqual(len($doc.enums), 1);
     testing.assertEqual(len($doc.diagnostics), 0);
     def e as EnumDoc init $doc.enums[0];
@@ -99,7 +99,7 @@ func testEnumRecognized() {
 
 # A private enum is recognized too, and marked unexported.
 func testEnumUnexported() {
-    def doc as FileDoc init parse("/** private tag */\ndef enum Tag { A, B };");
+    def doc as FileDoc init parse("/** private tag */\ndef enum Tag \{ A, B \};");
     testing.assertEqual(len($doc.enums), 1);
     testing.assertFalse($doc.enums[0].exported);
 }
@@ -107,7 +107,7 @@ func testEnumUnexported() {
 # An enum documents its variants in prose, so a stray @field / @return usually
 # means a struct's doc drifted onto the enum below it - flagged as a diagnostic.
 func testEnumWithFieldTagsWarns() {
-    def doc as FileDoc init parse("/**\n * Mislabelled.\n * @field x {int} a field\n */\nexport def enum Bad { A, B };");
+    def doc as FileDoc init parse("/**\n * Mislabelled.\n * @field x \{int\} a field\n */\nexport def enum Bad \{ A, B \};");
     testing.assertEqual(len($doc.enums), 1);
     testing.assertEqual(len($doc.diagnostics), 1);
     testing.assertTrue(strings.contains($doc.diagnostics[0].message, "mis-attached"));
@@ -117,7 +117,7 @@ func testEnumWithFieldTagsWarns() {
 
 # A func name with an interior/trailing digit (uuid.v4-style) parses.
 func testFuncNameWithDigit() {
-    def doc as FileDoc init parse("/**\n * Make a v4 UUID.\n * @return {string} the uuid\n */\nexport func v4() { return \"x\"; }");
+    def doc as FileDoc init parse("/**\n * Make a v4 UUID.\n * @return \{string\} the uuid\n */\nexport func v4() \{ return \"x\"; \}");
     testing.assertEqual(len($doc.funcs), 1);
     testing.assertEqual($doc.funcs[0].name, "v4");
     testing.assertTrue($doc.funcs[0].exported);
@@ -125,7 +125,7 @@ func testFuncNameWithDigit() {
 
 # A @param name with a trailing digit binds to a real parameter (no diagnostic).
 func testParamNameWithDigit() {
-    def doc as FileDoc init parse("/**\n * F.\n * @param x2 {int} second x\n */\nfunc f(x2 as int) { return; }");
+    def doc as FileDoc init parse("/**\n * F.\n * @param x2 \{int\} second x\n */\nfunc f(x2 as int) \{ return; \}");
     testing.assertEqual(len($doc.funcs), 1);
     testing.assertEqual($doc.funcs[0].params[0].name, "x2");
     testing.assertEqual($doc.funcs[0].params[0].type, "int");
@@ -134,7 +134,7 @@ func testParamNameWithDigit() {
 
 # A struct field name with a trailing digit (md5) parses and matches (no diag).
 func testStructFieldWithDigit() {
-    def doc as FileDoc init parse("/**\n * Hashes.\n * @field md5 {string} the md5 hex\n */\nexport def struct Hashes { md5 as string };");
+    def doc as FileDoc init parse("/**\n * Hashes.\n * @field md5 \{string\} the md5 hex\n */\nexport def struct Hashes \{ md5 as string \};");
     testing.assertEqual(len($doc.structs), 1);
     testing.assertEqual($doc.structs[0].fields[0].name, "md5");
     testing.assertEqual(len($doc.diagnostics), 0);
@@ -159,20 +159,20 @@ func testConstNameMultiChunkDigit() {
 # A digit-initial @param name is not a legal identifier: parseParam falls back
 # to firstWord (no {type} capture), so the type stays empty.
 func testDigitInitialParamNotIdent() {
-    def p as ParamDoc init parseParam("2x {int} bogus");
+    def p as ParamDoc init parseParam('2x {int} bogus');
     testing.assertEqual($p.type, "");
 }
 
 # --- diagnostics ------------------------------------------------------------
 
 func testBadParamDiagnostic() {
-    def doc as FileDoc init parse("/**\n * F.\n * @param bogus {int} nope\n */\nfunc f(real as int) { return; }");
+    def doc as FileDoc init parse("/**\n * F.\n * @param bogus \{int\} nope\n */\nfunc f(real as int) \{ return; \}");
     # bogus is not a parameter -> one diag; real is undocumented -> one diag
     testing.assertEqual(len($doc.diagnostics), 2);
 }
 
 func testUndocumentedParamDiagnostic() {
-    def doc as FileDoc init parse("/** F */\nfunc f(x as int) { return; }");
+    def doc as FileDoc init parse("/** F */\nfunc f(x as int) \{ return; \}");
     testing.assertEqual(len($doc.diagnostics), 1);
     testing.assertContains($doc.diagnostics[0].message, "has no @param");
 }
@@ -186,21 +186,21 @@ func testOrphanReported() {
 # --- scanner edge cases -----------------------------------------------------
 
 func testDocStartInStringIgnored() {
-    def doc as FileDoc init parse("/** real */\nexport func f() { return \"/** fake */\"; }");
+    def doc as FileDoc init parse("/** real */\nexport func f() \{ return \"/** fake */\"; \}");
     testing.assertEqual(len($doc.funcs), 1);
     testing.assertEqual($doc.funcs[0].summary, "real");
     testing.assertEqual(len($doc.diagnostics), 0);
 }
 
 func testNestedBlockCommentInBody() {
-    def doc as FileDoc init parse("/**\n * summary\n * nested /* c */ inside\n */\nexport func g() { return; }");
+    def doc as FileDoc init parse("/**\n * summary\n * nested /* c */ inside\n */\nexport func g() \{ return; \}");
     testing.assertEqual(len($doc.funcs), 1);
     testing.assertEqual($doc.funcs[0].name, "g");
     testing.assertEqual($doc.funcs[0].summary, "summary");
 }
 
 func testPlainBlockCommentInvisible() {
-    def doc as FileDoc init parse("/* just a plain comment */\nfunc h() { return; }");
+    def doc as FileDoc init parse("/* just a plain comment */\nfunc h() \{ return; \}");
     # a plain /* */ is not a doc comment: no docs, so h is undocumented (absent)
     testing.assertEqual(len($doc.funcs), 0);
     testing.assertEqual(len($doc.diagnostics), 0);

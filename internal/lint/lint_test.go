@@ -206,6 +206,28 @@ func TestLineTooLong(t *testing.T) {
 	}
 }
 
+func TestInterpSlotComplexity(t *testing.T) {
+	// A call in a slot is flagged; a variable / arithmetic slot is not.
+	flagged := `use io;
+func cost() { return 1; }
+def n as int init 3;
+io.printf("value {cost()}\n");
+io.printf("ok {$n + 1}\n");
+`
+	diags := lintSrc(t, flagged, only("L204"), lint.DefaultConfig())
+	if got := countID(diags, "L204"); got != 1 {
+		t.Fatalf("expected one L204 (the call slot only), got %d: %v", got, diags)
+	}
+	// A field / index slot is trivial - no finding.
+	clean := `use io;
+def xs as list of int init [1, 2, 3];
+io.printf("first {$xs[0]}\n");
+`
+	if d := lintSrc(t, clean, only("L204"), lint.DefaultConfig()); countID(d, "L204") != 0 {
+		t.Fatalf("index-access slot should not be flagged, got %v", d)
+	}
+}
+
 func TestSuppression(t *testing.T) {
 	t.Run("line directive", func(t *testing.T) {
 		src := "func f() { def dead as int init 2;   # lint-disable: L101\nreturn 0; }"
@@ -377,11 +399,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 15 {
-		t.Fatalf("expected 15 known IDs (4 source + 11 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 16 {
+		t.Fatalf("expected 16 known IDs (4 source + 12 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 15 {
-		t.Fatalf("catalog should list all 15 IDs")
+	if len(lint.Catalog()) != 16 {
+		t.Fatalf("catalog should list all 16 IDs")
 	}
 }
 

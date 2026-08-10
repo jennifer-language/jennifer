@@ -412,6 +412,32 @@ Two moves close out the optimization pass:
   to `true`. `!=` folds wherever `==` does (it is the negation).
   Mixed int/float *arithmetic* still folds (the int->float
   promotion there matches the language's arithmetic semantics).
+
+### String interpolation
+
+A cooked `"..."` string with one or more `{expr}` slots lexes to a single
+`TOKEN_STRING_INTERP` whose `Parts []lexer.StringPart` alternate literal chunks and
+expression-source slots. `readCookedString` drives this: `\{` / `\}` decode to
+literal braces, an unescaped `{` calls `scanInterpSlot` (which brace-counts nested
+`{}` so a map literal in a slot balances, and copies a nested string literal
+verbatim via `copyNestedString` so its braces / quotes do not disturb the count),
+and a bare `}` is a positioned lex error. Each expression slot records its
+**absolute** source line/col; the parser's `buildInterpString` sub-lexes it with
+`lexer.TokenizeAt` (seeding that position so diagnostics and resolver annotations
+point at the real spot) and sub-parses it to a single `expr` - a trailing non-EOF
+token is a "slot must be a single expression" error, an empty slot is rejected. The
+result is a `parser.InterpStringExpr` (`Parts []InterpPart`, each a literal `Lit`
+or an `Expr`). The resolver descends into each slot's `Expr` (undefined-variable /
+shadowing stay parse-time errors), so `lint` and `profile` - which walk the same
+tree - see slot expressions as ordinary code (`lint` adds the `L204`
+interpolation-slot-complexity check; `profile` attributes a slot's call to the
+slot's own position). Evaluation stringifies each slot value with `Display` (the
+`convert.toString` form, so no `use convert` is needed and any kind interpolates)
+and concatenates - the "sugar over concat + `convert.toString`" the milestone
+describes, kept as a node so the toolchain is not blind to slot code. A raw `'...'`
+string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
+`TOKEN_STRING_INTERP` from its captured `Raw`, so slots survive a format verbatim.
+
 ## Execution model
 
 1. `Interpreter.Run(prog)` calls `parser.Resolve(prog)` first

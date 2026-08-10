@@ -261,6 +261,23 @@ user-method pool even when aliasing has technically freed it.
   between the quotes is part of the value), which is handy for an embedded
   template or sample; `fmt` keeps it as written rather than collapsing it.
 
+### Interpolation slots
+
+- **A cooked `"..."` interpolates `{expr}`**; a raw `'...'` never does. Prefer
+  interpolation over `sprintf` concatenation when you are placing a value beside
+  its label: `"user {$name} has {$count} items"` reads better than a `%s` / `%d`
+  template whose arguments trail off the end.
+- **Keep a slot trivial** - a variable (`{$x}`), a constant (`{MAX}`), a field or
+  index access (`{$p.name}`, `{$xs[0]}`), or arithmetic (`{$a + $b}`). These read
+  at a glance and have no hidden cost.
+- **Do not hide a call in a slot.** `"total {computeTotal($cart)}"` buries a
+  method call - with its cost and any side effect - inside what looks like a
+  string literal. Compute it first (`def total ...; "total {$total}"`). `lint`
+  flags a call in a slot as **L204**.
+- **A literal brace is `\{` / `\}`** in a cooked string; if a string is mostly
+  literal braces (JSON, a `{{ }}` template), reach for a **raw** `'...'` string
+  instead of escaping every brace.
+
 ## Comments
 
 - `# line comment` for short notes that belong on or just above the

@@ -1128,7 +1128,7 @@ export func findParts(part as Part, mediaType as string) {
 # lets a bare (atom) display name hold only atext characters and spaces; any
 # other character (`.` `,` `:` `;` `(` `)` `<` `>` `@` `"` ...) forces quoting.
 func needsQuoting(s as string) {
-    def atext as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-/=?^_`{|}~ ";
+    def atext as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-/=?^_`\{|\}~ ";
     for (def ch in strings.chars($s)) {
         if (strings.indexOf($atext, $ch) < 0) {
             return true;

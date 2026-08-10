@@ -425,6 +425,13 @@ def struct Line {
     from as Point,
     to as Point
 };
+# An enum (sum type): a value is exactly one variant, each a payload-less tag
+# or a mini-struct. Used in the enums / match section below.
+def enum Shape {
+    Circle{r as float},
+    Square{side as float},
+    Empty
+};
 
 io.printf("=== structs ===\n");
 def p as Point init Point{x: 3, y: 4};
@@ -462,6 +469,55 @@ try {
 } catch (err) {
     io.printf("runtime err  = kind=%s\n", $err.kind);
 }
+
+# --- string interpolation ({expr} slots in cooked strings) ---
+#
+# A cooked "..." interpolates each {expr} in place; a raw '...' is literal
+# and `\{` / `\}` are literal braces.
+io.printf("=== interpolation ===\n");
+def who as string init "World";
+def items as int init 3;
+io.printf("hello {$who}, {$items + 1} items, x={$x}\n");
+io.printf("raw stays literal: " + '{$who}' + " and braces \{ {$items} \}\n");
+
+# --- match (multi-way value dispatch) ---
+io.printf("=== match ===\n");
+def code as int init 2;
+match ($code) {
+    when 1 { io.printf("one\n"); }
+    when 2, 3 { io.printf("two or three\n"); }
+    else { io.printf("other\n"); }
+}
+
+# --- enums (sum types) + pattern match ---
+#
+# An enum value is exactly one variant; `match` binds the payload and is
+# checked for exhaustiveness when the subject's type is statically known.
+io.printf("=== enums ===\n");
+def sh as Shape init Shape.Square{side: 3.0};
+match ($sh) {
+    when Circle(c) { io.printf("circle area = %f\n", 3.14159 * $c.r * $c.r); }
+    when Square(sq) { io.printf("square area = %f\n", $sq.side * $sq.side); }
+    when Empty { io.printf("empty\n"); }
+}
+def zeroShape as Shape;
+io.printf("enum zero = %v\n", $zeroShape);
+
+# --- defer (LIFO cleanup at block exit) ---
+io.printf("=== defer ===\n");
+deferDemo();
+
+# --- first-class functions + higher-order lists ---
+#
+# A bare method name is a `func` value: passed to lists.map / filter / reduce
+# and called through a variable.
+io.printf("=== functions ===\n");
+def fnseq as list of int init [1, 2, 3, 4];
+io.printf("map double  = %v\n", lists.map($fnseq, dbl));
+io.printf("filter even = %v\n", lists.filter($fnseq, isEven));
+io.printf("reduce sum  = %d\n", lists.reduce($fnseq, addup, 0));
+def op as func init dbl;
+io.printf("via func val = %d\n", $op(21));
 
 # --- time (instants, durations, zones, strftime) ---
 #
@@ -613,7 +669,7 @@ use json;
 
 io.printf("=== json ===\n");
 io.printf("encode       = %s\n", json.encode({"name": "jen", "nums": [1, 2, 3], "ok": true}));
-def parsed as json.Value init json.decode("{\"x\": 7, \"y\": 8}");
+def parsed as json.Value init json.decode('{"x": 7, "y": 8}');
 io.printf("decode x+y   = %d\n", json.asInt($parsed, "/x") + json.asInt($parsed, "/y"));
 
 # --- uuid (RFC 9562; values are random / time-based, so assert facts) ---
@@ -709,6 +765,93 @@ intl.load("en", {"hi": "Hello, %name%!"});
 intl.load("de", {"hi": "Hallo, %name%!"});
 intl.setLocale("de");
 io.printf("tr=%s\n", intl.tr("hi", {"name": "Welt"}));
+
+# --- stats (descriptive statistics over a numeric list) ---
+use stats;
+io.printf("=== stats ===\n");
+def data as list of int init [2, 4, 4, 4, 5, 5, 7, 9];
+io.printf(
+    "mean=%f median=%f stddev=%f\n",
+    stats.mean($data),
+    stats.median($data),
+    stats.stddev($data));
+io.printf("min=%d max=%d sum=%d\n", stats.min($data), stats.max($data), stats.sum($data));
+
+# --- linalg (vectors + matrices over Jennifer's own value types) ---
+use linalg;
+io.printf("=== linalg ===\n");
+def v1 as list of float init [1.0, 2.0, 2.0];
+def v2 as list of float init [3.0, 0.0, 4.0];
+io.printf("dot=%f norm(v1)=%f\n", linalg.dot($v1, $v2), linalg.norm($v1));
+def mat as list of list of float init [[1.0, 2.0], [3.0, 4.0]];
+io.printf("det=%f\n", linalg.determinant($mat));
+
+# --- binary (bulk bytes operations, the byte counterpart to strings) ---
+use binary;
+io.printf("=== binary ===\n");
+def hb as bytes init convert.bytesFromString("hello ", "utf-8");
+def wb as bytes init convert.bytesFromString("world", "utf-8");
+def bcat as bytes init binary.concat($hb, $wb);
+io.printf("concat len=%d indexOf=%d\n", len($bcat), binary.indexOf($bcat, $wb));
+io.printf("slice=%s\n", convert.stringFromBytes(binary.slice($bcat, 0, 5), "utf-8"));
+
+# --- kv (in-process key/value store, reset each run) ---
+use kv;
+io.printf("=== kv ===\n");
+def store as kv.Store init kv.open();
+kv.set($store, "name", "jennifer", 0);
+kv.set($store, "count", "10", 0);
+io.printf(
+    "get=%s has(x)=%t incr=%d\n",
+    kv.get($store, "name"),
+    kv.has($store, "x"),
+    kv.incr($store, "count", 5));
+kv.close($store);
+
+# --- channel (CSP conduit between goroutines; values are copied through) ---
+#
+# A spawned producer sends into the channel and closes it; the consumer drains
+# in send order until recv on the closed, empty channel throws (caught here).
+use channel;
+io.printf("=== channel ===\n");
+def ch as channel of int init channel.make(0);
+def producer as task of null init spawn {
+    def k as int init 1;
+    while ($k <= 3) {
+        channel.send($ch, $k * 10);
+        $k = $k + 1;
+    }
+    channel.close($ch);
+};
+def chSum as int init 0;
+def draining as bool init true;
+while ($draining) {
+    try {
+        $chSum = $chSum + channel.recv($ch);
+    } catch (drained) {
+        $draining = false;
+    }
+}
+task.wait($producer);
+io.printf("channel sum = %d\n", $chSum);
+
+# --- path (OS-aware path-string manipulation, no disk I/O) ---
+#
+# base / ext / stem are portable for a '/'-input; join / dir depend on the OS
+# separator, so we type-check those (like the os section) to keep the golden
+# host-independent.
+use path;
+io.printf("=== path ===\n");
+def somePath as string init "docs/user-guide/intro.md";
+io.printf(
+    "base=%s ext=%s stem=%s\n",
+    path.base($somePath),
+    path.ext($somePath),
+    path.stem($somePath));
+io.printf(
+    "typeOf(join)=%s typeOf(dir)=%s\n",
+    convert.typeOf(path.join("a", "b", "c")),
+    convert.typeOf(path.dir($somePath)));
 
 # --- testing (name-based dispatch, per-process accumulator) ---
 #

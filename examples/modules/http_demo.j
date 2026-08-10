@@ -23,7 +23,7 @@ try {
     def sent as http.Response init http.post(
         $base + "/items",
         "application/json",
-        "{\"name\":\"ada\"}",
+        '{"name":"ada"}',
         {"Authorization": http.basic("ada", "s3cret")});
     io.printf("POST /items -> %d\n", $sent.status);
 

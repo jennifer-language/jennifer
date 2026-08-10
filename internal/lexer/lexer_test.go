@@ -53,6 +53,58 @@ func TestTokenBudgetExceeded(t *testing.T) {
 	}
 }
 
+// TestInterpSlotBudget covers the amplification guard: a cooked string is one
+// top-level token, so many `{a}` slots must be capped against the same token
+// budget rather than growing an unbounded Parts slice.
+func TestInterpSlotBudget(t *testing.T) {
+	saved := maxTokens
+	maxTokens = 10
+	defer func() { maxTokens = saved }()
+
+	// 20 `{x}` slots in one string, past the slot cap of 10.
+	src := `"` + strings.Repeat("{x}", 20) + `"`
+	_, err := Tokenize(src)
+	if err == nil {
+		t.Fatal("expected a slot-budget error, got nil")
+	}
+	le, ok := err.(*LexError)
+	if !ok || !strings.Contains(le.Msg, "slots") {
+		t.Fatalf("expected a slot-budget *LexError, got %v", err)
+	}
+	// A handful of slots is fine.
+	if _, err := Tokenize(`"` + strings.Repeat("{x}", 5) + `"`); err != nil {
+		t.Errorf("under-budget interpolation should lex, got %v", err)
+	}
+}
+
+// TestInterpStringTokens checks the lexer's decomposition of a cooked string into
+// literal chunks and expression slots (and that a plain string carries no Parts).
+func TestInterpStringTokens(t *testing.T) {
+	toks, err := Tokenize(`"a{$x}b{$y}"`)
+	if err != nil {
+		t.Fatalf("lex: %v", err)
+	}
+	tok := toks[0]
+	if tok.Type != TOKEN_STRING_INTERP {
+		t.Fatalf("type = %v, want STRING_INTERP", tok.Type)
+	}
+	// parts: "a", {$x}, "b", {$y}
+	if len(tok.Parts) != 4 {
+		t.Fatalf("parts = %d, want 4: %+v", len(tok.Parts), tok.Parts)
+	}
+	if tok.Parts[0].IsExpr || tok.Parts[0].Text != "a" {
+		t.Errorf("part 0 = %+v, want literal \"a\"", tok.Parts[0])
+	}
+	if !tok.Parts[1].IsExpr || tok.Parts[1].Text != "$x" {
+		t.Errorf("part 1 = %+v, want expr \"$x\"", tok.Parts[1])
+	}
+	// A plain cooked string is a TOKEN_STRING with no Parts (no interpolation).
+	plain, _ := Tokenize(`"just text"`)
+	if plain[0].Type != TOKEN_STRING || plain[0].Parts != nil {
+		t.Errorf("plain string = %v with parts %+v, want STRING/no-parts", plain[0].Type, plain[0].Parts)
+	}
+}
+
 // An over-long identifier / variable name is rejected, and neither the scan nor
 // the error message retains the whole (potentially megabyte-long) run: the scan
 // stops just past the 64-char cap and the message is truncated.

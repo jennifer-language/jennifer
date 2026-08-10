@@ -114,7 +114,7 @@ func testPasswordSchemes() {
 
 func testPbkdf2Format() {
     def stored as string init password("hunter2", "pbkdf2");
-    testing.assertEqual(strings.startsWith($stored, "{PBKDF2-SHA256}$100000$"), true);
+    testing.assertEqual(strings.startsWith($stored, '{PBKDF2-SHA256}$100000$'), true);
     # four $-separated fields after the prefix: "", iters, salt, hash
     def parts as list of string init strings.split(
         strings.substring($stored, 15, len($stored)),
@@ -122,7 +122,7 @@ func testPbkdf2Format() {
     testing.assertEqual(len($parts), 4);
     testing.assertEqual($parts[1], "100000");
     def s512 as string init password("hunter2", "pbkdf2-sha512");
-    testing.assertEqual(strings.startsWith($s512, "{PBKDF2-SHA512}$"), true);
+    testing.assertEqual(strings.startsWith($s512, '{PBKDF2-SHA512}$'), true);
 }
 
 func testPasswordEmptyRejected() {
@@ -132,12 +132,12 @@ func testPasswordEmptyRejected() {
 # A malformed stored value must verify false and never throw - otherwise the
 # error unwinds out of the server's bind handler (audit F1/F3).
 func testMalformedPasswordNoThrow() {
-    testing.assertEqual(verifyPassword("{PBKDF2-SHA256}$notanumber$AA==$AA==", "x"), false);
-    testing.assertEqual(verifyPassword("{SSHA}@@@notbase64", "x"), false);
-    testing.assertEqual(verifyPassword("{SSHA256}@@@notbase64", "x"), false);
+    testing.assertEqual(verifyPassword('{PBKDF2-SHA256}$notanumber$AA==$AA==', "x"), false);
+    testing.assertEqual(verifyPassword('{SSHA}@@@notbase64', "x"), false);
+    testing.assertEqual(verifyPassword('{SSHA256}@@@notbase64', "x"), false);
     # iterations far over the honoured cap -> reject rather than stall
     testing.assertEqual(
-        verifyPassword("{PBKDF2-SHA256}$999999999999$QUFBQQ==$QUFBQQ==", "x"),
+        verifyPassword('{PBKDF2-SHA256}$999999999999$QUFBQQ==$QUFBQQ==', "x"),
         false);
     # a valid pbkdf2 value still verifies
     def good as string init password("s3cret", "pbkdf2");

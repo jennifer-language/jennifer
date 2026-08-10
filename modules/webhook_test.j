@@ -60,10 +60,10 @@ func testEqualConstantTime() {
 }
 
 func testSignRoundTrip() {
-    def s as string init sign("{\"event\":\"push\"}", "k3y");
+    def s as string init sign('{"event":"push"}', "k3y");
     testing.assertTrue(strings.startsWith($s, "sha256="));
-    testing.assertTrue(verify("{\"event\":\"push\"}", $s, "k3y"));
-    testing.assertFalse(verify("{\"event\":\"pull\"}", $s, "k3y"));
+    testing.assertTrue(verify('{"event":"push"}', $s, "k3y"));
+    testing.assertFalse(verify('{"event":"pull"}', $s, "k3y"));
 }
 
 # --- timestamped, replay-protected schemes ----------------------------------
@@ -71,7 +71,7 @@ func testSignRoundTrip() {
 def const TS as int init 1492774800; # a fixed unix timestamp for signing
 def const NOW as int init 1492774830; # 30s later: within a 300s tolerance
 def const OLD as int init 1492780800; # now 100 minutes later: beyond tolerance
-def const BODY as string init "{\"event\":\"payment\"}";
+def const BODY as string init '{"event":"payment"}';
 def const TOL as int init 300;
 
 func testStripeRoundTrip() {
@@ -82,7 +82,7 @@ func testStripeRoundTrip() {
 
 func testStripeTamperedBody() {
     def h as string init stripeSign(SECRET, BODY, TS);
-    testing.assertFalse(stripeVerify(SECRET, "{\"event\":\"refund\"}", $h, TOL, NOW));
+    testing.assertFalse(stripeVerify(SECRET, '{"event":"refund"}', $h, TOL, NOW));
 }
 
 func testStripeWrongSecret() {
@@ -112,7 +112,7 @@ func testSlackRoundTrip() {
 
 func testSlackTamperedBody() {
     def sig as string init slackSign(SECRET, BODY, TS);
-    testing.assertFalse(slackVerify(SECRET, "{\"event\":\"refund\"}", TS, $sig, TOL, NOW));
+    testing.assertFalse(slackVerify(SECRET, '{"event":"refund"}', TS, $sig, TOL, NOW));
 }
 
 func testSlackReplayRejected() {

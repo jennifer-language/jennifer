@@ -968,6 +968,32 @@ The one ergonomic cost - a raw literal cannot contain a `'` - is handled by
 switching to the cooked form (`"it's"`), which is rare in practice. See
 [M23.14](../milestones.md).
 
+## An `f"..."` interpolation prefix (Python / C# style)
+
+Considered when designing string interpolation (M24.19). Python marks an
+interpolating string `f"..."`; Jennifer could have gated `{expr}` slots behind an
+`f` prefix, leaving a plain `"..."` non-interpolating.
+
+Rejected in favor of **interpolating every cooked `"..."` string** (a raw `'...'`
+never interpolates), because:
+
+- **The cooked / raw split already is the opt-in.** Jennifer had just spent its
+  two quote characters on distinct jobs (raw vs cooked, M23.14). A cooked string is
+  already the "process this" mode and a raw string the "verbatim" mode, so a raw
+  `'...'` *is* the no-interpolation form. An `f` prefix would add a third axis on
+  top of an existing binary one - exactly the redundancy stance #1 rules out, and
+  the same reasoning that rejected the `r"..."` prefix above.
+- **No new lexer state / bare-`f` ambiguity.** A prefix forces the lexer and every
+  token classifier to look *behind* the opening quote and decide what a bare `f`
+  identifier immediately before a string means. Branching on the delimiter needs
+  neither.
+- **One obvious way.** With a prefix there would be `"..."`, `f"..."`, `'...'`, and
+  a pointless `f'...'`. Delimiter-is-the-mode gives exactly two forms, one per job.
+
+The cost - every existing cooked string holding a literal brace had to migrate to a
+raw string or `\{` / `\}` - was a one-time, mechanical, pre-1.0 break, paid once.
+See [M24.19](../milestones.md).
+
 ## `orm` typed-struct row mapping, Active Record, and `whereRaw`
 
 Three `orm` shapes were considered during its M23.15 workover and turned down.

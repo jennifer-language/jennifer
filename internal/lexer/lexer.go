@@ -80,15 +80,31 @@ func Tokenize(source string) ([]Token, error) {
 // TokenizeWithFile is like Tokenize but tags every produced token with the file name.
 // Use it when the source comes from a known file so cross-file diagnostics work.
 func TokenizeWithFile(source, file string) ([]Token, error) {
+	return NewWithFile(source, file).tokenizeAll()
+}
+
+// TokenizeAt lexes source as if it began at the given absolute line / col of file.
+// The interpolation sub-parser uses it so an expression pulled out of a `{...}`
+// slot lexes with positions that point at its real spot in the source file - so
+// error carets and resolver annotations land correctly, not at 1:1 of a fragment.
+func TokenizeAt(source, file string, line, col int) ([]Token, error) {
 	l := NewWithFile(source, file)
+	l.line = line
+	l.col = col
+	return l.tokenizeAll()
+}
+
+// tokenizeAll drives Next to completion, tagging tokens with the lexer's file and
+// enforcing the token budget. Shared by TokenizeWithFile and TokenizeAt.
+func (l *Lexer) tokenizeAll() ([]Token, error) {
 	var out []Token
 	for {
 		tok, err := l.Next()
 		if err != nil {
 			return nil, err
 		}
-		if file != "" {
-			tok.File = file
+		if l.file != "" {
+			tok.File = l.file
 		}
 		// Token budget: a small, dense file amplifies to millions of Token
 		// structs (~100x the input bytes), which the parser then walks again.
@@ -412,68 +428,234 @@ func (l *Lexer) withRaw(startPos int, tok Token, err error) (Token, error) {
 	return tok, err
 }
 
+// readString dispatches on the opening quote. A single-quoted literal is RAW: no
+// escape processing and no interpolation - its content runs verbatim (backslashes,
+// braces, and newlines included) to the next single quote, so `'\d+'` is a
+// five-character string, `'{"port": 8080}'` is literal JSON, and a multi-line
+// block needs no ceremony. A double-quoted literal is COOKED: escapes are
+// processed and an unescaped `{expr}` is a string-interpolation slot (write `\{` /
+// `\}` for a literal brace). To embed a single quote, use the cooked form:
+// "it's". Both forms report an unterminated literal (EOF before the closing quote)
+// as a positioned error.
 func (l *Lexer) readString(quote rune, startLine, startCol int) (Token, error) {
 	l.advance() // opening quote
-	// A single-quoted literal is RAW: no escape processing. Its content runs
-	// verbatim - backslashes and newlines included - to the next single quote, so
-	// `'\d+'` is a five-character string and a multi-line block needs no ceremony.
-	// A double-quoted literal is cooked (the escape switch below). To embed a
-	// single quote, use the cooked form: "it's". Both forms report an unterminated
-	// literal (EOF before the closing quote) as a positioned error.
-	raw := quote == '\''
+	if quote == '\'' {
+		return l.readRawString(startLine, startCol)
+	}
+	return l.readCookedString(startLine, startCol)
+}
+
+// readRawString reads a single-quoted raw literal: every byte to the next `'` is
+// literal (no escapes, no interpolation). l.pos is just past the opening quote.
+func (l *Lexer) readRawString(startLine, startCol int) (Token, error) {
 	var b strings.Builder
 	for {
 		if l.pos >= len(l.src) {
 			return Token{}, &LexError{File: l.file, Msg: "unterminated string literal", Line: startLine, Col: startCol}
 		}
 		ch := l.src[l.pos]
-		if ch == quote {
+		if ch == '\'' {
 			l.advance()
 			return Token{Type: TOKEN_STRING, Lexeme: b.String(), Line: startLine, Col: startCol}, nil
 		}
+		b.WriteRune(ch)
+		l.advance()
+	}
+}
+
+// readCookedString reads a double-quoted cooked literal, decomposing it into
+// literal chunks and `{expr}` interpolation slots. l.pos is just past the opening
+// quote. If the string has no slots it returns a plain TOKEN_STRING (Lexeme = the
+// decoded value); with one or more slots it returns TOKEN_STRING_INTERP carrying
+// the ordered parts. `\{` / `\}` are literal braces; a bare unescaped `}` outside
+// a slot is a positioned error (it points the user at `\}`).
+func (l *Lexer) readCookedString(startLine, startCol int) (Token, error) {
+	var lit strings.Builder
+	var parts []StringPart
+	hasExpr := false
+	flush := func() {
+		if lit.Len() > 0 {
+			parts = append(parts, StringPart{Text: lit.String()})
+			lit.Reset()
+		}
+	}
+	for {
+		if l.pos >= len(l.src) {
+			return Token{}, &LexError{File: l.file, Msg: "unterminated string literal", Line: startLine, Col: startCol}
+		}
+		ch := l.src[l.pos]
+		switch {
+		case ch == '"':
+			l.advance()
+			// Common case: a cooked string with no slots is a plain TOKEN_STRING -
+			// return the accumulated literal directly, allocating no `parts` slice.
+			if !hasExpr {
+				return Token{Type: TOKEN_STRING, Lexeme: lit.String(), Line: startLine, Col: startCol}, nil
+			}
+			flush()
+			return Token{Type: TOKEN_STRING_INTERP, Parts: parts, Line: startLine, Col: startCol}, nil
+		case ch == '\\':
+			r, err := l.readCookedEscape(startLine, startCol)
+			if err != nil {
+				return Token{}, err
+			}
+			lit.WriteRune(r)
+		case ch == '{':
+			// A cooked string is a single top-level token, so the token budget
+			// doesn't bound its slots; cap them against the same budget so an
+			// adversarial `"{a}{a}...{a}"` can't amplify one token into an unbounded
+			// Parts slice (and that many sub-parses) - a catchable lex error, not OOM.
+			if len(parts) >= maxTokens {
+				return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("interpolated string exceeds %d slots; the literal is too large", maxTokens), Line: startLine, Col: startCol}
+			}
+			l.advance() // consume the opening brace
+			exprLine, exprCol := l.line, l.col
+			src, err := l.scanInterpSlot(startLine, startCol)
+			if err != nil {
+				return Token{}, err
+			}
+			flush()
+			parts = append(parts, StringPart{IsExpr: true, Text: src, Line: exprLine, Col: exprCol})
+			hasExpr = true
+		case ch == '}':
+			return Token{}, &LexError{File: l.file, Msg: "unexpected `}` in string literal; write `\\}` for a literal `}`", Line: l.line, Col: l.col}
+		default:
+			lit.WriteRune(ch)
+			l.advance()
+		}
+	}
+}
+
+// readCookedEscape consumes a backslash escape in a cooked string and returns the
+// decoded rune. On entry l.pos is at the `\`. `\u` / `\U` delegate to the
+// fixed-width Unicode helper; `\{` / `\}` are literal braces (the interpolation
+// escape); every other letter is the small fixed escape set.
+func (l *Lexer) readCookedEscape(startLine, startCol int) (rune, error) {
+	l.advance() // backslash
+	if l.pos >= len(l.src) {
+		return 0, &LexError{File: l.file, Msg: "unterminated escape in string", Line: startLine, Col: startCol}
+	}
+	esc := l.src[l.pos]
+	switch esc {
+	case 'n':
+		l.advance()
+		return '\n', nil
+	case 'r':
+		l.advance()
+		return '\r', nil
+	case 't':
+		l.advance()
+		return '\t', nil
+	case '\\':
+		l.advance()
+		return '\\', nil
+	case '"':
+		l.advance()
+		return '"', nil
+	case '\'':
+		l.advance()
+		return '\'', nil
+	case '{':
+		l.advance()
+		return '{', nil
+	case '}':
+		l.advance()
+		return '}', nil
+	case '0':
+		l.advance()
+		return 0, nil
+	case 'u':
+		return l.readUnicodeEscape(4) // consumes 'u' + 4 hex digits
+	case 'U':
+		return l.readUnicodeEscape(8) // consumes 'U' + 8 hex digits
+	default:
+		return 0, &LexError{File: l.file, Msg: fmt.Sprintf("unknown escape sequence \\%c", esc), Line: l.line, Col: l.col}
+	}
+}
+
+// scanInterpSlot reads the expression source of a `{expr}` slot, starting just
+// past the opening brace, and returns it (exclusive of the closing brace). Braces
+// balance (a `{...}` map literal in the slot nests), and a nested string literal
+// is copied verbatim so a brace or quote inside it never disturbs the depth count.
+// strLine / strCol point at the enclosing string's opening quote, for the
+// unterminated-slot error.
+func (l *Lexer) scanInterpSlot(strLine, strCol int) (string, error) {
+	var b strings.Builder
+	depth := 1 // the opening brace has already been consumed
+	for {
+		if l.pos >= len(l.src) {
+			return "", &LexError{File: l.file, Msg: "unterminated interpolation slot `{` in string literal", Line: strLine, Col: strCol}
+		}
+		ch := l.src[l.pos]
+		switch ch {
+		case '{':
+			depth++
+			if depth > limits.MaxNestingDepth {
+				return "", &LexError{File: l.file, Msg: fmt.Sprintf("interpolation slot nesting exceeds %d levels", limits.MaxNestingDepth), Line: strLine, Col: strCol}
+			}
+			b.WriteRune(ch)
+			l.advance()
+		case '}':
+			depth--
+			if depth == 0 {
+				l.advance() // consume the closing brace
+				return b.String(), nil
+			}
+			b.WriteRune(ch)
+			l.advance()
+		case '"', '\'':
+			if err := l.copyNestedString(&b, ch); err != nil {
+				return "", err
+			}
+		case '\\':
+			// A backslash only ever appears inside a string literal, which
+			// copyNestedString handles. A bare `\` in slot code (a `\"` from the old
+			// habit of escaping a quote in a cooked string) is invalid: copy it and
+			// the next char verbatim so the sub-lexer reports the stray backslash at
+			// its own position (use a raw `'...'` string inside a slot instead), not
+			// mistake the following quote for a nested-string start.
+			b.WriteRune(ch)
+			l.advance()
+			if l.pos < len(l.src) {
+				b.WriteRune(l.src[l.pos])
+				l.advance()
+			}
+		default:
+			b.WriteRune(ch)
+			l.advance()
+		}
+	}
+}
+
+// copyNestedString copies a string literal that appears inside an interpolation
+// slot verbatim into b, from its opening quote through its matching close quote,
+// so its braces / quotes do not disturb the slot's brace balancing. Cooked-string
+// escapes are honored (an escaped quote does not end the literal). The sub-lexer
+// re-lexes the copied text later, so any interpolation inside it is handled then.
+func (l *Lexer) copyNestedString(b *strings.Builder, quote rune) error {
+	strLine, strCol := l.line, l.col
+	raw := quote == '\''
+	b.WriteRune(quote)
+	l.advance() // opening quote
+	for {
+		if l.pos >= len(l.src) {
+			return &LexError{File: l.file, Msg: "unterminated string literal in interpolation slot", Line: strLine, Col: strCol}
+		}
+		ch := l.src[l.pos]
+		b.WriteRune(ch)
 		if !raw && ch == '\\' {
 			l.advance()
 			if l.pos >= len(l.src) {
-				return Token{}, &LexError{File: l.file, Msg: "unterminated escape in string", Line: startLine, Col: startCol}
+				return &LexError{File: l.file, Msg: "unterminated escape in string", Line: strLine, Col: strCol}
 			}
-			esc := l.src[l.pos]
-			switch esc {
-			case 'n':
-				b.WriteRune('\n')
-			case 'r':
-				b.WriteRune('\r')
-			case 't':
-				b.WriteRune('\t')
-			case '\\':
-				b.WriteRune('\\')
-			case '"':
-				b.WriteRune('"')
-			case '\'':
-				b.WriteRune('\'')
-			case '0':
-				b.WriteRune(0)
-			case 'u':
-				r, err := l.readUnicodeEscape(4)
-				if err != nil {
-					return Token{}, err
-				}
-				b.WriteRune(r)
-				continue // helper consumed 'u' + the 4 hex digits
-			case 'U':
-				r, err := l.readUnicodeEscape(8)
-				if err != nil {
-					return Token{}, err
-				}
-				b.WriteRune(r)
-				continue // helper consumed 'U' + the 8 hex digits
-			default:
-				return Token{}, &LexError{File: l.file, Msg: fmt.Sprintf("unknown escape sequence \\%c", esc), Line: l.line, Col: l.col}
-			}
+			b.WriteRune(l.src[l.pos])
 			l.advance()
 			continue
 		}
-		b.WriteRune(ch)
 		l.advance()
+		if ch == quote {
+			return nil
+		}
 	}
 }
 

@@ -32,7 +32,7 @@ use convert;
 def const LOWER as string init "abcdefghijklmnopqrstuvwxyz";
 def const UPPER as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 def const DIGITS as string init "0123456789";
-def const SYMBOLS as string init "!@#$%^&*()-_=+[]{}|;:,.<>?/~";
+def const SYMBOLS as string init '!@#$%^&*()-_=+[]{}|;:,.<>?/~';
 def const AMBIGUOUS as string init "0Oo1lI|";
 
 /**

@@ -29,15 +29,15 @@ func testQueueFromKey() {
 func testEncodePayload() {
     testing.assertEqual(
         encodePayload("SendWelcome", ["a@b.c", "en"]),
-        "{\"class\":\"SendWelcome\",\"args\":[\"a@b.c\",\"en\"]}");
+        '{"class":"SendWelcome","args":["a@b.c","en"]}');
 }
 
 func testEncodePayloadEmptyArgs() {
-    testing.assertEqual(encodePayload("Ping", []), "{\"class\":\"Ping\",\"args\":[]}");
+    testing.assertEqual(encodePayload("Ping", []), '{"class":"Ping","args":[]}');
 }
 
 func testDecodeJob() {
-    def job as Job init decodeJob("email", "{\"class\":\"X\",\"args\":[\"p\",\"q\"]}");
+    def job as Job init decodeJob("email", '{"class":"X","args":["p","q"]}');
     testing.assertEqual($job.queue, "email");
     testing.assertEqual($job.class, "X");
     testing.assertEqual(len($job.args), 2);
@@ -46,14 +46,14 @@ func testDecodeJob() {
 }
 
 func testDecodeJobEmptyArgs() {
-    def job as Job init decodeJob("high", "{\"class\":\"Ping\",\"args\":[]}");
+    def job as Job init decodeJob("high", '{"class":"Ping","args":[]}');
     testing.assertEqual($job.class, "Ping");
     testing.assertEqual(len($job.args), 0);
 }
 
 func testDecodeJobNonStringArgs() {
     # a job enqueued elsewhere with int / bool / float args still reserves as strings
-    def job as Job init decodeJob("q", "{\"class\":\"C\",\"args\":[1,true,2.5]}");
+    def job as Job init decodeJob("q", '{"class":"C","args":[1,true,2.5]}');
     testing.assertEqual($job.args[0], "1");
     testing.assertEqual($job.args[1], "true");
     testing.assertEqual($job.args[2], "2.5");

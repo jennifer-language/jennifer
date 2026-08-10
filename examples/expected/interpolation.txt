@@ -1,0 +1,5 @@
+hello Jennifer, next is 42
+list = [1, 2, 3], first = 1, count = 3
+shout = JENNIFER
+a raw template: Jennifer stays literal -> {$name}
+literal braces: { 41 }

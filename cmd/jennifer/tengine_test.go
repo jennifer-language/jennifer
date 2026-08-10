@@ -24,9 +24,9 @@ func TestTengineModule(t *testing.T) {
 use json;
 import "` + tengineMod + `" as tengine;
 def set as tengine.Set init tengine.newSet();
-$set = tengine.add($set, "base", "<h1>{{ .title }}</h1>{{ template \"body\" . }}");
-$set = tengine.add($set, "page", "{{ define \"body\" }}<ul>{{- range $i, $it := .items }}<li>{{ $i }}:{{ $it.name | html }}{{ if eq $it.kind \"post\" }} [post]{{ else if gt $i 0 }} [$.n={{ $.count }}]{{ end }}</li>{{ end -}}</ul>{{ end }}");
-def out as string init tengine.render($set, "base", json.decode("{\"title\":\"Hi\",\"count\":2,\"items\":[{\"name\":\"a<b\",\"kind\":\"post\"},{\"name\":\"c&d\",\"kind\":\"page\"}]}"));
+$set = tengine.add($set, "base", '<h1>{{ .title }}</h1>{{ template "body" . }}');
+$set = tengine.add($set, "page", '{{ define "body" }}<ul>{{- range $i, $it := .items }}<li>{{ $i }}:{{ $it.name | html }}{{ if eq $it.kind "post" }} [post]{{ else if gt $i 0 }} [$.n={{ $.count }}]{{ end }}</li>{{ end -}}</ul>{{ end }}');
+def out as string init tengine.render($set, "base", json.decode('{"title":"Hi","count":2,"items":[{"name":"a<b","kind":"post"},{"name":"c&d","kind":"page"}]}'));
 testing.assertEqual($out, "<h1>Hi</h1><ul><li>0:a&lt;b [post]</li><li>1:c&amp;d [$.n=2]</li></ul>");`
 	progPath := filepath.Join(dir, "tengine.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

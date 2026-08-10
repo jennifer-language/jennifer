@@ -241,6 +241,35 @@ func emitNode(b *strings.Builder, n parser.Node, indent int) {
 		emitStringField(b, "value", v.Value, indent+1)
 		endObj(b, indent)
 
+	case *parser.InterpStringExpr:
+		startObj(b, indent)
+		emitTypeAndPos(b, "InterpStringExpr", v, indent+1)
+		writeIndent(b, indent+1)
+		b.WriteString("\"parts\": ")
+		if len(v.Parts) == 0 {
+			b.WriteString("[],\n")
+		} else {
+			b.WriteString("[\n")
+			for i, part := range v.Parts {
+				writeIndent(b, indent+2)
+				startObj(b, indent+2)
+				if part.Expr == nil {
+					emitStringField(b, "lit", part.Lit, indent+3)
+				} else {
+					emitNodeField(b, "expr", part.Expr, indent+3)
+				}
+				endObj(b, indent+2)
+				if i < len(v.Parts)-1 {
+					b.WriteString(",\n")
+				} else {
+					b.WriteByte('\n')
+				}
+			}
+			writeIndent(b, indent+1)
+			b.WriteString("],\n")
+		}
+		endObj(b, indent)
+
 	case *parser.BoolLit:
 		startObj(b, indent)
 		emitTypeAndPos(b, "BoolLit", v, indent+1)

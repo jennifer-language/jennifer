@@ -1344,20 +1344,20 @@ export func password(plain as string, scheme as string) {
         return $plain;
     }
     if ($s == "sha") {
-        return "{SHA}" +
+        return '{SHA}' +
             encoding.toText(
             hash.compute(convert.bytesFromString($plain, "utf-8"), "sha1"),
             "base64");
     }
     if ($s == "sha256") {
-        return "{SHA256}" +
+        return '{SHA256}' +
             encoding.toText(
             hash.compute(convert.bytesFromString($plain, "utf-8"), "sha256"),
             "base64");
     }
     if ($s == "ssha") {
         def salt as bytes init crypto.randBytes(8);
-        return "{SSHA}" +
+        return '{SSHA}' +
             encoding.toText(
             binary.concat(
                 hash.compute(
@@ -1368,7 +1368,7 @@ export func password(plain as string, scheme as string) {
     }
     if ($s == "ssha256") {
         def salt as bytes init crypto.randBytes(8);
-        return "{SSHA256}" +
+        return '{SSHA256}' +
             encoding.toText(
             binary.concat(
                 hash.compute(
@@ -1397,7 +1397,7 @@ func pbkdf2Password(plain as string, algo as string, keyLen as int, label as str
         PBKDF2_ITERATIONS,
         $keyLen,
         $algo);
-    return "{PBKDF2-" + $label + "}$" + convert.toString(PBKDF2_ITERATIONS) +
+    return '{PBKDF2-' + $label + '}$' + convert.toString(PBKDF2_ITERATIONS) +
         "$" + encoding.toText($salt, "base64") +
         "$" + encoding.toText($dk, "base64");
 }
@@ -1417,19 +1417,19 @@ func verifyPasswordInner(stored as string, supplied as string) {
     if ($stored == "") {
         return false;
     }
-    if (strings.startsWith($stored, "{SSHA256}")) {
+    if (strings.startsWith($stored, '{SSHA256}')) {
         return checkSalted($stored, 9, "sha256", 32, $supplied);
     }
-    if (strings.startsWith($stored, "{SSHA}")) {
+    if (strings.startsWith($stored, '{SSHA}')) {
         return checkSalted($stored, 6, "sha1", 20, $supplied);
     }
-    if (strings.startsWith($stored, "{SHA256}")) {
+    if (strings.startsWith($stored, '{SHA256}')) {
         return checkSimple($stored, 8, "sha256", $supplied);
     }
-    if (strings.startsWith($stored, "{SHA}")) {
+    if (strings.startsWith($stored, '{SHA}')) {
         return checkSimple($stored, 5, "sha1", $supplied);
     }
-    if (strings.startsWith($stored, "{PBKDF2-")) {
+    if (strings.startsWith($stored, '{PBKDF2-')) {
         return checkPbkdf2($stored, $supplied);
     }
     return crypto.hmacEqual(
@@ -1440,7 +1440,7 @@ func verifyPasswordInner(stored as string, supplied as string) {
 # checkPbkdf2 verifies a {PBKDF2-<ALGO>}$iterations$salt$hash value by re-deriving
 # the key with the stored algorithm / iterations / salt and comparing constant-time.
 func checkPbkdf2(stored as string, supplied as string) {
-    def close as int init strings.indexOf($stored, "}");
+    def close as int init strings.indexOf($stored, '}');
     if ($close < 0) {
         return false;
     }

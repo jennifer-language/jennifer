@@ -53,11 +53,23 @@ contexts:
 
   double-string:
     - meta_scope: string.quoted.double.jennifer
-    - match: '\\([nrt\\"''0]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
+    - match: '\\([nrt\\"''0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
       scope: constant.character.escape.jennifer
+    - match: '\{'
+      scope: punctuation.definition.template-expression.begin.jennifer
+      push: interpolation
     - match: '"'
       scope: punctuation.definition.string.end.jennifer
       pop: true
+
+  # A cooked-string interpolation slot: `{expr}`. Highlighted as embedded code
+  # (the main context) until the closing brace.
+  interpolation:
+    - meta_scope: meta.template.expression.jennifer
+    - match: '\}'
+      scope: punctuation.definition.template-expression.end.jennifer
+      pop: true
+    - include: main
 
   # Single-quoted is raw: backslashes are literal (no escape scope), and the
   # string ends at the next '.

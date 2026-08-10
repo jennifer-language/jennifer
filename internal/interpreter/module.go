@@ -735,6 +735,25 @@ func (i *Interpreter) declTypesExpr(e parser.Expr) {
 		for _, f := range ex.Fields {
 			i.declTypesExpr(f.Expr)
 		}
+	case *parser.CallValueExpr:
+		i.declTypesExpr(ex.Callee)
+		for _, a := range ex.Args {
+			i.declTypesExpr(a)
+		}
+	case *parser.RangeExpr:
+		i.declTypesExpr(ex.Lo)
+		i.declTypesExpr(ex.Hi)
+	case *parser.SliceExpr:
+		i.declTypesExpr(ex.Target)
+		i.declTypesExpr(ex.Lo)
+		i.declTypesExpr(ex.Hi)
+	case *parser.InterpStringExpr:
+		// Uniform with the other walkers: descend into each `{expr}` slot. A slot
+		// holds no type declaration today, so this stamps nothing, but it keeps the
+		// walker family complete for the next node kind that does.
+		for p := range ex.Parts {
+			i.declTypesExpr(ex.Parts[p].Expr)
+		}
 	}
 }
 

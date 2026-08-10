@@ -16,14 +16,14 @@ func rec(s as string) {
 
 func rows() {
     def r as list of json.Value init [];
-    $r[] = rec("{\"id\":1,\"name\":\"ada\"}");
+    $r[] = rec('{"id":1,"name":"ada"}');
     $r[] = rec("[10,20,30]");
     $r[] = rec("42");
     return $r;
 }
 
 func testEncodeBasic() {
-    testing.assertEqual(encode(rows()), "{\"id\":1,\"name\":\"ada\"}\n[10,20,30]\n42\n");
+    testing.assertEqual(encode(rows()), "\{\"id\":1,\"name\":\"ada\"\}\n[10,20,30]\n42\n");
 }
 
 func testEncodeEmpty() {
@@ -32,7 +32,7 @@ func testEncodeEmpty() {
 }
 
 func testDecodeBasic() {
-    def got as list of json.Value init decode("{\"a\":1}\n[2,3]\n\"x\"");
+    def got as list of json.Value init decode("\{\"a\":1\}\n[2,3]\n\"x\"");
     testing.assertEqual(len($got), 3);
     testing.assertEqual(json.asInt(json.get($got[0], "/a")), 1);
     testing.assertEqual(json.length($got[1]), 2);
@@ -40,13 +40,13 @@ func testDecodeBasic() {
 }
 
 func testDecodeSkipsBlankLines() {
-    def got as list of json.Value init decode("{\"a\":1}\n\n   \n\t\n{\"b\":2}\n");
+    def got as list of json.Value init decode("\{\"a\":1\}\n\n   \n\t\n\{\"b\":2\}\n");
     testing.assertEqual(len($got), 2);
     testing.assertEqual(json.asInt(json.get($got[1], "/b")), 2);
 }
 
 func testDecodeCRLF() {
-    def got as list of json.Value init decode("{\"a\":1}\r\n{\"b\":2}\r\n");
+    def got as list of json.Value init decode("\{\"a\":1\}\r\n\{\"b\":2\}\r\n");
     testing.assertEqual(len($got), 2);
     testing.assertEqual(json.asInt(json.get($got[0], "/a")), 1);
 }
@@ -57,7 +57,7 @@ func testDecodeEmpty() {
 }
 
 func testMixedTopLevelTypes() {
-    def got as list of json.Value init decode("{\"o\":1}\n[1,2]\n7\n\"s\"\ntrue\nnull");
+    def got as list of json.Value init decode("\{\"o\":1\}\n[1,2]\n7\n\"s\"\ntrue\nnull");
     testing.assertEqual(len($got), 6);
     testing.assertEqual(json.typeOf($got[0]), "map");
     testing.assertEqual(json.typeOf($got[1]), "list");
@@ -80,7 +80,7 @@ func testRoundTrip() {
 }
 
 func testDecodeToleratesWhitespaceAroundValue() {
-    def got as list of json.Value init decode("   {\"a\":1}   \n  42  ");
+    def got as list of json.Value init decode("   \{\"a\":1\}   \n  42  ");
     testing.assertEqual(len($got), 2);
     testing.assertEqual(json.asInt(json.get($got[0], "/a")), 1);
     testing.assertEqual(json.asInt($got[1]), 42);
@@ -93,7 +93,7 @@ func testStreamValueRoundTrip() {
     def path as string init fs.makeTempFile("", "jsonl-", ".jsonl");
     def wf as fs.File init fs.open($path, "write");
     def w as Writer init writer($wf);
-    writeValue($w, rec("{\"id\":1,\"name\":\"ada\"}"));
+    writeValue($w, rec('{"id":1,"name":"ada"}'));
     writeValue($w, rec("[10,20,30]"));
     writeValue($w, rec("42"));
     closeWriter($w);
@@ -129,10 +129,10 @@ func testWriteReadFileRoundTrip() {
 func testAppendFileGrowsTheFile() {
     def path as string init fs.makeTempFile("", "jsonl-app-", ".jsonl");
     def first as list of json.Value init [];
-    $first[] = rec("{\"a\":1}");
+    $first[] = rec('{"a":1}');
     writeFile($path, $first);
     def second as list of json.Value init [];
-    $second[] = rec("{\"a\":2}");
+    $second[] = rec('{"a":2}');
     appendFile($path, $second);
     def back as list of json.Value init readFile($path);
     fs.remove($path);

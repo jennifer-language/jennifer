@@ -27,9 +27,9 @@ func serve(srv as httpd.Server) {
             def req as httpd.Request init httpd.accept($srv);
             def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
             if (strings.contains($body, "boom")) {
-                httpd.respond($req, 200, "{\"errors\":[{\"message\":\"no such field: boom\"}]}");
+                httpd.respond($req, 200, '{"errors":[{"message":"no such field: boom"}]}');
             } else {
-                httpd.respond($req, 200, "{\"data\":{\"viewer\":{\"login\":\"octocat\"}}}");
+                httpd.respond($req, 200, '{"data":{"viewer":{"login":"octocat"}}}');
             }
         } catch (acceptErr) {
             return;
@@ -46,13 +46,13 @@ def server as task of null init spawn {
 def gql as graphql.Client init graphql.header(graphql.client("http://" + $addr), "X-Demo", "1");
 
 # A successful query - read the result from under /data.
-def resp as json.Value init graphql.query($gql, "{ viewer { login } }", json.map());
+def resp as json.Value init graphql.query($gql, '{ viewer { login } }', json.map());
 io.printf("viewer login = %s\n", json.asString($resp, "/data/viewer/login"));
 
 # A query the server rejects with a GraphQL errors array (HTTP 200) - caught as a
 # typed `graphql` error, not mistaken for success.
 try {
-    graphql.query($gql, "{ boom }", json.map());
+    graphql.query($gql, '{ boom }', json.map());
     io.printf("unexpected success\n");
 } catch (e) {
     io.printf("caught %s: %s\n", $e.kind, $e.message);

@@ -26,7 +26,7 @@ try {
     def created as rest.Response init rest.postJson(
         $api,
         "/users",
-        json.decode("{\"name\":\"ada\"}"));
+        json.decode('{"name":"ada"}'));
     io.printf("POST /users -> %d\n", $created.status);
 
     # read one back and decode it

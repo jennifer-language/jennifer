@@ -70,15 +70,15 @@ func testBuildRequestGet() {
 
 func testBuildRequestPostBody() {
     def hdrs as map of string to string init {"Content-Type": "application/json"};
-    def req as string init buildRequest("POST", parseUrl("http://h/i"), $hdrs, "{}");
+    def req as string init buildRequest("POST", parseUrl("http://h/i"), $hdrs, '{}');
     testing.assertContains($req, "Content-Type: application/json\r\n");
     testing.assertContains($req, "Content-Length: 2\r\n"); # "{}" is 2 bytes
-    testing.assertTrue(strings.endsWith($req, "\r\n\r\n{}"));
+    testing.assertTrue(strings.endsWith($req, "\r\n\r\n\{\}"));
 }
 
 func testBuildRequestPatch() {
     def hdrs as map of string to string init {"Content-Type": "application/json"};
-    def req as string init buildRequest("PATCH", parseUrl("http://h/i"), $hdrs, "{}");
+    def req as string init buildRequest("PATCH", parseUrl("http://h/i"), $hdrs, '{}');
     testing.assertTrue(strings.startsWith($req, "PATCH /i HTTP/1.1\r\n"));
     testing.assertContains($req, "Content-Length: 2\r\n");
 }

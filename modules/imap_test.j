@@ -13,12 +13,12 @@
 use testing;
 
 func testLiteralLength() {
-    testing.assertEqual(literalLength("* 1 FETCH (BODY[] {1234}"), 1234);
+    testing.assertEqual(literalLength('* 1 FETCH (BODY[] {1234}'), 1234);
     testing.assertEqual(literalLength("* 2 EXISTS"), -1);
 }
 
 func testExtractLiteral() {
-    def resp as string init "* 1 FETCH (BODY[] {11}\r\nHELLO WORLD)\r\nJEN OK\r\n";
+    def resp as string init "* 1 FETCH (BODY[] \{11\}\r\nHELLO WORLD)\r\nJEN OK\r\n";
     testing.assertEqual(extractLiteral($resp), "HELLO WORLD");
     testing.assertEqual(extractLiteral("JEN OK no literal\r\n"), "");
 }
@@ -261,9 +261,9 @@ func testParseStatus() {
 # byte-exact, not over-read by (bytes - runes) into the trailing `)`/CRLF/tag.
 # "HÉLLO" is 6 bytes / 5 runes -> marker {6}. (assertEqual, not assertContains.)
 func testExtractLiteralMultibyte() {
-    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] {6}\r\nHÉLLO)\r\nJEN OK\r\n"), "HÉLLO");
+    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] \{6\}\r\nHÉLLO)\r\nJEN OK\r\n"), "HÉLLO");
     # An ASCII body still round-trips exactly.
-    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] {5}\r\nplain)\r\nJEN OK\r\n"), "plain");
+    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] \{5\}\r\nplain)\r\nJEN OK\r\n"), "plain");
 }
 
 # parseStatus: a folder name containing a '(' must not be mistaken for the item

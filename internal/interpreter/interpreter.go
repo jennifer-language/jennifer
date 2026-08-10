@@ -3081,6 +3081,23 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		return FloatVal(ex.Value), nil
 	case *parser.StringLit:
 		return StringVal(ex.Value), nil
+	case *parser.InterpStringExpr:
+		// Cooked-string interpolation: concatenate literal chunks with each slot
+		// value stringified via Display (the same form convert.toString produces),
+		// so no `use convert` is needed and any value kind interpolates.
+		var b strings.Builder
+		for _, part := range ex.Parts {
+			if part.Expr == nil {
+				b.WriteString(part.Lit)
+				continue
+			}
+			v, err := i.evalExpr(part.Expr, env)
+			if err != nil {
+				return Value{}, err
+			}
+			b.WriteString(v.Display())
+		}
+		return StringVal(b.String()), nil
 	case *parser.BoolLit:
 		return BoolVal(ex.Value), nil
 	case *parser.NullLit:
@@ -5276,6 +5293,25 @@ func (i *Interpreter) walkExprForQualifiedRefs(e parser.Expr) {
 	case *parser.SpawnExpr:
 		for _, s := range ex.Body {
 			i.walkStmtForQualifiedRefs(s)
+		}
+	case *parser.CallValueExpr:
+		i.walkExprForQualifiedRefs(ex.Callee)
+		for _, a := range ex.Args {
+			i.walkExprForQualifiedRefs(a)
+		}
+	case *parser.RangeExpr:
+		i.walkExprForQualifiedRefs(ex.Lo)
+		i.walkExprForQualifiedRefs(ex.Hi)
+	case *parser.SliceExpr:
+		i.walkExprForQualifiedRefs(ex.Target)
+		i.walkExprForQualifiedRefs(ex.Lo)
+		i.walkExprForQualifiedRefs(ex.Hi)
+	case *parser.InterpStringExpr:
+		// A `{expr}` interpolation slot is real code: pre-stamp any qualified
+		// call / const inside it (`"{io.printf(...)}"`, `{m.CONST}`) so it takes
+		// the O(1) path like the same expression anywhere else.
+		for p := range ex.Parts {
+			i.walkExprForQualifiedRefs(ex.Parts[p].Expr)
 		}
 	}
 }

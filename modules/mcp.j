@@ -255,7 +255,7 @@ export func promptArg(name as string, description as string, required as bool) {
  * @return {json.Value} a `{"type":"object","properties":{},"required":[]}` skeleton
  */
 export func schema() {
-    return json.decode("{\"type\":\"object\",\"properties\":{},\"required\":[]}");
+    return json.decode('{"type":"object","properties":{},"required":[]}');
 }
 
 /**

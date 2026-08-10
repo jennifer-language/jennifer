@@ -147,8 +147,8 @@ func interpolate(value as string, acc as map of string to string) {
     def n as int init len($value);
     while ($i < $n) {
         def ch as string init strings.substring($value, $i, $i + 1);
-        if ($ch == "$" and $i + 1 < $n and strings.substring($value, $i + 1, $i + 2) == "{") {
-            def close as int init indexOfFrom($value, "}", $i + 2);
+        if ($ch == "$" and $i + 1 < $n and strings.substring($value, $i + 1, $i + 2) == '{') {
+            def close as int init indexOfFrom($value, '}', $i + 2);
             if ($close < 0) {
                 $out = $out + $ch;
                 $i = $i + 1;
@@ -227,7 +227,7 @@ func validEnvName(name as string) {
 # cannot become `../../etc/x` or `prod/../y`. path.base is not a sanitizer, so
 # this is validated up front.
 func validProfile(name as string) {
-    return regex.matches("^[A-Za-z0-9_-]{1,64}$", $name);
+    return regex.matches('^[A-Za-z0-9_-]{1,64}$', $name);
 }
 
 # --- single-file API (exported) ---------------------------------------------

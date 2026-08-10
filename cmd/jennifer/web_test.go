@@ -517,7 +517,7 @@ def h as map of string to string init {};
 def form as http.Response init http.post($base + "/submit", "application/x-www-form-urlencoded", "name=Jane+Doe", $h);
 testing.assertEqual($form.body, "hi Jane Doe");
 
-def apiResp as http.Response init http.post($base + "/api", "application/json", "{\"x\":5}", $h);
+def apiResp as http.Response init http.post($base + "/api", "application/json", '{"x":5}', $h);
 testing.assertEqual($apiResp.body, "x=5");
 
 def pageResp as http.Response init http.get($base + "/page", $h);

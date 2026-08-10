@@ -39,7 +39,15 @@
           "patterns": [
             {
               "name": "constant.character.escape.jennifer",
-              "match": "\\\\([nrt\\\\\"'0]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})"
+              "match": "\\\\([nrt\\\\\"'0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})"
+            },
+            {
+              "name": "meta.template.expression.jennifer",
+              "begin": "\\{",
+              "end": "\\}",
+              "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.jennifer" } },
+              "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.jennifer" } },
+              "patterns": [{ "include": "$self" }]
             }
           ]
         },

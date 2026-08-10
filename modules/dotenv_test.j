@@ -105,31 +105,31 @@ func testEnvNameValidation() { # OM-021
 
 func testInterpolationBackward() {
     # A later value references an earlier key; the resolved value substitutes.
-    def m as map of string to string init parse("HOST=example.com\nURL=http://${HOST}/x");
+    def m as map of string to string init parse("HOST=example.com\nURL=http://$\{HOST\}/x");
     testing.assertEqual($m["URL"], "http://example.com/x");
 }
 
 func testInterpolationForwardIsEmpty() {
     # Backward-reference only: a reference to a not-yet-defined key yields "".
-    def m as map of string to string init parse("URL=http://${HOST}/x\nHOST=example.com");
+    def m as map of string to string init parse("URL=http://$\{HOST\}/x\nHOST=example.com");
     testing.assertEqual($m["URL"], "http:///x");
 }
 
 func testInterpolationInDoubleQuotes() {
-    def m as map of string to string init parse("A=1\nB=\"v${A}v\"");
+    def m as map of string to string init parse("A=1\nB=\"v$\{A\}v\"");
     testing.assertEqual($m["B"], "v1v");
 }
 
 func testInterpolationNotInSingleQuotes() {
-    def m as map of string to string init parse("A=1\nB='v${A}v'");
-    testing.assertEqual($m["B"], "v${A}v"); # single quotes never interpolate
+    def m as map of string to string init parse("A=1\nB='v$\{A\}v'");
+    testing.assertEqual($m["B"], 'v${A}v'); # single quotes never interpolate
 }
 
 func testInterpolationInvalidRefIsLiteral() {
     # `${` with no valid env name is kept literal, not treated as an empty ref.
-    def m as map of string to string init parse("A=${1BAD}\nB=${no close");
-    testing.assertEqual($m["A"], "${1BAD}");
-    testing.assertEqual($m["B"], "${no close");
+    def m as map of string to string init parse("A=$\{1BAD\}\nB=$\{no close");
+    testing.assertEqual($m["A"], '${1BAD}');
+    testing.assertEqual($m["B"], '${no close');
 }
 
 func testNoCommandSubstitution() {
@@ -141,8 +141,8 @@ func testNoCommandSubstitution() {
 
 func testInterpolateHelper() {
     def acc as map of string to string init {"X": "9"};
-    testing.assertEqual(interpolate("a${X}b", $acc), "a9b");
-    testing.assertEqual(interpolate("none${MISSING}here", $acc), "nonehere"); # undefined -> ""
+    testing.assertEqual(interpolate('a${X}b', $acc), "a9b");
+    testing.assertEqual(interpolate('none${MISSING}here', $acc), "nonehere"); # undefined -> ""
     testing.assertEqual(interpolate("plain", $acc), "plain");
 }
 
@@ -155,7 +155,7 @@ func testMultilineDoubleQuoted() {
 }
 
 func testMultilineWithInterpolation() {
-    def m as map of string to string init parse("H=host\nA=\"top\n${H}\nbot\"");
+    def m as map of string to string init parse("H=host\nA=\"top\n$\{H\}\nbot\"");
     testing.assertEqual($m["A"], "top\nhost\nbot");
 }
 
@@ -196,7 +196,7 @@ func testParseWithBaseLaterWins() {
 func testParseWithBaseInterpolatesBase() {
     # A `${VAR}` resolves against an earlier cascade file's keys (the base map).
     def base as map of string to string init {"HOST": "h1"};
-    def m as map of string to string init parseWithBase("URL=${HOST}/p", $base);
+    def m as map of string to string init parseWithBase('URL=${HOST}/p', $base);
     testing.assertEqual($m["URL"], "h1/p");
 }
 

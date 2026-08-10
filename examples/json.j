@@ -17,7 +17,7 @@ io.printf("%s\n", json.encodePretty({"a": 1, "b": [true, null]}));
 
 # Decode yields an opaque json.Value; the accessors address it by JSON Pointer
 # (RFC 6901), the same paths the write surface uses. as* pulls a leaf out.
-def doc as json.Value init json.decode("{\"x\": 7, \"y\": 8}");
+def doc as json.Value init json.decode('{"x": 7, "y": 8}');
 io.printf("x+y = %d\n", json.asInt($doc, "/x") + json.asInt($doc, "/y"));
 
 # Build and edit a document with the non-mutating write verbs (each returns a
@@ -43,6 +43,6 @@ def struct Point {
     x as int,
     y as int
 };
-def d as json.Value init json.decode("{\"x\": 1, \"y\": 2}");
+def d as json.Value init json.decode('{"x": 1, "y": 2}');
 def p as Point init Point{x: json.asInt($d, "/x"), y: json.asInt($d, "/y")};
 io.printf("point = %s\n", json.encode($p));

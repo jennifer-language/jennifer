@@ -943,9 +943,10 @@ func (f *fmtState) writeToken(t, _ lexer.Token) {
 	case lexer.TOKEN_VARREF:
 		f.writeByte('$')
 		f.writeString(t.Lexeme)
-	case lexer.TOKEN_STRING:
-		// Emit the exact source spelling (quotes, escapes, embedded newlines) so
-		// a multi-line or specifically-escaped string survives verbatim; only a
+	case lexer.TOKEN_STRING, lexer.TOKEN_STRING_INTERP:
+		// Emit the exact source spelling (quotes, escapes, embedded newlines, and
+		// any `{expr}` interpolation slots verbatim) so a multi-line, specifically-
+		// escaped, or interpolated string survives a format byte-for-byte; only a
 		// token with no captured Raw (a hand-built AST in a test) falls back to
 		// re-quoting the processed value.
 		if t.Raw != "" {
@@ -1102,7 +1103,7 @@ func (f *fmtState) currentBraceKind() byte {
 // the formatter in an expression-start context.
 func isOperandToken(t lexer.Token) bool {
 	switch t.Type {
-	case lexer.TOKEN_INT, lexer.TOKEN_FLOAT, lexer.TOKEN_STRING,
+	case lexer.TOKEN_INT, lexer.TOKEN_FLOAT, lexer.TOKEN_STRING, lexer.TOKEN_STRING_INTERP,
 		lexer.TOKEN_VARREF, lexer.TOKEN_TRUE, lexer.TOKEN_FALSE,
 		lexer.TOKEN_NULL, lexer.TOKEN_IDENT,
 		lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACE:
@@ -1249,7 +1250,7 @@ func tokenWidth(t lexer.Token) int {
 	switch t.Type {
 	case lexer.TOKEN_VARREF:
 		return 1 + len([]rune(t.Lexeme))
-	case lexer.TOKEN_STRING:
+	case lexer.TOKEN_STRING, lexer.TOKEN_STRING_INTERP:
 		if t.Raw != "" {
 			return len([]rune(t.Raw))
 		}

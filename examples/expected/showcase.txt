@@ -194,6 +194,23 @@ nested write   = Line{from: Point{x: 5, y: 0}, to: Point{x: 10, y: 20}}
 === try/catch ===
 user thrown  = demo / user
 runtime err  = kind=runtime
+=== interpolation ===
+hello World, 4 items, x=10
+raw stays literal: {$who} and braces { 3 }
+=== match ===
+two or three
+=== enums ===
+square area = 9.0
+enum zero = Shape.Circle{r: 0.0}
+=== defer ===
+  body runs before any defer
+  runs first (registered last)
+  runs last (registered first)
+=== functions ===
+map double  = [2, 4, 6, 8]
+filter even = [2, 4]
+reduce sum  = 10
+via func val = 42
 === time ===
 epoch UTC       = 1970-01-01 00:00:00
 epoch year      = 1970
@@ -264,6 +281,22 @@ tag=book id=1 title=Go & XML
 name=jen nums=3
 === intl ===
 tr=Hallo, Welt!
+=== stats ===
+mean=5.0 median=4.5 stddev=2.0
+min=2 max=9 sum=40
+=== linalg ===
+dot=11.0 norm(v1)=3.0
+det=-2.0
+=== binary ===
+concat len=11 indexOf=6
+slice=hello
+=== kv ===
+get=jennifer has(x)=false incr=15
+=== channel ===
+channel sum = 60
+=== path ===
+base=intro.md ext=.md stem=intro
+typeOf(join)=string typeOf(dir)=string
 === testing ===
 ran=2 passed=1 failed=1
 === done ===

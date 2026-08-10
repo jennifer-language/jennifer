@@ -14,15 +14,15 @@ use json;
 import "../../modules/tengine.j" as tengine;
 
 def set as tengine.Set init tengine.newSet();
-$set = tengine.add($set, "base", "<h1>{{ .site | title }}</h1>\n{{ template \"content\" . }}");
+$set = tengine.add($set, "base", "<h1>\{\{ .site | title \}\}</h1>\n\{\{ template \"content\" . \}\}");
 $set = tengine.add(
     $set,
     "page",
-    "{{ define \"content\" }}{{ $tagline := .tagline | default \"a small site\" }}<p>{{ $tagline }}</p>\n<ul>\n{{- range $i, $post := .posts }}\n  <li>{{ $i }}. <a href=\"/{{ $post.title | urlize }}\">{{ $post.title | html }}</a>{{ if $post.draft }} (draft){{ else if $post.featured }} *{{ end }}</li>\n{{- end }}\n</ul>{{ end }}");
+    "\{\{ define \"content\" \}\}\{\{ $tagline := .tagline | default \"a small site\" \}\}<p>\{\{ $tagline \}\}</p>\n<ul>\n\{\{- range $i, $post := .posts \}\}\n  <li>\{\{ $i \}\}. <a href=\"/\{\{ $post.title | urlize \}\}\">\{\{ $post.title | html \}\}</a>\{\{ if $post.draft \}\} (draft)\{\{ else if $post.featured \}\} *\{\{ end \}\}</li>\n\{\{- end \}\}\n</ul>\{\{ end \}\}");
 
-def data as json.Value init json.decode("{\"site\":\"my blog\",\"posts\":[" +
-    "{\"title\":\"Hello & Welcome\",\"featured\":true}," +
-    "{\"title\":\"Work In Progress\",\"draft\":true}," +
-    "{\"title\":\"Just Another Post\"}]}");
+def data as json.Value init json.decode('{"site":"my blog","posts":[' +
+    '{"title":"Hello & Welcome","featured":true},' +
+    '{"title":"Work In Progress","draft":true},' +
+    '{"title":"Just Another Post"}]}');
 
 io.printf("%s\n", tengine.render($set, "base", $data));

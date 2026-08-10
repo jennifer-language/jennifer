@@ -179,9 +179,9 @@ export func embedField(m as Message, name as string, value as string, inline as 
     def out as Message init $m;
     def idx as int init lastEmbedIndex($out);
     def e as Embed init $out.embeds[$idx];
-    def f as string init "{\"name\":" + json.encode($name) +
+    def f as string init '{"name":' + json.encode($name) +
         ",\"value\":" + json.encode($value) +
-        ",\"inline\":" + convert.toString($inline) + "}";
+        ",\"inline\":" + convert.toString($inline) + '}';
     $e.fields = lists.push($e.fields, $f);
     $out.embeds[$idx] = $e;
     return $out;
@@ -198,7 +198,7 @@ export func embedFooter(m as Message, text as string) {
     def out as Message init $m;
     def idx as int init lastEmbedIndex($out);
     def e as Embed init $out.embeds[$idx];
-    $e.footer = "{\"text\":" + json.encode($text) + "}";
+    $e.footer = '{"text":' + json.encode($text) + '}';
     $out.embeds[$idx] = $e;
     return $out;
 }
@@ -214,7 +214,7 @@ export func embedAuthor(m as Message, name as string) {
     def out as Message init $m;
     def idx as int init lastEmbedIndex($out);
     def e as Embed init $out.embeds[$idx];
-    $e.author = "{\"name\":" + json.encode($name) + "}";
+    $e.author = '{"name":' + json.encode($name) + '}';
     $out.embeds[$idx] = $e;
     return $out;
 }
@@ -234,7 +234,7 @@ func renderEmbed(e as Embed) {
     if (len($e.author) > 0) {
         $parts[] = "\"author\":" + $e.author;
     }
-    return "{" + strings.join($parts, ",") + "}";
+    return '{' + strings.join($parts, ",") + '}';
 }
 
 /**
@@ -260,7 +260,7 @@ export func render(m as Message) {
         }
         $parts[] = "\"embeds\":[" + strings.join($rendered, ",") + "]";
     }
-    return "{" + strings.join($parts, ",") + "}";
+    return '{' + strings.join($parts, ",") + '}';
 }
 
 /**

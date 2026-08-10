@@ -2300,6 +2300,42 @@ func (p *parser) parsePrimary() (Expr, error) {
 	}
 }
 
+// buildInterpString turns a TOKEN_STRING_INTERP token into an InterpStringExpr,
+// sub-lexing and sub-parsing each `{expr}` slot into a real Expr subtree at its
+// absolute source position. A slot must be a single expression (not a statement or
+// block): parseExpr followed by a non-EOF token is a positioned error, so a `;` or
+// statement keyword in a slot is rejected. An empty slot `{}` is likewise an
+// error.
+func (p *parser) buildInterpString(t lexer.Token) (Expr, error) {
+	node := &InterpStringExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}}
+	for _, sp := range t.Parts {
+		if !sp.IsExpr {
+			node.Parts = append(node.Parts, InterpPart{Lit: sp.Text})
+			continue
+		}
+		if strings.TrimSpace(sp.Text) == "" {
+			return nil, &ParseError{Msg: "empty interpolation slot `{}`; a slot must hold one expression", File: t.File, Line: sp.Line, Col: sp.Col}
+		}
+		toks, err := lexer.TokenizeAt(sp.Text, t.File, sp.Line, sp.Col)
+		if err != nil {
+			return nil, err
+		}
+		sub := &parser{tokens: stripTrivia(toks), exprDepth: p.exprDepth}
+		expr, err := sub.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if next := sub.peek(); next.Type != lexer.TOKEN_EOF {
+			return nil, &ParseError{
+				Msg:  fmt.Sprintf("interpolation slot must be a single expression, got extra %s (%q)", next.Type, describeLexeme(next.Lexeme)),
+				File: next.File, Line: next.Line, Col: next.Col,
+			}
+		}
+		node.Parts = append(node.Parts, InterpPart{Expr: expr})
+	}
+	return node, nil
+}
+
 func (p *parser) parsePrimaryAtom() (Expr, error) {
 	// A seeded primary (from parseExprFrom) is returned once, consuming no
 	// tokens; parsePrimary's postfix loop then continues any further chain.
@@ -2336,6 +2372,9 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 	case lexer.TOKEN_STRING:
 		p.advance()
 		return &StringLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: t.Lexeme}, nil
+	case lexer.TOKEN_STRING_INTERP:
+		p.advance()
+		return p.buildInterpString(t)
 	case lexer.TOKEN_TRUE:
 		p.advance()
 		return &BoolLit{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Value: true}, nil

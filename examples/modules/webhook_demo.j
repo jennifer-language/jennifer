@@ -12,7 +12,7 @@ use io;
 import "../../modules/webhook.j" as webhook;
 
 def secret as string init "topsecret";
-def payload as string init "{\"event\":\"push\",\"ref\":\"main\"}";
+def payload as string init '{"event":"push","ref":"main"}';
 
 # The sender computes the signature and sends it in the X-Hub-Signature-256 header.
 def sig as string init webhook.sign($payload, $secret);
@@ -22,7 +22,7 @@ io.printf("X-Hub-Signature-256: %s\n", $sig);
 io.printf("valid delivery:      %t\n", webhook.verify($payload, $sig, $secret));
 io.printf(
     "tampered payload:    %t\n",
-    webhook.verify("{\"event\":\"push\",\"ref\":\"evil\"}", $sig, $secret));
+    webhook.verify('{"event":"push","ref":"evil"}', $sig, $secret));
 io.printf("wrong secret:        %t\n", webhook.verify($payload, $sig, "guessed"));
 
 # To actually deliver it (needs the default `jennifer` binary, over `http`):

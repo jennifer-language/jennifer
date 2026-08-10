@@ -87,14 +87,29 @@ function value), `channel of T` (a CSP channel between goroutines).
   separators in the mantissa only. Overflow (`1e400`) is an error, not `Infinity`;
   underflow (`1e-400`) rounds to `0.0` (a finite value; only the non-finite is banned).
 - **string** literals: two delimiters, one job each. `"..."` is **cooked** -
-  escape sequences `\n \r \t \\ \" \' \0`, plus Unicode `\uXXXX` (exactly 4 hex,
-  the BMP) and `\UXXXXXXXX` (exactly 8 hex, any plane, e.g. `\U0001F600`), are
+  escape sequences `\n \r \t \\ \" \' \0 \{ \}`, plus Unicode `\uXXXX` (exactly 4
+  hex, the BMP) and `\UXXXXXXXX` (exactly 8 hex, any plane, e.g. `\U0001F600`), are
   processed; a surrogate, an out-of-range code point, or the wrong digit count is
-  a lex error. `'...'` is **raw** - no
-  escape processing at all: every byte to the next `'` is literal (backslashes and
-  newlines included), so `'\d+\.\d+'` is an 8-char string and a multi-line block is
+  a lex error. A cooked string also **interpolates**: an unescaped `{expr}` is a
+  slot (see below). `'...'` is **raw** - no
+  escape processing at all and no interpolation: every byte to the next `'` is
+  literal (backslashes, braces, and newlines included), so `'\d+\.\d+'` is an
+  8-char string, `'{"port": 8080}'` is literal JSON, and a multi-line block is
   just a `'...'` that spans newlines. To put a `'` inside a string, use the cooked
   form: `"it's"`. There is no `r"..."` prefix.
+- **string interpolation**: inside a cooked `"..."` string, each unescaped
+  `{expr}` is a slot - one Jennifer **expression** evaluated in the current scope
+  and stringified in place (the `convert.toString` form; no `use convert` needed).
+  `"total: {$sum}, next {$n + 1}, up {strings.upper($s)}"`. A slot holds a single
+  expression (a variable, constant, field / index access, arithmetic, a call), not
+  a statement - a `;`, `def`, `if`, or assignment in a slot is a parse error, and
+  an empty `{}` is an error. Write a literal brace as `\{` / `\}`; a bare unescaped
+  `}` is a lex error. A **raw** `'...'` string never interpolates (it is the "no
+  interpolation" form). No `f"..."` prefix - the cooked / raw split is the opt-in.
+  Style: keep slots to variables, field / index access, and arithmetic; a
+  side-effecting or expensive **call** in a slot is flagged by `lint` (L204) -
+  compute it into a variable first. `undefined` variables in a slot are caught at
+  parse time, exactly like any other reference.
 - **bool**: `true`, `false`. **null**: `null`.
 - **bytes** has no literal: build with `convert.bytesFromString(s, "utf-8")`
   or append into `def b as bytes;` with `$b[] = 65;`.

@@ -19,22 +19,22 @@ def source as string init "/**
 
 /**
  * Distance between two points.
- * @param ax {float} first x
- * @param ay {float} first y
- * @param bx {float} second x
- * @param by {float} second y
- * @return {float} the Euclidean distance
+ * @param ax \{float\} first x
+ * @param ay \{float\} first y
+ * @param bx \{float\} second x
+ * @param by \{float\} second y
+ * @return \{float\} the Euclidean distance
  */
-export func distance(ax as float, ay as float, bx as float, by as float) {
+export func distance(ax as float, ay as float, bx as float, by as float) \{
     return 0.0;
-}
+\}
 
 /**
  * A point in the plane.
- * @field x {float} the x coordinate
- * @field y {float} the y coordinate
+ * @field x \{float\} the x coordinate
+ * @field y \{float\} the y coordinate
  */
-export def struct Point { x as float, y as float };
+export def struct Point \{ x as float, y as float \};
 
 /**
  * Ratio of a circle's circumference to its diameter.
@@ -44,11 +44,11 @@ def const PI as float init 3.14159;
 
 /**
  * Drifted docs: names a parameter that is not there.
- * @param typo {float} oops
+ * @param typo \{float\} oops
  */
-func drifted(real as float) {
+func drifted(real as float) \{
     return;
-}
+\}
 ";
 
 def doc as docblock.FileDoc init docblock.parse($source);

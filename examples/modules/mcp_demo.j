@@ -66,21 +66,21 @@ $srv = mcp.addPrompt(
 io.printf("MCP server side (mcp.handle):\n\n");
 
 io.printf("initialize    -> %s\n\n",
-    mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{},\"id\":1}"));
+    mcp.handle($srv, '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'));
 
 io.printf("tools/list    -> %s\n\n",
-    mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":2}"));
+    mcp.handle($srv, '{"jsonrpc":"2.0","method":"tools/list","id":2}'));
 
 io.printf("tools/call    -> %s\n\n",
-    mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"add\",\"arguments\":{\"a\":2,\"b\":3}},\"id\":3}"));
+    mcp.handle($srv, '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}},"id":3}'));
 
 io.printf("resources/read-> %s\n\n",
-    mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"resources/read\",\"params\":{\"uri\":\"file:///readme\"},\"id\":4}"));
+    mcp.handle($srv, '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":"file:///readme"},"id":4}'));
 
 io.printf("prompts/get   -> %s\n\n",
-    mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"prompts/get\",\"params\":{\"name\":\"greet\",\"arguments\":{\"who\":\"Ada\"}},\"id\":5}"));
+    mcp.handle($srv, '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":"greet","arguments":{"who":"Ada"}},"id":5}'));
 
 io.printf("unknown method-> %s\n\n",
-    mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"bogus\",\"id\":6}"));
+    mcp.handle($srv, '{"jsonrpc":"2.0","method":"bogus","id":6}'));
 
 io.printf("notification  -> (no reply owed; handle returned an empty string)\n");

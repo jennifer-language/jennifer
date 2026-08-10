@@ -44,10 +44,10 @@ func testRenderJson() {
     def lg as Logger init new("info", "json");
     testing.assertEqual(
         render($lg, "error", "boom", none(), fixed()),
-        "{\"time\":\"2026-01-02T03:04:05Z\",\"level\":\"error\",\"msg\":\"boom\"}");
+        '{"time":"2026-01-02T03:04:05Z","level":"error","msg":"boom"}');
     testing.assertEqual(
         render($lg, "info", "hi", fields(), fixed()),
-        "{\"time\":\"2026-01-02T03:04:05Z\",\"level\":\"info\",\"msg\":\"hi\",\"user\":\"ada\",\"id\":\"42\"}");
+        '{"time":"2026-01-02T03:04:05Z","level":"info","msg":"hi","user":"ada","id":"42"}');
 }
 
 func testQuoteIfNeeded() {

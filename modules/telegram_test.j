@@ -20,7 +20,7 @@ func testFormEncode() {
 }
 
 func testCheckResponseThrowsOnError() {
-    def node as json.Value init json.decode("{\"ok\":false,\"error_code\":401,\"description\":\"Unauthorized\"}");
+    def node as json.Value init json.decode('{"ok":false,"error_code":401,"description":"Unauthorized"}');
     def threw as bool init false;
     try {
         checkResponse($node);
@@ -32,12 +32,12 @@ func testCheckResponseThrowsOnError() {
 }
 
 func testCheckResponseOkPasses() {
-    checkResponse(json.decode("{\"ok\":true,\"result\":{}}"));
+    checkResponse(json.decode('{"ok":true,"result":{}}'));
     testing.assertTrue(true);
 }
 
 func testParseMessage() {
-    def node as json.Value init json.decode("{\"result\":{\"message_id\":42,\"chat\":{\"id\":-1001,\"type\":\"group\"},\"date\":1700000000,\"text\":\"hello\"}}");
+    def node as json.Value init json.decode('{"result":{"message_id":42,"chat":{"id":-1001,"type":"group"},"date":1700000000,"text":"hello"}}');
     def m as Message init parseMessage($node, "/result");
     testing.assertEqual($m.messageId, 42);
     testing.assertEqual($m.chatId, -1001);
@@ -46,7 +46,7 @@ func testParseMessage() {
 }
 
 func testParseUser() {
-    def node as json.Value init json.decode("{\"result\":{\"id\":777,\"is_bot\":true,\"first_name\":\"Botty\",\"username\":\"botty_bot\"}}");
+    def node as json.Value init json.decode('{"result":{"id":777,"is_bot":true,"first_name":"Botty","username":"botty_bot"}}');
     def u as User init parseUser($node, "/result");
     testing.assertEqual($u.id, 777);
     testing.assertTrue($u.isBot);
@@ -55,9 +55,9 @@ func testParseUser() {
 }
 
 func testParseUpdates() {
-    def body as string init "{\"ok\":true,\"result\":[" +
-        "{\"update_id\":100,\"message\":{\"message_id\":1,\"chat\":{\"id\":5},\"date\":1,\"text\":\"first\"}}," +
-        "{\"update_id\":101,\"edited_message\":{\"message_id\":2}}]}";
+    def body as string init '{"ok":true,"result":[' +
+        '{"update_id":100,"message":{"message_id":1,"chat":{"id":5},"date":1,"text":"first"}},' +
+        '{"update_id":101,"edited_message":{"message_id":2}}]}';
     def us as list of Update init parseUpdates(json.decode($body));
     testing.assertEqual(len($us), 2);
     testing.assertEqual($us[0].updateId, 100);
@@ -68,7 +68,7 @@ func testParseUpdates() {
 }
 
 func testParseUpdatesEmpty() {
-    def us as list of Update init parseUpdates(json.decode("{\"ok\":true,\"result\":[]}"));
+    def us as list of Update init parseUpdates(json.decode('{"ok":true,"result":[]}'));
     testing.assertEqual(len($us), 0);
 }
 
@@ -79,22 +79,22 @@ func testRenderInlineKeyboard() {
     ];
     testing.assertEqual(
         renderInlineKeyboard($rows),
-        "{\"inline_keyboard\":[[{\"text\":\"Open\",\"url\":\"https://example.org\"}," +
-            "{\"text\":\"Ping\",\"callback_data\":\"ping\"}]," +
-            "[{\"text\":\"Close\",\"callback_data\":\"close\"}]]}");
+        '{"inline_keyboard":[[{"text":"Open","url":"https://example.org"},' +
+            '{"text":"Ping","callback_data":"ping"}],' +
+            '[{"text":"Close","callback_data":"close"}]]}');
 }
 
 func testRenderInlineKeyboardEmpty() {
     def rows as list of list of Button init [];
-    testing.assertEqual(renderInlineKeyboard($rows), "{\"inline_keyboard\":[]}");
+    testing.assertEqual(renderInlineKeyboard($rows), '{"inline_keyboard":[]}');
 }
 
 func testParseCallbackQuery() {
-    def body as string init "{\"update_id\":200,\"callback_query\":{" +
+    def body as string init '{"update_id":200,"callback_query":{' +
         "\"id\":\"cbq-99\"," +
-        "\"from\":{\"id\":42,\"is_bot\":false,\"first_name\":\"Ada\",\"username\":\"ada\"}," +
-        "\"message\":{\"message_id\":7,\"chat\":{\"id\":5},\"date\":1,\"text\":\"pick\"}," +
-        "\"data\":\"ping\"}}";
+        '"from":{"id":42,"is_bot":false,"first_name":"Ada","username":"ada"},' +
+        '"message":{"message_id":7,"chat":{"id":5},"date":1,"text":"pick"},' +
+        '"data":"ping"}}';
     def cq as CallbackQuery init parseCallbackQuery(json.decode($body));
     testing.assertEqual($cq.id, "cbq-99");
     testing.assertEqual($cq.data, "ping");
@@ -104,7 +104,7 @@ func testParseCallbackQuery() {
 }
 
 func testParseCallbackQueryAbsent() {
-    def cq as CallbackQuery init parseCallbackQuery(json.decode("{\"update_id\":201}"));
+    def cq as CallbackQuery init parseCallbackQuery(json.decode('{"update_id":201}'));
     testing.assertEqual($cq.id, "");
     testing.assertEqual($cq.data, "");
     testing.assertEqual($cq.messageId, 0);

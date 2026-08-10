@@ -31,7 +31,7 @@ func colorForToken(t lexer.TokenType) string {
 	case lexer.TOKEN_INT, lexer.TOKEN_FLOAT,
 		lexer.TOKEN_TRUE, lexer.TOKEN_FALSE, lexer.TOKEN_NULL:
 		return sgrNumber
-	case lexer.TOKEN_STRING:
+	case lexer.TOKEN_STRING, lexer.TOKEN_STRING_INTERP:
 		return sgrString
 	case lexer.TOKEN_VARREF:
 		return sgrVar

@@ -79,7 +79,7 @@ func testEscapeHelpers() {
 }
 
 func testCellString() {
-    def n as json.Value init json.decode("{\"s\":\"txt\",\"i\":42,\"f\":3.5,\"b\":true,\"z\":null}");
+    def n as json.Value init json.decode('{"s":"txt","i":42,"f":3.5,"b":true,"z":null}');
     testing.assertEqual(cellString($n, "/s"), "txt");
     testing.assertEqual(cellString($n, "/i"), "42");
     testing.assertEqual(cellString($n, "/f"), "3.5");
@@ -88,7 +88,7 @@ func testCellString() {
 }
 
 func testParseQuery() {
-    def body as string init "{\"results\":[{\"statement_id\":0,\"series\":[{\"name\":\"cpu\",\"tags\":{\"host\":\"a\"},\"columns\":[\"time\",\"value\"],\"values\":[[\"2021-01-01T00:00:00Z\",0.5],[\"2021-01-01T00:01:00Z\",0.7]]}]}]}";
+    def body as string init '{"results":[{"statement_id":0,"series":[{"name":"cpu","tags":{"host":"a"},"columns":["time","value"],"values":[["2021-01-01T00:00:00Z",0.5],["2021-01-01T00:01:00Z",0.7]]}]}]}';
     def r as Result init parseQuery(json.decode($body));
     testing.assertEqual(len($r.series), 1);
     testing.assertEqual($r.series[0].name, "cpu");
@@ -101,7 +101,7 @@ func testParseQuery() {
 }
 
 func testParseQueryError() {
-    def body as string init "{\"results\":[{\"statement_id\":0,\"error\":\"database not found: nope\"}]}";
+    def body as string init '{"results":[{"statement_id":0,"error":"database not found: nope"}]}';
     def threw as bool init false;
     try {
         parseQuery(json.decode($body));
@@ -114,7 +114,7 @@ func testParseQueryError() {
 
 func testParseQueryEmpty() {
     # a statement with no series (e.g. a write-style statement) yields no series
-    def r as Result init parseQuery(json.decode("{\"results\":[{\"statement_id\":0}]}"));
+    def r as Result init parseQuery(json.decode('{"results":[{"statement_id":0}]}'));
     testing.assertEqual(len($r.series), 0);
 }
 

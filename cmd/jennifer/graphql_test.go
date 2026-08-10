@@ -40,14 +40,14 @@ func serve(srv as httpd.Server) {
                 httpd.respond($req, 500, "upstream exploded");
             } elseif (strings.contains($body, "\"operationName\":\"PickB\"")) {
                 # Confirms the operationName field reached the wire.
-                httpd.respond($req, 200, "{\"data\":{\"picked\":\"B\"}}");
+                httpd.respond($req, 200, '{"data":{"picked":"B"}}');
             } elseif (strings.contains($body, "structErr")) {
                 # A structured error: partial data + an errors entry with extensions.code.
-                httpd.respond($req, 200, "{\"data\":{\"x\":null},\"errors\":[{\"message\":\"denied\",\"extensions\":{\"code\":\"FORBIDDEN\"}}]}");
+                httpd.respond($req, 200, '{"data":{"x":null},"errors":[{"message":"denied","extensions":{"code":"FORBIDDEN"}}]}');
             } elseif (strings.contains($body, "causeErr")) {
-                httpd.respond($req, 200, "{\"errors\":[{\"message\":\"field x failed\"},{\"message\":\"and y\"}]}");
+                httpd.respond($req, 200, '{"errors":[{"message":"field x failed"},{"message":"and y"}]}');
             } else {
-                httpd.respond($req, 200, "{\"data\":{\"hello\":\"world\"}}");
+                httpd.respond($req, 200, '{"data":{"hello":"world"}}');
             }
         } catch (acceptErr) {
             return;
@@ -62,7 +62,7 @@ def server as task of null init spawn { serve($srv); };
 def c as graphql.Client init graphql.header(graphql.client("http://" + $addr), "X-Client", "jennifer");
 
 # 1. Success: the full response comes back, data is under /data.
-def ok as json.Value init graphql.query($c, "{ hello }", json.map());
+def ok as json.Value init graphql.query($c, '{ hello }', json.map());
 testing.assertEqual(json.asString($ok, "/data/hello"), "world");
 
 # 2. GraphQL errors (HTTP 200 + errors array) -> a graphql error with the joined
@@ -91,7 +91,7 @@ testing.assertTrue($gotHttpErr);
 
 # 4. queryNamed sends operationName - the stub only returns picked=B when it saw
 #    "operationName":"PickB" on the wire.
-def named as json.Value init graphql.queryNamed($c, "query A { a } query B { b }", json.map(), "PickB");
+def named as json.Value init graphql.queryNamed($c, 'query A { a } query B { b }', json.map(), "PickB");
 testing.assertEqual(json.asString($named, "/data/picked"), "B");
 
 # 5. tryQuery does NOT raise on GraphQL errors - it returns the envelope so the

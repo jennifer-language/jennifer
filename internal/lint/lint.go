@@ -106,6 +106,7 @@ func init() {
 		{id: "L201", desc: "method-too-long: method body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},
 		{id: "L203", desc: "line-too-long: a source line exceeds the column limit", severity: SeverityInfo, selectable: true, run: checkLineTooLong},
+		{id: "L204", desc: "interpolation-slot-too-complex: a call or other non-trivial expression inside a `{expr}` string slot", severity: SeverityInfo, selectable: true, run: checkInterpSlotComplexity},
 		// L3nn - API lifecycle.
 		{id: "L301", desc: "deprecation: use of a still-supported but retiring API (populated as features are deprecated)", severity: SeverityWarning, selectable: true, run: nil},
 		{id: "L302", desc: "removed-api: use of an API that has been removed", severity: SeverityWarning, selectable: true, run: checkRemovedApi},

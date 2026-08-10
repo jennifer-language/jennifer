@@ -52,7 +52,7 @@ use json;
 use fs;
 import %q as jwt;
 
-def claims as json.Value init json.decode("{\"sub\":\"ada\",\"scope\":\"read write\"}");
+def claims as json.Value init json.decode('{"sub":"ada","scope":"read write"}');
 
 # RS256: sign with the RSA private key, verify with the public key.
 def rpriv as bytes init fs.readBytes(%q);

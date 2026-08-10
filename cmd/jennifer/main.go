@@ -512,11 +512,57 @@ func printErrorContextTo(w io.Writer, src, mainFile string, err error) {
 	if line < 1 || line > len(lines) {
 		return
 	}
-	srcLine := lines[line-1]
+	srcLine, caretCol := clipToWindow(lines[line-1], col)
 	fmt.Fprintf(w, "  %s\n", srcLine)
 	if col > 0 {
-		fmt.Fprintf(w, "  %s^\n", caretIndent(srcLine, col))
+		fmt.Fprintf(w, "  %s^\n", caretIndent(srcLine, caretCol))
 	}
+}
+
+// caretWindow is the number of runes of source context shown on either side of the
+// error column when the offending line is very long. String interpolation makes a
+// single line arbitrarily long easy to write (a one-line string of many `{expr}`
+// slots is hundreds of KB on one line), so an unclipped context can dwarf the error
+// message. 120 either side keeps a screenful of relevant context.
+const caretWindow = 120
+
+// clipToWindow returns the source line and caret column unchanged when the line is
+// short, or a `...`-marked window of caretWindow runes either side of the 1-based
+// error column when it is very long, with the caret column adjusted to point into
+// that window. Rune-based (col is rune-counted, like the lexer), so it never splits
+// a multi-byte character. Only pathologically long lines are clipped; ordinary long
+// lines print in full.
+func clipToWindow(srcLine string, col int) (string, int) {
+	runes := []rune(srcLine)
+	if len(runes) <= 2*caretWindow {
+		return srcLine, col
+	}
+	errIdx := col - 1
+	if errIdx < 0 {
+		errIdx = 0
+	}
+	if errIdx > len(runes) {
+		errIdx = len(runes)
+	}
+	start := errIdx - caretWindow
+	if start < 0 {
+		start = 0
+	}
+	end := errIdx + caretWindow + 1
+	if end > len(runes) {
+		end = len(runes)
+	}
+	var b strings.Builder
+	prefix := 0
+	if start > 0 {
+		b.WriteString("...")
+		prefix = 3
+	}
+	b.WriteString(string(runes[start:end]))
+	if end < len(runes) {
+		b.WriteString("...")
+	}
+	return b.String(), prefix + (errIdx - start) + 1
 }
 
 // caretIndent builds the indent string that places a caret under column `col`

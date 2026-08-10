@@ -19,7 +19,7 @@ def sample as string init "# service config\n" +
     "export NAME=\"ada lovelace\"\n" +
     "GREETING='hi # not a comment'\n" +
     "DEBUG=true            # inline comment\n" +
-    "URL=\"http://localhost:${PORT}/api\"\n" + # ${PORT} interpolates the earlier key
+    "URL=\"http://localhost:$\{PORT\}/api\"\n" + # ${PORT} interpolates the earlier key
 "BANNER=\"line one\nline two\"\n"; # a multi-line double-quoted value
 
 def cfg as map of string to string init dotenv.parse($sample);

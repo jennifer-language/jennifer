@@ -131,6 +131,10 @@ func (w walker) doExpr(e parser.Expr) {
 		for _, el := range n.Elements {
 			w.doExpr(el)
 		}
+	case *parser.InterpStringExpr:
+		for i := range n.Parts {
+			w.doExpr(n.Parts[i].Expr)
+		}
 	case *parser.MapLit:
 		for i := range n.Keys {
 			w.doExpr(n.Keys[i])

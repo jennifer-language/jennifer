@@ -15,9 +15,9 @@ import "../../modules/jsonl.j" as jsonl;
 
 # Build a few records as json.Values (any top-level JSON type is a valid line).
 def rows as list of json.Value init [];
-$rows[] = json.decode("{\"event\": \"login\", \"user\": \"ada\"}");
-$rows[] = json.decode("{\"event\": \"click\", \"user\": \"ada\", \"x\": 42}");
-$rows[] = json.decode("{\"event\": \"logout\", \"user\": \"ada\"}");
+$rows[] = json.decode('{"event": "login", "user": "ada"}');
+$rows[] = json.decode('{"event": "click", "user": "ada", "x": 42}');
+$rows[] = json.decode('{"event": "logout", "user": "ada"}');
 
 def text as string init jsonl.encode($rows);
 io.printf("=== JSONL ===\n%s\n", $text);
@@ -34,7 +34,7 @@ def path as string init os.tempDir() + "/jsonl_demo.jsonl";
 jsonl.writeFile($path, $rows);
 jsonl.appendFile(
     $path,
-    [json.decode("{\"event\": \"purchase\", \"user\": \"ada\", \"amount\": 9}")]);
+    [json.decode('{"event": "purchase", "user": "ada", "amount": 9}')]);
 
 io.printf("=== streaming %s ===\n", $path);
 def reader as jsonl.Reader init jsonl.openReader($path);

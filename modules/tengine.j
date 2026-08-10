@@ -164,7 +164,7 @@ export func add(set as Set, name as string, src as string) {
     def residual as string init "";
     def rest as string init trimMarkers($src);
     while (true) {
-        def i as int init strings.indexOf($rest, "{{");
+        def i as int init strings.indexOf($rest, '{{');
         if ($i < 0) {
             $residual = $residual + $rest;
             break;
@@ -190,7 +190,7 @@ export func add(set as Set, name as string, src as string) {
             $s = addRaw($s, $na.name, $bp.thenPart);
             $rest = $bp.remainder;
         } else {
-            $residual = $residual + $pre + "{{" + $action + "}}";
+            $residual = $residual + $pre + '{{' + $action + '}}';
             $rest = $tail;
         }
     }
@@ -247,7 +247,7 @@ func exec(
     def rest as string init $src;
     def env as map of string to json.Value init $vars;
     while (true) {
-        def i as int init strings.indexOf($rest, "{{");
+        def i as int init strings.indexOf($rest, '{{');
         if ($i < 0) {
             $parts[] = $rest;
             break;
@@ -438,11 +438,11 @@ func takeBlock(src as string) {
     def elsePart as string init "";
     def rest as string init $src;
     while (true) {
-        def i as int init strings.indexOf($rest, "{{");
+        def i as int init strings.indexOf($rest, '{{');
         if ($i < 0) {
             throw Error{
                 kind: "tengine",
-                message: "tengine: missing {{ end }}",
+                message: 'tengine: missing {{ end }}',
                 file: "",
                 line: 0,
                 col: 0
@@ -468,7 +468,7 @@ func takeBlock(src as string) {
         def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
         def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
         def fw as string init firstWord($action);
-        def literal as string init "{{" + $action + "}}";
+        def literal as string init '{{' + $action + '}}';
         if ($fw == "if" or $fw == "range" or $fw == "with" or $fw == "block" or $fw == "define") {
             $depth = $depth + 1;
             if ($inElse) {
@@ -511,7 +511,7 @@ func repeatEnds(s as string, n as int) {
     def out as string init $s;
     def k as int init 0;
     while ($k < $n) {
-        $out = $out + "{{end}}";
+        $out = $out + '{{end}}';
         $k = $k + 1;
     }
     return $out;
@@ -526,15 +526,15 @@ func handleElse(action as string, inElse as bool, opened as int, elsePart as str
         if ($opened == 0 and not $inElse) {
             return ElseState{inElse: true, opened: $opened, elsePart: $elsePart};
         }
-        return ElseState{inElse: $inElse, opened: $opened, elsePart: $elsePart + "{{else}}"};
+        return ElseState{inElse: $inElse, opened: $opened, elsePart: $elsePart + '{{else}}'};
     }
     if ($opened == 0 and not $inElse) {
-        return ElseState{inElse: true, opened: 1, elsePart: $elsePart + "{{" + $cond + "}}"};
+        return ElseState{inElse: true, opened: 1, elsePart: $elsePart + '{{' + $cond + '}}'};
     }
     return ElseState{
         inElse: $inElse,
         opened: $opened + 1,
-        elsePart: $elsePart + "{{else}}{{" + $cond + "}}"
+        elsePart: $elsePart + '{{else}}{{' + $cond + '}}'
     };
 }
 
@@ -628,7 +628,7 @@ func closeActionIndex(s as string) {
                 while ($j < $n and ($cs[$j] == " " or $cs[$j] == "\t" or $cs[$j] == "-")) {
                     $j = $j + 1;
                 }
-                if ($j + 1 < $n and $cs[$j] == "}" and $cs[$j + 1] == "}") {
+                if ($j + 1 < $n and $cs[$j] == '}' and $cs[$j + 1] == '}') {
                     return $j;
                 }
             }
@@ -649,7 +649,7 @@ func closeActionIndex(s as string) {
         } elseif ($c == "\"" or $c == "'") {
             $quote = $c;
             $i = $i + 1;
-        } elseif ($c == "}" and $i + 1 < $n and $cs[$i + 1] == "}") {
+        } elseif ($c == '}' and $i + 1 < $n and $cs[$i + 1] == '}') {
             return $i;
         } else {
             $i = $i + 1;
@@ -1397,7 +1397,7 @@ func trimMarkers(src as string) {
     def out as string init "";
     def rest as string init $src;
     while (true) {
-        def i as int init strings.indexOf($rest, "{{");
+        def i as int init strings.indexOf($rest, '{{');
         if ($i < 0) {
             return $out + $rest;
         }
@@ -1427,7 +1427,7 @@ func trimMarkers(src as string) {
         if ($trimLeft) {
             $pre = strings.trimRight($pre);
         }
-        $out = $out + $pre + "{{" + $clean + "}}";
+        $out = $out + $pre + '{{' + $clean + '}}';
         if ($trimRight) {
             $tail = strings.trimLeft($tail);
         }

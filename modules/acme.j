@@ -219,20 +219,20 @@ func signInput(client as Client, input as bytes) {
 # otherwise the account `kid` is used. Returns the http.Response.
 func jws(client as Client, url as string, payload as string, useJwk as bool) {
     def nonce as string init fetchNonce($client);
-    def protected as string init "{\"alg\":\"" + $client.alg + "\",\"nonce\":\"" + jsonEsc($nonce) +
+    def protected as string init '{"alg":"' + $client.alg + "\",\"nonce\":\"" + jsonEsc($nonce) +
         "\",\"url\":\"" + jsonEsc($url) + "\"";
     if ($useJwk) {
         $protected = $protected + ",\"jwk\":" + crypto.jwkPublic($client.accountKey);
     } else {
         $protected = $protected + ",\"kid\":\"" + jsonEsc($client.kid) + "\"";
     }
-    $protected = $protected + "}";
+    $protected = $protected + '}';
     def head as string init encodeSeg(convert.bytesFromString($protected, "utf-8"));
     def body as string init encodeSeg(convert.bytesFromString($payload, "utf-8"));
     def signingInput as string init $head + "." + $body;
     def sig as bytes init signInput($client, convert.bytesFromString($signingInput, "utf-8"));
-    def jwsBody as string init "{\"protected\":\"" + $head + "\",\"payload\":\"" + $body +
-        "\",\"signature\":\"" + encodeSeg($sig) + "\"}";
+    def jwsBody as string init '{"protected":"' + $head + "\",\"payload\":\"" + $body +
+        "\",\"signature\":\"" + encodeSeg($sig) + '"}';
     return http.post($url, "application/jose+json", $jwsBody, {});
 }
 
@@ -325,11 +325,11 @@ export func connect(directoryUrl as string, accountKey as bytes) {
  * @throws {Error} on a registration error
  */
 export func register(client as Client, email as string) {
-    def payload as string init "{\"termsOfServiceAgreed\":true";
+    def payload as string init '{"termsOfServiceAgreed":true';
     if (len($email) > 0) {
         $payload = $payload + ",\"contact\":[\"mailto:" + jsonEsc($email) + "\"]";
     }
-    $payload = $payload + "}";
+    $payload = $payload + '}';
     def resp as http.Response init jwsOk($client, $client.newAccount, $payload, true);
     def kid as string init http.header($resp, "Location");
     if (len($kid) == 0) {
@@ -383,9 +383,9 @@ export func order(client as Client, domains as list of string) {
         if ($i > 0) {
             $ids = $ids + ",";
         }
-        $ids = $ids + "{\"type\":\"dns\",\"value\":\"" + jsonEsc($domains[$i]) + "\"}";
+        $ids = $ids + '{"type":"dns","value":"' + jsonEsc($domains[$i]) + '"}';
     }
-    def payload as string init "{\"identifiers\":[" + $ids + "]}";
+    def payload as string init '{"identifiers":[' + $ids + ']}';
     def resp as http.Response init jwsOk($client, $client.newOrder, $payload, false);
     def url as string init http.header($resp, "Location");
     return parseOrder($url, $resp);
@@ -495,7 +495,7 @@ export func dnsRecord(client as Client, token as string) {
  * @throws {Error} on an accept error
  */
 export func accept(client as Client, challengeUrl as string) {
-    jwsOk($client, $challengeUrl, "{}", false);
+    jwsOk($client, $challengeUrl, '{}', false);
     return;
 }
 
@@ -549,7 +549,7 @@ export func finalize(
     csrDer as bytes,
     intervalMs as int,
     maxTries as int) {
-    def payload as string init "{\"csr\":\"" + encodeSeg($csrDer) + "\"}";
+    def payload as string init '{"csr":"' + encodeSeg($csrDer) + '"}';
     jwsOk($client, $order.finalize, $payload, false);
     for (def i as int init 0; $i < $maxTries; $i = $i + 1) {
         def o as Order init fetchOrder($client, $order.url);

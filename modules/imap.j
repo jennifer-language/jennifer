@@ -107,7 +107,7 @@ func isTagged(line as string, tag as string) {
 # literalLength returns N when a line ends with an IMAP literal marker `{N}`,
 # else -1.
 func literalLength(line as string) {
-    def m as regex.Match init regex.find("\\{([0-9]+)\\}$", $line);
+    def m as regex.Match init regex.find('\{([0-9]+)\}$', $line);
     if ($m.start < 0) {
         return -1;
     }
@@ -117,7 +117,7 @@ func literalLength(line as string) {
 # extractLiteral returns the first `{N}`-introduced literal's content from a
 # FETCH response (the message body), or "".
 func extractLiteral(response as string) {
-    def m as regex.Match init regex.find("\\{([0-9]+)\\}\r\n", $response);
+    def m as regex.Match init regex.find("\\\{([0-9]+)\\\}\r\n", $response);
     if ($m.start < 0) {
         return "";
     }
@@ -1132,8 +1132,8 @@ export func move(session as Session, uid as int, folder as string) {
 # own CR/LF are data, not a command boundary).
 func appendLiteral(session as Session, folder as string, flagsPart as string, message as string) {
     def raw as bytes init convert.bytesFromString($message, "utf-8");
-    def head as string init TAG + " APPEND " + quoteArg($folder) + $flagsPart + " {" +
-        convert.toString(len($raw)) + "}";
+    def head as string init TAG + " APPEND " + quoteArg($folder) + $flagsPart + ' {' +
+        convert.toString(len($raw)) + '}';
     rejectControl($head, "APPEND command");
     writeLine($session.conn, $head);
     def cont as string init readLine($session.conn);

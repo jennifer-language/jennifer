@@ -268,11 +268,25 @@ shiftExpr   = addExpr { ("<<" | ">>") addExpr } ;
 addExpr     = mulExpr { ("+" | "-") mulExpr } ;
 mulExpr     = unaryExpr { ("*" | "/" | "//" | "%") unaryExpr } ;
 unaryExpr   = ("-" | "~") unaryExpr | primary ;
-primary     = ( INT | FLOAT | STRING | "true" | "false" | "null"
+primary     = ( INT | FLOAT | STRING | interpString | "true" | "false" | "null"
               | VARREF | qualifiedCall | qualifiedConstRef | taskCall
               | call | structLit | constRef | "(" expr ")"
               | listLit | mapLit | lenExpr | spawnExpr )
               { "[" ( expr | sliceTail ) "]" | "." wordName | callArgs } ;
+
+interpString = STRING_INTERP ;         (* a cooked "..." string carrying one or
+                                          more `{expr}` interpolation slots. The
+                                          lexer emits it as one TOKEN_STRING_INTERP
+                                          whose Parts alternate literal chunks and
+                                          expression-source slots; the parser
+                                          sub-parses each slot to a single `expr`
+                                          and builds an InterpStringExpr (lowered
+                                          to concat + convert.toString). A slot is
+                                          one expr, not a statement; `\{`/`\}` are
+                                          literal braces; a bare `}` is a lex
+                                          error; a raw '...' string never
+                                          interpolates. STRING is a cooked or raw
+                                          literal with no slots. *)
                                        (* any primary can be index-,
                                           slice-, field-, or call-chained. A
                                           `[...]` holds either an index `expr`

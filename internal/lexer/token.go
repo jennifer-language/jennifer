@@ -14,9 +14,10 @@ const (
 	// Literals
 	TOKEN_INT
 	TOKEN_FLOAT
-	TOKEN_STRING
-	TOKEN_IDENT  // method names like app, printf, stdlib
-	TOKEN_VARREF // $name
+	TOKEN_STRING        // a plain string literal (no interpolation); Lexeme = decoded value
+	TOKEN_STRING_INTERP // a cooked string with one or more `{expr}` slots; Parts carries the pieces
+	TOKEN_IDENT         // method names like app, printf, stdlib
+	TOKEN_VARREF        // $name
 
 	// Keywords
 	TOKEN_DEFINE // `def` keyword; introduces a variable or constant
@@ -122,91 +123,92 @@ const (
 )
 
 var tokenNames = map[TokenType]string{
-	TOKEN_EOF:         "EOF",
-	TOKEN_ILLEGAL:     "ILLEGAL",
-	TOKEN_INT:         "INT",
-	TOKEN_FLOAT:       "FLOAT",
-	TOKEN_STRING:      "STRING",
-	TOKEN_IDENT:       "IDENT",
-	TOKEN_VARREF:      "VARREF",
-	TOKEN_DEFINE:      "DEF",
-	TOKEN_FUNC:        "FUNC",
-	TOKEN_AS:          "AS",
-	TOKEN_INIT:        "INIT",
-	TOKEN_CONST:       "CONST",
-	TOKEN_INCLUDE:     "INCLUDE",
-	TOKEN_IMPORT:      "IMPORT",
-	TOKEN_USE:         "USE",
-	TOKEN_RETURN:      "RETURN",
-	TOKEN_IF:          "IF",
-	TOKEN_ELSEIF:      "ELSEIF",
-	TOKEN_ELSE:        "ELSE",
-	TOKEN_WHILE:       "WHILE",
-	TOKEN_FOR:         "FOR",
-	TOKEN_REPEAT:      "REPEAT",
-	TOKEN_UNTIL:       "UNTIL",
-	TOKEN_MATCH:       "MATCH",
-	TOKEN_WHEN:        "WHEN",
-	TOKEN_BREAK:       "BREAK",
-	TOKEN_CONTINUE:    "CONTINUE",
-	TOKEN_EXIT:        "EXIT",
-	TOKEN_TRY:         "TRY",
-	TOKEN_CATCH:       "CATCH",
-	TOKEN_THROW:       "THROW",
-	TOKEN_DEFER:       "DEFER",
-	TOKEN_ERRDEFER:    "ERRDEFER",
-	TOKEN_TRUE:        "TRUE",
-	TOKEN_FALSE:       "FALSE",
-	TOKEN_NULL:        "NULL",
-	TOKEN_AND:         "AND",
-	TOKEN_OR:          "OR",
-	TOKEN_NOT:         "NOT",
-	TOKEN_DIV:         "DIV",
-	TOKEN_INT_TYPE:    "INT_TYPE",
-	TOKEN_FLOAT_TYPE:  "FLOAT_TYPE",
-	TOKEN_BYTES_TYPE:  "BYTES_TYPE",
-	TOKEN_STRING_TYPE: "STRING_TYPE",
-	TOKEN_BOOL_TYPE:   "BOOL_TYPE",
-	TOKEN_LIST:        "LIST",
-	TOKEN_MAP:         "MAP",
-	TOKEN_OF:          "OF",
-	TOKEN_TO:          "TO",
-	TOKEN_IN:          "IN",
-	TOKEN_STRUCT:      "STRUCT",
-	TOKEN_ENUM:        "ENUM",
-	TOKEN_LEN:         "LEN",
-	TOKEN_TASK:        "TASK",
-	TOKEN_SPAWN:       "SPAWN",
-	TOKEN_EXPORT:      "EXPORT",
-	TOKEN_LBRACE:      "LBRACE",
-	TOKEN_RBRACE:      "RBRACE",
-	TOKEN_LPAREN:      "LPAREN",
-	TOKEN_RPAREN:      "RPAREN",
-	TOKEN_LBRACKET:    "LBRACKET",
-	TOKEN_RBRACKET:    "RBRACKET",
-	TOKEN_SEMI:        "SEMI",
-	TOKEN_COMMA:       "COMMA",
-	TOKEN_COLON:       "COLON",
-	TOKEN_ASSIGN:      "ASSIGN",
-	TOKEN_DOT:         "DOT",
-	TOKEN_DOTDOT:      "DOTDOT",
-	TOKEN_PLUS:        "PLUS",
-	TOKEN_MINUS:       "MINUS",
-	TOKEN_STAR:        "STAR",
-	TOKEN_SLASH:       "SLASH",
-	TOKEN_PERCENT:     "PERCENT",
-	TOKEN_LT:          "LT",
-	TOKEN_GT:          "GT",
-	TOKEN_LE:          "LE",
-	TOKEN_GE:          "GE",
-	TOKEN_EQ:          "EQ",
-	TOKEN_NEQ:         "NEQ",
-	TOKEN_BIT_AND:     "BIT_AND",
-	TOKEN_BIT_OR:      "BIT_OR",
-	TOKEN_BIT_XOR:     "BIT_XOR",
-	TOKEN_BIT_NOT:     "BIT_NOT",
-	TOKEN_SHL:         "SHL",
-	TOKEN_SHR:         "SHR",
+	TOKEN_EOF:           "EOF",
+	TOKEN_ILLEGAL:       "ILLEGAL",
+	TOKEN_INT:           "INT",
+	TOKEN_FLOAT:         "FLOAT",
+	TOKEN_STRING:        "STRING",
+	TOKEN_STRING_INTERP: "STRING_INTERP",
+	TOKEN_IDENT:         "IDENT",
+	TOKEN_VARREF:        "VARREF",
+	TOKEN_DEFINE:        "DEF",
+	TOKEN_FUNC:          "FUNC",
+	TOKEN_AS:            "AS",
+	TOKEN_INIT:          "INIT",
+	TOKEN_CONST:         "CONST",
+	TOKEN_INCLUDE:       "INCLUDE",
+	TOKEN_IMPORT:        "IMPORT",
+	TOKEN_USE:           "USE",
+	TOKEN_RETURN:        "RETURN",
+	TOKEN_IF:            "IF",
+	TOKEN_ELSEIF:        "ELSEIF",
+	TOKEN_ELSE:          "ELSE",
+	TOKEN_WHILE:         "WHILE",
+	TOKEN_FOR:           "FOR",
+	TOKEN_REPEAT:        "REPEAT",
+	TOKEN_UNTIL:         "UNTIL",
+	TOKEN_MATCH:         "MATCH",
+	TOKEN_WHEN:          "WHEN",
+	TOKEN_BREAK:         "BREAK",
+	TOKEN_CONTINUE:      "CONTINUE",
+	TOKEN_EXIT:          "EXIT",
+	TOKEN_TRY:           "TRY",
+	TOKEN_CATCH:         "CATCH",
+	TOKEN_THROW:         "THROW",
+	TOKEN_DEFER:         "DEFER",
+	TOKEN_ERRDEFER:      "ERRDEFER",
+	TOKEN_TRUE:          "TRUE",
+	TOKEN_FALSE:         "FALSE",
+	TOKEN_NULL:          "NULL",
+	TOKEN_AND:           "AND",
+	TOKEN_OR:            "OR",
+	TOKEN_NOT:           "NOT",
+	TOKEN_DIV:           "DIV",
+	TOKEN_INT_TYPE:      "INT_TYPE",
+	TOKEN_FLOAT_TYPE:    "FLOAT_TYPE",
+	TOKEN_BYTES_TYPE:    "BYTES_TYPE",
+	TOKEN_STRING_TYPE:   "STRING_TYPE",
+	TOKEN_BOOL_TYPE:     "BOOL_TYPE",
+	TOKEN_LIST:          "LIST",
+	TOKEN_MAP:           "MAP",
+	TOKEN_OF:            "OF",
+	TOKEN_TO:            "TO",
+	TOKEN_IN:            "IN",
+	TOKEN_STRUCT:        "STRUCT",
+	TOKEN_ENUM:          "ENUM",
+	TOKEN_LEN:           "LEN",
+	TOKEN_TASK:          "TASK",
+	TOKEN_SPAWN:         "SPAWN",
+	TOKEN_EXPORT:        "EXPORT",
+	TOKEN_LBRACE:        "LBRACE",
+	TOKEN_RBRACE:        "RBRACE",
+	TOKEN_LPAREN:        "LPAREN",
+	TOKEN_RPAREN:        "RPAREN",
+	TOKEN_LBRACKET:      "LBRACKET",
+	TOKEN_RBRACKET:      "RBRACKET",
+	TOKEN_SEMI:          "SEMI",
+	TOKEN_COMMA:         "COMMA",
+	TOKEN_COLON:         "COLON",
+	TOKEN_ASSIGN:        "ASSIGN",
+	TOKEN_DOT:           "DOT",
+	TOKEN_DOTDOT:        "DOTDOT",
+	TOKEN_PLUS:          "PLUS",
+	TOKEN_MINUS:         "MINUS",
+	TOKEN_STAR:          "STAR",
+	TOKEN_SLASH:         "SLASH",
+	TOKEN_PERCENT:       "PERCENT",
+	TOKEN_LT:            "LT",
+	TOKEN_GT:            "GT",
+	TOKEN_LE:            "LE",
+	TOKEN_GE:            "GE",
+	TOKEN_EQ:            "EQ",
+	TOKEN_NEQ:           "NEQ",
+	TOKEN_BIT_AND:       "BIT_AND",
+	TOKEN_BIT_OR:        "BIT_OR",
+	TOKEN_BIT_XOR:       "BIT_XOR",
+	TOKEN_BIT_NOT:       "BIT_NOT",
+	TOKEN_SHL:           "SHL",
+	TOKEN_SHR:           "SHR",
 
 	TOKEN_COMMENT_LINE:    "COMMENT_LINE",
 	TOKEN_COMMENT_BLOCK:   "COMMENT_BLOCK",
@@ -219,6 +221,19 @@ func (t TokenType) String() string {
 		return name
 	}
 	return fmt.Sprintf("TokenType(%d)", int(t))
+}
+
+// StringPart is one piece of an interpolated cooked string (TOKEN_STRING_INTERP).
+// A literal chunk has IsExpr=false and Text = the decoded literal text. An
+// expression slot has IsExpr=true and Text = the raw expression source between the
+// braces (still to be sub-lexed / sub-parsed); Line/Col are the absolute source
+// position of the first character of that expression, so the sub-parse annotates
+// references and reports errors at the right place.
+type StringPart struct {
+	IsExpr bool
+	Text   string
+	Line   int
+	Col    int
 }
 
 // Token is one lexeme produced by the scanner.
@@ -235,10 +250,14 @@ type Token struct {
 	// that surface form, so `jennifer fmt` re-emits Raw to stay byte-faithful
 	// (`1_000_000` and a multi-line string survive a format). Empty for every
 	// other token kind.
-	Raw  string
-	Line int
-	Col  int
-	File string
+	Raw string
+	// Parts is set only for TOKEN_STRING_INTERP: the ordered literal chunks and
+	// expression slots the cooked string decomposes into. Empty for every other
+	// token kind.
+	Parts []StringPart
+	Line  int
+	Col   int
+	File  string
 }
 
 func (t Token) String() string {

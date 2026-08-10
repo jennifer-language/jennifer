@@ -39,8 +39,8 @@ func testRemove() {
 func testAppend() {
     def db as DB init open("/no/such/flatdb/path/missing.json");
     $db = set($db, "/runs", json.list());
-    $db = append($db, "/runs", json.decode("{\"n\":1}"));
-    $db = append($db, "/runs", json.decode("{\"n\":2}"));
+    $db = append($db, "/runs", json.decode('{"n":1}'));
+    $db = append($db, "/runs", json.decode('{"n":2}'));
     testing.assertEqual(length($db, "/runs"), 2);
     testing.assertEqual(json.asInt(get($db, "/runs/1/n")), 2);
 }
@@ -76,7 +76,7 @@ func testWritersAreImmutable() {
 }
 
 func testOpenStringReadsInMemory() {
-    def db as DB init openString("{\"count\": 2, \"users\": {\"1\": {\"name\": \"ada\"}}}");
+    def db as DB init openString('{"count": 2, "users": {"1": {"name": "ada"}}}');
     testing.assertEqual(json.asInt(get($db, "/count")), 2);
     testing.assertEqual(json.asString(get($db, "/users/1/name")), "ada");
     testing.assertEqual(length($db, "/users"), 1);
@@ -85,7 +85,7 @@ func testOpenStringReadsInMemory() {
 }
 
 func testOpenStringIsValueSemantic() {
-    def db as DB init openString("{\"count\": 2}");
+    def db as DB init openString('{"count": 2}');
     def db2 as DB init set($db, "/count", json.decode("5"));
     testing.assertEqual(json.asInt(get($db2, "/count")), 5);
     testing.assertEqual(json.asInt(get($db, "/count")), 2); # original unchanged
@@ -93,7 +93,7 @@ func testOpenStringIsValueSemantic() {
 
 # saveReadOnly is a helper for testReadOnlySaveThrows (not a test itself).
 func saveReadOnly() {
-    save(openString("{}"));
+    save(openString('{}'));
 }
 func testReadOnlySaveThrows() {
     testing.assertThrows("saveReadOnly", "flatdb");
@@ -101,7 +101,7 @@ func testReadOnlySaveThrows() {
 
 func testSaveAsPromotesReadOnlyToWritable() {
     def p as string init os.tempDir() + "/flatdb_saveas_" + uuid.v4() + ".json";
-    def ro as DB init openString("{\"n\": 1}");
+    def ro as DB init openString('{"n": 1}');
     def w as DB init saveAs($ro, $p);
     testing.assertTrue(fs.exists($p));
     testing.assertEqual($w.path, $p); # returned handle bound to the new path
@@ -127,7 +127,7 @@ func testSaveAsForksIndependently() {
 
 # saveAsEmpty is a helper for testSaveAsEmptyPathThrows (not a test itself).
 func saveAsEmpty() {
-    saveAs(openString("{}"), "");
+    saveAs(openString('{}'), "");
 }
 func testSaveAsEmptyPathThrows() {
     testing.assertThrows("saveAsEmpty", "flatdb");

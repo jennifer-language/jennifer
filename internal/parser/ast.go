@@ -654,6 +654,28 @@ type StringLit struct {
 
 func (*StringLit) exprNode() {}
 
+// InterpStringExpr is a cooked string with one or more `{expr}` interpolation
+// slots (e.g. "total: {$sum}, next {$n + 1}"). It lowers to string concatenation
+// with each slot value stringified (the `convert.toString` / Display form), but is
+// kept as its own node so the whole toolchain treats each slot as real code: the
+// resolver descends into Parts[i].Expr (parse-time undefined-variable / shadowing
+// checks), lint checks inside slots, and profile attributes each slot to its own
+// position. A part is either a literal chunk (Expr == nil, Lit set) or an
+// expression slot (Expr != nil). Parts preserve source order.
+type InterpStringExpr struct {
+	pos
+	Parts []InterpPart
+}
+
+func (*InterpStringExpr) exprNode() {}
+
+// InterpPart is one piece of an InterpStringExpr: a literal chunk (Expr == nil) or
+// an expression slot (Expr != nil, Lit unused).
+type InterpPart struct {
+	Lit  string
+	Expr Expr
+}
+
 type BoolLit struct {
 	pos
 	Value bool
@@ -1138,6 +1160,19 @@ func Sprint(n Node) string {
 		return fmt.Sprintf("Float(%g)", v.Value)
 	case *StringLit:
 		return fmt.Sprintf("Str(%q)", v.Value)
+	case *InterpStringExpr:
+		s := "Interp("
+		for i, part := range v.Parts {
+			if i > 0 {
+				s += ", "
+			}
+			if part.Expr == nil {
+				s += fmt.Sprintf("%q", part.Lit)
+			} else {
+				s += "{" + Sprint(part.Expr) + "}"
+			}
+		}
+		return s + ")"
 	case *BoolLit:
 		return fmt.Sprintf("Bool(%t)", v.Value)
 	case *NullLit:

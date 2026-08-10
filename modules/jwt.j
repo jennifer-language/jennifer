@@ -174,7 +174,7 @@ export func sign(claims as json.Value, key as bytes, alg as string) {
     requireAlg($alg);
     # The alg comes from the validated whitelist, so this hand-built header JSON
     # cannot carry an injected value.
-    def headerJson as string init "{\"alg\":\"" + $alg + "\",\"typ\":\"JWT\"}";
+    def headerJson as string init '{"alg":"' + $alg + '","typ":"JWT"}';
     def head as string init encodeSegment(convert.bytesFromString($headerJson, "utf-8"));
     def payload as string init encodeSegment(convert.bytesFromString(json.encode($claims), "utf-8"));
     def signingInput as string init $head + "." + $payload;
@@ -426,7 +426,7 @@ func keyMaterialFor(alg as string, value as string) {
         return $value;
     }
     def t as string init strings.trim($value);
-    if (strings.startsWith($t, "{") and strings.contains($t, "\"kty\"")) {
+    if (strings.startsWith($t, '{') and strings.contains($t, "\"kty\"")) {
         return crypto.jwkToPem($t);
     }
     return $value;

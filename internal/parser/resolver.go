@@ -1321,6 +1321,18 @@ func (r *resolver) resolveExpr(e Expr) error {
 		// Same fold pass as UnaryExpr.
 		ex.Folded = tryFoldBinary(ex)
 		return nil
+	case *InterpStringExpr:
+		// Each `{expr}` slot is real code: resolve it so an undefined variable or a
+		// shadowing violation inside a string is a parse-time error, not something
+		// silently shipped in a literal.
+		for i := range ex.Parts {
+			if ex.Parts[i].Expr != nil {
+				if err := r.resolveExpr(ex.Parts[i].Expr); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	case *IntLit, *FloatLit, *StringLit, *BoolLit, *NullLit:
 		return nil
 	}

@@ -11,14 +11,17 @@ import (
 	"testing"
 )
 
-// The lint package hand-rolls several AST type-switch traversals (the parser
-// exposes no generic visitor). When a new node type is added to the parser, or
-// an existing one gains children, each traversal must grow a case - forgetting
-// one makes a check silently skip that node's whole subtree (the class of bug
-// behind the slice-bound / match-arm false positives). This test enumerates
-// every parser Expr / Stmt node type and asserts each general traversal either
-// handles it or lists it as an intentional leaf, so a missed case fails loudly
-// here instead of mis-linting in the field.
+// The lint package - and the interpreter - hand-roll several AST type-switch
+// traversals (the parser exposes no generic visitor). When a new node type is
+// added to the parser, or an existing one gains children, each traversal must grow
+// a case - forgetting one makes a walker silently skip that node's whole subtree
+// (the class of bug behind the slice-bound / match-arm false positives, and behind
+// the interpolation-slot pre-stamp / decl-type misses). This test enumerates every
+// parser Expr / Stmt node type and asserts each general traversal either handles it
+// or lists it as an intentional leaf, so a missed case fails loudly here instead of
+// mis-linting (or silently de-optimising) in the field. It covers the lint walkers
+// and the two interpreter expression walkers that share the same obligation
+// (`walkExprForQualifiedRefs`, `declTypesExpr`).
 
 // markerReceivers parses the parser package and returns the set of type names
 // whose pointer receiver defines the given marker method (exprNode / stmtNode).
@@ -122,6 +125,12 @@ func TestWalkerExhaustiveness(t *testing.T) {
 		{"walk.go", "doStmt", stmtTypes, stmtLeaves},
 		{"checks.go", "nestExpr", exprTypes, exprLeaves},
 		{"checks.go", "nestStmt", stmtTypes, stmtLeaves},
+		// The interpreter's two expression walkers carry the same obligation: a new
+		// node with child expressions must be descended into (qualified-ref
+		// pre-stamping, module-struct-type stamping) or it silently de-optimises /
+		// mis-types that subtree. Same parser Expr set, same leaf allowlist.
+		{filepath.Join("..", "interpreter", "interpreter.go"), "walkExprForQualifiedRefs", exprTypes, exprLeaves},
+		{filepath.Join("..", "interpreter", "module.go"), "declTypesExpr", exprTypes, exprLeaves},
 	}
 	for _, w := range walkers {
 		handled := switchCaseTypes(t, w.file, w.fn)

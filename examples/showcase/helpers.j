@@ -19,3 +19,24 @@ func fact(n as int) {
 func greet(who as string) {
     return "Hi, " + $who + "!";
 }
+
+# First-class function targets: passed by bare name as `func` values to the
+# higher-order `lists` layer and called through a variable.
+func dbl(n as int) {
+    return $n * 2;
+}
+
+func isEven(n as int) {
+    return $n % 2 == 0;
+}
+
+func addup(a as int, b as int) {
+    return $a + $b;
+}
+
+# `defer` runs its calls in LIFO order as the block exits, on every path.
+func deferDemo() {
+    defer io.printf("  runs last (registered first)\n");
+    defer io.printf("  runs first (registered last)\n");
+    io.printf("  body runs before any defer\n");
+}

@@ -271,6 +271,10 @@ func (s *scoped) doExpr(e parser.Expr) {
 		for _, el := range n.Elements {
 			s.doExpr(el)
 		}
+	case *parser.InterpStringExpr:
+		for i := range n.Parts {
+			s.doExpr(n.Parts[i].Expr)
+		}
 	case *parser.MapLit:
 		for i := range n.Keys {
 			s.doExpr(n.Keys[i])

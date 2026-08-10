@@ -27,16 +27,16 @@ func upper(params as json.Value) {
 io.printf("server side (jsonrpc.handle):\n");
 io.printf(
     "  add(2, 3)      -> %s\n",
-    jsonrpc.handle("{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[2,3],\"id\":1}"));
+    jsonrpc.handle('{"jsonrpc":"2.0","method":"add","params":[2,3],"id":1}'));
 io.printf(
     "  upper(\"hi\")    -> %s\n",
-    jsonrpc.handle("{\"jsonrpc\":\"2.0\",\"method\":\"upper\",\"params\":{\"text\":\"hi\"},\"id\":2}"));
+    jsonrpc.handle('{"jsonrpc":"2.0","method":"upper","params":{"text":"hi"},"id":2}'));
 io.printf(
     "  unknownMethod  -> %s\n",
-    jsonrpc.handle("{\"jsonrpc\":\"2.0\",\"method\":\"nope\",\"id\":3}"));
+    jsonrpc.handle('{"jsonrpc":"2.0","method":"nope","id":3}'));
 io.printf(
     "  a batch        -> %s\n",
-    jsonrpc.handle("[{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[10,20],\"id\":1},{\"jsonrpc\":\"2.0\",\"method\":\"add\",\"params\":[1,1]}]"));
+    jsonrpc.handle('[{"jsonrpc":"2.0","method":"add","params":[10,20],"id":1},{"jsonrpc":"2.0","method":"add","params":[1,1]}]'));
 
 # --- client: call a real endpoint if one is configured ---
 

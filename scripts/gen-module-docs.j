@@ -182,7 +182,7 @@ func renderOneFunc(mod as string, f as docblock.FuncDoc) {
         $out[] = "";
     }
     if ($f.returns.type != "") {
-        def r as string init "**Returns** `{" + $f.returns.type + "}`";
+        def r as string init '**Returns** `{' + $f.returns.type + '}`';
         if ($f.returns.description != "") {
             $r = $r + " - " + mdText($f.returns.description);
         }
@@ -209,7 +209,7 @@ func renderOneFunc(mod as string, f as docblock.FuncDoc) {
 # paramLine / throwLine render one bullet, keeping the description escape out of
 # the nested loops above.
 func paramLine(p as docblock.ParamDoc) {
-    def line as string init "- `" + $p.name + "` `{" + $p.type + "}`";
+    def line as string init "- `" + $p.name + '` `{' + $p.type + '}`';
     if ($p.description != "") {
         $line = $line + " - " + mdText($p.description);
     }
@@ -217,7 +217,7 @@ func paramLine(p as docblock.ParamDoc) {
 }
 
 func throwLine(t as docblock.ThrowDoc) {
-    def line as string init "- `{" + $t.type + "}`";
+    def line as string init '- `{' + $t.type + '}`';
     if ($t.description != "") {
         $line = $line + " - " + mdText($t.description);
     }

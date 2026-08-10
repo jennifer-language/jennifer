@@ -388,3 +388,36 @@ buy nothing: a program that then divides by the underflowed `0.0` hits the
 existing division-by-zero error anyway. So the rule is precisely "reject the
 non-finite (`Inf` / `NaN`), accept a finite result" - applied consistently, the
 tiny side stays a value and the huge side is the error.
+
+## String interpolation owns `{}`; the template libraries move to `%name%`
+
+String interpolation (M24.19) makes an unescaped `{expr}` inside a cooked `"..."`
+string an evaluation slot. That reserves `{}` for the language, and it *appears* to
+violate stance #1 (one obvious way) twice - once by adding a second way to build a
+string beside `+` concatenation, and once by colliding with the `{name}`
+placeholder markers `intl` and `validate` used. Both are reasoned, not overlooked.
+
+**Why interpolation despite `+` already existing.** Concatenation and
+interpolation are not the same job. `+` joins two *strings* and requires an
+explicit `convert.toString` on every non-string operand; interpolation places a
+*value beside its label* and stringifies in place. The recurring real-world shape -
+`"user " + convert.toString($name) + " has " + convert.toString($count) + " items"`
+- is exactly what interpolation removes: `"user {$name} has {$count} items"`. It is
+sugar (it lowers to concat + `convert.toString`), so it adds no new semantics, and
+the toolchain still sees each slot as ordinary code (the resolver, `lint`, and
+`profile` all descend into it). The `f"..."` opt-in prefix was rejected
+(`rejected.md`): the cooked / raw delimiter split already is the opt-in, so a raw
+`'...'` string is the "no interpolation" form.
+
+**Why the template libraries move off `{}` to `%name%`.** Two libraries used a
+`{name}` placeholder for named substitution - `intl.tr` and the `validate` module's
+`localize`. Once a cooked `"..."` interpolates, a template written as a cooked
+string (`"Hello, {name}"`) would try to evaluate `{name}` as an expression (and
+error on the undefined `name`). The fix keeps the language feature primary and
+moves the two *secondary* libraries to a brace-free **`%name%`** marker (with `%%`
+escaping a literal `%`), fully decoupled from interpolation and its `\{` escape - a
+`%name%` template then reads the same in a cooked or a raw string. A sweep
+confirmed these were the only two `{name}`-placeholder consumers (JSON / TOML / YAML
+braces are serialization, `io`'s `%a` braces are output delimiters). This is a
+pre-1.0 break to shipped libraries, taken because the language owning `{}` is worth
+more than a shipped library's marker syntax; see the M24.19 milestone.
