@@ -27,9 +27,22 @@ import (
 	"fmt"
 	"runtime"
 
+	"jennifer-lang.dev/jennifer/internal/capabilities"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/version"
 )
+
+// capabilitiesConstant builds the `meta.CAPABILITIES` list-of-string value from the
+// build's capability set.
+func capabilitiesConstant() interpreter.Value {
+	caps := capabilities.All()
+	data := make([]interpreter.Value, len(caps))
+	for i, c := range caps {
+		data[i] = interpreter.StringVal(c)
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), data)
+}
 
 // LibraryName is the Jennifer name programs `use` to enable these
 // constants, and doubles as the namespace prefix.
@@ -52,6 +65,21 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedConst(LibraryName, "VERSION", interpreter.StringVal(version.Version))
 	in.RegisterNamespacedConst(LibraryName, "BUILD", interpreter.StringVal(buildTag()))
 	in.RegisterNamespacedConst(LibraryName, "SYSMODDIR", interpreter.StringVal(sysmoddir))
+
+	// Host capabilities this interpreter was built with (the same set the
+	// `# pragma-jennifer-capability:` header is checked against): `net`, `exec`,
+	// or neither on jennifer-tiny. `meta.CAPABILITIES` is the sorted list;
+	// `meta.hasCapability(name)` lets a script branch on one.
+	in.RegisterNamespacedConst(LibraryName, "CAPABILITIES", capabilitiesConstant())
+	in.RegisterNamespaced(LibraryName, "hasCapability", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		if len(args) != 1 {
+			return interpreter.Null(), fmt.Errorf("meta.hasCapability expects 1 argument (name), got %d", len(args))
+		}
+		if args[0].Kind != interpreter.KindString {
+			return interpreter.Null(), fmt.Errorf("meta.hasCapability: name must be string, got %s", args[0].Kind)
+		}
+		return interpreter.BoolVal(capabilities.Has(args[0].Str)), nil
+	})
 
 	// Dynamic dispatch: invoke a top-level user method by a runtime string
 	// name. The general form of what `testing.run` does for tests - a

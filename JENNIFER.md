@@ -397,6 +397,14 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
   struct. `export` is only valid in a module (a parse error in a `run`
   script). A co-located `MODULE_test.j` white-box overlay runs under
   `jennifer test`.
+- **Requirement header** - a file may declare what it needs with typed comment
+  pragmas in its header block, checked at read time (a program, a module, and each
+  `include`d file self-checks): `# pragma-jennifer-version: >=0.25.0` (a minimum
+  interpreter floor; any `-dev` build bypasses, only a release tag is compared - one
+  floor per file) and `# pragma-jennifer-capability: net` (a host facility the build
+  must have: `net` or `exec`, neither on `jennifer-tiny`; multiple accumulate). A
+  mismatch aborts with a clear message; a malformed directive is a hard error.
+  Query capabilities at runtime with `meta.hasCapability("net")` / `meta.CAPABILITIES`.
 
 ## Standard library (all namespaced, all opt-in via `use`)
 

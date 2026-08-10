@@ -1411,103 +1411,48 @@ M24.17's from-scratch build. Ships the full module discipline: the `markdown`
 overlay extended, `docs/modules/markdown.md` + `JENNIFER.md` updated, and a demo
 of `parse` -> walk -> `render`.
 
-### M24.19 - string interpolation (`{expr}` in cooked strings)
+### M24.19 - string interpolation (`{expr}` in cooked strings) (compacted)
 
-**Done.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}"` - so a
-value sits beside its position with no `sprintf` arg-counting or verb/type
-mismatch. Sugar over string concatenation + `convert.toString`. Graduates the
-"String interpolation" language-sugar entry from `horizon.md`. The design settles
-the delimiter tension that recurs whenever a `{name}` template meets the feature:
-
-- **Cooked only; `{expr}` is any expression.** A cooked `"..."` string interpolates
-  each `{expr}` slot - a single Jennifer **expression** evaluated in the current
-  scope (`{$var}`, `{$a + 1}`, `{MAX}`, `{strings.upper($x)}`). A slot is an
-  expression, **not** a statement or block: no `import` / `use` / `def` / `if` /
-  `return` / assignment inside it (a `;` or statement keyword in a slot is a parse
-  error), and `import` / `use` are top-level preprocess/parse-time directives that
-  never exist as a runtime value - so the footgun is bounded to a side-effecting
-  *call*, never an inlined statement. A **raw** `'...'` string
-  never interpolates - it already processes nothing, so it is the literal form
-  (`'{"port": 8080}'` is literal JSON). No content heuristic: inside a cooked
-  string `{...}` always means "evaluate", so every expression form is uniform. A
-  literal brace is escaped **`\{` / `\}`** - backslash, matching the language's only
-  escape convention (`\n` / `\t` / `\"`), not Python-style `{{` doubling; `\{` is a
-  lex error today, so the escape is free and non-breaking. An `f"..."` opt-in prefix
-  was rejected (unnatural; the cooked/raw split already *is* the opt-in - a raw
-  string is the "no interpolation" form).
-- **Template placeholders move off braces.** A `{name}` marker (the kind `intl` /
-  `validate` use for named substitution) would interpolate or error inside a cooked
-  string. The two template-substitution libraries move to a brace-free **`%name%`**
-  marker, fully decoupled from interpolation and its escape - a `%name%` template
-  reads the same in a cooked or raw string. A sweep confirmed these are the **only**
-  two `{name}`-placeholder consumers (JSON / TOML / YAML braces are serialization,
-  `io`'s `%a` braces are output delimiters, `sql` binds through placeholders).
-
-Two parts:
-
-- **Part 1 - `%name%` placeholders. (Done.)** `intl.tr` moved from `{name}` (with
-  `{{` / `}}` escapes) to `%name%` (with `%%` escaping a literal `%`): the Go
-  interpolator rewritten to the `validate` grammar (a `%` that opens no known
-  placeholder is emitted literally and scanning resumes after it, so a missing value
-  or a lone `%` stays visible), plus the `intl` docs / examples / tests and the two
-  inline callers (`examples/intl.j`, `examples/intl_toml.j`, and the `showcase`
-  slice). `validate` was pre-migrated in its own (unreleased) window, so it already
-  speaks `%param%` / `%field%`. The `%%` escape is valid in cooked or raw strings
-  alike - the string engine owns `\` / `{}`, the module owns `%` - and substitution
-  is single-pass (a substituted value is never re-scanned). A pre-1.0 break to a
-  shipped library (the language feature owns `{}`; the two template libraries are
-  secondary).
-- **Part 2 - implement interpolation + migrate literal braces. (Done.)** The lexer
-  splits a cooked string into a `TOKEN_STRING_INTERP` whose `Parts` alternate
-  literal chunks and expression-source slots; `scanInterpSlot` brace-counts nested
-  `{}` (a map literal in a slot balances) and copies a nested string verbatim so its
-  braces / quotes never disturb the count; each slot records its **absolute**
-  line/col and the parser sub-lexes it (`lexer.TokenizeAt`) + sub-parses it to a
-  single `expr`, building an `InterpStringExpr` (`Parts []InterpPart`) the
-  interpreter evaluates by stringifying each slot via `Display` and concatenating -
-  no `use convert` needed. `\{` / `\}` unescape (added to the cooked escape set); a
-  bare `}` is a lex error; raw `'...'` strings are unchanged. Because a cooked `{`
-  is no longer literal, **every existing cooked string holding a literal brace was
-  migrated** across `modules/*.j`, the module-test overlays, `examples/`, and the
-  `.j` snippets embedded in the Go integration tests: **prefer raw** - a string
-  whose *value* has no `'`, no control char, and no `\u` escape became a raw `'...'`
-  (JSON / regex / template strings shed their `\"` noise, e.g.
-  `"{\"k\":1}"` -> `'{"k":1}'`), and only a string that genuinely needs cooked
-  escapes (an embedded `\n` / `\t`, a `'` in the value) stayed cooked with `\{` /
-  `\}` escapes. Applied by a one-off Go migrator (decode-and-decide, so it never
-  touches an interpolated string - one with an *unescaped* `{`) and value-checked by
-  the full golden / overlay suite. Landed with
-  updated editor highlighters (all four + the regenerated docs bundle), `fmt`
-  (re-emits `TOKEN_STRING_INTERP` verbatim via `Raw`), `ast` (`InterpStringExpr`
-  node), and the grammar EBNF kept in sync.
-- **The whole toolchain sees a slot as real code, not an opaque string.** A slot
-  is an ordinary expression, so: the **resolver** descends into it and annotates
-  its references, making undefined-variable / shadowing **parse-time** errors
-  (`"{$typo}"` is caught like any reference, not silently shipped in a string);
-  **`lint`** applies its correctness / style checks *inside* slots; and **`profile`**
-  attributes each slot to **its own source position** (hits / wall-clock /
-  `--allocs`), so a costly `"{compute()}"` shows up as the slot, not mysteriously as
-  a plain `def` / assignment. Treating an interpolating string as opaque would be a
-  correctness hole (unresolved variables and unlinted, unprofiled code hiding in
-  strings).
-- **Slot-complexity guidance (style, not a language limit).** A slot accepts *any*
-  expression, including a method call - `"{deploy()}"` runs code inside a string
-  literal, a footgun (hidden side effects / cost in something that reads as a
-  literal). The language stays permissive (complete `{expr}`, no heuristic); the
-  guard rails are docs + lint: a **style-guide** entry (keep slots
-  to variables, field / index access, and arithmetic; no side-effecting or expensive
-  calls) backed by the new **`L204`** style check (`interpolation-slot-too-complex`)
-  flagging a call or other non-trivial expression in an interpolation slot, added to
-  `docs/user-guide/style-guide.md`.
-
-Core (a language feature; both binaries - verified on `jennifer-tiny`). The
-`f"..."` rejection landed in `rejected.md` and the intl-break rationale in
-`design-decisions.md`.
+**Done.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}, up
+{strings.upper($x)}"` - a value beside its position, no `sprintf` arg-counting.
+Sugar over concat + `convert.toString`; graduates the horizon "String
+interpolation" entry. Only a **cooked** `"..."` interpolates; each `{expr}` slot is
+one Jennifer **expression** (var / arith / const / call), never a statement (a `;`
+/ statement keyword / empty `{}` / trailing token is a parse error); a **raw**
+`'...'` never interpolates (so `'{"port": 8080}'` is literal JSON - the "off"
+form); a literal brace is `\{` / `\}` (backslash, not `{{`); the `f"..."` opt-in was
+rejected (the cooked/raw split already is the opt-in - `rejected.md`). Two parts.
+**Part 1 - `%name%` placeholders:** the only two `{name}`-template consumers
+(`intl.tr`, `validate`) move to a brace-free `%name%` marker (`%%` escapes a literal
+`%`), the Go interpolator rewritten to the `validate` grammar (an unknown `%` stays
+literal, single-pass), decoupling them from the language owning `{}` (intl-break
+rationale in `design-decisions.md`). **Part 2 - the feature + migration:** the lexer
+emits `TOKEN_STRING_INTERP` whose `Parts` alternate literal chunks and slots -
+`scanInterpSlot` brace-counts nested `{}` (a map literal balances) and copies a
+nested string verbatim; each slot carries its **absolute** line/col, and the parser
+sub-lexes (`lexer.TokenizeAt`) + sub-parses it to a single `expr` inside an
+`InterpStringExpr`, evaluated by stringifying each slot via `Display` (no `use
+convert`). Because cooked `{` is no longer literal, **every literal-brace cooked
+string migrated** (`modules/*.j`, overlays, `examples/`, embedded Go-test `.j`):
+**prefer raw** (a value with no `'` / control / `\u` became `'...'`, shedding `\"`
+noise, e.g. `"{\"k\":1}"` -> `'{"k":1}'`), falling back to `\{` / `\}` only where
+cooked escapes are genuinely needed - a one-off decode-and-decide Go migrator that
+never touches an interpolated string, value-checked by the golden / overlay suite.
+**The toolchain treats a slot as real code:** the resolver descends (undefined-var /
+shadowing are parse-time errors), `lint` checks inside slots (new `L204`
+interpolation-slot-too-complex flags a call in a slot), and `profile` attributes
+each slot to its own position; landed with `fmt` (re-emits via `Raw`), `ast`
+(`InterpStringExpr`), the four editor highlighters + regenerated docs bundle, the
+grammar EBNF, and style-guide guidance. A language feature; both binaries (verified
+on `jennifer-tiny`). Follow-up `DF-strinterpol-report.md` audit closed the walker
+gaps (`walkExprForQualifiedRefs` / `declTypesExpr` now descend into slots; the
+`L204` colour + long-line caret windowing landed; `TestWalkerExhaustiveness` now
+guards the two interpreter walkers).
 
 ### M24.20 - module version + capability header
 
 **Planned.** A declarative per-file header that states the minimum interpreter
-version and the host capabilities a module needs, checked at **import time** so a
+version and the host capabilities a file needs, checked at **read time** so a
 mismatch aborts with a clear error instead of failing cryptically deep in a stub or
 after a breaking change. Pre-1.0 the language breaks at milestones deliberately
 (e.g. `intl`'s `{name}` -> `%name%` in M24.19), so a module that bumps its floor in
@@ -1516,46 +1461,71 @@ that supports it. The lightweight sibling of the planned `jvc` / `deck.toml`
 constraints (`horizon.md` DRAFT#12) - it works with no package manager, and `jvc`
 can later read the same header.
 
-Two **independent** axes (a module can need `net` at any version, so folding them
-into one field is muddy):
+**A typed `pragma` directive, not an ad-hoc comment.** One recognizable family,
+`# pragma-jennifer-<key>: <value>`, so new directive kinds slot into one parser that
+dispatches on `<key>` rather than inventing `# jennifer:` / `# jennifer-needs:` /
+`# jennifer-foo:` one-offs. `pragma-jennifer-*` is unmistakably a directive (never
+prose) and greppable. It is a **comment** by necessity: a module top level is
+declarations-only (a runtime `meta.requireVersion(...)` cannot live there) and the
+check must run **before** lex / parse, so it is scanned from raw source in the
+leading header block (tolerant of the shebang, the SPDX block, and the `/** */`
+docblock - it is a `#`-line comment among them). Two keys today:
 
-- **Minimum version** - `# jennifer: >=0.24.0`. A *minimum* compare, not a range
-  grammar (newer always satisfies; bump the floor when you break). Evaluated in Go
-  by a new `version.AtLeast(min)` (parse `major.minor.patch`, compare) - **not** the
-  `.j` `semver` module, which would bootstrap during load. `dev` bypasses the check
-  (`version.Version` defaults to `"dev"`, and every `go test` / dev build is `dev`,
-  so without the bypass they would all fail).
-- **Capabilities** - `# jennifer-needs: net` (or `exec`). The interpreter exposes
-  the capability set it was built with (`{net, exec}` on the standard `jennifer`,
-  neither on `jennifer-tiny`, derived from `runtime.Compiler != "tinygo"` + the
-  `net` build-tag split); a module naming an unavailable capability aborts at
-  import. Future-proof: a tinygo build rebuilt with a network stack simply reports
-  `net` and passes, no special-casing - and it finally gives the net / exec-backed
-  modules a clean import-time refusal instead of a runtime stub error. The same set
-  is queryable from `meta` (`meta.hasCapability("net")` / `meta.CAPABILITIES`) so a
-  script can branch.
+- **`version`** (single-valued) - `# pragma-jennifer-version: >=0.25.0`. A
+  *minimum* compare, not a range grammar (newer always satisfies; bump the floor
+  when you break). The `>=` is required syntax; the value is `major.minor.patch`.
+  Evaluated in Go by a new `version.AtLeast(min)` - **not** the `.j` `semver`
+  module, which would bootstrap during load. **Any dev build bypasses** (the literal
+  `"dev"` default and any `X.Y.Z-dev+...` are ahead of the last tag, so they satisfy
+  every floor up to the next release; only a clean release tag enforces - which is
+  also what keeps `go test` / `make build` from failing their own in-tree modules).
+- **`capability`** (a set) - `# pragma-jennifer-capability: net`. The interpreter
+  exposes the capability set it was built with (`{net, exec, sql}` on the standard
+  `jennifer`, neither on `jennifer-tiny`, via a build-tag split mirroring the `net`
+  library's `!tinygo` files); a file naming an unavailable capability aborts at read
+  time. Future-proof: a tinygo build rebuilt with a network stack adds `net` to its
+  set and passes, no special-casing - and it finally gives the net / exec-backed
+  modules a clean read-time refusal instead of a runtime stub error. Queryable from
+  `meta` (`meta.hasCapability("net")` / `meta.CAPABILITIES`) so a script can branch.
 
-**A header pragma, not a runtime call.** A comment scanned from raw source at
-file-read time (a small regex over the first ~10 comment lines, tolerant of the
-shebang and the SPDX block), before lex / parse. A module top level is
-declarations-only (so a runtime `meta.requireVersion(...)` cannot live there), and a
-`def const` floor is known only post-parse and may be a non-literal - the pragma
-sits with the existing header block, needs no grammar change, and covers programs,
-modules, and `include`d files uniformly. A **malformed** directive is a hard error,
-never silently ignored (a typo must not disable the guard).
+**Multiplicity is per key, and `include` needs no merge.** A duplicate
+single-valued key in one file is a hard error (two `version` floors is a
+contradiction - "best wins" would hide the mistake); a set-valued key accumulates
+across lines (`capability: net` + `capability: exec` = both). Crucially, enforcement
+is **per file at read time**, so `include` is not a merge problem: each spliced file
+self-checks its own header against the running interpreter *before* its tokens join
+the stream, so the effective floor is the max and the effective capability set the
+union with no cross-file merge logic - the only "multiple values" case that needs a
+policy is within a single file. A **malformed** directive (a line that opens
+`# pragma-jennifer-*` but does not parse, a bad `version` grammar, an unknown key, an
+unknown capability) is a hard error, never silently ignored (a typo must not disable
+the guard). **Version is evaluated first**: a module using a key a newer interpreter
+adds also bumps its `version` floor, so an older interpreter fails the version check
+(clear message) before it ever reaches the unknown key.
 
-Enforcement is one shared `checkRequirements(rawSource, path)` at each first-read
-seam: the CLI entry program (`cmd/jennifer` run path), the preprocessor for
-`include` (`internal/preproc`), and `loadModule` (`internal/interpreter/module.go`,
-each nested module checked independently). The error is positioned and actionable -
-`module "intl.j" requires jennifer >=0.24.0, but this build is 0.23.1` /
-`module "httpd.j" needs capability "net", unavailable in jennifer-tiny`.
+Enforcement is one shared `CheckRequirements(rawSource, path)` (a new
+`internal/reqcheck`, importing `version` + the capability set) called at each
+first-read seam: the CLI entry program (`cmd/jennifer` run path), the preprocessor
+for `include` (`internal/preproc`), and `loadModule`
+(`internal/interpreter/module.go`, each nested module checked independently). The
+error is positioned and actionable - `intl.j: requires jennifer >=0.25.0, but this
+build is 0.24.1` / `httpd.j: needs capability "net", unavailable in this build
+(jennifer-tiny)`.
 
-Ships with `version.AtLeast` + the capability query in `meta`, the three enforcement
-sites, a new `L3xx` lint rule flagging a shipped `modules/*.j` missing the header
-(so floors cannot silently drift), and docs. No interpreter-core or
-language-grammar change. Discipline: bump a module's floor in the same change that
-breaks it.
+Ships with `version.AtLeast` + the capability set (`net` / `exec` / `sql`, all
+`!tinygo`) + its `meta` query, the three enforcement sites, a new `L303` lint rule
+that **validates a pragma that is present** (a **malformed** directive, a
+**duplicate** `version`, a bad `>=major.minor.patch` grammar, an **unknown** key, or
+an **unknown** capability name) - so `jennifer lint` catches a bad header pre-import,
+with zero false positives - and docs. **Adoption:** every shipped `modules/*.j`
+carries a `# pragma-jennifer-version: >=0.24.0` floor, and each module that directly
+uses a gated facility also declares it (`capability: net` on the 17 net / httpd
+modules, `capability: sql` on `orm` / `sqlmigrate`, `capability: exec` on `mcp`); a
+transitive user needs nothing, since the imported module self-checks when it loads.
+Discipline going forward: bump a module's floor in the same change that breaks it.
+Requiring a shipped module to *carry* a floor (an `L303` "missing" clause) is a
+follow-on, once the `_test.j` overlay case is handled. No interpreter-core or
+language-grammar change.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 

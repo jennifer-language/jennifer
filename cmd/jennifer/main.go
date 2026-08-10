@@ -19,6 +19,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/preproc"
+	"jennifer-lang.dev/jennifer/internal/reqcheck"
 	"jennifer-lang.dev/jennifer/internal/stdlib"
 	"jennifer-lang.dev/jennifer/internal/version"
 )
@@ -303,6 +304,11 @@ func loadModuleProgram(path string) (*parser.Program, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read module %q: %v", path, err)
 	}
+	// Requirement header: each module self-checks its `# pragma-jennifer-*` floor /
+	// capabilities against this build before it is lexed.
+	if rerr := reqcheck.CheckRequirements(string(srcBytes), path); rerr != nil {
+		return nil, rerr
+	}
 	toks, err := lexer.TokenizeWithFile(string(srcBytes), path)
 	if err != nil {
 		return nil, err
@@ -361,6 +367,13 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 		abs, _ := filepath.Abs(path)
 		absPath = abs
 		baseDir = filepath.Dir(abs)
+	}
+
+	// Requirement header: refuse to run a program whose `# pragma-jennifer-*` floor
+	// or capability is not met by this build, before lex / parse.
+	if rerr := reqcheck.CheckRequirements(src, label); rerr != nil {
+		fmt.Fprintf(os.Stderr, "jennifer: %s\n", rerr.Error())
+		return 1
 	}
 
 	tokens, err := lexer.TokenizeWithFile(src, absPath)

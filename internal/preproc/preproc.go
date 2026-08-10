@@ -27,6 +27,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	"jennifer-lang.dev/jennifer/internal/limits"
+	"jennifer-lang.dev/jennifer/internal/reqcheck"
 )
 
 // errReason returns a filesystem error's reason without the (possibly huge)
@@ -354,6 +355,15 @@ func spliceFile(path, baseDir string, visited map[string]bool, originTok lexer.T
 		if rerr != nil {
 			return nil, &PreprocessError{
 				Msg:  fmt.Sprintf("cannot read imported file %q: %s", truncPath(fullPath), errReason(rerr)),
+				File: originTok.File, Line: originTok.Line, Col: originTok.Col,
+			}
+		}
+		// Requirement header: each included file self-checks its `# pragma-jennifer-*`
+		// floor / capabilities before its tokens are spliced in (so `include` needs
+		// no cross-file merge - every file is validated on its own).
+		if creq := reqcheck.CheckRequirements(string(srcBytes), fullPath); creq != nil {
+			return nil, &PreprocessError{
+				Msg:  creq.Error(),
 				File: originTok.File, Line: originTok.Line, Col: originTok.Col,
 			}
 		}

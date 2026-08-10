@@ -110,6 +110,7 @@ func init() {
 		// L3nn - API lifecycle.
 		{id: "L301", desc: "deprecation: use of a still-supported but retiring API (populated as features are deprecated)", severity: SeverityWarning, selectable: true, run: nil},
 		{id: "L302", desc: "removed-api: use of an API that has been removed", severity: SeverityWarning, selectable: true, run: checkRemovedApi},
+		{id: "L303", desc: "invalid-requirement-header: a malformed / duplicate / unknown `# pragma-jennifer-*` directive", severity: SeverityWarning, selectable: true, run: checkRequirementHeader},
 	}
 }
 

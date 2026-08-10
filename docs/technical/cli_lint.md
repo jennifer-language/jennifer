@@ -28,8 +28,10 @@ style, **L3nn** API lifecycle.
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100)                  |
+| `L204` | interpolation-slot-too-complex | info  | a call or other non-trivial expression inside a `{expr}` string slot |
 | `L301` | deprecation                 | warning  | reserved family, empty until an API is deprecated                  |
 | `L302` | removed-api                 | warning  | use of a removed API (e.g. `use core;`)                            |
+| `L303` | invalid-requirement-header  | warning  | a malformed / duplicate / unknown `# pragma-jennifer-*` directive    |
 
 The **L0nn source errors are always on and not user-selectable**: they
 are produced by the pipeline (lex / preprocess / parse) or the

@@ -27,6 +27,26 @@ io.printf("Jennifer %s (%s build)\n",
 | `meta.VERSION`   | string | The interpreter's build version. See format below.                 |
 | `meta.BUILD`     | string | Which Go toolchain compiled the interpreter: `"go"` or `"tinygo"`. |
 | `meta.SYSMODDIR` | string | The resolved system module directory (where bare `import`s look). Resolved from `--sysmoddir` > `JENNIFER_SYSMODDIR` > the compile-time default; `jennifer version -v` shows the layers. |
+| `meta.CAPABILITIES` | list of string | The host capabilities this build was compiled with, sorted: `["exec", "net", "sql"]` on the standard `jennifer`, `[]` on `jennifer-tiny`. The same set the `# pragma-jennifer-capability:` header is checked against. |
+
+## Capability query
+
+| Signature | Returns | Description |
+| --------- | ------- | ----------- |
+| `meta.hasCapability(name)` | bool | Whether this build includes the named host capability (`"net"` for TCP/UDP/TLS/DNS and the network-backed libraries, `"exec"` for `os/exec` external processes). Lets a script branch instead of failing in a stub. |
+
+```jennifer
+use meta;
+use io;
+if (meta.hasCapability("net")) {
+    io.printf("networking available\n");
+}
+io.printf("built with: %v\n", meta.CAPABILITIES);
+```
+
+A module can *require* a capability declaratively with a header pragma
+(`# pragma-jennifer-capability: net`), which refuses the module at read time on a
+build that lacks it - see [imports](../user-guide/imports.md#requirement-header).
 
 ### `VERSION` string format
 

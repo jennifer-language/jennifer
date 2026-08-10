@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-capability: sql
 
 /**
  * A minimal relational mapper over the [`sql`](../libraries/sql.md) library. It

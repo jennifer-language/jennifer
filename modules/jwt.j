@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
 
 /**
  * JSON Web Tokens (RFC 7519): sign, verify, and decode compact JWTs. Claims are

@@ -59,6 +59,17 @@ func TestBuildConstantReportsCompiler(t *testing.T) {
 	}
 }
 
+// TestCapabilityQuery confirms meta.CAPABILITIES / meta.hasCapability report the
+// build's host capabilities. The standard (gc) test build ships net + exec + sql.
+func TestCapabilityQuery(t *testing.T) {
+	if got := runOne(t, `use io; use meta; io.printf("%t %t", meta.hasCapability("net"), meta.hasCapability("nope"));`); got != "true false" {
+		t.Errorf("hasCapability(net/nope) = %q, want \"true false\"", got)
+	}
+	if got := runOne(t, `use io; use meta; io.printf("%v", meta.CAPABILITIES);`); got != `["exec", "net", "sql"]` {
+		t.Errorf("meta.CAPABILITIES = %q, want [\"exec\", \"net\", \"sql\"]", got)
+	}
+}
+
 // TestBareVersionNoLongerAvailable confirms bare JENNIFER_VERSION at
 // use site is now an error since the constant moved to meta and was
 // then renamed to meta.VERSION.

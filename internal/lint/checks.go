@@ -8,7 +8,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/capabilities"
 	"jennifer-lang.dev/jennifer/internal/parser"
+	"jennifer-lang.dev/jennifer/internal/reqcheck"
+	"jennifer-lang.dev/jennifer/internal/version"
 )
 
 // checkUnusedLocal (L101) flags a local `def` binding that is never read.
@@ -467,6 +470,47 @@ func checkRemovedApi(c *checkCtx) {
 // to match the lexer, and the finding is anchored at the first column past the
 // limit. Line-oriented, so it runs on the primary file's raw text; findings in
 // included files are out of scope for v1.
+// checkRequirementHeader (L303) validates a `# pragma-jennifer-*` requirement header
+// that is present: a malformed directive, a duplicate `version` (a file states one
+// floor), a version value that is not `>=major.minor.patch`, an unknown pragma key,
+// or an unknown capability name. It does not require a file to carry a header and
+// does not gate on the running build's version / capabilities (those are read-time
+// concerns, not code smells), so it has no false positives on a pragma-free file -
+// the runtime enforcement is the hard gate; this is the pre-import heads-up.
+func checkRequirementHeader(c *checkCtx) {
+	if c.source == "" {
+		return
+	}
+	dirs, mErr := reqcheck.Parse(c.source)
+	if mErr != nil {
+		c.reportAt("L303", c.sourceFile, mErr.Line, 1, mErr.Detail)
+		return
+	}
+	firstVersionLine := 0
+	for _, d := range dirs {
+		switch d.Key {
+		case "version":
+			if firstVersionLine != 0 {
+				c.reportAt("L303", c.sourceFile, d.Line, 1, "duplicate `version` pragma (a file states one version floor)")
+				continue
+			}
+			firstVersionLine = d.Line
+			if !strings.HasPrefix(d.Val, ">=") {
+				c.reportAt("L303", c.sourceFile, d.Line, 1, fmt.Sprintf("version pragma must be `>=major.minor.patch`, got %q", d.Val))
+			} else if _, err := version.AtLeast(strings.TrimSpace(d.Val[2:])); err != nil {
+				c.reportAt("L303", c.sourceFile, d.Line, 1, fmt.Sprintf("malformed version pragma %q", d.Val))
+			}
+		case "capability":
+			if !capabilities.Known(d.Val) {
+				c.reportAt("L303", c.sourceFile, d.Line, 1,
+					fmt.Sprintf("unknown capability %q (known: %s)", d.Val, strings.Join(capabilities.KnownNames(), ", ")))
+			}
+		default:
+			c.reportAt("L303", c.sourceFile, d.Line, 1, fmt.Sprintf("unknown pragma key %q", d.Key))
+		}
+	}
+}
+
 func checkLineTooLong(c *checkCtx) {
 	if c.cfg.MaxLineLength <= 0 || c.source == "" {
 		return

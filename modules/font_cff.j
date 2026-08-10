@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
 #
 # font_cff.j - the CFF (Compact Font Format) / Type2 charstring backend for the
 # font module, included (textual splice) into font.j. It parses the `CFF ` table

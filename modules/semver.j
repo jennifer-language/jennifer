@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
 
 /**
  * Strict Semantic Versioning 2.0.0 (https://semver.org): parse, compare,

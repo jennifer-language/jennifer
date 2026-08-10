@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
 #
 # label_cab.j - the cab JScript encoder for the `label` module. This file is
 # spliced into label.j via `include` and is not a standalone module: it declares

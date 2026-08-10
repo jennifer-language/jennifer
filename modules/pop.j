@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-capability: net
 
 /**
  * A POP3 receive client (RFC 1939): the line-oriented status dialogue ("+OK" /

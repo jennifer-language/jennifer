@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-capability: net
 
 /**
  * An HTTP/1.1 client over the `net` system library. Build a request (method,

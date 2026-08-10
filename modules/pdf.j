@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
 
 # A hand-rolled PDF writer: its render and PNG-decode methods legitimately run
 # past the L201 statement-count limit. Every other lint check stays active.

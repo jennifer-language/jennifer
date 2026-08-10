@@ -283,3 +283,41 @@ Notes:
   appears. A file containing a top-level `def` cannot be included
   inside a block (since definitions are only allowed at the top
   level).
+
+## Requirement header
+
+A file can declare the minimum interpreter version and the host capabilities it
+needs, so a mismatch is refused with a clear message at **read time** - before lex
+or parse - instead of failing cryptically deep in a stub or after a breaking
+change. Requirements are stated with typed `pragma` directives in the leading header
+block:
+
+```jennifer
+# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-capability: net
+```
+
+- **`version`** is a *minimum* floor (`>=major.minor.patch`; newer always
+  satisfies). The `>=` is **mandatory** - it is the only comparator. There is no
+  `>` (strictly-greater), `<`, `~`, or range grammar: a floor names the release that
+  introduced what you need, and any later version satisfies it. A bare
+  `0.25.0` (no `>=`) is a malformed directive. Any development build of the
+  interpreter bypasses the check (a `-dev` build is ahead of the last release);
+  only a clean release tag is compared. A file states **one** version floor - a
+  duplicate is an error.
+- **`capability`** names a host facility the build must provide: `net` (TCP / UDP /
+  TLS / DNS and the network-backed libraries) or `exec` (`os/exec` external
+  processes). Neither is present on `jennifer-tiny`. List several on one line
+  (`capability: net, exec`) or on separate lines; they accumulate. Query the same
+  set at runtime with [`meta.hasCapability`](../libraries/meta.md#capability-query)
+  / `meta.CAPABILITIES`.
+
+The header is a comment (a module top level is declarations-only, and the check runs
+before parsing), tolerant of the shebang, the SPDX block, and the docblock. It
+applies uniformly to a program, a module, and each `include`d file: **every file
+self-checks its own header** against the running interpreter, so `include` needs no
+merging - the effective floor is the highest and the effective capability set the
+union. A directive that opens `# pragma-jennifer-*` but does not parse, a bad version
+grammar, an unknown key, or an unknown capability name is a hard error (a typo must
+not silently disable the guard); `jennifer lint` (`L303`) reports the same problems
+before you run.

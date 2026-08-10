@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-capability: net
 
 /**
  * An IMAP4rev1 client (RFC 3501): tagged commands and untagged "*"

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
+	"jennifer-lang.dev/jennifer/internal/reqcheck"
 )
 
 // runFmt formats the named files per docs/user-guide/style-guide.md. Without a
@@ -552,7 +553,14 @@ func (f *fmtState) emitTrivia(t, next lexer.Token) {
 		} else if !f.atLineStart {
 			f.newline()
 		}
-		f.writeString(t.Lexeme)
+		// A `# pragma-jennifer-*:` directive is canonicalized to its single-spaced
+		// form so odd input spacing (`#pragma...`, wide gaps) renders uniformly;
+		// every other comment is preserved verbatim.
+		lex := t.Lexeme
+		if canon, ok := reqcheck.CanonicalLine(lex); ok {
+			lex = canon
+		}
+		f.writeString(lex)
 		f.writeByte('\n')
 		// Next real token starts a fresh line, indented for what it is (a
 		// following `}` dedents, so it lands one level out).

@@ -24,7 +24,9 @@ preferred-dark-theme = "ayu"
 additional-css = ["theme/custom.css"]
 # Swaps the menu-bar title for the wordmark lockup (currentColor text tracks the theme).
 additional-js = ["theme/logo.js"]
-git-repository-url = "https://github.com/jennifer-language/jennifer"
+# The header icon links to the GitHub organisation landing page; "edit this page"
+# still targets the repository at the exact file path.
+git-repository-url = "https://github.com/jennifer-language"
 edit-url-template = "https://github.com/jennifer-language/jennifer/edit/main/{path}"
 # Land users on a single-file table of contents; the section index
 # pages (libraries/index.md, technical/index.md, ...) still serve as

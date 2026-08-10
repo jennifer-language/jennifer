@@ -499,6 +499,55 @@ func TestFmtPreservesComments(t *testing.T) {
 	}
 }
 
+// TestFmtCanonicalizesPragmas confirms fmt rewrites a `# pragma-jennifer-*:`
+// requirement directive to its canonical single-spaced form (fixing missing/wide
+// spacing) while leaving ordinary comments - including prose that merely mentions
+// the marker - untouched.
+func TestFmtCanonicalizesPragmas(t *testing.T) {
+	cases := []struct {
+		name, src, want string
+	}{
+		{
+			"no space after hash and wide gaps",
+			"#pragma-jennifer-version:                  >=0.1.0\nuse io;\n",
+			"# pragma-jennifer-version: >=0.1.0\nuse io;\n",
+		},
+		{
+			"version internal whitespace is stripped entirely",
+			"#pragma-jennifer-version:          >=            0. 5 .0\nuse io;\n",
+			"# pragma-jennifer-version: >=0.5.0\nuse io;\n",
+		},
+		{
+			"capability list normalizes to comma-space without merging names",
+			"#  pragma-jennifer-capability:   net   exec,sql\nuse io;\n",
+			"# pragma-jennifer-capability: net, exec, sql\nuse io;\n",
+		},
+		{
+			"already canonical is stable",
+			"# pragma-jennifer-version: >=0.24.0\nuse io;\n",
+			"# pragma-jennifer-version: >=0.24.0\nuse io;\n",
+		},
+		{
+			"prose mentioning the marker is left verbatim",
+			"# see the pragma-jennifer-version: note\nuse io;\n",
+			"# see the pragma-jennifer-version: note\nuse io;\n",
+		},
+		{
+			"malformed directive (no colon) is left verbatim",
+			"# pragma-jennifer-version >=0.1.0\nuse io;\n",
+			"# pragma-jennifer-version >=0.1.0\nuse io;\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := fmtSource(t, c.src)
+			if got != c.want {
+				t.Errorf("got %q\nwant %q", got, c.want)
+			}
+		})
+	}
+}
+
 // TestFmtMatchReflow pins the canonical `match` layout: each `when` / `else` arm
 // starts on its own line (a flat case list, like switch/match in other
 // languages). An arm holding a single short statement stays inline

@@ -228,6 +228,34 @@ io.printf("first {$xs[0]}\n");
 	}
 }
 
+func TestRequirementHeader(t *testing.T) {
+	bad := []struct{ name, src string }{
+		{"malformed", "# pragma-jennifer-version\nuse io;\n"},
+		{"bad-version", "# pragma-jennifer-version: latest\nuse io;\n"},
+		{"no-ge", "# pragma-jennifer-version: 0.25.0\nuse io;\n"},
+		{"duplicate", "# pragma-jennifer-version: >=0.24.0\n# pragma-jennifer-version: >=0.25.0\nuse io;\n"},
+		{"unknown-key", "# pragma-jennifer-platform: linux\nuse io;\n"},
+		{"unknown-cap", "# pragma-jennifer-capability: nett\nuse io;\n"},
+	}
+	for _, c := range bad {
+		t.Run(c.name, func(t *testing.T) {
+			if d := lintSrc(t, c.src, only("L303"), lint.DefaultConfig()); countID(d, "L303") != 1 {
+				t.Errorf("expected one L303, got %v", d)
+			}
+		})
+	}
+	// A well-formed header and a pragma-free file are both clean (no false positive).
+	clean := []string{
+		"# pragma-jennifer-version: >=0.24.0\n# pragma-jennifer-capability: net\nuse io;\n",
+		"# just an ordinary comment\nuse io;\n",
+	}
+	for i, src := range clean {
+		if d := lintSrc(t, src, only("L303"), lint.DefaultConfig()); countID(d, "L303") != 0 {
+			t.Errorf("clean case %d should have no L303, got %v", i, d)
+		}
+	}
+}
+
 func TestSuppression(t *testing.T) {
 	t.Run("line directive", func(t *testing.T) {
 		src := "func f() { def dead as int init 2;   # lint-disable: L101\nreturn 0; }"
@@ -399,11 +427,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 16 {
-		t.Fatalf("expected 16 known IDs (4 source + 12 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 17 {
+		t.Fatalf("expected 17 known IDs (4 source + 13 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 16 {
-		t.Fatalf("catalog should list all 16 IDs")
+	if len(lint.Catalog()) != 17 {
+		t.Fatalf("catalog should list all 17 IDs")
 	}
 }
 
