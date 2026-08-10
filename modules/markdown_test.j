@@ -634,7 +634,7 @@ func testRenderRoundTripTransform() {
 }
 
 func renderBadFormat() {
-    def out as string init render(parse("x\n"), "pdf");
+    render(parse("x\n"), "pdf");
 }
 
 func testRenderUnknownFormatThrows() {
@@ -644,7 +644,7 @@ func testRenderUnknownFormatThrows() {
 func deepBlockConversion() {
     # A depth past the cap is a catchable "markdown" error, not a stack overflow.
     def b as Block init headingBlock(1, "x");
-    def n as Node init blockToPublic($b, 200);
+    blockToPublic($b, 200);
 }
 
 func testDepthCapThrows() {

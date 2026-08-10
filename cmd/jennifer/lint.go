@@ -301,8 +301,12 @@ func renderGitHub(diags []lint.Diagnostic) {
 		case lint.SeverityError:
 			level = "error"
 		}
+		// The file/line/col properties drive GitHub's inline code annotation, but the
+		// raw workflow log shows only the message - so repeat the position in the
+		// message text, making a plain log line self-identifying when many files lint.
+		msg := fmt.Sprintf("%s:%d:%d: [%s] %s", d.File, d.Line, d.Col, d.ID, d.Message)
 		fmt.Fprintf(os.Stdout, "::%s file=%s,line=%d,col=%d::%s\n",
-			level, ghProp(d.File), d.Line, d.Col, ghData("["+d.ID+"] "+d.Message))
+			level, ghProp(d.File), d.Line, d.Col, ghData(msg))
 	}
 }
 
