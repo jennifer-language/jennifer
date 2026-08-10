@@ -1357,7 +1357,7 @@ the raw finding count.
 
 ### M24.17 - `html` module: rebrand `htmlwriter` + add a parser
 
-**Planned.** Fold HTML **building** and **parsing** into one bare-named `html`
+**Done.** Fold HTML **building** and **parsing** into one bare-named `html`
 module. Two parts:
 
 - **Rebrand `htmlwriter` -> `html`** (a pre-1.0 breaking rename). The catalog
@@ -1384,9 +1384,17 @@ module. Two parts:
   nesting cap and node budget keep a malicious document a catchable error (the
   `xml` hardening precedent).
 
-Pure `.j`; **both binaries**. Core (a general format primitive). The largest
-build effort here (a from-scratch tolerant parser); best done before M24.18, which
-reuses its node / accessor shape.
+Pure `.j`; **both binaries**. Core (a general format primitive). Delivered: the
+rename touched the module + test + doc + demo + the one real consumer (`markdown`;
+`pdfwriter` only name-dropped it in a comment). The tolerant `parse` builds the
+**same transparent `Node`** the writers do, so `.tag` / `.attrs` / `.children` /
+`.text` are read as struct fields directly (unlike `xml`'s opaque Value) - the added
+surface is `parse` + `attrOf` / `hasAttr` + the XPath-ish `get` / `findAll` / `has`
+(the builder names `text` / `attr` were already taken, forcing the reader names
+apart). The parser threads all state through returns (a module top level is
+declarations-only, so no cursor global), builds the tree bottom-up on a `Frame`
+stack, and caps depth + node count. 23-test overlay; `M24.18` reuses this node /
+selector shape.
 
 ### M24.18 - `markdown` module: add a reader (surface the parse tree)
 

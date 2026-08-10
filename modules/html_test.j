@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# htmlwriter_test.j - white-box tests for htmlwriter.j. Run with:
+# html_test.j - white-box tests for html.j. Run with:
 #
-#     jennifer test modules/htmlwriter_test.j
+#     jennifer test modules/html_test.j
 #
-# The overlay splices htmlwriter.j in front of this file, so the tests reach
+# The overlay splices html.j in front of this file, so the tests reach
 # its private helpers (escapeAttr, isVoid, renderAttrs) and the private VOID
 # table by bare identifier, alongside its exported surface.
 use testing;
@@ -68,7 +68,7 @@ func injectBoolAttrName() {
 }
 func testBoolAttrNameValidated() {
     # An invalid boolean-attribute name still throws, like attr.
-    testing.assertThrows("injectBoolAttrName", "htmlwriter");
+    testing.assertThrows("injectBoolAttrName", "html");
     testing.assertEqual(boolAttr("data-x2").name, "data-x2");
 }
 
@@ -134,9 +134,9 @@ func injectTagSpace() {
     element("bad tag", [], []);
 }
 func testNameInjectionBlocked() {
-    testing.assertThrows("injectAttrName", "htmlwriter");
-    testing.assertThrows("injectTagName", "htmlwriter");
-    testing.assertThrows("injectTagSpace", "htmlwriter");
+    testing.assertThrows("injectAttrName", "html");
+    testing.assertThrows("injectTagName", "html");
+    testing.assertThrows("injectTagSpace", "html");
     # Legal names still build: letters, a digit, a hyphen.
     testing.assertEqual(attr("data-x2", "v").name, "data-x2");
     testing.assertEqual(element("h1", [], []).tag, "h1");
@@ -157,4 +157,59 @@ func testSafeUrl() {
     # for an allowed/relative reference.
     testing.assertEqual(safeUrl("http://exämple.com/x"), "http://exämple.com/x");
     testing.assertEqual(safeUrl("/café/menü"), "/café/menü");
+}
+
+# --- parser (reader) ---
+
+func testParseBasic() {
+    def doc as Node init parse("<ul class=fruit><li>apples</li><li>figs</li></ul>");
+    def ul as Node init get($doc, "ul");
+    testing.assertEqual($ul.tag, "ul");
+    testing.assertEqual(attrOf($ul, "class"), "fruit");
+    def items as list of Node init findAll($doc, "ul/li");
+    testing.assertEqual(len($items), 2);
+    testing.assertEqual($items[0].children[0].text, "apples");
+    testing.assertEqual($items[1].children[0].text, "figs");
+}
+
+func testParseSelectors() {
+    def doc as Node init parse("<div><p>a</p><p>b</p><p>c</p></div>");
+    testing.assertTrue(has($doc, "div/p"));
+    testing.assertEqual(len(findAll($doc, "div/p")), 3);
+    testing.assertEqual(len(findAll($doc, "div/*")), 3);
+    testing.assertEqual(get($doc, "div/p[2]").children[0].text, "b");
+    testing.assertFalse(has($doc, "div/span"));
+    testing.assertEqual(get($doc, "div/span").tag, "");   # no match -> empty node
+}
+
+func testParseAttrs() {
+    def doc as Node init parse('<a href="/x" data-id=42 disabled>hi</a>');
+    def a as Node init get($doc, "a");
+    testing.assertEqual(attrOf($a, "href"), "/x");
+    testing.assertEqual(attrOf($a, "data-id"), "42");   # unquoted value
+    testing.assertTrue(hasAttr($a, "disabled"));        # boolean attribute
+    testing.assertFalse(hasAttr($a, "nope"));
+    testing.assertEqual(attrOf($a, "nope"), "");
+}
+
+func testParseRoundTrip() {
+    def src as string init "<p>Hello <a href=\"/x\">link</a> &amp; more</p>";
+    testing.assertEqual(render(get(parse($src), "p")), $src);
+}
+
+func testParseTolerant() {
+    # void elements, unquoted attr, comment skipped, mismatched </i> ignored + <b> auto-closed
+    def doc as Node init parse("<div><br><img src=a.png><!-- c --><b>x</i></div>");
+    testing.assertEqual(render(get($doc, "div")), "<div><br><img src=\"a.png\"><b>x</b></div>");
+}
+
+func testParseScriptRaw() {
+    def doc as Node init parse("<script>if (a < b) x();</script>");
+    testing.assertEqual(get($doc, "script").children[0].text, "if (a < b) x();");
+}
+
+func testParseDoctype() {
+    def doc as Node init parse("<!DOCTYPE html><html><body>hi</body></html>");
+    testing.assertTrue(has($doc, "html/body"));
+    testing.assertEqual(get($doc, "html/body").children[0].text, "hi");
 }

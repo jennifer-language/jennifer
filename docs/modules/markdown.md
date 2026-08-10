@@ -1,7 +1,7 @@
 # `markdown` - render a Markdown subset to HTML and ANSI
 
 Import with `import "markdown.j" as markdown;`. Renders a small CommonMark
-subset to **HTML** (through the [`htmlwriter`](htmlwriter.md) module, so
+subset to **HTML** (through the [`html`](html.md) module, so
 escaping is handled for you) and to **styled terminal text** (through the
 [`ansi`](ansi.md) module). Pure Jennifer: line-oriented block parsing with a
 small inline scanner. Runs on either binary.
@@ -66,12 +66,12 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 A nested list is a more-indented list under a parent item; a blockquote's inner
 lines are parsed as blocks, so a quote can hold paragraphs, lists, or nested
 quotes. A link's `href` and an image's `src` both pass through the same scheme
-allowlist ([`htmlwriter.safeUrl`](htmlwriter.md)), so `javascript:` and other
+allowlist ([`html.safeUrl`](html.md)), so `javascript:` and other
 script schemes render as `#`.
 
 ## HTML output
 
-`toHtml` builds an [`htmlwriter`](htmlwriter.md) node tree and renders it, so
+`toHtml` builds an [`html`](html.md) node tree and renders it, so
 all text and every link target are correctly escaped - `&`, `<`, `>` in text
 and code, and `&`/`"` in an `href` - and you cannot produce malformed markup:
 
@@ -183,6 +183,6 @@ general-purpose CommonMark conformance.
 
 ## See also
 
-- [htmlwriter.md](htmlwriter.md) - the HTML backend `toHtml` renders through.
+- [html.md](html.md) - the HTML backend `toHtml` renders through.
 - [ansi.md](ansi.md) - the terminal styling `toAnsi` renders through.
 - [modules/index.md](index.md) - the module catalog and import rules.

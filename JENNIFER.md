@@ -689,14 +689,20 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `@reboot`) expand to a schedule - `@reboot` is startup-only and never matches a
   clock time. A pure calculator over `time` (no clock) - a scheduler is your own
   `spawn` + `time.sleep` loop. Both binaries.
-- **`htmlwriter`** - build an HTML element tree and render escaped HTML5:
+- **`html`** - build an HTML element tree and render escaped HTML5:
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
   constructors, `render` / `renderAll`, `escape`, `safeUrl(url)` (an
   `http`/`https`/`mailto` allowlist for `href`/`src`, else `"#"`), and
   `boolAttr(name)` for a valueless boolean attribute (renders `disabled`, not
-  `disabled=""`). A writer, not
-  a parser. `element` / `attr` reject a tag / attribute name outside
-  `[A-Za-z][A-Za-z0-9-]*` (a name is structure, not escapable data).
+  `disabled=""`). `element` / `attr` reject a tag / attribute name outside
+  `[A-Za-z][A-Za-z0-9-]*` (a name is structure, not escapable data). Also a
+  **tolerant `parse(src)`** that reads HTML back into the *same* `Node` tree
+  (void / self-closing / unquoted-attr / mismatched-nesting / comment / DOCTYPE /
+  `script`-raw tolerant; a depth + node budget cap a hostile document), walked by
+  `get(node, sel)` / `findAll(node, sel)` / `has(node, sel)` (XPath-ish `/`-path
+  selectors with `*` and `name[k]`) plus `attrOf(node, name)` / `hasAttr(node,
+  name)` - and re-serialized with the same `render`, so build and parse
+  round-trip through one model.
 - **`tengine`** - a lightweight-CMS text template engine (a subset of Go
   `text/template`) rendered over a `json.Value` tree. `tengine.newSet()` ->
   `Set`; `tengine.add(set, name, src)` -> `Set` (extracting `{{ define }}`
@@ -881,7 +887,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Run with `jennifer serve app.j [--watch]`. **Default `jennifer` binary
   only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
-  lists, code, GFM tables) to HTML (`markdown.toHtml`, through `htmlwriter`) and
+  lists, code, GFM tables) to HTML (`markdown.toHtml`, through `html`) and
   styled terminal text (`toAnsi`, through `ansi`); author Markdown with
   `header` / `style` / `link` / `bullets` / `numbered` / `codeBlock` / `table`;
   align handcrafted table source with `tablePretty`.
@@ -1344,7 +1350,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   rather than hanging. Query-only - it measures the offset, it does not discipline
   the clock or run as a daemon. **Default `jennifer` binary only** (`net`).
 - **`pdfwriter`** - generate simple PDF documents (text / lines / rectangles) the
-  way `htmlwriter` / `label` generate their formats. Value-semantic builders:
+  way `html` / `label` generate their formats. Value-semantic builders:
   `pdfwriter.document()`, `page(width, height)`, then `text(pg, x, y, font, size,
   str)` / `line(pg, fromX, fromY, toX, toY)` / `rect(pg, x, y, w, h, filled)` /
   `color(pg, red, green, blue)` (each returns a fresh `Page`), `addPage(doc, pg)`,

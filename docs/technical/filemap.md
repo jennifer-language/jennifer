@@ -173,7 +173,7 @@ co-located `X_test.j` white-box overlay (run under `jennifer test`) and a
 | `ansi.j` | Terminal styling as string wrappers (color / style / rgb / strip); TTY-aware. |
 | `csv.j` | RFC 4180 CSV parse / format (+ any delimiter) + header-keyed records. |
 | `semver.j` | Strict SemVer 2.0.0 parse / compare / sort / increment. |
-| `htmlwriter.j` | Build an HTML element tree and render escaped HTML5. |
+| `html.j` | Build an HTML element tree and render escaped HTML5. |
 | `markdown.j` | CommonMark subset -> HTML / ANSI, plus Markdown authoring helpers. |
 | `mime.j` | Build + parse MIME messages (RFC 5322 / 2045, RFC 2047 encoded-words). |
 | `smtp.j` / `pop.j` / `imap.j` | Mail clients over `net`: send (SMTP), receive (POP3 / IMAP4rev1). |

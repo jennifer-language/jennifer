@@ -6,7 +6,7 @@
 # lint-disable-file: L201
 
 /**
- * Generate PDF documents - text, lines, rectangles - the way `htmlwriter` /
+ * Generate PDF documents - text, lines, rectangles - the way `html` /
  * `label` generate their formats. Build a `Document` of `Page`s with
  * value-semantic builders, then `render()` writes the PDF object / xref structure
  * by hand (no stdlib PDF) as `bytes`. Content streams are FlateDecode-compressed

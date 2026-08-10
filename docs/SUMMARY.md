@@ -87,7 +87,7 @@
 - [`gotify`](modules/gotify.md)
 - [`gpio`](modules/gpio.md)
 - [`graphql`](modules/graphql.md)
-- [`htmlwriter`](modules/htmlwriter.md)
+- [`html`](modules/html.md)
 - [`http`](modules/http.md)
 - [`ical`](modules/ical.md)
 - [`idna`](modules/idna.md)

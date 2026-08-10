@@ -3,7 +3,7 @@
 Import with `import "pdfwriter.j" as pdf;`. Build a `Document` of `Page`s with
 value-semantic builders - text, lines, rectangles - then `render()` writes the
 PDF object / xref structure by hand (no stdlib PDF) as `bytes`, the way
-[`htmlwriter`](htmlwriter.md) / [`label`](label.md) generate their formats.
+[`html`](html.md) / [`label`](label.md) generate their formats.
 Content streams are FlateDecode-compressed via [`compress`](../libraries/compress.md).
 Pure Jennifer; runs on **both** binaries.
 
@@ -234,7 +234,7 @@ reproducible for content-addressed builds.
 ## See also
 
 - [compress.md](../libraries/compress.md) - the FlateDecode (`zlib`) streams.
-- [htmlwriter.md](htmlwriter.md) / [label.md](label.md) - the sibling
+- [html.md](html.md) / [label.md](label.md) - the sibling
   format-generation modules.
 - [fs.md](../libraries/fs.md) - `writeBytes` to save the rendered PDF.
 - [modules/index.md](index.md) - the module catalog and import rules.

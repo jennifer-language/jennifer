@@ -1,6 +1,6 @@
-# `htmlwriter` - build and render an HTML tree
+# `html` - build and render an HTML tree
 
-Import with `import "htmlwriter.j" as html;`. Assembles an HTML element tree
+Import with `import "html.j" as html;`. Assembles an HTML element tree
 and renders it to a correctly-escaped HTML5 string. Pure Jennifer over
 `strings` and `lists`, so it runs on either binary. It is a **writer, not a
 parser** - serialization is a handful of string operations, so it has no
@@ -10,7 +10,7 @@ layer).
 
 ```jennifer
 use io;
-import "htmlwriter.j" as html;
+import "html.j" as html;
 
 def kids as list of html.Node init [];
 $kids[] = html.text("hi & bye");
@@ -18,7 +18,7 @@ def p as html.Node init html.element("p", [], $kids);
 io.printf("%s\n", html.render($p));          # <p>hi &amp; bye</p>
 ```
 
-Runnable: [`examples/modules/htmlwriter_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/htmlwriter_demo.j).
+Runnable: [`examples/modules/html_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/html_demo.j).
 
 ## The node model
 
@@ -108,7 +108,7 @@ io.printf("%s\n", html.render(html.element("input", $a, [])));
 ## Safe tag / attribute names
 
 `html.element` and `html.attr` validate the tag / attribute name against
-`[A-Za-z][A-Za-z0-9-]*` and throw an `Error` of kind `"htmlwriter"` on anything
+`[A-Za-z][A-Za-z0-9-]*` and throw an `Error` of kind `"html"` on anything
 else. A name is markup structure, not data, so unlike a value it cannot be
 escaped: `html.attr("x onclick=alert(1)", "y")` or a tag built from an untrusted
 string would otherwise inject a live attribute or element. Legal names
@@ -151,6 +151,44 @@ $parts[] = html.element("h1", [], heading);
 $parts[] = html.element("hr", [], []);
 io.printf("%s\n", html.renderAll($parts));
 ```
+
+## Parsing
+
+`html.parse(src)` reads an HTML string into the **same `Node` tree** the builders
+produce, so a document can be walked, edited, and re-rendered with `render` - build
+and parse round-trip through one model. The result is a synthetic `#root` element
+whose `children` are the document's top-level nodes:
+
+```jennifer
+def doc as html.Node init html.parse("<ul class=fruit><li>apples</li><li>figs</li></ul>");
+io.printf("%s\n", html.attrOf(html.get($doc, "ul"), "class"));   # fruit
+for (def li in html.findAll($doc, "ul/li")) {
+    io.printf("%s\n", $li.children[0].text);                     # apples, figs
+}
+```
+
+Because `Node` is a plain struct, read `.tag` / `.attrs` / `.children` / `.text`
+directly; the query helpers add attribute lookup and tree search:
+
+| Call                        | Returns                                              |
+| --------------------------- | ---------------------------------------------------- |
+| `html.attrOf(node, name)`   | an attribute's value, or `""`                        |
+| `html.hasAttr(node, name)`  | whether the attribute is present                     |
+| `html.get(node, sel)`       | the first element matching `sel` (an empty node if none) |
+| `html.findAll(node, sel)`   | every element matching `sel`                         |
+| `html.has(node, sel)`       | whether any element matches `sel`                    |
+
+A selector is an XPath-ish `/`-path; each step is a tag name, `*` (any element), or
+`name[k]` (the k-th such child, 1-based). Steps match **direct element children**
+(text nodes are skipped), so `"article/ul/li[2]"` is the second `li` under the `ul`
+under the `article`.
+
+The parser is **tolerant** of real-world HTML: void elements (`<br>` / `<img>`),
+self-closing tags, unquoted (`id=x`) and boolean (`disabled`) attributes, mismatched
+nesting (`<b>x</i>` closes the `<b>`), comments, `<!DOCTYPE>`, and `script` / `style`
+raw text are handled, not rejected; the common entities (`&amp;` `&lt;` `&gt;`
+`&quot;` `&#39;`) decode. A nesting-depth and node budget make a malicious document a
+catchable `Error{kind: "html"}` rather than an unbounded parse.
 
 ## Out of scope
 

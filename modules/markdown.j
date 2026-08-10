@@ -9,7 +9,7 @@
  * A lightweight Markdown renderer for a small CommonMark subset: ATX headings,
  * bold / italic emphasis, inline code, links, images, fenced code blocks,
  * unordered / ordered lists (**nested** by indentation), blockquotes (nesting
- * recursively), and GFM tables. Renders to HTML (through the `htmlwriter`
+ * recursively), and GFM tables. Renders to HTML (through the `html`
  * module, so escaping is handled for you) and to styled terminal text (through
  * the `ansi` module). It also authors Markdown text (header / style / link /
  * list / codeBlock / table). Pure Jennifer; line-oriented block parsing with a
@@ -24,7 +24,7 @@
  * io.printf("%s\n", markdown.toHtml("# Hi\n\nA **bold** word.\n\n> a quote"));
  * io.printf("%s\n", markdown.toAnsi("- one\n  - nested\n- two"));
  */
-import "./htmlwriter.j" as html;
+import "./html.j" as html;
 import "./ansi.j" as ansi;
 use strings;
 use regex;
@@ -834,11 +834,11 @@ func fenceLen(trimmed as string) {
     return 0;
 }
 
-# --- HTML rendering, through htmlwriter (exported) -----------------
+# --- HTML rendering, through html (exported) -----------------
 
-# inlineToNodes maps spans to htmlwriter nodes; html.text escapes text content
+# inlineToNodes maps spans to html nodes; html.text escapes text content
 # and html.attr escapes the link target.
-# spanToNode renders one span to an htmlwriter node. The `match` is over a Span
+# spanToNode renders one span to an html node. The `match` is over a Span
 # parameter, so the resolver checks it covers every SpanKind - add a kind and
 # this fails to compile until it is handled.
 func spanToNode(sp as Span) {
@@ -874,7 +874,7 @@ func wrapEl(tag as string, text as string) {
 # read, because browsers ignore them inside a scheme (so "java\tscript:" and
 # "  javascript:" would otherwise execute).
 # safeHref returns a URL safe for an href (http / https / mailto, else "#").
-# The scheme allowlist lives in htmlwriter (html.safeUrl) so the anti-XSS policy
+# The scheme allowlist lives in html (html.safeUrl) so the anti-XSS policy
 # has one home; this thin wrapper keeps the local call sites readable.
 func safeHref(url as string) {
     return html.safeUrl($url);
@@ -974,7 +974,7 @@ func listNode(b as Block) {
     return html.element("ul", [], $lis);
 }
 
-# blockToNode renders one block to an htmlwriter node.
+# blockToNode renders one block to an html node.
 func blockToNode(b as Block) {
     match ($b.kind) {
         when Table {

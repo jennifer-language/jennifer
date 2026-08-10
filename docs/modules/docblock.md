@@ -161,5 +161,5 @@ that documents nothing.
 - [`jennifer fmt`](../technical/cli_fmt.md) - the canonical layout normaliser.
 - [`regex`](../libraries/regex.md) / [`strings`](../libraries/strings.md) - the
   libraries `docblock` is built on.
-- [`htmlwriter`](htmlwriter.md) - render parsed docs to HTML (a separate
+- [`html`](html.md) - render parsed docs to HTML (a separate
   consumer, not part of `docblock`).

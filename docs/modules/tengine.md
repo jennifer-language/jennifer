@@ -41,7 +41,7 @@ $set = tengine.add($set, "page", "<p>{{ .comment }}</p>");
 ```
 
 The `html` pipe escapes `&`, `<`, `>`, `'`, and `"`. For attribute values and
-URLs the same caution applies: build links through `htmlwriter.safeUrl` (which
+URLs the same caution applies: build links through `html.safeUrl` (which
 rejects `javascript:` and other dangerous schemes) rather than interpolating a
 raw URL into an `href`. When a template mixes trusted markup with untrusted
 data, escape at the boundary - the engine cannot tell the two apart for you.
@@ -237,5 +237,5 @@ Adding a pipe or a comparison function is one branch in the engine.
 - [json.md](../libraries/json.md) - the `json.Value` data tree templates render over.
 - [markdown.md](markdown.md) - render Markdown bodies to HTML for a template.
 - [toml.md](../libraries/toml.md) - parse front matter / config into a data tree.
-- [htmlwriter.md](htmlwriter.md) - build an HTML tree programmatically instead of from text.
+- [html.md](html.md) - build an HTML tree programmatically instead of from text.
 - [modules/index.md](index.md) - the module catalog and import rules.

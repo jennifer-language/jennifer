@@ -66,17 +66,16 @@ lose test surface.
 
 `pdfwriter` gained `measureText` over the standard-14 Adobe AFM width tables,
 `wrapText`, and `textBlock` (left / center / right / justify). What remains is the
-markup-driven document story - and the reason it is Markdown rather than HTML:
-Jennifer ships a `markdown` parser (GFM tables, headings, lists, emphasis) but no
-HTML *parser* (`htmlwriter` only builds HTML), so the cheap, ergonomic path to
-"write markup, get a PDF" is to drive that layout layer from the existing Markdown
-parse rather than write a quirky HTML-subset parser (Markdown tables are also
-easier to author than HTML tables). A prerequisite to verify first: whether the
+markup-driven document story. Jennifer ships a `markdown` parser (GFM tables,
+headings, lists, emphasis) and, since `M24.17`, an `html` parser too, so either
+could feed the layout layer. The Markdown path stays the cheaper, more ergonomic
+default for "write markup, get a PDF" (Markdown tables are easier to author than
+HTML tables), while the `html` reader makes a TCPDF-style HTML front-end viable for
+consuming pre-existing HTML - both would sit on the same layout foundation. A
+prerequisite to verify first: whether the
 `markdown` module exposes a reusable parse tree or only renders straight to a
 string - if the latter, a small refactor to surface the intermediate document
-model. An HTML-subset front-end (TCPDF-style) stays a *later* option, only worth
-it for consuming pre-existing HTML, and it would sit on the same layout
-foundation. Stays pure `.j`, both binaries.
+model. Stays pure `.j`, both binaries.
 
 ### Platform and distribution
 
