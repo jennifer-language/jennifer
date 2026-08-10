@@ -407,9 +407,22 @@ func isVoidTag(tag as string) {
     return lists.contains(VOID, $tag);
 }
 
-# unescape decodes the common HTML entities in parsed text / attribute content.
-# `&amp;` is decoded last so `&amp;lt;` yields the literal `&lt;`, not `<`.
-func unescape(s as string) {
+/**
+ * Decode the common HTML entities in a string - `&lt;` / `&gt;` / `&quot;` / `&#39;` /
+ * `&apos;` / `&amp;` to their characters - the inverse of `escape`. `&amp;` is decoded
+ * last, so `&amp;lt;` yields the literal `&lt;`, not `<`. A string with no `&` is
+ * returned unchanged.
+ *
+ * Scope is deliberately the metacharacter entities only: the ones any standard
+ * text-context escaper (including this module's `escape` / `escapeAttr`) emits, so a
+ * round-trip is exact. It is not a general HTML5 entity decoder - the ~2000 named
+ * references for authoring (`&nbsp;` / `&copy;` / `&mdash;` / ...) and numeric refs
+ * (`&#8212;`) are out of scope, since decoding those means shipping the full named
+ * table plus numeric parsing, not the metacharacter round-trip this serves.
+ * @param s {string} the text to decode
+ * @return {string} the decoded text
+ */
+export func unescape(s as string) {
     if (not strings.contains($s, "&")) {
         return $s;
     }

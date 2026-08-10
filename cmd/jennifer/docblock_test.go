@@ -32,6 +32,7 @@ func TestDocblockParse(t *testing.T) {
 
 /**
  * Add two numbers.
+ *
  * A longer description of add.
  * @param a {int} the first addend
  * @param b {int} the second addend

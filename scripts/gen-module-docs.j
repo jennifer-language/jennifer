@@ -77,7 +77,26 @@ func entryModules() {
 # mdText escapes angle brackets so a literal placeholder like <token> in a
 # description is not parsed as an HTML tag (mdBook warns on unclosed ones).
 func mdText(s as string) {
-    return strings.replace(strings.replace($s, "<", "&lt;"), ">", "&gt;");
+    # Escape < and > so a literal placeholder like <token> in prose is not parsed as
+    # an HTML tag by mdBook. Inside a `code span` the content is already rendered
+    # verbatim (by mdBook, and by the markdown module's PDF renderer), so escaping
+    # there is unnecessary - and it would otherwise leak a stray &lt; / &gt; into the
+    # generated PDF, whose code spans render exactly what they hold.
+    def out as list of string init [];
+    def inCode as bool init false;
+    for (def ch in strings.chars($s)) {
+        if ($ch == "`") {
+            $inCode = not $inCode;
+            $out[] = $ch;
+        } elseif ($ch == "<" and not $inCode) {
+            $out[] = "&lt;";
+        } elseif ($ch == ">" and not $inCode) {
+            $out[] = "&gt;";
+        } else {
+            $out[] = $ch;
+        }
+    }
+    return strings.join($out, "");
 }
 
 # mdCell is mdText plus a pipe escape, for text inside a Markdown table cell.

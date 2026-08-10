@@ -400,7 +400,28 @@ func parseInline(s as string) {
     if ($n > $bufStart) {
         $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $n), ""), "");
     }
-    return $spans;
+    return decodeSpanEntities($spans);
+}
+
+# decodeSpanEntities decodes HTML entities in each span's prose (its text, and a
+# link / image url + title), leaving Code spans literal (CommonMark keeps entities
+# raw in code). So a `&lt;` in Markdown source becomes `<` in the parse tree - it
+# renders as `<` in ANSI / PDF, and re-escapes correctly back to `&lt;` through
+# `html` for toHtml. Reuses the `html` module's decoder.
+func decodeSpanEntities(spans as list of Span) {
+    def out as list of Span init [];
+    for (def sp in $spans) {
+        if ($sp.kind == SpanKind.Code) {
+            $out[] = $sp;
+        } else {
+            def d as Span init $sp;
+            $d.text = html.unescape($sp.text);
+            $d.url = html.unescape($sp.url);
+            $d.title = html.unescape($sp.title);
+            $out[] = $d;
+        }
+    }
+    return $out;
 }
 
 # A link / image destination split into a URL and an optional title.
