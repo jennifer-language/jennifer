@@ -11,7 +11,7 @@
 // Surface: `intl.load(lang, catalog)` ingests a `map of string to string`;
 // `intl.setLocale(lang)` / `intl.locale()` get and set the current locale;
 // `intl.tr(key)` translates in the current locale, and `intl.tr(key, params)`
-// additionally fills `{name}` placeholders. A missing translation falls back
+// additionally fills `%name%` placeholders. A missing translation falls back
 // current locale -> its base language -> the default (first-loaded) language ->
 // the key itself, so a gap is always visible rather than silently blank.
 package intllib
@@ -203,13 +203,17 @@ func baseLang(locale string) string {
 	return locale
 }
 
-// interpolate replaces each `{name}` placeholder with params[name]. A name with
-// no matching param is left literal, so a missing value is visible; `{{` and
-// `}}` are escapes for a literal brace. The output is bounded by
+// interpolate replaces each `%name%` placeholder with params[name]. `%%` is the
+// escape for a literal `%`. A `%` that starts no known placeholder (its enclosed
+// name is not in params, or it has no closing `%`) is emitted literally and
+// scanning resumes just after it, so a missing value stays visible and a lone `%`
+// survives - matching the `validate` module's `%param%` grammar. Substitution is
+// single-pass: a substituted value is never re-scanned, so a param value that
+// itself contains `%other%` is emitted verbatim. The output is bounded by
 // maxTranslationBytes (checked incrementally): a template that amplifies past the
 // limit errors before the oversized string is built.
 func interpolate(s string, params map[string]string) (string, error) {
-	if !strings.ContainsRune(s, '{') && !strings.ContainsRune(s, '}') {
+	if !strings.ContainsRune(s, '%') {
 		if len(s) > maxTranslationBytes {
 			return "", errTooLarge()
 		}
@@ -227,43 +231,34 @@ func interpolate(s string, params map[string]string) (string, error) {
 		if b.Len() > maxTranslationBytes {
 			return "", errTooLarge()
 		}
-		switch s[i] {
-		case '{':
-			if i+1 < len(s) && s[i+1] == '{' {
-				b.WriteByte('{')
-				i += 2
-				continue
-			}
-			end := strings.IndexByte(s[i+1:], '}')
-			if end < 0 {
-				b.WriteString(s[i:])
-				i = len(s)
-				continue
-			}
-			name := s[i+1 : i+1+end]
-			if v, ok := params[name]; ok {
+		if s[i] != '%' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		// A doubled `%%` is a literal `%`.
+		if i+1 < len(s) && s[i+1] == '%' {
+			b.WriteByte('%')
+			i += 2
+			continue
+		}
+		// A `%name%` placeholder: name runs to the next `%`. Substitute only when
+		// the name is a known param; otherwise fall through and treat the leading
+		// `%` as a literal (so a lone `%` or an unknown `%name%` stays visible).
+		if end := strings.IndexByte(s[i+1:], '%'); end >= 0 {
+			if v, ok := params[s[i+1:i+1+end]]; ok {
 				// Reject a single substitution that alone would overshoot, so one
 				// oversized param cannot be copied into the builder at all.
 				if b.Len()+len(v) > maxTranslationBytes {
 					return "", errTooLarge()
 				}
 				b.WriteString(v)
-			} else {
-				b.WriteString(s[i : i+1+end+1]) // keep `{name}` literal
-			}
-			i += end + 2
-		case '}':
-			if i+1 < len(s) && s[i+1] == '}' {
-				b.WriteByte('}')
-				i += 2
+				i += end + 2 // past `%name%`
 				continue
 			}
-			b.WriteByte('}')
-			i++
-		default:
-			b.WriteByte(s[i])
-			i++
 		}
+		b.WriteByte('%')
+		i++
 	}
 	if b.Len() > maxTranslationBytes {
 		return "", errTooLarge()

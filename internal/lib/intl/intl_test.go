@@ -85,9 +85,9 @@ func TestFallbackChain(t *testing.T) {
 func TestInterpolation(t *testing.T) {
 	c := newCat()
 	mustLoad(t, c, "en", catalog(
-		"greet", "Hello, {name}!",
-		"count", "You have {n} items",
-		"lit", "raw {missing} and {{brace}}",
+		"greet", "Hello, %name%!",
+		"count", "You have %n% items",
+		"lit", "raw %missing% and %%brace%%",
 	))
 	params := func(kv ...interpreter.Value) interpreter.Value {
 		entries := make([]interpreter.MapEntry, 0, len(kv)/2)
@@ -106,8 +106,9 @@ func TestInterpolation(t *testing.T) {
 		params(interpreter.StringVal("n"), interpreter.IntVal(5))); got != "You have 5 items" {
 		t.Errorf("int interp = %q", got)
 	}
-	// A missing placeholder stays literal; {{ }} escape to single braces.
-	if got := tr(t, c, interpreter.StringVal("lit"), params()); got != "raw {missing} and {brace}" {
+	// An unknown placeholder stays literal (both delimiters preserved); %% escapes
+	// to a single %.
+	if got := tr(t, c, interpreter.StringVal("lit"), params()); got != "raw %missing% and %brace%" {
 		t.Errorf("literal/escape = %q", got)
 	}
 }
@@ -161,7 +162,7 @@ func TestBaseLang(t *testing.T) {
 // catalog state safe for `spawn`ed access.
 func TestConcurrentAccessRace(t *testing.T) {
 	c := newCat()
-	mustLoad(t, c, "en", catalog("k", "hello {who}"))
+	mustLoad(t, c, "en", catalog("k", "hello %who%"))
 	var wg sync.WaitGroup
 	for g := 0; g < 64; g++ {
 		wg.Add(1)
@@ -190,17 +191,17 @@ func TestInterpolationNoReexpansion(t *testing.T) {
 	const n = 20000
 	c := newCat()
 	c.loadFn(noCtx, []interpreter.Value{interpreter.StringVal("en"),
-		catalog("t", strings.Repeat("{x}", n), "self", "{x}")})
+		catalog("t", strings.Repeat("%x%", n), "self", "%x%")})
 
-	// Substituted value contains {x} and {t}: kept verbatim, not re-expanded.
-	out := tr(t, c, interpreter.StringVal("t"), catalog("x", "{x}{t}"))
-	if want := n * len("{x}{t}"); len(out) != want {
+	// Substituted value contains %x% and %t%: kept verbatim, not re-expanded.
+	out := tr(t, c, interpreter.StringVal("t"), catalog("x", "%x%%t%"))
+	if want := n * len("%x%%t%"); len(out) != want {
 		t.Fatalf("expansion = %d bytes, want %d (single-pass, no re-expansion)", len(out), want)
 	}
 
 	// A self-referential param terminates and is substituted exactly once.
-	if got := tr(t, c, interpreter.StringVal("self"), catalog("x", "{x}")); got != "{x}" {
-		t.Errorf("self-ref = %q, want %q (one substitution, no loop)", got, "{x}")
+	if got := tr(t, c, interpreter.StringVal("self"), catalog("x", "%x%")); got != "%x%" {
+		t.Errorf("self-ref = %q, want %q (one substitution, no loop)", got, "%x%")
 	}
 }
 
@@ -212,7 +213,7 @@ func TestInterpolationOutputCap(t *testing.T) {
 
 	// Small template, huge amplification: 200k copies of a 1 KiB param.
 	c.loadFn(noCtx, []interpreter.Value{interpreter.StringVal("en"),
-		catalog("amp", strings.Repeat("{x}", 200000))})
+		catalog("amp", strings.Repeat("%x%", 200000))})
 	_, err := c.trFn(noCtx, []interpreter.Value{interpreter.StringVal("amp"),
 		catalog("x", strings.Repeat("A", 1024))})
 	if err == nil || !strings.Contains(err.Error(), "limit") {
@@ -220,7 +221,7 @@ func TestInterpolationOutputCap(t *testing.T) {
 	}
 
 	// A single oversized param is rejected before it is copied in.
-	c.loadFn(noCtx, []interpreter.Value{interpreter.StringVal("en"), catalog("one", "{x}")})
+	c.loadFn(noCtx, []interpreter.Value{interpreter.StringVal("en"), catalog("one", "%x%")})
 	if _, err := c.trFn(noCtx, []interpreter.Value{interpreter.StringVal("one"),
 		catalog("x", strings.Repeat("B", maxTranslationBytes+1))}); err == nil {
 		t.Error("oversized single param should hit the cap")
@@ -241,16 +242,16 @@ func TestInterpolationOutputCap(t *testing.T) {
 }
 
 // TestInterpolationLinearScan guards against a quadratic scan on adversarial
-// brace patterns (unclosed braces, dense braces): each must complete in a single
-// linear pass.
+// percent patterns (unclosed markers, dense markers): each must complete in a
+// single linear pass.
 func TestInterpolationLinearScan(t *testing.T) {
 	c := newCat()
 	patterns := []string{
-		strings.Repeat("{", 100000),       // all opens, never closed
-		strings.Repeat("{}", 50000),       // empty placeholders
-		strings.Repeat("{{", 50000),       // all escapes
-		"{" + strings.Repeat("a", 100000), // one huge unterminated name
-		strings.Repeat("{a", 50000) + "}", // many opens, one distant close
+		strings.Repeat("%", 100000),       // all percents, never a closing pair
+		strings.Repeat("%z", 50000),       // many opens, no known name
+		strings.Repeat("%%", 50000),       // all escapes
+		"%" + strings.Repeat("a", 100000), // one huge unterminated name
+		strings.Repeat("%a", 50000) + "%", // many opens, one distant close
 	}
 	for i, p := range patterns {
 		c.loadFn(noCtx, []interpreter.Value{interpreter.StringVal("en"), catalog("p", p)})

@@ -1445,15 +1445,18 @@ the delimiter tension that recurs whenever a `{name}` template meets the feature
 
 Two parts:
 
-- **Part 1 - `%name%` placeholders.** `intl.tr` moves from `{name}` (with `{{` /
-  `}}` escapes) to `%name%` (with `%%` escaping a literal `%`), updating the Go
-  scanner + `intl` docs / examples / tests + the one inline caller
-  (`examples/intl.j`). `validate` is pre-migrated in its own (unreleased) window, so
-  it already speaks `%param%` / `%field%`. The `%%` escape is valid in cooked or raw
-  strings alike - the string engine owns `\` / `{}`, the module owns `%` - and
-  substitution is single-pass (a substituted value is never re-scanned). A pre-1.0
-  break to a shipped library (the language feature owns `{}`; the two template
-  libraries are secondary).
+- **Part 1 - `%name%` placeholders. (Done.)** `intl.tr` moved from `{name}` (with
+  `{{` / `}}` escapes) to `%name%` (with `%%` escaping a literal `%`): the Go
+  interpolator rewritten to the `validate` grammar (a `%` that opens no known
+  placeholder is emitted literally and scanning resumes after it, so a missing value
+  or a lone `%` stays visible), plus the `intl` docs / examples / tests and the two
+  inline callers (`examples/intl.j`, `examples/intl_toml.j`, and the `showcase`
+  slice). `validate` was pre-migrated in its own (unreleased) window, so it already
+  speaks `%param%` / `%field%`. The `%%` escape is valid in cooked or raw strings
+  alike - the string engine owns `\` / `{}`, the module owns `%` - and substitution
+  is single-pass (a substituted value is never re-scanned). A pre-1.0 break to a
+  shipped library (the language feature owns `{}`; the two template libraries are
+  secondary).
 - **Part 2 - implement interpolation + migrate literal braces.** The lexer
   re-enters expression parsing mid cooked-string and brace-counts nested `{}` (a map
   literal in a slot); the parser lowers a slot list to concat + `convert.toString`;

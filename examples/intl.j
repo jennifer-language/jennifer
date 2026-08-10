@@ -15,9 +15,9 @@ use intl;
 # The first language loaded is the default (source) language.
 intl.load(
     "en",
-    {"greeting": "Hello, {name}!", "cart": "You have {n} items in your cart", "bye": "Goodbye"});
-intl.load("de", {"greeting": "Hallo, {name}!", "bye": "Auf Wiedersehen"});
-intl.load("de-AT", {"greeting": "Servus, {name}!"});
+    {"greeting": "Hello, %name%!", "cart": "You have %n% items in your cart", "bye": "Goodbye"});
+intl.load("de", {"greeting": "Hallo, %name%!", "bye": "Auf Wiedersehen"});
+intl.load("de-AT", {"greeting": "Servus, %name%!"});
 
 # No locale set yet: everything resolves against the default language.
 io.printf("%s\n", intl.tr("greeting", {"name": "World"}));

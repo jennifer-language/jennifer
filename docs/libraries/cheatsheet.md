@@ -123,7 +123,7 @@ flat lookup view, not authoritative.
 | [`i2c`](i2c.md)`.close($bus)`                        | Close the bus. |
 | [`intl`](intl.md)`.load(lang, catalog)`               | Merge a `map of string to string` into the catalog for `lang`; the first language loaded is the default.                            |
 | [`intl`](intl.md)`.setLocale(lang)` / `.locale()`     | Set / read the current locale (e.g. `"de-AT"`; `locale()` is `""` until set).                                                       |
-| [`intl`](intl.md)`.tr(key[, params])`                 | Translate `key` (fallback: locale -> base language -> default -> the key); `params` (a `map`) fills `{name}` placeholders (`{{`/`}}` escape). |
+| [`intl`](intl.md)`.tr(key[, params])`                 | Translate `key` (fallback: locale -> base language -> default -> the key); `params` (a `map`) fills `%name%` placeholders (`%%` escapes a literal `%`). |
 | [`io`](io.md)`.eof()`                                 | True if and only if the next `io.readLine()` would error. Pair with `while (not io.eof()) {...}`.                                   |
 | [`io`](io.md)`.printf(format, args...)`               | Format-string write to stdout. Verbs: `%d %f %s %t %v %%`; per-verb `\|key=value` modifiers (`pad`, `prec`, `base`, `null=*`, ...). |
 | [`io`](io.md)`.printf(value)`                         | Write a value's display form to stdout.                                                                                             |

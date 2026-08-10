@@ -663,7 +663,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   Jennifer host CGI / FastCGI workloads end-to-end.
 - **i18n (CLDR formatting).** Locale-aware case folding, collation, number /
   date formatting, and BiDi - the CLDR-data-backed half of i18n, distinct from
-  the message catalogs + `{name}` interpolation already shipped as the `intl`
+  the message catalogs + `%name%` interpolation already shipped as the `intl`
   library (`M20.4`). Gated on the CLDR-data binary-size question (likely an
   optional library after the WASM runtime, so locale tables aren't baked into
   every build).

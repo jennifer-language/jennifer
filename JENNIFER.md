@@ -504,7 +504,7 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   translation. `intl.load(lang, catalog)` ingests a `map of string to string`
   (first language loaded is the default); `intl.setLocale(lang)` /
   `intl.locale()`; `intl.tr(key)` / `intl.tr(key, params)` translates with
-  `{name}` placeholder interpolation (`{{`/`}}` escape a literal brace) and a
+  `%name%` placeholder interpolation (`%%` escapes a literal `%`) and a
   fallback chain (current locale -> its base language -> default language -> the
   key itself, so a missing translation is visible). Named `intl` (letters-only,
   like JS `Intl`), not `i18n`; there is no ambient `_()`.

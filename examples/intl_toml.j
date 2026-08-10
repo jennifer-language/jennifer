@@ -35,11 +35,11 @@ func loadCatalog(path as string) {
 def dir as string init fs.makeTempDir("", "intl-");
 fs.writeString(
     $dir + "/en.toml",
-    "greeting = \"Hello, {name}!\"\n" + "cart = \"You have {n} items in your cart\"\n" +
+    "greeting = \"Hello, %name%!\"\n" + "cart = \"You have %n% items in your cart\"\n" +
         "bye = \"Goodbye\"\n");
 fs.writeString(
     $dir + "/de.toml",
-    "greeting = \"Hallo, {name}!\"\n" + "bye = \"Auf Wiedersehen\"\n");
+    "greeting = \"Hallo, %name%!\"\n" + "bye = \"Auf Wiedersehen\"\n");
 
 # Load them: the first language loaded (en) is the default / fallback.
 intl.load("en", loadCatalog($dir + "/en.toml"));

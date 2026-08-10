@@ -705,8 +705,8 @@ io.printf(
 use intl;
 
 io.printf("=== intl ===\n");
-intl.load("en", {"hi": "Hello, {name}!"});
-intl.load("de", {"hi": "Hallo, {name}!"});
+intl.load("en", {"hi": "Hello, %name%!"});
+intl.load("de", {"hi": "Hallo, %name%!"});
 intl.setLocale("de");
 io.printf("tr=%s\n", intl.tr("hi", {"name": "Welt"}));
 

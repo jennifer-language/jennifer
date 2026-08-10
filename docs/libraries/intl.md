@@ -22,7 +22,7 @@ library avoids.
 | `intl.setLocale(lang)` | `null` | Set the current locale (e.g. `"de"` or `"de-AT"`). |
 | `intl.locale()` | `string` | The current locale (`""` until set). |
 | `intl.tr(key)` | `string` | Translate `key` in the current locale, with fallback. |
-| `intl.tr(key, params)` | `string` | Same, filling `{name}` placeholders from `params` (a `map`). |
+| `intl.tr(key, params)` | `string` | Same, filling `%name%` placeholders from `params` (a `map`). |
 
 ## Loading catalogs
 
@@ -35,10 +35,10 @@ language again **merges** (later keys win):
 use intl;
 
 intl.load("en", {
-    "greeting": "Hello, {name}!",
-    "cart": "You have {n} items in your cart"
+    "greeting": "Hello, %name%!",
+    "cart": "You have %n% items in your cart"
 });
-intl.load("de", { "greeting": "Hallo, {name}!" });
+intl.load("de", { "greeting": "Hallo, %name%!" });
 ```
 
 The **first** language loaded is the *default* (source) language - the last stop
@@ -54,14 +54,14 @@ the decoded `yaml.Value` to the `map of string to string` `intl.load` wants -
 
 ```yaml
 # locales/en.yml
-greeting: "Hello, {name}!"
-cart: "You have {n} items in your cart"
+greeting: "Hello, %name%!"
+cart: "You have %n% items in your cart"
 bye: "Goodbye"
 ```
 
 ```yaml
 # locales/de.yml
-greeting: "Hallo, {name}!"
+greeting: "Hallo, %name%!"
 bye: "Auf Wiedersehen"
 ```
 
@@ -127,29 +127,34 @@ intl.tr("greeting", {"name": "Welt"})   # "Servus, Welt!" if de-AT has it,
 
 ### Placeholders
 
-With the two-argument form, each `{name}` in the template is replaced by
+With the two-argument form, each `%name%` in the template is replaced by
 `params["name"]`. A non-string value is rendered to its display form (so a number
 interpolates without a manual `convert.toString`). An unknown placeholder is left
-**literal** (a missing value is visible), and `{{` / `}}` are escapes for a
-literal brace:
+**literal** (a missing value is visible), and `%%` is the escape for a literal
+`%`:
 
 ```jennifer
 intl.tr("cart", {"n": 3})               # "You have 3 items in your cart"
 intl.tr("greeting", {"name": "Welt"})   # "Hallo, Welt!"
-# template "raw {missing} and {{brace}}" -> "raw {missing} and {brace}"
+# template "raw %missing% and %%brace%%" -> "raw %missing% and %brace%"
 ```
+
+The marker is `%name%`, not `{name}`, so a template reads the same whether it
+lives in a cooked `"..."` or a raw `'...'` string: the language reserves `{}` for
+[string interpolation](../user-guide/syntax.md) and `\` for escapes, while `intl`
+owns `%`. The two never collide.
 
 ### Output cap (untrusted catalogs)
 
 A catalog from an untrusted source could carry an amplification bomb - a template
-that repeats a placeholder many times (`"{x}{x}{x}..."`), so a small template plus
+that repeats a placeholder many times (`"%x%%x%%x%..."`), so a small template plus
 a modest param blows up into a huge string. To keep that from driving the process
 toward OOM, one interpolated translation is **capped at 1 MiB of output**, checked
 incrementally so `intl.tr` **errors before** the oversized string is ever built
 (the error is catchable with `try` / `catch`). A genuine translation is a UI
 message far below the cap; a document that large is a templating layer's job, not
 a catalog entry. Substitution is also single-pass - a param whose value itself
-contains `{...}` is inserted verbatim, never re-expanded - so there is no
+contains `%other%` is inserted verbatim, never re-expanded - so there is no
 recursive-expansion blow-up either.
 
 ## Why `intl.tr`, not a global `_()`
