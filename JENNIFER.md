@@ -939,6 +939,15 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   protocol only (no SSE, no sessions); the stdio *subprocess* client is deferred
   (it needs an `os` subprocess-stdin primitive). Default `jennifer` binary only
   (`jsonrpc` / `http` use `net`).
+- **`mdpdf`** - render a Markdown document to a laid-out PDF ("write markup, get
+  a PDF"): parse with `markdown`, then flow the block tree onto paginated pages
+  with the `pdf` layout primitives. `render(md)` / `renderWith(md, opts)` /
+  `renderTree(doc, opts)` produce PDF `bytes`; a heading becomes sized bold text,
+  a paragraph word-wraps with per-run bold / italic / inline code, a list indents
+  (nested), a GFM table rules an aligned grid with a bold header, a fenced code
+  block is monospaced, and a blockquote indents - all paginated. `renderTree` takes
+  a parsed (or transformed) `markdown.Node` tree. Standard-14 fonts (Latin-1 range);
+  both binaries.
 - **`memcache`** - a memcached client over `net` (classic text protocol):
   `memcache.connect(opts)` -> `memcache.Session`, then `set(session, key, value,
   exptime)` / `add` (store-if-absent, `-> bool`) / `get(session, key)` (`""`

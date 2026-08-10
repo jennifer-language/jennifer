@@ -60,23 +60,6 @@ either way: dogfooding is a first-class goal, and with no closures a handler is
 always a by-name entry method, so a Go rewrite of the router would buy little and
 lose test surface.
 
-### Higher-level modules
-
-#### DRAFT#13 - Markdown -> PDF
-
-`pdf` gained `measureText` over the standard-14 Adobe AFM width tables,
-`wrapText`, and `textBlock` (left / center / right / justify). What remains is the
-markup-driven document story. Jennifer ships a `markdown` parser (GFM tables,
-headings, lists, emphasis) and, since `M24.17`, an `html` parser too, so either
-could feed the layout layer. The Markdown path stays the cheaper, more ergonomic
-default for "write markup, get a PDF" (Markdown tables are easier to author than
-HTML tables), while the `html` reader makes a TCPDF-style HTML front-end viable for
-consuming pre-existing HTML - both would sit on the same layout foundation. A
-prerequisite to verify first: whether the
-`markdown` module exposes a reusable parse tree or only renders straight to a
-string - if the latter, a small refactor to surface the intermediate document
-model. Stays pure `.j`, both binaries.
-
 ### Platform and distribution
 
 #### DRAFT#12 - `jvc` package manager (decks)

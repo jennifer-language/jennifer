@@ -1368,7 +1368,7 @@ returns a public `Node` (a string `kind` plus the fields it uses, recursive over
 `level` / `attr` (`href` / `title` / `lang` / `align` / `ordered` / `level`) / `get`
 / `findAll` / `has` over a `/`-separated selector (kind names, `*`, `name[k]`) - so a
 caller can pull the headings for a TOC, rewrite links, or lint before rendering (the
-prerequisite `horizon.md`'s DRAFT#13, Markdown -> PDF, names). The `Block` / `Span`
+prerequisite the `M24.21` Markdown -> PDF layout names). The `Block` / `Span`
 model stays private; `parse` converts it, eagerly expanding inline spans so a link's
 `href` is walkable, and a fenced block's language is captured via a new `Block.lang`
 + `collectFence` info-string parse. The spec's `Doc` / `Node` pair collapsed to one
@@ -1461,6 +1461,40 @@ caller actually reaches. A transitive user needs nothing (the imported module
 self-checks). Discipline going forward: bump a module's floor in the same change that
 breaks it. Requiring a shipped module to *carry* a floor (an `L303` "missing" clause)
 is a follow-on. No interpreter-core or language-grammar change.
+
+### M24.21 - Markdown / HTML -> PDF (document layout)
+
+**Done.** The markup-driven document story for `pdf`, shipped as the new `mdpdf`
+module: render a Markdown document to a laid-out PDF ("write markup, get a PDF").
+Graduated from `horizon.md`'s DRAFT#13 once its one prerequisite landed - `M24.18`
+gave `markdown` a reusable parse tree (`parse` -> a `Node` walked by `typeOf` /
+`children` / `text` / `attr` / `get` / `findAll`), so `mdpdf` consumes that
+intermediate model instead of re-parsing. It builds on the existing `pdf` layout
+foundation (`measureText` over the standard-14 Adobe AFM tables, `wrapText`).
+
+- **A flow-layout engine** threads a value-semantic `Layout` (the accumulating
+  `Document` / `Page`, the pen `y`, and the current indent) through per-block
+  renderers that place each node with the `pdf` primitives and paginate - a new page
+  when the next line would cross the bottom margin. A heading -> sized bold text; a
+  paragraph -> a word-wrapped block with **per-run fonts** (a styled-word packer
+  switches to bold / italic / mono per inline node); a list -> indented `-` / `N.`
+  markers (nested); a GFM table -> a ruled grid, bold header, per-column alignment
+  (the table row loop keeps its cell-wrap / x-placement in `Layout`-free helpers so
+  a row costs no full-state copy); a fenced code block -> a monospaced block; a
+  blockquote -> indented inner blocks.
+- **`render(md)` / `renderWith(md, opts)` / `renderTree(doc, opts)` -> PDF `bytes`**,
+  the last over a parsed (or transformed) `markdown.Node`, so parse -> walk / rewrite
+  -> render works. An `Options` value (page size, margins, standard-14 fonts, body
+  size) is copied from `defaults()`.
+
+Markdown is the ergonomic default; the `M24.17` `html` reader makes an HTML
+front-end viable on the same `pdf` foundation, left as a follow-on (its node shape
+differs). Standard-14 fonts, so text is best kept to Latin-1; an embedded Unicode
+font (via `pdf.loadFont`) is a later refinement. Pure `.j`, **both binaries**
+(verified identical output on `jennifer-tiny`); full module discipline - a 15-test
+`mdpdf_test.j` overlay (100%, output checked structurally via the `%PDF` marker),
+`docs/modules/mdpdf.md` + index / `README` / `SUMMARY` / `JENNIFER.md` entries, and a
+runnable `mdpdf_demo.j` that renders a report to PDF and walks its headings.
 
 ## M25 - multiplatform: promote macOS / Windows to supported
 
