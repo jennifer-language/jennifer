@@ -1,6 +1,6 @@
-# `pdfwriter` - generate simple PDF documents
+# `pdf` - generate simple PDF documents
 
-Import with `import "pdfwriter.j" as pdf;`. Build a `Document` of `Page`s with
+Import with `import "pdf.j" as pdf;`. Build a `Document` of `Page`s with
 value-semantic builders - text, lines, rectangles - then `render()` writes the
 PDF object / xref structure by hand (no stdlib PDF) as `bytes`, the way
 [`html`](html.md) / [`label`](label.md) generate their formats.
@@ -8,7 +8,7 @@ Content streams are FlateDecode-compressed via [`compress`](../libraries/compres
 Pure Jennifer; runs on **both** binaries.
 
 ```jennifer
-import "pdfwriter.j" as pdf;
+import "pdf.j" as pdf;
 use fs;
 
 def p as pdf.Page init pdf.page(612, 792);
@@ -17,7 +17,7 @@ def doc as pdf.Document init pdf.addPage(pdf.document(), $p);
 fs.writeBytes("out.pdf", pdf.render($doc));
 ```
 
-Runnable: [`examples/modules/pdfwriter_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/pdfwriter_demo.j).
+Runnable: [`examples/modules/pdf_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/pdf_demo.j).
 
 ## Coordinates and units
 
@@ -61,7 +61,7 @@ flag fills the rectangle when `true`, otherwise strokes its outline.
 ## Fonts
 
 `text` takes one of the **standard-14** base fonts every PDF viewer provides;
-any other name throws `Error{kind: "pdfwriter"}`:
+any other name throws `Error{kind: "pdf"}`:
 
 ```
 Helvetica  Helvetica-Bold  Helvetica-Oblique  Helvetica-BoldOblique
@@ -123,7 +123,7 @@ Supported inputs:
 
 The image and its soft mask round-trip pixel-exact (the JPEG is re-embedded
 losslessly). **Not** supported: interlaced (Adam7) PNG, 16-bit alpha, and
-palette `tRNS` transparency - each throws `Error{kind: "pdfwriter"}` with a
+palette `tRNS` transparency - each throws `Error{kind: "pdf"}` with a
 reason. `addImage` the image before you `drawImage` it, so the `/name` resolves
 (the same rule as `addFont` / `textUnicode`).
 
@@ -166,7 +166,7 @@ $p = pdf.textBlock($p, 72, 720, 240, "Times-Roman", 11, 15, $body, "justify");
 `textBlockUnicode` is the same for an embedded font. The block does not clip or
 paginate; a column height is `len(wrapText(...)) * leading`, so you decide where
 it ends and when to start a new page. Measuring a Symbol / ZapfDingbats font, or a
-character outside WinAnsi, throws `Error{kind: "pdfwriter"}`.
+character outside WinAnsi, throws `Error{kind: "pdf"}`.
 
 ## Metadata
 
@@ -177,7 +177,7 @@ Properties" - with `pdf.info(doc, key, value)`. `key` is a PDF Info key:
 | --- | - |
 | `Title` / `Author` / `Subject` / `Keywords` | the descriptive fields |
 | `Creator` | the app that authored the source |
-| `Producer` | the app that wrote the PDF (defaults to `"Jennifer pdfwriter"`) |
+| `Producer` | the app that wrote the PDF (defaults to `"Jennifer pdf"`) |
 | `CreationDate` / `ModDate` | PDF date strings (see `pdfDate` below) |
 
 ```jennifer
@@ -187,7 +187,7 @@ $doc = pdf.info($doc, "Author", "Ada Lovelace");
 $doc = pdf.info($doc, "Keywords", "report, finance, q3");
 ```
 
-`document()` presets `Producer` to `"Jennifer pdfwriter"`; every other field is
+`document()` presets `Producer` to `"Jennifer pdf"`; every other field is
 unset until you set it. Any custom key works too. Dates use the PDF date syntax,
 which `pdf.pdfDate(t)` builds from a `time.Time`:
 
@@ -209,7 +209,7 @@ Write it with
 validates clean under `qpdf --check`.
 
 **Byte-identical output.** The same document always renders to the **exact same
-bytes** - on either binary, run to run. This is deliberate: `pdfwriter` never
+bytes** - on either binary, run to run. This is deliberate: `pdf` never
 auto-stamps a `CreationDate` or any other timestamp (you opt into one explicitly
 via `info` + `pdfDate`), so nothing varies with wall-clock time. That makes the
 output safe to assert against a golden file in an automated test, and

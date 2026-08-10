@@ -1349,17 +1349,17 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   lost reply times out via a UDP receive deadline (throws `Error{kind: "ntp"}`)
   rather than hanging. Query-only - it measures the offset, it does not discipline
   the clock or run as a daemon. **Default `jennifer` binary only** (`net`).
-- **`pdfwriter`** - generate simple PDF documents (text / lines / rectangles) the
+- **`pdf`** - generate simple PDF documents (text / lines / rectangles) the
   way `html` / `label` generate their formats. Value-semantic builders:
-  `pdfwriter.document()`, `page(width, height)`, then `text(pg, x, y, font, size,
+  `pdf.document()`, `page(width, height)`, then `text(pg, x, y, font, size,
   str)` / `line(pg, fromX, fromY, toX, toY)` / `rect(pg, x, y, w, h, filled)` /
   `color(pg, red, green, blue)` (each returns a fresh `Page`), `addPage(doc, pg)`,
   and `render(doc) -> bytes`. Document metadata via `info(doc, key, value)` (the
   PDF Info dictionary - `Title` / `Author` / `Subject` / `Keywords` / `Creator` /
-  `Producer`, which defaults to "Jennifer pdfwriter"; `pdfDate(t)` formats a PDF
+  `Producer`, which defaults to "Jennifer pdf"; `pdfDate(t)` formats a PDF
   date). `render` writes the PDF 1.7 object / xref structure by hand with
   FlateDecode-compressed content streams (via `compress`). Standard-14 base fonts
-  (an unknown font throws `Error{kind: "pdfwriter"}`); coordinates are PDF points
+  (an unknown font throws `Error{kind: "pdf"}`); coordinates are PDF points
   (origin bottom-left, y up, ints), colour is 0-255 RGB. For non-Latin text,
   **embed a TrueType font**: `loadFont(name, ttfBytes) -> LoadedFont` /
   `addFont(doc, lf)` / `textUnicode(pg, x, y, lf, size, str)` writes a Type0 /

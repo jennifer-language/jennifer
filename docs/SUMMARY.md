@@ -112,7 +112,7 @@
 - [`oauth`](modules/oauth.md)
 - [`orm`](modules/orm.md)
 - [`password`](modules/password.md)
-- [`pdfwriter`](modules/pdfwriter.md)
+- [`pdf`](modules/pdf.md)
 - [`pop`](modules/pop.md)
 - [`prometheus`](modules/prometheus.md)
 - [`ratelimit`](modules/ratelimit.md)

@@ -64,7 +64,7 @@ lose test surface.
 
 #### DRAFT#13 - Markdown -> PDF
 
-`pdfwriter` gained `measureText` over the standard-14 Adobe AFM width tables,
+`pdf` gained `measureText` over the standard-14 Adobe AFM width tables,
 `wrapText`, and `textBlock` (left / center / right / justify). What remains is the
 markup-driven document story. Jennifer ships a `markdown` parser (GFM tables,
 headings, lists, emphasis) and, since `M24.17`, an `html` parser too, so either

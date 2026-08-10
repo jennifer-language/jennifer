@@ -1355,46 +1355,27 @@ keys already escaped, `log` / `oauth` / `telegram` already hardened, three
 "typed-decode" modules that never decode JSON), so the real work was smaller than
 the raw finding count.
 
-### M24.17 - `html` module: rebrand `htmlwriter` + add a parser
+### M24.17 - `html` module: rebrand `htmlwriter` + add a parser (compacted)
 
-**Done.** Fold HTML **building** and **parsing** into one bare-named `html`
-module. Two parts:
-
-- **Rebrand `htmlwriter` -> `html`** (a pre-1.0 breaking rename). The catalog
-  names a format module for the format, not the direction: `xml` / `json` /
-  `yaml` / `toml` build *and* parse, `feed` builds *and* parses, `snmp` / `ldap`
-  are client *and* server. `htmlwriter` (build-only) is the lone `*writer`
-  outlier, so its build surface (`element` / `text` / `raw` / `attr` / `boolAttr`
-  / `render` / `renderAll` / `escape`) moves under the `html.` namespace
-  unchanged. The `htmlwriter.j` file, `docs/modules/htmlwriter.md`, its index /
-  `SUMMARY.md` / `README.md` / `JENNIFER.md` entries, its demo, and its one
-  consumer (`markdown`, which renders HTML through it) are all renamed / repointed
-  in the same change; the `htmlwriter` name is retired.
-- **Add the parser (reader).** A tolerant, hand-rolled HTML parser (no
-  `x/net/html`, to stay TinyGo-clean and reflect-free) that ingests existing HTML
-  - scraping a link / table, sanitising, an HTML front-end for the Markdown -> PDF
-  layout layer. Designed like `xml`: `parse` yields a walkable node tree with the
-  same accessor shape (`tag` / `text` / `attr` / `attrs` / `children`, plus `get`
-  / `findAll` / `has` over a small CSS-ish or XPath-ish selector). Where practical
-  the parsed node and the builder node are the **one** type (like `xml.Value` is
-  for both), so a parsed tree can be edited and re-`render`ed - build and parse
-  round-trip through one model. Unlike `xml` the parser is **tolerant**: implied
-  end tags, void elements (`<br>` / `<img>`), unquoted attributes, mismatched
-  nesting, and comments / DOCTYPE / script-CDATA are handled, not rejected; a
-  nesting cap and node budget keep a malicious document a catchable error (the
-  `xml` hardening precedent).
-
-Pure `.j`; **both binaries**. Core (a general format primitive). Delivered: the
-rename touched the module + test + doc + demo + the one real consumer (`markdown`;
-`pdfwriter` only name-dropped it in a comment). The tolerant `parse` builds the
-**same transparent `Node`** the writers do, so `.tag` / `.attrs` / `.children` /
-`.text` are read as struct fields directly (unlike `xml`'s opaque Value) - the added
-surface is `parse` + `attrOf` / `hasAttr` + the XPath-ish `get` / `findAll` / `has`
-(the builder names `text` / `attr` were already taken, forcing the reader names
-apart). The parser threads all state through returns (a module top level is
-declarations-only, so no cursor global), builds the tree bottom-up on a `Frame`
-stack, and caps depth + node count. 23-test overlay; `M24.18` reuses this node /
-selector shape.
+**Done.** Fold HTML building and parsing into one bare-named `html` module. **Part 1
+- rebrand `htmlwriter` -> `html`** (a pre-1.0 break): the catalog names a format
+module for the format, not the direction (`xml` / `json` build *and* parse), so the
+lone `*writer` outlier's build surface (`element` / `text` / `raw` / `attr` /
+`boolAttr` / `render` / `escape`) moves under `html.` unchanged; the file, doc, demo,
+index / `SUMMARY.md` / `README.md` / `JENNIFER.md` entries, and its one real consumer
+(`markdown`; `pdfwriter` only name-dropped it) are repointed, and the `htmlwriter`
+name is retired. **Part 2 - a tolerant, hand-rolled `parse`** (pure `.j`, no
+`x/net/html`) producing the **same transparent `Node`** the writers do, so a parsed
+tree is read (`.tag` / `.attrs` / `.children` / `.text` directly), edited, and
+re-`render`ed - build and parse round-trip through one model. Tolerant of void /
+self-closing tags, unquoted + boolean attrs, mismatched nesting (`<b>x</i>`
+auto-closes), comments, `<!DOCTYPE>`, and `script` / `style` raw text; entities
+decode; a depth + node budget cap a malicious document (catchable "html"). Added
+surface: `parse` + `attrOf` / `hasAttr` + the XPath-ish `get` / `findAll` / `has`
+(the builder names `text` / `attr` were taken, so the reader names diverge from
+`xml`). The parser threads all state through returns (a module top level is
+declarations-only, so no cursor global) and builds bottom-up on a `Frame` stack. Both
+binaries; 23-test overlay; `M24.18` reuses this node / selector shape.
 
 ### M24.18 - `markdown` module: add a reader (surface the parse tree)
 

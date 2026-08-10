@@ -13,13 +13,13 @@ import (
 	"testing"
 )
 
-// TestPdfwriterProducesValidPDF renders a PDF through the module and checks it:
+// TestPdfProducesValidPDF renders a PDF through the module and checks it:
 // always with byte-level structural assertions, and - when the tools are on the
 // PATH - with the real validators qpdf (--check) and pdftotext.
-func TestPdfwriterProducesValidPDF(t *testing.T) {
+func TestPdfProducesValidPDF(t *testing.T) {
 	dir := t.TempDir()
 	pdfPath := filepath.Join(dir, "out.pdf")
-	mod, err := filepath.Abs(filepath.Join("..", "..", "modules", "pdfwriter.j"))
+	mod, err := filepath.Abs(filepath.Join("..", "..", "modules", "pdf.j"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ fs.writeBytes(PATH, pdf.render($doc));
 		[]byte("/Type /Catalog"),
 		[]byte("/Type /Pages"),
 		[]byte("/Filter /FlateDecode"),
-		[]byte("/Producer (Jennifer pdfwriter)"),
+		[]byte("/Producer (Jennifer pdf)"),
 		[]byte("/Title (Jennifer Report)"),
 		[]byte("/Info "),
 		[]byte("/Subtype /Type0"),
@@ -166,7 +166,7 @@ fs.writeBytes(PATH, pdf.render($doc));
 	if pi, lerr := exec.LookPath("pdfinfo"); lerr == nil {
 		out, _ := exec.Command(pi, pdfPath).Output()
 		info := string(out)
-		for _, want := range []string{"Jennifer Report", "Ada Lovelace", "Jennifer pdfwriter"} {
+		for _, want := range []string{"Jennifer Report", "Ada Lovelace", "Jennifer pdf"} {
 			if !strings.Contains(info, want) {
 				t.Errorf("pdfinfo missing metadata %q; got:\n%s", want, info)
 			}

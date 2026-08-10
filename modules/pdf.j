@@ -26,9 +26,9 @@
  *
  * Coordinates are in PDF points (1/72 inch), origin bottom-left, y upward.
  * Common page sizes: US Letter 612 x 792, A4 595 x 842. Colours are 0-255 RGB.
- * @module pdfwriter
+ * @module pdf
  * @example
- * import "pdfwriter.j" as pdf;
+ * import "pdf.j" as pdf;
  * def p as pdf.Page init pdf.page(612, 792);
  * $p = pdf.text($p, 72, 720, "Helvetica", 24, "Hello, PDF");
  * def doc as pdf.Document init pdf.addPage(pdf.document(), $p);
@@ -44,7 +44,7 @@ use math;
 use time;
 use encoding;
 import "./font.j" as font;
-include "./pdfwriter_afm.j";
+include "./pdf_afm.j";
 
 /**
  * A loaded, embeddable font: a resource name (referenced in `textUnicode`) and
@@ -135,7 +135,7 @@ export def struct Page {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "pdfwriter", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "pdf", message: $msg, file: "", line: 0, col: 0};
 }
 
 # checkName validates a font / image resource name: a letter, then letters or
@@ -188,13 +188,13 @@ func standardFonts() {
 # --- builders (exported) ----------------------------------------------------
 
 /**
- * An empty document. The `Producer` metadata defaults to "Jennifer pdfwriter";
+ * An empty document. The `Producer` metadata defaults to "Jennifer pdf";
  * everything else is unset (no `CreationDate` is stamped, so output stays
  * deterministic - set one explicitly with `info` + `pdfDate` if you want it).
  * @return {Document} the document
  */
 export func document() {
-    def meta as map of string to string init {"Producer": "Jennifer pdfwriter"};
+    def meta as map of string to string init {"Producer": "Jennifer pdf"};
     def noFonts as list of LoadedFont init [];
     def noImages as list of Image init [];
     return Document{pages: [], info: $meta, embedded: $noFonts, images: $noImages};
@@ -346,7 +346,7 @@ func escapeString(s as string) {
  * @param size {int} the font size in points
  * @param str {string} the text to draw
  * @return {Page} a fresh page with the text added
- * @throws {Error} kind "pdfwriter" if the font is not a standard-14 name
+ * @throws {Error} kind "pdf" if the font is not a standard-14 name
  */
 export func text(pg as Page, x as int, y as int, font as string, size as int, str as string) {
     if (not lists.contains(standardFonts(), $font)) {
@@ -774,7 +774,7 @@ func parsePng(name as string, data as bytes) {
  * @param name {string} the resource name (e.g. "Logo"; letters / digits)
  * @param data {bytes} the PNG or JPEG file
  * @return {Image} the loaded image
- * @throws {Error} kind "pdfwriter" if the data is not a supported PNG / JPEG
+ * @throws {Error} kind "pdf" if the data is not a supported PNG / JPEG
  */
 export func loadImage(name as string, data as bytes) {
     checkName($name, "image");
@@ -869,7 +869,7 @@ func measureEm(font as string, str as string) {
  * @param size {int} the font size in points
  * @param str {string} the text to measure
  * @return {float} the width in points
- * @throws {Error} kind "pdfwriter" for an unknown / metric-less font
+ * @throws {Error} kind "pdf" for an unknown / metric-less font
  */
 export func measureText(font as string, size as int, str as string) {
     return (measureEm($font, $str) * $size) / 1000;
@@ -1073,7 +1073,7 @@ func drawJustifiedUni(pg as Page, x as int, baseline as int, width as int, lf as
  * @param str {string} the text (newlines are hard breaks)
  * @param align {string} "left" / "right" / "center" / "justify"
  * @return {Page} a fresh page with the text block drawn
- * @throws {Error} kind "pdfwriter" for an unknown align or font
+ * @throws {Error} kind "pdf" for an unknown align or font
  */
 export func textBlock(pg as Page, x as int, y as int, width as int, font as string, size as int, leading as int, str as string, align as string) {
     if (not validAlign($align)) {
@@ -1112,7 +1112,7 @@ export func textBlock(pg as Page, x as int, y as int, width as int, font as stri
  * @param str {string} the text (newlines are hard breaks)
  * @param align {string} "left" / "right" / "center" / "justify"
  * @return {Page} a fresh page with the text block drawn
- * @throws {Error} kind "pdfwriter" for an unknown align
+ * @throws {Error} kind "pdf" for an unknown align
  */
 export func textBlockUnicode(pg as Page, x as int, y as int, width as int, lf as LoadedFont, size as int, leading as int, str as string, align as string) {
     if (not validAlign($align)) {

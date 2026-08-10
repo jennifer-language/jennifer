@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# pdfwriter_test.j - white-box tests for pdfwriter.j. Run with:
+# pdf_test.j - white-box tests for pdf.j. Run with:
 #
-#     jennifer test modules/pdfwriter_test.j
+#     jennifer test modules/pdf_test.j
 #
 # These cover the builders and the private helpers (escapeString, colorComp,
 # zeroPad, font tracking) and a byte-level sanity check on render output; the
 # rendered PDF is validated with qpdf / pdftotext in the Go suite
-# (cmd/jennifer/pdfwriter_test.go). pdfwriter.j already `use`s strings / lists /
+# (cmd/jennifer/pdf_test.go). pdf.j already `use`s strings / lists /
 # convert / compress, so the overlay only adds testing.
 use testing;
 use encoding;
@@ -139,7 +139,7 @@ func testRenderEmptyDocument() {
 
 func testDefaultProducer() {
     def doc as Document init document();
-    testing.assertEqual($doc.info["Producer"], "Jennifer pdfwriter");
+    testing.assertEqual($doc.info["Producer"], "Jennifer pdf");
     testing.assertEqual(len($doc.info), 1); # no CreationDate auto-stamped
 }
 
@@ -148,7 +148,7 @@ func testInfoSetter() {
     $doc = info($doc, "Author", "Ada");
     testing.assertEqual($doc.info["Title"], "My Report");
     testing.assertEqual($doc.info["Author"], "Ada");
-    testing.assertEqual($doc.info["Producer"], "Jennifer pdfwriter"); # default preserved
+    testing.assertEqual($doc.info["Producer"], "Jennifer pdf"); # default preserved
 }
 
 func testPdfDate() {
@@ -242,7 +242,7 @@ func testLoadFontRejectsInjectingName() {
         loadFont("Evil>> /OpenAction << /S /JavaScript >>", ttfBytes());
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "pdfwriter");
+        testing.assertEqual($e.kind, "pdf");
     }
     testing.assertTrue($threw);
 }
@@ -271,7 +271,7 @@ func testLoadFontRejectsCff() {
         loadFont("X", encoding.fromText(CFF, "base64"));
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "pdfwriter");
+        testing.assertEqual($e.kind, "pdf");
     }
     testing.assertTrue($threw);
 }
@@ -341,7 +341,7 @@ func testLoadImageRejectsGarbage() {
         loadImage("bad", $junk);
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "pdfwriter");
+        testing.assertEqual($e.kind, "pdf");
     }
     testing.assertTrue($threw);
 }
@@ -354,20 +354,20 @@ func testHexGidRejectsOverflow() {
         hexGid(0x10000);
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "pdfwriter");
+        testing.assertEqual($e.kind, "pdf");
     }
     testing.assertTrue($threw);
 }
 
 # A PNG whose chunk length runs past the buffer (truncated / hostile) is a clean
-# pdfwriter error, not a raw index-out-of-range abort.
+# pdf error, not a raw index-out-of-range abort.
 func testLoadImageRejectsTruncated() {
     def threw as bool init false;
     try {
         loadImage("T", bytesSlice(rgbPng(), 0, 40));
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "pdfwriter");
+        testing.assertEqual($e.kind, "pdf");
     }
     testing.assertTrue($threw);
 }
@@ -477,7 +477,7 @@ func testTextBlockUnknownAlign() {
         textBlock(page(400, 300), 0, 0, 100, "Helvetica", 12, 14, "hi", "middle");
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "pdfwriter");
+        testing.assertEqual($e.kind, "pdf");
     }
     testing.assertTrue($threw);
 }
