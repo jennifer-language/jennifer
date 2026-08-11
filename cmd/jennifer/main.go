@@ -320,6 +320,20 @@ func loadModuleProgram(path string) (*parser.Program, error) {
 	return parser.ParseTokens(toks)
 }
 
+// sourceExtensionOK reports whether a file at `path` holding `src` is an
+// acceptable entry-point source. A Jennifer source normally must carry the `.j`
+// extension, with one exception: a file whose first line is a `#!` shebang. Such
+// a file is an executable script installed under a bare command name (e.g.
+// /usr/bin/mytool with a `#!/usr/bin/env -S jennifer run` line), where a `.j`
+// extension would be counterproductive - the shebang is the explicit "run me
+// directly" marker, and `#` starts a Jennifer comment so the line is inert to the
+// language. This relaxation applies only to the entry point given on the command
+// line; `import` / `include` targets still always require `.j`. It lives here (not
+// in the dev-tool-only dump.go) so both binaries can use it.
+func sourceExtensionOK(path, src string) bool {
+	return filepath.Ext(path) == ".j" || strings.HasPrefix(src, "#!")
+}
+
 func runFile(path string, searchDirs []string, vendorFlag string) int {
 	return runFileHook(path, searchDirs, vendorFlag, nil)
 }
@@ -353,16 +367,18 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 		}
 		baseDir = cwd
 	} else {
-		if filepath.Ext(path) != ".j" {
-			fmt.Fprintf(os.Stderr, "jennifer: source file must have .j extension, got %q\n", path)
-			return 2
-		}
 		srcBytes, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "jennifer: %v\n", err)
 			return 1
 		}
 		src = string(srcBytes)
+		// A `.j` extension is required, except for a `#!`-shebang executable script
+		// installed under a bare command name (see sourceExtensionOK).
+		if !sourceExtensionOK(path, src) {
+			fmt.Fprintf(os.Stderr, "jennifer: source file must have a .j extension or a `#!` shebang line, got %q\n", path)
+			return 2
+		}
 		label = path
 		abs, _ := filepath.Abs(path)
 		absPath = abs

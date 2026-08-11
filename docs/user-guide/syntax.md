@@ -102,6 +102,11 @@ io.printf("hi\n");
 (`env -S` splits the rest of the line into arguments, which is how
 `jennifer run` reaches the interpreter on Linux.)
 
+Source files normally must end in `.j`, but a file with a `#!` shebang first
+line is exempt: `chmod +x` it and install it under a bare command name
+(`/usr/local/bin/mytool`, no extension) and it runs as a normal command. Only the
+entry point is exempt - files it `import`s or `include`s still need `.j`.
+
 ## Number literals
 
 Decimal:

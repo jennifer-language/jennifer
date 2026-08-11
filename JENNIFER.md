@@ -71,7 +71,10 @@ an assistant usually guesses wrong:
   Legal: `MAX`, `MAX_RETRIES`, `HTTP_OK`, `SHA256`, `HTTP2`, `SCRAM_SHA256`.
   Illegal: `_MAX`, `MAX_`, `MAX__INT`, `maxInt`, `AES_256` (write `AES256`).
 - **`.j` import paths** are strings and may contain digits, `_`, `/`.
-- A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`.
+- A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`. A
+  file with a shebang may also be run **without a `.j` extension** (as an
+  executable installed under a bare command name); `import` / `include` targets
+  still require `.j`.
 
 ## Types
 

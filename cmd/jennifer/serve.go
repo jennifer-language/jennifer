@@ -92,8 +92,15 @@ func parseServeArgs(args []string) (string, bool, serveFlags, error) {
 	if file == "" {
 		return "", false, f, fmt.Errorf("no source file given")
 	}
-	if !strings.HasSuffix(file, ".j") {
-		return "", false, f, fmt.Errorf("source file %q must end in .j", file)
+	// A `.j` extension is required, except for a `#!`-shebang executable script
+	// (see sourceExtensionOK) - so `#!/usr/bin/env -S jennifer serve` works from a
+	// bare command name too. The file is read (serve needs it to exist regardless).
+	srcBytes, rerr := os.ReadFile(file)
+	if rerr != nil {
+		return "", false, f, rerr
+	}
+	if !sourceExtensionOK(file, string(srcBytes)) {
+		return "", false, f, fmt.Errorf("source file %q must have a .j extension or a `#!` shebang line", file)
 	}
 	return file, watch, f, nil
 }

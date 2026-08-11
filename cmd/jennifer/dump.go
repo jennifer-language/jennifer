@@ -49,13 +49,13 @@ func loadProgramSource(path string) (src, label, absPath, baseDir string, ok boo
 		}
 		return string(bytes), "<stdin>", "<stdin>", cwd, true
 	}
-	if filepath.Ext(path) != ".j" {
-		fmt.Fprintf(os.Stderr, "jennifer: source file must have .j extension, got %q\n", path)
-		return "", "", "", "", false
-	}
 	bytes, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jennifer: %v\n", err)
+		return "", "", "", "", false
+	}
+	if !sourceExtensionOK(path, string(bytes)) {
+		fmt.Fprintf(os.Stderr, "jennifer: source file must have a .j extension or a `#!` shebang line, got %q\n", path)
 		return "", "", "", "", false
 	}
 	abs, _ := filepath.Abs(path)

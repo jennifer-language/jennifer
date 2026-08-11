@@ -91,3 +91,26 @@ func TestValidRunProfile(t *testing.T) {
 		t.Error("a 65-char profile should be rejected")
 	}
 }
+
+// TestSourceExtensionOK pins the entry-point extension rule: a `.j` extension, or
+// a `#!` shebang (an executable script under a bare command name). A bare `#`
+// comment is not a shebang.
+func TestSourceExtensionOK(t *testing.T) {
+	cases := []struct {
+		path, src string
+		want      bool
+	}{
+		{"foo.j", "use io;", true},
+		{"foo.j", "#!/usr/bin/env jennifer run\nuse io;", true},
+		{"/usr/bin/mytool", "#!/usr/bin/env -S jennifer run\nuse io;", true},
+		{"mytool", "#!/usr/bin/env -S jennifer run", true},
+		{"notes.txt", "use io;", false},
+		{"mytool", "use io;", false},
+		{"mytool", "# a comment, not a shebang\nuse io;", false},
+	}
+	for _, c := range cases {
+		if got := sourceExtensionOK(c.path, c.src); got != c.want {
+			t.Errorf("sourceExtensionOK(%q, %q) = %v, want %v", c.path, c.src, got, c.want)
+		}
+	}
+}

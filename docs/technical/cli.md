@@ -78,7 +78,10 @@ after the file is the program's own `os.ARGS`.
 system module dir and the vendor root - each with the layers (compile default /
 `JENNIFER_SYSMODDIR`, and env / `vendor/`-walk) behind it.
 
-- Verifies the `.j` extension
+- Verifies the `.j` extension - unless the file's first line is a `#!` shebang,
+  in which case any name is accepted (so an executable script installed under a
+  bare command name, e.g. `/usr/bin/mytool`, runs without a `.j` suffix). Only the
+  entry point is exempt; `import` / `include` targets still require `.j`.
 - Reads the file, parses, runs
 - On error: prints the message and a source-context caret on stderr, exits `1`
 - Bad usage exits `2`
