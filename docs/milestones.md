@@ -719,7 +719,7 @@ docs.
 | M19.4 | resource lifecycle + numeric strictness | `os.spawn` handles keyed by a monotonic id, not the OS pid (a recycled pid can't alias a handle or misroute `wait`/`poll`/`kill`); the reaper drains captured buffers to strings and drops the live `*bytes.Buffer`s (idempotent `wait` / `poll`-after-`wait` preserved). Numeric strictness: `convert.toInt` and `math.floor`/`ceil`/`round` reject NaN / +/-Inf / out-of-int64 floats; `math.abs(MinInt64)` errors; the `toml` decoder errors on an int past int64 (`json` keeps its deliberate fallback); the most-negative int literal `-9223372036854775808` parses to `MinInt64` (folded at unary-minus with a 2^63 range check). |
 | M19.5 | module struct identity: canonical path | Module structs were tagged only by the file **stem**, so two modules sharing a basename (`a/util.j`, `b/util.j`, or two `@scope/package` decks) produced identical `(namespace, name)` identity and a foreign struct passed the other's type check. Identity is now keyed by the module's canonical (resolved) **path**: `Value` and `parser.Type` gained a `ModPath` field that `Equal` / `MatchesDeclared` compare alongside `StructNS` (which stays the stem, for display, so `%v` still reads `benchmark.Point`); the boundary retag + method-parameter stamping thread the path. Two imports of the same file stay one type; different files differ - no import error. |
 | M19.6 | `.j` code coverage | `jennifer test --coverage[=text|json]` reports statement coverage by reusing the profiler's per-position hits (no second counting path): a statement profiler runs from top-level init through every test method, and `renderCoverage` intersects those hits with the AST's executable positions (`statementPositions`, mirroring `execStmt`'s recording). Scoped to the tested program's files (an imported-but-only-ran module does not skew it), per-file + total; `text` names the never-executed positions, `json` owns stdout (the human report moves to stderr). The plain `jennifer test` path is unchanged (a nil collector). An HTML view is a later `htmlwriter` consumer. |
-| M19.7 | `@scope/package` resolution (vendored decks) | A leading `@` is a vendored-deck reference expanded by one function (`resolveVendor`): the `@` swaps in the vendor root and a reference not ending in `.j` gets the package-named entry appended, so `@claude/bitcoin`, `@claude/bitcoin/`, and `@claude/bitcoin/utils.j` all reduce to a plain absolute path (after which run-once cache + M19.5 path identity are untouched). The entry is `<package>.j`, so `moduleStem` gives the package name and the display namespace / default alias fall out (`import "@claude/bitcoin/"` binds `bitcoin.`); two same-package decks across scopes are distinct types, colliding only on the default alias (resolve with `as`). Vendor root via `FindVendorRoot`: `--vendor` > `JENNIFER_VENDOR` > nearest `vendor/` above the program. Path safety: `@` front-only, no `.`/`..`, the file must stay inside the deck; a missing root is a guided error. The `jvc` manager over this stays DRAFT#12. |
+| M19.7 | `@scope/package` resolution (vendored decks) | A leading `@` is a vendored-deck reference expanded by one function (`resolveVendor`): the `@` swaps in the vendor root and a reference not ending in `.j` gets the package-named entry appended, so `@claude/bitcoin`, `@claude/bitcoin/`, and `@claude/bitcoin/utils.j` all reduce to a plain absolute path (after which run-once cache + M19.5 path identity are untouched). The entry is `<package>.j`, so `moduleStem` gives the package name and the display namespace / default alias fall out (`import "@claude/bitcoin/"` binds `bitcoin.`); two same-package decks across scopes are distinct types, colliding only on the default alias (resolve with `as`). Vendor root via `FindVendorRoot`: `--vendor` > `JENNIFER_VENDOR` > nearest `vendor/` above the program. Path safety: `@` front-only, no `.`/`..`, the file must stay inside the deck; a missing root is a guided error. The `jvc` manager over this is M25. |
 | M19.8 | relocation: `jennifer-language` org + vanity path | A one-time mechanical relocation, no language / interpreter behavior change: the repo moves to a `jennifer-language` GitHub org, and (separately) the Go module path moves **off** GitHub to a vanity path `jennifer-lang.dev/jennifer` served by a `go-import` meta page, so module identity is host-independent. Two distinct targets: the **Go module path** -> the vanity domain (`go.mod` + 112 `.go` imports rewritten; the meta page maps it to the org repo, plus a `go-source` tag for pkg.go.dev); **human-facing URLs** -> `github.com/jennifer-language/jennifer` (the `-lang`.dev vs `-language` org spelling is deliberate; the redirect keeps old links working, but canonical in-tree URLs are updated). Metadata / CI / packaging swept until `grep -rn 'mplx/jennifer-lang'` is empty; the first-party deck scope placeholder flips `@mplx/` -> `@jennifer/` (doc-only until `jvc`). |
 | M19.9 | audit-driven correctness + hardening | A systematic severity-ordered sweep of ~190 findings from a full bug / performance audit of `internal/` + `modules/`, each fix with a regression test (Go test or `_test.j` overlay). **Crash / safety:** OS-entropy RNG seeding (predictable UUIDs / session ids / passwords fixed; `math.randSeed` stays the deterministic opt-in), `json` / `toml` decode nesting caps, a `try`-body scope fix (a throw-skipped `def` reads undefined, not null), `tengine` recursion guards, `archive` zip-slip + aggregate-decompression caps, a JSON-pointer overflow guard, the two interpreter `-race` races + REPL-vs-spawn table mutation. **Correctness:** lvalue writes re-fetch their root after the RHS, index / append stamp the element type, path-keyed module structs, `barcode` (Code 128 stop / EAN check digit / Code 39 `*` / QR mask 3), `pdfwriter` WinAnsi / Info encoding, a full `toml` conformance pass, `http` / `web` (CSRF / cookie / CORS / ETag) hardening, quote-aware `vcard` / `ical`. **Performance:** the O(N^2) accumulation patterns retired (map hash index, `json` object decode, wire-framing reads in `redis` / `amqp` / `mqtt` / `mikrotik` / `imap` / `websocket`, list-join builders in `csv` / `barcode` / `influxdb` / `jsonl` / `statsd`, GF(256) inline). **Lifecycle:** `os.release` + capped child output, non-blocking `net.eof` + mutex-guarded `net.Conn`, `httpd` admission bounds / must-respond timeout / TLS-1.2 floor / safe unix-socket unlink, per-stream mutex + a `discard` verb on hash / crc / compress streams, `lint` descending into `spawn` / `repeat`. Plus **six coordinated pre-1.0 strictness breaks** (each with tests + operator / scoping docs): `%` is floored (Python; `-7 % 3 == 2`, `7 % -3 == -2`); integer arithmetic overflow is a positioned error, not a silent wrap; a duplicate map-literal key is an error; mixed `int` / `float` comparison is exact (no lossy promotion, so `9007199254740993 == 9007199254740992.0` is `false`); a method may not share a top-level var / const name (no-shadowing both directions); reading a constant with the `$` sigil (`$MAX`) is a parse error. |
 
@@ -795,7 +795,7 @@ docs - this table is the milestone-number index.
 | M21.10 | byte-oriented throughput | The `binary` library (`concat` / `slice` / `indexOf` / `contains` / `split` / `startsWith` / `endsWith` - the byte counterpart to `strings`, value-semantic, TinyGo-clean) plus `net.readAll` / `readN` (bulk reads with catchable size / close-mid-frame caps). Reworked `http` / `mqtt` / `imap` onto bulk reads; a `binary.indexOf` benchmark fixture. |
 | M21.11 | range syntax (`..`) | Half-open `lo..hi` (int bounds), three materializing / value-semantic uses: list construction (`0..n`), lazy for-each (`for i in 0..n`, no list built), and slicing (`$xs[a..b]` + open forms, over list / bytes / string). `lo > hi` a positioned error; materialisation bounded by a catchable `limits.MaxRangeElements` (int64-span-overflow-safe, not the uncatchable `makeslice` panic). New `RangeExpr` / `SliceExpr` AST; `fmt` emits `..` tight. |
 | M21.12 | per-frame allocation elimination | A call / block frame now does **no** per-binding or per-call heap allocation: a slot-backed binding (`Slot >= 0`) writes only the pooled `slots` slice (the identifier travels in `Binding.Name`; the rare name-based readers scan the small slot slice via `lookupLocal`), and `evalCall` binds args interleaved with no intermediate `[]Value`. Recursive fib ~300k -> ~59 allocs/op; Go's minor page faults fell ~7x. Value semantics and the `vars` fallback (REPL) intact; guarded by `TestFrameAllocationsStayLow`. |
-| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M25.1`. |
+| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M27.1`. |
 
 Cross-cutting threads:
 
@@ -840,7 +840,7 @@ those docs; this table is the milestone-number index.
 | M22.4 | `match` statement | Multi-way value dispatch `match (EXPR) { when V [, V ...] { } ... else { } }`: subject evaluated **once**, strict `==` (`Value.Equal`), first match wins, values short-circuit left-to-right, **no fall-through**, **not a `break` target** (`break` / `continue` act on the enclosing loop), optional `else` last, no-match-no-`else` is a no-op; a statement, each arm its own scope. Keywords `match` / `when` (pre-1.0 break). `fmt` lays arms out flat (each `when` / `else` on its own line, **not** cuddled). New `MatchStmt`; the header `{` ambiguity (`when Name {` vs a `Name{...}` literal) is resolved by the parser's `noStructLit` flag. Designed to grow into M22.5 patterns. |
 | M22.5 | sum types (enums) + pattern `match` | `def enum Name { Variant [ { field as type, ... } ], ... };` (top-level, hoisted like `def struct`); `Name.Variant{...}` / `Name.Variant` construction; `match` gains variant patterns `when Variant(bind) { }` binding the payload into a fresh per-arm scope, with **exhaustiveness checked at resolve time** for a local / same-module enum subject. New `Value` `KindEnum` mirroring `KindStruct` (value semantics, deep-const, cross-module identity by canonical path, retag), tagged-union / reflect-free. **Case-agnostic** naming - `Prefix.Member` resolved from the tables at eval, not capitalisation, so no PascalCase rule is forced on a teaching language (only the pre-existing "ALL-CAPS is a constant" rule still applies). Graduated `DRAFT#19`. |
 | M22.6 | TLS options for `http` / `rest` | Reach an HTTPS host with a self-signed / private-CA cert. `http.TlsOptions{skipVerify, caCert}` + send variants `http.requestTls` / `requestWithTls`; `rest.Client.tls` field + a `rest.client(baseUrl)` constructor (the added required field breaks the bare literal) + `rest.withCA(c, pem)` (preferred) / `rest.insecure(c)`. **Secure by default** (verification stays on unless explicitly relaxed). Pure `.j` plumbing to `net.connectTLS` (M16.14) - no interpreter or system-library change. Verified end-to-end against a self-signed loopback (`http_tls_test.go`). Dogfoods M22.9 (`http.TlsOptions` as a struct field across `main -> rest -> http`). |
-| M22.7 | `graphql` client module | Thin GraphQL client over `http` / `rest`: `client(endpoint)` + `bearer` / `basic` / `header` / `withCA` / `insecure` builders, `query(c, query, variables) -> json.Value` (POST `{query, variables}`; result under `/data`). Gets the GraphQL convention right - a non-empty top-level `errors` array is an **HTTP 200**, not a non-2xx - raising a `graphql` error with the joined messages; a non-2xx also raises. `queryNamed` / `tryQueryNamed` add an `operationName`; `tryQuery` / `tryQueryNamed` return the raw envelope (no raise on GraphQL errors) for structured-error handling via exported `hasErrors` / `errorMessages` + `json` accessors. POSTs the endpoint **verbatim** via `http.requestTls` (`rest`'s `joinUrl` would append a trailing slash). The GraphQL dependency `DRAFT#24` (Unraid) consumes. |
+| M22.7 | `graphql` client module | Thin GraphQL client over `http` / `rest`: `client(endpoint)` + `bearer` / `basic` / `header` / `withCA` / `insecure` builders, `query(c, query, variables) -> json.Value` (POST `{query, variables}`; result under `/data`). Gets the GraphQL convention right - a non-empty top-level `errors` array is an **HTTP 200**, not a non-2xx - raising a `graphql` error with the joined messages; a non-2xx also raises. `queryNamed` / `tryQueryNamed` add an `operationName`; `tryQuery` / `tryQueryNamed` return the raw envelope (no raise on GraphQL errors) for structured-error handling via exported `hasErrors` / `errorMessages` + `json` accessors. POSTs the endpoint **verbatim** via `http.requestTls` (`rest`'s `joinUrl` would append a trailing slash). The GraphQL dependency the M26 Unraid deck consumes. |
 | M22.8 | self-referential struct guard | A struct containing itself **by value** (direct or mutual) has no finite zero value and used to fatally stack-overflow when its zero / a literal was built; `Interpreter.checkStructCycles` (a gray/black DFS over direct struct-typed fields, run after hoisting at both `Run` and `EvalInteractive`) now rejects it at hoist time with a positioned error pointing at `list of Self`. Recursion through a `list` / `map` / `task` field and ordinary nesting stay legal. |
 | M22.9 | module structs as struct fields | A module struct used as a **struct field type** now type-checks (was rejected "expects geo.Point, got struct" though it worked as a variable type). `resolveDeclaredTypesOnce` now also stamps struct **field** types with the module's `(stem, path)` identity (recursing into `list` / `map` elements), and a module struct's own sibling-struct field types retag to the module identity at the boundary check (construction + field assignment, via `retagType`). Value semantics + chained lvalues into a nested module-struct field work. |
 | M22.10 | byte-capable `http` download | `http` could not fetch a binary body (the response was always `convert.stringFromBytes(_, "utf-8")`, which throws on non-UTF-8). Added a byte path reusing the already byte-exact framing: `http.BytesResponse` (`body as bytes`) + `requestBytes` / `requestWithBytes` / `getBytes` (`parseResponse` split into a `parseRaw` byte core + a text decoder). Text verbs unchanged (still throw on non-UTF-8, by design); `rest` stays text / JSON. Pinned by `http_bytes_test.go` (a gzip round-trips with matching sha256). |
@@ -903,596 +903,339 @@ Cross-cutting threads:
 
 ## M24 - language, concurrency, and libraries
 
-**Planned.** The first batch of [horizon](horizon.md) drafts graduated into a
-scheduled track: a CLI ergonomic, the language's biggest expressiveness feature, a
-concurrency-coordination layer, libraries - each already
-design-shaped in the horizon collection and now committed. Five sub-milestones.
-Each carries the standard discipline (spec + grammar EBNF / PEG + editor
-highlighters where a language feature lands, a Go package +
+**Done.** The first batch of [horizon](horizon.md) drafts graduated into a
+scheduled track, then grew into the broadest single milestone: a CLI ergonomic,
+the language's biggest expressiveness feature (first-class functions), a
+concurrency-coordination layer, a numeric / ML library stack, two ASN.1 protocol
+clients, and a run of library / language refinements. Twenty-three sub-milestones.
+Each shipped with the standard discipline - spec + grammar EBNF/PEG + editor
+highlighters where a language feature lands; a Go package +
 `internal/stdlib.InstallAll` line + `docs/libraries/` reference + cheatsheet where
-a library lands, both binaries build, and the full test close-out).
+a library lands; a 100%-passing `*_test.j` overlay + `cmd/jennifer/*_test.go` +
+`docs/modules/` + catalog + `JENNIFER.md` + demo where a `.j` module lands; both
+binaries build; the full test close-out. Per-item surface detail lives in those
+docs - this table is the milestone-number index.
 
-### M24.1 - run profiles / `--env` CLI flag (compacted)
+| M#     | Topic | Summary |
+| ------ | ----- | ------- |
+| M24.1  | run profiles / `--env` flag | `jennifer run --env=prod script.j` sets `JENNIFER_ENV=prod` before `Run` - identical to the env var, no interpreter change (`dotenv`'s `.env.<profile>` selection is the first consumer). `cmd/jennifer`-only: `parseRunArgs` + a `validRunProfile` allowlist (`[A-Za-z0-9_-]`, 1-64, blocks a `.env.<profile>` traversal); an explicit flag overrides an inherited env. Both binaries. Graduated `DRAFT#26`. |
+| M24.2  | first-class functions | Closed the largest expressiveness gap - a function held in a value (type `func`), **immutable, not a pointer** (so the value-semantics stance is untouched); a **bare method name** in expression position *is* the value, a name + `(` is a call (no `&NAME` sigil). New `KindFunc` / `TypeFunc`; a `CallValueExpr` postfix-`(` node calls any function-valued expression (`$f(x)`, `$fns[0](x)`, `makeAdder(1)(2)`). Enables the higher-order `lists` layer (`map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy`, via `BuiltinCtx.Invoke`). **Deferred:** Tier 2 closures + migrating string-name dispatch. Graduated `DRAFT#18`. |
+| M24.3  | concurrency coordination | Gave `spawn` / `task` cancellation, bounded waits, and channels. `task.cancel` / `cancelled` - cooperative, observed at a shared `loopCheckpoint` (a catchable "task cancelled" at loop safe points; one atomic-nil check per iteration, hot path untouched); `waitTimeout` / `waitAnyTimeout` throw on timeout. `channel of T` + the `channel` library (`make` / `send` / `recv` / `close` / `select` / `len` / `capacity`): a `KindChannel` shares a `*ChannelState` while `send` deep-copies the value in (conduit shared, data copied), and `channel` is a **contextual keyword**. Buffer capacity capped (OOM guard); `send`-on-closed / double-close catchable. Graduated `DRAFT#21`. **Deferred:** cancellable channel ops, index-returning `select`. |
+| M24.4  | `stats` library | 26 descriptive statistics over `list of int` / `list of float` - central tendency (geo / harmonic / weighted means, `modes`), spread (population + `sample*` Bessel, `iqr`, `mad`), shape (`skewness` / excess `kurtosis`), order (`percentile` / `quartiles`), `sum` / `zscore`, bivariate (`correlation` / `covariance`), `describe` -> `stats.Summary`. Strict like `math` (an undefined result is a catchable error, never a NaN); real reductions -> `float`, selections preserve the input kind. Pure Go, TinyGo-clean. Graduated `DRAFT#5`. |
+| M24.5  | `ml` library | A classical / predictive ML core (scikit-learn-lite) over `stats` / `linalg`, **not** deep learning. Fit/predict: a fit fn -> an opaque `ml.Model` handle applied with `predict` / `transform` / `predictProba` / `free`. Regression (linear / ridge / lasso / kNN / tree / forest), classifiers (kNN / naiveBayes / logistic / CART tree / forest), `kMeans`, `pca`, scalers; metrics (`accuracy` / `precision` / `recall` / `f1` / `rocAuc` / `rmse` / `r2` / ...); `trainTestSplit` / `kFold` / `polynomialFeatures`. Random draws from `math`'s seedable source; hyper-parameters bounded (a runaway value -> catchable). Pure Go, both binaries. |
+| M24.6  | `linalg` library | Linear algebra over Jennifer's value types, the `stats` companion. Vectors (`list of float`): `dot` / `distance` / `cross` / `normalize`; matrices (`list of list of float`): `transpose` / `trace` / `determinant` / `inverse` / `solve` / `identity` / `zeros` / `shape`; polymorphic `norm` / `scale` / `add` / `sub`; `matmul` dispatches on operand shape. Direct algorithms (Gaussian / Gauss-Jordan), no `gonum`. Strict (dimension mismatch / singular / non-finite -> catchable); every value bounded by `MaxMatrixElements`. Pure Go, both binaries. |
+| M24.7  | `asn1` library | ASN.1 BER decode / DER encode, the byte enabler for LDAP / SNMP. Hand-rolled (Go's `encoding/asn1` is DER-only + reflect-bound). An opaque `asn1.Value` element tree (like `json` / `xml`) walked by `(node, pointer)` accessors whose tokens are child indices (`tagClass` / `tagNumber` / `asInt` / `asOid` / ...); typed constructors (`integer` / `oid` / `sequence` / `tagged` EXPLICIT / `retag` IMPLICIT). A decode-node budget + nesting cap turn a bomb into a catchable error; output byte-verified against Go's `encoding/asn1`. Pure Go, both binaries. |
+| M24.8  | `snmp` client + agent | SNMP v1 / v2c **client and agent** (`modules/snmp.j`) over `asn1` + `net` UDP. Client `get` / `getNext` / `set` / `walk` -> `list of Varbind` typed by SNMP type (counter32 / gauge32 / timeTicks via `asn1.retag`); request-id check, deadline + retries. Agent `agent` / `serve` answers GET / GETNEXT / SET for a MIB (GETNEXT in numeric OID order so a `walk` traverses it). Codec factored pure (socketless overlay); live loopback + real-hardware verified. No v3 / traps / GETBULK. Default binary only. |
+| M24.9  | `ldap` client + directory server | LDAP v3 (RFC 4511) client and lightweight directory server over `asn1` BER + `net`, LDAPS / StartTLS via `transport.Security`. Client `bind` / SASL `bindSasl`, `search` (RFC 4515 `parseFilter` or constructors) / `searchPaged`, writes `add` / `modify` / `delete` / `modifyDn` / `passwordModify`. Server answers simple bind (`password` schemes) + filtered search - read-only over the wire, mutable from code via a shared `kv` store (in-memory or file-backed), enough to back Authelia. Codec factored pure. Default binary only. |
+| M24.10 | `math` foundations + special fns | Filled the `math` gaps for 1.0, folded in. **Everyday:** trig (+ inverses, `atan2`), hyperbolic, exp / log (`exp` / `ln` / `log2` / arbitrary-base `log`), `cbrt` / `hypot` / `sign`, combinatorics (`factorial` / `comb` / `perm` / `gcd` / `lcm`, exact-int overflow-checked), `TAU`. **Special:** `erf` / `gamma` / `lgamma` / `beta` + the regularized incomplete gamma (`regGammaP` / `regGammaQ`) / beta (`regBetaI`) the CDF engine needs, hand-rolled to machine precision. Strict (domain / overflow / non-finite -> catchable). Go stdlib base; both binaries. |
+| M24.11 | distributions + inferential `stats` | The classical numerical-inference layer (the scipy.stats / Excel surface) folded into `stats` on M24.10's specials - **no separate `prob` library**. Distributions (normal / t / chi-square / F / binomial / Poisson): pdf/pmf, cdf, quantile (Acklam + bisection), Box-Muller `normalSample`. Inference: `linearRegression` / `multipleRegression`, `confidenceInterval`, `proportionCi` (Wald / Wilson / Clopper-Pearson), `tTest` / `chiSquareTest` / `fTest` / `anova`, `histogram` -> `Regression` / `Interval` / `Test` structs. Every p-value finite-guarded, clamped `[0, 1]`; a degenerate input -> catchable. Pinned to scipy; both binaries. |
+| M24.12 | scientific-notation float literals | Float literals accept an `[eE][+-]?digits` exponent (`6.022e23`, `1e10` - the exponent makes a literal a float even with no fraction), no `_` in the exponent, decimal-only (`0xe5` keeps `e` a hex digit). Lexer-only, additive / non-breaking. Strict at the edge: overflow (`1e400`) a positioned parse error (never `Inf`); underflow (`1e-400`) rounds to a finite `0.0`. Reasoned in `design-decisions.md`. |
+| M24.13 | `uri` module + `encoding` codecs | URL handling factored - byte encoding in `encoding`, URL semantics in a `.j` module. `encoding` gains `"uri-percent"` (RFC 3986) + `"uri-form"` (form-urlencoded, space `+`) `toText` / `fromText` codecs. The `uri` module (pure `.j`, both binaries): `parse` -> `Uri` / `build` (round-trips), `encode` / `decode` / `encodeForm` / `decodeForm`, `buildQuery` / `parseQuery`, RFC 3986 `resolve(base, ref)`. Seven modules de-duplicated onto them. **Pre-1.0 break:** `rest` query strings now form-encode a space as `+`. |
+| M24.14 | `args` CLI parser module | A declarative `argparse`-style parser (the "write your tools in Jennifer" gap `os.flag` / `os.ARGS` left). A value-semantic `Parser`: typed optional flags (`flag` / `intFlag` / `boolFlag` / `countFlag` `-vvv` / `listFlag`), `nargs` positionals, subcommands, `version`; `args.parse($p, os.ARGS)` -> a `Result` with typed accessors. Normalises `--flag=value`, bundled shorts, `--` end-of-flags; an error is a catchable `Error{kind:"args"}` (not `exit(2)`), `-h` / `--version` set `done`. Pure `.j`, both binaries. 32-test overlay. |
+| M24.15 | `validate` module | Declarative validation of a `map of string to string` -> a structured failure list. Value-semantic rules (`required` / `isInt` / `min` / `maxLen` / `pattern` / `email` / `url` / `datetime` / `oneOf` / `password` / `custom` `func` predicate + `withMessage`), grouped per field; `validate.check` -> `list of Failure`, plus `ok` / `messages` / `byField` / `localize` (i18n `%param%` markers). An absent / blank field passes every rule but `required`. Pure `.j` over `regex` / `uri` / `time` / `password`; both binaries. 16-test overlay. |
+| M24.16 | module suite hardening | A security / robustness pass whose audit findings collapsed to systemic root causes, each fixed once across its cluster (~35 fixes / ~24 modules, both binaries clean), remotely-exploitable first. Received-data caps (shared `transport.checkReceiveSize`); injection (`label` digits-only command class, CRLF / control stripping in `log` / `ical` / `vcard`, `barcode` colour); a cross-origin redirect credential leak (`http.send` drops `Authorization` / `Cookie` behind `allowCrossOriginRedirect`); typed error propagation; numeric clamps; correctness (`semver.satisfies(v, garbage)` -> `false`). |
+| M24.17 | `html` module (rebrand + parser) | Fold HTML building and parsing into one bare-named `html`. **Rebrand** `htmlwriter` -> `html` (pre-1.0 break; a format module is named for the format, like `xml` / `json`). A tolerant hand-rolled `parse` (pure `.j`, no `x/net/html`) producing the **same transparent `Node`** the writers do (build / parse round-trip): void / self-closing / unquoted-boolean attrs, mismatched-nesting auto-close, comments, DOCTYPE, raw `script`, entities; depth + node budget. Added `parse` / `attrOf` / `hasAttr` + XPath-ish `get` / `findAll` / `has`. Both binaries; 23-test overlay. |
+| M24.18 | `markdown` reader | Gave `markdown` reading (the consistency move M24.17 set up). `markdown.parse(md)` -> a public `Node` (a string `kind`, recursive over `children`) walked by the `xml` / `html` vocabulary (`typeOf` / `children` / `text` / `level` / `attr` / `get` / `findAll` / `has`); the private `Block` / `Span` model is converted, inline spans eagerly expanded (a link's `href` walkable), the fence language captured. **One model:** `toHtml` / `toAnsi` became `render(parse(md), ...)` wrappers (old renderers deleted; byte-identical output). Nesting cap + node budget. Pure `.j`, both binaries; +16 overlay tests. |
+| M24.19 | string interpolation | Cooked-string interpolation `"total: {$sum}, up {strings.upper($x)}"` - sugar over concat + `convert.toString`. Only a cooked `"..."` interpolates, each `{expr}` one expression (a statement / empty `{}` is a parse error); a raw `'...'` never (the off form); a literal brace is `\{` / `\}`; `f"..."` rejected. **Part 1** moved the two `{name}`-template consumers (`intl.tr`, `validate`) to a `%name%` marker. **Part 2** added the lexer `TOKEN_STRING_INTERP` (`Parts`) + the parser sub-lex / sub-parse of each slot -> `InterpStringExpr`. The whole toolchain treats a slot as real code (resolver / `lint` `L204` / `profile`); every literal-brace cooked string was migrated (prefer raw). Graduated the horizon entry; both binaries. |
+| M24.20 | module version + capability header | A per-file `# pragma-jennifer-<key>: <value>` header stating the minimum interpreter version + required host capabilities, checked at **read time** (the lightweight sibling of the M25 `jvc` / `deck.toml` constraints, no package manager). `version` (`>=0.25.0`, a min-compare via `version.AtLeast`; any dev build bypasses) + `capability` (`net` / `exec` / `sql`, from a build-tag-split set, queryable as `meta.CAPABILITIES` / `hasCapability`). Enforced per file at three first-read seams (CLI / `include` / `loadModule`), with bounded diagnostics; a malformed or duplicate-`version` directive is a hard error. Ships an `L303` lint + `fmt` canonicalisation. Every module carries a `>=0.24.0` floor; `capability:` only where mandatory (an optional backend stays ungated). No interpreter-core change. |
+| M24.21 | Markdown -> PDF (`markdown.toPdf`) | The markup-driven document story for `pdf`, **folded into `markdown`** as a third target beside `toHtml` / `toAnsi`: `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)` lay a document out to a paginated PDF over `pdf`'s layout primitives. A flow engine threads a value-semantic `Layout` through per-block renderers (heading, word-wrapped paragraph with per-run fonts, nested lists, ruled GFM table, code, blockquote), paginating at the bottom margin; `PdfOptions` sets size / margins / standard-14 fonts. Folded in (reasoned in `design-decisions.md`) at ~2x markdown import time / +~6 MB RSS; needed M24.18's parse tree. Graduated `DRAFT#13`. Pure `.j`, both binaries; +15 overlay tests. Dogfooded by `gen-module-docs.j` -> `jennifer-module-api.pdf`. |
+| M24.22 | `dot` module | Graphviz DOT graph description: build a graph of nodes and edges with attributes (`digraph` / `graph`, `node` / `nodeWith`, `edge` / `edgeWith`, `graphAttr` / `nodeAttr` / `edgeAttr`) and `render` it to `.dot` text for an external Graphviz tool to lay out (`dot -Tsvg`). Value-semantic builders; DOT-escaped strings; emits the description only (graph layout is Graphviz's job, deliberately not reimplemented). Pure `.j` over `strings` / `lists`, both binaries. |
+| M24.23 | `plot` module | Data plotting to SVG: a unified `chart(series, opts)` renders one or more `Series` (line / points / both / area, dashed, error bars, marker shapes) on shared axes with a positioned legend; `line` / `scatter` / `bar` / `bars` (grouped / stacked / diverging) / `histogram` wrap it. Automatic "nice" ticks, log scales, a `time`-labelled date axis, reference lines (`hline` / `vline`), fonts / margins, data labels, `<title>` hover tooltips, and `save`. The visual companion to `stats` / `ml`; pure `.j` over `math` / `time` / `fs` / `strings` / `lists` / `convert`, both binaries. |
 
-**Done.** `jennifer run --env=prod script.j` (or `--env prod`) is a run-profile
-flag that **sets `JENNIFER_ENV=prod` before `Run`** - identical to `JENNIFER_ENV=prod
-jennifer run script.j`, no interpreter change, so the module side stays pure `.j`
-(the `dotenv` `.env.<profile>` selection from `M22.18` is the first consumer, dogfood-
-verified end to end). A `cmd/jennifer`-only change: `parseRunArgs` takes the flag
-ahead of the script path, `validRunProfile` allowlists the label
-(`[A-Za-z0-9_-]`, 1-64, hand-rolled to stay TinyGo-clean, mirroring dotenv's
-`validProfile` and blocking a `.env.<profile>` traversal), then `os.Setenv` (an
-explicit flag overrides an inherited `JENNIFER_ENV`; a token after the file stays a
-program arg). Both binaries honor it. Pinned by `main_test.go`; documented in
-`tooling.md` + `cli.md` + a `dotenv.md` cross-link. Graduated `DRAFT#26`.
-**Requires:** `M22.18`; no interpreter dependency.
+Cross-cutting threads:
 
-### M24.2 - first-class functions (compacted)
+- **Graduated horizon drafts.** M24 drained the first scheduled batch from the
+  [horizon collection](horizon.md): `DRAFT#26` (M24.1 `--env`), `DRAFT#18` (M24.2
+  first-class functions), `DRAFT#21` (M24.3 concurrency coordination), `DRAFT#5`
+  (M24.4 `stats`), and `DRAFT#13` (M24.21 Markdown -> PDF), plus the
+  string-interpolation entry (M24.19).
+- **A numeric / statistical stack** landed together: `stats` (M24.4) + `linalg`
+  (M24.6) + `ml` (M24.5) + the `math` special functions (M24.10) + the
+  distributions / inference layer folded back into `stats` (M24.11) - each strict
+  (an undefined result is a catchable error, never a NaN) and bounded by a
+  materialised-value cap.
+- **An ASN.1 protocol stack:** the hand-rolled `asn1` byte layer (M24.7) enabled
+  the `snmp` (M24.8) and `ldap` (M24.9) clients-and-servers, each factoring its
+  codec pure so the overlay round-trips without a socket.
+- **Consistency across the format modules.** The `html` rebrand + parser (M24.17)
+  and the `markdown` reader (M24.18) gave both modules the same build-and-parse
+  `Node` model as `xml` / `json`, which M24.21's `toPdf` then consumed.
+- **Not all of M24 is libraries.** M24.2 (first-class functions), M24.3
+  (cancellation / channels), M24.12 (scientific-notation literals), and M24.19
+  (string interpolation) are language / interpreter work; M24.1 is a CLI flag;
+  M24.16 / M24.20 are a cross-suite hardening pass and a read-time guard.
 
-**Done (Tier 1).** Closed the **single largest expressiveness gap**: a function
-can now be held in a value (type `func`), so callbacks stop being string-name
-dispatch and `lists` gets a higher-order layer. A function value is **immutable,
-not a pointer** (holding one aliases nothing mutable), so it does not touch the
-value-semantics stance; the syntax reuses the call-vs-name shape the parser
-already peeks for - a **bare method name** in expression position *is* the value,
-a name followed by `(` is a call (no `&NAME` sigil). New `KindFunc` Value
-(`Fn *parser.MethodDef`; `DeepCopy`'s default shares the immutable pointer;
-`bindParamValue` treats it as a no-copy scalar) + `TypeFunc` (the `func` keyword in
-`parseType`). A bare method name lands as a `ConstRefExpr` the interpreter turns
-into a function value (the resolver already deferred such names to runtime); a new
-`CallValueExpr` postfix-`(` node calls through any function-valued expression
-(`$f(x)`, `$fns[0](x)`, `makeAdder(1)(2)`). The named-call dispatch stays **inline**
-in `evalCall` (the hot path - the helper is too large for Go to inline, so routing
-every call through it measurably slowed recursion); the byte-identical logic lives
-in a `callUserMethod` helper the dynamic path uses, kept in lock-step. Arity /
-kind checks, value-semantics arg copies, and the catchable call-depth guard are
-identical whether a call is static or through a value (recursion through a function
-value still trips the guard). `BuiltinCtx.Invoke` (backed by an unexported `interp`
-ref, threading the caller's depth counter) is the callback bridge for the
-higher-order **`lists`** layer: `map` (generic result, element-typed at the bind),
-`filter` / `find` / `any` / `all` (bool callback; `find` errors catchably on no
-match), `reduce`, `sortBy` (key extractor, decorate-sort-undecorate so the key runs
-O(n); guarded against an empty list). `fmt` hugs `(` after `$var` / `)` / `]` (all
-prior parse errors, so no existing program reflows). **Deferred:** Tier 2
-(anonymous closures with by-value capture) and migrating the existing string-name
-dispatch in `web` / `testing` / `meta` onto function values - a separate refactor;
-the *capability* is delivered. Graduated `DRAFT#18`. **Requires:** none hard;
-relates to a future bytecode VM (`DRAFT#17`) and the embedding API (`DRAFT#1`).
-Pinned by `internal/interpreter/funcvalue_test.go` (incl. the empty-list crash
-regression an audit surfaced); `examples/functions.j` + golden; both toolchains.
+---
 
-### M24.3 - concurrency coordination: cancellation, timeouts, channels (compacted)
+## M25 - `jvc` package manager (decks)
 
-**Done.** Gave `spawn` / `task` the coordination it lacked - cancel a task, bound
-a wait, and stream between goroutines - and retired the exit-time hang from an
-unobserved non-terminating `spawn`. Graduated `DRAFT#21`. **Requires:** none hard
-(builds on `spawn` / `task`).
+**Planned.** A package manager for Jennifer, in the shape of PHP's Composer (or Rust's
+Cargo): declare dependencies in a manifest, `jvc install` resolves and
+fetches them, and the app imports what it pulled. Installing an app becomes
+`git clone` + `jvc install`, and `jvc update` advances within the declared
+constraints.
 
-**Cancellation + timeouts.** `TaskState.Cancelled` (atomic) + an
-`Environment.cancel *TaskState` set on the spawn snapshot root, reached by every
-frame via `env.root`. A shared `loopCheckpoint(env, node)` replaced the five
-per-loop `diagReq` polls (while / C-for / for-each / range-for / repeat): it
-services the SIGUSR1 diagnostic poll and, inside a cancelled spawn, raises a
-**catchable** "task cancelled" so the loop stops at a safe point - one atomic-nil
-check per iteration, nil (never fires) on the main goroutine, loop-only so the
-`evalCall` hot path is untouched. `task.cancel($t)`; `task.cancelled()` is a
-**non-raising** poll (threaded via `BuiltinCtx.Cancel *TaskState`);
-`task.waitTimeout` / `task.waitAnyTimeout` are throw-on-timeout bounded waits (a
-too-large `ms` that would overflow the ns `time.Duration` is a catchable error,
-not a silent instant timeout). A clean partial result uses `try` / `catch` inside
-the body. **Rejected** (racy): a `CancelAcked` "poll suppresses the auto-raise"
-scheme - a parent `task.cancel` can land before the body's first poll, so the
-top-of-loop checkpoint fires before any ack; the auto-raise-is-the-mechanism model
-is race-free instead.
+- **Packages are "decks".** A deck is a distributable, versioned bundle of
+  `.j` modules, published to a public **deck repository / registry**
+  (provided later) that `jvc` resolves and fetches from - packagist-style; a
+  deck can also come straight from a git URL.
+- **Naming conventions.** A deck has two separate identities. Its **canonical
+  name** is the `@vendor/deckname` scope in `deck.toml` (what imports and jvc key
+  on) - kept clean, with no "deck" word: an official deck is `@jennifer/routeros`,
+  imported `import "@jennifer/routeros/";` -> `routeros.*`. Its **GitHub repo
+  name** is cosmetic (jvc reads `deck.toml`, not the repo name), so the "deck"
+  marker lives there and only there:
+  - **Official** decks (in the `jennifer-language` org) use a **`deck-` prefix** -
+    `jennifer-language/deck-routeros`. The prefix is the "*not core, but official
+    deck*" statement: it clusters the decks and keeps the org's top level readable
+    (core `jennifer` / `homebrew-tap` vs `deck-*`). The org already supplies
+    "jennifer", so `deck-` is the useful signal (deck vs core).
+  - **Community** decks (any account) can be named anything - jvc only needs it
+    configured - but the **suggested** form is a **`jennifer-` prefix**,
+    `alice/jennifer-routeros`: on a personal account there is no Jennifer
+    namespace, so "which ecosystem" is the useful signal instead.
+  - **All** deck repos carry the GitHub **topic `jennifer-deck`** for discovery,
+    which works regardless of the repo name.
+- **Installed into the `vendor/` tree M19.7 resolves.** `jvc` writes decks into
+  the project-local `vendor/` tree that the interpreter already addresses through
+  the `@scope/package` import form and vendor-root discovery shipped in
+  M19.7 - so a hand-populated `vendor/` imports before `jvc`
+  exists, and `jvc` is just the manager layered over that resolver. Nothing is
+  global; each app owns its decks beside it.
+- **The one remaining language-surface question: inline version selectors.**
+  M19.7 resolves `import "@jennifer/supercms/" as cms;` (the trailing `/` expands to
+  the package-named entry `supercms/supercms.j`) against whatever is installed.
+  `jvc` supplies the *default* - plain `import @jennifer/supercms;` takes
+  the version `jvc` resolved (declared in `deck.toml`, pinned in the lockfile),
+  version-transparent, which is what almost every script wants. The opt-in for
+  side-by-side versions is a **per-import selector** matched against the installed
+  set (never triggering a fetch): `@jennifer/supercms=1.2.3` (exact), `>=1.2.3` / `~`
+  / `^` (a `semver` constraint over what is installed), or `#cefa234` (a git
+  commit); one script can pin `=1.x` while another pins `=2.x`, and two versions
+  in one file take distinct `as` aliases. An unsatisfiable selector errors
+  pointing at `jvc install`, not a silent download. **Cost:** the selector is
+  **new grammar** (the lexer reads `@vendor/deck` + `semver` op + `#commit` as one
+  token up to `;`); the plain M19.7 string-path form is the no-new-grammar
+  fallback that loses only the inline selector.
+- **`deck.toml` manifest + lockfile.** `deck.toml` (TOML, so it needs the `toml`
+  library) declares required decks and constraints (`bitcoin = ">=1.2.0"`), and
+  `jvc` produces a **`camcorder.lock`** pinning exact resolved versions (content
+  hash per deck) so `git clone` + `jvc install` is reproducible. Dependency sets
+  split by section (`[prod]` / `[dev]`, `jvc install --prod`), with a **taxative**
+  (the section is the exact set) vs **additive** (base plus the section's extras)
+  mode still to design.
+- **`jvc` owns the lifecycle:** dependency resolution (semver constraint
+  solving across the graph), downloading, `jvc update` (advance to the
+  newest constraint-satisfying versions, rewrite `camcorder.lock`), integrity
+  pinning, and the publish flow to the registry.
 
-**Channels.** `channel of T` + the `channel` library (`internal/lib/channel`):
-`make(capacity)` / `send` / `recv` / `close` / `select` (fan-in) / `len` /
-`capacity`. A `KindChannel` Value shares a `*ChannelState` pointer (like `task`,
-not the spec's integer-registry - simpler, same sharing), so a copy (incl. the
-spawn snapshot's `DeepCopy`) refers to the one Go `chan Value` while **`send`
-deep-copies the value in** - conduit shared, data copied (no-shared-mutable-state
-holds) - and validates the value against the channel's `T` at the send site.
-`send`-on-closed / double-`close` are **catchable** errors, not Go panics
-(atomic-CAS `CloseOnce`; `recover` on the send/close race); `recv` on a
-closed+drained channel throws catchably (drain via `try` / `catch`). `select`
-returns the received **value** (not an index - a receive is destructive, no
-multiple-return), over the `reflect.Select` `task.waitAny` uses. `channel` is a
-**contextual keyword**: lexed as an IDENT, a type only in `channel of T` (the `of`
-disambiguates from a struct name). Reserving it broke `modules/amqp.j` (which uses
-`channel` as a field / param); the contextual form keeps every program valid *and*
-is simpler (`channel.send` / `use channel;` route through the IDENT paths). A
-blocked channel op is not at a loop checkpoint, so it is not cancellable and a
-channel with no counterpart **hangs** (Go's deadlock detector never fires - the
-SIGUSR1 goroutine stays live); close the channel to unblock.
+**Migrating bundled modules out to decks.** Once decks exist, niche or
+product-specific modules that ship bundled today should graduate *out* into
+decks (the archetype is `gotify` - a single-product push integration every
+install need not carry); language-fundamental modules stay bundled. Moving one
+changes its import, so it is a breaking change under semver: within 1.x ship it
+**both ways** (bundled + `@`-deck) with the bundled copy marked `@deprecated` so
+imports re-point at their own pace, let the two drift without breaking, and
+**remove the bundled copy in 2.0.0**. Conversely, *new* third-party service
+integrations ship **as decks from the start** rather than as core modules (core
+stays general primitives; specific-vendor clients live in the ecosystem) - the
+`M26` candidate-deck ecosystem collects the list (GitLab, GitHub, Steam,
+TheMovieDB, Jellyfin, Frigate, RouterOS, ...).
 
-**Concurrency hardening** (post-audit). `channel.make` caps the buffer at
-`limits.MaxChannelCapacity` (1<<20 std / 1<<16 tiny) with a catchable error - a
-`chan Value` (272 B/slot) allocates eagerly, so an unbounded capacity was a
-multi-GB OOM below Go's recoverable `makechan` panic (same class as
-`MaxRangeElements`); a `recover` stays as backstop. `TaskState`/`ChannelState`
-`ElemTyp` became `atomic.Pointer[parser.Type]` stamped set-once via CompareAndSwap
-- a generic channel held in a `list` and bound by two spawns concurrently
-otherwise raced on the plain field (confirmed under `-race`).
+**Requires:** the public deck **registry** (separate infrastructure, provided
+later); its language-side prerequisites - the `@scope/package` resolver + vendor
+root (`M19.7`), `toml`, the module system, and `semver`'s range surface - have
+shipped.
 
-Pinned by `channel_test.go` (8 tests incl. value-semantics, concurrent-bind
-`-race` guard, capacity-ceiling + huge-capacity regressions, identifier-still-works)
-+ `task_cancel_test.go` (8 tests incl. the ms-overflow guard);
-`examples/cancellation.j` / `channels.j` + goldens; both toolchains.
-**Deferred:** cancellable channel ops and index-returning `select`.
+---
 
-### M24.4 - `stats` library (compacted)
+## M26 - candidate decks (deck ecosystem)
 
-**Done.** A `stats` system library (`internal/lib/stats`): 26 descriptive
-statistics over `list of int` / `list of float` - central tendency (incl.
-geometric / harmonic / weighted means, `modes`), spread (population + `sample*`
-Bessel n-1, `range`, `iqr`, `mad`), shape (`skewness`, excess `kurtosis`), order
-statistics (`percentile` / `quartiles` / `min` / `max`), `sum`, `zscore`, bivariate
-`correlation` / `covariance` / `sampleCovariance`, and `describe` -> a
-`stats.Summary` struct. Real-valued reductions return `float`; the selections and
-`sum` / `range` preserve the input kind (overflow-checked); `quartiles` / `zscore`
-return `list of float`. `variance` / `stddev` / `covariance` and the moments are
-population (÷ n, NumPy default), `sample*` ÷ n-1, `kurtosis` excess. Strict like
-`math`: any undefined result (empty list, bad percentile, zero-variance
-bivariate/shape input, int-sum overflow, non-positive geo/harmonic input,
-constant `zscore`) is a catchable error, not a NaN. Pure Go stdlib, TinyGo-clean.
-Pinned by `statslib_test.go`; `examples/stats.j` + golden. Graduated `DRAFT#5`.
-**Requires:** none. Its `linalg` companion is `M24.6`; the numerical-inference
-piece (probability / regression / confidence intervals) is `M24.11`.
+**Planned.** A running parking lot of deck ideas - third-party service and integration
+clients that, once `jvc` / decks (M25) land, ship as **decks** rather than core
+`modules/`. The rule: core stays *general primitives* (protocols, formats,
+infrastructure - `http`, `graphql`, `csv`); a client for one *specific vendor or
+service* lives in the ecosystem as a deck (independently versioned,
+community-maintainable, so vendor API churn never touches the core). This list is
+demand-driven and open-ended, a collection not a commitment.
 
-### M24.5 - `ml` predictive / classical machine learning (compacted)
+Most are thin clients over `http` / `rest` + `json` (plus `xml` where a vendor
+returns XML, and the `graphql` module where the API is GraphQL). Each is a
+login / token step, a generic `call(path, params) -> json.Value`, and a handful of
+conveniences; a fat typed wrapper is explicitly **not** the plan - these APIs are
+enormous and firmware-versioned, so a thin client ages far better.
 
-**Done.** A `ml` **core** system library for classical / predictive machine
-learning on tabular data (scikit-learn-lite), over `stats` / `linalg`.
-Deliberately core, not a deck (classical algorithms are stable native-numeric
-primitives), and explicitly **not** a deep-learning framework (tensors / autodiff
-/ deep-net training are native GPU / C++; "run a pre-trained model" is already
-`http` / `os.run`). A **fit / predict** shape: a fit function returns an opaque
-`ml.Model` handle (registry-backed, immutable, read-only-shareable), applied with
-`predict` / `transform` / `predictProba` / `free`. Models: regression
-(`linearRegression` / `ridge` / `lasso` coordinate-descent, plus `kNNRegressor` /
-`decisionTreeRegressor` / `randomForestRegressor`), classifiers (`kNN`,
-`naiveBayes`, `logisticRegression` binary + multiclass one-vs-rest, `decisionTree`
-CART/Gini, `randomForest`), `kMeans` (k-means++), `pca` (Jacobi
-eigendecomposition), and `standardScaler` / `minMaxScaler`. Introspection reads
-the learned parameters (`coefficients` / `intercept` / `centroids` / `components`
-/ `explainedVariance` / `featureImportances`). Selection / preprocessing:
-`trainTestSplit` -> `ml.Split`, `kFold` -> list of `ml.Fold`,
-`polynomialFeatures`. Metrics: `accuracy` / `precision` / `recall` / `f1` (+
-positive label) / `confusionMatrix` / `rocAuc` (tie-aware) / `logLoss` / `rmse` /
-`mse` / `mae` / `r2`. X is a `list of list of float/int`, y a
-`list of float/int`. Random models draw from
-`math`'s `randSeed`-able source (reproducibility, not secrecy - a seed is not a
-secret, so not `crypto`). Strict: a degenerate input is a catchable error, and
-the cost-driving hyper-parameters are bounded (tree depth / forest size / iters /
-epochs / kFold work) so a runaway value errors instead of a stack overflow /
-hang / OOM. Pure Go stdlib, TinyGo-clean, both binaries; pinned against known
-results.
+### M26.1 - self-hosted infrastructure
 
-### M24.6 - `linalg` library (compacted)
+A LAN appliance, usually a **self-signed** cert. Per-vendor maturity differs and
+should set the order, not the vendor:
 
-**Done.** A `linalg` system library (`internal/lib/linalg`): linear algebra over
-Jennifer's own value types, the companion to `stats`. **Vectors** are
-`list of float` - `dot`, `distance`, `cross` (3-vectors), `normalize`;
-**matrices** are `list of list of float` - `transpose`, `trace`, `determinant`,
-`inverse`, `solve`, `identity`, `zeros`, `shape`. Four ops are **polymorphic**
-over a vector or a matrix (`norm` = L2 / Frobenius, `scale`, `add`, `sub`); and
-`matmul` dispatches on operand shape (matrix*matrix -> matrix; matrix*vector or
-vector*matrix -> vector; vector*vector errors, `dot` is the tool for that).
-Algorithms are direct (Gaussian / Gauss-Jordan for solve / determinant /
-inverse) - no `gonum` - so pure Go stdlib, TinyGo-clean, both binaries. A matrix
-is a plain nested list for v1 (idiomatic, value-semantic; a Go-backed opaque
-handle is the noted future escape hatch for big-matrix throughput). Strict like
-`math` / `stats`: a dimension mismatch, a non-rectangular matrix, a singular
-`inverse` / `solve`, the zero vector to `normalize`, or a non-finite (overflow)
-result is a catchable error, not a NaN; every vector / matrix (the `identity` /
-`zeros` constructors and the operation inputs alike) is bounded by
-`limits.MaxMatrixElements` - sized in 272-byte Value cells like MaxChannelCapacity,
-since a `linalg` value is always fully materialised - so an oversize dimension is a
-catchable error rather than an uncatchable OOM, which also bounds the O(n^3)
-routines. Eigenvalues / decompositions (LU / QR / Cholesky) / rank stay on the
-horizon as advanced `linalg` the numerical-inference (`M24.11`) work would build
-on.
+- **`routeros`** - a *full* RouterOS abstraction layer (MikroTik), well beyond the
+  small bundled `mikrotik.j` API client. Already in progress; the likely **first
+  published deck**.
+- **`proxmox`** - Proxmox VE: documented REST / JSON, API-token header auth
+  (`PVEAPIToken=...`). Clean.
+- **`vmware`** - vCenter / vSphere (vCSA): the vSphere Automation **REST** API
+  (JSON, session auth), clean and tractable like Proxmox. A standalone **ESXi**
+  host is the messier case - historically only the SOAP / VMOMI Web Services API
+  (XML / SOAP, heavier), with just partial REST on 8.x - so vCenter is the target,
+  a bare ESXi host best-effort.
+- **`synology`** - DSM: the cleanest NAS API - a documented Web API
+  (`SYNO.API.Auth` login -> session `sid`, JSON responses).
+- **`unraid`** - the newer official API is **GraphQL** over HTTP with an API key.
+- **`qnap`** - QTS: the messiest - much of the useful surface is undocumented,
+  reverse-engineered CGI with XML responses and a legacy hashed-password auth;
+  firmware-fragile and hard to keep green. Lowest priority, on real need only.
+- **`ugreen`** - NASync / UGOS Pro: **no official API** - only the internal
+  token-based API the web GUI uses (log in for a token, then GET), reverse-
+  engineered by the community (a working Home Assistant integration exists). Same
+  keep-green risk as `qnap`; UGOS is new and evolving, so revisit if UGREEN ever
+  ships official docs.
+- **`jellyfin`** - the self-hosted media server's REST API (API-key / token auth).
+- **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
+  paired with its MQTT feed (the `mqtt` module).
 
-### M24.7 - `asn1` library (compacted)
+### M26.2 - public / SaaS APIs
 
-**Done.** An `asn1` system library (`internal/lib/asn1`): ASN.1 BER decode / DER
-encode, the byte-level enabler for the LDAP / SNMP clients (later X.509 / PKCS).
-Hand-rolled in Go - Go's `encoding/asn1` is DER-only + reflect-bound - so no
-dependency: `decode` reads full **BER** (indefinite lengths, high-tag-number
-identifiers), `encode` emits canonical **DER**. Mirrors the opaque-value
-`KindObject` shape (`json` / `toml` / `xml` / `yaml`): `decode` yields an opaque
-`asn1.Value` (element tree - class / tag / constructed / content / children)
-walked by `(node, pointer)` accessors whose pointer tokens are **child indices**
-(`typeOf` / `tagClass` / `tagNumber` / `isConstructed` / `get` / `has` / `length`
-/ `asInt` / `asBool` / `asString` / `asBytes` / `asOid` / `isNull`); built with
-typed constructors (`integer` / `enumerated` / `boolean` / `null` / `octetString`
-/ `utf8String` / `printableString` / `ia5String` / `oid` / `sequence` / `set`,
-plus `tagged` EXPLICIT / `retag` IMPLICIT context tagging) and serialised by
-`encode`. Strict: malformed input and wrong-type leaf reads are catchable errors;
-a decode-node budget (sized in ~1.5 KB Value cells) + nesting cap turn a decode
-bomb into a catchable error, not an OOM / stack overflow; long-form lengths
-accumulate width-independently and tag numbers are bounded so build / decode stay
-symmetric. Encoder output byte-verified against Go's `encoding/asn1`; pinned by
-`asn1_test.go`; `examples/asn1.j` + golden. Pure Go stdlib, TinyGo-clean, both
-binaries.
+- **`gitlab`** / **`github`** - dev-platform clients; both expose REST **and**
+  GraphQL, token auth.
+- **`steam`** - the Steam Web API (JSON, `?key=` auth); parts of the surface are
+  community-reverse-engineered, which is exactly why it belongs in a deck, not core.
+- **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
 
-### M24.8 - `snmp` client + agent (compacted)
+### M26.3 - daily helpers
 
-**Done.** An SNMP v1 / v2c **client and agent** (`modules/snmp.j`), the simpler
-ASN.1-over-the-wire protocol: compact PDUs, UDP, community-string auth, no SASL. A
-`.j` module - the BER byte-crunching stays in `asn1` (`M24.7`), the transport in
-`net` UDP. *Client:* `client` / `clientWith` -> `Client`, then `get` / `getNext` /
-`set` / subtree `walk` return a `list of Varbind` `{oid, type, value, number}`
-typed by SNMP value type (universal integer / octetString / oid / null;
-`[APPLICATION]` counter32 / gauge32 / timeTicks / ipAddress / counter64 / opaque
-via `asn1.retag`; `[CONTEXT]` noSuchObject / noSuchInstance / endOfMibView); each
-exchange checks the request-id, bounds the wait with a deadline + retries, and
-normalises any failure to one `snmp`-kind error. *Agent (server / hardware
-simulator):* `agent(community, version, bindings)` + `serve` / `serveOn` answer
-GET / GETNEXT / SET for a MIB (GETNEXT in numeric OID order so a client `walk`
-traverses it; wrong-community / malformed datagrams dropped). The codec and
-dispatch are factored pure (network-free), so the overlay round-trips every value
-type and agent path without a socket; the live send/recv and a self-contained
-client<->agent loop run over loopback UDP in the Go suite, and the client was
-verified against real hardware. No SNMPv3 / USM, traps, or GETBULK. Module
-discipline (`snmp_test.j` 100%, doc, two demos, `cmd/jennifer/snmp_test.go`,
-catalog rows); default `jennifer` binary only (`net`).
+A grab-bag of small, everyday helper decks - the little utilities a script reaches
+for often, each a tiny pure-`.j` deck.
 
-### M24.9 - `ldap` client and directory server (compacted)
+- **cli spinners** - a small deck of terminal progress spinners for a long-running
+  task: a catalogue of spinner styles (dots / line / bar / braille / arc / ...),
+  each individually **colourable** (through `ansi`) and driven at its **own speed**
+  (frame interval). Self-suppresses when stdout is not a TTY (`os.isTerminal`), so
+  piped output stays clean.
 
-**Done.** An LDAP v3 client and lightweight directory server (RFC 4511)
-(`modules/ldap.j`) on `asn1` BER + `net`, LDAPS / StartTLS via the shared
-`transport.Security` enum; client and server share the private codec, so both
-live in one module (the `snmp` `M24.8` precedent). *Client:* `connect(address,
-security)` -> `Conn`, then simple `bind` / SASL-SCRAM `bindSasl` (via `sasl`)
-returning `Result{code, matchedDn, message}`; `search` (`SCOPE_BASE` / `ONE` /
-`SUB`) with an RFC 4515 `parseFilter` or the constructors (`equals` / `present` /
-`greaterOrEqual` / `lessOrEqual` / `substrings` / `allOf` / `anyOf` / `negate`),
-`searchPaged` (Active Directory's paged control); writes `add` / `modify` (`change`
-+ `MOD_ADD` / `MOD_DELETE` / `MOD_REPLACE`) / `delete` / `modifyDn` /
-`passwordModify` (RFC 3062); a non-UTF-8 attribute value (AD `objectGUID`) comes
-back base64. *Server:* a directory of `entry` / `group` records answers simple bind
-(`userPassword` via `password`'s `ssha` / `sha` / `ssha256` / `sha256` / `pbkdf2` /
-plaintext schemes) and filtered search (an evaluator over the same `asn1` tree,
-`userPassword` withheld unless requested) - read-only over the wire but mutable
-from code (`addEntry` / `modifyEntry` / `deleteEntry` / `setAttribute`) through a
-shared `kv` store (`directory` in-memory, `openDirectory` file-backed and
-persistent), enough to back an auth portal such as Authelia (worked config in the
-doc). The codec + filter + directory logic is factored pure, so the overlay
-(`ldap_test.j`) round-trips requests / responses without a socket; the live path
-plus a Go fake for the writes the read-only server rejects run in the Go suite
-(`TestLdapDirectory` / `TestLdapWriteOps`, plus `TestLdapServerRobustness` for
-malformed-request handling). AD Kerberos / GSSAPI SASL is out of scope (simple
-bind over TLS); referrals are avoided by binding a specific DC / Global Catalog.
-Default `jennifer` binary only (`net`).
+### M26.4 - bioinformatics
 
-### M24.10 - `math` foundations + special functions (compacted)
+A sequence-manipulation deck for DNA / RNA / protein, modelled on the
+[Sequence Manipulation Suite](https://stothardresearch.ca/sequence-manipulation-suite/)
+(SMS) tool catalogue - the classic, comprehensive reference for this surface.
+Almost all of it is pure string / list / map work, so it is a natural
+**pure-`.j` deck** (leaning on `strings`, `regex`, `lists`, `maps`, `math`, and
+`stats`, no Go), dogfooding the language and community-maintainable as tables and
+algorithms are added. Grouped SMS-style:
 
-**Done.** Fill the two `math` gaps a batteries-included language should not carry
-into 1.0, both folded into the existing `math`. **Everyday:** trigonometry (`sin`
-/ `cos` / `tan` + inverses + `atan2`), hyperbolic (`sinh` / `cosh` / `tanh` +
-inverses), exponentials / logarithms (`exp` / `expm1` / `ln` / `log10` / `log2` /
-`log1p` + arbitrary-base `log`), `cbrt` / `hypot` / `sign` / `trunc`, and
-combinatorics (`factorial` / `comb` / `perm` / `gcd` / `lcm`, exact-int with
-overflow errors), plus `TAU`. **Special:** `erf` / `erfc`, `gamma` / `lgamma`,
-`beta` / `lbeta`, and the regularized incomplete gamma (`regGammaP` / `regGammaQ`)
-and beta (`regBetaI`) - the CDF engine `M24.11` needs, hand-rolled by the standard
-series / continued-fraction algorithms and verified to machine precision. Strict
-throughout: a domain error, an overflow, or a non-converged / non-finite CDF is a
-catchable error, never a NaN (the CDF builtins guard the hand-rolled results and
-clamp into `[0, 1]`). Go stdlib for the base functions; TinyGo-clean, both
-binaries.
+- **Transforms** - `complement`, `reverseComplement`, `reverse`, `transcribe`
+  (DNA <-> RNA), `translate` (codon table), six-frame translation, `splitCodons`,
+  amino-acid `oneToThree` / `threeToOne`.
+- **Composition & properties** - `gcContent`, base / amino-acid composition,
+  `dnaStats` / `proteinStats` summaries, `molecularWeight` (DNA / RNA / protein),
+  `meltingTemp` (Wallace + nearest-neighbour), `isoelectricPoint` (pI), `gravy`
+  (hydropathy), `codonUsage`. The thermodynamic / pI / nearest-neighbour formulas
+  want `exp` / `ln` / `log`, so they pull in `M24.10` (`math` foundations).
+- **Search** - exact and IUPAC-ambiguity pattern find (via `regex` character
+  classes), fuzzy search (n mismatches), ORF finder (six frames), CpG islands,
+  restriction-site search and `restrictionDigest` (fragments) over a bundled
+  enzyme table.
+- **Formats** - FASTA parse / write (a `Record{id, description, sequence}` list),
+  FASTQ reads (sequence + quality), format conversion, `filterDna` /
+  `filterProtein` (strip non-sequence characters).
+- **Manipulation** - `randomDna` / `randomProtein` (length + optional
+  composition), composition-preserving `shuffle`, point `mutate` (rate), range /
+  sliding-window extraction.
+- **Comparison** - pairwise `alignGlobal` (Needleman-Wunsch) / `alignLocal`
+  (Smith-Waterman) with percent `identity` / `similarity`, plus `hammingDistance`
+  / `editDistance`. Alignment is the one `O(nm)` hot loop - fine in `.j` for the
+  small sequences a deck user handles; a candidate Go primitive only if
+  whole-genome throughput is ever needed.
+- **Reference data** - the standard genetic code + alternative codon tables, IUPAC
+  ambiguity codes, per-residue property tables (MW / pKa / hydropathy), and a
+  common-enzyme table - all plain `.j` maps a community can extend.
 
-### M24.11 - distributions + inferential `stats` (compacted)
+FASTA / FASTQ I/O and alignment cover the "molecule structures" the original note
+gestured at; PDB / 3-D structure parsing stays out of v1 (a much larger, separate
+effort).
 
-**Done.** The classical numerical-inference layer (the `scipy.stats` / Excel
-surface) folded into `stats`, built on `M24.10`'s `math` special functions.
-**No separate `prob` library** - distributions live with the descriptive stats
-and inference they are used with (as in `scipy.stats` / R's `dnorm` / `pnorm`),
-so `use stats;` gives the whole toolkit. Two new `stats` layers:
-- **Distributions** (`distributions.go`) - normal / t / chi-square / F /
-  binomial / Poisson, flat R-style names (`normalCdf` / `normalQuantile` /
-  `tCdf` / `binomialPmf` / ...): pdf/pmf, cdf (reusing `math`'s exported
-  `RegularizedGammaP` / `RegularizedIncBeta`), quantile (Acklam probit +
-  bracketed bisection), and Box-Muller `normalSample` on `math`'s random source.
-- **Inference** (`inference.go`) - `linearRegression` / `multipleRegression`
-  (self-contained Gauss-Jordan solve, no `linalg` dependency), `confidenceInterval`,
-  `proportionCi` (Wald / Wilson / exact **Clopper-Pearson**), `tTest` / `tTest2`
-  / `chiSquareTest` / `fTest` / `anova`, and `histogram` (Excel `FREQUENCY`).
-  Results are `stats.Regression` / `Interval` / `Test` structs.
+### M26.5 - forensic / statistical genetics
 
-Strict throughout: every p-value / CDF is finite-guarded and clamped to
-`[0, 1]`, and a degenerate / out-of-domain / overflowing input (zero variance,
-singular design, negative observed count, magnitudes past the float64 ceiling)
-is a catchable error, never a NaN. Pinned against scipy reference values;
-pure-value, TinyGo-clean, both binaries.
+The statistical-genetics sibling of the sequence deck (M26.4): it works on
+**profiles** (an unordered allele pair per autosomal STR locus, plus uniparental
+**haplotypes** for mtDNA / Y-STR) and reference frequency / count data, not on
+sequences, so it shares no code and no audience with SMS. Pure `.j` (probability
+arithmetic over allele-frequency maps, no Go, TinyGo-clean), leaning on `math`
+and on `xml` / text parsing to ingest a published frequency table.
 
-### M24.12 - scientific-notation float literals (compacted)
+- **Match probabilities** - Hardy-Weinberg single-locus genotype frequencies
+  (homozygote `p^2`, heterozygote `2 pa pb`), with the NRC II theta / Fst
+  sub-population correction (Balding-Nichols), multiplied across loci:
+  `randomMatchProbability` (RMP), the single-source match `LR = 1 / RMP`, and
+  `cpi` / `cpe` (combined probability of inclusion / exclusion) for mixtures. A
+  minimum-allele-frequency floor (`5 / 2N`, so the table keeps each locus's `N`)
+  handles rare or unobserved alleles.
+- **Lineage markers (mtDNA / Y-STR)** - mitochondrial and Y-chromosome markers are
+  haploid, non-recombining, and uniparentally inherited, so match probability is
+  **not** Hardy-Weinberg but a direct **haplotype count**: frequency `k / N` in a
+  reference database, with a **Clopper-Pearson** exact-binomial upper bound as the
+  conservative estimate (which pulls in the `beta` distribution `M24.11` adds to `stats`).
+  Deliberately **database-independent**, so the deck supplies the estimator
+  (`haplotypeFrequency(k, N)` / `lineageMatchProbability`) and the caller feeds the
+  count from whatever database they queried. mtDNA adds a haplotype coded as
+  differences from the **rCRS** (e.g. `263G 315.1C`) plus the substantive `align`
+  step that renders a raw sequence into that standard nomenclature; Y-STR is a
+  per-locus repeat-count vector with exact / single-step comparison.
+- **Kinship likelihood ratios** - relationships encoded as IBD coefficients
+  (kappa0 / kappa1 / kappa2: parent-child `(0, 1, 0)`, full sibs
+  `(1/4, 1/2, 1/4)`, half-sib / avuncular / grandparent `(1/2, 1/2, 0)`, first
+  cousins `(3/4, 1/4, 0)`, ...). `kinshipLR(a, b, relationship, db)` tests one
+  relationship against another; `paternityIndex(mother, child, allegedFather,
+  db)` gives a combined paternity index (CPI) and `probabilityOfPaternity`
+  (`W = CPI / (CPI + 1)`), with a stepwise STR mutation model to survive a lone
+  inconsistency. General pedigrees (beyond pairs / trios) need a peeling engine -
+  **Elston-Stewart** - the one substantial algorithm, the Familias / `forrel`-style
+  capability.
 
-**Done.** Float literals accept an `[eE][+-]?digits` exponent (`6.022e23`,
-`1.6e-19`, `2.5E8`, `1e10`) - the exponent makes a literal a **float** even with
-no fraction (`1e10` is a float; `1e` a positioned lex error), takes no `_`
-separators (the mantissa still does), and is decimal-only (`0xe5` keeps `e` as a
-hex digit). A lexer-only change (`readNumber` scans the exponent; the parser's
-`strconv.ParseFloat` reads the lexeme); additive / non-breaking. Strict at the
-magnitude edge: overflow (`1e400`) is a positioned parse error, never `Inf`;
-underflow (`1e-400`) rounds to a finite `0.0` (the check bans the non-finite, not
-a finite zero). On stance #1 it is admitted for the same reason `0xff` / `0o755`
-carry domain intent (not a parallel API), and it closes a round-trip gap - the
-interpreter already prints `1e+21` but could not read it back. Reasoning in
-`design-decisions.md`.
+Mixture deconvolution (multi-contributor, drop-in / drop-out - the EuroForMix
+space) is a larger, later effort layered on this base.
 
-### M24.13 - `uri` module + `encoding` percent / form codecs (compacted)
+A concrete frequency source to wire in first, as a sample: the ENFSI STR reference
+database **[STRidER](https://strider.online/frequencies)** - a
+`loadFrequencies(xml, "strider")` over the `xml` library, with its
+[formulae page](https://strider.online/formulae) and online calculator as the
+exact-conventions spec and a validation target.
 
-**Done.** URL handling, factored so the byte-level encoding lives in the
-`encoding` system library and the URL semantics live in a shared `.j` module,
-and every module that reinvented query-string building routes through them.
+### M26.6 - NGS / high-throughput sequencing
 
-- **`encoding` gains two binary-to-text codecs.** `"uri-percent"` is RFC 3986
-  percent-encoding (unreserved set `A-Za-z0-9-._~` literal, space `%20`,
-  uppercase hex, strict on a malformed `%` escape); `"uri-form"` is the
-  `application/x-www-form-urlencoded` variant (identical but space `+`, so a
-  literal `+` encodes `%2B`). Both plug into the existing `toText` / `fromText`
-  format table (hand-written, no `net/url`), so they inherit the exact-name,
-  catchable-error contract of the rest of the library. Named `uri-*` (not a bare
-  `percent` / `form`) so the codec table keeps the genuine binary-to-text
-  encodings distinct from the web ones, and to match RFC 3986's own vocabulary -
-  percent-encoding is defined by the URI RFC, which standardises on "URI", not
-  "URL".
-- **`uri` module (`modules/uri.j`).** Pure Jennifer over `strings` + `encoding` +
-  `convert` (no Go, no network -> **both binaries**). `parse(raw)` -> `Uri`
-  (`scheme` / `user` / `host` / `port` / `path` / `query` / `fragment`, absent =
-  ""; IPv6 literal keeps its brackets with the port split out) and `build(u)`
-  back (verbatim, no re-encode, so `parse` -> `build` round-trips); `encode` /
-  `decode` (`uri-percent`) and `encodeForm` / `decodeForm` (`uri-form`);
-  `buildQuery` / `parseQuery` between a `map of string to string` and a query
-  string (form-encoded, the query-string convention); and `resolve(base, ref)`
-  applying RFC 3986 section 5 relative-reference resolution (with the section
-  5.2.4 `remove_dot_segments` algorithm). 100% `uri_test.j` overlay.
-- **Consumers de-duplicated.** Seven modules hand-rolled a percent / form
-  byte-loop; all now delegate. `influxdb`, `totp`, and `prometheus` use
-  `uri.encode` (RFC 3986, their bytes - incl. `%20` for a space - unchanged);
-  `rest.queryString`, `gotify.formBody`, `oauth.formBody`, and `telegram.formEncode`
-  use `uri.encodeForm` / `uri.buildQuery`. Two encoders are deliberately **not**
-  folded in: `s3`'s AWS SigV4 encoder (byte-critical to the signature, a different
-  reserved set), and `web`'s request-body `percentDecode` (intentionally *lenient*
-  per OM-013 - it must not throw a 500 on a client's malformed `%` escape or
-  non-UTF-8 field, whereas the `uri` / `encoding` path is strict).
-- **Pre-1.0 break.** `rest`'s query strings now form-encode a space as `+`
-  (was `%20`), matching Go `url.Values` / JS `URLSearchParams` / Python
-  `urlencode`; both are decoded identically by any conformant server. The
-  affected overlay assertions were updated in the same change.
-- Deliverables: `docs/modules/uri.md` + index / `SUMMARY.md` rows,
-  `examples/modules/uri_demo.j`, a `JENNIFER.md` bullet, the `encoding.md` +
-  cheatsheet codec rows, and the four consumers' updated overlays. On stance #1
-  (one obvious way): a single percent/form implementation in `encoding`, one URL
-  module over it, no per-module reinvention.
+Unlike the pure-`.j` decks above, NGS breaks the model on two axes - **scale**
+(FASTQ.gz files run 10s of GB, BAM 100s, so everything **streams**, never
+load-into-memory) and **compute** (alignment / assembly / variant calling are
+heavily SIMD-optimised C a tree-walker is ~100-1000x too slow to replace). So the
+deck is deliberately the **glue and light-I/O layer**, not the heavy engine, with
+a different posture from the pure-`.j` decks: **Go-backed streaming parsers** (the
+decompress-and-parse hot loop in Go, the `net.readAll` / `binary` pattern) with
+the per-record logic in `.j`. In scope:
 
-### M24.14 - `args` CLI argument parser module (compacted)
+- **Streaming format I/O** - FASTQ (gzipped, over `compress` + `fs` handles) and
+  the tab-delimited **SAM** / **VCF** / **BED** / **GFF** / **GTF** text formats:
+  parse / filter / convert as a stream, so a 50 GB file never lands in memory.
+- **QC + preprocessing** (FastQC / fastp-lite) - per-base quality and read-length
+  / GC distributions, adapter detection, quality / adapter trimming, length
+  filtering, subsampling: one streaming pass over FASTQ.
+- **Interval ops** (bedtools-lite) - overlap / intersect / merge over BED / GFF
+  features.
+- **Pipeline orchestration** - the real sweet spot: NGS is fundamentally
+  `bwa | samtools | gatk` glued together, and Jennifer already has `os.run` /
+  `os.spawn` + `spawn` concurrency, so it can drive the standard tools, parse
+  their output, manage intermediate files, fan out over samples in parallel, and
+  handle errors - a Snakemake-lite in a real language.
 
-**Done.** A declarative command-line argument parser - the general-infrastructure
-gap a "write your tools in Jennifer" language conspicuously lacked (`os.flag` /
-`os.ARGS` are primitive string lookups: no typed conversion, defaults, required
-args, positionals, or subcommands). Scoped at Python `argparse`'s common surface
-plus `nargs` / `choices` / `count` / `append` / `--version`, stopping short of
-argument groups, mutually-exclusive sets, parent parsers, and prefix abbreviation
-(Level C). A value-semantic `Parser` (copy-returning builder): optional flags
-(`flag` / `intFlag` / `floatFlag` / `boolFlag`, plus `countFlag` `-vvv`->3 and
-`listFlag` append), `nargs` positionals (`"?"` / `"*"` / `"+"` / int), subcommands
-(each its own `Parser`), and `version`. `args.parse($p, os.ARGS)` -> a `Result`
-with typed accessors (`asString` / `asInt` / `asFloat` / `asBool` / `asList` /
-`count` / `has`). Normalisation covers `--flag=value`, bundled / glued shorts
-(`-abc`, `-nAda`), and `--` end-of-flags (`-5` is a negative-number positional); an
-unknown flag, missing required arg, bad type, or `choices` miss is a catchable
-`Error{kind: "args"}` (not argparse's `exit(2)`), and `-h` / `--help` / `--version`
-set the result's `done` flag with `helpText` rather than exiting. Pure `.j` over
-`strings` + `convert` + `lists` + `maps`; **both binaries**. Core infrastructure,
-not a deck. 100% `args_test.j` overlay (32 tests) + full docs / index / `SUMMARY.md`
-/ `README.md` / demo / `JENNIFER.md`.
+Out of scope (wrap and pipe the native tool, do not reimplement): read
+**alignment** (BWA / Bowtie2 / minimap2), de-novo **assembly** (SPAdes), **variant
+calling** (GATK), and heavy **BAM / CRAM** handling - which additionally needs
+**BGZF** (blocked gzip for random access), a `compress` gap and a Go addition
+whose standalone value is limited without the downstream compute the deck omits.
 
-### M24.15 - `validate` data validation module (compacted)
+---
 
-**Done.** Declarative validation of a `map of string to string` against a rule set,
-returning a structured failure list instead of ad-hoc per-field `if` checks. Rules
-are value-semantic descriptors: `required`, `isInt` / `isFloat` / `isBool`, `min` /
-`max`, `minLen` / `maxLen`, `pattern`, `email` / `url` (over `regex` + `uri`),
-`datetime(format)` (`strftime`, calendar-checked via `time.parse`), `oneOf`
-(whitelist) / `noneOf` (blacklist), `password(policy)` (passthrough to the
-`password` module - the `password.Schema` rides in the `Rule` since there are no
-closures), and `custom` (a `func` predicate, called exception-safely), plus a
-`withMessage` override. Grouped per field in a `map of string to list of Rule`;
-`validate.check` -> `list of validate.Failure` (`{field, rule, param, message}`,
-`rule` a stable id + `param` its argument), `validate.ok` the bool short-circuit,
-`messages` / `byField` renderers, and `localize(errs, templates)` for i18n - a
-`rule-id -> template` map with brace-free `%param%` / `%field%` markers (`%%`
-escapes a literal `%`; single-pass substitution), deliberately decoupled from the
-language's `{expr}` string interpolation. An absent or blank field passes every rule
-except `required`; the failure struct is `Failure` (not the reserved `Error`).
-Values are strings (the `web.bodyForm` / `dotenv` / query-string shape). Pure `.j`
-over `regex` + `uri` + `time` + `password` + `convert` + `lists` + `strings` +
-`maps`; **both binaries**. 100% `validate_test.j` overlay (16 tests) + full docs /
-index / `SUMMARY.md` / `README.md` / demo / `JENNIFER.md`.
-
-### M24.16 - module suite hardening (security + robustness audit follow-up)
-
-**Done.** A security / robustness pass over the shipped `.j` module suite from a
-source audit whose findings collapsed to a few **systemic** root causes - each fixed
-once and applied across its cluster, with a regression added to every touched
-`*_test.j` overlay (~35 fixes / ~24 modules, both binaries clean), ordered
-remotely-exploitable first (a recover-less interpreter turns an unbounded read into an
-uncatchable OOM). Delivered: **received-data caps** (one shared
-`transport.checkReceiveSize` + `MAX_RECEIVED_BYTES` on the uncapped aggregate reads -
-`amqp` body, `smtp` reply, `mqtt` varint / body / poll-hang, `multipart` unterminated
-body); **injection** (the `label` printer-command class validated digits-only across
-ZPL / CAB, plus CRLF / control stripping in `log` / `ical` / `vcard` and `barcode`
-colour validation); **cross-origin redirect credential leak** (`http.send` drops
-`Authorization` / `Cookie` + jar cross-origin behind an `allowCrossOriginRedirect`
-opt-in, `rest.paginate` matches); **typed error propagation** (the real `json.decode`
-sites wrapped to a module-kinded error); **numeric clamps** (`totp`, `bloom`,
-`ratelimit`, `password`, `barcode` scale + div-by-zero, `screen`, `orm`); and
-**correctness** (`semver.satisfies(v, garbage)` -> `false`; dead `ldap`
-self-assignment removed). The audit over-stated in every cluster (caps already
-present, keys already escaped, three "typed-decode" modules that never decode JSON),
-so the real work was smaller than the raw finding count.
-
-### M24.17 - `html` module: rebrand `htmlwriter` + add a parser (compacted)
-
-**Done.** Fold HTML building and parsing into one bare-named `html` module. **Part 1
-- rebrand `htmlwriter` -> `html`** (a pre-1.0 break): the catalog names a format
-module for the format, not the direction (`xml` / `json` build *and* parse), so the
-lone `*writer` outlier's build surface (`element` / `text` / `raw` / `attr` /
-`boolAttr` / `render` / `escape`) moves under `html.` unchanged; the file, doc, demo,
-index / `SUMMARY.md` / `README.md` / `JENNIFER.md` entries, and its one real consumer
-(`markdown`; `pdfwriter` only name-dropped it) are repointed, and the `htmlwriter`
-name is retired. **Part 2 - a tolerant, hand-rolled `parse`** (pure `.j`, no
-`x/net/html`) producing the **same transparent `Node`** the writers do, so a parsed
-tree is read (`.tag` / `.attrs` / `.children` / `.text` directly), edited, and
-re-`render`ed - build and parse round-trip through one model. Tolerant of void /
-self-closing tags, unquoted + boolean attrs, mismatched nesting (`<b>x</i>`
-auto-closes), comments, `<!DOCTYPE>`, and `script` / `style` raw text; entities
-decode; a depth + node budget cap a malicious document (catchable "html"). Added
-surface: `parse` + `attrOf` / `hasAttr` + the XPath-ish `get` / `findAll` / `has`
-(the builder names `text` / `attr` were taken, so the reader names diverge from
-`xml`). The parser threads all state through returns (a module top level is
-declarations-only, so no cursor global) and builds bottom-up on a `Frame` stack. Both
-binaries; 23-test overlay; `M24.18` reuses this node / selector shape.
-
-### M24.18 - `markdown` module: add a reader (surface the parse tree)
-
-**Done.** Gave `markdown` the direction it lacked - **reading** - the consistency
-move the M24.17 `html` rebrand set up. It already built a full internal document
-tree (the private `struct Block`) but never surfaced it; now `markdown.parse(md)`
-returns a public `Node` (a string `kind` plus the fields it uses, recursive over
-`children`; the document root) walked by the same `xml` / `html` vocabulary -
-`typeOf` / `children` / `text` (a leaf's text, else its descendants' concatenated) /
-`level` / `attr` (`href` / `title` / `lang` / `align` / `ordered` / `level`) / `get`
-/ `findAll` / `has` over a `/`-separated selector (kind names, `*`, `name[k]`) - so a
-caller can pull the headings for a TOC, rewrite links, or lint before rendering (the
-prerequisite the `M24.21` Markdown -> PDF layout names). The `Block` / `Span`
-model stays private; `parse` converts it, eagerly expanding inline spans so a link's
-`href` is walkable, and a fenced block's language is captured via a new `Block.lang`
-+ `collectFence` info-string parse. The spec's `Doc` / `Node` pair collapsed to one
-`Node` (like `html`'s `parse` -> `#root`; Jennifer has no type alias). **One model:**
-new node renderers consume the public tree and `toHtml` / `toAnsi` became
-`render(parse(md), ...)` wrappers, so the old `Block`-based renderers were deleted
-and `render(doc, "html" / "ansi")` renders a parsed *or* hand-built tree -
-byte-identical output pinned by the existing overlay (public tables padded
-rectangular to match). Hardened with a nesting cap + node budget (a pathological
-document is a catchable `"markdown"` error). Pure `.j`, both binaries; the overlay
-grew 16 reader / render / round-trip / depth-cap tests (86 total, 100%), with
-`docs/modules/markdown.md` + `JENNIFER.md` + the `parse` -> walk -> `render` demo
-updated.
-
-### M24.19 - string interpolation (`{expr}` in cooked strings)
-
-**Done.** Cooked-string interpolation - `"total: {$sum}, next {$n + 1}, up
-{strings.upper($x)}"` - sugar over concat + `convert.toString`, graduating the
-horizon entry. Only a **cooked** `"..."` interpolates; each `{expr}` slot is one
-Jennifer **expression** (a `;` / statement keyword / empty `{}` is a parse error); a
-**raw** `'...'` never interpolates (the "off" form, so `'{"port": 8080}'` is literal
-JSON); a literal brace is `\{` / `\}`; `f"..."` was rejected (the cooked / raw split
-is the opt-in). **Part 1** moved the two `{name}`-template consumers (`intl.tr`,
-`validate`) to a brace-free `%name%` marker (`%%` escapes), freeing `{}` for the
-language. **Part 2** added the feature: the lexer emits `TOKEN_STRING_INTERP` whose
-`Parts` alternate literal chunks and slots (`scanInterpSlot` brace-counts nested `{}`,
-each slot carrying its absolute line / col); the parser sub-lexes + sub-parses each
-slot into an `InterpStringExpr`, evaluated by `Display`-stringifying each slot.
-Because cooked `{` is no longer literal, every literal-brace cooked string was
-migrated (**prefer raw** `'...'`, e.g. `"{\"k\":1}"` -> `'{"k":1}'`, falling back to
-`\{` only where cooked escapes are needed) by a one-off decode-and-decide Go migrator,
-value-checked by the golden / overlay suite. The whole toolchain treats a slot as real
-code - the resolver descends (undefined-var / shadowing are parse-time), `lint` checks
-inside it (new `L204` flags a call in a slot), `profile` attributes each slot its own
-position - landed with `fmt` / `ast` / the editor highlighters / grammar EBNF. A
-language feature, both binaries. A follow-up audit (`DF-strinterpol-report.md`) closed
-the walker gaps (`walkExprForQualifiedRefs` / `declTypesExpr` descend into slots) and
-added `TestWalkerExhaustiveness` guards.
-
-### M24.20 - module version + capability header
-
-**Done.** A declarative per-file header stating the minimum interpreter version and
-the host capabilities a file needs, checked at **read time** so a mismatch aborts
-clearly instead of failing deep in a stub or after a breaking change - the lightweight
-sibling of the planned `jvc` / `deck.toml` constraints (`horizon.md` DRAFT#12), needing
-no package manager. One typed directive family, `# pragma-jennifer-<key>: <value>`
-(greppable, never prose, so new keys slot into one dispatcher), scanned from raw source
-in the leading header block (tolerant of shebang / SPDX / docblock) - it must be a
-comment run **before** lex, since a module top level is declarations-only. Two keys:
-
-- **`version`** (single-valued) - `# pragma-jennifer-version: >=0.25.0`. A *minimum*
-  compare, not a range grammar; `>=` is required syntax, the value `major.minor.patch`.
-  Evaluated by a new `version.AtLeast(min)` (Go, not the `.j` `semver` which would
-  bootstrap during load). **Any dev build bypasses** (the `"dev"` default and any
-  `X.Y.Z-dev+...` are ahead of the last tag; only a clean release tag enforces - which
-  keeps `go test` / `make build` from failing their own in-tree modules).
-- **`capability`** (a set) - `# pragma-jennifer-capability: net`. The build exposes its
-  capability set (`{net, exec, sql}` on standard `jennifer`, none on `jennifer-tiny`,
-  via a build-tag split mirroring `net`'s `!tinygo` files); a file naming an
-  unavailable one aborts at read time (future-proof: a tinygo build rebuilt with a
-  network stack just adds `net`). Queryable as `meta.CAPABILITIES` /
-  `meta.hasCapability("net")`.
-
-Multiplicity is per key: a duplicate `version` is a hard error (two floors is a
-contradiction), a set-valued key unions across lines. Enforcement is **per file at read
-time**, so `include` needs no merge - each spliced file self-checks before its tokens
-join, so the effective floor is the max and the capability set the union with no
-cross-file logic. A **malformed** directive (bad grammar, unknown key, unknown
-capability) is a hard error (a typo must not disable the guard), and **version is
-evaluated first** so an old interpreter reports the floor before an unrecognized newer
-key. One shared `internal/reqcheck.CheckRequirements(rawSource, path)` (importing
-`version` + the capability set) runs at the three first-read seams - the CLI entry, the
-`include` preprocessor, and `loadModule` (each nested module independently) - with a
-positioned, actionable error (`intl.j: requires jennifer >=0.25.0, but this build is
-0.24.1`). It scans line-by-line (early exit at the first code line) and bounds every
-untrusted echo (key / value / line length capped), so a pathological header is neither
-an OOM nor an oversized diagnostic. Ships an `L303` lint rule validating a present
-pragma (malformed / duplicate / bad grammar / unknown key / unknown capability, zero
-false positives), and `jennifer fmt` canonicalizes a pragma's spacing (a version
-collapses to `>=0.5.0`, a capability list to `net, exec` without merging names).
-
-**Adoption:** every `modules/*.j` carries a `>=0.24.0` floor; a module declares
-`capability:` only where the facility is **mandatory** (the net-protocol clients,
-`sql` on `orm` / `sqlmigrate`, `exec` on `mcp`). A module with an **optional** backend
-is deliberately *not* gated - `log` (console / file sinks work without net, only syslog
-needs it), `label` (build / render / emit is offline, net is just the `send`
-convenience), and `ldap` (an in-memory directory mode) all still load on
-`jennifer-tiny` for their non-net paths, letting the runtime stub gate the net calls a
-caller actually reaches. A transitive user needs nothing (the imported module
-self-checks). Discipline going forward: bump a module's floor in the same change that
-breaks it. Requiring a shipped module to *carry* a floor (an `L303` "missing" clause)
-is a follow-on. No interpreter-core or language-grammar change.
-
-### M24.21 - Markdown -> PDF (document layout, `markdown.toPdf`)
-
-**Done.** The markup-driven document story for `pdf`, **folded into `markdown`** as a
-third render target beside `toHtml` / `toAnsi`: `markdown.toPdf(md)` /
-`toPdfWith(md, opts)` / `renderPdf(doc, opts)` lay a Markdown document out to a
-paginated PDF ("write markup, get a PDF"), the last over a parsed (or transformed)
-`Node`. Graduated from `horizon.md`'s DRAFT#13 once `M24.18` surfaced the parse tree,
-built on `pdf`'s layout primitives (`measureText` over the standard-14 AFM tables,
-`wrapText`). A flow engine threads a value-semantic `Layout` (the accumulating
-`Document` / `Page`, the pen `y`, the indent) through per-block renderers that place
-each node and paginate at the bottom margin: a heading -> sized bold text; a
-paragraph -> a word-wrapped block with **per-run fonts** (a styled-word packer
-switches bold / italic / mono per inline node); a list -> indented `-` / `N.` markers
-(nested); a GFM table -> a ruled grid, bold header, per-column alignment (its row
-loop keeps cell-wrap / x-placement in `Layout`-free helpers so a row costs no
-full-state copy); code -> a monospaced block; a blockquote -> indented inner blocks.
-`PdfOptions` (from `pdfDefaults()`) sets page size / margins / standard-14 fonts.
-**Folded in, not a separate module** (reasoned in `design-decisions.md`): markdown is
-already a multi-format renderer, so `toPdf` joins `toHtml` / `toAnsi` for one unified
-surface, at the cost that every markdown import now loads `pdf` + `font` (measured
-~2x import time, +~6 MB RSS) - accepted for the single-surface ergonomics, and a
-concerned user can strip the file. Standard-14 fonts, so text is best kept to
-Latin-1 (an embedded Unicode font via `pdf.loadFont` is a later refinement); the
-`M24.17` `html` reader could feed the same layout as an HTML front-end (a follow-on,
-its node shape differs). Pure `.j`, **both binaries** (identical output on
-`jennifer-tiny`); the `markdown` overlay grew 15 PDF tests (102 total, 100%,
-structural `%PDF` checks) with the demo / docs / `JENNIFER.md` updated. Dogfooded by
-`scripts/gen-module-docs.j`, which renders the module-API reference to
-`jennifer-module-api.pdf`.
-
-## M25 - multiplatform: promote macOS / Windows to supported
+## M27 - multiplatform: promote macOS / Windows to supported
 
 Linux is the only *supported* platform, but best-effort **unsupported** macOS /
 Windows binaries (the standard-Go `jennifer`, via cross-compile) already ship each
@@ -1507,7 +1250,7 @@ packaging** (a Homebrew tap, Snap, Nix flake, Flatpak / AppImage) stays a
 per-format nice-to-have, shipped only when a user asks and a maintainer keeps it
 green - none blocks a release.
 
-### M25.1 - Windows: promote to supported
+### M27.1 - Windows: promote to supported
 
 **Planned.** The **Windows** track is a handful of concrete gaps, not a rewrite:
 
@@ -1535,13 +1278,13 @@ green - none blocks a release.
 
 **Requires:** none.
 
-### M25.2 - macOS: promote to supported
+### M27.2 - macOS: promote to supported
 
 **Planned.** The parallel case: the same "already ships unsupported, promote it"
-shape as `M25.1`, and simpler - macOS lacks even the module-path blocker Windows
+shape as `M27.1`, and simpler - macOS lacks even the module-path blocker Windows
 has (the POSIX exe-relative default resolves cleanly), and its separators / EOL /
 `$HOME` match Linux. A `macos-latest` CI test job running `go test ./...` verifies
-correctness (reusing the per-OS osinfo golden strategy from `M25.1`); once green,
+correctness (reusing the per-OS osinfo golden strategy from `M27.1`); once green,
 move darwin/amd64 + darwin/arm64 out of the `build-unsupported` matrix into the
 supported set and drop the "unsupported" labelling. **Requires:** none.
 
@@ -1549,8 +1292,8 @@ supported set and drop the "unsupported" labelling. **Requires:** none.
 
 ## Requirements for 1.0.0 stable
 
-- **Cross-build for macOS / Windows.** The `M25` multiplatform track
-  (`M25.1` Windows, `M25.2` macOS) does this; ships as soon as it lands.
+- **Cross-build for macOS / Windows.** The `M27` multiplatform track
+  (`M27.1` Windows, `M27.2` macOS) does this; ships as soon as it lands.
 - **Real apt repository** (replacing the "GitHub Release
   artifact" install of the M15.8 `.deb`) if user demand
   warrants the maintenance.
