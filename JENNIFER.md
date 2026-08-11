@@ -1414,6 +1414,41 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   text extracts with `pdftotext`. Pure `.j` over `strings` / `lists` / `maps` /
   `convert` / `compress` / `binary` / `math` / `time` / `encoding` + the `font`
   module; **both binaries**.
+- **`dot`** - Graphviz DOT graph description: build a graph and render it to
+  `.dot` text for an external Graphviz tool to lay out and draw (`dot -Tsvg
+  graph.dot > graph.svg`). `dot.digraph(name)` (directed, `->`) / `dot.graph(name)`
+  (undirected, `--`) start a `Graph`; `node(g, id)` / `nodeWith(g, id, attrs)` and
+  `edge(g, src, dst)` / `edgeWith(g, src, dst, attrs)` add nodes and edges (`attrs`
+  a `map of string to string`, e.g. `{"label": "Parser", "shape": "box"}`);
+  `graphAttr` / `nodeAttr` / `edgeAttr` set the graph-level and `node [ ... ]` /
+  `edge [ ... ]` default blocks; `render(g) -> string`. Every builder returns a
+  fresh `Graph` (value semantics); labels / names / attribute values are
+  DOT-escaped. Emits the text description only - graph layout is Graphviz's job and
+  is deliberately not reimplemented. Pure `.j` over `strings` / `lists`; **both
+  binaries**.
+- **`plot`** - data plotting to SVG. A unified `plot.chart(series, opts)` renders a
+  `list of plot.Series` (built with `plot.series(name, xs, ys)` / `plot.points(...)`;
+  each carries a `mark` of "line" / "points" / "both" / "area" fill, an optional
+  `dash`, symmetric error bars `yErr`, and a scatter marker `shape` of "circle" /
+  "square" / "triangle" / "diamond"; auto-coloured from a palette) on shared axes
+  **with a positioned legend**; `plot.line` / `scatter` / `bar(labels, values, opts)`
+  / `histogram(data, bins, opts)` are wrappers, and `plot.bars(labels, series, opts)`
+  draws **grouped or stacked** multi-series bars (`barMode`) with **negative /
+  diverging** values and optional value **data labels** (`barLabels`). Every chart
+  gets automatic "nice" ticks (Heckbert), a gridded frame, a title, and labels.
+  `plot.defaults() -> Options` carries `width` / `height` / `title` / `xLabel` /
+  `yLabel` / `color` / `background` plus `fontFamily` / `fontSize` (**fonts**), the
+  four `margin*` fields (**margins**), `grid` / `legend` / `legendPos` (top-right /
+  top-left / bottom-right / bottom-left), `xLog` / `yLog` (**log10 scales**), `xDate`
+  / `dateFormat` (**date axis**: x = Unix seconds, calendar-boundary ticks via
+  `time`), `hover` (native `<title>` **hover tooltips**), and `refLines` (**reference
+  lines** from `plot.hline(value, label)` / `plot.vline(...)` -> `plot.RefLine`).
+  `plot.floats(ints)` lifts a `list of int`; `plot.save(svg, path)` writes the SVG to
+  a file over `fs` (values have no methods, so it is `plot.save($svg, path)`, not
+  `$svg.save(path)`). Empty / mismatched / ragged input or a non-positive log value
+  throws `Error{kind: "plot"}`. The visual companion to the `stats` / `ml` numeric
+  stack, pure `.j` over `math` / `time` / `fs` / `strings` / `lists` / `convert`;
+  **both binaries**.
 - **`statsd`** - a fire-and-forget StatsD metrics client over UDP. `statsd.client(host)`
   (default port 8125) / `statsd.clientWith(address, prefix)` open a `Client`
   (`socket` + agent `address` + a metric-name `prefix`, "" for none; copies share

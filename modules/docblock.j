@@ -286,8 +286,10 @@ export func parse(source as string) {
         } else {
             # Match against a bounded window past the doc comment, not the whole
             # remaining source: a per-block `substring(... len(source))` copy is
-            # O(doc-count * file-size). A declaration line fits comfortably here.
-            def tailEnd as int init $raw.after + 512;
+            # O(doc-count * file-size). The window must clear the whole construct
+            # head, including a `def struct` with many fields (`{ ... }`), so it is
+            # generous - a struct with dozens of fields still fits comfortably.
+            def tailEnd as int init $raw.after + 4096;
             if ($tailEnd > len($source)) {
                 $tailEnd = len($source);
             }
