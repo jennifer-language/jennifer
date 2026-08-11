@@ -104,19 +104,36 @@ export def struct Image {
 };
 
 /**
+ * One outline (bookmark) entry: a title that jumps to a position on a page, plus
+ * the heading level that nests it under the outline tree. Built with `bookmark`.
+ * @field title {string} the bookmark label
+ * @field page {int} the 0-based page index the bookmark points at
+ * @field y {int} the destination y coordinate in PDF points (origin bottom-left)
+ * @field level {int} the nesting level (1 = top; a level-2 entry nests under the last level-1)
+ */
+export def struct OutlineEntry {
+    title as string,
+    page as int,
+    y as int,
+    level as int
+};
+
+/**
  * A PDF document: an ordered list of pages, the document metadata (the PDF Info
- * dictionary, keyed by PDF key name - "Title", "Author", ...), and any embedded
- * fonts registered with `addFont`.
+ * dictionary, keyed by PDF key name - "Title", "Author", ...), any embedded
+ * fonts registered with `addFont`, and any outline (bookmark) entries.
  * @field pages {list of Page} the document's pages
  * @field info {map of string to string} the Info-dictionary metadata
  * @field embedded {list of LoadedFont} the embedded fonts
  * @field images {list of Image} the embedded raster images
+ * @field outline {list of OutlineEntry} the outline / bookmark entries, in document order
  */
 export def struct Document {
     pages as list of Page,
     info as map of string to string,
     embedded as list of LoadedFont,
-    images as list of Image
+    images as list of Image,
+    outline as list of OutlineEntry
 };
 
 /**
@@ -198,7 +215,31 @@ export func document() {
     def meta as map of string to string init {"Producer": "Jennifer pdf"};
     def noFonts as list of LoadedFont init [];
     def noImages as list of Image init [];
-    return Document{pages: [], info: $meta, embedded: $noFonts, images: $noImages};
+    def noOutline as list of OutlineEntry init [];
+    return Document{pages: [], info: $meta, embedded: $noFonts, images: $noImages, outline: $noOutline};
+}
+
+/**
+ * A copy of the document with one outline (bookmark) entry appended
+ * (value-semantic). Entries are nested by `level` in the order added: a level-2
+ * entry becomes a child of the most recent level-1, and so on. The destination
+ * scrolls page `page` (0-based) so that `y` (PDF points, origin bottom-left) is
+ * at the top of the view. With any outline present, the viewer opens showing the
+ * bookmark panel.
+ * @param doc {Document} the document
+ * @param page {int} the 0-based index of the destination page
+ * @param y {int} the destination y in PDF points
+ * @param title {string} the bookmark label
+ * @param level {int} the nesting level (>= 1)
+ * @return {Document} a copy with the entry appended
+ */
+export func bookmark(doc as Document, page as int, y as int, title as string, level as int) {
+    if ($level < 1) {
+        fail("bookmark: level must be >= 1");
+    }
+    def out as Document init $doc;
+    $out.outline = lists.push($out.outline, OutlineEntry{title: $title, page: $page, y: $y, level: $level});
+    return $out;
 }
 
 /**
@@ -1293,13 +1334,129 @@ func buildToUnicode(gids as list of int, m as map of int to int) {
     return $out + "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
 }
 
+# escapePdfString escapes a string for a PDF literal `(...)` string: backslash,
+# and the two parentheses (kept ASCII / Latin-1, matching the standard-14 scope).
+func escapePdfString(s as string) {
+    def out as string init strings.replace($s, "\\", "\\\\");
+    $out = strings.replace($out, "(", "\\(");
+    $out = strings.replace($out, ")", "\\)");
+    return $out;
+}
+
+# outlineField renders `/Key N 0 R` when N is a real object number, else "".
+func outlineField(key as string, obj as int) {
+    if ($obj > 0) {
+        return " /" + $key + " " + convert.toString($obj) + " 0 R";
+    }
+    return "";
+}
+
+# buildOutlineObjects turns the flat, level-ordered outline entries into the PDF
+# object bodies (the /Outlines root first, then one item per entry, in object-
+# number order). Nesting is derived from `level`: an entry's parent is the nearest
+# preceding entry of a smaller level; siblings share a parent; /Count is the run of
+# following deeper entries. Returns the object strings ready to emit.
+func buildOutlineObjects(outline as list of OutlineEntry, rootNum as int, itemNums as list of int, pageNum as list of int) {
+    def n as int init len($outline);
+    def numPages as int init len($pageNum);
+    # parent index per entry (-1 = directly under the root)
+    def parentIdx as list of int init [];
+    def i as int init 0;
+    while ($i < $n) {
+        def par as int init -1;
+        def j as int init $i - 1;
+        while ($j >= 0) {
+            if ($outline[$j].level < $outline[$i].level) {
+                $par = $j;
+                break;
+            }
+            $j = $j - 1;
+        }
+        $parentIdx[] = $par;
+        $i = $i + 1;
+    }
+    # root children (parent == -1): first / last object numbers
+    def rootFirst as int init 0;
+    def rootLast as int init 0;
+    $i = 0;
+    while ($i < $n) {
+        if ($parentIdx[$i] == -1) {
+            if ($rootFirst == 0) {
+                $rootFirst = $itemNums[$i];
+            }
+            $rootLast = $itemNums[$i];
+        }
+        $i = $i + 1;
+    }
+    def objs as list of string init [];
+    $objs[] = convert.toString($rootNum) + " 0 obj\n<< /Type /Outlines" +
+        outlineField("First", $rootFirst) + outlineField("Last", $rootLast) +
+        " /Count " + convert.toString($n) + " >>\nendobj\n";
+    # each item
+    $i = 0;
+    while ($i < $n) {
+        def par as int init $rootNum;
+        if ($parentIdx[$i] != -1) {
+            $par = $itemNums[$parentIdx[$i]];
+        }
+        # previous / next sibling (same parent), first / last child, descendant count
+        def prevSib as int init 0;
+        def nextSib as int init 0;
+        def firstCh as int init 0;
+        def lastCh as int init 0;
+        def cnt as int init 0;
+        def j as int init 0;
+        while ($j < $n) {
+            if ($j != $i and $parentIdx[$j] == $parentIdx[$i]) {
+                if ($j < $i) {
+                    $prevSib = $itemNums[$j];
+                } elseif ($nextSib == 0) {
+                    $nextSib = $itemNums[$j];
+                }
+            }
+            if ($parentIdx[$j] == $i) {
+                if ($firstCh == 0) {
+                    $firstCh = $itemNums[$j];
+                }
+                $lastCh = $itemNums[$j];
+            }
+            $j = $j + 1;
+        }
+        def k as int init $i + 1;
+        while ($k < $n and $outline[$k].level > $outline[$i].level) {
+            $cnt = $cnt + 1;
+            $k = $k + 1;
+        }
+        def pageIdx as int init $outline[$i].page;
+        if ($pageIdx < 0) {
+            $pageIdx = 0;
+        }
+        if ($pageIdx >= $numPages) {
+            $pageIdx = $numPages - 1;
+        }
+        def countField as string init "";
+        if ($cnt > 0) {
+            $countField = " /Count " + convert.toString($cnt);
+        }
+        $objs[] = convert.toString($itemNums[$i]) + " 0 obj\n<< /Title (" + escapePdfString($outline[$i].title) +
+            ") /Parent " + convert.toString($par) + " 0 R" +
+            outlineField("Prev", $prevSib) + outlineField("Next", $nextSib) +
+            outlineField("First", $firstCh) + outlineField("Last", $lastCh) + $countField +
+            " /Dest [" + convert.toString($pageNum[$pageIdx]) + " 0 R /XYZ null " + convert.toString($outline[$i].y) + " null]" +
+            " >>\nendobj\n";
+        $i = $i + 1;
+    }
+    return $objs;
+}
+
 /**
  * Render the document to PDF bytes (PDF 1.7). Content streams are
  * FlateDecode-compressed; standard-14 fonts become shared Type1 objects and each
  * embedded font a Type0 / CIDFontType2 with an embedded FontFile2 and a ToUnicode
  * map. Registered images become image XObjects (with a soft-mask XObject when they
- * carry alpha). Objects are numbered dynamically, so any mix of pages, fonts,
- * images, and future resources references correctly.
+ * carry alpha). An outline (bookmarks) is emitted when the document has any, with
+ * the catalog set to open the bookmark panel. Objects are numbered dynamically, so
+ * any mix of pages, fonts, images, and resources references correctly.
  * @param doc {Document} the document to render
  * @return {bytes} the PDF file contents
  */
@@ -1357,6 +1514,18 @@ export func render(doc as Document) {
     if ($hasInfo) {
         $infoNum = $next; $next = $next + 1;
     }
+    # outline: the /Outlines root, then one object per entry (emitted last)
+    def hasOutline as bool init len($doc.outline) > 0;
+    def outlineRoot as int init 0;
+    def outlineItems as list of int init [];
+    if ($hasOutline) {
+        $outlineRoot = $next; $next = $next + 1;
+        def oi as int init 0;
+        while ($oi < len($doc.outline)) {
+            $outlineItems[] = $next; $next = $next + 1;
+            $oi = $oi + 1;
+        }
+    }
     def totalObjs as int init $next - 1;
 
     def buf as bytes;
@@ -1368,7 +1537,11 @@ export func render(doc as Document) {
 
     # obj 1: catalog
     $offsets[] = len($buf);
-    $buf = appendStr($buf, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    def catExtra as string init "";
+    if ($hasOutline) {
+        $catExtra = " /Outlines " + convert.toString($outlineRoot) + " 0 R /PageMode /UseOutlines";
+    }
+    $buf = appendStr($buf, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R" + $catExtra + " >>\nendobj\n");
 
     # obj 2: page tree
     def kids as string init "";
@@ -1571,6 +1744,16 @@ export func render(doc as Document) {
         }
         $offsets[] = len($buf);
         $buf = appendStr($buf, convert.toString($infoNum) + " 0 obj\n<< " + $dict + ">>\nendobj\n");
+    }
+
+    # outline (bookmark) objects: the /Outlines root, then one per entry, in
+    # object-number order (so the offsets stay in step).
+    if ($hasOutline) {
+        def outObjs as list of string init buildOutlineObjects($doc.outline, $outlineRoot, $outlineItems, $pageNum);
+        for (def obj in $outObjs) {
+            $offsets[] = len($buf);
+            $buf = appendStr($buf, $obj);
+        }
     }
 
     # cross-reference table

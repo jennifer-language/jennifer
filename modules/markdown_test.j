@@ -835,3 +835,41 @@ func testHeadingAndTableFillRender() {
     def out as bytes init toPdfWith("# H1\n\n## H2\n\n| A | B |\n|--|--|\n| 1 | 2 |\n", $o);
     testing.assertTrue(binary.startsWith($out, pdfMarker()));
 }
+
+# --- PDF metadata + bookmarks ---
+
+func pdfHas(b as bytes, s as string) {
+    return binary.contains($b, convert.bytesFromString($s, "utf-8"));
+}
+
+func testPdfMetadata() {
+    def o as PdfOptions init pdfDefaults();
+    $o.title = "My Report";
+    $o.author = "Ada";
+    def out as bytes init toPdfWith("# H\n\ntext\n", $o);
+    testing.assertTrue(pdfHas($out, "/Title (My Report)"));
+    testing.assertTrue(pdfHas($out, "/Author (Ada)"));
+}
+
+func testPdfBookmarks() {
+    def o as PdfOptions init pdfDefaults();
+    $o.bookmarkLevel = 2;
+    def out as bytes init toPdfWith("# Intro\n\ntext\n\n## Sub\n\ntext\n", $o);
+    testing.assertTrue(pdfHas($out, "/Type /Outlines"));
+    testing.assertTrue(pdfHas($out, "/PageMode /UseOutlines"));
+    testing.assertTrue(pdfHas($out, "/Title (Intro)"));
+    testing.assertTrue(pdfHas($out, "/Title (Sub)"));
+}
+
+func testPdfBookmarkLevelDefaultsToNone() {
+    def out as bytes init toPdf("# Intro\n\ntext\n");
+    testing.assertFalse(pdfHas($out, "/Outlines"));
+}
+
+func testPdfBookmarkLevelExcludesDeeper() {
+    def o as PdfOptions init pdfDefaults();
+    $o.bookmarkLevel = 1;
+    def out as bytes init toPdfWith("# Top\n\ntext\n\n## Deep\n\ntext\n", $o);
+    testing.assertTrue(pdfHas($out, "/Title (Top)"));
+    testing.assertFalse(pdfHas($out, "/Title (Deep)"));
+}

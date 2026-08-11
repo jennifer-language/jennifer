@@ -28,36 +28,11 @@ Rendering (Markdown in, HTML / terminal text / PDF out):
 | `markdown.toAnsi(md)` | `string` | Render to terminal text with `ansi` styling (self-suppressing). |
 | `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"ansi"`. |
 | `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
-| `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts). |
+| `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts, document metadata, bookmarks). |
 | `markdown.renderPdf(doc, opts)` | `bytes` | Lay a parsed (or transformed) tree out to a PDF.               |
 
 `toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, and `toPdf` over
 `renderPdf(parse(md), pdfDefaults())`, so build and parse share one document model.
-
-> **Note.** `toPdf` folds PDF rendering into `markdown` as a third output beside
-> `toHtml` / `toAnsi`, so it imports [`pdf`](pdf.md) (which pulls in `font`). That
-> makes every `markdown` import a bit heavier even for a `toHtml`-only program - a
-> deliberate trade for one unified rendering surface; see
-> [design-decisions.md](../technical/design-decisions.md). Text is best kept to the
-> Latin-1 range (standard-14 fonts). `PdfOptions` comes from `markdown.pdfDefaults()`
-> (US Letter, 54-pt margins, Helvetica / Courier); copy it and tweak the fields
-> (`pageWidth` / `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` /
-> `monoFont` / `headingFont` / `bodySize` / `tablePad`). A level-1 heading starts a
-> new page; table columns are sized to their content (a short column doesn't crowd a
-> long one), and `tablePad` tunes cell density.
->
-> **Backgrounds.** `tableHeaderFill` (a `Fill`) shades a table's header row, and
-> `headingStyles` (a `list of HeadingStyle`, index 0 = h1, 1 = h2, ...) shades each
-> heading level. Build a colour with `markdown.gray(level)` / `markdown.rgb(r, g, b)`
-> (or `markdown.noFill()` for none) and a heading style with
-> `markdown.headingStyle(fill)`:
->
-> ```jennifer
-> def o as markdown.PdfOptions init markdown.pdfDefaults();
-> $o.tableHeaderFill = markdown.gray(232);
-> $o.headingStyles = [markdown.headingStyle(markdown.gray(205)), markdown.headingStyle(markdown.gray(225))];
-> def out as bytes init markdown.toPdfWith($md, $o);
-> ```
 
 Reading (surface the parse tree, walked like [`xml`](xml.md) / [`html`](html.md)):
 
@@ -263,6 +238,48 @@ This is a subset, chosen to stay small and TinyGo-clean:
 For anything beyond this subset, render with an external tool. The module is
 sized for READMEs, help text, and comment / docblock bodies, not
 general-purpose CommonMark conformance.
+
+## Note
+
+> `toPdf` folds PDF rendering into `markdown` as a third output beside
+> `toHtml` / `toAnsi`, so it imports [`pdf`](pdf.md) (which pulls in `font`). That
+> makes every `markdown` import a bit heavier even for a `toHtml`-only program - a
+> deliberate trade for one unified rendering surface; see
+> [design-decisions.md](../technical/design-decisions.md). Text is best kept to the
+> Latin-1 range (standard-14 fonts). `PdfOptions` comes from `markdown.pdfDefaults()`
+> (US Letter, 54-pt margins, Helvetica / Courier); copy it and tweak the fields
+> (`pageWidth` / `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` /
+> `monoFont` / `headingFont` / `bodySize` / `tablePad`). A level-1 heading starts a
+> new page; table columns are sized to their content (a short column doesn't crowd a
+> long one), and `tablePad` tunes cell density.
+>
+> **Backgrounds.** `tableHeaderFill` (a `Fill`) shades a table's header row, and
+> `headingStyles` (a `list of HeadingStyle`, index 0 = h1, 1 = h2, ...) shades each
+> heading level. Build a colour with `markdown.gray(level)` / `markdown.rgb(r, g, b)`
+> (or `markdown.noFill()` for none) and a heading style with
+> `markdown.headingStyle(fill)`:
+>
+> ```jennifer
+> def o as markdown.PdfOptions init markdown.pdfDefaults();
+> $o.tableHeaderFill = markdown.gray(232);
+> $o.headingStyles = [markdown.headingStyle(markdown.gray(205)), markdown.headingStyle(markdown.gray(225))];
+> def out as bytes init markdown.toPdfWith($md, $o);
+> ```
+>
+> **Document metadata + bookmarks.** Set `title` / `author` / `subject` /
+> `keywords` on `PdfOptions` to write the PDF Info dictionary (shown in a viewer's
+> Document Properties). Set `bookmarkLevel` to add a navigation outline: every
+> heading up to that level becomes a bookmark, nested by heading level -
+> `bookmarkLevel = 2` bookmarks all `#` and `##` headings, `1` only `#`, `0` (the
+> default) none.
+>
+> ```jennifer
+> def o as markdown.PdfOptions init markdown.pdfDefaults();
+> $o.title = "My Report";
+> $o.author = "Ada Lovelace";
+> $o.bookmarkLevel = 2;
+> def out as bytes init markdown.toPdfWith($md, $o);
+> ```
 
 ## See also
 

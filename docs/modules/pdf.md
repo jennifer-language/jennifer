@@ -196,6 +196,22 @@ use time;
 $doc = pdf.info($doc, "CreationDate", pdf.pdfDate(time.utc()));   # D:20260714160000+00'00'
 ```
 
+## Bookmarks (outline)
+
+`pdf.bookmark(doc, page, y, title, level)` appends an outline entry - a bookmark
+in the viewer's sidebar that jumps to page `page` (0-based) at `y` (PDF points,
+origin bottom-left). Entries **nest by `level`** in the order added: a level-2
+entry becomes a child of the most recent level-1, and so on, so a heading
+hierarchy becomes a bookmark tree. When any bookmark is present, `render` emits
+the `/Outlines` object tree and opens the document with the bookmark panel
+showing (`/PageMode /UseOutlines`).
+
+```jennifer
+$doc = pdf.bookmark($doc, 0, 720, "Introduction", 1);
+$doc = pdf.bookmark($doc, 0, 600, "Background", 2);     # nests under Introduction
+$doc = pdf.bookmark($doc, 1, 720, "Results", 1);
+```
+
 ## Rendering
 
 `render(doc)` produces a complete PDF 1.7 file as `bytes`: a catalog, a page

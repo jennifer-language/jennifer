@@ -464,6 +464,9 @@ func generate(doPdf as bool) {
         # heading bars (darker for higher levels), and a light table-header band.
         def opts as markdown.PdfOptions init markdown.pdfDefaults();
         $opts.margin = 45;
+        $opts.title = "Jennifer Module API Reference";
+        $opts.author = "Jennifer";
+        $opts.bookmarkLevel = 2;
         $opts.tableHeaderFill = markdown.gray(232);
         $opts.headingStyles = [
             markdown.headingStyle(markdown.gray(205)),

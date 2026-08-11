@@ -505,3 +505,48 @@ func testRenderIsDeterministic() {
         $i = $i + 1;
     }
 }
+
+# --- outline / bookmarks ---
+use binary;
+
+func pdfContains(b as bytes, s as string) {
+    return binary.contains($b, convert.bytesFromString($s, "utf-8"));
+}
+
+func testBookmarkOutlineTree() {
+    def doc as Document init document();
+    $doc = addPage($doc, page(612, 792));
+    $doc = addPage($doc, page(612, 792));
+    $doc = bookmark($doc, 0, 700, "A", 1);
+    $doc = bookmark($doc, 0, 500, "B", 2);
+    $doc = bookmark($doc, 1, 700, "C", 1);
+    def out as bytes init render($doc);
+    testing.assertTrue(pdfContains($out, "/Type /Outlines"));
+    testing.assertTrue(pdfContains($out, "/PageMode /UseOutlines"));
+    testing.assertTrue(pdfContains($out, "/Title (A)"));
+    testing.assertTrue(pdfContains($out, "/Title (B)"));
+    testing.assertTrue(pdfContains($out, "/Title (C)"));
+    testing.assertTrue(pdfContains($out, "/Count 3"));
+}
+
+func testBookmarkEscapesParens() {
+    def doc as Document init addPage(document(), page(612, 792));
+    $doc = bookmark($doc, 0, 700, "a (b) c", 1);
+    def out as bytes init render($doc);
+    testing.assertTrue(pdfContains($out, "/Title (a \\(b\\) c)"));
+}
+
+func testNoOutlineWithoutBookmarks() {
+    def out as bytes init render(addPage(document(), page(612, 792)));
+    testing.assertFalse(pdfContains($out, "/Outlines"));
+}
+
+func testBookmarkRejectsBadLevel() {
+    def threw as bool init false;
+    try {
+        bookmark(document(), 0, 0, "x", 0);
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}

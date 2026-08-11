@@ -1871,6 +1871,11 @@ export func headingStyle(background as Fill) {
  * @field tableHeaderFill {Fill} background fill behind a table's header row (off for none)
  * @field headingStyles {list of HeadingStyle} per-level heading style; index 0 is h1,
  *   1 is h2, and so on (missing / off entries render with no background)
+ * @field title {string} PDF document Title metadata ("" = unset)
+ * @field author {string} PDF document Author metadata ("" = unset)
+ * @field subject {string} PDF document Subject metadata ("" = unset)
+ * @field keywords {string} PDF document Keywords metadata ("" = unset)
+ * @field bookmarkLevel {int} bookmark headings up to this level (0 = none; 2 = h1 + h2)
  */
 export def struct PdfOptions {
     pageWidth as int,
@@ -1884,7 +1889,12 @@ export def struct PdfOptions {
     bodySize as int,
     tablePad as int,
     tableHeaderFill as Fill,
-    headingStyles as list of HeadingStyle
+    headingStyles as list of HeadingStyle,
+    title as string,
+    author as string,
+    subject as string,
+    keywords as string,
+    bookmarkLevel as int
 };
 
 /**
@@ -1906,7 +1916,12 @@ export func pdfDefaults() {
         bodySize: 11,
         tablePad: 4,
         tableHeaderFill: noFill(),
-        headingStyles: []
+        headingStyles: [],
+        title: "",
+        author: "",
+        subject: "",
+        keywords: "",
+        bookmarkLevel: 0
     };
 }
 
@@ -1959,8 +1974,21 @@ func headingSize(level as int, opts as PdfOptions) {
 }
 
 func newLayout(opts as PdfOptions) {
+    def doc as pdf.Document init pdf.document();
+    if ($opts.title != "") {
+        $doc = pdf.info($doc, "Title", $opts.title);
+    }
+    if ($opts.author != "") {
+        $doc = pdf.info($doc, "Author", $opts.author);
+    }
+    if ($opts.subject != "") {
+        $doc = pdf.info($doc, "Subject", $opts.subject);
+    }
+    if ($opts.keywords != "") {
+        $doc = pdf.info($doc, "Keywords", $opts.keywords);
+    }
     return Layout{
-        doc: pdf.document(),
+        doc: $doc,
         page: pdf.page($opts.pageWidth, $opts.pageHeight),
         y: $opts.pageHeight - $opts.margin,
         x: $opts.margin,
@@ -2120,6 +2148,12 @@ func renderHeading(state as Layout, node as Node) {
     def lines as list of string init pdf.wrapText($state.opts.headingFont, $size, text($node), $state.width);
     def blockH as int init len($lines) * lineH($size);
     $state = ensureSpace($state, $blockH);
+    # Record a bookmark for this heading when its level is within the option's
+    # bookmark depth. The page it lands on is the one being built (its index once
+    # added is the current page count), and `y` is already in PDF coordinates.
+    if ($state.opts.bookmarkLevel > 0 and $lvl <= $state.opts.bookmarkLevel) {
+        $state.doc = pdf.bookmark($state.doc, len($state.doc.pages), $state.y, text($node), $lvl);
+    }
     # Optional shaded background bar behind the heading (drawn before the text; the
     # colour is reset to black so the text and later content stay black).
     def bg as Fill init headingBg($state.opts, $lvl);

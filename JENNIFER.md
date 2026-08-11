@@ -918,7 +918,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   works); `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)` lay the
   document out to a paginated PDF through `pdf` (headings, styled paragraphs,
   nested lists, aligned GFM tables, code, blockquotes, page breaks; a `PdfOptions`
-  from `pdfDefaults()` sets page size / fonts); author Markdown with `header` /
+  from `pdfDefaults()` sets page size / fonts, document metadata (`title` / `author`
+  / `subject` / `keywords`), and `bookmarkLevel` to add a PDF outline bookmarking
+  every heading up to that level - `2` = all `#` + `##`); author Markdown with `header` /
   `style` / `link` / `bullets` / `numbered` / `codeBlock` / `table`; align
   handcrafted table source with `tablePretty`.
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
@@ -1387,7 +1389,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   and `render(doc) -> bytes`. Document metadata via `info(doc, key, value)` (the
   PDF Info dictionary - `Title` / `Author` / `Subject` / `Keywords` / `Creator` /
   `Producer`, which defaults to "Jennifer pdf"; `pdfDate(t)` formats a PDF
-  date). `render` writes the PDF 1.7 object / xref structure by hand with
+  date). **Bookmarks** via `bookmark(doc, page, y, title, level)` - outline entries
+  that nest by `level` into a navigation tree; with any present, `render` emits the
+  `/Outlines` object tree and opens the viewer's bookmark panel. `render` writes the
+  PDF 1.7 object / xref structure by hand with
   FlateDecode-compressed content streams (via `compress`). Standard-14 base fonts
   (an unknown font throws `Error{kind: "pdf"}`); coordinates are PDF points
   (origin bottom-left, y up, ints), colour is 0-255 RGB. For non-Latin text,

@@ -11,7 +11,7 @@ Jennifer is an interpreted programming language.
 
 Jennifer is **batteries-included**, and not just in name:
 **[41 built-in libraries](docs/libraries/index.md) and
-[73 distributable modules](docs/modules/index.md) - over 1,800 functions,
+[72 distributable modules](docs/modules/index.md) - over 1,800 functions,
 constants, and types** cover what real programs actually need, so you build genuine tools,
 not toys. Talk to a
 real database with the [SQL](docs/libraries/sql.md) library
