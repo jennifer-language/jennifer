@@ -358,6 +358,14 @@ jobs:
           fi
           ls -la release/
 
+      - name: Set up Go
+        # Needed to run the module-API-PDF generator below (a .j program run
+        # through the interpreter via `go run`).
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Build documentation PDF
         # Build the mdBook site and render it to a single PDF (the same
         # jennifer-manual.pdf the docs site links), then drop it into the release
@@ -374,6 +382,17 @@ jobs:
           # ubuntu-latest ships Google Chrome, which scripts/gen-pdf.sh finds.
           sh scripts/gen-pdf.sh release/jennifer-manual.pdf
           ls -la release/jennifer-manual.pdf
+
+      - name: Build the module API reference PDF
+        # The single-file module API reference (docs/api/jennifer-module-api.pdf) is
+        # generated from each module's doc comments by scripts/gen-module-docs.j -
+        # the same generator docs.yml runs for the docs site. It is gitignored, so
+        # regenerate it here and copy it into the release directory to ship it as a
+        # release asset. `--pdf` renders the PDF into docs/api/.
+        run: |
+          go run ./cmd/jennifer run scripts/gen-module-docs.j --pdf
+          cp docs/api/jennifer-module-api.pdf release/
+          ls -la release/jennifer-module-api.pdf
 
       - name: Generate release-ready PKGBUILD-bin
         run: |
@@ -447,6 +466,7 @@ jobs:
               echo "- \`$(basename "$f")\`"
             done
             [ -e release/jennifer-manual.pdf ] && echo "- \`jennifer-manual.pdf\` - the full documentation as a single PDF."
+            [ -e release/jennifer-module-api.pdf ] && echo "- \`jennifer-module-api.pdf\` - the module API reference as a single PDF."
             echo
             echo "Artifacts named \`-UNSUPPORTED\` are best-effort macOS / Windows builds (standard \`jennifer\` only, no TinyGo, unsigned, no support); see \`docs/user-guide/installing.md\`. The \`*-setup.exe\` is the same unsupported Windows build wrapped in an installer (PATH, \`.j\` association, bundled modules). Any of these may be missing if that build failed - it does not block the Linux release."
           } > release_notes.md
@@ -484,3 +504,4 @@ jobs:
             release/coverage.html
             release/coverage-summary.txt
             release/jennifer-manual.pdf
+            release/jennifer-module-api.pdf
