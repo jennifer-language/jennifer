@@ -276,14 +276,35 @@ func canonical(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve %q: %s", truncPath(path), errReason(err))
 	}
+	return resolveReal(abs), nil
+}
+
+// resolveReal cleans an absolute path and resolves its symlinks so one file
+// reached via a symlinked directory and via its real path collapse to one
+// identity (the run-once / cycle / struct-identity key). EvalSymlinks needs the
+// path to exist; a path to a missing file falls back to the cleaned absolute
+// form, and the loader raises the positioned not-found error.
+func resolveReal(abs string) string {
 	cleaned := filepath.Clean(abs)
-	// Resolve symlinks so one file reached via a symlinked directory and via
-	// its real path collapse to one identity (the run-once / cycle /
-	// struct-identity key). EvalSymlinks needs the path to exist; a Local /
-	// Absolute import to a missing file falls back to the cleaned absolute
-	// path, and the loader raises the positioned not-found error.
 	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return resolved, nil
+		return resolved
 	}
-	return cleaned, nil
+	return cleaned
+}
+
+// RealPath returns the cleaned, absolute, symlink-resolved form of path - the
+// same canonicalization the module resolver applies to every import. The entry
+// program's base directory is derived from it, so a script reached through a
+// symlink (a shebang tool symlinked into a bin dir) resolves its local imports
+// and includes against the real file's directory rather than the symlink's.
+// It never fails: it falls back to the cleaned absolute path when the file does
+// not exist or symlink evaluation fails, and to the cleaned input when even the
+// working directory is unavailable, so a not-found entry still yields a sensible
+// base and the loader raises the positioned error.
+func RealPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return resolveReal(abs)
 }

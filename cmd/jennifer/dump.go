@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
+	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/preproc"
 )
@@ -58,7 +59,10 @@ func loadProgramSource(path string) (src, label, absPath, baseDir string, ok boo
 		fmt.Fprintf(os.Stderr, "jennifer: source file must have a .j extension or a `#!` shebang line, got %q\n", path)
 		return "", "", "", "", false
 	}
-	abs, _ := filepath.Abs(path)
+	// Resolve the entry path's symlinks so local imports / includes resolve
+	// against the real file's directory (the same canonicalization imported
+	// modules already get); the label stays the invocation path.
+	abs := module.RealPath(path)
 	return string(bytes), path, abs, filepath.Dir(abs), true
 }
 

@@ -70,6 +70,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "isFile", isFileFn)
 	in.RegisterNamespaced(LibraryName, "isDir", isDirFn)
 	in.RegisterNamespaced(LibraryName, "stat", statFn)
+	in.RegisterNamespaced(LibraryName, "realpath", realpathFn)
 	in.RegisterNamespaced(LibraryName, "chmod", chmodFn)
 	in.RegisterNamespaced(LibraryName, "chown", chownFn)
 
@@ -231,6 +232,34 @@ func appendBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // -------- Metadata --------
+
+// realpathFn resolves a path to its canonical form: made absolute (against the
+// working directory) and with every symlink in the chain followed. It is the
+// userland companion to the entry-script resolution the interpreter does for
+// module imports - a program locates data files beside its *real* file by
+// resolving `os.ARGS[0]`, whose raw value is the invocation path (a symlink when
+// the tool was installed by symlinking its entry point onto PATH). Unlike the
+// interpreter's internal base-dir resolution, which falls back on error, this
+// throws a catchable error when the path does not exist or cannot be resolved -
+// a data-file locator wants to know.
+func realpathFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("fs.realpath expects 1 argument (path), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.realpath", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	abs, absErr := filepath.Abs(path)
+	if absErr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %v", path, absErr)
+	}
+	resolved, evalErr := filepath.EvalSymlinks(abs)
+	if evalErr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %v", path, evalErr)
+	}
+	return interpreter.StringVal(resolved), nil
+}
 
 func existsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {

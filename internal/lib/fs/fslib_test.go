@@ -170,6 +170,37 @@ func TestExistsAndPredicates(t *testing.T) {
 }
 
 // TestStatShape - fs.stat returns an fs.Stat with the fields readable.
+func TestRealpathResolvesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	// Compare against Go's own resolution so the temp dir's own symlinks (e.g.
+	// /var -> /private/var) don't make this brittle.
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := runProg(t, fmt.Sprintf(`use io; use fs; io.printf("%%s", fs.realpath(%q));`, link))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != want {
+		t.Errorf("fs.realpath(symlink) = %q, want %q", out, want)
+	}
+}
+
+func TestRealpathThrowsOnMissing(t *testing.T) {
+	if _, err := runProg(t, `use fs; def x as string init fs.realpath("/no/such/path/definitely/missing/xyz");`); err == nil {
+		t.Error("fs.realpath on a nonexistent path should raise a catchable error")
+	}
+}
+
 func TestStatShape(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "info.txt")
 	if err := os.WriteFile(tmp, []byte("abc"), 0o644); err != nil {

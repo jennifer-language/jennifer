@@ -42,6 +42,19 @@ Boundary-friendly predicates plus a full `fs.stat`.
 | `fs.isFile(path)`   | `bool`    | True iff the path exists and is a regular file. False for missing.           |
 | `fs.isDir(path)`    | `bool`    | True iff the path exists and is a directory. False for missing.              |
 | `fs.stat(path)`     | `fs.Stat` | Missing path errors. Pair with `fs.exists` when tolerating absent files.     |
+| `fs.realpath(path)` | `string`  | Absolute, symlink-resolved canonical path. A missing / unresolvable path errors. |
+
+`fs.realpath` follows every symlink in the chain and makes the result absolute -
+the userland companion to the entry-script resolution the interpreter already
+does for module imports. A tool installed by symlinking its entry point onto
+`PATH` gets the *invocation* path in `os.ARGS[0]` (the symlink), so to load data
+files that sit beside its real source rather than beside the symlink, resolve it:
+
+```jennifer
+use os; use path; use fs;
+def self as string init fs.realpath(os.ARGS[0]);   # the real file, symlinks followed
+def assets as string init path.join(path.dir($self), "assets");
+```
 
 ### `fs.Stat`
 

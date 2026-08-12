@@ -380,7 +380,12 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 			return 2
 		}
 		label = path
-		abs, _ := filepath.Abs(path)
+		// Resolve the entry path's symlinks so its local imports / includes
+		// resolve against the real file's directory - the same canonicalization
+		// every imported module already gets. This is what makes a shebang tool
+		// symlinked into a bin dir (`/usr/local/bin/tool -> /opt/tool/tool.j`)
+		// find its siblings. `label` stays the invocation path for messages.
+		abs := module.RealPath(path)
 		absPath = abs
 		baseDir = filepath.Dir(abs)
 	}
