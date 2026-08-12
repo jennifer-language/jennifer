@@ -52,6 +52,7 @@ its argument, so you thread them (`$p = pdf.text($p, ...)`).
 | `pdf.textBlockUnicode(pg, x, y, width, lf, size, leading, str, align)` | `Page` | flow wrapped, aligned text into a column (embedded font) |
 | `pdf.line(pg, fromX, fromY, toX, toY)` | `Page` | draw a stroked line |
 | `pdf.rect(pg, x, y, width, height, filled)` | `Page` | draw a rectangle (fill or stroke) |
+| `pdf.link(pg, x, y, width, height, uri)` | `Page` | a clickable link annotation (`/Link` + `/URI`); an invisible rect over drawn text makes it a hyperlink |
 | `pdf.color(pg, red, green, blue)` | `Page` | set fill + stroke colour for what follows |
 | `pdf.addPage(doc, pg)` | `Document` | append a page |
 | `pdf.pageLabel()` | `PageLabel` | a blank running header / footer spec (Helvetica 9pt, 36pt margin) |
@@ -75,11 +76,17 @@ under a header / over a footer; `margin` is the inset from the page edge; `font`
 def f as pdf.PageLabel init pdf.pageLabel();
 $f.left = "sample.pdf";
 $f.center = "page %page%/%pages%";   # -> "page 13/108"
-$f.right = "(c) 2026 J Team";
+$f.right = "jennifer-lang.dev";
+$f.rightUri = "https://jennifer-lang.dev";  # makes the right slot a clickable backlink
 $f.border = true;
 $doc = pdf.setFooter($doc, $f);
 def out as bytes init pdf.render($doc);
 ```
+
+A slot becomes a clickable link when its `leftUri` / `centerUri` / `rightUri` is
+set - the running footer's backlink to a website, drawn on every page. (Under the
+hood that is a `pdf.link` annotation over the slot's measured rectangle; use
+`pdf.link` directly to make any drawn text a hyperlink.)
 
 `getTotalPages` / `getCurrentPageNr` report the page count while building (the
 total is known only once every page is added, which is why the placeholders resolve

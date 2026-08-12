@@ -685,3 +685,46 @@ func testSetFooterFlags() {
     $d = setHeader($d, $f);
     testing.assertTrue($d.headerOn);
 }
+
+# --- link annotations (/Annots /Link /URI) -------------------------
+
+func testLinkAnnotationRenders() {
+    def pg as Page init text(page(612, 792), 72, 700, "Helvetica", 12, "site");
+    $pg = link($pg, 72, 696, 40, 14, "https://example.com/x");
+    testing.assertEqual(len($pg.annots), 1);
+    def out as bytes init render(addPage(document(), $pg));
+    testing.assertTrue(pdfContains($out, "/Subtype /Link"));
+    testing.assertTrue(pdfContains($out, "/S /URI"));
+    testing.assertTrue(pdfContains($out, "/URI (https://example.com/x)"));
+    # rect is lower-left (x,y) to upper-right (x+w, y+h)
+    testing.assertTrue(pdfContains($out, "/Rect [72 696 112 710]"));
+}
+
+func testNoAnnotsWithoutLinks() {
+    def out as bytes init render(addPage(document(), text(page(612, 792), 72, 700, "Helvetica", 12, "x")));
+    testing.assertFalse(pdfContains($out, "/Annots"));
+}
+
+func testLinkUriIsEscaped() {
+    # PDF-special characters in a URI are escaped inside the string literal
+    def pg as Page init link(page(200, 200), 0, 0, 50, 12, "https://x/a(b)c");
+    def out as bytes init render(addPage(document(), $pg));
+    testing.assertTrue(pdfContains($out, "/URI (https://x/a\\(b\\)c)"));
+}
+
+func testFooterSlotBecomesLink() {
+    def d as Document init document();
+    $d = addPage($d, text(page(612, 792), 72, 700, "Helvetica", 12, "body"));
+    def f as PageLabel init pageLabel();
+    $f.right = "example.com";
+    $f.rightUri = "https://example.com";
+    def out as bytes init render(setFooter($d, $f));
+    testing.assertTrue(pdfContains($out, "/Subtype /Link"));
+    testing.assertTrue(pdfContains($out, "/URI (https://example.com)"));
+    # a slot without a URI adds no annotation
+    def d2 as Document init document();
+    $d2 = addPage($d2, text(page(612, 792), 72, 700, "Helvetica", 12, "body"));
+    def f2 as PageLabel init pageLabel();
+    $f2.right = "example.com";
+    testing.assertFalse(pdfContains(render(setFooter($d2, $f2)), "/Annots"));
+}

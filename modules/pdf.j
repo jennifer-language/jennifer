@@ -138,6 +138,9 @@ export def struct OutlineEntry {
  * @field red {int} text / rule colour red 0-255
  * @field green {int} text / rule colour green 0-255
  * @field blue {int} text / rule colour blue 0-255
+ * @field leftUri {string} if set, makes the left slot a link to this URI ("" = none)
+ * @field centerUri {string} if set, makes the centre slot a link to this URI ("" = none)
+ * @field rightUri {string} if set, makes the right slot a link to this URI ("" = none)
  */
 export def struct PageLabel {
     left as string,
@@ -149,7 +152,10 @@ export def struct PageLabel {
     border as bool,
     red as int,
     green as int,
-    blue as int
+    blue as int,
+    leftUri as string,
+    centerUri as string,
+    rightUri as string
 };
 
 /**
@@ -180,19 +186,40 @@ export def struct Document {
 };
 
 /**
- * A single page: its size (points) and its accumulated content-stream operators.
+ * A link annotation: a clickable rectangle on a page that opens a URI. The rect
+ * is given in PDF points by its lower-left corner and its size; the border is
+ * drawn invisibly, so only the underlying text (or graphic) shows.
+ * @field x {int} lower-left x of the clickable rectangle
+ * @field y {int} lower-left y of the clickable rectangle
+ * @field width {int} rectangle width in points
+ * @field height {int} rectangle height in points
+ * @field uri {string} the URI the link opens
+ */
+export def struct LinkAnnot {
+    x as int,
+    y as int,
+    width as int,
+    height as int,
+    uri as string
+};
+
+/**
+ * A single page: its size (points), its accumulated content-stream operators, and
+ * its link annotations.
  * @field width {int} the page width in points
  * @field height {int} the page height in points
  * @field content {string} the content-stream operators built so far
  * @field fonts {list of string} the distinct standard-14 fonts referenced on this page
  * @field glyphUses {list of GlyphUse} embedded-font glyphs drawn on this page
+ * @field annots {list of LinkAnnot} the page's link annotations
  */
 export def struct Page {
     width as int,
     height as int,
     content as string,
     fonts as list of string,
-    glyphUses as list of GlyphUse
+    glyphUses as list of GlyphUse,
+    annots as list of LinkAnnot
 };
 
 func fail(msg as string) {
@@ -290,7 +317,10 @@ export func pageLabel() {
         border: false,
         red: 0,
         green: 0,
-        blue: 0
+        blue: 0,
+        leftUri: "",
+        centerUri: "",
+        rightUri: ""
     };
 }
 
@@ -400,7 +430,26 @@ export func pdfDate(t as time.Time) {
  */
 export func page(width as int, height as int) {
     def noGlyphs as list of GlyphUse init [];
-    return Page{width: $width, height: $height, content: "", fonts: [], glyphUses: $noGlyphs};
+    def noAnnots as list of LinkAnnot init [];
+    return Page{width: $width, height: $height, content: "", fonts: [], glyphUses: $noGlyphs, annots: $noAnnots};
+}
+
+/**
+ * Add a link annotation: a clickable rectangle (lower-left `x`, `y`, plus `width`
+ * / `height`, in PDF points) that opens `uri`. The border is invisible, so place
+ * it over text drawn with `text` (measure the text width with `measureText`) to
+ * make that text a hyperlink - a footer backlink, a citation, a URL in prose.
+ * @param pg {Page} the page
+ * @param x {int} lower-left x of the clickable rectangle
+ * @param y {int} lower-left y of the clickable rectangle
+ * @param width {int} rectangle width in points
+ * @param height {int} rectangle height in points
+ * @param uri {string} the URI the link opens
+ * @return {Page} the page with the link recorded
+ */
+export func link(pg as Page, x as int, y as int, width as int, height as int, uri as string) {
+    $pg.annots = lists.push($pg.annots, LinkAnnot{x: $x, y: $y, width: $width, height: $height, uri: $uri});
+    return $pg;
 }
 
 # hexByte renders a byte as two uppercase hex digits.
@@ -1673,6 +1722,24 @@ func buildOutlineObjects(outline as list of OutlineEntry, rootNum as int, itemNu
     return $objs;
 }
 
+# annotsArray builds the ` /Annots [ ... ]` fragment for a page's link
+# annotations (inline annotation dictionaries), or "" when the page has none.
+# Each is a /Link with a URI action and an invisible border.
+func annotsArray(pg as Page) {
+    if (len($pg.annots) == 0) {
+        return "";
+    }
+    def parts as list of string init [];
+    for (def a in $pg.annots) {
+        $parts[] = "<< /Type /Annot /Subtype /Link /Rect [" +
+            convert.toString($a.x) + " " + convert.toString($a.y) + " " +
+            convert.toString($a.x + $a.width) + " " + convert.toString($a.y + $a.height) +
+            "] /Border [0 0 0] /A << /Type /Action /S /URI /URI (" +
+            escapeString($a.uri) + ") >> >>";
+    }
+    return " /Annots [" + strings.join($parts, " ") + "]";
+}
+
 # substPage fills the %page% / %pages% placeholders of a header / footer slot.
 # The tokens are percent-delimited (like `intl`), not brace-delimited, so they do
 # not collide with Jennifer's own `{expr}` string interpolation.
@@ -1684,6 +1751,16 @@ func substPage(s as string, pageNr as int, total as int) {
 # drawLabel draws one header (isHeader) or footer onto a page: the left / centre /
 # right slots (alignment measured with the font metrics), the colour, and an
 # optional separating rule. Placeholders are already resolved for (pageNr, total).
+# slotLink adds a link annotation over a header / footer slot drawn at (x, baseline)
+# with width `w`, so the slot's text becomes a clickable link to `uri`. The rect
+# covers the text's descenders and ascenders. A "" uri is a no-op.
+func slotLink(pg as Page, x as int, w as int, baseline as int, size as int, uri as string) {
+    if ($uri == "") {
+        return $pg;
+    }
+    return link($pg, $x, $baseline - $size // 4, $w, $size + $size // 4, $uri);
+}
+
 func drawLabel(pg as Page, label as PageLabel, pageNr as int, total as int, isHeader as bool) {
     def baseline as int init $label.margin;
     if ($isHeader) {
@@ -1697,14 +1774,22 @@ func drawLabel(pg as Page, label as PageLabel, pageNr as int, total as int, isHe
     $pg = color($pg, $label.red, $label.green, $label.blue);
     if (len($left) > 0) {
         $pg = text($pg, $label.margin, $baseline, $label.font, $label.size, $left);
+        if ($label.leftUri != "") {
+            def lw as int init math.round(measureText($label.font, $label.size, $left));
+            $pg = slotLink($pg, $label.margin, $lw, $baseline, $label.size, $label.leftUri);
+        }
     }
     if (len($center) > 0) {
         def cw as int init math.round(measureText($label.font, $label.size, $center));
-        $pg = text($pg, ($pg.width - $cw) // 2, $baseline, $label.font, $label.size, $center);
+        def cx as int init ($pg.width - $cw) // 2;
+        $pg = text($pg, $cx, $baseline, $label.font, $label.size, $center);
+        $pg = slotLink($pg, $cx, $cw, $baseline, $label.size, $label.centerUri);
     }
     if (len($right) > 0) {
         def rw as int init math.round(measureText($label.font, $label.size, $right));
-        $pg = text($pg, $pg.width - $label.margin - $rw, $baseline, $label.font, $label.size, $right);
+        def rx as int init $pg.width - $label.margin - $rw;
+        $pg = text($pg, $rx, $baseline, $label.font, $label.size, $right);
+        $pg = slotLink($pg, $rx, $rw, $baseline, $label.size, $label.rightUri);
     }
     if ($label.border) {
         # A rule below a header, above a footer.
@@ -1889,7 +1974,7 @@ export func render(doc as Document) {
             convert.toString($pageNum[$p]) + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
                 convert.toString($pg.width) + " " + convert.toString($pg.height) +
                 "] /Resources << " + $res + " >> /Contents " + convert.toString($contentNum[$p]) +
-                " 0 R >>\nendobj\n");
+                " 0 R" + annotsArray($pg) + " >>\nendobj\n");
 
         def comp as bytes init compress.pack(convert.bytesFromString($pg.content, "utf-8"), "zlib");
         $offsets[] = len($buf);
