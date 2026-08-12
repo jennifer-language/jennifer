@@ -366,21 +366,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build documentation PDF
-        # Build the mdBook site and render it to a single PDF (the same
-        # jennifer-manual.pdf the docs site links), then drop it into the release
-        # directory so it ships as a release asset. Keep MDBOOK_VERSION in sync
-        # with .github/workflows/docs.yml.
-        env:
-          MDBOOK_VERSION: '0.5.3'
+      - name: Check out Grimoire
+        # Grimoire (Jennifer source) renders the manual PDF and the docs site.
+        uses: actions/checkout@v7
+        with:
+          repository: jennifer-language/grimoire
+          path: .grimoire
+
+      - name: Build documentation PDF (Grimoire)
+        # Render the manual PDF with Grimoire (the same jennifer-manual.pdf the
+        # docs site links) and drop it into the release directory as an asset.
+        # Grimoire needs a >=0.25.0 interpreter; a plain `go build` (Version "dev")
+        # satisfies that floor, so it runs against this repo's modules regardless
+        # of the release version. Excludes the API reference (see docs.yml).
         run: |
           set -eu
-          mkdir -p "$HOME/.local/bin"
-          url="https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          curl -sSL "$url" | tar -xz -C "$HOME/.local/bin"
-          "$HOME/.local/bin/mdbook" build
-          # ubuntu-latest ships Google Chrome, which scripts/gen-pdf.sh finds.
-          sh scripts/gen-pdf.sh release/jennifer-manual.pdf
+          go build -o jennifer ./cmd/jennifer
+          ./jennifer run --sysmoddir=modules .grimoire/grimoire pdf --out "$RUNNER_TEMP/pdfout"
+          cp "$RUNNER_TEMP/pdfout/jennifer-manual.pdf" release/jennifer-manual.pdf
           ls -la release/jennifer-manual.pdf
 
       - name: Build the module API reference PDF

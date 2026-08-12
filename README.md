@@ -187,8 +187,8 @@ io.printf("%d\n", $x + $x);
 
 ## Documentation
 
-The full docs are served as an mdBook at
-[jennifer-lang.dev](https://jennifer-lang.dev/)
+The full docs are built with [Grimoire](https://grimoire.jennifer-lang.dev/)
+and served at [jennifer-lang.dev](https://jennifer-lang.dev/)
 (published from `main` on every push). The same content also reads
 fine inside the GitHub file tree:
 

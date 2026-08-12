@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: LGPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+#
+# Grimoire configuration for the Jennifer documentation site. The canonical
+# Markdown sources live in docs/; Grimoire builds the static site into
+# book-output/ (gitignored) and, with --pdf, the whole manual as one file.
+# The book ships via GitHub Pages on every push to main; see
+# .github/workflows/docs.yml.
+#
+# Grimoire is Jennifer source (https://github.com/jennifer-language/grimoire)
+# and requires Jennifer 0.25.0. It is therefore run with the interpreter and the
+# modules built from *this* repository rather than an installed release:
+#
+#   go build -o jennifer ./cmd/jennifer
+#   ./jennifer run --sysmoddir=modules <grimoire>/grimoire build --pdf
+#
+# Stable 0.24.0 will not run it.
+
+[book]
+title = "Jennifer Programming Language"
+description = "A small, batteries-included interpreted programming language, written in Go and shipping as one self-contained static binary (plus a constrained, embeddable TinyGo build)."
+authors = ["mplx <jennifer@mplx.dev>"]
+authorsLabel = "Made with ❤ by"
+language = "en"
+src = "docs"
+
+[build]
+out = "book-output"
+
+[html]
+theme = "obsidian"
+# First-time visitors follow their system's light / dark preference; the selector
+# still offers an explicit light or dark override.
+mode = "auto"
+tocDepth = 3
+sectionNumbers = true
+footer = 'Rendered with <a href="https://grimoire.jennifer-lang.dev/">Grimoire</a>.'
+repoUrl = "https://github.com/jennifer-language"
+repoLabel = "GitHub"
+# {path} is the chapter's path relative to `src`, so the template carries the
+# docs/ prefix itself.
+editUrl = "https://github.com/jennifer-language/jennifer/edit/main/docs/{path}"
+favicon = "../theme/favicon.svg"
+# An SVG is inlined into the mark beside the title, so it follows the colour
+# mode. Path is relative to `src`.
+logo = "../site/logo/jennifer.svg"
+
+[highlight]
+# Jennifer code blocks are coloured while the site is built - no CDN, no
+# JavaScript, nothing fetched.
+enabled = true
+
+[highlightjs]
+# Additionally load highlight.js from a CDN for the languages the built-in
+# highlighter does not know (go, bash, json, ...). This is the only setting that
+# makes the built site depend on a third party.
+enabled = false
+cdn = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1"
+style = "github"
+styleDark = "github-dark"
+languages = ["bash", "go", "json", "yaml", "xml", "ini", "nginx"]
+
+[search]
+enabled = true
+bodyChars = 1200
+
+[pdf]
+enabled = false
+output = "jennifer-manual.pdf"
+paper = "a4"
+bookmarkLevel = 3
+pageNumbers = true
+footerLeft = "Jennifer {version} Manual {commit}"
+titlePage = true
+# Kept on the site, kept out of the printed manual. Both are generated rather
+# than written - the module API reference from each module's doc comments, the
+# coverage report from `go test -cover` and `jennifer test --coverage` - and both
+# are large, tabular surfaces that read poorly in the prose manual's stylesheet.
+# Paths are relative to `src`; the trailing slash takes the whole directory.
+exclude = ["api/", "technical/coverage.md"]
