@@ -127,14 +127,38 @@ def const AFM_TIMES_BOLDITALIC as list of int init [
     500, 556, 500, 500, 500, 500, 500, 570, 500, 556, 556, 556, 556, 444, 500, 444
 ];
 
-# afmWidths returns the WinAnsi-code -> 1000-em advance table for a standard-14
-# text font, or an empty list for Courier (monospaced) / symbol fonts.
-func afmWidths(font as string) {
-    if ($font == "Helvetica" or $font == "Helvetica-Oblique") { return AFM_HELVETICA; }
-    if ($font == "Helvetica-Bold" or $font == "Helvetica-BoldOblique") { return AFM_HELVETICA_BOLD; }
-    if ($font == "Times-Roman") { return AFM_TIMES; }
-    if ($font == "Times-Bold") { return AFM_TIMES_BOLD; }
-    if ($font == "Times-Italic") { return AFM_TIMES_ITALIC; }
-    if ($font == "Times-BoldItalic") { return AFM_TIMES_BOLDITALIC; }
-    return [];
+# afmSum totals the 1000-em advances of the WinAnsi bytes `raw` in a standard-14
+# proportional font, indexing the font's advance-table const directly - no
+# per-call copy of the 256-entry table (the hot path of every text measurement).
+# Returns -1 when the font has no proportional metrics (Courier is monospaced;
+# Symbol / ZapfDingbats have none), which the caller handles.
+func afmSum(font as string, raw as bytes) {
+    def s as int init 0;
+    def i as int init 0;
+    def m as int init len($raw);
+    if ($font == "Helvetica" or $font == "Helvetica-Oblique") {
+        while ($i < $m) { $s = $s + AFM_HELVETICA[$raw[$i]]; $i = $i + 1; }
+        return $s;
+    }
+    if ($font == "Helvetica-Bold" or $font == "Helvetica-BoldOblique") {
+        while ($i < $m) { $s = $s + AFM_HELVETICA_BOLD[$raw[$i]]; $i = $i + 1; }
+        return $s;
+    }
+    if ($font == "Times-Roman") {
+        while ($i < $m) { $s = $s + AFM_TIMES[$raw[$i]]; $i = $i + 1; }
+        return $s;
+    }
+    if ($font == "Times-Bold") {
+        while ($i < $m) { $s = $s + AFM_TIMES_BOLD[$raw[$i]]; $i = $i + 1; }
+        return $s;
+    }
+    if ($font == "Times-Italic") {
+        while ($i < $m) { $s = $s + AFM_TIMES_ITALIC[$raw[$i]]; $i = $i + 1; }
+        return $s;
+    }
+    if ($font == "Times-BoldItalic") {
+        while ($i < $m) { $s = $s + AFM_TIMES_BOLDITALIC[$raw[$i]]; $i = $i + 1; }
+        return $s;
+    }
+    return -1;
 }

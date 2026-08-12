@@ -243,21 +243,21 @@ func isFlankSpace(c as string) {
 # made a run of unmatched markers O(N^2)).
 func nextIndexArray(cs as list of string, target as string) {
     def n as int init len($cs);
-    def nxt as list of int init [];
-    def k as int init 0;
-    while ($k <= $n) {
-        $nxt[] = $n;
-        $k = $k + 1;
-    }
+    # One backward pass tracking the nearest target index, appending into a
+    # reversed buffer that is reversed once (a Go-side op) and capped with
+    # nxt[n] = n - so the array is built with no separate size-n init loop.
+    def rev as list of int init [];
+    def last as int init $n;
     def j as int init $n - 1;
     while ($j >= 0) {
         if ($cs[$j] == $target) {
-            $nxt[$j] = $j;
-        } else {
-            $nxt[$j] = $nxt[$j + 1];
+            $last = $j;
         }
+        $rev[] = $last;
         $j = $j - 1;
     }
+    def nxt as list of int init lists.reverse($rev);
+    $nxt[] = $n;
     return $nxt;
 }
 
@@ -265,21 +265,20 @@ func nextIndexArray(cs as list of string, target as string) {
 # index of a `target target` pair at or after j, or len(cs) if none.
 func nextPairArray(cs as list of string, target as string) {
     def n as int init len($cs);
-    def nxt as list of int init [];
-    def k as int init 0;
-    while ($k <= $n) {
-        $nxt[] = $n;
-        $k = $k + 1;
-    }
-    def j as int init $n - 2;
+    def rev as list of int init [];
+    def last as int init $n;
+    def j as int init $n - 1;
     while ($j >= 0) {
-        if ($cs[$j] == $target and $cs[$j + 1] == $target) {
-            $nxt[$j] = $j;
-        } else {
-            $nxt[$j] = $nxt[$j + 1];
+        # A pair starts at j only when j+1 is in range; position n-1 (guard fails)
+        # carries the running `last`, matching the old init-to-n behaviour.
+        if ($j + 1 < $n and $cs[$j] == $target and $cs[$j + 1] == $target) {
+            $last = $j;
         }
+        $rev[] = $last;
         $j = $j - 1;
     }
+    def nxt as list of int init lists.reverse($rev);
+    $nxt[] = $n;
     return $nxt;
 }
 
@@ -344,15 +343,44 @@ func isAutolinkEmail(inner as string) {
 
 func parseInline(s as string) {
     def spans as list of Span init [];
+    # Fast path: a run with no inline-markup character at all is a single text
+    # span - skip strings.chars, the marker precompute, and the whole scan. This
+    # is the common case (plain paragraphs, headings, table cells), and the five
+    # `contains` checks short-circuit at the first marker for a marked-up run.
+    if (len($s) > 0 and not strings.contains($s, "`") and not strings.contains($s, "*")
+        and not strings.contains($s, "[") and not strings.contains($s, "!")
+        and not strings.contains($s, "<")) {
+        $spans[] = span(SpanKind.Text, $s, "");
+        return $spans;
+    }
     def cs as list of string init strings.chars($s);
     def n as int init len($cs);
     # Precompute, in one pass each, where every marker next occurs, so a run of
     # unmatched `[`, `*`, or `` ` `` costs O(N) total rather than O(N) per
-    # position (the old forward re-scan was O(N^2) on adversarial input).
-    def nBacktick as list of int init nextIndexArray($cs, "`");
-    def nStar as list of int init nextIndexArray($cs, "*");
-    def nDblStar as list of int init nextPairArray($cs, "*");
-    def nRparen as list of int init nextIndexArray($cs, ")");
+    # position (the old forward re-scan was O(N^2) on adversarial input). Build a
+    # marker's array only when that marker is present (a cheap Go `contains`
+    # instead of an O(n) Jennifer pass) - most inline strings (a plain heading,
+    # a table cell, a bare paragraph line) have few or none, so this skips the
+    # bulk of the precompute. A backtick / star array is read only while sitting
+    # on that character, so its presence flag is implied; `)` is read from the
+    # link / image branches, which are gated on `hasParen` below.
+    def hasBt as bool init strings.contains($s, "`");
+    def hasStar as bool init strings.contains($s, "*");
+    def hasParen as bool init strings.contains($s, ")");
+    def nBacktick as list of int init [];
+    def nStar as list of int init [];
+    def nDblStar as list of int init [];
+    def nRparen as list of int init [];
+    if ($hasBt) {
+        $nBacktick = nextIndexArray($cs, "`");
+    }
+    if ($hasStar) {
+        $nStar = nextIndexArray($cs, "*");
+        $nDblStar = nextPairArray($cs, "*");
+    }
+    if ($hasParen) {
+        $nRparen = nextIndexArray($cs, ")");
+    }
     def i as int init 0;
     # The pending plain-text run is s[bufStart:i]; slicing it with substring
     # (Go-side, linear) instead of accumulating rune-by-rune keeps a long text
@@ -419,7 +447,7 @@ func parseInline(s as string) {
         def imgEnd as int init -1;
         def irb as int init -1;
         def irp as int init -1;
-        if ($c == "!" and $i + 1 < $n and $cs[$i + 1] == "[") {
+        if ($c == "!" and $hasParen and $i + 1 < $n and $cs[$i + 1] == "[") {
             def kb as int init matchLinkLabel($cs, $i + 1, $n);
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
@@ -448,7 +476,7 @@ func parseInline(s as string) {
         def linkEnd as int init -1;
         def rb as int init -1;
         def rp as int init -1;
-        if ($c == "[") {
+        if ($c == "[" and $hasParen) {
             def kb as int init matchLinkLabel($cs, $i, $n);
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
@@ -2311,19 +2339,27 @@ func mdSanitize(opts as PdfOptions, s as string) {
 # on a line share a point size, so widths add up without per-word size bookkeeping.
 def struct IWord {
     text as string,
-    font as string
+    font as string,
+    width as float
 };
 
-# The running layout: the accumulated Document, the Page being filled, the pen `y`
-# (the top of the next line, decreasing down the page), and the current left `x` /
-# content `width` (widened / narrowed by lists and quotes).
+# The running layout: the page being filled, the pen `y` (the top of the next
+# line, decreasing down the page), the current left `x` / content `width`
+# (widened / narrowed by lists and quotes). The finished document is NOT
+# threaded through here - `done` collects the pages a call finalised (flushed)
+# so the caller can fold them into the document, instead of deep-copying the
+# whole growing `pdf.Document` at every render-function boundary. `pageNo` is
+# the count of finished pages (the 0-based index of the page being built, what
+# a bookmark points at); `bks` collects any bookmarks the subtree produced.
 def struct Layout {
-    doc as pdf.Document,
     page as pdf.Page,
     y as int,
     x as int,
     width as int,
-    opts as PdfOptions
+    opts as PdfOptions,
+    pageNo as int,
+    done as list of pdf.Page,
+    bks as list of pdf.OutlineEntry
 };
 
 # roundPt rounds a measured (float) width to whole points for integer placement.
@@ -2353,7 +2389,9 @@ func headingSize(level as int, opts as PdfOptions) {
     }
 }
 
-func newLayout(opts as PdfOptions) {
+# buildDoc creates the document carrying the option's metadata (each unset "" is
+# left out), for renderPdfDoc to fold the laid-out pages into.
+func buildDoc(opts as PdfOptions) {
     def doc as pdf.Document init pdf.document();
     if ($opts.title != "") {
         $doc = pdf.info($doc, "Title", $opts.title);
@@ -2373,23 +2411,30 @@ func newLayout(opts as PdfOptions) {
     if ($opts.producer != "") {
         $doc = pdf.info($doc, "Producer", $opts.producer);
     }
+    return $doc;
+}
+
+func newLayout(opts as PdfOptions) {
     return Layout{
-        doc: $doc,
         page: pdf.page($opts.pageWidth, $opts.pageHeight),
         y: $opts.pageHeight - $opts.margin,
         x: $opts.margin,
         width: $opts.pageWidth - 2 * $opts.margin,
-        opts: $opts
+        opts: $opts,
+        pageNo: 0,
+        done: [],
+        bks: []
     };
 }
 
-# flushPage finalises the current page into the document and starts a fresh one,
-# preserving the current indent (x / width) so a block split across a page break
-# keeps its column.
+# flushPage finalises the current page (handing it up in `done` for the caller
+# to fold into the document) and starts a fresh one, preserving the current
+# indent (x / width) so a block split across a page break keeps its column.
 func flushPage(state as Layout) {
-    $state.doc = pdf.addPage($state.doc, $state.page);
+    $state.done = lists.push($state.done, $state.page);
     $state.page = pdf.page($state.opts.pageWidth, $state.opts.pageHeight);
     $state.y = $state.opts.pageHeight - $state.opts.margin;
+    $state.pageNo = $state.pageNo + 1;
     return $state;
 }
 
@@ -2438,7 +2483,7 @@ func inlineWords(nodes as list of Node, opts as PdfOptions) {
         def t as string init mdSanitize($opts, inlineText($n));
         for (def w in strings.split($t, " ")) {
             if (len($w) > 0) {
-                $out[] = IWord{text: $w, font: $f};
+                $out[] = IWord{text: $w, font: $f, width: 0.0};
             }
         }
     }
@@ -2453,6 +2498,9 @@ func packLines(words as list of IWord, size as int, maxWidth as int, opts as Pdf
     def sp as float init pdf.measureText($opts.bodyFont, $size, " ");
     for (def w in $words) {
         def ww as float init pdf.measureText($w.font, $size, $w.text);
+        # Cache the measured width on the word so placeInlineLines does not
+        # re-measure it (every word was measured twice - wrap, then place).
+        $w.width = $ww;
         def add as float init $ww;
         if (len($cur) > 0) {
             $add = $ww + $sp;
@@ -2489,7 +2537,7 @@ func placeInlineLines(state as Layout, lines as list of list of IWord, size as i
             }
             $first = false;
             $state.page = pdf.text($state.page, $cx, $baseline, $w.font, $size, $w.text);
-            $cx = $cx + roundPt(pdf.measureText($w.font, $size, $w.text));
+            $cx = $cx + roundPt($w.width);
         }
         $state.y = $state.y - $lh;
     }
@@ -2532,10 +2580,10 @@ func renderHeading(state as Layout, node as Node) {
     def blockH as int init len($lines) * lineH($size);
     $state = ensureSpace($state, $blockH);
     # Record a bookmark for this heading when its level is within the option's
-    # bookmark depth. The page it lands on is the one being built (its index once
-    # added is the current page count), and `y` is already in PDF coordinates.
+    # bookmark depth. The page it lands on is the one being built (`pageNo`, its
+    # 0-based index once added), and `y` is already in PDF coordinates.
     if ($state.opts.bookmarkLevel > 0 and $lvl <= $state.opts.bookmarkLevel) {
-        $state.doc = pdf.bookmark($state.doc, len($state.doc.pages), $state.y, $htext, $lvl);
+        $state.bks = lists.push($state.bks, pdf.OutlineEntry{title: $htext, page: $state.pageNo, y: $state.y, level: $lvl});
     }
     # Optional shaded background bar behind the heading (drawn before the text; the
     # colour is reset to black so the text and later content stay black).
@@ -2843,17 +2891,19 @@ func renderQuote(state as Layout, node as Node, depth as int) {
     # quote falls back to no background (a single rectangle could not frame it).
     if ($fill.on or $rule.on) {
         def probe as Layout init Layout{
-            doc: pdf.document(),
             page: pdf.page($state.opts.pageWidth, $state.opts.pageHeight),
             y: $state.y,
             x: $savedX + $indent,
             width: $savedW - $indent,
-            opts: $state.opts
+            opts: $state.opts,
+            pageNo: 0,
+            done: [],
+            bks: []
         };
         for (def child in children($node)) {
             $probe = renderBlock($probe, $child, $depth + 1);
         }
-        if (len($probe.doc.pages) == 0) {
+        if (len($probe.done) == 0) {
             def top as int init $state.y + 2;
             def blockH as int init ($state.y - $probe.y) + 4;
             if ($fill.on) {
@@ -2925,12 +2975,25 @@ func renderBlock(state as Layout, node as Node, depth as int) {
  * @return {pdf.Document} the laid-out document, not yet serialised
  */
 export func renderPdfDoc(doc as Node, opts as PdfOptions) {
+    def outdoc as pdf.Document init buildDoc($opts);
     def state as Layout init newLayout($opts);
     for (def block in children($doc)) {
         $state = renderBlock($state, $block, 0);
+        # Fold the pages this block finalised (and any bookmarks it produced)
+        # into the document. `done` / `bks` never grow large here - they are
+        # drained after every top-level block, so the document itself is never
+        # carried (and thus never deep-copied) through the render tree.
+        for (def p in $state.done) {
+            $outdoc = pdf.addPage($outdoc, $p);
+        }
+        $state.done = [];
+        for (def b in $state.bks) {
+            $outdoc = pdf.bookmark($outdoc, $b.page, $b.y, $b.title, $b.level);
+        }
+        $state.bks = [];
     }
-    $state.doc = pdf.addPage($state.doc, $state.page);
-    return $state.doc;
+    $outdoc = pdf.addPage($outdoc, $state.page);
+    return $outdoc;
 }
 
 /**

@@ -44,6 +44,7 @@ use binary;
 use math;
 use time;
 use encoding;
+use regex;
 import "./font.j" as font;
 include "./pdf_afm.inc.j";
 
@@ -253,24 +254,17 @@ func checkName(name as string, what as string) {
     }
 }
 
-# standardFonts lists the 14 base fonts every PDF viewer provides.
-func standardFonts() {
-    return [
-        "Helvetica",
-        "Helvetica-Bold",
-        "Helvetica-Oblique",
-        "Helvetica-BoldOblique",
-        "Times-Roman",
-        "Times-Bold",
-        "Times-Italic",
-        "Times-BoldItalic",
-        "Courier",
-        "Courier-Bold",
-        "Courier-Oblique",
-        "Courier-BoldOblique",
-        "Symbol",
-        "ZapfDingbats"
-    ];
+# isStandardFont reports whether a name is one of the 14 base fonts every PDF
+# viewer provides. A plain comparison chain instead of building a 14-element
+# list per call - this is the hot path of every text draw and measurement.
+func isStandardFont(font as string) {
+    return $font == "Helvetica" or $font == "Helvetica-Oblique" or
+        $font == "Helvetica-Bold" or $font == "Helvetica-BoldOblique" or
+        $font == "Times-Roman" or $font == "Times-Bold" or
+        $font == "Times-Italic" or $font == "Times-BoldItalic" or
+        $font == "Courier" or $font == "Courier-Bold" or
+        $font == "Courier-Oblique" or $font == "Courier-BoldOblique" or
+        $font == "Symbol" or $font == "ZapfDingbats";
 }
 
 # --- builders (exported) ----------------------------------------------------
@@ -524,6 +518,13 @@ func octalTriple(b as int) {
 # octal `\ddd` runs (a raw UTF-8 emission would render as mojibake). A character
 # outside WinAnsi throws (from encoding.encode).
 func escapeString(s as string) {
+    # Fast path: pure printable ASCII that contains none of the escaped
+    # characters (the overwhelmingly common case) needs no escaping, so return
+    # it as-is and skip the per-byte loop and the encode.
+    if (regex.matches("^[ -~]*$", $s) and not strings.contains($s, "\\") and
+        not strings.contains($s, "(") and not strings.contains($s, ")")) {
+        return $s;
+    }
     def raw as bytes init encoding.encode($s, "windows-1252");
     def out as list of string init [];
     def i as int init 0;
@@ -561,7 +562,7 @@ func escapeString(s as string) {
  * @throws {Error} kind "pdf" if the font is not a standard-14 name
  */
 export func text(pg as Page, x as int, y as int, font as string, size as int, str as string) {
-    if (not lists.contains(standardFonts(), $font)) {
+    if (not isStandardFont($font)) {
         fail("unknown font '" + $font + "' (use a standard-14 base font)");
     }
     if (not lists.contains($pg.fonts, $font)) {
@@ -1053,22 +1054,19 @@ export func addPage(doc as Document, pg as Page) {
 # WinAnsi-encoded string. Courier is monospaced (600 per byte); Symbol /
 # ZapfDingbats have no layout metrics and throw.
 func measureEm(font as string, str as string) {
-    if (not lists.contains(standardFonts(), $font)) {
+    if (not isStandardFont($font)) {
         fail("measureText: unknown font '" + $font + "' (use a standard-14 base font)");
     }
     def raw as bytes init encoding.encode($str, "windows-1252");
-    def table as list of int init afmWidths($font);
-    if (len($table) == 0) {
-        if (strings.startsWith($font, "Courier")) {
-            return len($raw) * 600;
-        }
-        fail("measureText: font '" + $font + "' has no layout metrics (Symbol / ZapfDingbats)");
+    if (strings.startsWith($font, "Courier")) {
+        return len($raw) * 600;
     }
-    def total as int init 0;
-    def i as int init 0;
-    while ($i < len($raw)) {
-        $total = $total + $table[$raw[$i]];
-        $i = $i + 1;
+    # afmSum indexes the font's advance-table const directly, so no 256-entry
+    # table is copied per measurement (the hot path). A negative result means the
+    # font has no proportional metrics (Symbol / ZapfDingbats).
+    def total as int init afmSum($font, $raw);
+    if ($total < 0) {
+        fail("measureText: font '" + $font + "' has no layout metrics (Symbol / ZapfDingbats)");
     }
     return $total;
 }

@@ -876,9 +876,9 @@ func testImageInlineRendersAlt() {
 func testPackLinesRespectsWidth() {
     def o as PdfOptions init pdfDefaults();
     def words as list of IWord init [
-        IWord{text: "aaaa", font: "Helvetica"},
-        IWord{text: "bbbb", font: "Helvetica"},
-        IWord{text: "cccc", font: "Helvetica"}
+        IWord{text: "aaaa", font: "Helvetica", width: 0.0},
+        IWord{text: "bbbb", font: "Helvetica", width: 0.0},
+        IWord{text: "cccc", font: "Helvetica", width: 0.0}
     ];
     # A wide column fits all three on one line.
     testing.assertEqual(len(packLines($words, 11, 500, $o)), 1);
