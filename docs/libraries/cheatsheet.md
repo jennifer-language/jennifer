@@ -81,11 +81,13 @@ flat lookup view, not authoritative.
 | [`fs`](fs.md)`.close($f)`                             | Close an `fs.File` handle; removes it from the registry.                                                                            |
 | [`fs`](fs.md)`.eof($f)`                               | True iff the next read on `$f` would error or return partial. Sticky.                                                               |
 | [`fs`](fs.md)`.exists(path)`                          | True if `path` resolves; permission errors still surface.                                                                           |
+| [`fs`](fs.md)`.hasEvent($w)`                          | Whether an `fs.Watcher` has a queued change event (non-blocking peek).                                                              |
 | [`fs`](fs.md)`.isDir(path)`                           | True iff `path` exists and is a directory.                                                                                          |
 | [`fs`](fs.md)`.isFile(path)`                          | True iff `path` exists and is a regular file.                                                                                       |
 | [`fs`](fs.md)`.list(path)`                            | Sorted entry names in `path`. Non-recursive; returns `list of string`.                                                              |
 | [`fs`](fs.md)`.mkdir(path)`                           | Create a single directory; errors if any parent is missing.                                                                         |
 | [`fs`](fs.md)`.mkdirAll(path)`                        | Create `path` and every missing parent (like `mkdir -p`).                                                                           |
+| [`fs`](fs.md)`.next($w)`                              | Block for the next `fs.Event` (`path`, `kind`, `isDir`) from an `fs.Watcher`; errors when the watcher is closed.                    |
 | [`fs`](fs.md)`.open(path, mode)`                      | Open `path` and return an `fs.File`. `mode`: `"read"`, `"write"`, `"append"`.                                                       |
 | [`fs`](fs.md)`.readBytes(path)` / `.readBytes($f, n)` | Whole-file read (1 arg) or up to `n` bytes from handle (2 args). Partial + sticky-EOF on short handle reads.                        |
 | [`fs`](fs.md)`.readChars($f, n)`                      | Up to `n` runes from handle, UTF-8 decoded. Partial + sticky-EOF on short reads.                                                    |
@@ -98,6 +100,7 @@ flat lookup view, not authoritative.
 | [`fs`](fs.md)`.stat(path)`                            | Returns `fs.Stat` (`path`, `size`, `isDir`, `mtimeNanos`, `mode`). Missing path errors.                                             |
 | [`fs`](fs.md)`.sync($f)`                              | Flush a write/append handle's data to the storage device (fsync); handle stays open. The "safe to remove the stick" step.          |
 | [`fs`](fs.md)`.walk(path)`                            | Depth-first, sorted, includes `path`. Returns `list of fs.Stat`. Skips symlinks.                                                    |
+| [`fs`](fs.md)`.watch(path[, intervalMs])`             | Watch a file / dir (recursive) for changes -> `fs.Watcher`; pull with `fs.next` / `fs.hasEvent`, stop with `fs.close`. mtime polling. |
 | [`fs`](fs.md)`.writeBytes(path, content)` / `.writeBytes($f, b)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                      |
 | [`fs`](fs.md)`.writeString(path, content)` / `.writeString($f, s)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                    |
 | [`fs`](fs.md)`.makeTempFile([dir[, prefix[, suffix]]])` | Create a unique empty file (atomic, `0600`); returns its path. `dir=""` = system temp; parent must exist. |

@@ -168,7 +168,18 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 
 func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("fs.close expects 1 argument (fs.File), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("fs.close expects 1 argument (fs.File or fs.Watcher), got %d", len(args))
+	}
+	// Polymorphic: fs.close stops a watcher too (dispatch on the struct).
+	if isWatcher(args[0]) {
+		id, err := extractWatcherID("fs.close", args[0])
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if cerr := closeWatcher(id); cerr != nil {
+			return interpreter.Null(), cerr
+		}
+		return interpreter.Null(), nil
 	}
 	id, err := extractFileID("fs.close", args[0])
 	if err != nil {

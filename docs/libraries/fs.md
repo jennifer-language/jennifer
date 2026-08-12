@@ -293,6 +293,60 @@ Handles are the second "handles wrap shared state" carve-out
 in the language, sitting alongside `task of T`. Every other
 type keeps whole-value semantics.
 
+## Watching for changes
+
+`fs.watch` starts a background watch over a file or directory and returns an
+`fs.Watcher` handle; a pull loop drains change events - the same shape as an
+`httpd` server, so a `spawn`ed loop reacts to changes while the program does
+other work (a dev server rebuilding on save, a live reloader).
+
+| Call                     | Returns      | Notes                                                                        |
+| ------------------------ | ------------ | ---------------------------------------------------------------------------- |
+| `fs.watch(path)`         | `fs.Watcher` | Watch a file, or a directory recursively. Default poll ~300 ms.              |
+| `fs.watch(path, intervalMs)` | `fs.Watcher` | Same, with an explicit poll interval (>= 20 ms).                         |
+| `fs.next($w)`            | `fs.Event`   | Block until the next change; errors if the watcher is closed (which is how a blocked loop is released). |
+| `fs.hasEvent($w)`        | `bool`       | Whether an event is queued (non-blocking peek).                              |
+| `fs.close($w)`           | `null`       | Stop the watcher. `fs.close` is polymorphic over `fs.File` and `fs.Watcher`. |
+
+An `fs.Event` is `{ path as string, kind as string, isDir as bool }`, where
+`kind` is `"created"`, `"modified"`, or `"deleted"`.
+
+```jennifer
+use fs; use io;
+def w as fs.Watcher init fs.watch("content", 200);
+def worker as task of null init spawn {
+    try {
+        while (true) {
+            def e as fs.Event init fs.next($w);   # blocks until something changes
+            if (not $e.isDir) {                    # ignore bare directory-mtime bumps
+                io.printf("rebuild: {$e.kind} {$e.path}\n");
+            }
+        }
+    } catch (stop) {
+        # fs.next errors when fs.close releases the watcher - a clean shutdown.
+    }
+};
+# ... serve here; `fs.close($w)` ends the loop, then `task.wait($worker)`.
+```
+
+**How it works, and the trade-offs.** The watch is **mtime polling** (a
+background goroutine re-scans the tree each interval and diffs a snapshot), not
+inotify - so it is pure-stdlib, dependency-free, and works on both binaries,
+matching `jennifer serve --watch`. Two consequences worth knowing:
+
+- **Bursts coalesce.** An editor's save (write / rename / chmod) within one poll
+  interval collapses into one event per path - a save is one `"modified"`, not
+  three. Very short-lived transients (a file created and deleted between two
+  polls) may not be reported; the watch reflects the *net* change.
+- **Directory mtimes fire.** Adding or removing a file bumps its directory's
+  mtime, so you get a `"modified"` event for the directory alongside the child's
+  `"created"` / `"deleted"`. Filter with `$e.isDir` when you only care about
+  files.
+
+For a huge tree (100k+ files) polling gets expensive; that is not the target
+(dev tooling watches hundreds to low-thousands of files), and an inotify-backed
+variant could be added later behind a build tag if it is ever needed.
+
 ## Concurrency composition
 
 `fs` is blocking on purpose. Non-blocking use is a one-line

@@ -44,6 +44,14 @@ favicon = "../theme/favicon.svg"
 # An SVG is inlined into the mark beside the title, so it follows the colour
 # mode. Path is relative to `src`.
 logo = "../site/logo/jennifer.svg"
+# Each page gets a `keywords` meta tag worked out from its own title, headings,
+# and code spans.
+keywords = true
+# Jennifer's own keywords, on top of the built-in English stop list. They appear
+# in a code block on nearly every page of a language manual, which makes them
+# excellent at describing every chapter equally and useless at telling one from
+# another.
+keywordStopwords = ["def", "init", "return", "int"]
 
 [highlight]
 # Jennifer code blocks are coloured while the site is built - no CDN, no

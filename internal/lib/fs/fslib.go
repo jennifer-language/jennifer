@@ -54,6 +54,14 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedStruct(LibraryName, "File", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
+	in.RegisterNamespacedStruct(LibraryName, "Watcher", []parser.StructField{
+		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
+	in.RegisterNamespacedStruct(LibraryName, "Event", []parser.StructField{
+		{Name: "path", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "kind", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "isDir", Type: parser.PrimitiveType(parser.TypeBool)},
+	})
 
 	// One-shot ops. Several verbs (writeString, writeBytes, readBytes)
 	// are polymorphic on argument shape - the dispatcher versions live
@@ -92,6 +100,10 @@ func Install(in *interpreter.Interpreter) {
 
 	// File-handle surface lives in handles.go.
 	installHandles(in)
+
+	// Polling filesystem watch (watch.go): fs.watch -> fs.Watcher, fs.next /
+	// fs.hasEvent pull events, fs.close stops it.
+	installWatch(in)
 }
 
 // takeStringArg is the boundary check for a positional string argument.
