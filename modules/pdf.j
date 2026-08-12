@@ -119,21 +119,64 @@ export def struct OutlineEntry {
 };
 
 /**
+ * A running header or footer, drawn on every page at render time. Its three text
+ * slots are left- / centre- / right-aligned (alignment measured with the font's
+ * own metrics), and each may contain the placeholders `%page%` (the 1-based page
+ * number) and `%pages%` (the total page count), filled in per page - so a footer
+ * `"sample.pdf"` / `""` / `"%page%/%pages%"` reads `sample.pdf ... 13/108`. The
+ * placeholders are percent-delimited (not braces) so they do not collide with
+ * Jennifer's own `{expr}` string interpolation. `margin` is the distance from the
+ * page edge to the text on every side. With `border` on, a thin rule is drawn under
+ * a header / over a footer.
+ * @field left {string} left-aligned slot (may use %page% / %pages%)
+ * @field center {string} centre-aligned slot
+ * @field right {string} right-aligned slot
+ * @field font {string} a standard-14 font name
+ * @field size {int} the point size
+ * @field margin {int} distance from the page edge, in points
+ * @field border {bool} draw a separating rule
+ * @field red {int} text / rule colour red 0-255
+ * @field green {int} text / rule colour green 0-255
+ * @field blue {int} text / rule colour blue 0-255
+ */
+export def struct PageLabel {
+    left as string,
+    center as string,
+    right as string,
+    font as string,
+    size as int,
+    margin as int,
+    border as bool,
+    red as int,
+    green as int,
+    blue as int
+};
+
+/**
  * A PDF document: an ordered list of pages, the document metadata (the PDF Info
  * dictionary, keyed by PDF key name - "Title", "Author", ...), any embedded
- * fonts registered with `addFont`, and any outline (bookmark) entries.
+ * fonts registered with `addFont`, any outline (bookmark) entries, and an optional
+ * running header / footer drawn on every page at render time.
  * @field pages {list of Page} the document's pages
  * @field info {map of string to string} the Info-dictionary metadata
  * @field embedded {list of LoadedFont} the embedded fonts
  * @field images {list of Image} the embedded raster images
  * @field outline {list of OutlineEntry} the outline / bookmark entries, in document order
+ * @field header {PageLabel} the running header (drawn when headerOn)
+ * @field footer {PageLabel} the running footer (drawn when footerOn)
+ * @field headerOn {bool} whether a header has been set
+ * @field footerOn {bool} whether a footer has been set
  */
 export def struct Document {
     pages as list of Page,
     info as map of string to string,
     embedded as list of LoadedFont,
     images as list of Image,
-    outline as list of OutlineEntry
+    outline as list of OutlineEntry,
+    header as PageLabel,
+    footer as PageLabel,
+    headerOn as bool,
+    footerOn as bool
 };
 
 /**
@@ -216,7 +259,85 @@ export func document() {
     def noFonts as list of LoadedFont init [];
     def noImages as list of Image init [];
     def noOutline as list of OutlineEntry init [];
-    return Document{pages: [], info: $meta, embedded: $noFonts, images: $noImages, outline: $noOutline};
+    def blank as PageLabel init pageLabel();
+    return Document{
+        pages: [],
+        info: $meta,
+        embedded: $noFonts,
+        images: $noImages,
+        outline: $noOutline,
+        header: $blank,
+        footer: $blank,
+        headerOn: false,
+        footerOn: false
+    };
+}
+
+/**
+ * A blank page label (empty slots, Helvetica 9pt, 36-point margin, no border,
+ * black). Copy it and set slots / options, then attach with `setHeader` /
+ * `setFooter`.
+ * @return {PageLabel} the default label
+ */
+export func pageLabel() {
+    return PageLabel{
+        left: "",
+        center: "",
+        right: "",
+        font: "Helvetica",
+        size: 9,
+        margin: 36,
+        border: false,
+        red: 0,
+        green: 0,
+        blue: 0
+    };
+}
+
+/**
+ * Attach a running header, drawn on every page when the document renders.
+ * @param doc {Document} the document
+ * @param label {PageLabel} the header spec
+ * @return {Document} the document with the header set
+ */
+export func setHeader(doc as Document, label as PageLabel) {
+    def d as Document init $doc;
+    $d.header = $label;
+    $d.headerOn = true;
+    return $d;
+}
+
+/**
+ * Attach a running footer, drawn on every page when the document renders.
+ * @param doc {Document} the document
+ * @param label {PageLabel} the footer spec
+ * @return {Document} the document with the footer set
+ */
+export func setFooter(doc as Document, label as PageLabel) {
+    def d as Document init $doc;
+    $d.footer = $label;
+    $d.footerOn = true;
+    return $d;
+}
+
+/**
+ * The total number of pages added to the document (the value `{pages}` expands to).
+ * @param doc {Document} the document
+ * @return {int} the page count
+ */
+export func getTotalPages(doc as Document) {
+    return len($doc.pages);
+}
+
+/**
+ * The 1-based number of the page currently being built - the next page to be
+ * added, i.e. `getTotalPages(doc) + 1`. Use it while filling a page (before
+ * `addPage`) to label it.
+ * @param doc {Document} the document
+ * @return {int} the current page number
+ */
+export func getCurrentPageNr(doc as Document) {
+    return len($doc.pages) + 1;
 }
 
 /**
@@ -1012,9 +1133,103 @@ func wrapSegmentUnicode(lf as LoadedFont, size as int, seg as string, maxWidth a
     return packSegment($words, $wordW, measureTextUnicode($lf, $size, " "), $maxWidth);
 }
 
+# isBreakChar reports whether a hard fold may break right after this character:
+# a space or an identifier / URL seam, so a forced break lands at a readable spot.
+func isBreakChar(c as string) {
+    return $c == " " or $c == "/" or $c == "." or $c == "-" or $c == "_";
+}
+
+/**
+ * Hard-fold one line so every piece fits `maxWidth` (points). Breaks at the last
+ * space or seam punctuation before the overflow, or mid-token when there is none
+ * (a bare URL, a slash-joined identifier). Unlike `wrapText`, it does not reflow
+ * on every space - it only breaks where a line would otherwise run past the box -
+ * so it is the right tool for a code line or an unbreakable token that must stay
+ * on the page. A single character wider than `maxWidth` is emitted alone.
+ * @param font {string} the standard-14 font
+ * @param size {int} the point size
+ * @param text {string} the line to fold (no embedded newlines)
+ * @param maxWidth {int} the target width in points
+ * @return {list of string} the fitted pieces (at least one)
+ */
+export func foldLine(font as string, size as int, text as string, maxWidth as int) {
+    def chars as list of string init strings.chars($text);
+    def out as list of string init [];
+    def cur as string init "";
+    def curW as float init 0.0;
+    def brk as int init -1;
+    def limit as float init convert.toFloat($maxWidth);
+    for (def i in 0..len($chars)) {
+        def cw as float init measureText($font, $size, $chars[$i]);
+        if ($cur != "" and $curW + $cw > $limit) {
+            if ($brk >= 0) {
+                $out[] = strings.substring($cur, 0, $brk + 1);
+                $cur = strings.substring($cur, $brk + 1, len($cur));
+                $curW = measureText($font, $size, $cur);
+            } else {
+                $out[] = $cur;
+                $cur = "";
+                $curW = 0.0;
+            }
+            $brk = -1;
+        }
+        $cur = $cur + $chars[$i];
+        $curW = $curW + $cw;
+        if (isBreakChar($chars[$i])) {
+            $brk = len($cur) - 1;
+        }
+    }
+    if ($cur != "") {
+        $out[] = $cur;
+    }
+    if (len($out) == 0) {
+        $out[] = "";
+    }
+    return $out;
+}
+
+/**
+ * Return `s` with every character the standard-14 fonts cannot encode (outside
+ * WinAnsi / windows-1252) replaced by `replacement` ("" drops it). A clean string
+ * (the common case) is returned unchanged after a single whole-string check, so
+ * the per-character path runs only when there is something to replace. This lets
+ * a caller keep one out-of-range glyph from aborting a whole render.
+ * @param s {string} the text
+ * @param replacement {string} the substitute for an un-encodable character
+ * @return {string} the WinAnsi-safe text
+ */
+export func toWinAnsi(s as string, replacement as string) {
+    def clean as bool init true;
+    try {
+        encoding.encode($s, "windows-1252");
+    } catch (e) {
+        $clean = false;
+    }
+    if ($clean) {
+        return $s;
+    }
+    def out as list of string init [];
+    for (def ch in strings.chars($s)) {
+        def ok as bool init true;
+        try {
+            encoding.encode($ch, "windows-1252");
+        } catch (e) {
+            $ok = false;
+        }
+        if ($ok) {
+            $out[] = $ch;
+        } else {
+            $out[] = $replacement;
+        }
+    }
+    return strings.join($out, "");
+}
+
 /**
  * Word-wrap a standard-14 string to a maximum line width (points), returning the
  * lines. Existing newlines are honoured as hard breaks; runs of spaces collapse.
+ * A word-wrapped line still wider than the box (an unbreakable token) is
+ * hard-folded with `foldLine`, so no output line runs past `maxWidth`.
  * @param font {string} a standard-14 base font name
  * @param size {int} the font size in points
  * @param str {string} the text to wrap
@@ -1025,7 +1240,16 @@ export func wrapText(font as string, size as int, str as string, maxWidth as int
     def out as list of string init [];
     for (def seg in strings.split($str, "\n")) {
         for (def ln in wrapSegment($font, $size, $seg, $maxWidth)) {
-            $out[] = $ln;
+            # A word-wrapped line still wider than the box holds an unbreakable
+            # token (no space to break on); hard-fold it so it cannot run off the
+            # page (fixes over-wide table cells and any other wrapText caller).
+            if (measureText($font, $size, $ln) > convert.toFloat($maxWidth)) {
+                for (def piece in foldLine($font, $size, $ln, $maxWidth)) {
+                    $out[] = $piece;
+                }
+            } else {
+                $out[] = $ln;
+            }
         }
     }
     return $out;
@@ -1449,18 +1673,91 @@ func buildOutlineObjects(outline as list of OutlineEntry, rootNum as int, itemNu
     return $objs;
 }
 
+# substPage fills the %page% / %pages% placeholders of a header / footer slot.
+# The tokens are percent-delimited (like `intl`), not brace-delimited, so they do
+# not collide with Jennifer's own `{expr}` string interpolation.
+func substPage(s as string, pageNr as int, total as int) {
+    def out as string init strings.replace($s, "%page%", convert.toString($pageNr));
+    return strings.replace($out, "%pages%", convert.toString($total));
+}
+
+# drawLabel draws one header (isHeader) or footer onto a page: the left / centre /
+# right slots (alignment measured with the font metrics), the colour, and an
+# optional separating rule. Placeholders are already resolved for (pageNr, total).
+func drawLabel(pg as Page, label as PageLabel, pageNr as int, total as int, isHeader as bool) {
+    def baseline as int init $label.margin;
+    if ($isHeader) {
+        $baseline = $pg.height - $label.margin;
+    }
+    def left as string init substPage($label.left, $pageNr, $total);
+    def center as string init substPage($label.center, $pageNr, $total);
+    def right as string init substPage($label.right, $pageNr, $total);
+    # Set the label colour explicitly (the body content may have left a different
+    # fill / stroke colour), then restore black afterwards.
+    $pg = color($pg, $label.red, $label.green, $label.blue);
+    if (len($left) > 0) {
+        $pg = text($pg, $label.margin, $baseline, $label.font, $label.size, $left);
+    }
+    if (len($center) > 0) {
+        def cw as int init math.round(measureText($label.font, $label.size, $center));
+        $pg = text($pg, ($pg.width - $cw) // 2, $baseline, $label.font, $label.size, $center);
+    }
+    if (len($right) > 0) {
+        def rw as int init math.round(measureText($label.font, $label.size, $right));
+        $pg = text($pg, $pg.width - $label.margin - $rw, $baseline, $label.font, $label.size, $right);
+    }
+    if ($label.border) {
+        # A rule below a header, above a footer.
+        def ly as int init $baseline + $label.size;
+        if ($isHeader) {
+            $ly = $baseline - $label.size // 2;
+        }
+        $pg = line($pg, $label.margin, $ly, $pg.width - $label.margin, $ly);
+    }
+    $pg = color($pg, 0, 0, 0);
+    return $pg;
+}
+
+# applyHeadersFooters bakes the running header / footer onto every page just before
+# serialization, once the total page count is known. Drawing through `text` / `line`
+# registers the label font in each page's resources, so the later font collection
+# sees it. A no-op when neither is set.
+func applyHeadersFooters(doc as Document) {
+    if (not $doc.headerOn and not $doc.footerOn) {
+        return $doc;
+    }
+    def total as int init len($doc.pages);
+    def out as list of Page init [];
+    def p as int init 0;
+    while ($p < $total) {
+        def pg as Page init $doc.pages[$p];
+        if ($doc.headerOn) {
+            $pg = drawLabel($pg, $doc.header, $p + 1, $total, true);
+        }
+        if ($doc.footerOn) {
+            $pg = drawLabel($pg, $doc.footer, $p + 1, $total, false);
+        }
+        $out[] = $pg;
+        $p = $p + 1;
+    }
+    $doc.pages = $out;
+    return $doc;
+}
+
 /**
- * Render the document to PDF bytes (PDF 1.7). Content streams are
- * FlateDecode-compressed; standard-14 fonts become shared Type1 objects and each
- * embedded font a Type0 / CIDFontType2 with an embedded FontFile2 and a ToUnicode
- * map. Registered images become image XObjects (with a soft-mask XObject when they
- * carry alpha). An outline (bookmarks) is emitted when the document has any, with
- * the catalog set to open the bookmark panel. Objects are numbered dynamically, so
- * any mix of pages, fonts, images, and resources references correctly.
+ * Render the document to PDF bytes (PDF 1.7). Any running header / footer is drawn
+ * onto every page first. Content streams are FlateDecode-compressed; standard-14
+ * fonts become shared Type1 objects and each embedded font a Type0 / CIDFontType2
+ * with an embedded FontFile2 and a ToUnicode map. Registered images become image
+ * XObjects (with a soft-mask XObject when they carry alpha). An outline (bookmarks)
+ * is emitted when the document has any, with the catalog set to open the bookmark
+ * panel. Objects are numbered dynamically, so any mix of pages, fonts, images, and
+ * resources references correctly.
  * @param doc {Document} the document to render
  * @return {bytes} the PDF file contents
  */
 export func render(doc as Document) {
+    $doc = applyHeadersFooters($doc);
     def numPages as int init len($doc.pages);
     def fontNames as list of string init collectFonts($doc);
     def numFonts as int init len($fontNames);

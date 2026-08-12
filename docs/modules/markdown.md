@@ -30,6 +30,7 @@ Rendering (Markdown in, HTML / terminal text / PDF out):
 | `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
 | `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts, document metadata, bookmarks). |
 | `markdown.renderPdf(doc, opts)` | `bytes` | Lay a parsed (or transformed) tree out to a PDF.               |
+| `markdown.pageBreak()`        | `Node`   | A page-break node; `renderPdf` starts the next content on a fresh page. |
 
 `toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, and `toPdf` over
 `renderPdf(parse(md), pdfDefaults())`, so build and parse share one document model.
@@ -74,6 +75,9 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Nested list          | indent a sub-list under an item | a child `<ul>` / `<ol>` inside the parent `<li>` |
 | Blockquote           | `> x` (recursive: `> > y`)      | `<blockquote>` (inner text parsed as blocks) |
 | Fenced code block    | ` ``` ` ... ` ``` `             | `<pre><code>`               |
+| Indented code block  | four-space indent after a blank line | `<pre><code>`          |
+| Thematic break       | `---` / `***` / `___` (3+, spaced ok) | `<hr>`                 |
+| Raw HTML block       | a line opening with `<tag` / `</` / `<!--` to the next blank line | passed through verbatim |
 | Table (GFM)          | `\| a \| b \|` + `\| --- \| --- \|` row | `<table>` (aligned terminal columns in ANSI) |
 
 | Inline    | Syntax          | HTML                  | ANSI            |
@@ -82,13 +86,24 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Italic    | `*text*`        | `<em>`                | italic          |
 | Code      | `` `text` ``    | `<code>`              | cyan            |
 | Link      | `[text](url)`   | `<a href="url">`      | underline + ` (url)` |
+| Autolink  | `<https://x>` / `<a@b.com>` | `<a href="...">` (email gets `mailto:`) | underline + ` (url)` |
 | Image     | `![alt](url)`   | `<img src alt>`       | `[image] alt (url)`  |
 
-A nested list is a more-indented list under a parent item; a blockquote's inner
-lines are parsed as blocks, so a quote can hold paragraphs, lists, or nested
-quotes. A link's `href` and an image's `src` both pass through the same scheme
-allowlist ([`html.safeUrl`](html.md)), so `javascript:` and other
-script schemes render as `#`.
+**Inline spans nest.** A link inside `**...**`, a `` `code` `` span or
+`*emphasis*` inside a link label, and so on all parse to a nested tree, so
+`**[label](x)**` renders `<strong><a href="x">label</a></strong>` rather than
+dropping the link. A link label may contain a `]` inside a code span or a
+balanced nested `[...]` pair (`[the `$xs[]` sugar](x)` parses correctly).
+
+A **lazy continuation** line - a soft-wrapped line indented to an item's content
+column - stays part of that item rather than splitting the list. A blank line
+still ends the item. A nested list is a more-indented list under a parent item;
+a blockquote's inner lines are parsed as blocks, so a quote can hold paragraphs,
+lists, or nested quotes. A link's `href`, an autolink's target, and an image's
+`src` all pass through the same scheme allowlist ([`html.safeUrl`](html.md)), so
+`javascript:` and other script schemes render as `#`. A raw HTML block is emitted
+verbatim by `toHtml` (it is the author's own markup) and dropped by `toAnsi` /
+the PDF renderer, which have no HTML.
 
 ## HTML output
 
@@ -228,12 +243,12 @@ no-op.
 
 This is a subset, chosen to stay small and TinyGo-clean:
 
-- **Inline spans do not nest.** The content of `**...**`, `` `...` ``, and a
-  link's text is taken as plain text, so `**a `b`**` does not render the
-  inner code span.
-- No blockquotes, thematic breaks (`---`), images, reference links,
-  autolinks, HTML passthrough, or setext (underlined) headings.
-- No nested / indented lists; a list is a flat run of same-kind items.
+- No reference links (`[text][ref]`), setext (underlined) headings, or
+  hard-break-on-two-spaces.
+- Autolinks cover `<scheme:...>` and `<user@host>`; bare (unbracketed) URLs in
+  prose are not linkified.
+- The raw-HTML block rule is CommonMark's "type 6" shape (a tag at the line
+  start, to the next blank line); inline raw HTML in a paragraph is still escaped.
 
 For anything beyond this subset, render with an external tool. The module is
 sized for READMEs, help text, and comment / docblock bodies, not
@@ -245,8 +260,9 @@ general-purpose CommonMark conformance.
 > `toHtml` / `toAnsi`, so it imports [`pdf`](pdf.md) (which pulls in `font`). That
 > makes every `markdown` import a bit heavier even for a `toHtml`-only program - a
 > deliberate trade for one unified rendering surface; see
-> [design-decisions.md](../technical/design-decisions.md). Text is best kept to the
-> Latin-1 range (standard-14 fonts). `PdfOptions` comes from `markdown.pdfDefaults()`
+> [design-decisions.md](../technical/design-decisions.md). Text outside the WinAnsi
+> range the standard-14 fonts encode is replaced per the `unencodable` option
+> (below) rather than aborting the render. `PdfOptions` comes from `markdown.pdfDefaults()`
 > (US Letter, 54-pt margins, Helvetica / Courier); copy it and tweak the fields
 > (`pageWidth` / `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` /
 > `monoFont` / `headingFont` / `bodySize` / `tablePad`). A level-1 heading starts a
@@ -278,6 +294,35 @@ general-purpose CommonMark conformance.
 > $o.title = "My Report";
 > $o.author = "Ada Lovelace";
 > $o.bookmarkLevel = 2;
+> def out as bytes init markdown.toPdfWith($md, $o);
+> ```
+>
+> **Block panels + un-encodable text.** `codeFill` / `codeBorder` (each a `Fill`,
+> off by default) draw a background and / or border behind every code block, and
+> `quoteFill` / `quoteRule` do the same behind a blockquote (`quoteRule` is the
+> vertical bar down its left edge) - the way `tableHeaderFill` shades a table
+> header. A long code line or an unbreakable table token is folded to the column
+> instead of running off the page. A character the standard-14 fonts cannot encode
+> is replaced by `unencodable` (default `"?"`, `""` drops it) so one stray glyph
+> never fails the whole document.
+>
+> **More document metadata.** Alongside `title` / `author` / `subject` /
+> `keywords`, set `creator` (the application that produced the document) and
+> `producer` on `PdfOptions`; each is written to the PDF Info dictionary when
+> non-empty (an empty `producer` keeps `pdf`'s own `"Jennifer pdf"` default).
+>
+> **Page breaks.** A level-1 heading starts a fresh page, but a document can force
+> a break anywhere with `markdown.pageBreak()` - a node placed in a tree handed to
+> `markdown.renderPdf`, or, in Markdown source, a lone `<!-- pagebreak -->` comment.
+> `toHtml` / `toAnsi` ignore it.
+>
+> ```jennifer
+> def o as markdown.PdfOptions init markdown.pdfDefaults();
+> $o.codeFill = markdown.gray(240);
+> $o.codeBorder = markdown.gray(150);
+> $o.quoteFill = markdown.gray(244);
+> $o.quoteRule = markdown.gray(150);
+> $o.creator = "Grimoire";
 > def out as bytes init markdown.toPdfWith($md, $o);
 > ```
 

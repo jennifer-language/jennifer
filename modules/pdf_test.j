@@ -450,10 +450,64 @@ func testWrapCollapsesSpaces() {
 }
 
 func testPackOverflow() {
-    # a single word wider than the column lands alone (overflow, not truncated)
+    # a word wider than the column is hard-folded so no piece runs off the page
     def lines as list of string init wrapText("Helvetica", 12, "supercalifragilistic short", 20);
-    testing.assertEqual(len($lines), 2);
-    testing.assertEqual($lines[0], "supercalifragilistic");
+    testing.assertTrue(len($lines) > 2);
+    def joined as string init strings.join($lines, "");
+    testing.assertEqual($joined, "supercalifragilisticshort");
+    for (def ln in $lines) {
+        testing.assertTrue(len($ln) > 0);
+        testing.assertTrue(measureText("Helvetica", 12, $ln) <= convert.toFloat(20));
+    }
+}
+
+func testFoldLineFitsStaysWhole() {
+    # a line that already fits is returned as a single piece, unchanged
+    def pieces as list of string init foldLine("Helvetica", 12, "small", 200);
+    testing.assertEqual(len($pieces), 1);
+    testing.assertEqual($pieces[0], "small");
+}
+
+func testFoldLineBreaksAtSeam() {
+    # a slash-joined identifier folds at a seam and loses nothing
+    def pieces as list of string init foldLine("Courier", 10, "one/two/three/four/five/six", 40);
+    testing.assertTrue(len($pieces) > 1);
+    testing.assertEqual(strings.join($pieces, ""), "one/two/three/four/five/six");
+    for (def p in $pieces) {
+        testing.assertTrue(measureText("Courier", 10, $p) <= convert.toFloat(40));
+    }
+}
+
+func testFoldLineHardCutNoSeam() {
+    # a seamless token still folds (mid-token) rather than overflow
+    def pieces as list of string init foldLine("Courier", 10, "aaaaaaaaaaaaaaaaaaaaaaaa", 40);
+    testing.assertTrue(len($pieces) > 1);
+    testing.assertEqual(strings.join($pieces, ""), "aaaaaaaaaaaaaaaaaaaaaaaa");
+}
+
+# arrowStr builds U+2190 (LEFTWARDS ARROW, not in WinAnsi) from its UTF-8 bytes,
+# so the test needs no non-ASCII glyph in the source.
+func arrowStr() {
+    def b as bytes;
+    $b[] = 0xE2;
+    $b[] = 0x86;
+    $b[] = 0x90;
+    return convert.stringFromBytes($b, "utf-8");
+}
+
+func testToWinAnsiClean() {
+    # a WinAnsi-clean string is returned unchanged
+    testing.assertEqual(toWinAnsi("plain ASCII text", "?"), "plain ASCII text");
+}
+
+func testToWinAnsiReplace() {
+    # an un-encodable arrow becomes the replacement
+    testing.assertEqual(toWinAnsi("a" + arrowStr() + "b", "?"), "a?b");
+}
+
+func testToWinAnsiSkip() {
+    # an empty replacement drops the un-encodable character
+    testing.assertEqual(toWinAnsi("a" + arrowStr() + "b", ""), "ab");
 }
 
 func testAlignStart() {
@@ -549,4 +603,85 @@ func testBookmarkRejectsBadLevel() {
         $threw = true;
     }
     testing.assertTrue($threw);
+}
+
+# --- running headers / footers -------------------------------------
+
+func testPageLabelDefaults() {
+    def l as PageLabel init pageLabel();
+    testing.assertEqual($l.font, "Helvetica");
+    testing.assertEqual($l.size, 9);
+    testing.assertEqual($l.margin, 36);
+    testing.assertEqual($l.border, false);
+    testing.assertEqual($l.left, "");
+}
+
+func testSubstPagePlaceholders() {
+    testing.assertEqual(substPage("page %page%/%pages%", 13, 108), "page 13/108");
+    testing.assertEqual(substPage("%page%/%pages%", 1, 3), "1/3");
+    # a slot with no placeholder is unchanged; a stray percent survives
+    testing.assertEqual(substPage("sample.pdf", 5, 9), "sample.pdf");
+    testing.assertEqual(substPage("50% done", 1, 2), "50% done");
+}
+
+func testPageCountAccessors() {
+    def d as Document init document();
+    testing.assertEqual(getTotalPages($d), 0);
+    testing.assertEqual(getCurrentPageNr($d), 1);
+    $d = addPage($d, page(200, 200));
+    testing.assertEqual(getTotalPages($d), 1);
+    testing.assertEqual(getCurrentPageNr($d), 2);
+}
+
+func testDrawLabelPlacesAlignedText() {
+    def f as PageLabel init pageLabel();
+    $f.left = "sample.pdf";
+    $f.center = "page %page%/%pages%";
+    $f.right = "(c) 2026 J Team";
+    def pg as Page init drawLabel(page(612, 792), $f, 13, 108, false);
+    testing.assertTrue(strings.contains($pg.content, "sample.pdf"));
+    testing.assertTrue(strings.contains($pg.content, "page 13/108"));
+    # the parens of "(c)" are PDF-escaped in the content stream
+    testing.assertTrue(strings.contains($pg.content, "2026 J Team"));
+    # the label font is registered so render lists it in the page resources
+    testing.assertTrue(lists.contains($pg.fonts, "Helvetica"));
+}
+
+func testDrawLabelBorderAddsStroke() {
+    def f as PageLabel init pageLabel();
+    $f.center = "x";
+    def plain as Page init drawLabel(page(612, 792), $f, 1, 1, false);
+    $f.border = true;
+    def ruled as Page init drawLabel(page(612, 792), $f, 1, 1, false);
+    testing.assertTrue(len($ruled.content) > len($plain.content));
+    testing.assertTrue(strings.contains($ruled.content, " l\nS\n"));
+}
+
+func testRenderWithFooterAndHeader() {
+    def d as Document init document();
+    $d = addPage($d, text(page(612, 792), 72, 700, "Helvetica", 12, "body one"));
+    $d = addPage($d, text(page(612, 792), 72, 700, "Helvetica", 12, "body two"));
+    def f as PageLabel init pageLabel();
+    $f.left = "sample.pdf";
+    $f.right = "%page%/%pages%";
+    $f.border = true;
+    def plain as bytes init render($d);
+    def withF as bytes init render(setFooter($d, $f));
+    testing.assertTrue(pdfContains($withF, "%PDF"));
+    testing.assertTrue(len($withF) > len($plain));
+    # the original document is unchanged (render works on a copy)
+    testing.assertFalse($d.footerOn);
+}
+
+func testSetFooterFlags() {
+    def d as Document init document();
+    testing.assertFalse($d.footerOn);
+    testing.assertFalse($d.headerOn);
+    def f as PageLabel init pageLabel();
+    $f.center = "%page%";
+    $d = setFooter($d, $f);
+    testing.assertTrue($d.footerOn);
+    testing.assertFalse($d.headerOn);
+    $d = setHeader($d, $f);
+    testing.assertTrue($d.headerOn);
 }

@@ -44,7 +44,9 @@ its argument, so you thread them (`$p = pdf.text($p, ...)`).
 | `pdf.drawImage(pg, img, x, y, width, height)` | `Page` | draw an image into the box at (x, y) |
 | `pdf.measureText(font, size, str)` | `float` | width of `str` in points (standard-14) |
 | `pdf.measureTextUnicode(lf, size, str)` | `float` | width of `str` in points (embedded font) |
-| `pdf.wrapText(font, size, str, maxWidth)` | `list of string` | word-wrap to `maxWidth` points (standard-14) |
+| `pdf.wrapText(font, size, str, maxWidth)` | `list of string` | word-wrap to `maxWidth` points (standard-14); a line with an unbreakable token is hard-folded so nothing exceeds `maxWidth` |
+| `pdf.foldLine(font, size, text, maxWidth)` | `list of string` | hard-fold one line to `maxWidth`, breaking at a space / seam or mid-token (a code line, a bare URL) |
+| `pdf.toWinAnsi(s, replacement)` | `string` | replace every character the standard-14 fonts cannot encode with `replacement` (`""` drops it) |
 | `pdf.wrapTextUnicode(lf, size, str, maxWidth)` | `list of string` | word-wrap to `maxWidth` points (embedded font) |
 | `pdf.textBlock(pg, x, y, width, font, size, leading, str, align)` | `Page` | flow wrapped, aligned text into a column (standard-14) |
 | `pdf.textBlockUnicode(pg, x, y, width, lf, size, leading, str, align)` | `Page` | flow wrapped, aligned text into a column (embedded font) |
@@ -52,7 +54,39 @@ its argument, so you thread them (`$p = pdf.text($p, ...)`).
 | `pdf.rect(pg, x, y, width, height, filled)` | `Page` | draw a rectangle (fill or stroke) |
 | `pdf.color(pg, red, green, blue)` | `Page` | set fill + stroke colour for what follows |
 | `pdf.addPage(doc, pg)` | `Document` | append a page |
+| `pdf.pageLabel()` | `PageLabel` | a blank running header / footer spec (Helvetica 9pt, 36pt margin) |
+| `pdf.setHeader(doc, label)` | `Document` | attach a running header, drawn on every page at render |
+| `pdf.setFooter(doc, label)` | `Document` | attach a running footer, drawn on every page at render |
+| `pdf.getTotalPages(doc)` | `int` | pages added so far (what `%pages%` expands to) |
+| `pdf.getCurrentPageNr(doc)` | `int` | the page being built, `getTotalPages(doc) + 1` |
 | `pdf.render(doc)` | `bytes` | the finished PDF |
+
+### Running headers and footers
+
+A `PageLabel` is drawn on every page at render time, once the total page count is
+known. It has three text slots - `left` / `center` / `right`, each aligned with the
+font's own metrics - and each may contain `%page%` (the 1-based page number) and
+`%pages%` (the total). The tokens are percent-delimited (not braces) so they do not
+collide with Jennifer's `{expr}` string interpolation. `border` draws a thin rule
+under a header / over a footer; `margin` is the inset from the page edge; `font` /
+`size` / `red` / `green` / `blue` style the text.
+
+```jennifer
+def f as pdf.PageLabel init pdf.pageLabel();
+$f.left = "sample.pdf";
+$f.center = "page %page%/%pages%";   # -> "page 13/108"
+$f.right = "(c) 2026 J Team";
+$f.border = true;
+$doc = pdf.setFooter($doc, $f);
+def out as bytes init pdf.render($doc);
+```
+
+`getTotalPages` / `getCurrentPageNr` report the page count while building (the
+total is known only once every page is added, which is why the placeholders resolve
+at render). Because Jennifer has no closures, per-page footer text beyond the
+`%page%` / `%pages%` placeholders is not expressible; for fully custom per-page
+labels, build all pages, then loop them drawing with `pdf.text` and
+`getTotalPages(doc)`.
 
 `color` sets the drawing colour for **subsequent** operations on that page (both
 fill and stroke), so order matters: set the colour, then draw. `rect`'s `filled`

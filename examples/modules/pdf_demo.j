@@ -6,7 +6,8 @@
  * The pdf module (modules/pdf.j): build a two-page PDF with text in
  * several standard-14 fonts, a filled and a stroked rectangle, a coloured line,
  * an embedded PNG image, an embedded TrueType font drawing selectable Unicode
- * text, and write it to a file. Open the result in any PDF viewer.
+ * text, and a running header + footer (page numbers, aligned slots, a rule) drawn
+ * on every page; then write it to a file. Open the result in any PDF viewer.
  * Run: jennifer run examples/modules/pdf_demo.j [out.pdf]
  * @module pdf_demo
  */
@@ -51,12 +52,14 @@ $cover = pdf.drawImage($cover, $logo, 72, 500, 96, 72);
 $cover = pdf.text($cover, 180, 530, "Helvetica", 10, "<- an embedded PNG (with alpha)");
 
 # Page 2: monospaced text in a second font, plus a wrapped/justified paragraph.
+# Content starts below the running header (default 36pt margin), so the title
+# clears the header rule near the top of the page.
 def notes as pdf.Page init pdf.page(595, 842);
-$notes = pdf.text($notes, 50, 800, "Times-Roman", 16, "Page two (A4)");
+$notes = pdf.text($notes, 50, 770, "Times-Roman", 16, "Page two (A4)");
 $notes = pdf.text(
     $notes,
     50,
-    770,
+    740,
     "Courier",
     10,
     "Coordinates are PDF points; origin is bottom-left.");
@@ -67,23 +70,46 @@ $notes = pdf.text(
 def para as string init "Jennifer flows wrapped and justified paragraphs into a "
     + "column. Width measurement uses the Adobe standard-fourteen font metrics, "
     + "so lines break where they should and justify reaches the right margin.";
-$notes = pdf.textBlock($notes, 50, 730, 495, "Helvetica", 12, 16, $para, "justify");
+$notes = pdf.textBlock($notes, 50, 700, 495, "Helvetica", 12, 16, $para, "justify");
 
 # An embedded TrueType font: the text is drawn from the font's own glyphs and
 # stays selectable / copyable. The committed test fixture covers A/B/C; point
 # loadFont at any .ttf (DejaVuSans, a CJK font, ...) to render full Unicode.
 def body as pdf.LoadedFont init pdf.loadFont("Embedded", fs.readBytes(path.join($testdata, "font_fixture.ttf")));
-$notes = pdf.textUnicode($notes, 50, 660, $body, 24, "ABC");
+$notes = pdf.textUnicode($notes, 50, 630, $body, 24, "ABC");
 
 def doc as pdf.Document init pdf.document();
 $doc = pdf.info($doc, "Title", "Jennifer PDF demo");
-$doc = pdf.info($doc, "Author", "pdf");
+$doc = pdf.info($doc, "Author", "jennifer pdf module");
 $doc = pdf.info($doc, "Keywords", "jennifer, pdf, demo");
 $doc = pdf.addFont($doc, $body);
 $doc = pdf.addImage($doc, $logo);
 $doc = pdf.addPage($doc, $cover);
 $doc = pdf.addPage($doc, $notes);
 
+# A running footer drawn on every page at render: three slots aligned left /
+# center / right with the font's own metrics, a separating rule, and the
+# %page% / %pages% placeholders filled in per page (so "page 1/2", "page 2/2").
+# The two pages have different widths (Letter and A4); each footer aligns to its
+# own page, so the right slot ends at the margin on both.
+def footer as pdf.PageLabel init pdf.pageLabel();
+$footer.left = path.base($out);
+$footer.center = "page %page%/%pages%";
+$footer.right = "© 2026";
+$footer.border = true;
+$doc = pdf.setFooter($doc, $footer);
+
+# A lighter running header: just a right-aligned page number over a rule.
+def header as pdf.PageLabel init pdf.pageLabel();
+$header.left = "The Jennifer Programming Language";
+$header.right = "%page% / %pages%";
+$header.size = 8;
+$header.red = 120;
+$header.green = 120;
+$header.blue = 120;
+$header.border = true;
+$doc = pdf.setHeader($doc, $header);
+
 def data as bytes init pdf.render($doc);
 fs.writeBytes($out, $data);
-io.printf("wrote %s (%d bytes, 2 pages)\n", $out, len($data));
+io.printf("wrote %s (%d bytes, 2 pages, running header + footer)\n", $out, len($data));

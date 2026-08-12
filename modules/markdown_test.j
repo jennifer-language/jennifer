@@ -231,9 +231,123 @@ func testHtmlLinkEscapesHref() {
         "<p><a href=\"http://x/?a=1&amp;b=2\">t</a></p>");
 }
 
+func testHtmlNestedInlineInStrong() {
+    # a link inside bold survives (was flattened, dropping the link)
+    testing.assertEqual(
+        toHtml("x **[label](guide.md)** y"),
+        "<p>x <strong><a href=\"guide.md\">label</a></strong> y</p>");
+    # code inside bold
+    testing.assertEqual(
+        toHtml("**`code`**"),
+        "<p><strong><code>code</code></strong></p>");
+    # emphasis inside bold
+    testing.assertEqual(
+        toHtml("**outer *inner* rest**"),
+        "<p><strong>outer <em>inner</em> rest</strong></p>");
+}
+
+func testHtmlNestedInlineInLink() {
+    # bold inside a link label survives
+    testing.assertEqual(
+        toHtml("[**bold** link](u)"),
+        "<p><a href=\"u\"><strong>bold</strong> link</a></p>");
+}
+
+func testHtmlLinkLabelWithCodeBrackets() {
+    # a `]` inside a code span in the label does not end the label
+    testing.assertEqual(
+        toHtml("see [the `$xs[]` sugar](guide.md) ok"),
+        "<p>see <a href=\"guide.md\">the <code>$xs[]</code> sugar</a> ok</p>");
+}
+
+func testHtmlLinkLabelWithNestedBrackets() {
+    # a balanced nested bracket pair is part of the label
+    testing.assertEqual(
+        toHtml("[a [b] c](u)"),
+        "<p><a href=\"u\">a [b] c</a></p>");
+    testing.assertEqual(
+        toHtml("[argv[0]](u)"),
+        "<p><a href=\"u\">argv[0]</a></p>");
+}
+
 func testHtmlLists() {
     testing.assertEqual(toHtml("- a\n- b"), "<ul><li>a</li><li>b</li></ul>");
     testing.assertEqual(toHtml("1. a\n2. b"), "<ol><li>a</li><li>b</li></ol>");
+}
+
+func testListLazyContinuation() {
+    # a soft-wrapped item stays one item in one list (was split into two lists)
+    def md as string init "- **a** first item\n  continued on the next line\n- **b** second item\n";
+    testing.assertEqual(
+        toHtml($md),
+        "<ul><li><strong>a</strong> first item continued on the next line</li><li><strong>b</strong> second item</li></ul>");
+}
+
+func testListContinuationOrdered() {
+    def md as string init "1. one line\n   wraps here\n2. two\n";
+    testing.assertEqual(
+        toHtml($md),
+        "<ol><li>one line wraps here</li><li>two</li></ol>");
+}
+
+func testListBlankEndsItemThenParagraph() {
+    # a blank line still ends the list; the following text is its own paragraph
+    def md as string init "- item\n\nplain paragraph\n";
+    testing.assertEqual(
+        toHtml($md),
+        "<ul><li>item</li></ul><p>plain paragraph</p>");
+}
+
+func testHtmlThematicBreak() {
+    testing.assertEqual(toHtml("a\n\n---\n\nb"), "<p>a</p><hr><p>b</p>");
+    # a spaced dash run is a rule, not a list
+    testing.assertEqual(toHtml("- - -"), "<hr>");
+    testing.assertEqual(toHtml("***"), "<hr>");
+    testing.assertEqual(toHtml("___"), "<hr>");
+}
+
+func testHtmlRawBlock() {
+    testing.assertEqual(
+        toHtml("<div class=\"x\">\nraw\n</div>"),
+        "<div class=\"x\">\nraw\n</div>");
+    # a closing tag and a comment also open a raw block
+    testing.assertEqual(toHtml("<!-- note -->"), "<!-- note -->");
+}
+
+func testHtmlIndentedCode() {
+    testing.assertEqual(
+        toHtml("para\n\n    indented code\n\nafter"),
+        "<p>para</p><pre><code>indented code</code></pre><p>after</p>");
+}
+
+func testHtmlAutolinkUri() {
+    testing.assertEqual(
+        toHtml("see <https://example.com/x> ok"),
+        "<p>see <a href=\"https://example.com/x\">https://example.com/x</a> ok</p>");
+}
+
+func testHtmlAutolinkEmail() {
+    testing.assertEqual(
+        toHtml("mail <a@b.com> me"),
+        "<p>mail <a href=\"mailto:a@b.com\">a@b.com</a> me</p>");
+}
+
+func testHtmlAutolinkNotHtmlBlock() {
+    # a bare autolink line is prose, not a raw HTML block
+    testing.assertEqual(
+        toHtml("<https://example.com>"),
+        "<p><a href=\"https://example.com\">https://example.com</a></p>");
+}
+
+func testHtmlAngleBracketsStayLiteral() {
+    # angle text that is neither an autolink nor a tag stays escaped
+    testing.assertEqual(toHtml("compare <x and >y"), "<p>compare &lt;x and &gt;y</p>");
+}
+
+func testAnsiThematicBreakAndHtmlDropped() {
+    # a rule renders as a dashed line; a raw HTML block is dropped
+    testing.assertTrue(strings.contains(toAnsi("a\n\n---\n\nb"), "----"));
+    testing.assertTrue(not strings.contains(toAnsi("<div>\nx\n</div>"), "div"));
 }
 
 func testHtmlCodeBlockEscapes() {
@@ -669,6 +783,27 @@ func pdfMarker() {
     return convert.bytesFromString("%PDF", "utf-8");
 }
 
+# pdfContains reports whether the PDF bytes contain an ASCII substring.
+func pdfContains(b as bytes, needle as string) {
+    def nb as bytes init convert.bytesFromString($needle, "utf-8");
+    return binary.indexOf($b, $nb) >= 0;
+}
+
+# countPdfPages counts page objects by their one-per-page /MediaBox marker.
+func countPdfPages(b as bytes) {
+    def needle as bytes init convert.bytesFromString("/MediaBox", "utf-8");
+    def nl as int init len($needle);
+    def count as int init 0;
+    def rest as bytes init $b;
+    def idx as int init binary.indexOf($rest, $needle);
+    while ($idx >= 0) {
+        $count = $count + 1;
+        $rest = binary.slice($rest, $idx + $nl, len($rest));
+        $idx = binary.indexOf($rest, $needle);
+    }
+    return $count;
+}
+
 # --- options + metrics ---------------------------------------------
 
 func testDefaults() {
@@ -775,6 +910,120 @@ func testRenderProducesValidPdf() {
     def out as bytes init toPdf("# Hi\n\nA paragraph of text.\n");
     testing.assertTrue(len($out) > 100);
     testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+# mdArrow builds U+2190 (LEFTWARDS ARROW, outside WinAnsi) from its UTF-8 bytes,
+# so these tests need no non-ASCII glyph in the source.
+func mdArrow() {
+    def b as bytes;
+    $b[] = 0xE2;
+    $b[] = 0x86;
+    $b[] = 0x90;
+    return convert.stringFromBytes($b, "utf-8");
+}
+
+func testLongCodeLineFolds() {
+    # a code line far wider than the page renders to a valid PDF (folded onto the
+    # page rather than clipped at the right margin)
+    def long as string init strings.repeat("abcdef/", 60);
+    def md as string init "```\n" + $long + "\n```\n";
+    def out as bytes init toPdf($md);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+    # the folded block is materially larger than the same line kept to one column
+    def one as bytes init toPdf("```\nabcdef/\n```\n");
+    testing.assertTrue(len($out) > len($one));
+}
+
+func testUnencodableCharRenders() {
+    # a document containing a non-WinAnsi glyph renders instead of aborting; the
+    # glyph is replaced by the default substitute
+    def md as string init "# Arrow " + mdArrow() + " here\n\nbody " + mdArrow() + " text\n";
+    def out as bytes init toPdf($md);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+    testing.assertTrue(len($out) > 100);
+}
+
+func testUnencodableInCodeAndTableRenders() {
+    # the substitution reaches code blocks and table cells too
+    def md as string init "```\ncode " + mdArrow() + "\n```\n\n| A | B |\n|--|--|\n| " + mdArrow() + " | y |\n";
+    def out as bytes init toPdf($md);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+func testUnencodableSkipOption() {
+    # an empty `unencodable` drops the glyph rather than substituting
+    def o as PdfOptions init pdfDefaults();
+    $o.unencodable = "";
+    def md as string init "text " + mdArrow() + " end\n";
+    def out as bytes init toPdfWith($md, $o);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
+func testPageBreakNodeAddsPage() {
+    # a pageBreak node forces a second page
+    def doc as Node init parse("# One\n\ntext a\n");
+    $doc.children = lists.push($doc.children, pageBreak());
+    def more as Node init parse("more\n");
+    for (def c in children($more)) {
+        $doc.children = lists.push($doc.children, $c);
+    }
+    def out as bytes init renderPdf($doc, pdfDefaults());
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+    testing.assertEqual(countPdfPages($out), 2);
+    # the same content without the break stays on one page
+    def flat as bytes init toPdf("# One\n\ntext a\n\nmore\n");
+    testing.assertEqual(countPdfPages($flat), 1);
+}
+
+func testPageBreakComment() {
+    # a lone <!-- pagebreak --> comment parses to a page break
+    def out as bytes init toPdf("a\n\n<!-- pagebreak -->\n\nb\n");
+    testing.assertEqual(countPdfPages($out), 2);
+}
+
+func testCodeFillEnlargesOutput() {
+    # a code fill / border draws a rectangle behind the block; default is unchanged
+    def o as PdfOptions init pdfDefaults();
+    $o.codeFill = gray(240);
+    $o.codeBorder = gray(150);
+    def filled as bytes init toPdfWith("```\ncode line\n```\n", $o);
+    def plain as bytes init toPdf("```\ncode line\n```\n");
+    testing.assertTrue(binary.startsWith($filled, pdfMarker()));
+    testing.assertTrue(len($filled) > len($plain));
+}
+
+func testQuoteFillAndRule() {
+    # a quote fill / rule draws behind the block; default output is unchanged
+    def md as string init "> **A quoted note.** It matters.\n";
+    def o as PdfOptions init pdfDefaults();
+    $o.quoteFill = gray(240);
+    $o.quoteRule = gray(120);
+    def filled as bytes init toPdfWith($md, $o);
+    def plain as bytes init toPdf($md);
+    testing.assertTrue(binary.startsWith($filled, pdfMarker()));
+    testing.assertTrue(len($filled) > len($plain));
+}
+
+func testQuoteBackgroundDefaultOff() {
+    # with both off (the default), a quote renders exactly as before
+    testing.assertEqual(pdfDefaults().quoteFill.on, false);
+    testing.assertEqual(pdfDefaults().quoteRule.on, false);
+}
+
+func testPdfCreatorProducerMetadata() {
+    # creator / producer reach the Info dictionary
+    def o as PdfOptions init pdfDefaults();
+    $o.creator = "Grimoire";
+    $o.producer = "Grimoire 1.0";
+    def out as bytes init toPdfWith("# Hi\n", $o);
+    testing.assertTrue(pdfContains($out, "/Creator (Grimoire)"));
+    testing.assertTrue(pdfContains($out, "/Producer (Grimoire 1.0)"));
+}
+
+func testPdfProducerDefaultKept() {
+    # an empty producer keeps pdf's own default rather than blanking it
+    def out as bytes init toPdf("# Hi\n");
+    testing.assertTrue(pdfContains($out, "/Producer (Jennifer pdf)"));
 }
 
 func testRenderAllBlockTypes() {
