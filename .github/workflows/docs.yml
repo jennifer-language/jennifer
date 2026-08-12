@@ -61,9 +61,9 @@ jobs:
         # generated from each module's doc comments (via the docblock module) and
         # are NOT committed (see .gitignore). Regenerate them here, before the
         # build, so the published API reference is always in step with the code.
-        # `--pdf` also renders the standalone jennifer-module-api.pdf into
-        # docs/api/, so the published site ships it.
-        run: ./jennifer run scripts/gen-module-docs.j --pdf
+        # The standalone jennifer-module-api.pdf is built by Grimoire below, not
+        # here.
+        run: ./jennifer run scripts/gen-module-docs.j
 
       - name: Generate the test coverage report
         # docs/technical/coverage.md and the SUMMARY "coverage" region are
@@ -80,6 +80,16 @@ jobs:
         # be kept out of the printed manual. `--sysmoddir=modules` points Grimoire's
         # `import "markdown.j"` / `pdf.j` at this repository's modules.
         run: ./jennifer run --sysmoddir=modules .grimoire/grimoire build --pdf
+
+      - name: Build the module API reference PDF (Grimoire)
+        # The standalone ~360-page module API reference as one PDF, built by
+        # Grimoire from the docs/api/ Markdown generated above - the inverse of the
+        # manual, which excludes api/. grimoire-api.toml sets `src = "docs/api"`;
+        # render to a temp dir (so it does not disturb the site build), then drop
+        # it beside the API pages so the index's "single PDF" link resolves.
+        run: |
+          ./jennifer run --sysmoddir=modules .grimoire/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
+          cp "$RUNNER_TEMP/apipdf/jennifer-module-api.pdf" book-output/api/jennifer-module-api.pdf
 
       - name: Add the go-import vanity page
         # The Go module path is jennifer-lang.dev/jennifer, so `go get` fetches

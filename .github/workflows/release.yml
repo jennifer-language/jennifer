@@ -386,15 +386,17 @@ jobs:
           cp "$RUNNER_TEMP/pdfout/jennifer-manual.pdf" release/jennifer-manual.pdf
           ls -la release/jennifer-manual.pdf
 
-      - name: Build the module API reference PDF
-        # The single-file module API reference (docs/api/jennifer-module-api.pdf) is
-        # generated from each module's doc comments by scripts/gen-module-docs.j -
-        # the same generator docs.yml runs for the docs site. It is gitignored, so
-        # regenerate it here and copy it into the release directory to ship it as a
-        # release asset. `--pdf` renders the PDF into docs/api/.
+      - name: Build the module API reference PDF (Grimoire)
+        # The single-file module API reference as one PDF, built by Grimoire from
+        # the docs/api/ Markdown (generated from each module's doc comments by
+        # scripts/gen-module-docs.j) - grimoire-api.toml renders only api/. Reuses
+        # the ./jennifer built above and the Grimoire checkout, then copies the PDF
+        # into the release directory to ship it as an asset.
         run: |
-          go run ./cmd/jennifer run scripts/gen-module-docs.j --pdf
-          cp docs/api/jennifer-module-api.pdf release/
+          set -eu
+          ./jennifer run scripts/gen-module-docs.j
+          ./jennifer run --sysmoddir=modules .grimoire/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
+          cp "$RUNNER_TEMP/apipdf/jennifer-module-api.pdf" release/jennifer-module-api.pdf
           ls -la release/jennifer-module-api.pdf
 
       - name: Generate release-ready PKGBUILD-bin

@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: LGPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+#
+# Grimoire configuration for the standalone module API reference PDF - the whole
+# per-module reference (docs/api/, generated from the modules' own doc comments
+# by scripts/gen-module-docs.j) laid out as one file. It is a SEPARATE config
+# from grimoire.toml because it renders ONLY docs/api/: the prose manual excludes
+# api/ from its PDF (grimoire.toml `[pdf] exclude`), and this one is the inverse.
+#
+# Built alongside the manual, from this repository's own interpreter + modules
+# (see .github/workflows/docs.yml):
+#
+#   ./jennifer run --sysmoddir=modules <grimoire>/grimoire pdf -c grimoire-api.toml -o <out>
+#
+# docs/api/ has no SUMMARY.md, so Grimoire derives the outline from the directory
+# tree (the index, then one page per module).
+
+[book]
+title = "Jennifer Module API Reference"
+description = "The public surface of every shipped module, generated from the modules' own doc comments."
+authors = ["mplx <jennifer@mplx.dev>"]
+authorsLabel = "Made with ❤ by"
+language = "en"
+src = "docs/api"
+
+[build]
+out = "book-output"
+
+[html]
+# Unused by `grimoire pdf`, but kept the same as the manual so the PDF's colours
+# and code highlighting match the site.
+theme = "obsidian"
+
+[highlight]
+enabled = true
+
+[pdf]
+enabled = true
+output = "jennifer-module-api.pdf"
+paper = "a4"
+bookmarkLevel = 2
+pageNumbers = true
+footerLeft = "Jennifer Module API Reference {version} {commit}"
+titlePage = true
