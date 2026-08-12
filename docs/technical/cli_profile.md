@@ -67,10 +67,30 @@ section is silent for a program that made no method call.
 | `--format=table`  | Human-readable text (default).                                                             |
 | `--format=pprof`  | Gzipped protobuf, hand-encoded to keep the zero-dependency stance; `go tool pprof` and speedscope.app read it. |
 | `--format=trace`  | Chrome-trace JSON of the method-call timeline (open in `chrome://tracing` / Perfetto).     |
+| `--sysmoddir D`   | System module directory for bare imports (defaults to the built-in path).                  |
+| `-I DIR`          | Add `DIR` to the module search path (repeatable), same as `run`.                           |
+| `--vendor DIR`    | Vendor root for `@scope/package` deck imports.                                              |
 
 Unknown `--format` and the unsupported `--allocs --format=trace` combination
 (allocation events have no timeline) are rejected at argument parse, not deferred
 to output.
+
+## Programs that use modules
+
+`profile` enables `import` exactly as `run` does, so a program that reaches for a
+shipped module (`markdown`, `http`, ...) profiles normally. The module's own
+statements are instrumented too and attributed to their own file positions, so a
+hot line inside `markdown.j` appears in the table beside the caller's lines. The
+self / cumulative split is corrected at the module-call boundary: a call into a
+module counts toward the caller's *cumulative* time but not its *self* time (the
+module's own lines carry that), so nothing is double-counted. (`test --coverage`
+reuses the profiler but leaves module instrumentation off, so a coverage report
+still measures only the entry program.)
+
+After an error that executed nothing (a failed import, a bad path), no profile is
+written to stdout - the stderr error is the whole result, and in particular
+`--format=pprof` does not leave a valid-but-empty gzip behind. A run that executed
+some statements before erroring still emits its partial profile.
 
 ## Allocation profile (`--allocs`)
 

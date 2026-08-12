@@ -201,6 +201,12 @@ type Interpreter struct {
 	profStmts  bool
 	profCalls  bool
 	profAllocs bool
+	// profModules propagates the profiler into imported modules'
+	// sub-interpreters, so their statements are attributed to their own file
+	// positions. Off by default (and left off by `test --coverage`, which
+	// reuses the profiler for the entry program only); `jennifer profile`
+	// turns it on.
+	profModules bool
 }
 
 func New() *Interpreter {

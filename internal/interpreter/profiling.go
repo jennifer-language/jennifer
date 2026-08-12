@@ -46,6 +46,16 @@ func (i *Interpreter) SetProfiler(p Profiler, timeStmts, timeCalls, trackAllocs 
 	i.profAllocs = trackAllocs
 }
 
+// ProfileModules controls whether a profiler installed with SetProfiler is also
+// propagated into imported modules' sub-interpreters, so a module's statements
+// are recorded against their own file positions (a reader sees `markdown.j:2160`
+// beside their own lines). `jennifer profile` turns this on. `jennifer test
+// --coverage`, which reuses the profiler for the entry program only, leaves it
+// off, so standard-library module lines never pollute a coverage report.
+func (i *Interpreter) ProfileModules(on bool) {
+	i.profModules = on
+}
+
 // isCompoundCopyKind reports whether a value of kind k gets a real deep copy
 // from Copy() (bytes/list/map/struct). Scalars copy trivially and tasks share
 // a pointer, so neither is a meaningful "eager copy" to count.

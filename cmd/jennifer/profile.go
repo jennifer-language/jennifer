@@ -13,6 +13,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	oslib "jennifer-lang.dev/jennifer/internal/lib/os"
+	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/preproc"
 	"jennifer-lang.dev/jennifer/internal/profile"
@@ -69,6 +70,19 @@ func runProfile(args []string) int {
 	in.Out = os.Stderr // program output to stderr; the profile owns stdout
 	installLibraries(in)
 
+	// Enable module imports exactly as `run` does, so a program that reaches for
+	// a shipped module (`markdown`, `http`, ...) profiles instead of aborting.
+	// A bare `import "x.j"` resolves through the system module dir first, then any
+	// -I dir; `@scope/package` resolves under the vendor root.
+	sm, smErr := setupSysmoddir(opts.sysmoddir)
+	if smErr != nil {
+		fmt.Fprintf(os.Stderr, "jennifer profile: %v\n", smErr)
+		return 2
+	}
+	searchDirs := append([]string{sm.Dir}, opts.includes...)
+	in.EnableModules(baseDir, searchDirs, loadModuleProgram, installLibraries)
+	in.SetVendorRoot(module.FindVendorRoot(opts.vendor, baseDir))
+
 	mode := profile.ModeStatement
 	if opts.allocs {
 		mode = profile.ModeAllocs
@@ -82,8 +96,13 @@ func runProfile(args []string) int {
 	default:
 		in.SetProfiler(col, true, false, false)
 	}
+	// Instrument imported modules too: their statements are attributed to their
+	// own file positions, and the dispatch seam corrects the caller's self time
+	// so a module call is not double-counted.
+	in.ProfileModules(true)
 
 	code := 0
+	hadError := false
 	if runErr := in.Run(prog); runErr != nil {
 		if ex, ok := runErr.(*interpreter.ExitSignal); ok {
 			code = ex.Code
@@ -91,7 +110,16 @@ func runProfile(args []string) int {
 			fmt.Fprintf(os.Stderr, "%s: %s\n", label, runErr.Error())
 			printErrorContext(src, absPath, runErr)
 			code = 1
+			hadError = true
 		}
+	}
+
+	// After an error that collected nothing (a module-load or other failure
+	// before the first statement ran), do not write a misleading valid-but-empty
+	// profile to stdout - the stderr error is the whole story. A run that
+	// executed some statements before erroring still emits its partial profile.
+	if hadError && col.Empty() {
+		return code
 	}
 
 	// Emit whatever was collected, even after a program error.
@@ -113,11 +141,14 @@ func runProfile(args []string) int {
 }
 
 type profileOptions struct {
-	allocs   bool
-	format   string
-	path     string
-	progArgs []string
-	showHelp bool
+	allocs    bool
+	format    string
+	path      string
+	progArgs  []string
+	sysmoddir string
+	vendor    string
+	includes  []string
+	showHelp  bool
 }
 
 // parseProfileArgs parses the profile flags. Flags precede the file; anything
@@ -141,6 +172,33 @@ func parseProfileArgs(args []string) (profileOptions, bool) {
 			opts.allocs = true
 		case strings.HasPrefix(a, "--format="):
 			opts.format = strings.TrimPrefix(a, "--format=")
+		case strings.HasPrefix(a, "--sysmoddir="):
+			opts.sysmoddir = strings.TrimPrefix(a, "--sysmoddir=")
+		case a == "--sysmoddir":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "jennifer profile: --sysmoddir needs a directory argument")
+				return opts, false
+			}
+			i++
+			opts.sysmoddir = args[i]
+		case strings.HasPrefix(a, "--vendor="):
+			opts.vendor = strings.TrimPrefix(a, "--vendor=")
+		case a == "--vendor":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "jennifer profile: --vendor needs a directory argument")
+				return opts, false
+			}
+			i++
+			opts.vendor = args[i]
+		case strings.HasPrefix(a, "-I="):
+			opts.includes = append(opts.includes, strings.TrimPrefix(a, "-I="))
+		case a == "-I":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "jennifer profile: -I needs a directory argument")
+				return opts, false
+			}
+			i++
+			opts.includes = append(opts.includes, args[i])
 		default:
 			fmt.Fprintf(os.Stderr, "jennifer profile: unknown flag %q\n", a)
 			profileUsage(os.Stderr)
@@ -179,4 +237,7 @@ func profileUsage(w *os.File) {
 	fmt.Fprintln(w, "  --format=table human-readable (default)")
 	fmt.Fprintln(w, "  --format=pprof gzipped pprof, for `go tool pprof` / speedscope.app")
 	fmt.Fprintln(w, "  --format=trace Chrome-trace JSON of the call timeline (not valid with --allocs)")
+	fmt.Fprintln(w, "  --sysmoddir D  system module directory for bare imports (default: built-in)")
+	fmt.Fprintln(w, "  -I DIR         add DIR to the module search path (repeatable)")
+	fmt.Fprintln(w, "  --vendor DIR   vendor root for @scope/package imports")
 }

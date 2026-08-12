@@ -120,6 +120,16 @@ func NewCollector(mode Mode, maxCallEvents int) *Collector {
 // Mode reports the collector's mode.
 func (c *Collector) Mode() Mode { return c.mode }
 
+// Empty reports whether nothing was recorded - no statements, no allocation
+// events, no call spans. A caller uses it to avoid emitting a misleading
+// valid-but-empty profile after a run that errored before executing anything
+// (for example a module-load failure).
+func (c *Collector) Empty() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.stmts) == 0 && len(c.eager) == 0 && len(c.spawn) == 0 && len(c.calls) == 0
+}
+
 // Position is a source location where a statement executed. Exposed so a
 // coverage consumer can reuse the statement-profile hit data.
 type Position struct {

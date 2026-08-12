@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -444,7 +445,28 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 	// that recurses through a module call keeps accumulating on one
 	// goroutine-local counter and trips the catchable guard (rather than
 	// resetting per crossing and overflowing the Go stack).
-	v, err := m.interp.callMethodWithDepth(md, env.depth, args...)
+	//
+	// Under module-aware statement profiling, time the crossing and add it to the
+	// caller's `profChild` accumulator - exactly as a nested in-interpreter
+	// statement bubbles its cumulative time up - so the enclosing statement's
+	// self time excludes the module (whose own statements are recorded against
+	// their own positions inside the module's sub-interpreter). Without this the
+	// module's time would be counted twice: once in the call site's self and
+	// again in the module's own lines.
+	var v Value
+	var err error
+	if i.prof != nil && i.profStmts && i.profModules {
+		start := time.Now()
+		v, err = m.interp.callMethodWithDepth(md, env.depth, args...)
+		dur := time.Since(start)
+		root := env.root
+		if root == nil {
+			root = env
+		}
+		root.profChild += dur
+	} else {
+		v, err = m.interp.callMethodWithDepth(md, env.depth, args...)
+	}
 	if err != nil {
 		switch err.(type) {
 		case *runtimeError, *ExitSignal, *ErrorSignal:
@@ -988,6 +1010,16 @@ func (i *Interpreter) loadModule(importPath string, at parser.Node) (*loadedModu
 	sub.host = i.Host()                  // entry program, so meta.callMain reaches its handlers
 	sub.moduleNS = moduleStem(canonical) // stem, for meta.callMain struct retagging (display)
 	sub.modulePath = canonical           // canonical path, the struct-identity half
+	// Under `jennifer profile` (profModules on), instrument the module too: share
+	// the entry program's collector so the module's statements record against
+	// their own file positions, and carry the flag onward so a module the module
+	// imports is instrumented as well. The collector is concurrency-safe, and the
+	// caller's self/cum accounting is corrected at the dispatch seam
+	// (dispatchModuleMethod), so a module call's time is not double-counted.
+	if i.prof != nil && i.profModules {
+		sub.SetProfiler(i.prof, i.profStmts, i.profCalls, i.profAllocs)
+		sub.profModules = true
+	}
 
 	reg.stack = append(reg.stack, canonical)
 	runErr := sub.Run(modProg) // loads sub's imports (post-order), then runs its body
