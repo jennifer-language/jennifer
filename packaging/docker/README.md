@@ -23,6 +23,12 @@ Published to GHCR on each release tag by
 | `ghcr.io/jennifer-language/jennifer:<major>.<minor>` | `slim` | `debian:trixie-slim` | Floating minor. |
 | `ghcr.io/jennifer-language/jennifer:static` | `static` | `distroless/static` | Minimal, no shell. |
 | `ghcr.io/jennifer-language/jennifer:<version>-static` | `static` | `distroless/static` | Pinned static. |
+| `ghcr.io/jennifer-language/jennifer:dev` | `slim` | `debian:trixie-slim` | Latest commit on `main` (also `:main`). Moving tag, rebuilt every push; `meta.VERSION` is `dev`. |
+
+The release tags above (`:latest`, `:<version>`, `:static`, ...) are built on a
+version tag; `:dev` / `:main` are built on every push to `main` and overwrite the
+previous one, for trying the bleeding edge. `:dev` is slim-only (no static
+per-commit build).
 
 Both variants ship both binaries (`/usr/bin/jennifer` and
 `/usr/bin/jennifer-tiny`), the system modules, and run as a non-root user with

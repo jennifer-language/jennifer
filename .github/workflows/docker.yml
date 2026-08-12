@@ -1,22 +1,43 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# Build and push the Jennifer container images to GHCR on a version tag.
-# Two multi-arch variants from packaging/docker/Dockerfile:
+# Build and push the Jennifer container images to GHCR.
+#
+# On a version tag (a release) - two multi-arch variants from
+# packaging/docker/Dockerfile:
 #   slim   -> ghcr.io/<owner>/jennifer:<ver>, :<major>.<minor>, :latest
 #   static -> ghcr.io/<owner>/jennifer:<ver>-static, :static
-# Both linux/amd64 + linux/arm64. Cross-compiled on the amd64 runner (Go and
-# TinyGo honour GOARCH), so only the slim stage's tiny apt step touches QEMU.
-# Independent of release.yml - the image build is self-contained from source.
+#
+# On every push to main (the bleeding edge) - the slim variant only, tagged
+#   ghcr.io/<owner>/jennifer:dev  (and :main, the same image)
+# These are moving tags: each main build overwrites the previous one, so :dev is
+# always "the latest commit on main". The image reports a generic meta.VERSION of
+# "dev" (no commit id). :latest and the version tags are never touched by a main
+# push - they stay pinned to releases. The static variant is release-only (a
+# per-commit static image would double the build for little gain).
+#
+# Both release arches are linux/amd64 + linux/arm64, cross-compiled on the amd64
+# runner (Go and TinyGo honour GOARCH), so only the slim stage's tiny apt step
+# touches QEMU. Independent of release.yml - the image build is self-contained
+# from source.
 
 name: docker
 
 on:
   push:
+    branches:
+      - main
     tags:
       # Same bare-version glob as release.yml (e.g. `0.21.0`, no `v` prefix).
       - '[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
+
+# One in-flight build per ref: rapid pushes to main supersede each other (only the
+# newest commit's :dev image is built), while each tag has its own group and never
+# gets cancelled.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -58,6 +79,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push (slim)
         uses: docker/build-push-action@v6
@@ -66,17 +89,20 @@ jobs:
           file: packaging/docker/Dockerfile
           target: slim
           platforms: linux/amd64,linux/arm64
-          push: ${{ startsWith(github.ref, 'refs/tags/') }}
+          push: ${{ startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' }}
+          # A release build carries its version; a main build carries a generic
+          # "dev" (no commit id) so :dev images all report the same meta.VERSION.
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'dev' }}
           tags: ${{ steps.meta-slim.outputs.tags }}
           labels: ${{ steps.meta-slim.outputs.labels }}
           cache-from: type=gha,scope=slim
           cache-to: type=gha,scope=slim,mode=max
 
-      # ---- static (distroless / :static) ----
+      # ---- static (distroless / :static) - release-only ----
       - name: Metadata (static)
         id: meta-static
+        if: startsWith(github.ref, 'refs/tags/')
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
@@ -85,6 +111,7 @@ jobs:
             type=raw,value=static,enable=${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build and push (static)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v6
         with:
           context: .

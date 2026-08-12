@@ -122,7 +122,10 @@ The image bundles both binaries and the system modules, so a bare
 Two variants: `:latest` / `:<version>` is the Debian-slim default (full host
 features - `os.run`, TLS); `:static` / `:<version>-static` is a minimal
 distroless build (~15-25MB, no `/bin/sh`, so `os.run` of external programs is
-unavailable - use it for pure-interpreter or web-serving workloads). Build
+unavailable - use it for pure-interpreter or web-serving workloads). `:latest`
+and the version tags track releases; a **`:dev`** (also **`:main`**) slim image
+is rebuilt from the latest commit on `main` on every push - a moving tag for
+trying the bleeding edge, always overwriting the previous one. Build
 details and local-build recipes are in
 [`packaging/docker/README.md`](https://github.com/jennifer-language/jennifer/blob/main/packaging/docker/README.md).
 
