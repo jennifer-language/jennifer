@@ -2404,11 +2404,6 @@ func ensureSpace(state as Layout, needed as int) {
     return $state;
 }
 
-func finish(state as Layout) {
-    $state.doc = pdf.addPage($state.doc, $state.page);
-    return pdf.render($state.doc);
-}
-
 # --- inline layout (styled word wrapping) --------------------------
 
 # fontForInline picks the font for one inline node's kind (text / link / image ->
@@ -2918,18 +2913,36 @@ func renderBlock(state as Layout, node as Node, depth as int) {
 # --- entry points ---------------------------------------------------
 
 /**
+ * Lay a parsed (or hand-built / transformed) `markdown` document tree out to a
+ * `pdf.Document`, ready for any document-level work - a running header or footer
+ * (`pdf.setHeader` / `pdf.setFooter`, with `%page%` / `%pages%`), extra `pdf.info`
+ * metadata, more bookmarks - before it is serialised with `pdf.render`. This is
+ * the seam `renderPdf` renders through; use it directly when you need the document
+ * itself (a page number in a book's footer needs the total page count, which only
+ * exists once the whole document is laid out).
+ * @param doc {Node} the document root node from `parse`
+ * @param opts {PdfOptions} the page geometry and fonts
+ * @return {pdf.Document} the laid-out document, not yet serialised
+ */
+export func renderPdfDoc(doc as Node, opts as PdfOptions) {
+    def state as Layout init newLayout($opts);
+    for (def block in children($doc)) {
+        $state = renderBlock($state, $block, 0);
+    }
+    $state.doc = pdf.addPage($state.doc, $state.page);
+    return $state.doc;
+}
+
+/**
  * Render a parsed (or hand-built / transformed) `markdown` document tree to PDF bytes
- * with the given options.
+ * with the given options. A one-liner over `renderPdfDoc` + `pdf.render`; call those
+ * two directly when you need to touch the `pdf.Document` in between.
  * @param doc {Node} the document root node from `parse`
  * @param opts {PdfOptions} the page geometry and fonts
  * @return {bytes} the PDF document
  */
 export func renderPdf(doc as Node, opts as PdfOptions) {
-    def state as Layout init newLayout($opts);
-    for (def block in children($doc)) {
-        $state = renderBlock($state, $block, 0);
-    }
-    return finish($state);
+    return pdf.render(renderPdfDoc($doc, $opts));
 }
 
 /**

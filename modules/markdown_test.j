@@ -912,6 +912,43 @@ func testRenderProducesValidPdf() {
     testing.assertTrue(binary.startsWith($out, pdfMarker()));
 }
 
+# bytesEqual compares two byte arrays element-wise.
+func bytesEqual(a as bytes, b as bytes) {
+    if (len($a) != len($b)) {
+        return false;
+    }
+    def i as int init 0;
+    while ($i < len($a)) {
+        if ($a[$i] != $b[$i]) {
+            return false;
+        }
+        $i = $i + 1;
+    }
+    return true;
+}
+
+func testRenderPdfDocReturnsUsableDocument() {
+    # renderPdfDoc hands back the laid-out pdf.Document so document-level work
+    # (here a running footer with page numbers) can happen before serialization
+    def tree as Node init parse("# One\n\nbody\n\n<!-- pagebreak -->\n\n# Two\n\nmore\n");
+    def doc as pdf.Document init renderPdfDoc($tree, pdfDefaults());
+    testing.assertEqual(len($doc.pages), 2);
+    def lbl as pdf.PageLabel init pdf.pageLabel();
+    $lbl.right = "%page%/%pages%";
+    $doc = pdf.setFooter($doc, $lbl);
+    def out as bytes init pdf.render($doc);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+    testing.assertEqual(countPdfPages($out), 2);
+}
+
+func testRenderPdfEqualsDocThenRender() {
+    # renderPdf is exactly pdf.render(renderPdfDoc(...)); the split changed nothing
+    def tree as Node init parse("# Title\n\nsome **body** text\n\n- a\n- b\n");
+    def viaPdf as bytes init renderPdf($tree, pdfDefaults());
+    def viaDoc as bytes init pdf.render(renderPdfDoc($tree, pdfDefaults()));
+    testing.assertTrue(bytesEqual($viaPdf, $viaDoc));
+}
+
 # mdArrow builds U+2190 (LEFTWARDS ARROW, outside WinAnsi) from its UTF-8 bytes,
 # so these tests need no non-ASCII glyph in the source.
 func mdArrow() {

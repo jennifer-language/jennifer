@@ -30,6 +30,7 @@ Rendering (Markdown in, HTML / terminal text / PDF out):
 | `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
 | `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts, document metadata, bookmarks). |
 | `markdown.renderPdf(doc, opts)` | `bytes` | Lay a parsed (or transformed) tree out to a PDF.               |
+| `markdown.renderPdfDoc(doc, opts)` | `pdf.Document` | Lay a tree out to a `pdf.Document` (not yet serialized), so document-level work - a running header / footer, extra metadata - can happen before `pdf.render`. |
 | `markdown.pageBreak()`        | `Node`   | A page-break node; `renderPdf` starts the next content on a fresh page. |
 
 `toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, and `toPdf` over
@@ -324,6 +325,22 @@ general-purpose CommonMark conformance.
 > $o.quoteRule = markdown.gray(150);
 > $o.creator = "Grimoire";
 > def out as bytes init markdown.toPdfWith($md, $o);
+> ```
+>
+> **Running headers / footers (page numbers).** `toPdf` / `renderPdf` return
+> `bytes`, but `pdf`'s running header / footer take a `pdf.Document`. Use
+> `markdown.renderPdfDoc` to get the laid-out document, attach the footer with
+> [`pdf.setFooter`](pdf.md) (its `%page%` / `%pages%` placeholders fill in per page,
+> which needs the total - known only once the whole book is laid out), then
+> serialize with `pdf.render`:
+>
+> ```jennifer
+> import "markdown.j" as markdown;
+> import "pdf.j" as pdf;
+> def doc as pdf.Document init markdown.renderPdfDoc(markdown.parse($md), markdown.pdfDefaults());
+> def lbl as pdf.PageLabel init pdf.pageLabel();
+> $lbl.right = "%page%/%pages%";
+> def out as bytes init pdf.render(pdf.setFooter($doc, $lbl));
 > ```
 
 ## See also
