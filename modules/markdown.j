@@ -767,19 +767,20 @@ func isDelimiterRow(s as string) {
     return true;
 }
 
-# looksLikeTable reports whether lines[i] opens a table: a pipe-bearing header
-# row over a delimiter row of the same column count.
-func looksLikeTable(lines as list of string, i as int) {
-    if ($i + 1 >= len($lines)) {
+# looksLikeTable reports whether `row` opens a table: a pipe-bearing header row
+# over a delimiter row of the same column count. Takes the two lines rather than
+# the whole list plus an index - a caller does this once per plain line, so
+# binding the entire line list by value here (Jennifer's value semantics) made
+# the parse quadratic in document length. `next` is "" at end of document, which
+# is not a delimiter row, so a trailing pipe row correctly does not open a table.
+func looksLikeTable(row as string, next as string) {
+    if (not strings.contains($row, "|")) {
         return false;
     }
-    if (not strings.contains($lines[$i], "|")) {
+    if (not isDelimiterRow($next)) {
         return false;
     }
-    if (not isDelimiterRow($lines[$i + 1])) {
-        return false;
-    }
-    return len(splitCells($lines[$i])) == len(parseAligns($lines[$i + 1]));
+    return len(splitCells($row)) == len(parseAligns($next));
 }
 
 # tableFrom parses the table opening at line `i` (header, delimiter, then data
@@ -1001,8 +1002,13 @@ func parseLines(lines as list of string) {
         }
         def lt as string init lineType(strings.trim($line), $line);
         # A table opens on a pipe row over a delimiter row; it reads as "plain"
-        # but needs the two-line lookahead lineType cannot do.
-        def isTable as bool init ($lt == "plain") and looksLikeTable($lines, $i);
+        # but needs the two-line lookahead lineType cannot do. Pass the two lines
+        # rather than the whole list (see looksLikeTable) to keep the parse linear.
+        def next as string init "";
+        if ($i + 1 < $n) {
+            $next = $lines[$i + 1];
+        }
+        def isTable as bool init ($lt == "plain") and looksLikeTable($line, $next);
         # A paragraph continues only across a plain, non-table line.
         if ((not ($lt == "plain") or $isTable) and len($para) > 0) {
             $blocks[] = paraBlock($para);
@@ -3332,7 +3338,11 @@ export func tablePretty(md as string) {
     def n as int init len($lines);
     def i as int init 0;
     while ($i < $n) {
-        if (looksLikeTable($lines, $i)) {
+        def next as string init "";
+        if ($i + 1 < $n) {
+            $next = $lines[$i + 1];
+        }
+        if (looksLikeTable($lines[$i], $next)) {
             def tp as TablePretty init prettyTableAt($lines, $i);
             for (def line in $tp.lines) {
                 $out[] = $line;

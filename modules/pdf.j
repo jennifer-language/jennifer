@@ -1453,27 +1453,39 @@ export func textBlockUnicode(pg as Page, x as int, y as int, width as int, lf as
 
 # --- render (exported) ------------------------------------------------------
 
-# appendStr appends a string's UTF-8 bytes to a buffer.
-func appendStr(buf as bytes, s as string) {
-    def chunk as bytes init convert.bytesFromString($s, "utf-8");
-    def i as int init 0;
-    def n as int init len($chunk);
-    while ($i < $n) {
-        $buf[] = $chunk[$i];
-        $i = $i + 1;
-    }
-    return $buf;
+# strChunk builds one output byte segment from a string's UTF-8 bytes. render()
+# collects segments in a list and joins them once (joinBytes); it never passes a
+# growing buffer through a helper, because value semantics would deep-copy the
+# whole buffer on every call and make render O(objects * output-size).
+func strChunk(s as string) {
+    return convert.bytesFromString($s, "utf-8");
 }
 
-# appendBytes appends a raw byte chunk to a buffer.
-func appendBytes(buf as bytes, chunk as bytes) {
-    def i as int init 0;
-    def n as int init len($chunk);
-    while ($i < $n) {
-        $buf[] = $chunk[$i];
-        $i = $i + 1;
+# joinBytes concatenates a list of byte segments into one bytes. It reduces the
+# list pairwise (adjacent segments joined per round) rather than folding a single
+# accumulator, so it is O(total * log segments) of bulk binary.concat copies
+# instead of the O(total^2) a left-fold of concat (each copying the running
+# result) would cost - and it avoids a per-byte interpreter append loop entirely.
+func joinBytes(segs as list of bytes) {
+    if (len($segs) == 0) {
+        def empty as bytes;
+        return $empty;
     }
-    return $buf;
+    def cur as list of bytes init $segs;
+    while (len($cur) > 1) {
+        def nxt as list of bytes init [];
+        def i as int init 0;
+        def n as int init len($cur);
+        while ($i + 1 < $n) {
+            $nxt[] = binary.concat($cur[$i], $cur[$i + 1]);
+            $i = $i + 2;
+        }
+        if ($i < $n) {
+            $nxt[] = $cur[$i];
+        }
+        $cur = $nxt;
+    }
+    return $cur[0];
 }
 
 # zeroPad left-pads a number with zeros to a fixed width (for xref offsets).
@@ -1908,20 +1920,28 @@ export func render(doc as Document) {
     }
     def totalObjs as int init $next - 1;
 
-    def buf as bytes;
+    # Output is assembled as a list of byte segments joined once at the end
+    # (joinBytes), not appended into a single growing buffer: passing a growing
+    # `bytes` through an append helper deep-copies the whole buffer per object
+    # (value semantics), which made render O(objects * output-size). Each object
+    # pushes O(1) segments; `offsets` records each object's SEGMENT index, resolved
+    # to a byte offset by one prefix-sum pass before the xref table is written.
+    def segs as list of bytes init [];
     def offsets as list of int init [];
 
     # header + binary marker comment (four high bytes)
-    $buf = appendStr($buf, "%PDF-1.7\n");
-    $buf[] = 0x25; $buf[] = 0xE2; $buf[] = 0xE3; $buf[] = 0xCF; $buf[] = 0xD3; $buf[] = 0x0A;
+    $segs[] = strChunk("%PDF-1.7\n");
+    def marker as bytes;
+    $marker[] = 0x25; $marker[] = 0xE2; $marker[] = 0xE3; $marker[] = 0xCF; $marker[] = 0xD3; $marker[] = 0x0A;
+    $segs[] = $marker;
 
     # obj 1: catalog
-    $offsets[] = len($buf);
+    $offsets[] = len($segs);
     def catExtra as string init "";
     if ($hasOutline) {
         $catExtra = " /Outlines " + convert.toString($outlineRoot) + " 0 R /PageMode /UseOutlines";
     }
-    $buf = appendStr($buf, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R" + $catExtra + " >>\nendobj\n");
+    $segs[] = strChunk("1 0 obj\n<< /Type /Catalog /Pages 2 0 R" + $catExtra + " >>\nendobj\n");
 
     # obj 2: page tree
     def kids as string init "";
@@ -1933,9 +1953,8 @@ export func render(doc as Document) {
         $kids = $kids + convert.toString($pageNum[$p]) + " 0 R";
         $p = $p + 1;
     }
-    $offsets[] = len($buf);
-    $buf = appendStr(
-        $buf,
+    $offsets[] = len($segs);
+    $segs[] = strChunk(
         "2 0 obj\n<< /Type /Pages /Kids [" + $kids + "] /Count " + convert.toString($numPages) +
             " >>\nendobj\n");
 
@@ -1966,37 +1985,34 @@ export func render(doc as Document) {
             }
             $res = $res + " /XObject << " + $xobjDict + ">>";
         }
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($pageNum[$p]) + " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
                 convert.toString($pg.width) + " " + convert.toString($pg.height) +
                 "] /Resources << " + $res + " >> /Contents " + convert.toString($contentNum[$p]) +
                 " 0 R" + annotsArray($pg) + " >>\nendobj\n");
 
         def comp as bytes init compress.pack(convert.bytesFromString($pg.content, "utf-8"), "zlib");
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($contentNum[$p]) + " 0 obj\n<< /Length " + convert.toString(len($comp)) +
                 " /Filter /FlateDecode >>\nstream\n");
-        $buf = appendBytes($buf, $comp);
-        $buf = appendStr($buf, "\nendstream\nendobj\n");
+        $segs[] = $comp;
+        $segs[] = strChunk("\nendstream\nendobj\n");
         $p = $p + 1;
     }
 
     # standard-14 font objects (shared)
     def f as int init 0;
     while ($f < $numFonts) {
-        $offsets[] = len($buf);
+        $offsets[] = len($segs);
         # Symbol and ZapfDingbats carry their own built-in encodings; forcing
         # /WinAnsiEncoding on them remaps their glyphs, so omit /Encoding there.
         def enc as string init " /Encoding /WinAnsiEncoding";
         if ($fontNames[$f] == "Symbol" or $fontNames[$f] == "ZapfDingbats") {
             $enc = "";
         }
-        $buf = appendStr(
-            $buf,
+        $segs[] = strChunk(
             convert.toString($std14Base + $f) +
                 " 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /" +
                 $fontNames[$f] + $enc + " >>\nendobj\n");
@@ -2016,13 +2032,12 @@ export func render(doc as Document) {
         # FontFile2 (the raw font program, FlateDecode-compressed)
         def raw as bytes init font.data($fe);
         def fcomp as bytes init compress.pack($raw, "zlib");
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($embFile[$e]) + " 0 obj\n<< /Length " + convert.toString(len($fcomp)) +
                 " /Length1 " + convert.toString(len($raw)) + " /Filter /FlateDecode >>\nstream\n");
-        $buf = appendBytes($buf, $fcomp);
-        $buf = appendStr($buf, "\nendstream\nendobj\n");
+        $segs[] = $fcomp;
+        $segs[] = strChunk("\nendstream\nendobj\n");
 
         # FontDescriptor
         def bb as list of int init font.bbox($fe);
@@ -2030,9 +2045,8 @@ export func render(doc as Document) {
         if ($cap == 0) {
             $cap = font.ascender($fe);
         }
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($embDesc[$e]) + " 0 obj\n<< /Type /FontDescriptor /FontName /" + $base +
                 " /Flags 4 /FontBBox [" + convert.toString(scaleMetric($bb[0], $upem)) + " " +
                 convert.toString(scaleMetric($bb[1], $upem)) + " " +
@@ -2044,9 +2058,8 @@ export func render(doc as Document) {
                 " /StemV 80 /FontFile2 " + convert.toString($embFile[$e]) + " 0 R >>\nendobj\n");
 
         # CIDFontType2 (descendant)
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($embCid[$e]) +
                 " 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" + $base +
                 " /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>" +
@@ -2055,9 +2068,8 @@ export func render(doc as Document) {
                 "] >>\nendobj\n");
 
         # Type0 (composite)
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($embType0[$e]) +
                 " 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /" + $base +
                 " /Encoding /Identity-H /DescendantFonts [" + convert.toString($embCid[$e]) +
@@ -2065,13 +2077,12 @@ export func render(doc as Document) {
 
         # ToUnicode CMap
         def cmap as bytes init convert.bytesFromString(buildToUnicode($gids, $gmap), "utf-8");
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($embToUni[$e]) + " 0 obj\n<< /Length " + convert.toString(len($cmap)) +
                 " >>\nstream\n");
-        $buf = appendBytes($buf, $cmap);
-        $buf = appendStr($buf, "\nendstream\nendobj\n");
+        $segs[] = $cmap;
+        $segs[] = strChunk("\nendstream\nendobj\n");
         $e = $e + 1;
     }
 
@@ -2089,29 +2100,27 @@ export func render(doc as Document) {
                 " /BitsPerComponent " + convert.toString($img.bits) + " /Columns " +
                 convert.toString($img.width) + " >>";
         }
-        $offsets[] = len($buf);
-        $buf = appendStr(
-            $buf,
+        $offsets[] = len($segs);
+        $segs[] = strChunk(
             convert.toString($imgNum[$im]) +
                 " 0 obj\n<< /Type /XObject /Subtype /Image /Width " + convert.toString($img.width) +
                 " /Height " + convert.toString($img.height) + " /ColorSpace " + $img.colorSpace +
                 " /BitsPerComponent " + convert.toString($img.bits) + " /Filter /" + $img.filter +
                 $dp + $img.decode + $smaskRef + " /Length " + convert.toString(len($img.data)) +
                 " >>\nstream\n");
-        $buf = appendBytes($buf, $img.data);
-        $buf = appendStr($buf, "\nendstream\nendobj\n");
+        $segs[] = $img.data;
+        $segs[] = strChunk("\nendstream\nendobj\n");
 
         if ($img.hasSmask) {
-            $offsets[] = len($buf);
-            $buf = appendStr(
-                $buf,
+            $offsets[] = len($segs);
+            $segs[] = strChunk(
                 convert.toString($smaskNum[$im]) +
                     " 0 obj\n<< /Type /XObject /Subtype /Image /Width " +
                     convert.toString($img.width) + " /Height " + convert.toString($img.height) +
                     " /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length " +
                     convert.toString(len($img.smask)) + " >>\nstream\n");
-            $buf = appendBytes($buf, $img.smask);
-            $buf = appendStr($buf, "\nendstream\nendobj\n");
+            $segs[] = $img.smask;
+            $segs[] = strChunk("\nendstream\nendobj\n");
         }
         $im = $im + 1;
     }
@@ -2122,8 +2131,8 @@ export func render(doc as Document) {
         for (def key in $doc.info) {
             $dict = $dict + "/" + pdfName($key) + " " + infoValue($doc.info[$key]) + " ";
         }
-        $offsets[] = len($buf);
-        $buf = appendStr($buf, convert.toString($infoNum) + " 0 obj\n<< " + $dict + ">>\nendobj\n");
+        $offsets[] = len($segs);
+        $segs[] = strChunk(convert.toString($infoNum) + " 0 obj\n<< " + $dict + ">>\nendobj\n");
     }
 
     # outline (bookmark) objects: the /Outlines root, then one per entry, in
@@ -2131,18 +2140,39 @@ export func render(doc as Document) {
     if ($hasOutline) {
         def outObjs as list of string init buildOutlineObjects($doc.outline, $outlineRoot, $outlineItems, $pageNum);
         for (def obj in $outObjs) {
-            $offsets[] = len($buf);
-            $buf = appendStr($buf, $obj);
+            $offsets[] = len($segs);
+            $segs[] = strChunk($obj);
         }
     }
 
+    # Resolve each object's recorded SEGMENT index to a byte offset. segOff[i] is
+    # the byte offset of segment i (prefix sum of segment lengths); segOff[len] is
+    # the total content length, which is where the xref table starts. All content
+    # segments are in place now, so this single pass replaces what a running
+    # len($buf) gave before - without the per-object whole-buffer copy.
+    def segOff as list of int init [];
+    def acc as int init 0;
+    def si as int init 0;
+    def nseg as int init len($segs);
+    while ($si < $nseg) {
+        $segOff[] = $acc;
+        $acc = $acc + len($segs[$si]);
+        $si = $si + 1;
+    }
+    $segOff[] = $acc;
+    def oi as int init 0;
+    while ($oi < len($offsets)) {
+        $offsets[$oi] = $segOff[$offsets[$oi]];
+        $oi = $oi + 1;
+    }
+    def xrefOffset as int init $segOff[$nseg];
+
     # cross-reference table
-    def xrefOffset as int init len($buf);
-    $buf = appendStr($buf, "xref\n0 " + convert.toString($totalObjs + 1) + "\n");
-    $buf = appendStr($buf, "0000000000 65535 f \n");
+    $segs[] = strChunk("xref\n0 " + convert.toString($totalObjs + 1) + "\n");
+    $segs[] = strChunk("0000000000 65535 f \n");
     def k as int init 0;
     while ($k < len($offsets)) {
-        $buf = appendStr($buf, zeroPad($offsets[$k], 10) + " 00000 n \n");
+        $segs[] = strChunk(zeroPad($offsets[$k], 10) + " 00000 n \n");
         $k = $k + 1;
     }
 
@@ -2151,9 +2181,8 @@ export func render(doc as Document) {
     if ($hasInfo) {
         $trailerInfo = " /Info " + convert.toString($infoNum) + " 0 R";
     }
-    $buf = appendStr(
-        $buf,
+    $segs[] = strChunk(
         "trailer\n<< /Size " + convert.toString($totalObjs + 1) + " /Root 1 0 R" + $trailerInfo +
             " >>\nstartxref\n" + convert.toString($xrefOffset) + "\n%%EOF\n");
-    return $buf;
+    return joinBytes($segs);
 }
