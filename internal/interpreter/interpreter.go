@@ -155,6 +155,15 @@ type Interpreter struct {
 	// REPL. It gates `export`: a module publishes names, a script may not.
 	isModule bool
 
+	// entryGlobalsImmutable is set by Run for a non-module entry program when
+	// the program declares no mutable top-level global (only `def const` /
+	// `func` / `def struct` / `def enum`). It widens read-only-parameter borrow
+	// (argBorrowed) to a single-file script: with no mutable global for an
+	// argument to alias and a body to mutate, the borrow aliasing hole is
+	// unrepresentable, exactly as in a module. Left false for the REPL, whose
+	// mutable global set grows across inputs.
+	entryGlobalsImmutable bool
+
 	// host is the entry-program interpreter for a module sub-interpreter, or
 	// nil on the entry program itself. meta.callMain / meta.definedMain resolve
 	// against it, so a framework module (e.g. `web`) can dispatch by name to
@@ -894,7 +903,7 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int,
 			releaseBlockEnv(callFrame)
 			return Value{}, fmt.Errorf("argument %d to %q must be %s, got %s", idx+1, m.Name, p.Type, args[idx].Kind)
 		}
-		bound := bindParamValue(args[idx], p.Type)
+		bound := i.bindArg(args[idx], p)
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 			releaseBlockEnv(callFrame)
 			return Value{}, err
@@ -1040,6 +1049,15 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// the same annotations.
 	if err := parser.Resolve(prog); err != nil {
 		return err
+	}
+	// A single-file script with no mutable top-level global cannot construct the
+	// borrow aliasing hole (an argument aliasing a mutable global that the body
+	// mutates), so read-only-parameter borrow is sound for its own methods too,
+	// not just imported modules. Only a top-level mutable `def` creates such a
+	// global; `def const` and defs nested in a top-level block (loop / if body,
+	// which are frame-scoped and unreachable from a method) do not.
+	if !i.isModule {
+		i.entryGlobalsImmutable = !hasMutableTopLevelGlobal(prog)
 	}
 	if err := i.processImports(prog, false); err != nil {
 		return err
@@ -1789,6 +1807,44 @@ func bindParamValue(v Value, declType parser.Type) Value {
 		return v
 	}
 	return stampDeclaredType(v.Copy(), declType)
+}
+
+// argBorrowed reports whether an argument for parameter p will be bound by
+// alias rather than deep-copied. Borrow applies only when the resolver marked
+// the parameter borrowable (never written in the body, borrow-safe type) AND
+// this interpreter runs a module: a module's top level is declarations-only, so
+// no mutable global exists to alias the argument and be mutated during the call,
+// which is the one path by which a read-only-aliased backing could change under
+// a value-semantic callee. An entry program (isModule false) can hold mutable
+// globals, so it keeps the copying bind.
+func (i *Interpreter) argBorrowed(p parser.Param) bool {
+	return p.Borrow && (i.isModule || i.entryGlobalsImmutable)
+}
+
+// hasMutableTopLevelGlobal reports whether the program declares a mutable
+// top-level variable - the only construct that creates a global a method could
+// alias through an argument and mutate. `def const` is immutable; a `def` nested
+// in a top-level block lives in that block's frame, not the global scope reached
+// by methods, so only the direct top-level statement list is scanned.
+func hasMutableTopLevelGlobal(prog *parser.Program) bool {
+	for _, s := range prog.TopLevel {
+		if d, ok := s.(*parser.DefineStmt); ok && !d.IsConst {
+			return true
+		}
+	}
+	return false
+}
+
+// bindArg binds one argument into a call frame, aliasing the argument's backing
+// when argBorrowed holds and copying it otherwise. On the borrow path
+// stampDeclaredType only sets header type tags (the type is borrow-safe, so it
+// never recurses into the shared backing); the callee never writes the
+// parameter, so the alias is observationally identical to a copy.
+func (i *Interpreter) bindArg(v Value, p parser.Param) Value {
+	if i.argBorrowed(p) {
+		return stampDeclaredType(v, p.Type)
+	}
+	return bindParamValue(v, p.Type)
 }
 
 func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error {
@@ -4760,12 +4816,13 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 			}
 		}
 		// Value semantics: arguments copy into the call frame, so callee
-		// mutations don't leak back to the caller. bindParamValue stamps the
-		// declared parameter type (so compound params know their element /
-		// key+value type for index-write checks) and skips Copy for scalar
-		// kinds, where it is a no-op.
-		bound := bindParamValue(v, p.Type)
-		if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+		// mutations don't leak back to the caller. bindArg stamps the declared
+		// parameter type (so compound params know their element / key+value type
+		// for index-write checks) and skips Copy for scalar kinds (a no-op) and
+		// for a borrowable parameter (a read-only alias - no copy happens, so no
+		// eager-copy is recorded).
+		bound := i.bindArg(v, p)
+		if !i.argBorrowed(p) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 			pf, pl, pcol := posFor(a)
 			i.prof.RecordEagerCopy(pf, pl, pcol)
 		}
@@ -4895,8 +4952,8 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 					File: file, Line: line, Col: col,
 				}
 			}
-			bound := bindParamValue(v, p.Type)
-			if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+			bound := i.bindArg(v, p)
+			if !i.argBorrowed(p) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 				pf, pl, pcol := posFor(a)
 				i.prof.RecordEagerCopy(pf, pl, pcol)
 			}

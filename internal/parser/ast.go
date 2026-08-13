@@ -265,6 +265,14 @@ type Param struct {
 	File string
 	Line int
 	Col  int
+	// Borrow is set by Resolve when the method body never writes this
+	// parameter and its type is borrow-safe (a compound whose type stamp does
+	// not recurse into element backing). The interpreter may then bind the
+	// argument by alias instead of deep-copying it, when it runs in a context
+	// with no mutable globals (a module) so the shared backing cannot be
+	// mutated during the call. A read-only alias is observationally identical
+	// to a copy; this only removes the copy.
+	Borrow bool
 }
 
 // StructField is one declared field of a struct definition.

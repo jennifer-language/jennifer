@@ -72,6 +72,44 @@ eager deep copies at every store site, not on copy-on-write:
   / field reads, const refs, and calls can hand back a reference
   into a live binding, so those are still eager-copied.
 
+**Read-only-parameter borrow.** The one carve-out to "parameter
+binding always copies": when a method never writes a parameter, its
+argument is bound by **alias** rather than deep-copied, since a
+read-only alias is observationally identical to a copy. `Resolve`
+runs `markBorrowableParams` per method - a statement-level write-scan
+of the body (descending through nested control flow; because no
+shadowing is allowed, a written name is unambiguously the parameter,
+and `spawn` bodies mutate their own deep-copied snapshot so are
+correctly skipped) - and sets `Param.Borrow` when the parameter is
+never written **and** its type is *borrow-safe*: a compound whose
+`stampDeclaredType` does not recurse into element backing (a flat
+`list` / `map`, or a struct / `bytes`; a `list of list` falls back to
+copying so the stamp cannot mutate the shared backing).
+`Interpreter.bindArg` aliases when
+`Param.Borrow && (i.isModule || i.entryGlobalsImmutable)` and copies
+(`bindParamValue`) otherwise. The gate is the soundness boundary:
+"never writes the parameter" alone is not enough, because if the
+argument aliases a mutable global and the body mutates that global, a
+borrowed read would see the change where a copy would not. So borrow
+is enabled only where no mutable global can exist to alias: a **module**
+(top level is declarations-only, and cross-module arguments are copies
+at the boundary), or a **single-file script that declares no mutable
+top-level `def`** (`hasMutableTopLevelGlobal` false, recorded as
+`entryGlobalsImmutable` in `Run`) so a script's own read-only helpers
+benefit without being moved into a module. A script that *does* hold a
+mutable global, and the REPL (whose global set grows across inputs),
+keep the copying bind; a per-function escape analysis that borrows in
+provably global-immutable functions of such a script is the deferred
+follow-on.
+This is the extension of the scalar copy-elision to compound Kinds
+that `bindParamValue` was documented as needing a mutation-safety
+proof for. It removes accidental quadratics in read-only helpers (a
+`markdown` block collector that binds the whole line list once per
+block; the `countNodes` budget walk). Pinned by
+`internal/parser/borrow_test.go` (write-scan + type gate) and
+`internal/interpreter/borrow_test.go` (the entry-program soundness
+gate and module value-semantics parity).
+
 A shared-marker copy-on-write protocol (`Value.shared *bool` +
 `Share()` / `Ensure()`) was tried here and removed. It was inert: a
 value receiver plus by-value `Environment.Get` / `GetAt` reads meant
@@ -80,6 +118,24 @@ binding, so `Ensure` never detached and correctness always came from
 the eager copies above. Reintroducing it write-through (store
 `*Binding` so the marker propagates) was considered and rejected -
 see [rejected.md](rejected.md).
+
+Borrow and that COW are near-opposites, which is why one is rejected
+and the other ships. COW is dynamic and optimistic: share every value
+by default, then *detect a mutation at runtime and deep-copy at that
+moment* - so it needs a live marker on every read/write and it keeps a
+**mutable** shared backing around until a write splits it, exactly the
+shared mutable state the eager-copy model is designed to avoid. Borrow
+is static and conservative: share only the bindings a resolve-time
+proof shows are **never** written, so there is no detach, no runtime
+machinery, and the shared backing is **immutable** for the alias's
+lifetime (as safe to share as a `const`). COW was also rejected as
+barely-reachable - because every store copies, two live bindings
+almost never alias, so its deferred-copy case rarely occurs; borrow
+targets the opposite, ubiquitous case, since parameter binding is a
+store site that *always* copies and read-only helpers are everywhere.
+Borrow is a second narrow, provably-safe copy elision layered on top
+of eager copies (like `rhsFreshLiteral`), not a replacement of the
+model the way COW would have been.
 
 Aliasing correctness is exercised by
 [`internal/interpreter/value_alias_test.go`](https://github.com/jennifer-language/jennifer/blob/main/internal/interpreter/value_alias_test.go) -

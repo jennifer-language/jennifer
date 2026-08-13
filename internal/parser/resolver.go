@@ -229,7 +229,131 @@ func (r *resolver) resolveMethod(m *MethodDef, numGlobals int, globals *scopeFra
 	r.scopes = []*scopeFrame{globals, callFrame}
 	err := r.resolveBlock(m.Body)
 	r.scopes = saved
-	return err
+	if err != nil {
+		return err
+	}
+	markBorrowableParams(m)
+	return nil
+}
+
+// markBorrowableParams flags each parameter the method body never writes and
+// whose type is borrow-safe, so the interpreter can bind its argument by alias
+// instead of deep-copying it (read-only-parameter borrow). No-shadowing means a
+// name written in the body always refers to the parameter, so a written-root
+// scan of the body is exact. Assignments are statements (never expressions), so
+// scanning statement-level lvalues through the control-flow blocks catches every
+// write; expression subtrees hold no writes, and a `spawn` body (reached only
+// through an expression) mutates its own deep-copied snapshot, so skipping it is
+// correct, not just conservative.
+func markBorrowableParams(m *MethodDef) {
+	if len(m.Params) == 0 {
+		return
+	}
+	written := map[string]bool{}
+	collectWrittenRoots(m.Body.Stmts, written)
+	for i := range m.Params {
+		p := &m.Params[i]
+		p.Borrow = borrowSafeType(&p.Type) && !written[p.Name]
+	}
+}
+
+// borrowSafeType reports whether a parameter of type t can be bound by alias
+// without stampDeclaredType mutating the shared backing. True only when the
+// stamp does not recurse into element backing: a list/map whose element/value
+// type is itself a list/map would have its nested elements re-stamped in place,
+// so those fall back to copying. Scalars never reach the copy path; a struct /
+// enum (parsed as TypeStruct) and bytes take stampDeclaredType's no-op default,
+// and a flat list/map only sets header type tags.
+func borrowSafeType(t *Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind {
+	case TypeList:
+		return t.Element == nil || (t.Element.Kind != TypeList && t.Element.Kind != TypeMap)
+	case TypeMap:
+		return t.ValType == nil || (t.ValType.Kind != TypeList && t.ValType.Kind != TypeMap)
+	case TypeStruct, TypeBytes:
+		return true
+	default:
+		return false
+	}
+}
+
+// collectWrittenRoots records the root variable name of every lvalue statement
+// in stmts, descending through nested control-flow blocks (but not expressions).
+func collectWrittenRoots(stmts []Stmt, written map[string]bool) {
+	for _, s := range stmts {
+		collectWrittenInStmt(s, written)
+	}
+}
+
+func collectWrittenInStmt(s Stmt, written map[string]bool) {
+	switch st := s.(type) {
+	case *AssignStmt:
+		written[st.VarName] = true
+	case *IndexAssignStmt:
+		if n := lvalueRootName(st.Target); n != "" {
+			written[n] = true
+		}
+	case *AppendStmt:
+		if st.Target != nil {
+			written[st.Target.Name] = true
+		}
+	case *FieldAssignStmt:
+		if n := lvalueRootName(st.Target); n != "" {
+			written[n] = true
+		}
+	case *IfStmt:
+		collectWrittenRoots(st.Then.Stmts, written)
+		for _, b := range st.ElseIfBodies {
+			collectWrittenRoots(b.Stmts, written)
+		}
+		if st.Else != nil {
+			collectWrittenRoots(st.Else.Stmts, written)
+		}
+	case *MatchStmt:
+		for _, arm := range st.Arms {
+			collectWrittenRoots(arm.Body.Stmts, written)
+		}
+		if st.Else != nil {
+			collectWrittenRoots(st.Else.Stmts, written)
+		}
+	case *WhileStmt:
+		collectWrittenRoots(st.Body.Stmts, written)
+	case *ForStmt:
+		if st.Init != nil {
+			collectWrittenInStmt(st.Init, written)
+		}
+		if st.Step != nil {
+			collectWrittenInStmt(st.Step, written)
+		}
+		collectWrittenRoots(st.Body.Stmts, written)
+	case *ForEachStmt:
+		collectWrittenRoots(st.Body.Stmts, written)
+	case *RepeatStmt:
+		collectWrittenRoots(st.Body.Stmts, written)
+	case *TryStmt:
+		collectWrittenRoots(st.Body.Stmts, written)
+		collectWrittenRoots(st.CatchBody.Stmts, written)
+	case *Block:
+		collectWrittenRoots(st.Stmts, written)
+	}
+}
+
+// lvalueRootName returns the name of the root VarExpr at the bottom of an index
+// or field lvalue chain (`$p[i].f[j]` -> "p"), or "" if the root is not a plain
+// variable.
+func lvalueRootName(e Expr) string {
+	switch ex := e.(type) {
+	case *VarExpr:
+		return ex.Name
+	case *IndexExpr:
+		return lvalueRootName(ex.Target)
+	case *FieldAccessExpr:
+		return lvalueRootName(ex.Target)
+	}
+	return ""
 }
 
 // resolveBlock analyses a Block that will create a fresh runtime

@@ -969,50 +969,81 @@ Cross-cutting threads:
 
 ## M25 - read-only-parameter borrow (compound copy elision)
 
-**Planned.** Parameter binding deep-copies compound arguments (`list`, `map`,
-struct) to uphold value semantics. When the callee **never writes the
-parameter** - no `$p = ...`, `$p[i] = ...`, `$p[] = ...`, `$p.f = ...` anywhere
-in its body - that copy is pure waste: a read-only alias to the caller's backing
-is observationally identical to a copy. Bind such parameters by alias instead.
-This is the standard value-semantic-language optimization (the "borrow" half of
-copy-on-write), narrower and more clearly sound than the shared-marker COW that
-was tried and reverted as inert (see [technical/rejected.md](technical/rejected.md)):
-it never detaches-on-write, because a borrowed parameter is by construction never
-written. Promoted from the horizon backlog once the module work below made the
-cost concrete.
+Parameter binding deep-copies compound arguments (`list`, `map`, struct) to
+uphold value semantics. When the callee **never writes the parameter** - no
+`$p = ...`, `$p[i] = ...`, `$p[] = ...`, `$p.f = ...` anywhere in its body - that
+copy is pure waste: a read-only alias to the caller's backing is observationally
+identical to a copy, so the parameter can be bound by alias. This is the standard
+value-semantic-language optimization (the "borrow" half of copy-on-write),
+narrower and more clearly sound than the shared-marker COW that was tried and
+reverted as inert (see [technical/rejected.md](technical/rejected.md)): it never
+detaches-on-write, because a borrowed parameter is by construction never written.
+No `.j` changes and no new syntax - a pure interpreter optimization. Split into
+the borrow itself (M25.1) and the escape analysis that widens where it is sound
+(M25.2). Independent of the horizon bytecode-VM direction but composes with it.
 
-- **Why it is safe.** Value semantics only matters under mutation, so a
-  read-only alias is invisible. Execution is synchronous - the caller is
-  suspended for the callee's duration, so the aliased backing cannot change
-  underneath it. And a borrowed value cannot escape uncopied: every store /
-  return-receiving site already eager-copies, and a `spawn` deep-copies its
-  snapshot at launch, so a borrowed argument that is returned, stored, or
-  captured is copied at that boundary exactly as today.
-- **Mechanism.** Extends the existing **scalar** copy-elision in
-  `bindParamValue` to compound Kinds - the "mutation-safety proof" that elision
-  path is documented as requiring before it may cover compound values. The
-  resolver already runs per-function analysis; a per-parameter "is this parameter
-  ever the target of a write in this body?" pass marks a parameter borrowable,
-  and `bindParamValue` aliases a borrowable parameter instead of deep-copying. No
-  `.j` changes and no new syntax - a pure interpreter optimization.
-- **Why it earns a milestone.** It removes a whole class of accidental
-  quadratics transparently. Two are already measured in the shipped modules: the
+### M25.1 - borrow in modules and globals-free scripts
+
+**Done.** The borrow, enabled in the two contexts where it is sound without a
+whole-program analysis.
+
+- **The soundness subtlety.** "Never writes the parameter" alone is *not*
+  sufficient: if the argument aliases a mutable global and the body mutates that
+  global, a borrowed read observes the mutation where a copy would not
+  (`def g ...; func f(p) { $g[0] = 9; return $p[0]; } f($g)`). The synchronous
+  call model rules out the *caller* changing the backing mid-call, but not the
+  *callee* changing it through a global alias. Borrow is therefore enabled only
+  where no mutable global can exist to alias: (a) a **module**, whose top level is
+  declarations-only (and whose cross-boundary arguments are copies anyway); and
+  (b) a **single-file script that declares no mutable top-level `def`** - checked
+  once by `hasMutableTopLevelGlobal`, so a script's own read-only helpers benefit
+  without being moved into a module. A script *with* a mutable global keeps the
+  copying bind (M25.2 is what lifts that).
+- **Mechanism.** Extends the existing **scalar** copy-elision in `bindParamValue`
+  to compound Kinds - the "mutation-safety proof" that elision path was documented
+  as requiring. `Resolve` runs `markBorrowableParams` per method: a statement-level
+  write-scan of the body (through nested control flow; no-shadowing makes a written
+  name unambiguously the parameter; `spawn` bodies mutate their own snapshot so are
+  correctly skipped) sets `Param.Borrow` when the parameter is never written and
+  its type is *borrow-safe* - a compound whose `stampDeclaredType` does not recurse
+  into element backing (a flat `list`/`map`, or a struct/bytes; a `list of list`
+  falls back to copy so the stamp can't mutate the shared backing).
+  `Interpreter.bindArg` aliases when
+  `Param.Borrow && (i.isModule || i.entryGlobalsImmutable)`, else copies as before.
+- **What it buys.** It removes a class of accidental quadratics transparently. The
   `markdown` block collectors (`collectFence` / `collectQuote` / `collectList` /
-  `tableFrom`) each take `lines as list of string` and read a handful of entries,
-  so binding deep-copies the whole line list once per block (lines x blocks); and
-  the `countNodes` document-budget walk deep-copies every subtree it visits. Both
-  look free at the call site. The `.j`-level workarounds do not pay off: a
-  count-during-construction rewrite of the `countNodes` guard was implemented and
-  measured a **wash** (9.5 s vs 9.6 s on a 100k-node document), because
-  eliminating the read-only walk forces threading the count back through the
-  builders, which re-introduces an equal volume of value-semantic copies. There is
-  no reference-semantic handle a pure `.j` module can hang a large list on, so the
-  copy is only removable below the language - which is what makes this an
-  interpreter milestone rather than a module fix.
-- **Discipline.** TinyGo-clean, reflect-free, strict behaviour parity; the
-  alias-stress tests (`internal/interpreter/value_alias_test.go`) grow
-  borrowed-parameter aliasing cases as the soundness oracle. Independent of the
-  horizon bytecode-VM direction but composes with it.
+  `tableFrom`, all `lines as list of string`) deep-copied the whole line list once
+  per block (lines x blocks); parsing a 160-chapter synthetic book as one document
+  drops from **5.1 s to 0.85 s** and turns from super-linear (2.9x per input
+  doubling) to linear (2.0x). The `countNodes` budget walk borrows its `Node`
+  argument, and a globals-free script's own read-only helpers go linear the same
+  way. The `.j`-level workaround does not pay off: a count-during-construction
+  rewrite of the `countNodes` guard measured a **wash** (9.5 s vs 9.6 s on a
+  100k-node document), because eliminating the read-only walk forces threading the
+  count back through the builders, re-introducing an equal volume of copies. No
+  reference-semantic handle a pure `.j` module can hang a large list on exists, so
+  the copy is only removable below the language.
+- **Discipline.** TinyGo-clean, reflect-free, strict behaviour parity, race-clean.
+  `internal/parser/borrow_test.go` pins the write-scan and type gate (a false
+  positive would alias a mutated parameter); `internal/interpreter/borrow_test.go`
+  and `borrow_internal_test.go` pin the soundness gate (a script with a mutable
+  global keeps copy semantics; a globals-free script and a module borrow) and the
+  value-semantics parity (borrowed reads correct, caller values intact, returned
+  borrows copied at the receiver).
+
+### M25.2 - per-function escape analysis for scripts with mutable globals
+
+**Planned.** M25.1 gates a whole script all-or-nothing on "does it declare any
+mutable top-level global". M25.2 replaces that with a per-function decision:
+borrow a never-written parameter in any function proven not to mutate a global
+**transitively**, even in a script that has mutable globals elsewhere. A
+call-graph fixpoint marks each user method "may mutate a global" - seeded by a
+direct write to an outer-scope binding and propagated through its callees, with
+unanalysable targets (a `func`-value call, `meta.call` / `meta.callMain`) treated
+conservatively as "may mutate"; module and builtin calls are safe (module
+isolation; builtins do not touch `.j` globals). Composes with M25.1 unchanged -
+same `Param.Borrow` flag and `bindArg` path, only the enabling gate widens from
+"whole script is globals-immutable" to "this function mutates no global".
 
 ---
 
