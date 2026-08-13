@@ -1831,6 +1831,15 @@ func (i *Interpreter) methodBorrowCtx(m *parser.MethodDef) bool {
 // alias through an argument and mutate. `def const` is immutable; a `def` nested
 // in a top-level block lives in that block's frame, not the global scope reached
 // by methods, so only the direct top-level statement list is scanned.
+//
+// INVARIANT (borrow soundness): this rests on three properties of the current
+// evaluation model - (a) only top-level execution creates global-frame bindings,
+// (b) `def const` is deep-immutable, (c) a method cannot create or mutate a
+// global except through a top-level mutable `def` it aliases. If a future feature
+// lets a method reach a global another way (a `global` keyword, a hoisting /
+// scoping change, top-level shared state), the "globals-immutable script borrows
+// everywhere" widening (entryGlobalsImmutable) becomes unsound and this function
+// is the first thing to revisit.
 func hasMutableTopLevelGlobal(prog *parser.Program) bool {
 	for _, s := range prog.TopLevel {
 		if d, ok := s.(*parser.DefineStmt); ok && !d.IsConst {

@@ -81,3 +81,44 @@ func TestBorrowAnalysisIdempotent(t *testing.T) {
 		t.Errorf("after re-resolve: got [%v %v], want [true false]", m.Params[0].Borrow, m.Params[1].Borrow)
 	}
 }
+
+// unknownStmt is a statement node the write-scan does not enumerate - used to
+// exercise the conservative default directly (no real grammar node hits it,
+// which TestBorrowWalkersCoverAllNodes enforces).
+type unknownStmt struct{ pos }
+
+func (*unknownStmt) stmtNode() {}
+
+// F1: the write-scan fails closed. An unrecognised statement node, or an lvalue
+// whose root is not a plain variable, must force every parameter non-borrowable
+// rather than being treated as "no write" - otherwise a future write-capable
+// grammar node could leave a mutated parameter borrowable (a value-semantics
+// hole).
+func TestBorrowWriteScanFailsClosed(t *testing.T) {
+	listOfInt := Type{Kind: TypeList, Element: &Type{Kind: TypeInt}}
+
+	// Control: a never-written borrow-safe param over an empty body borrows.
+	ctrl := &MethodDef{Params: []Param{{Name: "xs", Type: listOfInt}}, Body: &Block{}}
+	markBorrowableParams(ctrl)
+	if !ctrl.Params[0].Borrow {
+		t.Fatal("control: a never-written borrow-safe param should be borrowable")
+	}
+
+	// An unrecognised statement node disables borrow for the whole method.
+	unknown := &MethodDef{Params: []Param{{Name: "xs", Type: listOfInt}}, Body: &Block{Stmts: []Stmt{&unknownStmt{}}}}
+	markBorrowableParams(unknown)
+	if unknown.Params[0].Borrow {
+		t.Error("unknown statement node must force conservative: parameter left borrowable (fail-open)")
+	}
+
+	// An lvalue whose root is not a plain variable (`foo()[0] = ...`) likewise
+	// fails closed - lvalueRootName returns "", which must mean "written,
+	// unknown root", not "no write".
+	badRoot := &MethodDef{Params: []Param{{Name: "xs", Type: listOfInt}}, Body: &Block{Stmts: []Stmt{
+		&IndexAssignStmt{Target: &IndexExpr{Target: &CallExpr{Callee: "foo"}, Index: &IntLit{}}, Value: &IntLit{}},
+	}}}
+	markBorrowableParams(badRoot)
+	if badRoot.Params[0].Borrow {
+		t.Error("lvalue with a non-variable root must force conservative")
+	}
+}

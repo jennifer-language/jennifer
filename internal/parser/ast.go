@@ -334,6 +334,9 @@ type MethodDef struct {
 	// globals - such a method's never-written params may still be aliased,
 	// because nothing reachable from it can mutate the global an argument aliases.
 	// Left false (conservative) for module methods, which borrow via isModule.
+	// Written during Run (like the resolveQualifiedRefs Fn/Const stamps), so it
+	// is valid only under the interpreter's one-Run-per-resolved-Program
+	// assumption; see computeEntryGlobalSafe for the concurrency note.
 	GlobalSafe bool
 }
 

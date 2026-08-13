@@ -7,7 +7,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,7 +30,12 @@ import (
 func markerReceivers(t *testing.T, marker string) map[string]bool {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, filepath.Join("..", "parser"), nil, 0)
+	// Exclude _test.go files: a test may define its own throwaway node type
+	// implementing stmtNode()/exprNode() (e.g. to exercise a walker's
+	// conservative default), and such a type is not part of the real grammar the
+	// walkers must handle.
+	noTests := func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }
+	pkgs, err := parser.ParseDir(fset, filepath.Join("..", "parser"), noTests, 0)
 	if err != nil {
 		t.Fatalf("parse parser package: %v", err)
 	}

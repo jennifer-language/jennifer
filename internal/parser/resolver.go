@@ -249,11 +249,16 @@ func markBorrowableParams(m *MethodDef) {
 	if len(m.Params) == 0 {
 		return
 	}
-	written := map[string]bool{}
-	collectWrittenRoots(m.Body.Stmts, written)
+	w := writeScan{written: map[string]bool{}}
+	w.stmts(m.Body.Stmts)
 	for i := range m.Params {
 		p := &m.Params[i]
-		p.Borrow = borrowSafeType(&p.Type) && !written[p.Name]
+		// w.conservative is set when the scan meets a statement kind or lvalue
+		// root it does not recognise: it could be an unhandled write, so no
+		// parameter is borrowable. This fails closed exactly like the
+		// interpreter-side hazard scan (globalsafe.go), so a future write-capable
+		// grammar node cannot silently leave a mutated parameter borrowable.
+		p.Borrow = !w.conservative && borrowSafeType(&p.Type) && !w.written[p.Name]
 	}
 }
 
@@ -280,64 +285,93 @@ func borrowSafeType(t *Type) bool {
 	}
 }
 
-// collectWrittenRoots records the root variable name of every lvalue statement
-// in stmts, descending through nested control-flow blocks (but not expressions).
-func collectWrittenRoots(stmts []Stmt, written map[string]bool) {
+// writeScan records the root variable name of every lvalue statement in a method
+// body, descending through nested control-flow blocks (but not expressions -
+// assignments are statements, and a `spawn` body reached through an expression
+// mutates its own snapshot). `conservative` latches when the scan meets a
+// statement kind it does not enumerate or an lvalue root it cannot name, so
+// markBorrowableParams disables borrow for the whole method rather than assuming
+// "no write" - the fail-closed default the interpreter-side hazard scan also
+// uses. Every current statement kind is enumerated (checked by
+// TestBorrowWalkersCoverAllNodes), so the default never fires today.
+type writeScan struct {
+	written      map[string]bool
+	conservative bool
+}
+
+func (w *writeScan) stmts(stmts []Stmt) {
 	for _, s := range stmts {
-		collectWrittenInStmt(s, written)
+		w.stmt(s)
 	}
 }
 
-func collectWrittenInStmt(s Stmt, written map[string]bool) {
+func (w *writeScan) writeRoot(root string) {
+	if root == "" {
+		// An lvalue whose root is not a plain variable: it writes something the
+		// scan cannot name, so fail closed.
+		w.conservative = true
+		return
+	}
+	w.written[root] = true
+}
+
+func (w *writeScan) stmt(s Stmt) {
 	switch st := s.(type) {
 	case *AssignStmt:
-		written[st.VarName] = true
+		w.written[st.VarName] = true
 	case *IndexAssignStmt:
-		if n := lvalueRootName(st.Target); n != "" {
-			written[n] = true
-		}
+		w.writeRoot(lvalueRootName(st.Target))
 	case *AppendStmt:
 		if st.Target != nil {
-			written[st.Target.Name] = true
+			w.written[st.Target.Name] = true
+		} else {
+			w.conservative = true
 		}
 	case *FieldAssignStmt:
-		if n := lvalueRootName(st.Target); n != "" {
-			written[n] = true
-		}
+		w.writeRoot(lvalueRootName(st.Target))
 	case *IfStmt:
-		collectWrittenRoots(st.Then.Stmts, written)
+		w.stmts(st.Then.Stmts)
 		for _, b := range st.ElseIfBodies {
-			collectWrittenRoots(b.Stmts, written)
+			w.stmts(b.Stmts)
 		}
 		if st.Else != nil {
-			collectWrittenRoots(st.Else.Stmts, written)
+			w.stmts(st.Else.Stmts)
 		}
 	case *MatchStmt:
 		for _, arm := range st.Arms {
-			collectWrittenRoots(arm.Body.Stmts, written)
+			w.stmts(arm.Body.Stmts)
 		}
 		if st.Else != nil {
-			collectWrittenRoots(st.Else.Stmts, written)
+			w.stmts(st.Else.Stmts)
 		}
 	case *WhileStmt:
-		collectWrittenRoots(st.Body.Stmts, written)
+		w.stmts(st.Body.Stmts)
 	case *ForStmt:
 		if st.Init != nil {
-			collectWrittenInStmt(st.Init, written)
+			w.stmt(st.Init)
 		}
 		if st.Step != nil {
-			collectWrittenInStmt(st.Step, written)
+			w.stmt(st.Step)
 		}
-		collectWrittenRoots(st.Body.Stmts, written)
+		w.stmts(st.Body.Stmts)
 	case *ForEachStmt:
-		collectWrittenRoots(st.Body.Stmts, written)
+		w.stmts(st.Body.Stmts)
 	case *RepeatStmt:
-		collectWrittenRoots(st.Body.Stmts, written)
+		w.stmts(st.Body.Stmts)
 	case *TryStmt:
-		collectWrittenRoots(st.Body.Stmts, written)
-		collectWrittenRoots(st.CatchBody.Stmts, written)
+		w.stmts(st.Body.Stmts)
+		w.stmts(st.CatchBody.Stmts)
 	case *Block:
-		collectWrittenRoots(st.Stmts, written)
+		w.stmts(st.Stmts)
+	case *DefineStmt, *ReturnStmt, *ExitStmt, *ThrowStmt, *DeferStmt,
+		*ExprStmt, *BreakStmt, *ContinueStmt, *ImportStmt, *ModuleImportStmt,
+		*StructDef, *EnumDef, *MethodDef:
+		// Introduce no write to an existing binding (a `def` creates a fresh one;
+		// the rest read or transfer control), so they contribute no written root.
+		// Listed explicitly so a new statement kind hits the conservative default
+		// below instead of being silently treated as "no write".
+	default:
+		w.conservative = true
 	}
 }
 

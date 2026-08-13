@@ -40,10 +40,26 @@ var jCallbackBuiltins = map[[2]string]bool{
 	{"lists", "sortBy"}:         true,
 }
 
-// computeEntryGlobalSafe stamps GlobalSafe on every entry-program method. Only
-// meaningful for the entry program (a module borrows via isModule); it reads
-// moduleAliases and the namespace table, so it runs after module load.
+// computeEntryGlobalSafe stamps GlobalSafe on every entry-program method that
+// (transitively over its named calls) mutates no global. Only meaningful for the
+// entry program (a module borrows via isModule); it reads moduleAliases and the
+// namespace table, so it runs after module load.
+//
+// Concurrency: GlobalSafe is written onto the shared *parser.MethodDef here, so
+// it is (like the resolveQualifiedRefs / resolveDeclaredTypesOnce stamps) valid
+// only under the one-Run-per-resolved-Program assumption the interpreter already
+// makes. It runs single-threaded in Run's setup, before any top-level statement
+// or spawn, so there is no intra-interpreter race; running one resolved Program
+// through two interpreters concurrently is unsupported (it would also race the
+// pre-existing qualified-ref stamps).
 func (i *Interpreter) computeEntryGlobalSafe() {
+	// Nothing can borrow unless some method has a borrowable parameter, so skip
+	// the whole scan + fixpoint (which would otherwise walk every method body on
+	// every Run of any globals-holding script) when none does. GlobalSafe stays
+	// false, which is the conservative, correct state.
+	if !i.anyBorrowableParam() {
+		return
+	}
 	type mstate struct {
 		unsafe  bool
 		callees []*parser.MethodDef
@@ -79,6 +95,20 @@ func (i *Interpreter) computeEntryGlobalSafe() {
 	for m, st := range states {
 		m.GlobalSafe = !st.unsafe
 	}
+}
+
+// anyBorrowableParam reports whether any entry method has a parameter the
+// resolver marked borrowable - the precondition for the escape analysis to buy
+// anything.
+func (i *Interpreter) anyBorrowableParam() bool {
+	for _, m := range i.methods {
+		for _, p := range m.Params {
+			if p.Borrow {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // collectMethodLocals gathers every name bound within a method body (defs, loop
@@ -136,6 +166,20 @@ func collectLocalsStmt(s parser.Stmt, locals map[string]bool) {
 		collectMethodLocals(st.CatchBody.Stmts, locals)
 	case *parser.Block:
 		collectMethodLocals(st.Stmts, locals)
+	case *parser.AssignStmt, *parser.IndexAssignStmt, *parser.AppendStmt,
+		*parser.FieldAssignStmt, *parser.ReturnStmt, *parser.ExitStmt,
+		*parser.ThrowStmt, *parser.DeferStmt, *parser.ExprStmt,
+		*parser.BreakStmt, *parser.ContinueStmt, *parser.ImportStmt,
+		*parser.ModuleImportStmt, *parser.StructDef, *parser.EnumDef,
+		*parser.MethodDef:
+		// Introduce no binding and hold no statement block to descend into
+		// (their expressions never bind a name). Listed explicitly so a new
+		// statement kind hits the default and is reviewed, rather than silently
+		// under-collecting a binding it might introduce.
+	default:
+		// Unknown statement: under-collect (ignore). Safe - a missed local only
+		// makes a write to it look global, disabling borrow. TestBorrowWalkers-
+		// CoverAllNodes fails on a new kind so this stays a conscious choice.
 	}
 }
 

@@ -234,6 +234,8 @@ func profileUsage(w *os.File) {
 	fmt.Fprintln(w, "(the program's own output goes to stderr).")
 	fmt.Fprintln(w, "  default        statement profile: hits + wall-clock time per source position")
 	fmt.Fprintln(w, "  --allocs       value-semantics profile: COW detachments and spawn-frame copies")
+	fmt.Fprintln(w, "                 (excludes read-only params that were borrowed, not copied, so")
+	fmt.Fprintln(w, "                 counts compare only within builds with the same borrow gating)")
 	fmt.Fprintln(w, "  --format=table human-readable (default)")
 	fmt.Fprintln(w, "  --format=pprof gzipped pprof, for `go tool pprof` / speedscope.app")
 	fmt.Fprintln(w, "  --format=trace Chrome-trace JSON of the call timeline (not valid with --allocs)")

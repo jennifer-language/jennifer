@@ -568,9 +568,14 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
     if (not lists.contains($pg.fonts, $font)) {
         $pg.fonts = lists.push($pg.fonts, $font);
     }
-    $pg.content = $pg.content + "BT\n/" + $font + " " + convert.toString($size) + " Tf\n" +
+    # Build this draw's chunk in its own parenthesised sub-expression, then one
+    # concat onto the page content. Without the parens, `$pg.content + a + b + ...`
+    # re-copies the whole (growing) content string at every `+`; grouping the
+    # chunk makes it a single append. Every draw op below follows the same shape -
+    # keep the parens.
+    $pg.content = $pg.content + ("BT\n/" + $font + " " + convert.toString($size) + " Tf\n" +
         convert.toString($x) + " " + convert.toString($y) + " Td\n(" + escapeString($str) +
-        ") Tj\nET\n";
+        ") Tj\nET\n");
     return $pg;
 }
 
@@ -645,8 +650,8 @@ export func textUnicode(pg as Page, x as int, y as int, lf as LoadedFont, size a
         $pg.glyphUses = lists.push($pg.glyphUses, GlyphUse{font: $lf.name, gid: $gids[$i], cp: $cps[$i]});
         $i = $i + 1;
     }
-    $pg.content = $pg.content + "BT\n/" + $lf.name + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex + "> Tj\nET\n";
+    $pg.content = $pg.content + ("BT\n/" + $lf.name + " " + convert.toString($size) + " Tf\n" +
+        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex + "> Tj\nET\n");
     return $pg;
 }
 
@@ -660,8 +665,8 @@ export func textUnicode(pg as Page, x as int, y as int, lf as LoadedFont, size a
  * @return {Page} a fresh page with the line added
  */
 export func line(pg as Page, fromX as int, fromY as int, toX as int, toY as int) {
-    $pg.content = $pg.content + convert.toString($fromX) + " " + convert.toString($fromY) + " m\n" +
-        convert.toString($toX) + " " + convert.toString($toY) + " l\nS\n";
+    $pg.content = $pg.content + (convert.toString($fromX) + " " + convert.toString($fromY) + " m\n" +
+        convert.toString($toX) + " " + convert.toString($toY) + " l\nS\n");
     return $pg;
 }
 
@@ -681,8 +686,8 @@ export func rect(pg as Page, x as int, y as int, width as int, height as int, fi
     if ($filled) {
         $op = "f";
     }
-    $pg.content = $pg.content + convert.toString($x) + " " + convert.toString($y) + " " +
-        convert.toString($width) + " " + convert.toString($height) + " re\n" + $op + "\n";
+    $pg.content = $pg.content + (convert.toString($x) + " " + convert.toString($y) + " " +
+        convert.toString($width) + " " + convert.toString($height) + " re\n" + $op + "\n");
     return $pg;
 }
 
@@ -712,8 +717,8 @@ export func color(pg as Page, red as int, green as int, blue as int) {
     def r as string init colorComp($red);
     def g as string init colorComp($green);
     def b as string init colorComp($blue);
-    $pg.content = $pg.content + $r + " " + $g + " " + $b + " rg\n" + $r + " " + $g + " " + $b +
-        " RG\n";
+    $pg.content = $pg.content + ($r + " " + $g + " " + $b + " rg\n" + $r + " " + $g + " " + $b +
+        " RG\n");
     return $pg;
 }
 
@@ -1031,9 +1036,9 @@ export func addImage(doc as Document, img as Image) {
  * @return {Page} a fresh page with the image drawn
  */
 export func drawImage(pg as Page, img as Image, x as int, y as int, width as int, height as int) {
-    $pg.content = $pg.content + "q\n" + convert.toString($width) + " 0 0 " +
+    $pg.content = $pg.content + ("q\n" + convert.toString($width) + " 0 0 " +
         convert.toString($height) + " " + convert.toString($x) + " " + convert.toString($y) +
-        " cm\n/" + $img.name + " Do\nQ\n";
+        " cm\n/" + $img.name + " Do\nQ\n");
     return $pg;
 }
 
