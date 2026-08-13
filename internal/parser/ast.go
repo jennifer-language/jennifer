@@ -327,6 +327,14 @@ type MethodDef struct {
 	Params   []Param
 	Body     *Block
 	Exported bool // `export func ...` - published from the enclosing module
+	// GlobalSafe is an interpreter annotation (not parser output): set by
+	// Interpreter.computeEntryGlobalSafe after module load, true when this
+	// method (transitively over its named calls) provably mutates no global. It
+	// widens read-only-parameter borrow to an entry program that holds mutable
+	// globals - such a method's never-written params may still be aliased,
+	// because nothing reachable from it can mutate the global an argument aliases.
+	// Left false (conservative) for module methods, which borrow via isModule.
+	GlobalSafe bool
 }
 
 func (*MethodDef) stmtNode() {}

@@ -86,29 +86,49 @@ never written **and** its type is *borrow-safe*: a compound whose
 `list` / `map`, or a struct / `bytes`; a `list of list` falls back to
 copying so the stamp cannot mutate the shared backing).
 `Interpreter.bindArg` aliases when
-`Param.Borrow && (i.isModule || i.entryGlobalsImmutable)` and copies
-(`bindParamValue`) otherwise. The gate is the soundness boundary:
-"never writes the parameter" alone is not enough, because if the
-argument aliases a mutable global and the body mutates that global, a
-borrowed read would see the change where a copy would not. So borrow
-is enabled only where no mutable global can exist to alias: a **module**
-(top level is declarations-only, and cross-module arguments are copies
-at the boundary), or a **single-file script that declares no mutable
-top-level `def`** (`hasMutableTopLevelGlobal` false, recorded as
-`entryGlobalsImmutable` in `Run`) so a script's own read-only helpers
-benefit without being moved into a module. A script that *does* hold a
-mutable global, and the REPL (whose global set grows across inputs),
-keep the copying bind; a per-function escape analysis that borrows in
-provably global-immutable functions of such a script is the deferred
-follow-on.
-This is the extension of the scalar copy-elision to compound Kinds
-that `bindParamValue` was documented as needing a mutation-safety
-proof for. It removes accidental quadratics in read-only helpers (a
-`markdown` block collector that binds the whole line list once per
-block; the `countNodes` budget walk). Pinned by
-`internal/parser/borrow_test.go` (write-scan + type gate) and
-`internal/interpreter/borrow_test.go` (the entry-program soundness
-gate and module value-semantics parity).
+`Param.Borrow && (i.isModule || i.entryGlobalsImmutable || m.GlobalSafe)`
+and copies (`bindParamValue`) otherwise, per callee method `m`
+(`methodBorrowCtx`). The gate is the soundness boundary: "never writes
+the parameter" alone is not enough, because if the argument aliases a
+mutable global and the body mutates that global, a borrowed read would
+see the change where a copy would not. So borrow is enabled only where
+no mutable global can be aliased and mutated during the call, which
+holds in three cases:
+
+- a **module** (top level is declarations-only, and cross-module
+  arguments are copies at the boundary);
+- a **single-file script that declares no mutable top-level `def`**
+  (`hasMutableTopLevelGlobal` false, recorded as `entryGlobalsImmutable`
+  in `Run`), so a script's own read-only helpers benefit without being
+  moved into a module;
+- a specific **method proven to mutate no global transitively**
+  (`m.GlobalSafe`), even in a script that holds mutable globals
+  elsewhere. `computeEntryGlobalSafe` (run after module load) scans each
+  entry method for a local hazard - a write to a non-local name, a
+  `CallValueExpr`, a module call (which can re-enter the host via
+  `meta.callMain`), or a callback builtin that can invoke `.j` code (the
+  higher-order `lists` layer, `meta.call` / `meta.callMain`,
+  `testing.run` / `runWith` / `assertThrows`, keyed by canonical
+  namespace) - then a fixpoint propagates the hazard along named-call
+  edges. The walker defaults an unrecognised node to hazardous, so a new
+  node never silently escapes; `spawn` bodies are skipped (they mutate a
+  snapshot). The callback set must be a denylist because a func-value
+  argument is not statically visible (a bare method name is a
+  `ConstRefExpr`, and curried func returns carry no type) - the invariant
+  "any builtin invoking `.j` code via `BuiltinCtx.Invoke` / `CallByName*`
+  / `CallHostWith*` is listed" lives in `globalsafe.go`.
+
+The REPL (whose global set grows across inputs) keeps the copying bind.
+This is the extension of the scalar copy-elision to compound Kinds that
+`bindParamValue` was documented as needing a mutation-safety proof for.
+It removes accidental quadratics in read-only helpers (a `markdown`
+block collector that binds the whole line list once per block; the
+`countNodes` budget walk; a per-element script helper over a growing
+list). Pinned by `internal/parser/borrow_test.go` (write-scan + type
+gate), `internal/interpreter/borrow_test.go` (soundness gates + value-
+semantics parity for module, globals-free script, and mutable-globals
+script), and `globalsafe_internal_test.go` / `borrow_internal_test.go`
+(the `GlobalSafe` fixpoint and the `entryGlobalsImmutable` wiring).
 
 A shared-marker copy-on-write protocol (`Value.shared *bool` +
 `Share()` / `Ensure()`) was tried here and removed. It was inert: a

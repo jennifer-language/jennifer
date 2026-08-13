@@ -898,12 +898,13 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int,
 		dc = &entryDepth
 	}
 	callFrame.depth = dc
+	borrowCtx := i.methodBorrowCtx(m)
 	for idx, p := range m.Params {
 		if !args[idx].MatchesDeclared(p.Type) {
 			releaseBlockEnv(callFrame)
 			return Value{}, fmt.Errorf("argument %d to %q must be %s, got %s", idx+1, m.Name, p.Type, args[idx].Kind)
 		}
-		bound := i.bindArg(args[idx], p)
+		bound := i.bindArg(args[idx], p, borrowCtx)
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 			releaseBlockEnv(callFrame)
 			return Value{}, err
@@ -1050,15 +1051,6 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	if err := parser.Resolve(prog); err != nil {
 		return err
 	}
-	// A single-file script with no mutable top-level global cannot construct the
-	// borrow aliasing hole (an argument aliasing a mutable global that the body
-	// mutates), so read-only-parameter borrow is sound for its own methods too,
-	// not just imported modules. Only a top-level mutable `def` creates such a
-	// global; `def const` and defs nested in a top-level block (loop / if body,
-	// which are frame-scoped and unreachable from a method) do not.
-	if !i.isModule {
-		i.entryGlobalsImmutable = !hasMutableTopLevelGlobal(prog)
-	}
 	if err := i.processImports(prog, false); err != nil {
 		return err
 	}
@@ -1130,6 +1122,18 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// their loaded const values), since both dictate which prefixes are valid and
 	// module-const stamping needs the imported module's constants to exist.
 	i.resolveQualifiedRefs(prog)
+	// Per-function escape analysis for read-only-parameter borrow: mark each
+	// entry-program method that (transitively over its named calls) mutates no
+	// global, so its never-written params may be borrowed even when the script
+	// holds mutable globals elsewhere. Runs after loadModuleImports +
+	// resolveQualifiedRefs so module-alias and namespace tables are populated
+	// (module calls and callback builtins are the analysis's unsafe cases). A
+	// module borrows via isModule, so this is entry-program-only.
+	if !i.isModule && !hasMutableTopLevelGlobal(prog) {
+		i.entryGlobalsImmutable = true
+	} else if !i.isModule {
+		i.computeEntryGlobalSafe()
+	}
 	// Stamp every declared struct type once, single-threaded, before any
 	// statement (and therefore any spawn) runs, so the per-execution
 	// re-resolve in execDefine is a guarded no-op and a shared type node
@@ -1809,16 +1813,17 @@ func bindParamValue(v Value, declType parser.Type) Value {
 	return stampDeclaredType(v.Copy(), declType)
 }
 
-// argBorrowed reports whether an argument for parameter p will be bound by
-// alias rather than deep-copied. Borrow applies only when the resolver marked
-// the parameter borrowable (never written in the body, borrow-safe type) AND
-// this interpreter runs a module: a module's top level is declarations-only, so
-// no mutable global exists to alias the argument and be mutated during the call,
-// which is the one path by which a read-only-aliased backing could change under
-// a value-semantic callee. An entry program (isModule false) can hold mutable
-// globals, so it keeps the copying bind.
-func (i *Interpreter) argBorrowed(p parser.Param) bool {
-	return p.Borrow && (i.isModule || i.entryGlobalsImmutable)
+// methodBorrowCtx reports whether read-only-parameter borrow is sound for a call
+// to method m in this interpreter - i.e. whether no mutable global can be aliased
+// by an argument and mutated during the call. That holds in three cases: a module
+// (declarations-only top level, no mutable globals); an entry script that
+// declares no mutable top-level global (entryGlobalsImmutable); or a specific
+// method proven by the per-function escape analysis to mutate no global
+// transitively (m.GlobalSafe), even in a script that has mutable globals
+// elsewhere. Combined with Param.Borrow (never-written, borrow-safe type) at the
+// bind site.
+func (i *Interpreter) methodBorrowCtx(m *parser.MethodDef) bool {
+	return i.isModule || i.entryGlobalsImmutable || m.GlobalSafe
 }
 
 // hasMutableTopLevelGlobal reports whether the program declares a mutable
@@ -1836,12 +1841,13 @@ func hasMutableTopLevelGlobal(prog *parser.Program) bool {
 }
 
 // bindArg binds one argument into a call frame, aliasing the argument's backing
-// when argBorrowed holds and copying it otherwise. On the borrow path
-// stampDeclaredType only sets header type tags (the type is borrow-safe, so it
-// never recurses into the shared backing); the callee never writes the
-// parameter, so the alias is observationally identical to a copy.
-func (i *Interpreter) bindArg(v Value, p parser.Param) Value {
-	if i.argBorrowed(p) {
+// when the parameter is borrowable and borrowCtx (methodBorrowCtx for the callee)
+// holds, and copying it otherwise. On the borrow path stampDeclaredType only sets
+// header type tags (the type is borrow-safe, so it never recurses into the shared
+// backing); the callee never writes the parameter, so the alias is
+// observationally identical to a copy.
+func (i *Interpreter) bindArg(v Value, p parser.Param, borrowCtx bool) Value {
+	if p.Borrow && borrowCtx {
 		return stampDeclaredType(v, p.Type)
 	}
 	return bindParamValue(v, p.Type)
@@ -4800,6 +4806,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	// partially-bound frame is never visible to arg evaluation.
 	numParams := len(m.Params)
 	callFrame := borrowBlockEnv(effectiveGlobal(env), numParams)
+	borrowCtx := i.methodBorrowCtx(m)
 	for idx, p := range m.Params {
 		a := argExprs[idx]
 		v, err := i.evalExpr(a, env)
@@ -4821,8 +4828,8 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 		// for index-write checks) and skips Copy for scalar kinds (a no-op) and
 		// for a borrowable parameter (a read-only alias - no copy happens, so no
 		// eager-copy is recorded).
-		bound := i.bindArg(v, p)
-		if !i.argBorrowed(p) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+		bound := i.bindArg(v, p, borrowCtx)
+		if !(p.Borrow && borrowCtx) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 			pf, pl, pcol := posFor(a)
 			i.prof.RecordEagerCopy(pf, pl, pcol)
 		}
@@ -4937,6 +4944,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 		numParams := len(m.Params)
 		callFrame := borrowBlockEnv(effectiveGlobal(env), numParams)
+		borrowCtx := i.methodBorrowCtx(m)
 		for idx, p := range m.Params {
 			a := c.Args[idx]
 			v, err := i.evalExpr(a, env)
@@ -4952,8 +4960,8 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 					File: file, Line: line, Col: col,
 				}
 			}
-			bound := i.bindArg(v, p)
-			if !i.argBorrowed(p) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+			bound := i.bindArg(v, p, borrowCtx)
+			if !(p.Borrow && borrowCtx) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 				pf, pl, pcol := posFor(a)
 				i.prof.RecordEagerCopy(pf, pl, pcol)
 			}

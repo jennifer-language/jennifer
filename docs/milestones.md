@@ -1033,17 +1033,48 @@ whole-program analysis.
 
 ### M25.2 - per-function escape analysis for scripts with mutable globals
 
-**Planned.** M25.1 gates a whole script all-or-nothing on "does it declare any
-mutable top-level global". M25.2 replaces that with a per-function decision:
-borrow a never-written parameter in any function proven not to mutate a global
-**transitively**, even in a script that has mutable globals elsewhere. A
-call-graph fixpoint marks each user method "may mutate a global" - seeded by a
-direct write to an outer-scope binding and propagated through its callees, with
-unanalysable targets (a `func`-value call, `meta.call` / `meta.callMain`) treated
-conservatively as "may mutate"; module and builtin calls are safe (module
-isolation; builtins do not touch `.j` globals). Composes with M25.1 unchanged -
-same `Param.Borrow` flag and `bindArg` path, only the enabling gate widens from
-"whole script is globals-immutable" to "this function mutates no global".
+**Done.** M25.1 gates a whole script all-or-nothing on "does it declare any
+mutable top-level global". M25.2 adds a per-function decision on top: borrow a
+never-written parameter in any method proven not to mutate a global
+**transitively**, even in a script that has mutable globals elsewhere.
+
+- **The analysis** (`computeEntryGlobalSafe`, run after module load so the
+  module-alias and namespace tables exist). Each entry-program method is scanned
+  for a **local hazard**, then a fixpoint propagates it along named-call edges
+  (`CallExpr.Method`), so a method that reaches a hazardous method is itself
+  hazardous. A local hazard is: a write whose root is not a method-local name (a
+  mutable global write - a `const` target is already rejected, so any non-local
+  write hits a mutable global); a `CallValueExpr` (dynamic func-value dispatch); a
+  **module** call (a module can re-enter the host via `meta.callMain` and reach a
+  host global write); a **callback builtin** (the higher-order `lists` layer,
+  which invokes a func-value argument, and the by-name dispatchers `meta.call` /
+  `meta.callMain` / `testing.run` / `runWith` / `assertThrows` - keyed by
+  canonical namespace, so an aliased `use lists as l` is caught); or an
+  unresolved bare call. The walker **defaults an unrecognised node to hazardous**,
+  so a new AST node never silently escapes. `spawn` bodies are skipped (they
+  mutate a deep-copied snapshot, not the live globals). A method with no hazard is
+  stamped `MethodDef.GlobalSafe`, and `methodBorrowCtx` widens the bind gate to
+  `i.isModule || i.entryGlobalsImmutable || m.GlobalSafe`.
+- **Why callback builtins are a denylist.** A func value is a `ConstRefExpr` at
+  the AST level (indistinguishable from a constant), and func values also arrive
+  through `func`-typed variables and untyped curried returns (`makeAdder(1)` -
+  methods declare no return type), so a func-value *argument* cannot be spotted
+  statically. The sound alternative is to name the builtins that can invoke `.j`
+  code (via `BuiltinCtx.Invoke` or `CallByName*` / `CallHostWith*`). The invariant
+  - any such builtin must be listed - lives beside the set in `globalsafe.go` and
+  in `CLAUDE.md` note 24. Conservative by construction: a script function that
+  calls a module or uses a func value does not borrow (M25.1 still covers it when
+  the script is globals-free or the call is into a module, whose own helpers
+  borrow via isModule).
+- **What it buys.** A read-only helper in a script that holds mutable globals goes
+  linear: a per-element `peek(xs, i)` scanned over a growing list drops from
+  quadratic to linear once `peek`/`scan` are proven `GlobalSafe`.
+- **Discipline.** `internal/interpreter/globalsafe_internal_test.go` pins the flag
+  (pure / direct-write / index+append-write / nested-block / transitive / mutual
+  recursion / cycle-reaching-a-writer / function-value-call); `borrow_test.go`
+  pins the value-semantics soundness end to end (direct, transitive-via-callee,
+  `meta.call`, and `lists.map` global mutations all keep copy semantics; a
+  GlobalSafe helper in a mutable-globals script borrows correctly). Race-clean.
 
 ---
 

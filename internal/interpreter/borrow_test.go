@@ -4,9 +4,30 @@
 package interpreter_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+
+	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/parser"
+	"jennifer-lang.dev/jennifer/internal/stdlib"
 )
+
+// runAllLibs parses + runs a script with the whole standard library installed
+// (needed by the M25.2 tests that exercise meta.call / lists.map callback paths).
+func runAllLibs(t *testing.T, src string) (string, error) {
+	t.Helper()
+	prog, err := parser.Parse(src)
+	if err != nil {
+		return "", err
+	}
+	in := interpreter.New()
+	var buf bytes.Buffer
+	in.Out = &buf
+	stdlib.InstallAll(in)
+	runErr := in.Run(prog)
+	return buf.String(), runErr
+}
 
 // Read-only-parameter borrow: a never-written compound parameter is bound by
 // alias instead of deep-copied, but only in a module (declarations-only, so no
@@ -33,6 +54,75 @@ func TestBorrowGateEntryProgramKeepsCopySemantics(t *testing.T) {
 	}
 	if out != "1" {
 		t.Fatalf("entry-program value semantics broken: got %q, want %q (borrow must not apply with a mutable global)", out, "1")
+	}
+}
+
+// M25.2: in a script that HAS a mutable global, a function that transitively
+// mutates that global (directly, via a callee, or via a reflective builtin) is
+// not GlobalSafe and keeps copy semantics. Each returns 1 (copy) not 99 (a
+// borrowed read of the mutated backing).
+func TestBorrowM252UnsafeFunctionsKeepCopy(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"direct write", `
+			use io; def g as list of int init [1,2,3];
+			func f(p as list of int) { $g[0] = 99; return $p[0]; }
+			io.printf("%d", f($g));`},
+		{"transitive write via callee", `
+			use io; def g as list of int init [1,2,3];
+			func mut() { $g[0] = 99; }
+			func f(p as list of int) { mut(); return $p[0]; }
+			io.printf("%d", f($g));`},
+		{"reflective dispatch (meta.call)", `
+			use io; use meta; def g as list of int init [1,2,3];
+			func evil() { $g[0] = 99; return 0; }
+			func f(p as list of int) { meta.call("evil"); return $p[0]; }
+			io.printf("%d", f($g));`},
+		{"higher-order builtin (lists.map)", `
+			use io; use lists; def g as list of int init [1,2,3];
+			func bump(x as int) { $g[0] = 99; return $x; }
+			func f(p as list of int) { def z as list of int init lists.map([1], bump); return $p[0]; }
+			io.printf("%d", f($g));`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := runAllLibs(t, c.src)
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if out != "1" {
+				t.Fatalf("value semantics broken: got %q, want %q (an unsafe function must keep copy semantics)", out, "1")
+			}
+		})
+	}
+}
+
+// M25.2: in a script that HAS a mutable global, a GlobalSafe function (mutates no
+// global transitively) borrows its never-written params. Value semantics must
+// hold: copying the borrowed param to a local and mutating the local leaves the
+// borrowed original intact.
+func TestBorrowM252SafeFunctionBorrowsCorrectly(t *testing.T) {
+	out, err := runAlias(t, `
+		use io;
+		def counter as int init 0;
+		func firstAfterLocalMutate(xs as list of int) {
+			def ys as list of int init $xs;
+			$ys[0] = 999;
+			return $xs[0];
+		}
+		def data as list of int init [5, 6, 7];
+		$counter = firstAfterLocalMutate($data);
+		io.printf("%d %d", $counter, $data[0]);
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// 5 (borrowed original intact despite the local copy's mutation), 5 (caller
+	// list untouched). If borrow were unsound here, the first would be 999.
+	if out != "5 5" {
+		t.Fatalf("safe-function borrow value semantics: got %q, want %q", out, "5 5")
 	}
 }
 
