@@ -37,6 +37,8 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | Call                             | Returns        | Notes                                                                              |
 | -------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
 | `binary.concat(a, b)`            | bytes          | Join two byte sequences. See [Building buffers](#building-buffers) for the loop caveat. |
+| `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. |
+| `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |
 | `binary.slice(b, start)`         | bytes          | From `start` to the end of `b`.                                                    |
 | `binary.slice(b, start, end)`    | bytes          | The half-open range `[start, end)`; **exclusive end**.                             |
 | `binary.indexOf(haystack, needle)`  | int            | Byte index of the first occurrence of `needle`; `-1` if absent. An empty `needle` returns `0`. Same shape as `strings.indexOf`. |
@@ -100,6 +102,27 @@ response body to EOF as one `bytes`, and [`net.readN`](net.md) reads an exact
 length-prefixed frame - both grow a single Go slice rather than concatenating in
 a `.j` loop. Reserve `binary.concat` for joining a small, fixed number of
 pieces.
+
+When you already hold the pieces - you built them in a loop rather than read
+them off a stream - collect them in a `list of bytes` and make one
+`binary.join` call. That is `O(n)` (a single allocation sized to the total),
+where the concat-in-a-loop it replaces is `O(n^2)`. It is the exact byte-data
+analogue of building a string with list-append plus `strings.join`:
+
+```jennifer
+# Slow: each concat re-copies the whole accumulator - O(n^2).
+def out as bytes;
+for (def chunk in $chunks) {
+    $out = binary.concat($out, $chunk);
+}
+
+# Fast: append the pieces, join once - O(n).
+def parts as list of bytes init [];
+for (def chunk in $chunks) {
+    $parts[] = $chunk;
+}
+def out as bytes init binary.join($parts);
+```
 
 ## TinyGo
 

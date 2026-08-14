@@ -129,3 +129,58 @@ func TestContains(t *testing.T) {
 		t.Fatalf("got %q", out)
 	}
 }
+
+// TestJoin covers binary.join: no-sep, with-sep, empty list, round-trip with
+// split, and the non-bytes-element error.
+func TestJoin(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use convert; use binary;
+		def parts as list of bytes init [
+			convert.bytesFromString("a", "utf-8"),
+			convert.bytesFromString("bb", "utf-8"),
+			convert.bytesFromString("ccc", "utf-8")
+		];
+		def sep as bytes init convert.bytesFromString(",", "utf-8");
+		io.printf("%s/", convert.stringFromBytes(binary.join($parts), "utf-8"));
+		io.printf("%s/", convert.stringFromBytes(binary.join($parts, $sep), "utf-8"));
+		def empty as list of bytes init [];
+		io.printf("%d/", len(binary.join($empty)));
+		def one as list of bytes init [convert.bytesFromString("x", "utf-8")];
+		io.printf("%s", convert.stringFromBytes(binary.join($one, $sep), "utf-8"));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "abbccc/a,bb,ccc/0/x" {
+		t.Fatalf("got %q", out)
+	}
+}
+
+// TestJoinRoundTripsSplit - join(split(b, sep), sep) == b.
+func TestJoinRoundTrips(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use convert; use binary;
+		def b as bytes init convert.bytesFromString("one,two,three", "utf-8");
+		def sep as bytes init convert.bytesFromString(",", "utf-8");
+		def back as bytes init binary.join(binary.split($b, $sep), $sep);
+		io.printf("%s", convert.stringFromBytes($back, "utf-8"));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "one,two,three" {
+		t.Fatalf("got %q", out)
+	}
+}
+
+// TestJoinNonBytesElement - a non-bytes element is a catchable error.
+func TestJoinNonBytesElement(t *testing.T) {
+	_, err := runProg(t, `
+		use convert; use binary;
+		def parts as list of int init [1, 2, 3];
+		def x as bytes init binary.join($parts);
+	`)
+	if err == nil || !strings.Contains(err.Error(), "expected bytes") {
+		t.Fatalf("expected list-of-bytes type error, got %v", err)
+	}
+}

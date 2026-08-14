@@ -33,6 +33,7 @@ type Value = interpreter.Value
 // every name lives behind the `binary.` prefix.
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
+	in.RegisterNamespaced(LibraryName, "join", joinFn)
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
@@ -57,9 +58,11 @@ func takeInt(fn string, args []Value, idx int, role string) (int64, error) {
 	return args[idx].Int, nil
 }
 
-// concatFn joins two byte sequences into a fresh bytes: binary.concat(a, b). For
-// building a buffer in a loop prefer net.readAll / net.readN (which grow one Go
-// slice); concat is O(len(a)+len(b)) per call, so a concat-in-a-loop is O(n^2).
+// concatFn joins two byte sequences into a fresh bytes: binary.concat(a, b).
+// concat is O(len(a)+len(b)) per call, so a concat-in-a-loop is O(n^2); to
+// assemble many chunks you already hold use binary.join (append to a list, join
+// once), and to build a buffer from a stream prefer net.readAll / net.readN
+// (which grow one Go slice).
 func concatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("binary.concat expects 2 arguments (a, b), got %d", len(args))
@@ -75,6 +78,49 @@ func concatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	out := make([]byte, 0, len(a)+len(b))
 	out = append(out, a...)
 	out = append(out, b...)
+	return interpreter.BytesVal(out), nil
+}
+
+// joinFn concatenates every `bytes` in `parts`, with an optional separator
+// between them, into one freshly-allocated bytes: binary.join(parts[, sep]).
+// The byte-data counterpart to strings.join, and the O(n) way to assemble many
+// byte chunks - a list-append + one join stays linear where a concat-in-a-loop
+// (each binary.concat re-copies the whole accumulator) is O(n^2). `parts` must
+// be a `list of bytes`; any non-bytes element is a positioned error. An empty
+// list yields empty bytes; the separator defaults to empty.
+func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("binary.join expects 1 or 2 arguments (parts[, sep]), got %d", len(args))
+	}
+	parts := args[0]
+	if parts.Kind != interpreter.KindList {
+		return interpreter.Null(), fmt.Errorf("binary.join: first argument must be a list of bytes, got %s", parts.Kind)
+	}
+	var sep []byte
+	if len(args) == 2 {
+		s, err := takeBytes("binary.join", args, 1, "separator")
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		sep = s
+	}
+	total := 0
+	for i, e := range parts.List {
+		if e.Kind != interpreter.KindBytes {
+			return interpreter.Null(), fmt.Errorf("binary.join: element %d is %s, expected bytes", i, e.Kind)
+		}
+		total += len(e.Bytes)
+	}
+	if len(parts.List) > 1 {
+		total += len(sep) * (len(parts.List) - 1)
+	}
+	out := make([]byte, 0, total)
+	for i, e := range parts.List {
+		if i > 0 {
+			out = append(out, sep...)
+		}
+		out = append(out, e.Bytes...)
+	}
 	return interpreter.BytesVal(out), nil
 }
 
