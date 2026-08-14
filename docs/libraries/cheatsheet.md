@@ -95,6 +95,8 @@ flat lookup view, not authoritative.
 | [`fs`](fs.md)`.readLine($f)`                          | One line from handle, `\r\n` / `\n` stripped. Errors on EOF - check `fs.eof` first.                                                 |
 | [`fs`](fs.md)`.readString(path)`                      | Whole file as UTF-8; invalid UTF-8 is a positioned runtime error.                                                                   |
 | [`fs`](fs.md)`.realpath(path)`                        | Absolute, symlink-resolved canonical path (resolve `os.ARGS[0]` to find files beside the real script). Missing / unresolvable errors. |
+| [`fs`](fs.md)`.readlink(path)`                        | A symlink's target, verbatim (not resolved; use `fs.realpath` to resolve). Non-symlink / missing errors.                            |
+| [`fs`](fs.md)`.symlink(target, linkPath)`             | Create a symlink at `linkPath` pointing to `target` (like `ln -s target linkPath`). Existing `linkPath` errors.                      |
 | [`fs`](fs.md)`.remove(path)`                          | Delete one file or empty directory. Non-empty dir errors.                                                                           |
 | [`fs`](fs.md)`.removeAll(path)`                       | Recursive delete. Explicit second verb (no-footguns stance).                                                                        |
 | [`fs`](fs.md)`.rename(old, new)`                      | Same-filesystem rename; cross-fs is a boundary error.                                                                               |

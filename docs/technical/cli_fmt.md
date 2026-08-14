@@ -1,23 +1,31 @@
 # Formatter (`cmd/jennifer/fmt.go`)
 
-`jennifer fmt [-w] <file.j>...` rewrites Jennifer source into the one canonical
+`jennifer fmt [-w|-l] <file.j>...` rewrites Jennifer source into the one canonical
 style defined in [../user-guide/style-guide.md](../user-guide/style-guide.md).
 By default it prints the result to **stdout**; `-w` (or `--write`) rewrites the
-named files in place instead:
+named files in place; `-l` (or `--check`) checks without rewriting:
 
 ```sh
 jennifer fmt prog.j            # preview the formatted source on stdout
 jennifer fmt prog.j > out.j    # or redirect it (pipe to `sponge`, an editor, ...)
 jennifer fmt -w prog.j         # rewrite prog.j in place
 jennifer fmt -w a.j b.j        # rewrite several named files in place
+jennifer fmt --check src/*.j   # list files that are not formatted; exit non-zero
 ```
 
 `-w` skips a file whose content is already canonical (no needless mtime churn)
 and preserves each file's mode; it prints `formatted <path>` to stderr for each
 file it changes. Sending several files to stdout without `-w` is refused as
-ambiguous. There is exactly one write flag - `-w` / `--write`, no `-i` synonym -
-and no style options: like `gofmt`, the formatter is opinionated by design, so a
-whole codebase reads the same and diffs stay minimal.
+ambiguous.
+
+`-l` / `--check` is the non-mutating **gate** mode: it writes the path of each file
+whose canonical form differs to **stdout**, one per line, mutates nothing, and
+sets the exit code to `0` (all formatted) / `1` (some need formatting) / `2` (a
+read or lex error) - the same `0`/`1`/`2` split `jennifer lint` uses, so a
+combined `fmt --check` + `lint` CI gate reads uniformly. It is mutually exclusive
+with `-w`. There is one write flag (`-w` / `--write`, no `-i` synonym) and one
+check flag (`-l` / `--check`), and no style options: like `gofmt`, the formatter
+is opinionated by design, so a whole codebase reads the same and diffs stay minimal.
 
 The write is careful about what it touches:
 

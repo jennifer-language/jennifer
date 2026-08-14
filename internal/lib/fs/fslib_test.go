@@ -733,3 +733,59 @@ func TestChownRejectsBadArity(t *testing.T) {
 		t.Fatalf("expected arity error, got %v", err)
 	}
 }
+
+// TestSymlinkCreateAndReadlink covers fs.symlink (create a link) and fs.readlink
+// (read its verbatim target), the pair the jvc app installer needs. It checks a
+// relative target round-trips exactly, that reads follow the link, and that
+// readlink on a non-symlink and a re-create over an existing link both error.
+func TestSymlinkCreateAndReadlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Probe symlink support first so an unsupported FS skips rather than fails.
+	if err := os.Symlink("target.txt", filepath.Join(dir, "probe")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	out, err := runProg(t, fmt.Sprintf(`use io; use fs;
+fs.symlink("target.txt", %q);
+io.printf("%%s", fs.readlink(%q));
+io.printf(":");
+io.printf("%%s", fs.readString(%q));`, link, link, link))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "target.txt:payload" {
+		t.Errorf("symlink/readlink round trip = %q, want %q", out, "target.txt:payload")
+	}
+	// The link really is a symlink on disk with the verbatim target.
+	if got, _ := os.Readlink(link); got != "target.txt" {
+		t.Errorf("on-disk link target = %q, want %q", got, "target.txt")
+	}
+}
+
+// TestReadlinkOnNonLinkErrors - readlink on a regular file is a catchable error.
+func TestReadlinkOnNonLinkErrors(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "plain.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runProg(t, fmt.Sprintf(`use fs; def s as string init fs.readlink(%q);`, f)); err == nil {
+		t.Error("fs.readlink on a non-symlink should raise a catchable error")
+	}
+}
+
+// TestSymlinkOverExistingErrors - fs.symlink does not replace an existing path.
+func TestSymlinkOverExistingErrors(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "here.txt")
+	if err := os.WriteFile(existing, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runProg(t, fmt.Sprintf(`use fs; fs.symlink("whatever", %q);`, existing)); err == nil {
+		t.Error("fs.symlink onto an existing path should raise a catchable error")
+	}
+}

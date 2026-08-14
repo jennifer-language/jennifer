@@ -79,6 +79,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "isDir", isDirFn)
 	in.RegisterNamespaced(LibraryName, "stat", statFn)
 	in.RegisterNamespaced(LibraryName, "realpath", realpathFn)
+	in.RegisterNamespaced(LibraryName, "symlink", symlinkFn)
+	in.RegisterNamespaced(LibraryName, "readlink", readlinkFn)
 	in.RegisterNamespaced(LibraryName, "chmod", chmodFn)
 	in.RegisterNamespaced(LibraryName, "chown", chownFn)
 
@@ -271,6 +273,50 @@ func realpathFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %v", path, evalErr)
 	}
 	return interpreter.StringVal(resolved), nil
+}
+
+// symlinkFn creates a symbolic link at `linkPath` that points to `target`:
+// fs.symlink(target, linkPath). The argument order mirrors `ln -s TARGET LINK`.
+// `target` is stored verbatim - a relative target is resolved (by the OS) against
+// the link's own directory, not the current working directory. Creating a link
+// whose `linkPath` already exists is an error (os.Symlink does not replace);
+// remove it first (fs.remove) to re-point. Symlinks are a Unix concept; on a
+// platform or filesystem without them the OS error surfaces as a catchable error.
+func symlinkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("fs.symlink expects 2 arguments (target, linkPath), got %d", len(args))
+	}
+	target, err := takeStringArg("fs.symlink", args, 0, "target")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	linkPath, err := takeStringArg("fs.symlink", args, 1, "link path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if slErr := os.Symlink(target, linkPath); slErr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.symlink: %s -> %s: %v", linkPath, target, slErr)
+	}
+	return interpreter.Null(), nil
+}
+
+// readlinkFn returns the target a symbolic link points to, verbatim (the stored
+// link text, not a fully-resolved absolute path - use fs.realpath for that):
+// fs.readlink(path). A `path` that is not a symlink, or that does not exist, is a
+// catchable error.
+func readlinkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("fs.readlink expects 1 argument (path), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.readlink", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	target, rlErr := os.Readlink(path)
+	if rlErr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.readlink: %s: %v", path, rlErr)
+	}
+	return interpreter.StringVal(target), nil
 }
 
 func existsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {

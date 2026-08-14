@@ -43,6 +43,8 @@ Boundary-friendly predicates plus a full `fs.stat`.
 | `fs.isDir(path)`    | `bool`    | True iff the path exists and is a directory. False for missing.              |
 | `fs.stat(path)`     | `fs.Stat` | Missing path errors. Pair with `fs.exists` when tolerating absent files.     |
 | `fs.realpath(path)` | `string`  | Absolute, symlink-resolved canonical path. A missing / unresolvable path errors. |
+| `fs.readlink(path)` | `string`  | The target a symlink points to, **verbatim** (the stored link text, not resolved; use `fs.realpath` to fully resolve). A non-symlink or missing path errors. |
+| `fs.symlink(target, linkPath)` | `null` | Create a symlink at `linkPath` pointing to `target` (argument order mirrors `ln -s TARGET LINK`). An already-existing `linkPath` errors - `fs.remove` it first to re-point. |
 
 `fs.realpath` follows every symlink in the chain and makes the result absolute -
 the userland companion to the entry-script resolution the interpreter already
@@ -426,7 +428,6 @@ concrete workload forces it.
 - **Streaming line iterator** (`for (def line in fs.lines(path))`).
   Compose with `fs.open` + `while (not fs.eof)`.
 - **`fs.copy(src, dst)`** and **`fs.chmod(path, mode)`**.
-- **Symlink ops** (`fs.readlink`, `fs.symlink`).
 - **`fs.stat($f)` on an open handle**. Only path-based `fs.stat`
   in v1.
 - **Watch / notify** (inotify / kqueue / FSEvents).
