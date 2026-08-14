@@ -3235,7 +3235,11 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		// can never collide with a variable / constant (the def/func namespace is
 		// shared), reaching here unambiguously means the function value.
 		if m, ok := i.methods[ex.Name]; ok {
-			return FuncVal(m), nil
+			fvv := FuncVal(m)
+			// Record the defining interpreter so a cross-module call runs the body
+			// in its home context (its own `use` / `import` namespaces resolve).
+			fvv.FnHome = i
+			return fvv, nil
 		}
 		file, line, col := posFor(ex)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("undefined name %q", ex.Name), File: file, Line: line, Col: col}
@@ -4921,7 +4925,42 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 			File: file, Line: line, Col: col,
 		}
 	}
+	// A func value carrying a home interpreter different from the caller runs its
+	// body in that home context, so the body resolves its own `use` / `import`
+	// namespaces (a func value passed across a module boundary would otherwise
+	// run against the caller's namespaces and fail to resolve its aliases). Args
+	// and the result are retagged across the boundary, exactly as a module method
+	// call's struct arguments / returns are.
+	if fv.FnHome != nil && fv.FnHome != i {
+		home := fv.FnHome
+		args := make([]Value, len(c.Args))
+		for idx, a := range c.Args {
+			v, err := i.evalExpr(a, env)
+			if err != nil {
+				return Value{}, err
+			}
+			args[idx] = crossRetag(v, i, home)
+		}
+		res, err := home.callMethodWithDepth(fv.Fn, env.depth, args...)
+		if err != nil {
+			return Value{}, err
+		}
+		return crossRetag(res, home, i), nil
+	}
 	return i.callUserMethod(fv.Fn, c.Args, env, fv.Fn.Name, c)
+}
+
+// crossRetag rewrites a value's struct identities as it crosses from interpreter
+// `from` into interpreter `to` (calling a func value whose home differs from the
+// caller). `to`'s own structs - tagged with `to`'s identity as `from` sees them
+// - become bare inside `to`; `from`'s own structs - bare inside `from` - take
+// `from`'s identity so `to` recognises them as that module's structs. The two
+// steps target disjoint owners (a struct belongs to one module), so both call /
+// return directions and every host/module pairing are handled by the same pass.
+func crossRetag(v Value, from, to *Interpreter) Value {
+	v = retagStructs(v, to.moduleNS, "", to.modulePath, "", to.isOwnStructName)
+	v = retagStructs(v, "", from.moduleNS, "", from.modulePath, from.isOwnStructName)
+	return v
 }
 
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {

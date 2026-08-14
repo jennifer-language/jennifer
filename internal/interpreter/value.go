@@ -223,6 +223,7 @@ type Value struct {
 	Task       *TaskState        // KindTask: shared handle - copying a task copies the pointer
 	Obj        *Value            // KindObject: wrapped opaque payload (e.g. json.Value's decoded tree); StructNS/StructName carry the owning type
 	Fn         *parser.MethodDef // KindFunc: the referenced top-level method (immutable); a copy shares this pointer, nil is the uninitialized zero
+	FnHome     *Interpreter      // KindFunc: the interpreter that defined Fn (its home context). A func value called from another interpreter dispatches back here so Fn's body resolves its own namespace imports; nil = legacy / caller-context (same interpreter). Immutable, shared on copy.
 	Chan       *ChannelState     // KindChannel: shared channel handle - copying a channel copies the pointer (values sent through it are copied)
 
 	// mapIdx is an unexported acceleration cache for KindMap: encoded scalar
