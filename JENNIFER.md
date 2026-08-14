@@ -20,6 +20,55 @@ the exact signature of any function there. Source and issues:
 > [hosted docs](https://jennifer-lang.dev/), the docs win - tell the
 > maintainer.
 
+> **Keep this file in sync with the installed interpreter - it is your job.**
+> This is a copy dropped into a project, so it silently goes stale as the local
+> `jennifer` is upgraded (or was already older than this copy). A JENNIFER.md
+> that does not match the installed release is the most common reason an
+> assistant writes `.j` code the interpreter then rejects. So **you, the
+> assistant, are responsible for keeping this file aligned with the installed
+> release** - do this before you rely on it (and again whenever code you wrote
+> fails with an "unknown"/"not defined"/pragma-version error).
+>
+> **Cheap self-check first.** Once you have synced this file you leave a marker on
+> its last line recording the exact `jennifer version` string it was fetched for
+> (`<!-- jennifer-md-synced-for: ... -->`). Run `jennifer version` and compare it
+> to that marker: **equal -> this copy is current, do nothing**; **different, or
+> no marker yet (a pristine copy just dropped into the project) -> run the sync
+> below**. That is one command and a string compare, so it is cheap enough to do
+> at the start of any `.j` work; you only fetch over the network when the marker
+> actually disagrees.
+>
+> **Sync:**
+>
+> 1. Read the installed version: `jennifer version` (e.g. `0.24.0`, or
+>    `0.24.0-dev+N.<sha>`).
+> 2. Fetch the JENNIFER.md that matches it from the source repo:
+>    - a **development build** - any version containing `-dev` (e.g.
+>      `0.24.0-dev+N.<sha>`) or the bare string `dev` - is ahead of the last
+>      release, so **always** fetch the `main` branch, regardless of the `X.Y.Z`
+>      it prints:
+>      `https://raw.githubusercontent.com/jennifer-language/jennifer/main/JENNIFER.md`;
+>    - a **clean release** `X.Y.Z` (no `-dev` suffix) fetches its own tag:
+>      `https://raw.githubusercontent.com/jennifer-language/jennifer/X.Y.Z/JENNIFER.md`.
+> 3. If the fetched file differs from this local copy, **replace this local copy
+>    with it**.
+> 4. **Stamp the marker.** Whether or not step 3 replaced anything, set the last
+>    line of the local copy to the full `jennifer version` string you read in
+>    step 1, so the next self-check is a cheap compare:
+>    `<!-- jennifer-md-synced-for: 0.24.0-dev+N.<sha> -->`. Record the whole
+>    string verbatim - for a dev build it carries the commit (`+N.<sha>`), so the
+>    marker changes the moment the installed interpreter is rebuilt and your check
+>    catches it. (A dev build always re-fetches `main` per step 2, since `main`
+>    advances even when the local commit has not; the marker still tells you the
+>    interpreter itself moved.)
+>
+> Match the **installed interpreter**, not the newest release: if the local
+> `jennifer` is `0.24.0` while `0.25.0` is out, fetch the `0.24.0` JENNIFER.md -
+> this file must describe the features the interpreter you actually run has, no
+> more and no less. (No web access? Then note in your reply that you could not
+> verify JENNIFER.md against the installed `jennifer version`, so some guidance
+> here may not match it.)
+
 ---
 
 ## The 10 rules that trip people up
@@ -602,184 +651,137 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 `import "./NAME.j" as NAME;` for a local copy); addressed `NAME.fn(...)` /
 `NAME.Struct` like a library.
 
-- **`acme`** - ACME (RFC 8555) client: obtain / renew TLS certificates from
-  Let's Encrypt and compatible CAs. `acme.connect(directoryUrl, accountKey)` /
-  `register(client, email)` an account, `order(client, domains)`,
-  `authorization(client, authzUrl)` + `challenge(authz, kind)`, compute the
-  HTTP-01 `keyAuthorization(client, token)` or DNS-01 `dnsRecord(client, token)`
-  (both pure), `accept(client, challengeUrl)` + `pollAuthorization`, then
-  `finalize(client, order, csr, ...)` with a `crypto.csr` and
-  `downloadCertificate(client, order)`. Every request a JWS (`RS256` / `ES256`)
-  over `http` + `json`; keys / CSR / JWK from `crypto`. Test against a CA
-  **staging** endpoint first. Needs the default binary.
+- **`acme`** - ACME (RFC 8555) client: obtain / renew TLS certificates from Let's
+  Encrypt and compatible CAs. `acme.connect(directoryUrl, accountKey)` /
+  `register(client, email)`, `order(client, domains)`, `authorization` +
+  `challenge(authz, kind)`, compute HTTP-01 `keyAuthorization(client, token)` /
+  DNS-01 `dnsRecord(client, token)`, `accept` + `pollAuthorization`, then
+  `finalize(client, order, csr, ...)` with a `crypto.csr` + `downloadCertificate`.
+  Every request a JWS (`RS256` / `ES256`) over `http` + `json`; keys / CSR / JWK
+  from `crypto`. Test against a CA **staging** endpoint first. Needs the default
+  binary.
 - **`ansi`** - terminal styling as string wrappers: `ansi.color(s, name)` /
   `bgColor` / `style(s, name)` (bold / dim / italic / underline / reverse) /
   `rgb` / `strip`, plus per-colour and per-style shortcuts (`ansi.red(s)`,
   `ansi.bold(s)`). TTY-aware: styling suppresses itself off a terminal or under
   `NO_COLOR`, and is forced on by `FORCE_COLOR`.
-- **`args`** - a declarative CLI argument parser (argparse-style) over
-  `os.ARGS`. Build a value-semantic `Parser` with copy-returning builders:
-  `args.parser(prog, help)` then `args.flag` / `intFlag` / `floatFlag` /
-  `boolFlag` (long + short, default, help), `args.countFlag` (`-vvv` -> 3),
-  `args.listFlag` (repeatable -> list), `args.positional` / `positionalOpt` /
-  `positionalList` / `positionalList1` / `positionalN` (`nargs` `?` / `*` / `+`
-  / N), plus the post-modifiers `args.required(p)` / `args.choices(p, allowed)`,
-  `args.command(p, name, help, sub)` (subcommands), and `args.version(p, ver)`.
-  `args.parse($p, os.ARGS)` -> a `Result` read with `args.asString` / `asInt` /
-  `asFloat` / `asBool` / `asList` / `count` / `has` (and the `$r.command` /
-  `$r.done` / `$r.helpText` fields). Accepts `--flag=value` / `--flag value` /
-  `-abc` bundling / `--` end-of-flags; an unknown flag, missing required arg,
-  bad type, or bad choice throws a catchable `Error{kind: "args"}`, while `-h` /
-  `--help` / `--version` set `$r.done` with `helpText` to print (not a process
-  exit). `args.dispatch($r, handlers)` routes the chosen subcommand to its
-  handler - `handlers` is a `map of string to func` (subcommand name -> a
-  `func(r as Result)` value), so a func value called there runs in the entry
-  program's context (resolving its own imports); it returns the handler's value
-  (e.g. an exit code), no-ops on `$r.done`, and throws `Error{kind: "args"}` for
-  a missing / unmatched command. Pure `.j` over `strings` + `convert` + `lists`
-  + `maps`; both binaries.
-- **`csv`** - RFC 4180: `csv.parse(s)` / `format(rows)` (`parseWith` /
-  `formatWith` for any single-character delimiter, e.g. TSV), plus `toRecords` /
-  `fromRecords` for header-keyed `map of string to string`. Quoting-aware.
-  `csv.formatSafe(rows)` neutralises spreadsheet-formula injection (CWE-1236) for
-  the export path; a `csv.Dialect` (`dialect(delim)` -> `parseDialect` /
-  `formatDialect`) groups delimiter / quote / comment / trim knobs; streaming
-  `csv.reader` / `writer` handles wrap an open `fs.File`.
+- **`args`** - a declarative CLI argument parser (argparse-style) over `os.ARGS`.
+  Build a value-semantic `Parser` with copy-returning builders: `args.parser(prog,
+  help)` then `args.flag` / `intFlag` / `floatFlag` / `boolFlag` (long + short,
+  default, help), `countFlag` (`-vvv` -> 3), `listFlag` (repeatable -> list),
+  `positional` / `positionalOpt` / `positionalList` / `positionalList1` /
+  `positionalN` (`nargs` `?` / `*` / `+` / N), post-modifiers `required(p)` /
+  `choices(p, allowed)`, `command(p, name, help, sub)` (subcommands), `version(p,
+  ver)`. `args.parse($p, os.ARGS)` -> a `Result` read with `asString` / `asInt` /
+  `asFloat` / `asBool` / `asList` / `count` / `has` (+ `$r.command` / `$r.done` /
+  `$r.helpText`). Accepts `--flag=value` / `--flag value` / `-abc` bundling / `--`;
+  an unknown flag / missing required / bad type / bad choice throws
+  `Error{kind: "args"}`, while `-h` / `--help` / `--version` set `$r.done` with
+  `helpText` to print. `args.dispatch($r, handlers)` routes the chosen subcommand
+  to its handler (`handlers` a `map of string to func` of `func(r as Result)`
+  values, run in the entry program's context), returning the handler's value.
+  Pure `.j` over `strings` + `convert` + `lists` + `maps`; both binaries.
+- **`csv`** - RFC 4180: `csv.parse(s)` / `format(rows)` (`parseWith` / `formatWith`
+  for any single-character delimiter, e.g. TSV), plus `toRecords` / `fromRecords`
+  for header-keyed `map of string to string`. Quoting-aware. `csv.formatSafe(rows)`
+  neutralises spreadsheet-formula injection (CWE-1236); a `csv.Dialect`
+  (`dialect(delim)` -> `parseDialect` / `formatDialect`) groups delimiter / quote /
+  comment / trim knobs; streaming `csv.reader` / `writer` wrap an open `fs.File`.
 - **`docblock`** - the Jennifer doc-comment format (`/**` ... `*/` with a
   summary, description, and `@param`/`@field`/`@return`/`@throws`/`@since`/
   `@deprecated`/`@see`/`@example`/`@internal`/`@module` tags; types in `{...}`)
   and its parser. `docblock.parse(source)` -> a typed `FileDoc` tree (module
   preamble + per-construct docs + `Diagnostic`s for doc drift / orphans). Data,
   not rendering. Over `regex` + `strings`; both binaries.
-- **`feed`** - RSS 2.0 and Atom 1.0 web syndication in one module (build and
-  parse; format chosen on `build`, detected on `parse`). Value-semantic
-  `feed.Feed { title, link, updated, entries, author, categories }` of
-  `feed.Entry { title, link, id, published, updated, summary, content, author,
-  categories, enclosure }` (an `feed.Enclosure { url, length, type }` media file)
-  with builders `feed.feed(title, link)` / `entry(title, link)` / `add(f, e)` /
-  `feedUpdated(f, t)` / `entryId` / `entryPublished` / `entryUpdated` /
-  `entrySummary` / `entryContent` / `entryAuthor` / `entryCategory` /
-  `entryEnclosure(e, url, length, type)` / `feedAuthor` / `feedCategory` /
-  `hasEnclosure(e)`; `feed.build(f, "rss"|"atom")` / `parse(text)` /
-  `kind(text)`, and `feed.fetch(url)` over the `http` module. Enclosures make it
-  a podcast feed (RSS `<enclosure>` / Atom `<link rel="enclosure">`); author +
-  categories round-trip on feed and entry (RSS author reads `<dc:creator>` as a
-  fallback). Over `xml` + `time` (build / parse on both binaries; `fetch` needs
-  the default binary). Hardened for untrusted feeds (xml nesting cap, no
-  billion-laughs, lenient dates, a 64 MiB body cap).
+- **`feed`** - RSS 2.0 and Atom 1.0 web syndication in one module (format chosen
+  on `build`, detected on `parse`). Value-semantic `feed.Feed{title, link, updated,
+  entries, author, categories}` of `feed.Entry{..., enclosure}` (an
+  `feed.Enclosure{url, length, type}`) with builders `feed.feed(title, link)` /
+  `entry(title, link)` / `add(f, e)` / `feedUpdated` / `entryId` / `entryPublished`
+  / `entrySummary` / `entryContent` / `entryAuthor` / `entryCategory` /
+  `entryEnclosure` / `hasEnclosure`; `feed.build(f, "rss"|"atom")` / `parse(text)`
+  / `kind(text)`, and `feed.fetch(url)` over `http`. Enclosures make it a podcast
+  feed; author + categories round-trip. Over `xml` + `time` (build / parse both
+  binaries, `fetch` the default). Hardened for untrusted feeds (nesting cap, 64 MiB
+  body cap).
 - **`font`** - a pure-Jennifer TrueType / OpenType font parser (no Go; `bytes` +
   bitwise ops + `fs`, so **both binaries**). `font.parse(b)` / `open(path)` ->
-  `font.Font` (a `.ttf` or `.otf`); `font.unitsPerEm(f)` / `name(f)` /
-  `advance(f, cp)` / `kern(f, left, right)` (legacy `kern`-table pair kerning) /
-  `ascender` / `descender` / `lineGap` / `capHeight` / `xHeight` (OS/2 vertical
-  metrics) / `glyphPath(f, cp)` -> an SVG path `d` string / `glyph(f, cp)` ->
-  `font.Glyph` (contours of on / off-curve `font.Point`s + advance + bbox). Both
-  outline backends ship: TrueType `glyf` (simple + composite, quadratic) and CFF
-  / PostScript for OpenType `OTTO` (a Type2 charstring interpreter with global /
-  local subrs and CID-keyed FDArray / FDSelect, so CJK outlines too); a CFF
-  glyph's cubic curves emit native `C` segments in `glyphPath`, approximated as
-  quadratics in the `Glyph` struct. Parses `head` / `cmap` (4 + 12) / `maxp` /
-  `hhea` / `hmtx` / `OS/2` / `kern` / `loca` / `glyf` or `CFF ` / `name`. GPOS /
-  GSUB shaping, `CFF2` / variable axes, and hinting are out of scope.
+  `font.Font` (`.ttf` or `.otf`); `font.unitsPerEm` / `name` / `advance(f, cp)` /
+  `kern(f, left, right)` / `ascender` / `descender` / `lineGap` / `capHeight` /
+  `xHeight` (OS/2 metrics) / `glyphPath(f, cp)` -> an SVG path `d` / `glyph(f, cp)`
+  -> `font.Glyph` (contours of `font.Point`s + advance + bbox). Both outline
+  backends ship: TrueType `glyf` (quadratic) and CFF for OpenType `OTTO` (a Type2
+  charstring interpreter with subrs + CID-keyed FDArray, so CJK too; cubic curves
+  emit native `C` in `glyphPath`). GPOS / GSUB shaping, `CFF2` / variable axes, and
+  hinting are out of scope.
 - **`flatdb`** - a file-backed JSON store over `json` + `fs`. `flatdb.open(path)`
-  -> value-semantic `DB` (empty if the file is absent), or `flatdb.openString(text)`
-  for a **read-only** DB from an in-memory JSON string (a store fetched over the
-  network - `http.get(url, {}).body` - or embedded; `save` throws, no backing
-  file). Query / edit by JSON Pointer (`get` / `has` / `keys` / `length`; the
-  fresh-`DB`-returning `set` / `append` / `remove`); `flatdb.save(db)` writes back
-  with a crash-atomic temp+`rename`, and `flatdb.saveAs(db, path)` writes to a new
-  file and returns a fresh `DB` bound to it (`db` unchanged) - the first dump for
-  an `openString` DB, or a copy / new version of an on-disk one. Values are
-  `json.Value`s (`json.decode` for scalars). Transport-agnostic (never imports
-  `http`/`net`), so both binaries. Not a database engine - crash-atomic
-  snapshotting of small data.
+  -> value-semantic `DB` (empty if absent), or `flatdb.openString(text)` for a
+  **read-only** DB from an in-memory JSON string (`save` throws). Query / edit by
+  JSON Pointer (`get` / `has` / `keys` / `length`; fresh-`DB`-returning `set` /
+  `append` / `remove`); `flatdb.save(db)` writes back crash-atomically (temp +
+  `rename`), `flatdb.saveAs(db, path)` writes to a new file and returns a fresh `DB`
+  bound to it. Values are `json.Value`s. Transport-agnostic (never imports `http` /
+  `net`), so both binaries. Not a database engine - crash-atomic snapshotting of
+  small data.
 - **`dotenv`** - read `.env` config files with layered profiles + `${VAR}`
-  interpolation. Single-file primitives: `dotenv.parse(text)` /
-  `dotenv.read(path)` -> `map of string to string`; `dotenv.load(path)` also sets
-  each variable via `os.setEnv` (unconditional override; returns the map). Cascade
-  loaders merge `.env` -> `.env.local` -> `.env.<profile>` ->
-  `.env.<profile>.local` from one explicit dir (no walk-up), with a real OS env
-  var always winning over a file value: `dotenv.readCascade(dir, profile)` (no env
-  mutation) / `dotenv.resolve(dir, profile)` (effective map, real env wins) /
-  `dotenv.loadCascade(dir, profile)` (setEnv only keys not already set) /
-  `dotenv.autoload(dir)` (profile from `JENNIFER_ENV`). Handles `#` comments
-  (whole-line + inline on unquoted values), a leading `export`, single quotes
-  (literal) and double quotes (expand `\n` / `\t` / `\r`, may span multiple
-  physical lines), and `${VAR}` interpolation in unquoted + double-quoted values
-  (backward-reference only: earlier keys -> real OS env -> ""; no `$(...)` command
-  substitution). Profile labels are validated `^[A-Za-z0-9_-]{1,64}$` (no
-  traversal). Over `fs` + `strings` + `os` + `path` + `regex` + `maps`; both
+  interpolation. Single-file: `dotenv.parse(text)` / `read(path)` -> `map of string
+  to string`; `dotenv.load(path)` also `os.setEnv`s each. Cascade loaders merge
+  `.env` -> `.env.local` -> `.env.<profile>` -> `.env.<profile>.local` from one
+  dir, a real OS env var always winning: `readCascade(dir, profile)` (no mutation)
+  / `resolve(dir, profile)` (effective map) / `loadCascade(dir, profile)` (setEnv
+  only unset keys) / `autoload(dir)` (profile from `JENNIFER_ENV`). Handles `#`
+  comments, a leading `export`, single (literal) / double (`\n` etc., multi-line)
+  quotes, and backward-reference `${VAR}` interpolation (earlier keys -> OS env ->
+  ""; no command substitution). Profile labels validated (no traversal). Over `fs`
+  + `strings` + `os` + `path` + `regex` + `maps`; both binaries.
+- **`cron`** - parse and evaluate cron expressions. `cron.parse(expr) -> Schedule`;
+  `cron.matches(schedule, t) -> bool`; `cron.next(schedule, after)` -> the next
+  `time.Time` at or after a time. Five fields (minute / hour / day-of-month / month
+  / day-of-week) with `*` / `,` / `-` / `/n` steps, three-letter month / day names,
+  and `@`-nickname macros (`@daily` / `@hourly` / `@reboot` / ...). A pure calculator
+  over `time` (no clock) - a scheduler is your own `spawn` + `time.sleep` loop. Both
   binaries.
-- **`cron`** - parse and evaluate cron expressions. `cron.parse(expr)` -> a
-  `Schedule`; `cron.matches(schedule, t)` -> bool; `cron.next(schedule, after)` ->
-  the next `time.Time` at or after a time (keeps its offset). Five fields
-  (minute / hour / day-of-month / month / day-of-week 0-7) with `*` / `,` / `-`
-  and `/n` steps; when both day fields are restricted a day matching either
-  fires. The month / day-of-week fields also take three-letter names (`JAN`-`DEC`,
-  `SUN`-`SAT`, case-insensitive), and `@`-nickname macros
-  (`@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` / `@midnight` /
-  `@reboot`) expand to a schedule - `@reboot` is startup-only and never matches a
-  clock time. A pure calculator over `time` (no clock) - a scheduler is your own
-  `spawn` + `time.sleep` loop. Both binaries.
 - **`html`** - build an HTML element tree and render escaped HTML5:
-  `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`
-  constructors, `render` / `renderAll`, `escape`, `safeUrl(url)` (an
-  `http`/`https`/`mailto` allowlist for `href`/`src`, else `"#"`), and
-  `boolAttr(name)` for a valueless boolean attribute (renders `disabled`, not
-  `disabled=""`). `element` / `attr` reject a tag / attribute name outside
-  `[A-Za-z][A-Za-z0-9-]*` (a name is structure, not escapable data). Also a
-  **tolerant `parse(src)`** that reads HTML back into the *same* `Node` tree
-  (void / self-closing / unquoted-attr / mismatched-nesting / comment / DOCTYPE /
-  `script`-raw tolerant; a depth + node budget cap a hostile document), walked by
-  `get(node, sel)` / `findAll(node, sel)` / `has(node, sel)` (XPath-ish `/`-path
-  selectors with `*` and `name[k]`) plus `attrOf(node, name)` / `hasAttr(node,
-  name)` - and re-serialized with the same `render`, so build and parse
-  round-trip through one model.
-- **`tengine`** - a lightweight-CMS text template engine (a subset of Go
-  `text/template`) rendered over a `json.Value` tree. `tengine.newSet()` ->
-  `Set`; `tengine.add(set, name, src)` -> `Set` (extracting `{{ define }}`
-  blocks); `tengine.render(set, entry, data)` -> string. Addressing: `.a.b`
-  (current node), `$` / `$.a.b` (root), `$var` (variable). Actions: value output;
-  `{{ if COND }}` / `{{ else if COND }}` / `{{ else }}` with the functions `eq` /
-  `ne` / `lt` / `le` / `gt` / `ge` / `and` / `or` / `not` (parenthesised nesting);
-  `{{ range .xs }}` / `{{ range $i, $e := .xs }}` and `{{ with }}`, each with
-  `else`; `{{ $x := PIPE }}` variables; `{{ define }}` / `{{ template }}` /
-  `{{ block }}` layout inheritance; `{{/* comments */}}`; `{{- -}}` trim markers;
-  and output pipes `upper` / `lower` / `title` / `trim` / `html` / `urlize` /
-  `default` / `truncate` / `join` / `len` / `printf`. Not auto-escaped (use the `html`
-  pipe). Over `json` / `strings` / `lists` / `maps` / `convert`; both binaries.
-- **`http`** - an HTTP/1.1 client over `net` (`https://` via TLS):
-  `http.request(method, url, headers, body)` (method-agnostic; or
-  `requestWith(..., timeoutMs)` for an explicit per-read idle timeout - `request`
-  and the shortcuts use a 30 s default so a hung server can't block forever,
-  `0` disables) plus
-  `get(url, headers)` / `post(url, contentType, body, headers)` / `put` /
-  `patch` / `delete` / `head` / `options` return an
-  `http.Response` (`status` / `statusText` / lowercased `headers` / `body`);
-  `http.header(resp, name)` reads a response header case-insensitively. Handles
-  Content-Length and chunked framing; text (UTF-8) bodies. For **binary**
-  downloads (a `.tar.gz`, an image) use `http.getBytes(url, headers)` /
-  `requestBytes` / `requestWithBytes` -> `http.BytesResponse` with a raw `bytes`
-  `body` (the string `Response` throws on non-UTF-8). To **upload** a raw `bytes`
-  body byte-for-byte (a multipart file upload, a protobuf) use
-  `http.requestRawBody(method, url, headers, body, timeoutMs, maxBytes)` /
-  `requestRawBodyTls` (set your own `Content-Type`). For a request **with a
-  policy** use `http.send(method, url, headers, body, options)` with an
-  `http.Options{timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls}`
-  (zero value = one-shot, like `request`): it follows up to `maxRedirects` 3xx
-  redirects, retries a 429 / 5xx up to `maxRetries` with exponential backoff
-  (honouring `Retry-After`), and carries cookies across the redirect chain.
-  `http.basic(user, pass)` builds a `Basic <base64>` `Authorization` value. For a
-  **persistent (keep-alive) connection**, `http.connect(url, options)` opens an
-  `http.Session` to one origin and `http.exchange(session, method, path, headers,
-  body)` reuses the socket, returning an `http.Exchange{response, session}` (thread
-  the returned session forward: `$s = $x.session;`) with a session cookie jar;
-  `http.close(session)` closes it. The one-shot verbs still return a 3xx as-is.
-  For a self-signed / private-CA `https://` server pass
-  `http.TlsOptions{skipVerify, caCert}` through `http.requestTls(method, url,
-  headers, body, tls)` (or `requestWithTls(..., timeoutMs, maxBytes, tls)`); the
-  zero `TlsOptions` full-verifies, so `request` and the shortcuts are unchanged.
-  **Default `jennifer` binary only** (`net`).
+  `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`,
+  `render` / `renderAll`, `escape`, `safeUrl(url)` (an `http` / `https` / `mailto`
+  allowlist, else `"#"`), `boolAttr(name)`. `element` / `attr` reject a tag /
+  attribute name outside `[A-Za-z][A-Za-z0-9-]*`. Also a **tolerant `parse(src)`**
+  that reads HTML back into the same `Node` tree (void / self-closing /
+  mismatched-nesting / comment / DOCTYPE tolerant, budget-capped), walked by
+  `get(node, sel)` / `findAll` / `has` (XPath-ish `/`-path selectors with `*` and
+  `name[k]`) + `attrOf` / `hasAttr` - re-serialized with the same `render`, so
+  build and parse round-trip through one model.
+- **`tengine`** - a text template engine (a subset of Go `text/template`) rendered
+  over a `json.Value` tree. `tengine.newSet()` -> `Set`; `tengine.add(set, name,
+  src)` (extracts `{{ define }}` blocks); `tengine.render(set, entry, data)` ->
+  string. Addressing `.a.b` / `$` / `$var`; actions `{{ if }}` / `{{ else if }}` /
+  `{{ else }}` (functions `eq` / `ne` / `lt` / `and` / `or` / `not`, parenthesised),
+  `{{ range }}` / `{{ with }}` (each with `else`), `{{ $x := PIPE }}`, `{{ template
+  }}` / `{{ block }}` layout inheritance, `{{/* comments */}}`, `{{- -}}` trim
+  markers, and output pipes (`upper` / `lower` / `title` / `trim` / `html` /
+  `urlize` / `default` / `truncate` / `join` / `len` / `printf`). Not auto-escaped
+  (use the `html` pipe). Over `json` / `strings` / `lists` / `maps` / `convert`;
+  both binaries.
+- **`http`** - an HTTP/1.1 client over `net` (`https://` via TLS).
+  `http.request(method, url, headers, body)` (or `requestWith(..., timeoutMs)`;
+  the verbs default to a 30 s idle timeout) plus `get` / `post(url, contentType,
+  body, headers)` / `put` / `patch` / `delete` / `head` / `options` return an
+  `http.Response` (`status` / `statusText` / lowercased `headers` / `body`;
+  `http.header(resp, name)` reads case-insensitively). Handles Content-Length +
+  chunked framing, text (UTF-8) bodies. For **binary** downloads use
+  `http.getBytes` / `requestBytes` -> `http.BytesResponse` (raw `bytes` body); to
+  **upload** raw bytes byte-for-byte, `http.requestRawBody(...)` / `requestRawBodyTls`.
+  For a request **with a policy** use `http.send(method, url, headers, body,
+  options)` with an `http.Options{timeoutMs, maxBytes, maxRedirects, maxRetries,
+  backoffMs, tls}` (zero value = one-shot): it follows redirects, retries 429 / 5xx
+  with backoff (honouring `Retry-After`), and carries cookies. `http.basic(user,
+  pass)` builds a `Basic` auth value. For a **keep-alive** connection,
+  `http.connect(url, options)` -> `http.Session` and `http.exchange(session, method,
+  path, headers, body)` -> `http.Exchange{response, session}` (thread the session
+  forward: `$s = $x.session;`), `http.close(session)`. For a self-signed / private-CA
+  server, pass `http.TlsOptions{skipVerify, caCert}` via `http.requestTls` /
+  `requestWithTls` (the zero value full-verifies). **Default `jennifer` binary
+  only** (`net`).
 - **`gotify`** - push a notification to a [Gotify](https://gotify.net) server,
   on top of `http`: `gotify.push(cfg, title, message, priority)` POSTs the
   message form (`X-Gotify-Key` header) to `cfg.url + "/message"` and returns the
@@ -794,23 +796,18 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `read(pin)` / `release(pin)`. Root `/sys/class/gpio`, overridable via the
   `JENNIFER_GPIO_BASE` env var (`os.setEnv`, e.g. for a mock). Off a
   GPIO-capable host, calls throw `Error{kind: "gpio"}` clearly. Both binaries.
-- **`rest`** - an ergonomic REST layer over `http` + `json`: build a
-  value-semantic client with `rest.client(baseUrl)` (`Client{baseUrl, headers,
-  options}`, where `options` is an `http.Options` request policy), then
-  `rest.get(c, path, query)` / `post(c, path, contentType, body)` / `put` /
-  `patch` / `delete` -> `rest.Response` (`status` / `headers` / `body`), plus
+- **`rest`** - an ergonomic REST layer over `http` + `json`. Build a
+  value-semantic `rest.client(baseUrl)` (`Client{baseUrl, headers, options}`,
+  `options` an `http.Options` policy), then `rest.get(c, path, query)` / `post(c,
+  path, contentType, body)` / `put` / `patch` / `delete` -> `rest.Response`, plus
   `getJson` (-> `json.Value`) / `postJson` / `putJson` / `patchJson`. Base-URL
-  joining, form-encoded query strings (via the `uri` module), `rest.bearer` / `rest.basic` /
-  `rest.withHeader` for auth. Every request routes through `http.send`, so the
-  client **inherits the http policy** via copy-returning builders:
-  `rest.withTimeout(c, ms)`, `rest.withRedirects(c, n)`, `rest.withRetries(c, n)`
-  / `rest.withBackoff(c, ms)`, plus TLS `rest.withCA(c, pem)` (trust a PEM cert,
-  preferred) / `rest.insecure(c)` (skip verification - trusted-LAN only). For
-  **paginated** collections, `rest.paginate(c, path, query, maxPages)` walks a
-  Link-header (`rel="next"`) collection and `rest.paginateCursor(c, path, query,
-  cursorPointer, cursorParam, maxPages)` walks a cursor collection, each
-  returning `list of json.Value` (one per page). A 4xx/5xx is a `Response` value,
-  not a crash. **Default `jennifer` binary only** (`net`).
+  joining, form-encoded queries (via `uri`), auth (`rest.bearer` / `basic` /
+  `withHeader`). Inherits the http policy via copy-returning builders
+  (`withTimeout` / `withRedirects` / `withRetries` / `withBackoff`, TLS `withCA(c,
+  pem)` / `insecure(c)`). For **paginated** collections, `rest.paginate(c, path,
+  query, maxPages)` (Link-header `rel="next"`) / `paginateCursor(...)` -> `list of
+  json.Value`. A 4xx/5xx is a `Response` value, not a crash. **Default `jennifer`
+  binary only** (`net`).
 - **`uri`** - URL / URI parsing, building, and query strings (RFC 3986), the
   shared URL layer the network modules build on. `uri.parse(raw)` -> `Uri`
   (`scheme` / `user` / `host` / `port` / `path` / `query` / `fragment`) and
@@ -822,45 +819,30 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
   on `encoding`'s `uri-percent` / `uri-form` codecs.
 - **`validate`** - declarative validation of a `map of string to string` (a form
-  body, query, or config) against a rule set, returning a structured failure
-  list instead of ad-hoc `if` checks. Rules compose per field as value-semantic
+  body, query, config) against a rule set, returning a structured failure list
+  instead of ad-hoc `if` checks. Rules compose per field as value-semantic
   descriptors: `validate.required` / `isInt` / `isFloat` / `isBool` / `min(n)` /
   `max(n)` / `minLen(n)` / `maxLen(n)` / `pattern(re)` / `email` / `url` /
-  `datetime(format)` (strftime, calendar-checked via `time.parse`) / `oneOf(list)` /
-  `noneOf(list)` (a blacklist, case-sensitive) / `password(policy)` (a
-  `password.Schema` passed through to the `password` module's policy engine) /
-  `custom(fn, msg)` (a first-class-`func` predicate, called exception-safely) /
-  `withMessage(r, m)`, grouped in a `map of string to list of validate.Rule`.
-  `validate.check(data, rules)` -> `list of validate.Failure` (`{field, rule,
-  param, message}`, where `rule` is a stable message id and `param` its
-  argument); `validate.ok(...)` short-circuits to a bool; `validate.messages` /
-  `validate.byField` render them, and `validate.localize(errs, templates)`
-  re-messages via a caller's `rule-id -> template` map (`{param}` / `{field}`
-  interpolation, falling back to the default for unlisted rules) - for non-English
-  messages, feed it templates from `intl.tr` per rule id. An absent or blank field
-  passes every rule except `required`; only fields named in the rule set are
-  checked. Pure `.j`
-  over `regex` + `uri` + `time` + `password` + `convert` + `lists` + `strings` +
-  `maps`; **both binaries**. (`Error` is the reserved global struct, so the failure
-  type is `validate.Failure`.)
-- **`graphql`** - a thin GraphQL client over `http` / `rest`. Build a client with
-  `graphql.client(endpoint)` (the full GraphQL URL, POSTed verbatim), layer auth /
-  TLS with `graphql.bearer(c, token)` / `basic` / `header(c, name, value)` /
-  `withCA(c, pem)` / `insecure(c)` (each returns a new `Client`), then
-  `graphql.query(c, query, variables)` POSTs `{"query": ..., "variables": ...}`
-  and returns the decoded response as a `json.Value` (the result is under
-  `/data`). The query is an opaque string (a mutation is just a query string);
-  `variables` is a `json.Value` (empty `json.map()` for none). The GraphQL-specific
-  rule it gets right: a GraphQL execution error is an **HTTP 200 with a top-level
-  `errors` array**, not a non-2xx status, so `query` raises a positioned `Error`
-  (kind `"graphql"`) carrying the joined server messages; a non-2xx status also
-  raises (with the status + body). To handle GraphQL errors without a `catch` -
-  branch on an error `code`, read partial data - `graphql.tryQuery(c, query,
-  variables)` returns the raw envelope (both `/data` and `/errors`) and raises
-  only on a non-2xx status; inspect it with `graphql.hasErrors($resp)` /
-  `graphql.errorMessages($resp)` and the `json` accessors. For a document with
-  several named operations, `graphql.queryNamed` / `tryQueryNamed` take a trailing
-  `operationName`. **Default `jennifer` binary only** (`net`).
+  `datetime(format)` / `oneOf(list)` / `noneOf(list)` / `password(schema)` /
+  `custom(fn, msg)` (a `func` predicate) / `withMessage(r, m)`, grouped in a `map
+  of string to list of validate.Rule`. `validate.check(data, rules)` -> `list of
+  validate.Failure` (`{field, rule, param, message}`, `rule` a stable id);
+  `validate.ok(...)` -> bool; `validate.messages` / `byField` render them, and
+  `validate.localize(errs, templates)` re-messages via a `rule-id -> template` map
+  (feed it `intl.tr` for non-English). An absent / blank field passes every rule
+  but `required`; only named fields are checked. Pure `.j` over `regex` + `uri` +
+  `time` + `password` + `convert` + `lists` + `strings` + `maps`; **both
+  binaries**.
+- **`graphql`** - a thin GraphQL client over `http` / `rest`. `graphql.client(endpoint)`,
+  layer auth / TLS with `bearer(c, token)` / `basic` / `header` / `withCA` /
+  `insecure`, then `graphql.query(c, query, variables)` POSTs `{"query", "variables"}`
+  and returns the decoded `json.Value` (result under `/data`; `variables` a
+  `json.Value`, empty `json.map()` for none). The rule it gets right: a GraphQL
+  execution error is an **HTTP 200 with a top-level `errors` array**, so `query`
+  raises `Error{kind: "graphql"}` (a non-2xx also raises). To read partial data,
+  `graphql.tryQuery(...)` returns the raw envelope (raises only on non-2xx);
+  inspect with `hasErrors` / `errorMessages`. `queryNamed` / `tryQueryNamed` add a
+  trailing `operationName`. **Default `jennifer` binary only** (`net`).
 - **`oauth`** - a generic OAuth2 client (the *get-a-token* half; `sasl` is the
   *use-a-token* half) over `http` + `json`: `oauth.clientCredentials(cfg)` /
   `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` -> `deviceWait(cfg,
@@ -870,178 +852,116 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   assertion gated on `httpd` / `crypto`. **Default `jennifer` binary only**
   (`net`).
 - **`web`** - a small HTTP framework over the `httpd` engine. Register routes
-  against handler methods **by name** (`web.get($app, "/users/:id",
-  "showUser")` / `post` / `put` / `patch` / `delete` / `route`); patterns take
-  `:param` captures and a trailing `*rest` wildcard (`/files/*path`; `/*path` as
-  an SPA fallback, registered last), plus
-  `web.before` middleware, `web.notFound`, and `web.onError` (a throwing
-  handler / middleware is contained as a 500, always logged to stderr, and *also*
-  handed to the onError handler when one is registered - which may bind it `as
-  Error`, since Error crosses `meta.callMain` intact); a `HEAD` request is served
-  by the matching `GET` route (body auto-suppressed); a handler is `func name(ctx
-  as web.Context)`, dispatched by `meta.callMain`. **Requests are handled
-  concurrently** - each in its own `spawn`ed worker, and the cross-boundary
-  dispatch is race-safe; reads of shared top-level state are safe, but do not have
-  two handlers **write** one top-level `def` at overlapping times (keep per-request
-  mutable state in the request/response or a synchronized store, not a bare
-  global). `web.Context` helpers:
-  `param` / `query` / `method` / `path` / `header` / `body` (bytes) / `bodyJson`
-  / `form` / `formValue` / `remoteAddr`, and `text` / `html` / `sendJson` /
-  `redirect` / `respond` / `setHeader` / `serveFile` / `serveDir` / `sendGzip`
-  (gzip when the client accepts it). **Cookies:**
-  `web.cookie($ctx, name)` / `web.setCookie($ctx, name, value, opts)` with a
-  `web.CookieOptions` (`path` / `domain` / `maxAge` / `httpOnly` / `secure` /
-  `sameSite`). **Sessions:** `web.sessionId($ctx, cookieName)` resolves or mints
-  the session-id cookie (a new UUID + `Secure`, `HttpOnly`, `SameSite=Lax` cookie
-  on first use; `Secure` is default-on, `JENNIFER_WEB_INSECURE_COOKIES=1` opts out
-  for local plaintext dev). An incoming id cookie is accepted only if it matches
-  the minted UUID shape (else re-minted - this blocks metacharacter smuggling
-  through the id, but is **not** a fixation defence: a well-formed planted UUID
-  still passes). The fixation defence is `web.renewSession($ctx, cookieName)`,
-  which rotates the id after a privilege change (login).
-  `web` owns only that cookie, the session store stays the app's (e.g. `session`
-  over `memcache`), so `web` forces no store dependency. **CORS:** `web.cors($app,
-  opts)` with a `web.CorsOptions` (`allowOrigin` / `allowMethods` /
-  `allowHeaders` / `allowCredentials` / `maxAge`) sets an app-wide policy - the
-  serve loop adds the `Access-Control-*` headers and answers an `OPTIONS`
-  preflight with `204`. **Caching:** `web.serveFile` already sets `ETag` /
-  `Last-Modified` for static files; for a dynamic response `web.etag($ctx, tag)`
-  sets the `ETag` and answers `304` on a matching `If-None-Match` (returns true
-  so the handler stops). **Auth:** `web.basicAuth($ctx)` decodes
-  `Authorization: Basic` into `web.BasicCredentials` (`user` / `password` /
-  `present`) and `web.bearerToken($ctx)` extracts a bearer token; the credential
-  check + `401` challenge stay app code (client-side auth is in `rest`; Digest is
-  unsupported). **CSRF:** `web.csrfToken($ctx, secret)` mints an HMAC-signed
-  double-submit token (into the `csrf` cookie) and `web.csrfCheck($ctx, secret)`
-  validates it (the app owns the secret, opts in via middleware; stateless, no
-  session store). **Mounting:** `web.mount($app, prefix, sub)` composes a
-  sub-router's routes under a path prefix (`web.joinRoute(prefix, pattern)`
-  builds one joined pattern), so one route set can serve at several base paths.
-  `web.run($app, addr)`
-  owns the accept loop (`web.serveOn($app, srv)` to hold the server handle).
-  Run with `jennifer serve app.j [--watch]`. **Default `jennifer` binary
-  only** (`net`).
+  against handler methods **by name** (`web.get($app, "/users/:id", "showUser")`
+  / `post` / `put` / `patch` / `delete` / `route`); patterns take `:param`
+  captures and a trailing `*rest` wildcard (`/*path` an SPA fallback, registered
+  last), plus `web.before` middleware, `web.notFound`, and `web.onError` (a
+  throwing handler is contained as a logged 500, and handed to onError bound `as
+  Error`). A handler is `func name(ctx as web.Context)`, dispatched by
+  `meta.callMain`; `HEAD` is served by the matching `GET`. **Requests are handled
+  concurrently** (each in its own `spawn`ed worker, dispatch race-safe): reads of
+  shared top-level state are safe, but do not have two handlers **write** one
+  top-level `def` at overlapping times. `web.Context` helpers: `param` / `query` /
+  `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /
+  `remoteAddr`, and `text` / `html` / `sendJson` / `redirect` / `respond` /
+  `setHeader` / `serveFile` / `serveDir` / `sendGzip`. Plus cookies (`web.cookie`
+  / `setCookie` + `CookieOptions`), sessions (`web.sessionId` mints a UUID id
+  cookie, `web.renewSession` rotates it after login; the app owns the store), CORS
+  (`web.cors` + `CorsOptions`), caching (`web.etag`; `serveFile` sets `ETag` /
+  `Last-Modified`), auth (`web.basicAuth` -> `BasicCredentials`, `web.bearerToken`),
+  CSRF (`web.csrfToken` / `csrfCheck`, HMAC double-submit, app owns the secret),
+  and mounting (`web.mount($app, prefix, sub)` / `joinRoute` composes a sub-router
+  under a prefix). `web.run($app, addr)` owns the accept loop (`serveOn` to hold
+  the server handle). Run with `jennifer serve app.j [--watch]`. **Default
+  `jennifer` binary only** (`net`).
 - **`webapi`** - a JSON-API conventions layer over `web`. A value-semantic
-  `webapi.Api` builder (`new` / `mount(a, version, path)` / `alias` / `deprecate`
-  / `authenticator(a, name)` / `limiter(a, name)` / `get` / `post` / ... with a
-  `Spec` / `feature` / `install(a, app, "guard")`). The `Spec` carries `auth`
-  (`Auth.None` / `Auth.Bearer` - an **enum**), `scopes`, `rules`
-  (`map of string to list of validate.Rule`, reusing `validate`), `rateLimit`,
+  `webapi.Api` builder (`new` / `mount(a, version, path)` / `alias` / `deprecate` /
+  `authenticator(a, name)` / `limiter(a, name)` / `get` / `post` / ... with a
+  `Spec` / `install(a, app, "guard")`). The `Spec` carries `auth` (`Auth.None` /
+  `Auth.Bearer`, an **enum**), `scopes`, `rules` (reusing `validate`), `rateLimit`,
   and `produces` (`Produces.Json` / `Html` / `Negotiate` enum); `webapi.public()`
-  is the zero `Spec`. Enforcement is one `before` guard the app wires with a
-  one-line shim `func apiGuard(ctx) { return webapi.guard($api, $ctx); }` -
-  needed because handlers dispatch **by name** and Jennifer has no closures for a
-  middleware to capture the `Api`; the authenticator / limiter are entry-program
-  handler **names** for the same reason (a func value crossing the module
-  boundary loses its home namespace). The guard authenticates, checks scopes
-  (`403`), validates (`422`), and rate-limits (`429`); `webapi.evaluate(spec,
-  identity, data)` is the **pure**, testable core. Uniform error envelopes
-  (`fail` / `failWith` / `notFound` / `denied` / `unauthorized`), request data
-  (`queryData` / `jsonData` / `validated(a, ctx)` / `identity(a, ctx)`),
-  content negotiation (`wants`), and pagination (`page` / `sendPage`). A
-  discovery `json.Value` (`webapi.discovery`) is derived from the route table so
-  it cannot drift. Over `web` + `validate` + `json`; **default `jennifer` binary
-  only** (`net`).
+  is the zero `Spec`. Enforcement is one `before` guard the app wires with a shim
+  `func apiGuard(ctx) { return webapi.guard($api, $ctx); }` (handlers dispatch **by
+  name**, so the authenticator / limiter are entry-program handler names too). The
+  guard authenticates, checks scopes (`403`), validates (`422`), rate-limits
+  (`429`); `webapi.evaluate(spec, identity, data)` is the **pure**, testable core.
+  Uniform error envelopes (`fail` / `notFound` / `denied` / `unauthorized`), request
+  data (`queryData` / `jsonData` / `validated` / `identity`), content negotiation
+  (`wants`), pagination (`page` / `sendPage`), and a drift-proof discovery
+  `json.Value` (`webapi.discovery`). Over `web` + `validate` + `json`; **default
+  `jennifer` binary only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
-  lists, code, GFM tables) to HTML (`markdown.toHtml`, through `html`) and
-  styled terminal text (`toAnsi`, through `ansi`); `parse(md)` surfaces the
-  document as a `Node` tree walked like `xml` / `html` (`typeOf` / `children` /
-  `text` / `level` / `attr` / `get` / `findAll` / `has`), and `render(doc,
-  format)` renders a parsed or hand-built tree (so parse -> transform -> render
-  works); `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)` lay the
-  document out to a paginated PDF through `pdf` (headings, styled paragraphs,
-  nested lists, aligned GFM tables, code, blockquotes, page breaks; a `PdfOptions`
-  from `pdfDefaults()` sets page size / fonts, document metadata (`title` / `author`
-  / `subject` / `keywords`), and `bookmarkLevel` to add a PDF outline bookmarking
-  every heading up to that level - `2` = all `#` + `##`); author Markdown with `header` /
-  `style` / `link` / `bullets` / `numbered` / `codeBlock` / `table`; align
-  handcrafted table source with `tablePretty`.
+  lists, code, GFM tables) to HTML (`markdown.toHtml`, via `html`) and styled
+  terminal text (`toAnsi`, via `ansi`); `parse(md)` surfaces a `Node` tree walked
+  like `xml` / `html` (`typeOf` / `children` / `text` / `level` / `get` / `findAll`
+  / `has`), and `render(doc, format)` renders a parsed or hand-built tree (parse ->
+  transform -> render). `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)`
+  lay the document out to a paginated PDF via `pdf` (a `PdfOptions` from
+  `pdfDefaults()` sets page size / fonts / metadata / `bookmarkLevel`). Author
+  Markdown with `header` / `style` / `link` / `bullets` / `numbered` / `codeBlock`
+  / `table`; align handcrafted table source with `tablePretty`.
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
-  client, over `jsonrpc` + `json`. Build a `Server` value-semantically:
-  `mcp.server(name, version)` then `addTool(s, name, desc, inputSchema, handler)`
-  / `addResource(s, uri, name, desc, mimeType, handler)` / `addPrompt(s, name,
-  desc, handler)`, each `handler` a top-level `func NAME(arg as json.Value)`
-  reached by name via `meta.callMain`. Declare a tool's input schema with
-  `mcp.schema()` + `mcp.property(schema, name, jsonType, desc, required)`.
-  `mcp.handle(server, requestBody) -> replyBody` is the transport-agnostic
-  router - `initialize` / `ping`, `tools/list` / `tools/call`, `resources/list`
-  / `resources/read`, `prompts/list` / `prompts/get`, a notification yielding
-  `""`. It is an **allow-list**: only a **registered** item's handler runs (an
-  unknown tool is a tool-result error, not an arbitrary-name dispatch), and a
-  thrown handler message never reaches the wire. `mcp.serveStdio(server)` runs
-  the primary stdio transport (newline-delimited JSON-RPC over the program's own
-  stdin/stdout). Client: `mcp.connect(endpoint)` / `connectWith(endpoint,
-  headers)` -> `Client`, then `initialize` / `listTools` / `callTool(client,
-  name, arguments)` / `listResources` / `readResource(client, uri)` /
-  `listPrompts` / `getPrompt(client, name, arguments)`. Targets the stateless
-  protocol only (no SSE, no sessions); the stdio *subprocess* client is deferred
-  (it needs an `os` subprocess-stdin primitive). Default `jennifer` binary only
-  (`jsonrpc` / `http` use `net`).
-- **`memcache`** - a memcached client over `net` (classic text protocol):
+  client, over `jsonrpc` + `json`. Build a `Server`: `mcp.server(name, version)`
+  then `addTool(s, name, desc, inputSchema, handler)` / `addResource` / `addPrompt`,
+  each `handler` a top-level `func NAME(arg as json.Value)` reached via
+  `meta.callMain`; declare a tool schema with `mcp.schema()` + `mcp.property(...)`.
+  `mcp.handle(server, requestBody) -> replyBody` is the transport-agnostic router
+  (`initialize` / `tools/list` / `tools/call` / `resources/*` / `prompts/*`) - an
+  **allow-list** (only a registered handler runs; a thrown message never reaches
+  the wire); `mcp.serveStdio(server)` runs the stdio transport. Client:
+  `mcp.connect(endpoint)` / `connectWith` -> `Client`, then `initialize` /
+  `listTools` / `callTool(client, name, arguments)` / `listResources` /
+  `readResource` / `listPrompts` / `getPrompt`. Stateless protocol only (no SSE /
+  sessions). Default `jennifer` binary only (`net` via `http`).
+- **`memcache`** - a memcached client over `net` (classic text protocol).
   `memcache.connect(opts)` -> `memcache.Session`, then `set(session, key, value,
-  exptime)` / `add` (store-if-absent, `-> bool`) / `get(session, key)` (`""`
-  when absent) / `delete` / `incr(session, key, delta)` (new value, `-1` when
-  absent) / `decr` / `touch` / `quit`. Every store carries a TTL (`exptime`
-  seconds). For a **binary** value, `setBytes(session, key, value, exptime)` /
-  `getBytes(session, key)` store / read raw `bytes` byte-for-byte (`get`/`set`
-  are text and throw on non-UTF-8). `getMulti(session, keys)` fetches several
-  keys in one round-trip (`-> map of string to string`, missing keys absent);
-  `gets(session, key)` -> `memcache.Item{value, cas, found}` + `cas(session, key,
-  value, exptime, casId)` -> `"stored"` / `"exists"` / `"not_found"` are the
-  check-and-set (optimistic-concurrency) pair. A volatile cache for sessions /
-  counters / locks. Throws `Error` (kind `"memcache"`) on a protocol error.
+  exptime)` / `add` (store-if-absent) / `get(session, key)` (`""` when absent) /
+  `delete` / `incr(session, key, delta)` (`-1` when absent) / `decr` / `touch` /
+  `quit`; every store carries a TTL. Binary values: `setBytes` / `getBytes`.
+  `getMulti(session, keys)` fetches several in one round-trip; `gets` ->
+  `memcache.Item{value, cas, found}` + `cas(session, key, value, exptime, casId)`
+  -> `"stored"` / `"exists"` / `"not_found"` are the check-and-set pair. A volatile
+  cache for sessions / counters / locks. Throws `Error{kind: "memcache"}`.
   **Default `jennifer` binary only** (`net`).
 - **`kvstore`** - a **selectable** key/value backend with per-key TTL behind one
   API: a `kvstore.Store` is a sum-type enum with a variant per backend -
-  `memcacheStore(mc)` / `redisStore(rc)` (distributed) / `inProcessStore()`
-  (in-memory `kv`) / `fileStore(path)` (persisted `kv`) - and `set(store, key,
-  value, ttl)` / `get` / `delete` / `touch` / `incrWindow(store, key, ttl)`
-  dispatch via an exhaustiveness-checked `match`. The shared backend layer under
-  `session` / `ratelimit`. Local backend on both binaries; distributed needs the
-  default binary.
-- **`session`** - server-side sessions over a `kvstore.Store` backend (memcache /
-  redis / in-process): a **`json.Value`** (structured, nested - not a flat map)
-  under `sess:ID` with a sliding TTL. `session.create(store, ttl)` -> id (UUID
-  v4), `load(store, id)` (empty object when absent / expired), `save(store, id,
-  data, ttl)`, `touch(store, id, ttl)`, `destroy(store, id)`. Data is stored
-  base64-wrapped JSON; the client-supplied id is validated `[A-Za-z0-9-]`.
-  Volatile (a cache, not a store of record). Binary depends on the backend.
+  `memcacheStore(mc)` / `redisStore(rc)` (distributed) / `inProcessStore()` /
+  `fileStore(path)` (`kv`) - and `set(store, key, value, ttl)` / `get` / `delete` /
+  `touch` / `incrWindow` dispatch via an exhaustiveness-checked `match`. The shared
+  backend layer under `session` / `ratelimit`. Local backend both binaries;
+  distributed needs the default.
+- **`session`** - server-side sessions over a `kvstore.Store` backend: a
+  **`json.Value`** (structured, nested) under `sess:ID` with a sliding TTL.
+  `session.create(store, ttl)` -> id (UUID v4), `load(store, id)` (empty object when
+  absent / expired), `save(store, id, data, ttl)`, `touch`, `destroy`. Data stored
+  base64-wrapped JSON; the client-supplied id is validated. Volatile (a cache, not
+  a store of record). Binary depends on the backend.
 - **`ratelimit`** - a rate limiter over a `kvstore.Store` backend, **fixed or
-  sliding window**: `ratelimit.fixedWindow(store, limit, window)` /
-  `slidingWindow(...)` -> `Limiter`, then `check(limiter, key)` -> `Result`
-  (records a hit) / `peek(limiter, key)` -> `Result` (no record). `Result` is
-  `{allowed, remaining, retryAfter, resetSeconds}` - everything for a compliant
-  `429`. Sliding window blends the current and previous window counts to smooth
-  the fixed-window boundary burst; both are clock-driven with window-aligned keys
-  (portable across backends via atomic `incrWindow`). Binary depends on the
-  backend.
+  sliding window**: `ratelimit.fixedWindow(store, limit, window)` / `slidingWindow(...)`
+  -> `Limiter`, then `check(limiter, key) -> Result` (records a hit) / `peek(...)`
+  (no record). `Result{allowed, remaining, retryAfter, resetSeconds}` is everything
+  for a compliant `429`. Sliding window blends current + previous window counts;
+  both use window-aligned keys (portable via atomic `incrWindow`). Binary depends on
+  the backend.
 - **`mime`** - build and parse MIME messages (RFC 5322 headers, multipart,
-  quoted-printable / base64 transfer encodings): `mime.text(contentType, body)` /
-  `attachment` / `attachmentBytes(filename, contentType, data)` (binary) /
-  `multipart(subtype, boundary, parts)` / `withHeader` build a `Part` tree,
-  `mime.encode(part)` serializes it, `mime.parse(text)` reads it back, and
-  `mime.headerValue` / `body` / `parts` / `contentType` / `address` read it. To
-  pull a received message apart, `mime.walk` / `attachments` / `textBodies` /
-  `findParts(part, mediaType)` flatten the tree, with `mime.data(part)` (raw
-  `bytes`, so binary attachments round-trip), `mime.filename` / `disposition` /
-  `isAttachment` per part. A text `body` is decoded per the Content-Type
-  `charset` (UTF-8 default; `iso-8859-*` / `windows-*` codepages honoured), and
-  `mime.filename` reads RFC 2231 extended / continued names (`filename*=`,
-  `filename*0=`...) - which `attachment` / `attachmentBytes` also emit for a
-  non-ASCII filename. A non-ASCII `Subject` / display name is auto-encoded as an
-  RFC 2047 encoded-word on `encode` and decoded on `parse` (primitives
-  `mime.encodeWord` / `decodeWord`). No networking. The foundation the mail
-  clients build on (`imap.fetchMessage` returns a parsed `mime.Part`).
+  quoted-printable / base64 transfer encodings). Build a `Part` tree with
+  `mime.text(contentType, body)` / `attachment` / `attachmentBytes(filename,
+  contentType, data)` / `multipart(subtype, boundary, parts)` / `withHeader`, then
+  `mime.encode(part)` / `parse(text)`, read with `headerValue` / `body` / `parts` /
+  `contentType` / `address`. Pull a received message apart with `mime.walk` /
+  `attachments` / `textBodies` / `findParts(part, mediaType)` + `mime.data` (raw
+  `bytes`) / `filename` / `disposition` / `isAttachment`. A text `body` is decoded
+  per the Content-Type `charset` (UTF-8 default, codepages honoured); RFC 2231
+  extended filenames and RFC 2047 encoded-words round-trip (primitives
+  `mime.encodeWord` / `decodeWord`). No networking. The foundation the mail clients
+  build on (`imap.fetchMessage` returns a `mime.Part`).
 - **`sasl`** - SASL auth mechanisms shared by the mail clients: base64 encoders
-  `sasl.plain(user, pass)`, `sasl.loginUser` / `loginPass`, `sasl.bearer(user,
-  token)` (SASL XOAUTH2 - the "use a token" half of OAuth2, for Google /
-  Microsoft 365; mail clients select it with `Options.auth = "xoauth2"`, token
-  in `pass`), plus challenge-response `sasl.cram(user, pass, challenge)`
-  (CRAM-MD5) and SCRAM: `sasl.scramStart(user, algo)` -> `scramClientFirst` ->
-  `scramClientFinal(s, serverFirst, pass)` -> `scramFinalToken` -> `scramVerify`
-  (SCRAM-SHA-1 / SCRAM-SHA-256, over `hash` + `crypto`). `sasl.negotiate(advertised)`
-  picks the strongest of a server's advertised mechanisms (what the mail clients
-  use for `auth: "auto"`; `auth: ""` keeps the plain default). No net; both binaries.
+  `sasl.plain(user, pass)` / `loginUser` / `loginPass` / `bearer(user, token)`
+  (XOAUTH2), challenge-response `sasl.cram(user, pass, challenge)` (CRAM-MD5), and
+  SCRAM (`scramStart(user, algo)` -> `scramClientFirst` -> `scramClientFinal` ->
+  `scramFinalToken` -> `scramVerify`, SCRAM-SHA-1 / -256 over `hash` + `crypto`).
+  `sasl.negotiate(advertised)` picks the strongest mechanism (mail clients' `auth:
+  "auto"`). No net; both binaries.
 - **`transport`** - the shared connection-security mode for every socket client
   (`smtp` / `pop` / `imap` / `redis` / `amqp` / `mqtt`): one enum
   `transport.Security { None, Tls, Starttls }` (zero value `None`), used as the
@@ -1052,56 +972,38 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `transport.encrypted(s)` -> bool (`Tls` / `Starttls` true). No net; both binaries.
 - **`screen`** - terminal user interfaces (an explicit `screen`, not a GUI).
   Output-only layer (both binaries): a value-semantic cell `screen.Buffer`
-  (`screen.newScreen(rows, cols)`) drawn with `screen.text` / `textColor` /
-  `box` / `fill` / `hline` / `vline` / `set`, ANSI control-sequence builders
-  (`screen.clear` / `moveTo(x, y)` / `hideCursor` / `enterAlt` / ...), and a
-  flicker-free `screen.render(buf)` / `diff(old, new)` paint loop that repaints
-  only changed cells. Interactive layer (needs the `term` library, default
-  binary): a pure `screen.decodeKey(seq)` -> `screen.Key{name, char}` (arrows,
-  nav, F1-F12, ctrl / alt keys) plus `screen.nextKey` / `begin` / `end` / `size`
-  over raw mode. Coordinates are 0-based (origin top-left); drawing past an edge
-  is clipped, not an error.
-- **`semver`** - strict SemVer 2.0.0 over a `Version` struct, package-registry-grade:
-  `semver.parse(s)` / `isValid` / `toString`, `compare` / `lt` / `lte` / `eq` /
-  `neq` / `gt` / `gte` / `diff`, `isStable` / `isPrerelease`, `incMajor` /
-  `incMinor` / `incPatch`, `sort` / `rsort`; `coerce(s)` / `clean(s)` for loose
-  tags; plus npm/Composer **range matching**: `satisfies(version, range)` (caret
-  `^1.2.0`, tilde `~1.2`, comparators `>=1.0.0 <2.0.0`, OR `^1 || ^3`, hyphen
-  `1.2.3 - 2.3.4`, x-ranges `1.x`; prereleases excluded unless a comparator pins
-  one at the same major.minor.patch), `maxSatisfying` / `minSatisfying(versions,
-  range)`, `minVersion(range)`, `validRange(range)`, and the solver algebra
-  `intersects(a, b)` / `subset(inner, outer)` / `gtr` / `ltr` / `outside` / `simplifyRange(versions, range)`, all prerelease-precise.
+  (`screen.newScreen(rows, cols)`) drawn with `screen.text` / `textColor` / `box` /
+  `fill` / `hline` / `vline` / `set`, ANSI control builders (`screen.clear` /
+  `moveTo(x, y)` / `hideCursor` / `enterAlt` / ...), and a flicker-free
+  `screen.render(buf)` / `diff(old, new)` paint loop. Interactive layer (needs
+  `term`, default binary): `screen.decodeKey(seq) -> screen.Key{name, char}`
+  (arrows, nav, F1-F12, ctrl / alt) + `nextKey` / `begin` / `end` / `size` over raw
+  mode. Coordinates 0-based (origin top-left); drawing past an edge is clipped.
+- **`semver`** - strict SemVer 2.0.0 over a `Version` struct,
+  package-registry-grade: `semver.parse(s)` / `isValid` / `toString`, `compare` /
+  `lt` / `eq` / `gt` / ... / `diff`, `isStable` / `isPrerelease`, `incMajor` /
+  `incMinor` / `incPatch`, `sort` / `rsort`, `coerce(s)` / `clean(s)`; plus
+  **range matching**: `satisfies(version, range)` (caret `^1.2.0`, tilde `~1.2`,
+  comparators, OR `||`, hyphen, x-ranges), `maxSatisfying` / `minSatisfying`,
+  `minVersion`, `validRange`, and the solver algebra `intersects` / `subset` /
+  `gtr` / `ltr` / `outside` / `simplifyRange`, all prerelease-precise.
 - **`imap`** - IMAP4rev1 (RFC 3501) client over `net`; reads **and** manages
-  folders (not read-only; the user-facing term is "folder", the IMAP "mailbox"):
-  `imap.connect(opts)` -> `imap.Session`, then `folders(session, pattern)` (LIST
-  -> `imap.Folder` name/delimiter/flags), `status(session, folder)` (`imap.Status`
-  counts without selecting), `selectFolder(session, name)`
-  (count), `search(session, criteria)` (the **UIDs** matching an `imap.Criteria`,
-  via `UID SEARCH`), `fetch(session, uid)` (a whole message as a string) or
-  `fetchMessage(session, uid)` (parsed to a `mime.Part`, ready for
-  `mime.attachments` / `textBodies`); manage with `addFlags`/`removeFlags`/`flags`,
-  `copy`, `move` (atomic `UID MOVE`, RFC 6851), `append`/`appendWith` (upload a
-  full RFC 5322 message, e.g. save to Sent), `createFolder`, and delete via
-  `\Deleted` + `expunge`; `fetchPartial(session, uid, offset, length)` pulls a
-  byte range of a large body; `logout(session)`, plus `imap.fetchAll(opts,
-  folder)`. **Every message verb addresses by the stable UID** (`UID FETCH` /
-  `STORE` / `COPY` / `MOVE` / `SEARCH`), which survives an expunge - the correct
-  key for "process only what is new since last run". Sequence numbers appear only
-  as the `selectFolder` count and the IDLE `EXISTS` / `EXPUNGE` push numbers
-  (server-emitted data, never an addressing input). `imap.Criteria` (build with `imap.criteria()`
-  + fields) filters server-side (substring on `subject`/`from`/`to`/`text`, a
-  `since`/`before` date range set with plain `time.Time` values (rendered to the
-  IMAP date form internally; a time-of-day is refined to the exact instant
-  client-side, so sub-day ranges work), flag state, size)
-  and client-side (`subjectRegex`/`fromRegex` on the decoded header,
-  `hasAttachments` via a `BODYSTRUCTURE` heuristic) - only the server's candidates
-  are fetched, and criteria strings can't inject a command (quoted / validated).
-  Handles tagged responses and `{N}` literals. RFC 2177 `IDLE` push:
-  `idle(session)` -> blocking `receiveNotification` / timeout-bounded
-  `pollNotification` -> `done`, delivering typed `EXISTS` / `EXPUNGE` / `RECENT`
-  notifications.
-  Throws `Error` (kind `"imap"`) on `NO` / `BAD`. **Default `jennifer` binary
-  only** (`net`).
+  folders. `imap.connect(opts)` -> `imap.Session`, then `folders(session, pattern)`
+  -> `imap.Folder`, `status(session, folder)` -> `imap.Status` (counts without
+  selecting), `selectFolder(session, name)`, `search(session, criteria)` (the
+  **UIDs** matching an `imap.Criteria`), `fetch(session, uid)` (raw string) or
+  `fetchMessage(session, uid)` (parsed to a `mime.Part`). Manage with `addFlags` /
+  `removeFlags` / `flags` / `copy` / `move` (atomic `UID MOVE`) / `append` (upload
+  an RFC 5322 message) / `createFolder` / expunge; `fetchPartial` pulls a byte
+  range; `logout`, `imap.fetchAll(opts, folder)`. **Every message verb addresses
+  by the stable UID** (survives an expunge - the key for "process what is new since
+  last run"). `imap.Criteria` (`imap.criteria()` + fields) filters server-side
+  (substring `subject` / `from` / `to` / `text`, `since` / `before` `time.Time`
+  range, flags, size) and client-side (`subjectRegex` / `hasAttachments`); criteria
+  can't inject a command. RFC 2177 `IDLE` push: `idle(session)` -> blocking
+  `receiveNotification` / bounded `pollNotification` -> `done`, delivering typed
+  `EXISTS` / `EXPUNGE` / `RECENT`. Throws `Error` (kind `"imap"`) on `NO` / `BAD`.
+  **Default `jennifer` binary only** (`net`).
 - **`idna`** - internationalized domain names: `idna.toAscii(domain)` /
   `idna.toUnicode(domain)` over a Punycode (RFC 3492) core
   (`münchen.de` <-> `xn--mnchen-3ya.de`), plus `idna.isAscii`. Pure Jennifer, no
@@ -1109,302 +1011,206 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   hosts and SMTP envelope domains through it.
 - **`pop`** - receive mail (POP3, RFC 1939) over `net`: `pop.connect(opts)` ->
   `pop.Session`, then `stat` / `count` / `sizes` / `retrieve(session, n)` /
-  `deleteMessage(session, n)` / `quit`, plus `pop.fetchAll(opts)` (every
-  message, no delete). `uidl(session)` -> `list of pop.MessageId` (`number` +
-  persistent `id`) / `uidlOne(session, n)` give the stable ids for
-  leave-on-server / skip-seen (retrieve only the numbers whose id is new);
-  `top(session, n, lines)` previews the headers plus `lines` body lines
-  (`0` = headers only); `reset(session)` (RSET, unmark deletions) and
-  `noop(session)` (keepalive). Retrieved messages are strings for `mime.parse`. Auth per
-  `Options.auth`: USER/PASS, APOP (`"apop"`), XOAUTH2, CRAM-MD5, SCRAM-SHA-1 /
-  SCRAM-SHA-256, or `"auto"` (strongest offered). Named `pop` because a namespace
-  is letters-only (no digit). **Default `jennifer` binary only** (`net`).
-- **`redis`** - a Redis client speaking RESP2 over `net`: `redis.connect(opts)`
-  -> `redis.Session`, then typed helpers `get` / `set(session, k, v)` /
-  `del` / `exists` / `incr` / `decr` / `keys(session, pattern)` / `ping`, plus
-  a generic `redis.command(session, args)` returning a raw `redis.Reply`
-  (`kind` / `str` / `num` / `items`, walked like a `json.Value`) for any other
-  command. For a **binary** value, `setBytes(session, k, v as bytes)` /
-  `getBytes(session, k)` store / read raw `bytes` byte-for-byte (`get`/`set` are
-  text and throw on non-UTF-8). Typed container helpers: hash `hset` / `hget` /
-  `hgetAll` (`-> map`) / `hdel`, list `lpush` / `rpush` / `lrange` / `llen` /
-  `lpop`, set `sadd` / `srem` / `smembers` / `sismember` / `scard`. RESP2 pub/sub
-  (`subscribe` / `psubscribe` / `publish` / blocking `receiveMessage`),
-  one-round-trip `pipeline`, `multi` / `exec` / `discard` transactions, and a
-  production-safe `scan` cursor (`keys` is now flagged production-unsafe).
-  `connect` does optional `AUTH` / `SELECT`; a `-ERR` reply throws `Error` (kind
-  `"redis"`). **Default `jennifer` binary only** (`net`).
+  `deleteMessage(session, n)` / `quit`, plus `pop.fetchAll(opts)`. `uidl(session)`
+  -> `list of pop.MessageId` (`number` + persistent `id`) / `uidlOne` give the
+  stable ids for leave-on-server / skip-seen; `top(session, n, lines)` previews;
+  `reset` (RSET) / `noop`. Retrieved messages are strings for `mime.parse`. Auth
+  per `Options.auth`: USER/PASS / APOP / XOAUTH2 / CRAM-MD5 / SCRAM-\* / `"auto"`.
+  **Default `jennifer` binary only** (`net`).
+- **`redis`** - a Redis client speaking RESP2 over `net`. `redis.connect(opts)` ->
+  `redis.Session`, then typed helpers `get` / `set(session, k, v)` / `del` /
+  `exists` / `incr` / `decr` / `keys(session, pattern)` / `ping`, plus generic
+  `redis.command(session, args) -> redis.Reply` (`kind` / `str` / `num` / `items`,
+  walked like a `json.Value`). Binary values: `setBytes` / `getBytes`. Container
+  helpers: hash (`hset` / `hget` / `hgetAll` / `hdel`), list (`lpush` / `rpush` /
+  `lrange` / `llen` / `lpop`), set (`sadd` / `srem` / `smembers` / `sismember` /
+  `scard`). Also RESP2 pub/sub (`subscribe` / `psubscribe` / `publish` /
+  `receiveMessage`), `pipeline`, `multi` / `exec` / `discard`, and a production-safe
+  `scan` cursor (`keys` flagged production-unsafe). A `-ERR` reply throws
+  `Error{kind: "redis"}`. **Default `jennifer` binary only** (`net`).
 - **`resque`** - background jobs on Redis, wire-compatible with Resque:
-  `resque.enqueue(session, queue, class, args)` schedules a job (JSON envelope
-  `{"class","args"}` onto `resque:queue:NAME`, queue registered in the
-  `resque:queues` set); `resque.reserve(session, queues)` -> `resque.Job`
-  (`queue` / `class` / `args`) pops the next job from the first non-empty queue
-  in priority order (empty `Job` when drained), or `resque.reserveBlocking(session,
-  queues, timeoutSec)` blocks on the queues (Redis `BLPOP`) until one has work;
-  plus `queueLength` / `queues` / `size` / `fail`. A Ruby-resque / php-resque worker can process the jobs and
-  vice versa; the worker's `class`-dispatch loop is user code. `args` is a
-  `list of string` (Ruby positional). Built on `redis` + `json`. **Default
-  `jennifer` binary only** (`net`).
-- **`smtp`** - send mail (SMTP client) over `net`: `smtp.send(opts, from,
-  recipients, message)` runs the dialogue (EHLO, optional STARTTLS / implicit
-  TLS via `smtp.Options.security` (a `transport.Security` - `.None` / `.Tls` /
-  `.Starttls`), SASL auth per `Options.auth` - PLAIN / LOGIN /
-  XOAUTH2 / CRAM-MD5 / SCRAM-SHA-1 / SCRAM-SHA-256, `MAIL FROM` / `RCPT TO` /
-  `DATA`), with `message` built by `mime`. Throws `Error` (kind `"smtp"`) on
-  rejection. Hardened: SASL auth over a cleartext (`transport.Security.None`) connection
-  is refused unless `Options.allowInsecureAuth` is true; STARTTLS is only issued
-  if the server advertised it (anti-downgrade); envelope addresses are validated
-  (`local@domain`, RFC 5321). For a **queue** of messages, `smtp.open(opts) ->
-  smtp.Session` does the connect + STARTTLS + auth handshake once, then
-  `smtp.sendOn(session, from, recipients, message)` delivers each (RSET + MAIL /
-  RCPT / DATA, reusing the socket - the `Session.conn` is a shared `net.Conn`
-  handle) and `smtp.close(session)` QUITs and closes; `smtp.send` is the one-shot
-  open / sendOn / close convenience. Uses `net`, so **default `jennifer` binary
-  only**.
-- **`snmp`** - an SNMP v1 / v2c **client and agent** over UDP, built on the `asn1`
-  BER codec and `net`. *Client:* `snmp.client(host, community)` (port 161, v2c, 2s
-  timeout) / `snmp.clientWith(address, community, version, timeoutMs, retries)` ->
-  `snmp.Client`; then `snmp.get(c, oids)` / `getNext(c, oids)` / `set(c, varbinds)`
-  / `walk(c, rootOid)` return a `list of snmp.Varbind` `{oid, type, value, number}`
-  typed by SNMP value type (`integer` / `octetString` / `oid` / `null` /
-  `counter32` / `gauge32` / `timeTicks` / `ipAddress` / `counter64` / `opaque` /
-  the `noSuchObject` / `noSuchInstance` / `endOfMibView` exceptions). *Agent
-  (server / hardware simulator):* `snmp.agent(community, version, bindings)` ->
-  `snmp.Agent`, then `snmp.serve(a, address)` (forever) or `snmp.serveOn(a,
-  socket, stop)` (until `channel.send(stop, true)`, for a graceful `task.wait`
-  join) answer GET / GETNEXT / SET for the MIB (GETNEXT walks OIDs in numeric
-  order, wrong community / malformed datagrams dropped). `snmp.intVar` / `stringVar` / `oidVar`
-  / `varbind` build bindings; constants `snmp.VERSION1` / `VERSION2C`.
-  Community-string auth only (no SNMPv3 / USM / traps); each client exchange
-  checks the request-id and times out. Throws `Error` (kind `"snmp"`). **Default
-  `jennifer` binary only** (`net`).
-- **`ldap`** - an LDAP v3 **client and directory server** (RFC 4511), built on the
+  `resque.enqueue(session, queue, class, args)` schedules a job (JSON envelope onto
+  `resque:queue:NAME`); `resque.reserve(session, queues) -> resque.Job{queue, class,
+  args}` pops the next job from the first non-empty queue (empty `Job` when
+  drained), or `reserveBlocking(session, queues, timeoutSec)` (Redis `BLPOP`); plus
+  `queueLength` / `queues` / `size` / `fail`. A Ruby / PHP Resque worker interops;
+  the `class`-dispatch loop is user code (`args` a `list of string`). Built on
+  `redis` + `json`. **Default `jennifer` binary only** (`net`).
+- **`smtp`** - send mail (SMTP client) over `net`. `smtp.send(opts, from,
+  recipients, message)` runs the dialogue (EHLO, STARTTLS / implicit TLS via
+  `smtp.Options.security` a `transport.Security`, SASL auth per `Options.auth` -
+  PLAIN / LOGIN / XOAUTH2 / CRAM-MD5 / SCRAM-\*, then MAIL / RCPT / DATA), `message`
+  built by `mime`. Throws `Error{kind: "smtp"}` on rejection. Hardened: cleartext
+  SASL refused unless `Options.allowInsecureAuth`; STARTTLS only if advertised
+  (anti-downgrade); envelope addresses validated. For a **queue**, `smtp.open(opts)
+  -> smtp.Session` does the handshake once, `smtp.sendOn(session, from, recipients,
+  message)` delivers each (reusing the socket), `smtp.close(session)` QUITs.
+  **Default `jennifer` binary only** (`net`).
+- **`snmp`** - an SNMP v1 / v2c **client and agent** over UDP, on the `asn1` BER
+  codec and `net`. *Client:* `snmp.client(host, community)` / `clientWith(address,
+  community, version, timeoutMs, retries)` -> `snmp.Client`, then `snmp.get(c,
+  oids)` / `getNext` / `set(c, varbinds)` / `walk(c, rootOid)` -> `list of
+  snmp.Varbind{oid, type, value, number}` (typed `integer` / `octetString` / `oid`
+  / `counter32` / `gauge32` / `timeTicks` / `counter64` / ...). *Agent:*
+  `snmp.agent(community, version, bindings)` -> `snmp.Agent`, then `snmp.serve(a,
+  address)` or `serveOn(a, socket, stop)` answer GET / GETNEXT / SET for the MIB.
+  `snmp.intVar` / `stringVar` / `oidVar` / `varbind` build bindings; constants
+  `VERSION1` / `VERSION2C`. Community-string auth only (no SNMPv3 / traps). Throws
+  `Error` (kind `"snmp"`). **Default `jennifer` binary only** (`net`).
+- **`ldap`** - an LDAP v3 **client and directory server** (RFC 4511) over the
   `asn1` BER codec and `net` (LDAPS / StartTLS via `transport.Security`). *Client:*
-  `ldap.connect(address, security)` -> `ldap.Conn`; then `ldap.bind(c, dn, password)`
-  (simple) / `ldap.bindSasl(c, user, password, algo)` (SASL SCRAM) return an
-  `ldap.Result` `{code, matchedDn, message}` (`ldap.SUCCESS` / `INVALID_CREDENTIALS`);
-  `ldap.search(c, baseDn, scope, filter, attributes)` (scopes `ldap.SCOPE_BASE` /
-  `SCOPE_ONE` / `SCOPE_SUB`) / `ldap.searchPaged(...)` return a `list of ldap.Entry`
-  `{dn, attributes}` (read values with `ldap.values` / `firstValue`; a binary value
-  such as AD `objectGUID` comes back base64). Filters:
-  `ldap.parseFilter("(&(objectClass=person)(uid=x))")` or the constructors `equals` /
-  `present` / `greaterOrEqual` / `lessOrEqual` / `substrings` / `allOf` / `anyOf` /
-  `negate`. *Writes:* `ldap.add` / `modify` (with `ldap.change(op, name, values)`,
-  ops `ldap.MOD_ADD` / `MOD_DELETE` / `MOD_REPLACE`) / `delete` / `modifyDn` /
-  `passwordModify` (RFC 3062). `ldap.unbind` / `close`. *Server:*
-  `ldap.directory(entries)` (in-memory) or `ldap.openDirectory(path)` (file-backed,
-  persistent) -> `ldap.Directory`; build entries with `ldap.entry(dn, attrs)` /
-  `ldap.group(dn, members)` / `ldap.password(plain, scheme)`; mutate a live directory
-  with `ldap.addEntry` / `modifyEntry` / `deleteEntry` / `setAttribute` / `getEntry`
-  / `hasEntry` / `listEntries`; `ldap.serve(dir, address)` or `ldap.listen` +
-  `ldap.serveOn(dir, listener)` answer simple bind + filtered search (read-only over
-  LDAP, mutable from code - enough to back an auth portal like Authelia). Throws
-  `Error` (kind `"ldap"`). **Default `jennifer` binary only** (`net`).
+  `ldap.connect(address, security)` -> `ldap.Conn`, then `ldap.bind(c, dn,
+  password)` / `bindSasl(c, user, password, algo)` -> `ldap.Result{code, matchedDn,
+  message}`; `ldap.search(c, baseDn, scope, filter, attributes)` (scopes
+  `SCOPE_BASE` / `SCOPE_ONE` / `SCOPE_SUB`) / `searchPaged` -> `list of ldap.Entry`
+  (read with `ldap.values` / `firstValue`). Filters:
+  `ldap.parseFilter("(&(objectClass=person)(uid=x))")` or constructors (`equals` /
+  `present` / `substrings` / `allOf` / `anyOf` / `negate` / ...). *Writes:*
+  `ldap.add` / `modify` (+ `ldap.change`, ops `MOD_ADD` / `MOD_DELETE` /
+  `MOD_REPLACE`) / `delete` / `modifyDn` / `passwordModify`; `unbind` / `close`.
+  *Server:* `ldap.directory(entries)` / `openDirectory(path)` (file-backed) ->
+  `ldap.Directory`, built with `ldap.entry` / `group` / `password`, mutated with
+  `addEntry` / `modifyEntry` / `getEntry` / ..., served by `ldap.serve(dir,
+  address)` (simple bind + filtered search). Throws `Error` (kind `"ldap"`).
+  **Default `jennifer` binary only** (`net`).
 - **`totp`** - time-based one-time passwords (RFC 6238 over RFC 4226 HOTP), the
   two-factor codes authenticator apps show. `totp.generate(secret, opts)` /
-  `verify(secret, code, opts)` read the clock (`verify` allows a +/-1-step skew);
-  `generateAt` / `verifyAt` take an explicit Unix time (deterministic).
-  `totp.uri(issuer, account, secret, opts)` builds the `otpauth://` provisioning
-  string a QR code encodes. `totp.generateSecret()` / `generateSecretN(nbytes)`
-  mint a fresh crypto-grade base32 secret (default 20-byte / 160-bit);
-  `totp.hotp(secret, counter)` is the raw RFC 4226 HOTP building block;
-  `totp.verifyWindow(secret, code, window, opts)` accepts a configurable
-  `window`-step skew each side. `secret` is base32; a zero-value `totp.Options` is 6
-  digits / 30 s / SHA-1, else set `digits` / `period` / `algorithm` (`"sha256"` /
-  `"sha512"`). `verify` compares codes constant-time (`crypto.hmacEqual`) so it
-  leaks nothing via timing. Over `hash.hmac` + `crypto` + `encoding` + `time`;
-  pure, both binaries.
+  `verify(secret, code, opts)` read the clock (`verify` allows +/-1-step skew);
+  `generateAt` / `verifyAt` take an explicit Unix time. `totp.uri(issuer, account,
+  secret, opts)` builds the `otpauth://` provisioning string; `generateSecret()` /
+  `generateSecretN(nbytes)` mint a crypto-grade base32 secret; `hotp(secret,
+  counter)` is the raw HOTP block; `verifyWindow(..., window, opts)` widens the
+  skew. A zero `totp.Options` is 6 digits / 30 s / SHA-1, else set `digits` /
+  `period` / `algorithm`. `verify` compares constant-time (`crypto.hmacEqual`).
+  Over `hash.hmac` + `crypto` + `encoding` + `time`; pure, both binaries.
 - **`webhook`** - HMAC-signed webhooks (the GitHub `X-Hub-Signature-256`
-  convention). `webhook.sign(payload, secret)` -> `"sha256=" + hex HMAC-SHA256`;
-  `webhook.verify(payload, signature, secret)` -> bool (constant-time compare,
-  never throws) - both pure, both binaries. Replay-protected timestamped signing
-  schemes: `stripeSign` / `stripeVerify` (Stripe `t=,v1=`), `slackSign` /
-  `slackVerify` (Slack `v0=`), and a generic `timestampedSign` / `timestampedVerify`
-  over a caller-chosen digest / encoding - each verify recomputes, constant-time
-  compares, and rejects a stale timestamp. `webhook.send(url, payload, secret)`
-  POSTs the payload as `application/json` with the signature header and returns
-  an `http.Response` (**default `jennifer` binary only**, over `http`). Sign /
-  verify the raw body bytes, before any parsing. Over `hash.hmac` + `encoding`.
-- **`s3`** - an S3-compatible object-storage client (AWS S3 / MinIO /
-  Cloudflare R2 / Backblaze B2), every request AWS Signature V4-signed.
-  `s3.connect(endpoint, region, accessKey, secretKey)` -> a `Client`, then
-  `s3.get` / `put` / `delete` / `listObjects` each return an `http.Response`;
-  `s3.objectKeys(xml)` pulls the keys out of a `listObjects` body. Binary
-  objects use `s3.getBytes` (-> `http.BytesResponse`) / `s3.putBytes` (a raw
-  `bytes` body); `s3.putWith` / `putBytesWith(client, bucket, key, body,
-  contentType, metadata)` sign a `Content-Type` + `x-amz-meta-*` metadata;
-  `s3.head` reads object metadata; `s3.copy(client, srcBucket, srcKey,
-  dstBucket, dstKey)` copies server-side. `s3.presign(client, method, bucket,
-  key, expiresSeconds)` builds a SigV4 query-signed URL (works on both binaries,
-  no request sent). Large objects use the multipart API:
-  `createMultipartUpload` -> `uploadPart` (returns an ETag) ->
-  `completeMultipartUpload` / `abortMultipartUpload`. Path-style addressing,
-  configurable endpoint (one module, every store). The list op is `listObjects`
-  (not `list`, a reserved keyword). `Client.timeout` (ms; `connect` defaults it
-  to 30000, `0` disables) fails a hung endpoint instead of blocking forever.
-  Over `hash.hmac` + `hash.compute` + `encoding` + `time` + `http`; the
-  networked ops need the **default `jennifer` binary**, but `presign` runs on
-  both.
+  convention). `webhook.sign(payload, secret) -> "sha256=" + hex HMAC-SHA256`;
+  `webhook.verify(payload, signature, secret) -> bool` (constant-time, never
+  throws). Replay-protected timestamped schemes: `stripeSign` / `stripeVerify`,
+  `slackSign` / `slackVerify`, and a generic `timestampedSign` / `timestampedVerify`
+  (each verify recomputes, constant-time compares, rejects a stale timestamp).
+  `webhook.send(url, payload, secret)` POSTs with the signature header ->
+  `http.Response` (**default binary only**, over `http`). Sign / verify the raw body
+  bytes, before parsing. Over `hash.hmac` + `encoding`; sign / verify both binaries.
+- **`s3`** - an S3-compatible object-storage client (AWS S3 / MinIO / R2 / B2),
+  every request AWS Signature V4-signed. `s3.connect(endpoint, region, accessKey,
+  secretKey)` -> `Client`, then `s3.get` / `put` / `delete` / `listObjects` (ret
+  `http.Response`; `s3.objectKeys(xml)` pulls keys from a listing). Binary objects:
+  `s3.getBytes` / `putBytes`; `putWith` / `putBytesWith(..., contentType, metadata)`
+  sign `Content-Type` + `x-amz-meta-*`; `s3.head` reads metadata; `s3.copy(...)`
+  server-side. `s3.presign(client, method, bucket, key, expiresSeconds)` builds a
+  query-signed URL (**both binaries**, no request sent). Large objects use the
+  multipart API (`createMultipartUpload` -> `uploadPart` -> `completeMultipartUpload`
+  / `abortMultipartUpload`). Path-style addressing; `listObjects` (not `list`, a
+  keyword); `Client.timeout` fails a hung endpoint. Over `hash` + `encoding` +
+  `time` + `http`; networked ops need the **default `jennifer` binary**.
 - **`label`** - industrial label printing in a build / render / emit pipeline.
-  Build a device-independent `label.Label` in millimetres: `label.new(w, h)`
-  then value-semantic `text(label, x, y, opts, content)` (`label.TextOptions`:
-  `height` mm / `points` / `rotation` 0-90-180-270 / `bold`) / `barcode(label, x,
-  y, type, opts, data)` (linear code128 / ean13 / ean8 / itf / code39 / gs1-128,
-  2D datamatrix / qr; ITF is padded to even length, GS1-128 takes `(AI)data`; a
-  zero-value `label.BarcodeOptions` = defaults, else set `height` / `moduleWidth`
-  (narrow element mm) / `ratio` (wide:narrow for ITF / Code 39) / `checkDigit`
-  (`"mod10"` -> cab `+MOD10`) / `errorLevel` (`"L"`/`"M"`/`"Q"`/`"H"`) /
-  `hideText`) / `box(label, x, y, w, h, thickness)` /
-  `image(label, x, y, name)` (a pre-stored logo by reference) / `quantity(label,
-  n)`. `render(label, device)` emits a selectable dialect; build the device with
-  `label.zpl(dpi)` (Zebra, raster) or `label.cab()` / `label.cabWith(setup)` (cab
-  JScript, mm-native). cab-only print-setup - the `J` job name, `H` heat/speed,
-  `O` orientation, and `S` sensor + geometry lines - rides in a `label.CabSetup`
-  vendor struct (ZPL ignores it). Build and render are pure (both binaries);
-  `send(host, port, rendered)` writes the stream to a printer's raw `:9100` port
-  (**default `jennifer` binary only**, `net`).
-- **`prometheus`** - Prometheus metrics in two halves. **Exposition** (pure
-  text, both binaries): `prometheus.counter(name, help)` / `gauge(name, help)` /
-  `histogram(name, help, buckets)` / `summary(name, help, quantiles)` ->
-  `prometheus.Metric` (a `MetricType` enum `{Counter, Gauge, Histogram,
-  Summary}`), `observe(metric, labels, value)` / `observeAt(metric, labels,
-  value, timestampMs)` records a sample (counter / gauge upsert by label set; a
-  histogram accumulates count / sum and cumulative buckets; a summary retains
-  observations for nearest-rank quantiles), `render(metrics)` -> the text
-  exposition format (`# HELP` / `# TYPE` / sample lines, incl. `x_bucket{le}` /
-  `x_sum` / `x_count` for a histogram and `x{quantile}` for a summary, with an
-  optional trailing timestamp). `pushgatewayPath(job, grouping)` builds the
-  `/metrics/job/<job>/<k>/<v>/...` Pushgateway path (percent-encoded). Strict
-  name / label validation and value / HELP escaping; an invalid name throws
-  `Error` (kind `"prometheus"`). **Retrieval** (needs the default binary, over
-  `http` + `json`): `query(base, promql)` (instant) / `queryRange(base, promql,
-  start, end, step)` (range) -> `prometheus.Result` (`resultType` + `series` of
-  `metric` label maps and `values` points).
-- **`mqtt`** - an MQTT 3.1.1 pub/sub client over `net` (`mqtts` via TLS):
+  Build a device-independent `label.Label` in millimetres: `label.new(w, h)` then
+  value-semantic `text(label, x, y, opts, content)` (`label.TextOptions`: `height`
+  mm / `points` / `rotation` / `bold`) / `barcode(label, x, y, type, opts, data)`
+  (linear code128 / ean13 / ean8 / itf / code39 / gs1-128, 2D datamatrix / qr; a
+  zero `label.BarcodeOptions` = defaults, else set `height` / `moduleWidth` /
+  `ratio` / `checkDigit` / `errorLevel` / `hideText`) / `box` / `image(label, x, y,
+  name)` (a pre-stored logo) / `quantity(label, n)`. `render(label, device)` emits
+  a selectable dialect: `label.zpl(dpi)` (Zebra, raster) or `label.cab()` /
+  `cabWith(setup)` (cab JScript, mm-native; print-setup lines ride in a
+  `label.CabSetup`, ZPL ignores it). Build / render pure (both binaries);
+  `send(host, port, rendered)` writes to a printer's raw `:9100` port (**default
+  `jennifer` binary only**, `net`).
+- **`prometheus`** - Prometheus metrics in two halves. **Exposition** (pure text,
+  both binaries): `prometheus.counter(name, help)` / `gauge` / `histogram(name,
+  help, buckets)` / `summary(name, help, quantiles)` -> `prometheus.Metric` (a
+  `MetricType` enum), `observe(metric, labels, value)` / `observeAt(...,
+  timestampMs)` records a sample, `render(metrics)` -> the text exposition format
+  (`# HELP` / `# TYPE` / samples, incl. histogram `_bucket` / `_sum` / `_count`).
+  `pushgatewayPath(job, grouping)` builds the Pushgateway path. Strict name / label
+  validation; an invalid name throws `Error{kind: "prometheus"}`. **Retrieval**
+  (default binary, over `http` + `json`): `query(base, promql)` / `queryRange(base,
+  promql, start, end, step)` -> `prometheus.Result{resultType, series}`.
+- **`mqtt`** - an MQTT 3.1.1 pub/sub client over `net` (`mqtts` via TLS).
   `mqtt.connect(opts)` -> `mqtt.Client`, then `subscribe(client, topic)` /
-  `publish(client, topic, message)` / `publishBytes(client, topic, payload)` at
-  QoS 0, blocking `receive(client)` -> `mqtt.Message` (`topic` / `payload`) and
-  single-threaded `poll(client, timeoutMs)` -> `list of Message` (0 or 1, via
-  `net.setDeadline`), plus `ping` / `disconnect`. Binary packet framing (1-byte
-  header, remaining-length varint, length-prefixed payload) is built with the
-  bitwise operators and `bytes`; `connect` / `subscribe` throw `Error` (kind
-  `"mqtt"`) on refusal. QoS-1 publish/subscribe with the PUBACK handshake
-  (`publishQos1` / `subscribeQos1`), retained messages, a CONNECT Last-Will
-  (`connectWith`), and `reconnect` session resumption sit alongside the
-  callback-free `receive` / `poll` loop.
-  **Default `jennifer` binary only** (`net`).
-- **`log`** - leveled, structured logging. A `log.Logger` carries a minimum
-  level (`debug` < `info` < `warn` < `error`), a format (`text` / `logfmt` /
-  `json`), and a sink; build one with `log.new(level, format)` (stdout) /
-  `toStderr(level, format)` / `toFile(level, format, path)` /
-  `toSyslog(level, address, app)`. `log.debug(logger, message, fields)` /
-  `info` / `warn` / `error` (and `at(logger, level, message, fields)` for a
-  runtime level) render one record - RFC 3339 timestamp, level, message, and a
-  `map of string to string` of `fields` - and write it, dropping records below
-  the logger's level; values with a space / quote / `=` are quoted in the text /
-  logfmt forms. `log.with(logger, fields)` returns a child logger that stamps
-  those persistent fields onto every record; `log.fatal(logger, message, fields)`
-  logs at a fatal level and then exits 1. The syslog sink frames each record as an RFC 5424 datagram over
-  UDP (facility `user`); console and file sinks work on both binaries, the
-  **syslog sink needs the default `jennifer` binary** (`net`). Over `io` / `fs`
-  + `json` + `strings` + `time` + `os` (+ `net` for syslog).
+  `publish(client, topic, message)` / `publishBytes` at QoS 0, blocking
+  `receive(client) -> mqtt.Message{topic, payload}` and `poll(client, timeoutMs) ->
+  list of Message` (0 or 1), plus `ping` / `disconnect`. Also QoS-1 (`publishQos1` /
+  `subscribeQos1`, PUBACK), retained messages, a CONNECT Last-Will (`connectWith`),
+  and `reconnect` session resumption. Binary framing hand-built from `bytes` +
+  bitwise ops; refusal throws `Error{kind: "mqtt"}`. **Default `jennifer` binary
+  only** (`net`).
+- **`log`** - leveled, structured logging. A `log.Logger` carries a minimum level
+  (`debug` < `info` < `warn` < `error`), a format (`text` / `logfmt` / `json`), and
+  a sink; build with `log.new(level, format)` (stdout) / `toStderr` / `toFile(...,
+  path)` / `toSyslog(level, address, app)`. `log.debug(logger, message, fields)` /
+  `info` / `warn` / `error` (and `at(logger, level, message, fields)`) render one
+  record (RFC 3339 timestamp, level, message, a `map of string to string` of
+  `fields`) and write it, dropping records below the level. `log.with(logger,
+  fields)` returns a child logger stamping persistent fields; `log.fatal(...)` logs
+  then exits 1. The syslog sink frames RFC 5424 over UDP; console / file sinks work
+  on both binaries, the **syslog sink needs the default `jennifer` binary** (`net`).
+  Over `io` / `fs` + `json` + `strings` + `time` + `os` (+ `net` for syslog).
 - **`ical`** - iCalendar (RFC 5545) build and parse. Build a value-semantic
-  `ical.Calendar` of `ical.Event`s (`VEVENT`) and `ical.Todo`s (`VTODO`):
-  `ical.calendar()`, `event(uid, start, end, summary)` (dates are `time.Time`),
-  then `describe` / `locate` / `withAllDay(ev, bool)` (all-day `VALUE=DATE`) /
-  `withZone(ev, tzid)` (named-zone `TZID`) / `recur(ev, rrule)` (build the string
-  with `ical.rule(freq, interval, count)`) / `addRdate` / `addExdate` /
-  `withOrganizer` / `addAttendee(ev, ical.attendee(addr, cn, role))` /
-  `addAlarm(ev, ical.alarm(action, trigger, desc))` (`VALARM`) / `add(cal, ev)` /
-  `addTodo(cal, ical.todo(uid, stamp, summary))` (each returns a fresh copy).
-  `ical.occurrences(ev, max) -> list of time.Time` expands the recurrence
-  (`FREQ` / `INTERVAL` / `COUNT` / `UNTIL` + `RDATE` - `EXDATE`; `MONTHLY` /
-  `YEARLY` day-clamp; `BY*` round-tripped but not expanded). `ical.encode(cal)`
-  renders CRLF lines, RFC 5545-escaped text, 75-char folding, UTC `DATE-TIME`
-  (`...Z`); a `TZID` value is floating + the zone name (`time` is fixed-offset, so
-  add a `VTIMEZONE` for a strict consumer). `ical.parse(text)` reads events / todos
-  / nested `VALARM`s and the `VALUE=DATE` / `TZID` / `CN` / `ROLE` parameters,
-  skips a `VTIMEZONE`, so `parse(encode(cal))` round-trips. Pure text over
-  `strings` / `lists` + `time`; **both binaries**.
+  `ical.Calendar` of `ical.Event`s / `ical.Todo`s: `ical.calendar()`, `event(uid,
+  start, end, summary)` (dates `time.Time`), then `describe` / `locate` /
+  `withAllDay` / `withZone(ev, tzid)` / `recur(ev, rrule)` (build with `ical.rule`)
+  / `addRdate` / `addExdate` / `withOrganizer` / `addAttendee(ev, ical.attendee(...))`
+  / `addAlarm(ev, ical.alarm(...))` / `add(cal, ev)` / `addTodo` (each returns a
+  fresh copy). `ical.occurrences(ev, max) -> list of time.Time` expands the
+  recurrence (`FREQ` / `INTERVAL` / `COUNT` / `UNTIL` + `RDATE` - `EXDATE`).
+  `ical.encode(cal)` renders CRLF, escaped text, 75-char folding, UTC `DATE-TIME`;
+  `ical.parse(text)` reads events / todos / alarms and the parameters, so
+  `parse(encode(cal))` round-trips. Pure text over `strings` / `lists` + `time`;
+  **both binaries**.
 - **`vcard`** - vCard (RFC 6350, vCard 4.0) contacts build and parse. Build a
-  value-semantic `vcard.Card`: `vcard.card(formattedName)` then
-  `withName(c, family, given)` / `withFullName(c, family, given, additional,
-  prefixes, suffixes)` (full 5-component `N`) / `withNickname` / `withOrg(c, org,
-  title)` / `addEmail(c, email)` / `addEmailTyped(c, email, type)` /
-  `addPhoneTyped(c, phone, type)` / `addAddress(c, vcard.address(...))` (or
-  `addressTyped(..., type)`) / `withBday` / `withPhoto` / `addCategory` /
-  `withUrl` / `withNote` (each returns a fresh copy). Emails / phones / addresses
-  are `Typed{value, type}` with an optional `TYPE` (`work` / `home`).
-  `vcard.encode(c) -> string` (one `VCARD`) / `encodeAll(cards)` writes
-  `VERSION:4.0`, the structured `N` / `ADR` / `ORG`, `TYPE` parameters, `BDAY` /
-  `PHOTO` / `NICKNAME` / `CATEGORIES`, RFC 6350-escaped text, and 75-char folding;
-  `vcard.parse(text) -> list of Card` reads one or many cards **including the
-  `TYPE` parameter**, so `parse(encode(c))` round-trips. Shares the content-line
-  codec with `ical`. Pure text over `strings` / `lists`; **both binaries**.
+  value-semantic `vcard.Card`: `vcard.card(formattedName)` then `withName(c,
+  family, given)` / `withFullName(...)` / `withNickname` / `withOrg(c, org, title)`
+  / `addEmail` / `addEmailTyped(c, email, type)` / `addPhoneTyped` / `addAddress(c,
+  vcard.address(...))` / `withBday` / `withPhoto` / `addCategory` / `withUrl` /
+  `withNote` (each returns a fresh copy; emails / phones / addresses are
+  `Typed{value, type}`). `vcard.encode(c)` / `encodeAll(cards)` writes
+  `VERSION:4.0`, structured `N` / `ADR` / `ORG`, `TYPE` params, escaped text,
+  75-char folding; `vcard.parse(text) -> list of Card` round-trips. Shares the
+  content-line codec with `ical`. Pure text over `strings` / `lists`; **both
+  binaries**.
 - **`jwt`** - JSON Web Tokens (RFC 7519). `jwt.sign(claims, key, alg)` /
-  `verify(token, key, alg)` / `decode(token)` / `header(token)`, claims a
-  `json.Value`. Ten algorithms - HMAC `HS256`/`384`/`512`, RSA
-  `RS256`/`384`/`512`, ECDSA `ES256`/`384`/`512`, and `EdDSA` (Ed25519); the
-  `key` is always `bytes` (HMAC secret / PEM / Ed25519). `verify` pins the
-  **expected** algorithm (rejecting algorithm-confusion), enforces `exp` / `nbf`,
-  and compares HMACs in constant time; `decode` / `header` read without
-  verifying (never authorize on them). `verifyWith(token, key, alg,
-  jwt.Policy{iss, aud})` additionally enforces the expected issuer / audience
-  (empty string skips a check); `verifyLeeway(token, key, alg, leeway)` widens the
-  `exp` / `nbf` checks by `leeway` seconds each way for clock skew; and
-  `verifyWithKeys(token, keysByKid, alg)` selects the key by the header's `kid`
-  from a caller-supplied `map of string to string`; and `verifyJwks(token,
-  jwksJson, alg)` resolves the `kid` against a JWKS, converting the JWK to a key
-  with `crypto.jwkToPem` (RS\* / ES\* only). Over `crypto` + `hash` + `encoding` +
-  `json` + `time`. HS\* / EdDSA on both binaries; RS\* / ES\* need the default
-  binary. JWT auth is this module used as a `web.before` middleware, not a
-  separate module.
+  `verify(token, key, alg)` / `decode(token)` / `header(token)` (claims a
+  `json.Value`, `key` always `bytes`). Ten algorithms: HMAC `HS256/384/512`, RSA
+  `RS256/384/512`, ECDSA `ES256/384/512`, `EdDSA`. `verify` pins the **expected**
+  algorithm (rejects algorithm-confusion), enforces `exp` / `nbf`, compares in
+  constant time; `decode` / `header` read without verifying (never authorize on
+  them). `verifyWith(..., jwt.Policy{iss, aud})` enforces issuer / audience;
+  `verifyLeeway(..., leeway)` widens `exp` / `nbf` for skew; `verifyWithKeys(token,
+  keysByKid, alg)` / `verifyJwks(token, jwksJson, alg)` select the key by header
+  `kid` (JWKS via `crypto.jwkToPem`, RS\* / ES\* only). Over `crypto` + `hash` +
+  `encoding` + `json` + `time`. HS\* / EdDSA both binaries; RS\* / ES\* need the
+  default binary. JWT auth is this module as a `web.before` middleware.
 - **`jsonl`** - JSON Lines (JSONL / NDJSON): newline-delimited JSON, one
-  independent `json.Value` per line. `jsonl.encode(records)` writes one compact
-  JSON value per line (each newline-terminated); `jsonl.decode(text) -> list of
-  json.Value` parses each non-blank line (blank / whitespace lines skipped,
-  trailing `\r` trimmed), so `decode(encode(rows))` round-trips. Whole-file
-  `readFile` / `writeFile` / `appendFile` (append is the growing-log pattern),
-  plus streaming handles over an open `fs.File` - a `jsonl.Reader` (`openReader` /
-  `hasMore` / `readRecord` / `closeReader`) that reads one record at a time for
-  files too large for memory (`readRecord` throws `Error{kind: "jsonl"}` at end -
-  guard with `hasMore`), and a `jsonl.Writer` (`writer` / `writeRecord` /
-  `closeWriter`) that appends records incrementally. A
-  thin framing layer over `json` + `fs`; **both binaries**.
+  `json.Value` per line. `jsonl.encode(records)` / `decode(text) -> list of
+  json.Value` (blank lines skipped, trailing `\r` trimmed), so
+  `decode(encode(rows))` round-trips. Whole-file `readFile` / `writeFile` /
+  `appendFile` (append = the growing-log pattern), plus streaming handles over an
+  open `fs.File`: a `jsonl.Reader` (`openReader` / `hasMore` / `readRecord` /
+  `closeReader`, for files too large for memory) and a `jsonl.Writer` (`writer` /
+  `writeRecord` / `closeWriter`). A thin framing layer over `json` + `fs`; **both
+  binaries**.
 - **`jsonrpc`** - JSON-RPC 2.0, client and server, over `http` + `json`.
-  `jsonrpc.client(endpoint)` / `clientWith(endpoint, headers)` -> a `Client`,
-  then `jsonrpc.call(client, method, params) -> json.Value` (throws
-  `Error{kind: "jsonrpc"}` on an error reply or transport failure) and
-  `notify(client, method, params)` (no `id`, no reply). `params` and the result
-  are `json.Value`s (built with the `json` write API, read with its accessors).
-  Server side, `jsonrpc.handle(requestBody) -> replyBody` is transport-agnostic:
-  it dispatches each request's `method` to a top-level `func NAME(params as
-  json.Value)` in the entry program by name (via `meta.callMain`), returns that
-  handler's `json.Value` or scalar result, and covers notifications, batches, and
-  the reserved error codes (`PARSE_ERROR` / `INVALID_REQUEST` /
-  `METHOD_NOT_FOUND` / `INVALID_PARAMS` / `INTERNAL_ERROR`; a missing method is
-  `-32601`, a thrown handler `-32603`). Needs the default binary (`net` via
-  `http`).
-- **`ipnet`** - IP addresses and CIDR networks, IPv4 and IPv6. `ipnet.parseAddress(s)
-  -> Address` (dotted-quad or IPv6 with `::` compression + embedded IPv4; a
-  v4-mapped `::ffff:a.b.c.d` folds to a v4 `Address`), `toString(addr)`
-  (canonical, RFC 5952 for IPv6), `version(addr)`, `equal(a, b)`, `unmap(addr)`,
-  `next(addr)` / `prev(addr)` / `compare(a, b)` (a total order for walking /
-  sorting). CIDR: `ipnet.parse(cidr) -> Network` (host bits zeroed; a v4-mapped
-  CIDR folds, prefix translated), `contains(net, addr) -> bool` (version mismatch
-  is false), `netmask(net)` / `broadcast(net)` -> `Address`, `networkString(net)`.
-  Subnet math: `hostCount(net)`, `firstUsable(net)` / `lastUsable(net)`,
-  `hosts(net) -> list of Address` (capped 65536), `split(net, newPrefix) -> list
-  of Network` (capped 65536), `aggregate(nets) -> list of Network` (drop
-  contained + merge sibling pairs), `overlaps(a, b)` / `subnetOf(child, parent)`.
-  Classification: `scope(addr) -> Scope` (a total, disjoint enum `{Global,
-  Private, Loopback, LinkLocal, Multicast, Unspecified, Reserved}` you can
-  `match`), with `isGlobal` / `isPrivate` / `isLoopback` / `isLinkLocal` /
-  `isMulticast` / `isUnspecified` predicates over it. An `ipnet.Address` holds its
-  raw `octets as bytes` (4 or 16) and `version`; a `Network` pairs a base `addr`
-  with a `prefix`. Bitwise math for allow-lists, subnetting, and membership;
-  malformed input throws `Error{kind: "ipnet"}`. Pure `.j` over `strings` +
-  `convert`; **both binaries**.
+  `jsonrpc.client(endpoint)` / `clientWith(endpoint, headers)` -> `Client`, then
+  `jsonrpc.call(client, method, params) -> json.Value` (throws `Error{kind:
+  "jsonrpc"}` on an error reply / transport failure) and `notify(client, method,
+  params)` (no reply). Server side, `jsonrpc.handle(requestBody) -> replyBody` is
+  transport-agnostic: it dispatches each `method` to a top-level `func NAME(params
+  as json.Value)` via `meta.callMain`, and covers notifications, batches, and the
+  reserved error codes. Needs the default binary (`net` via `http`).
+- **`ipnet`** - IP addresses and CIDR networks, IPv4 and IPv6.
+  `ipnet.parseAddress(s) -> Address` (v4-mapped folds to v4), `toString` (canonical,
+  RFC 5952), `version` / `equal` / `unmap` / `next` / `prev` / `compare` (a total
+  order). CIDR: `ipnet.parse(cidr) -> Network` (host bits zeroed), `contains(net,
+  addr)`, `netmask` / `broadcast` -> `Address`, `networkString`. Subnet math:
+  `hostCount`, `firstUsable` / `lastUsable`, `hosts(net)` / `split(net, newPrefix)`
+  (each capped 65536), `aggregate(nets)`, `overlaps` / `subnetOf`. Classification:
+  `scope(addr) -> Scope` (a disjoint enum `{Global, Private, Loopback, LinkLocal,
+  Multicast, Unspecified, Reserved}` you can `match`) + `isGlobal` / `isPrivate` /
+  `isLoopback` / ... predicates. An `Address` holds raw `octets as bytes` +
+  `version`; a `Network` pairs a base `addr` + `prefix`. Malformed input throws
+  `Error{kind: "ipnet"}`. Pure `.j` over `strings` + `convert`; **both binaries**.
 - **`ntp`** - a simple SNTP network-time client (RFC 4330 / 5905). `ntp.query(host)
   -> Result` (port 123, 5s timeout) and `ntp.queryWith(address, timeoutMs) ->
   Result` query a server over UDP; `ntp.Result` carries `serverTime as time.Time`,
@@ -1414,286 +1220,183 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   lost reply times out via a UDP receive deadline (throws `Error{kind: "ntp"}`)
   rather than hanging. Query-only - it measures the offset, it does not discipline
   the clock or run as a daemon. **Default `jennifer` binary only** (`net`).
-- **`pdf`** - generate simple PDF documents (text / lines / rectangles) the
-  way `html` / `label` generate their formats. Value-semantic builders:
-  `pdf.document()`, `page(width, height)`, then `text(pg, x, y, font, size,
-  str)` / `line(pg, fromX, fromY, toX, toY)` / `rect(pg, x, y, w, h, filled)` /
-  `color(pg, red, green, blue)` (each returns a fresh `Page`), `addPage(doc, pg)`,
-  and `render(doc) -> bytes`. Document metadata via `info(doc, key, value)` (the
-  PDF Info dictionary - `Title` / `Author` / `Subject` / `Keywords` / `Creator` /
-  `Producer`, which defaults to "Jennifer pdf"; `pdfDate(t)` formats a PDF
-  date). **Bookmarks** via `bookmark(doc, page, y, title, level)` - outline entries
-  that nest by `level` into a navigation tree; with any present, `render` emits the
-  `/Outlines` object tree and opens the viewer's bookmark panel. `render` writes the
-  PDF 1.7 object / xref structure by hand with
-  FlateDecode-compressed content streams (via `compress`). Standard-14 base fonts
-  (an unknown font throws `Error{kind: "pdf"}`); coordinates are PDF points
-  (origin bottom-left, y up, ints), colour is 0-255 RGB. For non-Latin text,
-  **embed a TrueType font**: `loadFont(name, ttfBytes) -> LoadedFont` /
-  `addFont(doc, lf)` / `textUnicode(pg, x, y, lf, size, str)` writes a Type0 /
-  CIDFontType2 composite (Identity-H, embedded `FontFile2`, ToUnicode map) over
-  the `font` module, so accented Latin / Greek / Cyrillic / CJK renders and stays
-  selectable (a CFF `.otf` throws - TrueType `glyf` only; whole-font embed, glyph
-  subsetting is a follow-on). **Embed raster images** with `loadImage(name,
-  imgBytes) -> Image` / `addImage(doc, img)` / `drawImage(pg, img, x, y, width,
-  height)`: PNG (greyscale / RGB / palette embed directly via a FlateDecode
-  predictor; 8-bit greyscale+alpha / RGBA decode to a colour stream plus an
-  `/SMask` soft mask) and JPEG (embedded as-is via `DCTDecode`), drawn as an
-  image XObject scaled into the box (interlaced PNG / 16-bit alpha / palette
-  `tRNS` throw). **Text layout**: `measureText(font, size, str) -> float`
-  (standard-14 via Adobe Core-14 AFM metrics) / `measureTextUnicode(lf, size,
-  str)` (embedded-font advances) measure width in points; `wrapText(font, size,
-  str, maxWidth) -> list of string` word-wraps (honouring `\n` hard breaks);
-  `textBlock(pg, x, y, width, font, size, leading, str, align)` (and
-  `textBlockUnicode`) flow wrapped text into a column with `align` "left" /
-  "right" / "center" / "justify". Object numbers are assigned dynamically.
-  Output is **byte-identical** (no auto timestamp - opt in via `info` +
-  `pdfDate`), so a rendered PDF is safe to assert against a golden; `qpdf`-clean,
-  text extracts with `pdftotext`. Pure `.j` over `strings` / `lists` / `maps` /
-  `convert` / `compress` / `binary` / `math` / `time` / `encoding` + the `font`
-  module; **both binaries**.
-- **`dot`** - Graphviz DOT graph description: build a graph and render it to
-  `.dot` text for an external Graphviz tool to lay out and draw (`dot -Tsvg
-  graph.dot > graph.svg`). `dot.digraph(name)` (directed, `->`) / `dot.graph(name)`
-  (undirected, `--`) start a `Graph`; `node(g, id)` / `nodeWith(g, id, attrs)` and
-  `edge(g, src, dst)` / `edgeWith(g, src, dst, attrs)` add nodes and edges (`attrs`
-  a `map of string to string`, e.g. `{"label": "Parser", "shape": "box"}`);
-  `graphAttr` / `nodeAttr` / `edgeAttr` set the graph-level and `node [ ... ]` /
-  `edge [ ... ]` default blocks; `render(g) -> string`. Every builder returns a
-  fresh `Graph` (value semantics); labels / names / attribute values are
-  DOT-escaped. Emits the text description only - graph layout is Graphviz's job and
-  is deliberately not reimplemented. Pure `.j` over `strings` / `lists`; **both
-  binaries**.
-- **`plot`** - data plotting to SVG. A unified `plot.chart(series, opts)` renders a
-  `list of plot.Series` (built with `plot.series(name, xs, ys)` / `plot.points(...)`;
-  each carries a `mark` of "line" / "points" / "both" / "area" fill, an optional
-  `dash`, symmetric error bars `yErr`, and a scatter marker `shape` of "circle" /
-  "square" / "triangle" / "diamond"; auto-coloured from a palette) on shared axes
-  **with a positioned legend**; `plot.line` / `scatter` / `bar(labels, values, opts)`
-  / `histogram(data, bins, opts)` are wrappers, and `plot.bars(labels, series, opts)`
-  draws **grouped or stacked** multi-series bars (`barMode`) with **negative /
-  diverging** values and optional value **data labels** (`barLabels`). Every chart
-  gets automatic "nice" ticks (Heckbert), a gridded frame, a title, and labels.
-  `plot.defaults() -> Options` carries `width` / `height` / `title` / `xLabel` /
-  `yLabel` / `color` / `background` plus `fontFamily` / `fontSize` (**fonts**), the
-  four `margin*` fields (**margins**), `grid` / `legend` / `legendPos` (top-right /
-  top-left / bottom-right / bottom-left), `xLog` / `yLog` (**log10 scales**), `xDate`
-  / `dateFormat` (**date axis**: x = Unix seconds, calendar-boundary ticks via
-  `time`), `hover` (native `<title>` **hover tooltips**), and `refLines` (**reference
-  lines** from `plot.hline(value, label)` / `plot.vline(...)` -> `plot.RefLine`).
-  `plot.floats(ints)` lifts a `list of int`; `plot.save(svg, path)` writes the SVG to
-  a file over `fs` (values have no methods, so it is `plot.save($svg, path)`, not
-  `$svg.save(path)`). Empty / mismatched / ragged input or a non-positive log value
-  throws `Error{kind: "plot"}`. The visual companion to the `stats` / `ml` numeric
-  stack, pure `.j` over `math` / `time` / `fs` / `strings` / `lists` / `convert`;
+- **`pdf`** - generate PDF documents (text / lines / rectangles / images). Value-
+  semantic builders: `pdf.document()`, `page(width, height)`, then `text(pg, x, y,
+  font, size, str)` / `line` / `rect(pg, x, y, w, h, filled)` / `color(pg, r, g,
+  b)` (each returns a fresh `Page`), `addPage(doc, pg)`, `render(doc) -> bytes`.
+  Metadata via `info(doc, key, value)` (`pdfDate(t)` for dates); `bookmark(doc,
+  page, y, title, level)` builds a nesting outline. Standard-14 base fonts;
+  coordinates are PDF points (origin bottom-left, ints), colour 0-255 RGB. For
+  non-Latin text, **embed a TrueType font** (`loadFont` / `addFont` /
+  `textUnicode`, Type0 / CIDFontType2 over the `font` module; `.otf`/CFF throws).
+  **Embed raster images** (`loadImage` / `addImage` / `drawImage`): PNG
+  (greyscale / RGB / palette / alpha via `/SMask`) and JPEG (`DCTDecode`).
+  **Text layout**: `measureText` / `measureTextUnicode` -> width in points,
+  `wrapText(...) -> list of string`, `textBlock(pg, x, y, width, font, size,
+  leading, str, align)` (`textBlockUnicode`) flows a column ("left" / "right" /
+  "center" / "justify"). Output is **byte-identical** (no auto timestamp), so a
+  render is golden-safe; `qpdf`-clean, `pdftotext`-extractable. Pure `.j` over
+  `strings` / `lists` / `maps` / `convert` / `compress` / `binary` / `math` /
+  `time` / `encoding` + `font`; **both binaries**.
+- **`dot`** - Graphviz DOT graph description: build a graph and render it to `.dot`
+  text for an external Graphviz tool (`dot -Tsvg graph.dot > graph.svg`).
+  `dot.digraph(name)` (directed) / `dot.graph(name)` (undirected) start a `Graph`;
+  `node(g, id)` / `nodeWith(g, id, attrs)` and `edge(g, src, dst)` / `edgeWith(...)`
+  add nodes / edges (`attrs` a `map of string to string`); `graphAttr` / `nodeAttr`
+  / `edgeAttr` set default blocks; `render(g) -> string`. Every builder returns a
+  fresh `Graph`; labels / attrs DOT-escaped. Text description only (layout is
+  Graphviz's job). Pure `.j` over `strings` / `lists`; **both binaries**.
+- **`plot`** - data plotting to SVG. `plot.chart(series, opts)` renders a `list of
+  plot.Series` (`plot.series(name, xs, ys)`; each carries a `mark` "line" /
+  "points" / "both" / "area", optional `dash`, error bars `yErr`, a scatter
+  `shape`) on shared axes with a legend; `plot.line` / `scatter` / `bar(labels,
+  values, opts)` / `histogram(data, bins, opts)` are wrappers, and `plot.bars`
+  draws grouped / stacked multi-series bars. Automatic "nice" ticks, gridded frame,
+  title, labels. `plot.defaults() -> Options` carries `width` / `height` / `title`
+  / `xLabel` / `yLabel` / `color` / fonts / margins / `legendPos`, log scales
+  (`xLog` / `yLog`), a date axis (`xDate` / `dateFormat`, x = Unix seconds), hover
+  tooltips, and reference lines (`plot.hline` / `vline` -> `RefLine`).
+  `plot.floats(ints)` lifts a `list of int`; `plot.save($svg, path)` writes over
+  `fs`. Bad input throws `Error{kind: "plot"}`. The visual companion to `stats` /
+  `ml`, pure `.j` over `math` / `time` / `fs` / `strings` / `lists` / `convert`;
   **both binaries**.
-- **`statsd`** - a fire-and-forget StatsD metrics client over UDP. `statsd.client(host)`
-  (default port 8125) / `statsd.clientWith(address, prefix)` open a `Client`
-  (`socket` + agent `address` + a metric-name `prefix`, "" for none; copies share
-  the socket). The verbs each format one `[prefix.]name:value|type` line and send
-  one datagram: `count(c, name, value)` / `increment(c, name)` / `decrement(c, name)`
-  (counter `c`), `gauge(c, name, value)` (`g`), `timing(c, name, ms)` (`ms`),
-  `set(c, name, value)` (`s`); `close(c)` closes the socket. The push counterpart to
-  a pull-based scrape - UDP means no reply and no error when no agent is listening
-  (metrics, not data you must not lose). Extensions: `countRate` / `timingRate`
-  (a `|@rate` sample-rate suffix), `*Tagged` verbs carrying a `map of string to
-  string` of DogStatsD `|#k:v` tags, `countFloat` / `gaugeFloat` (float values),
-  and a value-semantic `Batch` (`batch` / `add*` / `flush`) packing several
-  metrics into one datagram. Every line - name, prefix, value, tag keys /
-  values - is control-character validated. **Default `jennifer` binary only** (`net`).
+- **`statsd`** - a fire-and-forget StatsD metrics client over UDP.
+  `statsd.client(host)` (port 8125) / `clientWith(address, prefix)` open a `Client`
+  (copies share the socket). Each verb sends one `[prefix.]name:value|type`
+  datagram: `count(c, name, value)` / `increment` / `decrement` (counter),
+  `gauge(c, name, value)` / `timing(c, name, ms)` / `set(c, name, value)`;
+  `close(c)`. UDP means no reply and no error when no agent listens (metrics, not
+  must-keep data). Extensions: `countRate` / `timingRate` (`|@rate`), `*Tagged`
+  verbs (DogStatsD `|#k:v`), `countFloat` / `gaugeFloat`, and a value-semantic
+  `Batch` (`batch` / `add*` / `flush`). Every line is control-character validated.
+  **Default `jennifer` binary only** (`net`).
 - **`orm`** - a relational mapper over the `sql` library. **Data Mapper**, not
-  Active Record (structs have no methods): declare an `orm.Schema`
+  Active Record (structs have no methods). Declare an `orm.Schema`
   (`orm.schema(table, pk, dialect)` + `orm.column(s, name, kind)`, dialect
-  `orm.Dialect.Mysql` / `orm.Dialect.Postgres`, kind `orm.ColumnKind.Int` /
-  `String` / `Float` / `Bool` / `Bytes` - both closed enums; column attributes via
-  fluent setters `orm.notNull` / `unique` / `autoIncrement` / `withDefault(s, v)`
-  decorating the last-added column), then CRUD through an `orm.Session`
-  (`orm.session(conn)` auto-commit / `orm.transaction(tx)` inside a caller's
-  transaction): `orm.insert(session, schema, record)` / `find(session, schema, id)`
-  / `update` / `delete`, and `orm.all(session, query)`. Records are `map of string
-  to string`. Non-mutating **functional
-  query builder** (each step returns a fresh `orm.Query`): `orm.from($schema)` ->
-  `select` (projection) / `count` / `aggregate` (COUNT/SUM/AVG/MIN/MAX) ->
-  `where` / `orWhere` / `whereIn` / `orWhereIn` / `whereNotIn` (AND / OR / IN) ->
-  `join` / `leftJoin` / `rightJoin` -> `groupBy` + `having` / `orHaving` ->
-  `orderBy` / `limit` / `offset` -> `orm.toSql($q)` -> `Rendered{sql, params}`,
-  placeholders per dialect (`?` / `$1`); values bind only through placeholders.
-  Identifiers / operators / aggregate-functions / join-kinds are allowlist-checked
-  at **build and render** time, so a hand-built `orm.Query` / `orm.Schema` literal
-  cannot inject either. Plus DDL builders: `orm.createTable(schema)` (with
-  attributes) / `dropTable` / `addColumn` / `dropColumn` / `renameColumn` /
-  `createIndex` / `dropIndex` / `addForeignKey` / `dropForeignKey`. Relations
-  (metadata on the schema): `orm.belongsTo` / `hasOne` / `hasMany` / `manyToMany`
-  declare an association, `orm.joinRelation(q, schema, name)` emits its JOIN.
-  **Eager loading** (N+1 elimination): `orm.with(q, name)` marks a relation,
-  `orm.load(session, schema, q) -> Result` fetches parents + relations in a fixed
-  1 + R queries; walk it with `orm.rows` / `related` (has-many / many-to-many) /
-  `relatedOne` (belongs-to / has-one, `{}` if none). **Write path**:
-  `orm.upsert(session, s, record, conflictCols)` (ON CONFLICT / ON DUPLICATE KEY),
-  `insertMany` (multi-row, auto-chunked), `insertReturning -> string` (generated
-  key), `updateWhere(session, s, assignments, q)` / `deleteWhere(session, s, q)`
-  (bulk by a query's WHERE; refuse a WHERE-less query), `save` (insert if no PK
-  else update). **Finders**: `first(session, q)` / `exists(session, q) -> bool` /
-  `findBy(session, s, col, value)` / `pluck(session, q, col) -> list of string`.
-  **Filters**: `whereNull` / `whereNotNull` / `whereBetween(q, col, lo, hi)` /
-  `distinct(q)` / `page(q, pageNum, pageSize)`. Schema migrations are the separate
-  `sqlmigrate` module. Needs the default binary.
+  `orm.Dialect.Mysql` / `Postgres`, kind `orm.ColumnKind.Int` / `String` /
+  `Float` / `Bool` / `Bytes` - closed enums; fluent column attributes `orm.notNull`
+  / `unique` / `autoIncrement` / `withDefault`), then CRUD through an `orm.Session`
+  (`orm.session(conn)` / `orm.transaction(tx)`): `orm.insert` / `find` / `update`
+  / `delete` / `all`. Records are `map of string to string`. Non-mutating
+  **functional query builder** (each step returns a fresh `orm.Query`):
+  `orm.from($schema)` -> `select` / `count` / `aggregate` -> `where` / `orWhere` /
+  `whereIn` / `whereNotIn` / `whereNull` / `whereBetween` -> `join` / `leftJoin` /
+  `rightJoin` -> `groupBy` + `having` -> `orderBy` / `limit` / `offset` / `page` ->
+  `orm.toSql($q)` -> `Rendered{sql, params}` (placeholders per dialect). Identifiers
+  / operators / join-kinds are allowlist-checked at build **and** render time, so a
+  hand-built literal cannot inject. Plus DDL builders (`createTable` / `dropTable`
+  / `addColumn` / `createIndex` / `addForeignKey` / ...); relations (`belongsTo` /
+  `hasOne` / `hasMany` / `manyToMany` + `joinRelation`) with **eager loading**
+  (`orm.with` marks a relation, `orm.load -> Result` fetches parents + relations in
+  1 + R queries, walked by `rows` / `related` / `relatedOne`); and a write path
+  (`upsert` / `insertMany` / `insertReturning` / `updateWhere` / `deleteWhere` /
+  `save`) and finders (`first` / `exists` / `findBy` / `pluck`). Migrations are the
+  separate `sqlmigrate` module. Needs the default binary.
 - **`sqlmigrate`** - version-tracked schema migrations over the `sql` library,
-  decoupled from `orm`: `sqlmigrate.Migration{version, description, up as list of
-  string, down as list of string}` whose `up` / `down` are plain DDL strings
-  (built with `orm`'s DDL helpers or hand-written). `sqlmigrate.migrate(conn,
-  migrations)` applies pending versions in lexical order (each in its own
-  transaction, recorded in a `schema_migrations` table; idempotent),
-  `rollbackMigrations(conn, migrations, steps)` reverses the newest N,
-  `migrationStatus(conn, migrations) -> list of MigrationStatus{version,
-  description, applied}`. Takes a raw `sql.Connection` (it owns transaction
-  control). Version allowlisted + description escaped (injection-safe). Needs the
+  decoupled from `orm`: `sqlmigrate.Migration{version, description, up, down}` whose
+  `up` / `down` are plain DDL strings. `sqlmigrate.migrate(conn, migrations)`
+  applies pending versions in lexical order (each in its own transaction, recorded
+  in `schema_migrations`; idempotent); `rollbackMigrations(conn, migrations, steps)`
+  reverses the newest N; `migrationStatus(...)` -> `list of MigrationStatus`. Takes
+  a raw `sql.Connection`. Version allowlisted + description escaped. Needs the
   default binary.
 - **`password`** - generate, validate, and score passwords against a policy schema.
   `password.schema()` is a strong default (16 chars, all four classes, min 1 each);
-  copy-on-write builders `withLength(s, lo, hi)` / `withClasses(s, lo, up, dig, sym)`
-  / `withMinimums(s, lo, up, dig, sym)` / `withSymbolSet(s, chars)` /
-  `withoutAmbiguous(s)` each return a fresh `Schema`. `generate(schema) -> string`
-  produces a conforming password (throws `Error{kind: "password"}` on an infeasible
-  schema); `validate(schema, pw) -> Report{valid as bool, reasons as list of string}`
-  checks length + per-class minimums (minimums, not a whitelist); `complexity(pw) ->
-  Strength{length, classes, poolSize, entropy as float, label}` estimates bits
-  (`length * log2(pool)`, banded very weak / weak / reasonable / strong / very strong).
-  A disabled class overrides a leftover minimum. Randomness (character choice and
-  the final shuffle) is `crypto`-grade, so a generated password is unpredictable
-  and safe to mint as a real credential. Pure `.j` over `crypto` / `strings` /
-  `convert`; **both binaries**.
-- **`influxdb`** - an InfluxDB time-series client over the `http` module, both
-  the 1.x and the 2.x / 3.x generation (a `Version` enum `{V1, V2}` on the
-  `Client`; `write` dispatches, the line protocol is shared).
-  `influxdb.client(url, db)` / `clientWith(url, db, user, password)` open a 1.x
-  `Client`; `client2(url, org, bucket, token)` opens a 2.x client (org / bucket +
-  `Authorization: Token` auth, writing `/api/v2/write`; the token is redacted
-  from any raised error).
-  Build a `Point` with value-semantic builders: `point(measurement)`, then
-  `tag(p, k, v)` / `field(p, k, floatVal)` / `intField(p, k, intVal)` /
-  `stringField(p, k, strVal)` / `boolField(p, k, boolVal)` / `at(p, unixNanos)` /
-  `atTime(p, t)` (each returns a fresh `Point`; field types are held as pre-rendered
-  line-protocol fragments so one point mixes types). `line(p) -> string` renders one
-  line-protocol line (throws if no fields); `write(client, points)` posts a
-  `list of Point` to `/write` (nanosecond precision, throws `Error{kind: "influxdb"}`
-  on failure). `query(client, influxql) -> Result` runs InfluxQL and parses the
-  tabular JSON into `Result{series as list of Series}`, each `Series{name, tags as
-  map of string to string, columns as list of string, values as list of list of
-  string}` with every cell stringified (convert numeric columns yourself). Automatic
-  line-protocol escaping; 1.x Basic auth / 2.x token. `query(client, influxql)`
-  runs InfluxQL (1.x); `queryFlux(client, flux)` runs a Flux query over
-  `/api/v2/query` (2.x), returning the raw annotated-CSV body. Over `http` +
-  `json` + `time` + `encoding`. **Default `jennifer` binary only** (`net`).
-- **`slack`** - post to a Slack Incoming Webhook over the `http` module (sibling of
-  `gotify` / `discord`). `slack.send(webhookUrl, text)` posts a plain `{"text": ...}`
-  message. For a rich message, build a `Message` with `message()` then
-  `text(m, s)` / `section(m, markdown)` / `header(m, heading)` / `divider(m)`, plus
-  `contextBlock(m, text)` (small muted context), `fieldsSection(m, fields)`
-  (two-column fields), and `actionsBlock(m, buttons)` with `button(text, url)` (each
-  returns a fresh `Message`; blocks held as pre-rendered Block Kit JSON fragments),
-  and post it with `sendMessage(webhookUrl, m)` (`render(m) -> string` gives the JSON
-  payload). All text is JSON-escaped for you. Both `send` / `sendMessage` return the
-  `http.Response` (Slack answers 200 "ok"). Over `http` + `json`.
+  copy-on-write builders `withLength(s, lo, hi)` / `withClasses(...)` /
+  `withMinimums(...)` / `withSymbolSet(s, chars)` / `withoutAmbiguous(s)` each return
+  a fresh `Schema`. `generate(schema) -> string` (throws `Error{kind: "password"}`
+  on an infeasible schema); `validate(schema, pw) -> Report{valid, reasons}` checks
+  length + per-class minimums; `complexity(pw) -> Strength{length, classes,
+  poolSize, entropy, label}` estimates bits (banded very weak .. very strong).
+  Randomness is `crypto`-grade, so a generated password is safe as a real
+  credential. Pure `.j` over `crypto` / `strings` / `convert`; **both binaries**.
+- **`influxdb`** - an InfluxDB time-series client over `http`, both the 1.x and
+  2.x / 3.x generation (a `Version` enum `{V1, V2}` on the `Client`; `write`
+  dispatches, line protocol shared). `influxdb.client(url, db)` / `clientWith(url,
+  db, user, password)` open a 1.x client; `client2(url, org, bucket, token)` a 2.x
+  client (token redacted from errors). Build a `Point` value-semantically:
+  `point(measurement)` then `tag` / `field(p, k, floatVal)` / `intField` /
+  `stringField` / `boolField` / `at(p, unixNanos)` / `atTime(p, t)`. `line(p) ->
+  string` renders one line-protocol line; `write(client, points)` posts a `list of
+  Point` (throws `Error{kind: "influxdb"}` on failure). `query(client, influxql) ->
+  Result{series}` parses the tabular JSON (each cell stringified); `queryFlux(client,
+  flux)` runs a 2.x Flux query -> raw annotated-CSV. Over `http` + `json` + `time`
+  + `encoding`. **Default `jennifer` binary only** (`net`).
+- **`slack`** - post to a Slack Incoming Webhook over `http` (sibling of `gotify` /
+  `discord`). `slack.send(webhookUrl, text)` posts a plain message. For a rich one,
+  build a `Message` with `message()` then `text` / `section(m, markdown)` /
+  `header` / `divider` / `contextBlock` / `fieldsSection(m, fields)` /
+  `actionsBlock(m, buttons)` (+ `button(text, url)`; each returns a fresh
+  `Message`), and post with `sendMessage(webhookUrl, m)` (`render(m)` gives the
+  JSON). Text is JSON-escaped for you; both return the `http.Response`. Over `http`
+  + `json`. **Default `jennifer` binary only** (`net`).
+- **`discord`** - post to a Discord channel Webhook over `http` (sibling of
+  `gotify` / `slack`). `discord.send(webhookUrl, content)` posts a plain message.
+  For a rich one, build a `Message` with `message()` then `content(m, s)` /
+  `embed(m, title, description, color)`, decorate the latest embed with
+  `embedField(m, name, value, inline)` / `embedFooter` / `embedAuthor`, override
+  identity with `username(m, name)` / `avatar(m, url)` (each returns a fresh
+  `Message`), and post with `sendMessage(webhookUrl, m)` (`render(m)` gives the
+  JSON). Text is JSON-escaped for you; both return the `http.Response`. Over `http`
+  + `json`. **Default `jennifer` binary only** (`net`).
+- **`telegram`** - a Telegram Bot API client over `http` + `json`.
+  `telegram.bot(token)` (or `botWith(token, baseUrl)`) -> `Bot`. Send with
+  `sendMessage(bot, chatId, text)` / `sendMessageWith(..., parseMode)` /
+  `sendPhoto(bot, chatId, photo, caption)` / `sendChatAction`; `getMe(bot) -> User`
+  checks the token. Each returns a parsed struct (`Message` has `messageId` /
+  `chatId` / `text` / `date`); an API error throws `Error{kind: "telegram"}`.
+  Receive with `getUpdates(bot, offset, timeout) -> list of Update` (long-poll) -
+  the stateful loop advances `offset` to `updateId + 1` each pass (check
+  `Update.hasMessage` first). `chatId` is a 64-bit `int`. Inline keyboards via
+  `sendMessageWithKeyboard` + `parseCallbackQuery` / `answerCallbackQuery`; local
+  uploads via `sendPhotoFile` / `sendDocumentFile`. Token redacted from errors.
   **Default `jennifer` binary only** (`net`).
-- **`discord`** - post to a Discord channel Webhook over the `http` module (sibling of
-  `gotify` / `slack`). `discord.send(webhookUrl, content)` posts a plain
-  `{"content": ...}` message. For a rich message, build a `Message` with `message()`
-  then `content(m, s)` / `embed(m, title, description, color)`, decorate the latest
-  embed with `embedField(m, name, value, inline)` / `embedFooter(m, text)` /
-  `embedAuthor(m, name)`, and override the webhook identity per message with
-  `username(m, name)` / `avatar(m, url)` (each returns a fresh
-  `Message`; `color` is a decimal RGB int; embeds held as pre-rendered JSON
-  fragments), and post it with `sendMessage(webhookUrl, m)` (`render(m) -> string`
-  gives the JSON). All text is JSON-escaped for you. `send` / `sendMessage` return the
-  `http.Response` (Discord answers 204). Over `http` + `json`.
-  **Default `jennifer` binary only** (`net`).
-- **`telegram`** - a Telegram Bot API client over the `http` module + `json`.
-  `telegram.bot(token)` (or `botWith(token, baseUrl)` for a self-hosted API server)
-  gives a `Bot`. Send with `sendMessage(bot, chatId, text)` /
-  `sendMessageWith(bot, chatId, text, parseMode)` / `sendPhoto(bot, chatId, photo,
-  caption)` (photo by URL or file id) / `sendChatAction(bot, chatId, action)`, and
-  `getMe(bot) -> User` checks the token. Each returns a parsed struct (`Message` has
-  `messageId` / `chatId` / `text` / `date`); an API error `{"ok": false, ...}` throws
-  `Error{kind: "telegram"}`. Receive with `getUpdates(bot, offset, timeout) -> list
-  of Update` (long-poll `timeout` seconds); it is the stateful loop - advance `offset`
-  to the last `updateId + 1` each pass, and check `Update.hasMessage` before reading
-  `Update.message`. `chatId` is a 64-bit `int` (channel ids are large / negative).
-  Inline keyboards attach via `sendMessageWithKeyboard(bot, chatId, text, rows)`;
-  handle button presses with `parseCallbackQuery(update)` (pure) +
-  `answerCallbackQuery(bot, callbackId, text)`; upload a local file with
-  `sendPhotoFile` / `sendDocumentFile` (multipart). The bot token is redacted from
-  error messages. Params are form-encoded to `baseUrl/bot<token>/<method>`.
-  **Default `jennifer` binary only** (`net`).
-- **`websocket`** - an RFC 6455 WebSocket client over `net`. `websocket.connect(url)`
-  (or `connectWith(url, timeoutMs)`) does the HTTP Upgrade handshake to a `ws://`
-  (plain TCP) or `wss://` (TLS) URL and verifies the server's `Sec-WebSocket-Accept`
-  (`base64(SHA1(key + GUID))`), returning a `Conn`. `send(c, text)` /
-  `sendBytes(c, data)` write masked frames (client frames must be masked);
-  `receive(c) -> Message{kind, text, data}` reads the next message, kind one of
-  "text" / "binary" / "close" / "pong" - it transparently answers a ping with a pong
-  and reassembles fragmented messages. `ping(c)` and `close(c)` (sends a close frame,
-  shuts the socket). Frame length is auto-encoded in the 7 / 16 / 64-bit form; the
-  mask and handshake nonce use `crypto`-grade random (RFC 6455 requires a strong
-  entropy source for the mask).
-  A protocol error or dropped connection throws `Error{kind: "websocket"}`. Client
-  only (no server upgrade). **Default `jennifer` binary only** (`net`).
-- **`amqp`** - an AMQP 0-9-1 client for RabbitMQ over `net` (the largest protocol
-  module). `amqp.connect(amqp.options(host, user, password))` (tweak with
-  `withPort` / `withVhost`) runs the full handshake (protocol header,
-  `Connection.Start`/`Start-Ok` SASL PLAIN, `Tune`/`Tune-Ok`, `Open`/`Open-Ok`,
-  `Channel.Open`) and returns a `Conn`. `declareQueue(c, name, durable) ->
-  QueueInfo{name, messageCount, consumerCount}` (a classic queue) or
-  `declareQuorumQueue(c, name)` (a replicated, always-durable quorum queue, via
-  the `x-queue-type=quorum` argument); `publish(c, exchange, routingKey,
-  bytesBody)` / `publishText(c, exchange, routingKey, text)` send method +
-  content-header + body frames (exchange "" routes to a queue by name);
-  `get(c, queue, autoAck) -> Message{empty, deliveryTag, exchange, routingKey, body}`
-  pulls the next message with a synchronous `Basic.Get` (loop until `empty`);
-  `ack(c, deliveryTag)`; `close(c)`. Server-pushed `Basic.Consume` via a blocking
-  `receiveDelivery` (beside pull `get`), `declareExchange` / `bindQueue`, message
-  `Properties` on publish, `nack` / requeue, and publisher confirms
-  (`confirmSelect` / `waitConfirm`). All integer / short-string / long-string /
-  field-table / frame encoding is hand-built from `bytes` and the bitwise operators.
-  Single channel, SASL PLAIN, optional TLS (`Options.security = "tls"` for
-  AMQPS). A protocol error throws
-  `Error{kind: "amqp"}`. **Default `jennifer` binary only** (`net`).
-- **`multipart`** - build and parse `multipart/form-data` (RFC 7578), the file-upload
-  counterpart to `mime`. `multipart.field(name, value)` and
+- **`websocket`** - an RFC 6455 WebSocket client over `net`.
+  `websocket.connect(url)` (or `connectWith(url, timeoutMs)`) does the HTTP Upgrade
+  handshake to a `ws://` / `wss://` URL and verifies `Sec-WebSocket-Accept`,
+  returning a `Conn`. `send(c, text)` / `sendBytes(c, data)` write masked frames;
+  `receive(c) -> Message{kind, text, data}` (kind "text" / "binary" / "close" /
+  "pong"; auto-answers a ping, reassembles fragments); `ping(c)` / `close(c)`. The
+  mask + handshake nonce use `crypto`-grade random. A protocol error throws
+  `Error{kind: "websocket"}`. Client only. **Default `jennifer` binary only**
+  (`net`).
+- **`amqp`** - an AMQP 0-9-1 client for RabbitMQ over `net`.
+  `amqp.connect(amqp.options(host, user, password))` (tweak with `withPort` /
+  `withVhost`) runs the full handshake and returns a `Conn`. `declareQueue(c, name,
+  durable) -> QueueInfo{name, messageCount, consumerCount}` or `declareQuorumQueue`;
+  `publish(c, exchange, routingKey, bytesBody)` / `publishText`; `get(c, queue,
+  autoAck) -> Message{empty, deliveryTag, exchange, routingKey, body}` (loop until
+  `empty`); `ack(c, deliveryTag)`; `close(c)`. Also server-pushed `Basic.Consume`
+  via blocking `receiveDelivery`, `declareExchange` / `bindQueue`, `Properties` on
+  publish, `nack` / requeue, and publisher confirms (`confirmSelect` /
+  `waitConfirm`). Frames hand-built from `bytes` + bitwise ops. Single channel,
+  SASL PLAIN, optional TLS (`Options.security = "tls"`). Throws `Error{kind:
+  "amqp"}`. **Default `jennifer` binary only** (`net`).
+- **`multipart`** - build and parse `multipart/form-data` (RFC 7578), the
+  file-upload counterpart to `mime`. `multipart.field(name, value)` /
   `multipart.file(name, filename, contentType, dataBytes)` build `Part{name,
-  filename, contentType, data as bytes}` values; `multipart.build(parts)` (fresh
-  random boundary) or `buildWith(parts, boundary)` returns `Built{contentType, body
-  as bytes}` (POST `body` with header `Content-Type: contentType`);
-  `multipart.parse(contentType, body) -> list of Part` reads it back. `text(part)`
-  decodes a field value, `isFile(part)` tests for a filename. Bodies are `bytes` and
-  the boundary is matched at `CRLF--boundary`, so binary file content round-trips
-  intact. Pure `.j` over `strings` + `bytes`; **both binaries**.
-- **`barcode`** - generate scannable barcodes / QR codes as images (the complement to
-  `label`, which emits printer commands). `barcode.encode(data, symbology, opts) ->
-  Symbol` encodes 2D `"qr"` (Reed-Solomon over GF(256), EC levels L/M/Q/H via
-  `opts.ecLevel`, automatic version 1-40, data-mask scoring, numeric / alphanumeric /
-  byte mode chosen for compactness) and `"datamatrix"` (ECC200, square 10x10-26x26),
-  plus 1D `"code128"` / `"code93"` / `"ean13"` / `"ean8"` / `"upca"` / `"upce"` /
-  `"itf"` / `"code39"` / `"gs1-128"` (FNC1 + parenthesised Application Identifiers).
-  Render a `Symbol` with `barcode.svg(sym, opts) -> string` (a 1D SVG carries a
-  human-readable text line unless `opts.humanReadable = false`), `barcode.png(sym,
-  opts) -> bytes` (a monochrome PNG hand-encoded over `compress` + `crc`, no image
-  library), `barcode.terminal(sym) -> string` (Unicode half-blocks, 2D only), or
-  `barcode.matrix(sym) -> list of list of bool`. `barcode.defaults()` gives an
-  `Options` (scale / height / quiet / ecLevel / foreground / background /
-  humanReadable). The GF(256) / Reed-Solomon math is a private, `include`d
-  `barcode_ecc.inc.j` (parameterised for QR's 0x11d and DataMatrix's 0x12d). Pure `.j`;
-  **both binaries**.
-- **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) -> Filter`
-  (or `bloom.optimal(n, fpr)` to size for `n` items at a target false-positive rate);
-  `bloom.add(f, item)` / `bloom.addAll(f, items)` return a fresh filter (value-semantic,
-  so `$f = bloom.add($f, x)`); `bloom.mightContain(f, item) -> bool` has no false
-  negatives (a member always reports true) but possible false positives.
-  `bloom.serialize(f) -> bytes` / `deserialize(b) -> Filter` round-trip a filter, and
-  `bloom.union(a, b)` / `merge` combine two same-shape filters. Bits are
-  packed into `bytes`; the k positions per item come from double-hashing one SHA-256
-  digest (`pos_i = (h1 + i*h2) mod size`). Strings only. Over `hash` + `strings` +
-  `binary`; **both binaries**.
+  filename, contentType, data}` values; `multipart.build(parts)` (fresh boundary) /
+  `buildWith(parts, boundary)` -> `Built{contentType, body}` (POST it with header
+  `Content-Type: contentType`); `multipart.parse(contentType, body) -> list of
+  Part` reads it back (`text(part)` / `isFile(part)`). Bodies are `bytes`, so binary
+  content round-trips intact. Pure `.j` over `strings` + `bytes`; **both binaries**.
+- **`barcode`** - generate scannable barcodes / QR codes as images (the complement
+  to `label`, which emits printer commands). `barcode.encode(data, symbology, opts)
+  -> Symbol` encodes 2D `"qr"` (EC levels L/M/Q/H via `opts.ecLevel`, auto version
+  1-40) and `"datamatrix"` (ECC200), plus 1D `"code128"` / `"code93"` / `"ean13"` /
+  `"ean8"` / `"upca"` / `"upce"` / `"itf"` / `"code39"` / `"gs1-128"`. Render with
+  `barcode.svg(sym, opts) -> string` / `png(sym, opts) -> bytes` (monochrome PNG
+  over `compress` + `crc`) / `terminal(sym) -> string` (2D only) / `matrix(sym) ->
+  list of list of bool`. `barcode.defaults()` gives an `Options` (scale / height /
+  quiet / ecLevel / colours / humanReadable). The GF(256) / Reed-Solomon math is a
+  private `include`d `barcode_ecc.inc.j`. Pure `.j`; **both binaries**.
+- **`bloom`** - a Bloom filter (probabilistic set). `bloom.new(size, hashes) ->
+  Filter` (or `bloom.optimal(n, fpr)` to size for a target false-positive rate);
+  `bloom.add(f, item)` / `addAll` return a fresh filter (value-semantic, so `$f =
+  bloom.add($f, x)`); `bloom.mightContain(f, item) -> bool` has no false negatives
+  but possible false positives. `bloom.serialize(f)` / `deserialize(b)` round-trip;
+  `bloom.union(a, b)` / `merge` combine same-shape filters. Strings only. Over
+  `hash` + `strings` + `binary`; **both binaries**.
 - **`ringbuffer`** - a fixed-capacity ring buffer of strings (bounded FIFO,
   overwrite-oldest when full). `ringbuffer.new(capacity) -> RingBuffer`;
   `ringbuffer.push(rb, item)` appends (dropping the oldest at capacity),
@@ -1704,22 +1407,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   **both binaries**.
 - **`mikrotik`** - a MikroTik RouterOS API client over `net` (the binary API, not
   SSH). `mikrotik.connect(mikrotik.options(host, user, password))` (or `optionsTLS`
-  for api-ssl on 8729) logs in - plaintext for RouterOS 6.43+/v7, with an automatic
-  MD5 challenge-response fallback for older routers - and returns a `Session`.
-  `talk(s, command, attrs) -> list of map of string to string` sends a command
-  (`/interface/print`) with a `map of string to string` of `=key=value` attributes and
-  folds each `!re` reply sentence into a row map; `print(s, path)` is read sugar
-  (`path + "/print"`); `run(s, command, attrs) -> string` is for add / set / remove
-  and returns the `!done`'s `=ret=` (e.g. a new item id). `talkQuery(s, command,
-  attrs, queries)` / `printWhere(s, path, queries)` add raw `?...` **query words**
-  (each starting with `?`, e.g. `?type=ether`) to filter rows on the router. The wire protocol is
-  sentence-based (length-prefixed words, zero-length terminator) with RouterOS's
-  variable-length length codec, hand-built from `bytes` + the bitwise operators.
-  `.tag`-correlated commands and `/listen`-style server-push streaming (`listen`
-  / `receiveReply` / `cancel`); a bounded read no longer leaks a stale deadline to
-  the next operation. A
-  `!trap` / `!fatal` reply throws `Error{kind: "mikrotik"}`. Over `net` + `hash` (MD5
-  fallback) + `encoding`. **Default `jennifer` binary only** (`net`).
+  for api-ssl on 8729) logs in (plaintext for RouterOS 6.43+/v7, MD5
+  challenge-response fallback for older) -> `Session`. `talk(s, command, attrs) ->
+  list of map of string to string` sends a command with `=key=value` attributes,
+  folding each `!re` reply into a row map; `print(s, path)` is read sugar; `run(s,
+  command, attrs) -> string` (add / set / remove) returns the `!done` `=ret=`.
+  `talkQuery` / `printWhere` add raw `?...` query words to filter on the router.
+  Also `.tag`-correlated commands and `/listen` streaming (`listen` /
+  `receiveReply` / `cancel`). Sentence-based wire protocol hand-built from `bytes`
+  + bitwise ops. A `!trap` / `!fatal` throws `Error{kind: "mikrotik"}`. Over `net`
+  + `hash` + `encoding`. **Default `jennifer` binary only** (`net`).
 
 Full per-module reference: the hosted
 [module docs](https://jennifer-lang.dev/modules/index.html).
