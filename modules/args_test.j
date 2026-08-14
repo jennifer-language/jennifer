@@ -326,3 +326,53 @@ func testAccessorsAbsent() {
     testing.assertEqual(count($r, "nope"), 0);
     testing.assertFalse(has($r, "nope"));
 }
+
+# --- subcommand dispatch ---
+
+func cmdAdd(r as Result) { return "added:" + asString($r, "name"); }
+func cmdRemove(r as Result) { return "removed"; }
+
+func twoCmdParser() {
+    def p as Parser init parser("tool", "");
+    def addSub as Parser init parser("add", "");
+    $addSub = positional($addSub, "name", "");
+    $p = command($p, "add", "", $addSub);
+    def rmSub as Parser init parser("remove", "");
+    $p = command($p, "remove", "", $rmSub);
+    return $p;
+}
+
+func testDispatchRoutesToHandler() {
+    def r as Result init parse(twoCmdParser(), ["tool", "add", "gadget"]);
+    def h as map of string to func init {"add": cmdAdd, "remove": cmdRemove};
+    testing.assertEqual(dispatch($r, $h), "added:gadget");
+}
+
+func testDispatchRoutesSecond() {
+    def r as Result init parse(twoCmdParser(), ["tool", "remove"]);
+    def h as map of string to func init {"add": cmdAdd, "remove": cmdRemove};
+    testing.assertEqual(dispatch($r, $h), "removed");
+}
+
+func testDispatchDoneReturnsNull() {
+    def r as Result init parse(twoCmdParser(), ["tool", "--help"]);
+    def h as map of string to func init {"add": cmdAdd};
+    testing.assertEqual(convert.typeOf(dispatch($r, $h)), "null");
+}
+
+func errDispatchNoHandler() {
+    def r as Result init parse(twoCmdParser(), ["tool", "add", "x"]);
+    def h as map of string to func init {"remove": cmdRemove};
+    dispatch($r, $h);
+}
+
+func errDispatchNoCommand() {
+    def r as Result init parse(parser("tool", ""), ["tool"]);
+    def h as map of string to func init {};
+    dispatch($r, $h);
+}
+
+func testDispatchErrors() {
+    testing.assertThrows("errDispatchNoHandler", "args");
+    testing.assertThrows("errDispatchNoCommand", "args");
+}

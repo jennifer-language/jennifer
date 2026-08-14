@@ -842,6 +842,39 @@ export func has(r as Result, name as string) {
     return maps.has($r.present, $name) and $r.present[$name];
 }
 
+# --- subcommand dispatch -----------------------------------------------------
+
+/**
+ * Dispatch the parsed subcommand to its handler. `handlers` maps a subcommand
+ * name to a `func` value `func(r as Result)`; the handler for `r.command` is
+ * called with the whole `Result` (so it reads its own args with `args.asString`
+ * / `asInt` / ...), and its return value is passed back - so a handler may
+ * return an exit code. A `Result` with `done` set (a handled `--help` /
+ * `--version`) dispatches nothing and returns `null`; a caller usually checks
+ * `r.done` and prints `r.helpText` before calling this. A missing handler for
+ * the selected subcommand, or a selection of none, is a catchable error.
+ *
+ * The handlers are ordinary `func` values, not names - a func value called here
+ * runs in the entry program's own context, so it resolves its own imports.
+ * @param r {Result} the parse result
+ * @param handlers {map of string to func} subcommand name -> its handler
+ * @return the handler's return value (`null` when `r.done`)
+ * @throws {Error} kind "args" when no subcommand was selected or none matches
+ */
+export func dispatch(r as Result, handlers as map of string to func) {
+    if ($r.done) {
+        return;
+    }
+    if ($r.command == "") {
+        fail("dispatch: no subcommand was selected (check r.command, or the parser declares no commands)");
+    }
+    if (not maps.has($handlers, $r.command)) {
+        fail("dispatch: no handler for subcommand \"" + $r.command + "\"");
+    }
+    def fn as func init $handlers[$r.command];
+    return $fn($r);
+}
+
 # --- usage generation --------------------------------------------------------
 
 /**

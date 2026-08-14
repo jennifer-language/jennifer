@@ -707,6 +707,45 @@ a latent idempotency gap: re-resolving an already-stamped *library* alias would
 otherwise hit the "canonical namespace is aliased" rejection. (An importer alias
 to a module stem is also recognised on any later pass via `moduleByNS`.)
 
+### Func values across the module boundary
+
+A `func` value is a handle to a top-level method (`Value.Fn *parser.MethodDef`).
+It also carries **`Value.FnHome *Interpreter`** - the interpreter that *defined*
+the method - stamped when a bare method name is evaluated as a value
+(`i.methods[name]` -> `FuncVal(m)` with `FnHome = i`). This matters only across a
+module boundary: a func value is a value like any other, so it is routinely
+passed *into* a module (a `lists.map` predicate, an `args.dispatch` handler, a
+`webapi` authenticator) or returned *out* of one. Without a home, `evalCallValue`
+would run the body in the **caller's** interpreter, whose namespace table does
+not carry the func's own `use` / `import` aliases - so a body that references
+`strings.upper` or constructs `mymod.Thing{...}` would fail with "unknown
+namespace" against the wrong interpreter.
+
+So `evalCallValue`, when `fv.FnHome != nil && fv.FnHome != i`, dispatches the call
+to the home: it evaluates the arguments in the caller, then runs
+`home.callMethodWithDepth(fv.Fn, env.depth, args...)` - the body executes in its
+home context, its aliases resolve, and `env.depth` threads the caller's
+call-depth counter so recursion bouncing through a cross-boundary func call still
+trips the catchable guard (as it does through `dispatchModuleMethod` /
+`meta.callMain`). Same-interpreter calls (`FnHome == i`, or a legacy `nil` home)
+keep the ordinary `callUserMethod` path with no retag.
+
+Struct arguments and the return value cross the boundary through **`crossRetag(v,
+from, to)`**, which reuses `retagStructs` (above) in a two-pass form:
+`to`'s own structs - tagged with `to`'s identity as `from` sees them - are
+un-tagged to bare inside `to`, then `from`'s own structs - bare inside `from` -
+take `from`'s identity so `to` recognises them as that module's structs. Because
+a struct belongs to exactly one module, the two passes target disjoint owners, so
+the *same* helper serves both directions (arguments crossing in, the result
+crossing out) and every pairing (host->module, module->host, module->module). The
+webapi authenticator is the worked case: a host func value returning a
+`webapi.Identity` (built through the host's `webapi` alias, so tagged
+`(webapi-stem, webapi-path)` in the host) is called from inside the `webapi`
+module and its return is retagged bare, exactly the identity the module's own
+code expects. `FnHome` is a shared pointer, copied with the (immutable) func value
+like `Fn`, and never mutated. Pinned by `cmd/jennifer/funcvalue_home_test.go` and
+`args_dispatch_test.go`.
+
 ## Builtins and libraries
 
 Each library lives in its own Go package under `internal/lib/<name>/` and

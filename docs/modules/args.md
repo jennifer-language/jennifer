@@ -85,6 +85,30 @@ $p = args.choices(args.required(args.flag($p, "mode", "m", "", "build mode")), [
 The `Result` also exposes fields directly: `$r.command` (the chosen subcommand,
 `""` if none), `$r.done`, and `$r.helpText`.
 
+## Dispatching subcommands
+
+`args.dispatch(r, handlers)` routes the selected subcommand to its handler. The
+`handlers` map takes each subcommand name to a `func` value `func(r as Result)`;
+the handler for `$r.command` is called with the whole `Result` (it reads its own
+args with the accessors above) and its return value is passed back, so a handler
+can return an exit code. A `Result` whose `done` is set (a handled `--help` /
+`--version`) dispatches nothing and returns `null` - check `$r.done` and print
+`$r.helpText` first, as usual. A selection of no subcommand, or one with no
+matching handler, is a catchable `Error{kind: "args"}`.
+
+```jennifer
+func cmdAdd(r as args.Result) { store.add(args.asString($r, "item")); return 0; }
+func cmdList(r as args.Result) { io.printf("%s\n", store.all()); return 0; }
+
+def r as args.Result init args.parse($p, os.ARGS);
+if ($r.done) { io.printf("%s\n", $r.helpText); exit 0; }
+exit args.dispatch($r, {"add": cmdAdd, "list": cmdList});
+```
+
+The handlers are ordinary `func` values rather than names: a func value called
+by `dispatch` (inside the `args` module) runs in the entry program's own context,
+so it resolves its own imports.
+
 ## Argument syntax accepted
 
 - `--flag value`, `--flag=value`, and (for a `store_true` / `count` flag) a bare

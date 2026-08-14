@@ -631,7 +631,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `-abc` bundling / `--` end-of-flags; an unknown flag, missing required arg,
   bad type, or bad choice throws a catchable `Error{kind: "args"}`, while `-h` /
   `--help` / `--version` set `$r.done` with `helpText` to print (not a process
-  exit). Pure `.j` over `strings` + `convert` + `lists` + `maps`; both binaries.
+  exit). `args.dispatch($r, handlers)` routes the chosen subcommand to its
+  handler - `handlers` is a `map of string to func` (subcommand name -> a
+  `func(r as Result)` value), so a func value called there runs in the entry
+  program's context (resolving its own imports); it returns the handler's value
+  (e.g. an exit code), no-ops on `$r.done`, and throws `Error{kind: "args"}` for
+  a missing / unmatched command. Pure `.j` over `strings` + `convert` + `lists`
+  + `maps`; both binaries.
 - **`csv`** - RFC 4180: `csv.parse(s)` / `format(rows)` (`parseWith` /
   `formatWith` for any single-character delimiter, e.g. TSV), plus `toRecords` /
   `fromRecords` for header-keyed `map of string to string`. Quoting-aware.
