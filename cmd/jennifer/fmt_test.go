@@ -950,3 +950,98 @@ func TestSameCodeTokens(t *testing.T) {
 		}
 	}
 }
+
+// TestFmtFuncSignatureBraceWidth pins the fix for the trailing ` {`: fmt counts
+// the block-opening ` {` of a `func` signature when deciding whether to wrap, so
+// it never emits a signature line wider than the 100-column lint limit. A
+// signature whose joined `) {` form is 102 columns must wrap (and stay wrapped -
+// the bug was a two-state fmt/lint loop).
+func TestFmtFuncSignatureBraceWidth(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sig.j")
+	// Joined `) {` line is 102 columns (ASCII, so byte length == column count).
+	src := "export func publish(dir as string, url as string, dbPath as string, outDir as string, now as string) {\n    return 1;\n}\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := runFmt([]string{"-w", path}); code != 0 {
+		t.Fatalf("fmt -w exit %d", code)
+	}
+	got, _ := os.ReadFile(path)
+	for i, line := range strings.Split(string(got), "\n") {
+		if len(line) > 100 {
+			t.Errorf("line %d is %d columns (over 100):\n%s", i+1, len(line), line)
+		}
+	}
+	// Idempotent: the wrapped form is stable.
+	first := string(got)
+	if code := runFmt([]string{"-w", path}); code != 0 {
+		t.Fatalf("second fmt -w exit %d", code)
+	}
+	if again, _ := os.ReadFile(path); string(again) != first {
+		t.Errorf("fmt not idempotent on the wrapped signature:\n%s", again)
+	}
+
+	// A signature whose full `) {` line is exactly 100 columns must stay on one
+	// line (not over-wrapped by the +2).
+	fit := filepath.Join(dir, "fit.j")
+	// "func f(" (7) + params (90) + ") {" (3) = 100.
+	params := "p0 as int, p1 as int, p2 as int, p3 as int, p4 as int, p5 as int, p6 as intxxxxxxxxxxxxxxx"
+	one := "func f(" + params + ") {\n    return 1;\n}\n"
+	if len("func f("+params+") {") != 100 {
+		t.Fatalf("test setup: signature is %d cols, want 100", len("func f("+params+") {"))
+	}
+	os.WriteFile(fit, []byte(one), 0o644)
+	if code := runFmt([]string{"-w", fit}); code != 0 {
+		t.Fatalf("fmt -w exit %d", code)
+	}
+	gotFit, _ := os.ReadFile(fit)
+	if !strings.HasPrefix(string(gotFit), "func f("+params+") {\n") {
+		t.Errorf("a 100-column signature was wrapped instead of kept on one line:\n%s", gotFit)
+	}
+}
+
+// TestFmtCheckMode pins `jennifer fmt -l / --check`: it lists unformatted files
+// to stdout without mutating them and exits 0 clean / 1 needs-formatting / 2
+// broken - the non-mutating CI-gate mode.
+func TestFmtCheckMode(t *testing.T) {
+	dir := t.TempDir()
+	clean := filepath.Join(dir, "clean.j")
+	os.WriteFile(clean, []byte("func f() {\n    return 1;\n}\n"), 0o644)
+	dirty := filepath.Join(dir, "dirty.j")
+	os.WriteFile(dirty, []byte("func g(){return 2;}\n"), 0o644)
+
+	if code := runFmt([]string{"--check", clean}); code != 0 {
+		t.Errorf("--check on a clean file: exit %d, want 0", code)
+	}
+
+	// A dirty file lists to stdout and exits 1, and must not be rewritten.
+	orig, _ := os.ReadFile(dirty)
+	var code int
+	out := captureStdout(t, func() { code = runFmt([]string{"-l", dirty}) })
+	if code != 1 {
+		t.Errorf("-l on a dirty file: exit %d, want 1", code)
+	}
+	if strings.TrimSpace(out) != dirty {
+		t.Errorf("-l listed %q, want %q", strings.TrimSpace(out), dirty)
+	}
+	if after, _ := os.ReadFile(dirty); string(after) != string(orig) {
+		t.Errorf("--check mutated the file it was only meant to check")
+	}
+
+	// A mix lists only the dirty one and exits 1.
+	out = captureStdout(t, func() { code = runFmt([]string{"--check", clean, dirty}) })
+	if code != 1 || strings.TrimSpace(out) != dirty {
+		t.Errorf("--check mixed: exit %d out %q, want 1 and %q", code, strings.TrimSpace(out), dirty)
+	}
+
+	// A missing file is a broken invocation: exit 2.
+	if code := runFmt([]string{"--check", filepath.Join(dir, "nope.j")}); code != 2 {
+		t.Errorf("--check on a missing file: exit %d, want 2", code)
+	}
+
+	// -w and --check together is a usage error.
+	if code := runFmt([]string{"-w", "--check", clean}); code != 2 {
+		t.Errorf("-w --check together: exit %d, want 2", code)
+	}
+}

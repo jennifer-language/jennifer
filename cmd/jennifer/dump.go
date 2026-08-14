@@ -25,7 +25,7 @@ import (
 func printDevUsage(w io.Writer) {
 	fmt.Fprintln(w, "  jennifer tokens <file>   dump the lexer's token stream")
 	fmt.Fprintln(w, "  jennifer ast <file>      dump the parsed AST as JSON")
-	fmt.Fprintln(w, "  jennifer fmt [-w] <file>...  format source (stdout; -w/--write rewrites files in place)")
+	fmt.Fprintln(w, "  jennifer fmt [-w|-l] <file>...  format source (stdout; -w/--write rewrites in place; -l/--check lists unformatted files)")
 	fmt.Fprintln(w, "  jennifer lint <file>...  report compile-legal but suspect patterns")
 	fmt.Fprintln(w, "  jennifer profile <file>  run with the evaluator instrumented; write a profile")
 	fmt.Fprintln(w, "  jennifer test <file>     discover and run the file's test methods")

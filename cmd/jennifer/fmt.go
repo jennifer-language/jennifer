@@ -19,9 +19,10 @@ import (
 // runFmt formats the named files per docs/user-guide/style-guide.md. Without a
 // flag it writes a single file's canonical form to stdout; with -w / --write it
 // rewrites each file in place (only touching files whose content actually
-// changes). File selection - globs, recursion - is the shell's job, so a
-// directory argument is a usage error, not a tree walk. One write flag, not a
-// family of synonyms.
+// changes); with -l / --check it lists the files that are not already formatted
+// and exits non-zero, mutating nothing - the CI / publish-gate mode. File
+// selection - globs, recursion - is the shell's job, so a directory argument is
+// a usage error, not a tree walk.
 //
 // The formatter operates on the token stream rather than the AST, so it preserves
 // `import "file.j";` statements verbatim (the preprocessor would otherwise inline
@@ -30,20 +31,27 @@ import (
 // position; an in-expression `printf(/* note */ $x)` is positional only).
 func runFmt(args []string) int {
 	write := false
+	check := false
 	var files []string
 	for _, a := range args {
 		switch a {
 		case "-w", "--write":
 			write = true
+		case "-l", "--check", "--list":
+			check = true
 		case "-":
 			files = append(files, a)
 		default:
 			if strings.HasPrefix(a, "-") {
-				fmt.Fprintf(os.Stderr, "jennifer fmt: unknown flag %q (use -w / --write to rewrite in place)\n", a)
+				fmt.Fprintf(os.Stderr, "jennifer fmt: unknown flag %q (use -w / --write to rewrite in place, or -l / --check to list unformatted files)\n", a)
 				return 2
 			}
 			files = append(files, a)
 		}
+	}
+	if write && check {
+		fmt.Fprintln(os.Stderr, "jennifer fmt: -w / --write and -l / --check are mutually exclusive")
+		return 2
 	}
 	if len(files) == 0 {
 		fmt.Fprintln(os.Stderr, "jennifer fmt: no input file")
@@ -60,6 +68,39 @@ func runFmt(args []string) int {
 			fmt.Fprintf(os.Stderr, "jennifer fmt: %s is a directory; fmt takes files - let the shell select them (e.g. %s/**/*.j)\n", f, f)
 			return 2
 		}
+	}
+	if check {
+		// Non-mutating gate: list the files whose canonical form differs, one path
+		// per line to stdout, and exit non-zero when any does - so `jennifer fmt
+		// --check` slots into a CI / publish gate without rewriting the tree.
+		status := 0
+		anyChanged := false
+		for _, f := range files {
+			if f == "-" {
+				fmt.Fprintln(os.Stderr, "jennifer fmt: -l / --check cannot read stdin")
+				status = 2
+				continue
+			}
+			src, formatted, ok := formatFile(f)
+			if !ok {
+				// A read / lex failure is a broken invocation, not an "unformatted"
+				// finding - exit 2, matching `jennifer lint`, so the combined gate
+				// reads 0 clean / 1 needs-formatting / 2 broken uniformly.
+				status = 2
+				continue
+			}
+			if formatted != src {
+				fmt.Println(f)
+				anyChanged = true
+			}
+		}
+		if status != 0 {
+			return status
+		}
+		if anyChanged {
+			return 1
+		}
+		return 0
 	}
 	if !write {
 		if len(files) > 1 {
@@ -1324,6 +1365,25 @@ func inlineSepWidth(prev, cur lexer.Token, prevUnary bool) int {
 // forces it, when it has more than maxInlineElements top-level elements, or when
 // its inline rendering would push the line past maxLineLength. f.col is the
 // column the open bracket lands at, so the check is layout-aware.
+// trailingWidth is the number of columns the emitted line carries immediately
+// after a container's close bracket, so the fit test measures the whole line and
+// not just the bracketed span. A hugging `;` / `,` / `)` / `]` is 1 column; a
+// block-opening ` {` is 2 (the space plus the brace) - that is the `) {` of a
+// `func` signature, which ends in ` {` rather than `);`, so without this its
+// signature would be allowed two columns over the limit.
+func trailingWidth(tokens []lexer.Token, end int) int {
+	if end+1 >= len(tokens) {
+		return 0
+	}
+	switch tokens[end+1].Type {
+	case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+		return 1
+	case lexer.TOKEN_LBRACE:
+		return 2
+	}
+	return 0
+}
+
 func (f *fmtState) decideWrap(open int, applyCount bool) bool {
 	end := spanEnd(f.tokens, open)
 	if end < 0 || end == open+1 {
@@ -1346,13 +1406,7 @@ func (f *fmtState) decideWrap(open int, applyCount bool) bool {
 		return true
 	}
 	w := inlineContainerWidth(f.tokens, open, end)
-	trail := 0
-	if end+1 < len(f.tokens) {
-		switch f.tokens[end+1].Type {
-		case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
-			trail = 1
-		}
-	}
+	trail := trailingWidth(f.tokens, end)
 	return f.effectiveStartCol()+w+trail > maxLineLength
 }
 
@@ -1379,13 +1433,7 @@ func (f *fmtState) decideCallWrap(open int) bool {
 		}
 	}
 	w := inlineContainerWidth(f.tokens, open, end)
-	trail := 0
-	if end+1 < len(f.tokens) {
-		switch f.tokens[end+1].Type {
-		case lexer.TOKEN_SEMI, lexer.TOKEN_COMMA, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
-			trail = 1
-		}
-	}
+	trail := trailingWidth(f.tokens, end)
 	return f.effectiveStartCol()+w+trail > maxLineLength
 }
 
