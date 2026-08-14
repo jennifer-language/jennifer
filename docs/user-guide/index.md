@@ -44,6 +44,10 @@ seven-stance table.
 - [Best practices](best-practices.md) - stylistic guidance and
   code-smell heuristics for writing Jennifer that ages well. Not
   enforced by the language; click through if you want the "why".
+- [Performance](performance.md) - the few patterns that turn a
+  quadratic hot path into a linear one (append-and-join over `+` in a
+  loop, hoisting per-element calls out of hot loops), and what the
+  interpreter already optimizes for you.
 
 ## Related
 

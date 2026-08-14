@@ -176,37 +176,13 @@ without introducing a new type:
 As a rule of thumb: **one level is normal, two is fine, three is
 uncommon, four is almost always a sign there's a missing abstraction.**
 
-## Build strings by appending to a list, not by repeated concatenation
+## Write for clarity first; tune the hot path separately
 
-Jennifer values are copied, not shared: `$a = $b` deep-copies, which is what makes
-aliasing bugs impossible. The flip side is that `$s = $s + piece` copies the *whole*
-string accumulated so far on every step, so growing a string with `+` inside a loop
-is **quadratic** - the total work grows with the square of the number of pieces, and
-a few thousand appends spend most of their time copying intermediate strings you
-immediately throw away:
-
-```jennifer
-# O(N^2): each `+` copies the entire accumulated string
-def out as string init "";
-for (def row in $rows) {
-    $out = $out + row + "\n";
-}
-```
-
-Collect the pieces in a `list of string` with the `$xs[] = item;` append form -
-which is amortised **O(N)** (a list grows in place, no whole-value copy) - and join
-once at the end:
-
-```jennifer
-# O(N): append is amortised constant, a single join builds the result
-def lines as list of string init [];
-for (def row in $rows) {
-    $lines[] = row;
-}
-def out as string init strings.join($lines, "\n");
-```
-
-Building up `bytes` works the same way: append with `$b[] = byte;` and use the
-result directly (there is no `+` for `bytes`). Reach for `+` only to concatenate a
-small, fixed number of pieces (`$name + ": " + $value`); the moment a concatenation
-lives inside a loop, switch to append-and-join.
+Factor code into small, well-named helpers and build data structures the obvious
+way - the interpreter already elides the copies that would otherwise make that
+expensive (a read-only parameter is bound by alias, not deep-copied). The handful
+of places where the *shape* of the code decides whether a loop is linear or
+quadratic - growing a string with `+` in a loop, calling a helper once per element
+in a hot path - are collected in [Performance](performance.md), together with how
+to find them with `jennifer profile`. Reach for those rewrites only where a profile
+points; everywhere else, the readable version is the right version.

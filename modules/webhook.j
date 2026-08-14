@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Sign and verify HMAC-signed webhooks - the GitHub-style `X-Hub-Signature-256`
@@ -67,7 +67,14 @@ export func verify(payload as string, signature as string, secret as string) {
     # Normalize case before the compare: the hex digest and the `sha256=`
     # prefix are case-insensitive, so a signature sent as `SHA256=...` or with
     # uppercase hex is still valid. sign() always emits lowercase.
-    return equalConstantTime(sign($payload, $secret), strings.lower($signature));
+    def sig as string init strings.lower($signature);
+    # Bail before the HMAC: a valid signature is always exactly "sha256=" (7)
+    # plus a 64-char hex digest, so any other length is malformed and never
+    # pays for a keyed hash it cannot match.
+    if (len($sig) != 71) {
+        return false;
+    }
+    return equalConstantTime(sign($payload, $secret), $sig);
 }
 
 # --- timestamped, replay-protected schemes (pure) ---------------------------

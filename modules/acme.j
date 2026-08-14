@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * An ACME (RFC 8555) client: obtain and renew TLS certificates from Let's
@@ -125,30 +125,30 @@ func hexQuad(n as int) {
 # (< 0x20), which are otherwise invalid in a JSON string and could break the
 # JWS protected-header JSON (e.g. a hostile CA nonce carrying a quote or newline).
 func jsonEsc(s as string) {
-    def out as string init "";
+    def out as list of string init [];
     for (def c in strings.chars($s)) {
         def cp as int init convert.toCodepoint($c);
         if ($c == "\\") {
-            $out = $out + "\\\\";
+            $out[] = "\\\\";
         } elseif ($c == "\"") {
-            $out = $out + "\\\"";
+            $out[] = "\\\"";
         } elseif ($cp == 10) {
-            $out = $out + "\\n";
+            $out[] = "\\n";
         } elseif ($cp == 13) {
-            $out = $out + "\\r";
+            $out[] = "\\r";
         } elseif ($cp == 9) {
-            $out = $out + "\\t";
+            $out[] = "\\t";
         } elseif ($cp == 8) {
-            $out = $out + "\\b";
+            $out[] = "\\b";
         } elseif ($cp == 12) {
-            $out = $out + "\\f";
+            $out[] = "\\f";
         } elseif ($cp < 32) {
-            $out = $out + "\\u" + hexQuad($cp);
+            $out[] = "\\u" + hexQuad($cp);
         } else {
-            $out = $out + $c;
+            $out[] = $c;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # ---- JWS request signing ----
@@ -379,14 +379,11 @@ func parseOrder(url as string, resp as http.Response) {
  * @throws {Error} on an order error
  */
 export func order(client as Client, domains as list of string) {
-    def ids as string init "";
+    def ids as list of string init [];
     for (def i as int init 0; $i < len($domains); $i = $i + 1) {
-        if ($i > 0) {
-            $ids = $ids + ",";
-        }
-        $ids = $ids + '{"type":"dns","value":"' + jsonEsc($domains[$i]) + '"}';
+        $ids[] = '{"type":"dns","value":"' + jsonEsc($domains[$i]) + '"}';
     }
-    def payload as string init '{"identifiers":[' + $ids + ']}';
+    def payload as string init '{"identifiers":[' + strings.join($ids, ",") + ']}';
     def resp as http.Response init jwsOk($client, $client.newOrder, $payload, false);
     def url as string init http.header($resp, "Location");
     return parseOrder($url, $resp);

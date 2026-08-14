@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Declarative validation of a `map of string to string` (a form body, a query, a
@@ -521,29 +521,29 @@ func matchAt(cs as list of string, i as int, marker as string) {
 # "%field%" stays literal). "%%" is an escaped literal "%"; a lone "%" that starts
 # no marker is emitted as-is.
 func applyTemplate(tmpl as string, param as string, field as string) {
-    def out as string init "";
+    def out as list of string init [];
     def cs as list of string init strings.chars($tmpl);
     def n as int init len($cs);
     def i as int init 0;
     while ($i < $n) {
         if ($cs[$i] != "%") {
-            $out = $out + $cs[$i];
+            $out[] = $cs[$i];
             $i = $i + 1;
         } elseif (matchAt($cs, $i, "%param%")) {
-            $out = $out + $param;
+            $out[] = $param;
             $i = $i + 7;
         } elseif (matchAt($cs, $i, "%field%")) {
-            $out = $out + $field;
+            $out[] = $field;
             $i = $i + 7;
         } elseif ($i + 1 < $n and $cs[$i + 1] == "%") {
-            $out = $out + "%";
+            $out[] = "%";
             $i = $i + 2;
         } else {
-            $out = $out + "%";
+            $out[] = "%";
             $i = $i + 1;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 /**

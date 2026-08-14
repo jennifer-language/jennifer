@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Graphviz DOT graph description: build a graph of nodes and edges with
@@ -91,7 +91,20 @@ export func graph(name as string) {
  * @return {Graph} a copy with the node appended
  */
 export func node(g as Graph, id as string) {
-    return nodeWith($g, $id, {});
+    # The fresh-literal form (also in nodeWith / edge / edgeWith) costs one
+    # fewer list copy per call than "def out init $g; $out.nodes = lists.push(...)":
+    # the pushed list flows straight into the new field instead of being
+    # re-copied by a field write. Inlined here so the bare form skips the
+    # nested nodeWith call (another full graph copy at that boundary).
+    return Graph{
+        directed: $g.directed,
+        name: $g.name,
+        nodes: lists.push($g.nodes, Node{id: $id, attrs: {}}),
+        edges: $g.edges,
+        graphAttrs: $g.graphAttrs,
+        nodeAttrs: $g.nodeAttrs,
+        edgeAttrs: $g.edgeAttrs
+    };
 }
 
 /**
@@ -102,9 +115,15 @@ export func node(g as Graph, id as string) {
  * @return {Graph} a copy with the node appended
  */
 export func nodeWith(g as Graph, id as string, attrs as map of string to string) {
-    def out as Graph init $g;
-    $out.nodes = lists.push($out.nodes, Node{id: $id, attrs: $attrs});
-    return $out;
+    return Graph{
+        directed: $g.directed,
+        name: $g.name,
+        nodes: lists.push($g.nodes, Node{id: $id, attrs: $attrs}),
+        edges: $g.edges,
+        graphAttrs: $g.graphAttrs,
+        nodeAttrs: $g.nodeAttrs,
+        edgeAttrs: $g.edgeAttrs
+    };
 }
 
 /**
@@ -115,7 +134,15 @@ export func nodeWith(g as Graph, id as string, attrs as map of string to string)
  * @return {Graph} a copy with the edge appended
  */
 export func edge(g as Graph, src as string, dst as string) {
-    return edgeWith($g, $src, $dst, {});
+    return Graph{
+        directed: $g.directed,
+        name: $g.name,
+        nodes: $g.nodes,
+        edges: lists.push($g.edges, Edge{from: $src, to: $dst, attrs: {}}),
+        graphAttrs: $g.graphAttrs,
+        nodeAttrs: $g.nodeAttrs,
+        edgeAttrs: $g.edgeAttrs
+    };
 }
 
 /**
@@ -127,9 +154,15 @@ export func edge(g as Graph, src as string, dst as string) {
  * @return {Graph} a copy with the edge appended
  */
 export func edgeWith(g as Graph, src as string, dst as string, attrs as map of string to string) {
-    def out as Graph init $g;
-    $out.edges = lists.push($out.edges, Edge{from: $src, to: $dst, attrs: $attrs});
-    return $out;
+    return Graph{
+        directed: $g.directed,
+        name: $g.name,
+        nodes: $g.nodes,
+        edges: lists.push($g.edges, Edge{from: $src, to: $dst, attrs: $attrs}),
+        graphAttrs: $g.graphAttrs,
+        nodeAttrs: $g.nodeAttrs,
+        edgeAttrs: $g.edgeAttrs
+    };
 }
 
 /**

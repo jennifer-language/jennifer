@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Build and parse MIME messages (RFC 5322 headers + RFC 2045/2046 bodies): a
@@ -227,21 +227,27 @@ func splitHeaderLine(line as string) {
 # begin with whitespace) into the field above.
 func parseHeaders(text as string) {
     def hs as list of Header init [];
-    def cur as string init "";
+    # A folded header's continuation lines are collected and joined once at
+    # flush, so unfolding a header across many lines never re-copies the
+    # accumulated value per line.
+    def cur as list of string init [];
+    def started as bool init false;
     for (def line in strings.split($text, "\n")) {
         def l as string init stripCR($line);
         def folds as bool init strings.startsWith($l, " ") or strings.startsWith($l, "\t");
         if (len($l) > 0 and $folds) {
-            $cur = $cur + " " + strings.trim($l);
+            $cur[] = strings.trim($l);
+            $started = true;
         } else {
-            if (len($cur) > 0) {
-                $hs[] = splitHeaderLine($cur);
+            if ($started) {
+                $hs[] = splitHeaderLine(strings.join($cur, " "));
             }
-            $cur = $l;
+            $cur = [$l];
+            $started = len($l) > 0;
         }
     }
-    if (len($cur) > 0) {
-        $hs[] = splitHeaderLine($cur);
+    if ($started) {
+        $hs[] = splitHeaderLine(strings.join($cur, " "));
     }
     return $hs;
 }
@@ -404,13 +410,16 @@ export func decodeWord(value as string) {
     if (len($ms) == 0) {
         return $value;
     }
-    def out as string init "";
+    # Each between-run and decoded word is appended and the sequence joined once,
+    # so a value carrying many encoded-words never re-copies the accumulated
+    # result per word.
+    def chunks as list of string init [];
     def prevEnd as int init 0;
     def prevWord as bool init false;
     for (def m in $ms) {
         def between as string init strings.substring($value, $prevEnd, $m.start);
         if (not ($prevWord and isBlank($between))) {
-            $out = $out + $between;
+            $chunks[] = $between;
         }
         def decoded as string init strings.substring($value, $m.start, $m.end);
         try {
@@ -418,11 +427,12 @@ export func decodeWord(value as string) {
         } catch (e) {
             $decoded = strings.substring($value, $m.start, $m.end);
         }
-        $out = $out + $decoded;
+        $chunks[] = $decoded;
         $prevEnd = $m.end;
         $prevWord = true;
     }
-    return $out + strings.substring($value, $prevEnd, len($value));
+    $chunks[] = strings.substring($value, $prevEnd, len($value));
+    return strings.join($chunks, "");
 }
 
 # isEncodedWordHeader reports whether a header carries encoded-words (decode on
@@ -468,25 +478,25 @@ func unquote(s as string) {
     }
     def cs as list of string init strings.chars(strings.substring($s, 1, len($s) - 1));
     def n as int init len($cs);
-    def out as string init "";
+    def out as list of string init [];
     def i as int init 0;
     while ($i < $n) {
         if ($cs[$i] == "\\" and $i + 1 < $n) {
-            $out = $out + $cs[$i + 1];
+            $out[] = $cs[$i + 1];
             $i = $i + 2;
         } else {
-            $out = $out + $cs[$i];
+            $out[] = $cs[$i];
             $i = $i + 1;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # splitTopLevelCommas splits an address-list value on commas that are outside a
 # quoted display name (a comma inside `"Last, First"` is not a separator).
 func splitTopLevelCommas(s as string) {
     def out as list of string init [];
-    def cur as string init "";
+    def cur as list of string init [];
     def cs as list of string init strings.chars($s);
     def i as int init 0;
     def inQuote as bool init false;
@@ -494,16 +504,16 @@ func splitTopLevelCommas(s as string) {
         def c as string init $cs[$i];
         if ($c == "\"") {
             $inQuote = not $inQuote;
-            $cur = $cur + $c;
+            $cur[] = $c;
         } elseif ($c == "," and not $inQuote) {
-            $out[] = $cur;
-            $cur = "";
+            $out[] = strings.join($cur, "");
+            $cur = [];
         } else {
-            $cur = $cur + $c;
+            $cur[] = $c;
         }
         $i = $i + 1;
     }
-    $out[] = $cur;
+    $out[] = strings.join($cur, "");
     return $out;
 }
 
@@ -656,11 +666,14 @@ export func withHeader(part as Part, name as string, value as string) {
 # --- encoding (exported) -------------------------------------------
 
 func encodeMultipart(p as Part) {
-    def out as string init "";
+    # Each child is rendered into the list and the list joined once, so the
+    # growing message is never re-copied per attachment - O(N^2) in the total
+    # message size for a multi-attachment message otherwise.
+    def chunks as list of string init [];
     for (def sub in $p.parts) {
-        $out = $out + "--" + $p.boundary + "\r\n" + encode($sub) + "\r\n";
+        $chunks[] = "--" + $p.boundary + "\r\n" + encode($sub) + "\r\n";
     }
-    return $out + "--" + $p.boundary + "--\r\n";
+    return strings.join($chunks, "") + "--" + $p.boundary + "--\r\n";
 }
 
 /**
@@ -670,11 +683,14 @@ func encodeMultipart(p as Part) {
  * @return {string} the encoded MIME message
  */
 export func encode(part as Part) {
-    def out as string init "";
+    # Header lines are rendered into a list and joined once, so a part with many
+    # headers stays linear instead of re-copying the growing header block per line.
+    def parts as list of string init [];
     for (def h in $part.headers) {
-        $out = $out + $h.name + ": " + encodeHeaderValue($h.name, $h.value) + "\r\n";
+        $parts[] = $h.name + ": " + encodeHeaderValue($h.name, $h.value) + "\r\n";
     }
-    $out = $out + "\r\n";
+    $parts[] = "\r\n";
+    def out as string init strings.join($parts, "");
     if (len($part.boundary) > 0) {
         return $out + encodeMultipart($part);
     }
@@ -783,29 +799,29 @@ export func contentType(part as Part) {
 # skipped, so only the parameters remain.
 func splitParams(header as string) {
     def segs as list of string init [];
-    def cur as string init "";
+    def cur as list of string init [];
     def inQuote as bool init false;
     def esc as bool init false;
     for (def ch in strings.chars($header)) {
         if ($esc) {
             # A backslash-escaped character stays literal (kept with its escape so
             # unquote can reverse it), never a delimiter or a quote toggle.
-            $cur = $cur + $ch;
+            $cur[] = $ch;
             $esc = false;
         } elseif ($ch == "\\" and $inQuote) {
-            $cur = $cur + $ch;
+            $cur[] = $ch;
             $esc = true;
         } elseif ($ch == "\"") {
             $inQuote = not $inQuote;
-            $cur = $cur + $ch;
+            $cur[] = $ch;
         } elseif ($ch == ";" and not $inQuote) {
-            $segs[] = $cur;
-            $cur = "";
+            $segs[] = strings.join($cur, "");
+            $cur = [];
         } else {
-            $cur = $cur + $ch;
+            $cur[] = $ch;
         }
     }
-    $segs[] = $cur;
+    $segs[] = strings.join($cur, "");
     def out as list of Header init [];
     def first as bool init true;
     for (def s in $segs) {
@@ -856,9 +872,16 @@ func pctDecodeBytes(s as string) {
             $out[] = hexDigit($cs[$i + 1]) * 16 + hexDigit($cs[$i + 2]);
             $i = $i + 3;
         } else {
-            # A literal (non-`%XX`) character keeps its UTF-8 bytes; ASCII stays
-            # 1:1, and a stray non-ASCII byte can never overflow a byte slot.
-            $out = binary.concat($out, convert.bytesFromString($c, "utf-8"));
+            # A literal (non-`%XX`) character contributes its UTF-8 bytes one at a
+            # time. ASCII stays 1:1, and a stray non-ASCII byte can never overflow
+            # a byte slot. Appending is amortised O(N) - concatenating the whole
+            # accumulated buffer per character would be O(N^2).
+            def utf as bytes init convert.bytesFromString($c, "utf-8");
+            def bi as int init 0;
+            while ($bi < len($utf)) {
+                $out[] = $utf[$bi];
+                $bi = $bi + 1;
+            }
             $i = $i + 1;
         }
     }
@@ -894,7 +917,10 @@ func rfc2231ExtValue(v as string) {
 # segment's bytes are gathered and charset-decoded once.
 func assembleContinued(params as list of Header, key as string) {
     def charset as string init "";
-    def raw as bytes;
+    # Each segment's decoded bytes are gathered and joined once, so a filename
+    # split across many RFC 2231 segments never re-copies the accumulated bytes
+    # per segment (which binary.concat-in-a-loop would make O(N^2)).
+    def rawParts as list of bytes init [];
     def idx as int init 0;
     def more as bool init true;
     while ($more) {
@@ -909,10 +935,10 @@ func assembleContinued(params as list of Header, key as string) {
                     $charset = $pref[0];
                     $v = $pref[1];
                 }
-                $raw = binary.concat($raw, pctDecodeBytes($v));
+                $rawParts[] = pctDecodeBytes($v);
                 $found = true;
             } elseif ($p.name == $wantPlain) {
-                $raw = binary.concat($raw, convert.bytesFromString($p.value, "utf-8"));
+                $rawParts[] = convert.bytesFromString($p.value, "utf-8");
                 $found = true;
             }
         }
@@ -922,7 +948,7 @@ func assembleContinued(params as list of Header, key as string) {
             $more = false;
         }
     }
-    return safeCharset($raw, $charset);
+    return safeCharset(binary.join($rawParts), $charset);
 }
 
 # resolveFilename reads a `key` parameter honouring RFC 2231: a `key*=` extended

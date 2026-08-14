@@ -19,6 +19,7 @@
 - [Imports](user-guide/imports.md)
 - [Style guide](user-guide/style-guide.md)
 - [Best practices](user-guide/best-practices.md)
+- [Performance](user-guide/performance.md)
 - [Examples](user-guide/examples.md)
 
 # Libraries

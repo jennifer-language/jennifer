@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled doc-comment parser: its body parser legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -27,6 +27,8 @@
 use regex;
 use strings;
 use lists;
+use convert;
+use binary;
 
 # ===== result types (all exported; a FileDoc is a tree of these) =====
 
@@ -211,6 +213,13 @@ def struct RawDoc {
     line as int
 };
 
+# A block comment's end: the byte offset just past the closing `*/` and the
+# number of newlines inside it.
+def struct BlockEnd {
+    end as int,
+    nls as int
+};
+
 # A tag's gathered body (inline text plus continuation lines) and the line
 # index just past it.
 def struct TagBody {
@@ -264,6 +273,10 @@ def struct Parsed {
  * @return {FileDoc} the extracted documentation tree
  */
 export func parse(source as string) {
+    # scanDocs reports byte offsets; the tail window below slices the source as
+    # bytes so a multi-byte UTF-8 rune ahead of a doc comment cannot misalign the
+    # rune-indexed string ops.
+    def sb as bytes init convert.bytesFromString($source, "utf-8");
     def raws as list of RawDoc init scanDocs($source);
     def module as ModuleDoc init ModuleDoc{
         summary: "",
@@ -290,16 +303,27 @@ export func parse(source as string) {
             # head, including a `def struct` with many fields (`{ ... }`), so it is
             # generous - a struct with dozens of fields still fits comfortably.
             def tailEnd as int init $raw.after + 4096;
-            if ($tailEnd > len($source)) {
-                $tailEnd = len($source);
+            if ($tailEnd > len($sb)) {
+                $tailEnd = len($sb);
             }
-            def rawTail as string init strings.substring($source, $raw.after, $tailEnd);
+            # A fixed byte window can land in the middle of a multi-byte UTF-8
+            # sequence; back the cut off any trailing continuation byte
+            # (0x80..0xBF) so the slice ends on a rune boundary and the strict
+            # stringFromBytes below never sees a split rune.
+            while ($tailEnd > $raw.after and $tailEnd < len($sb) and
+                $sb[$tailEnd] >= 128 and $sb[$tailEnd] < 192) {
+                $tailEnd = $tailEnd - 1;
+            }
+            def window as bytes init binary.slice($sb, $raw.after, $tailEnd);
+            def rawTail as string init convert.stringFromBytes($window, "utf-8");
             def tail as string init strings.trimLeft($rawTail);
             # The construct sits after the whitespace trimmed above; advance the
             # reported line past those newlines so it points at the documented
-            # construct rather than the comment's closing line.
-            def gap as int init len($rawTail) - len($tail);
-            def line as int init $raw.line + countNewlines(strings.substring($rawTail, 0, $gap));
+            # construct rather than the comment's closing line. trimLeft strips
+            # Unicode whitespace, which can be multi-byte, so the trimmed byte
+            # span (not the rune count) bounds the newline scan.
+            def trimmedBytes as int init len($window) - len(convert.bytesFromString($tail, "utf-8"));
+            def line as int init $raw.line + countNewlineBytes($window, 0, $trimmedBytes);
             def fm as regex.Match init regex.find(
                 "^(export\\s+)?func\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\(([^)]*)\\)",
                 $tail);
@@ -316,14 +340,24 @@ export func parse(source as string) {
                 $tail);
             if (not ($fm.start == -1)) {
                 $funcs[] = buildFunc($p, $fm.groups[1], not ($fm.groups[0] == ""));
-                $diags = lists.concat(
-                    $diags,
-                    crossCheck("param", $fm.groups[1], $line, $p.params, declNames($fm.groups[2])));
+                for (def d in crossCheck(
+                    "param",
+                    $fm.groups[1],
+                    $line,
+                    $p.params,
+                    declNames($fm.groups[2]))) {
+                    $diags[] = $d;
+                }
             } elseif (not ($sm.start == -1)) {
                 $structs[] = buildStruct($p, $sm.groups[1], not ($sm.groups[0] == ""));
-                $diags = lists.concat(
-                    $diags,
-                    crossCheck("field", $sm.groups[1], $line, $p.params, declNames($sm.groups[2])));
+                for (def d in crossCheck(
+                    "field",
+                    $sm.groups[1],
+                    $line,
+                    $p.params,
+                    declNames($sm.groups[2]))) {
+                    $diags[] = $d;
+                }
             } elseif (not ($em.start == -1)) {
                 $enums[] = buildEnum($p, $em.groups[1], not ($em.groups[0] == ""));
                 # An enum documents its variants in prose, not with `@field` /
@@ -439,58 +473,60 @@ func buildModule(p as Parsed) {
 # scanDocs walks the source and returns each `/** ... */` doc comment with the
 # byte offset just past its close and the source line of the construct. It skips
 # string literals and `#` line comments (so a `/**` inside a string is not a doc
-# comment) and nests `/* */` correctly.
+# comment) and nests `/* */` correctly. Byte-indexed (a `string` carries rune
+# positions; the delimiters scanned here are all single ASCII bytes), so one
+# `bytes` conversion replaces building a per-rune list of the whole source.
 func scanDocs(source as string) {
-    def cs as list of string init strings.chars($source);
-    def n as int init len($cs);
+    def b as bytes init convert.bytesFromString($source, "utf-8");
+    def n as int init len($b);
     def out as list of RawDoc init [];
     def i as int init 0;
     def line as int init 1;
     while ($i < $n) {
-        def c as string init $cs[$i];
-        if ($c == "\n") {
+        def c as int init $b[$i];
+        if ($c == 10) {
             $line = $line + 1;
             $i = $i + 1;
-        } elseif ($c == "#") {
-            while ($i < $n and not ($cs[$i] == "\n")) {
+        } elseif ($c == 35) {
+            while ($i < $n and not ($b[$i] == 10)) {
                 $i = $i + 1;
             }
-        } elseif ($c == "\"" or $c == "'") {
-            def q as string init $c;
+        } elseif ($c == 34 or $c == 39) {
+            def q as int init $c;
             $i = $i + 1;
-            while ($i < $n and not ($cs[$i] == $q)) {
-                if ($cs[$i] == "\\") {
+            while ($i < $n and not ($b[$i] == $q)) {
+                if ($b[$i] == 92) {
                     $i = $i + 1;
                 }
-                if ($i < $n and $cs[$i] == "\n") {
+                if ($i < $n and $b[$i] == 10) {
                     $line = $line + 1;
                 }
                 $i = $i + 1;
             }
             $i = $i + 1;
-        } elseif ($c == "/" and $i + 1 < $n and $cs[$i + 1] == "*") {
-            def isDoc as bool init ($i + 2 < $n and $cs[$i + 2] == "*" and
-                not ($i + 3 < $n and $cs[$i + 3] == "/"));
+        } elseif ($c == 47 and $i + 1 < $n and $b[$i + 1] == 42) {
+            def isDoc as bool init ($i + 2 < $n and $b[$i + 2] == 42 and
+                not ($i + 3 < $n and $b[$i + 3] == 47));
             def openLen as int init 2;
             if ($isDoc) {
                 $openLen = 3;
             }
-            def afterEnd as int init blockNestEnd($cs, $n, $i, $openLen);
-            def span as string init strings.substring($source, $i, $afterEnd);
-            def nl as int init countNewlines($span);
+            def blk as BlockEnd init blockNestEnd($b, $n, $i, $openLen);
             if ($isDoc) {
                 # Slice off the trailing `*/` only when the comment is actually
                 # terminated; an unterminated comment ends at EOF, and a blind
                 # `-2` would drop the last two characters of the file.
-                def bodyEnd as int init $afterEnd;
-                if (strings.endsWith($span, "*/")) {
-                    $bodyEnd = $afterEnd - 2;
+                def bodyEnd as int init $blk.end;
+                if ($blk.end >= 2 and $b[$blk.end - 2] == 42 and $b[$blk.end - 1] == 47) {
+                    $bodyEnd = $blk.end - 2;
                 }
-                def body as string init strings.substring($source, $i + $openLen, $bodyEnd);
-                $out[] = RawDoc{body: $body, after: $afterEnd, line: $line + $nl};
+                def body as string init convert.stringFromBytes(
+                    binary.slice($b, $i + $openLen, $bodyEnd),
+                    "utf-8");
+                $out[] = RawDoc{body: $body, after: $blk.end, line: $line + $blk.nls};
             }
-            $line = $line + $nl;
-            $i = $afterEnd;
+            $line = $line + $blk.nls;
+            $i = $blk.end;
         } else {
             $i = $i + 1;
         }
@@ -498,31 +534,51 @@ func scanDocs(source as string) {
     return $out;
 }
 
-# blockNestEnd returns the index just past the `*/` that closes the block
+# blockNestEnd returns the BlockEnd just past the `*/` that closes the block
 # comment opened at `start` (openLen 2 for `/*`, 3 for `/**`), honouring nested
-# `/* */`. Returns n on an unterminated comment.
-func blockNestEnd(cs as list of string, n as int, start as int, openLen as int) {
+# `/* */`, with the newlines counted inside the spanned bytes. Returns end = n
+# on an unterminated comment.
+func blockNestEnd(b as bytes, n as int, start as int, openLen as int) {
     def i as int init $start + $openLen;
     def depth as int init 1;
+    def nls as int init 0;
     while ($i + 1 < $n) {
-        if ($cs[$i] == "/" and $cs[$i + 1] == "*") {
+        if ($b[$i] == 47 and $b[$i + 1] == 42) {
             $depth = $depth + 1;
             $i = $i + 2;
-        } elseif ($cs[$i] == "*" and $cs[$i + 1] == "/") {
+        } elseif ($b[$i] == 42 and $b[$i + 1] == 47) {
             $depth = $depth - 1;
             $i = $i + 2;
             if ($depth == 0) {
-                return $i;
+                return BlockEnd{end: $i, nls: $nls};
             }
         } else {
+            if ($b[$i] == 10) {
+                $nls = $nls + 1;
+            }
             $i = $i + 1;
         }
     }
-    return $n;
+    while ($i < $n) {
+        if ($b[$i] == 10) {
+            $nls = $nls + 1;
+        }
+        $i = $i + 1;
+    }
+    return BlockEnd{end: $n, nls: $nls};
 }
 
-func countNewlines(s as string) {
-    return len(strings.split($s, "\n")) - 1;
+# countNewlineBytes counts the `\n` bytes within `b[lo..hi)`.
+func countNewlineBytes(b as bytes, lo as int, hi as int) {
+    def cnt as int init 0;
+    def k as int init $lo;
+    while ($k < $hi) {
+        if ($b[$k] == 10) {
+            $cnt = $cnt + 1;
+        }
+        $k = $k + 1;
+    }
+    return $cnt;
 }
 
 # ===== body / tag parser =====
@@ -679,9 +735,30 @@ func parseBody(body as string) {
 }
 
 # cleanLine strips a line's leading doc decoration (optional whitespace + `*` +
-# one space) and trailing whitespace.
+# one space) and trailing whitespace. Hand-rolled so a per-line regex is not run
+# over every line of every doc comment.
 func cleanLine(line as string) {
-    return strings.trimRight(regex.replace("^[ \\t]*\\*?[ \\t]?", $line, ""));
+    # Byte-indexed: the decoration stripped here (spaces, tabs, an optional `*`)
+    # is all ASCII, so scanning bytes avoids building a per-rune list of every
+    # doc line. The trim boundaries land on ASCII (rune) boundaries, so the
+    # sliced remainder stays valid UTF-8.
+    def b as bytes init convert.bytesFromString($line, "utf-8");
+    def n as int init len($b);
+    def i as int init 0;
+    while ($i < $n and ($b[$i] == 32 or $b[$i] == 9)) {
+        $i = $i + 1;
+    }
+    if ($i < $n and $b[$i] == 42) {
+        $i = $i + 1;
+        if ($i < $n and ($b[$i] == 32 or $b[$i] == 9)) {
+            $i = $i + 1;
+        }
+    }
+    def j as int init $n - 1;
+    while ($j >= $i and ($b[$j] == 32 or $b[$j] == 9)) {
+        $j = $j - 1;
+    }
+    return convert.stringFromBytes(binary.slice($b, $i, $j + 1), "utf-8");
 }
 
 func isTag(line as string) {

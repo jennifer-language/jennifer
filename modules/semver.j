@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Strict Semantic Versioning 2.0.0 (https://semver.org): parse, compare,
@@ -24,6 +24,7 @@
  */
 use strings;
 use convert;
+use lists;
 use regex;
 
 /**
@@ -58,12 +59,6 @@ func sign(n as int) {
         return 1;
     }
     return 0;
-}
-
-# charCode returns the ASCII byte value of a single-character string.
-func charCode(c as string) {
-    def b as bytes init convert.bytesFromString($c, "utf-8");
-    return $b[0];
 }
 
 # isNum reports whether s is a run of decimal digits.
@@ -128,23 +123,19 @@ export func toString(v as Version) {
 
 # --- comparison (exported) -----------------------------------------
 
-# compareStr does an ASCII-lexical comparison of two identifier strings.
+# compareStr does an ASCII-lexical comparison of two identifier strings. SemVer
+# identifiers are ASCII-only (the grammar's [0-9a-zA-Z-]), so the language's
+# string ordering (UTF-8 byte / code-point order) is exactly the lexical rule -
+# no per-char split / bytes conversion is needed. This sits on the comparison
+# hot path (every prerelease identifier pair in a sort or range match).
 func compareStr(a as string, b as string) {
-    def ca as list of string init strings.chars($a);
-    def cb as list of string init strings.chars($b);
-    def n as int init len($ca);
-    if (len($cb) < $n) {
-        $n = len($cb);
+    if ($a < $b) {
+        return -1;
     }
-    def i as int init 0;
-    while ($i < $n) {
-        def d as int init charCode($ca[$i]) - charCode($cb[$i]);
-        if (not ($d == 0)) {
-            return sign($d);
-        }
-        $i = $i + 1;
+    if ($a > $b) {
+        return 1;
     }
-    return sign(len($ca) - len($cb));
+    return 0;
 }
 
 # compareIdent compares one prerelease identifier: numeric ids rank below
@@ -153,7 +144,14 @@ func compareIdent(a as string, b as string) {
     def an as bool init isNum($a);
     def bn as bool init isNum($b);
     if ($an and $bn) {
-        return sign(convert.toInt($a) - convert.toInt($b));
+        def d as int init convert.toInt($a) - convert.toInt($b);
+        if (not ($d == 0)) {
+            if ($d < 0) {
+                return -1;
+            }
+            return 1;
+        }
+        return 0;
     }
     if ($an and not $bn) {
         return -1;
@@ -181,7 +179,13 @@ func comparePre(a as string, b as string) {
         }
         $i = $i + 1;
     }
-    return sign(len($ai) - len($bi));
+    if (len($ai) < len($bi)) {
+        return -1;
+    }
+    if (len($ai) > len($bi)) {
+        return 1;
+    }
+    return 0;
 }
 
 /**
@@ -193,13 +197,22 @@ func comparePre(a as string, b as string) {
  */
 export func compare(a as Version, b as Version) {
     if (not ($a.major == $b.major)) {
-        return sign($a.major - $b.major);
+        if ($a.major < $b.major) {
+            return -1;
+        }
+        return 1;
     }
     if (not ($a.minor == $b.minor)) {
-        return sign($a.minor - $b.minor);
+        if ($a.minor < $b.minor) {
+            return -1;
+        }
+        return 1;
     }
     if (not ($a.patch == $b.patch)) {
-        return sign($a.patch - $b.patch);
+        if ($a.patch < $b.patch) {
+            return -1;
+        }
+        return 1;
     }
     def ap as bool init len($a.prerelease) > 0;
     def bp as bool init len($b.prerelease) > 0;
@@ -362,17 +375,11 @@ func mergeSort(vs as list of Version) {
         return $vs;
     }
     def mid as int init $n // 2;
-    def left as list of Version init [];
-    def right as list of Version init [];
-    def i as int init 0;
-    while ($i < $mid) {
-        $left[] = $vs[$i];
-        $i = $i + 1;
-    }
-    while ($i < $n) {
-        $right[] = $vs[$i];
-        $i = $i + 1;
-    }
+    # The split copies each contiguous half in one Go bulk call (lists.slice)
+    # instead of per-element appends - the halves stay in source order, so the
+    # slice is exactly the merge sort recursion's left / right partition.
+    def left as list of Version init lists.slice($vs, 0, $mid);
+    def right as list of Version init lists.slice($vs, $mid);
     return mergeVersions(mergeSort($left), mergeSort($right));
 }
 
@@ -430,7 +437,7 @@ def struct Core {
 
 # rest returns s with its first n characters dropped.
 func rest(s as string, n as int) {
-    return strings.substring($s, $n, len($s));
+    return strings.substring($s, $n);
 }
 
 # relVersion builds a plain release Version (no prerelease / build).
@@ -1626,14 +1633,14 @@ export func simplifyRange(versions as list of string, range as string) {
     def i as int init 0;
     def n as int init len($sorted);
     while ($i < $n) {
-        if (satisfies(toString($sorted[$i]), $range)) {
+        if (satisfiesVer($sorted[$i], $range)) {
             def startS as string init toString($sorted[$i]);
             def endS as string init $startS;
             $matched = $matched + 1;
             if (isPrerelease($sorted[$i])) {
                 $anyPre = true;
             }
-            while ($i + 1 < $n and satisfies(toString($sorted[$i + 1]), $range)) {
+            while ($i + 1 < $n and satisfiesVer($sorted[$i + 1], $range)) {
                 $i = $i + 1;
                 $endS = toString($sorted[$i]);
                 $matched = $matched + 1;
@@ -1674,7 +1681,7 @@ export func simplifyRange(versions as list of string, range as string) {
     }
     def pins as list of string init [];
     for (def v in $sorted) {
-        if (satisfies(toString($v), $range)) {
+        if (satisfiesVer($v, $range)) {
             $pins[] = toString($v);
         }
     }
@@ -1685,8 +1692,7 @@ export func simplifyRange(versions as list of string, range as string) {
 # subset of `sorted`.
 func sameMatchSet(sorted as list of Version, candidate as string, orig as string) {
     for (def v in $sorted) {
-        def s as string init toString($v);
-        if (not (satisfies($s, $candidate) == satisfies($s, $orig))) {
+        if (not (satisfiesVer($v, $candidate) == satisfiesVer($v, $orig))) {
             return false;
         }
     }

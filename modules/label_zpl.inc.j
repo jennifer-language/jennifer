@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 #
 # label_zpl.j - the ZPL (Zebra Programming Language) encoder for the `label`
 # module. This file is spliced into label.j via `include` and is not a
@@ -25,18 +25,18 @@ func hexByte(b as int) {
 # or non-ASCII byte as `_XX`, to be used after a `^FH` field-hex indicator.
 func zplEscape(s as string) {
     def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as string init "";
+    def parts as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
         def b as int init $raw[$i];
         if ($b == 94 or $b == 126 or $b == 95 or $b < 32 or $b > 126) {
-            $out = $out + "_" + hexByte($b);
+            $parts[] = "_" + hexByte($b);
         } else {
-            $out = $out + convert.fromCodepoint($b);
+            $parts[] = convert.fromCodepoint($b);
         }
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # zplBarcode renders the barcode command body (after the ^FO origin). `h` is the
@@ -166,9 +166,11 @@ func renderZpl(label as Label, dpi as int) {
             col: 0
         };
     }
-    def out as string init "^XA\n";
+    # Each field's ZPL is appended and the stream joined once, so a label with
+    # many fields stays linear instead of re-copying the growing command string.
+    def parts as list of string init ["^XA\n"];
     for (def f in $label.fields) {
-        $out = $out + zplField($f, $dpi) + "\n";
+        $parts[] = zplField($f, $dpi) + "\n";
     }
     # Clamp the print quantity into ZPL's valid ^PQ range (1..99,999,999): a
     # negative or huge value would otherwise make a printer reject or over-print.
@@ -179,5 +181,5 @@ func renderZpl(label as Label, dpi as int) {
     if ($qty > 99999999) {
         $qty = 99999999;
     }
-    return $out + "^PQ" + convert.toString($qty) + "\n^XZ\n";
+    return strings.join($parts, "") + "^PQ" + convert.toString($qty) + "\n^XZ\n";
 }

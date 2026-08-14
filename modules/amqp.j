@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -276,12 +276,7 @@ export func withVhost(o as Options, vhost as string) {
 # --- byte helpers (private) -------------------------------------------------
 
 func appendBytes(dst as bytes, src as bytes) {
-    def i as int init 0;
-    while ($i < len($src)) {
-        $dst[] = $src[$i];
-        $i = $i + 1;
-    }
-    return $dst;
+    return binary.concat($dst, $src);
 }
 
 func sliceBytes(src as bytes, start as int, end as int) {
@@ -532,21 +527,21 @@ func deliveryFrom(args as bytes, body as bytes) {
 # --- frame I/O (private) ----------------------------------------------------
 
 func readN(socket as net.Conn, n as int) {
-    def out as bytes;
-    while (len($out) < $n) {
-        def chunk as bytes init net.readBytes($socket, $n - len($out));
+    # Collect the chunks and join once (binary.join, a native Go copy): a per-byte
+    # `.j` append runs one interpreted iteration per byte over a large frame, and
+    # `out = appendBytes(out, chunk)` would recopy the whole growing buffer each
+    # read (O(N^2)).
+    def parts as list of bytes init [];
+    def got as int init 0;
+    while ($got < $n) {
+        def chunk as bytes init net.readBytes($socket, $n - $got);
         if (len($chunk) == 0) {
             fail("connection closed mid-frame");
         }
-        # Append into `out` in place: `out = appendBytes(out, chunk)` copies the
-        # whole growing buffer per read (O(N^2) over the accumulation).
-        def k as int init 0;
-        while ($k < len($chunk)) {
-            $out[] = $chunk[$k];
-            $k = $k + 1;
-        }
+        $parts[] = $chunk;
+        $got = $got + len($chunk);
     }
-    return $out;
+    return binary.join($parts);
 }
 
 # writeFrame writes one framed unit (type + channel + size + payload + 0xCE).
@@ -622,17 +617,16 @@ func readMessageBody(c as Conn) {
     # hostile / desynced broker cannot drive an unbounded allocation. The
     # per-frame MAX_FRAME_BYTES check does not bound the aggregate body.
     transport.checkReceiveSize($bodySize, "amqp message body");
-    def body as bytes;
-    # Append in place to keep multi-frame body assembly O(N), not O(N^2).
-    while (len($body) < $bodySize) {
+    # Collect each frame's payload and join once (binary.join, O(N) native) rather
+    # than feeding every body byte through the interpreter.
+    def parts as list of bytes init [];
+    def got as int init 0;
+    while ($got < $bodySize) {
         def bf as Frame init readFrame($c.socket);
-        def k as int init 0;
-        while ($k < len($bf.payload)) {
-            $body[] = $bf.payload[$k];
-            $k = $k + 1;
-        }
+        $parts[] = $bf.payload;
+        $got = $got + len($bf.payload);
     }
-    return $body;
+    return binary.join($parts);
 }
 
 # writeContentAndBody writes a Basic content-header frame (class, weight,

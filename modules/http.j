@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -1295,6 +1295,16 @@ func capGuard(size as int, limit as int) {
     }
 }
 
+# lastTail returns the last `keep` bytes of `b` once the buffer passes that
+# length, trimming to at most `keep`; the rolling tail used by the chunked gate.
+func lastTail(b as bytes, keep as int) {
+    def n as int init len($b);
+    if ($n <= $keep) {
+        return $b;
+    }
+    return sliceBytes($b, $n - $keep, $n);
+}
+
 # endsWithDoubleCRLF is the cheap gate before attempting a full dechunk: a
 # complete chunked body ends with CRLFCRLF.
 func endsWithDoubleCRLF(body as bytes) {
@@ -1307,15 +1317,20 @@ func endsWithDoubleCRLF(body as bytes) {
 }
 
 # chunkedComplete reports whether buf[bodyStart:] is a complete chunked body (its
-# terminal 0-length chunk has arrived). It attempts a real dechunk only once the
-# body ends in CRLFCRLF, so accumulation stays near-linear.
+# terminal 0-length chunk has arrived). The cheap gate checks only the last four
+# bytes (no per-read slice of the accumulated body - slicing the whole buffer
+# every chunk is O(N^2) over a large body); a real dechunk runs only when the
+# gate passes.
 func chunkedComplete(buf as bytes, bodyStart as int) {
-    def body as bytes init sliceBytes($buf, $bodyStart, len($buf));
-    if (not endsWithDoubleCRLF($body)) {
+    def n as int init len($buf);
+    if ($n - $bodyStart < 4) {
+        return false;
+    }
+    if (not endsWithDoubleCRLF(sliceBytes($buf, $n - 4, $n))) {
         return false;
     }
     try {
-        dechunk($body);
+        dechunk(sliceBytes($buf, $bodyStart, len($buf)));
         return true;
     } catch (e) {
         return false;
@@ -1356,7 +1371,26 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
         "\r\n"));
     def bodyStart as int init $hend + 4;
     if (isChunked($headers)) {
-        while (not chunkedComplete($buf, $bodyStart)) {
+        # Collect the wire chunks in a list and join once (binary.join, O(n)): a
+        # per-read re-copy of the accumulating body is O(N^2) over a large
+        # chunked body. The completion gate inspects only the last four bytes
+        # of what has arrived; a real dechunk runs only when the gate passes
+        # (an occasional spurious gate costs one extra read, bounded).
+        def pieces as list of bytes init [$buf];
+        def total as int init len($buf);
+        def tail as bytes init lastTail(sliceBytes($buf, $bodyStart, len($buf)), 4);
+        while (true) {
+            if (endsWithDoubleCRLF($tail)) {
+                def full as bytes init binary.join($pieces);
+                try {
+                    dechunk(sliceBytes($full, $bodyStart, len($full)));
+                    return $full;
+                } catch (e) {   # lint-disable: L103
+                    # Gate passed on a false positive (chunk data ending in
+                    # CRLFCRLF): keep reading. The error is intentionally
+                    # swallowed - an incomplete body simply loops for more bytes.
+                }
+            }
             def chunk as bytes init readSock($conn, $timeoutMs);
             if (len($chunk) == 0) {
                 throw Error{
@@ -1367,38 +1401,40 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
                     col: 0
                 };
             }
-            $buf = binary.concat($buf, $chunk);
-            capGuard(len($buf), $limit);
+            $pieces[] = $chunk;
+            $tail = lastTail(binary.concat($tail, $chunk), 4);
+            $total = $total + len($chunk);
+            capGuard($total, $limit);
         }
-        return $buf;
     }
     if (maps.has($headers, "content-length")) {
         def need as int init $bodyStart + convert.toInt($headers["content-length"]);
         capGuard($need, $limit);
-        while (len($buf) < $need) {
-            def chunk as bytes init readSock($conn, $timeoutMs);
-            if (len($chunk) == 0) {
-                throw Error{
-                    kind: "http",
-                    message: "connection closed before Content-Length bytes",
-                    file: "",
-                    line: 0,
-                    col: 0
-                };
-            }
-            $buf = binary.concat($buf, $chunk);
+        # The remaining body length is known: one net.readN reads it in a single
+        # Go loop, so a large body is one read + one concat instead of a
+        # per-chunk re-copy of the whole accumulating buffer (O(N^2)).
+        if (len($buf) < $need) {
+            # Pass the timeout so net.readN re-arms the idle deadline per internal
+            # read (as the old readSock loop did); without it the whole body would
+            # read under the single stale deadline last set while reading headers.
+            $buf = binary.concat($buf, net.readN($conn, $need - len($buf), $timeoutMs));
         }
         return sliceBytes($buf, 0, $need);
     }
     # No Content-Length, no chunked: the body runs to EOF, so the server has
     # closed the connection - read the rest and let the caller retire the socket.
+    # Chunks are collected and joined once (binary.join, O(n)), again avoiding
+    # the per-read re-copy over a large body.
+    def apieces as list of bytes init [$buf];
+    def atotal as int init len($buf);
     while (true) {
         def chunk as bytes init readSock($conn, $timeoutMs);
         if (len($chunk) == 0) {
-            return $buf;
+            return binary.join($apieces);
         }
-        $buf = binary.concat($buf, $chunk);
-        capGuard(len($buf), $limit);
+        $apieces[] = $chunk;
+        $atotal = $atotal + len($chunk);
+        capGuard($atotal, $limit);
     }
     return $buf;
 }

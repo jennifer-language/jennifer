@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 #
 # pdf_afm.j - standard-14 font metrics for pdf text layout, included
 # (textual splice) into pdf.j. Each table is a font's glyph advance widths
@@ -161,4 +161,59 @@ func afmSum(font as string, raw as bytes) {
         return $s;
     }
     return -1;
+}
+
+# afmCum is afmSum's cumulative sibling: returns an int list `cum` of length
+# len(raw)+1 where cum[i] is the sum of the 1000-em advances of raw[0..i), so a
+# substring's advance is `cum[hi] - cum[lo]` and a single byte's is a
+# difference. One pass serves a whole measured run, letting a caller (hard
+# folding, table layout) measure many substrings with a single pass over the
+# combined bytes instead of one pass per substring. Indexes the font's
+# advance-table const directly (no per-call copy of the 256-entry table).
+# Returns [] when the font has no proportional metrics (Symbol / ZapfDingbats).
+func afmCum(font as string, raw as bytes) {
+    def m as int init len($raw);
+    if ($font == "Helvetica" or $font == "Helvetica-Oblique") {
+        def out as list of int init [0];
+        def s as int init 0;
+        def i as int init 0;
+        while ($i < $m) { $s = $s + AFM_HELVETICA[$raw[$i]]; $out[] = $s; $i = $i + 1; }
+        return $out;
+    }
+    if ($font == "Helvetica-Bold" or $font == "Helvetica-BoldOblique") {
+        def out as list of int init [0];
+        def s as int init 0;
+        def i as int init 0;
+        while ($i < $m) { $s = $s + AFM_HELVETICA_BOLD[$raw[$i]]; $out[] = $s; $i = $i + 1; }
+        return $out;
+    }
+    if ($font == "Times-Roman") {
+        def out as list of int init [0];
+        def s as int init 0;
+        def i as int init 0;
+        while ($i < $m) { $s = $s + AFM_TIMES[$raw[$i]]; $out[] = $s; $i = $i + 1; }
+        return $out;
+    }
+    if ($font == "Times-Bold") {
+        def out as list of int init [0];
+        def s as int init 0;
+        def i as int init 0;
+        while ($i < $m) { $s = $s + AFM_TIMES_BOLD[$raw[$i]]; $out[] = $s; $i = $i + 1; }
+        return $out;
+    }
+    if ($font == "Times-Italic") {
+        def out as list of int init [0];
+        def s as int init 0;
+        def i as int init 0;
+        while ($i < $m) { $s = $s + AFM_TIMES_ITALIC[$raw[$i]]; $out[] = $s; $i = $i + 1; }
+        return $out;
+    }
+    if ($font == "Times-BoldItalic") {
+        def out as list of int init [0];
+        def s as int init 0;
+        def i as int init 0;
+        while ($i < $m) { $s = $s + AFM_TIMES_BOLDITALIC[$raw[$i]]; $out[] = $s; $i = $i + 1; }
+        return $out;
+    }
+    return [];
 }

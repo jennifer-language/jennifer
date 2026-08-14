@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -206,11 +206,6 @@ func capResponse(n as int) {
 # only once the whole response is in hand. Decoding each 512-byte chunk
 # separately would split a multi-byte sequence across a chunk boundary and
 # corrupt the body.
-
-func emptyBytes() {
-    def e as bytes;
-    return $e;
-}
 
 # byteSlice returns buf[start:end] as a fresh bytes value.
 func byteSlice(buf as bytes, start as int, end as int) {

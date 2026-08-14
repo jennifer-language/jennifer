@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -25,6 +25,7 @@
  * websocket.close($ws);
  */
 use net;
+use binary;
 use strings;
 use convert;
 use hash;
@@ -105,23 +106,35 @@ func appendBytes(dst as bytes, src as bytes) {
 }
 
 # readN reads exactly n bytes, looping over the "up to n" net.readBytes. The
-# chunk is appended into the owning `out` in place (amortised O(1) per byte);
-# `$out = appendBytes($out, $chunk)` would copy the whole growing buffer on
-# every short read (gigabytes of memcpy for a large frame read in small chunks).
+# common case - a single read that satisfies the whole request (a frame header,
+# or a body the peer wrote in one go) - is returned as-is, skipping any copy.
+# Only a short read falls back to collecting the chunks and joining them once
+# (binary.join, a native Go copy); appending byte by byte would feed every byte
+# of a large frame through the interpreter, and `$out = appendBytes($out, $chunk)`
+# would recopy the whole growing buffer on every short read (O(n^2)).
 func readN(socket as net.Conn, n as int) {
-    def out as bytes;
-    while (len($out) < $n) {
-        def chunk as bytes init net.readBytes($socket, $n - len($out));
-        if (len($chunk) == 0) {
+    if ($n <= 0) {
+        def e as bytes;
+        return $e;
+    }
+    def chunk as bytes init net.readBytes($socket, $n);
+    if (len($chunk) == 0) {
+        fail("connection closed mid-frame");
+    }
+    if (len($chunk) == $n) {
+        return $chunk;
+    }
+    def parts as list of bytes init [$chunk];
+    def total as int init len($chunk);
+    while ($total < $n) {
+        def more as bytes init net.readBytes($socket, $n - $total);
+        if (len($more) == 0) {
             fail("connection closed mid-frame");
         }
-        def i as int init 0;
-        while ($i < len($chunk)) {
-            $out[] = $chunk[$i];
-            $i = $i + 1;
-        }
+        $parts[] = $more;
+        $total = $total + len($more);
     }
-    return $out;
+    return binary.join($parts);
 }
 
 # randomBytes returns n crypto-grade random bytes. RFC 6455 (section 5.3)
@@ -294,7 +307,9 @@ func encodeFrameMasked(opcode as int, payload as bytes, mask as bytes) {
     $frame = appendBytes($frame, $mask);
     def j as int init 0;
     while ($j < $n) {
-        $frame[] = $payload[$j] ^ $mask[$j % 4];
+        # `& 3` is `% 4` (the mask is exactly 4 bytes) without the per-byte
+        # modulo; the masked payload has to be built byte by byte regardless.
+        $frame[] = $payload[$j] ^ $mask[$j & 3];
         $j = $j + 1;
     }
     return $frame;
@@ -345,7 +360,7 @@ func readFrame(socket as net.Conn) {
     if ($masked == 1) {
         def j as int init 0;
         while ($j < $n) {
-            $payload[$j] = $payload[$j] ^ $mkey[$j % 4];
+            $payload[$j] = $payload[$j] ^ $mkey[$j & 3];
             $j = $j + 1;
         }
     }
@@ -465,12 +480,18 @@ export func receive(c as Conn) {
             if (not ($f.opcode == OP_CONT)) {
                 $dataOpcode = $f.opcode;
             }
-            # Append fragment payload into `acc` in place (a by-value
-            # appendBytes copies the whole reassembly buffer per fragment).
+            # Reassemble the payload into `acc`. The common single-fragment case
+            # (acc still empty) copies the fresh payload with one binding write -
+            # a Go memcpy - instead of feeding every byte through the interpreter
+            # below. Later fragments append in place (a by-value appendBytes
+            # would copy the whole reassembly buffer per fragment).
             def bi as int init 0;
-            while ($bi < len($f.payload)) {
+            while ($bi < len($f.payload) and len($acc) > 0) {
                 $acc[] = $f.payload[$bi];
                 $bi = $bi + 1;
+            }
+            if (len($acc) == 0) {
+                $acc = $f.payload;
             }
             if (len($acc) > MAX_MESSAGE_BYTES) {
                 # Refuse the oversized message: send a 1009 (message too big)

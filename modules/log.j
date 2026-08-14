@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Leveled, structured logging. A `log.Logger` carries a minimum level
@@ -193,11 +193,13 @@ func escapeNewlines(v as string) {
 
 # renderText: `<ts> <LEVEL> <message> k=v ...`.
 func renderText(level as string, message as string, fields as map of string to string, ts as string) {
-    def s as string init $ts + " " + strings.upper(escapeNewlines($level)) + " " + escapeNewlines($message);
+    def parts as list of string init [
+        $ts + " " + strings.upper(escapeNewlines($level)) + " " + escapeNewlines($message)
+    ];
     for (def k in $fields) {
-        $s = $s + " " + $k + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = $k + "=" + quoteIfNeeded($fields[$k]);
     }
-    return $s;
+    return strings.join($parts, " ");
 }
 
 # renderLogfmt: `time=<ts> level=<level> msg="..." k=v ...`.
@@ -206,11 +208,13 @@ func renderLogfmt(
     message as string,
     fields as map of string to string,
     ts as string) {
-    def s as string init "time=" + $ts + " level=" + quoteIfNeeded($level) + " msg=" + quoteIfNeeded($message);
+    def parts as list of string init [
+        "time=" + $ts + " level=" + quoteIfNeeded($level) + " msg=" + quoteIfNeeded($message)
+    ];
     for (def k in $fields) {
-        $s = $s + " " + $k + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = $k + "=" + quoteIfNeeded($fields[$k]);
     }
-    return $s;
+    return strings.join($parts, " ");
 }
 
 # renderJson: a JSON object `{"time":..,"level":..,"msg":..,<fields>}`.
@@ -285,10 +289,11 @@ func syslogLine(
     if ($app == "") {
         $app = "-";
     }
-    def msg as string init $message;
+    def parts as list of string init [$message];
     for (def k in $fields) {
-        $msg = $msg + " " + $k + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = $k + "=" + quoteIfNeeded($fields[$k]);
     }
+    def msg as string init strings.join($parts, " ");
     return "<" + convert.toString($pri) + ">1 " + time.iso($t) + " " + $host + " " + $app +
         " - - - " + $msg;
 }

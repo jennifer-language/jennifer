@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -90,7 +90,7 @@ func tagsSuffix(tags as map of string to string) {
     }
     def parts as list of string init [];
     for (def k in $tags) {
-        $parts = lists.push($parts, $k + ":" + $tags[$k]);
+        $parts[] = $k + ":" + $tags[$k];
     }
     return "|#" + strings.join($parts, ",");
 }

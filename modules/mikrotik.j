@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -33,6 +33,7 @@
  * mikrotik.close($s);
  */
 use net;
+use binary;
 use strings;
 use convert;
 use maps;
@@ -137,36 +138,30 @@ export func withPort(o as Options, port as int) {
 # --- byte + word codec (private) --------------------------------------------
 
 func appendBytes(dst as bytes, src as bytes) {
-    def i as int init 0;
-    while ($i < len($src)) {
-        $dst[] = $src[$i];
-        $i = $i + 1;
-    }
-    return $dst;
+    return binary.concat($dst, $src);
 }
 
 func readN(socket as net.Conn, n as int) {
-    def out as bytes;
+    def parts as list of bytes init [];
+    def got as int init 0;
     # Clear the read deadline on every exit path (normal return, and the throw
     # from a mid-sentence close), so the bounded read window armed below never
     # leaks a stale deadline to a later read/write on this socket - which would
     # otherwise inherit it and spuriously time out. `defer` captures $socket now
     # and runs `net.setDeadline($socket, 0)` when this block exits (0 clears it).
     defer net.setDeadline($socket, 0);
-    while (len($out) < $n) {
+    while ($got < $n) {
         net.setDeadline($socket, CONNECT_TIMEOUT_MS);
-        def chunk as bytes init net.readBytes($socket, $n - len($out));
+        def chunk as bytes init net.readBytes($socket, $n - $got);
         if (len($chunk) == 0) {
             fail("connection closed mid-sentence");
         }
-        # Append in place to keep the read accumulation O(N), not O(N^2).
-        def k as int init 0;
-        while ($k < len($chunk)) {
-            $out[] = $chunk[$k];
-            $k = $k + 1;
-        }
+        # Collect the chunks and join once (binary.join, native Go copy) rather
+        # than feeding every byte of the read through the interpreter.
+        $parts[] = $chunk;
+        $got = $got + len($chunk);
     }
-    return $out;
+    return binary.join($parts);
 }
 
 # encodeLen encodes a word length with RouterOS's variable-length scheme.

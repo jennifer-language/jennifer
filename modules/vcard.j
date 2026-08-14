@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Build and parse vCard (RFC 6350, vCard 4.0): a `Card` of contact fields
@@ -385,27 +385,28 @@ func encodeAdr(a as Address) {
 # pair intact for a later per-component unescapeText.
 func splitStructured(value as string) {
     def parts as list of string init [];
-    def cur as string init "";
+    def cur as list of string init [];
     def chars as list of string init strings.chars($value);
     def n as int init len($chars);
     def i as int init 0;
     while ($i < $n) {
         def c as string init $chars[$i];
         if ($c == "\\" and $i + 1 < $n) {
-            $cur = $cur + $c + $chars[$i + 1];
+            $cur[] = $c;
+            $cur[] = $chars[$i + 1];
             $i = $i + 2;
             continue;
         }
         if ($c == ";") {
-            $parts[] = $cur;
-            $cur = "";
+            $parts[] = strings.join($cur, "");
+            $cur = [];
             $i = $i + 1;
             continue;
         }
-        $cur = $cur + $c;
+        $cur[] = $c;
         $i = $i + 1;
     }
-    $parts[] = $cur;
+    $parts[] = strings.join($cur, "");
     return $parts;
 }
 
@@ -422,27 +423,28 @@ func component(parts as list of string, i as int) {
 # tag (the comma-list counterpart to splitStructured's `;`).
 func splitCategories(value as string) {
     def out as list of string init [];
-    def cur as string init "";
+    def cur as list of string init [];
     def chars as list of string init strings.chars($value);
     def n as int init len($chars);
     def i as int init 0;
     while ($i < $n) {
         def c as string init $chars[$i];
         if ($c == "\\" and $i + 1 < $n) {
-            $cur = $cur + $c + $chars[$i + 1];
+            $cur[] = $c;
+            $cur[] = $chars[$i + 1];
             $i = $i + 2;
             continue;
         }
         if ($c == ",") {
-            $out[] = unescapeText($cur);
-            $cur = "";
+            $out[] = unescapeText(strings.join($cur, ""));
+            $cur = [];
             $i = $i + 1;
             continue;
         }
-        $cur = $cur + $c;
+        $cur[] = $c;
         $i = $i + 1;
     }
-    $out[] = unescapeText($cur);
+    $out[] = unescapeText(strings.join($cur, ""));
     return $out;
 }
 

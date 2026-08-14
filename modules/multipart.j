@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Build and parse `multipart/form-data` bodies (RFC 7578) - the file-upload
@@ -219,21 +219,21 @@ func extractParam(headers as string, key as string) {
         while ($i < $n and ($cs[$i] == ";" or $cs[$i] == " " or $cs[$i] == "\t")) {
             $i = $i + 1;
         }
-        def k as string init "";
+        def k as list of string init [];
         while ($i < $n and not ($cs[$i] == "=" or $cs[$i] == ";")) {
-            $k = $k + $cs[$i];
+            $k[] = $cs[$i];
             $i = $i + 1;
         }
         if ($i < $n and $cs[$i] == "=") {
             $i = $i + 1;
-            def v as string init "";
+            def v as list of string init [];
             if ($i < $n and $cs[$i] == "\"") {
                 $i = $i + 1;
                 while ($i < $n and not ($cs[$i] == "\"")) {
                     if ($cs[$i] == "\\" and $i + 1 < $n) {
                         $i = $i + 1;
                     }
-                    $v = $v + $cs[$i];
+                    $v[] = $cs[$i];
                     $i = $i + 1;
                 }
                 if ($i < $n) {
@@ -241,12 +241,12 @@ func extractParam(headers as string, key as string) {
                 }
             } else {
                 while ($i < $n and not ($cs[$i] == ";")) {
-                    $v = $v + $cs[$i];
+                    $v[] = $cs[$i];
                     $i = $i + 1;
                 }
             }
-            if (strings.lower(strings.trim($k)) == $target) {
-                return strings.trim($v);
+            if (strings.lower(strings.trim(strings.join($k, ""))) == $target) {
+                return strings.trim(strings.join($v, ""));
             }
         }
     }

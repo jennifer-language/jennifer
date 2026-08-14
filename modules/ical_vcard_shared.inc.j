@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 #
 # ical_vcard_shared.j - the shared "content line" codec for the text formats that
 # descend from the vCard / iCalendar line grammar (RFC 5545 iCalendar, RFC 6350
@@ -26,7 +26,9 @@ func escapeText(v as string) {
 # unescapeText reverses escapeText with a single left-to-right scan, so an
 # escaped backslash never re-triggers on the following character.
 func unescapeText(v as string) {
-    def out as string init "";
+    # Characters accumulate in a list and join once, so unescaping a long value
+    # is linear - a growing `+` would re-copy the whole result per character.
+    def out as list of string init [];
     def chars as list of string init strings.chars($v);
     def n as int init len($chars);
     def i as int init 0;
@@ -35,23 +37,23 @@ func unescapeText(v as string) {
         if ($c == "\\" and $i + 1 < $n) {
             def nx as string init $chars[$i + 1];
             if ($nx == "n" or $nx == "N") {
-                $out = $out + "\n";
+                $out[] = "\n";
             } elseif ($nx == "\\") {
-                $out = $out + "\\";
+                $out[] = "\\";
             } elseif ($nx == ";") {
-                $out = $out + ";";
+                $out[] = ";";
             } elseif ($nx == ",") {
-                $out = $out + ",";
+                $out[] = ",";
             } else {
-                $out = $out + $nx;
+                $out[] = $nx;
             }
             $i = $i + 2;
             continue;
         }
-        $out = $out + $c;
+        $out[] = $c;
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # --- line folding -----------------------------------------------------------

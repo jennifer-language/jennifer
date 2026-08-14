@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -83,5 +84,55 @@ testing.assertEqual($nf.status, 404);`, httpMod, srv.URL)
 
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("http client program failed with code %d", code)
+	}
+}
+
+// TestHttpLargeChunkedMultiRead drives the client against a large chunked
+// response (100 KB across 200 flushed chunks) so the de-chunk read loop must
+// iterate over many partial reads - the multi-read path a small single-read
+// chunked body never reaches. It pins the rolling-tail reassembly (a per-read
+// `bytes + bytes` here is a runtime type error that breaks every multi-read
+// chunked body).
+func TestHttpLargeChunkedMultiRead(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/big", func(w http.ResponseWriter, r *http.Request) {
+		fl := w.(http.Flusher)
+		for i := 0; i < 200; i++ {
+			fmt.Fprint(w, strings.Repeat("x", 500))
+			fl.Flush()
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	// Exercise BOTH body readers on a large chunked response: the one-shot
+	// `get` (readToEOF) and a keep-alive session `exchange` (readOneRaw) - the
+	// latter is where a per-read `bytes + bytes` broke every multi-read chunked
+	// body.
+	prog := fmt.Sprintf(`use testing;
+use strings;
+import %q as http;
+def want as string init strings.repeat("x", 100000);
+def r as http.Response init http.get(%q, {});
+testing.assertEqual($r.status, 200);
+testing.assertEqual($r.body, $want);
+def opts as http.Options init http.defaultOptions();
+def s as http.Session init http.connect(%q, $opts);
+def x as http.Exchange init http.exchange($s, "GET", "/big", {}, "");
+testing.assertEqual($x.response.status, 200);
+testing.assertEqual(len($x.response.body), 100000);
+testing.assertEqual($x.response.body, $want);
+http.close($x.session);`, httpMod, srv.URL+"/big", srv.URL)
+	progPath := filepath.Join(dir, "bigchunked.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("http large-chunked program failed with code %d", code)
 	}
 }

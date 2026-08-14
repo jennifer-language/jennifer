@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Build an HTML element tree and render it to a correctly escaped HTML5 string.
@@ -221,26 +221,27 @@ export func safeUrl(url as string) {
     # we test for is ASCII anyway. Drop whitespace / control characters
     # (codepoint <= 32) while reading the scheme so "java\tscript:" is still caught.
     def cs as list of string init strings.chars($url);
-    def probe as string init "";
+    def probe as list of string init [];
     def i as int init 0;
     while ($i < len($cs)) {
         if (convert.toCodepoint($cs[$i]) > 32) {
-            $probe = $probe + $cs[$i];
+            $probe[] = $cs[$i];
         }
         $i = $i + 1;
     }
     if (len($probe) == 0) {
         return $url;
     }
+    def probeStr as string init strings.join($probe, "");
     # The scheme is the run before the first ':', but only if that ':' comes
     # before any '/', '?', or '#' (else there is no scheme and the reference is
     # relative, hence safe).
     def scheme as string init "";
     def hasScheme as bool init false;
     def j as int init 0;
-    def pn as int init len($probe);
+    def pn as int init len($probeStr);
     while ($j < $pn) {
-        def ch as string init strings.substring($probe, $j, $j + 1);
+        def ch as string init strings.substring($probeStr, $j, $j + 1);
         if ($ch == ":") {
             $hasScheme = true;
             break;
@@ -270,15 +271,15 @@ func isVoid(tag as string) {
 
 # renderAttrs renders a leading-space-separated attribute list.
 func renderAttrs(attrs as list of Attr) {
-    def out as string init "";
+    def parts as list of string init [];
     for (def a in $attrs) {
         if ($a.boolean) {
-            $out = $out + " " + $a.name;
+            $parts[] = " " + $a.name;
         } else {
-            $out = $out + " " + $a.name + "=\"" + escapeAttr($a.value) + "\"";
+            $parts[] = " " + $a.name + "=\"" + escapeAttr($a.value) + "\"";
         }
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 /**

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * URL parsing, building, and query-string handling (RFC 3986). The shared URL
@@ -26,6 +26,7 @@
 use strings;
 use encoding;
 use convert;
+use lists;
 
 /**
  * The parts of a parsed URL. Missing components are the empty string (so a
@@ -332,10 +333,12 @@ func lastIndexOf(s as string, sub as string) {
 }
 
 # removeDotSegments applies the RFC 3986 section 5.2.4 algorithm, collapsing
-# "." and ".." segments (so "/a/b/../c" becomes "/a/c").
+# "." and ".." segments (so "/a/b/../c" becomes "/a/c"). Completed segments
+# collect in a list and join once: growing a string per segment is O(N^2) over
+# a long path.
 func removeDotSegments(path as string) {
     def input as string init $path;
-    def output as string init "";
+    def output as list of string init [];
     while (len($input) > 0) {
         if (strings.startsWith($input, "../")) {
             $input = strings.substring($input, 3, len($input));
@@ -347,10 +350,14 @@ func removeDotSegments(path as string) {
             $input = "/";
         } elseif (strings.startsWith($input, "/../")) {
             $input = "/" + strings.substring($input, 4, len($input));
-            $output = dropLastSegment($output);
+            if (len($output) > 0) {
+                $output = lists.pop($output);
+            }
         } elseif ($input == "/..") {
             $input = "/";
-            $output = dropLastSegment($output);
+            if (len($output) > 0) {
+                $output = lists.pop($output);
+            }
         } elseif ($input == "." or $input == "..") {
             $input = "";
         } else {
@@ -362,24 +369,15 @@ func removeDotSegments(path as string) {
             }
             def next as int init indexFrom($input, "/", $start);
             if ($next < 0) {
-                $output = $output + $input;
+                $output[] = $input;
                 $input = "";
             } else {
-                $output = $output + strings.substring($input, 0, $next);
+                $output[] = strings.substring($input, 0, $next);
                 $input = strings.substring($input, $next, len($input));
             }
         }
     }
-    return $output;
-}
-
-# dropLastSegment removes the last "/segment" from s (used by the ".." rules).
-func dropLastSegment(s as string) {
-    def slash as int init lastIndexOf($s, "/");
-    if ($slash < 0) {
-        return "";
-    }
-    return strings.substring($s, 0, $slash);
+    return strings.join($output, "");
 }
 
 # indexFrom is strings.indexOf starting at offset `from` (returns an absolute

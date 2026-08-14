@@ -5,7 +5,7 @@ records a string and `mightContain` tests membership with **no false negatives**
 (a member always reports present) but possible **false positives** (a non-member
 may report present, with a probability that grows as the filter fills). Trades a
 little accuracy for a lot of space - ideal for "have I seen this before?" checks
-over large sets. Pure `.j` over `hash` + `bytes`; runs on both binaries.
+over large sets. Pure `.j` over `hash` + `strings` + `binary`; runs on both binaries.
 
 ```jennifer
 import "bloom.j" as bloom;

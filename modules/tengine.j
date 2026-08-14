@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A small text template engine for lightweight CMS-style rendering - a subset of
@@ -162,12 +162,15 @@ func setGet(set as Set, name as string) {
  */
 export func add(set as Set, name as string, src as string) {
     def s as Set init $set;
-    def residual as string init "";
+    # Actions are stripped out as the source is stored; the residual text
+    # accumulates in a list and joins once, so a template with many actions is
+    # not re-copied per action (O(N^2) in the source size).
+    def residual as list of string init [];
     def rest as string init trimMarkers($src);
     while (true) {
         def i as int init strings.indexOf($rest, '{{');
         if ($i < 0) {
-            $residual = $residual + $rest;
+            $residual[] = $rest;
             break;
         }
         def pre as string init strings.substring($rest, 0, $i);
@@ -185,17 +188,17 @@ export func add(set as Set, name as string, src as string) {
         def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
         def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
         if (actionKind($action) == "define") {
-            $residual = $residual + $pre;
+            $residual[] = $pre;
             def na as NameArg init parseNameArg($action);
             def bp as BlockParts init takeBlock($tail);
             $s = addRaw($s, $na.name, $bp.thenPart);
             $rest = $bp.remainder;
         } else {
-            $residual = $residual + $pre + '{{' + $action + '}}';
+            $residual[] = $pre + '{{' + $action + '}}';
             $rest = $tail;
         }
     }
-    return addRaw($s, $name, $residual);
+    return addRaw($s, $name, strings.join($residual, ""));
 }
 
 # --- rendering (exported) ---------------------------------------------------
@@ -1395,12 +1398,15 @@ func parseNameArg(action as string) {
 # whitespace before the action, `-}}` the whitespace after it. The returned
 # source carries plain `{{ }}` actions.
 func trimMarkers(src as string) {
-    def out as string init "";
+    # Pieces accumulate and join once: growing `out` with `+` per action is
+    # O(N^2) over the action count of a large template.
+    def pieces as list of string init [];
     def rest as string init $src;
     while (true) {
         def i as int init strings.indexOf($rest, '{{');
         if ($i < 0) {
-            return $out + $rest;
+            $pieces[] = $rest;
+            break;
         }
         def pre as string init strings.substring($rest, 0, $i);
         def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
@@ -1428,13 +1434,13 @@ func trimMarkers(src as string) {
         if ($trimLeft) {
             $pre = strings.trimRight($pre);
         }
-        $out = $out + $pre + '{{' + $clean + '}}';
+        $pieces[] = $pre + '{{' + $clean + '}}';
         if ($trimRight) {
             $tail = strings.trimLeft($tail);
         }
         $rest = $tail;
     }
-    return $out;
+    return strings.join($pieces, "");
 }
 
 # escapeHtml replaces the five HTML-significant characters with entities.
@@ -1465,16 +1471,18 @@ func titleCase(s as string) {
 }
 
 # urlize slugifies a string: lower-case, alphanumerics kept, spaces / dashes /
-# underscores collapsed to single dashes.
+# underscores collapsed to single dashes. Chars collect and join once (per-char
+# `+` is O(N^2) over the string).
 func urlize(s as string) {
-    def out as string init "";
+    def parts as list of string init [];
     for (def c in strings.chars(strings.lower($s))) {
         if (isAlnum($c)) {
-            $out = $out + $c;
+            $parts[] = $c;
         } elseif ($c == " " or $c == "-" or $c == "_") {
-            $out = $out + "-";
+            $parts[] = "-";
         }
     }
+    def out as string init strings.join($parts, "");
     while (strings.contains($out, "--")) {
         $out = strings.replace($out, "--", "-");
     }

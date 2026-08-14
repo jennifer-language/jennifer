@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled PDF writer: its render and PNG-decode methods legitimately run
 # past the L201 statement-count limit. Every other lint check stays active.
@@ -643,15 +643,15 @@ export func textUnicode(pg as Page, x as int, y as int, lf as LoadedFont, size a
         $cps[] = convert.toCodepoint($ch);
     }
     def gids as list of int init font.glyphIds($lf.f, $cps);   # one font copy, not one per char
-    def hex as string init "";
+    def hex as list of string init [];
     def i as int init 0;
     while ($i < len($cps)) {
-        $hex = $hex + hexGid($gids[$i]);
+        $hex[] = hexGid($gids[$i]);
         $pg.glyphUses = lists.push($pg.glyphUses, GlyphUse{font: $lf.name, gid: $gids[$i], cp: $cps[$i]});
         $i = $i + 1;
     }
     $pg.content = $pg.content + ("BT\n/" + $lf.name + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex + "> Tj\nET\n");
+        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + strings.join($hex, "") + "> Tj\nET\n");
     return $pg;
 }
 
@@ -1090,6 +1090,31 @@ export func measureText(font as string, size as int, str as string) {
     return (measureEm($font, $str) * $size) / 1000;
 }
 
+# emCum returns the cumulative 1000-em advances of the WinAnsi bytes `raw` for a
+# standard-14 font: emCum[i] is the advance sum for raw[0..i) (i in 0..len(raw)),
+# so a single character's width is a difference and any substring's a
+# subtraction. One measurement pass serves a whole line of text instead of one
+# pass per character - the hot path of hard folding.
+func emCum(font as string, raw as bytes) {
+    if (not isStandardFont($font)) {
+        fail("measureText: unknown font '" + $font + "' (use a standard-14 base font)");
+    }
+    if (strings.startsWith($font, "Courier")) {
+        def out as list of int init [];
+        def i as int init 0;
+        while ($i <= len($raw)) {
+            $out[] = $i * 600;
+            $i = $i + 1;
+        }
+        return $out;
+    }
+    def cum as list of int init afmCum($font, $raw);
+    if (len($cum) == 0) {
+        fail("measureText: font '" + $font + "' has no layout metrics (Symbol / ZapfDingbats)");
+    }
+    return $cum;
+}
+
 /**
  * Measure the rendered width (in points) of a string in an embedded font at a
  * point size, using the font's own glyph advances.
@@ -1206,18 +1231,29 @@ func isBreakChar(c as string) {
  */
 export func foldLine(font as string, size as int, text as string, maxWidth as int) {
     def chars as list of string init strings.chars($text);
+    def n as int init len($chars);
+    # Measure the whole line in one encode + one cumulative advance pass: a
+    # character's width is a cumulative difference and the folded remainder's a
+    # cumulative subtraction, so folding a line measures nothing per character
+    # and re-measures nothing after a break.
+    def raw as bytes init encoding.encode($text, "windows-1252");
+    def cum as list of int init emCum($font, $raw);
+    def scale as float init convert.toFloat($size);
     def out as list of string init [];
     def cur as string init "";
     def curW as float init 0.0;
     def brk as int init -1;
     def limit as float init convert.toFloat($maxWidth);
-    for (def i in 0..len($chars)) {
-        def cw as float init measureText($font, $size, $chars[$i]);
+    def i as int init 0;
+    while ($i < $n) {
+        def cw as float init convert.toFloat($cum[$i + 1] - $cum[$i]) * $scale / 1000;
         if ($cur != "" and $curW + $cw > $limit) {
             if ($brk >= 0) {
                 $out[] = strings.substring($cur, 0, $brk + 1);
+                # The remainder is the chars from (i - len(cur)) to i: its width
+                # is the cumulative difference over that run, no re-measure.
                 $cur = strings.substring($cur, $brk + 1, len($cur));
-                $curW = measureText($font, $size, $cur);
+                $curW = convert.toFloat($cum[$i] - $cum[$i - len($cur)]) * $scale / 1000;
             } else {
                 $out[] = $cur;
                 $cur = "";
@@ -1230,6 +1266,7 @@ export func foldLine(font as string, size as int, text as string, maxWidth as in
         if (isBreakChar($chars[$i])) {
             $brk = len($cur) - 1;
         }
+        $i = $i + 1;
     }
     if ($cur != "") {
         $out[] = $cur;
@@ -1466,33 +1503,6 @@ func strChunk(s as string) {
     return convert.bytesFromString($s, "utf-8");
 }
 
-# joinBytes concatenates a list of byte segments into one bytes. It reduces the
-# list pairwise (adjacent segments joined per round) rather than folding a single
-# accumulator, so it is O(total * log segments) of bulk binary.concat copies
-# instead of the O(total^2) a left-fold of concat (each copying the running
-# result) would cost - and it avoids a per-byte interpreter append loop entirely.
-func joinBytes(segs as list of bytes) {
-    if (len($segs) == 0) {
-        def empty as bytes;
-        return $empty;
-    }
-    def cur as list of bytes init $segs;
-    while (len($cur) > 1) {
-        def nxt as list of bytes init [];
-        def i as int init 0;
-        def n as int init len($cur);
-        while ($i + 1 < $n) {
-            $nxt[] = binary.concat($cur[$i], $cur[$i + 1]);
-            $i = $i + 2;
-        }
-        if ($i < $n) {
-            $nxt[] = $cur[$i];
-        }
-        $cur = $nxt;
-    }
-    return $cur[0];
-}
-
 # zeroPad left-pads a number with zeros to a fixed width (for xref offsets).
 func zeroPad(value as int, width as int) {
     def s as string init convert.toString($value);
@@ -1598,10 +1608,14 @@ func toUnicodeHex(cp as int) {
 # buildToUnicode builds the ToUnicode CMap stream body mapping each glyph id to
 # its Unicode value, so a viewer can extract / copy the embedded text.
 func buildToUnicode(gids as list of int, m as map of int to int) {
-    def out as string init "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
-        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n" +
-        "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n" +
-        "1 begincodespacerange <0000> <FFFF> endcodespacerange\n";
+    # Chars (each mapping line) collect and join once: growing `out` with `+`
+    # per mapping is O(N^2) over the glyph count of a long document.
+    def lines as list of string init [
+        "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n",
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n",
+        "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n",
+        "1 begincodespacerange <0000> <FFFF> endcodespacerange\n"
+    ];
     def i as int init 0;
     def n as int init len($gids);
     while ($i < $n) {
@@ -1609,17 +1623,18 @@ func buildToUnicode(gids as list of int, m as map of int to int) {
         if ($cnt > 100) {
             $cnt = 100;
         }
-        $out = $out + convert.toString($cnt) + " beginbfchar\n";
+        $lines[] = convert.toString($cnt) + " beginbfchar\n";
         def j as int init 0;
         while ($j < $cnt) {
             def gid as int init $gids[$i + $j];
-            $out = $out + "<" + hexGid($gid) + "> <" + toUnicodeHex($m[$gid]) + ">\n";
+            $lines[] = "<" + hexGid($gid) + "> <" + toUnicodeHex($m[$gid]) + ">\n";
             $j = $j + 1;
         }
-        $out = $out + "endbfchar\n";
+        $lines[] = "endbfchar\n";
         $i = $i + $cnt;
     }
-    return $out + "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+    $lines[] = "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+    return strings.join($lines, "");
 }
 
 # escapePdfString escapes a string for a PDF literal `(...)` string: backslash,
@@ -2189,5 +2204,5 @@ export func render(doc as Document) {
     $segs[] = strChunk(
         "trailer\n<< /Size " + convert.toString($totalObjs + 1) + " /Root 1 0 R" + $trailerInfo +
             " >>\nstartxref\n" + convert.toString($xrefOffset) + "\n%%EOF\n");
-    return joinBytes($segs);
+    return binary.join($segs);
 }

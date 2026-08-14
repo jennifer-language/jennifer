@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * An S3-compatible object-storage client: get / put / delete objects and list a
@@ -109,20 +109,22 @@ func hexNibble(n as int) {
 # object keys keep their slashes) - the AWS canonical-URI rule.
 func uriEncodePath(path as string) {
     def raw as bytes init convert.bytesFromString($path, "utf-8");
-    def out as string init "";
+    # Bytes collect and join once: growing a string with `+` per input byte is
+    # O(N^2) over a long object key.
+    def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
         def b as int init $raw[$i];
         def unreserved as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or
             ($b >= 48 and $b <= 57) or $b == 45 or $b == 46 or $b == 95 or $b == 126 or $b == 47;
         if ($unreserved) {
-            $out = $out + convert.fromCodepoint($b);
+            $out[] = convert.fromCodepoint($b);
         } else {
-            $out = $out + "%" + hexNibble($b // 16) + hexNibble($b % 16);
+            $out[] = "%" + hexNibble($b // 16) + hexNibble($b % 16);
         }
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # hostOf renders the Host header the `http` module will send for this endpoint:
@@ -267,20 +269,20 @@ func sortedKeys(m as map of string to string) {
 # a metadata value with internal double spaces still verifies.
 func canonicalHeaderValue(s as string) {
     def t as string init strings.trim($s);
-    def out as string init "";
+    def out as list of string init [];
     def prevSpace as bool init false;
     for (def ch in strings.chars($t)) {
         if ($ch == " ") {
             if (not $prevSpace) {
-                $out = $out + " ";
+                $out[] = " ";
             }
             $prevSpace = true;
         } else {
-            $out = $out + $ch;
+            $out[] = $ch;
             $prevSpace = false;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # prepareHeaders signs a request whose signed set is the base three headers plus
@@ -864,12 +866,14 @@ export func completeMultipartUpload(
 
 # completeXml renders the CompleteMultipartUpload request body from part ETags.
 func completeXml(etags as list of string) {
-    def parts as string init "";
+    # Part elements collect and join once: growing `parts` with `+` per part is
+    # O(N^2) over a large multipart upload.
+    def parts as list of string init [];
     for (def i as int init 0; $i < len($etags); $i = $i + 1) {
-        $parts = $parts + "<Part><PartNumber>" + convert.toString($i + 1) +
+        $parts[] = "<Part><PartNumber>" + convert.toString($i + 1) +
             "</PartNumber><ETag>" + escapeXml($etags[$i]) + "</ETag></Part>";
     }
-    return "<CompleteMultipartUpload>" + $parts + "</CompleteMultipartUpload>";
+    return "<CompleteMultipartUpload>" + strings.join($parts, "") + "</CompleteMultipartUpload>";
 }
 
 /**

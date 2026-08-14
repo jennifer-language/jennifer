@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A fixed-capacity ring buffer of strings: a bounded FIFO that overwrites the
@@ -63,12 +63,21 @@ export func new(capacity as int) {
  * @return {RingBuffer} the updated buffer
  */
 export func push(rb as RingBuffer, item as string) {
-    def out as RingBuffer init $rb;
-    $out.items = lists.push($out.items, $item);
-    if (len($out.items) > $out.capacity) {
-        $out.items = lists.slice($out.items, 1); # drop the oldest
+    # Full: drop the oldest first, then append to the fresh (already private)
+    # slice - the slice is the only full list copy, and the append below is an
+    # in-place write (amortised O(1)), so a steady-state full buffer pays one
+    # copy per push instead of the two the append-then-trim order would.
+    if (len($rb.items) >= $rb.capacity) {
+        def reduced as list of string init lists.slice($rb.items, 1); # drop the oldest
+        $reduced[] = $item;
+        return RingBuffer{items: $reduced, capacity: $rb.capacity};
     }
-    return $out;
+    # Not full: one copy, then an in-place append (amortised O(1)). The copy is
+    # the value-semantics cost of returning a fresh list; the in-place append
+    # avoids a second one.
+    def grown as list of string init $rb.items;
+    $grown[] = $item;
+    return RingBuffer{items: $grown, capacity: $rb.capacity};
 }
 
 /**
@@ -82,9 +91,10 @@ export func pop(rb as RingBuffer) {
     if (len($rb.items) == 0) {
         fail("pop from an empty ring buffer");
     }
-    def out as RingBuffer init $rb;
-    $out.items = lists.slice($out.items, 1);
-    return $out;
+    # Drop the oldest with one list copy: `lists.slice` already returns a fresh
+    # list, so building the result struct around it avoids the extra whole-list
+    # deep copy that `def out init $rb` (then reassigning items) would pay.
+    return RingBuffer{items: lists.slice($rb.items, 1), capacity: $rb.capacity};
 }
 
 /**

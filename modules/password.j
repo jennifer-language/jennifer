@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Password generation, validation, and complexity scoring against a policy
@@ -210,15 +210,16 @@ export func withoutAmbiguous(s as Schema) {
 # --- character pools (private) ----------------------------------------------
 
 # filterOut returns `s` with every character that appears in `remove` deleted.
+# Kept characters collect and join once (per-char `+` is O(N^2)).
 func filterOut(s as string, remove as string) {
-    def out as string init "";
+    def out as list of string init [];
     def cs as list of string init strings.chars($s);
     for (def ch in $cs) {
         if (not strings.contains($remove, $ch)) {
-            $out = $out + $ch;
+            $out[] = $ch;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # classPool returns the (ambiguity-filtered) character pool for one class.

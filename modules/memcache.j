@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -267,12 +267,12 @@ func storeBytes(
 # has no block. The value is framed by its byte count, so a binary value round-
 # trips exactly and a value containing CRLF is not mis-split.
 func fetchValues(session as Session, verb as string, keys as list of string, withCas as bool) {
-    def cmd as string init $verb;
+    def cmdParts as list of string init [$verb];
     for (def k in $keys) {
         checkKey($k);
-        $cmd = $cmd + " " + $k;
+        $cmdParts[] = $k;
     }
-    writeCmd($session, $cmd + "\r\n");
+    writeCmd($session, strings.join($cmdParts, " ") + "\r\n");
     def items as list of RawItem init [];
     def minParts as int init 4;
     if ($withCas) {

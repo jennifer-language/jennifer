@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Read `.env` configuration files - the `KEY=VALUE` lines that keep secrets and
@@ -143,7 +143,7 @@ func resolveVar(name as string, acc as map of string to string) {
 # impossible. A lone `$` (or `$(` / backtick) is a plain character: there is no
 # command substitution, by design.
 func interpolate(value as string, acc as map of string to string) {
-    def out as string init "";
+    def out as list of string init [];
     def i as int init 0;
     def n as int init len($value);
     while ($i < $n) {
@@ -151,24 +151,24 @@ func interpolate(value as string, acc as map of string to string) {
         if ($ch == "$" and $i + 1 < $n and strings.substring($value, $i + 1, $i + 2) == '{') {
             def close as int init indexOfFrom($value, '}', $i + 2);
             if ($close < 0) {
-                $out = $out + $ch;
+                $out[] = $ch;
                 $i = $i + 1;
                 continue;
             }
             def name as string init strings.substring($value, $i + 2, $close);
             if (validEnvName($name)) {
-                $out = $out + resolveVar($name, $acc);
+                $out[] = resolveVar($name, $acc);
             } else {
                 # Not a valid reference - keep the whole `${...}` literal.
-                $out = $out + strings.substring($value, $i, $close + 1);
+                $out[] = strings.substring($value, $i, $close + 1);
             }
             $i = $close + 1;
             continue;
         }
-        $out = $out + $ch;
+        $out[] = $ch;
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # parseValueInterp turns the (already-trimmed) text after `=` into the value:

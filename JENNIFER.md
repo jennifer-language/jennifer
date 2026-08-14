@@ -119,10 +119,10 @@ function value), `channel of T` (a CSP channel between goroutines).
 - **list** literals: `[1, 2, 3]`, `[]`. Lists are homogeneous (one element
   type).
 - **map** literals: `{"a": 1, "b": 2}`, `{}`. Insertion-ordered.
-- **struct** literals: `Point{ x: 1, y: 2 }` after
+- **struct** literals: `Point{x: 1, y: 2}` after
   `def struct Point { x as int, y as int };`. Every field must be named.
 - **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
-  level. A value is one variant: construct with `Shape.Circle{ r: 2.0 }` or the
+  level. A value is one variant: construct with `Shape.Circle{r: 2.0}` or the
   payload-less `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value
   semantics + equality like structs. `def s as Shape;` (no init) zeroes to the
   **first** variant, payload zeroed. Read the payload only through `match` (no
@@ -239,7 +239,7 @@ is **no fall-through**, and `match` is **not** a `break` target - `break` /
 ```jennifer
 use io;
 try {
-    throw Error{ kind: "bad", message: "nope", file: "", line: 0, col: 0 };
+    throw Error{kind: "bad", message: "nope", file: "", line: 0, col: 0};
 } catch (e) {
     io.printf("%s\n", $e.message);
 }
@@ -316,7 +316,7 @@ def m as map of string to int init {"a": 1};
 $m["a"];           # read (missing key is an error - test with maps.has)
 $m["b"] = 2;       # write
 
-def p as Point init Point{ x: 1, y: 2 };
+def p as Point init Point{x: 1, y: 2};
 $p.x;              # field read
 $p.x = 5;          # field write
 
@@ -1662,8 +1662,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `bloom.serialize(f) -> bytes` / `deserialize(b) -> Filter` round-trip a filter, and
   `bloom.union(a, b)` / `merge` combine two same-shape filters. Bits are
   packed into `bytes`; the k positions per item come from double-hashing one SHA-256
-  digest (`pos_i = (h1 + i*h2) mod size`). Strings only. Over `hash` + `bytes`;
-  **both binaries**.
+  digest (`pos_i = (h1 + i*h2) mod size`). Strings only. Over `hash` + `strings` +
+  `binary`; **both binaries**.
 - **`ringbuffer`** - a fixed-capacity ring buffer of strings (bounded FIFO,
   overwrite-oldest when full). `ringbuffer.new(capacity) -> RingBuffer`;
   `ringbuffer.push(rb, item)` appends (dropping the oldest at capacity),
@@ -1717,12 +1717,12 @@ Structs, a list, and JSON:
 use io;
 use json;
 
-def struct User { name as string, age as int };
+def struct User {
+    name as string,
+    age as int
+};
 
-def users as list of User init [
-    User{ name: "ada", age: 36 },
-    User{ name: "bob", age: 41 },
-];
+def users as list of User init [User{name: "ada", age: 36}, User{name: "bob", age: 41}];
 
 for (def u in $users) {
     io.printf("%s is %d\n", $u.name, $u.age);

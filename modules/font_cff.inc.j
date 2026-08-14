@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 #
 # font_cff.j - the CFF (Compact Font Format) / Type2 charstring backend for the
 # font module, included (textual splice) into font.j. It parses the `CFF ` table
@@ -762,20 +762,20 @@ func cffGlyphPath(f as Font, gid as int) {
     def parts as list of string init [];
     for (def c as int init 0; $c < len($contours); $c = $c + 1) {
         def cmds as list of list of int init $contours[$c];
-        def d as string init "";
+        def segs as list of string init [];
         for (def i as int init 0; $i < len($cmds); $i = $i + 1) {
             def cmd as list of int init $cmds[$i];
             if ($cmd[0] == 0) {
-                $d = "M " + num($cmd[1]) + " " + num($cmd[2]);
+                $segs = ["M " + num($cmd[1]) + " " + num($cmd[2])];
             } elseif ($cmd[0] == 1) {
-                $d = $d + " L " + num($cmd[1]) + " " + num($cmd[2]);
+                $segs[] = "L " + num($cmd[1]) + " " + num($cmd[2]);
             } else {
-                $d = $d + " C " + num($cmd[1]) + " " + num($cmd[2]) + " " + num($cmd[3]) + " " +
+                $segs[] = "C " + num($cmd[1]) + " " + num($cmd[2]) + " " + num($cmd[3]) + " " +
                     num($cmd[4]) + " " + num($cmd[5]) + " " + num($cmd[6]);
             }
         }
-        if (len($d) > 0) {
-            $parts[] = $d + " Z";
+        if (len($segs) > 0) {
+            $parts[] = strings.join($segs, " ") + " Z";
         }
     }
     return strings.join($parts, " ");

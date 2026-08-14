@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: sql
 
 /**
@@ -47,6 +47,7 @@ use sql;
 use strings;
 use convert;
 use maps;
+use regex;
 
 # The per-statement placeholder ceiling. PostgreSQL caps a statement at 65535
 # parameters; 60000 stays safely under it for both dialects. `insertMany` splits a
@@ -339,52 +340,20 @@ func fail(message as string) {
     throw Error{kind: "orm", message: "orm: " + $message, file: "", line: 0, col: 0};
 }
 
-# validIdentSegment reports whether s is one bare SQL identifier: a letter or `_`
-# followed by letters, digits, or `_`. ASCII only (identifiers are).
-func validIdentSegment(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or $b == 95;
-        def digit as bool init $b >= 48 and $b <= 57;
-        if ($i == 0) {
-            if (not $alpha) {
-                return false;
-            }
-        } else {
-            if (not ($alpha or $digit)) {
-                return false;
-            }
-        }
-        $i = $i + 1;
-    }
-    return true;
-}
-
 # checkIdent validates a column / table identifier, optionally qualified as
 # `table.col`, and throws otherwise. Identifiers reach the SQL text
 # unparameterized - only `value`s bind through placeholders - so this is the
-# injection guard for every non-value token (OM-002).
+# injection guard for every non-value token. One RE2 match covers the
+# bare or `seg.seg` shape.
 func checkIdent(name as string, what as string) {
-    def parts as list of string init strings.split($name, ".");
-    if (len($parts) < 1 or len($parts) > 2) {
+    if (not regex.matches('^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$', $name)) {
         fail($what + " must be a bare or `table.col` identifier, got: " + $name);
-    }
-    for (def p in $parts) {
-        if (not validIdentSegment($p)) {
-            fail($what + " must be a SQL identifier (letter/`_`, then letters/digits/`_`), got: " +
-                $name);
-        }
     }
 }
 
 # checkOp maps a comparison operator through an allowlist to its canonical form,
 # throwing on anything else - the operator is interpolated raw, so it must be a
-# known operator, not caller-controlled free text (OM-002). IN / IS are omitted
+# known operator, not caller-controlled free text. IN / IS are omitted
 # because they do not fit the module's single-bound-value-per-condition shape.
 func checkOp(op as string) {
     def norm as string init strings.upper(strings.trim($op));
@@ -1285,26 +1254,28 @@ export func toSql(q as Query) {
         $prefix = "SELECT DISTINCT ";
     }
     def stmt as string init $prefix + renderSelects($q) + " FROM " + $q.table;
+    def jparts as list of string init [];
     for (def j in $q.joins) {
-        $stmt = $stmt + " " + $j.kind + " JOIN " + $j.table + " ON " + $j.leftCol + " = " +
+        $jparts[] = " " + $j.kind + " JOIN " + $j.table + " ON " + $j.leftCol + " = " +
             $j.rightCol;
     }
-    $stmt = $stmt + renderWhereClause($q, 1);
+    $stmt = $stmt + strings.join($jparts, "") + renderWhereClause($q, 1);
     if (len($q.groups) > 0) {
         $stmt = $stmt + " GROUP BY " + strings.join($q.groups, ", ");
     }
     if (len($q.havings) > 0) {
         # HAVING placeholders continue after the WHERE ones.
         def n as int init 1 + len($q.params);
-        $stmt = $stmt + " HAVING ";
+        def hparts as list of string init [];
         for (def i as int init 0; $i < len($q.havings); $i = $i + 1) {
             def h as Having init $q.havings[$i];
             if ($i > 0) {
-                $stmt = $stmt + " " + $h.connector + " ";
+                $hparts[] = " " + $h.connector + " ";
             }
-            $stmt = $stmt + $h.func + "(" + $h.column + ") " + $h.op + " " + ph($q.dialect, $n);
+            $hparts[] = $h.func + "(" + $h.column + ") " + $h.op + " " + ph($q.dialect, $n);
             $n = $n + 1;
         }
+        $stmt = $stmt + " HAVING " + strings.join($hparts, "");
     }
     if (len($q.orders) > 0) {
         def terms as list of string init [];
@@ -1478,13 +1449,11 @@ func renderColumnDef(c as Column, dialect as Dialect) {
  */
 export func createTable(s as Schema) {
     validateSchema($s);
-    def cols as string init "";
+    def colDefs as list of string init [];
     for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
-        if ($i > 0) {
-            $cols = $cols + ", ";
-        }
-        $cols = $cols + renderColumnDef($s.columns[$i], $s.dialect);
+        $colDefs[] = renderColumnDef($s.columns[$i], $s.dialect);
     }
+    def cols as string init strings.join($colDefs, ", ");
     return "CREATE TABLE " + $s.table + " (" + $cols + ", PRIMARY KEY (" + $s.primaryKey + "))";
 }
 
@@ -1633,25 +1602,22 @@ export func dropForeignKey(table as string, name as string, dialect as Dialect) 
 # buildInsert renders an INSERT for the columns present in the record.
 func buildInsert(s as Schema, record as map of string to string) {
     validateSchema($s);
-    def cols as string init "";
-    def phs as string init "";
+    def colNames as list of string init [];
+    def phList as list of string init [];
     def params as list of string init [];
     def n as int init 1;
     for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
         def name as string init $s.columns[$i].name;
         if (maps.has($record, $name)) {
-            if (len($params) > 0) {
-                $cols = $cols + ", ";
-                $phs = $phs + ", ";
-            }
-            $cols = $cols + $name;
-            $phs = $phs + ph($s.dialect, $n);
+            $colNames[] = $name;
+            $phList[] = ph($s.dialect, $n);
             $n = $n + 1;
             $params[] = $record[$name];
         }
     }
     return Rendered{
-        sql: "INSERT INTO " + $s.table + " (" + $cols + ") VALUES (" + $phs + ")",
+        sql: "INSERT INTO " + $s.table + " (" + strings.join($colNames, ", ") +
+            ") VALUES (" + strings.join($phList, ", ") + ")",
         params: $params
     };
 }
@@ -1708,6 +1674,19 @@ func presentColumns(s as Schema, record as map of string to string) {
         }
     }
     return $out;
+}
+
+# countPresentColumns is presentColumns' count-only sibling: the number of schema
+# columns the record sets, without building (and throwing away) the name list -
+# for the per-record "same columns" guard in a batch insert.
+func countPresentColumns(s as Schema, record as map of string to string) {
+    def c as int init 0;
+    for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
+        if (maps.has($record, $s.columns[$i].name)) {
+            $c = $c + 1;
+        }
+    }
+    return $c;
 }
 
 # buildUpsert renders an insert-or-update: Postgres `ON CONFLICT (...) DO UPDATE`,
@@ -1883,7 +1862,7 @@ func buildInsertManyChunk(s as Schema, cols as list of string, records as list o
         }
         # Reject a record that sets *extra* schema columns beyond the first record's
         # set - otherwise those columns would be silently dropped.
-        if (len(presentColumns($s, $rec)) != len($cols)) {
+        if (countPresentColumns($s, $rec) != len($cols)) {
             fail("insertMany: every record must set the same columns (a later record sets extra columns)");
         }
         $rowGroups[] = "(" + strings.join($phs, ", ") + ")";
@@ -1896,16 +1875,27 @@ func buildInsertManyChunk(s as Schema, cols as list of string, records as list o
 # ---- row mapping ----
 
 # mapRow reads the current cursor row into a map of column name to string value
-# (a NULL column becomes the empty string).
+# (a NULL column becomes the empty string). The column list is fetched once per
+# call - `sql.columns` is O(ncols) and only valid before the first `sql.next`.
 func mapRow(rows as sql.Rows) {
+    return mapRowCols($rows, sql.columns($rows));
+}
+
+# mapRowCols is `mapRow` against an already-fetched column list so `orm.all` can
+# hoist the `sql.columns` call out of the row loop. Accessing columns by 0-based
+# index avoids the per-access name scan the string form does (sql.md: "column of
+# the current row by name (string) or 0-based index (int)").
+func mapRowCols(rows as sql.Rows, cols as list of string) {
     def out as map of string to string init {};
-    def cols as list of string init sql.columns($rows);
-    for (def i as int init 0; $i < len($cols); $i = $i + 1) {
-        if (sql.isNull($rows, $cols[$i])) {
+    def n as int init len($cols);
+    def i as int init 0;
+    while ($i < $n) {
+        if (sql.isNull($rows, $i)) {
             $out[$cols[$i]] = "";
         } else {
-            $out[$cols[$i]] = sql.asString($rows, $cols[$i]);
+            $out[$cols[$i]] = sql.asString($rows, $i);
         }
+        $i = $i + 1;
     }
     return $out;
 }
@@ -1985,12 +1975,13 @@ export func all(session as Session, q as Query) {
     def r as Rendered init toSql($q);
     def rows as sql.Rows init sessQuery($session, $r.sql, $r.params);
     defer sql.closeRows($rows);
+    def cols as list of string init sql.columns($rows);
     def out as list of map of string to string init [];
     repeat {
         if (not sql.next($rows)) {
             break;
         }
-        $out[] = mapRow($rows);
+        $out[] = mapRowCols($rows, $cols);
     } until (false);
     return $out;
 }
@@ -2080,17 +2071,50 @@ func distinctKeys(rows as list of map of string to string, col as string) {
 
 # groupRows indexes rows by a column value -> the list of rows with that value.
 func groupRows(rows as list of map of string to string, col as string) {
-    def out as map of string to list of map of string to string init {};
+    # Bucket-and-fill in O(N). Appending into a map-value list (`$out[$k]`) would
+    # deep-copy the whole group on every row - O(group^2), so a skewed key (one
+    # parent, thousands of children) hangs. Instead: number the keys, pre-size a
+    # bucket per key, place each row with a chained index-write (which mutates in
+    # place, unlike the unsupported chained append `$buckets[i][] = r`), then commit
+    # each bucket to the map once. Key order is first-occurrence; within-group order
+    # is input order.
+    def idx as map of string to int init {};
+    def order as list of string init [];
+    def sizes as list of int init [];
     for (def r in $rows) {
         def k as string init $r[$col];
-        if (maps.has($out, $k)) {
-            def cur as list of map of string to string init $out[$k];
-            $cur[] = $r;
-            $out[$k] = $cur;
+        if (maps.has($idx, $k)) {
+            $sizes[$idx[$k]] = $sizes[$idx[$k]] + 1;
         } else {
-            def fresh as list of map of string to string init [$r];
-            $out[$k] = $fresh;
+            $idx[$k] = len($order);
+            $order[] = $k;
+            $sizes[] = 1;
         }
+    }
+    def buckets as list of list of map of string to string init [];
+    def fill as list of int init [];
+    def g as int init 0;
+    while ($g < len($order)) {
+        def bucket as list of map of string to string init [];
+        def j as int init 0;
+        while ($j < $sizes[$g]) {
+            $bucket[] = {};
+            $j = $j + 1;
+        }
+        $buckets[] = $bucket;
+        $fill[] = 0;
+        $g = $g + 1;
+    }
+    for (def r in $rows) {
+        def gi as int init $idx[$r[$col]];
+        $buckets[$gi][$fill[$gi]] = $r;
+        $fill[$gi] = $fill[$gi] + 1;
+    }
+    def out as map of string to list of map of string to string init {};
+    def gc as int init 0;
+    while ($gc < len($order)) {
+        $out[$order[$gc]] = $buckets[$gc];
+        $gc = $gc + 1;
     }
     return $out;
 }

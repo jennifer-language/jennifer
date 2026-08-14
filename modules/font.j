@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled SFNT font parser: its glyph decoder legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -1030,7 +1030,9 @@ func contourPath(pts as list of Point) {
         }
         $seq[] = $pts[$startIdx];
     }
-    def d as string init "M " + num($seq[0].x) + " " + num($seq[0].y);
+    # Segments collect and join once: growing `d` with `+` per contour point is
+    # O(N^2) over a long glyph outline.
+    def segs as list of string init ["M " + num($seq[0].x) + " " + num($seq[0].y)];
     def i as int init 1;
     def m as int init len($seq);
     repeat {
@@ -1038,25 +1040,25 @@ func contourPath(pts as list of Point) {
             break;
         }
         if ($seq[$i].onCurve) {
-            $d = $d + " L " + num($seq[$i].x) + " " + num($seq[$i].y);
+            $segs[] = " L " + num($seq[$i].x) + " " + num($seq[$i].y);
             $i = $i + 1;
         } else {
             def cx as int init $seq[$i].x;
             def cy as int init $seq[$i].y;
             if ($i + 1 < $m and $seq[$i + 1].onCurve) {
-                $d = $d + " Q " + num($cx) + " " + num($cy) + " " + num($seq[$i + 1].x) + " " + num($seq[$i + 1].y);
+                $segs[] = " Q " + num($cx) + " " + num($cy) + " " + num($seq[$i + 1].x) + " " + num($seq[$i + 1].y);
                 $i = $i + 2;
             } else {
                 # two consecutive off-curve points: the implied on-curve point is
                 # their midpoint.
                 def midx as int init ($cx + $seq[$i + 1].x) // 2;
                 def midy as int init ($cy + $seq[$i + 1].y) // 2;
-                $d = $d + " Q " + num($cx) + " " + num($cy) + " " + num($midx) + " " + num($midy);
+                $segs[] = " Q " + num($cx) + " " + num($cy) + " " + num($midx) + " " + num($midy);
                 $i = $i + 1;
             }
         }
     } until (false);
-    return $d + " Z";
+    return strings.join($segs, "") + " Z";
 }
 
 # ---- name ----

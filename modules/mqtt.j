@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -129,12 +129,7 @@ def struct DecodedLen {
 
 # appendBytes copies every byte of src onto dst and returns dst.
 func appendBytes(dst as bytes, src as bytes) {
-    def i as int init 0;
-    while ($i < len($src)) {
-        $dst[] = $src[$i];
-        $i = $i + 1;
-    }
-    return $dst;
+    return binary.concat($dst, $src);
 }
 
 # sliceBytes returns src[start:end] as a fresh bytes value.

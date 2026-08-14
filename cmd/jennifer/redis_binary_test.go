@@ -260,3 +260,67 @@ redis.quit($s);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j")
 		t.Fatalf("redis binary/typed program failed with code %d", code)
 	}
 }
+
+// TestRedisLargeBinaryValue exercises readBulkReply's framed read and
+// encodeCommandBytes's assembly with a value far larger than one 4096-byte
+// socket read: the reply spans several reads, so the header arrives with the
+// first chunk of payload as "overshoot" and the remainder is pulled by count
+// (net.readN). The blob is a deterministic byte pattern that includes embedded
+// CR (13), LF (10), NUL (0), and 0xFF across the chunk boundaries, so a
+// byte-exact round trip proves the value is framed by count, not by scanning.
+func TestRedisLargeBinaryValue(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	go fakeRedisTyped(ln)
+
+	redisMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "redis.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	// The .j side builds the same pattern the assertions below check:
+	// byte i == (i * 7 + 13) % 256, for i in [0, 20000).
+	prog := fmt.Sprintf(`use testing;
+import %q as redis;
+import %q as transport;
+def o as redis.Options init redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "", password: "", db: 0};
+def s as redis.Session init redis.connect($o);
+
+def blob as bytes;
+def i as int init 0;
+while ($i < 20000) {
+    $blob[] = ($i * 7 + 13) %% 256;
+    $i = $i + 1;
+}
+redis.setBytes($s, "big", $blob);
+def got as bytes init redis.getBytes($s, "big");
+testing.assertEqual(len($got), 20000);
+# spot-check across the 4096-byte read boundaries and at the ends
+testing.assertEqual($got[0], 13);
+testing.assertEqual($got[4095], (4095 * 7 + 13) %% 256);
+testing.assertEqual($got[4096], (4096 * 7 + 13) %% 256);
+testing.assertEqual($got[8192], (8192 * 7 + 13) %% 256);
+testing.assertEqual($got[19999], (19999 * 7 + 13) %% 256);
+# full byte-exact verification
+def bad as int init 0;
+def j as int init 0;
+while ($j < 20000) {
+    if ($got[$j] != ($j * 7 + 13) %% 256) {
+        $bad = $bad + 1;
+    }
+    $j = $j + 1;
+}
+testing.assertEqual($bad, 0);
+redis.quit($s);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j"), port)
+	progPath := filepath.Join(dir, "large.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("redis large-binary program failed with code %d", code)
+	}
+}

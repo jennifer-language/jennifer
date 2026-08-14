@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A Bloom filter: a compact, probabilistic set. `add` records a string;
@@ -12,8 +12,8 @@
  * positions.
  *
  * Value-semantic: `add` returns a fresh filter (the bit array is copied), so
- * chain adds (`$f = bloom.add($f, x)`). Over `hash` + `bytes`; runs on both
- * binaries.
+ * chain adds (`$f = bloom.add($f, x)`). Over `hash` + `strings` + `binary`;
+ * runs on both binaries.
  * @module bloom
  * @example
  * import "bloom.j" as bloom;
@@ -26,6 +26,8 @@
 use hash;
 use convert;
 use math;
+use strings;
+use binary;
 
 # The math library ships no natural log, so the optimal-sizing math below uses
 # this local ln. LN2 is the natural log of 2, used both as the reduction step
@@ -91,27 +93,6 @@ func readLong(buf as bytes, off as int) {
     return ($buf[$off] << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off + 3];
 }
 
-# positions returns the k bit positions for an item via double hashing.
-func positions(item as string, size as int, hashes as int) {
-    def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
-    def h as int init readLong($digest, 0);
-    def g as int init readLong($digest, 4);
-    # Guard the double-hash step: if g is 0 (mod size) every position collapses
-    # to the same bit, degrading the filter to a single hash. Force a non-zero
-    # step (Kirsch-Mitzenmacher).
-    def step as int init $g % $size;
-    if ($step == 0) {
-        $step = 1;
-    }
-    def out as list of int init [];
-    def i as int init 0;
-    while ($i < $hashes) {
-        $out[] = ($h + $i * $step) % $size;
-        $i = $i + 1;
-    }
-    return $out;
-}
-
 /**
  * Create an empty filter with `size` bits and `hashes` hash functions (k).
  * @param size {int} the number of bits (must be >= 1)
@@ -124,18 +105,16 @@ export func new(size as int, hashes as int) {
         fail("size must be >= 1");
     }
     if ($size > MAX_SIZE) {
-        fail("size " + convert.toString($size) + " exceeds the maximum of " + convert.toString(MAX_SIZE));
+        fail("size " + convert.toString($size) + " exceeds the maximum of " +
+            convert.toString(MAX_SIZE));
     }
     if ($hashes < 1) {
         fail("hashes must be >= 1");
     }
-    def bits as bytes;
     def nbytes as int init ($size + 7) // 8;
-    def i as int init 0;
-    while ($i < $nbytes) {
-        $bits[] = 0;
-        $i = $i + 1;
-    }
+    # A zero run from strings.repeat encodes to nbytes NUL bytes in two Go
+    # calls - a per-byte append loop allocates byte by byte instead.
+    def bits as bytes init convert.bytesFromString(strings.repeat("\u0000", $nbytes), "utf-8");
     return Filter{bits: $bits, size: $size, hashes: $hashes};
 }
 
@@ -147,11 +126,25 @@ export func new(size as int, hashes as int) {
  */
 export func add(f as Filter, item as string) {
     def out as Filter init $f;
-    def ps as list of int init positions($item, $f.size, $f.hashes);
-    for (def pos in $ps) {
+    def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
+    def h as int init readLong($digest, 0);
+    def g as int init readLong($digest, 4);
+    # Guard the double-hash step: if g is 0 (mod size) every position collapses
+    # to the same bit, degrading the filter to a single hash. Force a non-zero
+    # step (Kirsch-Mitzenmacher).
+    def step as int init $g % $out.size;
+    if ($step == 0) {
+        $step = 1;
+    }
+    # One fused loop computes each position and sets it directly - no
+    # intermediate list to build and walk.
+    def i as int init 0;
+    while ($i < $out.hashes) {
+        def pos as int init ($h + $i * $step) % $out.size;
         def bi as int init $pos // 8;
         def bit as int init $pos % 8;
         $out.bits[$bi] = $out.bits[$bi] | (1 << $bit);
+        $i = $i + 1;
     }
     return $out;
 }
@@ -165,14 +158,27 @@ export func add(f as Filter, item as string) {
 export func addAll(f as Filter, items as list of string) {
     # One copy of the filter, then set bits directly per item: calling `add`
     # per item would deep-copy the whole bit array on every item (O(items x
-    # size)).
+    # size)). Each item's k positions are computed and set in one fused loop -
+    # no intermediate list to build and walk.
     def out as Filter init $f;
     for (def item in $items) {
-        def ps as list of int init positions($item, $out.size, $out.hashes);
-        for (def pos in $ps) {
+        def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
+        def h as int init readLong($digest, 0);
+        def g as int init readLong($digest, 4);
+        # Guard the double-hash step: if g is 0 (mod size) every position
+        # collapses to the same bit, degrading the filter to a single hash.
+        # Force a non-zero step (Kirsch-Mitzenmacher).
+        def step as int init $g % $out.size;
+        if ($step == 0) {
+            $step = 1;
+        }
+        def i as int init 0;
+        while ($i < $out.hashes) {
+            def pos as int init ($h + $i * $step) % $out.size;
             def bi as int init $pos // 8;
             def bit as int init $pos % 8;
             $out.bits[$bi] = $out.bits[$bi] | (1 << $bit);
+            $i = $i + 1;
         }
     }
     return $out;
@@ -186,13 +192,26 @@ export func addAll(f as Filter, items as list of string) {
  * @return {bool} true if the item might be present, false if it is definitely absent
  */
 export func mightContain(f as Filter, item as string) {
-    def ps as list of int init positions($item, $f.size, $f.hashes);
-    for (def pos in $ps) {
+    def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
+    def h as int init readLong($digest, 0);
+    def g as int init readLong($digest, 4);
+    # Guard the double-hash step: if g is 0 (mod size) every position collapses
+    # to the same bit, degrading the filter to a single hash. Force a non-zero
+    # step (Kirsch-Mitzenmacher).
+    def step as int init $g % $f.size;
+    if ($step == 0) {
+        $step = 1;
+    }
+    # One fused loop checks each position and bails on the first unset bit.
+    def i as int init 0;
+    while ($i < $f.hashes) {
+        def pos as int init ($h + $i * $step) % $f.size;
         def bi as int init $pos // 8;
         def bit as int init $pos % 8;
         if ((($f.bits[$bi] >> $bit) & 1) == 0) {
             return false;
         }
+        $i = $i + 1;
     }
     return true;
 }
@@ -239,21 +258,18 @@ export func serialize(f as Filter) {
     if ($f.size > 4294967295 or $f.hashes > 4294967295) {
         fail("filter is too large to serialize (size / hashes exceed 32 bits)");
     }
-    def out as bytes;
-    $out[] = ($f.size >> 24) & 0xff;
-    $out[] = ($f.size >> 16) & 0xff;
-    $out[] = ($f.size >> 8) & 0xff;
-    $out[] = $f.size & 0xff;
-    $out[] = ($f.hashes >> 24) & 0xff;
-    $out[] = ($f.hashes >> 16) & 0xff;
-    $out[] = ($f.hashes >> 8) & 0xff;
-    $out[] = $f.hashes & 0xff;
-    def i as int init 0;
-    while ($i < len($f.bits)) {
-        $out[] = $f.bits[$i];
-        $i = $i + 1;
-    }
-    return $out;
+    def hdr as bytes;
+    $hdr[] = ($f.size >> 24) & 0xff;
+    $hdr[] = ($f.size >> 16) & 0xff;
+    $hdr[] = ($f.size >> 8) & 0xff;
+    $hdr[] = $f.size & 0xff;
+    $hdr[] = ($f.hashes >> 24) & 0xff;
+    $hdr[] = ($f.hashes >> 16) & 0xff;
+    $hdr[] = ($f.hashes >> 8) & 0xff;
+    $hdr[] = $f.hashes & 0xff;
+    # One Go-side copy appends the bit array to the header - bulk, not a
+    # per-byte loop.
+    return binary.concat($hdr, $f.bits);
 }
 
 /**
@@ -283,12 +299,9 @@ export func deserialize(b as bytes) {
     if (len($b) != 8 + $expected) {
         fail("serialized filter length does not match its declared size");
     }
-    def bits as bytes;
-    def i as int init 0;
-    while ($i < $expected) {
-        $bits[] = $b[8 + $i];
-        $i = $i + 1;
-    }
+    # One Go-side slice copies the payload out of the blob - bulk, not a
+    # per-byte loop.
+    def bits as bytes init binary.slice($b, 8, len($b));
     return Filter{bits: $bits, size: $size, hashes: $hashes};
 }
 

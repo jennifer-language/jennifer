@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * An LDAP v3 client and a lightweight, read-only directory server (RFC 4511),
@@ -266,8 +266,9 @@ func compareStr(a as string, b as string) {
  * @return {list of string} the attribute's values, or an empty list if absent
  */
 export func values(entry as Entry, name as string) {
+    def lname as string init strings.lower($name);
     for (def a in $entry.attributes) {
-        if (strings.lower($a.name) == strings.lower($name)) {
+        if (strings.lower($a.name) == $lname) {
             return $a.values;
         }
     }
@@ -1315,8 +1316,9 @@ export func setAttribute(dir as Directory, dn as string, name as string, vals as
     }
     def attrs as list of Attribute;
     def found as bool init false;
+    def lname as string init strings.lower($name);
     for (def a in $e.attributes) {
-        if (strings.lower($a.name) == strings.lower($name)) {
+        if (strings.lower($a.name) == $lname) {
             $attrs[] = Attribute{name: $name, values: $vals};
             $found = true;
         } else {
@@ -1783,12 +1785,10 @@ func matchSubstrings(f as asn1.Value, e as Entry) {
         }
         $i = $i + 1;
     }
+    def linitial as string init strings.lower($initial);
+    def lfinal as string init strings.lower($final);
     for (def v in values($e, $name)) {
-        if (substrMatch(
-            strings.lower($v),
-            strings.lower($initial),
-            $anyParts,
-            strings.lower($final))) {
+        if (substrMatch(strings.lower($v), $linitial, $anyParts, $lfinal)) {
             return true;
         }
     }
@@ -1853,7 +1853,8 @@ func encodeSearchEntry(id as int, e as Entry, reqAttrs as list of string) {
 }
 
 func attrRequested(name as string, reqAttrs as list of string) {
-    def isPw as bool init strings.lower($name) == "userpassword";
+    def lname as string init strings.lower($name);
+    def isPw as bool init $lname == "userpassword";
     if (len($reqAttrs) == 0) {
         return not $isPw;
     }
@@ -1862,7 +1863,7 @@ func attrRequested(name as string, reqAttrs as list of string) {
         if ($rl == "*" and not $isPw) {
             return true;
         }
-        if ($rl == strings.lower($name)) {
+        if ($rl == $lname) {
             return true;
         }
     }

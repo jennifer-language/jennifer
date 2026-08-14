@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A Prometheus metrics module in two halves. **Exposition** builds a metric set
@@ -597,7 +597,7 @@ export func render(metrics as list of Metric) {
  * @throws {Error} kind "prometheus" when a grouping label name is invalid
  */
 export func pushgatewayPath(job as string, grouping as map of string to string) {
-    def out as string init "/metrics/job/" + uri.encode($job);
+    def parts as list of string init ["/metrics/job/" + uri.encode($job)];
     def keys as list of string init lists.sort(maps.keys($grouping));
     for (def k in $keys) {
         if (not isValidLabelName($k)) {
@@ -609,9 +609,9 @@ export func pushgatewayPath(job as string, grouping as map of string to string) 
                 col: 0
             };
         }
-        $out = $out + "/" + $k + "/" + uri.encode($grouping[$k]);
+        $parts[] = "/" + $k + "/" + uri.encode($grouping[$k]);
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # --- retrieval (exported; needs the default binary via http) ----------------

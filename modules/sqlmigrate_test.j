@@ -21,23 +21,17 @@ func testValidVersion() {
     testing.assertEqual(validVersion("quote'd"), false);
 }
 
-func testStrLess() {
-    testing.assertEqual(strLess("001", "002"), true);
-    testing.assertEqual(strLess("002", "001"), false);
-    testing.assertEqual(strLess("001", "001"), false);
-    testing.assertEqual(strLess("a", "ab"), true);
-    # lexical, not numeric: "10" sorts before "9" (documented - zero-pad versions)
-    testing.assertEqual(strLess("10", "9"), true);
-}
-
 func testSortMigrations() {
     def a as Migration init Migration{version: "002", description: "b", up: [], down: []};
     def b as Migration init Migration{version: "001", description: "a", up: [], down: []};
     def c as Migration init Migration{version: "010", description: "c", up: [], down: []};
-    def sorted as list of Migration init sortMigrations([$a, $b, $c]);
+    def d as Migration init Migration{version: "9", description: "d", up: [], down: []};
+    def sorted as list of Migration init sortMigrations([$a, $b, $c, $d]);
+    # lexical, not numeric: "10" sorts before "9" (documented - zero-pad versions)
     testing.assertEqual($sorted[0].version, "001");
     testing.assertEqual($sorted[1].version, "002");
     testing.assertEqual($sorted[2].version, "010");
+    testing.assertEqual($sorted[3].version, "9");
     # sorting is stable / non-mutating: the input is untouched.
     testing.assertEqual($a.version, "002");
 }

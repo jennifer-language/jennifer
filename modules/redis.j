@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -23,6 +23,7 @@
  */
 use net;
 use binary;
+use strings;
 use convert;
 import "./transport.j" as transport;
 
@@ -177,14 +178,17 @@ func incomplete() {
 # --- RESP encode / decode (private, unit-tested) -------------------
 
 # encodeCommand renders a command's arguments as a RESP array of bulk strings.
-# Bulk lengths are byte counts.
+# Bulk lengths are byte counts. Each argument's piece is appended to a list and
+# joined once, so a command with many arguments (a wide MSET / RPUSH / SADD)
+# stays linear instead of re-copying the growing accumulator per argument.
 func encodeCommand(args as list of string) {
-    def out as string init "*" + convert.toString(len($args)) + "\r\n";
+    def parts as list of string init [];
+    $parts[] = "*" + convert.toString(len($args)) + "\r\n";
     for (def arg in $args) {
         def blen as int init len(convert.bytesFromString($arg, "utf-8"));
-        $out = $out + "$" + convert.toString($blen) + "\r\n" + $arg + "\r\n";
+        $parts[] = "$" + convert.toString($blen) + "\r\n" + $arg + "\r\n";
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # parseBulkAt parses a `$`-length bulk string in `buf` starting at `pos` (just
@@ -285,12 +289,14 @@ func publishArgs(channel as string, message as string) {
 
 # encodePipeline renders several commands into one back-to-back RESP payload, so
 # a pipeline is a single write followed by N reads (one network round trip).
+# Command payloads are appended in place and joined once, so a long pipeline
+# stays linear instead of re-copying the accumulated payload per command.
 func encodePipeline(commands as list of list of string) {
-    def out as string init "";
+    def parts as list of string init [];
     for (def cmd in $commands) {
-        $out = $out + encodeCommand($cmd);
+        $parts[] = encodeCommand($cmd);
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # emptyBytes returns a fresh zero-length bytes value.
@@ -305,17 +311,17 @@ func emptyBytes() {
 # control framing (`*`, `$`, length headers, CRLF) is ASCII; only the argument
 # payloads carry arbitrary bytes.
 func encodeCommandBytes(args as list of bytes) {
-    def out as bytes init convert.bytesFromString(
-        "*" + convert.toString(len($args)) + "\r\n",
-        "utf-8");
     def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    def parts as list of bytes init [];
+    $parts[] = convert.bytesFromString(
+        "*" + convert.toString(len($args)) + "\r\n", "utf-8");
     for (def arg in $args) {
         def hdr as string init "$" + convert.toString(len($arg)) + "\r\n";
-        $out = binary.concat($out, convert.bytesFromString($hdr, "utf-8"));
-        $out = binary.concat($out, $arg);
-        $out = binary.concat($out, $crlf);
+        $parts[] = convert.bytesFromString($hdr, "utf-8");
+        $parts[] = $arg;
+        $parts[] = $crlf;
     }
-    return $out;
+    return binary.join($parts);
 }
 
 # readBulkReply reads one RESP reply expecting a bulk string (a GET-style reply)
@@ -325,31 +331,12 @@ func encodeCommandBytes(args as list of bytes) {
 # is a byte count, so the payload (which may itself contain CRLF) is framed by
 # count, not by scanning.
 func readBulkReply(conn as net.Conn, timeoutMs as int) {
-    def buf as bytes;
-    while (true) {
-        def nl as int init crlfIndex($buf, 0);
-        if ($nl >= 1) {
-            def typ as int init $buf[0];
-            def header as string init convert.stringFromBytes(byteSlice($buf, 1, $nl), "utf-8");
-            if ($typ == 45) { # '-' error
-                throw Error{kind: "redis", message: $header, file: "", line: 0, col: 0};
-            }
-            if ($typ == 36) { # '$' bulk
-                def n as int init convert.toInt($header);
-                if ($n < 0) {
-                    return emptyBytes(); # nil
-                }
-                def start as int init $nl + 2;
-                if (len($buf) >= $start + $n + 2) {
-                    return byteSlice($buf, $start, $start + $n);
-                }
-                # else: header seen but payload still arriving - read more below
-            } elseif ($typ != 36) {
-                # A '+' simple string or ':' integer reply: return the line's
-                # payload bytes (unusual for a value read, but never decode-throws).
-                return byteSlice($buf, 1, $nl);
-            }
-        }
+    # Read until the reply's header line (the first CRLF) is in hand. The header
+    # is short, so this settles in the first read; any payload bytes read
+    # alongside it are the "overshoot" carried into the framed read below.
+    def head as bytes;
+    def nl as int init -1;
+    while ($nl < 0) {
         if ($timeoutMs > 0) {
             net.setDeadline($conn, $timeoutMs);
         }
@@ -363,10 +350,46 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
                 col: 0
             };
         }
-        $buf = binary.concat($buf, $chunk);
-        capReply(len($buf));
+        $head = binary.concat($head, $chunk);
+        capReply(len($head));
+        $nl = crlfIndex($head, 0);
     }
-    return emptyBytes();
+
+    def typ as int init $head[0];
+    def header as string init convert.stringFromBytes(byteSlice($head, 1, $nl), "utf-8");
+    if ($typ == 45) { # '-' error
+        throw Error{kind: "redis", message: $header, file: "", line: 0, col: 0};
+    }
+    if ($typ != 36) {
+        # A '+' simple string or ':' integer reply: return the line's payload
+        # bytes (unusual for a value read, but never decode-throws).
+        return byteSlice($head, 1, $nl);
+    }
+
+    # '$' bulk string: framed by a byte count, so the payload (which may itself
+    # contain CRLF) is read by count, not by scanning.
+    def n as int init convert.toInt($header);
+    if ($n < 0) {
+        return emptyBytes(); # nil
+    }
+    def start as int init $nl + 2;
+    capReply($start + $n + 2);
+
+    # Payload bytes already read alongside the header, then the exact remainder
+    # in one framed read - so a large value is O(value), not the O(value^2) a
+    # concat-per-chunk accumulation would cost.
+    def have as bytes init byteSlice($head, $start, len($head));
+    def need as int init $n + 2 - len($have);
+    if ($need > 0) {
+        def more as bytes;
+        if ($timeoutMs > 0) {
+            $more = net.readN($conn, $need, $timeoutMs);
+        } else {
+            $more = net.readN($conn, $need);
+        }
+        $have = binary.concat($have, $more);
+    }
+    return byteSlice($have, 0, $n);
 }
 
 # messageFromReply classifies a pushed pub/sub array into a Message. A `message`

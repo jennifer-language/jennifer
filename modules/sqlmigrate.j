@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: sql
 
 /**
@@ -43,6 +43,8 @@ use sql;
 use maps;
 use strings;
 use convert;
+use regex;
+use lists;
 
 # The tracking table: dialect-agnostic (VARCHAR PK + TEXT are accepted by both
 # MySQL and PostgreSQL), so the runner never needs a dialect.
@@ -82,21 +84,10 @@ func fail(message as string) {
 }
 
 # validVersion allowlists a migration version ([A-Za-z0-9._-]); the version is
-# interpolated into the tracking-table SQL, so it must be a safe token.
+# interpolated into the tracking-table SQL, so it must be a safe token. One RE2
+# match does the whole check in Go instead of a per-byte loop.
 func validVersion(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    for (def i as int init 0; $i < len($raw); $i = $i + 1) {
-        def b as int init $raw[$i];
-        def ok as bool init ($b >= 48 and $b <= 57) or ($b >= 65 and $b <= 90) or
-            ($b >= 97 and $b <= 122) or $b == 46 or $b == 95 or $b == 45;
-        if (not $ok) {
-            return false;
-        }
-    }
-    return true;
+    return regex.matches('^[A-Za-z0-9._-]+$', $s);
 }
 
 # escapeLiteral renders s as the body of a single-quoted SQL literal (each `'`
@@ -116,46 +107,16 @@ func escapeLiteral(s as string) {
     return strings.replace($s, "'", "''");
 }
 
-# strLess compares two strings byte-wise (Jennifer's `<` is numeric-only), for
-# lexical migration ordering.
-func strLess(a as string, b as string) {
-    def ba as bytes init convert.bytesFromString($a, "utf-8");
-    def bb as bytes init convert.bytesFromString($b, "utf-8");
-    def n as int init len($ba);
-    if (len($bb) < $n) {
-        $n = len($bb);
-    }
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
-        if ($ba[$i] < $bb[$i]) {
-            return true;
-        }
-        if ($ba[$i] > $bb[$i]) {
-            return false;
-        }
-    }
-    return len($ba) < len($bb);
+# versionKey extracts a migration's sort key for `lists.sortBy`.
+func versionKey(m as Migration) {
+    return $m.version;
 }
 
-# sortMigrations returns the migrations ordered by version ascending (a small
-# insertion sort; migration lists are short).
+# sortMigrations returns the migrations ordered by version ascending (lexical,
+# so "10" sorts after "9" - zero-pad numeric versions). `lists.sortBy` extracts
+# the key once per migration and sorts stably in Go, non-mutating.
 func sortMigrations(migrations as list of Migration) {
-    def out as list of Migration init [];
-    for (def m in $migrations) {
-        def next as list of Migration init [];
-        def inserted as bool init false;
-        for (def x in $out) {
-            if ((not $inserted) and strLess($m.version, $x.version)) {
-                $next[] = $m;
-                $inserted = true;
-            }
-            $next[] = $x;
-        }
-        if (not $inserted) {
-            $next[] = $m;
-        }
-        $out = $next;
-    }
-    return $out;
+    return lists.sortBy($migrations, versionKey);
 }
 
 # ensureTable creates the tracking table if absent.

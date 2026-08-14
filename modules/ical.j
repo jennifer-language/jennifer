@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled iCalendar parser: its parse dispatch legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -512,9 +512,11 @@ func attendeeName(a as Attendee) {
     return $s;
 }
 
-# encodeEvent appends one VEVENT (with recurrence / organizer / attendees /
-# alarms) to `lines`, returning the extended list.
-func encodeEvent(lines as list of string, ev as Event) {
+# encodeEvent renders one VEVENT (with recurrence / organizer / attendees /
+# alarms) as a fresh list of lines; `encode` appends them in place, so a
+# calendar with many events is not re-copied per event (O(E^2)).
+func encodeEvent(ev as Event) {
+    def lines as list of string init [];
     $lines[] = "BEGIN:VEVENT";
     $lines[] = emitLine("UID", escapeText($ev.uid));
     $lines[] = emitLine("DTSTAMP", formatDateTime($ev.stamp));
@@ -555,8 +557,9 @@ func encodeEvent(lines as list of string, ev as Event) {
     return $lines;
 }
 
-# encodeTodo appends one VTODO to `lines`, returning the extended list.
-func encodeTodo(lines as list of string, td as Todo) {
+# encodeTodo renders one VTODO as a fresh list of lines.
+func encodeTodo(td as Todo) {
+    def lines as list of string init [];
     $lines[] = "BEGIN:VTODO";
     $lines[] = emitLine("UID", escapeText($td.uid));
     $lines[] = emitLine("DTSTAMP", formatDateTime($td.stamp));
@@ -588,10 +591,16 @@ export func encode(cal as Calendar) {
     $lines[] = "VERSION:2.0";
     $lines[] = emitLine("PRODID", escapeText($cal.prodid));
     for (def ev in $cal.events) {
-        $lines = encodeEvent($lines, $ev);
+        def evl as list of string init encodeEvent($ev);
+        for (def l in $evl) {
+            $lines[] = $l;
+        }
     }
     for (def td in $cal.todos) {
-        $lines = encodeTodo($lines, $td);
+        def tdl as list of string init encodeTodo($td);
+        for (def l in $tdl) {
+            $lines[] = $l;
+        }
     }
     $lines[] = "END:VCALENDAR";
     return strings.join($lines, "\r\n") + "\r\n";

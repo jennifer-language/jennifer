@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -76,18 +76,17 @@ def const TAG as string init "JEN";
 # rejectControl throws if s contains a control byte. RFC 3501's QUOTED-CHAR
 # excludes CR and LF, so a value carrying them cannot be sent as a quoted string
 # at all - unchecked it splits the command line and injects IMAP commands (OM-006).
+# A single RE2 character-class scan replaces a per-rune loop (one call, no char
+# list), and it runs on every command, so this is on the command hot path.
 func rejectControl(s as string, what as string) {
-    for (def c in strings.chars($s)) {
-        def cp as int init convert.toCodepoint($c);
-        if ($cp < 32 or $cp == 127) {
-            throw Error{
-                kind: "imap",
-                message: $what + " contains a control character (IMAP command injection)",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
+    if (regex.matches('[\x00-\x1f\x7f]', $s)) {
+        throw Error{
+            kind: "imap",
+            message: $what + " contains a control character (IMAP command injection)",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return;
 }
@@ -126,16 +125,26 @@ func extractLiteral(response as string) {
     def n as int init convert.toInt($m.groups[0]);
     # `n` is the literal's BYTE count, but the decoded response is a rune string,
     # so a rune-indexed slice would over-read a multi-byte body by (bytes - runes).
-    # Re-encode the tail after the marker and take exactly `n` bytes (a valid
-    # char boundary for a valid-UTF-8 message), so the body is returned byte-exact.
-    def rest as bytes init convert.bytesFromString(
-        strings.substring($response, $m.end, len($response)),
+    # Re-encode the response once and take exactly `n` bytes at the marker's byte
+    # offset (a valid char boundary for a valid-UTF-8 message), so the body is
+    # returned byte-exact. The needle is the exact `{N}\r\n` marker text, so the
+    # first byte-index of it is always the marker itself (the fetch responses
+    # this serves carry it on their first line, before any body byte), and no
+    # per-marker tail copy is needed.
+    def all as bytes init convert.bytesFromString($response, "utf-8");
+    def needle as bytes init convert.bytesFromString(
+        "\{" + convert.toString($n) + "\}\r\n",
         "utf-8");
-    def take as int init $n;
-    if ($take > len($rest)) {
-        $take = len($rest);
+    def at as int init binary.indexOf($all, $needle);
+    if ($at < 0) {
+        return "";
     }
-    return convert.stringFromBytes(byteSlice($rest, 0, $take), "utf-8");
+    def start as int init $at + len($needle);
+    def take as int init $n;
+    if ($take > len($all) - $start) {
+        $take = len($all) - $start;
+    }
+    return convert.stringFromBytes(byteSlice($all, $start, $start + $take), "utf-8");
 }
 
 # parseExists returns the message count from an untagged "* N EXISTS" line.
@@ -166,9 +175,13 @@ func parseSearch(response as string) {
     if (len($line) == 0) {
         return $out;
     }
-    for (def tok in strings.split(strings.trim(strings.substring($line, 8)), " ")) {
-        if (len(strings.trim($tok)) > 0) {
-            $out[] = convert.toInt(strings.trim($tok));
+    # The headers are pre-trimmed once; a token from a single-space split already
+    # carries no surrounding space, so the per-token trim is dropped (double
+    # spaces just yield an empty token the filter skips).
+    def rest as string init strings.trim(strings.substring($line, 8));
+    for (def tok in strings.split($rest, " ")) {
+        if (len($tok) > 0) {
+            $out[] = convert.toInt($tok);
         }
     }
     return $out;
@@ -465,9 +478,7 @@ func authenticate(conn as net.Conn, opts as Options) {
             scramAuth($conn, $opts, $mech);
             return;
         }
-        else {
-            command($conn, "LOGIN " + quoteArg($opts.user) + " " + quoteArg($opts.pass));
-        }
+        else { command($conn, "LOGIN " + quoteArg($opts.user) + " " + quoteArg($opts.pass)); }
     }
 }
 
@@ -540,9 +551,10 @@ func parseListLine(line as string) {
     if ($m.start < 0) {
         return Folder{name: "", delimiter: "", flags: $flags};
     }
-    for (def f in strings.split(strings.trim($m.groups[0]), " ")) {
-        if (len(strings.trim($f)) > 0) {
-            $flags[] = strings.trim($f);
+    def flagList as string init strings.trim($m.groups[0]);
+    for (def f in strings.split($flagList, " ")) {
+        if (len($f) > 0) {
+            $flags[] = $f;
         }
     }
     def delim as string init "";

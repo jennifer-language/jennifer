@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * An InfluxDB client over `http` for both major API generations: write
@@ -183,18 +183,19 @@ export func client2(url as string, org as string, bucket as string, token as str
 # --- line-protocol escaping (private) ---------------------------------------
 
 # escapeChars backslash-escapes every character of `s` that appears in
-# `specials`.
+# `specials`. Characters collect and join once: growing a string with `+` per
+# char is O(N^2) over a long value (a string field value can be a paragraph).
 func escapeChars(s as string, specials as string) {
-    def out as string init "";
+    def out as list of string init [];
     def cs as list of string init strings.chars($s);
     for (def ch in $cs) {
         if (strings.contains($specials, $ch)) {
-            $out = $out + "\\" + $ch;
+            $out[] = "\\" + $ch;
         } else {
-            $out = $out + $ch;
+            $out[] = $ch;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # escapeMeasurement escapes a measurement name (comma and space, not equals).

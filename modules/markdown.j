@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled Markdown parser: its inline scanner legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -33,6 +33,7 @@ use regex;
 use convert;
 use lists;
 use math;
+use encoding;
 
 # The inline span kinds and block kinds, as sum types: the renderers `match` on
 # them, so adding a kind surfaces every place that must handle it (both the HTML
@@ -236,52 +237,6 @@ func isFlankSpace(c as string) {
     return $c == " " or $c == "\t" or $c == "\n" or $c == "\r";
 }
 
-# nextIndexArray returns an int list `nxt` of length len(cs)+1 where nxt[j] is
-# the index of the first `target` at or after j, or len(cs) if there is none.
-# One backward pass, so the inline scanner can resolve "where does this marker
-# close?" in O(1) instead of re-scanning to the end at every position (which
-# made a run of unmatched markers O(N^2)).
-func nextIndexArray(cs as list of string, target as string) {
-    def n as int init len($cs);
-    # One backward pass tracking the nearest target index, appending into a
-    # reversed buffer that is reversed once (a Go-side op) and capped with
-    # nxt[n] = n - so the array is built with no separate size-n init loop.
-    def rev as list of int init [];
-    def last as int init $n;
-    def j as int init $n - 1;
-    while ($j >= 0) {
-        if ($cs[$j] == $target) {
-            $last = $j;
-        }
-        $rev[] = $last;
-        $j = $j - 1;
-    }
-    def nxt as list of int init lists.reverse($rev);
-    $nxt[] = $n;
-    return $nxt;
-}
-
-# nextPairArray is nextIndexArray for a doubled marker: nxt[j] is the first
-# index of a `target target` pair at or after j, or len(cs) if none.
-func nextPairArray(cs as list of string, target as string) {
-    def n as int init len($cs);
-    def rev as list of int init [];
-    def last as int init $n;
-    def j as int init $n - 1;
-    while ($j >= 0) {
-        # A pair starts at j only when j+1 is in range; position n-1 (guard fails)
-        # carries the running `last`, matching the old init-to-n behaviour.
-        if ($j + 1 < $n and $cs[$j] == $target and $cs[$j + 1] == $target) {
-            $last = $j;
-        }
-        $rev[] = $last;
-        $j = $j - 1;
-    }
-    def nxt as list of int init lists.reverse($rev);
-    $nxt[] = $n;
-    return $nxt;
-}
-
 # NOTE: the precomputed next-index arrays are read by direct indexing
 # (`$arr[$from]`) at the marker sites below, never passed into a helper -
 # handing a list to a function deep-copies it under Jennifer's value semantics,
@@ -367,19 +322,59 @@ func parseInline(s as string) {
     def hasBt as bool init strings.contains($s, "`");
     def hasStar as bool init strings.contains($s, "*");
     def hasParen as bool init strings.contains($s, ")");
+    # One backward pass builds every needed next-index array at once - each char
+    # is visited once instead of once per present marker, keeping the build
+    # (and the per-column append) gated on the marker's presence flag.
     def nBacktick as list of int init [];
     def nStar as list of int init [];
     def nDblStar as list of int init [];
     def nRparen as list of int init [];
+    def lastBt as int init $n;
+    def lastStar as int init $n;
+    def lastDbl as int init $n;
+    def lastRp as int init $n;
+    def w as int init $n - 1;
+    while ($w >= 0) {
+        def cw as string init $cs[$w];
+        if ($hasBt and $cw == "`") {
+            $lastBt = $w;
+        }
+        if ($hasStar and $cw == "*") {
+            $lastStar = $w;
+            # A pair starts at w only when w+1 is in range; position n-1 (guard
+            # fails) carries the running last.
+            if ($w + 1 < $n and $cs[$w + 1] == "*") {
+                $lastDbl = $w;
+            }
+        }
+        if ($hasParen and $cw == ")") {
+            $lastRp = $w;
+        }
+        if ($hasBt) {
+            $nBacktick[] = $lastBt;
+        }
+        if ($hasStar) {
+            $nStar[] = $lastStar;
+            $nDblStar[] = $lastDbl;
+        }
+        if ($hasParen) {
+            $nRparen[] = $lastRp;
+        }
+        $w = $w - 1;
+    }
     if ($hasBt) {
-        $nBacktick = nextIndexArray($cs, "`");
+        $nBacktick = lists.reverse($nBacktick);
+        $nBacktick[] = $n;
     }
     if ($hasStar) {
-        $nStar = nextIndexArray($cs, "*");
-        $nDblStar = nextPairArray($cs, "*");
+        $nStar = lists.reverse($nStar);
+        $nStar[] = $n;
+        $nDblStar = lists.reverse($nDblStar);
+        $nDblStar[] = $n;
     }
     if ($hasParen) {
-        $nRparen = nextIndexArray($cs, ")");
+        $nRparen = lists.reverse($nRparen);
+        $nRparen[] = $n;
     }
     def i as int init 0;
     # The pending plain-text run is s[bufStart:i]; slicing it with substring
@@ -703,25 +698,25 @@ func splitCells(row as string) {
     if ($end > $start and $cs[$end - 1] == "|") {
         $end = $end - 1;
     }
-    def buf as string init "";
+    def buf as list of string init [];
     def i as int init $start;
     while ($i < $end) {
         def c as string init $cs[$i];
         if ($c == "\\" and $i + 1 < $end and $cs[$i + 1] == "|") {
-            $buf = $buf + "|";
+            $buf[] = "|";
             $i = $i + 2;
             continue;
         }
         if ($c == "|") {
-            $cells[] = strings.trim($buf);
-            $buf = "";
+            $cells[] = strings.trim(strings.join($buf, ""));
+            $buf = [];
             $i = $i + 1;
             continue;
         }
-        $buf = $buf + $c;
+        $buf[] = $c;
         $i = $i + 1;
     }
-    $cells[] = strings.trim($buf);
+    $cells[] = strings.trim(strings.join($buf, ""));
     return $cells;
 }
 
@@ -1524,11 +1519,11 @@ export func text(node as Node) {
     if (len($node.children) == 0) {
         return $node.text;
     }
-    def out as string init "";
+    def out as list of string init [];
     for (def c in $node.children) {
-        $out = $out + text($c);
+        $out[] = text($c);
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 /**
@@ -1709,23 +1704,30 @@ export func toHtml(md as string) {
 
 # --- ANSI helpers shared by the node renderer ----------------------
 
-# indentLines prefixes every line of s with `prefix`.
+# indentLines prefixes every line of s with `prefix`. Lines collect and join
+# once: growing a string with `+` per line is O(N^2) over the block's size.
 func indentLines(s as string, prefix as string) {
-    def out as string init "";
+    def out as list of string init [];
     def first as bool init true;
     for (def line in strings.split($s, "\n")) {
         if (not $first) {
-            $out = $out + "\n";
+            $out[] = "\n";
         }
         $first = false;
-        $out = $out + $prefix + $line;
+        $out[] = $prefix + $line;
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # isWideRune approximates the Unicode East-Asian Width "W"/"F" categories plus
 # the common emoji blocks - the code points a terminal renders two columns wide.
 func isWideRune(cp as int) {
+    # The ranges below span 0x1100..0x3FFFD; every script below Han / fullwidth
+    # (Latin, Greek, Cyrillic, etc. - the common case) exits on the first guard
+    # instead of evaluating the whole range chain.
+    if ($cp < 0x1100 or $cp > 0x3FFFD) {
+        return false;
+    }
     return ($cp >= 0x1100 and $cp <= 0x115F) or ($cp >= 0x2E80 and $cp <= 0x303E) or
         ($cp >= 0x3041 and $cp <= 0x33FF) or ($cp >= 0x3400 and $cp <= 0x4DBF) or
         ($cp >= 0x4E00 and $cp <= 0x9FFF) or ($cp >= 0xA000 and $cp <= 0xA4CF) or
@@ -1737,8 +1739,12 @@ func isWideRune(cp as int) {
 
 # displayWidth is the terminal column width of s: East-Asian wide / fullwidth
 # runes occupy two columns, so a table built from CJK / emoji cells aligns
-# instead of running one column short per wide rune.
+# instead of running one column short per wide rune. Pure ASCII (the common
+# cell) returns its rune count directly - one Go check, no per-rune loop.
 func displayWidth(s as string) {
+    if (encoding.isAscii(convert.bytesFromString($s, "utf-8"))) {
+        return len($s);
+    }
     def w as int init 0;
     for (def ch in strings.chars($s)) {
         if (isWideRune(convert.toCodepoint($ch))) {
@@ -1778,16 +1784,13 @@ func padCell(styled as string, plain as int, width as int, align as string) {
 
 # ansiDivider renders the `---+---` rule under the header row.
 func ansiDivider(widths as list of int) {
-    def out as string init "";
+    def parts as list of string init [];
     def i as int init 0;
     while ($i < len($widths)) {
-        if ($i > 0) {
-            $out = $out + "-+-";
-        }
-        $out = $out + strings.repeat("-", $widths[$i]);
+        $parts[] = strings.repeat("-", $widths[$i]);
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($parts, "-+-");
 }
 
 /**
@@ -1979,11 +1982,11 @@ func inlineNodeToAnsi(n as Node) {
 }
 
 func inlineChildrenToAnsi(ns as list of Node) {
-    def out as string init "";
+    def out as list of string init [];
     for (def c in $ns) {
-        $out = $out + inlineNodeToAnsi($c);
+        $out[] = inlineNodeToAnsi($c);
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # cellVisWidthNode is the visible terminal width of a cell (styling stripped).
@@ -2015,12 +2018,9 @@ func colWidthsNode(table as Node) {
 # ansiRowNode renders one ` | `-separated row padded to the column widths; the
 # header row is bold.
 func ansiRowNode(row as Node, widths as list of int, bold as bool) {
-    def out as string init "";
+    def cells as list of string init [];
     def i as int init 0;
     while ($i < len($widths)) {
-        if ($i > 0) {
-            $out = $out + " | ";
-        }
         def styled as string init "";
         def vis as int init 0;
         def align as string init "none";
@@ -2033,10 +2033,10 @@ func ansiRowNode(row as Node, widths as list of int, bold as bool) {
         if ($bold) {
             $styled = ansi.bold($styled);
         }
-        $out = $out + padCell($styled, $vis, $widths[$i], $align);
+        $cells[] = padCell($styled, $vis, $widths[$i], $align);
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($cells, " | ");
 }
 
 func tableNodeToAnsi(n as Node) {
@@ -2046,26 +2046,27 @@ func tableNodeToAnsi(n as Node) {
         return "";
     }
     def widths as list of int init colWidthsNode($n);
-    def out as string init ansiRowNode($n.children[0], $widths, true);
-    $out = $out + "\n" + ansiDivider($widths);
+    def rows as list of string init [ansiRowNode($n.children[0], $widths, true)];
+    $rows[] = ansiDivider($widths);
     def r as int init 1;
     while ($r < len($n.children)) {
-        $out = $out + "\n" + ansiRowNode($n.children[$r], $widths, false);
+        $rows[] = ansiRowNode($n.children[$r], $widths, false);
         $r = $r + 1;
     }
-    return $out;
+    return strings.join($rows, "\n");
 }
 
 # listNodeToAnsi renders a `list` node at nesting `depth` (2 spaces of indent per
-# level), recursing into each item's nested sub-list under it.
+# level), recursing into each item's nested sub-list under it. Rendered items
+# collect and join once: growing `out` with `+` per item is O(N^2) over a long list.
 func listNodeToAnsi(n as Node, depth as int) {
-    def out as string init "";
+    def out as list of string init [];
     def idx as int init 1;
     def first as bool init true;
     def pad as string init strings.repeat("  ", $depth + 1);
     for (def item in $n.children) {
         if (not $first) {
-            $out = $out + "\n";
+            $out[] = "\n";
         }
         $first = false;
         def marker as string init "- ";
@@ -2081,10 +2082,10 @@ func listNodeToAnsi(n as Node, depth as int) {
                 $inlineStr = $inlineStr + inlineNodeToAnsi($c);
             }
         }
-        $out = $out + $pad + $marker + $inlineStr + $nested;
+        $out[] = $pad + $marker + $inlineStr + $nested;
         $idx = $idx + 1;
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # nodeToAnsi renders one block Node to terminal text.
@@ -2103,16 +2104,11 @@ func nodeToAnsi(n as Node) {
             return listNodeToAnsi($n, 0);
         }
         when "quote" {
-            def inner as string init "";
-            def first as bool init true;
+            def parts as list of string init [];
             for (def cb in $n.children) {
-                if (not $first) {
-                    $inner = $inner + "\n";
-                }
-                $first = false;
-                $inner = $inner + nodeToAnsi($cb);
+                $parts[] = nodeToAnsi($cb);
             }
-            return indentLines($inner, ansi.dim("> "));
+            return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
         }
         when "paragraph" {
             return inlineChildrenToAnsi($n.children);
@@ -2156,16 +2152,16 @@ export func render(doc as Node, format as string) {
         return html.renderAll($nodes);
     }
     if ($format == "ansi") {
-        def out as string init "";
+        def parts as list of string init [];
         def first as bool init true;
         for (def c in $blocks) {
             if (not $first) {
-                $out = $out + "\n\n";
+                $parts[] = "\n\n";
             }
             $first = false;
-            $out = $out + nodeToAnsi($c);
+            $parts[] = nodeToAnsi($c);
         }
-        return $out;
+        return strings.join($parts, "");
     }
     mdFail("unknown render format \"" + $format + "\" (want \"html\" or \"ansi\")");
 }
@@ -3111,16 +3107,11 @@ export func link(text as string, url as string) {
  * @return {string} the Markdown bullet list
  */
 export func bullets(items as list of string) {
-    def out as string init "";
-    def first as bool init true;
+    def out as list of string init [];
     for (def item in $items) {
-        if (not $first) {
-            $out = $out + "\n";
-        }
-        $first = false;
-        $out = $out + "- " + $item;
+        $out[] = "- " + $item;
     }
-    return $out;
+    return strings.join($out, "\n");
 }
 
 /**
@@ -3129,18 +3120,13 @@ export func bullets(items as list of string) {
  * @return {string} the Markdown numbered list
  */
 export func numbered(items as list of string) {
-    def out as string init "";
+    def out as list of string init [];
     def i as int init 1;
-    def first as bool init true;
     for (def item in $items) {
-        if (not $first) {
-            $out = $out + "\n";
-        }
-        $first = false;
-        $out = $out + convert.toString($i) + ". " + $item;
+        $out[] = convert.toString($i) + ". " + $item;
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($out, "\n");
 }
 
 /**
@@ -3161,17 +3147,17 @@ func cellText(s as string) {
 
 # tableRow renders one `| a | b |` row, padded / truncated to `cols` columns.
 func tableRow(cells as list of string, cols as int) {
-    def out as string init "|";
+    def parts as list of string init ["|"];
     def c as int init 0;
     while ($c < $cols) {
         def v as string init "";
         if ($c < len($cells)) {
             $v = $cells[$c];
         }
-        $out = $out + " " + cellText($v) + " |";
+        $parts[] = " " + cellText($v) + " |";
         $c = $c + 1;
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # alignSep renders one column's separator cell from its alignment.
@@ -3193,17 +3179,17 @@ func alignSep(a as string) {
 
 # alignRow renders the `| :--- | ---: |` separator row under the header.
 func alignRow(aligns as list of string, cols as int) {
-    def out as string init "|";
+    def parts as list of string init ["|"];
     def c as int init 0;
     while ($c < $cols) {
         def a as string init "";
         if ($c < len($aligns)) {
             $a = $aligns[$c];
         }
-        $out = $out + " " + alignSep($a) + " |";
+        $parts[] = " " + alignSep($a) + " |";
         $c = $c + 1;
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 /**
@@ -3221,12 +3207,11 @@ export func table(
     aligns as list of string,
     rows as list of list of string) {
     def cols as int init len($headings);
-    def out as string init tableRow($headings, $cols);
-    $out = $out + "\n" + alignRow($aligns, $cols);
+    def lines as list of string init [tableRow($headings, $cols), alignRow($aligns, $cols)];
     for (def row in $rows) {
-        $out = $out + "\n" + tableRow($row, $cols);
+        $lines[] = tableRow($row, $cols);
     }
-    return $out;
+    return strings.join($lines, "\n");
 }
 
 # --- prettify: align table source columns (exported) ---------------
@@ -3286,28 +3271,28 @@ func prettyRow(
     widths as list of int,
     aligns as list of string,
     cols as int) {
-    def out as string init "|";
+    def parts as list of string init ["|"];
     def i as int init 0;
     while ($i < $cols) {
         def text as string init "";
         if ($i < len($cells)) {
             $text = cellText($cells[$i]);
         }
-        $out = $out + " " + padCell($text, len($text), $widths[$i], alignOf($aligns, $i)) + " |";
+        $parts[] = " " + padCell($text, len($text), $widths[$i], alignOf($aligns, $i)) + " |";
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # prettyDelim renders the padded `| :--- | ---: |` delimiter row.
 func prettyDelim(widths as list of int, aligns as list of string, cols as int) {
-    def out as string init "|";
+    def parts as list of string init ["|"];
     def i as int init 0;
     while ($i < $cols) {
-        $out = $out + " " + delimCell($widths[$i], alignOf($aligns, $i)) + " |";
+        $parts[] = " " + delimCell($widths[$i], alignOf($aligns, $i)) + " |";
         $i = $i + 1;
     }
-    return $out;
+    return strings.join($parts, "");
 }
 
 # prettyTableAt reformats the table at line `i` into aligned source lines.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -31,6 +31,7 @@
 use net;
 use strings;
 use convert;
+use binary;
 import "./sasl.j" as sasl;
 import "./idna.j" as idna;
 import "./transport.j" as transport;
@@ -237,23 +238,48 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 
 # readReply reads from the connection until a complete SMTP reply arrives.
 func readReply(conn as net.Conn) {
-    def buf as string init "";
+    # Raw chunks collect and join once: a per-read concat over a long reply is
+    # O(n^2) (and re-decodes the growing buffer every read). The completion
+    # check needs only the tail of the text - a final reply line always ends
+    # the buffer - so a bounded rolling tail is checked, and the full text is
+    # decoded once from the joined bytes when the reply completes.
+    def pieces as list of bytes init [];
+    def tail as string init "";
+    def total as int init 0;
     while (true) {
-        def code as int init replyFinalCode($buf);
-        if ($code >= 0) {
-            return Reply{code: $code, text: $buf};
+        if (replyFinalCode($tail) >= 0) {
+            return Reply{
+                code: replyFinalCode($tail),
+                text: convert.stringFromBytes(binary.join($pieces), "utf-8")
+            };
         }
         net.setDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
-            return Reply{code: replyFinalCode($buf + "\n"), text: $buf};
+            def etext as string init convert.stringFromBytes(binary.join($pieces), "utf-8");
+            return Reply{code: replyFinalCode($etext + "\n"), text: $etext};
         }
-        $buf = $buf + convert.stringFromBytes($chunk, "utf-8");
+        $pieces[] = $chunk;
+        $tail = $tail + convert.stringFromBytes($chunk, "utf-8");
+        def tl as int init len($tail);
+        if ($tl > 2048) {
+            # Trim from the front, through the first newline, so the tail still
+            # starts on a complete line (a mid-line fragment could otherwise
+            # read as a premature "final" code). The last, final reply line is
+            # at the end, so it always survives a front-trim.
+            def cut as int init strings.indexOf($tail, "\n");
+            if ($cut >= 0) {
+                $tail = strings.substring($tail, $cut + 1, $tl);
+            } else {
+                $tail = "";
+            }
+        }
+        $total = $total + len($chunk);
         # A hostile server can stream an endless multi-line (`250-...`) reply; cap
-        # the cumulative buffer so it fails typed instead of growing without bound.
-        transport.checkReceiveSize(len($buf), "smtp reply");
+        # the cumulative size so it fails typed instead of growing without bound.
+        transport.checkReceiveSize($total, "smtp reply");
     }
-    return Reply{code: -1, text: $buf};
+    return Reply{code: -1, text: ""};
 }
 
 # command sends one line and returns the server's reply.

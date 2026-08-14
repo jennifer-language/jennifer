@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 #
 # label_cab.j - the cab JScript encoder for the `label` module. This file is
 # spliced into label.j via `include` and is not a standalone module: it declares
@@ -188,8 +188,10 @@ func renderCab(label as Label, setup as CabSetup) {
         }
     }
     $out = $out + "\n";
+    def parts as list of string init [$out];
     for (def f in $label.fields) {
-        $out = $out + cabField($f) + "\n";
+        $parts[] = cabField($f) + "\n";
     }
-    return $out + "A " + convert.toString($label.quantity) + "\n";
+    $parts[] = "A " + convert.toString($label.quantity) + "\n";
+    return strings.join($parts, "");
 }

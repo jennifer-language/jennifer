@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // wsAccept computes the RFC 6455 Sec-WebSocket-Accept for a client key.
@@ -321,5 +322,85 @@ websocket.close($ws);`, wsMod, url)
 	}
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("websocket program failed with code %d", code)
+	}
+}
+
+// serveWSLargeChunked handshakes, waits for one client data frame, then sends a
+// single large text frame dribbled out in 4 KiB TCP writes with a pause between
+// them - so the client's readN cannot satisfy the payload in one net.readBytes
+// and must exercise its short-read reassembly path (binary.join).
+func serveWSLargeChunked(ln net.Listener, payload []byte) {
+	conn, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	var key string
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		if strings.HasPrefix(strings.ToLower(line), "sec-websocket-key:") {
+			key = strings.TrimSpace(line[len("sec-websocket-key:"):])
+		}
+	}
+	fmt.Fprint(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"+
+		"Connection: Upgrade\r\nSec-WebSocket-Accept: "+wsAccept(key)+"\r\n\r\n")
+	if _, _, err := readClientFrame(r); err != nil {
+		return
+	}
+	frame := encodeServerFrame(0x1, payload)
+	for off := 0; off < len(frame); off += 4096 {
+		end := off + 4096
+		if end > len(frame) {
+			end = len(frame)
+		}
+		conn.Write(frame[off:end])
+		time.Sleep(time.Millisecond)
+	}
+	readClientFrame(r) // wait for the client's close
+}
+
+// TestWebsocketLargeFramePartialReads drives the client against a server that
+// dribbles a 100 KB frame out in small writes, so readN reassembles the payload
+// across many partial reads - the short-read path the single-read fast path
+// skips. A byte-exact 100 000-char round trip proves binary.join reassembly.
+func TestWebsocketLargeFramePartialReads(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	payload := []byte(strings.Repeat("abcdefghij", 10000)) // 100000 bytes
+	go serveWSLargeChunked(ln, payload)
+
+	wsMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "websocket.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "ws://" + ln.Addr().String() + "/"
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use strings;
+import %q as websocket;
+def ws as websocket.Conn init websocket.connect(%q);
+websocket.send($ws, "go");
+def m as websocket.Message init websocket.receive($ws);
+testing.assertEqual($m.kind, "text");
+testing.assertEqual(len($m.text), 100000);
+testing.assertEqual($m.text, strings.repeat("abcdefghij", 10000));
+websocket.close($ws);`, wsMod, url)
+	progPath := filepath.Join(dir, "ws_large.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("websocket large-frame program failed with code %d", code)
 	}
 }

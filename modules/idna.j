@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Internationalized domain names: convert a Unicode domain to its
@@ -45,11 +45,11 @@ func codePoints(s as string) {
 }
 
 func fromCodePoints(cps as list of int) {
-    def out as string init "";
+    def out as list of string init [];
     for (def c in $cps) {
-        $out = $out + convert.fromCodepoint($c);
+        $out[] = convert.fromCodepoint($c);
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # digitToChar maps a base-36 digit value to its Punycode character (0-25 to
@@ -134,21 +134,22 @@ func minGE(cps as list of int, n as int) {
 }
 
 # encodeLabel Punycode-encodes a label's code points (no `xn--` prefix).
+# Output pieces collect and join once (per-append `+` is O(N^2) over the label).
 func encodeLabel(cps as list of int) {
     def n as int init INITIAL_N;
     def delta as int init 0;
     def bias as int init INITIAL_BIAS;
-    def out as string init "";
+    def out as list of string init [];
     def b as int init 0;
     for (def c in $cps) {
         if ($c < 128) {
-            $out = $out + convert.fromCodepoint($c);
+            $out[] = convert.fromCodepoint($c);
             $b = $b + 1;
         }
     }
     def h as int init $b;
     if ($b > 0) {
-        $out = $out + "-";
+        $out[] = "-";
     }
     while ($h < len($cps)) {
         def m as int init minGE($cps, $n);
@@ -159,7 +160,7 @@ func encodeLabel(cps as list of int) {
                 $delta = $delta + 1;
             }
             if ($c == $n) {
-                $out = $out + encodeDigits($delta, $bias);
+                $out[] = encodeDigits($delta, $bias);
                 $bias = adapt($delta, $h + 1, $h == $b);
                 $delta = 0;
                 $h = $h + 1;
@@ -168,7 +169,7 @@ func encodeLabel(cps as list of int) {
         $delta = $delta + 1;
         $n = $n + 1;
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # lastDash returns the index of the last "-" in cs, or -1.

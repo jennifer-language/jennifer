@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled barcode encoder (QR / Reed-Solomon) plus renderers: its
 # table-building methods legitimately run past the L201 statement-count limit.
@@ -1245,12 +1245,14 @@ func code128Bars(data as string) {
     }
     $values[] = $sum % 103;   # checksum
     $values[] = 106;          # Stop
-    def bits as string init "";
+    # Patterns append in place and join once: growing a `+`-built bit string
+    # re-copies the whole symbol per codeword (O(N^2) for a long payload).
+    def parts as list of string init [];
     for (def v in $values) {
-        $bits = $bits + $patterns[$v];
+        $parts[] = $patterns[$v];
     }
-    $bits = $bits + "11";   # final bar of the stop pattern
-    return bitsToBars($bits);
+    $parts[] = "11";   # final bar of the stop pattern
+    return bitsToBars(strings.join($parts, ""));
 }
 
 # charToCode maps an ASCII char to a Code 128 set-B value (space..~ -> 0..94).
@@ -1264,7 +1266,7 @@ func charToCode(ch as string) {
 
 # code39Bars encodes Code 39 (with start / stop `*`, no check digit).
 func code39Bars(data as string) {
-    def bits as string init code39Char("*");
+    def parts as list of string init [code39Char("*")];
     def cs as list of string init strings.chars(strings.upper($data));
     for (def ch in $cs) {
         # `*` is the Code 39 start/stop delimiter; in the payload it would encode
@@ -1272,10 +1274,10 @@ func code39Bars(data as string) {
         if ($ch == "*") {
             fail("code39: '*' is the start/stop delimiter and cannot appear in the data");
         }
-        $bits = $bits + "0" + code39Char($ch);
+        $parts[] = "0" + code39Char($ch);
     }
-    $bits = $bits + "0" + code39Char("*");
-    return bitsToBars($bits);
+    $parts[] = "0" + code39Char("*");
+    return bitsToBars(strings.join($parts, ""));
 }
 
 # ean13Bars / ean8Bars / itfBars.
@@ -1735,12 +1737,12 @@ func gs1128Bars(data as string) {
     }
     $values[] = $sum % 103;   # checksum
     $values[] = 106;          # Stop
-    def bits as string init "";
+    def parts as list of string init [];
     for (def v in $values) {
-        $bits = $bits + $patterns[$v];
+        $parts[] = $patterns[$v];
     }
-    $bits = $bits + "11";
-    return bitsToBars($bits);
+    $parts[] = "11";
+    return bitsToBars(strings.join($parts, ""));
 }
 
 # code128Patterns is the Code 128 module-pattern table (values

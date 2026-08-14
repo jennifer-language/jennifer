@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 # pragma-jennifer-capability: net
 
 /**
@@ -837,16 +837,7 @@ func matchPattern(r as Route, segs as list of string) {
         $idx = $idx + 1;
     }
     if (len($wildKey) > 0) {
-        def rest as string init "";
-        def j as int init $fixed;
-        while ($j < len($segs)) {
-            if (len($rest) > 0) {
-                $rest = $rest + "/";
-            }
-            $rest = $rest + $segs[$j];
-            $j = $j + 1;
-        }
-        $params[$wildKey] = $rest;
+        $params[$wildKey] = strings.join($segs[$fixed..], "/");
     }
     return Match{found: true, handler: $r.handler, params: $params};
 }

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Data plotting to SVG: turn numbers into a self-contained `<svg>` chart string
@@ -203,29 +203,40 @@ func paletteColor(i as int) {
     return $pal[$i % len($pal)];
 }
 
-func tfm(v as float, isLog as bool) {
-    if ($isLog) {
-        return math.log10($v);
-    }
-    return $v;
-}
-
 func sx(g as Geom, v as float, lo as float, hi as float, isLog as bool) {
-    def tlo as float init tfm($lo, $isLog);
-    def thi as float init tfm($hi, $isLog);
+    # tfm is inlined here (and in sy) instead of called: these two are the
+    # per-point geometry hot path, and a linear axis makes the call a no-op.
+    def tlo as float init $lo;
+    def thi as float init $hi;
+    if ($isLog) {
+        $tlo = math.log10($lo);
+        $thi = math.log10($hi);
+    }
     if ($thi == $tlo) {
         return convert.toFloat($g.x0 + $g.x1) / 2.0;
     }
-    return convert.toFloat($g.x0) + (tfm($v, $isLog) - $tlo) / ($thi - $tlo) * convert.toFloat($g.x1 - $g.x0);
+    def tv as float init $v;
+    if ($isLog) {
+        $tv = math.log10($v);
+    }
+    return convert.toFloat($g.x0) + ($tv - $tlo) / ($thi - $tlo) * convert.toFloat($g.x1 - $g.x0);
 }
 
 func sy(g as Geom, v as float, lo as float, hi as float, isLog as bool) {
-    def tlo as float init tfm($lo, $isLog);
-    def thi as float init tfm($hi, $isLog);
+    def tlo as float init $lo;
+    def thi as float init $hi;
+    if ($isLog) {
+        $tlo = math.log10($lo);
+        $thi = math.log10($hi);
+    }
     if ($thi == $tlo) {
         return convert.toFloat($g.y0 + $g.y1) / 2.0;
     }
-    return convert.toFloat($g.y0) + ($thi - tfm($v, $isLog)) / ($thi - $tlo) * convert.toFloat($g.y1 - $g.y0);
+    def tv as float init $v;
+    if ($isLog) {
+        $tv = math.log10($v);
+    }
+    return convert.toFloat($g.y0) + ($thi - $tv) / ($thi - $tlo) * convert.toFloat($g.y1 - $g.y0);
 }
 
 # --- numeric + string helpers (private) ----------------------------
@@ -266,6 +277,13 @@ func num(x as float) {
 }
 
 func svgEsc(s as string) {
+    # Fast path: most strings (colours, tooltips) carry no special char, and the
+    # three replaces below would otherwise scan and reallocate for each one.
+    # indexOf skips the allocation when there is nothing to escape.
+    if (strings.indexOf($s, "&") < 0 and strings.indexOf($s, "<") < 0 and
+        strings.indexOf($s, ">") < 0) {
+        return $s;
+    }
     def out as string init strings.replace($s, "&", "&amp;");
     $out = strings.replace($out, "<", "&lt;");
     $out = strings.replace($out, ">", "&gt;");
@@ -278,6 +296,10 @@ func svgEsc(s as string) {
 # every attribute slot fed a caller-controlled value; a palette / literal colour
 # passes through unchanged.
 func attrEsc(s as string) {
+    if (strings.indexOf($s, "&") < 0 and strings.indexOf($s, "<") < 0 and
+        strings.indexOf($s, ">") < 0 and strings.indexOf($s, '"') < 0) {
+        return $s;
+    }
     return strings.replace(svgEsc($s), '"', "&quot;");
 }
 
@@ -322,20 +344,39 @@ func labelText(opts as Options, x as float, y as float, anchor as string, size a
     return '<text x="' + num($x) + '" y="' + num($y) + '" text-anchor="' + $anchor + '" font-family="' + attrEsc($opts.fontFamily) + '" font-size="' + convert.toString($size) + '" font-weight="' + $weight + '" fill="' + attrEsc($fill) + '">' + svgEsc($s) + '</text>';
 }
 
-# markerEl draws a scatter marker of the given shape, with an optional tooltip.
-func markerEl(shape as string, cx as float, cy as float, r as float, col as string, title as string) {
+# markerEl draws a scatter marker, with an optional tooltip. cxs / cys are the
+# centre coordinates already run through num() by the caller - the marker loop
+# would otherwise format each point twice (once for the line, once here).
+func markerEl(
+    shape as string,
+    cxs as string,
+    cys as string,
+    cx as float,
+    cy as float,
+    r as float,
+    col as string,
+    title as string) {
     if ($shape == "square") {
-        return elemWithTitle("rect", 'x="' + num($cx - $r) + '" y="' + num($cy - $r) + '" width="' + num($r * 2.0) + '" height="' + num($r * 2.0) + '" fill="' + attrEsc($col) + '"', $title);
+        return elemWithTitle(
+            "rect",
+            'x="' + num($cx - $r) + '" y="' + num($cy - $r) + '" width="' + num($r * 2.0) +
+                '" height="' + num($r * 2.0) + '" fill="' + attrEsc($col) + '"',
+            $title);
     }
     if ($shape == "triangle") {
-        def p as string init num($cx) + ',' + num($cy - $r) + ' ' + num($cx - $r) + ',' + num($cy + $r) + ' ' + num($cx + $r) + ',' + num($cy + $r);
+        def p as string init $cxs + ',' + num($cy - $r) + ' ' + num($cx - $r) + ',' +
+            num($cy + $r) + ' ' + num($cx + $r) + ',' + num($cy + $r);
         return elemWithTitle("polygon", 'points="' + $p + '" fill="' + attrEsc($col) + '"', $title);
     }
     if ($shape == "diamond") {
-        def p as string init num($cx) + ',' + num($cy - $r) + ' ' + num($cx + $r) + ',' + num($cy) + ' ' + num($cx) + ',' + num($cy + $r) + ' ' + num($cx - $r) + ',' + num($cy);
+        def p as string init $cxs + ',' + num($cy - $r) + ' ' + num($cx + $r) + ',' + $cys + ' ' +
+            $cxs + ',' + num($cy + $r) + ' ' + num($cx - $r) + ',' + $cys;
         return elemWithTitle("polygon", 'points="' + $p + '" fill="' + attrEsc($col) + '"', $title);
     }
-    return elemWithTitle("circle", 'cx="' + num($cx) + '" cy="' + num($cy) + '" r="' + num($r) + '" fill="' + attrEsc($col) + '"', $title);
+    return elemWithTitle(
+        "circle",
+        'cx="' + $cxs + '" cy="' + $cys + '" r="' + num($r) + '" fill="' + attrEsc($col) + '"',
+        $title);
 }
 
 func barRect(x as float, yTop as float, w as float, h as float, col as string, title as string) {
@@ -573,29 +614,58 @@ func errorBars(g as Geom, s as Series, col as string, xa as Axis, ya as Axis) {
 }
 
 func drawSeries(g as Geom, s as Series, col as string, xa as Axis, ya as Axis, opts as Options) {
+    # One pass over the points computes each coordinate pair once and formats it
+    # once; the "both" / "area" marks used to re-run sx/sy and num() in a second
+    # loop, doubling the per-point work (the hot path of every line chart).
     def out as list of string init [];
-    if ($s.mark == "area") {
-        def base as float init sy($g, $ya.lo, $ya.lo, $ya.hi, $ya.isLog);
-        def poly as list of string init [num(sx($g, $s.xs[0], $xa.lo, $xa.hi, $xa.isLog)) + ',' + num($base)];
-        for (def i in 0..len($s.xs)) {
-            $poly[] = num(sx($g, $s.xs[$i], $xa.lo, $xa.hi, $xa.isLog)) + ',' + num(sy($g, $s.ys[$i], $ya.lo, $ya.hi, $ya.isLog));
-        }
-        $poly[] = num(sx($g, $s.xs[len($s.xs) - 1], $xa.lo, $xa.hi, $xa.isLog)) + ',' + num($base);
-        $out[] = '<polygon fill="' + attrEsc($col) + '" fill-opacity="0.25" stroke="none" points="' + strings.join($poly, " ") + '"/>';
-    }
-    if ($s.mark == "line" or $s.mark == "both" or $s.mark == "area") {
-        def pts as list of string init [];
-        for (def i in 0..len($s.xs)) {
-            $pts[] = num(sx($g, $s.xs[$i], $xa.lo, $xa.hi, $xa.isLog)) + ',' + num(sy($g, $s.ys[$i], $ya.lo, $ya.hi, $ya.isLog));
-        }
-        $out[] = '<polyline fill="none" stroke="' + attrEsc($col) + '" stroke-width="2"' + dashAttr($s.dash, "6,4") + ' points="' + strings.join($pts, " ") + '">' + titleChild($opts.hover, $s.name) + '</polyline>';
-    }
-    if ($s.mark == "points" or $s.mark == "both") {
-        for (def i in 0..len($s.xs)) {
+    def n as int init len($s.xs);
+    def haveLine as bool init $s.mark == "line" or $s.mark == "both" or $s.mark == "area";
+    def havePts as bool init $s.mark == "points" or $s.mark == "both";
+    def coords as list of string init [];
+    def markers as list of string init [];
+    if ($haveLine) {
+        for (def i in 0..$n) {
             def cx as float init sx($g, $s.xs[$i], $xa.lo, $xa.hi, $xa.isLog);
             def cy as float init sy($g, $s.ys[$i], $ya.lo, $ya.hi, $ya.isLog);
-            $out[] = markerEl($s.shape, $cx, $cy, 3.5, $col, titleChild($opts.hover, pointTitle($s, $s.xs[$i], $s.ys[$i])));
+            def cxs as string init num($cx);
+            def cys as string init num($cy);
+            $coords[] = $cxs + ',' + $cys;
+            if ($havePts) {
+                def mt as string init "";
+                if ($opts.hover) {
+                    $mt = titleChild(true, pointTitle($s, $s.xs[$i], $s.ys[$i]));
+                }
+                $markers[] = markerEl($s.shape, $cxs, $cys, $cx, $cy, 3.5, $col, $mt);
+            }
         }
+        if ($s.mark == "area") {
+            def base as float init sy($g, $ya.lo, $ya.lo, $ya.hi, $ya.isLog);
+            def poly as list of string init [
+                num(sx($g, $s.xs[0], $xa.lo, $xa.hi, $xa.isLog)) + ',' + num($base)
+            ];
+            $poly = lists.concat($poly, $coords);
+            $poly[] = num(sx($g, $s.xs[$n - 1], $xa.lo, $xa.hi, $xa.isLog)) + ',' + num($base);
+            $out[] = '<polygon fill="' + attrEsc($col) +
+                '" fill-opacity="0.25" stroke="none" points="' + strings.join($poly, " ") + '"/>';
+        }
+        $out[] = '<polyline fill="none" stroke="' + attrEsc($col) + '" stroke-width="2"' +
+            dashAttr($s.dash, "6,4") + ' points="' + strings.join($coords, " ") + '">' +
+            titleChild($opts.hover, $s.name) + '</polyline>';
+    } elseif ($havePts) {
+        for (def i in 0..$n) {
+            def cx as float init sx($g, $s.xs[$i], $xa.lo, $xa.hi, $xa.isLog);
+            def cy as float init sy($g, $s.ys[$i], $ya.lo, $ya.hi, $ya.isLog);
+            def cxs as string init num($cx);
+            def cys as string init num($cy);
+            def mt as string init "";
+            if ($opts.hover) {
+                $mt = titleChild(true, pointTitle($s, $s.xs[$i], $s.ys[$i]));
+            }
+            $markers[] = markerEl($s.shape, $cxs, $cys, $cx, $cy, 3.5, $col, $mt);
+        }
+    }
+    if (len($markers) > 0) {
+        $out = lists.concat($out, $markers);
     }
     if (len($s.yErr) == len($s.ys) and len($s.yErr) > 0 and not $ya.isLog) {
         $out = lists.concat($out, errorBars($g, $s, $col, $xa, $ya));
