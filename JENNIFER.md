@@ -520,8 +520,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   dimension mismatch, a non-rectangular matrix, a singular `inverse`/`solve`, the
   zero vector to `normalize`, or a non-finite (overflow) result is a catchable
   error, not a NaN.
-- **`strings`** - `upper lower contains startsWith endsWith indexOf trim
-  replace repeat substring split chars join`. Rune-indexed.
+- **`strings`** - `upper lower fold contains startsWith endsWith indexOf
+  trim trimLeft trimRight replace repeat substring split chars join`.
+  Rune-indexed (`fold` = case-insensitive compare).
 - **`lists`** - `push pop first last head tail reverse sort contains concat
   slice shuffle range`, plus higher-order `map filter reduce find any all sortBy`
   (each takes a `func` value). Non-mutating (they return new lists).
@@ -533,11 +534,11 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   For building a buffer from a stream use `net.readAll`/`readN`, not
   `binary.concat` in a loop (O(n^2)).
 - **`maps`** - `keys values has delete merge`. `has` before a missing-key read.
-- **`os`** - `getEnv`, `hasFlag`/`flag`, `isTerminal`, `run`/`spawn`;
-  `catchSignal(name)`/`gotSignal(name)` to trap and poll a Unix signal
-  (`"int"`/`"term"`/`"hup"`/`"usr2"`; cooperative, opt-in, for graceful shutdown;
-  `"usr1"` reserved for `kill -USR1` interpreter diagnostics). Constants
-  `PLATFORM ARCH EOL DIRSEP PATHSEP ARGS`.
+- **`os`** - `getEnv`, `hasFlag`/`flag`, `isTerminal`, `run`/`spawn`,
+  `cwd`/`homeDir`/`tempDir`; `catchSignal(name)`/`gotSignal(name)` to trap and poll
+  a Unix signal (`"int"`/`"term"`/`"hup"`/`"usr2"`; cooperative, opt-in, for
+  graceful shutdown; `"usr1"` reserved for `kill -USR1` interpreter diagnostics).
+  Constants `PLATFORM ARCH NCPU EOL DIRSEP PATHSEP ARGS`.
 - **`path`** - OS-aware filesystem path manipulation (the string layer paired
   with `fs`; no I/O): `path.base(p)`, `dir(p)`, `ext(p)`, `stem(p)`,
   `join(a, b, ...)`, `clean(p)`, `isAbs(p)`, `split(p)` -> `[dir, file]`. Uses
@@ -584,7 +585,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   key itself, so a missing translation is visible). Named `intl` (letters-only,
   like JS `Intl`), not `i18n`; there is no ambient `_()`.
 - **`httpd`** - HTTP/1.1 server engine over `net/http`. Pull loop (no handler
-  callbacks): `httpd.listen(addr)` -> `Server`, then loop
+  callbacks): `httpd.listen(addr)` (or `listenTLS(addr, cert, key)`, TLS + HTTP/2)
+  -> `Server`, then loop
   `httpd.accept($srv)` -> `Request` and `httpd.respond($req, status, body)`;
   request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`, plus
   `setHeader`/`serveFile`/`serveDir`/`shutdown`. `spawn` several accept loops
@@ -595,14 +597,18 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   raw byte from stdin, `-1` at EOF; bytes, not decoded keys). Over
   `golang.org/x/term`; default binary only (`jennifer-tiny` stubs it). Refused in
   the REPL. Output-only TUIs need only `ansi` + `os.isTerminal`.
-- **Device I/O (Linux-only, default binary; stubs elsewhere and on
-  `jennifer-tiny`):** **`serial`** - serial ports (`serial.open(path, baud)` ->
-  `serial.Port`, `read`/`write`/`flush`/`close`, `openWith` for full termios
-  config). **`spi`** - `spi.open(path)` -> `spi.Device`, `configure(dev, mode,
-  speedHz)`, full-duplex `transfer(dev, bytes)`. **`i2c`** - the I2C bus
-  (`i2c.open(path, addr)` -> `i2c.Bus`, `read`/`write`/`readReg`/`writeReg`).
-  **`gpio`** - `/dev/gpiochipN` lines, pin-keyed `setup`/`read`/`write`/`release`
-  + `gpio.IN`/`gpio.OUT` (mirrors the sysfs `gpio` module).
+- **`serial`** - serial ports: `serial.open(path, baud)` -> `serial.Port`, `read`
+  / `write` / `flush` / `close`, `openWith` for full termios config. Linux-only,
+  **default binary only** (stubs elsewhere and on `jennifer-tiny`).
+- **`spi`** - SPI devices: `spi.open(path)` -> `spi.Device`, `configure(dev, mode,
+  speedHz)`, full-duplex `transfer(dev, bytes)`, `close`. Linux-only, **default
+  binary only**.
+- **`i2c`** - the I2C bus: `i2c.open(path, addr)` -> `i2c.Bus`, `read` / `write` /
+  `readReg(bus, reg, n)` / `writeReg` / `close`. Linux-only, **default binary
+  only**.
+- **`gpio`** - GPIO over `/dev/gpiochipN` lines, pin-keyed `setup` / `read` /
+  `write` / `release` + `gpio.IN` / `gpio.OUT` (mirrors the sysfs `gpio` module).
+  Linux-only, **default binary only**.
 - **`sql`** - relational-database client over `database/sql`: MySQL / MariaDB +
   PostgreSQL (pure-Go drivers; SQLite excluded). `sql.open(driver, dsn)` ->
   `Connection`, `query`/`exec` (target is a Connection or Tx), pull cursor
@@ -610,22 +616,67 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `begin`/`commit`/`rollback`, prepared statements. Values bind **only through
   placeholders** (no string interpolation -> injection-safe). Default `jennifer`
   binary only; `jennifer-tiny` stubs it.
-- **`time`**, **`fs`**, **`net`**, **`regex`**, **`hash`**, **`crc`**,
-  **`crypto`**, **`compress`**, **`archive`**, **`encoding`**, **`uuid`**,
-  **`meta`**, **`testing`** - clock, files, sockets, RE2 regex, digests
-  (`hash.compute`/`hmac`, plus constant-time `hash.equal` for MAC / token
-  checks),
-  checksums, security primitives (crypto-grade random `crypto.randBytes`/
-  `randInt`, constant-time `crypto.hmacEqual`, key derivation `crypto.hkdf`/
-  `crypto.pbkdf2`, AES-256-GCM `crypto.encrypt`/`decrypt`, Ed25519
-  `crypto.signKeypair`/`sign`/`verify`, PEM-key RSA / ECDSA
-  `crypto.rsaSign`/`rsaVerify`/`ecdsaSign`/`ecdsaVerify` for JWT RS\* / ES\*, and
-  key generation / CSR / JWK `crypto.rsaGenerateKey`/`ecGenerateKey`/`jwkPublic`/
-  `csr` for ACME - the RSA / ECDSA parts default binary only), byte-stream + container compression, text/character codecs,
-  UUIDs, interpreter identity, and test primitives. `encoding`'s binary-to-text
-  codecs include `"uri-percent"` (RFC 3986) and `"uri-form"`
-  (`application/x-www-form-urlencoded`); the `uri` module builds URL handling on
-  them.
+- **`time`** - dates, durations, zones. Structs `time.Time` / `Duration` / `Zone`;
+  constructors + accessors, arithmetic (`add` / `sub` / `before` / `after` /
+  `equal`), `inZone`, `sleep`, strftime `format` / `parse`, ISO 8601 `iso` /
+  `fromIso`. Constants `UTC`, `PROGRAM_START`. Fixed-offset zones (no IANA / DST
+  yet).
+- **`fs`** - blocking filesystem I/O. Whole-file `read` / `write` / `append`
+  (String / Bytes); metadata `exists` / `isFile` / `isDir` / `stat` (-> `fs.Stat`)
+  / `realpath` / `readlink` / `symlink(target, linkPath)`; permissions `chmod` /
+  `chown` (Unix); dir ops `mkdir` / `mkdirAll` / `remove` / `removeAll` / `rename`
+  / `list` / `walk`; temp entries `makeTempFile` / `makeTempDir`; buffered `fs.File`
+  handles (`open` / `readLine` / ... / `sync` / `close`); and a polling `watch` ->
+  `fs.Watcher` (`next` / `hasEvent` / `close`). Path- vs handle-form verbs dispatch
+  on the first arg.
+- **`net`** - sockets. TCP `connect` / `listen` / `accept` / `readBytes` /
+  `writeBytes`, bulk `readAll` / `readN`; TLS `connectTLS` / `startTLS` (opt-out
+  verify via `net.TLSOptions{skipVerify, caCert}`); UDP `listenUDP` / `sendTo` /
+  `recvFrom`; DNS `lookup` / `reverseLookup`; polymorphic `close` / `address`.
+  `connect` takes an optional trailing `timeoutMs`. **Default `jennifer` binary
+  only** (`jennifer-tiny` stubs it).
+- **`regex`** - RE2 (linear-time): `matches` / `find` / `findAll` / `replace` /
+  `split` / `escape`. A match is a `regex.Match{text, start, end, groups,
+  groupsNamed}` (rune indices; `start == -1` means no match). Implicit 128-entry
+  LRU pattern cache.
+- **`hash`** - MD5 / SHA-1 / SHA-256 digests over `bytes`: `hash.compute(b, algo)`,
+  keyed `hmac(key, message, algo)`, constant-time `equal(a, b)` (MAC / token
+  checks), and streaming (`stream` / `update` / `finalize` via `hash.Stream`). The
+  algorithm is always a value (`"sha256"`, ...), never a per-digest shortcut.
+- **`crc`** - CRC-32 / CRC-64 checksums over `bytes`, the same codec-table shape as
+  `hash`.
+- **`crypto`** - security primitives above `hash`: crypto-grade random
+  `randBytes(n)` / `randInt(lo, hi)`, constant-time `hmacEqual`, key derivation
+  `hkdf` / `pbkdf2`, AES-256-GCM `encrypt` / `decrypt`, Ed25519 `signKeypair` /
+  `sign` / `verify`, and PEM-key RSA / ECDSA `rsaSign` / `rsaVerify` / `ecdsaSign` /
+  `ecdsaVerify` plus key generation / CSR / JWK `rsaGenerateKey` / `ecGenerateKey` /
+  `jwkPublic` / `jwkToPem` / `csr` (for JWT RS\* / ES\* and ACME). TinyGo-clean
+  except the RSA / ECDSA surface, which is **default binary only**.
+- **`compress`** - byte-stream compression: `pack` / `unpack` for `"gzip"` /
+  `"zlib"` / `"deflate"` (`bytes` in/out, optional `"fast"` / `"default"` /
+  `"best"` level), plus streaming via a `compress.Stream` handle. Both binaries.
+- **`archive`** - tar / zip containers over `bytes` (no `fs`): `pack` / `unpack`
+  for `"tar"` / `"zip"` / `"tar.gz"`; a bundle is a `list of archive.Entry{name,
+  data, mode, mtime}`. Both binaries.
+- **`encoding`** - introspection (`isAscii` / `lenBytes` / `lenRunes`),
+  binary-to-text `toText` / `fromText` (`hex` / `base32` / `base64` / `base64-url`
+  / `ascii85` / `z85` / `quoted-printable`, plus `uri-percent` (RFC 3986) and
+  `uri-form` (form-urlencoded) that the `uri` module builds on), and character
+  `encode` / `decode` (`ascii` / `iso-8859-*` / `windows-*` / `ebcdic`). Codec
+  names are exact-match.
+- **`uuid`** - RFC 9562 UUIDs: `uuid.v4()` (random) / `v7()` (time-ordered),
+  `parse` / `isValid` / `version`, constant `NIL`. Randomness is `crypto`-grade, so
+  a generated UUID is safe as a security token.
+- **`meta`** - interpreter self-identity: constants `VERSION` / `BUILD` /
+  `SYSMODDIR` / `CAPABILITIES` + `hasCapability(name)`, and a small reflection
+  surface - `call(name, args...)` / `defined(name)` (a top-level method by string
+  name) and `callMain` / `definedMain` (resolve against the entry program, so a
+  module can dispatch to handlers its host defined).
+- **`testing`** - test-runner primitives: `run(name)` (invoke a user method by
+  name; the one place `exit` is caught), assertions `assertEqual` / ... /
+  `assertThrows` (throw `Error{kind: "assertion"}`), `results` / `reset`, and
+  `report` (`text` / `tap` / `junit`). The `.j` test framework and the `jennifer
+  test` subcommand build on top.
 - **`kv`** - in-process key/value store with per-key TTL (the no-server local
   counterpart to the `memcache` / `redis` modules): `kv.open()` (in-memory) /
   `kv.openFile(path)` (persisted across `jennifer run` invocations) -> `kv.Store`,

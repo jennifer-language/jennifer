@@ -214,63 +214,6 @@ Copy-on-write for compound Values is **not** part of this: it was tried
 for reintroducing shared mutable state - see
 [technical/rejected.md](technical/rejected.md).
 
-### Project and governance
-
-#### DRAFT#14 - Project governance, licensing, and contribution policy
-
-The rules for *how the project is run and how outside contributions are taken* -
-organizational, not code. Untouched while the project is solo (one author,
-`Copyright (C) 2026 mplx <jennifer@mplx.dev>`, `LGPL-3.0-only`, no outside PRs), but
-it must be settled **before the first external contribution is merged**: several
-of the choices are hard to reverse once other people's copyrightable work is in
-the tree. The open questions, roughly by urgency:
-
-- **Copyright-holder model.** Under distributed copyright (the default, no
-  paperwork) every non-trivial contributor automatically holds copyright in their
-  patch, so the tree becomes a mosaic of holders and any future relicensing needs
-  each one's agreement. The alternatives are a **CLA** (contributor grants the
-  project a broad license, keeps their own copyright) or an **assignment / CAA**
-  (contributor transfers copyright to a single holder) - both consolidate the
-  rights but add contributor friction, and assignment needs an entity to hold
-  them. This is the decision that is expensive to undo.
-- **The copyright *notice*.** Whether headers stay per-author (`(C) <name>`) or
-  move to a collective label (`(C) The Jennifer Authors`, defined by git
-  history). The trap to avoid: a two-file `AUTHORS` (holders) / `CONTRIBUTORS`
-  (credit) split only carries information when a **work-for-hire** contributor
-  exists (employer holds copyright, individual is merely credited); for an
-  all-volunteer project the two lists are identical, so the split is pointless.
-  Either keep no enumerated holder file (the collective label refers to git
-  history) or consolidate ownership via CLA / assignment.
-- **Relicensing headroom.** LGPL already lets anyone embed / link Jennifer
-  without permission, so ordinary use never needs a contributor's sign-off. The
-  only thing distributed copyright forecloses is issuing a *different* license -
-  e.g. a commercial embedding exception for a deep-embedded `jennifer-tiny`
-  target that cannot meet LGPL's static-relink terms. If keeping that option open
-  matters (embedding is a first-class goal), a CLA is the tool; if "LGPL-only
-  forever" is acceptable, distributed copyright is fine and the constraint never
-  bites.
-- **Contribution mechanics.** `CONTRIBUTING.md`, the sign-off mechanism (a
-  lightweight **DCO** `Signed-off-by` line, which asserts "I have the right to
-  submit this" without a license grant, vs a full CLA-bot, which also grants
-  one - the choice follows from the relicensing decision above), a code of
-  conduct, and the PR / review workflow.
-- **Project governance.** Who decides (BDFL vs a maintainer group), how commit
-  rights are granted (judgment and sustained involvement, never an LOC or
-  commit-count threshold - metrics are a bad proxy and get gamed), and a
-  `MAINTAINERS` file once more than one decision-maker exists. Being listed as a
-  contributor confers no authority; credit and governance are separate.
-- **Name / mark.** Whether the "Jennifer" / `jennifer-lang` identity needs any
-  trademark-style usage policy (forks, the deck registry) or stays informal.
-
-The license itself stays **`LGPL-3.0-only`** unless a deliberate relicensing
-decision above changes it; this draft is about the *process and ownership* around
-it, not a license change.
-
-**Requires:** none (organizational, independent of the codebase). Socially
-paired with the M19.8 org move and triggered by the first external contribution,
-but no code prerequisite. Not legal advice - the chosen model should get a real
-legal review before it is published.
-
 ## Loose ideas
 
 A grab-bag, loosely grouped and recorded when it comes up.

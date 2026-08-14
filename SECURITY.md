@@ -50,7 +50,7 @@ by case, and fixes ship with a regression test.
 
 Please send a **description**, not patch code. The project does not yet have a
 contribution / inbound-licensing policy (the governance work is tracked as
-`DRAFT#14` in the [horizon notes](docs/horizon.md)), so unsolicited code cannot be
+`M29` in the [milestones](docs/milestones.md)), so unsolicited code cannot be
 merged cleanly - the maintainer writes the fix from your report, which keeps the
 tree's copyright unambiguous.
 

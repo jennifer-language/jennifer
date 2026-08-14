@@ -1080,6 +1080,14 @@ never-written parameter in any method proven not to mutate a global
 
 ## M26 - `jvc` package manager (decks)
 
+**Planned.** The package manager for Jennifer and its distribution: the tool
+itself (`M26.1`), shipping a known-good copy inside every interpreter release
+(`M26.2`), gating that release on jvc's own test suite (`M26.3`), and the
+lockfile forward-compatibility guard the two programs need once the interpreter
+reads jvc's output (`M26.4`).
+
+### M26.1 - the package manager itself
+
 **Planned.** A package manager for Jennifer, in the shape of PHP's Composer (or Rust's
 Cargo): declare dependencies in a manifest, `jvc install` resolves and
 fetches them, and the app imports what it pulled. Installing an app becomes
@@ -1157,6 +1165,97 @@ TheMovieDB, Jellyfin, Frigate, RouterOS, ...).
 later); its language-side prerequisites - the `@scope/package` resolver + vendor
 root (`M19.7`), `toml`, the module system, and `semver`'s range surface - have
 shipped.
+
+### M26.2 - bundle jvc in tagged releases
+
+**Planned.** Ship a known-good jvc inside every tagged `jennifer` release, so
+`install Jennifer` yields a working deck manager with no second step, while
+`jvc app install` can still shadow the bundled copy for anyone who needs a fix
+ahead of the next language release (the bundled copy is then the rescue path if a
+self-installed jvc breaks). jvc is **Jennifer source** (`.j` files, ~17 modules,
+no build step, no per-platform artifact), so bundling is copying text - but it
+uses `http` / `os.run` / `archive`, so it runs on the **default `jennifer` binary
+only**; `jennifer-tiny` (no net / exec) does not carry it, and the launcher must
+`exec jennifer`, never the tiny build.
+
+- **Vendored copy, pinned to a commit.** The jvc source is vendored into the
+  jennifer tree (a `sync` script refreshes it) with a CI check that the copy
+  matches a **pinned jvc commit SHA** - a commit, never a branch or a tag, since a
+  tag is a mutable pointer (the same rule the deck resolver applies to git-sourced
+  decks). A git submodule is the alternative if keeping upstream canonical and the
+  pin visible in `git log` outweighs the `--recursive` friction. Fetch-at-build is
+  rejected (a release build must stay offline / air-gapped, and packagers dislike
+  network); a separate companion tarball is rejected (it leaves a fresh install
+  with no jvc, so it does not meet the goal).
+- **Install as source, beside the bundled modules.** `$PREFIX/share/jennifer/jvc/`
+  holds jvc's `cli/*.j`, and `$PREFIX/bin/jvc` is a one-line launcher
+  (`exec jennifer run $PREFIX/share/jennifer/jvc/cli/jvc.j "$@"`), threaded through
+  the `.deb` / OCI image / tarball / Homebrew packaging the same way the system
+  modules already are. The shippable set is the clean `cli/` directory once jvc
+  moves its registry-writing `publish` path off the `server/` maintenance verbs (a
+  client CLI should not bundle the registry server's admin code); until then it is
+  `cli/*.j` plus `server/{store,admin}.j`.
+- **Report the pair in `jennifer version`.** `jennifer 0.25.0 (jvc 0.3.0)`, so a
+  bug report names both halves. The jvc pin is stamped at build time through the
+  **version codegen path** (`gen-version.sh` -> `internal/version/version_gen.go`),
+  **not** `-ldflags -X`, which TinyGo silently ignores (implementation-note 7). jvc's
+  own `jvc version` stays the authority on which copy is running vs installed (PATH
+  order decides silently; its provenance report is the mitigation for that and for
+  a `~/.local/bin` shadow).
+
+**Requires:** `M26.1` (a taggable jvc to pin). Do not bundle ahead of it.
+
+### M26.3 - jvc suite as a release gate
+
+**Planned.** Run jvc's test overlays against the release-candidate interpreter in
+`release.yml`; a red suite blocks the tag. jvc is the language's most complete
+integration test - its assertions exercise `toml` / `json` / `semver` / `archive`
+/ `http` / `fs` / `os` / `path` / `hash` / `encoding` / `convert` / `strings` /
+`lists` / `maps` / `docblock` / `flatdb`, git through `exec`, and the module
+system itself (cross-module struct identity, the `@vendor` resolver, the
+capability pragmas), so a change that breaks the language's own package manager
+cannot ship. This gate is what makes bundling valuable rather than merely
+convenient.
+
+- **jvc is a first-class caller.** The gate fits the existing breaking-change
+  discipline (one batch updates a library, its overlays, docs, and every caller):
+  jvc becomes another caller updated in the same batch. An **unintended** break is
+  a hard red caught in the language CI instead of jvc's; an **intended** break (a
+  pre-1.0 milestone is free to make one) is handled by advancing the pinned jvc
+  commit to a version already green against the RC, in that same batch - the gate
+  passes because the pin moved, not because anything reverted.
+- **The pin policy is written, not implicit.** A release pins a jvc commit
+  **known-green against that RC**. An intended interpreter break requires a
+  compatible jvc commit to exist before the tag; if jvc cannot keep up, the release
+  waits or holds the pin back and documents the incompatibility. The language cut
+  thereby depends on jvc being green - an acceptable reverse dependency for one
+  maintainer who owns both repositories, named here so it is a deliberate choice.
+
+**Requires:** `M26.2` (a pinned, bundled jvc) and jvc's overlay suite. The two
+recent breaks it would have caught - cooked-string `{expr}` interpolation turning
+embedded JSON literals into lex errors, and the `fmt` / `lint` line-width
+disagreement (`fmt` not counting a trailing ` {`) - motivate it; the latter is
+already fixed in the tree, which the gate would confirm ships.
+
+### M26.4 - lockfile forward-compatibility guard (design-open)
+
+**Planned.** Once the interpreter's vendor resolver reads jvc's `camcorder.lock`
+at import time, a newer jvc can write a `lockfileVersion` the bundled resolver
+predates. The forward-compat rule both sides agree on: the interpreter **refuses
+an unknown `lockfileVersion` with a clear message** rather than misreading it,
+settled before the first jvc that changes the format ships.
+
+- **Open design question, deliberately deferred.** Nothing in `internal/` reads
+  `camcorder.lock` today; the lockfile contract is spec, not code. Whether the
+  **core resolver** should parse jvc's lockfile `[engines]` at all is unsettled -
+  the interpreter already enforces version floors per file via the
+  `# pragma-jennifer-version:` header and exposes `meta.CAPABILITIES`, so
+  engine-floor enforcement may stay jvc's job and the interpreter's only lockfile
+  duty be the `lockfileVersion` refusal above. Enforcing package-manager policy in
+  the core resolver runs against the minimal-core stance, so this is resolved when
+  `M26.1`'s resolver work is designed, not as part of bundling.
+
+**Requires:** `M26.1` (the lockfile format and the resolver that would read it).
 
 ---
 
@@ -1401,8 +1500,73 @@ supported set and drop the "unsupported" labelling. **Requires:** none.
 
 ---
 
+## M29 - project governance, licensing, and contribution policy
+
+**Planned. A hard requirement for 1.0.0 stable** (also listed under
+[Requirements for 1.0.0 stable](#requirements-for-100-stable)). The rules for
+*how the project is run and how outside contributions are taken* - organizational,
+not code. Untouched while the project is solo (one author, `Copyright (C) 2026
+mplx <jennifer@mplx.dev>`, `LGPL-3.0-only`, no outside PRs), but it must be settled
+**before the first external contribution is merged**: several of the choices are
+hard to reverse once other people's copyrightable work is in the tree. The open
+questions, roughly by urgency:
+
+- **Copyright-holder model.** Under distributed copyright (the default, no
+  paperwork) every non-trivial contributor automatically holds copyright in their
+  patch, so the tree becomes a mosaic of holders and any future relicensing needs
+  each one's agreement. The alternatives are a **CLA** (contributor grants the
+  project a broad license, keeps their own copyright) or an **assignment / CAA**
+  (contributor transfers copyright to a single holder) - both consolidate the
+  rights but add contributor friction, and assignment needs an entity to hold
+  them. This is the decision that is expensive to undo.
+- **The copyright *notice*.** Whether headers stay per-author (`(C) <name>`) or
+  move to a collective label (`(C) The Jennifer Authors`, defined by git
+  history). The trap to avoid: a two-file `AUTHORS` (holders) / `CONTRIBUTORS`
+  (credit) split only carries information when a **work-for-hire** contributor
+  exists (employer holds copyright, individual is merely credited); for an
+  all-volunteer project the two lists are identical, so the split is pointless.
+  Either keep no enumerated holder file (the collective label refers to git
+  history) or consolidate ownership via CLA / assignment.
+- **Relicensing headroom.** LGPL already lets anyone embed / link Jennifer
+  without permission, so ordinary use never needs a contributor's sign-off. The
+  only thing distributed copyright forecloses is issuing a *different* license -
+  e.g. a commercial embedding exception for a deep-embedded `jennifer-tiny`
+  target that cannot meet LGPL's static-relink terms. If keeping that option open
+  matters (embedding is a first-class goal), a CLA is the tool; if "LGPL-only
+  forever" is acceptable, distributed copyright is fine and the constraint never
+  bites.
+- **Contribution mechanics.** `CONTRIBUTING.md`, the sign-off mechanism (a
+  lightweight **DCO** `Signed-off-by` line, which asserts "I have the right to
+  submit this" without a license grant, vs a full CLA-bot, which also grants
+  one - the choice follows from the relicensing decision above), a code of
+  conduct, and the PR / review workflow.
+- **Project governance.** Who decides (BDFL vs a maintainer group), how commit
+  rights are granted (judgment and sustained involvement, never an LOC or
+  commit-count threshold - metrics are a bad proxy and get gamed), and a
+  `MAINTAINERS` file once more than one decision-maker exists. Being listed as a
+  contributor confers no authority; credit and governance are separate.
+- **Name / mark.** Whether the "Jennifer" / `jennifer-lang` identity needs any
+  trademark-style usage policy (forks, the deck registry) or stays informal.
+
+The license itself stays **`LGPL-3.0-only`** unless a deliberate relicensing
+decision above changes it; this milestone is about the *process and ownership*
+around it, not a license change. Not legal advice - the chosen model should get a
+real legal review before it is published.
+
+**Requires:** none (organizational, independent of the codebase). Socially paired
+with the M19.8 org move and triggered by the first external contribution, but no
+code prerequisite - which is why it is the one 1.0.0 requirement that can be
+settled at any time before the first outside PR.
+
+---
+
 ## Requirements for 1.0.0 stable
 
+- **Project governance, licensing, and contribution policy** - the `M29`
+  work: the copyright-holder model, copyright notice, relicensing headroom,
+  `CONTRIBUTING.md` / sign-off, governance, and name / mark. A **hard
+  requirement** for 1.0.0, and it must be settled before the first external
+  contribution is merged (whichever comes first).
 - **Cross-build for macOS / Windows.** The `M28` multiplatform track
   (`M28.1` Windows, `M28.2` macOS) does this; ships as soon as it lands.
 - **Real apt repository** (replacing the "GitHub Release
