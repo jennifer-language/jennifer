@@ -908,9 +908,33 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   unsupported). **CSRF:** `web.csrfToken($ctx, secret)` mints an HMAC-signed
   double-submit token (into the `csrf` cookie) and `web.csrfCheck($ctx, secret)`
   validates it (the app owns the secret, opts in via middleware; stateless, no
-  session store). `web.run($app, addr)`
+  session store). **Mounting:** `web.mount($app, prefix, sub)` composes a
+  sub-router's routes under a path prefix (`web.joinRoute(prefix, pattern)`
+  builds one joined pattern), so one route set can serve at several base paths.
+  `web.run($app, addr)`
   owns the accept loop (`web.serveOn($app, srv)` to hold the server handle).
   Run with `jennifer serve app.j [--watch]`. **Default `jennifer` binary
+  only** (`net`).
+- **`webapi`** - a JSON-API conventions layer over `web`. A value-semantic
+  `webapi.Api` builder (`new` / `mount(a, version, path)` / `alias` / `deprecate`
+  / `authenticator(a, name)` / `limiter(a, name)` / `get` / `post` / ... with a
+  `Spec` / `feature` / `install(a, app, "guard")`). The `Spec` carries `auth`
+  (`Auth.None` / `Auth.Bearer` - an **enum**), `scopes`, `rules`
+  (`map of string to list of validate.Rule`, reusing `validate`), `rateLimit`,
+  and `produces` (`Produces.Json` / `Html` / `Negotiate` enum); `webapi.public()`
+  is the zero `Spec`. Enforcement is one `before` guard the app wires with a
+  one-line shim `func apiGuard(ctx) { return webapi.guard($api, $ctx); }` -
+  needed because handlers dispatch **by name** and Jennifer has no closures for a
+  middleware to capture the `Api`; the authenticator / limiter are entry-program
+  handler **names** for the same reason (a func value crossing the module
+  boundary loses its home namespace). The guard authenticates, checks scopes
+  (`403`), validates (`422`), and rate-limits (`429`); `webapi.evaluate(spec,
+  identity, data)` is the **pure**, testable core. Uniform error envelopes
+  (`fail` / `failWith` / `notFound` / `denied` / `unauthorized`), request data
+  (`queryData` / `jsonData` / `validated(a, ctx)` / `identity(a, ctx)`),
+  content negotiation (`wants`), and pagination (`page` / `sendPage`). A
+  discovery `json.Value` (`webapi.discovery`) is derived from the route table so
+  it cannot drift. Over `web` + `validate` + `json`; **default `jennifer` binary
   only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
   lists, code, GFM tables) to HTML (`markdown.toHtml`, through `html`) and

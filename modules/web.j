@@ -216,6 +216,60 @@ export func delete(app as App, pattern as string, handler as string) {
 }
 
 /**
+ * Concatenate a mount prefix and a route pattern into one clean pattern: drops
+ * empty segments (so stray or doubled slashes never matter) and always yields a
+ * single leading slash. `:param` and trailing `*wildcard` segments carry no
+ * slash, so they pass through intact. `"" + "/deck"` -> `"/deck"`; `"/v1" + "/"`
+ * -> `"/v1"`; `"" + ""` -> `"/"`. Exposed so a layer above (e.g. `webapi`) can
+ * reconstruct the full pattern a mounted route is served under.
+ * @param prefix {string} the mount prefix
+ * @param pattern {string} the route pattern
+ * @return {string} the joined pattern
+ */
+export func joinRoute(prefix as string, pattern as string) {
+    def segs as list of string init [];
+    for (def s in strings.split($prefix, "/")) {
+        if (not ($s == "")) {
+            $segs[] = $s;
+        }
+    }
+    for (def s in strings.split($pattern, "/")) {
+        if (not ($s == "")) {
+            $segs[] = $s;
+        }
+    }
+    return "/" + strings.join($segs, "/");
+}
+
+/**
+ * Mount a sub-router's routes under a path prefix, returning a new App. Every
+ * route in `sub` is re-registered on `app` with `prefix` prepended to its pattern
+ * (`web.mount($app, "/v1", $apiV1)` serves `apiV1`'s `/deck` at `/v1/deck`). A
+ * `prefix` of `""` (or `"/"`) mounts at the root, so the same sub-router can be
+ * mounted under several prefixes to serve one route set at many base paths.
+ *
+ * Only the sub-router's **routes** are composed; app-level middleware, the
+ * not-found handler, CORS, and the error handler stay `app`'s. `:param` and
+ * trailing `*wildcard` segments are preserved.
+ * @param app {App} the router to extend
+ * @param prefix {string} the base path to mount under ("" / "/" = root)
+ * @param sub {App} the sub-router whose routes are mounted
+ * @return {App} a new App with the sub-router's routes added under the prefix
+ */
+export func mount(app as App, prefix as string, sub as App) {
+    def out as App init $app;
+    for (def r in $sub.routes) {
+        def mounted as Route init Route{
+            method: $r.method,
+            pattern: joinRoute($prefix, $r.pattern),
+            handler: $r.handler
+        };
+        $out.routes = lists.push($out.routes, $mounted);
+    }
+    return $out;
+}
+
+/**
  * Register a middleware handler, run before each route handler. A middleware is
  * `func name(ctx as web.Context) { ...; return true; }`: return true to continue
  * to the route handler, or respond and return false to halt.

@@ -141,6 +141,7 @@
 - [`validate`](modules/validate.md)
 - [`vcard`](modules/vcard.md)
 - [`web`](modules/web.md)
+- [`webapi`](modules/webapi.md)
 - [`webhook`](modules/webhook.md)
 - [`websocket`](modules/websocket.md)
 
