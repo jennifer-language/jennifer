@@ -5,22 +5,24 @@
 
 /**
  * An ergonomic HTTP framework over the `httpd` server engine. Register routes
- * against handler methods by name, then `web.run` owns the accept loop, matches
- * each request, and dispatches to the handler. Since Jennifer has no
- * first-class functions, dispatch is by method name via `meta.callMain` (which
- * reaches the entry program's handlers across the module boundary); a handler
- * is `func name(ctx as web.Context) { ... }`. Routing supports `:param`
- * segments, a middleware chain, and a custom not-found handler. Response and
- * request helpers hang off the `web.Context` so a handler rarely reaches for
- * `httpd` directly. Needs the default `jennifer` binary (the `httpd` engine is
- * net-backed; the constrained `jennifer-tiny` has no network stack).
+ * against handler **func values**, then `web.run` owns the accept loop, matches
+ * each request, and dispatches to the handler. A handler is a `func` value -
+ * `func name(ctx as web.Context) { ... }`, passed by its bare name
+ * (`web.get($app, "/x", showUser)`) - and it is called through its home
+ * interpreter, so an entry-program handler runs in the entry program's context
+ * across the module boundary. Routing supports `:param` segments, a middleware
+ * chain, and a custom not-found handler. Response and request helpers hang off
+ * the `web.Context` so a handler rarely reaches for `httpd` directly. Needs the
+ * default `jennifer` binary (the `httpd` engine is net-backed; the constrained
+ * `jennifer-tiny` has no network stack).
  *
  * CONCURRENCY: the serve loop handles requests **concurrently** - it accepts a
  * request, hands it to its own `spawn`ed worker, and immediately accepts the
  * next, so a handler that blocks (a `sql` query, an outbound `http` call, a slow
  * filesystem read) no longer stalls every other request. In-flight concurrency
- * is bounded by the `httpd` engine's accept rate. Dispatch reaches the entry
- * program's handlers via `meta.callMain`, and that cross-boundary call path is
+ * is bounded by the `httpd` engine's accept rate. Dispatch calls each handler
+ * func value, which runs in its home (entry-program) context, and that
+ * cross-boundary call path is
  * race-safe: each worker carries its own call-depth counter, and reads of shared
  * program state (globals, constants, maps) are safe. The one thing that is *not*
  * safe by construction is a handler **writing** a shared top-level variable of
@@ -31,12 +33,11 @@
  * @module web
  * @example
  * def app as web.App init web.new();
- * $app = web.get($app, "/hello/:name", "hello");
+ * $app = web.get($app, "/hello/:name", hello);
  * web.run($app, ":8080");
  */
 
 use httpd;
-use meta;
 use io;
 use json;
 use lists;
@@ -53,35 +54,39 @@ use task;
 import "./multipart.j" as formdata;
 
 /**
- * One registered (method, pattern, handler-name) triple. Exported only to
+ * One registered (method, pattern, handler) triple. Exported only to
  * satisfy the referential-closure rule (App exposes a list of Route); programs
  * never build one directly - they call web.get / web.route.
  * @field method {string} the HTTP method (e.g. "GET")
  * @field pattern {string} the route pattern, with optional `:param` segments
- * @field handler {string} the name of the handler method to dispatch to
+ * @field handler {func} the handler func value to dispatch to
  */
 export def struct Route {
     method as string,
     pattern as string,
-    handler as string
+    handler as func
 };
 
 /**
  * The value-semantic router state: the routes, the middleware chain (handler
- * names run before each route), and an optional not-found handler name (empty =
- * the built-in 404). Every registrar returns a fresh App.
+ * func values run before each route), and an optional not-found handler
+ * (`hasNotFound` false = the built-in 404). Every registrar returns a fresh App.
  * @field routes {list of Route} the registered routes
- * @field middleware {list of string} handler names run before each route
- * @field notFound {string} the not-found handler name (empty = built-in 404)
+ * @field middleware {list of func} handler func values run before each route
+ * @field notFound {func} the not-found handler (only when hasNotFound)
+ * @field hasNotFound {bool} whether a custom not-found handler is set (else built-in 404)
  * @field cors {CorsOptions} the CORS policy applied by the serve loop (zero-value = off)
- * @field onError {string} the error-handler name (empty = stderr only; stderr always logs); see web.onError
+ * @field onError {func} the error-handler (only when hasOnError); see web.onError
+ * @field hasOnError {bool} whether an error handler is set (stderr always logs regardless)
  */
 export def struct App {
     routes as list of Route,
-    middleware as list of string,
-    notFound as string,
+    middleware as list of func,
+    notFound as func,
+    hasNotFound as bool,
     cors as CorsOptions,
-    onError as string
+    onError as func,
+    hasOnError as bool
 };
 
 /**
@@ -118,7 +123,7 @@ export def struct Context {
 # in an exported signature.
 def struct Match {
     found as bool,
-    handler as string,
+    handler as func,
     params as map of string to string
 };
 
@@ -130,9 +135,18 @@ def struct Match {
  */
 export func new() {
     def routes as list of Route init [];
-    def mw as list of string init [];
+    def mw as list of func init [];
     def noCors as CorsOptions;
-    return App{routes: $routes, middleware: $mw, notFound: "", cors: $noCors, onError: ""};
+    def noHandler as func;
+    return App{
+        routes: $routes,
+        middleware: $mw,
+        notFound: $noHandler,
+        hasNotFound: false,
+        cors: $noCors,
+        onError: $noHandler,
+        hasOnError: false
+    };
 }
 
 /**
@@ -140,20 +154,10 @@ export func new() {
  * @param app {App} the router to extend
  * @param method {string} the HTTP method to match
  * @param pattern {string} the route pattern, with optional `:param` segments
- * @param handler {string} the name of the handler method
+ * @param handler {func} the handler func value
  * @return {App} a new App with the route added
- * @throws {Error} kind "web" when the handler method is not defined
  */
-export func route(app as App, method as string, pattern as string, handler as string) {
-    if (not meta.definedMain($handler)) {
-        throw Error{
-            kind: "web",
-            message: "web.route: handler not defined: " + $handler,
-            file: "",
-            line: 0,
-            col: 0
-        };
-    }
+export func route(app as App, method as string, pattern as string, handler as func) {
     def r as Route init Route{method: $method, pattern: $pattern, handler: $handler};
     def out as App init $app;
     $out.routes = lists.push($out.routes, $r);
@@ -164,10 +168,10 @@ export func route(app as App, method as string, pattern as string, handler as st
  * Register a GET handler for a pattern, returning a new App.
  * @param app {App} the router to extend
  * @param pattern {string} the route pattern, with optional `:param` segments
- * @param handler {string} the name of the handler method
+ * @param handler {func} the handler func value
  * @return {App} a new App with the route added
  */
-export func get(app as App, pattern as string, handler as string) {
+export func get(app as App, pattern as string, handler as func) {
     return route($app, "GET", $pattern, $handler);
 }
 
@@ -175,10 +179,10 @@ export func get(app as App, pattern as string, handler as string) {
  * Register a POST handler for a pattern, returning a new App.
  * @param app {App} the router to extend
  * @param pattern {string} the route pattern, with optional `:param` segments
- * @param handler {string} the name of the handler method
+ * @param handler {func} the handler func value
  * @return {App} a new App with the route added
  */
-export func post(app as App, pattern as string, handler as string) {
+export func post(app as App, pattern as string, handler as func) {
     return route($app, "POST", $pattern, $handler);
 }
 
@@ -186,10 +190,10 @@ export func post(app as App, pattern as string, handler as string) {
  * Register a PUT handler for a pattern, returning a new App.
  * @param app {App} the router to extend
  * @param pattern {string} the route pattern, with optional `:param` segments
- * @param handler {string} the name of the handler method
+ * @param handler {func} the handler func value
  * @return {App} a new App with the route added
  */
-export func put(app as App, pattern as string, handler as string) {
+export func put(app as App, pattern as string, handler as func) {
     return route($app, "PUT", $pattern, $handler);
 }
 
@@ -197,10 +201,10 @@ export func put(app as App, pattern as string, handler as string) {
  * Register a PATCH handler for a pattern, returning a new App.
  * @param app {App} the router to extend
  * @param pattern {string} the route pattern, with optional `:param` segments
- * @param handler {string} the name of the handler method
+ * @param handler {func} the handler func value
  * @return {App} a new App with the route added
  */
-export func patch(app as App, pattern as string, handler as string) {
+export func patch(app as App, pattern as string, handler as func) {
     return route($app, "PATCH", $pattern, $handler);
 }
 
@@ -208,10 +212,10 @@ export func patch(app as App, pattern as string, handler as string) {
  * Register a DELETE handler for a pattern, returning a new App.
  * @param app {App} the router to extend
  * @param pattern {string} the route pattern, with optional `:param` segments
- * @param handler {string} the name of the handler method
+ * @param handler {func} the handler func value
  * @return {App} a new App with the route added
  */
-export func delete(app as App, pattern as string, handler as string) {
+export func delete(app as App, pattern as string, handler as func) {
     return route($app, "DELETE", $pattern, $handler);
 }
 
@@ -274,20 +278,10 @@ export func mount(app as App, prefix as string, sub as App) {
  * `func name(ctx as web.Context) { ...; return true; }`: return true to continue
  * to the route handler, or respond and return false to halt.
  * @param app {App} the router to extend
- * @param handler {string} the name of the middleware method
+ * @param handler {func} the middleware func value
  * @return {App} a new App with the middleware appended to the chain
- * @throws {Error} kind "web" when the middleware method is not defined
  */
-export func before(app as App, handler as string) {
-    if (not meta.definedMain($handler)) {
-        throw Error{
-            kind: "web",
-            message: "web.before: middleware not defined: " + $handler,
-            file: "",
-            line: 0,
-            col: 0
-        };
-    }
+export func before(app as App, handler as func) {
     def out as App init $app;
     $out.middleware = lists.push($out.middleware, $handler);
     return $out;
@@ -296,31 +290,22 @@ export func before(app as App, handler as string) {
 /**
  * Set a custom handler for unmatched requests (default: a plain 404).
  * @param app {App} the router to extend
- * @param handler {string} the name of the not-found handler method
+ * @param handler {func} the not-found handler func value
  * @return {App} a new App with the not-found handler set
- * @throws {Error} kind "web" when the handler method is not defined
  */
-export func notFound(app as App, handler as string) {
-    if (not meta.definedMain($handler)) {
-        throw Error{
-            kind: "web",
-            message: "web.notFound: handler not defined: " + $handler,
-            file: "",
-            line: 0,
-            col: 0
-        };
-    }
+export func notFound(app as App, handler as func) {
     def out as App init $app;
     $out.notFound = $handler;
+    $out.hasNotFound = true;
     return $out;
 }
 
 /**
- * Register an error handler by name, returning a new App. When a handler or
+ * Register an error handler, returning a new App. When a handler or
  * middleware throws, `web` catches it (so one failing request never stops the
  * server), writes the failure to stderr, and *then also* invokes this handler
  * with the thrown value - the `Error` struct `{kind, message, file, line, col}`
- * for a runtime failure or a thrown `Error` (which crosses `meta.callMain`
+ * for a runtime failure or a thrown `Error` (which crosses the module boundary
  * intact, so the handler may declare its parameter `as Error`; a handler that
  * throws some other value delivers that value instead). The hook is **additive**:
  * stderr always gets the error, so registering a handler adds alerting / struct-
@@ -329,22 +314,13 @@ export func notFound(app as App, handler as string) {
  * for observability. An error *from* the error handler is itself caught and
  * logged, never re-raised.
  * @param app {App} the router to extend
- * @param handler {string} the name of the error-handler method
+ * @param handler {func} the error-handler func value
  * @return {App} a new App with the error handler set
- * @throws {Error} kind "web" when the handler method is not defined
  */
-export func onError(app as App, handler as string) {
-    if (not meta.definedMain($handler)) {
-        throw Error{
-            kind: "web",
-            message: "web.onError: handler not defined: " + $handler,
-            file: "",
-            line: 0,
-            col: 0
-        };
-    }
+export func onError(app as App, handler as func) {
     def out as App init $app;
     $out.onError = $handler;
+    $out.hasOnError = true;
     return $out;
 }
 
@@ -855,7 +831,8 @@ func splitPath(p as string) {
 # matchMiss is the "no match" Match value.
 func matchMiss() {
     def empty as map of string to string init {};
-    return Match{found: false, handler: "", params: $empty};
+    def noHandler as func;
+    return Match{found: false, handler: $noHandler, params: $empty};
 }
 
 # matchPattern tries one route against the request's path segments. A `:name`
@@ -929,7 +906,7 @@ func matchRoute(app as App, method as string, path as string) {
 # runMiddleware runs the chain; returns false as soon as one middleware halts.
 func runMiddleware(app as App, ctx as Context) {
     for (def mw in $app.middleware) {
-        def keep as bool init meta.callMain($mw, $ctx);
+        def keep as bool init $mw($ctx);
         if (not $keep) {
             return false;
         }
@@ -953,11 +930,11 @@ func ensureAnswered(req as httpd.Request, status as int, body as string) {
 # either is contained here and turned into a 500 by the safety net below - it
 # must never propagate to serveOn, which would read it as a shutdown signal and
 # stop the whole server (a one-request DoS).
-func dispatch(app as App, handler as string, ctx as Context, req as httpd.Request) {
+func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request) {
     try {
         def cont as bool init runMiddleware($app, $ctx);
         if ($cont) {
-            meta.callMain($handler, $ctx);
+            $handler($ctx);
         }
     } catch (err) {
         # Middleware or handler failed - the safety net below turns it into a 500.
@@ -965,14 +942,15 @@ func dispatch(app as App, handler as string, ctx as Context, req as httpd.Reques
         # onError hook. The hook is additive, never a replacement: registering it
         # must not make a deployment lose the diagnostic it would get without one.
         # `err` is the thrown value - the canonical Error struct for a runtime
-        # failure or a thrown Error (which now crosses meta.callMain intact, so an
+        # failure or a thrown Error (which crosses the module boundary intact, so an
         # onError handler may bind it `as Error`); a handler that throws some other
         # value delivers that value. The hook call is wrapped in its own try so the
         # reporting path can never take the request down.
         io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
-        if (not ($app.onError == "")) {
+        if ($app.hasOnError) {
             try {
-                meta.callMain($app.onError, $err);
+                def eh as func init $app.onError;
+                $eh($err);
             } catch (reportErr) {
                 io.eprintf("web: onError handler failed: %s\n", convert.toString($reportErr));
             }
@@ -1270,8 +1248,9 @@ func handleOne(app as App, req as httpd.Request) {
         httpd.respond($req, 204, "");
     } elseif ($matched.found) {
         dispatch($app, $matched.handler, $ctx, $req);
-    } elseif (not ($app.notFound == "")) {
-        dispatch($app, $app.notFound, $ctx, $req);
+    } elseif ($app.hasNotFound) {
+        def nf as func init $app.notFound;
+        dispatch($app, $nf, $ctx, $req);
     } else {
         httpd.respond($req, 404, "404 not found\n");
     }

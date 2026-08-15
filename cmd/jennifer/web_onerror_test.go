@@ -54,9 +54,9 @@ func showObserved(ctx as web.Context) {
 }
 
 def app as web.App init web.new();
-$app = web.onError($app, "recordError");
-$app = web.get($app, "/boom", "boom");
-$app = web.get($app, "/observed", "showObserved");
+$app = web.onError($app, recordError);
+$app = web.get($app, "/boom", boom);
+$app = web.get($app, "/observed", showObserved);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);

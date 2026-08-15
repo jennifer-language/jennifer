@@ -87,9 +87,9 @@ what built the binary.
 
 ## Reflection - calling a method by name
 
-Jennifer has no first-class functions: a bare call `greet(...)` is
-resolved at compile time, so you cannot dispatch on a name computed at
-runtime. `meta.call` closes that gap - it invokes a top-level user
+A `func` value binds to a specific method at parse time, and a bare call
+`greet(...)` is resolved at compile time, so neither dispatches on a name
+computed at runtime. `meta.call` closes that gap - it invokes a top-level user
 method by a runtime string, the general form of what `testing.run` does
 for tests.
 
@@ -142,21 +142,22 @@ func handleAction(name as string, arg as string) {
 }
 ```
 
-A framework that maps requests to handlers must register the handler names up
-front and dispatch only registered ones - which is exactly what the
-[`web`](../modules/web.md) module does (routes are declared with `web.get` /
-`web.post`; the request's own path never becomes a method name). Follow the same
-discipline whenever you build dispatch on `meta.call`.
+A dispatcher that maps a runtime name to a method must be careful: never let
+untrusted input (a request path, a wire field) name an arbitrary method. Gate on
+a name you control - a registered allow-list, or at least a `meta.defined` check
+that the target exists - and never dispatch a name you did not intend. Follow
+that discipline whenever you build dispatch on `meta.call`.
 
 ### `callMain` / `definedMain` - reaching the entry program
 
 Modules run on isolated sub-interpreters, so a `meta.call` *inside a
 module* reaches that module's own methods, not the program that imported
 it. The `*Main` variants cross that boundary: they resolve against the
-**entry program's** top-level methods. This is what lets a framework
-module dispatch to handlers the application defined - the
-[`web`](../modules/web.md) module registers routes against handler names
-and calls them with `meta.callMain`. Called from the entry program
+**entry program's** top-level methods. This is what lets a module dispatch to
+methods the application defined - the [`jsonrpc`](../modules/jsonrpc.md) module
+resolves each request's wire method name against the entry program with
+`meta.callMain` (a cross-boundary `func` value, as in `web`, uses the same host
+reference to run in its home context). Called from the entry program
 itself, `callMain` / `definedMain` coincide with the plain forms (the
 entry program is its own host). Struct arguments are re-tagged across the
 boundary automatically, so a module can pass one of its own struct values

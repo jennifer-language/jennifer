@@ -50,7 +50,7 @@ func serve(hsrv as httpd.Server, srv as mcp.Server) {
 }
 
 def sch as json.Value init mcp.property(mcp.schema(), "text", "string", "text to echo", true);
-def srv as mcp.Server init mcp.addTool(mcp.server("demo", "1.0.0"), "echo", "echo text", $sch, "echoTool");
+def srv as mcp.Server init mcp.addTool(mcp.server("demo", "1.0.0"), "echo", "echo text", $sch, echoTool);
 
 def hsrv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($hsrv);

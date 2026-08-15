@@ -903,13 +903,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   assertion gated on `httpd` / `crypto`. **Default `jennifer` binary only**
   (`net`).
 - **`web`** - a small HTTP framework over the `httpd` engine. Register routes
-  against handler methods **by name** (`web.get($app, "/users/:id", "showUser")`
+  against handler **`func` values** (`web.get($app, "/users/:id", showUser)`
   / `post` / `put` / `patch` / `delete` / `route`); patterns take `:param`
   captures and a trailing `*rest` wildcard (`/*path` an SPA fallback, registered
   last), plus `web.before` middleware, `web.notFound`, and `web.onError` (a
   throwing handler is contained as a logged 500, and handed to onError bound `as
-  Error`). A handler is `func name(ctx as web.Context)`, dispatched by
-  `meta.callMain`; `HEAD` is served by the matching `GET`. **Requests are handled
+  Error`). A handler is `func name(ctx as web.Context)`, passed by its bare name
+  and called through its home interpreter (so an entry-program handler runs in the
+  entry program's context); `HEAD` is served by the matching `GET`. **Requests are handled
   concurrently** (each in its own `spawn`ed worker, dispatch race-safe): reads of
   shared top-level state are safe, but do not have two handlers **write** one
   top-level `def` at overlapping times. `web.Context` helpers: `param` / `query` /
@@ -927,13 +928,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `jennifer` binary only** (`net`).
 - **`webapi`** - a JSON-API conventions layer over `web`. A value-semantic
   `webapi.Api` builder (`new` / `mount(a, version, path)` / `alias` / `deprecate` /
-  `authenticator(a, name)` / `limiter(a, name)` / `get` / `post` / ... with a
-  `Spec` / `install(a, app, "guard")`). The `Spec` carries `auth` (`Auth.None` /
+  `authenticator(a, fn)` / `limiter(a, fn)` / `get` / `post` / ... with a
+  `Spec` / `install(a, app, guard)`). Routes and the authenticator / limiter are
+  `func` values. The `Spec` carries `auth` (`Auth.None` /
   `Auth.Bearer`, an **enum**), `scopes`, `rules` (reusing `validate`), `rateLimit`,
   and `produces` (`Produces.Json` / `Html` / `Negotiate` enum); `webapi.public()`
   is the zero `Spec`. Enforcement is one `before` guard the app wires with a shim
-  `func apiGuard(ctx) { return webapi.guard($api, $ctx); }` (handlers dispatch **by
-  name**, so the authenticator / limiter are entry-program handler names too). The
+  `func apiGuard(ctx) { return webapi.guard($api, $ctx); }` (the shim only binds the
+  `Api`, since there are no closures yet to capture it). The
   guard authenticates, checks scopes (`403`), validates (`422`), rate-limits
   (`429`); `webapi.evaluate(spec, identity, data)` is the **pure**, testable core.
   Uniform error envelopes (`fail` / `notFound` / `denied` / `unauthorized`), request
@@ -954,8 +956,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
   client, over `jsonrpc` + `json`. Build a `Server`: `mcp.server(name, version)`
   then `addTool(s, name, desc, inputSchema, handler)` / `addResource` / `addPrompt`,
-  each `handler` a top-level `func NAME(arg as json.Value)` reached via
-  `meta.callMain`; declare a tool schema with `mcp.schema()` + `mcp.property(...)`.
+  each `handler` a `func` value (a top-level `func NAME(arg as json.Value)` passed
+  by bare name, called in its home context); declare a tool schema with
+  `mcp.schema()` + `mcp.property(...)`.
   `mcp.handle(server, requestBody) -> replyBody` is the transport-agnostic router
   (`initialize` / `tools/list` / `tools/call` / `resources/*` / `prompts/*`) - an
   **allow-list** (only a registered handler runs; a thrown message never reaches

@@ -166,8 +166,9 @@ type Interpreter struct {
 
 	// host is the entry-program interpreter for a module sub-interpreter, or
 	// nil on the entry program itself. meta.callMain / meta.definedMain resolve
-	// against it, so a framework module (e.g. `web`) can dispatch by name to
-	// handler methods defined in the program that imported it. Set in
+	// against it, so a module (e.g. `jsonrpc`, dispatching a wire method name)
+	// can dispatch by name to methods defined in the program that imported it;
+	// a cross-boundary `func` value likewise runs in its home via this. Set in
 	// loadModule via Host(), so nested module loads still point at the ultimate
 	// entry program, not an intermediate module.
 	host *Interpreter

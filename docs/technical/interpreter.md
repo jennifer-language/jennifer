@@ -688,7 +688,7 @@ module's **canonical path**, carried in the `ModPath` field on both `Value` and
 `parser.Type` (empty for library / user structs) and compared by `Value.Equal` /
 `MatchesDeclared`; `StructNS` holds the file **stem** purely for display, so two
 module files sharing a basename (`a/util.j`, `b/util.j`, or `@jennifer/benchmark` vs
-`@claude/benchmark`) are genuinely distinct types while both still render as
+`@alice/benchmark`) are genuinely distinct types while both still render as
 `benchmark.Point`. The boundary retag threads `(StructNS, ModPath)` so a foreign
 struct that only shares the stem is left untouched, and method parameter types
 are stamped alongside `def` types so a `func f(s as mod.Struct)` param carries

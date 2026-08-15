@@ -14,9 +14,10 @@
  *
  * It is a value-semantic builder finished once, before the server runs:
  * `webapi.new()` -> add mounts, an authenticator, routes with a `Spec` ->
- * `webapi.install($api, $app, "guardName")`. Because handlers dispatch by name
- * and Jennifer has no closures, one small guard shim in the entry program binds
- * the built `Api` into `web`'s middleware chain:
+ * `webapi.install($api, $app, apiGuard)`. Routes and the authenticator / limiter
+ * are `func` values; the one small guard shim in the entry program exists only to
+ * bind the built `Api` into `web`'s middleware chain (Jennifer has no closures
+ * yet, so the shim captures `$api` through a top-level binding):
  *
  *     func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
  *
@@ -30,9 +31,9 @@
  * def app as web.App init web.new();
  * def api as webapi.Api init webapi.new();
  * $api = webapi.mount($api, 1, "/v1");
- * $api = webapi.get($api, "/deck", "getDeck", webapi.public());
+ * $api = webapi.get($api, "/deck", getDeck, webapi.public());
  * func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
- * $app = webapi.install($api, $app, "apiGuard");
+ * $app = webapi.install($api, $app, apiGuard);
  * web.run($app, ":8080");
  */
 use strings;
@@ -40,7 +41,6 @@ use lists;
 use maps;
 use convert;
 use json;
-use meta;
 import "./web.j" as web;
 import "./validate.j" as validate;
 
@@ -108,14 +108,14 @@ export def struct Page {
  * them; programs build these through `webapi.get` / `post` / ..., never directly.
  * @field method {string} the HTTP method
  * @field pattern {string} the un-prefixed route pattern
- * @field handler {string} the entry-program handler name
- * @field feature {string} the discovery feature label (defaults to the handler name)
+ * @field handler {func} the entry-program handler func value
+ * @field feature {string} the discovery feature label (defaults to "METHOD /pattern")
  * @field spec {Spec} the route's specification
  */
 export def struct RouteDef {
     method as string,
     pattern as string,
-    handler as string,
+    handler as func,
     feature as string,
     spec as Spec
 };
@@ -134,22 +134,25 @@ export def struct Mount {
 };
 
 /**
- * The built API description: its routes, mount points, and the names of the
- * authenticator / limiter handlers. Value-semantic; every builder returns a
- * fresh `Api`. The authenticator / limiter are entry-program handler **names**
- * (dispatched via `meta.callMain`, like route handlers), not `func` values: a
- * func value called across the module boundary loses its home namespace and so
- * cannot construct a `webapi.Identity`.
+ * The built API description: its routes, mount points, and the authenticator /
+ * limiter `func` values. Value-semantic; every builder returns a fresh `Api`. The
+ * authenticator / limiter are entry-program `func` values, called through their
+ * home interpreter so they resolve their own imports and can construct a
+ * `webapi.Identity` across the module boundary.
  * @field routes {list of RouteDef} the registered routes
  * @field mounts {list of Mount} the version mount points
- * @field authenticator {string} `func(token as string) -> Identity` handler name ("" = public only)
- * @field limiter {string} `func(key as string, limit as int) -> bool` handler name ("" = no limiting)
+ * @field authenticator {func} `func(token as string) -> Identity` (only when hasAuthenticator)
+ * @field hasAuthenticator {bool} whether an authenticator is set (else every route is public)
+ * @field limiter {func} `func(key as string, limit as int) -> bool` (only when hasLimiter)
+ * @field hasLimiter {bool} whether a rate limiter is set (else no limiting)
  */
 export def struct Api {
     routes as list of RouteDef,
     mounts as list of Mount,
-    authenticator as string,
-    limiter as string
+    authenticator as func,
+    hasAuthenticator as bool,
+    limiter as func,
+    hasLimiter as bool
 };
 
 /**
@@ -177,12 +180,20 @@ export def struct Decision {
 export func new() {
     def routes as list of RouteDef init [];
     def mounts as list of Mount init [];
-    return Api{routes: $routes, mounts: $mounts, authenticator: "", limiter: ""};
+    def noHandler as func;
+    return Api{
+        routes: $routes,
+        mounts: $mounts,
+        authenticator: $noHandler,
+        hasAuthenticator: false,
+        limiter: $noHandler,
+        hasLimiter: false
+    };
 }
 
 /**
  * A zero `Spec`: a public JSON route with no scopes, rules, or rate limit. Keeps
- * an unauthenticated route a one-liner: `webapi.get($a, "/x", "h", webapi.public())`.
+ * an unauthenticated route a one-liner: `webapi.get($a, "/x", h, webapi.public())`.
  * @return {Spec} the zero specification
  */
 export func public() {
@@ -242,50 +253,46 @@ export func deprecate(a as Api, version as int, sunset as string) {
 }
 
 /**
- * Set the authenticator: the name of an entry-program handler
- * `func(token as string) -> webapi.Identity`. The module calls it for a `Bearer`
- * route; it never learns how a token is verified.
+ * Set the authenticator: an entry-program `func(token as string) ->
+ * webapi.Identity` value. The module calls it for a `Bearer` route; it never
+ * learns how a token is verified.
  * @param a {Api} the builder to extend
- * @param handler {string} the verifier handler name
+ * @param handler {func} the verifier func value
  * @return {Api} a new Api with the authenticator set
- * @throws {Error} kind "webapi" when the handler is not a defined entry method
  */
-export func authenticator(a as Api, handler as string) {
-    if (not meta.definedMain($handler)) {
-        apiFail("webapi.authenticator: handler not defined: " + $handler);
-    }
+export func authenticator(a as Api, handler as func) {
     def out as Api init $a;
     $out.authenticator = $handler;
+    $out.hasAuthenticator = true;
     return $out;
 }
 
 /**
- * Set the rate limiter: the name of an entry-program handler
- * `func(key as string, limit as int) -> bool` (true = allowed). Keyed on the
- * identity's subject when authenticated, else the remote address.
+ * Set the rate limiter: an entry-program `func(key as string, limit as int) ->
+ * bool` value (true = allowed). Keyed on the identity's subject when
+ * authenticated, else the remote address.
  * @param a {Api} the builder to extend
- * @param handler {string} the limiter handler name
+ * @param handler {func} the limiter func value
  * @return {Api} a new Api with the limiter set
- * @throws {Error} kind "webapi" when the handler is not a defined entry method
  */
-export func limiter(a as Api, handler as string) {
-    if (not meta.definedMain($handler)) {
-        apiFail("webapi.limiter: handler not defined: " + $handler);
-    }
+export func limiter(a as Api, handler as func) {
     def out as Api init $a;
     $out.limiter = $handler;
+    $out.hasLimiter = true;
     return $out;
 }
 
-# addRoute is the shared registrar: it checks the handler is a defined entry
-# method (like web.route), defaults the feature to the handler name, and appends.
-func addRoute(a as Api, method as string, pattern as string, handler as string, spec as Spec) {
+# addRoute is the shared registrar: it defaults the discovery feature label to
+# "METHOD /pattern" (a func value has no name to borrow) and appends. An
+# undefined handler is already a parse-time error at the call site (a bare name
+# that is not a top-level method), so no runtime existence check is needed.
+func addRoute(a as Api, method as string, pattern as string, handler as func, spec as Spec) {
     def out as Api init $a;
     $out.routes = lists.push($out.routes, RouteDef{
         method: $method,
         pattern: $pattern,
         handler: $handler,
-        feature: $handler,
+        feature: $method + " " + $pattern,
         spec: $spec
     });
     return $out;
@@ -295,11 +302,11 @@ func addRoute(a as Api, method as string, pattern as string, handler as string, 
  * Register a GET route with a `Spec`.
  * @param a {Api} the builder to extend
  * @param pattern {string} the route pattern (`:param` captures allowed)
- * @param handler {string} the entry-program handler method name
+ * @param handler {func} the entry-program handler func value
  * @param spec {Spec} the route's specification
  * @return {Api} a new Api with the route added
  */
-export func get(a as Api, pattern as string, handler as string, spec as Spec) {
+export func get(a as Api, pattern as string, handler as func, spec as Spec) {
     return addRoute($a, "GET", $pattern, $handler, $spec);
 }
 
@@ -307,11 +314,11 @@ export func get(a as Api, pattern as string, handler as string, spec as Spec) {
  * Register a POST route with a `Spec`.
  * @param a {Api} the builder to extend
  * @param pattern {string} the route pattern
- * @param handler {string} the entry-program handler method name
+ * @param handler {func} the entry-program handler func value
  * @param spec {Spec} the route's specification
  * @return {Api} a new Api with the route added
  */
-export func post(a as Api, pattern as string, handler as string, spec as Spec) {
+export func post(a as Api, pattern as string, handler as func, spec as Spec) {
     return addRoute($a, "POST", $pattern, $handler, $spec);
 }
 
@@ -319,11 +326,11 @@ export func post(a as Api, pattern as string, handler as string, spec as Spec) {
  * Register a PUT route with a `Spec`.
  * @param a {Api} the builder to extend
  * @param pattern {string} the route pattern
- * @param handler {string} the entry-program handler method name
+ * @param handler {func} the entry-program handler func value
  * @param spec {Spec} the route's specification
  * @return {Api} a new Api with the route added
  */
-export func put(a as Api, pattern as string, handler as string, spec as Spec) {
+export func put(a as Api, pattern as string, handler as func, spec as Spec) {
     return addRoute($a, "PUT", $pattern, $handler, $spec);
 }
 
@@ -331,11 +338,11 @@ export func put(a as Api, pattern as string, handler as string, spec as Spec) {
  * Register a PATCH route with a `Spec`.
  * @param a {Api} the builder to extend
  * @param pattern {string} the route pattern
- * @param handler {string} the entry-program handler method name
+ * @param handler {func} the entry-program handler func value
  * @param spec {Spec} the route's specification
  * @return {Api} a new Api with the route added
  */
-export func patch(a as Api, pattern as string, handler as string, spec as Spec) {
+export func patch(a as Api, pattern as string, handler as func, spec as Spec) {
     return addRoute($a, "PATCH", $pattern, $handler, $spec);
 }
 
@@ -343,17 +350,17 @@ export func patch(a as Api, pattern as string, handler as string, spec as Spec) 
  * Register a DELETE route with a `Spec`.
  * @param a {Api} the builder to extend
  * @param pattern {string} the route pattern
- * @param handler {string} the entry-program handler method name
+ * @param handler {func} the entry-program handler func value
  * @param spec {Spec} the route's specification
  * @return {Api} a new Api with the route added
  */
-export func delete(a as Api, pattern as string, handler as string, spec as Spec) {
+export func delete(a as Api, pattern as string, handler as func, spec as Spec) {
     return addRoute($a, "DELETE", $pattern, $handler, $spec);
 }
 
 /**
  * Set an explicit discovery feature label for the most recently added route
- * (defaults to the handler name), so the discovery document reads meaningfully.
+ * (defaults to "METHOD /pattern"), so the discovery document reads meaningfully.
  * @param a {Api} the builder whose last route to label
  * @param feature {string} the feature name
  * @return {Api} a new Api with the last route's feature set
@@ -378,16 +385,16 @@ export func feature(a as Api, feature as string) {
 
 /**
  * Register every route on the `web.App`, once per mount path (via `web.mount`),
- * and wire the `Spec`-enforcing guard as a `before` middleware under `guardName`.
- * `guardName` must be an entry-program handler that calls `webapi.guard($api,
- * $ctx)`; this indirection is required because handlers dispatch by name and
- * Jennifer has no closures for the guard to capture the `Api`.
+ * and wire the `Spec`-enforcing guard as a `before` middleware. `guard` must be an
+ * entry-program `func` value that calls `webapi.guard($api, $ctx)`; the shim is
+ * only needed to bind the `Api` (Jennifer has no closures yet for the guard to
+ * capture it directly).
  * @param a {Api} the built API
  * @param app {web.App} the web router to register onto
- * @param guardName {string} the entry-program guard shim name
+ * @param guard {func} the entry-program guard shim func value
  * @return {web.App} a new App with the routes and guard installed
  */
-export func install(a as Api, app as web.App, guardName as string) {
+export func install(a as Api, app as web.App, guard as func) {
     def out as web.App init $app;
     # Build a sub-router holding every route once, then mount it under each path.
     def sub as web.App init web.new();
@@ -397,7 +404,7 @@ export func install(a as Api, app as web.App, guardName as string) {
     for (def m in $a.mounts) {
         $out = web.mount($out, $m.path, $sub);
     }
-    $out = web.before($out, $guardName);
+    $out = web.before($out, $guard);
     return $out;
 }
 
@@ -610,14 +617,15 @@ export func validated(a as Api, ctx as web.Context) {
  */
 export func identity(a as Api, ctx as web.Context) {
     def none as Identity;
-    if ($a.authenticator == "") {
+    if (not $a.hasAuthenticator) {
         return $none;
     }
     def token as string init web.bearerToken($ctx);
     if ($token == "") {
         return $none;
     }
-    return meta.callMain($a.authenticator, $token);
+    def auth as func init $a.authenticator;
+    return $auth($token);
 }
 
 # --- Spec evaluation (pure) -------------------------------------------------
@@ -716,14 +724,15 @@ export func guard(a as Api, ctx as web.Context) {
 # remote address, so an unauthenticated flood is still bounded. No limiter set =
 # allow (the builder simply did not opt in).
 func applyLimit(a as Api, ctx as web.Context, who as Identity, limit as int) {
-    if ($a.limiter == "") {
+    if (not $a.hasLimiter) {
         return true;
     }
     def key as string init web.remoteAddr($ctx);
     if ($who.ok and not ($who.subject == "")) {
         $key = $who.subject;
     }
-    return meta.callMain($a.limiter, $key, $limit);
+    def lim as func init $a.limiter;
+    return $lim($key, $limit);
 }
 
 # --- error envelopes --------------------------------------------------------
@@ -799,11 +808,11 @@ export func unauthorized(ctx as web.Context, message as string) {
  * becomes a `500` in the same shape rather than a bare engine error. Pair with
  * `install`; the original error is still logged by `web`.
  * @param app {web.App} the router to extend
- * @param handlerName {string} an entry-program handler `func(e as Error)` that calls `webapi`
+ * @param handler {func} an entry-program `func(e as Error)` value that calls `webapi`
  * @return {web.App} a new App with the error handler set
  */
-export func onError(app as web.App, handlerName as string) {
-    return web.onError($app, $handlerName);
+export func onError(app as web.App, handler as func) {
+    return web.onError($app, $handler);
 }
 
 /**

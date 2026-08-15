@@ -3,7 +3,7 @@
 `import "web.j" as web;`
 
 An ergonomic HTTP framework over the [`httpd`](../libraries/httpd.md) server
-engine. Register routes against handler methods by name, then `web.run` owns
+engine. Register routes against handler **`func` values**, then `web.run` owns
 the accept loop, matches each request, and dispatches to the handler - so a web
 app reads as a set of handlers plus a route table, not a hand-written server
 loop.
@@ -19,7 +19,8 @@ blocks - a `sql` query, an outbound `http` / `rest` call, `memcache`, a slow fil
 read - no longer stalls the requests behind it; each runs on its own worker. In-
 flight concurrency is bounded by the `httpd` engine's accept rate.
 
-Dispatch reaches the entry program's handlers through `meta.callMain`, and that
+Dispatch calls each handler `func` value, which runs in its home (entry-program)
+context, and that
 cross-boundary call path is **race-safe**: each worker carries its own call-depth
 counter, and reads of shared program state (top-level constants, variables, and
 the maps / lists they hold) are safe to do from many handlers at once.
@@ -70,15 +71,16 @@ func showUser(ctx as web.Context) {
 }
 
 def app as web.App init web.new();
-$app = web.get($app, "/users/:id", "showUser");
+$app = web.get($app, "/users/:id", showUser);
 web.run($app, ":8080");
 ```
 
-Because Jennifer has no first-class functions, a route stores the handler's
-**name** and dispatch happens by name via `meta.callMain` - the primitive that
-lets the framework module reach a handler defined in the entry program across
-the module boundary. You never register a function value; you register a name,
-and `web.get`/`web.route` check at registration time that the method exists.
+A route stores the handler as a **`func` value** (pass a method by its bare name,
+`web.get($app, "/x", showUser)`). A func value carries its home interpreter, so a
+handler defined in the entry program is called back in the entry program's context
+across the module boundary - it resolves its own imports and can build the app's
+own structs. A bare name that is not a defined method is a parse-time error at the
+call site, so a mistyped handler fails before the server ever starts.
 
 ## The `web.Context`
 
@@ -193,8 +195,8 @@ The first matching route wins, so register specific routes **before** a wildcard
 special as the last pattern segment.
 
 ```jennifer
-$app = web.get($app, "/static/*path", "serveStatic"); # nested static files
-$app = web.get($app, "/*page", "spaIndex");           # fallback, registered last
+$app = web.get($app, "/static/*path", serveStatic); # nested static files
+$app = web.get($app, "/*page", spaIndex);           # fallback, registered last
 ```
 
 ## Middleware
@@ -212,7 +214,7 @@ func requireKey(ctx as web.Context) {
     return false;
 }
 
-$app = web.before($app, "requireKey");
+$app = web.before($app, requireKey);
 ```
 
 Every request is answered exactly once: if a handler throws or forgets to
@@ -229,7 +231,7 @@ handler to route it somewhere else (a log file, an alerting service):
 func logError(err as Error) {
     io.eprintf("request failed: %s: %s (%s:%d)\n", $err.kind, $err.message, $err.file, $err.line);
 }
-$app = web.onError($app, "logError");
+$app = web.onError($app, logError);
 ```
 
 The handler receives the thrown value (the `Error` struct by convention) and runs
@@ -270,7 +272,7 @@ func requireLogin(ctx as web.Context) {
     web.text($ctx, 401, "unauthorized\n");
     return false;
 }
-$app = web.before($app, "requireLogin");
+$app = web.before($app, requireLogin);
 ```
 
 For **bearer** tokens, `web.bearerToken($ctx)` extracts the token; validate it
@@ -315,7 +317,7 @@ func guardCsrf(ctx as web.Context) {
     web.text($ctx, 403, "CSRF check failed\n");
     return false;
 }
-$app = web.before($app, "guardCsrf");
+$app = web.before($app, guardCsrf);
 ```
 
 The submitted token is read from the `X-CSRF-Token` header (for JSON / fetch

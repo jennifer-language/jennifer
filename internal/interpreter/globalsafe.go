@@ -23,8 +23,7 @@ import "jennifer-lang.dev/jennifer/internal/parser"
 // CallHostWith* MUST appear here (keyed by canonical namespace, not an alias).
 // Missing one would let the per-function analysis mark a method GlobalSafe that
 // can in fact reach a global write, making borrow in a mutable-globals script
-// unsound. See CLAUDE.md note 24. Verified against a grep for those entry points
-// across internal/lib.
+// unsound. Verified against a grep for those entry points accross internal/lib.
 var jCallbackBuiltins = map[[2]string]bool{
 	{"meta", "call"}:            true,
 	{"meta", "callMain"}:        true,

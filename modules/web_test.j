@@ -9,11 +9,11 @@
 # (splitPath, matchRoute) and the private Match struct by bare identifier, as
 # well as the exported registration surface. The serving loop itself is covered
 # by the Go integration test (cmd/jennifer/web_test.go) and the demo, since it
-# needs a live listener. web.j already `use`s httpd / meta / json / lists /
+# needs a live listener. web.j already `use`s httpd / json / lists /
 # maps / strings / convert / uuid, so the overlay only adds testing.
 use testing;
 
-# Dummy handlers so route registration's meta.defined check passes.
+# Dummy handler func values to register as routes / middleware.
 func hHome(ctx as Context) {
     return;
 }
@@ -31,15 +31,14 @@ func testSplitPath() {
 
 func testMatchExact() {
     def app as App init new();
-    $app = get($app, "/home", "hHome");
+    $app = get($app, "/home", hHome);
     def m as Match init matchRoute($app, "GET", "/home");
     testing.assertTrue($m.found);
-    testing.assertEqual($m.handler, "hHome");
 }
 
 func testMatchParam() {
     def app as App init new();
-    $app = get($app, "/users/:id", "hUser");
+    $app = get($app, "/users/:id", hUser);
     def m as Match init matchRoute($app, "GET", "/users/42");
     testing.assertTrue($m.found);
     testing.assertEqual($m.params["id"], "42");
@@ -47,7 +46,7 @@ func testMatchParam() {
 
 func testMultiParam() {
     def app as App init new();
-    $app = get($app, "/users/:uid/posts/:pid", "hUser");
+    $app = get($app, "/users/:uid/posts/:pid", hUser);
     def m as Match init matchRoute($app, "GET", "/users/7/posts/99");
     testing.assertEqual($m.params["uid"], "7");
     testing.assertEqual($m.params["pid"], "99");
@@ -55,7 +54,7 @@ func testMultiParam() {
 
 func testMatchWildcard() {
     def app as App init new();
-    $app = get($app, "/files/*path", "hHome");
+    $app = get($app, "/files/*path", hHome);
     def m as Match init matchRoute($app, "GET", "/files/a/b/c");
     testing.assertTrue($m.found);
     testing.assertEqual($m.params["path"], "a/b/c");
@@ -63,7 +62,7 @@ func testMatchWildcard() {
 
 func testMatchWildcardPrefixEmpty() {
     def app as App init new();
-    $app = get($app, "/files/*path", "hHome");
+    $app = get($app, "/files/*path", hHome);
     def m as Match init matchRoute($app, "GET", "/files");
     testing.assertTrue($m.found);
     testing.assertEqual($m.params["path"], "");
@@ -71,7 +70,7 @@ func testMatchWildcardPrefixEmpty() {
 
 func testMatchSpaFallback() {
     def app as App init new();
-    $app = get($app, "/*path", "hHome");
+    $app = get($app, "/*path", hHome);
     testing.assertEqual(
         matchRoute($app, "GET", "/deep/nested/page").params["path"],
         "deep/nested/page");
@@ -80,8 +79,8 @@ func testMatchSpaFallback() {
 
 func testWildcardPrecedence() {
     def app as App init new();
-    $app = get($app, "/files/:id", "hHome");
-    $app = get($app, "/files/*path", "hHome");
+    $app = get($app, "/files/:id", hHome);
+    $app = get($app, "/files/*path", hHome);
     # a single segment matches the specific :id route (registered first)
     def one as Match init matchRoute($app, "GET", "/files/report");
     testing.assertTrue(maps.has($one.params, "id"));
@@ -94,54 +93,49 @@ func testWildcardPrecedence() {
 
 func testNoMatchPath() {
     def app as App init new();
-    $app = get($app, "/home", "hHome");
+    $app = get($app, "/home", hHome);
     def m as Match init matchRoute($app, "GET", "/nope");
     testing.assertFalse($m.found);
 }
 
 func testMethodMismatch() {
     def app as App init new();
-    $app = get($app, "/home", "hHome");
+    $app = get($app, "/home", hHome);
     def m as Match init matchRoute($app, "POST", "/home");
     testing.assertFalse($m.found);
 }
 
 func testRegistrationIsImmutable() {
     def app as App init new();
-    def grown as App init get($app, "/home", "hHome");
+    def grown as App init get($app, "/home", hHome);
     testing.assertEqual(len($app.routes), 0);
     testing.assertEqual(len($grown.routes), 1);
 }
 
 func testVerbsSetMethod() {
     def app as App init new();
-    $app = post($app, "/a", "hHome");
-    $app = delete($app, "/b", "hHome");
+    $app = post($app, "/a", hHome);
+    $app = delete($app, "/b", hHome);
     testing.assertEqual($app.routes[0].method, "POST");
     testing.assertEqual($app.routes[1].method, "DELETE");
 }
 
 func testBeforeRegisters() {
     def app as App init new();
-    $app = before($app, "hHome");
+    $app = before($app, hHome);
     testing.assertEqual(len($app.middleware), 1);
 }
 
 func testNotFoundSets() {
     def app as App init new();
-    $app = notFound($app, "hHome");
-    testing.assertEqual($app.notFound, "hHome");
+    testing.assertFalse($app.hasNotFound);
+    $app = notFound($app, hHome);
+    testing.assertTrue($app.hasNotFound);
 }
 
-# badRoute registers an undefined handler, which web.route must reject.
-func badRoute() {
-    def app as App init new();
-    route($app, "GET", "/x", "definitelyNotDefined"); # must throw: handler not defined
-}
-
-func testRouteValidatesHandler() {
-    testing.assertThrows("badRoute", "web");
-}
+# An undefined handler is now a parse-time error at the call site (a bare name
+# that is not a top-level method), so there is no runtime web.route rejection to
+# test - the resolver's own tests cover it.
 
 func testParseCookie() {
     testing.assertEqual(parseCookie("sid=abc; theme=dark", "theme"), "dark");
@@ -317,28 +311,21 @@ func hErr(err as Error) {
 # OM-019: a HEAD request matches a route registered with GET.
 func testHeadFallsBackToGet() {
     def app as App init new();
-    $app = get($app, "/home", "hHome");
+    $app = get($app, "/home", hHome);
     def m as Match init matchRoute($app, "HEAD", "/home");
     testing.assertTrue($m.found);
-    testing.assertEqual($m.handler, "hHome");
     # A HEAD with no GET route still misses.
     testing.assertFalse(matchRoute($app, "HEAD", "/nope").found);
     # An explicit HEAD route still wins for HEAD (registered directly).
-    def app2 as App init route(new(), "HEAD", "/ping", "hHome");
+    def app2 as App init route(new(), "HEAD", "/ping", hHome);
     testing.assertTrue(matchRoute($app2, "HEAD", "/ping").found);
 }
 
-# OM-009: web.onError sets the handler; an undefined handler is rejected.
+# OM-009: web.onError sets the error handler.
 func testOnErrorRegisters() {
-    def app as App init onError(new(), "hErr");
-    testing.assertEqual($app.onError, "hErr");
-    def threw as bool init false;
-    try {
-        onError(new(), "hMissing");
-    } catch (e) {
-        $threw = true;
-    }
-    testing.assertTrue($threw);
+    def app as App init onError(new(), hErr);
+    testing.assertTrue($app.hasOnError);
+    testing.assertFalse(new().hasOnError);
 }
 
 # OM-013: a non-UTF-8 form value decodes leniently instead of throwing.

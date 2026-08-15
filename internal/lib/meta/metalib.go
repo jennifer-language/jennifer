@@ -83,8 +83,8 @@ func Install(in *interpreter.Interpreter) {
 
 	// Dynamic dispatch: invoke a top-level user method by a runtime string
 	// name. The general form of what `testing.run` does for tests - a
-	// framework (the `web` module) matches a request to a handler name and
-	// calls it here. Unlike `testing.run`, it does not catch `exit`: dispatch
+	// dispatcher (the `jsonrpc` module) matches a wire method name to a handler
+	// and calls it here. Unlike `testing.run`, it does not catch `exit`: dispatch
 	// is transparent, so every sentinel (runtime error, thrown Error, exit)
 	// propagates to the caller, catchable with `try` / `catch`.
 	in.RegisterNamespaced(LibraryName, "call", func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

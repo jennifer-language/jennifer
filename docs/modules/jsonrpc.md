@@ -67,7 +67,8 @@ error code) and leaves the transport to you: read the body off
 
 Each request's `method` names a **top-level method** `func NAME(params as
 json.Value)` in the program that imported the module (dispatched by name via
-`meta.callMain`, the same mechanism the [`web`](web.md) module uses). The handler
+`meta.callMain` - the method name arrives on the wire, so it is resolved as a
+runtime string, not a `func` value). The handler
 is called with the request's params and returns a `json.Value` **or a scalar**
 (int / float / string / bool / null) as its result.
 

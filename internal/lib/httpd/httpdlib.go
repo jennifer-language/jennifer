@@ -8,8 +8,9 @@
 // chunked transfer, TLS / HTTP-2, timeouts, graceful shutdown), where parsing
 // each request in the tree-walker would be the wrong place for the hot path.
 //
-// Request handling is a **pull loop**. Jennifer has no first-class functions,
-// so a handler cannot be a callback handed to Go. Instead `net/http` accepts
+// Request handling is a **pull loop**. A Jennifer handler cannot be a callback
+// handed to Go: the tree-walker is not re-entered from `net/http`'s own handler
+// goroutines. Instead `net/http` accepts
 // and parses concurrently on its own goroutines and hands the interpreter one
 // request at a time: `httpd.accept($srv)` blocks for the next request and
 // `httpd.respond($req, status, body)` answers it. The two concurrency worlds

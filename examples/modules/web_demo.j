@@ -4,7 +4,7 @@
 
 /**
  * A tiny web app with the web framework module.
- * Registers routes against handler methods by name, serves them on an ephemeral local port in a spawned task, then acts as its own client to exercise the routes and prints the results. Self-contained, so it needs no external service - just the default jennifer binary (the httpd engine is net-backed).
+ * Registers routes against handler func values, serves them on an ephemeral local port in a spawned task, then acts as its own client to exercise the routes and prints the results. Self-contained, so it needs no external service - just the default jennifer binary (the httpd engine is net-backed).
  * @module web_demo
  */
 use io;
@@ -73,10 +73,10 @@ func addServerHeader(ctx as web.Context) {
 # --- build the app ----------------------------------------------------------
 
 def app as web.App init web.new();
-$app = web.before($app, "addServerHeader");
-$app = web.get($app, "/", "showHome");
-$app = web.get($app, "/users/:id", "showUser");
-$app = web.get($app, "/hit", "hit");
+$app = web.before($app, addServerHeader);
+$app = web.get($app, "/", showHome);
+$app = web.get($app, "/users/:id", showUser);
+$app = web.get($app, "/hit", hit);
 
 # --- serve on an ephemeral port, in the background --------------------------
 

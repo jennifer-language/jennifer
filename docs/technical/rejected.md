@@ -27,6 +27,38 @@ Rejected in favor of `defer` (which shipped) because:
 
 See [M20.7](../milestones.md) for the `defer` design.
 
+## Reference-capturing (mutable-capture) closures
+
+Distinct from the **value-capturing** closure literal on the roadmap
+([`DRAFT#28`](../horizon.md)): what is rejected here is the JS / Python flavor,
+where a closure captures its enclosing bindings **by live reference** so a mutation
+on either side is visible to the other. Value-capture (a deep-copy snapshot at
+literal-evaluation time, the way `spawn` already captures) is accepted;
+reference-capture is not.
+
+Rejected because:
+
+- **It breaks the value-semantics pillar.** A live captured binding is aliasing by
+  another name - two holders share one mutable backing, which is exactly what
+  "assignment and argument passing copy; no aliasing" rules out everywhere else in
+  the language.
+- **It invalidates optimizations documented as safe *because* there are no such
+  captures.** The `sync.Pool` frame recycling (implementation-note 14), the
+  read-only-parameter borrow analysis (implementation-note 24), and the `spawn`
+  deep-copy capture all rest on the invariant "no value, no library, no AST node
+  can capture an env pointer past its lifetime." Reference-capture reintroduces
+  exactly that pointer, so a pooled / borrowed / snapshotted frame could be mutated
+  through a surviving closure.
+- **Value-capture already covers the real need** - inline lambdas and currying -
+  without the aliasing. The only thing lost is live mutable capture, which in a
+  value-semantic language reads as spooky-action-at-a-distance more than a feature.
+
+The **snapshot surprise** value-capture carries (a captured variable is frozen at
+creation, so a later outer mutation is invisible inside the closure) is the
+deliberate, teachable trade for keeping value semantics, and is the same model
+`spawn` already establishes. See [`DRAFT#28`](../horizon.md) for the accepted
+design.
+
 ## Increment / decrement (`++`/`--`)
 
 Considered: postfix `$i++` and prefix `++$i`.

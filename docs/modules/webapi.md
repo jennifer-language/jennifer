@@ -15,9 +15,9 @@ def app as web.App init web.new();
 def api as webapi.Api init webapi.new();
 $api = webapi.mount($api, 1, "/v1");
 $api = webapi.alias($api, 1);
-$api = webapi.authenticator($api, "verifyToken");
-$api = webapi.get($api, "/deck/:name", "getDeck", webapi.public());
-$api = webapi.post($api, "/publish", "publish", webapi.Spec{
+$api = webapi.authenticator($api, verifyToken);
+$api = webapi.get($api, "/deck/:name", getDeck, webapi.public());
+$api = webapi.post($api, "/publish", publish, webapi.Spec{
     summary: "publish a deck version",
     auth: webapi.Auth.Bearer, scopes: ["publish"],
     rules: {"tag": [validate.required(), validate.maxLen(16)]},
@@ -25,7 +25,7 @@ $api = webapi.post($api, "/publish", "publish", webapi.Spec{
 });
 
 func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
-$app = webapi.install($api, $app, "apiGuard");
+$app = webapi.install($api, $app, apiGuard);
 web.run($app, ":8080");
 ```
 
@@ -41,11 +41,11 @@ every builder returns a fresh `Api`.
 | `webapi.mount(a, version, path)` | serve the routes under `path` (labelled `version`) |
 | `webapi.alias(a, version)` | additionally serve `version` at the bare root |
 | `webapi.deprecate(a, version, sunset)` | mark a version deprecated with a date |
-| `webapi.authenticator(a, name)` | the token verifier handler name |
-| `webapi.limiter(a, name)` | the rate-limit counter handler name |
-| `webapi.get/post/put/patch/delete(a, pattern, handler, spec)` | register a route with a `Spec` |
+| `webapi.authenticator(a, fn)` | the token-verifier `func` value |
+| `webapi.limiter(a, fn)` | the rate-limit counter `func` value |
+| `webapi.get/post/put/patch/delete(a, pattern, handler, spec)` | register a route (`handler` a `func` value) with a `Spec` |
 | `webapi.feature(a, name)` | label the last route for the discovery document |
-| `webapi.install(a, app, guardName)` | register every route (once per mount) + wire the guard |
+| `webapi.install(a, app, guard)` | register every route (once per mount) + wire the guard `func` value |
 
 `webapi.public()` returns a zero `Spec` - an unauthenticated JSON route with no
 scopes, rules, or rate limit.
@@ -68,11 +68,12 @@ exhaustiveness-checked and a typo is a compile error.
 
 ## The guard, and why the shim
 
-`web` dispatches handlers **by name** (via `meta.callMain`, reaching the entry
-program's methods across the module boundary), and Jennifer has no closures - so
-a middleware value cannot capture the built `Api`. `install` therefore wires the
-enforcement as a `before` middleware whose name you supply, backed by a one-line
-entry-program shim that holds the `Api`:
+Routes, the authenticator, the limiter, and the guard are all `func` values,
+called through their home interpreter so they resolve their own imports and can
+build a `webapi.Identity` across the module boundary. The one thing a `func` value
+still cannot do is **capture** the built `Api` (Jennifer has no closures yet), so
+`install` wires the enforcement as a `before` middleware whose `func` value you
+supply, backed by a one-line entry-program shim that binds the `Api`:
 
 ```jennifer
 func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
@@ -83,9 +84,9 @@ validates the body, and rate-limits - answering the request and returning false
 on any failure, or true to run the handler. A request matching no API route
 passes through untouched.
 
-The authenticator and limiter are entry-program handler **names** (dispatched
-like route handlers) for the same reason - a `func` value called across the
-module boundary loses its home namespace. Their signatures:
+The authenticator and limiter are entry-program `func` values, called through
+their home interpreter (so the authenticator can construct and return a
+`webapi.Identity`). Their signatures:
 
 ```jennifer
 func verifyToken(token as string) -> webapi.Identity        # ok:false = reject

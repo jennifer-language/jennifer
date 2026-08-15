@@ -12,8 +12,9 @@ import (
 )
 
 // envPool recycles short-lived Environment frames (block bodies + method
-// call frames). Jennifer has no closures and no first-class functions,
-// so every frame's lifetime ends deterministically when the block /
+// call frames). Jennifer has no closures - a `func` value is an immutable
+// handle to a top-level method and captures no frame - so every frame's
+// lifetime ends deterministically when the block /
 // call returns - the interpreter's execBlock, evalCall, and CallByName
 // borrow an env on entry and return it on the way out. sync.Pool is
 // per-P internally, so contention across the goroutine boundaries

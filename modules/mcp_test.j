@@ -7,14 +7,14 @@
 #
 # The overlay splices mcp.j in first, so these tests reach its private helpers
 # (findTool, valueText, encodeError) and its exported surface by bare
-# identifier. The server `handle` dispatches tool / resource / prompt handlers
-# by name via meta.callMain to the methods below, which the overlay is the entry
-# program for; the live HTTP client round-trip is verified against an in-process
-# httpd server in the Go suite (TestMcpRoundTrip).
+# identifier. The server `handle` dispatches tool / resource / prompt handler
+# func values (the methods below, registered by bare name), which the overlay is
+# the entry program for; the live HTTP client round-trip is verified against an
+# in-process httpd server in the Go suite (TestMcpRoundTrip).
 use testing;
 use json;
 
-# --- handler methods `handle` dispatches to (named in the registry) ----------
+# --- handler func values `handle` dispatches to (registered by bare name) -----
 
 func echoTool(args as json.Value) {
     return json.asString($args, "/text");
@@ -54,11 +54,11 @@ func greetingPrompt(args as json.Value) {
 func buildServer() {
     def sch as json.Value init property(schema(), "text", "string", "text to echo", true);
     def s as Server init server("demo", "1.0.0");
-    $s = addTool($s, "echo", "echo text", $sch, "echoTool");
-    $s = addTool($s, "add", "add two ints", schema(), "addTool2");
-    $s = addTool($s, "boom", "always throws", schema(), "boomTool");
-    $s = addResource($s, "file:///readme", "readme", "the readme", "text/plain", "readmeResource");
-    $s = addPrompt($s, "greet", "a greeting", [promptArg("who", "who to greet", true)], "greetingPrompt");
+    $s = addTool($s, "echo", "echo text", $sch, echoTool);
+    $s = addTool($s, "add", "add two ints", schema(), addTool2);
+    $s = addTool($s, "boom", "always throws", schema(), boomTool);
+    $s = addResource($s, "file:///readme", "readme", "the readme", "text/plain", readmeResource);
+    $s = addPrompt($s, "greet", "a greeting", [promptArg("who", "who to greet", true)], greetingPrompt);
     return $s;
 }
 
@@ -138,7 +138,7 @@ func testToolsCallThrowIsToolError() {
 func testUnregisteredToolNotDispatchable() {
     # SECURITY: a top-level method that exists (echoTool) but is NOT registered
     # under that name cannot be reached by naming it as the tool; only the
-    # registered allow-list name ("echo") dispatches. So "echoTool" is unknown.
+    # registered allow-list name ("echo") dispatches. So echoTool is unknown.
     testing.assertEqual(
         handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"echoTool","arguments":{"text":"hi"}},"id":8}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Unknown tool: echoTool"}],"isError":true},"id":8}');
@@ -183,7 +183,7 @@ func testPromptArgBuilder() {
 
 func testPromptNoArgsOmitsArguments() {
     # a prompt with no declared arguments omits the `arguments` key entirely
-    def s as Server init addPrompt(server("t", "1"), "bare", "no args", [], "greetingPrompt");
+    def s as Server init addPrompt(server("t", "1"), "bare", "no args", [], greetingPrompt);
     testing.assertEqual(
         handle($s, '{"jsonrpc":"2.0","method":"prompts/list","id":30}'),
         '{"jsonrpc":"2.0","result":{"prompts":[{"name":"bare","description":"no args"}]},"id":30}');

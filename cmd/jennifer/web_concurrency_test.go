@@ -45,8 +45,8 @@ func slowHandler(ctx as web.Context) {
 func fastHandler(ctx as web.Context) { web.text($ctx, 200, "fast"); }
 
 def app as web.App init web.new();
-$app = web.get($app, "/slow", "slowHandler");
-$app = web.get($app, "/fast", "fastHandler");
+$app = web.get($app, "/slow", slowHandler);
+$app = web.get($app, "/fast", fastHandler);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);

@@ -16,9 +16,11 @@
  *
  * A `Server` is built value-semantically: `server(name, version)` then
  * `addTool` / `addResource` / `addPrompt`, each returning a fresh `Server`. Each
- * registered item names a top-level `func NAME(arg as json.Value)` in the entry
- * program, reached by name via `meta.callMain` (the same mechanism the `web`
- * module uses). `handle(server, requestBody) -> replyBody` is the transport-
+ * registered item is handled by a top-level `func NAME(arg as json.Value)` in the
+ * entry program, passed as a `func` value and called through its home interpreter
+ * (the same mechanism the `web` module uses), so it resolves its own imports and
+ * builds its `json.Value` result in the entry program's context.
+ * `handle(server, requestBody) -> replyBody` is the transport-
  * agnostic dispatcher; `serveStdio(server)` runs the primary stdio transport
  * (newline-delimited JSON-RPC on the program's own stdin/stdout).
  *
@@ -41,14 +43,13 @@
  * func echo(args as json.Value) { return json.asString($args, "/text"); }
  * def sch as json.Value init mcp.property(mcp.schema(), "text", "string", "echo it", true);
  * def base as mcp.Server init mcp.server("demo", "1.0.0");
- * def srv as mcp.Server init mcp.addTool($base, "echo", "echo text", $sch, "echo");
+ * def srv as mcp.Server init mcp.addTool($base, "echo", "echo text", $sch, echo);
  * def reply as string init mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}");
  */
 use json;
 use io;
 use strings;
 use convert;
-use meta;
 use os;
 import "./jsonrpc.j" as jsonrpc;
 
@@ -77,35 +78,35 @@ def const NULL_VALUE as json.Value init json.decode("null");
 # --- registry structs (exported) -----------------------------------
 
 /**
- * A tool the server exposes. Its `handler` names a top-level `func NAME(args as
+ * A tool the server exposes. Its `handler` is a `func` value `func NAME(args as
  * json.Value)` in the entry program that runs when the tool is called.
  * @field name {string} the tool's unique name (the `tools/call` key)
  * @field description {string} a human / model readable description
- * @field handler {string} the top-level method name to dispatch the call to
+ * @field handler {func} the handler func value to dispatch the call to
  * @field inputSchema {json.Value} the JSON Schema for the tool's arguments
  */
 export def struct Tool {
     name as string,
     description as string,
-    handler as string,
+    handler as func,
     inputSchema as json.Value
 };
 
 /**
- * A resource the server exposes. Its `handler` names a top-level `func
+ * A resource the server exposes. Its `handler` is a `func` value `func
  * NAME(uri as json.Value)` returning the resource's text.
  * @field uri {string} the resource's unique URI (the `resources/read` key)
  * @field name {string} a short display name
  * @field description {string} a human / model readable description
  * @field mimeType {string} the content type of the resource's text
- * @field handler {string} the top-level method name that produces the content
+ * @field handler {func} the handler func value that produces the content
  */
 export def struct Resource {
     uri as string,
     name as string,
     description as string,
     mimeType as string,
-    handler as string
+    handler as func
 };
 
 /**
@@ -122,19 +123,19 @@ export def struct PromptArg {
 };
 
 /**
- * A prompt template the server exposes. Its `handler` names a top-level `func
+ * A prompt template the server exposes. Its `handler` is a `func` value `func
  * NAME(arguments as json.Value)` returning the prompt messages as a json.Value;
  * `arguments` declares what a host should collect (surfaced by `prompts/list`).
  * @field name {string} the prompt's unique name (the `prompts/get` key)
  * @field description {string} a human / model readable description
  * @field arguments {list of PromptArg} the declared arguments (may be empty)
- * @field handler {string} the top-level method name that builds the messages
+ * @field handler {func} the handler func value that builds the messages
  */
 export def struct Prompt {
     name as string,
     description as string,
     arguments as list of PromptArg,
-    handler as string
+    handler as func
 };
 
 /**
@@ -175,12 +176,12 @@ export func server(name as string, version as string) {
  * @param name {string} the tool's unique name
  * @param description {string} a description of the tool
  * @param inputSchema {json.Value} the JSON Schema for the tool's arguments
- * @param handler {string} the top-level method name the call dispatches to
+ * @param handler {func} the handler func value the call dispatches to
  * @return {Server} a server with the tool added
  */
 export func addTool(
     server as Server, name as string, description as string,
-    inputSchema as json.Value, handler as string) {
+    inputSchema as json.Value, handler as func) {
     def s as Server init $server;
     def t as Tool init Tool{
         name: $name, description: $description,
@@ -198,12 +199,12 @@ export func addTool(
  * @param name {string} a short display name
  * @param description {string} a description of the resource
  * @param mimeType {string} the content type of the resource's text
- * @param handler {string} the top-level method name that produces the content
+ * @param handler {func} the handler func value that produces the content
  * @return {Server} a server with the resource added
  */
 export func addResource(
     server as Server, uri as string, name as string, description as string,
-    mimeType as string, handler as string) {
+    mimeType as string, handler as func) {
     def s as Server init $server;
     def r as Resource init Resource{
         uri: $uri, name: $name, description: $description,
@@ -222,12 +223,12 @@ export func addResource(
  * @param name {string} the prompt's unique name
  * @param description {string} a description of the prompt
  * @param arguments {list of PromptArg} the declared arguments (may be empty)
- * @param handler {string} the top-level method name that builds the messages
+ * @param handler {func} the handler func value that builds the messages
  * @return {Server} a server with the prompt added
  */
 export func addPrompt(
     server as Server, name as string, description as string,
-    arguments as list of PromptArg, handler as string) {
+    arguments as list of PromptArg, handler as func) {
     def s as Server init $server;
     def p as Prompt init Prompt{
         name: $name, description: $description,
@@ -436,7 +437,8 @@ func toolsCallResult(server as Server, params as json.Value) {
     def text as string;
     try {
         def ret as json.Value init json.map();
-        $ret = json.set($ret, "/v", meta.callMain($tool.handler, $arguments));
+        def h as func init $tool.handler;
+        $ret = json.set($ret, "/v", $h($arguments));
         $text = valueText($ret, "/v");
     } catch (e) {
         return toolResult("Tool execution failed", true);
@@ -472,7 +474,8 @@ func resourcesReadReply(server as Server, params as json.Value, id as json.Value
     def resource as Resource init $server.resources[$idx];
     try {
         def ret as json.Value init json.map();
-        $ret = json.set($ret, "/v", meta.callMain($resource.handler, uriValue($uri)));
+        def h as func init $resource.handler;
+        $ret = json.set($ret, "/v", $h(uriValue($uri)));
         def text as string init valueText($ret, "/v");
         def item as json.Value init json.map();
         $item = json.set($item, "/uri", $uri);
@@ -528,7 +531,8 @@ func promptsGetReply(server as Server, params as json.Value, id as json.Value) {
         $arguments = json.get($params, "/arguments");
     }
     try {
-        def messages as json.Value init meta.callMain($prompt.handler, $arguments);
+        def h as func init $prompt.handler;
+        def messages as json.Value init $h($arguments);
         def res as json.Value init json.map();
         $res = json.set($res, "/description", $prompt.description);
         $res = json.set($res, "/messages", $messages);

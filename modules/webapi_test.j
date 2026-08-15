@@ -17,6 +17,16 @@ func idWith(scopes as list of string) {
     return Identity{ok: true, subject: "u1", display: "user one", scopes: $scopes};
 }
 
+# Dummy handler func values to register on routes. These pure tests only build
+# and match the route table, never invoke a handler, so a param-less body is
+# enough (arity is checked at the call site, not at registration).
+func getDeck() {
+    return;
+}
+func publish() {
+    return;
+}
+
 # --- Spec evaluation (the pure core) ----------------------------------------
 
 func testEvaluatePublicProceeds() {
@@ -139,8 +149,8 @@ func buildApi() {
     def a as Api init new();
     $a = mount($a, 1, "/v1");
     $a = alias($a, 1);
-    $a = get($a, "/deck", "getDeck", public());
-    $a = post($a, "/publish", "publish", Spec{
+    $a = get($a, "/deck", getDeck, public());
+    $a = post($a, "/publish", publish, Spec{
         summary: "publish a deck", auth: Auth.Bearer, scopes: ["publish"],
         rules: {}, rateLimit: 30, produces: Produces.Json
     });
@@ -186,15 +196,15 @@ func testPublicIsZeroSpec() {
     testing.assertEqual($s.rateLimit, 0);
 }
 
-func testFeatureDefaultsToHandler() {
+func testFeatureDefaultsToMethodPath() {
     def a as Api init new();
-    $a = get($a, "/deck", "getDeck", public());
-    testing.assertEqual($a.routes[0].feature, "getDeck");
+    $a = get($a, "/deck", getDeck, public());
+    testing.assertEqual($a.routes[0].feature, "GET /deck");
 }
 
 func testFeatureOverride() {
     def a as Api init new();
-    $a = get($a, "/deck", "getDeck", public());
+    $a = get($a, "/deck", getDeck, public());
     $a = feature($a, "deck-lookup");
     testing.assertEqual($a.routes[0].feature, "deck-lookup");
 }
@@ -224,8 +234,8 @@ func testDiscoveryReflectsRoutesAndMounts() {
     def s as string init json.encode($doc);
     testing.assertTrue(strings.contains($s, "jennifer-registry"));
     testing.assertTrue(strings.contains($s, "/v1"));
-    testing.assertTrue(strings.contains($s, "getDeck"));   # a feature
-    testing.assertTrue(strings.contains($s, "publish"));   # the other feature
+    testing.assertTrue(strings.contains($s, "GET /deck"));   # a default feature label
+    testing.assertTrue(strings.contains($s, "publish"));     # from "POST /publish"
 }
 
 func testDiscoveryMarksDeprecation() {

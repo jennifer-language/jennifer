@@ -86,11 +86,11 @@ func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
 def api as webapi.Api init webapi.new();
 $api = webapi.mount($api, 1, "/v1");
 $api = webapi.alias($api, 1);
-$api = webapi.authenticator($api, "verifyToken");
-$api = webapi.limiter($api, "countHit");
-$api = webapi.get($api, "/deck/:name", "getDeck", webapi.public());
-$api = webapi.get($api, "/decks", "listDecks", webapi.public());
-$api = webapi.post($api, "/publish", "publish", webapi.Spec{
+$api = webapi.authenticator($api, verifyToken);
+$api = webapi.limiter($api, countHit);
+$api = webapi.get($api, "/deck/:name", getDeck, webapi.public());
+$api = webapi.get($api, "/decks", listDecks, webapi.public());
+$api = webapi.post($api, "/publish", publish, webapi.Spec{
     summary: "publish a deck version",
     auth: webapi.Auth.Bearer,
     scopes: ["publish"],
@@ -100,7 +100,7 @@ $api = webapi.post($api, "/publish", "publish", webapi.Spec{
 });
 
 def app as web.App init web.new();
-$app = webapi.install($api, $app, "apiGuard");
+$app = webapi.install($api, $app, apiGuard);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def base as string init "http://" + httpd.address($srv);

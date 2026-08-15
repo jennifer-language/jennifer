@@ -15,8 +15,9 @@ import (
 // full round-trip: an exact-route text response, a `:param` route returning
 // JSON with the captured parameter, a middleware-set response header, and a 404
 // for an unmatched path. This exercises the whole chain - httpd engine, route
-// matching, and cross-module handler dispatch via meta.callMain (a web.Context
-// built inside the module reaching a handler defined in this entry program).
+// matching, and cross-module handler dispatch via a func value called in its
+// home context (a web.Context built inside the module reaching a handler
+// defined in this entry program).
 func TestWebFrameworkRoundTrip(t *testing.T) {
 	webMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "web.j"))
 	if err != nil {
@@ -44,9 +45,9 @@ func showUser(ctx as web.Context) {
 func tagHeader(ctx as web.Context) { web.setHeader($ctx, "X-Powered-By", "jennifer/web"); return true; }
 
 def app as web.App init web.new();
-$app = web.before($app, "tagHeader");
-$app = web.get($app, "/", "showHome");
-$app = web.get($app, "/users/:id", "showUser");
+$app = web.before($app, tagHeader);
+$app = web.get($app, "/", showHome);
+$app = web.get($app, "/users/:id", showUser);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
@@ -109,9 +110,9 @@ func guard(ctx as web.Context) {
 func showHome(ctx as web.Context) { web.text($ctx, 200, "home"); }
 
 def app as web.App init web.new();
-$app = web.before($app, "guard");
-$app = web.get($app, "/", "showHome");
-$app = web.get($app, "/boom", "showHome");
+$app = web.before($app, guard);
+$app = web.get($app, "/", showHome);
+$app = web.get($app, "/boom", showHome);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
@@ -180,7 +181,7 @@ func hit(ctx as web.Context) {
 }
 
 def app as web.App init web.new();
-$app = web.get($app, "/hit", "hit");
+$app = web.get($app, "/hit", hit);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -242,8 +243,8 @@ func whoami(ctx as web.Context) { web.text($ctx, 200, web.sessionId($ctx, "sid")
 func rotate(ctx as web.Context) { web.text($ctx, 200, web.renewSession($ctx, "sid")); }
 
 def app as web.App init web.new();
-$app = web.get($app, "/whoami", "whoami");
-$app = web.get($app, "/rotate", "rotate");
+$app = web.get($app, "/whoami", whoami);
+$app = web.get($app, "/rotate", rotate);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -310,7 +311,7 @@ $opts.maxAge = 600;
 
 def app as web.App init web.new();
 $app = web.cors($app, $opts);
-$app = web.get($app, "/", "ok");
+$app = web.get($app, "/", ok);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
@@ -371,7 +372,7 @@ func page(ctx as web.Context) {
 }
 
 def app as web.App init web.new();
-$app = web.get($app, "/", "page");
+$app = web.get($app, "/", page);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -435,8 +436,8 @@ func secret(ctx as web.Context) {
 func token(ctx as web.Context) { web.text($ctx, 200, "token=" + web.bearerToken($ctx)); }
 
 def app as web.App init web.new();
-$app = web.get($app, "/secret", "secret");
-$app = web.get($app, "/token", "token");
+$app = web.get($app, "/secret", secret);
+$app = web.get($app, "/token", token);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -503,11 +504,11 @@ func old(ctx as web.Context) { web.redirect($ctx, 302, "/new"); }
 func ip(ctx as web.Context) { web.text($ctx, 200, web.remoteAddr($ctx)); }
 
 def app as web.App init web.new();
-$app = web.post($app, "/submit", "submit");
-$app = web.post($app, "/api", "api");
-$app = web.get($app, "/page", "page");
-$app = web.get($app, "/old", "old");
-$app = web.get($app, "/ip", "ip");
+$app = web.post($app, "/submit", submit);
+$app = web.post($app, "/api", api);
+$app = web.get($app, "/page", page);
+$app = web.get($app, "/old", old);
+$app = web.get($app, "/ip", ip);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -583,7 +584,7 @@ func upload(ctx as web.Context) {
 }
 
 def app as web.App init web.new();
-$app = web.post($app, "/upload", "upload");
+$app = web.post($app, "/upload", upload);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -642,8 +643,8 @@ func submit(ctx as web.Context) {
 }
 
 def app as web.App init web.new();
-$app = web.get($app, "/form", "mint");
-$app = web.post($app, "/submit", "submit");
+$app = web.get($app, "/form", mint);
+$app = web.post($app, "/submit", submit);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };
@@ -701,8 +702,8 @@ func files(ctx as web.Context) { web.text($ctx, 200, "path=" + web.param($ctx, "
 func fallback(ctx as web.Context) { web.text($ctx, 200, "spa:" + web.param($ctx, "page")); }
 
 def app as web.App init web.new();
-$app = web.get($app, "/static/*path", "files");
-$app = web.get($app, "/*page", "fallback");
+$app = web.get($app, "/static/*path", files);
+$app = web.get($app, "/*page", fallback);
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def addr as string init httpd.address($srv);
 def server as task of null init spawn { web.serveOn($app, $srv); };

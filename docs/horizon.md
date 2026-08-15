@@ -37,12 +37,72 @@ Each draft also states its **Requires** - the `DRAFT#` handles and/or milestones
 (`M`-numbers) that must land first, or *none* - so its blockers are explicit
 before it is scheduled.
 
+### Language
+
+#### DRAFT#28 - Anonymous function literals with value capture (Tier 2 of first-class functions)
+
+`func` values already ship (`M24.2`): a function held in an immutable value,
+passed / returned / stored / called, powering the higher-order `lists` layer. What
+is missing - the "Tier 2" `M24.2` deferred - is the **anonymous function literal**
+(an inline lambda) and **capture** of enclosing bindings. Today a one-off transform
+must be hoisted to a named top-level method
+(`func dbl(n as int) { return $n * 2; }` just to write `lists.map($xs, dbl)`), and
+a middleware or handler cannot close over state, which is why the module ecosystem
+routes so much through **by-name dispatch** (`web` handlers, `args.dispatch`,
+`webapi`'s authenticator / limiter names + its `guard` shim). Both the ergonomic
+complaint ("no closures") and those internal workarounds are the same gap.
+
+**The design that fits: value capture, not reference capture.** A literal
+`func(n as int) { return $n * $factor; }` in expression position evaluates to a
+`func` value whose captured bindings (`$factor`) are a **deep-copy snapshot taken
+at the moment the literal is evaluated** - exactly what `spawn` already does to its
+enclosing scope. Captured bindings are immutable snapshots, never live references,
+so no aliasing is introduced and value semantics hold unchanged. This is the only
+flavor consistent with the language; the reference-capturing (JS / Python) flavor
+is rejected (see [rejected.md](technical/rejected.md)) because a live env pointer
+breaks value semantics and the frame-pool / borrow / spawn-snapshot optimizations
+documented as safe *because* there are no such captures.
+
+**It reuses machinery that already exists.** Capture is `snapshotForSpawn`'s
+deep-copy, so the value-semantics-capture path is built. A closure body is a
+resolver / borrow-analysis **hazard boundary** the same way a `spawn` body is (skip
+descent, treat as opaque), and a captured closure is **excluded from the frame
+pool** the same way a spawn snapshot is - the carve-outs are the ones the
+concurrency work already established, applied to a new node. Across a module
+boundary a closure carries its defining interpreter like `FnHome`
+(implementation-note 25) already lets a `func` value do, so a captured closure
+resolves its own namespaces and retags structs at the boundary.
+
+**The one teachable surprise** is the snapshot: a captured variable is frozen at
+creation, so a later mutation of the outer variable is invisible inside the closure
+- the identical mental model `spawn` already teaches, deliberately consistent
+rather than the JS / Python live-binding behavior.
+
+**What it buys, beyond inline lambdas.** Real currying actually captures
+(`makeAdder(1)(2)` today is call-through-expression syntax, not capture - this is
+what would make it capture). And it lets the module ecosystem replace by-name
+dispatch with closures that close over their state - a `webapi` guard could capture
+the `Api` directly instead of a name plus a one-line shim, `args.dispatch` could
+take closures - simplifying those APIs. Whether to *migrate* those modules is a
+separate follow-on, not part of this draft.
+
+Syntax and semantics to settle at graduation: the literal spelling
+(`func(params) { body }`, mirroring a named `func` declaration without the name),
+whether parameter types are required (yes, for consistency with methods), no
+declared return type (consistent), and how `defer` / `spawn` inside a closure body
+behave.
+
+**Requires:** `M24.2` (the `func` value, `KindFunc`, and `CallValueExpr` this
+extends). Reuses the `spawn` snapshot and the resolver / borrow carve-outs already
+in place; no new dependency.
+
 ### Concurrency
 
 #### DRAFT#25 - Go-side concurrent HTTP serve loop
 
-The `web` framework dispatches each request into an entry-program handler by name
-through `meta.callMain`, and `web.serveOn` runs that dispatch in a `.j` loop. Once
+The `web` framework dispatches each request into an entry-program handler `func`
+value (called in its home context), and `web.serveOn` runs that dispatch in a
+`.j` loop. Once
 `web` handles requests concurrently (each wrapped in a `spawn`), an optional
 refinement is to move only the **accept + bounded-worker-pool loop** into Go, as
 an `httpd` primitive (e.g. `httpd.serveLoop(server, handlerName)`, or a small
@@ -59,6 +119,76 @@ does the real work - this only relocates the loop. Keep `web` a `.j` module
 either way: dogfooding is a first-class goal, and with no closures a handler is
 always a by-name entry method, so a Go rewrite of the router would buy little and
 lose test surface.
+
+### Developer tooling
+
+#### DRAFT#27 - Static call-site checking in `jennifer lint`
+
+`jennifer lint` resolves a call's *name* (`L107 undefined-call`) but never checks
+its **arity or argument types**, so code that is compile-legal yet cannot run - a
+`bytes` passed to a `string` parameter, a call left one argument short after a
+signature changed - passes a lint gate in CI or a container build and surfaces
+only as a runtime error on the first request that exercises the path. The runtime
+diagnostic is already precise (`argument 3 to "token" must be string, got
+bytes`); the goal is to surface a **decidable subset** of it at lint time,
+emitting **only where the type is statically known** so the checks stay
+false-positive-free - the property that earns them a place in a CI gate. These
+land in the `L1nn` correctness band as `L108` (arity), `L109` (argument type), and
+`L110` (initializer type). The work splits into three tiers by how much is
+statically knowable, plus one part that stays undecidable.
+
+##### Tier 1 - same-file, no language change
+
+Arity and type mismatches against a **same-file user method** are fully decidable
+from the AST lint already walks. `L108` compares a call's argument count to the
+callee's `MethodDef.Params` (the callee resolves exactly the way `L107` does
+today). `L109` / `L110` compare an argument's - or a `def ... init` expression's -
+static type to the declared parameter / binding type, but **only** when that type
+is knowable without inference: a literal, or a variable / parameter / constant /
+struct-field reference whose declared type lint's own scope pass (`scope.go`)
+already resolves. This catches the arity-drift bug (a parameter added, one call
+site missed) and same-file type mismatches with zero false positives, and ships as
+an additive lint change over the existing AST and scope machinery.
+
+##### Tier 2 - cross-module (lint loads module ASTs)
+
+Extend the same three checks across an `import` boundary, so
+`callee.wantsString(42)` is caught the way a same-file call is. This needs lint to
+**parse the imported module's AST** to read the callee's parameter types - which
+it does not do today: lint sees the import *declarations* (`c.prog.ModuleImports`)
+but never loads the target file. Reusing the interpreter's module resolver closes
+that gap; a bounded lift. This tier is what makes lint a trustworthy gate for a
+module-heavy repo, where a thin entry script is untested and all the checked logic
+sits behind module boundaries.
+
+##### Tier 3 - library builtin signatures
+
+The single change that closes the *originally reported* symptom - a library return
+type flowing into a typed slot, `web.body(ctx)` (`bytes`) passed to a `string`
+parameter. It is out of reach of Tiers 1 and 2 because **builtins carry no static
+signature**: a registered builtin is `type Builtin = func(ctx BuiltinCtx, args
+[]Value) (Value, error)`, with no declared arity, argument types, or return type -
+each validates its own arguments at runtime, so the interpreter learns a builtin's
+types only by calling it. Adding a **static signature table** (arity + argument
+kinds + return kind), attached at registration or as a declarative side table,
+unlocks library-call arity, library-call *arguments*
+(`wantsString(crypto.randBytes(4))`), and library-call *initializers*
+(`def s as string init crypto.randBytes(4)`). It is bounded but real work across
+the ~40 libraries, must stay TinyGo-clean and not bloat `RegisterNamespaced`, and
+is independently valuable (editor tooling, doc / cheatsheet generation, possibly
+stricter runtime messages). The open design question is *how* to attach signatures
+without that bloat, which earns a `design-decisions.md` record.
+
+##### The undecidable remainder
+
+A **user method declares no return type** (deliberately - "the caller's `def x as
+T init f();` checks it"), so `f(g())` with `g` a user method stays undecidable in
+a single pass whatever the tiers above do. v1 **skips** it (still valuable - the
+reported case was a library call, not a user-function nesting). Inferring a return
+type from a body's `return` statements is possible but multi-type / ambiguous
+bodies add false-positive risk; an optional return-type annotation is a genuine
+language change against a deliberate design choice, so either path needs its own
+decision and record rather than riding along with the checks.
 
 ### Embedding, WASM, and sandboxing
 

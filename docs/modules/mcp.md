@@ -22,7 +22,7 @@ func echo(args as json.Value) {
 }
 
 def sch as json.Value init mcp.property(mcp.schema(), "text", "string", "text to echo", true);
-def srv as mcp.Server init mcp.addTool(mcp.server("demo", "1.0.0"), "echo", "echo text", $sch, "echo");
+def srv as mcp.Server init mcp.addTool(mcp.server("demo", "1.0.0"), "echo", "echo text", $sch, echo);
 
 # answer one request (transport-agnostic):
 def reply as string init mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}");
@@ -47,14 +47,15 @@ def struct mcp.Server {
 | Call | Returns | |
 | ---- | ------- | - |
 | `mcp.server(name, version)` | `Server` | an empty server with the given identity |
-| `mcp.addTool(server, name, description, inputSchema, handler)` | `Server` | register a tool; `inputSchema` is a `json.Value` JSON Schema, `handler` a top-level method name |
+| `mcp.addTool(server, name, description, inputSchema, handler)` | `Server` | register a tool; `inputSchema` is a `json.Value` JSON Schema, `handler` a `func` value |
 | `mcp.addResource(server, uri, name, description, mimeType, handler)` | `Server` | register a resource keyed by `uri` |
 | `mcp.addPrompt(server, name, description, arguments, handler)` | `Server` | register a prompt template; `arguments` is a `list of PromptArg` (declared to the host, may be `[]`) |
 | `mcp.promptArg(name, description, required)` | `PromptArg` | one prompt-argument declaration for `addPrompt` |
 
-Each item's `handler` names a **top-level method** in the program that imported
-the module, dispatched by name via `meta.callMain` (the same mechanism the
-[`web`](web.md) module uses):
+Each item's `handler` is a **`func` value** - a top-level method in the program
+that imported the module, passed by its bare name and called through its home
+interpreter, so it resolves its own imports and builds its `json.Value` result in
+the entry program's context (the same mechanism the [`web`](web.md) module uses):
 
 - a **tool** handler is `func NAME(arguments as json.Value)` and returns a
   `json.Value` **or a scalar** (a string is used as the text content verbatim;
@@ -212,6 +213,6 @@ io.printf("isError=%t text=%s\n",
   from and read with.
 - [httpd.md](../libraries/httpd.md) / [http.md](http.md) - the server engine and
   client transport.
-- [web.md](web.md) - the web framework, the other `meta.callMain`-dispatched
+- [web.md](web.md) - the web framework, the other `func`-value-dispatched
   request/response module.
 - [modules/index.md](index.md) - the module catalog and import rules.

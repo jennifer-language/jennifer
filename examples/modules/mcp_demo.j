@@ -14,7 +14,7 @@ use io;
 use json;
 import "../../modules/mcp.j" as mcp;
 
-# --- tool / resource / prompt handlers (reached by name via meta.callMain) ---
+# --- tool / resource / prompt handler func values (called in their home context) ---
 
 func echoTool(args as json.Value) {
     return json.asString($args, "/text");
@@ -51,15 +51,15 @@ def addSchema as json.Value init mcp.property(
     "b", "integer", "second addend", true);
 
 def srv as mcp.Server init mcp.server("demo-server", "1.0.0");
-$srv = mcp.addTool($srv, "echo", "Echo the given text", $echoSchema, "echoTool");
-$srv = mcp.addTool($srv, "add", "Add two integers", $addSchema, "addTool2");
-$srv = mcp.addResource($srv, "file:///readme", "readme", "The project readme", "text/plain", "readmeResource");
+$srv = mcp.addTool($srv, "echo", "Echo the given text", $echoSchema, echoTool);
+$srv = mcp.addTool($srv, "add", "Add two integers", $addSchema, addTool2);
+$srv = mcp.addResource($srv, "file:///readme", "readme", "The project readme", "text/plain", readmeResource);
 $srv = mcp.addPrompt(
     $srv,
     "greet",
     "A friendly greeting",
     [mcp.promptArg("who", "the name to greet", true)],
-    "greetingPrompt");
+    greetingPrompt);
 
 # --- answer a request sequence with mcp.handle (no network) ------------------
 

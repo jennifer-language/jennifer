@@ -13,8 +13,9 @@ friendly error (TinyGo ships no netdev driver). See
 
 ## The pull loop
 
-Jennifer has no first-class functions, so you cannot hand Go a request handler
-callback. Instead the engine accepts and parses requests concurrently on Go's
+You cannot hand Go's `net/http` a Jennifer request-handler callback: the
+interpreter is not re-entered from Go's handler goroutines. Instead the engine
+accepts and parses requests concurrently on Go's
 side and hands them to your program **one at a time**: `httpd.accept` blocks
 for the next request, and `httpd.respond` answers it.
 

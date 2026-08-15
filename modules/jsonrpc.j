@@ -5,10 +5,10 @@
 /**
  * JSON-RPC 2.0 (https://www.jsonrpc.org/specification) over HTTP: a **client**
  * that calls remote methods, and a transport-agnostic **server** `handle` that
- * dispatches an incoming request to the entry program's methods (by name, via
- * `meta.callMain`, the same way the `web` module reaches handlers - Jennifer has
- * no first-class functions). Built on `json` for the wire format and `http` for
- * the client transport, so it needs the default `jennifer` binary.
+ * dispatches an incoming request to the entry program's methods **by name**, via
+ * `meta.callMain` - the method name arrives on the wire, so it is resolved as a
+ * runtime string, not a `func` value. Built on `json` for the wire format and
+ * `http` for the client transport, so it needs the default `jennifer` binary.
  *
  * `params` and a call's result are `json.Value`s: the caller builds params with
  * the `json` write API (`json.list` / `json.map` + `json.append` / `json.set`)
