@@ -46,6 +46,18 @@ and by
 and
 .B \-I " " \fIDIR\fR
 (repeatable) adds a directory to the module search path.
+.B \-\-vendor=\fIDIR\fR
+sets the vendor root for
+.B @scope/package
+deck imports (else
+.BR JENNIFER_VENDOR ,
+else the nearest
+.I vendor/
+above the program), and
+.B \-\-env=\fINAME\fR
+selects the run profile: it is identical to running with
+.B JENNIFER_ENV=\fINAME\fR
+in the environment.
 .TP
 .BR repl
 Start the interactive read-eval-print loop. Built-in line editor
@@ -58,9 +70,26 @@ Print the lexer's token stream for the given source file.
 .BR ast " " \fIfile.j\fR
 Print the parsed abstract syntax tree as JSON.
 .TP
-.BR fmt " " \fIfile.j\fR
-Format the source file per the project style guide and print to
-standard output. (No in-place rewrite.)
+.BR fmt " " [\fIflags\fR] " " \fIfile.j\fR...
+Format Jennifer source per the project style guide. With no flag it writes a
+single file's canonical form to standard output. With
+.B \-w
+(or
+.BR \-\-write )
+it rewrites each file in place, touching only files whose content actually
+changes (an atomic temp\-file\-then\-rename write). With
+.B \-l
+(or
+.BR \-\-check ", " \-\-list )
+it rewrites nothing and instead lists the files that are not already
+formatted, one path per line \- a non\-mutating gate for CI or a publish
+check. Exit status is 0 when every file is formatted, 1 when some need
+formatting, 2 on a read or lex failure (matching
+.BR lint ).
+.B \-w
+and
+.B \-l
+are mutually exclusive, and neither reads standard input.
 .TP
 .BR lint " " \fIfile.j\fR...
 Report patterns that are compile-legal but stylistically or
@@ -99,7 +128,11 @@ and
 .B trace
 are read by
 .B go tool pprof
-and speedscope.app.
+and speedscope.app. Profiling a program that imports modules attributes each
+module's statements to its own file, resolved with the same
+.BR \-I ", " \-\-sysmoddir ", and " \-\-vendor
+flags as
+.BR run .
 .TP
 .BR test " " \fIfile.j\fR
 Discover and run the file's test methods (the
@@ -114,7 +147,12 @@ hooks.
 .B \-\-format=\fItext|tap|junit\fR
 selects the report shape;
 .B \-\-isolated
-runs each test in a fresh interpreter subprocess. Exit status is 0
+runs each test in a fresh interpreter subprocess, and
+.B \-\-coverage\fR[=\fItext|json\fR]
+also reports statement coverage (text by default; the JSON form owns standard
+output, and coverage always runs in\-process, so it overrides
+.BR \-\-isolated ).
+Exit status is 0
 when all pass, 1 on failures, 2 on a runner error.
 .TP
 .BR serve " " [\fIflags\fR] " " \fIfile.j\fR
@@ -155,6 +193,20 @@ System module directory for bare module imports, below a
 .B \-\-sysmoddir
 flag and above the compile-time default. A value that is missing or not a
 directory refuses to start.
+.TP
+.B JENNIFER_VENDOR
+Vendor root for
+.B @scope/package
+deck imports, below a
+.B \-\-vendor
+flag and above the nearest
+.I vendor/
+directory found above the program.
+.TP
+.B JENNIFER_ENV
+Run profile name (set directly, or via
+.BR "run \-\-env" ).
+Read by programs that select configuration by environment.
 .SH FILES
 .TP
 .I /usr/share/mime/packages/jennifer.xml
