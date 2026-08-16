@@ -789,3 +789,27 @@ func TestSymlinkOverExistingErrors(t *testing.T) {
 		t.Error("fs.symlink onto an existing path should raise a catchable error")
 	}
 }
+
+// TestWriteNewExclusive: fs.writeNew creates a file, and a second writeNew on the
+// same path is refused (a catchable error) - the atomic test-and-set a file lock
+// is built on. Concurrency (exactly one winner among racers) is exercised
+// end-to-end by flatdb's update overlay, which builds its lock on this.
+func TestWriteNewExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lock")
+	src := fmt.Sprintf(`
+		use io;
+		use fs;
+		fs.writeNew(%q, "holder-a");
+		def refused as bool init false;
+		try { fs.writeNew(%q, "holder-b"); } catch (e) { $refused = true; }
+		def content as string init fs.readString(%q);
+		io.printf("%%t %%s", $refused, $content);
+	`, path, path, path)
+	out, err := runProg(t, src)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "true holder-a" {
+		t.Fatalf("got %q, want %q (second create refused, first content intact)", out, "true holder-a")
+	}
+}

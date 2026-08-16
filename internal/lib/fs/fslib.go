@@ -72,6 +72,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "readString", readStringFn)
 	in.RegisterNamespaced(LibraryName, "appendString", appendStringFn)
 	in.RegisterNamespaced(LibraryName, "appendBytes", appendBytesFn)
+	in.RegisterNamespaced(LibraryName, "writeNew", writeNewFn)
 
 	// Metadata.
 	in.RegisterNamespaced(LibraryName, "exists", existsFn)
@@ -189,6 +190,30 @@ func writeStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("fs.writeString: content must be string, got %s", args[1].Kind)
 	}
 	if err := writeCommon("fs.writeString", path, []byte(args[1].Str), os.O_WRONLY|os.O_CREATE|os.O_TRUNC); err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.Null(), nil
+}
+
+// writeNewFn implements `fs.writeNew(path, content) -> null`: create `path` with
+// `content`, failing with a catchable error if it already exists. The create is
+// O_EXCL, so it is atomic against concurrent creators - the primitive for a
+// file-based advisory lock (the winner creates the file; every other creator's
+// call errors, and that error IS the lock test). Unlike a symlink lock the result
+// is a normal file, so `fs.exists` / `fs.readString` see it without the
+// symlink-follow surprise `fs.exists` has on a link whose target is a label.
+func writeNewFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("fs.writeNew expects 2 arguments (path, content), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.writeNew", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("fs.writeNew: content must be string, got %s", args[1].Kind)
+	}
+	if err := writeCommon("fs.writeNew", path, []byte(args[1].Str), os.O_WRONLY|os.O_CREATE|os.O_EXCL); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.Null(), nil
