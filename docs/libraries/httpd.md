@@ -125,6 +125,41 @@ outside it exposes its target. If the served tree can contain links created by
 another user or an upload feature, resolve and containment-check the path
 yourself before serving, or serve from a directory you fully control.
 
+## Response headers and the `Server` line
+
+The engine adds **no `Server:` header**. Go's `net/http` sends `Date` and the
+framing headers (`Content-Length` / `Transfer-Encoding`) but never advertises the
+server software, and `httpd` adds nothing on top - so a response carries no
+`Server: ...` fingerprint (no stack name, no version a scanner can match a CVE
+against). This is a deliberate default; you opt *in* to advertising a server, you
+do not opt out.
+
+To send a `Server` header (or any custom header), set it **before** `respond`, on
+that one request:
+
+```jennifer
+func handle(req as httpd.Request) {
+    httpd.setHeader($req, "Server", "jennifer");
+    httpd.respond($req, 200, "hi\n");
+}
+```
+
+The pull loop has no middleware of its own, so to stamp a header onto **every**
+response use the [`web`](../modules/web.md) framework's `web.before` middleware,
+which runs before each handler:
+
+```jennifer
+func stampServer(ctx as web.Context) {
+    web.setHeader($ctx, "Server", "jennifer");
+    return true;
+}
+$app = web.before($app, stampServer);
+```
+
+(`web.setHeader` is the framework wrapper over `httpd.setHeader`; a bare `httpd`
+program repeats the per-request call, or factors it into a small helper the
+handlers call.)
+
 ## Graceful shutdown
 
 `httpd.shutdown` closes the listener, wakes any workers blocked in

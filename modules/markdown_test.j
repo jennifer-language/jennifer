@@ -307,11 +307,32 @@ func testHtmlThematicBreak() {
 }
 
 func testHtmlRawBlock() {
+    # SECURITY: raw HTML blocks are ESCAPED by default, so untrusted Markdown
+    # (a README, a comment) cannot inject a <script> or an event handler.
     testing.assertEqual(
         toHtml("<div class=\"x\">\nraw\n</div>"),
+        "&lt;div class=\"x\"&gt;\nraw\n&lt;/div&gt;");
+    testing.assertEqual(toHtml("<!-- note -->"), "&lt;!-- note --&gt;");
+    testing.assertEqual(
+        toHtml("<script>alert(1)</script>"),
+        "&lt;script&gt;alert(1)&lt;/script&gt;");
+    testing.assertEqual(
+        toHtml("<img src=x onerror=alert(1)>"),
+        "&lt;img src=x onerror=alert(1)&gt;");
+}
+
+func testHtmlRawBlockOptIn() {
+    # A trusted caller opts back in to verbatim passthrough.
+    testing.assertEqual(
+        toHtmlWith("<div class=\"x\">\nraw\n</div>", HtmlOptions{allowRawHtml: true}),
         "<div class=\"x\">\nraw\n</div>");
-    # a closing tag and a comment also open a raw block
-    testing.assertEqual(toHtml("<!-- note -->"), "<!-- note -->");
+    testing.assertEqual(
+        toHtmlWith("<script>ok()</script>", HtmlOptions{allowRawHtml: true}),
+        "<script>ok()</script>");
+    # allowRawHtml false is identical to the default toHtml (escaped).
+    testing.assertEqual(
+        toHtmlWith("<b>x</b>", HtmlOptions{allowRawHtml: false}),
+        toHtml("<b>x</b>"));
 }
 
 func testHtmlIndentedCode() {

@@ -945,7 +945,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `jennifer` binary only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
   lists, code, GFM tables) to HTML (`markdown.toHtml`, via `html`) and styled
-  terminal text (`toAnsi`, via `ansi`); `parse(md)` surfaces a `Node` tree walked
+  terminal text (`toAnsi`, via `ansi`). `toHtml` is **safe by default** - raw HTML
+  in the source is escaped, so untrusted Markdown (a README, a comment) cannot
+  inject `<script>` / event handlers; `toHtmlWith(md, HtmlOptions{allowRawHtml:
+  true})` opts trusted input back into verbatim passthrough. `parse(md)` surfaces a `Node` tree walked
   like `xml` / `html` (`typeOf` / `children` / `text` / `level` / `get` / `findAll`
   / `has`), and `render(doc, format)` renders a parsed or hand-built tree (parse ->
   transform -> render). `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)`

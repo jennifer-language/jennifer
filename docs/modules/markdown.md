@@ -24,7 +24,8 @@ Rendering (Markdown in, HTML / terminal text / PDF out):
 
 | Call                  | Returns  | Notes                                                            |
 | --------------------- | -------- | --------------------------------------------------------------- |
-| `markdown.toHtml(md)` | `string` | Render to HTML: block elements concatenated, no indentation.    |
+| `markdown.toHtml(md)` | `string` | Render to HTML: block elements concatenated, no indentation. Safe by default: raw HTML in the source is escaped. |
+| `markdown.toHtmlWith(md, opts)` | `string` | `toHtml` with an `HtmlOptions`; set `allowRawHtml: true` to pass raw HTML blocks through (trusted input only). |
 | `markdown.toAnsi(md)` | `string` | Render to terminal text with `ansi` styling (self-suppressing). |
 | `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"ansi"`. |
 | `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
@@ -102,11 +103,11 @@ still ends the item. A nested list is a more-indented list under a parent item;
 a blockquote's inner lines are parsed as blocks, so a quote can hold paragraphs,
 lists, or nested quotes. A link's `href`, an autolink's target, and an image's
 `src` all pass through the same scheme allowlist ([`html.safeUrl`](html.md)), so
-`javascript:` and other script schemes render as `#`. A raw HTML block is emitted
-verbatim by `toHtml` (it is the author's own markup) and dropped by `toAnsi` /
-the PDF renderer, which have no HTML.
+`javascript:` and other script schemes render as `#`. A raw HTML block is
+**escaped** by `toHtml` (rendered as literal text, not markup) and dropped by
+`toAnsi` / the PDF renderer, which have no HTML.
 
-## HTML output
+## HTML output and safety
 
 `toHtml` builds an [`html`](html.md) node tree and renders it, so
 all text and every link target are correctly escaped - `&`, `<`, `>` in text
@@ -116,6 +117,24 @@ and code, and `&`/`"` in an `href` - and you cannot produce malformed markup:
 markdown.toHtml("[t](http://x/?a=1&b=2) and <b> & `x<y`");
 # <p><a href="http://x/?a=1&amp;b=2">t</a> and &lt;b&gt; &amp; <code>x&lt;y</code></p>
 ```
+
+**Safe by default for untrusted Markdown.** A raw HTML block in the source (a line
+opening with `<tag>`) is **escaped**, so rendering a README, a comment, or any
+publisher-supplied Markdown cannot inject a `<script>` or an event-handler
+attribute (`<img onerror=...>`) - it renders as visible text instead. This closes
+the stored-XSS vector that verbatim HTML passthrough would open on the rendering
+origin. Inline raw HTML was already escaped, and everything the renderer builds
+(text, link URLs, image attributes) is escaped too.
+
+For **trusted** Markdown where raw HTML is intended (your own docs using
+`<details>`, `<div align>`, badges), opt back in to verbatim passthrough:
+
+```jennifer
+markdown.toHtmlWith($trustedMd, markdown.HtmlOptions{allowRawHtml: true});
+```
+
+`allowRawHtml` defaults to false, so `toHtml(md)` and
+`toHtmlWith(md, markdown.HtmlOptions{allowRawHtml: false})` are identical.
 
 Output is compact (no newlines between block elements), which diffs and
 round-trips predictably; wrap it in your own formatter if you need indented

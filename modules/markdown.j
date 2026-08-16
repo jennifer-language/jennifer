@@ -1693,13 +1693,40 @@ func alignOf(aligns as list of string, i as int) {
 }
 
 /**
+ * Options for HTML rendering.
+ * @field allowRawHtml {bool} pass raw HTML blocks through verbatim (trusted input
+ *   only). Default (zero value) is false: raw HTML is escaped, so untrusted
+ *   Markdown cannot inject scripts or event handlers.
+ */
+export def struct HtmlOptions {
+    allowRawHtml as bool
+};
+
+/**
  * Render Markdown to an HTML string (block elements concatenated, no
- * indentation).
+ * indentation). **Safe by default:** a raw HTML block in the source (a line
+ * opening with `<tag>`) is escaped and rendered as literal text, so passing
+ * untrusted Markdown (a README, a user comment) cannot inject a `<script>` or an
+ * event-handler attribute. Everything the renderer builds is already escaped
+ * (text, link URLs via an allow-list, image attributes). To pass raw HTML through
+ * for **trusted** input, use `toHtmlWith` with `allowRawHtml: true`.
  * @param md {string} the Markdown source
  * @return {string} the rendered HTML
  */
 export func toHtml(md as string) {
     return render(parse($md), "html");
+}
+
+/**
+ * Render Markdown to HTML with explicit options. The only option today is
+ * `allowRawHtml`: set it true to emit raw HTML blocks verbatim (for trusted
+ * Markdown), or false (the default `toHtml` behavior) to escape them.
+ * @param md {string} the Markdown source
+ * @param opts {HtmlOptions} the render options
+ * @return {string} the rendered HTML
+ */
+export func toHtmlWith(md as string, opts as HtmlOptions) {
+    return htmlBlocksToString(parse($md).children, $opts.allowRawHtml);
 }
 
 # --- ANSI helpers shared by the node renderer ----------------------
@@ -1851,13 +1878,13 @@ func inlineNodesToHtml(ns as list of Node) {
 
 # listNodeToHtml renders a `list` node: each `item`'s children are inline nodes plus
 # an optional nested `list` (rendered as a child `<ul>` / `<ol>` inside the `<li>`).
-func listNodeToHtml(n as Node) {
+func listNodeToHtml(n as Node, allowRaw as bool) {
     def lis as list of html.Node init [];
     for (def item in $n.children) {
         def kids as list of html.Node init [];
         for (def c in $item.children) {
             if ($c.kind == "list") {
-                $kids[] = nodeToHtml($c);
+                $kids[] = nodeToHtml($c, $allowRaw);
             } else {
                 $kids[] = inlineNodeToHtml($c);
             }
@@ -1907,7 +1934,7 @@ func tableNodeToHtml(n as Node) {
 }
 
 # nodeToHtml renders one block Node to an html node.
-func nodeToHtml(n as Node) {
+func nodeToHtml(n as Node, allowRaw as bool) {
     match ($n.kind) {
         when "heading" {
             def tag as string init "h" + convert.toString($n.level);
@@ -1924,7 +1951,7 @@ func nodeToHtml(n as Node) {
             return html.element("pre", [], $pre);
         }
         when "list" {
-            return listNodeToHtml($n);
+            return listNodeToHtml($n, $allowRaw);
         }
         when "table" {
             return tableNodeToHtml($n);
@@ -1932,7 +1959,7 @@ func nodeToHtml(n as Node) {
         when "quote" {
             def kids as list of html.Node init [];
             for (def cb in $n.children) {
-                $kids[] = nodeToHtml($cb);
+                $kids[] = nodeToHtml($cb, $allowRaw);
             }
             return html.element("blockquote", [], $kids);
         }
@@ -1941,7 +1968,15 @@ func nodeToHtml(n as Node) {
             return html.element("hr", [], $noKids);
         }
         when "html_block" {
-            return html.raw($n.text);
+            # SECURITY: raw HTML from the source is escaped by default, so
+            # untrusted Markdown (a README, a comment) cannot inject a `<script>`
+            # or an event-handler attribute (`<img onerror=...>`). A trusted
+            # caller opts back in to verbatim passthrough with
+            # `toHtmlWith(md, HtmlOptions{allowRawHtml: true})`.
+            if ($allowRaw) {
+                return html.raw($n.text);
+            }
+            return html.text($n.text);
         }
         when "page_break" {
             # A page break has no HTML representation; emit nothing.
@@ -2129,6 +2164,17 @@ func nodeToAnsi(n as Node) {
     }
 }
 
+# htmlBlocksToString renders a block list to an HTML string. `allowRaw` controls
+# whether a raw `html_block` is emitted verbatim (trusted) or escaped (the safe
+# default) - see nodeToHtml's html_block arm.
+func htmlBlocksToString(blocks as list of Node, allowRaw as bool) {
+    def nodes as list of html.Node init [];
+    for (def c in $blocks) {
+        $nodes[] = nodeToHtml($c, $allowRaw);
+    }
+    return html.renderAll($nodes);
+}
+
 /**
  * Render a document tree (a `parse` result, or a hand-built one) to a string.
  * `format` is `"html"` (block elements concatenated, no indentation) or `"ansi"`
@@ -2145,11 +2191,7 @@ export func render(doc as Node, format as string) {
         $blocks = [$doc];
     }
     if ($format == "html") {
-        def nodes as list of html.Node init [];
-        for (def c in $blocks) {
-            $nodes[] = nodeToHtml($c);
-        }
-        return html.renderAll($nodes);
+        return htmlBlocksToString($blocks, false);
     }
     if ($format == "ansi") {
         def parts as list of string init [];
