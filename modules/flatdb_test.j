@@ -10,6 +10,7 @@
 # adds testing (for assertions) and os (for a temp path).
 use testing;
 use os;
+use task;
 
 # tmpPath returns a scratch file path under the OS temp dir.
 func tmpPath() {
@@ -139,14 +140,85 @@ func testSavePreservesMode() {
     def path as string init os.tempDir() + "/flatdb_mode_scratch.json";
     def db as DB init open($path);
     $db = set($db, "/k", json.decode("1"));
-    save($db); # first write of a new file
+    $db = save($db); # first write of a new file; thread the rebound DB for the next save
     def st1 as fs.Stat init fs.stat($path);
     testing.assertEqual($st1.mode, 0o600);
     # A later save preserves the operator's chosen mode instead of resetting to 0644.
     fs.chmod($path, 0o640);
     $db = set($db, "/k", json.decode("2"));
-    save($db);
+    $db = save($db);
     def st2 as fs.Stat init fs.stat($path);
     testing.assertEqual($st2.mode, 0o640);
     fs.remove($path);
+}
+
+# --- concurrency: version-conflict + locked update -------------------------
+
+# testSaveConflictThrows: two writers open the same file at the same version; the
+# first save commits, the second must fail loudly instead of silently clobbering.
+func testSaveConflictThrows() {
+    def path as string init os.tempDir() + "/flatdb_conflict_" + uuid.v4() + ".json";
+    save(set(open($path), "/n", json.decode("0")));
+    def w1 as DB init set(open($path), "/a", json.decode("1"));
+    def w2 as DB init set(open($path), "/b", json.decode("2"));
+    save($w1);
+    def threw as bool init false;
+    try {
+        save($w2);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "flatdb");
+    }
+    testing.assertTrue($threw);
+    fs.remove($path);
+}
+
+# incrementCount is the transform for the concurrency test: read the counter (0 if
+# absent) and write it back +1. Under `update` this whole read-modify-write is
+# locked, so concurrent runs cannot lose an increment.
+func incrementCount(db as DB) {
+    def n as int init 0;
+    if (has($db, "/count")) {
+        $n = json.asInt(get($db, "/count"));
+    }
+    return set($db, "/count", json.decode(convert.toString($n + 1)));
+}
+
+# testUpdateSerializesConcurrentWriters: 10 spawned workers each run a locked
+# read-modify-write increment of one counter. Without the lock this loses writes
+# (last save wins); with `update` every increment survives -> exactly 10.
+func testUpdateSerializesConcurrentWriters() {
+    def path as string init os.tempDir() + "/flatdb_update_" + uuid.v4() + ".json";
+    save(set(open($path), "/count", json.decode("0")));
+    def ts as list of task of null init [];
+    def i as int init 0;
+    while ($i < 10) {
+        $ts[] = spawn {
+            update($path, incrementCount);
+            return;
+        };
+        $i = $i + 1;
+    }
+    for (def t in $ts) {
+        task.wait($t);
+    }
+    testing.assertEqual(json.asInt(get(open($path), "/count")), 10);
+    fs.remove($path);
+    try { fs.remove($path + ".lock"); } catch (e) { } # lint-disable: L103
+}
+
+# testLockUnlockRoundTrip: lock is exclusive while held (a second writeNew on the
+# lock path fails) and free again after unlock.
+func testLockUnlockRoundTrip() {
+    def path as string init os.tempDir() + "/flatdb_lock_" + uuid.v4() + ".json";
+    def lk as Lock init lock($path);
+    def stillHeld as bool init false;
+    try {
+        fs.writeNew($path + ".lock", "intruder");
+    } catch (e) {
+        $stillHeld = true; # the lock file exists, so the intruder create failed
+    }
+    testing.assertTrue($stillHeld);
+    unlock($lk);
+    testing.assertFalse(fs.exists($path + ".lock")); # released
 }

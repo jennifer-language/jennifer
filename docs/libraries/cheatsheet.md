@@ -106,6 +106,7 @@ flat lookup view, not authoritative.
 | [`fs`](fs.md)`.watch(path[, intervalMs])`             | Watch a file / dir (recursive) for changes -> `fs.Watcher`; pull with `fs.next` / `fs.hasEvent`, stop with `fs.close`. mtime polling. |
 | [`fs`](fs.md)`.writeBytes(path, content)` / `.writeBytes($f, b)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                      |
 | [`fs`](fs.md)`.writeString(path, content)` / `.writeString($f, s)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                    |
+| [`fs`](fs.md)`.writeNew(path, content)`               | Create `path` with `content`, failing (catchable) if it exists (`O_EXCL`). Atomic test-and-set for a file lock.                     |
 | [`fs`](fs.md)`.makeTempFile([dir[, prefix[, suffix]]])` | Create a unique empty file (atomic, `0600`); returns its path. `dir=""` = system temp; parent must exist. |
 | [`fs`](fs.md)`.makeTempDir([dir[, prefix]])`          | Create a unique directory (atomic, `0700`); returns its path. Only the leaf is created (not `mkdir -p`).                            |
 | [`gpio`](gpio.md)`.setup(pin, direction)`            | Request `pin` (0..63) with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |

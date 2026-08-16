@@ -15,8 +15,10 @@ snapshotting of small data*:
 - **Atomicity** - whole-file, via a temp file + rename. A reader ever sees the
   whole old file or the whole new one, never a torn write.
 - **Consistency** - application-level (you decide what's valid).
-- **Isolation** - none. One process, reload-the-whole-file, no concurrent
-  transactions. Single-writer by construction.
+- **Isolation** - optimistic, with an opt-in lock. Each writer reads the whole
+  file; `save` **fails loudly** if it changed since `open` (no silent lost
+  update), and `flatdb.update` adds a cross-process advisory lock so concurrent
+  writers serialize with no loss. No multi-key transactions.
 - **Durability** - the rename is atomic, but flush-to-disk is OS-buffered.
 
 For a real database, reach for a client over `net` (e.g. [`redis`](redis.md)),
@@ -30,7 +32,7 @@ A module holds no mutable state and `spawn` deep-copies scope, so a store can't
 be a shared open connection - it's a **value** you hold:
 
 ```jennifer
-export def struct DB { path as string, data as json.Value };
+export def struct DB { path as string, data as json.Value, version as string };
 ```
 
 Reading verbs leave the `DB` untouched; writing verbs return a **fresh** `DB`
@@ -50,8 +52,10 @@ only side effect.
 | `flatdb.set(db, pointer, value)` | `DB` | Upsert an object key / replace a list index (strict: no auto-vivify). |
 | `flatdb.append(db, pointer, value)` | `DB` | Push onto the list at the pointer (create it first with `set`). |
 | `flatdb.remove(db, pointer)` | `DB` | Drop the key / element at the pointer. |
-| `flatdb.save(db)` | `null` | Write the document back to its own file, atomically (temp + rename). Throws for a read-only DB (no backing file). |
+| `flatdb.save(db)` | `DB` | Write back atomically (temp + rename) and return a **rebound DB** (thread it - `$db = flatdb.save($db)` - to save again). Throws for a read-only DB, or a `flatdb` **conflict** if the file changed since `open`. |
 | `flatdb.saveAs(db, path)` | `DB` | Write the document to `path` and return a **fresh DB bound to `path`** (`db` unchanged). First dump for an `openString` DB, or a copy / new version of an on-disk one. |
+| `flatdb.update(path, transform)` | `DB` | **Locked** read-modify-write: take the lock, open the current doc, apply `transform` (a `func(db as DB) -> DB`), save, release (via `defer`). The safe path when concurrent writers may touch one store - no lost update. |
+| `flatdb.lock(dbPath)` / `flatdb.unlock(lk)` | `Lock` / `null` | The raw advisory lock (cross-process, over `fs.writeNew`) behind `update`, for a multi-step transaction. Prefer `update`. |
 
 `value` is any JSON value - a `json.Value`. Build objects and lists with
 `json.map()` / `json.list()` (then `json.set` / `json.append` into them), and
@@ -128,6 +132,53 @@ stack overflow), and JSON has no entity/alias expansion to amplify size - so a
 malicious URL can't crash or blow up the process. Bound the *download* itself with
 `http`'s body cap (64 MiB by default; pass an explicit `maxBytes` to
 `http.requestWith` for more or less).
+
+## Concurrent writers
+
+Crash-atomic is **not** the same as write-safe. Two writers that each `open`,
+edit different parts, and `save` would clobber one of the two changes (last
+rename wins). `flatdb` closes that two ways:
+
+**`save` fails loudly on a conflict.** `open` records a token of the file's
+on-disk state; `save` re-checks it and throws a `flatdb` error if the file moved
+since - so a lost update can never be *silent*. Catch it and re-open, or retry:
+
+```jennifer
+try {
+    flatdb.save($db);
+} catch (e) {
+    # someone else wrote first - re-open, re-apply, retry
+}
+```
+
+(This is best-effort - it rests on the filesystem's mtime granularity and has a
+tiny check-then-rename window - so it makes loss *loud*, not impossible.)
+
+**`flatdb.update` makes it impossible.** It brackets the whole read-modify-write
+in a cross-process advisory lock (built on [`fs.writeNew`](../libraries/fs.md), an
+atomic exclusive create), so concurrent writers serialize and no update is lost.
+`transform` is a `func(db as DB) -> DB`:
+
+```jennifer
+func addVisit(db as flatdb.DB) {
+    def n as int init 0;
+    if (flatdb.has($db, "/visits")) { $n = json.asInt(flatdb.get($db, "/visits")); }
+    return flatdb.set($db, "/visits", json.decode(convert.toString($n + 1)));
+}
+flatdb.update("state.json", addVisit);   # locked read -> edit -> save -> release
+```
+
+The lock coordinates across **separate processes** (a CLI and a server, two CLI
+runs) as well as `spawn`ed tasks - a symlink-free lock file created with
+`fs.writeNew`, whose holder id and timestamp let a lock leaked by a crashed writer
+be broken after a stale window. `flatdb.lock` / `flatdb.unlock` are the raw
+primitives for a multi-step transaction, but prefer `update`, which releases on
+every exit path.
+
+A note on `save` returning a `DB`: `save` returns the document rebound to the
+just-written file, so if you save the **same handle** more than once, thread the
+return - `$db = flatdb.save($db);` - or the next `save` sees the file it wrote as
+a conflict.
 
 ## Atomic save, in detail
 

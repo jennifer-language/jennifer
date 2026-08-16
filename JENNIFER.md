@@ -622,7 +622,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `fromIso`. Constants `UTC`, `PROGRAM_START`. Fixed-offset zones (no IANA / DST
   yet).
 - **`fs`** - blocking filesystem I/O. Whole-file `read` / `write` / `append`
-  (String / Bytes); metadata `exists` / `isFile` / `isDir` / `stat` (-> `fs.Stat`)
+  (String / Bytes), plus `writeNew(path, content)` (create, failing if it exists -
+  `O_EXCL`, the atomic test-and-set a file lock builds on); metadata `exists` /
+  `isFile` / `isDir` / `stat` (-> `fs.Stat`)
   / `realpath` / `readlink` / `symlink(target, linkPath)`; permissions `chmod` /
   `chown` (Unix); dir ops `mkdir` / `mkdirAll` / `remove` / `removeAll` / `rename`
   / `list` / `walk`; temp entries `makeTempFile` / `makeTempDir`; buffered `fs.File`
@@ -770,10 +772,16 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   **read-only** DB from an in-memory JSON string (`save` throws). Query / edit by
   JSON Pointer (`get` / `has` / `keys` / `length`; fresh-`DB`-returning `set` /
   `append` / `remove`); `flatdb.save(db)` writes back crash-atomically (temp +
-  `rename`), `flatdb.saveAs(db, path)` writes to a new file and returns a fresh `DB`
-  bound to it. Values are `json.Value`s. Transport-agnostic (never imports `http` /
-  `net`), so both binaries. Not a database engine - crash-atomic snapshotting of
-  small data.
+  `rename`) and returns a rebound `DB` (thread it - `$db = flatdb.save($db)` - to
+  save again), `flatdb.saveAs(db, path)` writes to a new file and returns a fresh
+  `DB` bound to it. Values are `json.Value`s. **Concurrent writers:** `save` throws
+  a `flatdb` conflict if the file changed since `open` (no silent lost update), and
+  `flatdb.update(path, transform)` runs a locked read-modify-write (a `func(db as
+  DB) -> DB`, cross-process advisory lock over `fs.writeNew`) so concurrent writers
+  (processes or `spawn`ed tasks) serialize with no loss - prefer it when more than
+  one writer touches a store (`flatdb.lock` / `unlock` are the raw primitives).
+  Transport-agnostic (never imports `http` / `net`), so both binaries. Not a
+  database engine - crash-atomic snapshotting of small data.
 - **`dotenv`** - read `.env` config files with layered profiles + `${VAR}`
   interpolation. Single-file: `dotenv.parse(text)` / `read(path)` -> `map of string
   to string`; `dotenv.load(path)` also `os.setEnv`s each. Cascade loaders merge
