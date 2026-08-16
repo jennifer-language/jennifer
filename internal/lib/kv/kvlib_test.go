@@ -227,3 +227,45 @@ func TestConcurrentIncr(t *testing.T) {
 		t.Errorf("concurrent incr total = %q, want 4000", got.Str)
 	}
 }
+
+// TestConcurrentCrossProcessFlush simulates N separate processes (each its own
+// registry, so no shared mutex) persisting the same file at once. Before the
+// unique-temp fix these raced on a fixed ".tmp" sibling: one writer renamed it
+// out from under another, crashing with `rename ...: no such file or directory`
+// (and could publish a torn file). With a unique temp per writer the worst case
+// is a lost write (last rename wins) - never an error, never a torn file. Run
+// under -race.
+func TestConcurrentCrossProcessFlush(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kv.dat")
+	const procs = 8
+	const ops = 40
+	var wg sync.WaitGroup
+	errs := make(chan error, procs*ops+procs)
+	for p := 0; p < procs; p++ {
+		wg.Add(1)
+		go func(p int) {
+			defer wg.Done()
+			r := &registry{stores: map[int64]*store{}}
+			stv, err := r.openFileFn(ctx, []interpreter.Value{str(path)})
+			if err != nil {
+				errs <- fmt.Errorf("proc %d openFile: %w", p, err)
+				return
+			}
+			for i := 0; i < ops; i++ {
+				if _, err := r.setFn(ctx, []interpreter.Value{stv, str(fmt.Sprintf("k%d-%d", p, i)), str("v"), iv(0)}); err != nil {
+					errs <- fmt.Errorf("proc %d set: %w", p, err)
+					return
+				}
+			}
+		}(p)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent cross-process flush errored (a fixed temp path ENOENT-crashes here): %v", err)
+	}
+	// The file must still be a well-formed store afterwards (never torn).
+	if _, err := loadFile(path); err != nil {
+		t.Fatalf("file was corrupted by concurrent writers: %v", err)
+	}
+}

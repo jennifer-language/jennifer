@@ -60,10 +60,13 @@ io.printf("%s\n", kv.get($store, "greeting"));
   (gone when the program exits); `openFile` persists to disk and survives across
   runs (a rewrite-the-whole-file flush after every mutation - simple and correct,
   not fast). Both are safe for `spawn`ed tasks within one process (a per-store
-  mutex; `incr` is atomic), but **not** for concurrent *separate* processes on one
-  file. For state shared across processes (multiple workers, a web fleet), use
-  `memcache` / `redis` - the [`kvstore`](../modules/kvstore.md) selector switches
-  backends behind one API.
+  mutex; `incr` is atomic). Concurrent *separate* processes on one file get
+  **last-write-wins** - a lost write, never a crash or a torn file (the flush
+  renames a uniquely-named temp over the target). Note `add`'s test-and-set checks
+  the in-memory snapshot loaded at open, so `openFile` + `add` is **not** a
+  cross-process lock. For state shared across processes (multiple workers, a web
+  fleet), use `memcache` / `redis` - the [`kvstore`](../modules/kvstore.md)
+  selector switches backends behind one API.
 
 ## See also
 

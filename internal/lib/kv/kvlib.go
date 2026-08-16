@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -100,11 +101,33 @@ func (s *store) flushLocked() error {
 		b.WriteString(strconv.FormatInt(exp, 10))
 		b.WriteByte('\n')
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+	// Write to a uniquely-named temp in the same directory, then rename over the
+	// target. The unique name (not a fixed `.tmp` sibling) is what makes this
+	// safe when *separate* processes persist the same file at once: a fixed
+	// sibling would have two writers share one temp path, so one could rename it
+	// out from under the other (an ENOENT crash) or read a half-written temp (a
+	// torn file). With a unique temp each writer renames its own file; the worst
+	// concurrent outcome is a lost write (last rename wins), which is exactly what
+	// the single-process contract documents - never a crash or a torn file.
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".tmp.*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	tmpName := tmp.Name()
+	if _, err := tmp.WriteString(b.String()); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, s.path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // loadFile reads a store file written by flushLocked, dropping entries that have
@@ -256,11 +279,16 @@ func (r *registry) openFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 }
 
 // openFileFn implements `kv.openFile(path) -> kv.Store`: a store persisted to
-// `path`. Its contents are loaded on open and rewritten after every mutation, so
-// state survives across `jennifer run` invocations (unlike `open`, which is reset
-// each run). Single-process persistence: within a process, `spawn`ed tasks share
-// it safely, but concurrent *separate* processes on one file can lose writes -
-// use `redis` / `memcache` for cross-process coordination.
+// `path`. Its contents are loaded on open and rewritten after every mutation
+// (crash-atomically - a uniquely-named temp file renamed over the target - so a
+// reader never sees a torn or half-written file, even across processes). State
+// survives across `jennifer run` invocations (unlike `open`, which is reset each
+// run). Single-process coordination only: within a process, `spawn`ed tasks share
+// it safely under the per-store mutex; concurrent *separate* processes on one file
+// get last-write-wins (a lost write, never a crash). Note `add`'s test-and-set is
+// per-process - it checks the in-memory snapshot loaded at open - so `openFile` +
+// `add` is not a cross-process lock; use `redis` / `memcache` for cross-process
+// coordination.
 func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("kv.openFile expects 1 argument (path), got %d", len(args))
