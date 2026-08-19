@@ -47,10 +47,41 @@ def struct mikrotik.Session { socket as net.Conn };
 | Call | Returns | |
 | ---- | ------- | - |
 | `mikrotik.options(host, user, password)` | `Options` | plain TCP, port 8728 |
-| `mikrotik.optionsTLS(host, user, password)` | `Options` | api-ssl (TLS), port 8729 |
+| `mikrotik.optionsTLS(host, user, password)` | `Options` | api-ssl (TLS), port 8729 - certificate **verified** by default (below) |
 | `mikrotik.withPort(o, port)` | `Options` | copy with a different port |
+| `mikrotik.withCA(o, pem)` | `Options` | copy that trusts a PEM certificate (private CA / pinned self-signed) |
+| `mikrotik.insecure(o)` | `Options` | copy that accepts **any** certificate (disables authentication) |
 | `mikrotik.connect(opts)` | `Session` | connect and log in |
 | `mikrotik.close(s)` | | close the connection |
+
+`host` may be an **IP or a DNS hostname** - it is resolved when the connection is
+dialled. The example above uses an IP only for brevity.
+
+### TLS verification
+
+`optionsTLS` dials api-ssl and, **by default, verifies the router's
+certificate** against the system roots and the host you dialled (IP or DNS name -
+Go's TLS checks IP SANs too). The zero `Options` maps to a zero
+`net.TLSOptions`, i.e. full verification. Three deployments:
+
+- **A router with a certificate a public CA issued for its DNS name** - dial that
+  name; it verifies with no extra options.
+- **A self-signed or private-CA router** (the RouterOS default) - pin its
+  certificate with `mikrotik.withCA(opts, pem)`. The peer is still
+  authenticated, just against the certificate you supplied, so this is the
+  preferred way to reach a self-signed box:
+
+  ```jennifer
+  use fs;
+  def ca as bytes init fs.readBytes("router.pem");
+  def s as mikrotik.Session init mikrotik.connect(mikrotik.withCA(
+      mikrotik.optionsTLS("192.168.88.1", "admin", "secret"), $ca));
+  ```
+
+- **A trusted-wire bootstrap where you cannot supply the certificate** -
+  `mikrotik.insecure(opts)` accepts any certificate. This disables server
+  authentication and exposes the session to a man-in-the-middle; TLS still
+  encrypts, but you no longer know who you are talking to. Prefer `withCA`.
 
 ## Commands
 

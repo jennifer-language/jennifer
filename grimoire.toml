@@ -40,7 +40,7 @@ repoLabel = "GitHub"
 # {path} is the chapter's path relative to `src`, so the template carries the
 # docs/ prefix itself.
 editUrl = "https://github.com/jennifer-language/jennifer/edit/main/docs/{path}"
-favicon = "../theme/favicon.svg"
+favicon = "favicon.ico"
 # An SVG is inlined into the mark beside the title, so it follows the colour
 # mode. Path is relative to `src`.
 logo = "../site/logo/jennifer.svg"

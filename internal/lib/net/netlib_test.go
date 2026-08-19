@@ -319,6 +319,47 @@ func TestReverseLookupLoopback(t *testing.T) {
 	}
 }
 
+// TestSetBroadcast - enabling SO_BROADCAST succeeds and leaves the
+// socket fully functional for an ordinary loopback datagram. A full
+// 255.255.255.255 send is not asserted (a CI host may lack a
+// broadcast-capable route); the point is the setsockopt itself works
+// and does not disturb normal I/O.
+func TestSetBroadcast(t *testing.T) {
+	out, err := runProg(t, `
+		use net;
+		use convert;
+		use io;
+		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		net.setBroadcast($a, true);
+		net.setBroadcast($a, false);
+		net.setBroadcast($a, true);
+		net.sendTo($a, net.address($b), convert.bytesFromString("hi", "utf-8"));
+		def dg as net.Datagram init net.recvFrom($b, 16);
+		io.printf("%s", convert.stringFromBytes($dg.data, "utf-8"));
+		net.close($a);
+		net.close($b);
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "hi" {
+		t.Errorf("round-trip after setBroadcast: got %q, want %q", out, "hi")
+	}
+}
+
+// TestSetBroadcastWrongType - setBroadcast rejects a non-UDPSocket.
+func TestSetBroadcastWrongType(t *testing.T) {
+	_, err := runProg(t, `
+		use net;
+		def l as net.Listener init net.listen("127.0.0.1:0");
+		net.setBroadcast($l, true);
+	`)
+	if err == nil {
+		t.Fatal("expected type error for setBroadcast on a Listener")
+	}
+}
+
 // TestClosePolymorphic - the single close verb accepts three kinds.
 func TestClosePolymorphic(t *testing.T) {
 	_, err := runProg(t, `

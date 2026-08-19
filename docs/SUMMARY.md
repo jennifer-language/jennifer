@@ -103,6 +103,7 @@
 - [`label`](modules/label.md)
 - [`ldap`](modules/ldap.md)
 - [`log`](modules/log.md)
+- [`mactelnet`](modules/mactelnet.md)
 - [`markdown`](modules/markdown.md)
 - [`mcp`](modules/mcp.md)
 - [`memcache`](modules/memcache.md)

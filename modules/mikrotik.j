@@ -42,19 +42,27 @@ use encoding;
 use uuid;
 
 /**
- * Connection options.
- * @field host {string} the router host
+ * Connection options. `host` may be an IP or a DNS hostname (it is resolved when
+ * the connection is dialled). For api-ssl (`tls`), the zero value **verifies**
+ * the router's certificate against the system roots and the dialled host; a
+ * self-signed or private-CA router needs `withCA` (trust a specific cert) or,
+ * as a last resort, `insecure` (accept any cert).
+ * @field host {string} the router host (IP or DNS name)
  * @field port {int} the API port (8728 plain, 8729 api-ssl)
  * @field user {string} the API username
  * @field password {string} the API password
  * @field tls {bool} whether to use api-ssl (TLS)
+ * @field skipVerify {bool} accept *any* certificate (disables authentication; prefer `withCA`)
+ * @field caCert {bytes} a PEM certificate to trust besides the system roots (a private CA or pinned cert)
  */
 export def struct Options {
     host as string,
     port as int,
     user as string,
     password as string,
-    tls as bool
+    tls as bool,
+    skipVerify as bool,
+    caCert as bytes
 };
 
 /**
@@ -109,18 +117,32 @@ func checkWordLen(n as int) {
  * @return {Options} the options
  */
 export func options(host as string, user as string, password as string) {
-    return Options{host: $host, port: 8728, user: $user, password: $password, tls: false};
+    def o as Options;
+    $o.host = $host;
+    $o.port = 8728;
+    $o.user = $user;
+    $o.password = $password;
+    $o.tls = false;
+    return $o;
 }
 
 /**
- * api-ssl (TLS) options (port 8729).
- * @param host {string} the router host
+ * api-ssl (TLS) options (port 8729). The router's certificate is **verified** by
+ * default (against the system roots and the dialled host, IP or DNS name). For a
+ * self-signed or private-CA router, add `withCA` (preferred) or `insecure`.
+ * @param host {string} the router host (IP or DNS name)
  * @param user {string} the API username
  * @param password {string} the API password
  * @return {Options} the options
  */
 export func optionsTLS(host as string, user as string, password as string) {
-    return Options{host: $host, port: 8729, user: $user, password: $password, tls: true};
+    def o as Options;
+    $o.host = $host;
+    $o.port = 8729;
+    $o.user = $user;
+    $o.password = $password;
+    $o.tls = true;
+    return $o;
 }
 
 /**
@@ -132,6 +154,36 @@ export func optionsTLS(host as string, user as string, password as string) {
 export func withPort(o as Options, port as int) {
     def out as Options init $o;
     $out.port = $port;
+    return $out;
+}
+
+/**
+ * Copy options that trust a specific PEM certificate (a private CA or a pinned
+ * self-signed router cert) in addition to the system roots. The preferred way to
+ * reach a self-signed api-ssl router: the peer is still authenticated, just
+ * against this certificate.
+ * @param o {Options} the options
+ * @param pem {bytes} a PEM certificate to trust
+ * @return {Options} a fresh options
+ */
+export func withCA(o as Options, pem as bytes) {
+    def out as Options init $o;
+    $out.caCert = $pem;
+    return $out;
+}
+
+/**
+ * Copy options that skip TLS certificate verification entirely. SECURITY: this
+ * disables server authentication and exposes the session to a man-in-the-middle;
+ * TLS still encrypts, but you no longer know who you are talking to. Prefer
+ * `withCA`. Use only for a trusted-wire bootstrap of a self-signed router where
+ * you cannot supply its certificate.
+ * @param o {Options} the options
+ * @return {Options} a fresh options
+ */
+export func insecure(o as Options) {
+    def out as Options init $o;
+    $out.skipVerify = true;
     return $out;
 }
 
@@ -466,7 +518,15 @@ export func connect(opts as Options) {
     def addr as string init $opts.host + ":" + convert.toString($opts.port);
     def socket as net.Conn;
     if ($opts.tls) {
-        $socket = net.connectTLS($addr, CONNECT_TIMEOUT_MS);
+        # api-ssl verifies the router's certificate by default (against the
+        # system roots and the dialled host, IP or DNS name). A self-signed or
+        # private-CA router opts out per-connection: `withCA` pins its cert
+        # (still authenticated) or `insecure` accepts any cert. The zero Options
+        # maps to a zero net.TLSOptions - full verification.
+        def tlsOpts as net.TLSOptions;
+        $tlsOpts.skipVerify = $opts.skipVerify;
+        $tlsOpts.caCert = $opts.caCert;
+        $socket = net.connectTLS($addr, $tlsOpts, CONNECT_TIMEOUT_MS);
     } else {
         $socket = net.connect($addr, CONNECT_TIMEOUT_MS);
     }

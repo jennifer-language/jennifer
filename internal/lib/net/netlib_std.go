@@ -19,6 +19,7 @@ import (
 	"io"
 	stdnet "net"
 	"sync"
+	"syscall"
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -1025,6 +1026,50 @@ func recvFromFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.recvFrom: %v", rerr)
 	}
 	return makeDatagram(buf[:read], peer.String()), nil
+}
+
+// setBroadcastFn toggles the SO_BROADCAST socket option on a UDP socket, so a
+// sendTo may target a subnet or the limited broadcast address (255.255.255.255).
+// The kernel refuses a broadcast send on a socket without it; receiving a
+// broadcast needs no option. The actual setsockopt lives in a platform helper
+// (setSocketBroadcast) so the best-effort Windows build still compiles.
+func setBroadcastFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("net.setBroadcast expects 2 arguments (net.UDPSocket, enabled), got %d", len(args))
+	}
+	id, err := extractID("net.setBroadcast", "UDPSocket", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindBool {
+		return interpreter.Null(), fmt.Errorf("net.setBroadcast: second argument (enabled) must be bool, got %s", args[1].Kind)
+	}
+	s, err := resolveUDP("net.setBroadcast", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	sc, ok := s.c.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	})
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("net.setBroadcast: this UDP socket does not support broadcast control")
+	}
+	rc, cerr := sc.SyscallConn()
+	if cerr != nil {
+		return interpreter.Null(), fmt.Errorf("net.setBroadcast: %v", cerr)
+	}
+	val := 0
+	if args[1].Bool {
+		val = 1
+	}
+	var opErr error
+	if ctlErr := rc.Control(func(fd uintptr) { opErr = setSocketBroadcast(fd, val) }); ctlErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.setBroadcast: %v", ctlErr)
+	}
+	if opErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.setBroadcast: %v", opErr)
+	}
+	return interpreter.Null(), nil
 }
 
 func closeUDP(id int64) error {

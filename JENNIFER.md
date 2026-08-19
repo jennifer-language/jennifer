@@ -1470,9 +1470,30 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   pop can't return both the item and the new buffer). Plus `last` / `size` / `capacity`
   / `isEmpty` / `isFull` / `toList` (oldest-first). Strings only. Over `lists`;
   **both binaries**.
+- **`mactelnet`** - a MikroTik **MAC-Telnet** Layer-2 console: reach a RouterOS
+  device **by MAC address** with no IP configured on either side (what Winbox's
+  "Neighbors" console does), to give a fresh or just-reset router its first
+  address before switching to the IP-based `mikrotik` API. Transport is UDP
+  broadcast on port 20561 with the source / destination MAC in the payload.
+  `mactelnet.connect(iface, mac, user, password) -> Session` runs the full
+  session-start + auth handshake, auto-detecting the router's generation by the
+  salt it offers: legacy 16-byte-salt MD5, or modern 49-byte EC-SRP over
+  Curve25519 (via `crypto.mtweiKeygen` / `mtweiId` / `mtweiClientKey`; RouterOS
+  6.43+ and all v7, including factory-fresh devices). `mactelnet.send(s, text)`
+  and `mactelnet.recv(s, timeoutMs)` drive the router's text CLI (end a command
+  line with `\r\n`, read the echoed output); `mactelnet.close(s)` ends the
+  session; `parseMac` / `formatMac` convert addresses. A failed login or an
+  unreachable router throws `Error{kind: "mactelnet"}`. Over `net` (SO_BROADCAST
+  + UDP) + `crypto` + `hash` + `binary` + `encoding` + `fs` + `kv` + `os`.
+  **Linux + default `jennifer` binary only** (broadcast UDP); cleartext L2, so
+  bootstrap-only.
 - **`mikrotik`** - a MikroTik RouterOS API client over `net` (the binary API, not
   SSH). `mikrotik.connect(mikrotik.options(host, user, password))` (or `optionsTLS`
-  for api-ssl on 8729) logs in (plaintext for RouterOS 6.43+/v7, MD5
+  for api-ssl on 8729, which **verifies the certificate by default**; `host` may
+  be an IP or a DNS name). For a self-signed / private-CA router,
+  `mikrotik.withCA(opts, pem)` pins its cert (still authenticated) or, as a last
+  resort, `mikrotik.insecure(opts)` accepts any cert. Logs in
+  (plaintext for RouterOS 6.43+/v7, MD5
   challenge-response fallback for older) -> `Session`. `talk(s, command, attrs) ->
   list of map of string to string` sends a command with `=key=value` attributes,
   folding each `!re` reply into a row map; `print(s, path)` is read sugar; `run(s,

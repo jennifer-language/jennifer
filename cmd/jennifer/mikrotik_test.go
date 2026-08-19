@@ -5,13 +5,22 @@ package main
 
 import (
 	"bufio"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- RouterOS API broker-side wire helpers (stdlib only) --------------------
@@ -304,5 +313,178 @@ mikrotik.close($s);`, mtMod, addr.Port)
 	}
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("mikrotik stream program failed with code %d", code)
+	}
+}
+
+// unverifiableTLSConfig returns a server TLS config holding a certificate no
+// client can verify: self-signed (unknown issuer) and issued for a name the
+// test never dials (no IP SAN for 127.0.0.1). Both failures are exactly what a
+// RouterOS box presents - its certificate is self-signed, and admin sessions
+// are dialled by address - so a handshake through it succeeds only if the
+// client asked net.connectTLS to skip verification.
+func unverifiableTLSConfig(t *testing.T) *tls.Config {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "not-the-router.invalid"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+		MinVersion:   tls.VersionTLS12,
+	}
+}
+
+// verifiableTLSConfig returns a self-signed api-ssl server config whose cert IS
+// a CA and carries an IP SAN for 127.0.0.1, plus the certificate PEM. Trusting
+// that PEM (mikrotik.withCA) and dialling 127.0.0.1 verifies successfully.
+func verifiableTLSConfig(t *testing.T) (*tls.Config, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "router.local"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	cfg := &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+		MinVersion:   tls.VersionTLS12,
+	}
+	return cfg, pemBytes
+}
+
+// TestMikrotikTLSVerifyByDefault - api-ssl verifies the certificate by default,
+// so an untrusted self-signed cert makes connect throw before any command.
+func TestMikrotikTLSVerifyByDefault(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln := tls.NewListener(base, unverifiableTLSConfig(t))
+	defer ln.Close()
+	go serveMikrotik(ln)
+
+	addr := base.Addr().(*net.TCPAddr)
+	mtMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "mikrotik.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+import %q as mikrotik;
+def threw as bool init false;
+try {
+    def s as mikrotik.Session init mikrotik.connect(mikrotik.withPort(mikrotik.optionsTLS("127.0.0.1", "admin", "pw"), %d));
+    mikrotik.close($s);
+} catch (e) {
+    $threw = true;
+}
+testing.assertTrue($threw);`, mtMod, addr.Port)
+	progPath := filepath.Join(dir, "mt-tls-verify.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("mikrotik verify-by-default program failed with code %d", code)
+	}
+}
+
+// TestMikrotikTLSInsecureOptOut - mikrotik.insecure() restores the accept-any
+// behavior for a self-signed router on a trusted wire.
+func TestMikrotikTLSInsecureOptOut(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln := tls.NewListener(base, unverifiableTLSConfig(t))
+	defer ln.Close()
+	go serveMikrotik(ln)
+
+	addr := base.Addr().(*net.TCPAddr)
+	mtMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "mikrotik.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+import %q as mikrotik;
+def s as mikrotik.Session init mikrotik.connect(mikrotik.insecure(mikrotik.withPort(mikrotik.optionsTLS("127.0.0.1", "admin", "pw"), %d)));
+def rows as list of map of string to string init mikrotik.print($s, "/interface");
+testing.assertEqual(len($rows), 2);
+testing.assertEqual($rows[0]["name"], "ether1");
+mikrotik.close($s);`, mtMod, addr.Port)
+	progPath := filepath.Join(dir, "mt-tls-insecure.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("mikrotik insecure api-ssl program failed with code %d", code)
+	}
+}
+
+// TestMikrotikTLSWithCA - mikrotik.withCA(pem) authenticates a self-signed router
+// against its pinned certificate (the cert carries a 127.0.0.1 IP SAN), so the
+// verified handshake succeeds without disabling authentication.
+func TestMikrotikTLSWithCA(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, certPEM := verifiableTLSConfig(t)
+	ln := tls.NewListener(base, cfg)
+	defer ln.Close()
+	go serveMikrotik(ln)
+
+	addr := base.Addr().(*net.TCPAddr)
+	mtMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "mikrotik.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	pemPath := filepath.Join(dir, "router.pem")
+	if err := os.WriteFile(pemPath, certPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prog := fmt.Sprintf(`use testing;
+use fs;
+import %q as mikrotik;
+def ca as bytes init fs.readBytes(%q);
+def s as mikrotik.Session init mikrotik.connect(mikrotik.withCA(mikrotik.withPort(mikrotik.optionsTLS("127.0.0.1", "admin", "pw"), %d), $ca));
+def rows as list of map of string to string init mikrotik.print($s, "/interface");
+testing.assertEqual(len($rows), 2);
+testing.assertEqual($rows[0]["name"], "ether1");
+mikrotik.close($s);`, mtMod, pemPath, addr.Port)
+	progPath := filepath.Join(dir, "mt-tls-ca.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("mikrotik withCA api-ssl program failed with code %d", code)
 	}
 }

@@ -183,7 +183,15 @@ func extractTime(fnName string, v interpreter.Value) (int64, int64, error) {
 // extractDuration pulls nanos out of a `time.Duration` Value.
 func extractDuration(fnName string, v interpreter.Value) (int64, error) {
 	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Duration" {
-		return 0, fmt.Errorf("%s: argument must be a time.Duration, got %s", fnName, v.Kind)
+		hint := ""
+		if v.Kind == interpreter.KindInt {
+			// The common trap: `seconds` / `milliseconds` are accessors
+			// (Duration -> int), not constructors. Point at the real ones so a
+			// caller (e.g. a lock retry loop) does not just retry the same
+			// mistake and crash under the very concurrency it is trying to fix.
+			hint = " (build one with time.fromSeconds(n) / time.fromMilliseconds(n) / time.fromMinutes(n) / time.fromHours(n))"
+		}
+		return 0, fmt.Errorf("%s: argument must be a time.Duration, got %s%s", fnName, v.Kind, hint)
 	}
 	for _, f := range v.Fields {
 		if f.Name == "nanos" {

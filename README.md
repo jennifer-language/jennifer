@@ -42,10 +42,13 @@ more niche - [Gotify](docs/modules/gotify.md) push, strict
 [TOTP](docs/modules/totp.md) two-factor codes - and lots of others? No need to
 ask: it is all there already. The interpreter and its built-in libraries ship
 as **one self-contained static binary** - about 23 MB with everything, ~10 MB for
-the embeddable build - with no runtime, package manager, or dependency tree to
-install; the modules ride along as plain `.j` source files (installed beside the
-binary and resolved through the module path), readable and hackable with no
-compile step.
+the embeddable build - with nothing else to install to run everything built in:
+no separate runtime, and no dependency tree to resolve first. The modules ride
+along as plain `.j` source files (installed beside the binary and resolved
+through the module path), readable and hackable with no compile step. Reaching
+past the built-ins is opt-in: third-party **decks** (Jennifer's packages) are
+vendored into your project's own tree - no global install, no daemon - with the
+`jvc` package manager to resolve and pin them.
 
 It is also a natural fit for **teaching and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an

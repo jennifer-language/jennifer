@@ -249,6 +249,25 @@ def thumbprint as bytes init hash.compute(convert.bytesFromString($jwk, "utf-8")
 def csr as bytes init crypto.csr($key, ["example.com", "www.example.com"]);
 ```
 
+## EC-SRP (MikroTik MAC-Telnet / Winbox login)
+
+`crypto.mtwei*` is the client side of the Elliptic-Curve Secure Remote Password
+(EC-SRP) exchange RouterOS 6.43+ and all of v7 use for MAC-Telnet / Winbox login
+(the modern replacement for the old MD5 salt). It is a dependency-free port
+(`math/big` + `crypto/sha256`) of the reference algorithm over Curve25519 in
+short-Weierstrass form - no OpenSSL, and it stays TinyGo-clean. The
+[`mactelnet`](../modules/mactelnet.md) module drives these; you rarely call them
+directly.
+
+| Call | Returns | Notes |
+| --- | --- | --- |
+| `crypto.mtweiKeygen()` | `crypto.Keypair` | A client keypair: 32-byte `private` scalar, 33-byte compressed `public` key. |
+| `crypto.mtweiId(user, password, salt)` | `bytes` | The 32-byte SRP validator `SHA256(salt + SHA256(user ":" password))`; `salt` is the router's 16-byte salt. |
+| `crypto.mtweiClientKey(private, serverKey, clientKey, validator)` | `bytes` | The 32-byte authenticator sent as the login proof, from your `private`, the router's 33-byte `serverKey`, your 33-byte `clientKey`, and the `validator`. |
+
+The password itself never crosses the wire; only the derived proof does, and a
+wrong password yields a proof the router will not match.
+
 ## Errors
 
 Every function validates argument kinds and counts and raises a

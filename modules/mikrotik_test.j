@@ -182,3 +182,33 @@ func testTagRoundTrip() {
     testing.assertEqual(parseTag($reply), parseTag($sent));
     testing.assertEqual(parseTag($sent), "xyz");
 }
+
+# --- connection options ------------------------------------------------------
+
+func testOptionsPlainDefaults() {
+    def o as Options init options("192.168.88.1", "admin", "secret");
+    testing.assertEqual($o.host, "192.168.88.1");
+    testing.assertEqual($o.user, "admin");
+    testing.assertEqual($o.port, 8728);
+    testing.assertFalse($o.tls);
+}
+
+# api-ssl moves the port and turns TLS on. `connect` skips certificate
+# verification on that path (a router is dialled by IP, which no certificate's
+# SAN covers); the Go suite proves that on a live socket - see
+# TestMikrotikTLSSkipsVerification in cmd/jennifer/mikrotik_test.go.
+func testOptionsTLSDefaults() {
+    def o as Options init optionsTLS("192.168.88.1", "admin", "secret");
+    testing.assertEqual($o.port, 8729);
+    testing.assertTrue($o.tls);
+}
+
+func testWithPortKeepsTransport() {
+    def secure as Options init withPort(optionsTLS("10.0.0.1", "admin", "pw"), 18729);
+    testing.assertEqual($secure.port, 18729);
+    testing.assertTrue($secure.tls);
+
+    def plain as Options init withPort(options("10.0.0.1", "admin", "pw"), 18728);
+    testing.assertEqual($plain.port, 18728);
+    testing.assertFalse($plain.tls);
+}

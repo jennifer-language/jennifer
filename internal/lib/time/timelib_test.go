@@ -310,3 +310,23 @@ func TestNonIntArgumentToConstructor(t *testing.T) {
 		t.Errorf("err = %v; want mention of time.fromUnix + int", err)
 	}
 }
+
+// TestDurationIntHint: passing an int where a time.Duration is expected hints at
+// the from* constructors, and does so for the accessor names people mistake for
+// constructors (a `time.seconds(int)` reads as a constructor but is not one).
+func TestDurationIntHint(t *testing.T) {
+	for _, src := range []string{
+		`use time; time.sleep(25);`,
+		`use time; def d as time.Duration init time.seconds(25);`,
+	} {
+		msg := expectErr(t, src)
+		if !strings.Contains(msg, "time.fromSeconds") || !strings.Contains(msg, "time.fromMilliseconds") {
+			t.Fatalf("int->Duration error should hint at the from* constructors, got: %s", msg)
+		}
+	}
+	// A non-int wrong type does not get the int-specific hint.
+	msg := expectErr(t, `use time; time.sleep("x");`)
+	if strings.Contains(msg, "time.fromSeconds") {
+		t.Fatalf("non-int arg should not get the int hint, got: %s", msg)
+	}
+}

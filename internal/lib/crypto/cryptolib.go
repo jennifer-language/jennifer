@@ -76,6 +76,12 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "sign", signFn)
 	in.RegisterNamespaced(LibraryName, "verify", verifyFn)
 
+	// EC-SRP (Curve25519) key agreement for MikroTik MAC-Telnet / Winbox login
+	// on RouterOS 6.43+ and v7. Dependency-free (math/big); TinyGo-clean.
+	in.RegisterNamespaced(LibraryName, "mtweiKeygen", mtweiKeygenFn)
+	in.RegisterNamespaced(LibraryName, "mtweiId", mtweiIdFn)
+	in.RegisterNamespaced(LibraryName, "mtweiClientKey", mtweiClientKeyFn)
+
 	// Asymmetric RSA / ECDSA sign / verify over PEM keys (for JWT RS* / ES*).
 	// Build-tag split like `net`: real on the default binary, a friendly stub on
 	// jennifer-tiny (crypto/x509 is heavy and off the TinyGo build).

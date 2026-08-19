@@ -80,6 +80,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "listenUDP", listenUDPFn)
 	in.RegisterNamespaced(LibraryName, "sendTo", sendToFn)
 	in.RegisterNamespaced(LibraryName, "recvFrom", recvFromFn)
+	in.RegisterNamespaced(LibraryName, "setBroadcast", setBroadcastFn)
 
 	// DNS.
 	in.RegisterNamespaced(LibraryName, "lookup", lookupFn)
