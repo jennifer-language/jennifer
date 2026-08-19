@@ -10,7 +10,7 @@
 # Built alongside the manual, from this repository's own interpreter + modules
 # (see .github/workflows/docs.yml):
 #
-#   ./jennifer run --sysmoddir=modules <grimoire>/grimoire pdf -c grimoire-api.toml -o <out>
+#   ./jennifer run --sysmoddir=modules <grimoire>/bin/grimoire pdf -c grimoire-api.toml -o <out>
 #
 # docs/api/ has no SUMMARY.md, so Grimoire derives the outline from the directory
 # tree (the index, then one page per module).

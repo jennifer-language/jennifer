@@ -79,7 +79,7 @@ jobs:
         # `[pdf] exclude` in grimoire.toml, so both can be generated above and still
         # be kept out of the printed manual. `--sysmoddir=modules` points Grimoire's
         # `import "markdown.j"` / `pdf.j` at this repository's modules.
-        run: ./jennifer run --sysmoddir=modules .grimoire/grimoire build --pdf
+        run: ./jennifer run --sysmoddir=modules .grimoire/bin/grimoire build --pdf
 
       - name: Build the module API reference PDF (Grimoire)
         # The standalone ~360-page module API reference as one PDF, built by
@@ -88,7 +88,7 @@ jobs:
         # render to a temp dir (so it does not disturb the site build), then drop
         # it beside the API pages so the index's "single PDF" link resolves.
         run: |
-          ./jennifer run --sysmoddir=modules .grimoire/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
+          ./jennifer run --sysmoddir=modules .grimoire/bin/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
           cp "$RUNNER_TEMP/apipdf/jennifer-module-api.pdf" book-output/api/jennifer-module-api.pdf
 
       - name: Add the go-import vanity page

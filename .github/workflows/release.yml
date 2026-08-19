@@ -382,7 +382,7 @@ jobs:
         run: |
           set -eu
           go build -o jennifer ./cmd/jennifer
-          ./jennifer run --sysmoddir=modules .grimoire/grimoire pdf --out "$RUNNER_TEMP/pdfout"
+          ./jennifer run --sysmoddir=modules .grimoire/bin/grimoire pdf --out "$RUNNER_TEMP/pdfout"
           cp "$RUNNER_TEMP/pdfout/jennifer-manual.pdf" release/jennifer-manual.pdf
           ls -la release/jennifer-manual.pdf
 
@@ -395,7 +395,7 @@ jobs:
         run: |
           set -eu
           ./jennifer run scripts/gen-module-docs.j
-          ./jennifer run --sysmoddir=modules .grimoire/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
+          ./jennifer run --sysmoddir=modules .grimoire/bin/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
           cp "$RUNNER_TEMP/apipdf/jennifer-module-api.pdf" release/jennifer-module-api.pdf
           ls -la release/jennifer-module-api.pdf
 

@@ -12,7 +12,7 @@
 # modules built from *this* repository rather than an installed release:
 #
 #   go build -o jennifer ./cmd/jennifer
-#   ./jennifer run --sysmoddir=modules <grimoire>/grimoire build --pdf
+#   ./jennifer run --sysmoddir=modules <grimoire>/bin/grimoire build --pdf
 #
 # Stable 0.24.0 will not run it.
 
