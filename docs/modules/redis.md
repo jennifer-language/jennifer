@@ -256,17 +256,6 @@ hash / list / set helpers are covered end to end by in-process RESP servers in
 the Go test suite (`TestRedisCommands`, `TestRedisBinaryAndTyped`), so they run
 in CI without a Redis install.
 
-## Testing
-
-The pure protocol logic - the RESP command encoder and the simple-string /
-error / integer / bulk / nil / array decoder (including the incomplete-buffer
-and leftover-buffer cases), the pub/sub command builders, the
-`message` / `pmessage` push classifier, the pipeline encoder, and the SCAN
-reply reader - is unit-tested in the overlay (`modules/redis_test.j`). The
-networked session, pub/sub delivery, pipelining, transactions, and SCAN are
-covered end to end by an in-process RESP server in the Go test suite
-(`TestRedisCommands`), so it runs in CI without a Redis install.
-
 ## Out of scope
 
 - **A working subset**, not the full command set: strings, counters, keys,

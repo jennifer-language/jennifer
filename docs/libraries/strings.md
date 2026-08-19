@@ -13,10 +13,9 @@ substring extraction, and split / join.
 > `replace`, ...) belong in their domain library to keep the bare-name
 > pool clean.
 
-> **Looking for `len(s)`?** It lives in the auto-loaded
-> [`core`](core.md) library, so it's available everywhere without
-> any `use` statement. The same `len` covers strings, lists, and maps
-> with one polymorphic dispatch.
+> **`len(s)` is a language built-in** - no `use` statement needed. The
+> same `len` covers strings, lists, maps, and bytes with one polymorphic
+> dispatch.
 
 **String positions are 0-relative.** The first character is at index `0`,
 not `1`. So `strings.indexOf("hello", "h")` returns `0`,
@@ -37,7 +36,7 @@ what you'd guess - the same units come out of every function.
 use io;
 use strings;
 
-io.printf("%d\n", len("hello"));                       # 5  (core, auto-loaded)
+io.printf("%d\n", len("hello"));                       # 5  (built-in, no use needed)
 io.printf("%s\n", strings.upper("hello"));             # "HELLO"
 io.printf("%t\n", strings.contains("hello", "ell"));   # true
 io.printf("%t\n", strings.startsWith("hello", "he"));  # true

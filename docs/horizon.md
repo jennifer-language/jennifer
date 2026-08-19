@@ -428,7 +428,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   rather than another encoder branch. Until then, `label.image` (by reference)
   covers the stored-logo case.
 - **SQLite (`sql` engine backend).** SQLite stays parked here, and it is 
-  worth being precise about *why*, because it is not the reason it first looks like.
+  worth being precise about *why*, because the reason is not what it first looks like.
   SQLite is **also** just a pure-Go `database/sql` driver - `modernc.org/sqlite`,
   registered with the same one-line `import _` as `go-sql-driver/mysql` or
   `pgx`, cross-compiling cleanly like any pure-Go package (the cgo
@@ -455,7 +455,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   TinyGo, and no TinyGo-compatible SQLite exists. Unlike a wire-protocol
   database - which could in principle be reimplemented as pure `.j` over a
   net-enabled tiny rebuild - SQLite has no wire protocol and so can *never*
-  reach the embeddable binary. That is the genuinely ironic gap: a local,
+  reach the embeddable binary. That is the irony: a local,
   file-based store is exactly what a minimal embedded target would most want,
   and it is the one database that binary can't have with current tooling.
 - **FCGI.** `use FCGI as web;` library when `net` and `httpd` mature. Lets

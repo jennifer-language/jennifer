@@ -67,9 +67,10 @@ if ($n == -1) {                                  # first hit this window
 }
 ```
 
-That `incr`-then-`add` shape is exactly what the planned `ratelimit` module
-builds on, and `add` + a TTL is what the planned `session` module uses to mint
-a session; both are small modules designed to sit on top of this client.
+That `incr`-then-`add` shape is exactly what the [`ratelimit`](ratelimit.md)
+module builds on, and `add` + a TTL is what the [`session`](session.md) module
+uses to mint a session; both are small modules designed to sit on top of this
+client.
 
 ## Errors
 

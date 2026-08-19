@@ -192,8 +192,10 @@ catchable `Error{kind: "html"}` rather than an unbounded parse.
 
 ## Out of scope
 
-This module **writes** HTML; it does not parse it (parsing arbitrary HTML
-is a separate, much larger job and would want the `xml` system library).
+The parser is **tolerant, not a full HTML5 conformance engine** - it handles
+the common real-world syntax (void elements, self-closing tags, unquoted and
+boolean attributes, mismatched nesting, comments, DOCTYPE, `script` / `style`
+raw text), not the whole HTML5 tree-construction algorithm.
 There is no pretty-printing / indentation pass - output is compact, which
 round-trips and diffs predictably; wrap it in your own formatter if you
 need indented source. A `<!DOCTYPE html>` prologue is not emitted; prepend

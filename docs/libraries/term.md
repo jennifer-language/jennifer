@@ -106,5 +106,5 @@ when you need the current value.
   before entering raw mode.
 - [`ansi`](../modules/ansi.md) - escape codes for colour and cursor control,
   which pair with `term` for a full-screen TUI.
-- [milestones.md](../milestones.md) - the `term` design and the `screen` / `tui`
-  module planned on top of it.
+- [`screen`](../modules/screen.md) - the full-screen TUI module (cell buffer,
+  diff rendering, key decoding) built on top of `term`.

@@ -102,12 +102,12 @@ or `,` inside a component value is escaped, so it never splits the structure.
 
 ## Scope
 
-- **A contact subset.** `FN` / `N` / `ORG` / `TITLE` / `EMAIL` / `TEL` / `ADR` /
-  `URL` / `NOTE`. No `BDAY` / `PHOTO` / `GEO` / `TZ` / `KIND` / grouping, no
-  parameter round-tripping (a `TYPE=work` on input is dropped, not preserved),
-  and the `N` additional / prefix / suffix and `ADR` PO-box / extended components
-  are not modelled. The escaping / folding / structured-value discipline is the
-  reusable core.
+- **A contact subset.** `FN` / `N` / `NICKNAME` / `ORG` / `TITLE` / `EMAIL` /
+  `TEL` / `ADR` / `BDAY` / `PHOTO` / `CATEGORIES` / `URL` / `NOTE`. No `GEO` /
+  `TZ` / `KIND` / grouping, no parameter round-tripping (a `TYPE=work` on input
+  is dropped, not preserved), and the `ADR` PO-box / extended components are not
+  modelled. The escaping / folding / structured-value discipline is the reusable
+  core.
 - **vCard 4.0 output.** `encode` always writes `VERSION:4.0`; `parse` reads any
   version's properties (it does not enforce the version line).
 

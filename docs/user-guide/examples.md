@@ -59,7 +59,7 @@ for (def i as int init 0; $i <= 8; $i = $i + 1) {
 ## More substantive examples
 
 For programs that exercise the full feature surface - lists, maps,
-iteration, the `core` and `strings` libraries - see `examples/showcase.j`
+iteration, the `len` built-in, and the `strings` library - see `examples/showcase.j`
 (every feature in one file) and `examples/wordcount.j` (word-frequency
 analyzer with histogram, nested aggregation, and a 3x3 grid demo). Both
 are part of the golden test suite.

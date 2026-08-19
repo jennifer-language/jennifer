@@ -44,7 +44,7 @@ binary-to-text codecs (hex, base64, quoted-printable) live in
 These convert between a single **code point** (a Unicode scalar value, an
 `int`) and the **one-rune string** that holds it - the primitive a Unicode
 algorithm needs (Punycode digits, a `\x01` control byte, an escape). Two
-things worth being precise about:
+details matter here:
 
 - **The whole range works, not just ASCII or the BMP.** `fromCodepoint`
   accepts any scalar value `0`..`0x10FFFF` (hex literals are fine:

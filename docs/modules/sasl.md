@@ -90,7 +90,7 @@ smtp.send($opts, "me@gmail.com", ["you@example.com"], $message);
 The function is named `bearer`, not `xoauth2`, because a Jennifer method name
 is letters-only (no digit); the wire mechanism name `"XOAUTH2"` is a string the
 client sends. Getting the **token itself** is the other half of OAuth2 - the
-job of the generic `oauth` client (planned, M18.7.3).
+job of the generic [`oauth`](oauth.md) client.
 
 ## Out of scope
 

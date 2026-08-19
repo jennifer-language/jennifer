@@ -9,11 +9,10 @@
 
 Jennifer is an interpreted programming language written in (Tiny)Go.
 
-It is **batteries-included**, and not just in name:
+It is **batteries-included**:
 **[41 built-in libraries](libraries/index.md) and
-[72 distributable modules](modules/index.md) - over 1,800 functions,
-constants, and types** cover what real programs actually need, so you build genuine tools,
-not toys. Talk to a
+[74 distributable modules](modules/index.md) - over 1,800 functions,
+constants, and types** cover what real programs actually need. Talk to a
 real database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
 PostgreSQL, parameterized and injection-safe) or map rows to structs with the
 [ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
@@ -24,35 +23,39 @@ both ways: an [HTTP/S client](modules/http.md) and ergonomic
 and [web framework](modules/web.md) to serve. Email is a complete stack -
 [SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) / [IMAP](modules/imap.md)
 to receive; caches and stores come through [Redis](modules/redis.md) and
-[memcached](modules/memcache.md) clients. Security is the real thing, not a stub:
+[memcached](modules/memcache.md) clients. Security is implemented, not stubbed:
 [AES-256-GCM, Ed25519, HKDF / PBKDF2](libraries/crypto.md), and [JWT](modules/jwt.md).
 Wire your program into AI agents with the
 [Model Context Protocol](modules/mcp.md): expose your own functions as tools /
 resources / prompts to a host (Claude, an IDE, ...), or call another MCP server
 as a client - validated end to end against the official MCP SDK. And
 lightweight [concurrency](user-guide/concurrency.md) is built into the language
-via `spawn` and the [task](libraries/task.md) library. Something more niche -
-[Gotify](modules/gotify.md) push, strict [SemVer](modules/semver.md),
+via `spawn` and the [task](libraries/task.md) library. More niche needs are covered
+too - [Gotify](modules/gotify.md) push, strict [SemVer](modules/semver.md),
 [S3](modules/s3.md) object storage, [vCard](modules/vcard.md) /
 [iCalendar](modules/ical.md), [MQTT](modules/mqtt.md) and [AMQP](modules/amqp.md)
 messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
-two-factor codes - and lots of others? No need to ask: it is all there already.
+two-factor codes.
 The interpreter and its built-in libraries ship as **one self-contained static
-binary** - about 23 MB with everything, ~10 MB for the embeddable build - with no
-runtime, package manager, or dependency tree to install; the modules ride along
-as plain `.j` source files (installed beside the binary and resolved through the
-module path), readable and hackable with no compile step.
+binary** - about 23 MB with everything, ~10 MB for the embeddable build - with
+nothing else to install to run everything built in: no separate runtime, and no
+dependency tree to resolve first. The modules ride along as plain `.j` source
+files (installed beside the binary and resolved through the module path),
+readable and hackable with no compile step. Reaching past the built-ins is
+opt-in: third-party **decks** (Jennifer's packages) are vendored into your
+project's own tree - no global install, no daemon - with the `jvc` package
+manager to resolve and pin them.
 
-It is also a natural fit for **teaching and learning**: an interactive
+It also works well for **teaching and learning**: an interactive
 [REPL](technical/cli_repl.md), an [easy-to-read grammar](technical/grammar.md),
-and [token and AST dumps](technical/cli_inspect.md) that make it ideal for
-mastering language design, plus a built-in [linter](technical/cli_lint.md) and
+and [token and AST dumps](technical/cli_inspect.md) show what an interpreter does
+at each stage, plus a built-in [linter](technical/cli_lint.md) and
 [profiler](technical/cli_profile.md) and full
 [test support](technical/cli_test.md). Its
 [strict, explicit design](design-stances.md) - conditions must be `bool`,
 conversions are spelled out, names never shadow, and errors are positioned -
-surfaces a mistake as a clear message instead of a silent surprise, so a
-learner sees exactly what went wrong.
+so a mistake shows up as a clear message rather than silent misbehavior, and a
+learner can see exactly what went wrong.
 
 Source files use the `.j` extension. Whitespace is not significant
 anywhere; statements end with `;`.

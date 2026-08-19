@@ -126,7 +126,6 @@ server.
   via [`sasl`](sasl.md). `auth: "auto"` picks the strongest the server offers
   (SASL from `CAPA`, then APOP when the greeting carries a timestamp, else USER /
   PASS); `auth: ""` is plain USER / PASS.
-- **No `TOP` / `UIDL`.** Just `STAT` / `LIST` / `RETR` / `DELE`.
 - An internationalized (IDN) host is IDNA-encoded to its `xn--` form
   automatically (via [`idna`](idna.md)).
 
