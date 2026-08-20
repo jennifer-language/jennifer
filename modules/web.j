@@ -1128,47 +1128,21 @@ export func csrfCheck(ctx as Context, secret as string) {
 
 # --- caching ----------------------------------------------------------------
 
-# etagMatches reports whether an If-None-Match header value matches the tag. It
-# handles the RFC 7232 comma-list (`"a", "b"`) and weak validators (`W/"tag"`,
-# common behind nginx+gzip), which a bare exact match would miss - so a 304
-# still fires behind a proxy.
-func etagMatches(inm as string, quoted as string, tag as string) {
-    def trimmed as string init strings.trim($inm);
-    if ($trimmed == "*") {
-        return true;
-    }
-    for (def part in strings.split($trimmed, ",")) {
-        def cand as string init strings.trim($part);
-        # Strip a weak-validator prefix; comparison is weak either way here.
-        if (strings.startsWith($cand, "W/")) {
-            $cand = strings.trim(strings.substring($cand, 2, len($cand)));
-        }
-        if ($cand == $quoted or $cand == $tag) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /**
- * Set an `ETag` and honour a conditional GET. Sets the `ETag` response header to
- * `tag` (quoted) and, if the request's `If-None-Match` matches, answers
- * `304 Not Modified` and returns true - the handler should then stop. Returns
- * false when the client has no matching cached copy, so the handler sends the
- * full body. `tag` is the app's choice of validator: a content hash (via
- * `hash`), a row version, an mtime - so `web` needs no hashing of its own.
+ * Set an `ETag` and honour a conditional GET. Delegates to the engine's
+ * `httpd.etag`: sets the `ETag` response header to `tag` (quoted) and, if the
+ * request's `If-None-Match` matches, answers `304 Not Modified` and returns
+ * true - the handler should then stop. Returns false when the client has no
+ * matching cached copy, so the handler sends the full body. The engine handles
+ * the RFC 7232 comma-list and weak-validator (`W/`) forms a proxy may add.
+ * `tag` is the app's choice of validator: a content hash (via `hash`), a row
+ * version, an mtime - so `web` needs no hashing of its own.
  * @param ctx {Context} the request context
  * @param tag {string} the entity tag identifying this version of the response
  * @return {bool} true if a 304 was sent (stop), false to send the full response
  */
 export func etag(ctx as Context, tag as string) {
-    def quoted as string init "\"" + $tag + "\"";
-    httpd.setHeader($ctx.req, "ETag", $quoted);
-    if (etagMatches(httpd.header($ctx.req, "If-None-Match"), $quoted, $tag)) {
-        httpd.respond($ctx.req, 304, "");
-        return true;
-    }
-    return false;
+    return httpd.etag($ctx.req, $tag);
 }
 
 # --- CORS -------------------------------------------------------------------

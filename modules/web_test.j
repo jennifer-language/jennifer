@@ -224,14 +224,6 @@ func testParseBearer() {
     testing.assertEqual(parseBearer(""), "");
 }
 
-func testEtagMatches() {
-    testing.assertTrue(etagMatches("\"v1\"", "\"v1\"", "v1"));
-    testing.assertTrue(etagMatches("v1", "\"v1\"", "v1"));
-    testing.assertTrue(etagMatches("*", "\"v1\"", "v1"));
-    testing.assertFalse(etagMatches("\"v2\"", "\"v1\"", "v1"));
-    testing.assertFalse(etagMatches("", "\"v1\"", "v1"));
-}
-
 func testCorsRegisters() {
     def app as App init new();
     testing.assertFalse(corsEnabled($app));

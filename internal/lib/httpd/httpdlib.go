@@ -69,9 +69,12 @@ func Install(in *interpreter.Interpreter) {
 
 	// Response.
 	in.RegisterNamespaced(LibraryName, "setHeader", setHeaderFn)
+	in.RegisterNamespaced(LibraryName, "etag", etagFn)
 	in.RegisterNamespaced(LibraryName, "respond", respondFn)
 	in.RegisterNamespaced(LibraryName, "serveFile", serveFileFn)
 	in.RegisterNamespaced(LibraryName, "serveDir", serveDirFn)
+	in.RegisterNamespaced(LibraryName, "serveFileEtag", serveFileEtagFn)
+	in.RegisterNamespaced(LibraryName, "serveDirEtag", serveDirEtagFn)
 }
 
 // makeServer / makeRequest build the Jennifer struct values wrapping a registry

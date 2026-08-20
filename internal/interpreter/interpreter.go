@@ -75,6 +75,19 @@ func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
 	return c.interp.callMethodWithDepth(fn.Fn, c.Depth, args...)
 }
 
+// HostSharedState exposes the owning interpreter's run-scoped shared state to a
+// builtin (see Interpreter.HostSharedState). A library resolves its
+// cross-module handle-registry through this at call time, rather than closing
+// over a per-Install registry that cannot cross a module boundary. mk is not
+// called when a caller has no bound interpreter (a bare test BuiltinCtx); the
+// returned value is then whatever mk produces, unshared.
+func (c BuiltinCtx) HostSharedState(key string, mk func() any) any {
+	if c.interp == nil {
+		return mk()
+	}
+	return c.interp.HostSharedState(key, mk)
+}
+
 // Builtin is a Go-implemented library function callable from Jennifer source.
 // The interpreter passes a populated BuiltinCtx; functions that don't need
 // I/O can ignore it. Returning Null() for void-like calls is fine.
@@ -181,6 +194,18 @@ type Interpreter struct {
 	// half of the retag (StructNS is the stem for display, ModPath is the path
 	// for identity). Empty on the entry program.
 	modulePath string
+
+	// sharedState holds run-scoped state a library needs to share across every
+	// interpreter in one run (the entry program and all its module
+	// sub-interpreters), keyed by an opaque string. It lives only on the
+	// host/root interpreter (HostSharedState resolves through Host()), so it is
+	// created fresh each Run and garbage-collected with the root - nothing leaks
+	// between runs. This is the escape hatch for a handle-registry that must
+	// resolve across a module boundary (kv.Store handles), which a per-Install
+	// closure cannot do; a library that instead wants per-interpreter isolation
+	// (intl) keeps closing over its own state and does not touch this.
+	sharedMu    sync.Mutex
+	sharedState map[string]any
 
 	// spawned task registry. Every `spawn { ... }` appends its
 	// TaskState here; the CLI scans the slice on shutdown to surface
@@ -971,6 +996,30 @@ func (i *Interpreter) Host() *Interpreter {
 		return i.host
 	}
 	return i
+}
+
+// HostSharedState returns run-scoped state stored on the host/root interpreter
+// under key, creating it via mk on first use. Every interpreter in a run (the
+// entry program and its module sub-interpreters) resolves the same host, so a
+// library that stores a handle-registry here shares it across the whole run -
+// which is what lets a kv.Store handle opened in the entry program resolve
+// inside a module (a per-Install closure cannot, since each interpreter Installs
+// its own). Fresh each Run (the host is created per run and GC'd with it), so
+// nothing leaks between runs. Guarded by the host's sharedMu, so it is safe to
+// call from a spawn body.
+func (i *Interpreter) HostSharedState(key string, mk func() any) any {
+	h := i.Host()
+	h.sharedMu.Lock()
+	defer h.sharedMu.Unlock()
+	if h.sharedState == nil {
+		h.sharedState = map[string]any{}
+	}
+	if v, ok := h.sharedState[key]; ok {
+		return v
+	}
+	v := mk()
+	h.sharedState[key] = v
+	return v
 }
 
 // CallHostWith invokes an entry-program method by name from a module, binding

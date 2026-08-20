@@ -3,11 +3,14 @@
 
 // Package kv is an in-process key/value store with per-key TTL: the local,
 // no-server backend that parallels the `memcache` / `redis` clients. A store is
-// an integer handle into a per-interpreter registry (the pattern `net.Conn` /
+// an integer handle into a run-scoped registry (the pattern `net.Conn` /
 // `hash.Stream` use), so a `kv.Store` value shares its backing map across
 // value-copies and across `spawn`ed tasks - the shared mutable state a pure `.j`
-// module cannot hold itself. Pure Go stdlib (`sync`, `time`), so TinyGo-clean and
-// available on both binaries.
+// module cannot hold itself. The registry lives on the host/root interpreter
+// (via Interpreter.HostSharedState) rather than a per-Install closure, so a
+// handle resolves across a module boundary: a store opened in the entry program
+// is usable from an imported module, and vice versa, throughout one run. Pure Go
+// stdlib (`sync`, `time`), so TinyGo-clean and available on both binaries.
 //
 // The verb set deliberately mirrors `memcache` (set / add / get / delete / touch
 // / incr) so the `session` / `ratelimit` backend selector can dispatch to any of
@@ -168,30 +171,54 @@ func loadFile(path string) (map[string]entry, error) {
 	return m, nil
 }
 
-// registry holds the live stores keyed by integer handle, per interpreter (a
-// fresh registry is closed over in Install, so nothing leaks across runs).
+// registry holds the live stores keyed by integer handle. One registry is shared
+// across every interpreter in a run (it lives on the host via HostSharedState),
+// so a handle resolves across a module boundary; a fresh one is minted per run,
+// so nothing leaks between runs.
 type registry struct {
 	mu     sync.Mutex
 	stores map[int64]*store
 	nextID int64
 }
 
-// Install registers the kv surface with a fresh per-interpreter registry.
+// stateKey names the kv registry inside the host interpreter's shared state.
+const stateKey = "kv.registry"
+
+// hostRegistry returns the run's single kv registry, creating it on first use.
+// It is resolved through the host interpreter at call time (not closed over in
+// Install), so the entry program and every module sub-interpreter share one
+// registry and a kv.Store handle is valid wherever it is passed within the run.
+func hostRegistry(ctx interpreter.BuiltinCtx) *registry {
+	return ctx.HostSharedState(stateKey, func() any {
+		return &registry{stores: map[int64]*store{}}
+	}).(*registry)
+}
+
+// bind adapts a registry method into a Builtin that resolves the shared registry
+// from the call context, so the handle-registry crosses module boundaries.
+func bind(fn func(*registry, interpreter.BuiltinCtx, []interpreter.Value) (interpreter.Value, error)) interpreter.Builtin {
+	return func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		return fn(hostRegistry(ctx), ctx, args)
+	}
+}
+
+// Install registers the kv surface. Every call resolves the run-shared registry
+// via the host interpreter, so a kv.Store handle is valid across module
+// boundaries for the whole run (see hostRegistry).
 func Install(in *interpreter.Interpreter) {
-	r := &registry{stores: map[int64]*store{}}
 	in.RegisterNamespacedStruct(LibraryName, "Store", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
-	in.RegisterNamespaced(LibraryName, "open", r.openFn)
-	in.RegisterNamespaced(LibraryName, "openFile", r.openFileFn)
-	in.RegisterNamespaced(LibraryName, "set", r.setFn)
-	in.RegisterNamespaced(LibraryName, "add", r.addFn)
-	in.RegisterNamespaced(LibraryName, "get", r.getFn)
-	in.RegisterNamespaced(LibraryName, "has", r.hasFn)
-	in.RegisterNamespaced(LibraryName, "delete", r.deleteFn)
-	in.RegisterNamespaced(LibraryName, "touch", r.touchFn)
-	in.RegisterNamespaced(LibraryName, "incr", r.incrFn)
-	in.RegisterNamespaced(LibraryName, "close", r.closeFn)
+	in.RegisterNamespaced(LibraryName, "open", bind((*registry).openFn))
+	in.RegisterNamespaced(LibraryName, "openFile", bind((*registry).openFileFn))
+	in.RegisterNamespaced(LibraryName, "set", bind((*registry).setFn))
+	in.RegisterNamespaced(LibraryName, "add", bind((*registry).addFn))
+	in.RegisterNamespaced(LibraryName, "get", bind((*registry).getFn))
+	in.RegisterNamespaced(LibraryName, "has", bind((*registry).hasFn))
+	in.RegisterNamespaced(LibraryName, "delete", bind((*registry).deleteFn))
+	in.RegisterNamespaced(LibraryName, "touch", bind((*registry).touchFn))
+	in.RegisterNamespaced(LibraryName, "incr", bind((*registry).incrFn))
+	in.RegisterNamespaced(LibraryName, "close", bind((*registry).closeFn))
 }
 
 // makeStore builds the Jennifer-side `kv.Store{id}` value.

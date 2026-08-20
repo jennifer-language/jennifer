@@ -127,7 +127,9 @@ flat lookup view, not authoritative.
 | [`httpd`](httpd.md)`.accept($srv)`                    | Block for the next request -> `httpd.Request` (the pull loop). Errors once the server is shut down.                                |
 | [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `body` -> `bytes`). |
 | [`httpd`](httpd.md)`.setHeader($req, name, value)` / `.respond($req, status, body)` | Set a response header / send the response once (`body` is string or bytes). |
+| [`httpd`](httpd.md)`.etag($req, tag)`                 | Set the `ETag` and honour a conditional GET -> `bool` (`true` = a `304` was sent, stop; handles `If-None-Match` list / `*` / `W/`).  |
 | [`httpd`](httpd.md)`.serveFile($req, path)` / `.serveDir($req, root)` | Answer with a file / the file under `root` for the request path (`..` cannot escape `root`).                    |
+| [`httpd`](httpd.md)`.serveFileEtag($req, path)` / `.serveDirEtag($req, root)` | Same, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
 | [`i2c`](i2c.md)`.open(path, addr)`                   | Open an I2C bus and select 7-bit slave `addr` -> `i2c.Bus`. Linux only. |
 | [`i2c`](i2c.md)`.read($bus, n)` / `.write($bus, data)` | Read `n` raw bytes / write raw bytes to the selected slave. |
 | [`i2c`](i2c.md)`.readReg($bus, reg, n)` / `.writeReg($bus, reg, data)` | Register read (set pointer, read back) / register write. |

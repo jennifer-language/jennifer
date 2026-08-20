@@ -46,6 +46,7 @@ func remoteAddrFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 func setHeaderFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.setHeader")
 }
+func etagFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("httpd.etag") }
 func respondFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.respond")
 }
@@ -54,4 +55,10 @@ func serveFileFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 }
 func serveDirFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.serveDir")
+}
+func serveFileEtagFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.serveFileEtag")
+}
+func serveDirEtagFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.serveDirEtag")
 }

@@ -9,6 +9,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +25,12 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
+
+// sha256Tag is the quoted strong ETag contentEtag produces for the given bytes.
+func sha256Tag(b []byte) string {
+	sum := sha256.Sum256(b)
+	return "\"" + hex.EncodeToString(sum[:]) + "\""
+}
 
 // noCtx is a zero BuiltinCtx; the httpd builtins ignore it.
 var noCtx interpreter.BuiltinCtx
@@ -586,5 +594,210 @@ func TestIdleKeepAliveTimesOut(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("idle close took %v (want ~idleTimeout)", elapsed)
+	}
+}
+
+// TestEtagMatches pins the RFC 7232 If-None-Match parsing the engine does for
+// httpd.etag: exact quoted, bare-tag fallback, "*", comma list, and the W/ weak
+// prefix a cache/proxy may add; a non-match and an empty header return false.
+func TestEtagMatches(t *testing.T) {
+	cases := []struct {
+		inm    string
+		want   bool
+		reason string
+	}{
+		{`"v1"`, true, "exact quoted"},
+		{`v1`, true, "bare-tag fallback"},
+		{`*`, true, "star matches any"},
+		{`"v0", "v1"`, true, "comma list contains it"},
+		{`W/"v1"`, true, "weak prefix stripped"},
+		{`"v2"`, false, "different tag"},
+		{``, false, "empty header"},
+		{`"v10"`, false, "no substring false-positive"},
+	}
+	for _, c := range cases {
+		if got := etagMatches(c.inm, `"v1"`, "v1"); got != c.want {
+			t.Errorf("etagMatches(%q) = %v, want %v (%s)", c.inm, got, c.want, c.reason)
+		}
+	}
+}
+
+// TestEtagConditionalGET drives httpd.etag end to end: the first GET (no
+// validator) gets the full body plus an ETag, and a second GET carrying that
+// ETag as If-None-Match gets a bodyless 304 - and the handler sees etag return
+// true so it stops.
+func TestEtagConditionalGET(t *testing.T) {
+	ResetForTest()
+	srv, addr := startServer(t)
+	defer shutdownFn(noCtx, []Value{srv})
+
+	// First request: no If-None-Match, so etag returns false and the handler
+	// sends the full body.
+	var firstRet Value
+	var wg sync.WaitGroup
+	wg.Add(1)
+	serveOnce(srv, func(req Value) {
+		defer wg.Done()
+		firstRet, _ = etagFn(noCtx, []Value{req, interpreter.StringVal("v1")})
+		if !firstRet.Bool {
+			_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("full body")})
+		}
+	})
+	resp, err := http.Get("http://" + addr + "/asset")
+	if err != nil {
+		t.Fatalf("GET 1: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	wg.Wait()
+	if firstRet.Bool {
+		t.Errorf("first etag() = true, want false (no If-None-Match)")
+	}
+	if resp.StatusCode != 200 || string(body) != "full body" {
+		t.Errorf("first response = %d %q, want 200 %q", resp.StatusCode, string(body), "full body")
+	}
+	if et := resp.Header.Get("ETag"); et != `"v1"` {
+		t.Errorf("first ETag = %q, want %q", et, `"v1"`)
+	}
+
+	// Second request: If-None-Match carries the tag, so etag claims a 304 and
+	// returns true; the handler stops without sending a body.
+	var secondRet Value
+	wg.Add(1)
+	serveOnce(srv, func(req Value) {
+		defer wg.Done()
+		secondRet, _ = etagFn(noCtx, []Value{req, interpreter.StringVal("v1")})
+		if !secondRet.Bool {
+			_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("full body")})
+		}
+	})
+	req, _ := http.NewRequest("GET", "http://"+addr+"/asset", nil)
+	req.Header.Set("If-None-Match", `"v1"`)
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET 2: %v", err)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	wg.Wait()
+	if !secondRet.Bool {
+		t.Errorf("second etag() = false, want true (If-None-Match matched)")
+	}
+	if resp2.StatusCode != http.StatusNotModified {
+		t.Errorf("second status = %d, want 304", resp2.StatusCode)
+	}
+	if len(body2) != 0 {
+		t.Errorf("304 carried a body %q, want empty", string(body2))
+	}
+	if et := resp2.Header.Get("ETag"); et != `"v1"` {
+		t.Errorf("304 ETag = %q, want %q (validator belongs on a 304)", et, `"v1"`)
+	}
+}
+
+// TestServeFileEtag: serveFileEtag sets a content-hash ETag, and a
+// conditional GET carrying it gets a bodyless 304 (via http.ServeContent).
+func TestServeFileEtag(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+	content := []byte("<h1>cached</h1>")
+	fpath := filepath.Join(dir, "index.html")
+	if err := os.WriteFile(fpath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantTag := sha256Tag(content)
+
+	srv, addr := startServer(t)
+	defer shutdownFn(noCtx, []Value{srv})
+
+	serveOnce(srv, func(req Value) {
+		_, _ = serveFileEtagFn(noCtx, []Value{req, interpreter.StringVal(fpath)})
+	})
+	resp, err := http.Get("http://" + addr + "/whatever")
+	if err != nil {
+		t.Fatalf("GET 1: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(body) != string(content) {
+		t.Errorf("first = %d %q, want 200 %q", resp.StatusCode, string(body), string(content))
+	}
+	if et := resp.Header.Get("ETag"); et != wantTag {
+		t.Errorf("ETag = %q, want %q (quoted sha256)", et, wantTag)
+	}
+
+	serveOnce(srv, func(req Value) {
+		_, _ = serveFileEtagFn(noCtx, []Value{req, interpreter.StringVal(fpath)})
+	})
+	req, _ := http.NewRequest("GET", "http://"+addr+"/whatever", nil)
+	req.Header.Set("If-None-Match", wantTag)
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET 2: %v", err)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotModified {
+		t.Errorf("conditional GET status = %d, want 304", resp2.StatusCode)
+	}
+	if len(body2) != 0 {
+		t.Errorf("304 carried a body %q", string(body2))
+	}
+}
+
+// TestServeFileEtagInvalidatesOnEdit: editing the file (new bytes + a later
+// mtime) yields a new ETag - the mtime+size-keyed cache does not serve a stale
+// digest.
+func TestServeFileEtagInvalidatesOnEdit(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+	fpath := filepath.Join(dir, "a.txt")
+	v1 := []byte("one")
+	if err := os.WriteFile(fpath, v1, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if tag := contentEtag(fpath); tag != sha256Tag(v1) {
+		t.Fatalf("tag v1 = %q, want %q", tag, sha256Tag(v1))
+	}
+	// Rewrite with different bytes and force a later mtime so the change is
+	// visible even if the two writes land in the same filesystem-time tick.
+	v2 := []byte("two!!")
+	if err := os.WriteFile(fpath, v2, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(fpath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if tag := contentEtag(fpath); tag != sha256Tag(v2) {
+		t.Errorf("tag v2 = %q, want %q (stale cache not invalidated)", tag, sha256Tag(v2))
+	}
+}
+
+// TestServeDirEtag: serveDirEtag maps the request path under root and sets a
+// content ETag, while keeping serveDir's traversal guard (a backslash is 400).
+func TestServeDirEtag(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+	content := []byte("body{}")
+	if err := os.WriteFile(filepath.Join(dir, "style.css"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, addr := startServer(t)
+	defer shutdownFn(noCtx, []Value{srv})
+
+	serveOnce(srv, func(req Value) {
+		_, _ = serveDirEtagFn(noCtx, []Value{req, interpreter.StringVal(dir)})
+	})
+	resp, err := http.Get("http://" + addr + "/style.css")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(body) != string(content) {
+		t.Errorf("response = %d %q, want 200 %q", resp.StatusCode, string(body), string(content))
+	}
+	if et := resp.Header.Get("ETag"); et != sha256Tag(content) {
+		t.Errorf("ETag = %q, want %q", et, sha256Tag(content))
 	}
 }

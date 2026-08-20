@@ -19,7 +19,9 @@ package httpdlib
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -134,6 +136,7 @@ type reqState struct {
 	respHeaders  []respHeader
 	useServeFile bool
 	serveFile    string
+	serveEtag    string // content ETag to set before ServeFile (serveFileEtag / serveDirEtag); "" = none
 }
 
 var (
@@ -165,6 +168,10 @@ func ResetForTest() {
 	reqStates = map[int64]*reqState{}
 	nextReqID = 0
 	reqsMu.Unlock()
+
+	etagCacheMu.Lock()
+	etagCache = map[string]etagCacheEntry{}
+	etagCacheMu.Unlock()
 }
 
 func registerServer(st *serverState) int64 {
@@ -317,6 +324,7 @@ func makeHandler(st *serverState) http.Handler {
 		// Response I/O happens here, on the handler goroutine only.
 		rs.mu.Lock()
 		useFile, filePath := rs.useServeFile, rs.serveFile
+		serveEtag := rs.serveEtag
 		status, respBody := rs.status, rs.respBody
 		headers := rs.respHeaders
 		rs.mu.Unlock()
@@ -342,6 +350,12 @@ func makeHandler(st *serverState) http.Handler {
 			}
 		}
 		if useFile {
+			// Set the content validator (serveFileEtag / serveDirEtag) before
+			// ServeFile, so http.ServeContent honours If-None-Match against it and
+			// answers 304 itself - it parses the RFC 7232 list / * / weak forms.
+			if serveEtag != "" {
+				w.Header().Set("ETag", serveEtag)
+			}
 			http.ServeFile(w, r, filePath)
 			return
 		}
@@ -676,6 +690,75 @@ func respondFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
+// etagMatches reports whether an If-None-Match header value matches the tag,
+// per RFC 7232: "*" matches any current representation, the value is a comma
+// list, and a weak-validator prefix (W/, which a cache or a gzip proxy may add)
+// is stripped before comparing - so a 304 still fires behind a proxy that
+// weakened the tag. quoted is the `"tag"` form; tag is the bare form (a lenient
+// fallback for a client that sends the tag unquoted).
+func etagMatches(inm, quoted, tag string) bool {
+	trimmed := strings.TrimSpace(inm)
+	if trimmed == "" {
+		return false
+	}
+	if trimmed == "*" {
+		return true
+	}
+	for _, part := range strings.Split(trimmed, ",") {
+		cand := strings.TrimSpace(part)
+		if strings.HasPrefix(cand, "W/") {
+			cand = strings.TrimSpace(cand[2:])
+		}
+		if cand == quoted || cand == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// etagFn sets an ETag validator and honours a conditional GET at the engine
+// level, so a bare-httpd app gets the same conditional-request handling the
+// `web` module exposes without re-parsing If-None-Match itself. It sets the
+// `ETag` response header to the quoted tag and, when the request's
+// If-None-Match matches, claims the response as 304 Not Modified and returns
+// true (the handler should then stop); otherwise it returns false so the
+// handler sends the full body. The ETag header is applied to both the 200 and
+// the 304 (RFC 7232 wants the validator on a 304). `tag` is the app's choice of
+// validator (a content hash, a row version, an mtime), so the engine hashes
+// nothing.
+func etagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("httpd.etag expects 2 arguments (httpd.Request, tag), got %d", len(args))
+	}
+	rs, err := reqField("httpd.etag", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	tag, err := takeStringArg("httpd.etag", args, 1, "tag")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	quoted := "\"" + tag + "\""
+	inm := rs.r.Header.Get("If-None-Match")
+	rs.mu.Lock()
+	if rs.responded {
+		rs.mu.Unlock()
+		return interpreter.Null(), fmt.Errorf("httpd.etag: request already answered")
+	}
+	// Set the validator now, so it is present on whichever response follows.
+	rs.respHeaders = append(rs.respHeaders, respHeader{key: "ETag", value: quoted})
+	if etagMatches(inm, quoted, tag) {
+		rs.responded = true
+		rs.status = 304
+		rs.respBody = nil
+		rs.mu.Unlock()
+		close(rs.done)
+		return interpreter.BoolVal(true), nil
+	}
+	rs.mu.Unlock()
+	return interpreter.BoolVal(false), nil
+}
+
 func serveFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("httpd.serveFile expects 2 arguments (httpd.Request, path), got %d", len(args))
@@ -692,23 +775,46 @@ func serveFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 func serveDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	rs, root, err := serveDirArgs("httpd.serveDir", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	full, ok, v, err := resolveDirPath(rs, root)
+	if !ok {
+		return v, err
+	}
+	return answerWithFile(rs, full)
+}
+
+// serveDirArgs validates the (httpd.Request, root) arguments shared by serveDir
+// and serveDirEtag.
+func serveDirArgs(fnName string, args []Value) (*reqState, string, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("httpd.serveDir expects 2 arguments (httpd.Request, root), got %d", len(args))
+		return nil, "", fmt.Errorf("%s expects 2 arguments (httpd.Request, root), got %d", fnName, len(args))
 	}
-	rs, err := reqField("httpd.serveDir", args)
+	rs, err := reqField(fnName, args)
 	if err != nil {
-		return interpreter.Null(), err
+		return nil, "", err
 	}
-	root, err := takeStringArg("httpd.serveDir", args, 1, "root")
+	root, err := takeStringArg(fnName, args, 1, "root")
 	if err != nil {
-		return interpreter.Null(), err
+		return nil, "", err
 	}
+	return rs, root, nil
+}
+
+// resolveDirPath applies serveDir's traversal guards to the request path under
+// root and returns the resolved on-disk path. On a rejected path it answers the
+// request (400 for a backslash, 404 for an escape) and returns ok=false with
+// that answer's (value, error). Shared by serveDir and serveDirEtag.
+func resolveDirPath(rs *reqState, root string) (string, bool, Value, error) {
 	// A backslash never appears in a well-formed URL path. path.Clean treats only
 	// '/' as a separator, so "/..\\..\\x" survives it intact - but on Windows
 	// filepath.Join *does* split on '\\' and would resolve the ".." above root.
 	// Reject the backslash outright rather than rely on the host separator.
 	if strings.ContainsRune(rs.r.URL.Path, '\\') {
-		return answerWithStatus(rs, http.StatusBadRequest, "bad request")
+		v, err := answerWithStatus(rs, http.StatusBadRequest, "bad request")
+		return "", false, v, err
 	}
 	// path.Clean on a rooted path collapses any ".." so the request cannot
 	// escape root; then map slashes to the host separator under root.
@@ -717,9 +823,104 @@ func serveDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// Defence in depth: re-verify the joined path is still under root on the host
 	// filesystem before serving it.
 	if rel, rerr := filepath.Rel(root, full); rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return answerWithStatus(rs, http.StatusNotFound, "not found")
+		v, err := answerWithStatus(rs, http.StatusNotFound, "not found")
+		return "", false, v, err
 	}
-	return answerWithFile(rs, full)
+	return full, true, interpreter.Null(), nil
+}
+
+func serveFileEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("httpd.serveFileEtag expects 2 arguments (httpd.Request, path), got %d", len(args))
+	}
+	rs, err := reqField("httpd.serveFileEtag", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	p, err := takeStringArg("httpd.serveFileEtag", args, 1, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return answerWithFileEtag(rs, p, contentEtag(p))
+}
+
+func serveDirEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	rs, root, err := serveDirArgs("httpd.serveDirEtag", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	full, ok, v, err := resolveDirPath(rs, root)
+	if !ok {
+		return v, err
+	}
+	return answerWithFileEtag(rs, full, contentEtag(full))
+}
+
+// etagCacheEntry is a file's cached strong validator, tied to the file image it
+// was hashed from. A hit is trusted only when both mtime and size still match,
+// so an edited file recomputes.
+type etagCacheEntry struct {
+	mtime int64 // ModTime().UnixNano()
+	size  int64
+	tag   string // quoted strong ETag, `"<hex sha256>"`
+}
+
+// etagCacheMax bounds the digest cache. A wrongly-evicted entry only costs a
+// recompute (every hit is revalidated against mtime+size), never correctness.
+const etagCacheMax = 4096
+
+var (
+	etagCacheMu sync.Mutex
+	etagCache   = map[string]etagCacheEntry{}
+)
+
+// contentEtag returns a strong ETag for the file at p, hashing its bytes at most
+// once per (path, mtime, size) via etagCache - so a hot file is not re-hashed on
+// every request. It returns "" (no error) when p is missing, a directory, or
+// unreadable; the caller then serves without a content validator (ServeFile
+// still applies Last-Modified and any 404). The tag is the quoted hex SHA-256 of
+// the file content, so it is stable across replicas serving identical bytes
+// (unlike an mtime, which is per-file-copy).
+func contentEtag(p string) string {
+	f, err := os.Open(p)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	mtime, size := info.ModTime().UnixNano(), info.Size()
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	etagCacheMu.Lock()
+	if e, ok := etagCache[abs]; ok && e.mtime == mtime && e.size == size {
+		etagCacheMu.Unlock()
+		return e.tag
+	}
+	etagCacheMu.Unlock()
+
+	// Hash outside the lock so a slow read never stalls another request's lookup.
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	tag := "\"" + hex.EncodeToString(h.Sum(nil)) + "\""
+
+	etagCacheMu.Lock()
+	if _, present := etagCache[abs]; !present && len(etagCache) >= etagCacheMax {
+		// Bounded map: drop one arbitrary entry before inserting a new key.
+		for k := range etagCache {
+			delete(etagCache, k)
+			break
+		}
+	}
+	etagCache[abs] = etagCacheEntry{mtime: mtime, size: size, tag: tag}
+	etagCacheMu.Unlock()
+	return tag
 }
 
 // answerWithStatus marks a request to be answered with a plain status + body
@@ -741,6 +942,13 @@ func answerWithStatus(rs *reqState, status int, body string) (Value, error) {
 // answerWithFile marks a request to be answered by ServeFile from the handler
 // goroutine.
 func answerWithFile(rs *reqState, p string) (Value, error) {
+	return answerWithFileEtag(rs, p, "")
+}
+
+// answerWithFileEtag is answerWithFile plus a content ETag the handler sets
+// before ServeFile (so http.ServeContent answers a matching If-None-Match with a
+// 304). etag "" behaves exactly like answerWithFile.
+func answerWithFileEtag(rs *reqState, p, etag string) (Value, error) {
 	rs.mu.Lock()
 	if rs.responded {
 		rs.mu.Unlock()
@@ -749,6 +957,7 @@ func answerWithFile(rs *reqState, p string) (Value, error) {
 	rs.responded = true
 	rs.useServeFile = true
 	rs.serveFile = p
+	rs.serveEtag = etag
 	rs.mu.Unlock()
 	close(rs.done)
 	return interpreter.Null(), nil

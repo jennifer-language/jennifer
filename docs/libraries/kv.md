@@ -3,9 +3,13 @@
 Enable with `use kv;`. An in-process key/value store with per-key **TTL** - the
 local, no-server counterpart to the `memcache` / `redis` clients. Open a store,
 then set / get / delete / touch / increment; values expire on their own. A store
-is a handle (`kv.Store`) into a per-interpreter registry, so a `kv.Store` value
-**shares its backing map across copies and across `spawn`ed tasks** - the shared
-mutable state a pure `.j` module cannot hold itself. This is what backs the
+is a handle (`kv.Store`) into a run-scoped registry, so a `kv.Store` value
+**shares its backing map across copies, across `spawn`ed tasks, and across a
+module boundary** - the shared mutable state a pure `.j` module cannot hold
+itself. A store opened in your program is usable from a module you `import` (pass
+the handle in), and one a module hands back is usable in your program: the
+registry is shared by every interpreter in a run and minted fresh each run. This
+is what backs the
 in-process option of the [`kvstore`](../modules/kvstore.md) backend selector (and
 so [`session`](../modules/session.md) / [`ratelimit`](../modules/ratelimit.md)).
 Pure Go stdlib, so it is on **both** binaries.
@@ -54,8 +58,10 @@ io.printf("%s\n", kv.get($store, "greeting"));
   (one verb, both directions). Unlike memcached's `DECR` it does **not** floor at
   0; clamp yourself if you need a non-negative counter.
 - **Handles are shared, values are copies.** The `kv.Store` handle shares one
-  backing map (that is the point - it survives value-copies and `spawn`); the
-  string values it stores are ordinary copies.
+  backing map (that is the point - it survives value-copies, `spawn`, and being
+  passed into or out of an `import`ed module); the string values it stores are
+  ordinary copies. The sharing is run-scoped: the registry is created fresh each
+  run and never leaks into the next.
 - **Single process.** State lives in this process only. `open` is in-memory
   (gone when the program exits); `openFile` persists to disk and survives across
   runs (a rewrite-the-whole-file flush after every mutation - simple and correct,

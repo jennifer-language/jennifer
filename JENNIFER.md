@@ -589,8 +589,13 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   -> `Server`, then loop
   `httpd.accept($srv)` -> `Request` and `httpd.respond($req, status, body)`;
   request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`, plus
-  `setHeader`/`serveFile`/`serveDir`/`shutdown`. `spawn` several accept loops
-  for a worker pool. Default binary only (`jennifer-tiny` stubs it).
+  `setHeader`/`serveFile`/`serveDir`/`shutdown`. `httpd.etag($req, tag)` sets an
+  `ETag` and honours a conditional GET (returns `bool`; `true` = a `304` was
+  sent, so stop) - parsing `If-None-Match` (list / `*` / weak `W/`) for you.
+  `serveFileEtag` / `serveDirEtag` are `serveFile` / `serveDir` plus a cached
+  content-hash `ETag` (stable across replicas, unlike an mtime).
+  `spawn` several accept loops for a worker pool. Default binary only
+  (`jennifer-tiny` stubs it).
 - **`term`** - terminal control for interactive TUIs: `term.makeRaw(stream)` ->
   `term.State` and `term.restore(state)` (raw mode: unbuffered, no-echo input),
   `term.size(stream)` -> `term.Size{rows, cols}`, `term.readByte()` -> int (one

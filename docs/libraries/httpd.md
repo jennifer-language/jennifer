@@ -66,9 +66,12 @@ for (def i in lists.range(0, 4)) {
 | `httpd.body(req)` | `bytes` | The request body (buffered; a body over the 10 MiB cap is answered 413 by the engine). |
 | `httpd.remoteAddr(req)` | `string` | Client `host:port`. |
 | `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). |
+| `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag`, else returns `false` (send the full body). |
 | `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. |
 | `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). |
 | `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (`..` cannot escape `root`). |
+| `httpd.serveFileEtag(req, path)` | `null` | Like `serveFile`, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
+| `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
 | `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, finish in-flight requests. |
 
 Each request must be answered **exactly once** - a second `respond` /
@@ -124,6 +127,55 @@ one specific file regardless of the request path.
 outside it exposes its target. If the served tree can contain links created by
 another user or an upload feature, resolve and containment-check the path
 yourself before serving, or serve from a directory you fully control.
+
+`serveFile` / `serveDir` already send `Last-Modified` and honour
+`If-Modified-Since` (Go's `http.ServeContent`), so a browser revalidates a static
+file for free. They do **not** add an `ETag` - an mtime is a per-file-copy
+validator, so two replicas serving identical bytes disagree. When you want a
+validator that is stable across replicas, use **`serveFileEtag` /
+`serveDirEtag`**: they behave exactly like the plain verbs but also set a
+strong `ETag` that is the SHA-256 of the file content, so an unchanged file
+answers `304` regardless of which replica serves it. The digest is cached per
+`(path, mtime, size)`, so a hot file is hashed once, not on every hit; an edit
+(new bytes, or a changed size / mtime) recomputes it. The first request for a
+large cold file pays a full read to hash it - reach for the cached verbs when
+cross-replica revalidation is worth that, and keep the plain verbs otherwise.
+
+## Conditional requests (ETags)
+
+`httpd.etag($req, tag)` sets an `ETag` validator and handles a conditional GET in
+one call, so a bare-engine app does not re-parse `If-None-Match` itself (the
+comma-list, `*`, and the weak-validator `W/` prefix a cache or a gzip proxy may
+add are all handled). It sets the `ETag` response header to `tag` (quoted) and:
+
+- returns `true` when the request's `If-None-Match` matches - it has already
+  answered `304 Not Modified` (with the `ETag`, no body); the handler should
+  **stop**;
+- returns `false` otherwise - the handler sends the full response as usual.
+
+```jennifer
+use httpd;
+use hash;
+use convert;
+use encoding;
+def srv as httpd.Server init httpd.listen(":8080");
+while (true) {
+    def req as httpd.Request init httpd.accept($srv);
+    def page as string init render();                 # your content
+    def tag as string init encoding.toText(
+        hash.compute(convert.bytesFromString($page, "utf-8"), "sha256"), "hex");
+    if (not httpd.etag($req, $tag)) {                 # 304 already sent when true
+        httpd.respond($req, 200, $page);
+    }
+}
+```
+
+`tag` is your choice of validator - a content hash (as above), a row version, a
+build id - so the engine hashes nothing on your behalf. A content hash is stable
+across replicas (unlike an mtime); a strong hash of the exact bytes is the safe
+default. `web.etag($ctx, tag)` is the framework wrapper over this same engine
+call. For **static files**, `serveFileEtag` / `serveDirEtag` (above) do this
+for you - a cached content-hash `ETag` without your handler computing anything.
 
 ## Response headers and the `Server` line
 
