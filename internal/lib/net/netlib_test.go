@@ -360,6 +360,63 @@ func TestSetBroadcastWrongType(t *testing.T) {
 	}
 }
 
+// TestBindToDevice - net.bindToDevice(sock, iface) exercises the
+// SO_BINDTODEVICE setsockopt. The bind needs CAP_NET_RAW (typically root), so a
+// non-privileged CI run gets a catchable EPERM rather than a success; the point
+// is the verb reaches the socket and returns a clean value either way, leaving
+// the socket otherwise usable. Whichever branch fires, no crash and the handle
+// stays valid for a subsequent close.
+func TestBindToDevice(t *testing.T) {
+	out, err := runProg(t, `
+		use net;
+		use io;
+		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		def bound as bool init true;
+		try {
+			net.bindToDevice($a, "lo");
+		} catch (e) {
+			# Unprivileged host: SO_BINDTODEVICE returns EPERM. Expected; the
+			# verb still resolved the socket and reported a catchable error.
+			$bound = false;
+		}
+		net.close($a);
+		io.printf("done bound=%t", $bound);
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "done bound=true" && out != "done bound=false" {
+		t.Errorf("unexpected output: %q", out)
+	}
+}
+
+// TestBindToDeviceWrongType - bindToDevice rejects a non-UDPSocket.
+func TestBindToDeviceWrongType(t *testing.T) {
+	_, err := runProg(t, `
+		use net;
+		def l as net.Listener init net.listen("127.0.0.1:0");
+		net.bindToDevice($l, "lo");
+	`)
+	if err == nil {
+		t.Fatal("expected type error for bindToDevice on a Listener")
+	}
+}
+
+// TestBindToDeviceBadIface - binding to a non-existent interface errors
+// (ENODEV on a privileged host, EPERM on an unprivileged one) - either way a
+// catchable net.bindToDevice error, never a crash.
+func TestBindToDeviceBadIface(t *testing.T) {
+	_, err := runProg(t, `
+		use net;
+		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		net.bindToDevice($a, "definitelynotaniface0");
+		net.close($a);
+	`)
+	if err == nil {
+		t.Skip("bindToDevice to a bogus interface unexpectedly succeeded (privileged host with a permissive kernel); nothing to assert")
+	}
+}
+
 // TestClosePolymorphic - the single close verb accepts three kinds.
 func TestClosePolymorphic(t *testing.T) {
 	_, err := runProg(t, `

@@ -639,7 +639,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`net`** - sockets. TCP `connect` / `listen` / `accept` / `readBytes` /
   `writeBytes`, bulk `readAll` / `readN`; TLS `connectTLS` / `startTLS` (opt-out
   verify via `net.TLSOptions{skipVerify, caCert}`); UDP `listenUDP` / `sendTo` /
-  `recvFrom`; DNS `lookup` / `reverseLookup`; polymorphic `close` / `address`.
+  `recvFrom` / `setBroadcast` / `bindToDevice` (pin a UDP socket to one interface
+  via `SO_BINDTODEVICE` - Linux-only, needs root; the multi-homed-host fix a
+  wildcard bind can't give); DNS `lookup` / `reverseLookup`; polymorphic `close` / `address`.
   `connect` takes an optional trailing `timeoutMs`. **Default `jennifer` binary
   only** (`jennifer-tiny` stubs it).
 - **`regex`** - RE2 (linear-time): `matches` / `find` / `findAll` / `replace` /
@@ -1484,7 +1486,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   session-start + auth handshake, auto-detecting the router's generation by the
   salt it offers: legacy 16-byte-salt MD5, or modern 49-byte EC-SRP over
   Curve25519 (via `crypto.mtweiKeygen` / `mtweiId` / `mtweiClientKey`; RouterOS
-  6.43+ and all v7, including factory-fresh devices). `mactelnet.send(s, text)`
+  6.43+ and all v7, including factory-fresh devices). `iface` selects the local
+  link: its MAC stamps the packet, and the broadcast socket is best-effort bound
+  to it (`SO_BINDTODEVICE`) so a multi-homed host reaches the right NIC - that
+  bind needs root, and is skipped when unprivileged (fine on a single-NIC host).
+  `mactelnet.send(s, text)`
   and `mactelnet.recv(s, timeoutMs)` drive the router's text CLI (end a command
   line with `\r\n`, read the echoed output); `mactelnet.close(s)` ends the
   session; `parseMac` / `formatMac` convert addresses. A failed login or an

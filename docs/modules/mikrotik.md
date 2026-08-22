@@ -174,6 +174,19 @@ into the `{}` stop signal, so the receive loop exits cleanly. A genuine `!trap` 
 `!fatal` (a bad command, a dropped connection) still throws
 `Error{kind: "mikrotik"}` out of `receiveReply`.
 
+> **Catch errors inside the reader task at the `task.wait`, not around the
+> `spawn`.** A read that fails inside the `spawn` body - a dropped connection, a
+> read-deadline timeout - throws *within the task*, not into the code that
+> launched it. `task.wait($reader)` re-raises that error at the wait site, where
+> a `try` / `catch` can handle it; a `try` around the `spawn { ... }` block only
+> guards launching the task, not its later body. A reader task that errors and is
+> **never** `task.wait`ed or `task.discard`ed is reported at program exit by the
+> loud-fail scan (`<prog>: unwaited spawn error: ...`, a non-zero exit) - which
+> is uncatchable by design, since nothing observed it. So always `task.wait` (or
+> `task.discard`) the reader and wrap the `wait` in `try` / `catch`. The
+> synchronous calls (`print` / `run` / `command`) throw straight into their own
+> caller's `try` as usual.
+
 ## Read deadlines
 
 Every bounded read arms a `net.setDeadline` window (`CONNECT_TIMEOUT_MS`) so a

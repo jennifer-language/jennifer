@@ -325,6 +325,21 @@ func broadcastTarget() {
     return $t;
 }
 
+# bindDevice best-effort-binds the broadcast socket to `iface` (SO_BINDTODEVICE),
+# so egress and ingress use that link rather than whichever one the kernel
+# routing table picks for 255.255.255.255 - the difference between reaching the
+# right NIC and silently timing out on a multi-homed host. The bind needs
+# CAP_NET_RAW (root); when unprivileged it is skipped, leaving the historical
+# wildcard behavior (reliable on a single-NIC host, where there is only one link
+# to use). A multi-homed host therefore needs to run this with privilege.
+func bindDevice(sock as net.UDPSocket, iface as string) {
+    try {
+        net.bindToDevice($sock, $iface);
+    } catch (e) { # lint-disable: L103
+    }
+    return;
+}
+
 # recvPacket waits up to timeoutMs for a datagram. Returns the raw bytes, or an
 # empty bytes on timeout. The read deadline is cleared on every exit path (0
 # clears it) so it never leaks onto the next send - net.setDeadline arms the
@@ -505,10 +520,14 @@ func closeQuiet(s as Session) {
  * session-start + authentication handshake (auto-detecting MD5 vs EC-SRP from
  * the router's salt) and returns a logged-in `Session`.
  *
- * `iface` is the local interface to reach the router on (its MAC is read from
- * `/sys/class/net/<iface>/address`); `mac` is the router's MAC. A blank password
- * is valid (a factory-default `admin`). Throws `Error{kind: "mactelnet"}` on an
- * unreachable router or a failed login.
+ * `iface` is the local interface to reach the router on: its MAC is read from
+ * `/sys/class/net/<iface>/address`, and the broadcast socket is best-effort bound
+ * to the interface (`SO_BINDTODEVICE`) so a multi-homed host sends out that link
+ * rather than one the kernel routing table picks. The bind needs root; when
+ * unprivileged it is skipped (fine on a single-NIC host, but a multi-homed host
+ * should run this with privilege or it may time out on the wrong NIC). `mac` is
+ * the router's MAC. A blank password is valid (a factory-default `admin`). Throws
+ * `Error{kind: "mactelnet"}` on an unreachable router or a failed login.
  * @param iface {string} local network interface name (e.g. "eth0")
  * @param mac {string} the router's MAC address
  * @param user {string} the login user (e.g. "admin")
@@ -530,6 +549,9 @@ export func connect(iface as string, mac as string, user as string, password as 
 
     def sock as net.UDPSocket init net.listenUDP("0.0.0.0:0");
     net.setBroadcast($sock, true);
+    # Pin egress/ingress to the named interface so a multi-homed host does not
+    # send the broadcast out the wrong NIC (best-effort - needs root).
+    bindDevice($sock, $iface);
     def s as Session init Session{
         sock: $sock,
         state: $store,

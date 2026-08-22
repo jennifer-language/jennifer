@@ -250,6 +250,7 @@ flat lookup view, not authoritative.
 | [`net`](net.md)`.reverseLookup(ip)`                   | Reverse DNS: IP address to a `list of string` of hostnames.                                                                         |
 | [`net`](net.md)`.sendTo($sock, peer, bytes)`          | Send one UDP datagram to `peer` (`"host:port"`).                                                                                    |
 | [`net`](net.md)`.setBroadcast($sock, on)`             | Enable/disable `SO_BROADCAST` so a `sendTo` may target a broadcast address. Off by default; Linux/Unix only.                         |
+| [`net`](net.md)`.bindToDevice($sock, iface)`          | Pin a UDP socket's egress/ingress to one interface via `SO_BINDTODEVICE` (`""` clears). The multi-homed-host fix a wildcard bind can't give. Linux-only, needs `CAP_NET_RAW` (root).             |
 | [`net`](net.md)`.setDeadline($conn, ms)`              | Arm a read/write deadline `ms` ms out (`0` clears). A read past it fails with a catchable `read timed out`.                          |
 | [`net`](net.md)`.writeBytes($conn, bytes)`            | Blocking write of every byte to a `net.Conn`.                                                                                       |
 | [`regex`](regex.md)`.escape(s)`                       | Escape RE2 metacharacters so `s` matches literally when used as a pattern.                                                          |

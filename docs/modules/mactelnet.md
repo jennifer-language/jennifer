@@ -66,7 +66,7 @@ A blank password is valid (a factory-default `admin`). A failed login throws
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `connect(iface, mac, user, password)` | `Session` | run the full session-start + auth handshake; `iface` is the local interface (its MAC is read from `/sys/class/net/<iface>/address`), `mac` the router's MAC. |
+| `connect(iface, mac, user, password)` | `Session` | run the full session-start + auth handshake; `iface` is the local interface (its MAC is read from `/sys/class/net/<iface>/address`, and the broadcast socket is best-effort bound to it - see caveats), `mac` the router's MAC. |
 | `send(s, text)` | `null` | send console input; end a command line with `"\r\n"`. |
 | `recv(s, timeoutMs)` | `string` | read whatever output has arrived (waiting up to `timeoutMs` for the first byte); call again for more. ANSI escapes pass through verbatim. |
 | `closed(s)` | `bool` | whether the router has ended the session. |
@@ -85,6 +85,16 @@ holding the mutable send/receive counters and pending output), `srcmac` /
   sysfs.
 - **Same broadcast segment.** Client and router must share a Layer-2 segment (no
   router in between) - it is a link-local protocol.
+- **Multi-homed hosts need privilege.** `iface` selects the link two ways: its
+  MAC stamps the packet, and the broadcast socket is best-effort bound to the
+  interface (`SO_BINDTODEVICE`, via `net.bindToDevice`) so egress and ingress use
+  it rather than whichever link the kernel routing table picks for
+  `255.255.255.255`. That bind needs `CAP_NET_RAW` (root); when unprivileged it
+  is skipped, leaving the historical wildcard behavior. On a host with a single
+  active NIC that is fine (one link either way), but on a laptop with more than
+  one interface up (wired + wifi + a USB adapter) an unprivileged run can send
+  out the wrong NIC and silently time out - **run it with `sudo` / as root** so
+  the interface bind takes effect.
 - **`mac-server` must allow the interface.** RouterOS enables MAC-Telnet on all
   interfaces by default; a hardened or narrowly-configured device may have
   disabled it (`/tool mac-server`), in which case `connect` times out. A

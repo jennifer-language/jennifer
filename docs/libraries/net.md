@@ -130,6 +130,28 @@ while ($running) {
 The deadline is absolute and is **not** rearmed automatically: reset it
 (or clear it with `0`) before the next read. It applies to writes too.
 
+### Read errors are catchable - including inside `spawn`
+
+Every read error (`read timed out`, `connection reset by peer`, a closed
+peer) is an ordinary catchable runtime error. It unwinds like any other
+error: through nested method calls, across one or more `import` module
+boundaries, and through `defer` / `errdefer` cleanup, into the nearest
+enclosing `try` - wherever that `try` sits on the call chain. There is no
+stack-depth, cross-module, or cleanup interaction that makes a read error
+escape a `try` that dynamically encloses the read.
+
+The one exception is not a read-error rule at all but the concurrency
+model's: an error raised **inside a `spawn` body** does not propagate to
+code around the `spawn` - it belongs to the task. Observe it with
+`task.wait` (which re-raises it at the wait site, catchable there) or
+`task.discard`. A task that errors and is **never** observed is reported
+at program exit by the loud-fail scan, which prints
+`<prog>: unwaited spawn error: ...` and bumps the exit code - by design,
+and distinct from a top-level uncaught error (`<prog>: runtime error at
+...`). So if a background reader task hits a dropped connection, wrap the
+`task.wait` in `try` / `catch`; a `try` around the `spawn` **launch**
+cannot catch what happens later inside the body.
+
 ### Server pattern
 
 ```jennifer
@@ -227,6 +249,13 @@ to establish; the socket is a bound port.
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
 | `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes.                                                  |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
+| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. This is the interface selection a wildcard bind (`0.0.0.0:0`) otherwise leaves to the kernel routing table - the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux-only and needs `CAP_NET_RAW`** (typically root); it errors with `EPERM` when unprivileged. |
+
+On a host with only one active interface, `bindToDevice` is unnecessary - there
+is only one link to send or receive on. It matters when more than one interface
+is up (a laptop with wired + wifi + a USB adapter): without it, the kernel
+picks the egress link for a broadcast destination independently of intent, and a
+reply arriving on a different NIC than expected can look like a silent timeout.
 
 ### Structs
 

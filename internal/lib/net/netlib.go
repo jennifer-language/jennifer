@@ -81,6 +81,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "sendTo", sendToFn)
 	in.RegisterNamespaced(LibraryName, "recvFrom", recvFromFn)
 	in.RegisterNamespaced(LibraryName, "setBroadcast", setBroadcastFn)
+	in.RegisterNamespaced(LibraryName, "bindToDevice", bindToDeviceFn)
 
 	// DNS.
 	in.RegisterNamespaced(LibraryName, "lookup", lookupFn)

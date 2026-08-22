@@ -1072,6 +1072,51 @@ func setBroadcastFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
+// bindToDeviceFn binds a UDP socket to a specific network interface via
+// SO_BINDTODEVICE, so a sendTo leaves on that link and only datagrams arriving
+// on it are received - the interface selection a wildcard bind (0.0.0.0:0)
+// otherwise leaves to the kernel routing table. This is what lets a broadcast
+// to 255.255.255.255 reach a device on a chosen NIC of a multi-homed host (a
+// mactelnet bootstrap of a router with no IP yet). An empty iface clears the
+// binding. Linux-only and needs CAP_NET_RAW (typically root); it errors with
+// EPERM when unprivileged. The setsockopt lives in a platform helper
+// (setSocketBindToDevice) so the non-Linux best-effort builds still compile.
+func bindToDeviceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("net.bindToDevice expects 2 arguments (net.UDPSocket, iface), got %d", len(args))
+	}
+	id, err := extractID("net.bindToDevice", "UDPSocket", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	iface, err := takeStringArg("net.bindToDevice", args, 1, "iface")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	s, err := resolveUDP("net.bindToDevice", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	sc, ok := s.c.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	})
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("net.bindToDevice: this UDP socket does not support interface binding")
+	}
+	rc, cerr := sc.SyscallConn()
+	if cerr != nil {
+		return interpreter.Null(), fmt.Errorf("net.bindToDevice: %v", cerr)
+	}
+	var opErr error
+	if ctlErr := rc.Control(func(fd uintptr) { opErr = setSocketBindToDevice(fd, iface) }); ctlErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.bindToDevice: %v", ctlErr)
+	}
+	if opErr != nil {
+		return interpreter.Null(), fmt.Errorf("net.bindToDevice: %v", opErr)
+	}
+	return interpreter.Null(), nil
+}
+
 func closeUDP(id int64) error {
 	udpsMu.Lock()
 	s, ok := udps[id]

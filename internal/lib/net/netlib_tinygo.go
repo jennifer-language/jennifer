@@ -85,6 +85,9 @@ func recvFromFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 func setBroadcastFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.setBroadcast")
 }
+func bindToDeviceFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.bindToDevice")
+}
 
 // DNS.
 
