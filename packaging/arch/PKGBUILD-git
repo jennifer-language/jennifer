@@ -2,9 +2,15 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # AUR PKGBUILD for `jennifer-git`: clones the upstream repository
-# and builds both binaries (`jennifer` standard Go + `jennifer-tiny`
-# TinyGo) from source. Tracks the `main` branch; rebuild to
-# follow upstream.
+# and builds the standard-Go `jennifer` binary from source. Tracks the
+# `main` branch; rebuild to follow upstream.
+#
+# The TinyGo `jennifer-tiny` binary is not built here for now: Arch ships
+# Go 1.27, and the current TinyGo release only supports Go up to 1.26, so
+# `tinygo build` fails against the system toolchain. Only the default
+# `jennifer` is packaged until TinyGo catches up with Go 1.27; re-enable
+# the `build-tinygo` half of `make build` and the tiny install lines below
+# once it does.
 #
 # Maintainer: mplx <jennifer@mplx.dev>
 
@@ -18,7 +24,9 @@ url='https://github.com/jennifer-language/jennifer'
 license=('LGPL3')
 provides=('jennifer')
 conflicts=('jennifer' 'jennifer-bin')
-makedepends=('git' 'go' 'tinygo')
+# `tinygo` is intentionally omitted: it does not support Arch's Go 1.27
+# yet, so `jennifer-tiny` is not built here (see the header note).
+makedepends=('git' 'go')
 optdepends=(
     'shared-mime-info: registers the .j file extension with file managers'
     'vim: syntax highlighting for .j files'
@@ -44,7 +52,11 @@ build() {
     # -trimpath drops the local $srcdir path from the binary (makepkg flags a
     # $srcdir reference otherwise); the plain dev `make build` keeps symbols,
     # so the packaged build asks for the release flag explicitly.
-    make build GOBUILDFLAGS=-trimpath
+    #
+    # `build-go` builds only the standard-Go `jennifer`. The TinyGo
+    # `jennifer-tiny` half is skipped until TinyGo supports Go 1.27 (see the
+    # header note); switch back to `make build` to restore both binaries.
+    make build-go GOBUILDFLAGS=-trimpath
 }
 
 check() {
@@ -55,24 +67,21 @@ check() {
 package() {
     cd "$srcdir/$_realname"
 
-    # Binaries.
+    # Binary. `jennifer-tiny` is not built here (TinyGo lacks Go 1.27
+    # support; see the header note), so only the default binary installs.
     install -Dm755 jennifer      "$pkgdir/usr/bin/jennifer"
-    install -Dm755 jennifer-tiny "$pkgdir/usr/bin/jennifer-tiny"
 
-    # Man pages.
+    # Man page. The jennifer-tiny.1 page is skipped alongside its binary.
     install -Dm644 packaging/man/jennifer.1      "$pkgdir/usr/share/man/man1/jennifer.1"
-    install -Dm644 packaging/man/jennifer-tiny.1 "$pkgdir/usr/share/man/man1/jennifer-tiny.1"
     gzip -9n "$pkgdir/usr/share/man/man1/jennifer.1"
-    gzip -9n "$pkgdir/usr/share/man/man1/jennifer-tiny.1"
 
     # XDG MIME info for the .j extension.
     install -Dm644 packaging/mime/jennifer.xml \
         "$pkgdir/usr/share/mime/packages/jennifer.xml"
 
-    # Bash completion (jennifer-tiny symlinks to it).
+    # Bash completion. The jennifer-tiny symlink is omitted with its binary.
     install -Dm644 packaging/completions/jennifer.bash \
         "$pkgdir/usr/share/bash-completion/completions/jennifer"
-    ln -sf jennifer "$pkgdir/usr/share/bash-completion/completions/jennifer-tiny"
 
     # Vim / Neovim syntax highlighting, so `.j` files highlight with no user
     # setup. Vim and Neovim read separate runtimepaths (/usr/share/vim/vimfiles
