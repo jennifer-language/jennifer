@@ -352,6 +352,33 @@ general-purpose CommonMark conformance.
 > def out as bytes init markdown.toPdfWith($md, $o);
 > ```
 >
+> **Images.** By default `![alt](url)` renders as its `[alt]` text in the PDF (the
+> same fallback `toAnsi` uses), so nothing is lost when no picture is supplied. To
+> draw the actual picture, load its bytes with [`pdf.loadImage`](pdf.md) and put it
+> in `PdfOptions.images`, a `map of string to pdf.Image` keyed by the image URL
+> **exactly as it appears in the Markdown source**. `markdown` never touches the
+> filesystem - the caller owns loading the bytes (and so resolving relative paths),
+> which is what keeps a rendering module free of I/O and path opinions.
+>
+> ```jennifer
+> import "markdown.j" as markdown;
+> import "pdf.j" as pdf;
+> use fs;
+> def o as markdown.PdfOptions init markdown.pdfDefaults();
+> $o.images["figure.png"] = pdf.loadImage("Figure", fs.readBytes("figure.png"));
+> def out as bytes init markdown.toPdfWith("# Report\n\n![a diagram](figure.png)\n", $o);
+> ```
+>
+> Only a **paragraph that is a single image** (a picture on its own line) is drawn;
+> an image inline in a sentence keeps its `[alt]` run, and an image in a list item,
+> quote, or table cell keeps the fallback too. A drawn picture is scaled to keep its
+> aspect ratio, never wider than the text column and never taller than one page;
+> `imageDpi` (default 96) sets the pixel-to-point scale, so a screenshot wider than
+> the column shrinks to fit. Each image's resource `name` (the first `loadImage`
+> argument) must be unique across the map - a duplicate is a catchable `markdown`
+> error. Registration order follows the map's insertion order (a language
+> guarantee), so output stays byte-identical run to run.
+>
 > **Running headers / footers (page numbers).** `toPdf` / `renderPdf` return
 > `bytes`, but `pdf`'s running header / footer take a `pdf.Document`. Use
 > `markdown.renderPdfDoc` to get the laid-out document, attach the footer with

@@ -10,7 +10,9 @@ use io;
 use fs;
 use os;
 use path;
+use encoding;
 import "../../modules/markdown.j" as markdown;
+import "../../modules/pdf.j" as pdf;
 
 def doc as string init "# Shopping list\n";
 $doc = $doc + "\n";
@@ -76,3 +78,17 @@ def pdfBytes as bytes init markdown.toPdf($doc);
 def pdfPath as string init path.join(os.tempDir(), "markdown_demo.pdf");
 fs.writeBytes($pdfPath, $pdfBytes);
 io.printf("\n=== PDF (markdown.toPdf) ===\nwrote %d bytes to %s\n", len($pdfBytes), $pdfPath);
+
+# A PDF that actually draws a picture. markdown never touches the filesystem, so
+# the caller loads the image bytes (here an 8x6 PNG carried inline as base64) and
+# hands them to renderPdfDoc keyed by the image URL exactly as written in the
+# source. A lone-image paragraph is drawn; an image inline in a sentence keeps its
+# [alt] text.
+def pngB64 as string init 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGklEQVR42mNkYGBQYBDBRCwMGiIMDFgQPSQAwgMFakXvt1IAAAAASUVORK5CYII=';
+def imgDoc as string init "# Report\n\nProse before the figure.\n\n![a small green rectangle](figure.png)\n\nProse after.\n";
+def opts as markdown.PdfOptions init markdown.pdfDefaults();
+$opts.images["figure.png"] = pdf.loadImage("Figure", encoding.fromText($pngB64, "base64"));
+def withPic as bytes init markdown.toPdfWith($imgDoc, $opts);
+def picPath as string init path.join(os.tempDir(), "markdown_image_demo.pdf");
+fs.writeBytes($picPath, $withPic);
+io.printf("\n=== PDF with an embedded image (markdown.toPdfWith + PdfOptions.images) ===\nwrote %d bytes to %s\n", len($withPic), $picPath);

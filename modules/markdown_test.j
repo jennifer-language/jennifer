@@ -1235,3 +1235,121 @@ func testPdfBookmarkLevelExcludesDeeper() {
     testing.assertTrue(pdfHas($out, "/Title (Top)"));
     testing.assertFalse(pdfHas($out, "/Title (Deep)"));
 }
+
+# --- PDF images (markdown.toPdf picture embedding) ---
+#
+# An 8x6 opaque RGB PNG (base64), the same fixture pdf.j's own tests use. Kept
+# small so the tests stay fast and the base64 stays readable.
+def const MDIMGPNG as string init "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGklEQVR42mNkYGBQYBDBRCwMGiIMDFgQPSQAwgMFakXvt1IAAAAASUVORK5CYII=";
+
+func mdImgFixture() {
+    return encoding.fromText(MDIMGPNG, "base64");
+}
+
+# mdStripBytes mirrors what renderPdfDoc stores in Layout.placements: the image
+# with its byte fields cleared (drawImage needs only the name + pixel dims).
+func mdStripBytes(img as pdf.Image) {
+    def light as pdf.Image init $img;
+    def empty as bytes;
+    $light.data = $empty;
+    $light.smask = $empty;
+    $light.hasSmask = false;
+    return $light;
+}
+
+func mdImageNode(url as string, alt as string) {
+    def n as Node init nodeOf("image");
+    $n.url = $url;
+    $n.text = $alt;
+    return $n;
+}
+
+# A single-image paragraph draws (and embeds) the picture when the caller supplied
+# its bytes for the URL.
+func testPdfImageEmbeddedWhenSupplied() {
+    def o as PdfOptions init pdfDefaults();
+    $o.images["shot.png"] = pdf.loadImage("Shot", mdImgFixture());
+    def withImg as bytes init toPdfWith("# T\n\n![a green box](shot.png)\n", $o);
+    def fallback as bytes init toPdf("# T\n\n![a green box](shot.png)\n");
+    testing.assertTrue(binary.startsWith($withImg, pdfMarker()));
+    # Embedded as an image XObject, referenced from a page's resources.
+    testing.assertTrue(pdfHas($withImg, "/Subtype /Image"));
+    testing.assertTrue(pdfHas($withImg, "/XObject"));
+    # Embedding the bytes makes it larger than the [alt]-text fallback.
+    testing.assertTrue(len($withImg) > len($fallback));
+}
+
+# With no image supplied for the URL, the same source keeps the [alt] text and
+# embeds no image.
+func testPdfImageFallbackWhenAbsent() {
+    def out as bytes init toPdf("# T\n\n![only alt](missing.png)\n");
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+    testing.assertFalse(pdfHas($out, "/Subtype /Image"));
+}
+
+# White-box: renderImage appends the draw operator and advances the pen down.
+func testRenderImageDrawsAndAdvances() {
+    def o as PdfOptions init pdfDefaults();
+    def st as Layout init newLayout($o);
+    $st.placements["p.png"] = mdStripBytes(pdf.loadImage("Pic", mdImgFixture()));
+    def y0 as int init $st.y;
+    def out as Layout init renderImage($st, mdImageNode("p.png", "alt"));
+    testing.assertTrue(strings.contains($out.page.content, "/Pic Do"));
+    testing.assertTrue($out.y < $y0);
+}
+
+# White-box: a picture wider than the text column is capped to the column width
+# (aspect ratio kept), so a screenshot never overflows the margin.
+func testRenderImageScalesToColumn() {
+    def o as PdfOptions init pdfDefaults();
+    def wide as pdf.Image init pdf.loadImage("Wide", mdImgFixture());
+    $wide.width = 4000;
+    $wide.height = 1000;
+    def st as Layout init newLayout($o);
+    $st.placements["w.png"] = mdStripBytes($wide);
+    def out as Layout init renderImage($st, mdImageNode("w.png", "alt"));
+    # drawImage writes "<w> 0 0 <h> <x> <y> cm"; the drawn width equals the column.
+    testing.assertTrue(strings.contains($out.page.content, convert.toString($st.width) + " 0 0 "));
+}
+
+# White-box: an image whose URL has no supplied bytes falls back to [alt] text,
+# drawing no image.
+func testRenderImageMissingFallsBackToText() {
+    def o as PdfOptions init pdfDefaults();
+    def st as Layout init newLayout($o);
+    def out as Layout init renderImage($st, mdImageNode("nope.png", "the caption"));
+    testing.assertFalse(strings.contains($out.page.content, " Do\n"));
+    testing.assertTrue(strings.contains($out.page.content, "Tj"));
+}
+
+# White-box: an image inline in a sentence is NOT drawn - only a lone-image
+# paragraph routes to renderImage; a mixed paragraph flows as text (the [alt] run).
+func testInlineImageNotDrawn() {
+    def o as PdfOptions init pdfDefaults();
+    def st as Layout init newLayout($o);
+    $st.placements["a.png"] = mdStripBytes(pdf.loadImage("Inl", mdImgFixture()));
+    def tree as Node init parse("text before ![tiny](a.png) after\n");
+    def blocks as list of Node init children($tree);
+    def out as Layout init renderBlock($st, $blocks[0], 0);
+    testing.assertFalse(strings.contains($out.page.content, "/Inl Do"));
+    testing.assertTrue(strings.contains($out.page.content, "Tj"));
+}
+
+# Two images sharing a resource name would collide in the /XObject dict; the
+# module rejects it up front.
+func dupImageNames() {
+    def o as PdfOptions init pdfDefaults();
+    $o.images["a.png"] = pdf.loadImage("Same", mdImgFixture());
+    $o.images["b.png"] = pdf.loadImage("Same", mdImgFixture());
+    return toPdfWith("![x](a.png)\n\n![y](b.png)\n", $o);
+}
+
+func testPdfImageDuplicateNameThrows() {
+    testing.assertThrows("dupImageNames", "markdown");
+}
+
+# Default options keep images off (empty map) and imageDpi at 96.
+func testPdfImageDefaults() {
+    testing.assertEqual(len(pdfDefaults().images), 0);
+    testing.assertEqual(pdfDefaults().imageDpi, 96);
+}

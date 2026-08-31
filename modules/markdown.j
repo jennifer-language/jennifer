@@ -32,6 +32,7 @@ use strings;
 use regex;
 use convert;
 use lists;
+use maps;
 use math;
 use encoding;
 
@@ -2368,13 +2369,24 @@ export def struct PdfOptions {
     quoteFill as Fill,
     quoteRule as Fill,
     creator as string,
-    producer as string
+    producer as string,
+    images as map of string to pdf.Image,
+    imageDpi as int
 };
 
 /**
  * The default options: US Letter, 54-point margins, the Helvetica family for body /
  * bold / italic / headings, Courier for code, 11-point body. Copy and tweak fields
  * (value semantics) to customise.
+ *
+ * `images` is empty by default, so `![alt](url)` renders as its `[alt]` text (as
+ * before). To draw pictures, load each with `pdf.loadImage(name, bytes)` and put
+ * it in `images` keyed by the image URL exactly as it appears in the Markdown
+ * source (`markdown` never touches the filesystem - the caller supplies the
+ * bytes); each image `name` must be unique. `imageDpi` (default 96) converts a
+ * picture's pixel size to points; a picture wider than the text column shrinks to
+ * it, keeping aspect ratio. Only a paragraph that is a single image is drawn; an
+ * image inline in a sentence keeps its `[alt]` text.
  * @return {PdfOptions} the default options
  */
 export func pdfDefaults() {
@@ -2402,7 +2414,9 @@ export func pdfDefaults() {
         quoteFill: noFill(),
         quoteRule: noFill(),
         creator: "",
-        producer: ""
+        producer: "",
+        images: {},
+        imageDpi: 96
     };
 }
 
@@ -2441,7 +2455,11 @@ def struct Layout {
     opts as PdfOptions,
     pageNo as int,
     done as list of pdf.Page,
-    bks as list of pdf.OutlineEntry
+    bks as list of pdf.OutlineEntry,
+    # URL -> a byte-free copy of the registered image (name + pixel dims only).
+    # The real bytes live once in the document's `images`; carrying only this
+    # light copy keeps the per-block Layout deep-copy off the image bytes.
+    placements as map of string to pdf.Image
 };
 
 # roundPt rounds a measured (float) width to whole points for integer placement.
@@ -2457,6 +2475,23 @@ func lineH(size as int) {
 # blockGap is the vertical space left after each block.
 func blockGap(opts as PdfOptions) {
     return ($opts.bodySize * 3) // 5;
+}
+
+# usableHeight is the tallest a block can be on a page: the full height less the
+# top and bottom margins. An image is capped to this so it always fits one page.
+func usableHeight(opts as PdfOptions) {
+    return $opts.pageHeight - 2 * $opts.margin;
+}
+
+# pxToPoints converts a pixel length to whole points at the given dpi (72 pt per
+# inch). A non-positive dpi falls back to 96 so a caller that left imageDpi unset
+# on a hand-built PdfOptions never divides by zero.
+func pxToPoints(px as int, dpi as int) {
+    def d as int init $dpi;
+    if ($d <= 0) {
+        $d = 96;
+    }
+    return $px * 72 // $d;
 }
 
 # headingSize maps a heading level (1-6) to a point size.
@@ -2505,7 +2540,8 @@ func newLayout(opts as PdfOptions) {
         opts: $opts,
         pageNo: 0,
         done: [],
-        bks: []
+        bks: [],
+        placements: {}
     };
 }
 
@@ -2980,7 +3016,8 @@ func renderQuote(state as Layout, node as Node, depth as int) {
             opts: $state.opts,
             pageNo: 0,
             done: [],
-            bks: []
+            bks: [],
+            placements: $state.placements
         };
         for (def child in children($node)) {
             $probe = renderBlock($probe, $child, $depth + 1);
@@ -3023,10 +3060,65 @@ func renderRule(state as Layout) {
     return $state;
 }
 
+# renderImage draws a supplied picture for a single-image paragraph, scaled to
+# fit the text column and one page (aspect ratio kept). When no image was supplied
+# for the node's URL - or the supplied one has no positive size - it falls back to
+# the bracketed [alt] text, exactly as an inline image renders, so a missing image
+# degrades to a caption rather than a blank.
+func renderImage(state as Layout, node as Node) {
+    if (not maps.has($state.placements, $node.url)) {
+        return renderImageFallback($state, $node);
+    }
+    def img as pdf.Image init $state.placements[$node.url];
+    if ($img.width <= 0 or $img.height <= 0) {
+        return renderImageFallback($state, $node);
+    }
+    def w as int init pxToPoints($img.width, $state.opts.imageDpi);
+    def h as int init pxToPoints($img.height, $state.opts.imageDpi);
+    # Never wider than the text column (keep aspect ratio).
+    if ($w > $state.width) {
+        $w = $state.width;
+        $h = $img.height * $w // $img.width;
+    }
+    # Never taller than a full page's usable height (keep aspect ratio), so an
+    # over-tall picture fits one page instead of overflowing forever.
+    def maxH as int init usableHeight($state.opts);
+    if ($h > $maxH) {
+        $h = $maxH;
+        $w = $img.width * $h // $img.height;
+    }
+    # Break to a fresh page when it will not fit below the current position; a
+    # freshly-started (empty) page just takes it, since it has been capped to fit.
+    $state = ensureSpace($state, $h);
+    # drawImage places by the lower-left corner; $state.y is the current top.
+    $state.page = pdf.drawImage($state.page, $img, $state.x, $state.y - $h, $w, $h);
+    $state.y = $state.y - $h;
+    return $state;
+}
+
+# renderImageFallback renders a bare image node as a one-line paragraph, so a URL
+# with no supplied bytes keeps the [alt] text (the same run inlineText produces).
+func renderImageFallback(state as Layout, node as Node) {
+    def para as Node init nodeOf("paragraph");
+    $para.children = [$node];
+    return renderParagraph($state, $para);
+}
+
 func renderBlock(state as Layout, node as Node, depth as int) {
     match (typeOf($node)) {
         when "heading" { $state = renderHeading($state, $node); }
-        when "paragraph" { $state = renderParagraph($state, $node); }
+        when "paragraph" {
+            # A paragraph that is a single image on its own line becomes a drawn
+            # picture (when the caller supplied bytes for its URL); every other
+            # paragraph - including one with an image mid-sentence - flows as text,
+            # so an inline image keeps its [alt] run.
+            def kids as list of Node init children($node);
+            if (len($kids) == 1 and typeOf($kids[0]) == "image") {
+                $state = renderImage($state, $kids[0]);
+            } else {
+                $state = renderParagraph($state, $node);
+            }
+        }
         when "list" { $state = renderList($state, $node, $depth); }
         when "code" { $state = renderCode($state, $node); }
         when "table" { $state = renderTable($state, $node); }
@@ -3058,7 +3150,38 @@ func renderBlock(state as Layout, node as Node, depth as int) {
  */
 export func renderPdfDoc(doc as Node, opts as PdfOptions) {
     def outdoc as pdf.Document init buildDoc($opts);
-    def state as Layout init newLayout($opts);
+
+    # Register every supplied image on the document up front, so `render` wires
+    # each into every page's /XObject dict and any page may reference it. Build a
+    # light placement lookup (each image with its byte fields stripped) to thread
+    # through the layout: `drawImage` needs only the resource name, and copying
+    # image bytes on every per-block Layout copy would be O(blocks * image bytes).
+    # Iteration is in the images map's insertion order (a language guarantee), so
+    # registration - and thus the resource numbering `render` assigns - is
+    # deterministic regardless of how the caller built the map.
+    def placements as map of string to pdf.Image init {};
+    def seenNames as map of string to bool init {};
+    def emptyBytes as bytes;
+    for (def url in $opts.images) {
+        def img as pdf.Image init $opts.images[$url];
+        if (maps.has($seenNames, $img.name)) {
+            mdFail("markdown: PdfOptions.images has two images named '" + $img.name +
+                "'; each image needs a unique resource name (from pdf.loadImage)");
+        }
+        $seenNames[$img.name] = true;
+        $outdoc = pdf.addImage($outdoc, $img);
+        def light as pdf.Image init $img;
+        $light.data = $emptyBytes;
+        $light.smask = $emptyBytes;
+        $light.hasSmask = false;
+        $placements[$url] = $light;
+    }
+
+    # Thread the placement lookup, not the byte-heavy images map, through layout.
+    def slim as PdfOptions init $opts;
+    $slim.images = {};
+    def state as Layout init newLayout($slim);
+    $state.placements = $placements;
     for (def block in children($doc)) {
         $state = renderBlock($state, $block, 0);
         # Fold the pages this block finalised (and any bookmarks it produced)

@@ -983,7 +983,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   / `has`), and `render(doc, format)` renders a parsed or hand-built tree (parse ->
   transform -> render). `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)`
   lay the document out to a paginated PDF via `pdf` (a `PdfOptions` from
-  `pdfDefaults()` sets page size / fonts / metadata / `bookmarkLevel`). Author
+  `pdfDefaults()` sets page size / fonts / metadata / `bookmarkLevel`). Images in a
+  PDF: `![alt](url)` is `[alt]` text by default; to draw the picture, `pdf.loadImage`
+  its bytes (the caller owns the filesystem) into `PdfOptions.images` (a
+  `map of string to pdf.Image` keyed by the source URL) - a lone-image paragraph is
+  drawn, scaled to the column at `imageDpi` (default 96); inline / list / quote
+  images keep the `[alt]` fallback. Author
   Markdown with `header` / `style` / `link` / `bullets` / `numbered` / `codeBlock`
   / `table`; align handcrafted table source with `tablePretty`.
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
