@@ -2344,6 +2344,10 @@ export func headingStyle(background as Fill) {
  * @field quoteRule {Fill} colour of the vertical bar down a blockquote's left edge (off for none)
  * @field creator {string} PDF document Creator metadata ("" = unset)
  * @field producer {string} PDF document Producer metadata ("" = keep the pdf default)
+ * @field images {map of string to pdf.Image} pictures to draw, keyed by the image URL
+ *   exactly as written in the source (empty = every `![alt](url)` stays `[alt]` text);
+ *   load each with `pdf.loadImage`, each with a unique resource name
+ * @field imageDpi {int} pixels-to-points scale for a drawn image (default 96)
  */
 export def struct PdfOptions {
     pageWidth as int,
