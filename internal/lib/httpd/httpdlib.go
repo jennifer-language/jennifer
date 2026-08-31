@@ -67,6 +67,10 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "body", bodyFn)
 	in.RegisterNamespaced(LibraryName, "remoteAddr", remoteAddrFn)
 
+	// Request-scoped scratch (compute-once-per-request notes).
+	in.RegisterNamespaced(LibraryName, "requestValue", requestValueFn)
+	in.RegisterNamespaced(LibraryName, "setRequestValue", setRequestValueFn)
+
 	// Response.
 	in.RegisterNamespaced(LibraryName, "setHeader", setHeaderFn)
 	in.RegisterNamespaced(LibraryName, "etag", etagFn)

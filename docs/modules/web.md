@@ -292,8 +292,17 @@ without the secret cannot mint one.
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `web.csrfToken($ctx, secret)` | `string` | Mint a token, set the `csrf` cookie, return it for the form / an `X-CSRF-Token` header. |
+| `web.csrfToken($ctx, secret)` | `string` | Mint a token, set the `csrf` cookie, return it for the form / an `X-CSRF-Token` header. Idempotent per request. |
 | `web.csrfCheck($ctx, secret)` | `bool` | True when the request carries a valid token. |
+
+`web.csrfToken` is **idempotent per request**: the token and its cookie are
+minted on the first call and memoized for the rest of the request, so every call
+returns the *same* token. That makes the natural way to build a multi-form page -
+call `web.csrfToken` once per form, including in a loop or in page chrome (a
+header sign-out button) - correct: all forms carry one token bound to the one
+`csrf` cookie, so all of them validate. (The `csrf` cookie holds a single value;
+a second, different token would replace it and break every form already
+rendered.)
 
 Mint the token in the GET handler that renders a form; guard the unsafe methods
 with a middleware:

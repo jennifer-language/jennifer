@@ -599,7 +599,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   -> `Server`, then loop
   `httpd.accept($srv)` -> `Request` and `httpd.respond($req, status, body)`;
   request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`, plus
-  `setHeader`/`serveFile`/`serveDir`/`shutdown`. `httpd.etag($req, tag)` sets an
+  `setHeader`/`serveFile`/`serveDir`/`shutdown`. `httpd.setRequestValue($req, key,
+  value)` / `requestValue($req, key)` are per-request scratch notes (`""` if
+  unset; never sent to the client) for memoizing a compute-once-per-request value.
+  `httpd.etag($req, tag)` sets an
   `ETag` and honours a conditional GET (returns `bool`; `true` = a `304` was
   sent, so stop) - parsing `If-None-Match` (list / `*` / weak `W/`) for you.
   `serveFileEtag` / `serveDirEtag` are `serveFile` / `serveDir` plus a cached
@@ -946,7 +949,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   cookie, `web.renewSession` rotates it after login; the app owns the store), CORS
   (`web.cors` + `CorsOptions`), caching (`web.etag`; `serveFile` sets `ETag` /
   `Last-Modified`), auth (`web.basicAuth` -> `BasicCredentials`, `web.bearerToken`),
-  CSRF (`web.csrfToken` / `csrfCheck`, HMAC double-submit, app owns the secret),
+  CSRF (`web.csrfToken` / `csrfCheck`, HMAC double-submit, app owns the secret;
+  `csrfToken` is idempotent per request, so calling it once per form - even in a
+  loop - is safe),
   and mounting (`web.mount($app, prefix, sub)` / `joinRoute` composes a sub-router
   under a prefix). `web.run($app, addr)` owns the accept loop (`serveOn` to hold
   the server handle). Run with `jennifer serve app.j [--watch]`. **Default

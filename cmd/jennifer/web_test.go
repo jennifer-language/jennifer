@@ -679,6 +679,88 @@ task.wait($server);`, webMod, httpMod)
 	}
 }
 
+// TestWebCsrfMultiForm pins the multi-form fix: a handler that mints a token
+// once per form (here, twice in one request) must get the SAME token both times
+// and emit exactly ONE csrf cookie, so every form on the page validates - not
+// just the last. Before the fix, each web.csrfToken call minted a fresh token
+// and reset the cookie, so all but the final form failed the check.
+func TestWebCsrfMultiForm(t *testing.T) {
+	webMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "web.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use httpd;
+use task;
+use strings;
+import %q as web;
+import %q as http;
+
+def const SECRET as string init "topsecret";
+
+# Two forms on one page: mint a token for each. The two calls must return the
+# same token bound to one cookie.
+func mint(ctx as web.Context) {
+    def t1 as string init web.csrfToken($ctx, SECRET);
+    def t2 as string init web.csrfToken($ctx, SECRET);
+    web.text($ctx, 200, $t1 + "|" + $t2);
+}
+func submit(ctx as web.Context) {
+    if (web.csrfCheck($ctx, SECRET)) {
+        web.text($ctx, 200, "ok");
+        return;
+    }
+    web.text($ctx, 403, "forbidden");
+}
+
+def app as web.App init web.new();
+$app = web.get($app, "/form", mint);
+$app = web.post($app, "/submit", submit);
+def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+def addr as string init httpd.address($srv);
+def server as task of null init spawn { web.serveOn($app, $srv); };
+def base as string init "http://" + $addr;
+def none as map of string to string init {};
+
+def minted as http.Response init http.get($base + "/form", $none);
+testing.assertEqual($minted.status, 200);
+def parts as list of string init strings.split($minted.body, "|");
+testing.assertEqual(len($parts), 2);
+# Idempotent: both forms carry the same token.
+testing.assertEqual($parts[0], $parts[1]);
+
+# Exactly one csrf cookie was set (split on "csrf=" yields 2 pieces for 1 hit;
+# the old bug set two cookies -> 3 pieces).
+def sc as string init http.header($minted, "Set-Cookie");
+testing.assertEqual(len(strings.split($sc, "csrf=")), 2);
+
+# The first form's token validates end-to-end against that single cookie.
+def token as string init $parts[0];
+def pair as string init strings.substring($sc, 0, strings.indexOf($sc, ";"));
+def h as map of string to string init {};
+$h["X-CSRF-Token"] = $token;
+$h["Cookie"] = $pair;
+def okResp as http.Response init http.post($base + "/submit", "text/plain", "", $h);
+testing.assertEqual($okResp.status, 200);
+testing.assertEqual($okResp.body, "ok");
+
+httpd.shutdown($srv);
+task.wait($server);`, webMod, httpMod)
+
+	progPath := filepath.Join(dir, "csrf_multiform.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("web csrf multi-form program failed with code %d", code)
+	}
+}
+
 // TestWebWildcard drives wildcard routes live: a `/static/*path` route captures
 // the nested remainder, and a `/*page` catch-all (registered last) is the SPA
 // fallback for everything else, including "/".

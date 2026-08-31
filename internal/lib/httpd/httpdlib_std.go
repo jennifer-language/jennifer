@@ -136,7 +136,8 @@ type reqState struct {
 	respHeaders  []respHeader
 	useServeFile bool
 	serveFile    string
-	serveEtag    string // content ETag to set before ServeFile (serveFileEtag / serveDirEtag); "" = none
+	serveEtag    string            // content ETag to set before ServeFile (serveFileEtag / serveDirEtag); "" = none
+	scratch      map[string]string // request-scoped key/value notes (httpd.requestValue / setRequestValue); nil until first write
 }
 
 var (
@@ -653,6 +654,61 @@ func setHeaderFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	rs.respHeaders = append(rs.respHeaders, respHeader{key: name, value: value})
 	return interpreter.Null(), nil
+}
+
+// setRequestValueFn stores a request-scoped note. It is per-request scratch
+// space (not a response header, not visible to the client): a place for a `.j`
+// layer to memoize a value it must compute at most once per request. `web`
+// uses it to make `web.csrfToken` idempotent - the first call mints the token
+// and stashes it here; later calls in the same request read it back rather than
+// minting a second token (which would reset the `csrf` cookie and invalidate
+// every form already rendered). Guarded by rs.mu so it is safe if the request
+// is handed to a `spawn`.
+func setRequestValueFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("httpd.setRequestValue expects 3 arguments (httpd.Request, key, value), got %d", len(args))
+	}
+	rs, err := reqField("httpd.setRequestValue", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	key, err := takeStringArg("httpd.setRequestValue", args, 1, "key")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	value, err := takeStringArg("httpd.setRequestValue", args, 2, "value")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.scratch == nil {
+		rs.scratch = map[string]string{}
+	}
+	rs.scratch[key] = value
+	return interpreter.Null(), nil
+}
+
+// requestValueFn reads a note set by setRequestValueFn, or "" if none. The
+// empty string doubles as "absent" - callers memoizing a non-empty value (a
+// token, an id) treat "" as "not computed yet", which is all `web.csrfToken`
+// needs; a caller wanting to store a legitimately-empty value should record a
+// separate presence flag.
+func requestValueFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("httpd.requestValue expects 2 arguments (httpd.Request, key), got %d", len(args))
+	}
+	rs, err := reqField("httpd.requestValue", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	key, err := takeStringArg("httpd.requestValue", args, 1, "key")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return interpreter.StringVal(rs.scratch[key]), nil
 }
 
 func respondFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {

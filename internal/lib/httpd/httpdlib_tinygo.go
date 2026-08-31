@@ -43,6 +43,12 @@ func bodyFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)   { return unava
 func remoteAddrFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.remoteAddr")
 }
+func requestValueFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.requestValue")
+}
+func setRequestValueFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.setRequestValue")
+}
 func setHeaderFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.setHeader")
 }

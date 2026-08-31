@@ -292,6 +292,46 @@ func TestRespondRejectsBadStatus(t *testing.T) {
 	}
 }
 
+// TestRequestScratch round-trips the per-request scratch store: an unset key
+// reads back "", a set key reads back its value, and a second set overwrites.
+// This is the primitive web.csrfToken uses to memoize its token per request.
+func TestRequestScratch(t *testing.T) {
+	rs := &reqState{done: make(chan struct{}), status: 200}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	req := makeRequest(id)
+
+	// Absent key -> "".
+	got, err := requestValueFn(noCtx, []Value{req, interpreter.StringVal("k")})
+	if err != nil {
+		t.Fatalf("requestValue (absent): %v", err)
+	}
+	if got.Kind != interpreter.KindString || got.Str != "" {
+		t.Fatalf("absent key: want empty string, got %v %q", got.Kind, got.Str)
+	}
+
+	// Set then read back.
+	if _, err := setRequestValueFn(noCtx, []Value{req, interpreter.StringVal("k"), interpreter.StringVal("v1")}); err != nil {
+		t.Fatalf("setRequestValue: %v", err)
+	}
+	got, err = requestValueFn(noCtx, []Value{req, interpreter.StringVal("k")})
+	if err != nil {
+		t.Fatalf("requestValue (set): %v", err)
+	}
+	if got.Str != "v1" {
+		t.Fatalf("after set: want %q, got %q", "v1", got.Str)
+	}
+
+	// Overwrite.
+	if _, err := setRequestValueFn(noCtx, []Value{req, interpreter.StringVal("k"), interpreter.StringVal("v2")}); err != nil {
+		t.Fatalf("setRequestValue (overwrite): %v", err)
+	}
+	got, _ = requestValueFn(noCtx, []Value{req, interpreter.StringVal("k")})
+	if got.Str != "v2" {
+		t.Fatalf("after overwrite: want %q, got %q", "v2", got.Str)
+	}
+}
+
 // TestServeDirRejectsBackslash verifies OF-004: a request path carrying a
 // backslash (a Windows separator that path.Clean's slash-only cleaning leaves
 // intact but filepath.Join would resolve above root) is answered 400, not served.

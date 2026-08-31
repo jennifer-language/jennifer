@@ -65,6 +65,8 @@ for (def i in lists.range(0, 4)) {
 | `httpd.header(req, name)` | `string` | Request header (`""` if absent; case-insensitive name). |
 | `httpd.body(req)` | `bytes` | The request body (buffered; a body over the 10 MiB cap is answered 413 by the engine). |
 | `httpd.remoteAddr(req)` | `string` | Client `host:port`. |
+| `httpd.requestValue(req, key)` | `string` | Read a request-scoped note (`""` if unset). Per-request scratch space, not a header and never sent to the client. |
+| `httpd.setRequestValue(req, key, value)` | `null` | Store a request-scoped note - a place to memoize a value computed at most once per request (see below). |
 | `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). |
 | `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag`, else returns `false` (send the full body). |
 | `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. |
@@ -85,6 +87,21 @@ registry (the same pattern as `fs`, `net`, `os.Process`): value-semantic to
 copy, but every copy refers to the same underlying server / request. That is
 what lets a copied `Server` handle inside a `spawn` worker pull from the same
 accept queue.
+
+## Request-scoped notes
+
+`httpd.setRequestValue(req, key, value)` and `httpd.requestValue(req, key)` are a
+small per-request string map - scratch space that lives as long as the request
+and is never sent to the client. Use it to memoize a value that must be computed
+at most once per request, even when several call sites (or a helper reached from
+many of them) would otherwise each recompute it. An unset key reads back `""`, so
+a caller storing a non-empty value can treat `""` as "not computed yet".
+
+The framework layer uses this to make `web.csrfToken` idempotent: the first call
+in a request mints the token and stashes it here; later calls read it back rather
+than minting a second token (which would reset the `csrf` cookie and invalidate
+every form already rendered on the page). The store is guarded by the request's
+mutex, so it is safe when the request is handed to a `spawn`.
 
 ## A tiny JSON API
 

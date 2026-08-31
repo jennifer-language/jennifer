@@ -126,6 +126,7 @@ flat lookup view, not authoritative.
 | [`httpd`](httpd.md)`.address($srv)` / `.shutdown($srv)`  | Bound address of a server / graceful drain (unblocks parked `accept`).                                                            |
 | [`httpd`](httpd.md)`.accept($srv)`                    | Block for the next request -> `httpd.Request` (the pull loop). Errors once the server is shut down.                                |
 | [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `body` -> `bytes`). |
+| [`httpd`](httpd.md)`.requestValue($req, key)` / `.setRequestValue($req, key, value)` | Read / write a request-scoped note (`""` if unset); scratch space to memoize a value computed once per request, never sent to the client. |
 | [`httpd`](httpd.md)`.setHeader($req, name, value)` / `.respond($req, status, body)` | Set a response header / send the response once (`body` is string or bytes). |
 | [`httpd`](httpd.md)`.etag($req, tag)`                 | Set the `ETag` and honour a conditional GET -> `bool` (`true` = a `304` was sent, stop; handles `If-None-Match` list / `*` / `W/`).  |
 | [`httpd`](httpd.md)`.serveFile($req, path)` / `.serveDir($req, root)` | Answer with a file / the file under `root` for the request path (`..` cannot escape `root`).                    |

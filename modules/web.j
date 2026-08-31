@@ -1081,11 +1081,26 @@ func csrfValid(secret as string, token as string) {
  * Mint a CSRF token, set it in the `csrf` cookie, and return it for embedding in
  * a form (a hidden `csrf` field) or handing to the client for an `X-CSRF-Token`
  * header. Call from the GET handler that renders the form.
+ *
+ * Idempotent per request: the token (and the cookie) are minted on the first
+ * call and memoized for the rest of the request, so calling it once per form is
+ * safe. A page that renders many forms in a loop, or page chrome (a header
+ * sign-out button) that mints its own token after the body, all get the *same*
+ * token bound to the one `csrf` cookie - every form on the page validates. (The
+ * cookie carries a single value; a second, different token would replace it and
+ * invalidate every form already rendered.)
  * @param ctx {Context} the request context
  * @param secret {string} the app's CSRF secret (stable per deployment)
  * @return {string} the token to embed in the form / send as a header
  */
 export func csrfToken(ctx as Context, secret as string) {
+    # Return the token already minted for this request, if any - so calling
+    # csrfToken once per form on a multi-form page does not reset the cookie
+    # (each reset would invalidate every form rendered before it).
+    def existing as string init httpd.requestValue($ctx.req, "web.csrfToken");
+    if (not ($existing == "")) {
+        return $existing;
+    }
     def rand as string init uuid.v4();
     def token as string init $rand + "." + csrfSign($secret, $rand);
     def opts as CookieOptions;
@@ -1094,6 +1109,7 @@ export func csrfToken(ctx as Context, secret as string) {
     $opts.sameSite = "Lax";
     $opts.secure = secureCookies();
     setCookie($ctx, "csrf", $token, $opts);
+    httpd.setRequestValue($ctx.req, "web.csrfToken", $token);
     return $token;
 }
 
