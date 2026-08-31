@@ -149,6 +149,16 @@ function value), `channel of T` (a CSP channel between goroutines).
   8-char string, `'{"port": 8080}'` is literal JSON, and a multi-line block is
   just a `'...'` that spans newlines. To put a `'` inside a string, use the cooked
   form: `"it's"`. There is no `r"..."` prefix.
+  **Reach for raw `'...'` by default when the text carries backslashes or
+  braces** - regex patterns (`'\d+\.\d+'`, `'\bword\b'`), Windows paths
+  (`'C:\Users\me'`), JSON / template / brace-heavy literals (`'{"a": 1}'`,
+  `'${VAR}'`), and any escape-dense blob. Raw needs **zero** escaping and reads
+  exactly as written, so it is shorter and clearer than the cooked equivalent
+  (`"\\d+\\.\\d+"`, `"C:\\Users\\me"`, `"\{\"a\": 1\}"` - error-prone and hard to
+  read). Only pick cooked `"..."` when you actually need one of its three
+  features: an escape sequence (`\n`, `\t`, `\uXXXX`), a `'` inside the string,
+  or `{expr}` interpolation. Rule of thumb: **if you find yourself typing `\\`,
+  `\{`, or `\}`, switch the whole literal to raw `'...'`.**
 - **string interpolation**: inside a cooked `"..."` string, each unescaped
   `{expr}` is a slot - one Jennifer **expression** evaluated in the current scope
   and stringified in place (the `convert.toString` form; no `use convert` needed).

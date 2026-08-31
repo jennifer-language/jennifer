@@ -97,6 +97,12 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 dropping the link. A link label may contain a `]` inside a code span or a
 balanced nested `[...]` pair (`[the `$xs[]` sugar](x)` parses correctly).
 
+A **destination may contain parentheses** when they balance, which is what makes
+a DOI a link: `[NW](https://doi.org/10.1016/0022-2836(70)90057-4)` keeps the
+whole URL rather than ending at the first `)`. One that does not balance ends
+the destination, and a `\(` or `\)` is data - escaped in the source, plain in
+the `href`.
+
 A **lazy continuation** line - a soft-wrapped line indented to an item's content
 column - stays part of that item rather than splitting the list. A blank line
 still ends the item. A nested list is a more-indented list under a parent item;

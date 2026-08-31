@@ -283,6 +283,44 @@ func matchLinkLabel(cs as list of string, open as int, n as int) {
     return -1;
 }
 
+# matchLinkDest finds the `)` that closes a `[text](dest)` destination opened at
+# `open`, counting nested pairs so a destination may carry parentheses of its
+# own. A DOI is the everyday case: the first `)` of
+# `https://doi.org/10.1016/0022-2836(70)90057-4` does not end the link, and
+# treating it as the end cut the URL in half and left `90057-4)` as text beside
+# it.
+#
+# CommonMark allows a parenthesis in a destination when it is backslash-escaped
+# or part of a balanced pair, and ends the destination at one that is neither -
+# which is what the depth test below says. Shaped like matchLinkLabel above,
+# cost included: a forward scan per candidate rather than a lookup, over a span
+# that is a URL and therefore short.
+#
+# Returns the index of the closing `)`, or -1 if the parentheses never balance.
+func matchLinkDest(cs as list of string, open as int, n as int) {
+    def depth as int init 0;
+    def i as int init $open + 1;
+    while ($i < $n) {
+        def c as string init $cs[$i];
+        if ($c == "\\") {
+            # An escaped parenthesis is data: step over both characters so it
+            # can neither open nor close anything.
+            $i = $i + 2;
+            continue;
+        }
+        if ($c == "(") {
+            $depth = $depth + 1;
+        } elseif ($c == ")") {
+            if ($depth == 0) {
+                return $i;
+            }
+            $depth = $depth - 1;
+        }
+        $i = $i + 1;
+    }
+    return -1;
+}
+
 # isAutolinkUri reports whether an angle-bracket span is a URI autolink: an RFC
 # 3986 scheme (letter then letters / digits / `+` / `.` / `-`) followed by `:`.
 # The caller has already established there is no whitespace or `<` inside.
@@ -317,8 +355,9 @@ func parseInline(s as string) {
     # instead of an O(n) Jennifer pass) - most inline strings (a plain heading,
     # a table cell, a bare paragraph line) have few or none, so this skips the
     # bulk of the precompute. A backtick / star array is read only while sitting
-    # on that character, so its presence flag is implied; `)` is read from the
-    # link / image branches, which are gated on `hasParen` below.
+    # on that character, so its presence flag is implied. `)` needs no array -
+    # matchLinkDest counts depth as it goes - but the flag still gates the link
+    # and image branches, since neither can close without one.
     def hasBt as bool init strings.contains($s, "`");
     def hasStar as bool init strings.contains($s, "*");
     def hasParen as bool init strings.contains($s, ")");
@@ -328,11 +367,9 @@ func parseInline(s as string) {
     def nBacktick as list of int init [];
     def nStar as list of int init [];
     def nDblStar as list of int init [];
-    def nRparen as list of int init [];
     def lastBt as int init $n;
     def lastStar as int init $n;
     def lastDbl as int init $n;
-    def lastRp as int init $n;
     def w as int init $n - 1;
     while ($w >= 0) {
         def cw as string init $cs[$w];
@@ -347,18 +384,12 @@ func parseInline(s as string) {
                 $lastDbl = $w;
             }
         }
-        if ($hasParen and $cw == ")") {
-            $lastRp = $w;
-        }
         if ($hasBt) {
             $nBacktick[] = $lastBt;
         }
         if ($hasStar) {
             $nStar[] = $lastStar;
             $nDblStar[] = $lastDbl;
-        }
-        if ($hasParen) {
-            $nRparen[] = $lastRp;
         }
         $w = $w - 1;
     }
@@ -371,10 +402,6 @@ func parseInline(s as string) {
         $nStar[] = $n;
         $nDblStar = lists.reverse($nDblStar);
         $nDblStar[] = $n;
-    }
-    if ($hasParen) {
-        $nRparen = lists.reverse($nRparen);
-        $nRparen[] = $n;
     }
     def i as int init 0;
     # The pending plain-text run is s[bufStart:i]; slicing it with substring
@@ -446,7 +473,7 @@ func parseInline(s as string) {
             def kb as int init matchLinkLabel($cs, $i + 1, $n);
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
-                $kp = $nRparen[$kb + 2];
+                $kp = matchLinkDest($cs, $kb + 1, $n);
             }
             if ($kp >= 0 and $kp < $n) {
                 $irb = $kb;
@@ -466,8 +493,8 @@ func parseInline(s as string) {
             continue;
         }
         # link: [text](url) - the label is matched with a bracket counter (so a
-        # `]` inside the label or a code span does not end it), the `)` via the
-        # precomputed array.
+        # `]` inside the label or a code span does not end it), the `)` with a
+        # depth counter of its own (so a URL may carry balanced parentheses).
         def linkEnd as int init -1;
         def rb as int init -1;
         def rp as int init -1;
@@ -475,7 +502,7 @@ func parseInline(s as string) {
             def kb as int init matchLinkLabel($cs, $i, $n);
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
-                $kp = $nRparen[$kb + 2];
+                $kp = matchLinkDest($cs, $kb + 1, $n);
             }
             if ($kp >= 0 and $kp < $n) {
                 $rb = $kb;
@@ -556,6 +583,17 @@ def struct Dest {
     title as string
 };
 
+# unescapeParens turns the two escapes a destination may carry back into the
+# characters they stand for. matchLinkDest reads `\\(` and `\\)` as data so an
+# escaped parenthesis cannot end the link early; by the time the URL is used the
+# backslash has done its work, and leaving it in would put it in the href.
+func unescapeParens(url as string) {
+    if (not strings.contains($url, "\\")) {
+        return $url;
+    }
+    return strings.replace(strings.replace($url, "\\(", "("), "\\)", ")");
+}
+
 # splitDest parses a `[...](url "title")` destination: the URL, then an optional
 # space-separated quoted title (a single pair of surrounding `"` or `'` stripped),
 # so the title lands in its own attribute rather than in the href / src.
@@ -563,9 +601,9 @@ func splitDest(rawDest as string) {
     def dest as string init strings.trim($rawDest);
     def sp as int init strings.indexOf($dest, " ");
     if ($sp < 0) {
-        return Dest{url: $dest, title: ""};
+        return Dest{url: unescapeParens($dest), title: ""};
     }
-    def url as string init strings.substring($dest, 0, $sp);
+    def url as string init unescapeParens(strings.substring($dest, 0, $sp));
     def rawTitle as string init strings.trim(strings.substring($dest, $sp + 1, len($dest)));
     if (len($rawTitle) >= 2 and
         (strings.startsWith($rawTitle, "\"") and strings.endsWith($rawTitle, "\"") or

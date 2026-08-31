@@ -270,6 +270,61 @@ func testHtmlLinkLabelWithNestedBrackets() {
         "<p><a href=\"u\">argv[0]</a></p>");
 }
 
+func testMatchLinkDestCountsDepth() {
+    # the closing `)` is the one that balances, not the first one seen
+    def cs as list of string init strings.chars("(a(b)c)d");
+    testing.assertEqual(matchLinkDest($cs, 0, len($cs)), 6);
+    # and a destination that never balances closes nothing
+    def open as list of string init strings.chars("(a(b");
+    testing.assertEqual(matchLinkDest($open, 0, len($open)), -1);
+}
+
+func testHtmlLinkDestWithBalancedParens() {
+    # a DOI carries a parenthesised year, so the first `)` is not the end of the
+    # destination - reading it as the end truncated the href and spilled the
+    # remainder of the URL into the paragraph as text
+    testing.assertEqual(
+        toHtml("[NW](https://doi.org/10.1016/0022-2836(70)90057-4)"),
+        "<p><a href=\"https://doi.org/10.1016/0022-2836(70)90057-4\">NW</a></p>");
+    # nested pairs
+    testing.assertEqual(
+        toHtml("[x](https://e.com/a(b(c)d)e)"),
+        "<p><a href=\"https://e.com/a(b(c)d)e\">x</a></p>");
+    # two such links on one line still end where they should
+    testing.assertEqual(
+        toHtml("[a](https://e.com/q?x=(1)) and [b](https://e.com/z(2))"),
+        "<p><a href=\"https://e.com/q?x=(1)\">a</a> and " +
+            "<a href=\"https://e.com/z(2)\">b</a></p>");
+}
+
+func testHtmlLinkDestWithEscapedParen() {
+    # an escaped parenthesis is data rather than structure, and the backslash
+    # does not survive into the href
+    testing.assertEqual(
+        toHtml("[x](https://e.com/a\\)b) end"),
+        "<p><a href=\"https://e.com/a)b\">x</a> end</p>");
+}
+
+func testHtmlLinkDestUnbalancedIsNotALink() {
+    # parentheses that never balance close no link, and the text stays literal
+    testing.assertEqual(toHtml("[x](a(b"), "<p>[x](a(b</p>");
+    # a stray `)` after a complete link is text, as before
+    testing.assertEqual(toHtml("[a](u)x)"), "<p><a href=\"u\">a</a>x)</p>");
+}
+
+func testHtmlImageDestWithBalancedParens() {
+    testing.assertEqual(
+        toHtml("![alt](https://e.com/i(1).png)"),
+        "<p><img src=\"https://e.com/i(1).png\" alt=\"alt\"></p>");
+}
+
+func testHtmlLinkTitleAfterParenthesisedUrl() {
+    # the title still splits off the destination when the URL holds parentheses
+    testing.assertEqual(
+        toHtml("[a](https://e.com/x(y) \"T\")"),
+        "<p><a href=\"https://e.com/x(y)\" title=\"T\">a</a></p>");
+}
+
 func testHtmlLists() {
     testing.assertEqual(toHtml("- a\n- b"), "<ul><li>a</li><li>b</li></ul>");
     testing.assertEqual(toHtml("1. a\n2. b"), "<ol><li>a</li><li>b</li></ol>");
