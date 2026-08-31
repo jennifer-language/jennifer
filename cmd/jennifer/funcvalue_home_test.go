@@ -63,3 +63,58 @@ testing.assertEqual($sh("hi"), "HI");
 		t.Fatalf("func-value home-context program failed with code %d", code)
 	}
 }
+
+// TestCrossHomeFuncValueArityErrorIsCatchable pins that calling a func value
+// across a module boundary with the wrong argument count (or a wrong argument
+// type) raises a CATCHABLE runtime error, exactly like a same-interpreter call.
+// The dispatch entry used to return a plain (non-runtimeError) error, which
+// escaped every try/catch - the shape behind the web.onError "unanswered
+// request" hang: a wrong-arity handler threw an uncatchable error that blew
+// through the framework's safety nets.
+func TestCrossHomeFuncValueArityErrorIsCatchable(t *testing.T) {
+	dir := t.TempDir()
+
+	// A module that calls a supplied func value with two args, inside try/catch.
+	modSrc := `use convert;
+export func callTwo(f as func) {
+    try {
+        $f(1, 2);
+    } catch (e) {
+        return "arity:" + convert.toString($e.kind);
+    }
+    return "no-throw";
+}
+export func callBadType(f as func) {
+    try {
+        $f("not an int");
+    } catch (e) {
+        return "type:" + convert.toString($e.kind);
+    }
+    return "no-throw";
+}`
+	modPath := filepath.Join(dir, "callmod.j")
+	if err := os.WriteFile(modPath, []byte(modSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prog := fmt.Sprintf(`use testing;
+import %q as m;
+
+# A host func value taking exactly one int.
+func oneInt(x as int) { return $x; }
+
+def f as func init oneInt;
+# Wrong arity across the boundary -> caught, not a fatal escape.
+testing.assertEqual(m.callTwo($f), "arity:runtime");
+# Wrong argument type across the boundary -> also caught.
+testing.assertEqual(m.callBadType($f), "type:runtime");
+`, modPath)
+
+	progPath := filepath.Join(dir, "app.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("cross-home arity/type error was not catchable (code %d)", code)
+	}
+}

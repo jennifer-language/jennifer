@@ -912,7 +912,16 @@ func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value,
 // caller chain to continue and each entry should stand alone.
 func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int, args ...Value) (Value, error) {
 	if len(args) != len(m.Params) {
-		return Value{}, fmt.Errorf("method %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args))
+		// A *runtimeError (not a plain fmt.Errorf) so this is catchable by a
+		// surrounding try/catch, exactly like the same-interpreter callUserMethod
+		// path. This dispatch entry is reached for a cross-module method call and
+		// for a func value called across a module boundary (evalCallValue); a plain
+		// error here escapes every try/catch (execTry catches only *runtimeError /
+		// *ErrorSignal), so a wrong-arity handler passed to, e.g., web.onError would
+		// leave the request unanswered instead of raising a catchable error.
+		return Value{}, &runtimeError{
+			Msg: fmt.Sprintf("method %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args)),
+		}
 	}
 	if i.global == nil {
 		i.global = NewEnvironment(nil)
@@ -928,12 +937,17 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int,
 	for idx, p := range m.Params {
 		if !args[idx].MatchesDeclared(p.Type) {
 			releaseBlockEnv(callFrame)
-			return Value{}, fmt.Errorf("argument %d to %q must be %s, got %s", idx+1, m.Name, p.Type, args[idx].Kind)
+			// Catchable *runtimeError (see the arity check above): a plain error
+			// would escape a surrounding try/catch on the cross-boundary path.
+			return Value{}, &runtimeError{
+				Msg:  fmt.Sprintf("argument %d to %q must be %s, got %s", idx+1, m.Name, p.Type, args[idx].Kind),
+				Line: p.Line, Col: p.Col,
+			}
 		}
 		bound := i.bindArg(args[idx], p, borrowCtx)
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 			releaseBlockEnv(callFrame)
-			return Value{}, err
+			return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
 		}
 	}
 	// Count this cross-boundary dispatch as one call-depth unit: it adds Go

@@ -140,6 +140,69 @@ task.wait($server);`, webMod, httpMod)
 	}
 }
 
+// TestWebOnErrorWrongArityStillAnswers pins the fix for an onError handler
+// declared with the wrong arity. web.onError calls the hook with one argument
+// (the thrown value); registering a two-parameter handler used to raise an
+// UNCATCHABLE error inside dispatch's reporting try, which blew through every
+// safety net and left the request unanswered (the connection hung until the
+// client timed out). Now the arity error is catchable, so dispatch logs
+// "onError handler failed" and the trailing ensureAnswered still returns 500.
+func TestWebOnErrorWrongArityStillAnswers(t *testing.T) {
+	webMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "web.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use httpd;
+use task;
+import %q as web;
+import %q as http;
+
+func boom(ctx as web.Context) {
+    throw Error{kind: "demo", message: "kaputt", file: "", line: 0, col: 0};
+}
+# One parameter too many: web.onError calls the hook with just the thrown value.
+func report(ctx as web.Context, err as Error) {
+    return null;
+}
+func showHome(ctx as web.Context) { web.text($ctx, 200, "home"); }
+
+def app as web.App init web.new();
+$app = web.get($app, "/boom", boom);
+$app = web.get($app, "/", showHome);
+$app = web.onError($app, report);
+
+def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+def addr as string init httpd.address($srv);
+def server as task of null init spawn { web.serveOn($app, $srv); };
+
+def h as map of string to string init {};
+# The erroring route answers 500 rather than hanging the connection, even though
+# the onError hook itself fails (wrong arity).
+def boomResp as http.Response init http.get("http://" + $addr + "/boom", $h);
+testing.assertEqual($boomResp.status, 500);
+# The server is still healthy afterwards.
+def home as http.Response init http.get("http://" + $addr + "/", $h);
+testing.assertEqual($home.status, 200);
+testing.assertEqual($home.body, "home");
+
+httpd.shutdown($srv);
+task.wait($server);`, webMod, httpMod)
+
+	progPath := filepath.Join(dir, "app.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("web onError wrong-arity program failed with code %d", code)
+	}
+}
+
 // TestWebCookiesAndSession drives the cookie + session-id surface end to end: a
 // handler resolves the session id via web.sessionId (minting + Set-Cookie on
 // first use), counting hits in an app-owned store keyed by the id. The .j

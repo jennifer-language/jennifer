@@ -730,6 +730,17 @@ trips the catchable guard (as it does through `dispatchModuleMethod` /
 `meta.callMain`). Same-interpreter calls (`FnHome == i`, or a legacy `nil` home)
 keep the ordinary `callUserMethod` path with no retag.
 
+`callMethodWithDepth` raises its **argument-count and argument-type mismatches as
+`*runtimeError`** (not a plain Go error), so a wrong-arity or wrong-kind call to a
+cross-boundary func value (or module method) is **catchable** by a surrounding
+`try`/`catch`, exactly like the same-interpreter `callUserMethod` path - `execTry`
+only converts `*runtimeError` / `*ErrorSignal` into a catch value, so a plain
+error would escape every handler. This is what keeps a framework's safety net
+intact when a caller supplies a mis-declared handler: e.g. a two-parameter
+`web.onError` handler (the hook is called with one argument) fails *catchably*, so
+`web`'s dispatch logs it and still answers the request instead of leaving the
+connection hung.
+
 Struct arguments and the return value cross the boundary through **`crossRetag(v,
 from, to)`**, which reuses `retagStructs` (above) in a two-pass form:
 `to`'s own structs - tagged with `to`'s identity as `from` sees them - are
