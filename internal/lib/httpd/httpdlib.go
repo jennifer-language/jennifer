@@ -49,10 +49,21 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedStruct(LibraryName, "Request", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
+	// Options carries the per-server limits for httpd.listenWith /
+	// httpd.listenTLSWith. A 0 field selects that limit's built-in default, so a
+	// caller can set just one (e.g. httpd.Options{maxBodyBytes: 100 * 1024 * 1024}).
+	in.RegisterNamespacedStruct(LibraryName, "Options", []parser.StructField{
+		{Name: "maxBodyBytes", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "maxInFlight", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
 
 	// Lifecycle.
 	in.RegisterNamespaced(LibraryName, "listen", listenFn)
+	in.RegisterNamespaced(LibraryName, "listenWith", listenWithFn)
 	in.RegisterNamespaced(LibraryName, "listenTLS", listenTLSFn)
+	in.RegisterNamespaced(LibraryName, "listenTLSWith", listenTLSWithFn)
+	in.RegisterNamespaced(LibraryName, "setMaxBufferBudget", setMaxBufferBudgetFn)
+	in.RegisterNamespaced(LibraryName, "setMaxBufferBudgetFromRAM", setMaxBufferBudgetFromRAMFn)
 	in.RegisterNamespaced(LibraryName, "address", addressFn)
 	in.RegisterNamespaced(LibraryName, "shutdown", shutdownFn)
 
@@ -134,6 +145,32 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 		return nil, fmt.Errorf("%s: %s must be bytes, got %s", fnName, role, args[idx].Kind)
 	}
 	return args[idx].Bytes, nil
+}
+
+// takeOptionsArg reads the (maxBodyBytes, maxInFlight) pair out of a
+// httpd.Options struct value. Both are returned as int64 exactly as written (0 =
+// "use default", the guard in resolveServerLimits validates the range); a
+// missing field defaults to 0, so the zero value httpd.Options is all-defaults.
+func takeOptionsArg(fnName string, v Value) (int64, int64, error) {
+	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Options" {
+		return 0, 0, fmt.Errorf("%s: options must be a httpd.Options, got %s", fnName, v.Kind)
+	}
+	var maxBody, inFlight int64
+	for _, f := range v.Fields {
+		switch f.Name {
+		case "maxBodyBytes":
+			if f.Value.Kind != interpreter.KindInt {
+				return 0, 0, fmt.Errorf("%s: httpd.Options.maxBodyBytes must be int, got %s", fnName, f.Value.Kind)
+			}
+			maxBody = f.Value.Int
+		case "maxInFlight":
+			if f.Value.Kind != interpreter.KindInt {
+				return 0, 0, fmt.Errorf("%s: httpd.Options.maxInFlight must be int, got %s", fnName, f.Value.Kind)
+			}
+			inFlight = f.Value.Int
+		}
+	}
+	return maxBody, inFlight, nil
 }
 
 // takeBodyArg accepts a response body as either a string or bytes.

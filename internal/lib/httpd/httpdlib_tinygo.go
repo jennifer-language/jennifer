@@ -25,8 +25,20 @@ func unavailable(fnName string) (Value, error) {
 func ResetForTest() {}
 
 func listenFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("httpd.listen") }
+func listenWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.listenWith")
+}
 func listenTLSFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.listenTLS")
+}
+func listenTLSWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.listenTLSWith")
+}
+func setMaxBufferBudgetFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.setMaxBufferBudget")
+}
+func setMaxBufferBudgetFromRAMFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.setMaxBufferBudgetFromRAM")
 }
 func addressFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.address")

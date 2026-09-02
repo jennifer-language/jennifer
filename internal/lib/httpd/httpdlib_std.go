@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -46,10 +47,13 @@ func parseListenAddr(addr string) (string, string) {
 	return "tcp", addr
 }
 
-// maxBodyBytes caps how much request body the engine buffers per request. A
-// tunable knob is a planned follow-up; the default keeps a runaway upload from
-// exhausting memory.
-const maxBodyBytes = 10 << 20 // 10 MiB
+// defaultMaxBodyBytes caps how much request body the engine buffers per request
+// when a server is opened without explicit limits (httpd.listen / listenTLS).
+// The default keeps a runaway upload from exhausting memory; a server opened via
+// httpd.listenWith / listenTLSWith can raise it (bounded by the guard in
+// resolveServerLimits). Stored per-server on serverState.maxBody so the handler
+// enforces the value this server was opened with, not a package constant.
+const defaultMaxBodyBytes = 10 << 20 // 10 MiB
 
 // readHeaderTimeout bounds how long a slow client may take to send request
 // headers (Slowloris protection).
@@ -99,16 +103,59 @@ type serverState struct {
 	closing   chan struct{}
 	closeOnce sync.Once
 	// sem bounds how many requests may buffer a body concurrently, capping
-	// worst-case buffered memory at maxInFlight * maxBodyBytes rather than
-	// growing with the connection count.
+	// worst-case buffered memory at inFlight * maxBody rather than growing with
+	// the connection count. Its capacity is inFlight.
 	sem chan struct{}
+	// maxBody / inFlight are this server's resolved limits (from the defaults
+	// for httpd.listen, or from httpd.Options for httpd.listenWith). The handler
+	// reads maxBody per request; inFlight equals cap(sem).
+	maxBody  int64
+	inFlight int
 }
 
-// maxInFlight caps concurrent in-flight (body-buffered) requests. Bounds
-// worst-case buffered RSS to maxInFlight * maxBodyBytes. The per-request
-// registry (reqStates) is bounded by it: registerReq runs only after a slot is
-// acquired, and unregisterReq is deferred on the same handler.
-const maxInFlight = 256
+// defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
+// server opened without explicit limits. Bounds worst-case buffered RSS to
+// maxInFlight * maxBodyBytes. The per-request registry (reqStates) is bounded by
+// it: registerReq runs only after a slot is acquired, and unregisterReq is
+// deferred on the same handler. Stored per-server on serverState.inFlight.
+const defaultMaxInFlight = 256
+
+// maxInFlightCeiling hard-caps the per-server concurrency knob. A slot is a
+// buffered-channel entry plus a potential concurrent handler goroutine, so an
+// unbounded value would let httpd.listenWith disable admission control entirely
+// (and size the sem channel absurdly); this ceiling keeps the goroutine / fd
+// fan-out and the channel allocation sane regardless of the configured value.
+const maxInFlightCeiling = 65536
+
+// defaultBufferBudget is the initial ceiling on worst-case body-buffer RSS
+// (inFlight * maxBody) that httpd.listenWith enforces. Set above the default
+// configuration's product (256 * 10 MiB = 2.56 GiB) so a modestly larger upload
+// cap is allowed out of the box, while a careless combination (a 1 GiB body at
+// the default concurrency would arm ~256 GiB) is still caught. It is a
+// typo-catcher, NOT a hardware limit: an operator who knows the host has the RAM
+// raises it with httpd.setMaxBufferBudget (an 8 GiB VPS), and one on a tiny
+// container lowers it to a tighter policy. Only listenWith is bounded by it;
+// httpd.listen keeps the fixed defaults.
+const defaultBufferBudget = 4 << 30 // 4 GiB
+
+// bufferBudget is the live ceiling, settable via httpd.setMaxBufferBudget.
+// Atomic because listenWith / the setter may be called from spawned tasks.
+var bufferBudget atomic.Int64
+
+// minBufferBudget floors the settable ceiling so it can never drop below one
+// default-sized body: a lower value would make every non-trivial listenWith
+// fail, which reads as a bug rather than a policy.
+const minBufferBudget = defaultMaxBodyBytes
+
+// maxBufferBudget caps the settable ceiling at 4 PiB - astronomically above any
+// real machine (the largest servers are single-digit TiB), so it never
+// constrains a legitimate value, but it rejects a nonsensical fat-finger (a
+// mistyped 9e18) rather than storing it. The guard's product test is already
+// overflow-safe via division regardless of the budget size; this is a
+// separate sanity bound on the operator-supplied number itself.
+const maxBufferBudget = 1 << 52 // 4 PiB
+
+func init() { bufferBudget.Store(defaultBufferBudget) }
 
 // maxServers bounds the live-server registry, the one httpd registry the
 // earlier hardening pass left unbounded. A program that calls httpd.listen in a
@@ -152,6 +199,7 @@ var (
 
 // ResetForTest wipes both registries between test runs.
 func ResetForTest() {
+	bufferBudget.Store(defaultBufferBudget)
 	serversMu.Lock()
 	for _, s := range servers {
 		s.closeOnce.Do(func() { close(s.closing) })
@@ -237,9 +285,10 @@ func makeHandler(st *serverState) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Admission control: bound how many requests buffer a body (and stay
 		// in flight) concurrently, so N connections can't each buffer up to
-		// maxBodyBytes before backpressure (~N * 10 MiB of RSS). Wait for a
-		// slot or bail on shutdown; the slot is held for the whole handler and
-		// released when the response is written / the request times out.
+		// st.maxBody before backpressure (worst case inFlight * maxBody of RSS).
+		// Wait for a slot or bail on shutdown; the slot is held for the whole
+		// handler and released when the response is written / the request times
+		// out.
 		select {
 		case st.sem <- struct{}{}:
 			defer func() { <-st.sem }()
@@ -255,7 +304,7 @@ func makeHandler(st *serverState) http.Handler {
 		// trickling client can't hold its admission slot forever.
 		rc := http.NewResponseController(w)
 		_ = rc.SetReadDeadline(time.Now().Add(bodyReadTimeout))
-		body, rerr := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+		body, rerr := io.ReadAll(io.LimitReader(r.Body, st.maxBody+1))
 		_ = rc.SetReadDeadline(time.Time{})
 		if rerr != nil {
 			// A mid-body client disconnect (or bodyReadTimeout expiry) leaves a
@@ -267,10 +316,12 @@ func makeHandler(st *serverState) http.Handler {
 			http.Error(w, "error reading request body", http.StatusBadRequest)
 			return
 		}
-		if int64(len(body)) > maxBodyBytes {
+		if int64(len(body)) > st.maxBody {
 			// Same drain concern: the client may still be streaming the rest.
+			// Name the actual limit so the rejection is self-explaining rather
+			// than a mystery 413 the client has to reverse-engineer.
 			w.Header().Set("Connection", "close")
-			http.Error(w, "request body exceeds the server's limit", http.StatusRequestEntityTooLarge)
+			http.Error(w, fmt.Sprintf("request body exceeds the server's limit of %d bytes", st.maxBody), http.StatusRequestEntityTooLarge)
 			return
 		}
 		rs := &reqState{r: r, body: body, done: make(chan struct{}), status: 200, srv: st}
@@ -369,17 +420,107 @@ func makeHandler(st *serverState) http.Handler {
 
 // -------- lifecycle --------
 
-func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("httpd.listen expects 1 argument (address), got %d", len(args))
+// resolveServerLimits turns a caller's requested (maxBody, inFlight) - where 0
+// means "use the built-in default" - into the concrete per-server limits, and is
+// the memory guard: it rejects a negative value, an over-ceiling concurrency, or
+// a combination whose worst-case buffered RSS (inFlight * maxBody) exceeds the
+// live bufferBudget (settable via httpd.setMaxBufferBudget). The product is
+// computed overflow-safely: a single body over the budget is rejected first, so
+// the surviving factors are both bounded before the multiply.
+func resolveServerLimits(maxBody, inFlight int64) (int64, int, error) {
+	if maxBody < 0 {
+		return 0, 0, fmt.Errorf("maxBodyBytes must be >= 0 (0 selects the %d MiB default), got %d", defaultMaxBodyBytes>>20, maxBody)
 	}
-	addr, err := takeStringArg("httpd.listen", args, 0, "address")
+	if inFlight < 0 {
+		return 0, 0, fmt.Errorf("maxInFlight must be >= 0 (0 selects the default %d), got %d", defaultMaxInFlight, inFlight)
+	}
+	if maxBody == 0 {
+		maxBody = defaultMaxBodyBytes
+	}
+	if inFlight == 0 {
+		inFlight = defaultMaxInFlight
+	}
+	if inFlight > maxInFlightCeiling {
+		return 0, 0, fmt.Errorf("maxInFlight %d exceeds the ceiling %d", inFlight, maxInFlightCeiling)
+	}
+	budget := bufferBudget.Load()
+	if maxBody > budget {
+		return 0, 0, fmt.Errorf("maxBodyBytes %d exceeds the %d MiB worst-case-memory budget on its own (raise it with httpd.setMaxBufferBudget if the host has the RAM)", maxBody, budget>>20)
+	}
+	// Reject when inFlight * maxBody > budget, expressed as maxBody >
+	// budget/inFlight so the check never overflows int64 (a large settable
+	// budget could make the direct product wrap negative and silently pass).
+	// For positive integers the two forms are exactly equivalent: maxBody >
+	// floor(budget/inFlight) iff maxBody*inFlight > budget. inFlight >= 1 here
+	// (0 was replaced by the default above), so the division is safe.
+	if maxBody > budget/inFlight {
+		return 0, 0, fmt.Errorf("maxInFlight (%d) x maxBodyBytes (%d) of worst-case buffered memory exceeds the %d MiB budget; lower one of them, or raise the budget with httpd.setMaxBufferBudget if the host has the RAM", inFlight, maxBody, budget>>20)
+	}
+	return maxBody, int(inFlight), nil
+}
+
+// setMaxBufferBudgetFn sets the process-wide ceiling that httpd.listenWith's
+// memory guard enforces (worst-case inFlight * maxBody). The default 4 GiB is a
+// typo-catcher sized for a general host; an operator who knows the box's RAM
+// raises it (an 8 GiB VPS) or lowers it (a small container). Process-wide, not
+// per-server: several servers in one process share that RAM, so size the budget
+// for their combined worst case. Floored at one default body so it can't be set
+// to a value that rejects every listenWith.
+func setMaxBufferBudgetFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudget expects 1 argument (bytes), got %d", len(args))
+	}
+	n, err := takeIntArg("httpd.setMaxBufferBudget", args, 0, "bytes")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if serverCount() >= maxServers {
-		return interpreter.Null(), fmt.Errorf("httpd.listen: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", maxServers)
+	if n < minBufferBudget {
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudget: budget %d is below the %d MiB floor (one default-sized request body)", n, minBufferBudget>>20)
 	}
+	if n > maxBufferBudget {
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudget: budget %d exceeds the %d TiB sanity ceiling (larger than any real machine - check the value)", n, maxBufferBudget>>40)
+	}
+	bufferBudget.Store(n)
+	return interpreter.Null(), nil
+}
+
+// setMaxBufferBudgetFromRAMFn is the OPT-IN, cgroup-aware convenience: it sizes
+// the memory-guard budget to `fraction` of the detected machine limit (the min
+// of the host RAM and any cgroup memory limit, so it is container-correct) and
+// returns the bytes it set, for logging. `fraction` is in (0, 1]; the operator
+// owns the split with everything else on the box. It acts only when called - a
+// plain httpd.listen keeps the fixed default - and errors (rather than guessing)
+// on a host where the limit cannot be determined, pointing at the explicit
+// setter. Floored at one default body via budgetFromLimit.
+func setMaxBufferBudgetFromRAMFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM expects 1 argument (fraction in (0, 1]), got %d", len(args))
+	}
+	var frac float64
+	switch args[0].Kind {
+	case interpreter.KindFloat:
+		frac = args[0].Float
+	case interpreter.KindInt:
+		frac = float64(args[0].Int)
+	default:
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM: fraction must be a float in (0, 1], got %s", args[0].Kind)
+	}
+	if !(frac > 0 && frac <= 1.0) {
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM: fraction must be > 0 and <= 1.0, got %v", frac)
+	}
+	limit, err := detectMemoryLimitBytes()
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM: %v; set an explicit budget with httpd.setMaxBufferBudget instead", err)
+	}
+	budget := budgetFromLimit(limit, frac)
+	bufferBudget.Store(budget)
+	return interpreter.IntVal(budget), nil
+}
+
+// doListen opens the listener for addr (TCP, or a unix: socket) with the shared
+// stale-socket recovery and permission tightening, returning a friendly,
+// fnName-prefixed error on failure.
+func doListen(fnName, addr string) (net.Listener, error) {
 	network, address := parseListenAddr(addr)
 	ln, err := net.Listen(network, address)
 	if err != nil {
@@ -392,7 +533,7 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 			ln, err = net.Listen(network, address)
 		}
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("httpd.listen: %v", err)
+			return nil, fmt.Errorf("%s: %v", fnName, err)
 		}
 	}
 	if network == "unix" {
@@ -402,9 +543,53 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// unix: prefix exists to sit behind. Tighten it to owner+group (0660).
 		_ = os.Chmod(address, 0o660)
 	}
-	st := newServer(ln)
+	return ln, nil
+}
+
+// openServer opens a plaintext server on addr with the given resolved limits.
+func openServer(fnName, addr string, maxBody int64, inFlight int) (Value, error) {
+	if serverCount() >= maxServers {
+		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
+	}
+	ln, err := doListen(fnName, addr)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	st := newServer(ln, maxBody, inFlight)
 	go func() { _ = st.srv.Serve(ln) }()
 	return makeServer(registerServer(st)), nil
+}
+
+func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.listen expects 1 argument (address), got %d", len(args))
+	}
+	addr, err := takeStringArg("httpd.listen", args, 0, "address")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return openServer("httpd.listen", addr, defaultMaxBodyBytes, defaultMaxInFlight)
+}
+
+// listenWithFn is httpd.listen with an explicit httpd.Options{maxBodyBytes,
+// maxInFlight}; a 0 field selects that limit's default.
+func listenWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("httpd.listenWith expects 2 arguments (address, httpd.Options), got %d", len(args))
+	}
+	addr, err := takeStringArg("httpd.listenWith", args, 0, "address")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	reqBody, reqInFlight, err := takeOptionsArg("httpd.listenWith", args[1])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	maxBody, inFlight, err := resolveServerLimits(reqBody, reqInFlight)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("httpd.listenWith: %v", err)
+	}
+	return openServer("httpd.listenWith", addr, maxBody, inFlight)
 }
 
 // isStaleUnixSocket reports whether path is a leftover unix socket with no live
@@ -424,6 +609,31 @@ func isStaleUnixSocket(path string) bool {
 	return false // a live server owns this socket
 }
 
+// openServerTLS opens a TLS server on addr with the given cert/key and resolved
+// limits.
+func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, maxBody int64, inFlight int) (Value, error) {
+	if serverCount() >= maxServers {
+		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("%s: bad certificate / key pair: %v", fnName, err)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+	}
+	st := newServer(ln, maxBody, inFlight)
+	// Floor at TLS 1.2: 1.0/1.1 are deprecated (RFC 8996) and fail compliance
+	// scans.
+	st.srv.TLSConfig = &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	go func() { _ = st.srv.ServeTLS(ln, "", "") }()
+	return makeServer(registerServer(st)), nil
+}
+
 func listenTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("httpd.listenTLS expects 3 arguments (address, cert, key), got %d", len(args))
@@ -440,36 +650,49 @@ func listenTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if serverCount() >= maxServers {
-		return interpreter.Null(), fmt.Errorf("httpd.listenTLS: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", maxServers)
-	}
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("httpd.listenTLS: bad certificate / key pair: %v", err)
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("httpd.listenTLS: %v", err)
-	}
-	st := newServer(ln)
-	// Floor at TLS 1.2: 1.0/1.1 are deprecated (RFC 8996) and fail compliance
-	// scans.
-	st.srv.TLSConfig = &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-	}
-	go func() { _ = st.srv.ServeTLS(ln, "", "") }()
-	return makeServer(registerServer(st)), nil
+	return openServerTLS("httpd.listenTLS", addr, certPEM, keyPEM, defaultMaxBodyBytes, defaultMaxInFlight)
 }
 
-// newServer builds the serverState + http.Server for an already-open listener.
-func newServer(ln net.Listener) *serverState {
+// listenTLSWithFn is httpd.listenTLS with a trailing httpd.Options for the
+// per-server body / concurrency limits.
+func listenTLSWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 4 {
+		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith expects 4 arguments (address, cert, key, httpd.Options), got %d", len(args))
+	}
+	addr, err := takeStringArg("httpd.listenTLSWith", args, 0, "address")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	certPEM, err := takeBytesArg("httpd.listenTLSWith", args, 1, "cert")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	keyPEM, err := takeBytesArg("httpd.listenTLSWith", args, 2, "key")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	reqBody, reqInFlight, err := takeOptionsArg("httpd.listenTLSWith", args[3])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	maxBody, inFlight, err := resolveServerLimits(reqBody, reqInFlight)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: %v", err)
+	}
+	return openServerTLS("httpd.listenTLSWith", addr, certPEM, keyPEM, maxBody, inFlight)
+}
+
+// newServer builds the serverState + http.Server for an already-open listener,
+// with the resolved per-server limits.
+func newServer(ln net.Listener, maxBody int64, inFlight int) *serverState {
 	st := &serverState{
-		ln:      ln,
-		addr:    ln.Addr().String(),
-		reqs:    make(chan *reqState),
-		closing: make(chan struct{}),
-		sem:     make(chan struct{}, maxInFlight),
+		ln:       ln,
+		addr:     ln.Addr().String(),
+		reqs:     make(chan *reqState),
+		closing:  make(chan struct{}),
+		sem:      make(chan struct{}, inFlight),
+		maxBody:  maxBody,
+		inFlight: inFlight,
 	}
 	st.srv = &http.Server{
 		Handler:           makeHandler(st),

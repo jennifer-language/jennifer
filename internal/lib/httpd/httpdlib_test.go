@@ -418,7 +418,7 @@ func TestOversizeBodyRejectedNotTruncated(t *testing.T) {
 
 	// One byte over the cap: the handler must answer 413 on its own (the
 	// pull loop never sees the request, so no serveOnce here).
-	over := bytes.Repeat([]byte("x"), int(maxBodyBytes)+1)
+	over := bytes.Repeat([]byte("x"), int(defaultMaxBodyBytes)+1)
 	resp, err := http.Post("http://"+addr+"/", "application/octet-stream", bytes.NewReader(over))
 	if err != nil {
 		t.Fatalf("POST over-cap: %v", err)
@@ -438,7 +438,7 @@ func TestOversizeBodyRejectedNotTruncated(t *testing.T) {
 		}
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
-	atCap := bytes.Repeat([]byte("y"), int(maxBodyBytes))
+	atCap := bytes.Repeat([]byte("y"), int(defaultMaxBodyBytes))
 	resp2, err := http.Post("http://"+addr+"/", "application/octet-stream", bytes.NewReader(atCap))
 	if err != nil {
 		t.Fatalf("POST at-cap: %v", err)
@@ -448,8 +448,283 @@ func TestOversizeBodyRejectedNotTruncated(t *testing.T) {
 	if resp2.StatusCode != 200 {
 		t.Errorf("at-cap status = %d, want 200", resp2.StatusCode)
 	}
-	if gotLen != maxBodyBytes {
-		t.Errorf("at-cap body length seen by the program = %d, want %d", gotLen, maxBodyBytes)
+	if gotLen != defaultMaxBodyBytes {
+		t.Errorf("at-cap body length seen by the program = %d, want %d", gotLen, defaultMaxBodyBytes)
+	}
+}
+
+// optionsVal builds a httpd.Options struct value for the listenWith tests.
+func optionsVal(maxBody, inFlight int64) Value {
+	return interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
+		{Name: "maxBodyBytes", Value: interpreter.IntVal(maxBody)},
+		{Name: "maxInFlight", Value: interpreter.IntVal(inFlight)},
+	})
+}
+
+// resolveServerLimits is the memory guard: 0 selects a default, a negative or
+// over-budget value is rejected, and the product is computed overflow-safely.
+func TestResolveServerLimits(t *testing.T) {
+	cases := []struct {
+		name             string
+		maxBody, inFlt   int64
+		wantBody         int64
+		wantInFlt        int
+		wantErrSubstring string // "" = expect success
+	}{
+		{"both-default", 0, 0, defaultMaxBodyBytes, defaultMaxInFlight, ""},
+		// Raising the body at the default concurrency is bounded by the budget:
+		// 16 MiB * 256 = exactly 4 GiB is allowed (the ceiling is inclusive).
+		{"raise-body-at-ceiling", 16 << 20, 0, 16 << 20, defaultMaxInFlight, ""},
+		// A big body needs a matching concurrency cut: 100 MiB * 40 = 4000 MiB.
+		{"repartition-for-big-body", 100 << 20, 40, 100 << 20, 40, ""},
+		{"repartition", 26 << 20, 100, 26 << 20, 100, ""},
+		{"body-default-when-zero", 0, 50, defaultMaxBodyBytes, 50, ""},
+		{"negative-body", -1, 0, 0, 0, "maxBodyBytes must be >= 0"},
+		{"negative-inflight", 0, -5, 0, 0, "maxInFlight must be >= 0"},
+		{"inflight-over-ceiling", 0, maxInFlightCeiling + 1, 0, 0, "exceeds the ceiling"},
+		{"single-body-over-budget", defaultBufferBudget + 1, 1, 0, 0, "on its own"},
+		{"product-over-budget", 3 << 30, 256, 0, 0, "worst-case buffered memory exceeds"},
+		// A huge body with a bounded inFlight must be rejected without an int64
+		// multiply overflow (the single-body check fires first).
+		{"overflow-guarded", 1 << 62, maxInFlightCeiling, 0, 0, "on its own"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotBody, gotInFlt, err := resolveServerLimits(tc.maxBody, tc.inFlt)
+			if tc.wantErrSubstring != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil (body=%d inflight=%d)", tc.wantErrSubstring, gotBody, gotInFlt)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrSubstring) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstring)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotBody != tc.wantBody || gotInFlt != tc.wantInFlt {
+				t.Fatalf("resolveServerLimits = (%d, %d), want (%d, %d)", gotBody, gotInFlt, tc.wantBody, tc.wantInFlt)
+			}
+		})
+	}
+}
+
+// The guard's product check must not overflow int64 when the operator raises
+// the budget very high: a (maxBody, inFlight) whose true product exceeds the
+// budget but whose int64 multiply would wrap must still be rejected.
+func TestResolveServerLimitsNoOverflowAtHighBudget(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest()
+	// Raise the budget to 1<<62. maxBody 1<<50 is under it (passes the
+	// single-body check), but 1<<50 * 65536 = 1<<66 overflows int64 - and is
+	// genuinely far over the 1<<62 budget, so it must be rejected.
+	bufferBudget.Store(1 << 62)
+	if _, _, err := resolveServerLimits(1<<50, maxInFlightCeiling); err == nil {
+		t.Fatal("a product that overflows int64 must still be rejected, not wrap past the guard")
+	}
+	// A pair whose product is exactly the raised budget is allowed (inclusive).
+	if _, _, err := resolveServerLimits(1<<46, 1<<16); err != nil {
+		t.Fatalf("product == budget should be allowed: %v", err)
+	}
+}
+
+// A server opened with httpd.listenWith enforces ITS OWN body cap, not the
+// package default: here a cap lowered to 1 KiB rejects a 2 KiB body (which the
+// default 10 MiB server would accept) and admits a sub-cap body whole. Proves
+// the per-server limit threads all the way to the handler.
+func TestListenWithEnforcesPerServerBodyCap(t *testing.T) {
+	ResetForTest()
+	srvV, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsVal(1024, 0)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srvV})
+	addrV, _ := addressFn(noCtx, []Value{srvV})
+	addr := addrV.Str
+
+	// Over the 1 KiB per-server cap: 413 on its own, and the message names the
+	// actual limit so it is self-explaining.
+	over := bytes.Repeat([]byte("x"), 2048)
+	resp, err := http.Post("http://"+addr+"/", "application/octet-stream", bytes.NewReader(over))
+	if err != nil {
+		t.Fatalf("POST over-cap: %v", err)
+	}
+	msg, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("over-cap status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
+	}
+	if !strings.Contains(string(msg), "1024") {
+		t.Errorf("413 body %q should name the 1024-byte limit", strings.TrimSpace(string(msg)))
+	}
+
+	// Under the cap: handed to the program complete.
+	var gotLen int64
+	serveOnce(srvV, func(req Value) {
+		b, err := bodyFn(noCtx, []Value{req})
+		if err == nil {
+			gotLen = int64(len(b.Bytes))
+		}
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
+	})
+	under := bytes.Repeat([]byte("y"), 512)
+	resp2, err := http.Post("http://"+addr+"/", "application/octet-stream", bytes.NewReader(under))
+	if err != nil {
+		t.Fatalf("POST under-cap: %v", err)
+	}
+	io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Errorf("under-cap status = %d, want 200", resp2.StatusCode)
+	}
+	if gotLen != 512 {
+		t.Errorf("under-cap body length seen by the program = %d, want 512", gotLen)
+	}
+}
+
+// The memory guard rejects an over-budget httpd.Options at listen time, and no
+// server (nor its listening socket) leaks into the registry when it does.
+func TestListenWithGuardRejectsOverBudget(t *testing.T) {
+	ResetForTest()
+	before := serverCount()
+	// 3 GiB body at the default 256 concurrency = ~768 GiB worst case, far over
+	// the 4 GiB ceiling.
+	_, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsVal(3<<30, 0)})
+	if err == nil {
+		t.Fatal("expected listenWith to reject an over-budget Options, got nil")
+	}
+	if !strings.Contains(err.Error(), "worst-case buffered memory exceeds") {
+		t.Errorf("error %q should explain the memory-budget rejection", err.Error())
+	}
+	if got := serverCount(); got != before {
+		t.Errorf("a rejected listenWith leaked a server: count %d -> %d", before, got)
+	}
+}
+
+// httpd.setMaxBufferBudget raises (or lowers) the guard ceiling: a config the
+// default 4 GiB budget rejects becomes allowed after the operator raises the
+// budget to match the host's RAM, and a below-floor budget is refused.
+func TestSetMaxBufferBudget(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest() // restore the default for later tests
+
+	// 5 GiB body is over the default 4 GiB budget on its own.
+	if _, _, err := resolveServerLimits(5<<30, 1); err == nil {
+		t.Fatal("5 GiB body should be rejected under the default 4 GiB budget")
+	}
+
+	// Raise the budget to 8 GiB (an 8 GiB VPS); now 5 GiB x 1 fits.
+	if _, err := setMaxBufferBudgetFn(noCtx, []Value{interpreter.IntVal(8 << 30)}); err != nil {
+		t.Fatalf("setMaxBufferBudget(8 GiB): %v", err)
+	}
+	gotBody, gotInFlt, err := resolveServerLimits(5<<30, 1)
+	if err != nil {
+		t.Fatalf("5 GiB body should be allowed after raising the budget: %v", err)
+	}
+	if gotBody != 5<<30 || gotInFlt != 1 {
+		t.Fatalf("resolveServerLimits = (%d, %d), want (%d, 1)", gotBody, gotInFlt, int64(5<<30))
+	}
+
+	// A below-floor budget is refused (would reject every listenWith).
+	if _, err := setMaxBufferBudgetFn(noCtx, []Value{interpreter.IntVal(1024)}); err == nil {
+		t.Fatal("setMaxBufferBudget below the floor should error")
+	}
+
+	// An absurd fat-finger above the sanity ceiling is refused, not stored.
+	if _, err := setMaxBufferBudgetFn(noCtx, []Value{interpreter.IntVal(9000000000000000000)}); err == nil {
+		t.Fatal("setMaxBufferBudget above the sanity ceiling should error")
+	}
+	// budgetFromLimit caps at the ceiling even for an absurd detected limit.
+	if got := budgetFromLimit(1<<60, 1.0); got != maxBufferBudget {
+		t.Errorf("budgetFromLimit(1<<60, 1.0) = %d, want ceiling %d", got, int64(maxBufferBudget))
+	}
+}
+
+// The cgroup / meminfo parsers that back setMaxBufferBudgetFromRAM.
+func TestMemLimitParsers(t *testing.T) {
+	// /proc/meminfo -> bytes.
+	if got, ok := parseMemTotalBytes("MemFree: 100 kB\nMemTotal:   16384000 kB\nBuffers: 1 kB\n"); !ok || got != 16384000*1024 {
+		t.Errorf("parseMemTotalBytes = (%d, %v), want (%d, true)", got, ok, int64(16384000)*1024)
+	}
+	if _, ok := parseMemTotalBytes("Buffers: 1 kB\n"); ok {
+		t.Error("parseMemTotalBytes should fail when MemTotal is absent")
+	}
+
+	// cgroup v2 memory.max: "max" = unlimited, a number = a cap.
+	if _, ok := parseCgroupV2MemoryMax("max\n"); ok {
+		t.Error(`parseCgroupV2MemoryMax("max") should report no limit`)
+	}
+	if got, ok := parseCgroupV2MemoryMax(" 536870912 \n"); !ok || got != 536870912 {
+		t.Errorf("parseCgroupV2MemoryMax = (%d, %v), want (536870912, true)", got, ok)
+	}
+
+	// cgroup v1 limit_in_bytes: a near-int64-max sentinel = unlimited.
+	if _, ok := parseCgroupV1Limit("9223372036854771712\n"); ok {
+		t.Error("parseCgroupV1Limit should treat the sentinel as unlimited")
+	}
+	if got, ok := parseCgroupV1Limit("268435456"); !ok || got != 268435456 {
+		t.Errorf("parseCgroupV1Limit = (%d, %v), want (268435456, true)", got, ok)
+	}
+
+	// /proc/self/cgroup path extraction.
+	if p, ok := cgroupV2Path("0::/system.slice/app.service\n"); !ok || p != "/system.slice/app.service" {
+		t.Errorf("cgroupV2Path = (%q, %v)", p, ok)
+	}
+	if p, ok := cgroupV1MemoryPath("9:cpu,cpuacct:/x\n8:memory:/system.slice/app\n"); !ok || p != "/system.slice/app" {
+		t.Errorf("cgroupV1MemoryPath = (%q, %v)", p, ok)
+	}
+	if _, ok := cgroupV1MemoryPath("9:cpu,cpuacct:/x\n"); ok {
+		t.Error("cgroupV1MemoryPath should fail when no memory controller line is present")
+	}
+}
+
+// budgetFromLimit applies the fraction and floors at one default body.
+func TestBudgetFromLimit(t *testing.T) {
+	if got := budgetFromLimit(8<<30, 0.5); got != 4<<30 {
+		t.Errorf("budgetFromLimit(8 GiB, 0.5) = %d, want %d", got, int64(4)<<30)
+	}
+	if got := budgetFromLimit(8<<30, 1.0); got != 8<<30 {
+		t.Errorf("budgetFromLimit(8 GiB, 1.0) = %d, want %d", got, int64(8)<<30)
+	}
+	// A tiny limit floors at one default body rather than going below it.
+	if got := budgetFromLimit(1<<20, 0.5); got != minBufferBudget {
+		t.Errorf("budgetFromLimit(1 MiB, 0.5) = %d, want floor %d", got, int64(minBufferBudget))
+	}
+}
+
+// setMaxBufferBudgetFromRAM is opt-in: it validates the fraction, and on a Linux
+// host it sets a sane positive budget (>= floor) and returns the bytes it chose.
+func TestSetMaxBufferBudgetFromRAM(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest()
+
+	// Fraction out of range is rejected without touching the budget.
+	for _, bad := range []Value{interpreter.FloatVal(0), interpreter.FloatVal(1.5), interpreter.FloatVal(-0.1)} {
+		if _, err := setMaxBufferBudgetFromRAMFn(noCtx, []Value{bad}); err == nil {
+			t.Errorf("fraction %v should be rejected", bad)
+		}
+	}
+
+	// On this Linux host, detection should succeed and set a floored, positive
+	// budget no larger than the detected machine limit.
+	limit, derr := detectMemoryLimitBytes()
+	res, err := setMaxBufferBudgetFromRAMFn(noCtx, []Value{interpreter.FloatVal(0.5)})
+	if derr != nil {
+		// Non-Linux / unusual host: the builtin must error cleanly, not panic.
+		if err == nil {
+			t.Skip("no machine memory limit detectable here; builtin returned without error")
+		}
+		t.Skipf("memory limit not detectable on this host: %v", derr)
+	}
+	if err != nil {
+		t.Fatalf("setMaxBufferBudgetFromRAM(0.5): %v", err)
+	}
+	if res.Kind != interpreter.KindInt || res.Int < minBufferBudget || res.Int > limit {
+		t.Fatalf("budget = %v (%s), want an int in [%d, %d]", res, res.Kind, int64(minBufferBudget), limit)
+	}
+	if bufferBudget.Load() != res.Int {
+		t.Fatalf("live budget %d != returned %d", bufferBudget.Load(), res.Int)
 	}
 }
 

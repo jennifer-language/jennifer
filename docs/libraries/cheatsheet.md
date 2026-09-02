@@ -123,6 +123,9 @@ flat lookup view, not authoritative.
 | [`hash`](hash.md)`.stream(algo)`                      | Allocate a `hash.Stream` for `algo`; feed chunks via `hash.update` then close with `hash.finalize`.                                 |
 | [`hash`](hash.md)`.update($s, $bytes)`                | Feed one chunk into a `hash.Stream` (mutates by side effect).                                                                       |
 | [`httpd`](httpd.md)`.listen(addr)` / `.listenTLS(addr, cert, key)` | Start an HTTP / HTTPS server -> `httpd.Server` (`":0"` = ephemeral port). Default binary only. |
+| [`httpd`](httpd.md)`.listenWith(addr, opts)` / `.listenTLSWith(addr, cert, key, opts)` | Same, with per-server limits via `httpd.Options{maxBodyBytes, maxInFlight}` (a `0` field = its default: 10 MiB / 256). Guarded: `maxInFlight x maxBodyBytes` must stay under the memory budget. |
+| [`httpd`](httpd.md)`.setMaxBufferBudget(bytes)` | Move the process-wide memory-guard ceiling (default 4 GiB) `listenWith` enforces - raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
+| [`httpd`](httpd.md)`.setMaxBufferBudgetFromRAM(fraction)` | Opt-in, cgroup-aware: set the budget to `fraction` of the detected machine limit (min of host RAM and cgroup limit) -> the bytes set; errors if undeterminable. |
 | [`httpd`](httpd.md)`.address($srv)` / `.shutdown($srv)`  | Bound address of a server / graceful drain (unblocks parked `accept`).                                                            |
 | [`httpd`](httpd.md)`.accept($srv)`                    | Block for the next request -> `httpd.Request` (the pull loop). Errors once the server is shut down.                                |
 | [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `body` -> `bytes`). |

@@ -56,7 +56,11 @@ for (def i in lists.range(0, 4)) {
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `httpd.listen(addr)` | `httpd.Server` | Start listening. `"127.0.0.1:8080"` (TCP), `":0"` (ephemeral TCP port), or `"unix:/run/app.sock"` (a Unix domain socket). |
+| `httpd.listenWith(addr, opts)` | `httpd.Server` | Like `listen`, with per-server limits from an `httpd.Options` (see [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits)). |
 | `httpd.listenTLS(addr, cert, key)` | `httpd.Server` | HTTPS; `cert` / `key` are PEM `bytes`. HTTP/2 negotiated automatically. |
+| `httpd.listenTLSWith(addr, cert, key, opts)` | `httpd.Server` | Like `listenTLS`, with an `httpd.Options` trailing the cert/key. |
+| `httpd.setMaxBufferBudget(bytes)` | `null` | Move the process-wide memory-guard ceiling (default 4 GiB) that `listenWith` enforces; raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
+| `httpd.setMaxBufferBudgetFromRAM(fraction)` | `int` | Opt-in, cgroup-aware: set the budget to `fraction` (`0 < f <= 1`) of the detected machine limit (min of host RAM and any cgroup limit); returns the bytes it set. Errors on a host where the limit can't be determined. |
 | `httpd.address(srv)` | `string` | The actual bound address (resolve `":0"` to the chosen port). |
 | `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Errors once the server is shut down. |
 | `httpd.method(req)` | `string` | `"GET"`, `"POST"`, ... |
@@ -293,17 +297,115 @@ Each process handles one request at a time (the pull loop is serial per accept
 loop - see Scope and limits), so for concurrency and multi-core use run several
 app processes on distinct ports or sockets behind one nginx `upstream {}` block.
 
+## Tuning the body / concurrency limits
+
+`httpd.listen` / `listenTLS` open a server with two safety limits: a **10 MiB**
+request-body cap and a **256** in-flight-request ceiling. They exist to bound
+worst-case memory - the engine buffers each body fully into RAM before your
+program sees it, so the worst case is `maxInFlight x maxBodyBytes` (`256 x 10
+MiB = 2.56 GiB` at the defaults). Raising the body cap for everyone therefore
+also raises that ceiling; the two knobs let you spend a fixed memory budget the
+way your traffic needs it.
+
+`httpd.listenWith(addr, opts)` (and `httpd.listenTLSWith(addr, cert, key, opts)`)
+open a server with an explicit `httpd.Options`:
+
+| Field | Meaning |
+| ----- | ------- |
+| `maxBodyBytes as int` | Per-request body cap in bytes. `0` selects the 10 MiB default. |
+| `maxInFlight as int` | Concurrent in-flight requests. `0` selects the default 256. |
+
+A `0` field takes that limit's default, so you can set just one:
+
+```jennifer
+use httpd;
+
+# A dedicated upload endpoint on a low-concurrency server: 100 MiB bodies, but
+# only 40 at once (100 MiB x 40 = 4 GiB worst case).
+def srv as httpd.Server init httpd.listenWith(":8080",
+    httpd.Options{ maxBodyBytes: 100 * 1024 * 1024, maxInFlight: 40 });
+```
+
+**The memory guard.** `listenWith` validates the pair at listen time and refuses
+a combination whose worst-case buffered memory (`maxInFlight x maxBodyBytes`)
+exceeds the process **memory budget**, or a `maxInFlight` over 65536, or a
+negative value. The budget starts at **4 GiB** - a typo-catcher sized for a
+general host (it stops a slip like `maxBodyBytes: 1 GiB` at the default 256
+concurrency from silently arming a ~256 GiB worst case), **not** a hardware
+limit. The rejection names both values, and what to do:
+
+```
+httpd.listenWith: maxInFlight (256) x maxBodyBytes (104857600) of worst-case
+buffered memory exceeds the 4096 MiB budget; lower one of them, or raise the
+budget with httpd.setMaxBufferBudget if the host has the RAM
+```
+
+**`httpd.setMaxBufferBudget(bytes)`** moves that ceiling to match the actual box,
+since only you know its RAM. On an 8 GiB VPS, raise it once at startup and the
+larger configuration is allowed; on a small container, lower it to a tighter
+policy (floored at one default body, 10 MiB, so it can never reject everything):
+
+```jennifer
+use httpd;
+httpd.setMaxBufferBudget(6 * 1024 * 1024 * 1024); # this 8 GiB VPS can spend 6 GiB
+def srv as httpd.Server init httpd.listenWith(":8080",
+    httpd.Options{ maxBodyBytes: 500 * 1024 * 1024, maxInFlight: 12 });
+```
+
+The budget is **process-wide**, not per-server: several servers in one process
+share the machine's RAM, so size it for their combined worst case (the guard
+checks each server's own product against it, it does not sum them for you).
+
+**Sizing to the machine automatically.** `httpd.setMaxBufferBudgetFromRAM(fraction)`
+sets the budget to a fraction of the **detected** machine limit and returns the
+bytes it chose (for logging):
+
+```jennifer
+use io;
+def budget as int init httpd.setMaxBufferBudgetFromRAM(0.5); # half the box
+io.printf("upload budget: {$budget} bytes\n");
+```
+
+It is **opt-in** and **cgroup-aware** by design. The detected limit is the
+minimum of the host's `MemTotal` and any cgroup memory limit found by walking
+this process's cgroup to the root - so inside a container it uses the
+**container's** limit, not the host's RAM (auto-sizing off host RAM in a
+container is the classic over-commit that gets a process OOM-killed, which is an
+uncatchable `SIGKILL`, not a 413). Because it only acts when you call it, a plain
+`httpd.listen` is never affected; and on a host where no limit can be determined
+(a non-Linux box) it **errors** rather than guessing, pointing you at the
+explicit `setMaxBufferBudget`. The result is floored at one default body (10 MiB)
+and, since `fraction <= 1`, never exceeds the detected limit. You still choose the
+fraction - leave headroom for the interpreter heap, response buffers, the page
+cache, and anything else on the box.
+
+Because the body is fully buffered, none of this is a streaming-upload path:
+genuinely large uploads (video, backups, multi-GB files) want a reverse proxy or
+object storage in front, not a bigger buffer - see below.
+
+For the [`web`](../modules/web.md) framework, open the tuned server yourself and
+hand it to `web.serveOn(app, srv)` instead of `web.run(app, addr)` (which uses
+the defaults):
+
+```jennifer
+def srv as httpd.Server init httpd.listenWith(":8080",
+    httpd.Options{ maxBodyBytes: 50 * 1024 * 1024, maxInFlight: 64 });
+web.serveOn(app, srv);
+```
+
 ## Scope and limits
 
 - **HTTP/1.1** over plaintext; **HTTP/2** is negotiated automatically over TLS
   by `net/http`.
-- The request body is buffered with a **10 MiB cap**; a body over the cap is
-  rejected with **413 Request Entity Too Large** before it reaches the program
-  (never silently truncated - a truncated body would defeat body-signature
-  checks). A configurable limit is a planned follow-up.
-- **Admission control.** At most 256 requests buffer a body / stay in flight at
-  once; further connections wait for a slot, so buffered memory is bounded
-  (~slots x 10 MiB) rather than growing with the connection count.
+- The request body is buffered with a **10 MiB cap** by default; a body over the
+  cap is rejected with **413 Request Entity Too Large** before it reaches the
+  program (never silently truncated - a truncated body would defeat body-signature
+  checks). The cap is per-server settable - see
+  [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits).
+- **Admission control.** At most 256 requests (by default) buffer a body / stay
+  in flight at once; further connections wait for a slot, so buffered memory is
+  bounded (`slots x maxBody`) rather than growing with the connection count. The
+  concurrency slot count is per-server settable too.
 - **Must respond.** Every accepted request must be answered with
   `httpd.respond` (or `serveFile` / `serveDir`). A request left unanswered -
   e.g. the program threw between `accept` and `respond` - is answered **500**

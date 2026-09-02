@@ -596,7 +596,15 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   like JS `Intl`), not `i18n`; there is no ambient `_()`.
 - **`httpd`** - HTTP/1.1 server engine over `net/http`. Pull loop (no handler
   callbacks): `httpd.listen(addr)` (or `listenTLS(addr, cert, key)`, TLS + HTTP/2)
-  -> `Server`, then loop
+  -> `Server`, then loop. `httpd.listenWith(addr, opts)` /
+  `listenTLSWith(addr, cert, key, opts)` take an `httpd.Options{maxBodyBytes as
+  int, maxInFlight as int}` for per-server limits (a `0` field selects its
+  default: a 10 MiB request-body cap / 256 concurrent in-flight requests); the
+  guard rejects a pair whose `maxInFlight x maxBodyBytes` worst-case buffered
+  memory exceeds a process-wide budget (default 4 GiB, set with
+  `httpd.setMaxBufferBudget(bytes)` to match the host's RAM, or opt into
+  `httpd.setMaxBufferBudgetFromRAM(fraction)` -> the bytes set, cgroup-aware so a
+  container uses its own limit). Then loop
   `httpd.accept($srv)` -> `Request` and `httpd.respond($req, status, body)`;
   request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`, plus
   `setHeader`/`serveFile`/`serveDir`/`shutdown`. `httpd.setRequestValue($req, key,
