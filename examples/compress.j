@@ -11,6 +11,7 @@
 use io;
 use compress;
 use convert;
+use strings;
 
 def text as string init "jennifer jennifer jennifer jennifer jennifer jennifer";
 def raw as bytes init convert.bytesFromString($text, "utf-8");
@@ -25,7 +26,12 @@ io.printf("deflate round-trip: %t\n", convert.stringFromBytes($d, "utf-8") == $t
 def best as int init len(compress.pack($raw, "gzip", "best"));
 def fast as int init len(compress.pack($raw, "gzip", "fast"));
 io.printf("best <= fast size:  %t\n", $best <= $fast);
-io.printf("compressible shrank:%t\n", len(compress.pack($raw, "gzip")) < len($raw));
+
+# A realistically-sized compressible input shrinks. A few dozen bytes is too
+# small to beat gzip's ~18-byte framing at the default level, so use a larger
+# buffer here rather than $raw for a stable demonstration.
+def bulk as bytes init convert.bytesFromString(strings.repeat("jennifer ", 40), "utf-8");
+io.printf("compressible shrank:%t\n", len(compress.pack($bulk, "gzip")) < len($bulk));
 
 # streaming, in two chunks, matches a one-shot pack of the whole input
 def s as compress.Stream init compress.stream("gzip");
