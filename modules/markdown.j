@@ -2697,15 +2697,23 @@ func renderHeading(state as Layout, node as Node) {
         $state = flushPage($state);
     }
     def size as int init headingSize($lvl, $state.opts);
-    def htext as string init mdSanitize($state.opts, text($node));
+    def raw as string init text($node);
+    def htext as string init mdSanitize($state.opts, $raw);
     def lines as list of string init pdf.wrapText($state.opts.headingFont, $size, $htext, $state.width);
     def blockH as int init len($lines) * lineH($size);
     $state = ensureSpace($state, $blockH);
     # Record a bookmark for this heading when its level is within the option's
     # bookmark depth. The page it lands on is the one being built (`pageNo`, its
     # 0-based index once added), and `y` is already in PDF coordinates.
+    #
+    # The bookmark takes the *unsanitised* heading. A bookmark is read by the
+    # viewer rather than drawn in a font, so `pdf` writes it as UTF-16BE and it
+    # carries any script; the WinAnsi fold above exists because the standard-14
+    # fonts cannot draw those glyphs, which is a constraint on the page and not
+    # on the sidebar. A Cyrillic heading now reads as itself in the outline even
+    # where the page beneath it shows the substitute.
     if ($state.opts.bookmarkLevel > 0 and $lvl <= $state.opts.bookmarkLevel) {
-        $state.bks = lists.push($state.bks, pdf.OutlineEntry{title: $htext, page: $state.pageNo, y: $state.y, level: $lvl});
+        $state.bks = lists.push($state.bks, pdf.OutlineEntry{title: $raw, page: $state.pageNo, y: $state.y, level: $lvl});
     }
     # Optional shaded background bar behind the heading (drawn before the text; the
     # colour is reset to black so the text and later content stay black).

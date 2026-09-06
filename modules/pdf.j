@@ -497,10 +497,21 @@ func utfSixteenBe(s as string) {
     return $out;
 }
 
-# infoValue renders a document-info value: a WinAnsi literal `(...)` for ASCII
-# text, else a UTF-16BE hex string `<FEFF...>` so non-Latin metadata isn't
-# emitted as raw UTF-8 mojibake.
-func infoValue(v as string) {
+# textString renders a PDF *text string* (PDF 32000-1 7.9.2.2): a WinAnsi literal
+# `(...)` for ASCII text, else a UTF-16BE hex string `<FEFF...>`.
+#
+# The two forms are not a style choice. A literal string carries no encoding of
+# its own, so a viewer reads it as PDFDocEncoding - one byte, one character -
+# and raw UTF-8 in it comes out as mojibake: an o-umlaut arrives as two Latin-1
+# characters. The BOM-prefixed UTF-16BE form is how the format says to write
+# anything else, and it covers every script rather than the 224 characters a
+# WinAnsi round-trip would keep.
+#
+# Every string a *reader* sees outside the page content goes through here: the
+# Info dictionary and the outline (bookmark) titles. Text drawn on a page does
+# not - that is `escapeString`, which has to match the font's /WinAnsiEncoding
+# because a glyph the font cannot carry cannot be drawn at all.
+func textString(v as string) {
     if (encoding.isAscii(convert.bytesFromString($v, "utf-8"))) {
         return "(" + escapeString($v) + ")";
     }
@@ -1637,15 +1648,6 @@ func buildToUnicode(gids as list of int, m as map of int to int) {
     return strings.join($lines, "");
 }
 
-# escapePdfString escapes a string for a PDF literal `(...)` string: backslash,
-# and the two parentheses (kept ASCII / Latin-1, matching the standard-14 scope).
-func escapePdfString(s as string) {
-    def out as string init strings.replace($s, "\\", "\\\\");
-    $out = strings.replace($out, "(", "\\(");
-    $out = strings.replace($out, ")", "\\)");
-    return $out;
-}
-
 # outlineField renders `/Key N 0 R` when N is a real object number, else "".
 func outlineField(key as string, obj as int) {
     if ($obj > 0) {
@@ -1741,8 +1743,8 @@ func buildOutlineObjects(outline as list of OutlineEntry, rootNum as int, itemNu
         if ($cnt > 0) {
             $countField = " /Count " + convert.toString($cnt);
         }
-        $objs[] = convert.toString($itemNums[$i]) + " 0 obj\n<< /Title (" + escapePdfString($outline[$i].title) +
-            ") /Parent " + convert.toString($par) + " 0 R" +
+        $objs[] = convert.toString($itemNums[$i]) + " 0 obj\n<< /Title " + textString($outline[$i].title) +
+            " /Parent " + convert.toString($par) + " 0 R" +
             outlineField("Prev", $prevSib) + outlineField("Next", $nextSib) +
             outlineField("First", $firstCh) + outlineField("Last", $lastCh) + $countField +
             " /Dest [" + convert.toString($pageNum[$pageIdx]) + " 0 R /XYZ null " + convert.toString($outline[$i].y) + " null]" +
@@ -2149,7 +2151,7 @@ export func render(doc as Document) {
     if ($hasInfo) {
         def dict as string init "";
         for (def key in $doc.info) {
-            $dict = $dict + "/" + pdfName($key) + " " + infoValue($doc.info[$key]) + " ";
+            $dict = $dict + "/" + pdfName($key) + " " + textString($doc.info[$key]) + " ";
         }
         $offsets[] = len($segs);
         $segs[] = strChunk(convert.toString($infoNum) + " 0 obj\n<< " + $dict + ">>\nendobj\n");

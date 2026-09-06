@@ -237,6 +237,13 @@ use time;
 $doc = pdf.info($doc, "CreationDate", pdf.pdfDate(time.utc()));   # D:20260714160000+00'00'
 ```
 
+Metadata and bookmark titles are *text strings*, which is a different thing from
+the text drawn on a page: they are read by the viewer rather than set in a font,
+so they are not limited to what the standard-14 fonts can encode. An ASCII value
+is written as a plain literal; anything else goes out as UTF-16BE with a byte
+order mark, which every viewer reads and which covers every script. Nothing has
+to be transliterated, and no embedded font is involved.
+
 ## Bookmarks (outline)
 
 `pdf.bookmark(doc, page, y, title, level)` appends an outline entry - a bookmark
@@ -252,6 +259,10 @@ $doc = pdf.bookmark($doc, 0, 720, "Introduction", 1);
 $doc = pdf.bookmark($doc, 0, 600, "Background", 2);     # nests under Introduction
 $doc = pdf.bookmark($doc, 1, 720, "Results", 1);
 ```
+
+A title may hold any script - see the note under [Metadata](#metadata). A German
+heading keeps its umlauts in the sidebar even when the page it points at is drawn
+in a standard-14 font.
 
 ## Rendering
 

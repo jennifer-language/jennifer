@@ -330,7 +330,10 @@ general-purpose CommonMark conformance.
 > header. A long code line or an unbreakable table token is folded to the column
 > instead of running off the page. A character the standard-14 fonts cannot encode
 > is replaced by `unencodable` (default `"?"`, `""` drops it) so one stray glyph
-> never fails the whole document.
+> never fails the whole document. The substitution is for what is *drawn*: a
+> bookmark is read by the viewer rather than set in a font, so it keeps the
+> heading whole in every script, and the Info dictionary keeps its values whole
+> too.
 >
 > **More document metadata.** Alongside `title` / `author` / `subject` /
 > `keywords`, set `creator` (the application that produced the document) and

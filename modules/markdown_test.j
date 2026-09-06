@@ -1223,6 +1223,28 @@ func testPdfBookmarks() {
     testing.assertTrue(pdfHas($out, "/Title (Sub)"));
 }
 
+# A heading the standard-14 fonts cannot draw still names itself in the sidebar.
+# The page falls back to the substitute because no glyph exists for it; the
+# outline is a text string, not drawn text, so it keeps the heading whole. The
+# escapes spell "Uber" with an umlaut and the Russian for "chapter".
+func testPdfBookmarksKeepWhatThePageCannotDraw() {
+    def o as PdfOptions init pdfDefaults();
+    $o.bookmarkLevel = 1;
+    def out as bytes init toPdfWith("# \u0413\u043b\u0430\u0432\u0430\n\ntext\n", $o);
+    testing.assertTrue(pdfHas($out, "/Title <feff0413043b043004320430>"));
+}
+
+# The umlaut is inside WinAnsi, so the page draws it - and the bookmark, being
+# UTF-16BE, spells it out rather than emitting the raw UTF-8 a viewer would read
+# as two Latin-1 characters.
+func testPdfBookmarksAreNotRawUtfEight() {
+    def o as PdfOptions init pdfDefaults();
+    $o.bookmarkLevel = 1;
+    def out as bytes init toPdfWith("# \u00dcbersicht\n\ntext\n", $o);
+    testing.assertTrue(pdfHas($out, "/Title <feff00dc00620065007200730069006300680074>"));
+    testing.assertFalse(pdfHas($out, "/Title (\u00dcbersicht)"));
+}
+
 func testPdfBookmarkLevelDefaultsToNone() {
     def out as bytes init toPdf("# Intro\n\ntext\n");
     testing.assertFalse(pdfHas($out, "/Outlines"));

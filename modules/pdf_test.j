@@ -590,6 +590,39 @@ func testBookmarkEscapesParens() {
     testing.assertTrue(pdfContains($out, "/Title (a \\(b\\) c)"));
 }
 
+# A literal `(...)` string carries no encoding, so a viewer reads it as
+# PDFDocEncoding and raw UTF-8 in it becomes mojibake - a German bookmark read
+# `FA1/4r` rather than `Fur` with an umlaut. Anything but ASCII goes out as
+# UTF-16BE with a BOM, which is what the format says and what every viewer
+# reads. The escape below is `Fur` with a u-umlaut.
+func testBookmarkNonAsciiIsUtfSixteen() {
+    def doc as Document init addPage(document(), page(612, 792));
+    $doc = bookmark($doc, 0, 700, "F\u00fcr", 1);
+    def out as bytes init render($doc);
+    testing.assertTrue(pdfContains($out, "/Title <feff004600fc0072>"));
+    testing.assertFalse(pdfContains($out, "F\u00fcr"));
+}
+
+# The BOM form is per string, not per document: an ASCII title beside a
+# non-ASCII one stays a readable literal.
+func testBookmarkAsciiStaysALiteral() {
+    def doc as Document init addPage(document(), page(612, 792));
+    $doc = bookmark($doc, 0, 700, "Intro", 1);
+    $doc = bookmark($doc, 0, 500, "\u00dcbersicht", 2);
+    def out as bytes init render($doc);
+    testing.assertTrue(pdfContains($out, "/Title (Intro)"));
+    testing.assertTrue(pdfContains($out, "/Title <feff00dc00620065007200730069006300680074>"));
+}
+
+# Beyond the BMP: an emoji in a heading is a surrogate pair, not a dropped
+# character.
+func testBookmarkOutsideTheBasicPlane() {
+    def doc as Document init addPage(document(), page(612, 792));
+    $doc = bookmark($doc, 0, 700, "a\U0001F600b", 1);
+    def out as bytes init render($doc);
+    testing.assertTrue(pdfContains($out, "/Title <feff0061d83dde000062>"));
+}
+
 func testNoOutlineWithoutBookmarks() {
     def out as bytes init render(addPage(document(), page(612, 792)));
     testing.assertFalse(pdfContains($out, "/Outlines"));
@@ -728,3 +761,4 @@ func testFooterSlotBecomesLink() {
     $f2.right = "example.com";
     testing.assertFalse(pdfContains(render(setFooter($d2, $f2)), "/Annots"));
 }
+
