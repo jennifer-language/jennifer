@@ -136,8 +136,23 @@ func TestIsTerminalRegularFileIsNotTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if isCharDevice(f) {
+	if isTerminalFile(f) {
 		t.Error("a regular file reported as a terminal")
+	}
+}
+
+// TestIsTerminalNullDeviceIsNotTerminal guards the regression the character-
+// device mode bit had: /dev/null is a character device but not a terminal, and
+// an "am I interactive?" guard must read it as non-interactive. stdos.DevNull is
+// "/dev/null" on Unix and "NUL" on Windows, so this stays portable.
+func TestIsTerminalNullDeviceIsNotTerminal(t *testing.T) {
+	f, err := stdos.Open(stdos.DevNull)
+	if err != nil {
+		t.Skipf("cannot open %s: %v", stdos.DevNull, err)
+	}
+	defer f.Close()
+	if isTerminalFile(f) {
+		t.Errorf("%s reported as a terminal", stdos.DevNull)
 	}
 }
 

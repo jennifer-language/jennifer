@@ -159,12 +159,15 @@ func hasFlagFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 }
 
 // isTerminalFn implements `os.isTerminal(stream) -> bool`: is the named
-// standard stream ("stdout" / "stderr" / "stdin") an interactive terminal?
-// Detected via the character-device mode bit (pure stdlib - no x/term
-// dependency, which stays CLI-scoped - and TinyGo-clean). A stream that can't
-// be stat'd (closed, or a runtime without terminal introspection like
-// jennifer-tiny) conservatively reports false, since the point of the check is
-// to suppress terminal escapes on anything that isn't an interactive terminal.
+// standard stream ("stdout" / "stderr" / "stdin") an interactive terminal? The
+// default binary answers the real question via golang.org/x/term (already a
+// dependency of the term library), so a /dev/null or /dev/zero redirect reads
+// false - what an "am I interactive?" guard needs, not just a color gate.
+// jennifer-tiny has no x/term and falls back to the character-device mode bit
+// (right for a pty, wrong only for a non-terminal character device). Either way
+// a stream that can't be introspected conservatively reports false, since the
+// point of the check is to suppress a prompt or terminal escapes on anything
+// that isn't an interactive terminal.
 func isTerminalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.isTerminal expects 1 argument (stream), got %d", len(args))
@@ -183,7 +186,7 @@ func isTerminalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	default:
 		return interpreter.Null(), fmt.Errorf("os.isTerminal: unknown stream %q; known: \"stdout\", \"stderr\", \"stdin\"", args[0].Str)
 	}
-	return interpreter.BoolVal(isCharDevice(f)), nil
+	return interpreter.BoolVal(isTerminalFile(f)), nil
 }
 
 // cwdFn implements os.cwd() -> string: the process's current working
@@ -224,19 +227,6 @@ func tempDirFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		return interpreter.Null(), fmt.Errorf("os.tempDir expects 0 arguments, got %d", len(args))
 	}
 	return interpreter.StringVal(stdos.TempDir()), nil
-}
-
-// isCharDevice reports whether f is a character device - the terminal
-// heuristic. A pipe or a regular-file redirect is not (reports false); a
-// terminal is. /dev/null is also a character device and reads true, which is
-// harmless for the color-gating use case (escapes written there are
-// discarded). A stat error reports false.
-func isCharDevice(f *stdos.File) bool {
-	fi, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&stdos.ModeCharDevice != 0
 }
 
 // flagFn returns the argument that immediately follows `name` in

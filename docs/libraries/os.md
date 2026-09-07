@@ -130,13 +130,15 @@ use os;
 def coloured as bool init os.isTerminal("stdout");   # false when piped or redirected
 ```
 
-It reports `true` for a terminal and `false` for a pipe or a file
-redirect. Detection uses the character-device mode bit (no external
-dependency), so `/dev/null` - also a character device - reads `true`;
-that is harmless, since escapes written there are discarded. A stream
-that can't be inspected reports `false` (the conservative answer: when in
-doubt, don't emit escapes). On `jennifer-tiny` the minimal runtime may
-not introspect terminals, in which case it reports `false`.
+It reports `true` for a terminal and `false` for a pipe, a file redirect, or
+a redirect from a non-terminal character device such as `/dev/null` or
+`/dev/zero` - so it also works as an "am I interactive? (may I prompt?)" gate,
+not just a color gate. The default binary uses a real terminal probe
+(`golang.org/x/term`); a stream that can't be inspected reports `false` (the
+conservative answer: when in doubt, don't emit escapes or a prompt). On
+`jennifer-tiny`, which excludes `x/term`, detection falls back to the
+character-device mode bit - correct for a pty, but a `/dev/null` redirect reads
+`true` there; use `io.eof()` to gate a read on the tiny build.
 
 ### Flag inspection
 
