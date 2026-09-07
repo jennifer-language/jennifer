@@ -145,11 +145,15 @@ server cased it; `http.header($r, "Content-Type")` does the case-folding for you
 
 ## Response body and framing
 
-The client reads the whole response (it sends `Connection: close`, so the server
-closes when done) and decodes the body, handling both framings:
+The client frames the response from its own headers (RFC 9112 6.3), so a request
+returns as soon as the body is complete - it does **not** wait for the connection
+to close, even though it sends `Connection: close`. A server that ignores that
+token and holds the socket open (some appliances and proxies) works the same as
+one that closes. Both framings are handled:
 
 - **Content-Length** - the body is taken as exactly that many bytes.
 - **Transfer-Encoding: chunked** - the chunks are decoded and concatenated.
+- **Neither** - the body runs to connection close (the last-resort framing).
 
 `request` and the verb shortcuts return the body as **text** (UTF-8): a JSON /
 HTML / XML body round-trips exactly, but a binary body (an image, a gzip stream)

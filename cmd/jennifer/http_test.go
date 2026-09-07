@@ -110,10 +110,10 @@ func TestHttpLargeChunkedMultiRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	// Exercise BOTH body readers on a large chunked response: the one-shot
-	// `get` (readToEOF) and a keep-alive session `exchange` (readOneRaw) - the
-	// latter is where a per-read `bytes + bytes` broke every multi-read chunked
-	// body.
+	// Exercise the framing-aware reader (readOneRaw) on a large chunked response
+	// through both entry points: the one-shot `get` and a keep-alive session
+	// `exchange`. Both share the reader, where a per-read `bytes + bytes` once
+	// broke every multi-read chunked body.
 	prog := fmt.Sprintf(`use testing;
 use strings;
 import %q as http;

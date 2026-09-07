@@ -517,44 +517,6 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 # (or unlimited) body passes an explicit `maxBytes` to `requestWith`.
 def const MAX_BODY_BYTES as int init 67108864;
 
-# readToEOF reads the whole connection (the server closes after the response
-# because we send Connection: close). `timeoutMs` re-arms a read deadline before
-# each read, so a stalled connection breaks with an error; 0 clears it.
-# `maxBytes` caps the body: 0 uses the default (MAX_BODY_BYTES), a negative value
-# is unlimited, a positive value is that exact ceiling.
-#
-# The whole body is read in one Go call (net.readAll), not a per-byte interpreted
-# accumulation loop - so a large body (an object-storage download) runs at
-# native speed instead of paying the tree-walker's per-byte cost.
-func readToEOF(conn as net.Conn, timeoutMs as int, maxBytes as int) {
-    def limit as int init $maxBytes;
-    if ($limit == 0) {
-        $limit = MAX_BODY_BYTES;
-    }
-    # net.readAll: maxBytes > 0 caps, <= 0 is unlimited; a negative $limit
-    # (unlimited) maps to 0. idleTimeoutMs re-arms the per-read deadline.
-    def capBytes as int init $limit;
-    if ($capBytes < 0) {
-        $capBytes = 0;
-    }
-    try {
-        return net.readAll($conn, $capBytes, $timeoutMs);
-    } catch (e) {
-        # Re-tag the cap-exceeded error as kind "http" so callers catch it the
-        # same way as before; re-raise anything else (timeout, I/O) unchanged.
-        if (strings.contains($e.message, "exceeds the")) {
-            throw Error{
-                kind: "http",
-                message: "http: response body exceeds " + convert.toString($limit) + " bytes",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
-        throw $e;
-    }
-}
-
 func dial(u as Url, tls as TlsOptions) {
     def addr as string init $u.host + ":" + convert.toString($u.port);
     if ($u.scheme == "https") {
@@ -623,7 +585,12 @@ func sendCore(
         net.setDeadline($conn, $timeoutMs); # covers the write and the first read
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
-    return readToEOF($conn, $timeoutMs, $maxBytes);
+    # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
+    # 9112 6.3), then let the deferred net.close retire the socket. A server that
+    # ignores our Connection: close and holds the socket open (Cisco appliances,
+    # some proxies) still terminates here as soon as the framing says the body is
+    # complete, instead of blocking until the idle timeout.
+    return readOneRaw($conn, $timeoutMs, $maxBytes);
 }
 
 # sendCoreRaw is sendCore for a **bytes** request body: it writes the ASCII head
@@ -649,7 +616,12 @@ func sendCoreRaw(
     if (len($body) > 0) {
         net.writeBytes($conn, $body);
     }
-    return readToEOF($conn, $timeoutMs, $maxBytes);
+    # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
+    # 9112 6.3), then let the deferred net.close retire the socket. A server that
+    # ignores our Connection: close and holds the socket open (Cisco appliances,
+    # some proxies) still terminates here as soon as the framing says the body is
+    # complete, instead of blocking until the idle timeout.
+    return readOneRaw($conn, $timeoutMs, $maxBytes);
 }
 
 /**
@@ -1421,22 +1393,43 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
         }
         return sliceBytes($buf, 0, $need);
     }
-    # No Content-Length, no chunked: the body runs to EOF, so the server has
-    # closed the connection - read the rest and let the caller retire the socket.
-    # Chunks are collected and joined once (binary.join, O(n)), again avoiding
-    # the per-read re-copy over a large body.
-    def apieces as list of bytes init [$buf];
-    def atotal as int init len($buf);
-    while (true) {
-        def chunk as bytes init readSock($conn, $timeoutMs);
-        if (len($chunk) == 0) {
-            return binary.join($apieces);
+    # No Content-Length, no chunked: the body is framed by the server closing the
+    # connection (RFC 9112 6.3 rule 7), so the caller retires the socket after. Read
+    # the remainder in one native net.readAll rather than an interpreted per-4KB
+    # accumulate loop, so a large unframed body (a big getBytes download) runs at
+    # native speed. The cap is what is left of the budget after the head and any
+    # body bytes over-read while reading the headers; net.readAll enforces it
+    # (a <= 0 cap means unlimited, matching a negative $limit).
+    def rest as int init 0;
+    if ($limit > 0) {
+        if (len($buf) >= $limit) {
+            throw Error{
+                kind: "http",
+                message: "http: response body exceeds " + convert.toString($limit) + " bytes",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
-        $apieces[] = $chunk;
-        $atotal = $atotal + len($chunk);
-        capGuard($atotal, $limit);
+        $rest = $limit - len($buf);
     }
-    return $buf;
+    try {
+        return binary.concat($buf, net.readAll($conn, $rest, $timeoutMs));
+    } catch (e) {
+        # Re-tag net.readAll's cap-exceeded error as kind "http" so callers catch
+        # it the same way as the other framing paths; re-raise anything else
+        # (timeout, I/O) unchanged.
+        if (strings.contains($e.message, "exceeds the")) {
+            throw Error{
+                kind: "http",
+                message: "http: response body exceeds " + convert.toString($limit) + " bytes",
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
+        throw $e;
+    }
 }
 
 # responseClosesConn reports whether a response ends the connection: an explicit
