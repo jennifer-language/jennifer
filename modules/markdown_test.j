@@ -851,6 +851,141 @@ func testRenderEmptyTableNodeNoCrash() {
     testing.assertEqual(render($doc, "ansi"), "");
 }
 
+# --- admonitions -----------------------------------------------------
+
+func admOf(md as string) {
+    return children(parse($md))[0];
+}
+
+# The marker is structure: it opens the block and is not part of what it says.
+func testAMarkerOpensAnAdmonition() {
+    def n as Node init admOf("> [!NOTE]\n> body one.\n");
+    testing.assertEqual(typeOf($n), "admonition");
+    testing.assertEqual(attr($n, "kind"), "note");
+    testing.assertEqual(attr($n, "title"), "");
+    testing.assertEqual(text($n), "body one.");
+}
+
+func testEveryKindIsRecognised() {
+    for (def kind in ALERT_KINDS) {
+        def n as Node init admOf("> [" + "!" + strings.upper($kind) + "]\n> x\n");
+        testing.assertEqual(typeOf($n), "admonition");
+        testing.assertEqual(attr($n, "kind"), $kind);
+    }
+}
+
+# GitHub writes the marker in capitals; a book that does not means the same
+# thing.
+func testTheMarkerIsCaseInsensitive() {
+    testing.assertEqual(attr(admOf("> [!note]\n> x\n"), "kind"), "note");
+    testing.assertEqual(attr(admOf("> [!Warning]\n> x\n"), "kind"), "warning");
+}
+
+# The title is the one thing only a parser can see: after the block is built,
+# the line break behind it has been folded into a space and the title is
+# indistinguishable from the first words of the body.
+func testAMarkerCanCarryATitle() {
+    def n as Node init admOf("> [!WARNING] Mind the gap\n> body.\n");
+    testing.assertEqual(attr($n, "title"), "Mind the gap");
+    testing.assertEqual(text($n), "body.");
+}
+
+func testAMarkerWithNoBodyIsStillAnAdmonition() {
+    def n as Node init admOf("> [!TIP]\n");
+    testing.assertEqual(typeOf($n), "admonition");
+    testing.assertEqual(text($n), "");
+}
+
+# A sixth word, a marker that is not the whole of what precedes the title, or no
+# marker at all: all quotations, which is what every renderer that has never
+# heard of the syntax makes of them.
+func testEverythingElseIsAQuotation() {
+    for (def md in ["> [!NOTES]\n> x\n", "> [!NOTE]: x\n", "> [!]\n> x\n", "> quoted\n"]) {
+        testing.assertEqual(typeOf(admOf($md)), "quote");
+    }
+}
+
+# `kind` is the admonition alert kind and nothing else: on any other node - a
+# code block, whose language shares the same backing field - it is empty.
+func testKindIsEmptyOnNonAdmonition() {
+    def code as Node init children(parse("```go\nx := 1\n```\n"))[0];
+    testing.assertEqual(attr($code, "language"), "go");
+    testing.assertEqual(attr($code, "kind"), "");
+}
+
+func testAnAdmonitionHoldsBlocks() {
+    def n as Node init admOf("> [!NOTE]\n> lead\n>\n> - a\n> - b\n");
+    testing.assertEqual(len(children($n)), 2);
+    testing.assertEqual(typeOf(children($n)[0]), "paragraph");
+    testing.assertEqual(typeOf(children($n)[1]), "list");
+}
+
+func testAnAdmonitionCanNest() {
+    def outer as Node init admOf("> [!WARNING]\n> outer\n>\n> > [!TIP]\n> > inner\n");
+    testing.assertEqual(attr($outer, "kind"), "warning");
+    def inner as Node init children($outer)[1];
+    testing.assertEqual(typeOf($inner), "admonition");
+    testing.assertEqual(attr($inner, "kind"), "tip");
+}
+
+# The class names are the conventional ones, so a stylesheet written for another
+# generator's callouts already matches.
+func testAdmonitionHtml() {
+    testing.assertEqual(
+        toHtml("> [!TIP] Try this\n> body\n"),
+        '<div class="admonition admonition-tip"><p class="admonition-title">Try this</p>' +
+            "<p>body</p></div>");
+    testing.assertContains(
+        toHtml("> [!CAUTION]\n> body\n"),
+        '<p class="admonition-title">Caution</p>');
+}
+
+# A terminal has no panel to draw, so the label carries the weight.
+func testAdmonitionAnsi() {
+    def out as string init toAnsi("> [!NOTE] Heads up\n> body\n");
+    testing.assertContains($out, "Heads up");
+    testing.assertContains($out, "body");
+}
+
+# The label reaches the page as an ordinary bold paragraph, so the quotation
+# renderer measures and paints it with the rest.
+func testTitledPrependsTheLabel() {
+    def n as Node init admOf("> [!NOTE]\n> body\n");
+    def out as Node init titled($n, pdfDefaults());
+    testing.assertEqual(len(children($out)), len(children($n)) + 1);
+    def label as Node init children($out)[0];
+    testing.assertEqual(typeOf($label), "paragraph");
+    testing.assertEqual(typeOf(children($label)[0]), "strong");
+    testing.assertEqual(text($label), "Note");
+    # The caller's tree is untouched: nodes are values.
+    testing.assertEqual(len(children($n)), 1);
+}
+
+# A book laid out in another language says so, without the module knowing any
+# German.
+func testTheLabelTableTranslates() {
+    def o as PdfOptions init pdfDefaults();
+    $o.admonitionLabels = {"note": "Hinweis", "warning": "Warnung"};
+    testing.assertEqual(pdfAlertLabel(admOf("> [!NOTE]\n> x\n"), $o), "Hinweis");
+    # A kind the table does not name is called by its own name rather than
+    # blank.
+    testing.assertEqual(pdfAlertLabel(admOf("> [!TIP]\n> x\n"), $o), "Tip");
+}
+
+# The title is the author's words, so it outranks any table.
+func testATitleOutranksTheTable() {
+    def o as PdfOptions init pdfDefaults();
+    $o.admonitionLabels = {"note": "Hinweis"};
+    testing.assertEqual(pdfAlertLabel(admOf("> [!NOTE] Mind the gap\n> x\n"), $o), "Mind the gap");
+}
+
+func testAdmonitionPdfRenders() {
+    def o as PdfOptions init pdfDefaults();
+    $o.quoteFill = gray(94);
+    def out as bytes init toPdfWith("> [!NOTE]\n> body\n", $o);
+    testing.assertTrue(binary.startsWith($out, pdfMarker()));
+}
+
 # --- PDF rendering (markdown.toPdf, white-box) ---
 
 use binary;

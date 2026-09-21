@@ -986,7 +986,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   terminal text (`toAnsi`, via `ansi`). `toHtml` is **safe by default** - raw HTML
   in the source is escaped, so untrusted Markdown (a README, a comment) cannot
   inject `<script>` / event handlers; `toHtmlWith(md, HtmlOptions{allowRawHtml:
-  true})` opts trusted input back into verbatim passthrough. `parse(md)` surfaces a `Node` tree walked
+  true})` opts trusted input back into verbatim passthrough. A blockquote opening
+  with a GitHub-style alert marker (`> [!NOTE]`, also `TIP` / `IMPORTANT` /
+  `WARNING` / `CAUTION`, any case, with an optional title after the marker) parses
+  as an `admonition` node (`attr(n, "kind")` / `attr(n, "title")`) and renders as a
+  `<div class="admonition admonition-note">` callout in HTML and a bold-labelled
+  quote in ANSI / PDF (`PdfOptions.admonitionLabels` translates the labels).
+  `parse(md)` surfaces a `Node` tree walked
   like `xml` / `html` (`typeOf` / `children` / `text` / `level` / `get` / `findAll`
   / `has`), and `render(doc, format)` renders a parsed or hand-built tree (parse ->
   transform -> render). `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)`

@@ -46,7 +46,7 @@ Reading (surface the parse tree, walked like [`xml`](xml.md) / [`html`](html.md)
 | `markdown.children(node)`     | `list of Node` | The node's direct children.                                 |
 | `markdown.text(node)`         | `string`       | A leaf's text, else its descendants' text concatenated.     |
 | `markdown.level(node)`        | `int`          | A heading's level (1-6); 0 otherwise.                       |
-| `markdown.attr(node, name)`   | `string`       | `"href"` / `"title"` / `"lang"` / `"align"` / `"ordered"` / `"level"`, or "". |
+| `markdown.attr(node, name)`   | `string`       | `"href"` / `"title"` / `"lang"` / `"kind"` / `"align"` / `"ordered"` / `"level"`, or "". |
 | `markdown.get(node, sel)`     | `Node`         | First node matching a `/`-separated selector, or an empty node. |
 | `markdown.findAll(node, sel)` | `list of Node` | Every node matching the selector.                           |
 | `markdown.has(node, sel)`     | `bool`         | Whether any node matches.                                   |
@@ -76,6 +76,7 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Ordered list         | `1. x`                          | `<ol><li>`                  |
 | Nested list          | indent a sub-list under an item | a child `<ul>` / `<ol>` inside the parent `<li>` |
 | Blockquote           | `> x` (recursive: `> > y`)      | `<blockquote>` (inner text parsed as blocks) |
+| Admonition           | `> [!NOTE]` opening a blockquote | `<div class="admonition admonition-note">` with a title paragraph |
 | Fenced code block    | ` ``` ` ... ` ``` `             | `<pre><code>`               |
 | Indented code block  | four-space indent after a blank line | `<pre><code>`          |
 | Thematic break       | `---` / `***` / `___` (3+, spaced ok) | `<hr>`                 |
@@ -112,6 +113,49 @@ lists, or nested quotes. A link's `href`, an autolink's target, and an image's
 `javascript:` and other script schemes render as `#`. A raw HTML block is
 **escaped** by `toHtml` (rendered as literal text, not markup) and dropped by
 `toAnsi` / the PDF renderer, which have no HTML.
+
+### Admonitions
+
+A blockquote that opens with an alert marker is an `admonition` node rather than
+a `quote`:
+
+```markdown
+> [!NOTE]
+> Useful to know, and not in the way of the sentence you were reading.
+
+> [!WARNING] Mind the gap
+> A marker can carry its own title.
+```
+
+Five kinds - `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION` - spelled in any
+case. `attr(node, "kind")` is the kind in lower case, `attr(node, "title")` the
+custom title or `""`, and the marker itself is gone: it is structure rather than
+content, so `text(node)` is the body alone. Everything else the quotation holds -
+paragraphs, lists, code, a nested admonition - is its children.
+
+A sixth word, or a marker that is not the whole of what precedes the title, is a
+quotation: `> [!NOTES]` and `> [!NOTE]: as it happens` both parse as `quote` -
+which is also what a renderer that has never heard of the syntax makes of all of
+them, and the reason for this syntax rather than `:::note`. It is already
+Markdown, so nothing breaks anywhere else.
+
+The title is plain text, not inline Markdown, and only the parser can see it: by
+the time the block exists the line break after the marker has been folded into a
+space, and `> [!NOTE] Mind the gap` is then indistinguishable from a marker with
+a body on the next line.
+
+`toHtml` writes the conventional class names, so a stylesheet written for another
+generator's callouts already matches - this module ships none. `toAnsi` prints
+the label in bold above the quotation. In a PDF the label is a bold paragraph at
+the head of the panel, which is what a callout looks like in print, and
+`PdfOptions.admonitionLabels` is how a book in another language says so:
+
+```jennifer
+$o.admonitionLabels = {"note": "Hinweis", "warning": "Warnung"};
+```
+
+A kind the table does not name is called by its own name; a title, being the
+author's words rather than the renderer's, outranks both.
 
 ## HTML output and safety
 
@@ -163,7 +207,8 @@ same accessor vocabulary as [`xml`](xml.md) / [`html`](html.md) - so a document
 can be inspected or transformed (pull the headings for a table of contents,
 rewrite links, lint) and then rendered, rather than going straight to a string. A
 node's `typeOf` is a block kind (`"document"`, `"heading"`, `"paragraph"`,
-`"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`) or an
+`"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`,
+`"admonition"`) or an
 inline kind (`"text"`, `"codespan"`, `"strong"`, `"emphasis"`, `"link"`,
 `"image"`). `get` / `findAll` / `has` take a `/`-separated selector whose steps
 are kind names, `*` (any kind), or `name[k]` (the k-th such child, 1-based),

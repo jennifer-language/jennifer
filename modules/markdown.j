@@ -152,13 +152,16 @@ func emptyListFor(ordered as bool) {
     return listBlockFull($noItems, $none, $ordered);
 }
 
-# quoteBlock wraps the inner blocks of a blockquote.
-func quoteBlock(children as list of Block) {
+# quoteBlock wraps the inner blocks of a blockquote. `alert` is the admonition
+# kind a `> [!NOTE]` marker opened ("" for a plain quotation) and `title` the
+# custom title that followed it on the same line; they ride in `lang` and `text`,
+# which a Quote block does not otherwise use.
+func quoteBlock(children as list of Block, alert as string, title as string) {
     return Block{
         kind: BlockKind.Quote,
         level: 0,
-        text: "",
-        lang: "",
+        text: $title,
+        lang: $alert,
         ordered: false,
         items: [],
         headings: [],
@@ -995,9 +998,62 @@ func stripQuoteMarker(line as string) {
     return $t;
 }
 
+# The five admonition kinds, spelled as they are written. GitHub calls these
+# alerts; the rest of the world calls the box they produce an admonition. A
+# sixth word is a quotation that happens to start with a bracket, which is what
+# every renderer that has never heard of the syntax makes of all of them.
+def const ALERT_KINDS as list of string init [
+    "note",
+    "tip",
+    "important",
+    "warning",
+    "caution"
+];
+
+# What an admonition marker line opens: the kind, and the custom title that
+# followed it on the same line. An empty kind means the line is not a marker.
+def struct Alert {
+    kind as string,
+    title as string
+};
+
+# alertMarker reads `[!NOTE]`, optionally followed by a title, off the first line
+# of a blockquote.
+#
+# This runs while the source is still lines, which is the whole reason the parser
+# does it rather than a consumer: by the time the paragraph exists, the line
+# break after the marker has been folded into a space and `> [!NOTE] Mind the
+# gap` is indistinguishable from a marker with a body on the next line.
+#
+# The marker has to be the whole of what precedes the title, and the kind has to
+# be one of the five: `[!NOTE]:` opening a quotation is prose, and so is
+# `[!NOTES]`.
+func alertMarker(line as string) {
+    def none as Alert init Alert{kind: "", title: ""};
+    def trimmed as string init strings.trim($line);
+    if (not strings.startsWith($trimmed, "[!")) {
+        return $none;
+    }
+    def close as int init strings.indexOf($trimmed, "]");
+    if ($close < 3) {
+        return $none;
+    }
+    def kind as string init strings.lower(strings.substring($trimmed, 2, $close));
+    if (not lists.contains(ALERT_KINDS, $kind)) {
+        return $none;
+    }
+    def rest as string init strings.substring($trimmed, $close + 1, len($trimmed));
+    if ($rest != "" and not strings.startsWith($rest, " ")) {
+        return $none;
+    }
+    return Alert{kind: $kind, title: strings.trim($rest)};
+}
+
 # collectQuote gathers a run of `>`-prefixed lines, strips the marker, and parses
 # the inner text recursively - so a blockquote holds real blocks (paragraphs,
-# lists, nested quotes). Returns the Quote block + resume index.
+# lists, nested quotes). A leading `[!NOTE]` makes it an admonition instead, and
+# the marker line is consumed: it is structure, not content. Returns the Quote
+# block + resume index.
 func collectQuote(lines as list of string, start as int) {
     def inner as list of string init [];
     def n as int init len($lines);
@@ -1006,7 +1062,16 @@ func collectQuote(lines as list of string, start as int) {
         $inner[] = stripQuoteMarker($lines[$j]);
         $j = $j + 1;
     }
-    return BlockScan{block: quoteBlock(parseLines($inner)), next: $j};
+    def alert as Alert init Alert{kind: "", title: ""};
+    if (len($inner) > 0) {
+        $alert = alertMarker($inner[0]);
+    }
+    if ($alert.kind != "") {
+        # The marker line becomes blank rather than disappearing, so a body on
+        # the next line still opens its own paragraph.
+        $inner[0] = "";
+    }
+    return BlockScan{block: quoteBlock(parseLines($inner), $alert.kind, $alert.title), next: $j};
 }
 
 # parseBlocks splits Markdown text into a list of blocks, line by line.
@@ -1450,7 +1515,16 @@ func blockToPublic(b as Block, depth as int) {
             return tableToPublic($b);
         }
         when Quote {
+            # A quotation opened by an alert marker is an admonition: a different
+            # node kind rather than a flag on this one, so a renderer that draws
+            # a panel and a renderer that draws a quotation each match on what
+            # they mean to draw.
             def n as Node init nodeOf("quote");
+            if ($b.lang != "") {
+                $n = nodeOf("admonition");
+                $n.lang = $b.lang;
+                $n.title = $b.text;
+            }
             def kids as list of Node init [];
             for (def cb in $b.children) {
                 $kids[] = blockToPublic($cb, $depth + 1);
@@ -1567,9 +1641,10 @@ export func text(node as Node) {
 
 /**
  * A named string attribute of a node: `"href"` / `"title"` (a `link` / `image`),
- * `"lang"` (a `code` block), `"align"` (a table `cell`), `"ordered"` ("true" /
- * "false", a `list`), or `"level"` (a heading, as a string). Returns "" for an
- * absent attribute.
+ * `"lang"` (a `code` block), `"kind"` and `"title"` (an `admonition`: the alert
+ * kind, and the custom title or ""), `"align"` (a table `cell`), `"ordered"`
+ * ("true" / "false", a `list`), or `"level"` (a heading, as a string). Returns ""
+ * for an absent attribute.
  * @param node {Node} the node
  * @param name {string} the attribute name
  * @return {string} the attribute value, or ""
@@ -1584,6 +1659,15 @@ export func attr(node as Node, name as string) {
         }
         when "lang", "language" {
             return $node.lang;
+        }
+        when "kind" {
+            # The alert kind of an admonition, and only that: on any other node
+            # `kind` is not a meaningful attribute (a code block's language is
+            # `lang`, which shares the field but answers a different question).
+            if ($node.kind == "admonition") {
+                return $node.lang;
+            }
+            return "";
         }
         when "align" {
             return $node.align;
@@ -1954,6 +2038,27 @@ func tableRowToHtml(tag as string, row as Node) {
     return html.element("tr", [], $tds);
 }
 
+# capitalise upper-cases the first rune of a word, which is all the five kind
+# names need: they are ASCII and one word each.
+func capitalise(word as string) {
+    if ($word == "") {
+        return "";
+    }
+    return strings.upper(strings.substring($word, 0, 1)) +
+        strings.substring($word, 1, len($word));
+}
+
+# alertLabel is what an admonition is called: the author's own title when the
+# marker carried one, else the kind's name. The renderers that draw chrome in
+# one language use this; `renderPdfDoc` takes a translation table instead, since
+# the caller laying out a book knows what language it is in.
+func alertLabel(n as Node) {
+    if ($n.title != "") {
+        return $n.title;
+    }
+    return capitalise($n.lang);
+}
+
 func tableNodeToHtml(n as Node) {
     def head as list of html.Node init [];
     def body as list of html.Node init [];
@@ -2001,6 +2106,23 @@ func nodeToHtml(n as Node, allowRaw as bool) {
                 $kids[] = nodeToHtml($cb, $allowRaw);
             }
             return html.element("blockquote", [], $kids);
+        }
+        when "admonition" {
+            # The class names are the conventional ones, so a stylesheet written
+            # for another generator's callouts already matches. Nothing here
+            # ships a stylesheet: the markup carries the kind, and what it looks
+            # like is the page's business.
+            def kids as list of html.Node init [];
+            def labelText as list of html.Node init [html.text(alertLabel($n))];
+            def titleAttrs as list of html.Attr init [html.attr("class", "admonition-title")];
+            $kids[] = html.element("p", $titleAttrs, $labelText);
+            for (def cb in $n.children) {
+                $kids[] = nodeToHtml($cb, $allowRaw);
+            }
+            def attrs as list of html.Attr init [
+                html.attr("class", "admonition admonition-" + $n.lang)
+            ];
+            return html.element("div", $attrs, $kids);
         }
         when "thematic_break" {
             def noKids as list of html.Node init [];
@@ -2184,6 +2306,15 @@ func nodeToAnsi(n as Node) {
             }
             return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
         }
+        when "admonition" {
+            # A terminal has no panel to draw, so the label carries the weight:
+            # bold, above the quotation it opened.
+            def parts as list of string init [ansi.bold(alertLabel($n))];
+            for (def cb in $n.children) {
+                $parts[] = nodeToAnsi($cb);
+            }
+            return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
+        }
         when "paragraph" {
             return inlineChildrenToAnsi($n.children);
         }
@@ -2344,6 +2475,11 @@ export func headingStyle(background as Fill) {
  * @field quoteRule {Fill} colour of the vertical bar down a blockquote's left edge (off for none)
  * @field creator {string} PDF document Creator metadata ("" = unset)
  * @field producer {string} PDF document Producer metadata ("" = keep the pdf default)
+ * @field admonitionLabels {map of string to string} what to call each admonition
+ *   kind - `{"note": "Hinweis", ...}` - for a book laid out in a language other
+ *   than English. A kind that is missing is called by its own name; a marker
+ *   that carried a title is called by that, since the title is the author's own
+ *   words rather than the renderer's.
  * @field images {map of string to pdf.Image} pictures to draw, keyed by the image URL
  *   exactly as written in the source (empty = every `![alt](url)` stays `[alt]` text);
  *   load each with `pdf.loadImage`, each with a unique resource name
@@ -2374,6 +2510,7 @@ export def struct PdfOptions {
     quoteRule as Fill,
     creator as string,
     producer as string,
+    admonitionLabels as map of string to string,
     images as map of string to pdf.Image,
     imageDpi as int
 };
@@ -2419,6 +2556,7 @@ export func pdfDefaults() {
         quoteRule: noFill(),
         creator: "",
         producer: "",
+        admonitionLabels: {},
         images: {},
         imageDpi: 96
     };
@@ -3008,6 +3146,36 @@ func renderTable(state as Layout, node as Node) {
     return $state;
 }
 
+# pdfAlertLabel is what this document calls an admonition kind: the author's own
+# title first, then the caller's table, then the kind's name. The table is how a
+# book in another language gets "Hinweis" without the module knowing any German.
+func pdfAlertLabel(node as Node, opts as PdfOptions) {
+    if ($node.title != "") {
+        return $node.title;
+    }
+    if (maps.has($opts.admonitionLabels, $node.lang)) {
+        return $opts.admonitionLabels[$node.lang];
+    }
+    return capitalise($node.lang);
+}
+
+# titled returns the admonition with its label prepended as a bold paragraph, so
+# the quotation renderer can draw it without knowing what it is. Nodes are
+# values, so this is a fresh one and the caller's tree is untouched.
+func titled(node as Node, opts as PdfOptions) {
+    def label as Node init nodeOf("strong");
+    $label.children = [textNode(pdfAlertLabel($node, $opts))];
+    def para as Node init nodeOf("paragraph");
+    $para.children = [$label];
+    def kids as list of Node init [$para];
+    for (def child in $node.children) {
+        $kids[] = $child;
+    }
+    def out as Node init $node;
+    $out.children = $kids;
+    return $out;
+}
+
 func renderQuote(state as Layout, node as Node, depth as int) {
     def indent as int init 16;
     def savedX as int init $state.x;
@@ -3135,6 +3303,13 @@ func renderBlock(state as Layout, node as Node, depth as int) {
         when "code" { $state = renderCode($state, $node); }
         when "table" { $state = renderTable($state, $node); }
         when "quote" { $state = renderQuote($state, $node, $depth); }
+        # An admonition is a quotation with a title, and print has had that
+        # shape for centuries. Giving the label to `renderQuote` as an ordinary
+        # first child means it is measured with the rest, so the panel covers it
+        # and a page-spanning callout falls back the same way a quotation does.
+        when "admonition" {
+            $state = renderQuote($state, titled($node, $state.opts), $depth);
+        }
         when "thematic_break" { $state = renderRule($state); }
         when "page_break" {
             # Start a fresh page; no trailing gap.
