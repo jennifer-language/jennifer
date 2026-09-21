@@ -185,6 +185,14 @@ jobs:
           esac
           ./scripts/build-deb.sh "$DEB_VERSION" "$DEB_ARCH" dist
 
+      - name: Build OpenWRT .ipk
+        run: |
+          mkdir -p dist
+          # Bare semver tag. build-ipk.sh maps amd64 -> x86_64 and
+          # arm64 -> aarch64_generic and assembles the .ipk from the static
+          # ./jennifer with plain ar/tar (no OpenWRT SDK needed).
+          ./scripts/build-ipk.sh "${GITHUB_REF_NAME}" "${{ matrix.arch }}" dist
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -192,6 +200,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.deb
+            dist/*.ipk
             dist/*.sha256
           retention-days: 7
 
@@ -348,7 +357,7 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f \
-              \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.sha256' -o -name '*.exe' \) \
+              \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.ipk' -o -name '*.sha256' -o -name '*.exe' \) \
               -exec cp {} release/ \;
           # Test + coverage reports (produced by the amd64 build row).
           if [ -d artifacts/test-reports ]; then
@@ -438,6 +447,23 @@ jobs:
           echo "--- generated PKGBUILD-git ---"
           cat release/PKGBUILD-git
 
+      - name: Generate release-ready OpenWRT feed Makefile
+        run: |
+          # Fill the committed packaging/openwrt/Makefile template's version and
+          # per-arch tarball hashes so a feed maintainer can drop it into an
+          # OpenWRT SDK without hand-editing. Same tarball hashes as PKGBUILD-bin;
+          # the in-tree template stays the canonical source. Tags are bare semver.
+          PKGVER="${GITHUB_REF_NAME}"
+          AMD64_HASH=$(awk '{print $1}' "release/jennifer-${PKGVER}-linux-amd64.tar.gz.sha256")
+          ARM64_HASH=$(awk '{print $1}' "release/jennifer-${PKGVER}-linux-arm64.tar.gz.sha256")
+          sed \
+              -e "s/@PKG_VERSION@/${PKGVER}/" \
+              -e "s/@HASH_AMD64@/${AMD64_HASH}/" \
+              -e "s/@HASH_ARM64@/${ARM64_HASH}/" \
+              packaging/openwrt/Makefile > release/openwrt-Makefile
+          echo "--- generated openwrt-Makefile ---"
+          cat release/openwrt-Makefile
+
       - name: Compose release notes
         run: |
           TAG="${GITHUB_REF_NAME}"
@@ -502,9 +528,11 @@ jobs:
             release/*.zip
             release/*.exe
             release/*.deb
+            release/*.ipk
             release/*.sha256
             release/PKGBUILD-bin
             release/PKGBUILD-git
+            release/openwrt-Makefile
             release/report.xml
             release/coverage.html
             release/coverage-summary.txt

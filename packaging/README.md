@@ -20,6 +20,10 @@ packaging/
   homebrew/             - Homebrew formula (jennifer.rb, builds from source) +
                           publish.sh + README; best-effort unsupported macOS tap,
                           published like the AUR packages (manual publish.sh)
+  openwrt/              - OpenWRT package: control template + feed Makefile
+                          (prebuilt-install) + README; the CI release job
+                          assembles the .ipk (scripts/build-ipk.sh) from the
+                          static jennifer binary and attaches it to the Release
   mime/jennifer.xml       - XDG shared-mime-info; both .deb and AUR install it
   man/jennifer.1          - man page for the default (standard-Go) binary
   man/jennifer-tiny.1     - man page for the constrained (TinyGo) binary
@@ -35,9 +39,10 @@ Two more assets ship in the packages but live outside `packaging/`
 the root `JENNIFER.md` language reference installs to
 `usr/share/doc/jennifer/`.
 
-The actual `.deb` is built by `scripts/build-deb.sh` (invoked
-by `.github/workflows/release.yml`) and attached to the GitHub
-Release. AUR packages are published manually after each tagged
+The actual `.deb` is built by `scripts/build-deb.sh` and the OpenWRT
+`.ipk` by `scripts/build-ipk.sh` (both invoked by
+`.github/workflows/release.yml`) and attached to the GitHub Release.
+AUR packages are published manually after each tagged
 release (the PKGBUILDs in `arch/` are the canonical source):
 copy `arch/publish-bin.sh` / `arch/publish-git.sh` into the
 respective AUR clone as `publish.sh` and run it. See the AUR

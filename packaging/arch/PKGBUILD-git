@@ -5,12 +5,32 @@
 # and builds the standard-Go `jennifer` binary from source. Tracks the
 # `main` branch; rebuild to follow upstream.
 #
-# The TinyGo `jennifer-tiny` binary is not built here for now: Arch ships
-# Go 1.27, and the current TinyGo release only supports Go up to 1.26, so
-# `tinygo build` fails against the system toolchain. Only the default
-# `jennifer` is packaged until TinyGo catches up with Go 1.27; re-enable
-# the `build-tinygo` half of `make build` and the tiny install lines below
-# once it does.
+# The TinyGo `jennifer-tiny` binary is not built here for now. Arch currently
+# ships Go 1.27 and TinyGo 0.42; TinyGo 0.42 does compile Jennifer against Go
+# 1.27 (so the Go version is no longer the blocker), but 0.42 has scheduler
+# regressions on linux/amd64 that stop a working `jennifer-tiny`. The Makefile
+# pins `-scheduler=tasks` because Jennifer's recursive-`spawn` tree-walker needs
+# a cooperative scheduler whose goroutine stacks `-stack-size` governs; under
+# 0.42 that link step fails (duplicate symbol `tinygo_task_exit`), and the other
+# cooperative scheduler `-scheduler=asyncify` fails to compile
+# (`undefined: task.SystemStack` in the runtime GC). The default
+# `-scheduler=threads` does build but crashes on recursive `spawn` (Boehm GC
+# mark-stack overflow), so it is not a usable substitute. These failures
+# reproduce under both Go 1.26 and Go 1.27, and in the official upstream
+# `tinygo/tinygo:0.42.0` image on a trivial goroutine program - i.e. they are
+# upstream TinyGo bugs (not Arch packaging, not a Go-version mismatch, not
+# Jennifer's code). The `-scheduler=tasks` link failure is
+# `//export tinygo_task_exit` in TinyGo's `internal/task/task_stack.go` being
+# emitted into both the cached runtime object and the program object; it still
+# reproduces on `tinygo/tinygo-dev` (0.43.0-dev), so the next release will not
+# fix it on its own (the 0.42 UEFI-scheduler work in tinygo PR 5553 addressed
+# only the none-scheduler UEFI path, not this one). Tracked upstream at
+# https://github.com/tinygo-org/tinygo/issues/5652. The standard-Go `jennifer`
+# is unaffected. Only the
+# default `jennifer` is packaged until that issue is fixed and a TinyGo release
+# restores a working cooperative scheduler (`tasks` or `asyncify`) for
+# linux/amd64; re-enable the `build-tinygo` half of `make build` and the tiny
+# install lines below once it does.
 #
 # Maintainer: mplx <jennifer@mplx.dev>
 
@@ -24,8 +44,9 @@ url='https://github.com/jennifer-language/jennifer'
 license=('LGPL3')
 provides=('jennifer')
 conflicts=('jennifer' 'jennifer-bin')
-# `tinygo` is intentionally omitted: it does not support Arch's Go 1.27
-# yet, so `jennifer-tiny` is not built here (see the header note).
+# `tinygo` is intentionally omitted: TinyGo 0.42's scheduler regressions on
+# linux/amd64 prevent a working `jennifer-tiny`, so it is not built here (see
+# the header note).
 makedepends=('git' 'go')
 optdepends=(
     'shared-mime-info: registers the .j file extension with file managers'
@@ -54,8 +75,9 @@ build() {
     # so the packaged build asks for the release flag explicitly.
     #
     # `build-go` builds only the standard-Go `jennifer`. The TinyGo
-    # `jennifer-tiny` half is skipped until TinyGo supports Go 1.27 (see the
-    # header note); switch back to `make build` to restore both binaries.
+    # `jennifer-tiny` half is skipped until a TinyGo release restores a working
+    # cooperative scheduler on linux/amd64 (see the header note); switch back to
+    # `make build` to restore both binaries.
     make build-go GOBUILDFLAGS=-trimpath
 }
 
@@ -67,8 +89,8 @@ check() {
 package() {
     cd "$srcdir/$_realname"
 
-    # Binary. `jennifer-tiny` is not built here (TinyGo lacks Go 1.27
-    # support; see the header note), so only the default binary installs.
+    # Binary. `jennifer-tiny` is not built here (TinyGo 0.42 scheduler
+    # regressions; see the header note), so only the default binary installs.
     install -Dm755 jennifer      "$pkgdir/usr/bin/jennifer"
 
     # Man page. The jennifer-tiny.1 page is skipped alongside its binary.
