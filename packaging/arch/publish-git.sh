@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# publish-git.sh - refresh the jennifer-git -git pkgver from upstream and
-# publish it to the AUR. Copy this into your jennifer-git AUR clone as
-# `publish.sh` and run it there (see RELEASE.md). It clones the source so
-# pkgver() can run, regenerates .SRCINFO, then commits and pushes PKGBUILD +
-# jennifer.install + .SRCINFO. With no new upstream commits it is a clean no-op.
+# publish-git.sh - sync the jennifer-git recipe from the repo, refresh its -git
+# pkgver from upstream, and publish it to the AUR. Copy this into your
+# jennifer-git AUR clone as `publish.sh` and run it there (see RELEASE.md). It
+# copies PKGBUILD + jennifer.install from the sibling jennifer-lang checkout,
+# clones the source so pkgver() can run, regenerates .SRCINFO, then commits and
+# pushes PKGBUILD + jennifer.install + .SRCINFO. When neither the recipe nor the
+# computed pkgver has changed it is a clean no-op.
 
 set -euo pipefail
 
@@ -25,6 +27,19 @@ fi
 if [[ ! -f PKGBUILD ]]; then
     echo "error: no PKGBUILD in $(pwd)" >&2
     exit 1
+fi
+
+# Keep the PKGBUILD in sync with its canonical copy in the jennifer-lang repo
+# (a sibling checkout), when that checkout is present. Unlike the -bin flow -
+# which fetches a release-generated PKGBUILD-bin with substituted hashes - the
+# -git recipe is static (pkgver() computes the version at build time), so there
+# is nothing release-specific to fetch; the recipe just needs to travel from the
+# repo to the AUR. Copying it here is what makes an in-tree PKGBUILD-git edit
+# actually reach users, instead of silently staying on the last-published recipe.
+src_pkgbuild="../jennifer-lang/packaging/arch/PKGBUILD-git"
+if [[ -f "$src_pkgbuild" ]]; then
+    echo "==> Syncing PKGBUILD from jennifer-lang (packaging/arch/PKGBUILD-git)..."
+    cp "$src_pkgbuild" PKGBUILD
 fi
 
 # Keep the install hook in sync with its canonical copy in the jennifer-lang

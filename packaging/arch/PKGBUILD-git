@@ -1,36 +1,26 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
-# AUR PKGBUILD for `jennifer-git`: clones the upstream repository
-# and builds the standard-Go `jennifer` binary from source. Tracks the
-# `main` branch; rebuild to follow upstream.
+# AUR PKGBUILD for `jennifer-git`: clones the upstream repository and builds
+# from source. Tracks the `main` branch; rebuild to follow upstream.
 #
-# The TinyGo `jennifer-tiny` binary is not built here for now. Arch currently
-# ships Go 1.27 and TinyGo 0.42; TinyGo 0.42 does compile Jennifer against Go
-# 1.27 (so the Go version is no longer the blocker), but 0.42 has scheduler
-# regressions on linux/amd64 that stop a working `jennifer-tiny`. The Makefile
-# pins `-scheduler=tasks` because Jennifer's recursive-`spawn` tree-walker needs
-# a cooperative scheduler whose goroutine stacks `-stack-size` governs; under
-# 0.42 that link step fails (duplicate symbol `tinygo_task_exit`), and the other
-# cooperative scheduler `-scheduler=asyncify` fails to compile
-# (`undefined: task.SystemStack` in the runtime GC). The default
-# `-scheduler=threads` does build but crashes on recursive `spawn` (Boehm GC
-# mark-stack overflow), so it is not a usable substitute. These failures
-# reproduce under both Go 1.26 and Go 1.27, and in the official upstream
-# `tinygo/tinygo:0.42.0` image on a trivial goroutine program - i.e. they are
-# upstream TinyGo bugs (not Arch packaging, not a Go-version mismatch, not
-# Jennifer's code). The `-scheduler=tasks` link failure is
-# `//export tinygo_task_exit` in TinyGo's `internal/task/task_stack.go` being
-# emitted into both the cached runtime object and the program object; it still
-# reproduces on `tinygo/tinygo-dev` (0.43.0-dev), so the next release will not
-# fix it on its own (the 0.42 UEFI-scheduler work in tinygo PR 5553 addressed
-# only the none-scheduler UEFI path, not this one). Tracked upstream at
-# https://github.com/tinygo-org/tinygo/issues/5652. The standard-Go `jennifer`
-# is unaffected. Only the
-# default `jennifer` is packaged until that issue is fixed and a TinyGo release
-# restores a working cooperative scheduler (`tasks` or `asyncify`) for
-# linux/amd64; re-enable the `build-tinygo` half of `make build` and the tiny
-# install lines below once it does.
+# Both binaries are built via `make build`: the standard-Go `jennifer` (always)
+# and the TinyGo `jennifer-tiny` (only when the toolchain can produce it).
+# `make build` probes the toolchain and skips `jennifer-tiny` when TinyGo cannot
+# build it; package() then installs the tiny binary, its man page, and its
+# completion symlink only when it exists. So the package ships whatever was built
+# and needs no edit to flip tiny on or off.
+#
+# Today `jennifer-tiny` is skipped: Arch ships Go 1.27, and no current TinyGo
+# release links Jennifer against it. TinyGo 0.42 accepts Go 1.27 but the
+# `-scheduler=tasks` link fails with a duplicate `tinygo_task_exit` symbol
+# (`//export` in TinyGo's internal/task/task_stack.go, emitted into both the
+# cached runtime object and the program object); it reproduces on the official
+# `tinygo/tinygo:0.42.0` image and on `tinygo/tinygo-dev` (0.43.0-dev), even on a
+# trivial goroutine program - an upstream TinyGo bug, not Arch packaging or
+# Jennifer's code. Tracked at https://github.com/tinygo-org/tinygo/issues/5652.
+# When a TinyGo release fixes it, `make build` starts producing `jennifer-tiny`
+# again and this package ships it automatically - no PKGBUILD change needed.
 #
 # Maintainer: mplx <jennifer@mplx.dev>
 
@@ -44,10 +34,12 @@ url='https://github.com/jennifer-language/jennifer'
 license=('LGPL3')
 provides=('jennifer')
 conflicts=('jennifer' 'jennifer-bin')
-# `tinygo` is intentionally omitted: TinyGo 0.42's scheduler regressions on
-# linux/amd64 prevent a working `jennifer-tiny`, so it is not built here (see
-# the header note).
-makedepends=('git' 'go')
+# `tinygo` is a makedepend so `make build` can produce `jennifer-tiny` whenever
+# the toolchain supports it. On current Arch (Go 1.27) TinyGo cannot build it, so
+# the build skips it and only `jennifer` is packaged; the dep stays so recovery
+# is automatic once upstream (tinygo#5652) ships. Drop `tinygo` here for a lighter
+# source build that never produces the tiny binary.
+makedepends=('git' 'go' 'tinygo')
 optdepends=(
     'shared-mime-info: registers the .j file extension with file managers'
     'vim: syntax highlighting for .j files'
@@ -74,11 +66,11 @@ build() {
     # $srcdir reference otherwise); the plain dev `make build` keeps symbols,
     # so the packaged build asks for the release flag explicitly.
     #
-    # `build-go` builds only the standard-Go `jennifer`. The TinyGo
-    # `jennifer-tiny` half is skipped until a TinyGo release restores a working
-    # cooperative scheduler on linux/amd64 (see the header note); switch back to
-    # `make build` to restore both binaries.
-    make build-go GOBUILDFLAGS=-trimpath
+    # `make build` builds the standard-Go `jennifer` and, when the toolchain can,
+    # the TinyGo `jennifer-tiny`; it skips the tiny half gracefully otherwise (see
+    # the header note / tinygo#5652), so this never fails for lack of a working
+    # TinyGo. package() installs whichever binaries were produced.
+    make build GOBUILDFLAGS=-trimpath
 }
 
 check() {
@@ -89,21 +81,31 @@ check() {
 package() {
     cd "$srcdir/$_realname"
 
-    # Binary. `jennifer-tiny` is not built here (TinyGo 0.42 scheduler
-    # regressions; see the header note), so only the default binary installs.
+    # Binaries. `jennifer-tiny` installs only when `make build` produced it (the
+    # TinyGo build is skipped when the toolchain can't build it - see the header).
     install -Dm755 jennifer      "$pkgdir/usr/bin/jennifer"
+    if [[ -f jennifer-tiny ]]; then
+        install -Dm755 jennifer-tiny "$pkgdir/usr/bin/jennifer-tiny"
+    fi
 
-    # Man page. The jennifer-tiny.1 page is skipped alongside its binary.
+    # Man pages, gzipped. The jennifer-tiny.1 page ships only when its binary did.
     install -Dm644 packaging/man/jennifer.1      "$pkgdir/usr/share/man/man1/jennifer.1"
     gzip -9n "$pkgdir/usr/share/man/man1/jennifer.1"
+    if [[ -f jennifer-tiny ]]; then
+        install -Dm644 packaging/man/jennifer-tiny.1 "$pkgdir/usr/share/man/man1/jennifer-tiny.1"
+        gzip -9n "$pkgdir/usr/share/man/man1/jennifer-tiny.1"
+    fi
 
     # XDG MIME info for the .j extension.
     install -Dm644 packaging/mime/jennifer.xml \
         "$pkgdir/usr/share/mime/packages/jennifer.xml"
 
-    # Bash completion. The jennifer-tiny symlink is omitted with its binary.
+    # Bash completion. jennifer-tiny symlinks to the same script when present.
     install -Dm644 packaging/completions/jennifer.bash \
         "$pkgdir/usr/share/bash-completion/completions/jennifer"
+    if [[ -f jennifer-tiny ]]; then
+        ln -sf jennifer "$pkgdir/usr/share/bash-completion/completions/jennifer-tiny"
+    fi
 
     # Vim / Neovim syntax highlighting, so `.j` files highlight with no user
     # setup. Vim and Neovim read separate runtimepaths (/usr/share/vim/vimfiles

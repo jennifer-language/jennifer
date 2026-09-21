@@ -63,8 +63,16 @@ build-go: gen-version
 # (internal/limits.MaxCallDepth = 48 on tinygo; a heavy recursive body
 # segfaults near depth 75 on this stack). Bump both together if a future
 # workload needs deeper recursion.
+#
+# The build goes through scripts/build-tinygo.sh, which SKIPS gracefully (exit 0)
+# when the toolchain cannot build jennifer-tiny at all - so `make build` still
+# succeeds on a host where only the standard binary is buildable (e.g. Go 1.27,
+# which no current TinyGo release links: tinygo#5652). It gates the skip on a
+# probe build, so a real TinyGo-cleanliness regression in Jennifer still fails.
+# The scheduler/stack flags stay here as the single source; the script forwards
+# them to both the probe and the real build.
 build-tinygo: gen-version
-	tinygo build -o jennifer-tiny -scheduler=tasks -stack-size=4mb ./cmd/jennifer
+	sh scripts/build-tinygo.sh jennifer-tiny ./cmd/jennifer -scheduler=tasks -stack-size=4mb
 
 test:
 	go test ./...
