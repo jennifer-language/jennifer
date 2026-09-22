@@ -999,6 +999,37 @@ func TestFmtFuncSignatureBraceWidth(t *testing.T) {
 	if !strings.HasPrefix(string(gotFit), "func f("+params+") {\n") {
 		t.Errorf("a 100-column signature was wrapped instead of kept on one line:\n%s", gotFit)
 	}
+
+	// A ONE-parameter signature whose joined `) {` line overflows must also wrap
+	// (a lone parameter wraps on overflow, unlike a lone call argument), or fmt
+	// would leave it over the limit for lint to flag - unformattable. This is the
+	// residual of the trailing-` {` fix: the +2 was only applied where a param
+	// list already wrapped, and a single param never wrapped.
+	lone := filepath.Join(dir, "lone.j")
+	loneParam := "xxxxxxxxxxxxx as " + strings.Repeat("list of ", 9) + "int"
+	if len("func f("+loneParam+") {") != 102 {
+		t.Fatalf("test setup: lone signature is %d cols, want 102", len("func f("+loneParam+") {"))
+	}
+	os.WriteFile(lone, []byte("func f("+loneParam+") {\n    return 1;\n}\n"), 0o644)
+	if code := runFmt([]string{"-w", lone}); code != 0 {
+		t.Fatalf("fmt -w (lone) exit %d", code)
+	}
+	gotLone, _ := os.ReadFile(lone)
+	if !strings.HasPrefix(string(gotLone), "func f(\n") {
+		t.Errorf("a lone over-long parameter was not wrapped:\n%s", gotLone)
+	}
+	for i, line := range strings.Split(string(gotLone), "\n") {
+		if len(line) > 100 {
+			t.Errorf("lone-param line %d is %d columns (over 100):\n%s", i+1, len(line), line)
+		}
+	}
+	firstLone := string(gotLone)
+	if code := runFmt([]string{"-w", lone}); code != 0 {
+		t.Fatalf("second fmt -w (lone) exit %d", code)
+	}
+	if again, _ := os.ReadFile(lone); string(again) != firstLone {
+		t.Errorf("fmt not idempotent on the wrapped lone signature:\n%s", again)
+	}
 }
 
 // TestFmtCheckMode pins `jennifer fmt -l / --check`: it lists unformatted files

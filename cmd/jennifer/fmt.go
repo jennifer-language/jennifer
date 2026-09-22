@@ -480,7 +480,11 @@ func (f *fmtState) emit(t, next lexer.Token) {
 		// `(` never wrap.
 		wraps := false
 		if f.hasPrev && (noSpaceBeforeLParen(f.prev.Type) || f.beforePrev.Type == lexer.TOKEN_DOT) {
-			wraps = f.decideCallWrap(f.tokenIdx)
+			// `func NAME(` is a signature param list: a lone parameter wraps on
+			// overflow (so the trailing ` {` cannot leave it over the limit); a
+			// call's lone argument stays inline.
+			funcSig := f.prev.Type == lexer.TOKEN_IDENT && f.beforePrev.Type == lexer.TOKEN_FUNC
+			wraps = f.decideCallWrap(f.tokenIdx, funcSig)
 		}
 		f.pushWrap(wraps)
 		if f.hasPrev && f.prev.Type == lexer.TOKEN_FOR {
@@ -1410,26 +1414,38 @@ func (f *fmtState) decideWrap(open int, applyCount bool) bool {
 	return f.effectiveStartCol()+w+trail > maxLineLength
 }
 
-// decideCallWrap reports whether a call-argument list opening at tokens[open]
-// (a call `(`) should wrap one argument per line: only with **two or more**
-// arguments (a lone argument has no better shape, and a lone spawn/block arg
-// expands on its own), and then when embedded trivia / a spawn block forces it
-// or its inline rendering would pass the column limit. The close `)` hugs the
-// last argument (handled by the RPAREN separator rules), so a wrapped call reads
-// `foo(\n    a,\n    b)`.
-func (f *fmtState) decideCallWrap(open int) bool {
+// decideCallWrap reports whether a parenthesised list opening at tokens[open]
+// (a call or a func-signature `(`) should wrap one element per line: normally
+// only with **two or more** elements (a lone argument has no better shape, and a
+// lone spawn/block arg expands on its own), and then when embedded trivia / a
+// spawn block forces it or its inline rendering would pass the column limit. The
+// close `)` hugs the last element (handled by the RPAREN separator rules), so a
+// wrapped call reads `foo(\n    a,\n    b)`. `wrapLone` is set for a func
+// signature's param list: there a single parameter still wraps when the joined
+// form (including the trailing ` {`) would overflow, so a one-parameter signature
+// can never be left over the limit for lint to flag.
+func (f *fmtState) decideCallWrap(open int, wrapLone bool) bool {
 	end := spanEnd(f.tokens, open)
 	if end < 0 || end == open+1 {
 		return false
 	}
-	if topLevelElements(f.tokens, open, end) < 2 {
+	n := topLevelElements(f.tokens, open, end)
+	if n < 2 && !wrapLone {
+		// A lone call argument has no better shape than inline. A func
+		// signature's lone parameter (wrapLone) is the exception: it still wraps
+		// when the joined form would overflow, so the trailing ` {` cannot push a
+		// one-parameter signature past the column limit and out of fmt/lint
+		// agreement (fmt would join it, lint would flag it, and it would be
+		// unformattable).
 		return false
 	}
-	for i := open + 1; i < end; i++ {
-		switch f.tokens[i].Type {
-		case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
-			lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE, lexer.TOKEN_SPAWN:
-			return true
+	if n >= 2 {
+		for i := open + 1; i < end; i++ {
+			switch f.tokens[i].Type {
+			case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK,
+				lexer.TOKEN_COMMENT_SHEBANG, lexer.TOKEN_BLANK_LINE, lexer.TOKEN_SPAWN:
+				return true
+			}
 		}
 	}
 	w := inlineContainerWidth(f.tokens, open, end)
