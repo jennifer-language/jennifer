@@ -830,7 +830,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   binaries.
 - **`html`** - build an HTML element tree and render escaped HTML5:
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`,
-  `render` / `renderAll`, `escape`, `safeUrl(url)` (an `http` / `https` / `mailto`
+  `render` / `renderAll` (HTML5) or `renderXhtml` / `renderAllXhtml` (well-formed
+  XHTML: void elements self-close, boolean attributes expand - for EPUB / XML),
+  `escape`, `safeUrl(url)` (an `http` / `https` / `mailto`
   allowlist, else `"#"`), `boolAttr(name)`. `element` / `attr` reject a tag /
   attribute name outside `[A-Za-z][A-Za-z0-9-]*`. Also a **tolerant `parse(src)`**
   that reads HTML back into the same `Node` tree (void / self-closing /
@@ -986,7 +988,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   terminal text (`toAnsi`, via `ansi`). `toHtml` is **safe by default** - raw HTML
   in the source is escaped, so untrusted Markdown (a README, a comment) cannot
   inject `<script>` / event handlers; `toHtmlWith(md, HtmlOptions{allowRawHtml:
-  true})` opts trusted input back into verbatim passthrough. A blockquote opening
+  true})` opts trusted input back into verbatim passthrough. `toXhtml(md)` (or
+  `render(doc, "xhtml")`) emits well-formed XHTML for an EPUB / XML content
+  document (void elements self-close, boolean attributes expand). A blockquote
+  opening
   with a GitHub-style alert marker (`> [!NOTE]`, also `TIP` / `IMPORTANT` /
   `WARNING` / `CAUTION`, any case, with an optional title after the marker) parses
   as an `admonition` node (`attr(n, "kind")` / `attr(n, "title")`) and renders as a

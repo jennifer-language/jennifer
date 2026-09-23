@@ -269,15 +269,64 @@ func isVoid(tag as string) {
     return lists.contains(VOID, strings.lower($tag));
 }
 
-# renderAttrs renders a leading-space-separated attribute list.
-func renderAttrs(attrs as list of Attr) {
+# renderAttrs renders a leading-space-separated attribute list. Under `xhtml` a
+# boolean attribute renders as `name="name"` (XML has no minimized attributes)
+# rather than the bare HTML5 name.
+func renderAttrs(attrs as list of Attr, xhtml as bool) {
     def parts as list of string init [];
     for (def a in $attrs) {
         if ($a.boolean) {
-            $parts[] = " " + $a.name;
+            if ($xhtml) {
+                $parts[] = " " + $a.name + "=\"" + $a.name + "\"";
+            } else {
+                $parts[] = " " + $a.name;
+            }
         } else {
             $parts[] = " " + $a.name + "=\"" + escapeAttr($a.value) + "\"";
         }
+    }
+    return strings.join($parts, "");
+}
+
+# renderNode serializes a node and its subtree. When `xhtml` is true the output
+# is well-formed XML - void elements self-close (`<hr />`) and boolean attributes
+# expand (`disabled="disabled"`) - so it parses as an XHTML / EPUB content
+# document; when false it is HTML5 (`<hr>`, bare booleans). Everything else
+# (attribute quoting, `&` `<` `>` `"` escaping) is already XML-clean in both modes.
+func renderNode(node as Node, xhtml as bool) {
+    match ($node.kind) {
+        when Text {
+            return escape($node.text);
+        }
+        when Raw {
+            return $node.text;
+        }
+        when Element {
+            def open as string init "<" + $node.tag + renderAttrs($node.attrs, $xhtml);
+            if (isVoid($node.tag)) {
+                if ($xhtml) {
+                    return $open + " />";
+                }
+                return $open + ">";
+            }
+            # Collect the pieces and join once. Growing a string with `+` per
+            # child is O(output^2), so a node with many children (a paragraph
+            # full of links) would otherwise be quadratic in its rendered size.
+            def parts as list of string init [$open + ">"];
+            for (def child in $node.children) {
+                $parts[] = renderNode($child, $xhtml);
+            }
+            $parts[] = "</" + $node.tag + ">";
+            return strings.join($parts, "");
+        }
+    }
+}
+
+# renderAllMode serializes a fragment in either mode.
+func renderAllMode(nodes as list of Node, xhtml as bool) {
+    def parts as list of string init [];
+    for (def n in $nodes) {
+        $parts[] = renderNode($n, $xhtml);
     }
     return strings.join($parts, "");
 }
@@ -288,29 +337,19 @@ func renderAttrs(attrs as list of Attr) {
  * @return {string} the rendered HTML
  */
 export func render(node as Node) {
-    match ($node.kind) {
-        when Text {
-            return escape($node.text);
-        }
-        when Raw {
-            return $node.text;
-        }
-        when Element {
-            def open as string init "<" + $node.tag + renderAttrs($node.attrs);
-            if (isVoid($node.tag)) {
-                return $open + ">";
-            }
-            # Collect the pieces and join once. Growing a string with `+` per
-            # child is O(output^2), so a node with many children (a paragraph
-            # full of links) would otherwise be quadratic in its rendered size.
-            def parts as list of string init [$open + ">"];
-            for (def child in $node.children) {
-                $parts[] = render($child);
-            }
-            $parts[] = "</" + $node.tag + ">";
-            return strings.join($parts, "");
-        }
-    }
+    return renderNode($node, false);
+}
+
+/**
+ * Serialize a node and its subtree to a well-formed XHTML string: void elements
+ * self-close (`<hr />`) and boolean attributes expand (`disabled="disabled"`), so
+ * the output parses as XML - an XHTML / EPUB content document. Identical to
+ * `render` otherwise (text and attribute escaping is XML-clean already).
+ * @param node {Node} the node to render
+ * @return {string} the rendered XHTML
+ */
+export func renderXhtml(node as Node) {
+    return renderNode($node, true);
 }
 
 /**
@@ -319,11 +358,16 @@ export func render(node as Node) {
  * @return {string} the rendered HTML fragment
  */
 export func renderAll(nodes as list of Node) {
-    def parts as list of string init [];
-    for (def n in $nodes) {
-        $parts[] = render($n);
-    }
-    return strings.join($parts, "");
+    return renderAllMode($nodes, false);
+}
+
+/**
+ * Serialize a fragment as well-formed XHTML (see `renderXhtml`).
+ * @param nodes {list of Node} the sibling nodes
+ * @return {string} the rendered XHTML fragment
+ */
+export func renderAllXhtml(nodes as list of Node) {
+    return renderAllMode($nodes, true);
 }
 
 # ============================================================================

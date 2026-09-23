@@ -133,6 +133,20 @@ func testHtmlImage() {
         "<p><img src=\"/cat.png\" alt=\"a cat\" title=\"kitty\"></p>");
 }
 
+# XHTML output (for an EPUB / XHTML content document): void elements self-close.
+# HTML5 output is unchanged; both escape identically.
+func testXhtmlVoidSelfCloses() {
+    testing.assertEqual(toHtml("---\n"), "<hr>");
+    testing.assertEqual(toXhtml("---\n"), "<hr />");
+    testing.assertEqual(
+        toXhtml("![a cat](/cat.png)"),
+        "<p><img src=\"/cat.png\" alt=\"a cat\" /></p>");
+    # render(doc, "xhtml") is the same path as toXhtml.
+    testing.assertEqual(render(parse("---\n"), "xhtml"), "<hr />");
+    # A non-void element is identical in both modes.
+    testing.assertEqual(toXhtml("a **b**"), toHtml("a **b**"));
+}
+
 # An image src runs through the same scheme allowlist as a link href.
 func testHtmlImageNeutralizesScriptSrc() {
     def out as string init toHtml("![x](javascript:alert(1))");

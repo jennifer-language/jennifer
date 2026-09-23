@@ -61,6 +61,8 @@ attribute).
 | `html.boolAttr(name)`               | `Attr`   | A boolean (valueless) attribute; renders as the bare name (`disabled`). |
 | `html.render(node)`                 | `string` | Serialize a node and its subtree to HTML5.                        |
 | `html.renderAll(nodes)`             | `string` | Serialize a `list of Node` fragment in order.                     |
+| `html.renderXhtml(node)`            | `string` | Like `render`, but well-formed XHTML: void elements self-close (`<hr />`) and boolean attributes expand (`disabled="disabled"`) - an XHTML / EPUB content document. |
+| `html.renderAllXhtml(nodes)`        | `string` | `renderAll` in XHTML mode (see `renderXhtml`).                     |
 | `html.escape(s)`                    | `string` | HTML-escape a bare string for text context (the helper `render` uses). |
 | `html.safeUrl(url)`                 | `string` | The URL if its scheme is `http` / `https` / `mailto`, else `"#"` (anti-XSS `href`/`src` gate). |
 

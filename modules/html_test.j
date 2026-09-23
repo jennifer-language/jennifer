@@ -48,7 +48,7 @@ func testBoolAttrBareName() {
     testing.assertEqual(boolAttr("checked").value, "");
     # A normal attribute is unaffected and still renders name="value".
     testing.assertFalse(attr("id", "x").boolean);
-    testing.assertEqual(renderAttrs([attr("id", "x")]), " id=\"x\"");
+    testing.assertEqual(renderAttrs([attr("id", "x")], false), " id=\"x\"");
 }
 
 func testBoolAttrMixed() {
@@ -118,8 +118,31 @@ func testPrivateRenderAttrs() {
     def attrs as list of Attr init [];
     $attrs[] = attr("id", "main");
     $attrs[] = attr("data", "x&y");
-    testing.assertEqual(renderAttrs($attrs), " id=\"main\" data=\"x&amp;y\"");
-    testing.assertEqual(renderAttrs([]), "");
+    testing.assertEqual(renderAttrs($attrs, false), " id=\"main\" data=\"x&amp;y\"");
+    testing.assertEqual(renderAttrs([], false), "");
+    # Under xhtml a boolean attribute expands to name="name"; a normal attribute
+    # is unchanged.
+    def b as list of Attr init [attr("id", "main"), boolAttr("disabled")];
+    testing.assertEqual(renderAttrs($b, false), " id=\"main\" disabled");
+    testing.assertEqual(renderAttrs($b, true), " id=\"main\" disabled=\"disabled\"");
+}
+
+# XHTML rendering (for EPUB / XML content documents): void elements self-close and
+# boolean attributes expand, while HTML5 render is unchanged.
+func testRenderXhtml() {
+    testing.assertEqual(render(element("hr", [], [])), "<hr>");
+    testing.assertEqual(renderXhtml(element("hr", [], [])), "<hr />");
+    def inp as Node init element("input", [attr("name", "x"), boolAttr("disabled")], []);
+    testing.assertEqual(render($inp), "<input name=\"x\" disabled>");
+    testing.assertEqual(renderXhtml($inp), "<input name=\"x\" disabled=\"disabled\" />");
+    # A non-void element and its escaping are identical in both modes.
+    def p as Node init element("p", [], [text("a & b")]);
+    testing.assertEqual(render($p), "<p>a &amp; b</p>");
+    testing.assertEqual(renderXhtml($p), "<p>a &amp; b</p>");
+    # renderAllXhtml over a fragment.
+    testing.assertEqual(
+        renderAllXhtml([element("br", [], []), element("hr", [], [])]),
+        "<br /><hr />");
 }
 
 # --- OM-011: tag / attribute name validation + safeUrl -----------------------

@@ -1841,6 +1841,18 @@ export func toHtml(md as string) {
 }
 
 /**
+ * Render Markdown to a well-formed XHTML string: void elements self-close
+ * (`<hr />`) and boolean attributes expand, so the output is an XHTML / EPUB
+ * content document. Raw HTML in the source is escaped, exactly as `toHtml`;
+ * otherwise identical.
+ * @param md {string} the Markdown source
+ * @return {string} the rendered XHTML
+ */
+export func toXhtml(md as string) {
+    return render(parse($md), "xhtml");
+}
+
+/**
  * Render Markdown to HTML with explicit options. The only option today is
  * `allowRawHtml`: set it true to emit raw HTML blocks verbatim (for trusted
  * Markdown), or false (the default `toHtml` behavior) to escape them.
@@ -1849,7 +1861,7 @@ export func toHtml(md as string) {
  * @return {string} the rendered HTML
  */
 export func toHtmlWith(md as string, opts as HtmlOptions) {
-    return htmlBlocksToString(parse($md).children, $opts.allowRawHtml);
+    return htmlBlocksToString(parse($md).children, $opts.allowRawHtml, false);
 }
 
 # --- ANSI helpers shared by the node renderer ----------------------
@@ -2337,22 +2349,27 @@ func nodeToAnsi(n as Node) {
 # htmlBlocksToString renders a block list to an HTML string. `allowRaw` controls
 # whether a raw `html_block` is emitted verbatim (trusted) or escaped (the safe
 # default) - see nodeToHtml's html_block arm.
-func htmlBlocksToString(blocks as list of Node, allowRaw as bool) {
+func htmlBlocksToString(blocks as list of Node, allowRaw as bool, xhtml as bool) {
     def nodes as list of html.Node init [];
     for (def c in $blocks) {
         $nodes[] = nodeToHtml($c, $allowRaw);
+    }
+    if ($xhtml) {
+        return html.renderAllXhtml($nodes);
     }
     return html.renderAll($nodes);
 }
 
 /**
  * Render a document tree (a `parse` result, or a hand-built one) to a string.
- * `format` is `"html"` (block elements concatenated, no indentation) or `"ansi"`
- * (styled terminal text, blocks separated by a blank line). A `"document"` node
- * renders its children; any other node renders as a single block. An unknown format
- * is a catchable `"markdown"` error.
+ * `format` is `"html"` (block elements concatenated, no indentation), `"xhtml"`
+ * (the same, but well-formed XML for an EPUB / XHTML content document: void
+ * elements self-close and boolean attributes expand), or `"ansi"` (styled
+ * terminal text, blocks separated by a blank line). A `"document"` node renders
+ * its children; any other node renders as a single block. An unknown format is a
+ * catchable `"markdown"` error.
  * @param doc {Node} the document (or block) node to render
- * @param format {string} "html" or "ansi"
+ * @param format {string} "html", "xhtml", or "ansi"
  * @return {string} the rendered document
  */
 export func render(doc as Node, format as string) {
@@ -2361,7 +2378,10 @@ export func render(doc as Node, format as string) {
         $blocks = [$doc];
     }
     if ($format == "html") {
-        return htmlBlocksToString($blocks, false);
+        return htmlBlocksToString($blocks, false, false);
+    }
+    if ($format == "xhtml") {
+        return htmlBlocksToString($blocks, false, true);
     }
     if ($format == "ansi") {
         def parts as list of string init [];
@@ -2375,7 +2395,7 @@ export func render(doc as Node, format as string) {
         }
         return strings.join($parts, "");
     }
-    mdFail("unknown render format \"" + $format + "\" (want \"html\" or \"ansi\")");
+    mdFail("unknown render format \"" + $format + "\" (want \"html\", \"xhtml\", or \"ansi\")");
 }
 
 # --- PDF rendering, through pdf (exported) -----------------------

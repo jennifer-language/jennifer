@@ -26,8 +26,9 @@ Rendering (Markdown in, HTML / terminal text / PDF out):
 | --------------------- | -------- | --------------------------------------------------------------- |
 | `markdown.toHtml(md)` | `string` | Render to HTML: block elements concatenated, no indentation. Safe by default: raw HTML in the source is escaped. |
 | `markdown.toHtmlWith(md, opts)` | `string` | `toHtml` with an `HtmlOptions`; set `allowRawHtml: true` to pass raw HTML blocks through (trusted input only). |
+| `markdown.toXhtml(md)` | `string` | Render to well-formed XHTML (void elements self-close, boolean attributes expand) - an XHTML / EPUB content document. Raw HTML is escaped, as `toHtml`. |
 | `markdown.toAnsi(md)` | `string` | Render to terminal text with `ansi` styling (self-suppressing). |
-| `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"ansi"`. |
+| `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"xhtml"` / `"ansi"`. |
 | `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
 | `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts, document metadata, bookmarks). |
 | `markdown.renderPdf(doc, opts)` | `bytes` | Lay a parsed (or transformed) tree out to a PDF.               |
