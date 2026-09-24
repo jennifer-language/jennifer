@@ -1089,7 +1089,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `screen.render(buf)` / `diff(old, new)` paint loop. Interactive layer (needs
   `term`, default binary): `screen.decodeKey(seq) -> screen.Key{name, char}`
   (arrows, nav, F1-F12, ctrl / alt) + `nextKey` / `begin` / `end` / `size` over raw
-  mode. Coordinates 0-based (origin top-left); drawing past an edge is clipped.
+  mode. For a free-running loop (a game, a live dashboard) that cannot block on a
+  keypress, `screen.startInput() -> Input` runs a background reader into a buffered
+  channel, polled with `hasKey` / `pollKey` (non-blocking) or `waitKey`.
+  Coordinates 0-based (origin top-left); drawing past an edge is clipped.
 - **`semver`** - strict SemVer 2.0.0 over a `Version` struct,
   package-registry-grade: `semver.parse(s)` / `isValid` / `toString`, `compare` /
   `lt` / `eq` / `gt` / ... / `diff`, `isStable` / `isPrerelease`, `incMajor` /

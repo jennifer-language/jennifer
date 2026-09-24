@@ -120,6 +120,37 @@ either way: dogfooding is a first-class goal, and with no closures a handler is
 always a by-name entry method, so a Go rewrite of the router would buy little and
 lose test surface.
 
+#### DRAFT#29 - Non-blocking / timed terminal read
+
+`term.readByte` blocks with no timeout: it reads the abstract `ctx.In` reader via
+`io.ReadFull`, so a free-running TUI loop (a game, a live dashboard, anything also
+watching a clock or socket) stalls in it. The `screen` module's `startInput` works
+around this with a background reader task feeding a buffered channel, polled with
+`screen.hasKey` / `pollKey`. That solves the *poll* case, but the reader blocks in
+the syscall read and **cannot be interrupted mid-read** - neither `task.cancel`
+(which only fires at loop checkpoints) nor closing the channel reaches a syscall
+read - so it runs until end of input or process exit. An app that wants to stop
+raw input and return to line mode mid-program, or bound a single read, has no
+clean path.
+
+The primitive that lifts this: a timed / non-blocking terminal read, e.g.
+`term.readByteTimeout(ms) -> int` (`-1` on timeout, or a distinct sentinel) or
+`term.pollByte()`. It removes the dedicated reader goroutine entirely - the main
+loop just calls it each tick - and makes stop/resume trivial.
+
+Why it is a draft, not a quick add: it cannot use the `ctx.In` `io.Reader`
+abstraction (which is what the injected-input tests feed and which has no
+deadline); it has to reach the raw fd and either set termios `VMIN` / `VTIME`
+(which conflicts with `term.makeRaw`'s blocking `VMIN=1`) or `poll(2)` the fd with
+a timeout. That is Unix-only and `x/sys/unix`-backed, so it is a build-tag split
+like the rest of `term` (real on `linux && !tinygo`, stub elsewhere), and it needs
+a reconciliation with how raw mode is entered. Worth doing when a real
+stop/resume-input use case lands; until then the `screen` channel reader covers
+the free-running loop.
+
+**Requires:** none hard; refines the `term` library and the `screen` async-input
+layer.
+
 ### Developer tooling
 
 #### DRAFT#27 - Static call-site checking in `jennifer lint`

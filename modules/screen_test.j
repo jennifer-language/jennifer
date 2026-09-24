@@ -282,3 +282,37 @@ func testTildeAndFinalHelpers() {
     testing.assertEqual(finalKey(65), "up");
     testing.assertEqual(finalKey(48), "unknown");
 }
+
+# The async input layer (startInput / hasKey / pollKey / waitKey) drives a
+# free-running loop. The background reader needs a real terminal, so it is not
+# exercised here; the poll logic is tested against a hand-fed channel of Key
+# wrapped in an Input, which is exactly what the reader feeds.
+func testAsyncInputPoll() {
+    def ch as channel of Key init channel.make(8);
+    channel.send($ch, Key{name: "up", char: ""});
+    channel.send($ch, Key{name: "char", char: "a"});
+    def h as Input init Input{keys: $ch};
+    # hasKey / pollKey drain in order, non-blocking.
+    testing.assertTrue(hasKey($h));
+    testing.assertEqual(pollKey($h).name, "up");
+    # waitKey returns the buffered key (does not block when one is ready).
+    def k as Key init waitKey($h);
+    testing.assertEqual($k.name, "char");
+    testing.assertEqual($k.char, "a");
+    # Drained: hasKey is false and pollKey returns the "none" sentinel.
+    testing.assertFalse(hasKey($h));
+    testing.assertEqual(pollKey($h).name, "none");
+}
+
+# Multi-byte UTF-8 keys assemble into a single "char" key; malformed or lone
+# lead bytes stay total ("unknown"), never a throw.
+func testDecodeKeyUtf8() {
+    def o as Key init decodeKey([195, 182]);          # o-umlaut, 2-byte
+    testing.assertEqual($o.name, "char");
+    testing.assertEqual($o.char, "ö");
+    testing.assertEqual(len($o.char), 1);
+    testing.assertEqual(decodeKey([194, 167]).char, "§");   # section sign, 2-byte
+    testing.assertEqual(len(decodeKey([240, 159, 152, 128]).char), 1); # emoji, 4-byte
+    testing.assertEqual(decodeKey([195]).name, "unknown");      # lone lead byte
+    testing.assertEqual(decodeKey([195, 40]).name, "unknown");  # bad continuation
+}

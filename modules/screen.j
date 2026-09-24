@@ -29,6 +29,8 @@ use strings;
 use maps;
 use io;
 use term;
+use channel;
+use task;
 
 # The ESC control byte (27) has no string-literal escape in Jennifer, so it is
 # built from a one-byte `bytes`; CSI is the "ESC [" control-sequence introducer.
@@ -511,7 +513,9 @@ func finalKey(b as int) {
 /**
  * Decode one raw key byte sequence into a `Key`. Pure and total: `seq` is the
  * bytes of a single key press (`[65]` for `A`, `[27, 91, 65]` for Up,
- * `[27, 91, 51, 126]` for Delete). Unrecognized input decodes to `"unknown"`;
+ * `[27, 91, 51, 126]` for Delete, `[195, 182]` for a two-byte UTF-8 character).
+ * A multi-byte UTF-8 sequence decodes to a `"char"` key holding the full rune.
+ * Unrecognized input decodes to `"unknown"`;
  * an empty sequence to `"eof"`. This is what `nextKey` calls after reading the
  * bytes, exposed separately so key handling is testable without a terminal.
  * @param seq {list of int} the raw byte values of one key event
@@ -561,6 +565,21 @@ export func decodeKey(seq as list of int) {
             return Key{name: "alt-" + charOf($c), char: charOf($c)};
         }
     }
+    # A UTF-8 encoded character: a lead byte 0xC0-0xF7 plus its continuation
+    # bytes (an accented letter, the section sign, an emoji). Decode the whole
+    # sequence to its rune. Kept total - malformed or truncated bytes fall through
+    # to "unknown" rather than throwing.
+    if ($b >= 192) {
+        def bs as bytes;
+        for (def i as int init 0; $i < len($seq); $i = $i + 1) {
+            $bs[] = $seq[$i];
+        }
+        try {
+            return Key{name: "char", char: convert.stringFromBytes($bs, "utf-8")};
+        } catch (e) {
+            return Key{name: "unknown", char: ""};
+        }
+    }
     return Key{name: "unknown", char: ""};
 }
 
@@ -602,6 +621,25 @@ export func nextKey() {
                 }
             } until (false);
         }
+    } elseif ($b >= 192) {
+        # A UTF-8 lead byte: read the continuation bytes so a multi-byte character
+        # arrives whole - 0xC0-0xDF is 2 bytes total, 0xE0-0xEF is 3, 0xF0-0xF7 is
+        # 4. decodeKey turns the assembled sequence into a "char" key.
+        def extra as int init 0;
+        if ($b <= 223) {
+            $extra = 1;
+        } elseif ($b <= 239) {
+            $extra = 2;
+        } elseif ($b <= 247) {
+            $extra = 3;
+        }
+        for (def i as int init 0; $i < $extra; $i = $i + 1) {
+            def c as int init term.readByte();
+            if ($c == -1) {
+                break;
+            }
+            $seq[] = $c;
+        }
     }
     return decodeKey($seq);
 }
@@ -629,6 +667,87 @@ export func end(state as term.State) {
     io.printf("%s%s", showCursor(), exitAlt());
     term.restore($state);
     return;
+}
+
+/**
+ * A live keyboard reader for a free-running event loop. A background task drains
+ * the terminal into a buffered channel of decoded `Key` events, so the loop can
+ * poll for input (`hasKey` / `pollKey`) without blocking the way `nextKey` does.
+ * Build one with `startInput`.
+ * @field keys {channel of Key} the buffered decoded-key stream
+ */
+export def struct Input {
+    keys as channel of Key
+};
+
+# INPUT_BUFFER is the reader's channel capacity: decoded keys queue here between
+# polls. When it is full the reader blocks on send (backpressure), so keys are
+# delayed, never dropped; 64 is far more than one render tick accumulates.
+def const INPUT_BUFFER as int init 64;
+
+/**
+ * Start a background keyboard reader for a free-running loop (a game, a live
+ * dashboard, anything that must keep ticking without a keypress). It spawns a
+ * task that reads and decodes keys through `nextKey` into a buffered channel;
+ * poll it with `hasKey` / `pollKey` (non-blocking) or drain it with `waitKey`
+ * (blocking) while the loop renders. Requires raw mode (`begin`) and the `term`
+ * library (default binary).
+ *
+ * The reader task is deliberately **discarded**: it blocks in `term.readByte` and
+ * cannot be interrupted mid-read (neither `task.cancel` nor closing the channel
+ * reaches a syscall read), so it runs until end of input or program exit, when
+ * the OS reaps it. Discarding it is what lets the program exit instead of hanging
+ * on the never-returning reader. One reader owns stdin; do not also call
+ * `nextKey` while it runs.
+ * @return {Input} the live input handle
+ */
+export func startInput() {
+    def keys as channel of Key init channel.make(INPUT_BUFFER);
+    def reader as task of null init spawn {
+        def running as bool init true;
+        while ($running) {
+            def k as Key init nextKey();
+            channel.send($keys, $k);
+            if ($k.name == "eof") {
+                $running = false;
+            }
+        }
+    };
+    task.discard($reader);
+    return Input{keys: $keys};
+}
+
+/**
+ * Whether a decoded key is waiting (non-blocking): true when `pollKey` would
+ * return a real key rather than the `"none"` sentinel.
+ * @param input {Input} the live input handle (from `startInput`)
+ * @return {bool} true if a key is buffered
+ */
+export func hasKey(input as Input) {
+    return channel.len($input.keys) > 0;
+}
+
+/**
+ * The next decoded key if one is waiting, else a `"none"` sentinel key
+ * (non-blocking) - the poll a free-running loop calls each tick.
+ * @param input {Input} the live input handle (from `startInput`)
+ * @return {Key} the next key, or `Key{name: "none", char: ""}` when none is ready
+ */
+export func pollKey(input as Input) {
+    if (channel.len($input.keys) > 0) {
+        return channel.recv($input.keys);
+    }
+    return Key{name: "none", char: ""};
+}
+
+/**
+ * Block until the next decoded key and return it - the buffered equivalent of
+ * `nextKey`, for a loop that waits rather than spins.
+ * @param input {Input} the live input handle (from `startInput`)
+ * @return {Key} the next key event
+ */
+export func waitKey(input as Input) {
+    return channel.recv($input.keys);
 }
 
 /**

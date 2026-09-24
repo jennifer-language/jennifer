@@ -104,6 +104,10 @@ event loop reads through the [`term`](../libraries/term.md) library.
 | `screen.begin()`        | `term.State`  | Enter raw mode + alternate screen, hide the cursor, clear. Pair with `end`. |
 | `screen.end(state)`     | `null`        | Show the cursor, leave the alternate screen, restore the terminal.        |
 | `screen.size()`         | `term.Size`   | The terminal dimensions (`{rows, cols}`), a passthrough to `term.size`.   |
+| `screen.startInput()`   | `screen.Input`| Start a background reader that drains decoded keys into a buffered channel (for a free-running loop). |
+| `screen.hasKey(input)`  | `bool`        | Whether a decoded key is waiting (non-blocking).                          |
+| `screen.pollKey(input)` | `screen.Key`  | The next key if one is waiting, else a `"none"` sentinel (non-blocking).  |
+| `screen.waitKey(input)` | `screen.Key`  | Block until the next decoded key (the buffered equivalent of `nextKey`).  |
 
 `screen.Key { name as string, char as string }`. `name` is symbolic: a printable
 key is `"char"` (the character in `char`); the rest are named - `"up"` / `"down"`
@@ -129,8 +133,38 @@ repeat {
 
 A lone **Escape** press is only reported once the next byte arrives:
 `term.readByte` has no timeout to tell a bare `ESC` from the start of an escape
-sequence. Prefer a named key (or `Ctrl-C`) to quit a loop. Multi-byte UTF-8
-input is decoded byte-first; full rune assembly is a planned follow-on.
+sequence. Prefer a named key (or `Ctrl-C`) to quit a loop. A multi-byte UTF-8
+character (an accented letter, a symbol, an emoji) is read whole and decodes to a
+single `"char"` key with the full rune in `char`; malformed or truncated bytes
+decode to `"unknown"` (never a throw).
+
+### Free-running loops (non-blocking input)
+
+`nextKey` blocks, which stalls a loop that must keep ticking without a keypress -
+a game, a live dashboard, anything also watching a clock or a socket. `startInput`
+runs the reader in a background task that drains decoded keys into a buffered
+channel, so the loop polls (`hasKey` / `pollKey`) and keeps rendering:
+
+```jennifer
+def state as term.State init screen.begin();
+defer screen.end($state);
+def input as screen.Input init screen.startInput();
+repeat {
+    while (screen.hasKey($input)) {              # drain all input this tick
+        def key as screen.Key init screen.pollKey($input);
+        # ... handle $key ...
+    }
+    # ... advance the world, screen.render(...) ...
+    time.sleep(time.fromMilliseconds(16));
+} until ($quit);
+```
+
+The background reader blocks in `term.readByte` and **cannot be interrupted
+mid-read** (neither `task.cancel` nor closing the channel reaches a syscall read),
+so it runs until end of input or program exit, when the OS reaps it; `startInput`
+discards the task so the program exits cleanly instead of hanging on it. One
+reader owns stdin - do not also call `nextKey` while it runs. Stopping and
+resuming raw input mid-program needs a lower-level timed read (a horizon item).
 
 ## Layering and platforms
 
