@@ -1524,3 +1524,93 @@ func testPdfImageDefaults() {
     testing.assertEqual(len(pdfDefaults().images), 0);
     testing.assertEqual(pdfDefaults().imageDpi, 96);
 }
+
+# --- markdown extensions: fenced info, strikethrough, task lists -----
+
+# the fenced language becomes class="language-x" and the full info string is
+# kept on the node.
+func testCodeLanguageClassAndInfo() {
+    testing.assertContains(toHtml("```py\nx\n```\n"), '<code class="language-py">');
+    testing.assertContains(toXhtml("```py\nx\n```\n"), '<code class="language-py">');
+    testing.assertEqual(toHtml("```\ny\n```\n"), "<pre><code>y</code></pre>");
+    def code as Node init children(parse('```py title="a.py"' + "\nx\n```\n"))[0];
+    testing.assertEqual(attr($code, "lang"), "py");
+    testing.assertEqual(attr($code, "info"), 'py title="a.py"');
+}
+
+# strikethrough (~~...~~), GFM. Nests; a space-flanked or single ~ stays literal.
+func testStrikethrough() {
+    testing.assertEqual(toHtml("a ~~withdrawn~~ b"), "<p>a <del>withdrawn</del> b</p>");
+    testing.assertEqual(toHtml("~~**x**~~"), "<p><del><strong>x</strong></del></p>");
+    testing.assertEqual(toHtml("a ~~ x ~~ b"), "<p>a ~~ x ~~ b</p>");
+    # A space-flanked single tilde is neither strikethrough nor subscript.
+    testing.assertEqual(toHtml("a ~ b"), "<p>a ~ b</p>");
+}
+
+# task list items (GFM) -> a disabled checkbox + task-list-item class; the
+# item node carries task / checked attrs; a plain item is untouched.
+func testTaskList() {
+    def m as string init "- [ ] todo\n- [x] done\n- plain\n";
+    def out as string init toHtml($m);
+    testing.assertContains($out, '<li class="task-list-item"><input type="checkbox" disabled> todo</li>');
+    testing.assertContains($out, 'disabled checked> done</li>');
+    testing.assertContains($out, "<li>plain</li>");
+    # XHTML self-closes the checkbox and expands the boolean attrs.
+    testing.assertContains(toXhtml($m), 'type="checkbox" disabled="disabled" />');
+    # Node attrs.
+    def items as list of Node init children(children(parse($m))[0]);
+    testing.assertEqual(attr($items[0], "task"), "true");
+    testing.assertEqual(attr($items[0], "checked"), "false");
+    testing.assertEqual(attr($items[1], "checked"), "true");
+    testing.assertEqual(attr($items[2], "task"), "");
+    # ANSI shows the checkbox glyph.
+    testing.assertContains(toAnsi($m), "[x] done");
+    # GFM requires a space after the marker: `[x]done` is an ordinary item.
+    testing.assertContains(toHtml("- [x]done\n"), "<li>[x]done</li>");
+}
+
+# attribute lists {#id .class key="value"} on headings, links, and images.
+func testAttributeLists() {
+    testing.assertEqual(toHtml('## H {#anchor}' + "\n"), '<h2 id="anchor">H</h2>');
+    testing.assertEqual(toHtml('# H {#id .a .b}' + "\n"), '<h1 id="id" class="a b">H</h1>');
+    testing.assertContains(toHtml('[a](x){.btn target="_blank"}'),
+        '<a href="x" class="btn" target="_blank">a</a>');
+    testing.assertContains(toHtml('![alt](i.png){width="20"}'),
+        '<img src="i.png" alt="alt" width="20">');
+    # attr() reads them.
+    def h as Node init children(parse('## T {#x .y}' + "\n"))[0];
+    testing.assertEqual(attr($h, "id"), "x");
+    testing.assertEqual(attr($h, "class"), "y");
+    # A brace group that is not a valid attribute list stays literal text.
+    testing.assertEqual(toHtml('## no {plain here}' + "\n"), '<h2>no {plain here}</h2>');
+}
+
+# highlight (==), subscript (~x~), superscript (^x^). ~~ stays strikethrough.
+func testHighlightSubSup() {
+    testing.assertEqual(toHtml("==important=="), "<p><mark>important</mark></p>");
+    testing.assertEqual(toHtml("H~2~O"), "<p>H<sub>2</sub>O</p>");
+    testing.assertEqual(toHtml("x^2^"), "<p>x<sup>2</sup></p>");
+    testing.assertEqual(toHtml("~~gone~~"), "<p><del>gone</del></p>");
+    # single = is literal (only == highlights).
+    testing.assertEqual(toHtml("a = b"), "<p>a = b</p>");
+    # A sub/sup span may not contain whitespace (pandoc): a stray caret / tilde
+    # in prose or math stays literal instead of swallowing the rest of the line.
+    testing.assertEqual(toHtml("x^2 + y^2 done"), "<p>x^2 + y^2 done</p>");
+    testing.assertEqual(toHtml("a ~2 x cost~ b"), "<p>a ~2 x cost~ b</p>");
+}
+
+# definition lists (term / ": definition"), pandoc-style -> <dl><dt><dd>.
+func testDefinitionList() {
+    testing.assertEqual(toHtml("term\n: what it means\n"),
+        "<dl><dt>term</dt><dd>what it means</dd></dl>");
+    testing.assertContains(toHtml("Apple\n: a fruit\n: a company\n"),
+        "<dd>a fruit</dd><dd>a company</dd>");
+    def dl as Node init children(parse("term\n: def\n"))[0];
+    testing.assertEqual(typeOf($dl), "definition_list");
+    testing.assertEqual(typeOf(children($dl)[0]), "def_term");
+    testing.assertEqual(typeOf(children($dl)[1]), "def_desc");
+    testing.assertContains(toAnsi("term\n: def\n"), "def");
+    # A mid-line colon is not a definition.
+    testing.assertEqual(toHtml("a line\nwith a colon: here\n"),
+        "<p>a line with a colon: here</p>");
+}

@@ -47,7 +47,7 @@ Reading (surface the parse tree, walked like [`xml`](xml.md) / [`html`](html.md)
 | `markdown.children(node)`     | `list of Node` | The node's direct children.                                 |
 | `markdown.text(node)`         | `string`       | A leaf's text, else its descendants' text concatenated.     |
 | `markdown.level(node)`        | `int`          | A heading's level (1-6); 0 otherwise.                       |
-| `markdown.attr(node, name)`   | `string`       | `"href"` / `"title"` / `"lang"` / `"kind"` / `"align"` / `"ordered"` / `"level"`, or "". |
+| `markdown.attr(node, name)`   | `string`       | `"href"` / `"title"` / `"lang"` / `"kind"` / `"align"` / `"ordered"` / `"level"`; a code block's `"info"`; a task item's `"task"` / `"checked"`; an attribute list's `"id"` / `"class"` / any key; else "". |
 | `markdown.get(node, sel)`     | `Node`         | First node matching a `/`-separated selector, or an empty node. |
 | `markdown.findAll(node, sel)` | `list of Node` | Every node matching the selector.                           |
 | `markdown.has(node, sel)`     | `bool`         | Whether any node matches.                                   |
@@ -76,9 +76,11 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Unordered list       | `- x` / `* x` / `+ x`           | `<ul><li>`                  |
 | Ordered list         | `1. x`                          | `<ol><li>`                  |
 | Nested list          | indent a sub-list under an item | a child `<ul>` / `<ol>` inside the parent `<li>` |
+| Task list (GFM)      | `- [ ] todo` / `- [x] done`     | `<li class="task-list-item">` + a disabled checkbox |
+| Definition list      | `term` then `: definition`      | `<dl><dt><dd>`              |
 | Blockquote           | `> x` (recursive: `> > y`)      | `<blockquote>` (inner text parsed as blocks) |
 | Admonition           | `> [!NOTE]` opening a blockquote | `<div class="admonition admonition-note">` with a title paragraph |
-| Fenced code block    | ` ``` ` ... ` ``` `             | `<pre><code>`               |
+| Fenced code block    | ` ```py ` ... ` ``` `           | `<pre><code class="language-py">` (info kept as `attr "info"`) |
 | Indented code block  | four-space indent after a blank line | `<pre><code>`          |
 | Thematic break       | `---` / `***` / `___` (3+, spaced ok) | `<hr>`                 |
 | Raw HTML block       | a line opening with `<tag` / `</` / `<!--` to the next blank line | passed through verbatim |
@@ -92,6 +94,19 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 | Link      | `[text](url)`   | `<a href="url">`      | underline + ` (url)` |
 | Autolink  | `<https://x>` / `<a@b.com>` | `<a href="...">` (email gets `mailto:`) | underline + ` (url)` |
 | Image     | `![alt](url)`   | `<img src alt>`       | `[image] alt (url)`  |
+| Strikethrough (GFM) | `~~text~~` | `<del>`               | strikethrough   |
+| Highlight | `==text==`      | `<mark>`              | reverse         |
+| Subscript | `~text~`        | `<sub>`               | plain           |
+| Superscript | `^text^`      | `<sup>`               | plain           |
+
+**Attribute lists.** A `{#id .class key="value"}` trailing a heading, or immediately
+after a link or image, sets that node's attributes - a stable heading anchor
+(`## Title {#my-anchor}` -> `<h2 id="my-anchor">`), extra classes, a
+`target="_blank"` link, an image `width`. HTML/XHTML emit them; ANSI/PDF ignore
+them. Read any of them with `attr(node, name)`. Note: in a `.j` **string literal**
+a cooked `"...{...}"` treats `{...}` as interpolation, so write Markdown that
+contains attribute lists (or any literal brace) with a **raw** `'...'` string, or
+read it from a file.
 
 **Inline spans nest.** A link inside `**...**`, a `` `code` `` span or
 `*emphasis*` inside a link label, and so on all parse to a nested tree, so
@@ -209,9 +224,9 @@ can be inspected or transformed (pull the headings for a table of contents,
 rewrite links, lint) and then rendered, rather than going straight to a string. A
 node's `typeOf` is a block kind (`"document"`, `"heading"`, `"paragraph"`,
 `"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`,
-`"admonition"`) or an
-inline kind (`"text"`, `"codespan"`, `"strong"`, `"emphasis"`, `"link"`,
-`"image"`). `get` / `findAll` / `has` take a `/`-separated selector whose steps
+`"admonition"`, `"definition_list"`, `"def_term"`, `"def_desc"`) or an
+inline kind (`"text"`, `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`,
+`"highlight"`, `"subscript"`, `"superscript"`, `"link"`, `"image"`). `get` / `findAll` / `has` take a `/`-separated selector whose steps
 are kind names, `*` (any kind), or `name[k]` (the k-th such child, 1-based),
 matching direct children.
 

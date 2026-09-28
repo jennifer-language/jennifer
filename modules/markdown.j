@@ -16,7 +16,7 @@
  * list / codeBlock / table). Pure Jennifer; line-oriented block parsing with a
  * small inline scanner. Not full CommonMark: inline spans do not nest (the
  * content of `**...**`, `` `...` ``, a link, or an image alt is plain text), and
- * there is no thematic break, setext heading, or reference-link support. A
+ * there is no setext heading, reference-link, or footnote support. A
  * link / image URL cannot contain an unescaped `)` (the scanner closes on the
  * first one).
  * @module markdown
@@ -39,8 +39,8 @@ use encoding;
 # The inline span kinds and block kinds, as sum types: the renderers `match` on
 # them, so adding a kind surfaces every place that must handle it (both the HTML
 # and the ANSI path) instead of silently falling through a string compare.
-def enum SpanKind { Text, Code, Strong, Em, Link, Image };
-def enum BlockKind { Paragraph, Heading, Code, List, Table, Quote, Rule, Html };
+def enum SpanKind { Text, Code, Strong, Em, Link, Image, Strike, Highlight, Sub, Sup };
+def enum BlockKind { Paragraph, Heading, Code, List, Table, Quote, Rule, Html, DefList };
 
 # An inline span: a run of Text, or an emphasised / code / link / image span.
 # Link and Image spans carry the target in `url` (and an optional `title`); the
@@ -49,7 +49,8 @@ def struct Span {
     kind as SpanKind,
     text as string,
     url as string,
-    title as string
+    title as string,
+    attrs as map of string to string
 };
 
 # A block: a Heading (with `level`), a Paragraph or Code block (in `text`), a
@@ -102,12 +103,12 @@ def struct TablePretty {
 # --- span + block constructors (private) ---------------------------
 
 func span(kind as SpanKind, text as string, url as string) {
-    return Span{kind: $kind, text: $text, url: $url, title: ""};
+    return Span{kind: $kind, text: $text, url: $url, title: "", attrs: {}};
 }
 
 # linkSpan builds a link span carrying an optional title (from `[t](url "t")`).
 func linkSpan(text as string, url as string, title as string) {
-    return Span{kind: SpanKind.Link, text: $text, url: $url, title: $title};
+    return Span{kind: SpanKind.Link, text: $text, url: $url, title: $title, attrs: {}};
 }
 
 func paraBlock(lines as list of string) {
@@ -338,15 +339,126 @@ func isAutolinkEmail(inner as string) {
     return regex.matches("^[^@ \t]+@[^@ \t]+\\.[^@ \t]+$", $inner);
 }
 
+# AttrSplit is a heading's text with a trailing `{...}` attribute list peeled off.
+def struct AttrSplit {
+    text as string,
+    attrs as map of string to string
+};
+
+# attrTokens splits an attribute-list body on whitespace, keeping a quoted value
+# (`key="a b"`) as one token.
+func attrTokens(body as string) {
+    def cs as list of string init strings.chars($body);
+    def n as int init len($cs);
+    def toks as list of string init [];
+    def cur as list of string init [];
+    def inQuote as bool init false;
+    for (def i as int init 0; $i < $n; $i = $i + 1) {
+        def c as string init $cs[$i];
+        if ($c == "\"") {
+            $inQuote = not $inQuote;
+            $cur[] = $c;
+        } elseif (($c == " " or $c == "\t") and not $inQuote) {
+            if (len($cur) > 0) {
+                $toks[] = strings.join($cur, "");
+                $cur = [];
+            }
+        } else {
+            $cur[] = $c;
+        }
+    }
+    if (len($cur) > 0) {
+        $toks[] = strings.join($cur, "");
+    }
+    return $toks;
+}
+
+# parseAttrList parses an attribute-list body (`#id .class key="value"`): `#` sets
+# id, `.` appends to a space-joined class, `key=value` (quotes optional) sets a
+# named attribute. Returns the attrs map (empty when nothing valid is found).
+func parseAttrList(body as string) {
+    def attrs as map of string to string init {};
+    def classes as list of string init [];
+    for (def t in attrTokens($body)) {
+        if (strings.startsWith($t, "#") and len($t) > 1) {
+            $attrs["id"] = strings.substring($t, 1, len($t));
+        } elseif (strings.startsWith($t, ".") and len($t) > 1) {
+            $classes[] = strings.substring($t, 1, len($t));
+        } else {
+            def eq as int init strings.indexOf($t, "=");
+            if ($eq > 0) {
+                def k as string init strings.substring($t, 0, $eq);
+                def v as string init strings.substring($t, $eq + 1, len($t));
+                if (len($v) >= 2 and strings.startsWith($v, "\"") and strings.endsWith($v, "\"")) {
+                    $v = strings.substring($v, 1, len($v) - 1);
+                }
+                $attrs[$k] = $v;
+            }
+        }
+    }
+    if (len($classes) > 0) {
+        $attrs["class"] = strings.join($classes, " ");
+    }
+    return $attrs;
+}
+
+# attrBraceEnd: when cs[j] opens an inline attribute list ("{"), the index of its
+# closing "}" (no nesting - a stray inner "{" voids it), else -1.
+func attrBraceEnd(cs as list of string, j as int, n as int) {
+    if ($j >= $n or $cs[$j] != '{') {
+        return -1;
+    }
+    for (def k as int init $j + 1; $k < $n; $k = $k + 1) {
+        if ($cs[$k] == '}') {
+            return $k;
+        }
+        if ($cs[$k] == '{') {
+            return -1;
+        }
+    }
+    return -1;
+}
+
+# splitTrailingAttrs peels a trailing `{...}` attribute list off a heading's text
+# (`## H {#id .cls}`). Returns the text without it and the parsed attrs; with no
+# valid trailing list the text is unchanged and attrs is empty.
+func splitTrailingAttrs(s as string) {
+    def none as AttrSplit init AttrSplit{text: $s, attrs: {}};
+    def cs as list of string init strings.chars(strings.trimRight($s));
+    def n as int init len($cs);
+    if ($n == 0 or $cs[$n - 1] != '}') {
+        return $none;
+    }
+    def open as int init -1;
+    for (def k as int init $n - 2; $k >= 0 and $open < 0; $k = $k - 1) {
+        if ($cs[$k] == '{') {
+            $open = $k;
+        }
+    }
+    if ($open < 0) {
+        return $none;
+    }
+    def attrs as map of string to string init parseAttrList(
+        strings.join(lists.slice($cs, $open + 1, $n - 1), ""));
+    if (len(maps.keys($attrs)) == 0) {
+        return $none;
+    }
+    def before as string init strings.trimRight(strings.join(lists.slice($cs, 0, $open), ""));
+    return AttrSplit{text: $before, attrs: $attrs};
+}
+
 func parseInline(s as string) {
     def spans as list of Span init [];
     # Fast path: a run with no inline-markup character at all is a single text
     # span - skip strings.chars, the marker precompute, and the whole scan. This
-    # is the common case (plain paragraphs, headings, table cells), and the five
+    # is the common case (plain paragraphs, headings, table cells), and the
     # `contains` checks short-circuit at the first marker for a marked-up run.
+    # Highlight is `==`, so a lone `=` (very common in prose) does not leave the
+    # fast path; `~` and `^` are single-char markers (sub / sup) so they do.
     if (len($s) > 0 and not strings.contains($s, "`") and not strings.contains($s, "*")
         and not strings.contains($s, "[") and not strings.contains($s, "!")
-        and not strings.contains($s, "<")) {
+        and not strings.contains($s, "<") and not strings.contains($s, "~")
+        and not strings.contains($s, "==") and not strings.contains($s, "^")) {
         $spans[] = span(SpanKind.Text, $s, "");
         return $spans;
     }
@@ -365,15 +477,34 @@ func parseInline(s as string) {
     def hasBt as bool init strings.contains($s, "`");
     def hasStar as bool init strings.contains($s, "*");
     def hasParen as bool init strings.contains($s, ")");
+    def hasTilde as bool init strings.contains($s, "~");
+    def hasEq as bool init strings.contains($s, "==");
+    def hasCaret as bool init strings.contains($s, "^");
     # One backward pass builds every needed next-index array at once - each char
     # is visited once instead of once per present marker, keeping the build
-    # (and the per-column append) gated on the marker's presence flag.
+    # (and the per-column append) gated on the marker's presence flag. The tilde /
+    # `==` / caret arrays back the strike / highlight / sub / sup scans the same
+    # way, so those markers are O(N) total, not a per-opener rescan.
     def nBacktick as list of int init [];
     def nStar as list of int init [];
     def nDblStar as list of int init [];
+    def nTilde as list of int init [];
+    def nDblTilde as list of int init [];
+    def nDblEq as list of int init [];
+    def nCaret as list of int init [];
+    # Subscript / superscript may not span whitespace (pandoc): nSpace[i] is the
+    # next whitespace at or after i, so a `~`/`^` candidate is rejected in O(1)
+    # when a space falls inside it. Only built when a caret or single tilde is present.
+    def nSpace as list of int init [];
+    def wantSpace as bool init ($hasCaret or $hasTilde);
+    def lastSpace as int init $n;
     def lastBt as int init $n;
     def lastStar as int init $n;
     def lastDbl as int init $n;
+    def lastTilde as int init $n;
+    def lastDblTilde as int init $n;
+    def lastDblEq as int init $n;
+    def lastCaret as int init $n;
     def w as int init $n - 1;
     while ($w >= 0) {
         def cw as string init $cs[$w];
@@ -388,12 +519,40 @@ func parseInline(s as string) {
                 $lastDbl = $w;
             }
         }
+        if ($hasTilde and $cw == "~") {
+            $lastTilde = $w;
+            if ($w + 1 < $n and $cs[$w + 1] == "~") {
+                $lastDblTilde = $w;
+            }
+        }
+        if ($hasEq and $cw == "=" and $w + 1 < $n and $cs[$w + 1] == "=") {
+            $lastDblEq = $w;
+        }
+        if ($hasCaret and $cw == "^") {
+            $lastCaret = $w;
+        }
+        if ($wantSpace and isFlankSpace($cw)) {
+            $lastSpace = $w;
+        }
         if ($hasBt) {
             $nBacktick[] = $lastBt;
         }
         if ($hasStar) {
             $nStar[] = $lastStar;
             $nDblStar[] = $lastDbl;
+        }
+        if ($hasTilde) {
+            $nTilde[] = $lastTilde;
+            $nDblTilde[] = $lastDblTilde;
+        }
+        if ($hasEq) {
+            $nDblEq[] = $lastDblEq;
+        }
+        if ($hasCaret) {
+            $nCaret[] = $lastCaret;
+        }
+        if ($wantSpace) {
+            $nSpace[] = $lastSpace;
         }
         $w = $w - 1;
     }
@@ -406,6 +565,24 @@ func parseInline(s as string) {
         $nStar[] = $n;
         $nDblStar = lists.reverse($nDblStar);
         $nDblStar[] = $n;
+    }
+    if ($hasTilde) {
+        $nTilde = lists.reverse($nTilde);
+        $nTilde[] = $n;
+        $nDblTilde = lists.reverse($nDblTilde);
+        $nDblTilde[] = $n;
+    }
+    if ($hasEq) {
+        $nDblEq = lists.reverse($nDblEq);
+        $nDblEq[] = $n;
+    }
+    if ($hasCaret) {
+        $nCaret = lists.reverse($nCaret);
+        $nCaret[] = $n;
+    }
+    if ($wantSpace) {
+        $nSpace = lists.reverse($nSpace);
+        $nSpace[] = $n;
     }
     def i as int init 0;
     # The pending plain-text run is s[bufStart:i]; slicing it with substring
@@ -469,6 +646,82 @@ func parseInline(s as string) {
             $bufStart = $i;
             continue;
         }
+        # strikethrough: ~~text~~ (GFM). Flanking like strong - a non-space just
+        # inside each `~~`, so a space-flanked `~~` stays literal.
+        def strike as int init -1;
+        if ($c == "~" and $i + 1 < $n and $cs[$i + 1] == "~" and $i + 2 < $n and
+            not isFlankSpace($cs[$i + 2])) {
+            def k as int init $nDblTilde[$i + 2];
+            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+                $strike = $k;
+            }
+        }
+        if ($strike >= 0) {
+            if ($i > $bufStart) {
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+            }
+            $spans[] = span(SpanKind.Strike, strings.join(lists.slice($cs, $i + 2, $strike), ""), "");
+            $i = $strike + 2;
+            $bufStart = $i;
+            continue;
+        }
+        # highlight: ==text== (pymdownx / pandoc).
+        def hl as int init -1;
+        if ($c == "=" and $i + 1 < $n and $cs[$i + 1] == "=" and $i + 2 < $n and
+            not isFlankSpace($cs[$i + 2])) {
+            def k as int init $nDblEq[$i + 2];
+            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+                $hl = $k;
+            }
+        }
+        if ($hl >= 0) {
+            if ($i > $bufStart) {
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+            }
+            $spans[] = span(SpanKind.Highlight, strings.join(lists.slice($cs, $i + 2, $hl), ""), "");
+            $i = $hl + 2;
+            $bufStart = $i;
+            continue;
+        }
+        # superscript: ^text^ (pandoc). Single caret, and the span may not
+        # contain whitespace (nSpace guards it), so a stray caret in prose
+        # (x^2 + y) stays literal instead of swallowing a run.
+        def sup as int init -1;
+        if ($c == "^" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
+            def k as int init $nCaret[$i + 1];
+            if ($k < $n and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
+                $sup = $k;
+            }
+        }
+        if ($sup >= 0) {
+            if ($i > $bufStart) {
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+            }
+            $spans[] = span(SpanKind.Sup, strings.join(lists.slice($cs, $i + 1, $sup), ""), "");
+            $i = $sup + 1;
+            $bufStart = $i;
+            continue;
+        }
+        # subscript: ~text~ (pandoc). Single tilde - a `~~` was handled as
+        # strikethrough above, so a lone `~` with non-space just inside is a sub.
+        # A subscript may not contain whitespace either (pandoc), so a lone `~`
+        # in prose stays literal.
+        def sub as int init -1;
+        if ($c == "~" and $i + 1 < $n and $cs[$i + 1] != "~" and not isFlankSpace($cs[$i + 1])) {
+            def k as int init $nTilde[$i + 1];
+            if ($k < $n and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
+                $sub = $k;
+            }
+        }
+        if ($sub >= 0) {
+            if ($i > $bufStart) {
+                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+            }
+            $spans[] = span(SpanKind.Sub, strings.join(lists.slice($cs, $i + 1, $sub), ""), "");
+            $i = $sub + 1;
+            $bufStart = $i;
+            continue;
+        }
         # image: ![alt](url) - like a link, but opened by `!` before the `[`.
         def imgEnd as int init -1;
         def irb as int init -1;
@@ -491,7 +744,14 @@ func parseInline(s as string) {
             }
             def altText as string init strings.join(lists.slice($cs, $i + 2, $irb), "");
             def imgDest as string init strings.join(lists.slice($cs, $irb + 2, $irp), "");
-            $spans[] = imageSpanFrom($altText, $imgDest);
+            def imgSp as Span init imageSpanFrom($altText, $imgDest);
+            # An attribute list right after the image (`![a](u){.cls width="20"}`).
+            def iae as int init attrBraceEnd($cs, $imgEnd, $n);
+            if ($iae >= 0) {
+                $imgSp.attrs = parseAttrList(strings.join(lists.slice($cs, $imgEnd + 1, $iae), ""));
+                $imgEnd = $iae + 1;
+            }
+            $spans[] = $imgSp;
             $i = $imgEnd;
             $bufStart = $i;
             continue;
@@ -524,7 +784,14 @@ func parseInline(s as string) {
             # so O(N^2) across many links).
             def linkText as string init strings.join(lists.slice($cs, $i + 1, $rb), "");
             def linkDest as string init strings.join(lists.slice($cs, $rb + 2, $rp), "");
-            $spans[] = linkSpanFrom($linkText, $linkDest);
+            def linkSp as Span init linkSpanFrom($linkText, $linkDest);
+            # An attribute list right after the link (`[t](u){.button target="_blank"}`).
+            def lae as int init attrBraceEnd($cs, $linkEnd, $n);
+            if ($lae >= 0) {
+                $linkSp.attrs = parseAttrList(strings.join(lists.slice($cs, $linkEnd + 1, $lae), ""));
+                $linkEnd = $lae + 1;
+            }
+            $spans[] = $linkSp;
             $i = $linkEnd;
             $bufStart = $i;
             continue;
@@ -565,7 +832,7 @@ func parseInline(s as string) {
             if ($i > $bufStart) {
                 $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
             }
-            $spans[] = Span{kind: SpanKind.Link, text: $autoText, url: $autoUrl, title: ""};
+            $spans[] = Span{kind: SpanKind.Link, text: $autoText, url: $autoUrl, title: "", attrs: {}};
             $i = $autoEnd;
             $bufStart = $i;
             continue;
@@ -626,7 +893,7 @@ func linkSpanFrom(text as string, rawDest as string) {
 
 # imageSpan builds an image span carrying alt text, a URL, and an optional title.
 func imageSpan(alt as string, url as string, title as string) {
-    return Span{kind: SpanKind.Image, text: $alt, url: $url, title: $title};
+    return Span{kind: SpanKind.Image, text: $alt, url: $url, title: $title, attrs: {}};
 }
 
 # imageSpanFrom builds the image span for `![alt](url "title")`, splitting the
@@ -1075,6 +1342,63 @@ func collectQuote(lines as list of string, start as int) {
 }
 
 # parseBlocks splits Markdown text into a list of blocks, line by line.
+# defLine reports whether a line is a definition-list definition (": text").
+func defLine(line as string) {
+    def t as string init strings.trimLeft($line);
+    return $t == ":" or strings.startsWith($t, ": ") or strings.startsWith($t, ":\t");
+}
+
+# defText is the definition text of a ": ..." line (the marker and one space off).
+func defText(line as string) {
+    def t as string init strings.trimLeft($line);
+    if ($t == ":") {
+        return "";
+    }
+    return strings.trim(strings.substring($t, 1, len($t)));
+}
+
+# defListBlock builds a DefList block; `rows` holds tagged ["term"|"def", text]
+# entries in document order (rows is otherwise the table field, unused here).
+func defListBlock(rows as list of list of string) {
+    return Block{
+        kind: BlockKind.DefList,
+        level: 0,
+        text: "",
+        lang: "",
+        ordered: false,
+        items: [],
+        headings: [],
+        aligns: [],
+        rows: $rows,
+        children: []
+    };
+}
+
+# collectDefList gathers a definition list - a term line followed by one or more
+# ": definition" lines, repeated - into tagged rows. Returns the block + resume
+# index. The caller enters only when the line at `start` is a term (its next line
+# is a definition).
+func collectDefList(lines as list of string, start as int) {
+    def rows as list of list of string init [];
+    def n as int init len($lines);
+    def j as int init $start;
+    while ($j < $n) {
+        def term as string init strings.trim($lines[$j]);
+        # A term is a plain non-blank line whose next line is a definition.
+        if (len($term) == 0 or defLine($lines[$j]) or
+            not ($j + 1 < $n and defLine($lines[$j + 1]))) {
+            break;
+        }
+        $rows[] = ["term", $term];
+        $j = $j + 1;
+        while ($j < $n and defLine($lines[$j])) {
+            $rows[] = ["def", defText($lines[$j])];
+            $j = $j + 1;
+        }
+    }
+    return BlockScan{block: defListBlock($rows), next: $j};
+}
+
 func parseBlocks(md as string) {
     return parseLines(strings.split($md, "\n"));
 }
@@ -1156,6 +1480,17 @@ func parseLines(lines as list of string) {
             def ts as TableScan init tableFrom($lines, $i);
             $blocks[] = $ts.block;
             $i = $ts.next;
+            continue;
+        }
+        # Definition list: a plain term line immediately followed by a ": def" line.
+        if ($lt == "plain" and not defLine($line) and defLine($next)) {
+            if (len($para) > 0) {
+                $blocks[] = paraBlock($para);
+                $para = [];
+            }
+            def ds as BlockScan init collectDefList($lines, $i);
+            $blocks[] = $ds.block;
+            $i = $ds.next;
             continue;
         }
         $para[] = strings.trim($line);
@@ -1255,14 +1590,11 @@ func collectFence(lines as list of string, open as int) {
     # length closes it).
     def trimmedOpen as string init strings.trim($lines[$open]);
     def openLen as int init fenceLen($trimmedOpen);
-    # The info string follows the opening backtick run; its first word is the
-    # language (```python -> "python"). The rest (rare "```python extra") is dropped.
+    # The whole info string follows the opening backtick run (```python or
+    # ```python title="a.py"). It is carried verbatim in the Fence's `lang` field;
+    # blockToPublic splits the leading word off as the language and keeps the full
+    # string as the `info` attribute (for title= / hl_lines= and the like).
     def info as string init strings.trim(strings.substring($trimmedOpen, $openLen, len($trimmedOpen)));
-    def lang as string init $info;
-    def sp as int init strings.indexOf($info, " ");
-    if ($sp >= 0) {
-        $lang = strings.substring($info, 0, $sp);
-    }
     def parts as list of string init [];
     def j as int init $open + 1;
     while ($j < $n) {
@@ -1274,9 +1606,9 @@ func collectFence(lines as list of string, open as int) {
     }
     def code as string init strings.join($parts, "\n");
     if ($j < $n) {
-        return Fence{code: $code, lang: $lang, next: $j + 1};
+        return Fence{code: $code, lang: $info, next: $j + 1};
     }
-    return Fence{code: $code, lang: $lang, next: $j};
+    return Fence{code: $code, lang: $info, next: $j};
 }
 
 # fenceLen returns the number of leading backticks in a trimmed line when it is
@@ -1311,6 +1643,10 @@ func fenceLen(trimmed as string) {
  * @field url {string} a `link` / `image` target
  * @field title {string} a `link` / `image` title ("" if none)
  * @field align {string} a table `cell`'s alignment ("left" / "right" / "center" / "")
+ * @field attrs {map of string to string} extra named attributes: a heading /
+ *   link / image / code's `{#id .class key="value"}` attribute list (`id` /
+ *   `class` / any key), a fenced block's `info` string, a task `item`'s `task` /
+ *   `checked`, a `footnote_ref`'s `label` / `number`. Read with `attr(node, name)`.
  * @field children {list of Node} the child nodes
  */
 export def struct Node {
@@ -1322,6 +1658,7 @@ export def struct Node {
     url as string,
     title as string,
     align as string,
+    attrs as map of string to string,
     children as list of Node
 };
 
@@ -1391,10 +1728,31 @@ func spanToPublic(sp as Span, depth as int) {
             $n.children = inlineChildren($sp.text, $depth);
             return $n;
         }
+        when Strike {
+            def n as Node init nodeOf("strikethrough");
+            $n.children = inlineChildren($sp.text, $depth);
+            return $n;
+        }
+        when Highlight {
+            def n as Node init nodeOf("highlight");
+            $n.children = inlineChildren($sp.text, $depth);
+            return $n;
+        }
+        when Sub {
+            def n as Node init nodeOf("subscript");
+            $n.children = inlineChildren($sp.text, $depth);
+            return $n;
+        }
+        when Sup {
+            def n as Node init nodeOf("superscript");
+            $n.children = inlineChildren($sp.text, $depth);
+            return $n;
+        }
         when Link {
             def n as Node init nodeOf("link");
             $n.url = html.unescape($sp.url);
             $n.title = html.unescape($sp.title);
+            $n.attrs = $sp.attrs;
             $n.children = inlineChildren($sp.text, $depth);
             return $n;
         }
@@ -1403,6 +1761,7 @@ func spanToPublic(sp as Span, depth as int) {
             $n.url = html.unescape($sp.url);
             $n.title = html.unescape($sp.title);
             $n.text = html.unescape($sp.text);
+            $n.attrs = $sp.attrs;
             return $n;
         }
     }
@@ -1466,7 +1825,23 @@ func listToPublic(b as Block, depth as int) {
     def i as int init 0;
     for (def itemText in $b.items) {
         def item as Node init nodeOf("item");
-        def ikids as list of Node init inlineToPublic(parseInline($itemText));
+        def content as string init $itemText;
+        # GFM task list item: a leading `[ ]` / `[x]` / `[X]` becomes a checkbox.
+        # GFM requires the marker to be followed by a space (or be the whole item),
+        # so `[x]done` is an ordinary item. The marker is stripped and recorded as
+        # task / checked attrs.
+        if ((strings.startsWith($itemText, "[ ]") or strings.startsWith($itemText, "[x]")
+            or strings.startsWith($itemText, "[X]"))
+            and (len($itemText) == 3 or strings.substring($itemText, 3, 4) == " ")) {
+            $item.attrs["task"] = "true";
+            if (strings.startsWith($itemText, "[ ]")) {
+                $item.attrs["checked"] = "false";
+            } else {
+                $item.attrs["checked"] = "true";
+            }
+            $content = strings.trimLeft(strings.substring($itemText, 3, len($itemText)));
+        }
+        def ikids as list of Node init inlineToPublic(parseInline($content));
         # The parallel `children` entry is a nested sub-list (an empty List when the
         # item has no nesting); attach it as a child of the item when non-empty.
         if ($i < len($b.children)) {
@@ -1494,7 +1869,11 @@ func blockToPublic(b as Block, depth as int) {
         when Heading {
             def n as Node init nodeOf("heading");
             $n.level = $b.level;
-            $n.children = inlineToPublic(parseInline($b.text));
+            # A trailing `{#id .class}` sets the heading's attributes (a stable
+            # anchor, custom classes) and is stripped from the rendered text.
+            def hs as AttrSplit init splitTrailingAttrs($b.text);
+            $n.attrs = $hs.attrs;
+            $n.children = inlineToPublic(parseInline($hs.text));
             return $n;
         }
         when Paragraph {
@@ -1505,7 +1884,19 @@ func blockToPublic(b as Block, depth as int) {
         when Code {
             def n as Node init nodeOf("code");
             $n.text = $b.text;
-            $n.lang = $b.lang;
+            # b.lang holds the raw info string: the leading word is the language
+            # (emitted as `class="language-<lang>"`), the whole string is kept as
+            # the `info` attribute for a documentation generator (title=, hl_lines=).
+            def info as string init $b.lang;
+            def lang as string init $info;
+            def sp as int init strings.indexOf($info, " ");
+            if ($sp >= 0) {
+                $lang = strings.substring($info, 0, $sp);
+            }
+            $n.lang = $lang;
+            if ($info != "") {
+                $n.attrs["info"] = $info;
+            }
             return $n;
         }
         when List {
@@ -1543,6 +1934,23 @@ func blockToPublic(b as Block, depth as int) {
             }
             def n as Node init nodeOf("html_block");
             $n.text = $b.text;
+            return $n;
+        }
+        when DefList {
+            # rows carry tagged ["term"|"def", text] entries; each becomes a
+            # def_term / def_desc child (inline content parsed) of a definition_list.
+            def n as Node init nodeOf("definition_list");
+            def kids as list of Node init [];
+            for (def r in $b.rows) {
+                def kind as string init "def_desc";
+                if ($r[0] == "term") {
+                    $kind = "def_term";
+                }
+                def item as Node init nodeOf($kind);
+                $item.children = inlineToPublic(parseInline($r[1]));
+                $kids[] = $item;
+            }
+            $n.children = $kids;
             return $n;
         }
     }
@@ -1682,6 +2090,13 @@ export func attr(node as Node, name as string) {
             return convert.toString($node.level);
         }
         else {
+            # Any other name falls back to the extra-attributes map: `id` / `class`
+            # and custom `key="value"` from an attribute list, a fenced block's
+            # `info`, a task item's `task` / `checked`, a footnote ref's `label` /
+            # `number`. Absent -> "".
+            if (maps.has($node.attrs, $name)) {
+                return $node.attrs[$name];
+            }
             return "";
         }
     }
@@ -1796,12 +2211,34 @@ func safeHref(url as string) {
 # imageNode builds an `<img>` void element. The src runs through the same
 # scheme allowlist as a link href (so `![x](javascript:...)` is neutralized),
 # and the alt text is an escaped attribute.
-func imageNode(alt as string, url as string, title as string) {
+# mdAttrsToHtml renders a node's attribute-list attrs (id / class / custom key=val
+# from a `{...}`) as html attributes, id then class then the rest by key. Used by
+# the heading / link / image renderers; other renderers ignore these attrs.
+func mdAttrsToHtml(node as Node) {
+    def out as list of html.Attr init [];
+    if (maps.has($node.attrs, "id")) {
+        $out[] = html.attr("id", $node.attrs["id"]);
+    }
+    if (maps.has($node.attrs, "class")) {
+        $out[] = html.attr("class", $node.attrs["class"]);
+    }
+    for (def k in maps.keys($node.attrs)) {
+        if (not ($k == "id") and not ($k == "class")) {
+            $out[] = html.attr($k, $node.attrs[$k]);
+        }
+    }
+    return $out;
+}
+
+func imageNode(alt as string, url as string, title as string, extra as list of html.Attr) {
     def attrs as list of html.Attr init [];
     $attrs[] = html.attr("src", safeHref($url));
     $attrs[] = html.attr("alt", $alt);
     if (not ($title == "")) {
         $attrs[] = html.attr("title", $title);
+    }
+    for (def a in $extra) {
+        $attrs[] = $a;
     }
     def noKids as list of html.Node init [];
     return html.element("img", $attrs, $noKids);
@@ -1986,16 +2423,32 @@ func inlineNodeToHtml(n as Node) {
         when "emphasis" {
             return html.element("em", [], inlineNodesToHtml($n.children));
         }
+        when "strikethrough" {
+            return html.element("del", [], inlineNodesToHtml($n.children));
+        }
+        when "highlight" {
+            return html.element("mark", [], inlineNodesToHtml($n.children));
+        }
+        when "subscript" {
+            return html.element("sub", [], inlineNodesToHtml($n.children));
+        }
+        when "superscript" {
+            return html.element("sup", [], inlineNodesToHtml($n.children));
+        }
         when "link" {
             def attrs as list of html.Attr init [];
             $attrs[] = html.attr("href", safeHref($n.url));
             if (not ($n.title == "")) {
                 $attrs[] = html.attr("title", $n.title);
             }
+            # `{.class key="v"}` attributes from an attribute list.
+            for (def a in mdAttrsToHtml($n)) {
+                $attrs[] = $a;
+            }
             return html.element("a", $attrs, inlineNodesToHtml($n.children));
         }
         when "image" {
-            return imageNode($n.text, $n.url, $n.title);
+            return imageNode($n.text, $n.url, $n.title, mdAttrsToHtml($n));
         }
         else {
             return html.text(text($n));
@@ -2017,6 +2470,18 @@ func listNodeToHtml(n as Node, allowRaw as bool) {
     def lis as list of html.Node init [];
     for (def item in $n.children) {
         def kids as list of html.Node init [];
+        def liAttrs as list of html.Attr init [];
+        # GFM task list item: a disabled checkbox before the content, and a
+        # `task-list-item` class on the <li> (what GFM and its stylesheets use).
+        if (attr($item, "task") == "true") {
+            $liAttrs[] = html.attr("class", "task-list-item");
+            def box as list of html.Attr init [html.attr("type", "checkbox"), html.boolAttr("disabled")];
+            if (attr($item, "checked") == "true") {
+                $box[] = html.boolAttr("checked");
+            }
+            $kids[] = html.element("input", $box, []);
+            $kids[] = html.text(" ");
+        }
         for (def c in $item.children) {
             if ($c.kind == "list") {
                 $kids[] = nodeToHtml($c, $allowRaw);
@@ -2024,7 +2489,7 @@ func listNodeToHtml(n as Node, allowRaw as bool) {
                 $kids[] = inlineNodeToHtml($c);
             }
         }
-        $lis[] = html.element("li", [], $kids);
+        $lis[] = html.element("li", $liAttrs, $kids);
     }
     if ($n.ordered) {
         return html.element("ol", [], $lis);
@@ -2094,7 +2559,7 @@ func nodeToHtml(n as Node, allowRaw as bool) {
     match ($n.kind) {
         when "heading" {
             def tag as string init "h" + convert.toString($n.level);
-            return html.element($tag, [], inlineNodesToHtml($n.children));
+            return html.element($tag, mdAttrsToHtml($n), inlineNodesToHtml($n.children));
         }
         when "paragraph" {
             return html.element("p", [], inlineNodesToHtml($n.children));
@@ -2102,12 +2567,29 @@ func nodeToHtml(n as Node, allowRaw as bool) {
         when "code" {
             def codeKids as list of html.Node init [];
             $codeKids[] = html.text($n.text);
+            # CommonMark: the language becomes `class="language-<lang>"`, which is
+            # what web highlighters key on. No language -> a bare <code>.
+            def codeAttrs as list of html.Attr init [];
+            if ($n.lang != "") {
+                $codeAttrs[] = html.attr("class", "language-" + $n.lang);
+            }
             def pre as list of html.Node init [];
-            $pre[] = html.element("code", [], $codeKids);
+            $pre[] = html.element("code", $codeAttrs, $codeKids);
             return html.element("pre", [], $pre);
         }
         when "list" {
             return listNodeToHtml($n, $allowRaw);
+        }
+        when "definition_list" {
+            def dkids as list of html.Node init [];
+            for (def c in $n.children) {
+                if ($c.kind == "def_term") {
+                    $dkids[] = html.element("dt", [], inlineNodesToHtml($c.children));
+                } else {
+                    $dkids[] = html.element("dd", [], inlineNodesToHtml($c.children));
+                }
+            }
+            return html.element("dl", [], $dkids);
         }
         when "table" {
             return tableNodeToHtml($n);
@@ -2176,6 +2658,18 @@ func inlineNodeToAnsi(n as Node) {
         }
         when "emphasis" {
             return ansi.italic(inlineChildrenToAnsi($n.children));
+        }
+        when "strikethrough" {
+            return ansi.strike(inlineChildrenToAnsi($n.children));
+        }
+        when "highlight" {
+            return ansi.reverse(inlineChildrenToAnsi($n.children));
+        }
+        when "subscript" {
+            return inlineChildrenToAnsi($n.children);
+        }
+        when "superscript" {
+            return inlineChildrenToAnsi($n.children);
         }
         when "link" {
             return ansi.underline(inlineChildrenToAnsi($n.children)) + " (" + $n.url + ")";
@@ -2281,6 +2775,14 @@ func listNodeToAnsi(n as Node, depth as int) {
         if ($n.ordered) {
             $marker = convert.toString($idx) + ". ";
         }
+        # GFM task list item: show the checkbox after the bullet ("- [x] done").
+        if (attr($item, "task") == "true") {
+            if (attr($item, "checked") == "true") {
+                $marker = $marker + "[x] ";
+            } else {
+                $marker = $marker + "[ ] ";
+            }
+        }
         def inlineStr as string init "";
         def nested as string init "";
         for (def c in $item.children) {
@@ -2310,6 +2812,17 @@ func nodeToAnsi(n as Node) {
         }
         when "list" {
             return listNodeToAnsi($n, 0);
+        }
+        when "definition_list" {
+            def parts as list of string init [];
+            for (def c in $n.children) {
+                if ($c.kind == "def_term") {
+                    $parts[] = ansi.bold(inlineChildrenToAnsi($c.children));
+                } else {
+                    $parts[] = "    " + inlineChildrenToAnsi($c.children);
+                }
+            }
+            return strings.join($parts, "\n");
         }
         when "quote" {
             def parts as list of string init [];
@@ -2890,6 +3403,34 @@ func renderParagraph(state as Layout, node as Node) {
     return placeInlineLines($state, $lines, $state.opts.bodySize);
 }
 
+# renderDefList lays out a definition list: each term in bold, each definition
+# flowed in an indented column beneath it.
+func renderDefList(state as Layout, node as Node) {
+    def indent as int init 18;
+    for (def c in children($node)) {
+        def size as int init $state.opts.bodySize;
+        if (typeOf($c) == "def_term") {
+            def words as list of IWord init inlineWords(children($c), $state.opts);
+            for (def k as int init 0; $k < len($words); $k = $k + 1) {
+                $words[$k].font = $state.opts.boldFont;
+            }
+            def lines as list of list of IWord init packLines($words, $size, $state.width, $state.opts);
+            $state = placeInlineLines($state, $lines, $size);
+        } else {
+            def savedX as int init $state.x;
+            def savedW as int init $state.width;
+            $state.x = $savedX + $indent;
+            $state.width = $savedW - $indent;
+            def words as list of IWord init inlineWords(children($c), $state.opts);
+            def lines as list of list of IWord init packLines($words, $size, $state.width, $state.opts);
+            $state = placeInlineLines($state, $lines, $size);
+            $state.x = $savedX;
+            $state.width = $savedW;
+        }
+    }
+    return $state;
+}
+
 func renderCode(state as Layout, node as Node) {
     def raw as list of string init strings.split(text($node), "\n");
     # Fold each code line to the code column so a long line (a full command, a
@@ -2932,8 +3473,18 @@ func renderList(state as Layout, node as Node, depth as int) {
     def idx as int init 1;
     for (def item in children($node)) {
         def marker as string init "-";
+        def mw as int init $markerW;
         if ($ordered) {
             $marker = convert.toString($idx) + ".";
+        }
+        # GFM task list item: the checkbox stands in for the bullet; widen the
+        # marker column so "[x]" fits.
+        if (attr($item, "task") == "true") {
+            $marker = "[ ]";
+            if (attr($item, "checked") == "true") {
+                $marker = "[x]";
+            }
+            $mw = 30;
         }
         # Separate the item's inline content from any nested sub-list.
         def inlineKids as list of Node init [];
@@ -2952,8 +3503,8 @@ func renderList(state as Layout, node as Node, depth as int) {
         # Item text flows in a column indented past the marker, starting on that line.
         def savedX as int init $state.x;
         def savedW as int init $state.width;
-        $state.x = $savedX + $markerW;
-        $state.width = $savedW - $markerW;
+        $state.x = $savedX + $mw;
+        $state.width = $savedW - $mw;
         def words as list of IWord init inlineWords($inlineKids, $state.opts);
         def lines as list of list of IWord init packLines($words, $state.opts.bodySize, $state.width, $state.opts);
         if (len($lines) == 0) {
@@ -3320,6 +3871,7 @@ func renderBlock(state as Layout, node as Node, depth as int) {
             }
         }
         when "list" { $state = renderList($state, $node, $depth); }
+        when "definition_list" { $state = renderDefList($state, $node); }
         when "code" { $state = renderCode($state, $node); }
         when "table" { $state = renderTable($state, $node); }
         when "quote" { $state = renderQuote($state, $node, $depth); }
