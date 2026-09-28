@@ -55,7 +55,8 @@ def const STYLE as map of string to string init {
     "dim": "2",
     "italic": "3",
     "underline": "4",
-    "reverse": "7"
+    "reverse": "7",
+    "strike": "9"
 };
 
 # enabled reports whether to emit escapes at all: NO_COLOR forces off,
@@ -278,4 +279,12 @@ export func underline(s as string) {
  */
 export func reverse(s as string) {
     return style($s, "reverse");
+}
+/**
+ * Wrap a string in the strikethrough (crossed-out) text style.
+ * @param s {string} the text to style
+ * @return {string} the wrapped text, or s unchanged when colour is off
+ */
+export func strike(s as string) {
+    return style($s, "strike");
 }

@@ -53,13 +53,14 @@ func testShortcutsRoundTripWithColour() {
     os.setEnv("FORCE_COLOR", "1");
     def fns as list of func init [
         black, red, green, yellow, blue, magenta, cyan, white, gray,
-        bold, dim, italic, underline, reverse
+        bold, dim, italic, underline, reverse, strike
     ];
     for (def f in $fns) {
         def wrapped as string init $f("sample");
         testing.assertNotEqual($wrapped, "sample");   # escapes were emitted
         testing.assertEqual(strip($wrapped), "sample");
     }
+    testing.assertContains(strike("x"), "9m");        # strikethrough is SGR 9
     testing.assertEqual(strip(bgColor("hi", "green")), "hi");
     # rgb clamps out-of-range channels (exercises clampChannel's low/high/pass branches).
     testing.assertEqual(strip(rgb("hi", -5, 300, 128)), "hi");

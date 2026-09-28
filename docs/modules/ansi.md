@@ -28,7 +28,7 @@ Runnable: [`examples/modules/ansi_demo.j`](https://github.com/jennifer-language/
 | -------------------------- | -------- | ------------------------------------------------------------------------------ |
 | `ansi.color(s, name)`      | `string` | Wrap `s` in the named foreground colour. Unknown name `throw`s.                |
 | `ansi.bgColor(s, name)`    | `string` | Wrap `s` in the named background colour.                                       |
-| `ansi.style(s, name)`      | `string` | Wrap `s` in a text style: `bold` / `dim` / `italic` / `underline` / `reverse`. |
+| `ansi.style(s, name)`      | `string` | Wrap `s` in a text style: `bold` / `dim` / `italic` / `underline` / `reverse` / `strike`. |
 | `ansi.rgb(s, r, g, b)`     | `string` | 24-bit truecolor foreground; each channel `0`-`255`.                           |
 | `ansi.strip(s)`            | `string` | Remove every SGR escape - the inverse of the wrappers.                         |
 
@@ -40,7 +40,7 @@ its own code and a reset, so an inner reset never truncates an outer style.
 - **Foreground / background** (`color` / `bgColor`): `black`, `red`,
   `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`. `color` also
   accepts the bright `gray` (alias `grey`).
-- **Styles** (`style`): `bold`, `dim`, `italic`, `underline`, `reverse`.
+- **Styles** (`style`): `bold`, `dim`, `italic`, `underline`, `reverse`, `strike`.
 
 An unrecognized name is a thrown `Error` (`kind: "value"`), catchable with
 `try` / `catch`.
@@ -52,7 +52,7 @@ is exactly `ansi.color(s, "NAME")` (or `ansi.style` for a style name):
 
 - Colours: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`,
   `white`, `gray`.
-- Styles: `bold`, `dim`, `italic`, `underline`, `reverse`.
+- Styles: `bold`, `dim`, `italic`, `underline`, `reverse`, `strike`.
 
 ## When styling is emitted
 
