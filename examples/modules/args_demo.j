@@ -36,8 +36,11 @@ def greeting as string init args.asString($r, "greeting");
 if (args.asBool($r, "shout")) {
     $greeting = "HEY";
 }
-io.printf("greeting=%s lang=%s verbose=%d\n",
-    $greeting, args.asString($r, "lang"), args.count($r, "verbose"));
+io.printf(
+    "greeting=%s lang=%s verbose=%d\n",
+    $greeting,
+    args.asString($r, "lang"),
+    args.count($r, "verbose"));
 for (def name in args.asList($r, "names")) {
     io.printf("  %s, %s!\n", $greeting, $name);
 }

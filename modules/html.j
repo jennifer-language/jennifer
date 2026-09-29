@@ -28,7 +28,11 @@ use convert;
  * The kind of an HTML node: `Element` (a tag with attributes and children),
  * `Text` (escaped text content), or `Raw` (verbatim, already-trusted markup).
  */
-export def enum NodeKind { Element, Text, Raw };
+export def enum NodeKind {
+    Element,
+    Text,
+    Raw
+};
 
 /**
  * A node is one of three kinds, tagged by `kind`: "element" (tag + attrs +
@@ -295,12 +299,8 @@ func renderAttrs(attrs as list of Attr, xhtml as bool) {
 # (attribute quoting, `&` `<` `>` `"` escaping) is already XML-clean in both modes.
 func renderNode(node as Node, xhtml as bool) {
     match ($node.kind) {
-        when Text {
-            return escape($node.text);
-        }
-        when Raw {
-            return $node.text;
-        }
+        when Text { return escape($node.text); }
+        when Raw { return $node.text; }
         when Element {
             def open as string init "<" + $node.tag + renderAttrs($node.attrs, $xhtml);
             if (isVoid($node.tag)) {
@@ -395,12 +395,26 @@ def struct Frame {
 
 # The Scan* structs carry a sub-scan's result plus the new cursor, so the
 # closure-free parser can thread the scan position through return values.
-def struct ScanTag { tag as string, attrs as list of Attr, selfClose as bool, i as int };
-def struct ScanEnd { tag as string, i as int };
-def struct ScanText { text as string, i as int };
+def struct ScanTag {
+    tag as string,
+    attrs as list of Attr,
+    selfClose as bool,
+    i as int
+};
+def struct ScanEnd {
+    tag as string,
+    i as int
+};
+def struct ScanText {
+    text as string,
+    i as int
+};
 
 # A parsed selector step: a tag name (or "*"), and a 1-based index (0 = all).
-def struct Step { name as string, index as int };
+def struct Step {
+    name as string,
+    index as int
+};
 
 func isSpace(ch as string) {
     return $ch == " " or $ch == "\t" or $ch == "\n" or $ch == "\r";
@@ -531,7 +545,8 @@ func readStartTag(cs as list of string, i as int, n as int) {
             $j = $j + 1;
         } else {
             def anStart as int init $j;
-            while ($j < $n and not (isSpace($cs[$j]) or $cs[$j] == "=" or $cs[$j] == ">" or $cs[$j] == "/")) {
+            while ($j < $n and
+                not (isSpace($cs[$j]) or $cs[$j] == "=" or $cs[$j] == ">" or $cs[$j] == "/")) {
                 $j = $j + 1;
             }
             def aname as string init strings.lower(joinRange($cs, $anStart, $j));
@@ -612,7 +627,13 @@ func closeTag(stack as list of Frame, name as string) {
     while (len($s) - 1 >= $target) {
         def t2 as int init len($s) - 1;
         def f as Frame init $s[$t2];
-        def node as Node init Node{kind: NodeKind.Element, tag: $f.tag, attrs: $f.attrs, children: $f.children, text: ""};
+        def node as Node init Node{
+            kind: NodeKind.Element,
+            tag: $f.tag,
+            attrs: $f.attrs,
+            children: $f.children,
+            text: ""
+        };
         $s = lists.slice($s, 0, $t2);
         $s = addChild($s, $node);
     }
@@ -659,16 +680,38 @@ export func parse(src as string) {
                 failParse("document exceeds the node budget");
             }
             if ($st.selfClose or isVoidTag($st.tag)) {
-                $stack = addChild($stack, Node{kind: NodeKind.Element, tag: $st.tag, attrs: $st.attrs, children: [], text: ""});
+                $stack = addChild(
+                    $stack,
+                    Node{
+                        kind: NodeKind.Element,
+                        tag: $st.tag,
+                        attrs: $st.attrs,
+                        children: [],
+                        text: ""
+                    });
             } elseif ($st.tag == "script" or $st.tag == "style") {
                 def close as string init "</" + $st.tag;
                 def end as int init findLit($cs, $i, $close);
                 def body as list of Node init [];
                 def rawText as string init joinRange($cs, $i, $end);
                 if (len($rawText) > 0) {
-                    $body[] = Node{kind: NodeKind.Raw, tag: "", attrs: [], children: [], text: $rawText};
+                    $body[] = Node{
+                        kind: NodeKind.Raw,
+                        tag: "",
+                        attrs: [],
+                        children: [],
+                        text: $rawText
+                    };
                 }
-                $stack = addChild($stack, Node{kind: NodeKind.Element, tag: $st.tag, attrs: $st.attrs, children: $body, text: ""});
+                $stack = addChild(
+                    $stack,
+                    Node{
+                        kind: NodeKind.Element,
+                        tag: $st.tag,
+                        attrs: $st.attrs,
+                        children: $body,
+                        text: ""
+                    });
                 $i = findLit($cs, $end, ">");
                 if ($i < $n) {
                     $i = $i + 1;
@@ -694,7 +737,15 @@ export func parse(src as string) {
                 if ($budget > MAX_PARSE_NODES) {
                     failParse("document exceeds the node budget");
                 }
-                $stack = addChild($stack, Node{kind: NodeKind.Text, tag: "", attrs: [], children: [], text: unescape($content)});
+                $stack = addChild(
+                    $stack,
+                    Node{
+                        kind: NodeKind.Text,
+                        tag: "",
+                        attrs: [],
+                        children: [],
+                        text: unescape($content)
+                    });
             }
         }
     }
@@ -702,7 +753,13 @@ export func parse(src as string) {
         $stack = closeTag($stack, "");
     }
     def root as Frame init $stack[0];
-    return Node{kind: NodeKind.Element, tag: "#root", attrs: [], children: $root.children, text: ""};
+    return Node{
+        kind: NodeKind.Element,
+        tag: "#root",
+        attrs: [],
+        children: $root.children,
+        text: ""
+    };
 }
 
 # --- node queries (exported) --------------------------------------------------

@@ -31,9 +31,7 @@ io.printf(
 io.printf(
     "  upper(\"hi\")    -> %s\n",
     jsonrpc.handle('{"jsonrpc":"2.0","method":"upper","params":{"text":"hi"},"id":2}'));
-io.printf(
-    "  unknownMethod  -> %s\n",
-    jsonrpc.handle('{"jsonrpc":"2.0","method":"nope","id":3}'));
+io.printf("  unknownMethod  -> %s\n", jsonrpc.handle('{"jsonrpc":"2.0","method":"nope","id":3}'));
 io.printf(
     "  a batch        -> %s\n",
     jsonrpc.handle('[{"jsonrpc":"2.0","method":"add","params":[10,20],"id":1},{"jsonrpc":"2.0","method":"add","params":[1,1]}]'));

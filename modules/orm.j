@@ -65,13 +65,22 @@ def const MAX_PAGE_SIZE as int init 10000;
  * The SQL dialect: the backend selector that governs placeholder syntax and DDL
  * spelling. `orm.Dialect.Mysql` or `orm.Dialect.Postgres`.
  */
-export def enum Dialect { Mysql, Postgres };
+export def enum Dialect {
+    Mysql,
+    Postgres
+};
 
 /**
  * A column's value kind: the SQL type family `createTable` renders. One of
  * `orm.ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`.
  */
-export def enum ColumnKind { Int, String, Float, Bool, Bytes };
+export def enum ColumnKind {
+    Int,
+    String,
+    Float,
+    Bool,
+    Bytes
+};
 
 /**
  * One column in a schema: its name, value kind, and DDL attributes. The
@@ -102,7 +111,12 @@ export def struct Column {
  * (this table holds the foreign key), `HasOne` / `HasMany` (the target table
  * holds it), or `ManyToMany` (a join table links the two).
  */
-export def enum RelationKind { BelongsTo, HasOne, HasMany, ManyToMany };
+export def enum RelationKind {
+    BelongsTo,
+    HasOne,
+    HasMany,
+    ManyToMany
+};
 
 /**
  * A declared association from a schema to another table. Metadata only - built
@@ -358,14 +372,11 @@ func checkIdent(name as string, what as string) {
 func checkOp(op as string) {
     def norm as string init strings.upper(strings.trim($op));
     match ($norm) {
-        when "=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "NOT LIKE" {
-            return $norm;
-        }
-        when "IN", "NOT IN" {
-            fail("use orm.whereIn for an IN condition, not a single-value where");
-        }
+        when "=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "NOT LIKE" { return $norm; }
+        when "IN", "NOT IN" { fail("use orm.whereIn for an IN condition, not a single-value where"); }
         else {
-            fail("operator not allowed: \"" + $op + "\" (use = != <> < > <= >= LIKE or \"NOT LIKE\")");
+            fail("operator not allowed: \"" + $op +
+                "\" (use = != <> < > <= >= LIKE or \"NOT LIKE\")");
         }
     }
 }
@@ -377,12 +388,9 @@ func checkOp(op as string) {
 func checkRenderedOp(op as string) {
     def norm as string init strings.upper(strings.trim($op));
     match ($norm) {
-        when "=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "NOT LIKE", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN" {
-            return $norm;
-        }
-        else {
-            fail("operator not allowed: \"" + $op + "\"");
-        }
+        when "=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "NOT LIKE", "IN", "NOT IN", "IS NULL", "IS NOT NULL",
+             "BETWEEN" { return $norm; }
+        else { fail("operator not allowed: \"" + $op + "\""); }
     }
 }
 
@@ -400,9 +408,7 @@ func checkColRef(name as string, what as string) {
 func checkAggFunc(fn as string) {
     def u as string init strings.upper(strings.trim($fn));
     match ($u) {
-        when "COUNT", "SUM", "AVG", "MIN", "MAX" {
-            return $u;
-        }
+        when "COUNT", "SUM", "AVG", "MIN", "MAX" { return $u; }
         else {
             fail("aggregate function not allowed: \"" + $fn + "\" (use COUNT SUM AVG MIN or MAX)");
         }
@@ -422,12 +428,8 @@ func checkDir(dir as string) {
 func checkJoinKind(kind as string) {
     def u as string init strings.upper(strings.trim($kind));
     match ($u) {
-        when "INNER", "LEFT", "RIGHT" {
-            return $u;
-        }
-        else {
-            fail("join kind must be INNER LEFT or RIGHT, got: " + $kind);
-        }
+        when "INNER", "LEFT", "RIGHT" { return $u; }
+        else { fail("join kind must be INNER LEFT or RIGHT, got: " + $kind); }
     }
 }
 
@@ -873,7 +875,13 @@ export func groupBy(q as Query, cols as list of string) {
 }
 
 # addHaving appends one HAVING condition over an aggregate.
-func addHaving(q as Query, fn as string, col as string, op as string, value as string, connector as string) {
+func addHaving(
+    q as Query,
+    fn as string,
+    col as string,
+    op as string,
+    value as string,
+    connector as string) {
     def f as string init checkAggFunc($fn);
     checkColRef($col, "having column");
     def out as Query init $q;
@@ -1071,16 +1079,18 @@ func addRelation(s as Schema, rel as Relation) {
  * @return {Schema} the schema with the relation added
  */
 export func belongsTo(s as Schema, name as string, target as string, foreignKey as string) {
-    return addRelation($s, Relation{
-        name: $name,
-        kind: RelationKind.BelongsTo,
-        target: $target,
-        foreignKey: $foreignKey,
-        localKey: "id",
-        through: "",
-        throughLocalKey: "",
-        throughTargetKey: ""
-    });
+    return addRelation(
+        $s,
+        Relation{
+            name: $name,
+            kind: RelationKind.BelongsTo,
+            target: $target,
+            foreignKey: $foreignKey,
+            localKey: "id",
+            through: "",
+            throughLocalKey: "",
+            throughTargetKey: ""
+        });
 }
 
 /**
@@ -1094,16 +1104,18 @@ export func belongsTo(s as Schema, name as string, target as string, foreignKey 
  * @return {Schema} the schema with the relation added
  */
 export func hasOne(s as Schema, name as string, target as string, foreignKey as string) {
-    return addRelation($s, Relation{
-        name: $name,
-        kind: RelationKind.HasOne,
-        target: $target,
-        foreignKey: $foreignKey,
-        localKey: $s.primaryKey,
-        through: "",
-        throughLocalKey: "",
-        throughTargetKey: ""
-    });
+    return addRelation(
+        $s,
+        Relation{
+            name: $name,
+            kind: RelationKind.HasOne,
+            target: $target,
+            foreignKey: $foreignKey,
+            localKey: $s.primaryKey,
+            through: "",
+            throughLocalKey: "",
+            throughTargetKey: ""
+        });
 }
 
 /**
@@ -1117,16 +1129,18 @@ export func hasOne(s as Schema, name as string, target as string, foreignKey as 
  * @return {Schema} the schema with the relation added
  */
 export func hasMany(s as Schema, name as string, target as string, foreignKey as string) {
-    return addRelation($s, Relation{
-        name: $name,
-        kind: RelationKind.HasMany,
-        target: $target,
-        foreignKey: $foreignKey,
-        localKey: $s.primaryKey,
-        through: "",
-        throughLocalKey: "",
-        throughTargetKey: ""
-    });
+    return addRelation(
+        $s,
+        Relation{
+            name: $name,
+            kind: RelationKind.HasMany,
+            target: $target,
+            foreignKey: $foreignKey,
+            localKey: $s.primaryKey,
+            through: "",
+            throughLocalKey: "",
+            throughTargetKey: ""
+        });
 }
 
 /**
@@ -1142,17 +1156,25 @@ export func hasMany(s as Schema, name as string, target as string, foreignKey as
  * @param targetFk {string} the join-table column referencing the target
  * @return {Schema} the schema with the relation added
  */
-export func manyToMany(s as Schema, name as string, target as string, joinTable as string, localFk as string, targetFk as string) {
-    return addRelation($s, Relation{
-        name: $name,
-        kind: RelationKind.ManyToMany,
-        target: $target,
-        foreignKey: "id",
-        localKey: $s.primaryKey,
-        through: $joinTable,
-        throughLocalKey: $localFk,
-        throughTargetKey: $targetFk
-    });
+export func manyToMany(
+    s as Schema,
+    name as string,
+    target as string,
+    joinTable as string,
+    localFk as string,
+    targetFk as string) {
+    return addRelation(
+        $s,
+        Relation{
+            name: $name,
+            kind: RelationKind.ManyToMany,
+            target: $target,
+            foreignKey: "id",
+            localKey: $s.primaryKey,
+            through: $joinTable,
+            throughLocalKey: $localFk,
+            throughTargetKey: $targetFk
+        });
 }
 
 # findRelation returns the named relation on the schema, throwing if absent.
@@ -1179,19 +1201,24 @@ export func joinRelation(q as Query, s as Schema, relationName as string) {
     def rel as Relation init findRelation($s, $relationName);
     match ($rel.kind) {
         when BelongsTo {
-            return join($q, $rel.target, $s.table + "." + $rel.foreignKey,
+            return join(
+                $q,
+                $rel.target,
+                $s.table + "." + $rel.foreignKey,
                 $rel.target + "." + $rel.localKey);
         }
-        when HasOne {
-            return joinChild($q, $s, $rel);
-        }
-        when HasMany {
-            return joinChild($q, $s, $rel);
-        }
+        when HasOne { return joinChild($q, $s, $rel); }
+        when HasMany { return joinChild($q, $s, $rel); }
         when ManyToMany {
-            def q2 as Query init join($q, $rel.through,
-                $rel.through + "." + $rel.throughLocalKey, $s.table + "." + $rel.localKey);
-            return join($q2, $rel.target, $rel.through + "." + $rel.throughTargetKey,
+            def q2 as Query init join(
+                $q,
+                $rel.through,
+                $rel.through + "." + $rel.throughLocalKey,
+                $s.table + "." + $rel.localKey);
+            return join(
+                $q2,
+                $rel.target,
+                $rel.through + "." + $rel.throughTargetKey,
                 $rel.target + "." + $rel.foreignKey);
         }
     }
@@ -1200,7 +1227,10 @@ export func joinRelation(q as Query, s as Schema, relationName as string) {
 # joinChild joins a has-one / has-many target (FK on the target references this
 # table's local key).
 func joinChild(q as Query, s as Schema, rel as Relation) {
-    return join($q, $rel.target, $rel.target + "." + $rel.foreignKey,
+    return join(
+        $q,
+        $rel.target,
+        $rel.target + "." + $rel.foreignKey,
         $s.table + "." + $rel.localKey);
 }
 
@@ -1391,23 +1421,13 @@ func renderDefault(kind as ColumnKind, value as string) {
         when Bool {
             def v as string init strings.lower(strings.trim($value));
             match ($v) {
-                when "true", "1" {
-                    return "TRUE";
-                }
-                when "false", "0" {
-                    return "FALSE";
-                }
-                else {
-                    fail("boolean DEFAULT must be true/false/1/0, got: " + $value);
-                }
+                when "true", "1" { return "TRUE"; }
+                when "false", "0" { return "FALSE"; }
+                else { fail("boolean DEFAULT must be true/false/1/0, got: " + $value); }
             }
         }
-        when String {
-            return "'" + escapeStringLiteral($value) + "'";
-        }
-        when Bytes {
-            return "'" + escapeStringLiteral($value) + "'";
-        }
+        when String { return "'" + escapeStringLiteral($value) + "'"; }
+        when Bytes { return "'" + escapeStringLiteral($value) + "'"; }
     }
 }
 
@@ -1418,12 +1438,8 @@ func renderColumnDef(c as Column, dialect as Dialect) {
     def out as string init $c.name;
     if ($c.autoIncrement) {
         match ($dialect) {
-            when Postgres {
-                $out = $out + " SERIAL";
-            }
-            when Mysql {
-                $out = $out + " " + sqlType($c.kind, $dialect) + " AUTO_INCREMENT";
-            }
+            when Postgres { $out = $out + " SERIAL"; }
+            when Mysql { $out = $out + " " + sqlType($c.kind, $dialect) + " AUTO_INCREMENT"; }
         }
     } else {
         $out = $out + " " + sqlType($c.kind, $dialect);
@@ -1519,7 +1535,11 @@ export func renameColumn(table as string, fromName as string, toName as string) 
  * @param isUnique {bool} whether the index is UNIQUE
  * @return {string} the CREATE INDEX statement
  */
-export func createIndex(name as string, table as string, columns as list of string, isUnique as bool) {
+export func createIndex(
+    name as string,
+    table as string,
+    columns as list of string,
+    isUnique as bool) {
     checkIdent($name, "index name");
     checkIdent($table, "table name");
     if (len($columns) == 0) {
@@ -1548,12 +1568,8 @@ export func dropIndex(name as string, table as string, dialect as Dialect) {
     checkIdent($name, "index name");
     checkIdent($table, "table name");
     match ($dialect) {
-        when Postgres {
-            return "DROP INDEX " + $name;
-        }
-        when Mysql {
-            return "DROP INDEX " + $name + " ON " + $table;
-        }
+        when Postgres { return "DROP INDEX " + $name; }
+        when Mysql { return "DROP INDEX " + $name + " ON " + $table; }
     }
 }
 
@@ -1566,7 +1582,12 @@ export func dropIndex(name as string, table as string, dialect as Dialect) {
  * @param refColumn {string} the referenced column
  * @return {string} the ALTER TABLE ADD CONSTRAINT statement
  */
-export func addForeignKey(table as string, name as string, column as string, refTable as string, refColumn as string) {
+export func addForeignKey(
+    table as string,
+    name as string,
+    column as string,
+    refTable as string,
+    refColumn as string) {
     checkIdent($table, "table name");
     checkIdent($name, "constraint name");
     checkIdent($column, "foreign-key column");
@@ -1588,12 +1609,8 @@ export func dropForeignKey(table as string, name as string, dialect as Dialect) 
     checkIdent($table, "table name");
     checkIdent($name, "constraint name");
     match ($dialect) {
-        when Postgres {
-            return "ALTER TABLE " + $table + " DROP CONSTRAINT " + $name;
-        }
-        when Mysql {
-            return "ALTER TABLE " + $table + " DROP FOREIGN KEY " + $name;
-        }
+        when Postgres { return "ALTER TABLE " + $table + " DROP CONSTRAINT " + $name; }
+        when Mysql { return "ALTER TABLE " + $table + " DROP FOREIGN KEY " + $name; }
     }
 }
 
@@ -1718,12 +1735,8 @@ func buildUpsert(s as Schema, record as map of string to string, conflictCols as
     for (def c in $cols) {
         if (not maps.has($conflictSet, $c)) {
             match ($s.dialect) {
-                when Postgres {
-                    $sets[] = $c + " = EXCLUDED." + $c;
-                }
-                when Mysql {
-                    $sets[] = $c + " = VALUES(" + $c + ")";
-                }
+                when Postgres { $sets[] = $c + " = EXCLUDED." + $c; }
+                when Mysql { $sets[] = $c + " = VALUES(" + $c + ")"; }
             }
         }
     }
@@ -1846,7 +1859,10 @@ func buildDeleteWhere(s as Schema, q as Query) {
 
 # buildInsertManyChunk renders one multi-row INSERT for a slice of records that all
 # write the same `cols`.
-func buildInsertManyChunk(s as Schema, cols as list of string, records as list of map of string to string) {
+func buildInsertManyChunk(
+    s as Schema,
+    cols as list of string,
+    records as list of map of string to string) {
     def rowGroups as list of string init [];
     def params as list of string init [];
     def n as int init 1;
@@ -2018,18 +2034,10 @@ export def struct Result {
 # the lookup for the accessor).
 func baseKeyColumn(rel as Relation) {
     match ($rel.kind) {
-        when BelongsTo {
-            return $rel.foreignKey;
-        }
-        when HasOne {
-            return $rel.localKey;
-        }
-        when HasMany {
-            return $rel.localKey;
-        }
-        when ManyToMany {
-            return $rel.localKey;
-        }
+        when BelongsTo { return $rel.foreignKey; }
+        when HasOne { return $rel.localKey; }
+        when HasMany { return $rel.localKey; }
+        when ManyToMany { return $rel.localKey; }
     }
 }
 
@@ -2037,18 +2045,10 @@ func baseKeyColumn(rel as Relation) {
 # baseKeyColumn value, by the foreign-key relationship).
 func childKeyColumn(rel as Relation) {
     match ($rel.kind) {
-        when BelongsTo {
-            return $rel.localKey;
-        }
-        when HasOne {
-            return $rel.foreignKey;
-        }
-        when HasMany {
-            return $rel.foreignKey;
-        }
-        when ManyToMany {
-            return $rel.throughLocalKey;
-        }
+        when BelongsTo { return $rel.localKey; }
+        when HasOne { return $rel.foreignKey; }
+        when HasMany { return $rel.foreignKey; }
+        when ManyToMany { return $rel.throughLocalKey; }
     }
 }
 
@@ -2159,7 +2159,11 @@ func fetchChildren(session as Session, schema as Schema, rel as Relation, keys a
 
 # fetchChildrenChunk runs one batched query for a single (non-empty, bounded) key
 # chunk.
-func fetchChildrenChunk(session as Session, schema as Schema, rel as Relation, keys as list of string) {
+func fetchChildrenChunk(
+    session as Session,
+    schema as Schema,
+    rel as Relation,
+    keys as list of string) {
     match ($rel.kind) {
         when ManyToMany {
             # `SELECT *` across the join keeps every joined column (so join-table
@@ -2167,36 +2171,46 @@ func fetchChildrenChunk(session as Session, schema as Schema, rel as Relation, k
             # share a column name, that name collapses in the row map (last wins) -
             # join tables conventionally use distinct FK names, so this is rare.
             def target as Schema init targetSchema($rel.target, $rel.foreignKey, $schema.dialect);
-            def joined as Query init join(from($target), $rel.through,
-                $rel.through + "." + $rel.throughTargetKey, $rel.target + "." + $rel.foreignKey);
+            def joined as Query init join(
+                from($target),
+                $rel.through,
+                $rel.through + "." + $rel.throughTargetKey,
+                $rel.target + "." + $rel.foreignKey);
             def q as Query init whereIn($joined, $rel.through + "." + $rel.throughLocalKey, $keys);
             return all($session, $q);
         }
-        when BelongsTo {
-            return fetchInCol($session, $schema, $rel.target, $rel.localKey, $keys);
-        }
-        when HasOne {
-            return fetchInCol($session, $schema, $rel.target, $rel.foreignKey, $keys);
-        }
-        when HasMany {
-            return fetchInCol($session, $schema, $rel.target, $rel.foreignKey, $keys);
-        }
+        when BelongsTo { return fetchInCol($session, $schema, $rel.target, $rel.localKey, $keys); }
+        when HasOne { return fetchInCol($session, $schema, $rel.target, $rel.foreignKey, $keys); }
+        when HasMany { return fetchInCol($session, $schema, $rel.target, $rel.foreignKey, $keys); }
     }
 }
 
 # fetchInCol runs `SELECT * FROM table WHERE col IN (keys)` (values parameterized).
-func fetchInCol(session as Session, schema as Schema, table as string, col as string, keys as list of string) {
+func fetchInCol(
+    session as Session,
+    schema as Schema,
+    table as string,
+    col as string,
+    keys as list of string) {
     def target as Schema init targetSchema($table, $col, $schema.dialect);
     def q as Query init whereIn(from($target), $col, $keys);
     return all($session, $q);
 }
 
 # loadRelation runs one relation's batched query and builds its parent-key lookup.
-func loadRelation(session as Session, schema as Schema, rel as Relation, baseRows as list of map of string to string) {
+func loadRelation(
+    session as Session,
+    schema as Schema,
+    rel as Relation,
+    baseRows as list of map of string to string) {
     def baseCol as string init baseKeyColumn($rel);
     def childCol as string init childKeyColumn($rel);
     def keys as list of string init distinctKeys($baseRows, $baseCol);
-    def children as list of map of string to string init fetchChildren($session, $schema, $rel, $keys);
+    def children as list of map of string to string init fetchChildren(
+        $session,
+        $schema,
+        $rel,
+        $keys);
     return RelationData{
         name: $rel.name,
         parentKeyColumn: $baseCol,
@@ -2311,7 +2325,11 @@ export func relatedOne(result as Result, row as map of string to string, name as
  * @param conflictCols {list of string} the conflict-target columns (unique / PK; non-empty)
  * @return {sql.Result} the affected-rows result
  */
-export func upsert(session as Session, s as Schema, record as map of string to string, conflictCols as list of string) {
+export func upsert(
+    session as Session,
+    s as Schema,
+    record as map of string to string,
+    conflictCols as list of string) {
     def r as Rendered init buildUpsert($s, $record, $conflictCols);
     return sessExec($session, $r.sql, $r.params);
 }
@@ -2326,7 +2344,10 @@ export func upsert(session as Session, s as Schema, record as map of string to s
  * @param records {list of map of string to string} the rows to insert
  * @return {int} the number of records inserted
  */
-export func insertMany(session as Session, s as Schema, records as list of map of string to string) {
+export func insertMany(
+    session as Session,
+    s as Schema,
+    records as list of map of string to string) {
     if (len($records) == 0) {
         return 0;
     }
@@ -2389,7 +2410,11 @@ export func insertReturning(session as Session, s as Schema, record as map of st
  * @param q {Query} the query whose `WHERE` selects the rows
  * @return {sql.Result} the affected-rows result
  */
-export func updateWhere(session as Session, s as Schema, assignments as map of string to string, q as Query) {
+export func updateWhere(
+    session as Session,
+    s as Schema,
+    assignments as map of string to string,
+    q as Query) {
     def r as Rendered init buildUpdateWhere($s, $assignments, $q);
     return sessExec($session, $r.sql, $r.params);
 }

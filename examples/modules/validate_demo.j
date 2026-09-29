@@ -23,13 +23,23 @@ func isHandle(v as string) {
 # The password policy validate.password enforces: 8-64 chars, at least one
 # lower / upper / digit (symbols optional). Built with the password module's own
 # schema builders, then handed to validate.password($policy) as a rule.
-def policy as password.Schema init
-    password.withMinimums(password.withLength(password.schema(), 8, 64), 1, 1, 1, 0);
+def policy as password.Schema init password.withMinimums(
+    password.withLength(password.schema(), 8, 64),
+    1,
+    1,
+    1,
+    0);
 
 # The rule set: each field maps to the rules it must satisfy. `noneOf` blacklists
 # reserved usernames; `password` delegates to the policy above.
 def rules as map of string to list of validate.Rule init {
-    "username": [validate.required(), validate.minLen(3), validate.maxLen(20), validate.noneOf(["admin", "root", "administrator"]), validate.custom(isHandle, "must be lower-case letters, digits, or _")],
+    "username": [
+        validate.required(),
+        validate.minLen(3),
+        validate.maxLen(20),
+        validate.noneOf(["admin", "root", "administrator"]),
+        validate.custom(isHandle, "must be lower-case letters, digits, or _")
+    ],
     "email": [validate.required(), validate.email()],
     "age": [validate.isInt(), validate.min(13.0), validate.max(120.0)],
     "role": [validate.oneOf(["reader", "author", "admin"])],
@@ -50,17 +60,36 @@ func report(label as string, form as map of string to string) {
 }
 
 # A good signup (website omitted - optional, so it passes).
-def good as map of string to string init {"username": "ada_lovelace", "email": "ada@example.com", "age": "36", "role": "author", "password": "Str0ngPass"};
+def good as map of string to string init {
+    "username": "ada_lovelace",
+    "email": "ada@example.com",
+    "age": "36",
+    "role": "author",
+    "password": "Str0ngPass"
+};
 report("good", $good);
 
 # A bad signup: short username with a capital, malformed email, under-age, bad
 # role, non-URL website, and a too-short password missing an uppercase and a digit.
-def bad as map of string to string init {"username": "Ad", "email": "not-an-email", "age": "9", "role": "root", "website": "example.com", "password": "weak"};
+def bad as map of string to string init {
+    "username": "Ad",
+    "email": "not-an-email",
+    "age": "9",
+    "role": "root",
+    "website": "example.com",
+    "password": "weak"
+};
 report("bad", $bad);
 
 # A reserved-name attempt: "admin" passes minLen and the handle pattern, but the
 # noneOf blacklist rejects it - the one rule that fires here.
-def reserved as map of string to string init {"username": "admin", "email": "a@b.com", "age": "30", "role": "reader", "password": "Str0ngPass"};
+def reserved as map of string to string init {
+    "username": "admin",
+    "email": "a@b.com",
+    "age": "30",
+    "role": "reader",
+    "password": "Str0ngPass"
+};
 report("reserved", $reserved);
 
 # --- localisation: the same failures rendered in German via localize ---------

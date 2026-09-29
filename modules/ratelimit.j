@@ -176,7 +176,12 @@ func fixedAt(lim as Limiter, key as string, now as int, record as bool) {
 # slidingRetry estimates the seconds until a denied request would fit: if the
 # current window alone is full, wait for it to roll; otherwise wait for the
 # previous window to age out enough. Capped at the window roll.
-func slidingRetry(lim as Limiter, curCount as int, prevCount as int, elapsed as int, resetIn as int) {
+func slidingRetry(
+    lim as Limiter,
+    curCount as int,
+    prevCount as int,
+    elapsed as int,
+    resetIn as int) {
     def w as int init $lim.window;
     if ($curCount >= $lim.limit or $prevCount == 0) {
         return $resetIn;

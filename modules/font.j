@@ -174,14 +174,26 @@ export def struct Font {
  */
 export func parse(b as bytes) {
     if (len($b) < 12) {
-        throw Error{kind: "font", message: "font.parse: too short to be a font", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "font",
+            message: "font.parse: too short to be a font",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def version as int init ulong($b, 0);
     # 0x00010000 / "true" / "ttcf" are TrueType-outline SFNTs; "OTTO" carries CFF
     # (PostScript) outlines.
-    def isCff as bool init $version == 1330926671;   # "OTTO"
+    def isCff as bool init $version == 1330926671; # "OTTO"
     if (not ($isCff or $version == 65536 or $version == 1953658213)) {
-        throw Error{kind: "font", message: "font.parse: unrecognised sfnt version", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "font",
+            message: "font.parse: unrecognised sfnt version",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def numTables as int init ushort($b, 4);
     def tables as map of string to int init {};
@@ -272,7 +284,13 @@ func verticalMetrics(b as bytes, tables as map of string to int) {
 
 func requireTable(tables as map of string to int, name as string) {
     if (not maps.has($tables, $name)) {
-        throw Error{kind: "font", message: "font.parse: missing required table '" + $name + "'", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "font",
+            message: "font.parse: missing required table '" + $name + "'",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
 }
 
@@ -313,7 +331,13 @@ func pickCmap(b as bytes, cmap as int) {
         }
     }
     if ($best < 0) {
-        throw Error{kind: "font", message: "font.parse: no supported (Unicode) cmap subtable", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "font",
+            message: "font.parse: no supported (Unicode) cmap subtable",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return [$best, ushort($b, $best)];
 }
@@ -563,8 +587,8 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
             $out[] = $gid;
         }
     } elseif ($fmt == 12) {
-        def nGroups as int init ($d[$sub + 12] << 24) | ($d[$sub + 13] << 16) |
-            ($d[$sub + 14] << 8) | $d[$sub + 15];
+        def nGroups as int init ($d[$sub + 12] << 24) | ($d[$sub + 13] << 16) | ($d[$sub + 14] << 8) | $d[$sub +
+            15];
         for (def cp in $cps) {
             def gid as int init 0;
             def lo as int init 0;
@@ -572,17 +596,17 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
             while ($lo <= $hi) {
                 def mid as int init ($lo + $hi) // 2;
                 def g as int init $sub + 16 + $mid * 12;
-                def startc as int init ($d[$g] << 24) | ($d[$g + 1] << 16) |
-                    ($d[$g + 2] << 8) | $d[$g + 3];
-                def endc as int init ($d[$g + 4] << 24) | ($d[$g + 5] << 16) |
-                    ($d[$g + 6] << 8) | $d[$g + 7];
+                def startc as int init ($d[$g] << 24) | ($d[$g + 1] << 16) | ($d[$g + 2] << 8) | $d[$g +
+                    3];
+                def endc as int init ($d[$g + 4] << 24) | ($d[$g + 5] << 16) | ($d[$g + 6] << 8) | $d[$g +
+                    7];
                 if ($cp < $startc) {
                     $hi = $mid - 1;
                 } elseif ($cp > $endc) {
                     $lo = $mid + 1;
                 } else {
-                    $gid = (($d[$g + 8] << 24) | ($d[$g + 9] << 16) | ($d[$g + 10] << 8) |
-                        $d[$g + 11]) + ($cp - $startc);
+                    $gid = (($d[$g + 8] << 24) | ($d[$g + 9] << 16) | ($d[$g + 10] << 8) | $d[$g +
+                        11]) + ($cp - $startc);
                     $lo = $hi + 1;
                 }
             }
@@ -688,7 +712,7 @@ export func kern(f as Font, left as int, right as int) {
 # table's subtables.
 func kernPair(b as bytes, kern as int, leftGid as int, rightGid as int) {
     if (ushort($b, $kern) != 0) {
-        return 0;   # Apple 'kern' (version 1.0) layout not supported
+        return 0; # Apple 'kern' (version 1.0) layout not supported
     }
     def nTables as int init ushort($b, $kern + 2);
     def pos as int init $kern + 4;
@@ -707,7 +731,7 @@ func kernPair(b as bytes, kern as int, leftGid as int, rightGid as int) {
 # kernFormatZero binary-searches a format-0 subtable's sorted pair array.
 func kernFormatZero(b as bytes, p as int, leftGid as int, rightGid as int) {
     def nPairs as int init ushort($b, $p);
-    def pairs as int init $p + 8;   # past nPairs / searchRange / entrySelector / rangeShift
+    def pairs as int init $p + 8; # past nPairs / searchRange / entrySelector / rangeShift
     def key as int init ($leftGid << 16) | $rightGid;
     def lo as int init 0;
     def hi as int init $nPairs - 1;
@@ -784,13 +808,22 @@ func decodeGlyphB(f as Font, gid as int, depth as int, budget as int) {
         return DecodeResult{glyph: cffGlyphById($f, $gid), budget: $budget};
     }
     if ($depth > 8) {
-        throw Error{kind: "font", message: "font.glyph: composite nesting too deep", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "font",
+            message: "font.glyph: composite nesting too deep",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def adv as int init advanceOf($f, $gid);
     def rng as list of int init glyfRange($f, $gid);
     if ($rng[1] <= $rng[0]) {
         # empty glyph (no outline), e.g. a space
-        return DecodeResult{glyph: Glyph{advance: $adv, xMin: 0, yMin: 0, xMax: 0, yMax: 0, contours: []}, budget: $budget};
+        return DecodeResult{
+            glyph: Glyph{advance: $adv, xMin: 0, yMin: 0, xMax: 0, yMax: 0, contours: []},
+            budget: $budget
+        };
     }
     def g as int init $f.glyf + $rng[0];
     def numContours as int init sshort($f.data, $g);
@@ -800,10 +833,30 @@ func decodeGlyphB(f as Font, gid as int, depth as int, budget as int) {
     def yMax as int init sshort($f.data, $g + 8);
     if ($numContours < 0) {
         def cr as CompResult init compositeB($f, $g + 10, $depth, $budget);
-        return DecodeResult{glyph: Glyph{advance: $adv, xMin: $xMin, yMin: $yMin, xMax: $xMax, yMax: $yMax, contours: $cr.contours}, budget: $cr.budget};
+        return DecodeResult{
+            glyph: Glyph{
+                advance: $adv,
+                xMin: $xMin,
+                yMin: $yMin,
+                xMax: $xMax,
+                yMax: $yMax,
+                contours: $cr.contours
+            },
+            budget: $cr.budget
+        };
     }
     def cs as list of Contour init simpleGlyph($f.data, $g + 10, $numContours);
-    return DecodeResult{glyph: Glyph{advance: $adv, xMin: $xMin, yMin: $yMin, xMax: $xMax, yMax: $yMax, contours: $cs}, budget: $budget};
+    return DecodeResult{
+        glyph: Glyph{
+            advance: $adv,
+            xMin: $xMin,
+            yMin: $yMin,
+            xMax: $xMax,
+            yMax: $yMax,
+            contours: $cs
+        },
+        budget: $budget
+    };
 }
 
 # simpleGlyph decodes a simple glyph's contours starting at `p` (just past the
@@ -905,7 +958,13 @@ func compositeB(f as Font, p as int, depth as int, budget as int) {
         $pos = $pos + 4;
         $bud = $bud - 1;
         if ($bud < 0) {
-            throw Error{kind: "font", message: "font.glyph: composite exceeds component budget (malformed / hostile font)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "font",
+                message: "font.glyph: composite exceeds component budget (malformed / hostile font)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def dx as int init 0;
         def dy as int init 0;
@@ -1018,7 +1077,11 @@ func contourPath(pts as list of Point) {
     if ($startIdx < 0) {
         # all off-curve: synthesize an on-curve start at the midpoint of the
         # last and first control points.
-        def mid as Point init Point{x: ($pts[$n - 1].x + $pts[0].x) // 2, y: ($pts[$n - 1].y + $pts[0].y) // 2, onCurve: true};
+        def mid as Point init Point{
+            x: ($pts[$n - 1].x + $pts[0].x) // 2,
+            y: ($pts[$n - 1].y + $pts[0].y) // 2,
+            onCurve: true
+        };
         $seq[] = $mid;
         for (def i as int init 0; $i < $n; $i = $i + 1) {
             $seq[] = $pts[$i];
@@ -1046,7 +1109,8 @@ func contourPath(pts as list of Point) {
             def cx as int init $seq[$i].x;
             def cy as int init $seq[$i].y;
             if ($i + 1 < $m and $seq[$i + 1].onCurve) {
-                $segs[] = " Q " + num($cx) + " " + num($cy) + " " + num($seq[$i + 1].x) + " " + num($seq[$i + 1].y);
+                $segs[] = " Q " + num($cx) + " " + num($cy) + " " + num($seq[$i + 1].x) + " " +
+                    num($seq[$i + 1].y);
                 $i = $i + 2;
             } else {
                 # two consecutive off-curve points: the implied on-curve point is

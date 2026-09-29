@@ -59,7 +59,11 @@ export def struct Client {
  * @param secretKey {string} the secret access key
  * @return {Client} a configured client (30 s timeout; set `.timeout` to change it)
  */
-export func connect(endpoint as string, region as string, accessKey as string, secretKey as string) {
+export func connect(
+    endpoint as string,
+    region as string,
+    accessKey as string,
+    secretKey as string) {
     return Client{
         endpoint: $endpoint,
         region: $region,
@@ -795,7 +799,8 @@ export func createMultipartUpload(
     if ($m.start == -1) {
         throw Error{
             kind: "s3",
-            message: "createMultipartUpload: no UploadId (status " + convert.toString($resp.status) + ")",
+            message: "createMultipartUpload: no UploadId (status " +
+                convert.toString($resp.status) + ")",
             file: "",
             line: 0,
             col: 0

@@ -278,8 +278,12 @@ func testIsRedirect() {
 # Credential headers (any case) are dropped; ordinary headers are kept - the
 # sanitization applied before a cross-origin redirect hop.
 func testStripCredentialHeaders() {
-    def h as map of string to string init {"authorization": "Bearer x", "COOKIE": "a=1",
-        "Accept": "application/json", "X-Custom": "y"};
+    def h as map of string to string init {
+        "authorization": "Bearer x",
+        "COOKIE": "a=1",
+        "Accept": "application/json",
+        "X-Custom": "y"
+    };
     def s as map of string to string init stripCredentialHeaders($h);
     testing.assertFalse(maps.has($s, "authorization"));
     testing.assertFalse(maps.has($s, "COOKIE"));

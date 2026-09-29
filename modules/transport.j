@@ -36,7 +36,11 @@ use convert;
  * - `Starttls` - connect in plaintext, then upgrade in-band (SMTP STARTTLS, POP3
  *   STLS, IMAP STARTTLS). Only the protocols with an upgrade command accept it.
  */
-export def enum Security { None, Tls, Starttls };
+export def enum Security {
+    None,
+    Tls,
+    Starttls
+};
 
 /**
  * Whether a security mode encrypts the connection (`Tls` or `Starttls`). `None`
@@ -77,7 +81,8 @@ export func checkReceiveSize(n as int, what as string) {
     if ($n < 0 or $n > MAX_RECEIVED_BYTES) {
         throw Error{
             kind: "transport",
-            message: $what + " exceeds the " + convert.toString(MAX_RECEIVED_BYTES) + "-byte receive limit",
+            message: $what + " exceeds the " + convert.toString(MAX_RECEIVED_BYTES) +
+                "-byte receive limit",
             file: "",
             line: 0,
             col: 0

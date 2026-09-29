@@ -7,17 +7,27 @@
 use io;
 use lists;
 
-func double(n as int) { return $n * 2; }
-func isEven(n as int) { return $n % 2 == 0; }
-func add(a as int, b as int) { return $a + $b; }
-func neg(n as int) { return 0 - $n; }
+func double(n as int) {
+    return $n * 2;
+}
+func isEven(n as int) {
+    return $n % 2 == 0;
+}
+func add(a as int, b as int) {
+    return $a + $b;
+}
+func neg(n as int) {
+    return 0 - $n;
+}
 
 # A bare method name in expression position is the function value.
 def f as func init double;
 io.printf("call through a variable: %d\n", $f(21));
 
 # Pass a function value to a method and call it inside.
-func applyTo(fn as func, x as int) { return $fn($x); }
+func applyTo(fn as func, x as int) {
+    return $fn($x);
+}
 io.printf("passed as an argument: %d\n", applyTo(double, 20));
 
 # The higher-order layer over `lists`, each taking a `func`.
@@ -30,8 +40,13 @@ io.printf("any/all even: %t %t\n", lists.any($xs, isEven), lists.all($xs, isEven
 io.printf("sortBy desc: %v\n", lists.sortBy($xs, neg));
 
 # Sort a list of structs by a field, via a one-line key accessor.
-def struct Person { name as string, age as int };
-func ageOf(p as Person) { return $p.age; }
+def struct Person {
+    name as string,
+    age as int
+};
+func ageOf(p as Person) {
+    return $p.age;
+}
 def people as list of Person init [
     Person{name: "cy", age: 30},
     Person{name: "al", age: 25},

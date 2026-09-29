@@ -175,7 +175,7 @@ func testLevelFilteringDropsBelowThreshold() {
     def p as string init fs.makeTempFile("", "log-lvl-", ".log");
     def lg as Logger init toFile("error", "text", $p);
     def empty as map of string to string;
-    info($lg, "should-drop", $empty);   # below the error threshold
+    info($lg, "should-drop", $empty); # below the error threshold
     error($lg, "should-keep", $empty);
     def content as string init fs.readString($p);
     fs.remove($p);
@@ -199,7 +199,7 @@ func testChildLoggerAddsFields() {
 
 func testStdoutAndStderrSinks() {
     def empty as map of string to string;
-    info(new("info", "text"), "to stdout", $empty);       # io.printf branch
-    info(toStderr("info", "text"), "to stderr", $empty);  # io.eprintf branch
+    info(new("info", "text"), "to stdout", $empty); # io.printf branch
+    info(toStderr("info", "text"), "to stderr", $empty); # io.eprintf branch
     testing.assertTrue(true);
 }

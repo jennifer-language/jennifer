@@ -23,10 +23,7 @@ def api as rest.Client init rest.withRetries(
 
 try {
     # create a resource from a JSON value
-    def created as rest.Response init rest.postJson(
-        $api,
-        "/users",
-        json.decode('{"name":"ada"}'));
+    def created as rest.Response init rest.postJson($api, "/users", json.decode('{"name":"ada"}'));
     io.printf("POST /users -> %d\n", $created.status);
 
     # read one back and decode it

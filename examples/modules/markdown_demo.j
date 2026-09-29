@@ -18,12 +18,12 @@ def doc as string init "# Shopping list\n";
 $doc = $doc + "\n";
 $doc = $doc + "Buy **fresh** fruit and a *little* `bread`.\n";
 $doc = $doc + "\n";
-$doc = $doc + "- fruit\n";           # a nested list under an item
+$doc = $doc + "- fruit\n"; # a nested list under an item
 $doc = $doc + "  - apples & pears\n";
 $doc = $doc + "  - figs\n";
 $doc = $doc + "- bread\n";
 $doc = $doc + "\n";
-$doc = $doc + "> Tip: shop the ![market](http://example/market.png) early.\n";  # blockquote + image
+$doc = $doc + "> Tip: shop the ![market](http://example/market.png) early.\n"; # blockquote + image
 $doc = $doc + "\n";
 $doc = $doc + "See [the recipe](http://example/recipe?id=1&v=2).\n";
 $doc = $doc + "\n";
@@ -91,4 +91,7 @@ $opts.images["figure.png"] = pdf.loadImage("Figure", encoding.fromText($pngB64, 
 def withPic as bytes init markdown.toPdfWith($imgDoc, $opts);
 def picPath as string init path.join(os.tempDir(), "markdown_image_demo.pdf");
 fs.writeBytes($picPath, $withPic);
-io.printf("\n=== PDF with an embedded image (markdown.toPdfWith + PdfOptions.images) ===\nwrote %d bytes to %s\n", len($withPic), $picPath);
+io.printf(
+    "\n=== PDF with an embedded image (markdown.toPdfWith + PdfOptions.images) ===\nwrote %d bytes to %s\n",
+    len($withPic),
+    $picPath);

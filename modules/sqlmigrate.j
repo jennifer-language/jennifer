@@ -122,7 +122,8 @@ func sortMigrations(migrations as list of Migration) {
 # ensureTable creates the tracking table if absent.
 func ensureTable(conn as sql.Connection) {
     def noParams as list of string init [];
-    sql.exec($conn,
+    sql.exec(
+        $conn,
         "CREATE TABLE IF NOT EXISTS " + TABLE +
             " (version VARCHAR(255) PRIMARY KEY, description TEXT)",
         $noParams);
@@ -155,7 +156,8 @@ func applyMigration(conn as sql.Connection, m as Migration) {
     for (def stmt in $m.up) {
         sql.exec($tx, $stmt, $noParams);
     }
-    sql.exec($tx,
+    sql.exec(
+        $tx,
         "INSERT INTO " + TABLE + " (version, description) VALUES ('" + $m.version + "', '" +
             escapeLiteral($m.description) + "')",
         $noParams);
@@ -210,7 +212,10 @@ export func migrate(conn as sql.Connection, migrations as list of Migration) {
  * @param steps {int} how many applied migrations to reverse
  * @return {int} the number of migrations rolled back
  */
-export func rollbackMigrations(conn as sql.Connection, migrations as list of Migration, steps as int) {
+export func rollbackMigrations(
+    conn as sql.Connection,
+    migrations as list of Migration,
+    steps as int) {
     ensureTable($conn);
     def applied as map of string to string init appliedVersions($conn);
     def sorted as list of Migration init sortMigrations($migrations);

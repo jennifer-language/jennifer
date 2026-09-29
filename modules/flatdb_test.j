@@ -204,7 +204,10 @@ func testUpdateSerializesConcurrentWriters() {
     }
     testing.assertEqual(json.asInt(get(open($path), "/count")), 10);
     fs.remove($path);
-    try { fs.remove($path + ".lock"); } catch (e) { } # lint-disable: L103
+    try {
+        fs.remove($path + ".lock");
+    } catch (e) { # lint-disable: L103
+    }
 }
 
 # testLockUnlockRoundTrip: lock is exclusive while held (a second writeNew on the

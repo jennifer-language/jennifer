@@ -371,10 +371,7 @@ func testSplitErrors() {
 # --- aggregation ------------------------------------------------------------
 
 func testAggregateMergesSiblings() {
-    def parts as list of Network init [
-        parse("192.168.0.0/25"),
-        parse("192.168.0.128/25")
-    ];
+    def parts as list of Network init [parse("192.168.0.0/25"), parse("192.168.0.128/25")];
     def agg as list of Network init aggregate($parts);
     testing.assertEqual(len($agg), 1);
     testing.assertEqual(networkString($agg[0]), "192.168.0.0/24");
@@ -419,10 +416,7 @@ func testAggregateKeepsVersionsSeparate() {
 
 func testAggregateNonMergeable() {
     # not siblings (different parents) -> stay separate
-    def parts as list of Network init [
-        parse("192.168.0.0/24"),
-        parse("192.168.2.0/24")
-    ];
+    def parts as list of Network init [parse("192.168.0.0/24"), parse("192.168.2.0/24")];
     testing.assertEqual(len(aggregate($parts)), 2);
 }
 

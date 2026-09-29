@@ -104,7 +104,12 @@ func sampleClient() {
 # implementation for these exact path-style inputs.
 func testPresignVector() {
     def url as string init presignAt(
-        sampleClient(), "GET", "examplebucket", "test.txt", 86400, "20130524T000000Z");
+        sampleClient(),
+        "GET",
+        "examplebucket",
+        "test.txt",
+        86400,
+        "20130524T000000Z");
     testing.assertEqual(
         $url,
         "https://s3.amazonaws.com/examplebucket/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=733255ef022bec3f2a8701cd61d4b371f3f28c9f193a1f02279211d48d5193d7");
@@ -113,8 +118,18 @@ func testPresignVector() {
 # presignAt for a key with a space, parens and `+` - the path is encoded (slashes
 # kept) and the whole URL matches the independent (Python) SigV4 reference.
 func testPresignSpecialKey() {
-    def c as Client init connect("https://s3.amazonaws.com", "us-east-1", "AKIDEXAMPLE", "test-secret-key");
-    def url as string init presignAt($c, "GET", "my-bucket", "reports/2026 Q1 (final)+draft.pdf", 900, "20260101T000000Z");
+    def c as Client init connect(
+        "https://s3.amazonaws.com",
+        "us-east-1",
+        "AKIDEXAMPLE",
+        "test-secret-key");
+    def url as string init presignAt(
+        $c,
+        "GET",
+        "my-bucket",
+        "reports/2026 Q1 (final)+draft.pdf",
+        900,
+        "20260101T000000Z");
     testing.assertEqual(
         $url,
         "https://s3.amazonaws.com/my-bucket/reports/2026%20Q1%20%28final%29%2Bdraft.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20260101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260101T000000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&X-Amz-Signature=ac48b447297c626a38786a3f6abcea0131bf79994f8e486df50dba5383c28c7a");
@@ -170,8 +185,16 @@ func testMetadataHeaders() {
 
 # prepareHeaders with no extras signs the same fixed header set as authorization.
 func testPrepareHeadersFixedSet() {
-    def h as map of string to string init prepareHeaders(sampleClient(), "GET", "/b/k", "", hexDigest(""), {});
-    testing.assertContains($h["Authorization"], "SignedHeaders=host;x-amz-content-sha256;x-amz-date");
+    def h as map of string to string init prepareHeaders(
+        sampleClient(),
+        "GET",
+        "/b/k",
+        "",
+        hexDigest(""),
+        {});
+    testing.assertContains(
+        $h["Authorization"],
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date");
     testing.assertTrue(maps.has($h, "x-amz-date"));
     testing.assertTrue(maps.has($h, "x-amz-content-sha256"));
 }
@@ -180,7 +203,15 @@ func testPrepareHeadersFixedSet() {
 func testPrepareHeadersSignsMetadata() {
     def extra as map of string to string init {};
     $extra["x-amz-meta-team"] = "eng";
-    def h as map of string to string init prepareHeaders(sampleClient(), "PUT", "/b/k", "", hexDigest(""), $extra);
-    testing.assertContains($h["Authorization"], "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-meta-team");
+    def h as map of string to string init prepareHeaders(
+        sampleClient(),
+        "PUT",
+        "/b/k",
+        "",
+        hexDigest(""),
+        $extra);
+    testing.assertContains(
+        $h["Authorization"],
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-meta-team");
     testing.assertEqual($h["x-amz-meta-team"], "eng");
 }

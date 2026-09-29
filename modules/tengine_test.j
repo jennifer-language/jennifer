@@ -21,9 +21,7 @@ func testOutput() {
 }
 
 func testMissingKeyIsEmpty() {
-    testing.assertEqual(
-        render(oneSet('x{{ .nope }}y'), "main", json.decode('{"a":"Z"}')),
-        "xy");
+    testing.assertEqual(render(oneSet('x{{ .nope }}y'), "main", json.decode('{"a":"Z"}')), "xy");
 }
 
 func testDotIsCurrentNode() {
@@ -38,10 +36,7 @@ func testIntAndFloatOutput() {
 
 func testIfTrue() {
     testing.assertEqual(
-        render(
-            oneSet('{{ if .show }}Y{{ else }}N{{ end }}'),
-            "main",
-            json.decode('{"show":true}')),
+        render(oneSet('{{ if .show }}Y{{ else }}N{{ end }}'), "main", json.decode('{"show":true}')),
         "Y");
 }
 
@@ -141,9 +136,7 @@ func testNestedIfInRange() {
 func testLayoutInheritance() {
     def set as Set init add(newSet(), "base", '<h1>{{ .t }}</h1>{{ template "content" . }}');
     $set = add($set, "page", '{{ define "content" }}<p>{{ .t }}</p>{{ end }}');
-    testing.assertEqual(
-        render($set, "base", json.decode('{"t":"Hi"}')),
-        "<h1>Hi</h1><p>Hi</p>");
+    testing.assertEqual(render($set, "base", json.decode('{"t":"Hi"}')), "<h1>Hi</h1><p>Hi</p>");
 }
 
 func testBlockDefault() {
@@ -264,10 +257,7 @@ func testPipeDefault() {
         render(oneSet('{{ .missing | default "fallback" }}'), "main", json.decode('{"x":1}')),
         "fallback");
     testing.assertEqual(
-        render(
-            oneSet('{{ .name | default "fallback" }}'),
-            "main",
-            json.decode('{"name":"Ada"}')),
+        render(oneSet('{{ .name | default "fallback" }}'), "main", json.decode('{"name":"Ada"}')),
         "Ada");
 }
 
@@ -282,10 +272,7 @@ func testPipeTruncate() {
 
 func testPipeJoin() {
     testing.assertEqual(
-        render(
-            oneSet('{{ .tags | join ", " }}'),
-            "main",
-            json.decode('{"tags":["go","cms"]}')),
+        render(oneSet('{{ .tags | join ", " }}'), "main", json.decode('{"tags":["go","cms"]}')),
         "go, cms");
 }
 
@@ -293,9 +280,7 @@ func testPipeLen() {
     testing.assertEqual(
         render(oneSet('{{ .xs | len }}'), "main", json.decode('{"xs":[1,2,3]}')),
         "3");
-    testing.assertEqual(
-        render(oneSet('{{ .s | len }}'), "main", json.decode('{"s":"abcd"}')),
-        "4");
+    testing.assertEqual(render(oneSet('{{ .s | len }}'), "main", json.decode('{"s":"abcd"}')), "4");
 }
 
 func testPrintfPipe() {
@@ -309,10 +294,7 @@ func testPrintfPipe() {
 
 func testPrintfFunc() {
     testing.assertEqual(
-        render(
-            oneSet('{{ printf "%s: %d" .k .n }}'),
-            "main",
-            json.decode('{"k":"posts","n":5}')),
+        render(oneSet('{{ printf "%s: %d" .k .n }}'), "main", json.decode('{"k":"posts","n":5}')),
         "posts: 5");
     testing.assertEqual(
         render(oneSet('{{ printf "$%.2f" .price }}'), "main", json.decode('{"price":3.5}')),
@@ -413,10 +395,7 @@ func testPipeSplitIgnoresQuotedBar() {
 # A printf format string may legitimately contain `|`.
 func testPrintfFormatWithBar() {
     testing.assertEqual(
-        render(
-            oneSet('{{ printf "%s|%s" .a .b }}'),
-            "main",
-            json.decode('{"a":"L","b":"R"}')),
+        render(oneSet('{{ printf "%s|%s" .a .b }}'), "main", json.decode('{"a":"L","b":"R"}')),
         "L|R");
 }
 

@@ -266,7 +266,15 @@ export func parseQuery(q as string) {
 export func resolve(base as string, ref as string) {
     def b as Uri init parse($base);
     def r as Uri init parse($ref);
-    def out as Uri init Uri{scheme: "", user: "", host: "", port: "", path: "", query: "", fragment: ""};
+    def out as Uri init Uri{
+        scheme: "",
+        user: "",
+        host: "",
+        port: "",
+        path: "",
+        query: "",
+        fragment: ""
+    };
 
     if ($r.scheme != "") {
         $out = $r;

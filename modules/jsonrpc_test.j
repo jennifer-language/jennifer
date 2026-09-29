@@ -63,10 +63,7 @@ func testParseResultError() {
 }
 
 func parseError() {
-    parseResult(
-        '{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":1}',
-        200,
-        1);
+    parseResult('{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":1}', 200, 1);
 }
 
 func testParseResultNonJson() {

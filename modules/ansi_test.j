@@ -49,18 +49,31 @@ func tearDown() {
 # path); strip() recovers the original, so the round-trip is deterministic. The
 # shortcuts are exercised as first-class func values in a list.
 func testShortcutsRoundTripWithColour() {
-    os.setEnv("NO_COLOR", "");        # NO_COLOR is checked first, so clear it
+    os.setEnv("NO_COLOR", ""); # NO_COLOR is checked first, so clear it
     os.setEnv("FORCE_COLOR", "1");
     def fns as list of func init [
-        black, red, green, yellow, blue, magenta, cyan, white, gray,
-        bold, dim, italic, underline, reverse, strike
+        black,
+        red,
+        green,
+        yellow,
+        blue,
+        magenta,
+        cyan,
+        white,
+        gray,
+        bold,
+        dim,
+        italic,
+        underline,
+        reverse,
+        strike
     ];
     for (def f in $fns) {
         def wrapped as string init $f("sample");
-        testing.assertNotEqual($wrapped, "sample");   # escapes were emitted
+        testing.assertNotEqual($wrapped, "sample"); # escapes were emitted
         testing.assertEqual(strip($wrapped), "sample");
     }
-    testing.assertContains(strike("x"), "9m");        # strikethrough is SGR 9
+    testing.assertContains(strike("x"), "9m"); # strikethrough is SGR 9
     testing.assertEqual(strip(bgColor("hi", "green")), "hi");
     # rgb clamps out-of-range channels (exercises clampChannel's low/high/pass branches).
     testing.assertEqual(strip(rgb("hi", -5, 300, 128)), "hi");
@@ -70,7 +83,7 @@ func testShortcutsRoundTripWithColour() {
 # Colour gating: NO_COLOR and FORCE_COLOR=0 both force the wrappers to no-op.
 func testColourGatingDisabled() {
     os.setEnv("NO_COLOR", "1");
-    testing.assertEqual(red("x"), "x");             # unchanged when disabled
+    testing.assertEqual(red("x"), "x"); # unchanged when disabled
     os.setEnv("NO_COLOR", "");
     os.setEnv("FORCE_COLOR", "0");
     testing.assertEqual(bold("x"), "x");

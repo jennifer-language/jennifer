@@ -147,8 +147,21 @@ func addArg(p as Parser, a as Arg) {
  * @return {Parser} the updated parser
  */
 export func flag(p as Parser, long as string, short as string, deflt as string, help as string) {
-    return addArg($p, Arg{name: $long, short: $short, kind: "flag", typ: "string", action: "store",
-        fallback: $deflt, hasDefault: true, required: false, nargs: "", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $long,
+            short: $short,
+            kind: "flag",
+            typ: "string",
+            action: "store",
+            fallback: $deflt,
+            hasDefault: true,
+            required: false,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -161,8 +174,21 @@ export func flag(p as Parser, long as string, short as string, deflt as string, 
  * @return {Parser} the updated parser
  */
 export func intFlag(p as Parser, long as string, short as string, deflt as int, help as string) {
-    return addArg($p, Arg{name: $long, short: $short, kind: "flag", typ: "int", action: "store",
-        fallback: convert.toString($deflt), hasDefault: true, required: false, nargs: "", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $long,
+            short: $short,
+            kind: "flag",
+            typ: "int",
+            action: "store",
+            fallback: convert.toString($deflt),
+            hasDefault: true,
+            required: false,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -174,9 +200,27 @@ export func intFlag(p as Parser, long as string, short as string, deflt as int, 
  * @param help {string} the help text
  * @return {Parser} the updated parser
  */
-export func floatFlag(p as Parser, long as string, short as string, deflt as float, help as string) {
-    return addArg($p, Arg{name: $long, short: $short, kind: "flag", typ: "float", action: "store",
-        fallback: convert.toString($deflt), hasDefault: true, required: false, nargs: "", choices: [], help: $help});
+export func floatFlag(
+    p as Parser,
+    long as string,
+    short as string,
+    deflt as float,
+    help as string) {
+    return addArg(
+        $p,
+        Arg{
+            name: $long,
+            short: $short,
+            kind: "flag",
+            typ: "float",
+            action: "store",
+            fallback: convert.toString($deflt),
+            hasDefault: true,
+            required: false,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -188,8 +232,21 @@ export func floatFlag(p as Parser, long as string, short as string, deflt as flo
  * @return {Parser} the updated parser
  */
 export func boolFlag(p as Parser, long as string, short as string, help as string) {
-    return addArg($p, Arg{name: $long, short: $short, kind: "flag", typ: "bool", action: "store",
-        fallback: "false", hasDefault: true, required: false, nargs: "", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $long,
+            short: $short,
+            kind: "flag",
+            typ: "bool",
+            action: "store",
+            fallback: "false",
+            hasDefault: true,
+            required: false,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -202,8 +259,21 @@ export func boolFlag(p as Parser, long as string, short as string, help as strin
  * @return {Parser} the updated parser
  */
 export func countFlag(p as Parser, long as string, short as string, help as string) {
-    return addArg($p, Arg{name: $long, short: $short, kind: "flag", typ: "int", action: "count",
-        fallback: "0", hasDefault: true, required: false, nargs: "", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $long,
+            short: $short,
+            kind: "flag",
+            typ: "int",
+            action: "count",
+            fallback: "0",
+            hasDefault: true,
+            required: false,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -216,8 +286,21 @@ export func countFlag(p as Parser, long as string, short as string, help as stri
  * @return {Parser} the updated parser
  */
 export func listFlag(p as Parser, long as string, short as string, help as string) {
-    return addArg($p, Arg{name: $long, short: $short, kind: "flag", typ: "string", action: "append",
-        fallback: "", hasDefault: false, required: false, nargs: "", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $long,
+            short: $short,
+            kind: "flag",
+            typ: "string",
+            action: "append",
+            fallback: "",
+            hasDefault: false,
+            required: false,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -228,8 +311,21 @@ export func listFlag(p as Parser, long as string, short as string, help as strin
  * @return {Parser} the updated parser
  */
 export func positional(p as Parser, name as string, help as string) {
-    return addArg($p, Arg{name: $name, short: "", kind: "positional", typ: "string", action: "store",
-        fallback: "", hasDefault: false, required: true, nargs: "", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $name,
+            short: "",
+            kind: "positional",
+            typ: "string",
+            action: "store",
+            fallback: "",
+            hasDefault: false,
+            required: true,
+            nargs: "",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -241,8 +337,21 @@ export func positional(p as Parser, name as string, help as string) {
  * @return {Parser} the updated parser
  */
 export func positionalOpt(p as Parser, name as string, deflt as string, help as string) {
-    return addArg($p, Arg{name: $name, short: "", kind: "positional", typ: "string", action: "store",
-        fallback: $deflt, hasDefault: true, required: false, nargs: "?", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $name,
+            short: "",
+            kind: "positional",
+            typ: "string",
+            action: "store",
+            fallback: $deflt,
+            hasDefault: true,
+            required: false,
+            nargs: "?",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -254,8 +363,21 @@ export func positionalOpt(p as Parser, name as string, deflt as string, help as 
  * @return {Parser} the updated parser
  */
 export func positionalList(p as Parser, name as string, help as string) {
-    return addArg($p, Arg{name: $name, short: "", kind: "positional", typ: "string", action: "store",
-        fallback: "", hasDefault: false, required: false, nargs: "*", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $name,
+            short: "",
+            kind: "positional",
+            typ: "string",
+            action: "store",
+            fallback: "",
+            hasDefault: false,
+            required: false,
+            nargs: "*",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -267,8 +389,21 @@ export func positionalList(p as Parser, name as string, help as string) {
  * @return {Parser} the updated parser
  */
 export func positionalList1(p as Parser, name as string, help as string) {
-    return addArg($p, Arg{name: $name, short: "", kind: "positional", typ: "string", action: "store",
-        fallback: "", hasDefault: false, required: true, nargs: "+", choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $name,
+            short: "",
+            kind: "positional",
+            typ: "string",
+            action: "store",
+            fallback: "",
+            hasDefault: false,
+            required: true,
+            nargs: "+",
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -280,8 +415,21 @@ export func positionalList1(p as Parser, name as string, help as string) {
  * @return {Parser} the updated parser
  */
 export func positionalN(p as Parser, name as string, n as int, help as string) {
-    return addArg($p, Arg{name: $name, short: "", kind: "positional", typ: "string", action: "store",
-        fallback: "", hasDefault: false, required: true, nargs: convert.toString($n), choices: [], help: $help});
+    return addArg(
+        $p,
+        Arg{
+            name: $name,
+            short: "",
+            kind: "positional",
+            typ: "string",
+            action: "store",
+            fallback: "",
+            hasDefault: false,
+            required: true,
+            nargs: convert.toString($n),
+            choices: [],
+            help: $help
+        });
 }
 
 /**
@@ -418,7 +566,8 @@ func validateValue(a as Arg, v as string) {
         }
     }
     if (len($a.choices) > 0 and not lists.contains($a.choices, $v)) {
-        fail("argument " + argLabel($a) + ": '" + $v + "' is not one of " + strings.join($a.choices, ", "));
+        fail("argument " + argLabel($a) + ": '" + $v + "' is not one of " +
+            strings.join($a.choices, ", "));
     }
     return $v;
 }
@@ -482,8 +631,15 @@ export func parse(p as Parser, argv as list of string) {
     if (len($argv) > 1) {
         $toks = $argv[1..];
     }
-    def r as Result init Result{command: "", values: {}, lists: {}, counts: {},
-        present: {}, helpText: "", done: false};
+    def r as Result init Result{
+        command: "",
+        values: {},
+        lists: {},
+        counts: {},
+        present: {},
+        helpText: "",
+        done: false
+    };
     return run($p, $toks, $r);
 }
 

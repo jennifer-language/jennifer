@@ -156,7 +156,11 @@ func testChoicesAccepted() {
 
 func testSubcommand() {
     def sub as Parser init positional(parser("add", "add"), "url", "");
-    def top as Parser init command(boolFlag(parser("git", ""), "quiet", "q", ""), "add", "add a remote", $sub);
+    def top as Parser init command(
+        boolFlag(parser("git", ""), "quiet", "q", ""),
+        "add",
+        "add a remote",
+        $sub);
     def r as Result init parse($top, ["prog", "-q", "add", "http://x"]);
     testing.assertEqual($r.command, "add");
     testing.assertEqual(asString($r, "url"), "http://x");
@@ -237,10 +241,32 @@ func testFindLookups() {
 }
 
 func testArgLabel() {
-    def fa as Arg init Arg{name: "name", short: "n", kind: "flag", typ: "string", action: "store",
-        fallback: "", hasDefault: false, required: false, nargs: "", choices: [], help: ""};
-    def pa as Arg init Arg{name: "target", short: "", kind: "positional", typ: "string", action: "store",
-        fallback: "", hasDefault: false, required: false, nargs: "", choices: [], help: ""};
+    def fa as Arg init Arg{
+        name: "name",
+        short: "n",
+        kind: "flag",
+        typ: "string",
+        action: "store",
+        fallback: "",
+        hasDefault: false,
+        required: false,
+        nargs: "",
+        choices: [],
+        help: ""
+    };
+    def pa as Arg init Arg{
+        name: "target",
+        short: "",
+        kind: "positional",
+        typ: "string",
+        action: "store",
+        fallback: "",
+        hasDefault: false,
+        required: false,
+        nargs: "",
+        choices: [],
+        help: ""
+    };
     testing.assertEqual(argLabel($fa), "--name");
     testing.assertEqual(argLabel($pa), "target");
 }
@@ -329,8 +355,12 @@ func testAccessorsAbsent() {
 
 # --- subcommand dispatch ---
 
-func cmdAdd(r as Result) { return "added:" + asString($r, "name"); }
-func cmdRemove(r as Result) { return "removed"; }
+func cmdAdd(r as Result) {
+    return "added:" + asString($r, "name");
+}
+func cmdRemove(r as Result) {
+    return "removed";
+}
 
 func twoCmdParser() {
     def p as Parser init parser("tool", "");

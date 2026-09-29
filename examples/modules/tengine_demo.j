@@ -14,7 +14,10 @@ use json;
 import "../../modules/tengine.j" as tengine;
 
 def set as tengine.Set init tengine.newSet();
-$set = tengine.add($set, "base", "<h1>\{\{ .site | title \}\}</h1>\n\{\{ template \"content\" . \}\}");
+$set = tengine.add(
+    $set,
+    "base",
+    "<h1>\{\{ .site | title \}\}</h1>\n\{\{ template \"content\" . \}\}");
 $set = tengine.add(
     $set,
     "page",

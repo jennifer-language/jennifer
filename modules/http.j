@@ -1357,7 +1357,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
                 try {
                     dechunk(sliceBytes($full, $bodyStart, len($full)));
                     return $full;
-                } catch (e) {   # lint-disable: L103
+                } catch (e) { # lint-disable: L103
                     # Gate passed on a false positive (chunk data ending in
                     # CRLFCRLF): keep reading. The error is intentionally
                     # swallowed - an incomplete body simply loops for more bytes.

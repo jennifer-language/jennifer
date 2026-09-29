@@ -58,8 +58,6 @@ export def struct Response {
 
 # --- pure helpers (private + exported) -----------------------------
 
-
-
 # joinUrl joins a base URL and a path with exactly one slash between them. An
 # already-absolute path (a full http(s):// URL, e.g. a Link-header "next") is
 # returned as-is, so pagination can feed back a server-supplied absolute URL.
@@ -419,7 +417,11 @@ func decodeOk(fn as string, r as Response) {
  * @return {list of json.Value} the decoded body of each page, in order
  * @throws {Error} kind "rest" on a non-2xx page
  */
-export func paginate(c as Client, path as string, query as map of string to string, maxPages as int) {
+export func paginate(
+    c as Client,
+    path as string,
+    query as map of string to string,
+    maxPages as int) {
     def pages as list of json.Value init [];
     def nextPath as string init $path;
     def nextQuery as map of string to string init $query;

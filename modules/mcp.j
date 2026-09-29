@@ -180,12 +180,18 @@ export func server(name as string, version as string) {
  * @return {Server} a server with the tool added
  */
 export func addTool(
-    server as Server, name as string, description as string,
-    inputSchema as json.Value, handler as func) {
+    server as Server,
+    name as string,
+    description as string,
+    inputSchema as json.Value,
+    handler as func) {
     def s as Server init $server;
     def t as Tool init Tool{
-        name: $name, description: $description,
-        handler: $handler, inputSchema: $inputSchema};
+        name: $name,
+        description: $description,
+        handler: $handler,
+        inputSchema: $inputSchema
+    };
     def ts as list of Tool init $s.tools;
     $ts[] = $t;
     $s.tools = $ts;
@@ -203,12 +209,20 @@ export func addTool(
  * @return {Server} a server with the resource added
  */
 export func addResource(
-    server as Server, uri as string, name as string, description as string,
-    mimeType as string, handler as func) {
+    server as Server,
+    uri as string,
+    name as string,
+    description as string,
+    mimeType as string,
+    handler as func) {
     def s as Server init $server;
     def r as Resource init Resource{
-        uri: $uri, name: $name, description: $description,
-        mimeType: $mimeType, handler: $handler};
+        uri: $uri,
+        name: $name,
+        description: $description,
+        mimeType: $mimeType,
+        handler: $handler
+    };
     def rs as list of Resource init $s.resources;
     $rs[] = $r;
     $s.resources = $rs;
@@ -227,12 +241,18 @@ export func addResource(
  * @return {Server} a server with the prompt added
  */
 export func addPrompt(
-    server as Server, name as string, description as string,
-    arguments as list of PromptArg, handler as func) {
+    server as Server,
+    name as string,
+    description as string,
+    arguments as list of PromptArg,
+    handler as func) {
     def s as Server init $server;
     def p as Prompt init Prompt{
-        name: $name, description: $description,
-        arguments: $arguments, handler: $handler};
+        name: $name,
+        description: $description,
+        arguments: $arguments,
+        handler: $handler
+    };
     def ps as list of Prompt init $s.prompts;
     $ps[] = $p;
     $s.prompts = $ps;
@@ -273,8 +293,11 @@ export func schema() {
  * @return {json.Value} the extended schema
  */
 export func property(
-    schema as json.Value, name as string, jsonType as string,
-    description as string, required as bool) {
+    schema as json.Value,
+    name as string,
+    jsonType as string,
+    description as string,
+    required as bool) {
     def s as json.Value init $schema;
     def prop as json.Value init json.map();
     $prop = json.set($prop, "/type", $jsonType);
@@ -335,33 +358,15 @@ export func handle(server as Server, requestBody as string) {
 # returns the encoded reply. Split out of `handle` so the router is one place.
 func route(server as Server, method as string, params as json.Value, id as json.Value) {
     match ($method) {
-        when "initialize" {
-            return encodeResult($id, initializeResult($server));
-        }
-        when "ping" {
-            return encodeResult($id, json.map());
-        }
-        when "tools/list" {
-            return encodeResult($id, toolsListResult($server));
-        }
-        when "tools/call" {
-            return encodeResult($id, toolsCallResult($server, $params));
-        }
-        when "resources/list" {
-            return encodeResult($id, resourcesListResult($server));
-        }
-        when "resources/read" {
-            return resourcesReadReply($server, $params, $id);
-        }
-        when "prompts/list" {
-            return encodeResult($id, promptsListResult($server));
-        }
-        when "prompts/get" {
-            return promptsGetReply($server, $params, $id);
-        }
-        else {
-            return encodeError($id, METHOD_NOT_FOUND, "Method not found");
-        }
+        when "initialize" { return encodeResult($id, initializeResult($server)); }
+        when "ping" { return encodeResult($id, json.map()); }
+        when "tools/list" { return encodeResult($id, toolsListResult($server)); }
+        when "tools/call" { return encodeResult($id, toolsCallResult($server, $params)); }
+        when "resources/list" { return encodeResult($id, resourcesListResult($server)); }
+        when "resources/read" { return resourcesReadReply($server, $params, $id); }
+        when "prompts/list" { return encodeResult($id, promptsListResult($server)); }
+        when "prompts/get" { return promptsGetReply($server, $params, $id); }
+        else { return encodeError($id, METHOD_NOT_FOUND, "Method not found"); }
     }
 }
 
@@ -865,13 +870,19 @@ func stdioCall(argv as list of string, method as string, params as json.Value) {
         throw Error{
             kind: "mcp",
             message: "mcp: cannot run the stdio server: " + $e.message,
-            file: "", line: 0, col: 0};
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     if ($res.exitCode != 0) {
         throw Error{
             kind: "mcp",
             message: "mcp: stdio server exited with code " + convert.toString($res.exitCode),
-            file: "", line: 0, col: 0};
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     return stdioReply($res.stdout, $opId);
 }
@@ -900,7 +911,10 @@ func stdioReply(stdout as string, opId as int) {
                 throw Error{
                     kind: "mcp",
                     message: "mcp error " + convert.toString($code) + ": " + $msg,
-                    file: "", line: 0, col: 0};
+                    file: "",
+                    line: 0,
+                    col: 0
+                };
             }
             return json.get($reply, "/result");
         }
@@ -909,5 +923,8 @@ func stdioReply(stdout as string, opId as int) {
         kind: "mcp",
         message: "mcp: no reply for request id " + convert.toString($opId) +
             " from the stdio server",
-        file: "", line: 0, col: 0};
+        file: "",
+        line: 0,
+        col: 0
+    };
 }

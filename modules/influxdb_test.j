@@ -146,7 +146,8 @@ func testBuildWriteV2() {
     def c as Client init client2("http://localhost:8086", "myorg", "mybucket", "mytoken");
     def p as Point init field(tag(point("cpu"), "host", "server01"), "value", 0.64);
     def req as Req init buildWrite($c, line($p));
-    testing.assertEqual($req.url,
+    testing.assertEqual(
+        $req.url,
         "http://localhost:8086/api/v2/write?org=myorg&bucket=mybucket&precision=ns");
     testing.assertEqual($req.contentType, "text/plain; charset=utf-8");
     testing.assertEqual($req.headers["Authorization"], "Token mytoken");
@@ -186,7 +187,8 @@ func testBuildFluxV2() {
 func testBuildQueryV1() {
     def c as Client init client("http://localhost:8086", "metrics");
     def req as Req init buildQuery($c, "SELECT * FROM cpu");
-    testing.assertEqual($req.url,
+    testing.assertEqual(
+        $req.url,
         "http://localhost:8086/query?db=metrics&q=SELECT%20%2A%20FROM%20cpu");
     testing.assertEqual($req.contentType, "application/x-www-form-urlencoded");
     testing.assertEqual($req.body, "");

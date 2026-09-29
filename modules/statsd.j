@@ -97,7 +97,13 @@ func tagsSuffix(tags as map of string to string) {
 
 # buildLine is the pure, network-free line builder: "[prefix.]name:value|type"
 # plus an optional "|@rate" then "|#tags". Unit-tested directly by the overlay.
-func buildLine(prefix as string, name as string, value as string, kind as string, rate as float, tags as map of string to string) {
+func buildLine(
+    prefix as string,
+    name as string,
+    value as string,
+    kind as string,
+    rate as float,
+    tags as map of string to string) {
     return formatLine($prefix, $name, $value, $kind) + rateSuffix($rate) + tagsSuffix($tags);
 }
 
@@ -192,7 +198,11 @@ func checkTag(key as string, value as string) {
 
 # validateMetric runs every wire-line check for one metric: the prefix and name
 # (name charset), the value (no separators), and each tag key / value.
-func validateMetric(prefix as string, name as string, value as string, tags as map of string to string) {
+func validateMetric(
+    prefix as string,
+    name as string,
+    value as string,
+    tags as map of string to string) {
     if (len($prefix) > 0) {
         checkName($prefix);
     }
@@ -205,7 +215,13 @@ func validateMetric(prefix as string, name as string, value as string, tags as m
 
 # emitFull validates, builds, and sends one metric datagram with an optional
 # sample rate and tag set (fire-and-forget).
-func emitFull(c as Client, name as string, value as string, kind as string, rate as float, tags as map of string to string) {
+func emitFull(
+    c as Client,
+    name as string,
+    value as string,
+    kind as string,
+    rate as float,
+    tags as map of string to string) {
     validateMetric($c.prefix, $name, $value, $tags);
     def line as string init buildLine($c.prefix, $name, $value, $kind, $rate, $tags);
     net.sendTo($c.socket, $c.address, convert.bytesFromString($line, "utf-8"));
@@ -349,7 +365,11 @@ export func timingRate(c as Client, name as string, ms as int, rate as float) {
  * @param value {int} the counter delta
  * @param tags {map of string to string} tags rendered as "|#k:v,..." (insertion order)
  */
-export func countTagged(c as Client, name as string, value as int, tags as map of string to string) {
+export func countTagged(
+    c as Client,
+    name as string,
+    value as int,
+    tags as map of string to string) {
     emitFull($c, $name, convert.toString($value), "c", 1.0, $tags);
 }
 
@@ -382,7 +402,11 @@ export func decrementTagged(c as Client, name as string, tags as map of string t
  * @param value {int} the gauge value
  * @param tags {map of string to string} tags rendered as "|#k:v,..." (insertion order)
  */
-export func gaugeTagged(c as Client, name as string, value as int, tags as map of string to string) {
+export func gaugeTagged(
+    c as Client,
+    name as string,
+    value as int,
+    tags as map of string to string) {
     if ($value < 0) {
         emitFull($c, $name, "0", "g", 1.0, $tags);
     }
@@ -409,7 +433,11 @@ export func timingTagged(c as Client, name as string, ms as int, tags as map of 
  * @param value {string} the set member
  * @param tags {map of string to string} tags rendered as "|#k:v,..." (insertion order)
  */
-export func setTagged(c as Client, name as string, value as string, tags as map of string to string) {
+export func setTagged(
+    c as Client,
+    name as string,
+    value as string,
+    tags as map of string to string) {
     emitFull($c, $name, $value, "s", 1.0, $tags);
 }
 

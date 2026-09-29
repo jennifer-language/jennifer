@@ -14,7 +14,10 @@ use sql;
 # A three-column schema in a chosen dialect.
 func usersSchema(dialect as Dialect) {
     return column(
-        column(column(schema("users", "id", $dialect), "id", ColumnKind.Int), "name", ColumnKind.String),
+        column(
+            column(schema("users", "id", $dialect), "id", ColumnKind.Int),
+            "name",
+            ColumnKind.String),
         "age",
         ColumnKind.Int);
 }
@@ -60,7 +63,9 @@ func testWhereMysqlPlaceholders() {
 
 func testOrderLimitOffset() {
     def q as Query init offset(
-        limit(orderBy(orderBy(from(usersSchema(Dialect.Postgres)), "age", "desc"), "name", "asc"), 10),
+        limit(
+            orderBy(orderBy(from(usersSchema(Dialect.Postgres)), "age", "desc"), "name", "asc"),
+            10),
         20);
     testing.assertEqual(
         toSql($q).sql,
@@ -68,7 +73,11 @@ func testOrderLimitOffset() {
 }
 
 func testJoin() {
-    def q as Query init join(from(usersSchema(Dialect.Mysql)), "orders", "users.id", "orders.userId");
+    def q as Query init join(
+        from(usersSchema(Dialect.Mysql)),
+        "orders",
+        "users.id",
+        "orders.userId");
     testing.assertEqual(
         toSql($q).sql,
         "SELECT * FROM users INNER JOIN orders ON users.id = orders.userId");
@@ -185,7 +194,8 @@ func testSelectProjection() {
 }
 
 func testCountAndAggregate() {
-    testing.assertEqual(toSql(count(from(usersSchema(Dialect.Mysql)), "n")).sql,
+    testing.assertEqual(
+        toSql(count(from(usersSchema(Dialect.Mysql)), "n")).sql,
         "SELECT COUNT(*) AS n FROM users");
     testing.assertEqual(
         toSql(aggregate(from(usersSchema(Dialect.Mysql)), "SUM", "age", "total")).sql,
@@ -198,34 +208,49 @@ func testCountAndAggregate() {
 
 func testOrWhere() {
     def r as Rendered init toSql(orWhere(
-        where(from(usersSchema(Dialect.Postgres)), "age", ">", "18"), "name", "=", "ada"));
+        where(from(usersSchema(Dialect.Postgres)), "age", ">", "18"),
+        "name",
+        "=",
+        "ada"));
     testing.assertEqual($r.sql, "SELECT * FROM users WHERE age > $1 OR name = $2");
     testing.assertEqual(len($r.params), 2);
 }
 
 func testWhereIn() {
-    def r as Rendered init toSql(whereIn(from(usersSchema(Dialect.Postgres)), "id", ["1", "2", "3"]));
+    def r as Rendered init toSql(whereIn(
+        from(usersSchema(Dialect.Postgres)),
+        "id",
+        ["1", "2", "3"]));
     testing.assertEqual($r.sql, "SELECT * FROM users WHERE id IN ($1, $2, $3)");
     testing.assertEqual(len($r.params), 3);
     testing.assertEqual($r.params[2], "3");
-    testing.assertEqual(toSql(whereIn(from(usersSchema(Dialect.Mysql)), "id", ["a", "b"])).sql,
+    testing.assertEqual(
+        toSql(whereIn(from(usersSchema(Dialect.Mysql)), "id", ["a", "b"])).sql,
         "SELECT * FROM users WHERE id IN (?, ?)");
-    testing.assertEqual(toSql(whereNotIn(from(usersSchema(Dialect.Mysql)), "id", ["1"])).sql,
+    testing.assertEqual(
+        toSql(whereNotIn(from(usersSchema(Dialect.Mysql)), "id", ["1"])).sql,
         "SELECT * FROM users WHERE id NOT IN (?)");
 }
 
 # An IN condition consumes N placeholders; a following AND continues numbering.
 func testInThenAndNumbersPlaceholders() {
     def q as Query init where(
-        whereIn(from(usersSchema(Dialect.Postgres)), "id", ["1", "2"]), "age", ">", "18");
+        whereIn(from(usersSchema(Dialect.Postgres)), "id", ["1", "2"]),
+        "age",
+        ">",
+        "18");
     testing.assertEqual(toSql($q).sql, "SELECT * FROM users WHERE id IN ($1, $2) AND age > $3");
 }
 
 func testGroupByHaving() {
     def r as Rendered init toSql(having(
         groupBy(count(select(from(usersSchema(Dialect.Postgres)), ["age"]), "n"), ["age"]),
-        "COUNT", "*", ">", "5"));
-    testing.assertEqual($r.sql,
+        "COUNT",
+        "*",
+        ">",
+        "5"));
+    testing.assertEqual(
+        $r.sql,
         "SELECT age, COUNT(*) AS n FROM users GROUP BY age HAVING COUNT(*) > $1");
     testing.assertEqual($r.params[0], "5");
 }
@@ -234,8 +259,12 @@ func testGroupByHaving() {
 func testHavingParamsAfterWhere() {
     def r as Rendered init toSql(having(
         groupBy(where(from(usersSchema(Dialect.Postgres)), "age", ">", "18"), ["name"]),
-        "COUNT", "*", ">", "2"));
-    testing.assertEqual($r.sql,
+        "COUNT",
+        "*",
+        ">",
+        "2"));
+    testing.assertEqual(
+        $r.sql,
         "SELECT * FROM users WHERE age > $1 GROUP BY name HAVING COUNT(*) > $2");
     testing.assertEqual($r.params[0], "18");
     testing.assertEqual($r.params[1], "2");
@@ -274,7 +303,13 @@ func renderInjectedWhere() {
     toSql($bad);
 }
 func renderInjectedTable() {
-    createTable(Schema{table: "u; DROP TABLE x", columns: [], primaryKey: "id", dialect: Dialect.Mysql, relations: []});
+    createTable(Schema{
+        table: "u; DROP TABLE x",
+        columns: [],
+        primaryKey: "id",
+        dialect: Dialect.Mysql,
+        relations: []
+    });
 }
 func testRenderTimeValidationBlocksInjection() {
     testing.assertThrows("renderInjectedWhere", "orm");
@@ -346,16 +381,19 @@ func testCreateTableWithAttributesMysql() {
 
 func testStringDefaultEscaping() {
     def s as Schema init withDefault(
-        column(schema("t", "id", Dialect.Postgres), "note", ColumnKind.String), "it's ok");
+        column(schema("t", "id", Dialect.Postgres), "note", ColumnKind.String),
+        "it's ok");
     testing.assertContains(createTable($s), "note TEXT DEFAULT 'it''s ok'");
 }
 
 func badIntDefault() {
-    createTable(withDefault(column(schema("t", "id", Dialect.Postgres), "n", ColumnKind.Int),
+    createTable(withDefault(
+        column(schema("t", "id", Dialect.Postgres), "n", ColumnKind.Int),
         "1; DROP TABLE x"));
 }
 func badStringDefaultBackslash() {
-    createTable(withDefault(column(schema("t", "id", Dialect.Postgres), "n", ColumnKind.String),
+    createTable(withDefault(
+        column(schema("t", "id", Dialect.Postgres), "n", ColumnKind.String),
         "a\\b"));
 }
 func setterNoColumn() {
@@ -369,22 +407,31 @@ func testDefaultInjectionAndSetterGuards() {
 
 func testDdlBuilders() {
     testing.assertEqual(dropTable("users"), "DROP TABLE users");
-    testing.assertEqual(addColumn("users", "age", ColumnKind.Int, Dialect.Postgres),
+    testing.assertEqual(
+        addColumn("users", "age", ColumnKind.Int, Dialect.Postgres),
         "ALTER TABLE users ADD COLUMN age INTEGER");
     testing.assertEqual(dropColumn("users", "age"), "ALTER TABLE users DROP COLUMN age");
-    testing.assertEqual(renameColumn("users", "name", "fullName"),
+    testing.assertEqual(
+        renameColumn("users", "name", "fullName"),
         "ALTER TABLE users RENAME COLUMN name TO fullName");
-    testing.assertEqual(createIndex("idxEmail", "users", ["email"], true),
+    testing.assertEqual(
+        createIndex("idxEmail", "users", ["email"], true),
         "CREATE UNIQUE INDEX idxEmail ON users (email)");
-    testing.assertEqual(createIndex("idxName", "users", ["last", "first"], false),
+    testing.assertEqual(
+        createIndex("idxName", "users", ["last", "first"], false),
         "CREATE INDEX idxName ON users (last, first)");
     testing.assertEqual(dropIndex("idxEmail", "users", Dialect.Postgres), "DROP INDEX idxEmail");
-    testing.assertEqual(dropIndex("idxEmail", "users", Dialect.Mysql), "DROP INDEX idxEmail ON users");
-    testing.assertEqual(addForeignKey("posts", "fkAuthor", "authorId", "authors", "id"),
+    testing.assertEqual(
+        dropIndex("idxEmail", "users", Dialect.Mysql),
+        "DROP INDEX idxEmail ON users");
+    testing.assertEqual(
+        addForeignKey("posts", "fkAuthor", "authorId", "authors", "id"),
         "ALTER TABLE posts ADD CONSTRAINT fkAuthor FOREIGN KEY (authorId) REFERENCES authors (id)");
-    testing.assertEqual(dropForeignKey("posts", "fkAuthor", Dialect.Postgres),
+    testing.assertEqual(
+        dropForeignKey("posts", "fkAuthor", Dialect.Postgres),
         "ALTER TABLE posts DROP CONSTRAINT fkAuthor");
-    testing.assertEqual(dropForeignKey("posts", "fkAuthor", Dialect.Mysql),
+    testing.assertEqual(
+        dropForeignKey("posts", "fkAuthor", Dialect.Mysql),
         "ALTER TABLE posts DROP FOREIGN KEY fkAuthor");
 }
 
@@ -410,17 +457,25 @@ func testRelationBuilders() {
     testing.assertEqual($r.kind, RelationKind.HasMany);
     testing.assertEqual($r.target, "posts");
     testing.assertEqual($r.foreignKey, "authorId");
-    testing.assertEqual($r.localKey, "id");           # authors' primary key
-
-    def posts as Schema init belongsTo(schema("posts", "id", Dialect.Postgres),
-        "author", "authors", "authorId");
+    testing.assertEqual($r.localKey, "id"); # authors' primary key
+    
+    def posts as Schema init belongsTo(
+        schema("posts", "id", Dialect.Postgres),
+        "author",
+        "authors",
+        "authorId");
     def b as Relation init $posts.relations[0];
     testing.assertEqual($b.kind, RelationKind.BelongsTo);
-    testing.assertEqual($b.foreignKey, "authorId");   # on this (posts) table
-    testing.assertEqual($b.localKey, "id");           # target's key by convention
-
-    def m2m as Schema init manyToMany(schema("posts", "id", Dialect.Postgres),
-        "tags", "tags", "postTags", "postId", "tagId");
+    testing.assertEqual($b.foreignKey, "authorId"); # on this (posts) table
+    testing.assertEqual($b.localKey, "id"); # target's key by convention
+    
+    def m2m as Schema init manyToMany(
+        schema("posts", "id", Dialect.Postgres),
+        "tags",
+        "tags",
+        "postTags",
+        "postId",
+        "tagId");
     def mm as Relation init $m2m.relations[0];
     testing.assertEqual($mm.kind, RelationKind.ManyToMany);
     testing.assertEqual($mm.through, "postTags");
@@ -429,26 +484,40 @@ func testRelationBuilders() {
 }
 
 func testJoinRelationHasMany() {
-    def authors as Schema init hasMany(schema("authors", "id", Dialect.Postgres),
-        "posts", "posts", "authorId");
+    def authors as Schema init hasMany(
+        schema("authors", "id", Dialect.Postgres),
+        "posts",
+        "posts",
+        "authorId");
     def q as Query init joinRelation(from($authors), $authors, "posts");
-    testing.assertEqual(toSql($q).sql,
+    testing.assertEqual(
+        toSql($q).sql,
         "SELECT * FROM authors INNER JOIN posts ON posts.authorId = authors.id");
 }
 
 func testJoinRelationBelongsTo() {
-    def posts as Schema init belongsTo(schema("posts", "id", Dialect.Postgres),
-        "author", "authors", "authorId");
+    def posts as Schema init belongsTo(
+        schema("posts", "id", Dialect.Postgres),
+        "author",
+        "authors",
+        "authorId");
     def q as Query init joinRelation(from($posts), $posts, "author");
-    testing.assertEqual(toSql($q).sql,
+    testing.assertEqual(
+        toSql($q).sql,
         "SELECT * FROM posts INNER JOIN authors ON posts.authorId = authors.id");
 }
 
 func testJoinRelationManyToMany() {
-    def posts as Schema init manyToMany(schema("posts", "id", Dialect.Postgres),
-        "tags", "tags", "postTags", "postId", "tagId");
+    def posts as Schema init manyToMany(
+        schema("posts", "id", Dialect.Postgres),
+        "tags",
+        "tags",
+        "postTags",
+        "postId",
+        "tagId");
     def q as Query init joinRelation(from($posts), $posts, "tags");
-    testing.assertEqual(toSql($q).sql,
+    testing.assertEqual(
+        toSql($q).sql,
         "SELECT * FROM posts INNER JOIN postTags ON postTags.postId = posts.id INNER JOIN tags ON postTags.tagId = tags.id");
 }
 
@@ -467,8 +536,11 @@ func testRelationGuards() {
 # ---- eager loading (pure logic; a hand-built Result needs no DB) ----
 
 func testWithMarksRelations() {
-    def authors as Schema init hasMany(schema("authors", "id", Dialect.Postgres),
-        "posts", "posts", "authorId");
+    def authors as Schema init hasMany(
+        schema("authors", "id", Dialect.Postgres),
+        "posts",
+        "posts",
+        "authorId");
     def q as Query init with(from($authors), "posts");
     testing.assertEqual(len($q.withRelations), 1);
     testing.assertEqual($q.withRelations[0], "posts");
@@ -541,7 +613,9 @@ func testKeyColumns() {
 func testPlannedQueryCountIs1PlusR() {
     def authors as Schema init hasMany(
         hasMany(schema("authors", "id", Dialect.Postgres), "posts", "posts", "authorId"),
-        "comments", "comments", "authorId");
+        "comments",
+        "comments",
+        "authorId");
     def q as Query init with(with(from($authors), "posts"), "comments");
     def rows as list of map of string to string init [];
     def a as map of string to string init {};
@@ -586,7 +660,11 @@ func handBuiltResult() {
     $p2["title"] = "world";
     def lookup as map of string to list of map of string to string init {};
     $lookup["1"] = [$p1, $p2];
-    def rd as RelationData init RelationData{name: "posts", parentKeyColumn: "id", byParentKey: $lookup};
+    def rd as RelationData init RelationData{
+        name: "posts",
+        parentKeyColumn: "id",
+        byParentKey: $lookup
+    };
     return Result{rows: $authors, relations: [$rd]};
 }
 
@@ -613,7 +691,11 @@ func testRelatedOneAccessor() {
     $author1["name"] = "ada";
     def lookup as map of string to list of map of string to string init {};
     $lookup["1"] = [$author1];
-    def rd as RelationData init RelationData{name: "author", parentKeyColumn: "authorId", byParentKey: $lookup};
+    def rd as RelationData init RelationData{
+        name: "author",
+        parentKeyColumn: "authorId",
+        byParentKey: $lookup
+    };
     def r as Result init Result{rows: $posts, relations: [$rd]};
     testing.assertEqual(relatedOne($r, $posts[0], "author")["name"], "ada"); # matched
     testing.assertEqual(len(relatedOne($r, $posts[1], "author")), 0); # unmatched -> {}
@@ -630,8 +712,13 @@ func testEagerAccessorGuards() {
 # ---- write path (pure builders) ----
 
 func upsertSchema(dialect as Dialect) {
-    return column(column(column(schema("users", "id", $dialect), "id", ColumnKind.Int),
-        "email", ColumnKind.String), "name", ColumnKind.String);
+    return column(
+        column(
+            column(schema("users", "id", $dialect), "id", ColumnKind.Int),
+            "email",
+            ColumnKind.String),
+        "name",
+        ColumnKind.String);
 }
 
 func upsertRecord() {
@@ -644,23 +731,27 @@ func upsertRecord() {
 
 func testBuildUpsertPostgres() {
     def r as Rendered init buildUpsert(upsertSchema(Dialect.Postgres), upsertRecord(), ["id"]);
-    testing.assertEqual($r.sql,
+    testing.assertEqual(
+        $r.sql,
         "INSERT INTO users (id, email, name) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name");
     testing.assertEqual(len($r.params), 3);
 }
 
 func testBuildUpsertMysql() {
     def r as Rendered init buildUpsert(upsertSchema(Dialect.Mysql), upsertRecord(), ["id"]);
-    testing.assertEqual($r.sql,
+    testing.assertEqual(
+        $r.sql,
         "INSERT INTO users (id, email, name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE email = VALUES(email), name = VALUES(name)");
 }
 
 func testBuildUpsertNoUpdateColumns() {
     def rec as map of string to string init {};
     $rec["id"] = "1"; # only the conflict column is present
-    testing.assertContains(buildUpsert(upsertSchema(Dialect.Postgres), $rec, ["id"]).sql,
+    testing.assertContains(
+        buildUpsert(upsertSchema(Dialect.Postgres), $rec, ["id"]).sql,
         "ON CONFLICT (id) DO NOTHING");
-    testing.assertContains(buildUpsert(upsertSchema(Dialect.Mysql), $rec, ["id"]).sql,
+    testing.assertContains(
+        buildUpsert(upsertSchema(Dialect.Mysql), $rec, ["id"]).sql,
         "ON DUPLICATE KEY UPDATE id = id");
 }
 
@@ -687,8 +778,10 @@ func insertManyExtraCol() {
     $r2["id"] = "2";
     $r2["name"] = "b";
     $r2["age"] = "30"; # an extra schema column the first record lacks
-    buildInsertManyChunk(usersSchema(Dialect.Postgres),
-        presentColumns(usersSchema(Dialect.Postgres), $r1), [$r1, $r2]);
+    buildInsertManyChunk(
+        usersSchema(Dialect.Postgres),
+        presentColumns(usersSchema(Dialect.Postgres), $r1),
+        [$r1, $r2]);
 }
 func testInsertManyRejectsExtraColumns() {
     testing.assertThrows("insertManyExtraCol", "orm"); # no silent column drop
@@ -727,7 +820,9 @@ func upsertNoConflict() {
 func updateWhereInjection() {
     def bad as map of string to string init {};
     $bad["name; DROP TABLE x"] = "v";
-    buildUpdateWhere(usersSchema(Dialect.Postgres), $bad,
+    buildUpdateWhere(
+        usersSchema(Dialect.Postgres),
+        $bad,
         where(from(usersSchema(Dialect.Postgres)), "id", "=", "1"));
 }
 func testWritePathGuards() {
@@ -740,38 +835,55 @@ func testWritePathGuards() {
 # ---- filter completeness + pagination ----
 
 func testWhereNullAndNotNull() {
-    testing.assertEqual(toSql(whereNull(from(usersSchema(Dialect.Postgres)), "age")).sql,
+    testing.assertEqual(
+        toSql(whereNull(from(usersSchema(Dialect.Postgres)), "age")).sql,
         "SELECT * FROM users WHERE age IS NULL");
-    testing.assertEqual(toSql(whereNotNull(from(usersSchema(Dialect.Mysql)), "name")).sql,
+    testing.assertEqual(
+        toSql(whereNotNull(from(usersSchema(Dialect.Mysql)), "name")).sql,
         "SELECT * FROM users WHERE name IS NOT NULL");
     # an IS NULL consumes no placeholder, so a following valued condition is still $1.
-    def r as Rendered init toSql(
-        where(whereNull(from(usersSchema(Dialect.Postgres)), "age"), "name", "=", "ada"));
+    def r as Rendered init toSql(where(
+        whereNull(from(usersSchema(Dialect.Postgres)), "age"),
+        "name",
+        "=",
+        "ada"));
     testing.assertEqual($r.sql, "SELECT * FROM users WHERE age IS NULL AND name = $1");
     testing.assertEqual(len($r.params), 1);
 }
 
 func testWhereBetween() {
-    def r as Rendered init toSql(whereBetween(from(usersSchema(Dialect.Postgres)), "age", "18", "65"));
+    def r as Rendered init toSql(whereBetween(
+        from(usersSchema(Dialect.Postgres)),
+        "age",
+        "18",
+        "65"));
     testing.assertEqual($r.sql, "SELECT * FROM users WHERE age BETWEEN $1 AND $2");
     testing.assertEqual($r.params[1], "65");
-    testing.assertEqual(toSql(whereBetween(from(usersSchema(Dialect.Mysql)), "age", "1", "9")).sql,
+    testing.assertEqual(
+        toSql(whereBetween(from(usersSchema(Dialect.Mysql)), "age", "1", "9")).sql,
         "SELECT * FROM users WHERE age BETWEEN ? AND ?");
     # BETWEEN consumes two placeholders; a following condition continues at $3.
-    testing.assertEqual(toSql(
-        where(whereBetween(from(usersSchema(Dialect.Postgres)), "age", "1", "9"), "name", "=", "x")).sql,
+    testing.assertEqual(
+        toSql(where(
+            whereBetween(from(usersSchema(Dialect.Postgres)), "age", "1", "9"),
+            "name",
+            "=",
+            "x")).sql,
         "SELECT * FROM users WHERE age BETWEEN $1 AND $2 AND name = $3");
 }
 
 func testDistinct() {
-    testing.assertEqual(toSql(distinct(select(from(usersSchema(Dialect.Postgres)), ["name"]))).sql,
+    testing.assertEqual(
+        toSql(distinct(select(from(usersSchema(Dialect.Postgres)), ["name"]))).sql,
         "SELECT DISTINCT name FROM users");
 }
 
 func testPage() {
-    testing.assertEqual(toSql(page(from(usersSchema(Dialect.Postgres)), 1, 10)).sql,
+    testing.assertEqual(
+        toSql(page(from(usersSchema(Dialect.Postgres)), 1, 10)).sql,
         "SELECT * FROM users LIMIT 10 OFFSET 0");
-    testing.assertEqual(toSql(page(from(usersSchema(Dialect.Mysql)), 3, 10)).sql,
+    testing.assertEqual(
+        toSql(page(from(usersSchema(Dialect.Mysql)), 3, 10)).sql,
         "SELECT * FROM users LIMIT 10 OFFSET 20");
 }
 
@@ -791,9 +903,13 @@ func testPageGuards() {
 func testHavingNumbersAfterBetween() {
     def q as Query init having(
         groupBy(whereBetween(from(usersSchema(Dialect.Postgres)), "age", "18", "65"), ["name"]),
-        "COUNT", "*", ">", "2");
+        "COUNT",
+        "*",
+        ">",
+        "2");
     def r as Rendered init toSql($q);
-    testing.assertEqual($r.sql,
+    testing.assertEqual(
+        $r.sql,
         "SELECT * FROM users WHERE age BETWEEN $1 AND $2 GROUP BY name HAVING COUNT(*) > $3");
     testing.assertEqual($r.params[2], "2");
 }

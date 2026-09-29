@@ -313,8 +313,7 @@ func emptyBytes() {
 func encodeCommandBytes(args as list of bytes) {
     def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
     def parts as list of bytes init [];
-    $parts[] = convert.bytesFromString(
-        "*" + convert.toString(len($args)) + "\r\n", "utf-8");
+    $parts[] = convert.bytesFromString("*" + convert.toString(len($args)) + "\r\n", "utf-8");
     for (def arg in $args) {
         def hdr as string init "$" + convert.toString(len($arg)) + "\r\n";
         $parts[] = convert.bytesFromString($hdr, "utf-8");
@@ -513,7 +512,13 @@ func dial(opts as Options) {
         when Tls { return net.connectTLS($addr, DEFAULT_TIMEOUT_MS); }
         when None { return net.connect($addr, DEFAULT_TIMEOUT_MS); }
         when Starttls {
-            throw Error{kind: "redis", message: "redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "redis",
+                message: "redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
 }

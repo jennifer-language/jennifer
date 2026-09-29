@@ -301,17 +301,15 @@ func testFilenameNameFallback() {
 # A text body declaring a non-UTF-8 charset is decoded from that charset, not
 # force-read as UTF-8 (which would have mangled the high bytes).
 func testDecodeLatin1Body() {
-    def p as Part init parse(
-        "Content-Type: text/plain; charset=iso-8859-1\r\n" +
-            "Content-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 r=E9sum=E9\r\n");
+    def p as Part init parse("Content-Type: text/plain; charset=iso-8859-1\r\n" +
+        "Content-Transfer-Encoding: quoted-printable\r\n\r\ncaf=E9 r=E9sum=E9\r\n");
     testing.assertEqual(strings.trim(body($p)), "café résumé");
 }
 
 func testDecodeWindows1252Body() {
     # 0x92 is a right single quote in Windows-1252 (undefined in Latin-1).
-    def p as Part init parse(
-        "Content-Type: text/plain; charset=windows-1252\r\n" +
-            "Content-Transfer-Encoding: quoted-printable\r\n\r\nit=92s\r\n");
+    def p as Part init parse("Content-Type: text/plain; charset=windows-1252\r\n" +
+        "Content-Transfer-Encoding: quoted-printable\r\n\r\nit=92s\r\n");
     testing.assertEqual(strings.trim(body($p)), "it’s");
 }
 
@@ -346,7 +344,9 @@ func testGetParamExactMatch() {
 
 func testPctRoundTrip() {
     testing.assertEqual(pctEncode("café.txt"), "caf%C3%A9.txt");
-    testing.assertEqual(convert.stringFromBytes(pctDecodeBytes("caf%C3%A9.txt"), "utf-8"), "café.txt");
+    testing.assertEqual(
+        convert.stringFromBytes(pctDecodeBytes("caf%C3%A9.txt"), "utf-8"),
+        "café.txt");
     testing.assertEqual(hexByte(0xE9), "E9");
 }
 
@@ -363,32 +363,28 @@ func testStripExtPrefix() {
 # --- M23.6: RFC 2231 filenames (decode) --------------------------------------
 
 func testFilenameExtended() {
-    def p as Part init parse(
-        "Content-Type: image/png\r\n" +
-            "Content-Disposition: attachment; filename*=UTF-8''caf%C3%A9.txt\r\n\r\n");
+    def p as Part init parse("Content-Type: image/png\r\n" +
+        "Content-Disposition: attachment; filename*=UTF-8''caf%C3%A9.txt\r\n\r\n");
     testing.assertEqual(filename($p), "café.txt");
     testing.assertTrue(isAttachment($p));
 }
 
 func testFilenameContinuedPlain() {
-    def p as Part init parse(
-        "Content-Type: application/octet-stream\r\n" +
-            "Content-Disposition: attachment; filename*0=\"a very long \"; filename*1=\"name.dat\"\r\n\r\n");
+    def p as Part init parse("Content-Type: application/octet-stream\r\n" +
+        "Content-Disposition: attachment; filename*0=\"a very long \"; filename*1=\"name.dat\"\r\n\r\n");
     testing.assertEqual(filename($p), "a very long name.dat");
 }
 
 func testFilenameContinuedExtended() {
-    def p as Part init parse(
-        "Content-Type: application/octet-stream\r\n" +
-            "Content-Disposition: attachment; filename*0*=UTF-8''%E2%82%AC%20; filename*1*=rates.txt\r\n\r\n");
+    def p as Part init parse("Content-Type: application/octet-stream\r\n" +
+        "Content-Disposition: attachment; filename*0*=UTF-8''%E2%82%AC%20; filename*1*=rates.txt\r\n\r\n");
     testing.assertEqual(filename($p), "€ rates.txt");
 }
 
 func testFilenamePrefersDisposition() {
     # filename in the disposition wins over a name= in the content type.
-    def p as Part init parse(
-        "Content-Type: image/png; name=\"ct.png\"\r\n" +
-            "Content-Disposition: attachment; filename=\"disp.png\"\r\n\r\n");
+    def p as Part init parse("Content-Type: image/png; name=\"ct.png\"\r\n" +
+        "Content-Disposition: attachment; filename=\"disp.png\"\r\n\r\n");
     testing.assertEqual(filename($p), "disp.png");
 }
 
@@ -422,16 +418,14 @@ func testAsciiFilenameEscapesRoundTrip() {
 # A quoted filename holding both an escaped quote and a semicolon must not be
 # split at that inner semicolon (the `;` is inside the quoted-string).
 func testQuotedFilenameWithSemicolon() {
-    def p as Part init parse(
-        "Content-Type: application/octet-stream\r\n" +
-            "Content-Disposition: attachment; filename=\"a\\\";b.txt\"; size=1\r\n\r\n");
+    def p as Part init parse("Content-Type: application/octet-stream\r\n" +
+        "Content-Disposition: attachment; filename=\"a\\\";b.txt\"; size=1\r\n\r\n");
     testing.assertEqual(filename($p), "a\";b.txt");
 }
 
 # The extended form also decodes a non-UTF-8 charset (Latin-1 here).
 func testFilenameExtendedLatin1() {
-    def p as Part init parse(
-        "Content-Type: image/png\r\n" +
-            "Content-Disposition: attachment; filename*=iso-8859-1'en'caf%E9.txt\r\n\r\n");
+    def p as Part init parse("Content-Type: image/png\r\n" +
+        "Content-Disposition: attachment; filename*=iso-8859-1'en'caf%E9.txt\r\n\r\n");
     testing.assertEqual(filename($p), "café.txt");
 }

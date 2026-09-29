@@ -83,14 +83,18 @@ $api = webapi.limiter($api, countHit);
 
 $api = webapi.get($api, "/deck/:name", getDeck, webapi.public());
 $api = webapi.get($api, "/decks", listDecks, webapi.public());
-$api = webapi.post($api, "/publish", publish, webapi.Spec{
-    summary: "publish a deck version",
-    auth: webapi.Auth.Bearer,
-    scopes: ["publish"],
-    rules: {"tag": [validate.required(), validate.maxLen(16)]},
-    rateLimit: 2,
-    produces: webapi.Produces.Json
-});
+$api = webapi.post(
+    $api,
+    "/publish",
+    publish,
+    webapi.Spec{
+        summary: "publish a deck version",
+        auth: webapi.Auth.Bearer,
+        scopes: ["publish"],
+        rules: {"tag": [validate.required(), validate.maxLen(16)]},
+        rateLimit: 2,
+        produces: webapi.Produces.Json
+    });
 $api = webapi.feature($api, "publish-deck");
 
 def app as web.App init web.new();
@@ -103,7 +107,9 @@ io.printf("discovery: %s\n", json.encode(webapi.discovery($api, "jennifer-regist
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
 def base as string init "http://" + httpd.address($srv);
-def server as task of null init spawn { web.serveOn($app, $srv); };
+def server as task of null init spawn {
+    web.serveOn($app, $srv);
+};
 
 def h as map of string to string init {};
 def admin as map of string to string init {"Authorization": "Bearer admin-token"};
@@ -130,7 +136,11 @@ io.printf("POST /v1/publish (ok)    -> %d %s\n", $okr.status, $okr.body);
 def dupe as http.Response init http.post($base + "/v1/publish", "application/json", $body, $admin);
 io.printf("POST /v1/publish (2nd)   -> %d\n", $dupe.status);
 
-def limited as http.Response init http.post($base + "/v1/publish", "application/json", $body, $admin);
+def limited as http.Response init http.post(
+    $base + "/v1/publish",
+    "application/json",
+    $body,
+    $admin);
 io.printf("POST /v1/publish (3rd)   -> %d %s (rate limited)\n", $limited.status, $limited.body);
 
 httpd.shutdown($srv);

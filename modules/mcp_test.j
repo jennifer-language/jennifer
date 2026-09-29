@@ -58,16 +58,19 @@ func buildServer() {
     $s = addTool($s, "add", "add two ints", schema(), addTool2);
     $s = addTool($s, "boom", "always throws", schema(), boomTool);
     $s = addResource($s, "file:///readme", "readme", "the readme", "text/plain", readmeResource);
-    $s = addPrompt($s, "greet", "a greeting", [promptArg("who", "who to greet", true)], greetingPrompt);
+    $s = addPrompt(
+        $s,
+        "greet",
+        "a greeting",
+        [promptArg("who", "who to greet", true)],
+        greetingPrompt);
     return $s;
 }
 
 # --- schema builder -----------------------------------------------------------
 
 func testSchemaSkeleton() {
-    testing.assertEqual(
-        json.encode(schema()),
-        '{"type":"object","properties":{},"required":[]}');
+    testing.assertEqual(json.encode(schema()), '{"type":"object","properties":{},"required":[]}');
 }
 
 func testSchemaProperty() {
@@ -109,21 +112,27 @@ func testToolsList() {
 func testToolsCallString() {
     # a string handler return becomes the text content verbatim
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"echo","arguments":{"text":"hi"}},"id":4}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"echo","arguments":{"text":"hi"}},"id":4}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"hi"}],"isError":false},"id":4}');
 }
 
 func testToolsCallJsonValue() {
     # a json.Value handler return is JSON-encoded into the text content
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}},"id":5}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"add","arguments":{"a":2,"b":3}},"id":5}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"sum\":5}"}],"isError":false},"id":5}');
 }
 
 func testToolsCallUnknownIsToolError() {
     # an unknown tool is a tool error (isError true), not a JSON-RPC error
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"nope","arguments":{}},"id":6}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"nope","arguments":{}},"id":6}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Unknown tool: nope"}],"isError":true},"id":6}');
 }
 
@@ -131,7 +140,9 @@ func testToolsCallThrowIsToolError() {
     # a throwing handler is a tool error; the thrown message ("kaboom") stays
     # server-side and never reaches the wire
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"boom","arguments":{}},"id":7}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"boom","arguments":{}},"id":7}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Tool execution failed"}],"isError":true},"id":7}');
 }
 
@@ -140,7 +151,9 @@ func testUnregisteredToolNotDispatchable() {
     # under that name cannot be reached by naming it as the tool; only the
     # registered allow-list name ("echo") dispatches. So echoTool is unknown.
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"echoTool","arguments":{"text":"hi"}},"id":8}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"echoTool","arguments":{"text":"hi"}},"id":8}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Unknown tool: echoTool"}],"isError":true},"id":8}');
 }
 
@@ -154,13 +167,17 @@ func testResourcesList() {
 
 func testResourcesRead() {
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":"file:///readme"},"id":10}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":"file:///readme"},"id":10}'),
         '{"jsonrpc":"2.0","result":{"contents":[{"uri":"file:///readme","mimeType":"text/plain","text":"hello from file:///readme"}]},"id":10}');
 }
 
 func testResourcesReadUnknown() {
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":"file:///nope"},"id":11}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":"file:///nope"},"id":11}'),
         '{"jsonrpc":"2.0","error":{"code":-32602,"message":"Resource not found"},"id":11}');
 }
 
@@ -191,13 +208,17 @@ func testPromptNoArgsOmitsArguments() {
 
 func testPromptsGet() {
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":"greet","arguments":{"who":"ada"}},"id":13}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":"greet","arguments":{"who":"ada"}},"id":13}'),
         '{"jsonrpc":"2.0","result":{"description":"a greeting","messages":[{"role":"user","content":{"type":"text","text":"hi ada"}}]},"id":13}');
 }
 
 func testPromptsGetUnknown() {
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":"nope","arguments":{}},"id":14}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":"nope","arguments":{}},"id":14}'),
         '{"jsonrpc":"2.0","error":{"code":-32602,"message":"Prompt not found"},"id":14}');
 }
 
@@ -212,9 +233,7 @@ func testNotificationNoReply() {
 
 func testIdlessRequestIsNotification() {
     # a request with no id owes no reply, even for a real method
-    testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"ping"}'),
-        "");
+    testing.assertEqual(handle(buildServer(), '{"jsonrpc":"2.0","method":"ping"}'), "");
 }
 
 func testUnknownMethod() {
@@ -237,19 +256,25 @@ func testParseError() {
 func testToolsCallNonStringNameNoCrash() {
     # a numeric tool name -> a clean "unknown tool" tool error, not a crash
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":{"name":123},"id":20}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":123},"id":20}'),
         '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Unknown tool: "}],"isError":true},"id":20}');
 }
 
 func testResourcesReadNonStringUriNoCrash() {
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":42},"id":21}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"resources/read","params":{"uri":42},"id":21}'),
         '{"jsonrpc":"2.0","error":{"code":-32602,"message":"Resource not found"},"id":21}');
 }
 
 func testPromptsGetNonStringNameNoCrash() {
     testing.assertEqual(
-        handle(buildServer(), '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":true},"id":22}'),
+        handle(
+            buildServer(),
+            '{"jsonrpc":"2.0","method":"prompts/get","params":{"name":true},"id":22}'),
         '{"jsonrpc":"2.0","error":{"code":-32602,"message":"Prompt not found"},"id":22}');
 }
 

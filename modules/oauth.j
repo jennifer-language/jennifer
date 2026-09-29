@@ -351,7 +351,11 @@ export func google(clientId as string, clientSecret as string, scope as string) 
  * @param scope {string} the space-separated requested scopes
  * @return {Config} a Config wired to the tenant's endpoints
  */
-export func microsoft(tenant as string, clientId as string, clientSecret as string, scope as string) {
+export func microsoft(
+    tenant as string,
+    clientId as string,
+    clientSecret as string,
+    scope as string) {
     def base as string init "https://login.microsoftonline.com/" + $tenant + "/oauth2/v2.0";
     return Config{
         tokenUrl: $base + "/token",

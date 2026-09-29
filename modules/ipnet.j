@@ -393,7 +393,10 @@ export func parse(cidr as string) {
     if ($prefix > $maxp) {
         fail("prefix out of range 0.." + convert.toString($maxp) + ": " + $cidr);
     }
-    def masked as Address init Address{version: $raw.version, octets: applyMask($raw.octets, $prefix)};
+    def masked as Address init Address{
+        version: $raw.version,
+        octets: applyMask($raw.octets, $prefix)
+    };
     # Fold a v4-mapped IPv6 block down to v4 only when it lies wholly inside
     # ::ffff:0:0/96 (prefix >= 96), translating the prefix by the 96-bit offset.
     if ($raw.version == 6 and $prefix >= 96) {
@@ -567,7 +570,7 @@ func decBytes(octets as bytes) {
     def borrow as int init 1;
     def j as int init len($out) - 1;
     while ($j >= 0 and $borrow > 0) {
-        def v as int init $out[$j] - $borrow;
+        def v as int init $out[$j] -$borrow;
         if ($v < 0) {
             $out[$j] = $v + 256;
             $borrow = 1;
@@ -710,7 +713,8 @@ export func lastUsable(net as Network) {
 export func hosts(net as Network) {
     def cnt as int init hostCount($net);
     if ($cnt > 65536) {
-        fail("network has too many addresses to list (" + convert.toString($cnt) + "); iterate with next()");
+        fail("network has too many addresses to list (" + convert.toString($cnt) +
+            "); iterate with next()");
     }
     def out as list of Address init [];
     def cur as Address init firstUsable($net);
@@ -748,7 +752,8 @@ func strideAdd(octets as bytes, prefix as int) {
 export func split(net as Network, newPrefix as int) {
     def bits as int init bitsFor($net.addr);
     if ($newPrefix < $net.prefix or $newPrefix > $bits) {
-        fail("split prefix must be between " + convert.toString($net.prefix) + " and " + convert.toString($bits));
+        fail("split prefix must be between " + convert.toString($net.prefix) + " and " +
+            convert.toString($bits));
     }
     def added as int init $newPrefix - $net.prefix;
     if ($added > 16) {
@@ -759,7 +764,10 @@ export func split(net as Network, newPrefix as int) {
     def cur as bytes init copyBytes($net.addr.octets);
     def i as int init 0;
     while ($i < $count) {
-        $out[] = Network{addr: Address{version: $net.addr.version, octets: $cur}, prefix: $newPrefix};
+        $out[] = Network{
+            addr: Address{version: $net.addr.version, octets: $cur},
+            prefix: $newPrefix
+        };
         if ($i + 1 < $count) {
             $cur = strideAdd($cur, $newPrefix);
         }
@@ -876,7 +884,10 @@ func siblings(a as Network, b as Network) {
 
 func parentOf(nw as Network) {
     return Network{
-        addr: Address{version: $nw.addr.version, octets: applyMask($nw.addr.octets, $nw.prefix - 1)},
+        addr: Address{
+            version: $nw.addr.version,
+            octets: applyMask($nw.addr.octets, $nw.prefix - 1)
+        },
         prefix: $nw.prefix - 1
     };
 }
@@ -1011,7 +1022,9 @@ export func scope(addr as Address) {
         if (inCidr($a, "10.0.0.0/8") or inCidr($a, "172.16.0.0/12") or inCidr($a, "192.168.0.0/16")) {
             return Scope.Private;
         }
-        if (inCidr($a, "0.0.0.0/8") or inCidr($a, "100.64.0.0/10") or inCidr($a, "192.0.2.0/24") or inCidr($a, "198.51.100.0/24") or inCidr($a, "203.0.113.0/24") or inCidr($a, "192.88.99.0/24") or inCidr($a, "240.0.0.0/4")) {
+        if (inCidr($a, "0.0.0.0/8") or inCidr($a, "100.64.0.0/10") or inCidr($a, "192.0.2.0/24") or
+            inCidr($a, "198.51.100.0/24") or inCidr($a, "203.0.113.0/24") or
+            inCidr($a, "192.88.99.0/24") or inCidr($a, "240.0.0.0/4")) {
             return Scope.Reserved;
         }
         return Scope.Global;

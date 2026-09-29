@@ -12,15 +12,15 @@ use testing;
 # --- percent encode / decode ---
 
 func testEncodeUnreservedAndReserved() {
-    testing.assertEqual(encode("aZ9-._~"), "aZ9-._~");   # unreserved stays literal
+    testing.assertEqual(encode("aZ9-._~"), "aZ9-._~"); # unreserved stays literal
     testing.assertEqual(encode("a b&c=1/?#"), "a%20b%26c%3D1%2F%3F%23");
-    testing.assertEqual(encode("café"), "caf%C3%A9");    # multi-byte UTF-8
+    testing.assertEqual(encode("café"), "caf%C3%A9"); # multi-byte UTF-8
 }
 
 func testDecodeRoundTrip() {
     testing.assertEqual(decode("caf%C3%A9"), "café");
     testing.assertEqual(decode("a%20b"), "a b");
-    testing.assertEqual(decode("a+b"), "a+b");           # "+" is literal here (RFC 3986)
+    testing.assertEqual(decode("a+b"), "a+b"); # "+" is literal here (RFC 3986)
 }
 
 func badPercent() {
@@ -33,14 +33,14 @@ func testDecodeMalformedThrows() {
 # --- form encode / decode (application/x-www-form-urlencoded) ---
 
 func testFormEncodeSpaceAsPlus() {
-    testing.assertEqual(encodeForm("a b"), "a+b");        # space -> "+"
-    testing.assertEqual(encodeForm("a+b"), "a%2Bb");      # literal "+" escapes
+    testing.assertEqual(encodeForm("a b"), "a+b"); # space -> "+"
+    testing.assertEqual(encodeForm("a+b"), "a%2Bb"); # literal "+" escapes
     testing.assertEqual(encodeForm("x&y=1"), "x%26y%3D1");
 }
 
 func testFormDecode() {
-    testing.assertEqual(decodeForm("a+b"), "a b");        # "+" -> space
-    testing.assertEqual(decodeForm("a%2Bb"), "a+b");      # "%2B" -> literal "+"
+    testing.assertEqual(decodeForm("a+b"), "a b"); # "+" -> space
+    testing.assertEqual(decodeForm("a%2Bb"), "a+b"); # "%2B" -> literal "+"
     testing.assertEqual(decodeForm("caf%C3%A9"), "café");
 }
 
@@ -59,35 +59,43 @@ func testParseFullUrl() {
 }
 
 func testParseNoAuthorityAndNoPort() {
-    def m as Uri init parse("mailto:alice@example.com");    # scheme, no "//"
+    def m as Uri init parse("mailto:alice@example.com"); # scheme, no "//"
     testing.assertEqual($m.scheme, "mailto");
     testing.assertEqual($m.host, "");
     testing.assertEqual($m.path, "alice@example.com");
 
-    def h as Uri init parse("http://host/only/path");       # no port, no user
+    def h as Uri init parse("http://host/only/path"); # no port, no user
     testing.assertEqual($h.host, "host");
     testing.assertEqual($h.port, "");
     testing.assertEqual($h.path, "/only/path");
 }
 
 func testParseRelativeAndIpv6() {
-    def r as Uri init parse("/just/a/path?q=1");            # no scheme, no authority
+    def r as Uri init parse("/just/a/path?q=1"); # no scheme, no authority
     testing.assertEqual($r.scheme, "");
     testing.assertEqual($r.host, "");
     testing.assertEqual($r.path, "/just/a/path");
     testing.assertEqual($r.query, "q=1");
 
-    def v6 as Uri init parse("http://[::1]:9000/x");        # IPv6 literal host
+    def v6 as Uri init parse("http://[::1]:9000/x"); # IPv6 literal host
     testing.assertEqual($v6.host, "[::1]");
     testing.assertEqual($v6.port, "9000");
 
-    def bare as Uri init parse("http://example.com");       # authority, empty path
+    def bare as Uri init parse("http://example.com"); # authority, empty path
     testing.assertEqual($bare.host, "example.com");
     testing.assertEqual($bare.path, "");
 }
 
 func testBuildPartial() {
-    def only as Uri init Uri{scheme: "", user: "", host: "", port: "", path: "/rel", query: "", fragment: ""};
+    def only as Uri init Uri{
+        scheme: "",
+        user: "",
+        host: "",
+        port: "",
+        path: "/rel",
+        query: "",
+        fragment: ""
+    };
     testing.assertEqual(build($only), "/rel");
 }
 
@@ -97,7 +105,7 @@ func testBuildQueryEncodesAndOrders() {
     def m as map of string to string init {};
     $m["name"] = "a b";
     $m["tag"] = "x&y";
-    testing.assertEqual(buildQuery($m), "name=a+b&tag=x%26y");   # form: space -> "+", insertion order
+    testing.assertEqual(buildQuery($m), "name=a+b&tag=x%26y"); # form: space -> "+", insertion order
     def empty as map of string to string init {};
     testing.assertEqual(buildQuery($empty), "");
 }
@@ -105,12 +113,12 @@ func testBuildQueryEncodesAndOrders() {
 func testParseQuery() {
     def m as map of string to string init parseQuery("a=1&b=hello+world&c=%20x&flag");
     testing.assertEqual($m["a"], "1");
-    testing.assertEqual($m["b"], "hello world");    # "+" -> space
-    testing.assertEqual($m["c"], " x");             # "%20" -> space
-    testing.assertEqual($m["flag"], "");            # bare key -> ""
+    testing.assertEqual($m["b"], "hello world"); # "+" -> space
+    testing.assertEqual($m["c"], " x"); # "%20" -> space
+    testing.assertEqual($m["flag"], ""); # bare key -> ""
     def none as map of string to string init parseQuery("");
     testing.assertEqual(len($none), 0);
-    def dbl as map of string to string init parseQuery("a=1&&b=2");   # empty pair skipped
+    def dbl as map of string to string init parseQuery("a=1&&b=2"); # empty pair skipped
     testing.assertEqual(len($dbl), 2);
 }
 
@@ -148,7 +156,7 @@ func testResolveEdgeCases() {
 func testDotSegmentHelpers() {
     testing.assertEqual(removeDotSegments("/a/b/c/./../../g"), "/a/g");
     testing.assertEqual(removeDotSegments("mid/content=5/../6"), "mid/6");
-    testing.assertEqual(removeDotSegments("/../a"), "/a");        # ".." at root is dropped
+    testing.assertEqual(removeDotSegments("/../a"), "/a"); # ".." at root is dropped
     testing.assertEqual(removeDotSegments("a/./b"), "a/b");
     # Leading and lone dot-segment forms.
     testing.assertEqual(removeDotSegments("../a"), "a");
@@ -162,6 +170,14 @@ func testDotSegmentHelpers() {
     testing.assertEqual(indexFrom("a/b/c", "/", 2), 3);
     # mergePath edges: base with authority + empty path, and a slashless base path.
     testing.assertEqual(resolve("http://h", "rel"), "http://h/rel");
-    def noSlash as Uri init Uri{scheme: "", user: "", host: "", port: "", path: "noslash", query: "", fragment: ""};
+    def noSlash as Uri init Uri{
+        scheme: "",
+        user: "",
+        host: "",
+        port: "",
+        path: "noslash",
+        query: "",
+        fragment: ""
+    };
     testing.assertEqual(mergePath($noSlash, "x"), "x");
 }

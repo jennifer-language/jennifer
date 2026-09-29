@@ -38,7 +38,12 @@ func testEvaluatePublicProceeds() {
 
 func testEvaluateBearerWithoutIdentityIs401() {
     def spec as Spec init Spec{
-        summary: "", auth: Auth.Bearer, scopes: [], rules: {}, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.Bearer,
+        scopes: [],
+        rules: {},
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def none as Identity;
     def d as map of string to string init {};
@@ -49,7 +54,12 @@ func testEvaluateBearerWithoutIdentityIs401() {
 
 func testEvaluateBearerWithIdentityProceeds() {
     def spec as Spec init Spec{
-        summary: "", auth: Auth.Bearer, scopes: [], rules: {}, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.Bearer,
+        scopes: [],
+        rules: {},
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def d as map of string to string init {};
     def dec as Decision init evaluate($spec, idWith([]), $d);
@@ -58,7 +68,12 @@ func testEvaluateBearerWithIdentityProceeds() {
 
 func testEvaluateScopeShortfallIs403() {
     def spec as Spec init Spec{
-        summary: "", auth: Auth.Bearer, scopes: ["publish"], rules: {}, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.Bearer,
+        scopes: ["publish"],
+        rules: {},
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def d as map of string to string init {};
     def dec as Decision init evaluate($spec, idWith(["read"]), $d);
@@ -69,7 +84,12 @@ func testEvaluateScopeShortfallIs403() {
 
 func testEvaluateScopePresentProceeds() {
     def spec as Spec init Spec{
-        summary: "", auth: Auth.Bearer, scopes: ["publish"], rules: {}, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.Bearer,
+        scopes: ["publish"],
+        rules: {},
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def d as map of string to string init {};
     def dec as Decision init evaluate($spec, idWith(["read", "publish"]), $d);
@@ -81,7 +101,12 @@ func testEvaluateValidationFailsIs422() {
         "tag": [validate.required(), validate.maxLen(4)]
     };
     def spec as Spec init Spec{
-        summary: "", auth: Auth.None, scopes: [], rules: $rules, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.None,
+        scopes: [],
+        rules: $rules,
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def none as Identity;
     def bad as map of string to string init {"tag": "waytoolong"};
@@ -95,7 +120,12 @@ func testEvaluateValidationFailsIs422() {
 func testEvaluateValidationPassesProceeds() {
     def rules as map of string to list of validate.Rule init {"tag": [validate.required()]};
     def spec as Spec init Spec{
-        summary: "", auth: Auth.None, scopes: [], rules: $rules, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.None,
+        scopes: [],
+        rules: $rules,
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def none as Identity;
     def ok as map of string to string init {"tag": "v1"};
@@ -108,7 +138,12 @@ func testEvaluateAuthCheckedBeforeValidation() {
     # not 422 - so an unauthenticated caller learns nothing about the body shape.
     def rules as map of string to list of validate.Rule init {"tag": [validate.required()]};
     def spec as Spec init Spec{
-        summary: "", auth: Auth.Bearer, scopes: [], rules: $rules, rateLimit: 0, produces: Produces.Json
+        summary: "",
+        auth: Auth.Bearer,
+        scopes: [],
+        rules: $rules,
+        rateLimit: 0,
+        produces: Produces.Json
     };
     def none as Identity;
     def empty as map of string to string init {};
@@ -150,10 +185,18 @@ func buildApi() {
     $a = mount($a, 1, "/v1");
     $a = alias($a, 1);
     $a = get($a, "/deck", getDeck, public());
-    $a = post($a, "/publish", publish, Spec{
-        summary: "publish a deck", auth: Auth.Bearer, scopes: ["publish"],
-        rules: {}, rateLimit: 30, produces: Produces.Json
-    });
+    $a = post(
+        $a,
+        "/publish",
+        publish,
+        Spec{
+            summary: "publish a deck",
+            auth: Auth.Bearer,
+            scopes: ["publish"],
+            rules: {},
+            rateLimit: 30,
+            produces: Produces.Json
+        });
     return $a;
 }
 
@@ -234,8 +277,8 @@ func testDiscoveryReflectsRoutesAndMounts() {
     def s as string init json.encode($doc);
     testing.assertTrue(strings.contains($s, "jennifer-registry"));
     testing.assertTrue(strings.contains($s, "/v1"));
-    testing.assertTrue(strings.contains($s, "GET /deck"));   # a default feature label
-    testing.assertTrue(strings.contains($s, "publish"));     # from "POST /publish"
+    testing.assertTrue(strings.contains($s, "GET /deck")); # a default feature label
+    testing.assertTrue(strings.contains($s, "publish")); # from "POST /publish"
 }
 
 func testDiscoveryMarksDeprecation() {

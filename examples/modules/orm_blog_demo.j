@@ -41,15 +41,30 @@ func run(driver as string, dsn as string) {
 
     # Schemas. Explicit integer keys keep the seed relationships simple.
     def authors as orm.Schema init orm.hasMany(
-        orm.column(orm.column(orm.schema("authors", "id", $dia), "id", orm.ColumnKind.Int),
-            "name", orm.ColumnKind.String),
-        "posts", "posts", "authorId");
+        orm.column(
+            orm.column(orm.schema("authors", "id", $dia), "id", orm.ColumnKind.Int),
+            "name",
+            orm.ColumnKind.String),
+        "posts",
+        "posts",
+        "authorId");
     def posts as orm.Schema init orm.manyToMany(
-        orm.column(orm.column(orm.column(orm.schema("posts", "id", $dia), "id", orm.ColumnKind.Int),
-            "authorId", orm.ColumnKind.Int), "title", orm.ColumnKind.String),
-        "tags", "tags", "post_tags", "postId", "tagId");
+        orm.column(
+            orm.column(
+                orm.column(orm.schema("posts", "id", $dia), "id", orm.ColumnKind.Int),
+                "authorId",
+                orm.ColumnKind.Int),
+            "title",
+            orm.ColumnKind.String),
+        "tags",
+        "tags",
+        "post_tags",
+        "postId",
+        "tagId");
     def tags as orm.Schema init orm.column(
-        orm.column(orm.schema("tags", "id", $dia), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String);
+        orm.column(orm.schema("tags", "id", $dia), "id", orm.ColumnKind.Int),
+        "name",
+        orm.ColumnKind.String);
 
     # Migrate: a single migration that creates the four tables (the join table's
     # composite key is hand-written DDL - orm.createTable emits a single-column PK).
@@ -74,34 +89,51 @@ func run(driver as string, dsn as string) {
     io.printf("migrated %d\n", mig.migrate($conn, [$m1]));
 
     # Seed. insertMany writes the authors in one INSERT; upsert is idempotent.
-    orm.insertMany($sess, $authors, [rec2("id", "1", "name", "ada"), rec2("id", "2", "name", "bob")]);
+    orm.insertMany(
+        $sess,
+        $authors,
+        [rec2("id", "1", "name", "ada"), rec2("id", "2", "name", "bob")]);
     orm.upsert($sess, $authors, rec2("id", "1", "name", "Ada Lovelace"), ["id"]);
-    orm.insertMany($sess, $posts, [
-        rec3("id", "10", "authorId", "1", "title", "hello"),
-        rec3("id", "11", "authorId", "1", "title", "world"),
-        rec3("id", "12", "authorId", "2", "title", "hi")
-    ]);
-    orm.insertMany($sess, $tags, [rec2("id", "100", "name", "go"), rec2("id", "101", "name", "sql")]);
+    orm.insertMany(
+        $sess,
+        $posts,
+        [
+            rec3("id", "10", "authorId", "1", "title", "hello"),
+            rec3("id", "11", "authorId", "1", "title", "world"),
+            rec3("id", "12", "authorId", "2", "title", "hi")
+        ]);
+    orm.insertMany(
+        $sess,
+        $tags,
+        [rec2("id", "100", "name", "go"), rec2("id", "101", "name", "sql")]);
     def pt as list of map of string to string init [
         rec2("postId", "10", "tagId", "100"),
         rec2("postId", "10", "tagId", "101"),
         rec2("postId", "11", "tagId", "100")
     ];
     for (def link in $pt) {
-        sql.exec($conn, "INSERT INTO post_tags (postId, tagId) VALUES (" + $link["postId"] + ", " +
-            $link["tagId"] + ")");
+        sql.exec(
+            $conn,
+            "INSERT INTO post_tags (postId, tagId) VALUES (" + $link["postId"] + ", " +
+                $link["tagId"] + ")");
     }
 
     # Eager load: authors + their posts in 2 queries (authors, then posts IN ...).
-    def byAuthor as orm.Result init orm.load($sess, $authors,
+    def byAuthor as orm.Result init orm.load(
+        $sess,
+        $authors,
         orm.with(orm.orderBy(orm.from($authors), "id", "asc"), "posts"));
     for (def author in orm.rows($byAuthor)) {
-        io.printf("%s: %d post(s)\n", $author["name"],
+        io.printf(
+            "%s: %d post(s)\n",
+            $author["name"],
             len(orm.related($byAuthor, $author, "posts")));
     }
 
     # Many-to-many: each post's tags in 2 queries (posts, then the join query).
-    def byPost as orm.Result init orm.load($sess, $posts,
+    def byPost as orm.Result init orm.load(
+        $sess,
+        $posts,
         orm.with(orm.orderBy(orm.from($posts), "id", "asc"), "tags"));
     for (def post in orm.rows($byPost)) {
         def names as list of string init [];

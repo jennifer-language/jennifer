@@ -35,9 +35,18 @@ for (def m in $modes) {
 # across smtp / pop / imap / redis / amqp / mqtt.
 io.printf("=== used as a client Options field ===\n");
 def o as smtp.Options init smtp.Options{
-    host: "smtp.example.com", port: 587,
+    host: "smtp.example.com",
+    port: 587,
     security: transport.Security.Starttls,
-    clientName: "me.example.com", user: "me@example.com", pass: "secret",
-    auth: "", allowInsecureAuth: false};
-io.printf("  smtp to %s:%d over %s (credentials safe: %t)\n",
-    $o.host, $o.port, label($o.security), transport.encrypted($o.security));
+    clientName: "me.example.com",
+    user: "me@example.com",
+    pass: "secret",
+    auth: "",
+    allowInsecureAuth: false
+};
+io.printf(
+    "  smtp to %s:%d over %s (credentials safe: %t)\n",
+    $o.host,
+    $o.port,
+    label($o.security),
+    transport.encrypted($o.security));

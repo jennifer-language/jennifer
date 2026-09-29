@@ -134,7 +134,12 @@ func fail(msg as string) {
  * @return {Client} the configured client
  */
 export func client(host as string, community as string) {
-    return clientWith($host + ":" + convert.toString(DEFAULT_PORT), $community, VERSION2C, DEFAULT_TIMEOUT, DEFAULT_RETRIES);
+    return clientWith(
+        $host + ":" + convert.toString(DEFAULT_PORT),
+        $community,
+        VERSION2C,
+        DEFAULT_TIMEOUT,
+        DEFAULT_RETRIES);
 }
 
 /**
@@ -146,8 +151,19 @@ export func client(host as string, community as string) {
  * @param retries {int} the number of extra attempts after the first
  * @return {Client} the configured client
  */
-export func clientWith(address as string, community as string, version as int, timeoutMs as int, retries as int) {
-    return Client{address: $address, community: $community, version: $version, timeoutMs: $timeoutMs, retries: $retries};
+export func clientWith(
+    address as string,
+    community as string,
+    version as int,
+    timeoutMs as int,
+    retries as int) {
+    return Client{
+        address: $address,
+        community: $community,
+        version: $version,
+        timeoutMs: $timeoutMs,
+        retries: $retries
+    };
 }
 
 /**
@@ -339,7 +355,7 @@ export func serveOn(a as Agent, socket as net.UDPSocket, stop as channel of bool
             if (len($r.reply) > 0) {
                 net.sendTo($socket, $dg.peer, $r.reply);
             }
-        } catch (e) {  # lint-disable: L103
+        } catch (e) { # lint-disable: L103
             # A malformed request (or a transient send error) is intentionally
             # dropped, like a real agent - keep serving the next datagram.
         }
@@ -373,18 +389,10 @@ func handleRequest(mib as list of Varbind, a as Agent, data as bytes) {
         return ServeResult{reply: emptyReply(), mib: $mib};
     }
     match ($req.pduTag) {
-        when PDU_GET {
-            return respondGet($mib, $req);
-        }
-        when PDU_GETNEXT {
-            return respondGetNext($mib, $req);
-        }
-        when PDU_SET {
-            return respondSet($mib, $req);
-        }
-        else {
-            return ServeResult{reply: emptyReply(), mib: $mib};
-        }
+        when PDU_GET { return respondGet($mib, $req); }
+        when PDU_GETNEXT { return respondGetNext($mib, $req); }
+        when PDU_SET { return respondSet($mib, $req); }
+        else { return ServeResult{reply: emptyReply(), mib: $mib}; }
     }
 }
 
@@ -416,7 +424,12 @@ func respondGetNext(mib as list of Varbind, req as Message) {
             if ($req.version == VERSION1) {
                 return buildResult($mib, $req, 2, $i + 1, $req.varbinds);
             }
-            $out[] = Varbind{oid: $req.varbinds[$i].oid, type: "endOfMibView", value: "", number: 0};
+            $out[] = Varbind{
+                oid: $req.varbinds[$i].oid,
+                type: "endOfMibView",
+                value: "",
+                number: 0
+            };
         } else {
             $out[] = $mib[$nxt];
         }
@@ -443,8 +456,21 @@ func respondSet(mib as list of Varbind, req as Message) {
 
 # buildResult encodes a Response PDU echoing the request-id and pairs it with the
 # resulting MIB.
-func buildResult(mib as list of Varbind, req as Message, errStatus as int, errIndex as int, out as list of Varbind) {
-    def reply as bytes init encodeMessage($req.version, $req.community, PDU_RESPONSE, $req.requestId, $errStatus, $errIndex, $out, false);
+func buildResult(
+    mib as list of Varbind,
+    req as Message,
+    errStatus as int,
+    errIndex as int,
+    out as list of Varbind) {
+    def reply as bytes init encodeMessage(
+        $req.version,
+        $req.community,
+        PDU_RESPONSE,
+        $req.requestId,
+        $errStatus,
+        $errIndex,
+        $out,
+        false);
     return ServeResult{reply: $reply, mib: $mib};
 }
 
@@ -511,7 +537,15 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     # encoding; normalise it to one snmp-kind error like the decode path.
     def payload as bytes;
     try {
-        $payload = encodeMessage($c.version, $c.community, $pduTag, $requestId, 0, 0, $vbs, $nullValues);
+        $payload = encodeMessage(
+            $c.version,
+            $c.community,
+            $pduTag,
+            $requestId,
+            0,
+            0,
+            $vbs,
+            $nullValues);
     } catch (e) {
         if ($e.kind == "snmp") {
             throw $e;
@@ -532,10 +566,12 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     }
     def resp as Message init decodeMessage($reply);
     if ($resp.requestId != $requestId) {
-        fail("response request-id mismatch (sent " + convert.toString($requestId) + ", got " + convert.toString($resp.requestId) + ")");
+        fail("response request-id mismatch (sent " + convert.toString($requestId) + ", got " +
+            convert.toString($resp.requestId) + ")");
     }
     if ($resp.errorStatus != 0) {
-        fail("agent returned error-status " + convert.toString($resp.errorStatus) + " at index " + convert.toString($resp.errorIndex));
+        fail("agent returned error-status " + convert.toString($resp.errorStatus) + " at index " +
+            convert.toString($resp.errorIndex));
     }
     return $resp.varbinds;
 }
@@ -554,7 +590,8 @@ func exchange(c as Client, payload as bytes) {
             $attempt = $attempt + 1;
         }
     }
-    fail("no response from " + $c.address + " after " + convert.toString($c.retries + 1) + " attempt(s)");
+    fail("no response from " + $c.address + " after " + convert.toString($c.retries + 1) +
+        " attempt(s)");
 }
 
 # --- message codec (private, pure) ---
@@ -570,7 +607,15 @@ func oidsToVarbinds(oids as list of string) {
 # encodeMessage builds a complete SNMP message. nullValues true encodes each
 # binding's value as NULL (a GET / GETNEXT request); false encodes the actual
 # typed value (a SET, or a simulated response).
-func encodeMessage(version as int, community as string, pduTag as int, requestId as int, errStatus as int, errIndex as int, vbs as list of Varbind, nullValues as bool) {
+func encodeMessage(
+    version as int,
+    community as string,
+    pduTag as int,
+    requestId as int,
+    errStatus as int,
+    errIndex as int,
+    vbs as list of Varbind,
+    nullValues as bool) {
     def bindings as list of asn1.Value;
     for (def vb in $vbs) {
         def valElem as asn1.Value;
@@ -598,48 +643,27 @@ func encodeMessage(version as int, community as string, pduTag as int, requestId
 # encodeValue renders a Varbind's typed value as an asn1 element.
 func encodeValue(vb as Varbind) {
     match ($vb.type) {
-        when "null" {
-            return asn1.null();
-        }
-        when "integer" {
-            return asn1.integer($vb.number);
-        }
-        when "octetString" {
-            return asn1.octetString(convert.bytesFromString($vb.value, "utf-8"));
-        }
-        when "oid" {
-            return asn1.oid($vb.value);
-        }
-        when "counter32" {
-            return asn1.retag("application", 1, asn1.integer($vb.number));
-        }
-        when "gauge32" {
-            return asn1.retag("application", 2, asn1.integer($vb.number));
-        }
-        when "timeTicks" {
-            return asn1.retag("application", 3, asn1.integer($vb.number));
-        }
-        when "counter64" {
-            return asn1.retag("application", 6, asn1.integer($vb.number));
-        }
+        when "null" { return asn1.null(); }
+        when "integer" { return asn1.integer($vb.number); }
+        when "octetString" { return asn1.octetString(convert.bytesFromString($vb.value, "utf-8")); }
+        when "oid" { return asn1.oid($vb.value); }
+        when "counter32" { return asn1.retag("application", 1, asn1.integer($vb.number)); }
+        when "gauge32" { return asn1.retag("application", 2, asn1.integer($vb.number)); }
+        when "timeTicks" { return asn1.retag("application", 3, asn1.integer($vb.number)); }
+        when "counter64" { return asn1.retag("application", 6, asn1.integer($vb.number)); }
         when "ipAddress" {
             return asn1.retag("application", 0, asn1.octetString(parseIp($vb.value)));
         }
         when "opaque" {
-            return asn1.retag("application", 4, asn1.octetString(convert.bytesFromString($vb.value, "utf-8")));
+            return asn1.retag(
+                "application",
+                4,
+                asn1.octetString(convert.bytesFromString($vb.value, "utf-8")));
         }
-        when "noSuchObject" {
-            return asn1.retag("context", 0, asn1.null());
-        }
-        when "noSuchInstance" {
-            return asn1.retag("context", 1, asn1.null());
-        }
-        when "endOfMibView" {
-            return asn1.retag("context", 2, asn1.null());
-        }
-        else {
-            fail("cannot encode SNMP value of type '" + $vb.type + "'");
-        }
+        when "noSuchObject" { return asn1.retag("context", 0, asn1.null()); }
+        when "noSuchInstance" { return asn1.retag("context", 1, asn1.null()); }
+        when "endOfMibView" { return asn1.retag("context", 2, asn1.null()); }
+        else { fail("cannot encode SNMP value of type '" + $vb.type + "'"); }
     }
 }
 
@@ -698,57 +722,34 @@ func decodeValue(oid as string, v as asn1.Value) {
                 def n as int init asn1.asInt($v);
                 return Varbind{oid: $oid, type: "integer", value: convert.toString($n), number: $n};
             }
-            when 4 {
-                return octetVarbind($oid, "octetString", asn1.asBytes($v));
-            }
-            when 6 {
-                return Varbind{oid: $oid, type: "oid", value: asn1.asOid($v), number: 0};
-            }
-            when 5 {
-                return Varbind{oid: $oid, type: "null", value: "", number: 0};
-            }
-            else {
-                return octetVarbind($oid, asn1.typeOf($v), asn1.asBytes($v));
-            }
+            when 4 { return octetVarbind($oid, "octetString", asn1.asBytes($v)); }
+            when 6 { return Varbind{oid: $oid, type: "oid", value: asn1.asOid($v), number: 0}; }
+            when 5 { return Varbind{oid: $oid, type: "null", value: "", number: 0}; }
+            else { return octetVarbind($oid, asn1.typeOf($v), asn1.asBytes($v)); }
         }
     } elseif ($cls == "application") {
         match ($num) {
             when 0 {
-                return Varbind{oid: $oid, type: "ipAddress", value: renderIp(asn1.asBytes($v)), number: 0};
+                return Varbind{
+                    oid: $oid,
+                    type: "ipAddress",
+                    value: renderIp(asn1.asBytes($v)),
+                    number: 0
+                };
             }
-            when 1 {
-                return unsignedVarbind($oid, "counter32", asn1.asBytes($v));
-            }
-            when 2 {
-                return unsignedVarbind($oid, "gauge32", asn1.asBytes($v));
-            }
-            when 3 {
-                return unsignedVarbind($oid, "timeTicks", asn1.asBytes($v));
-            }
-            when 6 {
-                return unsignedVarbind($oid, "counter64", asn1.asBytes($v));
-            }
-            when 4 {
-                return octetVarbind($oid, "opaque", asn1.asBytes($v));
-            }
-            else {
-                return octetVarbind($oid, "application", asn1.asBytes($v));
-            }
+            when 1 { return unsignedVarbind($oid, "counter32", asn1.asBytes($v)); }
+            when 2 { return unsignedVarbind($oid, "gauge32", asn1.asBytes($v)); }
+            when 3 { return unsignedVarbind($oid, "timeTicks", asn1.asBytes($v)); }
+            when 6 { return unsignedVarbind($oid, "counter64", asn1.asBytes($v)); }
+            when 4 { return octetVarbind($oid, "opaque", asn1.asBytes($v)); }
+            else { return octetVarbind($oid, "application", asn1.asBytes($v)); }
         }
     } elseif ($cls == "context") {
         match ($num) {
-            when 0 {
-                return Varbind{oid: $oid, type: "noSuchObject", value: "", number: 0};
-            }
-            when 1 {
-                return Varbind{oid: $oid, type: "noSuchInstance", value: "", number: 0};
-            }
-            when 2 {
-                return Varbind{oid: $oid, type: "endOfMibView", value: "", number: 0};
-            }
-            else {
-                return Varbind{oid: $oid, type: "context", value: "", number: 0};
-            }
+            when 0 { return Varbind{oid: $oid, type: "noSuchObject", value: "", number: 0}; }
+            when 1 { return Varbind{oid: $oid, type: "noSuchInstance", value: "", number: 0}; }
+            when 2 { return Varbind{oid: $oid, type: "endOfMibView", value: "", number: 0}; }
+            else { return Varbind{oid: $oid, type: "context", value: "", number: 0}; }
         }
     }
     return octetVarbind($oid, "unknown", asn1.asBytes($v));
@@ -802,7 +803,8 @@ func renderIp(b as bytes) {
     if (len($b) != 4) {
         return "0x" + encoding.toText($b, "hex");
     }
-    return convert.toString($b[0]) + "." + convert.toString($b[1]) + "." + convert.toString($b[2]) + "." + convert.toString($b[3]);
+    return convert.toString($b[0]) + "." + convert.toString($b[1]) + "." + convert.toString($b[2]) +
+        "." + convert.toString($b[3]);
 }
 
 func parseIp(s as string) {

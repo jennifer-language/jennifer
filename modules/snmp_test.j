@@ -92,9 +92,22 @@ func testNonPrintableOctetString() {
     $raw[] = 0x1b;
     $raw[] = 0xff;
     # Encode a real binary octet string directly, bypassing the string value path.
-    def wire as bytes init encodeMessage(VERSION2C, "c", PDU_RESPONSE, 1, 0, 0, [
-        Varbind{oid: "1.1", type: "octetString", value: convert.stringFromBytes(convert.bytesFromString("AB", "utf-8"), "utf-8"), number: 0}
-    ], false);
+    def wire as bytes init encodeMessage(
+        VERSION2C,
+        "c",
+        PDU_RESPONSE,
+        1,
+        0,
+        0,
+        [
+            Varbind{
+                oid: "1.1",
+                type: "octetString",
+                value: convert.stringFromBytes(convert.bytesFromString("AB", "utf-8"), "utf-8"),
+                number: 0
+            }
+        ],
+        false);
     def resp as Message init decodeMessage($wire);
     testing.assertEqual($resp.varbinds[0].value, "AB");
     # Direct check of the hex fallback on binary content.
@@ -118,11 +131,14 @@ func testExceptionVariants() {
     def excSeq as asn1.Value init asn1.sequence([
         asn1.sequence([asn1.oid("1.1"), asn1.retag("context", 1, asn1.null())])
     ]);
-    def pdu as asn1.Value init asn1.retag("context", PDU_RESPONSE, asn1.sequence([
-        asn1.integer(1), asn1.integer(0), asn1.integer(0), $excSeq
-    ]));
+    def pdu as asn1.Value init asn1.retag(
+        "context",
+        PDU_RESPONSE,
+        asn1.sequence([asn1.integer(1), asn1.integer(0), asn1.integer(0), $excSeq]));
     def msg as bytes init asn1.encode(asn1.sequence([
-        asn1.integer(VERSION2C), asn1.octetString(convert.bytesFromString("c", "utf-8")), $pdu
+        asn1.integer(VERSION2C),
+        asn1.octetString(convert.bytesFromString("c", "utf-8")),
+        $pdu
     ]));
     def resp as Message init decodeMessage($msg);
     testing.assertEqual($resp.varbinds[0].type, "noSuchInstance");
@@ -171,41 +187,87 @@ func testCompareOid() {
 }
 
 func testAgentGet() {
-    def ag as Agent init agent("public", VERSION2C, [
-        stringVar("1.3.6.1.2.1.1.1.0", "example agent"),
-        varbind("1.3.6.1.2.1.1.3.0", "timeTicks", "", 4200)
-    ]);
+    def ag as Agent init agent(
+        "public",
+        VERSION2C,
+        [
+            stringVar("1.3.6.1.2.1.1.1.0", "example agent"),
+            varbind("1.3.6.1.2.1.1.3.0", "timeTicks", "", 4200)
+        ]);
     # An existing OID comes back with its value and the echoed request-id.
-    def req as bytes init encodeMessage(VERSION2C, "public", PDU_GET, 7, 0, 0, oidsToVarbinds(["1.3.6.1.2.1.1.1.0"]), true);
+    def req as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GET,
+        7,
+        0,
+        0,
+        oidsToVarbinds(["1.3.6.1.2.1.1.1.0"]),
+        true);
     def r as ServeResult init handleRequest($ag.bindings, $ag, $req);
     def resp as Message init decodeMessage($r.reply);
     testing.assertEqual($resp.requestId, 7);
     testing.assertEqual($resp.varbinds[0].value, "example agent");
     # A missing OID is a v2c noSuchObject exception.
-    def miss as bytes init encodeMessage(VERSION2C, "public", PDU_GET, 8, 0, 0, oidsToVarbinds(["1.3.6.1.2.1.99.0"]), true);
+    def miss as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GET,
+        8,
+        0,
+        0,
+        oidsToVarbinds(["1.3.6.1.2.1.99.0"]),
+        true);
     def rm as ServeResult init handleRequest($ag.bindings, $ag, $miss);
     def respm as Message init decodeMessage($rm.reply);
     testing.assertEqual($respm.varbinds[0].type, "noSuchObject");
 }
 
 func testAgentGetNext() {
-    def ag as Agent init agent("public", VERSION2C, [
-        stringVar("1.3.6.1.2.1.1.1.0", "a"),
-        stringVar("1.3.6.1.2.1.1.2.0", "b"),
-        stringVar("1.3.6.1.2.1.1.10.0", "c")
-    ]);
+    def ag as Agent init agent(
+        "public",
+        VERSION2C,
+        [
+            stringVar("1.3.6.1.2.1.1.1.0", "a"),
+            stringVar("1.3.6.1.2.1.1.2.0", "b"),
+            stringVar("1.3.6.1.2.1.1.10.0", "c")
+        ]);
     # GETNEXT from ...1.2.0 must return ...1.10.0 (10 follows 2 numerically).
-    def req as bytes init encodeMessage(VERSION2C, "public", PDU_GETNEXT, 1, 0, 0, oidsToVarbinds(["1.3.6.1.2.1.1.2.0"]), true);
+    def req as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GETNEXT,
+        1,
+        0,
+        0,
+        oidsToVarbinds(["1.3.6.1.2.1.1.2.0"]),
+        true);
     def r as ServeResult init handleRequest($ag.bindings, $ag, $req);
     def resp as Message init decodeMessage($r.reply);
     testing.assertEqual($resp.varbinds[0].oid, "1.3.6.1.2.1.1.10.0");
     # GETNEXT from the subtree root returns the first entry.
-    def root as bytes init encodeMessage(VERSION2C, "public", PDU_GETNEXT, 2, 0, 0, oidsToVarbinds(["1.3.6.1.2.1.1"]), true);
+    def root as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GETNEXT,
+        2,
+        0,
+        0,
+        oidsToVarbinds(["1.3.6.1.2.1.1"]),
+        true);
     def rr as ServeResult init handleRequest($ag.bindings, $ag, $root);
     def respr as Message init decodeMessage($rr.reply);
     testing.assertEqual($respr.varbinds[0].oid, "1.3.6.1.2.1.1.1.0");
     # GETNEXT past the last entry is endOfMibView.
-    def endReq as bytes init encodeMessage(VERSION2C, "public", PDU_GETNEXT, 3, 0, 0, oidsToVarbinds(["1.3.6.1.2.1.1.10.0"]), true);
+    def endReq as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GETNEXT,
+        3,
+        0,
+        0,
+        oidsToVarbinds(["1.3.6.1.2.1.1.10.0"]),
+        true);
     def re as ServeResult init handleRequest($ag.bindings, $ag, $endReq);
     def respe as Message init decodeMessage($re.reply);
     testing.assertEqual($respe.varbinds[0].type, "endOfMibView");
@@ -214,16 +276,40 @@ func testAgentGetNext() {
 func testAgentSet() {
     def ag as Agent init agent("public", VERSION2C, [intVar("1.3.6.1.2.1.1.7.0", 72)]);
     # SET updates the MIB; the returned ServeResult carries the new MIB.
-    def setReq as bytes init encodeMessage(VERSION2C, "public", PDU_SET, 1, 0, 0, [intVar("1.3.6.1.2.1.1.7.0", 100)], false);
+    def setReq as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_SET,
+        1,
+        0,
+        0,
+        [intVar("1.3.6.1.2.1.1.7.0", 100)],
+        false);
     def r as ServeResult init handleRequest($ag.bindings, $ag, $setReq);
     testing.assertEqual(decodeMessage($r.reply).errorStatus, 0);
     # A follow-up GET against the updated MIB reflects the new value.
-    def getReq as bytes init encodeMessage(VERSION2C, "public", PDU_GET, 2, 0, 0, oidsToVarbinds(["1.3.6.1.2.1.1.7.0"]), true);
+    def getReq as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GET,
+        2,
+        0,
+        0,
+        oidsToVarbinds(["1.3.6.1.2.1.1.7.0"]),
+        true);
     def r2 as ServeResult init handleRequest($r.mib, $ag, $getReq);
     def resp2 as Message init decodeMessage($r2.reply);
     testing.assertEqual($resp2.varbinds[0].number, 100);
     # SET on an unknown OID errors and leaves the MIB unchanged.
-    def bad as bytes init encodeMessage(VERSION2C, "public", PDU_SET, 3, 0, 0, [intVar("1.3.6.1.2.1.99.0", 1)], false);
+    def bad as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_SET,
+        3,
+        0,
+        0,
+        [intVar("1.3.6.1.2.1.99.0", 1)],
+        false);
     def r3 as ServeResult init handleRequest($ag.bindings, $ag, $bad);
     def resp3 as Message init decodeMessage($r3.reply);
     testing.assertEqual($resp3.errorStatus, 2);
@@ -231,7 +317,15 @@ func testAgentSet() {
 
 func testAgentWrongCommunityDropped() {
     def ag as Agent init agent("public", VERSION2C, [stringVar("1.1", "x")]);
-    def req as bytes init encodeMessage(VERSION2C, "private", PDU_GET, 1, 0, 0, oidsToVarbinds(["1.1"]), true);
+    def req as bytes init encodeMessage(
+        VERSION2C,
+        "private",
+        PDU_GET,
+        1,
+        0,
+        0,
+        oidsToVarbinds(["1.1"]),
+        true);
     def r as ServeResult init handleRequest($ag.bindings, $ag, $req);
     testing.assertEqual(len($r.reply), 0);
 }
@@ -240,11 +334,27 @@ func testAgentWrongCommunityDropped() {
 # request, a v2c agent accepts v1.
 func testAgentVersionGate() {
     def v1agent as Agent init agent("public", VERSION1, [stringVar("1.1", "x")]);
-    def req2c as bytes init encodeMessage(VERSION2C, "public", PDU_GET, 1, 0, 0, oidsToVarbinds(["1.1"]), true);
+    def req2c as bytes init encodeMessage(
+        VERSION2C,
+        "public",
+        PDU_GET,
+        1,
+        0,
+        0,
+        oidsToVarbinds(["1.1"]),
+        true);
     def dropped as ServeResult init handleRequest($v1agent.bindings, $v1agent, $req2c);
     testing.assertEqual(len($dropped.reply), 0);
 
-    def req1 as bytes init encodeMessage(VERSION1, "public", PDU_GET, 2, 0, 0, oidsToVarbinds(["1.1"]), true);
+    def req1 as bytes init encodeMessage(
+        VERSION1,
+        "public",
+        PDU_GET,
+        2,
+        0,
+        0,
+        oidsToVarbinds(["1.1"]),
+        true);
     def served as ServeResult init handleRequest($v1agent.bindings, $v1agent, $req1);
     testing.assertTrue(len($served.reply) > 0);
 
@@ -300,11 +410,14 @@ use task;
 # pre-bound socket (no bind race), driving the client's get/getNext/walk/set.
 
 func testClientAgentRoundTrip() {
-    def ag as Agent init agent("public", VERSION2C, [
-        stringVar("1.3.6.1.2.1.1.1.0", "sysdescr"),
-        stringVar("1.3.6.1.2.1.1.2.0", "middle"),
-        stringVar("1.3.6.1.2.1.1.10.0", "last")
-    ]);
+    def ag as Agent init agent(
+        "public",
+        VERSION2C,
+        [
+            stringVar("1.3.6.1.2.1.1.1.0", "sysdescr"),
+            stringVar("1.3.6.1.2.1.1.2.0", "middle"),
+            stringVar("1.3.6.1.2.1.1.10.0", "last")
+        ]);
     def socket as net.UDPSocket init net.listenUDP("127.0.0.1:0");
     def addr as string init net.address($socket);
     def stop as channel of bool init channel.make(1);
@@ -334,7 +447,7 @@ func testClientAgentRoundTrip() {
 # client() convenience + oidVar builder.
 func testClientAndOidVarConstructors() {
     def c as Client init client("127.0.0.1", "public");
-    testing.assertTrue(strings.contains($c.address, "127.0.0.1"));   # default host:port
+    testing.assertTrue(strings.contains($c.address, "127.0.0.1")); # default host:port
     def ov as Varbind init oidVar("1.3.6.1.2.1.1.2.0", "1.3.6.1.4.1.8072");
     testing.assertEqual($ov.type, "oid");
     testing.assertEqual($ov.value, "1.3.6.1.4.1.8072");

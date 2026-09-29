@@ -73,7 +73,10 @@ func testInvalidNamesThrow() {
 # --- histogram --------------------------------------------------------------
 
 func testRenderHistogram() {
-    def h as Metric init histogram("http_request_duration_seconds", "Request latency", [0.1, 0.5, 1.0]);
+    def h as Metric init histogram(
+        "http_request_duration_seconds",
+        "Request latency",
+        [0.1, 0.5, 1.0]);
     $h = observe($h, {"method": "get"}, 0.3);
     $h = observe($h, {"method": "get"}, 0.05);
     $h = observe($h, {"method": "get"}, 2.0);

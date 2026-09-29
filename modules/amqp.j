@@ -556,7 +556,12 @@ func writeFrame(socket as net.Conn, ftype as int, channel as int, payload as byt
 }
 
 # writeMethod writes a method frame (class + method + args).
-func writeMethod(socket as net.Conn, channel as int, classId as int, methodId as int, args as bytes) {
+func writeMethod(
+    socket as net.Conn,
+    channel as int,
+    classId as int,
+    methodId as int,
+    args as bytes) {
     def p as bytes;
     $p = putShort($p, $classId);
     $p = putShort($p, $methodId);

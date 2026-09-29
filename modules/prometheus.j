@@ -63,7 +63,12 @@ export def struct Sample {
  * observations with `_bucket` / `_sum` / `_count` child series), or `Summary`
  * (quantile observations with `{quantile="..."}` / `_sum` / `_count` series).
  */
-export def enum MetricType { Counter, Gauge, Histogram, Summary };
+export def enum MetricType {
+    Counter,
+    Gauge,
+    Histogram,
+    Summary
+};
 
 /**
  * A metric family: a name, help text, a type, its samples, and (for a
@@ -228,7 +233,14 @@ export func counter(name as string, help as string) {
     def s as list of Sample init [];
     def bk as list of float init [];
     def qs as list of float init [];
-    return Metric{name: $name, help: $help, type: MetricType.Counter, samples: $s, buckets: $bk, quantiles: $qs};
+    return Metric{
+        name: $name,
+        help: $help,
+        type: MetricType.Counter,
+        samples: $s,
+        buckets: $bk,
+        quantiles: $qs
+    };
 }
 
 /**
@@ -251,7 +263,14 @@ export func gauge(name as string, help as string) {
     def s as list of Sample init [];
     def bk as list of float init [];
     def qs as list of float init [];
-    return Metric{name: $name, help: $help, type: MetricType.Gauge, samples: $s, buckets: $bk, quantiles: $qs};
+    return Metric{
+        name: $name,
+        help: $help,
+        type: MetricType.Gauge,
+        samples: $s,
+        buckets: $bk,
+        quantiles: $qs
+    };
 }
 
 /**
@@ -277,7 +296,14 @@ export func histogram(name as string, help as string, buckets as list of float) 
     def s as list of Sample init [];
     def bk as list of float init lists.sort($buckets);
     def qs as list of float init [];
-    return Metric{name: $name, help: $help, type: MetricType.Histogram, samples: $s, buckets: $bk, quantiles: $qs};
+    return Metric{
+        name: $name,
+        help: $help,
+        type: MetricType.Histogram,
+        samples: $s,
+        buckets: $bk,
+        quantiles: $qs
+    };
 }
 
 /**
@@ -315,7 +341,14 @@ export func summary(name as string, help as string, quantiles as list of float) 
     def s as list of Sample init [];
     def bk as list of float init [];
     def qs as list of float init lists.sort($quantiles);
-    return Metric{name: $name, help: $help, type: MetricType.Summary, samples: $s, buckets: $bk, quantiles: $qs};
+    return Metric{
+        name: $name,
+        help: $help,
+        type: MetricType.Summary,
+        samples: $s,
+        buckets: $bk,
+        quantiles: $qs
+    };
 }
 
 # labelsEqual reports whether two label sets have identical keys and values.
@@ -360,7 +393,12 @@ func freshSample(labels as map of string to string, nbuckets as int) {
 # appends) the sample for the label set, and updates it per metric type -
 # Counter / Gauge upsert the value (last write wins); Histogram / Summary
 # accumulate. An optional millisecond timestamp is stamped onto the sample.
-func record(metric as Metric, labels as map of string to string, value as float, hasTs as bool, ts as int) {
+func record(
+    metric as Metric,
+    labels as map of string to string,
+    value as float,
+    hasTs as bool,
+    ts as int) {
     for (def k in $labels) {
         if (not isValidLabelName($k)) {
             throw Error{
@@ -387,12 +425,8 @@ func record(metric as Metric, labels as map of string to string, value as float,
         $idx = len($out.samples) - 1;
     }
     match ($out.type) {
-        when Counter {
-            $out.samples[$idx].value = $value;
-        }
-        when Gauge {
-            $out.samples[$idx].value = $value;
-        }
+        when Counter { $out.samples[$idx].value = $value; }
+        when Gauge { $out.samples[$idx].value = $value; }
         when Histogram {
             $out.samples[$idx].count = $out.samples[$idx].count + 1.0;
             $out.samples[$idx].sum = $out.samples[$idx].sum + $value;
@@ -446,7 +480,11 @@ export func observe(metric as Metric, labels as map of string to string, value a
  * @return {Metric} a new Metric with the timestamped observation recorded
  * @throws {Error} kind "prometheus" when a label name is invalid
  */
-export func observeAt(metric as Metric, labels as map of string to string, value as float, timestampMs as int) {
+export func observeAt(
+    metric as Metric,
+    labels as map of string to string,
+    value as float,
+    timestampMs as int) {
     return record($metric, $labels, $value, true, $timestampMs);
 }
 
@@ -502,7 +540,8 @@ func quantileOf(sorted as list of float, q as float) {
 func simpleLines(m as Metric) {
     def lines as list of string init [];
     for (def s in $m.samples) {
-        $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value) + sampleTsSuffix($s);
+        $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value) +
+            sampleTsSuffix($s);
     }
     return $lines;
 }
@@ -515,14 +554,19 @@ func histogramLines(m as Metric) {
         def ts as string init sampleTsSuffix($s);
         def j as int init 0;
         while ($j < len($m.buckets)) {
-            def le as map of string to string init mergeLabel($s.labels, "le", convert.toString($m.buckets[$j]));
-            $lines[] = $m.name + "_bucket" + renderLabels($le) + " " + convert.toString($s.buckets[$j]) + $ts;
+            def le as map of string to string init mergeLabel(
+                $s.labels,
+                "le",
+                convert.toString($m.buckets[$j]));
+            $lines[] = $m.name + "_bucket" + renderLabels($le) + " " +
+                convert.toString($s.buckets[$j]) + $ts;
             $j = $j + 1;
         }
         def inf as map of string to string init mergeLabel($s.labels, "le", "+Inf");
         $lines[] = $m.name + "_bucket" + renderLabels($inf) + " " + convert.toString($s.count) + $ts;
         $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " " + convert.toString($s.sum) + $ts;
-        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) + $ts;
+        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) +
+            $ts;
     }
     return $lines;
 }
@@ -535,11 +579,16 @@ func summaryLines(m as Metric) {
         def ts as string init sampleTsSuffix($s);
         def sorted as list of float init lists.sort($s.observations);
         for (def q in $m.quantiles) {
-            def ql as map of string to string init mergeLabel($s.labels, "quantile", convert.toString($q));
-            $lines[] = $m.name + renderLabels($ql) + " " + convert.toString(quantileOf($sorted, $q)) + $ts;
+            def ql as map of string to string init mergeLabel(
+                $s.labels,
+                "quantile",
+                convert.toString($q));
+            $lines[] = $m.name + renderLabels($ql) + " " +
+                convert.toString(quantileOf($sorted, $q)) + $ts;
         }
         $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " " + convert.toString($s.sum) + $ts;
-        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) + $ts;
+        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) +
+            $ts;
     }
     return $lines;
 }
@@ -734,7 +783,8 @@ export func queryRange(
     start as string,
     end as string,
     step as string) {
-    def url as string init joinBase($base, "/api/v1/query_range") + "?query=" + uri.encode($promql) +
+    def url as string init joinBase($base, "/api/v1/query_range") + "?query=" +
+        uri.encode($promql) +
         "&start=" + uri.encode($start) + "&end=" + uri.encode($end) + "&step=" + uri.encode($step);
     def resp as http.Response init http.get($url, {});
     return parseResult(decodeBody($resp));

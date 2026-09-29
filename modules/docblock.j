@@ -709,9 +709,7 @@ func parseBody(body as string) {
                         $license = $rest;
                         $i = $i + 1;
                     }
-                    else {
-                        $i = $i + 1;
-                    }
+                    else { $i = $i + 1; }
                 }
             }
         }
@@ -767,9 +765,7 @@ func isTag(line as string) {
 
 # parseParam parses `name {type} desc`.
 func parseParam(rest as string) {
-    def m as regex.Match init regex.find(
-        '^([A-Za-z][A-Za-z0-9]*)\s+\{([^}]*)\}\s*(.*)$',
-        $rest);
+    def m as regex.Match init regex.find('^([A-Za-z][A-Za-z0-9]*)\s+\{([^}]*)\}\s*(.*)$', $rest);
     if ($m.start == -1) {
         return ParamDoc{name: firstWord($rest), type: "", description: ""};
     }

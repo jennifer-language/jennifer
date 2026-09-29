@@ -13,7 +13,10 @@ import "../../modules/orm.j" as orm;
 # Declare the table mapping once (no reflection). The dialect - Postgres here -
 # selects the placeholder and DDL spelling.
 def users as orm.Schema init orm.column(
-    orm.column(orm.column(orm.schema("users", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String),
+    orm.column(
+        orm.column(orm.schema("users", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int),
+        "name",
+        orm.ColumnKind.String),
     "age",
     orm.ColumnKind.Int);
 
@@ -42,13 +45,19 @@ io.printf(
     len($rendered.params));
 
 # The same schema in MySQL renders `?` placeholders instead of `$1` / `$2`.
-def mysqlUsers as orm.Schema init orm.column(orm.schema("users", "id", orm.Dialect.Mysql), "name", orm.ColumnKind.String);
+def mysqlUsers as orm.Schema init orm.column(
+    orm.schema("users", "id", orm.Dialect.Mysql),
+    "name",
+    orm.ColumnKind.String);
 io.printf("mysql:\n  %s\n\n", orm.toSql(orm.where(orm.from($mysqlUsers), "name", "=", "ada")).sql);
 
 # Column projection + aggregate + GROUP BY + HAVING: "age brackets with 5+ users".
 def report as orm.Query init orm.having(
     orm.groupBy(orm.count(orm.select(orm.from($users), ["age"]), "n"), ["age"]),
-    "COUNT", "*", ">", "5");
+    "COUNT",
+    "*",
+    ">",
+    "5");
 io.printf("report:\n  %s\n\n", orm.toSql($report).sql);
 
 # OR + IN conditions, and a LEFT JOIN.
@@ -57,18 +66,25 @@ def filtered as orm.Query init orm.whereIn(
     "id",
     ["1", "2", "3"]);
 io.printf("or + in:\n  %s\n\n", orm.toSql($filtered).sql);
-io.printf("left join:\n  %s\n", orm.toSql(
-    orm.leftJoin(orm.from($users), "orders", "users.id", "orders.userId")).sql);
+io.printf(
+    "left join:\n  %s\n",
+    orm.toSql(orm.leftJoin(orm.from($users), "orders", "users.id", "orders.userId")).sql);
 
 # Relations: declare an association once on the schema, then `joinRelation` emits
 # the correct JOIN from it (two joins for a many-to-many, through its join table).
 def authors as orm.Schema init orm.manyToMany(
     orm.hasMany(orm.schema("authors", "id", orm.Dialect.Postgres), "posts", "posts", "authorId"),
-    "tags", "tags", "authorTags", "authorId", "tagId");
-io.printf("\nhas-many join:\n  %s\n", orm.toSql(
-    orm.joinRelation(orm.from($authors), $authors, "posts")).sql);
-io.printf("many-to-many join:\n  %s\n", orm.toSql(
-    orm.joinRelation(orm.from($authors), $authors, "tags")).sql);
+    "tags",
+    "tags",
+    "authorTags",
+    "authorId",
+    "tagId");
+io.printf(
+    "\nhas-many join:\n  %s\n",
+    orm.toSql(orm.joinRelation(orm.from($authors), $authors, "posts")).sql);
+io.printf(
+    "many-to-many join:\n  %s\n",
+    orm.toSql(orm.joinRelation(orm.from($authors), $authors, "tags")).sql);
 
 # runCrud shows the Data-Mapper CRUD shape against a live connection: you pass a
 # record (a `map of string to string`) and the schema to the repository
@@ -81,13 +97,13 @@ func runCrud(conn as sql.Connection, s as orm.Schema) {
     $ada["name"] = "ada";
     $ada["age"] = "36";
     orm.insert($sess, $s, $ada); # INSERT
-
+    
     def found as map of string to string init orm.find($sess, $s, "1"); # SELECT by id
     io.printf("found: %s\n", $found["name"]);
 
     $found["age"] = "37";
     orm.update($sess, $s, $found); # UPDATE by primary key
-
+    
     def adults as list of map of string to string init orm.all(
         $sess,
         orm.where(orm.from($s), "age", ">=", "18")); # SELECT with a filter
@@ -115,8 +131,12 @@ func runEager(conn as sql.Connection) {
     def sess as orm.Session init orm.session($conn);
     def authorSchema as orm.Schema init orm.hasMany(
         orm.column(orm.schema("authors", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int),
-        "posts", "posts", "authorId");
-    def res as orm.Result init orm.load($sess, $authorSchema,
+        "posts",
+        "posts",
+        "authorId");
+    def res as orm.Result init orm.load(
+        $sess,
+        $authorSchema,
         orm.with(orm.from($authorSchema), "posts"));
     for (def author in orm.rows($res)) {
         def posts as list of map of string to string init orm.related($res, $author, "posts");
@@ -140,12 +160,12 @@ func runWrites(conn as sql.Connection) {
     $b["sku"] = "B";
     $b["qty"] = "9";
     orm.insertMany($sess, $s, [$a, $b]); # one multi-row INSERT
-
+    
     def a2 as map of string to string init {};
     $a2["sku"] = "A";
     $a2["qty"] = "10";
     orm.upsert($sess, $s, $a2, ["sku"]); # A already exists -> updated in place
-
+    
     def zero as map of string to string init {};
     $zero["qty"] = "0";
     orm.updateWhere($sess, $s, $zero, orm.where(orm.from($s), "qty", ">", "5"));

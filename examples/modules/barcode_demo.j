@@ -16,14 +16,21 @@ use fs;
 import "../../modules/barcode.j" as barcode;
 
 def text as string init "https://github.com/jennifer-language/jennifer/";
-if (len(os.ARGS) > 1) { $text = os.ARGS[1]; }
+if (len(os.ARGS) > 1) {
+    $text = os.ARGS[1];
+}
 
 def o as barcode.Options init barcode.defaults();
 $o.scale = 6;
 
 # QR as terminal art (Unicode half-blocks).
 def qr as barcode.Symbol init barcode.encode($text, "qr", $o);
-io.printf("QR for: %s   (version %d, %dx%d modules)\n\n", $text, ($qr.size - 17) // 4, $qr.size, $qr.size);
+io.printf(
+    "QR for: %s   (version %d, %dx%d modules)\n\n",
+    $text,
+    ($qr.size - 17) // 4,
+    $qr.size,
+    $qr.size);
 io.printf("%s\n", barcode.terminal($qr));
 
 # QR to PNG and SVG.

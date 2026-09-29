@@ -179,7 +179,13 @@ func decodeRemLen(buf as bytes, start as int) {
         # byte is malformed (and would otherwise overflow the multiplier / run off
         # the buffer). Fail typed instead.
         if ($i - $start >= 4) {
-            throw Error{kind: "mqtt", message: "mqtt: malformed remaining-length (over 4 bytes)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "mqtt",
+                message: "mqtt: malformed remaining-length (over 4 bytes)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def b as int init $buf[$i];
         $value = $value + ($b & 0x7f) * $mult;
@@ -468,7 +474,13 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
         when Tls { $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS); }
         when None { $conn = net.connect($addr, HANDSHAKE_TIMEOUT_MS); }
         when Starttls {
-            throw Error{kind: "mqtt", message: "mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "mqtt",
+                message: "mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     # A refused / malformed CONNACK must not leak the socket; on success the
@@ -574,7 +586,11 @@ export func publish(client as Client, topic as string, message as string) {
  * @param payload {bytes} the message bytes
  * @param retain {bool} whether the broker retains the message
  */
-export func publishBytesRetain(client as Client, topic as string, payload as bytes, retain as bool) {
+export func publishBytesRetain(
+    client as Client,
+    topic as string,
+    payload as bytes,
+    retain as bool) {
     net.writeBytes($client.conn, buildPublish($topic, $payload, 0, 0, false, $retain));
     return null;
 }

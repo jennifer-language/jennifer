@@ -42,7 +42,13 @@ use lists;
  * @field color {string} the line colour ("" = a default red)
  * @field dash {bool} dashed (true) or solid
  */
-export def struct RefLine { axis as string, value as float, label as string, color as string, dash as bool };
+export def struct RefLine {
+    axis as string,
+    value as float,
+    label as string,
+    color as string,
+    dash as bool
+};
 
 /**
  * A horizontal reference line at y = value (a threshold / target).
@@ -134,7 +140,32 @@ def const MB as int init 46;
  * @return {Options} the default options
  */
 export func defaults() {
-    return Options{width: 640, height: 400, title: "", xLabel: "", yLabel: "", color: "#3366cc", background: "#ffffff", fontFamily: "sans-serif", fontSize: 11, grid: true, legend: true, legendPos: "top-right", xLog: false, yLog: false, xDate: false, dateFormat: "", marginLeft: ML, marginRight: MR, marginTop: MT, marginBottom: MB, barMode: "grouped", barLabels: false, hover: true, refLines: []};
+    return Options{
+        width: 640,
+        height: 400,
+        title: "",
+        xLabel: "",
+        yLabel: "",
+        color: "#3366cc",
+        background: "#ffffff",
+        fontFamily: "sans-serif",
+        fontSize: 11,
+        grid: true,
+        legend: true,
+        legendPos: "top-right",
+        xLog: false,
+        yLog: false,
+        xDate: false,
+        dateFormat: "",
+        marginLeft: ML,
+        marginRight: MR,
+        marginTop: MT,
+        marginBottom: MB,
+        barMode: "grouped",
+        barLabels: false,
+        hover: true,
+        refLines: []
+    };
 }
 
 /**
@@ -151,7 +182,16 @@ export func defaults() {
  * @field yErr {list of float} symmetric +/- error per point ([] = none)
  * @field shape {string} marker for points: "circle" / "square" / "triangle" / "diamond"
  */
-export def struct Series { name as string, xs as list of float, ys as list of float, color as string, mark as string, dash as bool, yErr as list of float, shape as string };
+export def struct Series {
+    name as string,
+    xs as list of float,
+    ys as list of float,
+    color as string,
+    mark as string,
+    dash as bool,
+    yErr as list of float,
+    shape as string
+};
 
 /**
  * A line series (mark "line"). Set `.mark` / `.color` / `.dash` / `.yErr` /
@@ -162,7 +202,16 @@ export def struct Series { name as string, xs as list of float, ys as list of fl
  * @return {Series} the series
  */
 export func series(name as string, xs as list of float, ys as list of float) {
-    return Series{name: $name, xs: $xs, ys: $ys, color: "", mark: "line", dash: false, yErr: [], shape: "circle"};
+    return Series{
+        name: $name,
+        xs: $xs,
+        ys: $ys,
+        color: "",
+        mark: "line",
+        dash: false,
+        yErr: [],
+        shape: "circle"
+    };
 }
 
 /**
@@ -173,7 +222,16 @@ export func series(name as string, xs as list of float, ys as list of float) {
  * @return {Series} the series
  */
 export func points(name as string, xs as list of float, ys as list of float) {
-    return Series{name: $name, xs: $xs, ys: $ys, color: "", mark: "points", dash: false, yErr: [], shape: "circle"};
+    return Series{
+        name: $name,
+        xs: $xs,
+        ys: $ys,
+        color: "",
+        mark: "points",
+        dash: false,
+        yErr: [],
+        shape: "circle"
+    };
 }
 
 /**
@@ -192,14 +250,33 @@ export func floats(xs as list of int) {
 
 # --- geometry + palette (private) ----------------------------------
 
-def struct Geom { x0 as int, y0 as int, x1 as int, y1 as int };
+def struct Geom {
+    x0 as int,
+    y0 as int,
+    x1 as int,
+    y1 as int
+};
 
 func geomOf(opts as Options) {
-    return Geom{x0: $opts.marginLeft, y0: $opts.marginTop, x1: $opts.width - $opts.marginRight, y1: $opts.height - $opts.marginBottom};
+    return Geom{
+        x0: $opts.marginLeft,
+        y0: $opts.marginTop,
+        x1: $opts.width - $opts.marginRight,
+        y1: $opts.height - $opts.marginBottom
+    };
 }
 
 func paletteColor(i as int) {
-    def pal as list of string init ["#3366cc", "#dc3912", "#109618", "#ff9900", "#990099", "#0099c6", "#dd4477", "#66aa00"];
+    def pal as list of string init [
+        "#3366cc",
+        "#dc3912",
+        "#109618",
+        "#ff9900",
+        "#990099",
+        "#0099c6",
+        "#dd4477",
+        "#66aa00"
+    ];
     return $pal[$i % len($pal)];
 }
 
@@ -337,11 +414,22 @@ func elemWithTitle(tag as string, attrs as string, title as string) {
 }
 
 func lineEl(x1 as float, y1 as float, x2 as float, y2 as float, stroke as string, w as string) {
-    return '<line x1="' + num($x1) + '" y1="' + num($y1) + '" x2="' + num($x2) + '" y2="' + num($y2) + '" stroke="' + attrEsc($stroke) + '" stroke-width="' + $w + '"/>';
+    return '<line x1="' + num($x1) + '" y1="' + num($y1) + '" x2="' + num($x2) + '" y2="' +
+        num($y2) + '" stroke="' + attrEsc($stroke) + '" stroke-width="' + $w + '"/>';
 }
 
-func labelText(opts as Options, x as float, y as float, anchor as string, size as int, weight as string, fill as string, s as string) {
-    return '<text x="' + num($x) + '" y="' + num($y) + '" text-anchor="' + $anchor + '" font-family="' + attrEsc($opts.fontFamily) + '" font-size="' + convert.toString($size) + '" font-weight="' + $weight + '" fill="' + attrEsc($fill) + '">' + svgEsc($s) + '</text>';
+func labelText(
+    opts as Options,
+    x as float,
+    y as float,
+    anchor as string,
+    size as int,
+    weight as string,
+    fill as string,
+    s as string) {
+    return '<text x="' + num($x) + '" y="' + num($y) + '" text-anchor="' + $anchor +
+        '" font-family="' + attrEsc($opts.fontFamily) + '" font-size="' + convert.toString($size) +
+        '" font-weight="' + $weight + '" fill="' + attrEsc($fill) + '">' + svgEsc($s) + '</text>';
 }
 
 # markerEl draws a scatter marker, with an optional tooltip. cxs / cys are the
@@ -380,12 +468,22 @@ func markerEl(
 }
 
 func barRect(x as float, yTop as float, w as float, h as float, col as string, title as string) {
-    return elemWithTitle("rect", 'x="' + num($x) + '" y="' + num($yTop) + '" width="' + num($w) + '" height="' + num($h) + '" fill="' + attrEsc($col) + '"', $title);
+    return elemWithTitle(
+        "rect",
+        'x="' + num($x) + '" y="' + num($yTop) + '" width="' + num($w) + '" height="' + num($h) +
+            '" fill="' + attrEsc($col) + '"',
+        $title);
 }
 
 # --- axes ----------------------------------------------------------
 
-def struct Axis { ticks as list of float, labels as list of string, lo as float, hi as float, isLog as bool };
+def struct Axis {
+    ticks as list of float,
+    labels as list of string,
+    lo as float,
+    hi as float,
+    isLog as bool
+};
 
 func niceNum(x as float, round as bool) {
     def expv as int init math.floor(math.log10($x));
@@ -424,7 +522,9 @@ func niceTicks(lo as float, hi as float, count as int) {
         }
         $top = $lo + $bump;
     }
-    def spacing as float init niceNum(niceNum($top - $lo, false) / convert.toFloat($count - 1), true);
+    def spacing as float init niceNum(
+        niceNum($top - $lo, false) / convert.toFloat($count - 1),
+        true);
     def niceMin as float init convert.toFloat(math.floor($lo / $spacing)) * $spacing;
     def niceMax as float init convert.toFloat(math.ceil($top / $spacing)) * $spacing;
     def ticks as list of float init [];
@@ -444,12 +544,24 @@ func linearAxis(dmin as float, dmax as float) {
     for (def i in 0..len($ticks)) {
         $labels[] = num($ticks[$i]);
     }
-    return Axis{ticks: $ticks, labels: $labels, lo: $ticks[0], hi: $ticks[len($ticks) - 1], isLog: false};
+    return Axis{
+        ticks: $ticks,
+        labels: $labels,
+        lo: $ticks[0],
+        hi: $ticks[len($ticks) - 1],
+        isLog: false
+    };
 }
 
 func logAxis(dmin as float, dmax as float) {
     if ($dmin <= 0.0) {
-        throw Error{kind: "plot", message: "plot: a log axis needs strictly positive values", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "plot",
+            message: "plot: a log axis needs strictly positive values",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def loExp as int init math.floor(math.log10($dmin));
     def hiExp as int init math.ceil(math.log10($dmax));
@@ -463,11 +575,42 @@ func logAxis(dmin as float, dmax as float) {
         $ticks[] = $v;
         $labels[] = num($v);
     }
-    return Axis{ticks: $ticks, labels: $labels, lo: math.pow(10.0, convert.toFloat($loExp)), hi: math.pow(10.0, convert.toFloat($hiExp)), isLog: true};
+    return Axis{
+        ticks: $ticks,
+        labels: $labels,
+        lo: math.pow(10.0, convert.toFloat($loExp)),
+        hi: math.pow(10.0, convert.toFloat($hiExp)),
+        isLog: true
+    };
 }
 
 func dateStep(span as int, count as int) {
-    def steps as list of int init [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800, 2592000, 7776000, 31536000, 63072000];
+    def steps as list of int init [
+        1,
+        2,
+        5,
+        10,
+        15,
+        30,
+        60,
+        120,
+        300,
+        600,
+        900,
+        1800,
+        3600,
+        7200,
+        10800,
+        21600,
+        43200,
+        86400,
+        172800,
+        604800,
+        2592000,
+        7776000,
+        31536000,
+        63072000
+    ];
     def target as int init $span // $count;
     for (def i in 0..len($steps)) {
         if ($steps[$i] >= $target) {
@@ -530,17 +673,39 @@ func makeAxis(dmin as float, dmax as float, isLog as bool, isDate as bool, fmt a
 
 func frameCommon(g as Geom, opts as Options) {
     def out as list of string init [];
-    $out[] = '<rect x="0" y="0" width="' + convert.toString($opts.width) + '" height="' + convert.toString($opts.height) + '" fill="' + attrEsc($opts.background) + '"/>';
-    $out[] = '<rect x="' + convert.toString($g.x0) + '" y="' + convert.toString($g.y0) + '" width="' + convert.toString($g.x1 - $g.x0) + '" height="' + convert.toString($g.y1 - $g.y0) + '" fill="none" stroke="#cccccc" stroke-width="1"/>';
+    $out[] = '<rect x="0" y="0" width="' + convert.toString($opts.width) + '" height="' +
+        convert.toString($opts.height) + '" fill="' + attrEsc($opts.background) + '"/>';
+    $out[] = '<rect x="' + convert.toString($g.x0) + '" y="' + convert.toString($g.y0) +
+        '" width="' + convert.toString($g.x1 - $g.x0) + '" height="' +
+        convert.toString($g.y1 - $g.y0) + '" fill="none" stroke="#cccccc" stroke-width="1"/>';
     if ($opts.title != "") {
-        $out[] = labelText($opts, convert.toFloat($opts.width // 2), 22.0, "middle", $opts.fontSize + 4, "bold", "#222222", $opts.title);
+        $out[] = labelText(
+            $opts,
+            convert.toFloat($opts.width // 2),
+            22.0,
+            "middle",
+            $opts.fontSize + 4,
+            "bold",
+            "#222222",
+            $opts.title);
     }
     if ($opts.xLabel != "") {
-        $out[] = labelText($opts, convert.toFloat(($g.x0 + $g.x1) // 2), convert.toFloat($opts.height - 8), "middle", $opts.fontSize + 1, "normal", "#333333", $opts.xLabel);
+        $out[] = labelText(
+            $opts,
+            convert.toFloat(($g.x0 + $g.x1) // 2),
+            convert.toFloat($opts.height - 8),
+            "middle",
+            $opts.fontSize + 1,
+            "normal",
+            "#333333",
+            $opts.xLabel);
     }
     if ($opts.yLabel != "") {
         def cy as int init ($g.y0 + $g.y1) // 2;
-        $out[] = '<text x="14" y="' + convert.toString($cy) + '" text-anchor="middle" font-family="' + attrEsc($opts.fontFamily) + '" font-size="' + convert.toString($opts.fontSize + 1) + '" fill="#333333" transform="rotate(-90 14 ' + convert.toString($cy) + ')">' + svgEsc($opts.yLabel) + '</text>';
+        $out[] = '<text x="14" y="' + convert.toString($cy) +
+            '" text-anchor="middle" font-family="' + attrEsc($opts.fontFamily) + '" font-size="' +
+            convert.toString($opts.fontSize + 1) + '" fill="#333333" transform="rotate(-90 14 ' +
+            convert.toString($cy) + ')">' + svgEsc($opts.yLabel) + '</text>';
     }
     return $out;
 }
@@ -552,9 +717,23 @@ func drawYAxis(g as Geom, opts as Options, ax as Axis) {
         if ($opts.grid) {
             $out[] = lineEl(convert.toFloat($g.x0), $y, convert.toFloat($g.x1), $y, "#eeeeee", "1");
         } else {
-            $out[] = lineEl(convert.toFloat($g.x0 - 4), $y, convert.toFloat($g.x0), $y, "#999999", "1");
+            $out[] = lineEl(
+                convert.toFloat($g.x0 - 4),
+                $y,
+                convert.toFloat($g.x0),
+                $y,
+                "#999999",
+                "1");
         }
-        $out[] = labelText($opts, convert.toFloat($g.x0 - 6), $y + 4.0, "end", $opts.fontSize, "normal", "#333333", $ax.labels[$i]);
+        $out[] = labelText(
+            $opts,
+            convert.toFloat($g.x0 - 6),
+            $y + 4.0,
+            "end",
+            $opts.fontSize,
+            "normal",
+            "#333333",
+            $ax.labels[$i]);
     }
     return $out;
 }
@@ -566,15 +745,32 @@ func drawXAxis(g as Geom, opts as Options, ax as Axis) {
         if ($opts.grid) {
             $out[] = lineEl($x, convert.toFloat($g.y0), $x, convert.toFloat($g.y1), "#eeeeee", "1");
         } else {
-            $out[] = lineEl($x, convert.toFloat($g.y1), $x, convert.toFloat($g.y1 + 4), "#999999", "1");
+            $out[] = lineEl(
+                $x,
+                convert.toFloat($g.y1),
+                $x,
+                convert.toFloat($g.y1 + 4),
+                "#999999",
+                "1");
         }
-        $out[] = labelText($opts, $x, convert.toFloat($g.y1 + 16), "middle", $opts.fontSize, "normal", "#333333", $ax.labels[$i]);
+        $out[] = labelText(
+            $opts,
+            $x,
+            convert.toFloat($g.y1 + 16),
+            "middle",
+            $opts.fontSize,
+            "normal",
+            "#333333",
+            $ax.labels[$i]);
     }
     return $out;
 }
 
 func svgWrap(opts as Options, body as list of string) {
-    def head as string init '<svg xmlns="http://www.w3.org/2000/svg" width="' + convert.toString($opts.width) + '" height="' + convert.toString($opts.height) + '" viewBox="0 0 ' + convert.toString($opts.width) + ' ' + convert.toString($opts.height) + '">';
+    def head as string init '<svg xmlns="http://www.w3.org/2000/svg" width="' +
+        convert.toString($opts.width) + '" height="' + convert.toString($opts.height) +
+        '" viewBox="0 0 ' + convert.toString($opts.width) + ' ' + convert.toString($opts.height) +
+        '">';
     def parts as list of string init [$head];
     $parts = lists.concat($parts, $body);
     $parts[] = '</svg>';
@@ -605,7 +801,7 @@ func errorBars(g as Geom, s as Series, col as string, xa as Axis, ya as Axis) {
         def x as float init sx($g, $s.xs[$i], $xa.lo, $xa.hi, $xa.isLog);
         def e as float init $s.yErr[$i];
         def yHi as float init sy($g, $s.ys[$i] + $e, $ya.lo, $ya.hi, false);
-        def yLo as float init sy($g, $s.ys[$i] - $e, $ya.lo, $ya.hi, false);
+        def yLo as float init sy($g, $s.ys[$i] -$e, $ya.lo, $ya.hi, false);
         $out[] = lineEl($x, $yLo, $x, $yHi, $col, "1");
         $out[] = lineEl($x - 3.0, $yLo, $x + 3.0, $yLo, $col, "1");
         $out[] = lineEl($x - 3.0, $yHi, $x + 3.0, $yHi, $col, "1");
@@ -691,7 +887,8 @@ func legendBox(g as Geom, data as list of Series, opts as Options) {
             $maxLen = len($data[$i].name);
         }
     }
-    def lw as int init 28 + convert.toInt(convert.toFloat($maxLen) * convert.toFloat($opts.fontSize) * 0.6);
+    def lw as int init 28 +
+        convert.toInt(convert.toFloat($maxLen) * convert.toFloat($opts.fontSize) * 0.6);
     def lh as int init len($data) * ($opts.fontSize + 7) + 8;
     def bx as int init $g.x1 - $lw - 6;
     def by as int init $g.y0 + 8;
@@ -703,15 +900,27 @@ func legendBox(g as Geom, data as list of Series, opts as Options) {
         $bx = $g.x0 + 6;
         $by = $g.y1 - $lh - 6;
     }
-    $out[] = '<rect x="' + convert.toString($bx) + '" y="' + convert.toString($by) + '" width="' + convert.toString($lw) + '" height="' + convert.toString($lh) + '" fill="#ffffff" fill-opacity="0.85" stroke="#cccccc"/>';
+    $out[] = '<rect x="' + convert.toString($bx) + '" y="' + convert.toString($by) + '" width="' +
+        convert.toString($lw) + '" height="' + convert.toString($lh) +
+        '" fill="#ffffff" fill-opacity="0.85" stroke="#cccccc"/>';
     for (def i in 0..len($data)) {
         def col as string init $data[$i].color;
         if ($col == "") {
             $col = paletteColor($i);
         }
         def rowY as int init $by + 8 + $i * ($opts.fontSize + 7);
-        $out[] = '<rect x="' + convert.toString($bx + 8) + '" y="' + convert.toString($rowY) + '" width="' + convert.toString($opts.fontSize) + '" height="' + convert.toString($opts.fontSize) + '" fill="' + attrEsc($col) + '"/>';
-        $out[] = labelText($opts, convert.toFloat($bx + 12 + $opts.fontSize), convert.toFloat($rowY + $opts.fontSize - 1), "start", $opts.fontSize, "normal", "#333333", $data[$i].name);
+        $out[] = '<rect x="' + convert.toString($bx + 8) + '" y="' + convert.toString($rowY) +
+            '" width="' + convert.toString($opts.fontSize) + '" height="' +
+            convert.toString($opts.fontSize) + '" fill="' + attrEsc($col) + '"/>';
+        $out[] = labelText(
+            $opts,
+            convert.toFloat($bx + 12 + $opts.fontSize),
+            convert.toFloat($rowY + $opts.fontSize - 1),
+            "start",
+            $opts.fontSize,
+            "normal",
+            "#333333",
+            $data[$i].name);
     }
     return $out;
 }
@@ -727,15 +936,35 @@ func drawRefLines(g as Geom, opts as Options, xa as Axis, ya as Axis, numericX a
         def dash as string init dashAttr($r.dash, "5,4");
         if ($r.axis == "y" and not ($ya.isLog and $r.value <= 0.0)) {
             def y as float init sy($g, $r.value, $ya.lo, $ya.hi, $ya.isLog);
-            $out[] = '<line x1="' + convert.toString($g.x0) + '" y1="' + num($y) + '" x2="' + convert.toString($g.x1) + '" y2="' + num($y) + '" stroke="' + attrEsc($col) + '" stroke-width="1"' + $dash + '/>';
+            $out[] = '<line x1="' + convert.toString($g.x0) + '" y1="' + num($y) + '" x2="' +
+                convert.toString($g.x1) + '" y2="' + num($y) + '" stroke="' + attrEsc($col) +
+                '" stroke-width="1"' + $dash + '/>';
             if ($r.label != "") {
-                $out[] = labelText($opts, convert.toFloat($g.x1 - 4), $y - 3.0, "end", $opts.fontSize, "normal", $col, $r.label);
+                $out[] = labelText(
+                    $opts,
+                    convert.toFloat($g.x1 - 4),
+                    $y - 3.0,
+                    "end",
+                    $opts.fontSize,
+                    "normal",
+                    $col,
+                    $r.label);
             }
         } elseif ($r.axis == "x" and $numericX and not ($xa.isLog and $r.value <= 0.0)) {
             def x as float init sx($g, $r.value, $xa.lo, $xa.hi, $xa.isLog);
-            $out[] = '<line x1="' + num($x) + '" y1="' + convert.toString($g.y0) + '" x2="' + num($x) + '" y2="' + convert.toString($g.y1) + '" stroke="' + attrEsc($col) + '" stroke-width="1"' + $dash + '/>';
+            $out[] = '<line x1="' + num($x) + '" y1="' + convert.toString($g.y0) + '" x2="' +
+                num($x) + '" y2="' + convert.toString($g.y1) + '" stroke="' + attrEsc($col) +
+                '" stroke-width="1"' + $dash + '/>';
             if ($r.label != "") {
-                $out[] = labelText($opts, $x + 3.0, convert.toFloat($g.y0 + 10), "start", $opts.fontSize, "normal", $col, $r.label);
+                $out[] = labelText(
+                    $opts,
+                    $x + 3.0,
+                    convert.toFloat($g.y0 + 10),
+                    "start",
+                    $opts.fontSize,
+                    "normal",
+                    $col,
+                    $r.label);
             }
         }
     }
@@ -746,7 +975,13 @@ func drawRefLines(g as Geom, opts as Options, xa as Axis, ya as Axis, numericX a
 
 func requireXY(kind as string, xs as list of float, ys as list of float) {
     if (len($xs) == 0 or len($xs) != len($ys)) {
-        throw Error{kind: "plot", message: "plot." + $kind + ": xs and ys must be non-empty and the same length", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "plot",
+            message: "plot." + $kind + ": xs and ys must be non-empty and the same length",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
 }
 
@@ -762,7 +997,13 @@ func requireXY(kind as string, xs as list of float, ys as list of float) {
  */
 export func chart(data as list of Series, opts as Options) {
     if (len($data) == 0) {
-        throw Error{kind: "plot", message: "plot.chart: no series to plot", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "plot",
+            message: "plot.chart: no series to plot",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     # Validate the first series before seeding the extrema from its [0] elements,
     # so a malformed first series gives the friendly message, not a raw index
@@ -845,7 +1086,16 @@ export func chart(data as list of Series, opts as Options) {
  */
 export func line(xs as list of float, ys as list of float, opts as Options) {
     requireXY("line", $xs, $ys);
-    def s as Series init Series{name: "", xs: $xs, ys: $ys, color: $opts.color, mark: "line", dash: false, yErr: [], shape: "circle"};
+    def s as Series init Series{
+        name: "",
+        xs: $xs,
+        ys: $ys,
+        color: $opts.color,
+        mark: "line",
+        dash: false,
+        yErr: [],
+        shape: "circle"
+    };
     return chart([$s], $opts);
 }
 
@@ -859,7 +1109,16 @@ export func line(xs as list of float, ys as list of float, opts as Options) {
  */
 export func scatter(xs as list of float, ys as list of float, opts as Options) {
     requireXY("scatter", $xs, $ys);
-    def s as Series init Series{name: "", xs: $xs, ys: $ys, color: $opts.color, mark: "points", dash: false, yErr: [], shape: "circle"};
+    def s as Series init Series{
+        name: "",
+        xs: $xs,
+        ys: $ys,
+        color: $opts.color,
+        mark: "points",
+        dash: false,
+        yErr: [],
+        shape: "circle"
+    };
     return chart([$s], $opts);
 }
 
@@ -880,7 +1139,15 @@ func barSpan(data as list of Series, i as int) {
 
 # barGrouped draws one category's series bars side by side, from the zero
 # baseline (up for positive values, down for negative).
-func barGrouped(g as Geom, data as list of Series, ya as Axis, opts as Options, label as string, cx as float, slot as float, i as int) {
+func barGrouped(
+    g as Geom,
+    data as list of Series,
+    ya as Axis,
+    opts as Options,
+    label as string,
+    cx as float,
+    slot as float,
+    i as int) {
     def out as list of string init [];
     def m as int init len($data);
     def baseline as float init sy($g, 0.0, $ya.lo, $ya.hi, false);
@@ -904,13 +1171,27 @@ func barGrouped(g as Geom, data as list of Series, ya as Axis, opts as Options, 
         if ($nm == "") {
             $nm = $label;
         }
-        $out[] = barRect($bx, $yTop, $sub * 0.9, $h, $col, titleChild($opts.hover, capName($nm) + ": " + num($v)));
+        $out[] = barRect(
+            $bx,
+            $yTop,
+            $sub * 0.9,
+            $h,
+            $col,
+            titleChild($opts.hover, capName($nm) + ": " + num($v)));
         if ($opts.barLabels) {
             def ly as float init $yTop - 3.0;
             if ($v < 0.0) {
                 $ly = $yTop + $h + convert.toFloat($opts.fontSize);
             }
-            $out[] = labelText($opts, $bx + $sub * 0.45, $ly, "middle", $opts.fontSize - 1, "normal", "#333333", num($v));
+            $out[] = labelText(
+                $opts,
+                $bx + $sub * 0.45,
+                $ly,
+                "middle",
+                $opts.fontSize - 1,
+                "normal",
+                "#333333",
+                num($v));
         }
     }
     return $out;
@@ -918,7 +1199,15 @@ func barGrouped(g as Geom, data as list of Series, ya as Axis, opts as Options, 
 
 # barStacked draws one category's series stacked from zero: positive segments up,
 # negative segments down.
-func barStacked(g as Geom, data as list of Series, ya as Axis, opts as Options, label as string, cx as float, slot as float, i as int) {
+func barStacked(
+    g as Geom,
+    data as list of Series,
+    ya as Axis,
+    opts as Options,
+    label as string,
+    cx as float,
+    slot as float,
+    i as int) {
     def out as list of string init [];
     def gw as float init $slot * 0.7;
     def accPos as float init 0.0;
@@ -946,7 +1235,13 @@ func barStacked(g as Geom, data as list of Series, ya as Axis, opts as Options, 
         if ($nm == "") {
             $nm = $label;
         }
-        $out[] = barRect($cx - $gw / 2.0, $top, $gw, $h, $col, titleChild($opts.hover, capName($nm) + ": " + num($v)));
+        $out[] = barRect(
+            $cx - $gw / 2.0,
+            $top,
+            $gw,
+            $h,
+            $col,
+            titleChild($opts.hover, capName($nm) + ": " + num($v)));
     }
     return $out;
 }
@@ -965,12 +1260,24 @@ func barStacked(g as Geom, data as list of Series, ya as Axis, opts as Options, 
  */
 export func bars(labels as list of string, data as list of Series, opts as Options) {
     if (len($labels) == 0 or len($data) == 0) {
-        throw Error{kind: "plot", message: "plot.bars: labels and data must be non-empty", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "plot",
+            message: "plot.bars: labels and data must be non-empty",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def n as int init len($labels);
     for (def si in 0..len($data)) {
         if (len($data[$si].ys) != $n) {
-            throw Error{kind: "plot", message: "plot.bars: every series must have one value per label", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "plot",
+                message: "plot.bars: every series must have one value per label",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
     }
     def stacked as bool init $opts.barMode == "stacked";
@@ -1008,11 +1315,23 @@ export func bars(labels as list of string, data as list of Series, opts as Optio
     for (def i in 0..$n) {
         def cx as float init convert.toFloat($g.x0) + $slot * (convert.toFloat($i) + 0.5);
         if ($stacked) {
-            $out = lists.concat($out, barStacked($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i));
+            $out = lists.concat(
+                $out,
+                barStacked($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i));
         } else {
-            $out = lists.concat($out, barGrouped($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i));
+            $out = lists.concat(
+                $out,
+                barGrouped($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i));
         }
-        $out[] = labelText($opts, $cx, convert.toFloat($g.y1 + 16), "middle", $opts.fontSize, "normal", "#333333", $labels[$i]);
+        $out[] = labelText(
+            $opts,
+            $cx,
+            convert.toFloat($g.y1 + 16),
+            "middle",
+            $opts.fontSize,
+            "normal",
+            "#333333",
+            $labels[$i]);
     }
     $out = lists.concat($out, drawRefLines($g, $opts, $ya, $ya, false));
     if ($opts.legend and wantsLegend($data)) {
@@ -1032,9 +1351,24 @@ export func bars(labels as list of string, data as list of Series, opts as Optio
  */
 export func bar(labels as list of string, values as list of float, opts as Options) {
     if (len($labels) == 0 or len($labels) != len($values)) {
-        throw Error{kind: "plot", message: "plot.bar: labels and values must be non-empty and the same length", file: "", line: 0, col: 0};
+        throw Error{
+            kind: "plot",
+            message: "plot.bar: labels and values must be non-empty and the same length",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
-    def s as Series init Series{name: "", xs: [], ys: $values, color: $opts.color, mark: "line", dash: false, yErr: [], shape: "circle"};
+    def s as Series init Series{
+        name: "",
+        xs: [],
+        ys: $values,
+        color: $opts.color,
+        mark: "line",
+        dash: false,
+        yErr: [],
+        shape: "circle"
+    };
     return bars($labels, [$s], $opts);
 }
 
@@ -1049,7 +1383,14 @@ export func bar(labels as list of string, values as list of float, opts as Optio
  */
 export func histogram(data as list of float, bins as int, opts as Options) {
     if (len($data) == 0 or $bins < 1 or $bins > MAX_BINS) {
-        throw Error{kind: "plot", message: "plot.histogram: data must be non-empty and bins in 1.." + convert.toString(MAX_BINS), file: "", line: 0, col: 0};
+        throw Error{
+            kind: "plot",
+            message: "plot.histogram: data must be non-empty and bins in 1.." +
+                convert.toString(MAX_BINS),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def lo as float init minOf($data);
     def hi as float init maxOf($data);
@@ -1087,8 +1428,15 @@ export func histogram(data as list of float, bins as int, opts as Options) {
         def left as float init sx($g, $lo + convert.toFloat($i) * $bw, $xa.lo, $xa.hi, false);
         def right as float init sx($g, $lo + convert.toFloat($i + 1) * $bw, $xa.lo, $xa.hi, false);
         def top as float init sy($g, convert.toFloat($counts[$i]), $ya.lo, $ya.hi, false);
-        def tt as string init num($lo + convert.toFloat($i) * $bw) + ".." + num($lo + convert.toFloat($i + 1) * $bw) + ": " + convert.toString($counts[$i]);
-        $out[] = barRect($left + 0.5, $top, $right - $left - 1.0, convert.toFloat($g.y1) - $top, $opts.color, titleChild($opts.hover, $tt));
+        def tt as string init num($lo + convert.toFloat($i) * $bw) + ".." +
+            num($lo + convert.toFloat($i + 1) * $bw) + ": " + convert.toString($counts[$i]);
+        $out[] = barRect(
+            $left + 0.5,
+            $top,
+            $right - $left - 1.0,
+            convert.toFloat($g.y1) - $top,
+            $opts.color,
+            titleChild($opts.hover, $tt));
     }
     $out = lists.concat($out, drawRefLines($g, $opts, $xa, $ya, true));
     return svgWrap($opts, $out);

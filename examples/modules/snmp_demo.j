@@ -41,8 +41,10 @@ def names as map of string to string init {
 try {
     io.printf("GET system OIDs from %s (%s):\n", $host, $community);
     def keys as list of string init [
-        "1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.3.0",
-        "1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.6.0"
+        "1.3.6.1.2.1.1.1.0",
+        "1.3.6.1.2.1.1.3.0",
+        "1.3.6.1.2.1.1.5.0",
+        "1.3.6.1.2.1.1.6.0"
     ];
     for (def vb in snmp.get($c, $keys)) {
         io.printf("  %s [%s] %s\n", $names[$vb.oid], $vb.type, $vb.value);

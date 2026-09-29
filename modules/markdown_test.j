@@ -251,9 +251,7 @@ func testHtmlNestedInlineInStrong() {
         toHtml("x **[label](guide.md)** y"),
         "<p>x <strong><a href=\"guide.md\">label</a></strong> y</p>");
     # code inside bold
-    testing.assertEqual(
-        toHtml("**`code`**"),
-        "<p><strong><code>code</code></strong></p>");
+    testing.assertEqual(toHtml("**`code`**"), "<p><strong><code>code</code></strong></p>");
     # emphasis inside bold
     testing.assertEqual(
         toHtml("**outer *inner* rest**"),
@@ -276,12 +274,8 @@ func testHtmlLinkLabelWithCodeBrackets() {
 
 func testHtmlLinkLabelWithNestedBrackets() {
     # a balanced nested bracket pair is part of the label
-    testing.assertEqual(
-        toHtml("[a [b] c](u)"),
-        "<p><a href=\"u\">a [b] c</a></p>");
-    testing.assertEqual(
-        toHtml("[argv[0]](u)"),
-        "<p><a href=\"u\">argv[0]</a></p>");
+    testing.assertEqual(toHtml("[a [b] c](u)"), "<p><a href=\"u\">a [b] c</a></p>");
+    testing.assertEqual(toHtml("[argv[0]](u)"), "<p><a href=\"u\">argv[0]</a></p>");
 }
 
 func testMatchLinkDestCountsDepth() {
@@ -354,17 +348,13 @@ func testListLazyContinuation() {
 
 func testListContinuationOrdered() {
     def md as string init "1. one line\n   wraps here\n2. two\n";
-    testing.assertEqual(
-        toHtml($md),
-        "<ol><li>one line wraps here</li><li>two</li></ol>");
+    testing.assertEqual(toHtml($md), "<ol><li>one line wraps here</li><li>two</li></ol>");
 }
 
 func testListBlankEndsItemThenParagraph() {
     # a blank line still ends the list; the following text is its own paragraph
     def md as string init "- item\n\nplain paragraph\n";
-    testing.assertEqual(
-        toHtml($md),
-        "<ul><li>item</li></ul><p>plain paragraph</p>");
+    testing.assertEqual(toHtml($md), "<ul><li>item</li></ul><p>plain paragraph</p>");
 }
 
 func testHtmlThematicBreak() {
@@ -1207,7 +1197,8 @@ func testUnencodableCharRenders() {
 
 func testUnencodableInCodeAndTableRenders() {
     # the substitution reaches code blocks and table cells too
-    def md as string init "```\ncode " + mdArrow() + "\n```\n\n| A | B |\n|--|--|\n| " + mdArrow() + " | y |\n";
+    def md as string init "```\ncode " + mdArrow() + "\n```\n\n| A | B |\n|--|--|\n| " + mdArrow() +
+        " | y |\n";
     def out as bytes init toPdf($md);
     testing.assertTrue(binary.startsWith($out, pdfMarker()));
 }
@@ -1552,7 +1543,9 @@ func testStrikethrough() {
 func testTaskList() {
     def m as string init "- [ ] todo\n- [x] done\n- plain\n";
     def out as string init toHtml($m);
-    testing.assertContains($out, '<li class="task-list-item"><input type="checkbox" disabled> todo</li>');
+    testing.assertContains(
+        $out,
+        '<li class="task-list-item"><input type="checkbox" disabled> todo</li>');
     testing.assertContains($out, 'disabled checked> done</li>');
     testing.assertContains($out, "<li>plain</li>");
     # XHTML self-closes the checkbox and expands the boolean attrs.
@@ -1573,9 +1566,11 @@ func testTaskList() {
 func testAttributeLists() {
     testing.assertEqual(toHtml('## H {#anchor}' + "\n"), '<h2 id="anchor">H</h2>');
     testing.assertEqual(toHtml('# H {#id .a .b}' + "\n"), '<h1 id="id" class="a b">H</h1>');
-    testing.assertContains(toHtml('[a](x){.btn target="_blank"}'),
+    testing.assertContains(
+        toHtml('[a](x){.btn target="_blank"}'),
         '<a href="x" class="btn" target="_blank">a</a>');
-    testing.assertContains(toHtml('![alt](i.png){width="20"}'),
+    testing.assertContains(
+        toHtml('![alt](i.png){width="20"}'),
         '<img src="i.png" alt="alt" width="20">');
     # attr() reads them.
     def h as Node init children(parse('## T {#x .y}' + "\n"))[0];
@@ -1601,9 +1596,11 @@ func testHighlightSubSup() {
 
 # definition lists (term / ": definition"), pandoc-style -> <dl><dt><dd>.
 func testDefinitionList() {
-    testing.assertEqual(toHtml("term\n: what it means\n"),
+    testing.assertEqual(
+        toHtml("term\n: what it means\n"),
         "<dl><dt>term</dt><dd>what it means</dd></dl>");
-    testing.assertContains(toHtml("Apple\n: a fruit\n: a company\n"),
+    testing.assertContains(
+        toHtml("Apple\n: a fruit\n: a company\n"),
         "<dd>a fruit</dd><dd>a company</dd>");
     def dl as Node init children(parse("term\n: def\n"))[0];
     testing.assertEqual(typeOf($dl), "definition_list");
@@ -1611,6 +1608,5 @@ func testDefinitionList() {
     testing.assertEqual(typeOf(children($dl)[1]), "def_desc");
     testing.assertContains(toAnsi("term\n: def\n"), "def");
     # A mid-line colon is not a definition.
-    testing.assertEqual(toHtml("a line\nwith a colon: here\n"),
-        "<p>a line with a colon: here</p>");
+    testing.assertEqual(toHtml("a line\nwith a colon: here\n"), "<p>a line with a colon: here</p>");
 }

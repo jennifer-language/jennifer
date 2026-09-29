@@ -211,6 +211,8 @@ func testPlainBlockCommentInvisible() {
 # split at the source line break), and a blank line separates it from the description.
 func testSummaryIsFirstParagraph() {
     def doc as FileDoc init parse("/**\n * A wrapped opening sentence that runs\n * across two source lines.\n *\n * A second paragraph of detail.\n * @module m\n */");
-    testing.assertEqual($doc.module.summary, "A wrapped opening sentence that runs across two source lines.");
+    testing.assertEqual(
+        $doc.module.summary,
+        "A wrapped opening sentence that runs across two source lines.");
     testing.assertEqual($doc.module.description, "A second paragraph of detail.");
 }

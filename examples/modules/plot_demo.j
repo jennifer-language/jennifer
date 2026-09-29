@@ -26,10 +26,16 @@ $multiOpts.xLabel = "x";
 $multiOpts.yLabel = "y";
 $multiOpts.legendPos = "top-left";
 $multiOpts.refLines = [plot.hline(20.0, "target")];
-def measured as plot.Series init plot.points("measured", [1.0, 2.0, 3.0, 4.0, 5.0], [1.1, 4.2, 8.8, 16.4, 24.7]);
+def measured as plot.Series init plot.points(
+    "measured",
+    [1.0, 2.0, 3.0, 4.0, 5.0],
+    [1.1, 4.2, 8.8, 16.4, 24.7]);
 $measured.yErr = [0.6, 0.8, 1.0, 1.2, 1.4];
 $measured.shape = "square";
-def model as plot.Series init plot.series("model", [1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 4.0, 9.0, 16.0, 25.0]);
+def model as plot.Series init plot.series(
+    "model",
+    [1.0, 2.0, 3.0, 4.0, 5.0],
+    [1.0, 4.0, 9.0, 16.0, 25.0]);
 $names[] = "multi";
 $svgs[] = plot.chart([$measured, $model], $multiOpts);
 
@@ -56,9 +62,15 @@ $names[] = "stacked";
 $svgs[] = plot.bars(["Q1", "Q2", "Q3", "Q4"], [$north, $south], $stackedOpts);
 
 # 4. An area fill under one series and a dashed second series, wider left margin.
-def areaS as plot.Series init plot.series("cumulative", [1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 5.0, 9.0, 12.0, 18.0]);
+def areaS as plot.Series init plot.series(
+    "cumulative",
+    [1.0, 2.0, 3.0, 4.0, 5.0],
+    [2.0, 5.0, 9.0, 12.0, 18.0]);
 $areaS.mark = "area";
-def dashedS as plot.Series init plot.series("budget", [1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 6.0, 9.0, 12.0, 15.0]);
+def dashedS as plot.Series init plot.series(
+    "budget",
+    [1.0, 2.0, 3.0, 4.0, 5.0],
+    [3.0, 6.0, 9.0, 12.0, 15.0]);
 $dashedS.dash = true;
 def areaOpts as plot.Options init plot.defaults();
 $areaOpts.title = "area + dashed";
@@ -67,7 +79,23 @@ $names[] = "area";
 $svgs[] = plot.chart([$areaS, $dashedS], $areaOpts);
 
 # 5. A histogram of a small sample into 5 buckets.
-def sample as list of float init [1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0, 4.0, 5.0, 2.0, 3.0, 3.0, 4.0, 4.0, 3.0];
+def sample as list of float init [
+    1.0,
+    2.0,
+    2.0,
+    3.0,
+    3.0,
+    3.0,
+    4.0,
+    4.0,
+    5.0,
+    2.0,
+    3.0,
+    3.0,
+    4.0,
+    4.0,
+    3.0
+];
 def histOpts as plot.Options init plot.defaults();
 $histOpts.title = "sample distribution";
 $names[] = "histogram";

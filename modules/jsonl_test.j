@@ -147,7 +147,7 @@ func testPathReaderStreaming() {
     def path as string init fs.makeTempFile("", "jsonl-rd-", ".jsonl");
     writeFile($path, rows());
     def r as Reader init openReader($path);
-    testing.assertTrue(hasMore($r));   # non-empty file
+    testing.assertTrue(hasMore($r)); # non-empty file
     def count as int init 0;
     def next as Record init readRecord($r);
     while (not $next.done) {

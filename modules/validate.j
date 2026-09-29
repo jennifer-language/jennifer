@@ -85,8 +85,16 @@ func alwaysTrue(v as string) {
 
 func baseRule(kind as string) {
     def z as pw.Schema;
-    return Rule{kind: $kind, num: 0.0, intVal: 0, str: "", choices: [],
-        fn: alwaysTrue, schema: $z, message: ""};
+    return Rule{
+        kind: $kind,
+        num: 0.0,
+        intVal: 0,
+        str: "",
+        choices: [],
+        fn: alwaysTrue,
+        schema: $z,
+        message: ""
+    };
 }
 
 # --- rule builders -----------------------------------------------------------
@@ -450,7 +458,12 @@ export func check(data as map of string to string, rules as map of string to lis
         for (def r in $rules[$field]) {
             def msg as string init applyRule($r, $value, $present);
             if ($msg != "") {
-                $errs[] = Failure{field: $field, rule: $r.kind, param: ruleParam($r), message: $msg};
+                $errs[] = Failure{
+                    field: $field,
+                    rule: $r.kind,
+                    param: ruleParam($r),
+                    message: $msg
+                };
             }
         }
     }

@@ -161,9 +161,9 @@ func testPdfDate() {
 # --- embedded fonts (M23.6) -------------------------------------------------
 
 func testScaleMetric() {
-    testing.assertEqual(scaleMetric(1000, 1000), 1000);   # 1:1 at 1000 upem
-    testing.assertEqual(scaleMetric(1024, 2048), 500);    # half em at 2048 upem
-    testing.assertEqual(scaleMetric(-220, 1000), -220);   # negative (descender)
+    testing.assertEqual(scaleMetric(1000, 1000), 1000); # 1:1 at 1000 upem
+    testing.assertEqual(scaleMetric(1024, 2048), 500); # half em at 2048 upem
+    testing.assertEqual(scaleMetric(-220, 1000), -220); # negative (descender)
 }
 
 func testHexGid() {
@@ -173,8 +173,8 @@ func testHexGid() {
 }
 
 func testToUnicodeHex() {
-    testing.assertEqual(toUnicodeHex(65), "0041");         # 'A'
-    testing.assertEqual(toUnicodeHex(0x65E5), "65E5");     # a BMP CJK char
+    testing.assertEqual(toUnicodeHex(65), "0041"); # 'A'
+    testing.assertEqual(toUnicodeHex(0x65E5), "65E5"); # a BMP CJK char
     testing.assertEqual(toUnicodeHex(0x1F600), "D83DDE00"); # astral -> surrogate pair
 }
 
@@ -250,7 +250,7 @@ func testLoadFontRejectsInjectingName() {
 func testLoadImageRejectsInjectingName() {
     def threw as bool init false;
     try {
-        loadImage("A B", rgbPng());       # a space is not a legal resource name
+        loadImage("A B", rgbPng()); # a space is not a legal resource name
     } catch (e) {
         $threw = true;
     }
@@ -290,8 +290,8 @@ func testBeHelpers() {
 }
 
 func testPaeth() {
-    testing.assertEqual(paeth(2, 3, 4), 2);      # p=1: |p-a|=1 smallest -> a
-    testing.assertEqual(paeth(10, 20, 10), 20);  # p=20: |p-b|=0 smallest -> b
+    testing.assertEqual(paeth(2, 3, 4), 2); # p=1: |p-a|=1 smallest -> a
+    testing.assertEqual(paeth(10, 20, 10), 20); # p=20: |p-b|=0 smallest -> b
     testing.assertEqual(paeth(200, 100, 50), 200); # p=250: |p-a|=50 smallest -> a
 }
 
@@ -314,7 +314,7 @@ func testLoadImagePngRgba() {
     testing.assertEqual($img.width, 8);
     testing.assertEqual($img.height, 6);
     testing.assertEqual($img.colorSpace, "/DeviceRGB");
-    testing.assertEqual($img.predictor, 0);      # decoded, no predictor
+    testing.assertEqual($img.predictor, 0); # decoded, no predictor
     testing.assertTrue($img.hasSmask);
     testing.assertTrue(len($img.smask) > 0);
 }
@@ -398,10 +398,10 @@ func testImageObjects() {
 # --- text layout (M23.6) ----------------------------------------------------
 
 func testMeasureEm() {
-    testing.assertEqual(measureEm("Helvetica", "AV"), 1334);    # 667 + 667
+    testing.assertEqual(measureEm("Helvetica", "AV"), 1334); # 667 + 667
     testing.assertEqual(measureEm("Helvetica", " "), 278);
     testing.assertEqual(measureEm("Times-Roman", "A"), 722);
-    testing.assertEqual(measureEm("Courier", "WWWW"), 2400);    # monospaced 600
+    testing.assertEqual(measureEm("Courier", "WWWW"), 2400); # monospaced 600
     testing.assertEqual(measureEm("Helvetica-Oblique", "AV"), 1334); # shares Helvetica
 }
 
@@ -417,14 +417,14 @@ func testMeasureRejects() {
     } catch (e) {
         $threw1 = true;
     }
-    testing.assertTrue($threw1);                                # unknown font
+    testing.assertTrue($threw1); # unknown font
     def threw2 as bool init false;
     try {
         measureText("Symbol", 12, "x");
     } catch (e) {
         $threw2 = true;
     }
-    testing.assertTrue($threw2);                                # symbol font, no metrics
+    testing.assertTrue($threw2); # symbol font, no metrics
 }
 
 func testWrapText() {
@@ -437,7 +437,7 @@ func testWrapText() {
 
 func testWrapHardNewline() {
     def lines as list of string init wrapText("Courier", 10, "one\ntwo\n\nfour", 500);
-    testing.assertEqual(len($lines), 4);                        # one / two / blank / four
+    testing.assertEqual(len($lines), 4); # one / two / blank / four
     testing.assertEqual($lines[0], "one");
     testing.assertEqual($lines[2], "");
     testing.assertEqual($lines[3], "four");
@@ -512,8 +512,8 @@ func testToWinAnsiSkip() {
 
 func testAlignStart() {
     testing.assertEqual(alignStart(50, 300, 100.0, "left"), 50);
-    testing.assertEqual(alignStart(50, 300, 100.0, "right"), 250);   # 50 + (300 - 100)
-    testing.assertEqual(alignStart(50, 300, 100.0, "center"), 150);  # 50 + (300 - 100) / 2
+    testing.assertEqual(alignStart(50, 300, 100.0, "right"), 250); # 50 + (300 - 100)
+    testing.assertEqual(alignStart(50, 300, 100.0, "center"), 150); # 50 + (300 - 100) / 2
 }
 
 func testTextBlockJustify() {
@@ -734,7 +734,9 @@ func testLinkAnnotationRenders() {
 }
 
 func testNoAnnotsWithoutLinks() {
-    def out as bytes init render(addPage(document(), text(page(612, 792), 72, 700, "Helvetica", 12, "x")));
+    def out as bytes init render(addPage(
+        document(),
+        text(page(612, 792), 72, 700, "Helvetica", 12, "x")));
     testing.assertFalse(pdfContains($out, "/Annots"));
 }
 

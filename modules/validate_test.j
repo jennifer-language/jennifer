@@ -67,8 +67,16 @@ func testAllValid() {
         "score": [isFloat()],
         "even": [custom(even, "must be even")]
     };
-    def data as map of string to string init {"email": "a@b.com", "age": "30", "name": "Ada",
-        "role": "admin", "site": "https://example.com", "flag": "true", "score": "1.5", "even": "4"};
+    def data as map of string to string init {
+        "email": "a@b.com",
+        "age": "30",
+        "name": "Ada",
+        "role": "admin",
+        "site": "https://example.com",
+        "flag": "true",
+        "score": "1.5",
+        "even": "4"
+    };
     testing.assertTrue(ok($data, $rules));
     testing.assertEqual(len(check($data, $rules)), 0);
 }
@@ -90,9 +98,20 @@ func testEachRuleFails() {
         "role": [oneOf(["admin", "user"])],
         "even": [custom(even, "must be even")]
     };
-    def data as map of string to string init {"email": "nope", "site": "xx", "n": "x", "f": "x",
-        "b": "maybe", "lo": "3", "hi": "9", "short": "ab", "long": "abc", "pat": "abc",
-        "role": "root", "even": "3"};
+    def data as map of string to string init {
+        "email": "nope",
+        "site": "xx",
+        "n": "x",
+        "f": "x",
+        "b": "maybe",
+        "lo": "3",
+        "hi": "9",
+        "short": "ab",
+        "long": "abc",
+        "pat": "abc",
+        "role": "root",
+        "even": "3"
+    };
     def errs as list of Failure init check($data, $rules);
     testing.assertEqual(len($errs), 12);
     testing.assertEqual(firstMsg($errs, "email"), "must be a valid email address");
@@ -143,9 +162,9 @@ func testMinMaxNonNumeric() {
 
 func testMinMaxBoundariesPass() {
     def rules as map of string to list of Rule init {"a": [min(5.0), max(5.0)]};
-    testing.assertTrue(ok({"a": "5"}, $rules));       # equal passes both
-    testing.assertFalse(ok({"a": "4"}, $rules));      # below min
-    testing.assertFalse(ok({"a": "6"}, $rules));      # above max
+    testing.assertTrue(ok({"a": "5"}, $rules)); # equal passes both
+    testing.assertFalse(ok({"a": "4"}, $rules)); # below min
+    testing.assertFalse(ok({"a": "6"}, $rules)); # above max
 }
 
 # --- custom pass + a per-rule message override ---
@@ -178,10 +197,12 @@ func testMessagesAndByField() {
 
 func testDatetimeRule() {
     def rules as map of string to list of Rule init {"dob": [datetime("%d.%m.%Y")]};
-    testing.assertTrue(ok({"dob": "25.12.2026"}, $rules));   # valid
-    testing.assertFalse(ok({"dob": "2026-12-25"}, $rules));  # wrong format
-    testing.assertFalse(ok({"dob": "25.13.2026"}, $rules));  # month 13 (calendar-invalid)
-    testing.assertEqual(firstMsg(check({"dob": "nope"}, $rules), "dob"), "must be a valid date/time");
+    testing.assertTrue(ok({"dob": "25.12.2026"}, $rules)); # valid
+    testing.assertFalse(ok({"dob": "2026-12-25"}, $rules)); # wrong format
+    testing.assertFalse(ok({"dob": "25.13.2026"}, $rules)); # month 13 (calendar-invalid)
+    testing.assertEqual(
+        firstMsg(check({"dob": "nope"}, $rules), "dob"),
+        "must be a valid date/time");
     # ISO + a friendly override
     testing.assertTrue(ok({"d": "2026-01-31"}, {"d": [datetime("%Y-%m-%d")]}));
 }
@@ -201,10 +222,19 @@ func testCustomPredicateThrowIsCaught() {
 
 func testParamAndLocalize() {
     def rules as map of string to list of Rule init {
-        "a": [min(5.0)], "b": [minLen(3)], "c": [oneOf(["x", "y"])],
-        "d": [datetime("%Y")], "e": [email()]
+        "a": [min(5.0)],
+        "b": [minLen(3)],
+        "c": [oneOf(["x", "y"])],
+        "d": [datetime("%Y")],
+        "e": [email()]
     };
-    def data as map of string to string init {"a": "1", "b": "x", "c": "q", "d": "nope", "e": "bad"};
+    def data as map of string to string init {
+        "a": "1",
+        "b": "x",
+        "c": "q",
+        "d": "nope",
+        "e": "bad"
+    };
     def errs as list of Failure init check($data, $rules);
     # param carries the rule's argument; parameterless rules (email) -> ""
     testing.assertEqual(paramOf($errs, "a"), "5.0");
@@ -214,7 +244,10 @@ func testParamAndLocalize() {
     testing.assertEqual(paramOf($errs, "e"), "");
     # localize: %param% / %field% substitution; unlisted rules keep the default.
     # The markers are brace-free, so they never collide with string interpolation.
-    def tmpl as map of string to string init {"min": "at least %param%!", "oneOf": "%field%: pick %param%"};
+    def tmpl as map of string to string init {
+        "min": "at least %param%!",
+        "oneOf": "%field%: pick %param%"
+    };
     def loc as list of Failure init localize($errs, $tmpl);
     testing.assertEqual(firstMsg($loc, "a"), "at least 5.0!");
     testing.assertEqual(firstMsg($loc, "c"), "c: pick x, y");
@@ -224,14 +257,17 @@ func testParamAndLocalize() {
 # --- noneOf (blacklist) ---
 
 func testNoneOf() {
-    def rules as map of string to list of Rule init {"u": [noneOf(["admin", "root", "Administrator"])]};
-    testing.assertTrue(ok({"u": "bob"}, $rules));            # not blocked
-    testing.assertFalse(ok({"u": "root"}, $rules));          # blocked
-    testing.assertTrue(ok({"u": "Root"}, $rules));           # case-sensitive: "Root" != "root"
-    testing.assertEqual(firstMsg(check({"u": "admin"}, $rules), "u"),
+    def rules as map of string to list of Rule init {
+        "u": [noneOf(["admin", "root", "Administrator"])]
+    };
+    testing.assertTrue(ok({"u": "bob"}, $rules)); # not blocked
+    testing.assertFalse(ok({"u": "root"}, $rules)); # blocked
+    testing.assertTrue(ok({"u": "Root"}, $rules)); # case-sensitive: "Root" != "root"
+    testing.assertEqual(
+        firstMsg(check({"u": "admin"}, $rules), "u"),
         "must not be one of: admin, root, Administrator");
     testing.assertEqual(paramOf(check({"u": "admin"}, $rules), "u"), "admin, root, Administrator");
-    testing.assertTrue(ok({}, $rules));                      # absent -> only required fires
+    testing.assertTrue(ok({}, $rules)); # absent -> only required fires
 }
 
 # --- password (passthrough to the password module's policy engine) ---
@@ -239,15 +275,19 @@ func testNoneOf() {
 func testPasswordRule() {
     def policy as pw.Schema init pw.withMinimums(pw.withLength(pw.schema(), 8, 64), 1, 1, 1, 0);
     def rules as map of string to list of Rule init {"pw": [required(), password($policy)]};
-    testing.assertTrue(ok({"pw": "Str0ngPass"}, $rules));    # 10 chars, upper+lower+digit
+    testing.assertTrue(ok({"pw": "Str0ngPass"}, $rules)); # 10 chars, upper+lower+digit
     # too short + missing classes -> one failure carrying the policy's joined reasons
     def errs as list of Failure init check({"pw": "weak"}, $rules);
     testing.assertEqual(len($errs), 1);
     testing.assertEqual($errs[0].rule, "password");
     testing.assertTrue(strings.contains($errs[0].message, "too short"));
     # withMessage collapses the policy reasons to a single hint
-    def r2 as map of string to list of Rule init {"pw": [withMessage(password($policy), "8+ chars, mixed case + a digit")]};
-    testing.assertEqual(firstMsg(check({"pw": "weak"}, $r2), "pw"), "8+ chars, mixed case + a digit");
+    def r2 as map of string to list of Rule init {
+        "pw": [withMessage(password($policy), "8+ chars, mixed case + a digit")]
+    };
+    testing.assertEqual(
+        firstMsg(check({"pw": "weak"}, $r2), "pw"),
+        "8+ chars, mixed case + a digit");
     # absent/blank is skipped (pair with required to demand a value)
     testing.assertTrue(ok({}, {"pw": [password($policy)]}));
     testing.assertTrue(ok({"pw": ""}, {"pw": [password($policy)]}));
@@ -259,10 +299,12 @@ func testLocalizeEscaping() {
     def rules as map of string to list of Rule init {"x": [min(5.0)]};
     def errs as list of Failure init check({"x": "1"}, $rules);
     # %% -> literal %, in a cooked string (the string engine never touches %)
-    testing.assertEqual(firstMsg(localize($errs, {"min": "at least %param% (100%% sure)"}), "x"),
+    testing.assertEqual(
+        firstMsg(localize($errs, {"min": "at least %param% (100%% sure)"}), "x"),
         "at least 5.0 (100% sure)");
     # identical result from a raw-string template - %% is the module's escape, not the engine's
-    testing.assertEqual(firstMsg(localize($errs, {"min": 'at least %param% (100%% sure)'}), "x"),
+    testing.assertEqual(
+        firstMsg(localize($errs, {"min": 'at least %param% (100%% sure)'}), "x"),
         "at least 5.0 (100% sure)");
     # single pass: a param value that itself contains "%field%" is NOT re-scanned
     def rr as map of string to list of Rule init {"fld": [oneOf(["%field%"])]};

@@ -427,7 +427,13 @@ export func image(label as Label, x as float, y as float, name as string) {
  * @param thickness {float} the line thickness in millimetres
  * @return {Label} a new Label with the box added
  */
-export func box(label as Label, x as float, y as float, w as float, h as float, thickness as float) {
+export func box(
+    label as Label,
+    x as float,
+    y as float,
+    w as float,
+    h as float,
+    thickness as float) {
     def f as Field init Field{
         kind: "box",
         x: $x,

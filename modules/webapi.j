@@ -50,13 +50,20 @@ import "./validate.j" as validate;
  * How a route authenticates. `None` is public (no credential); `Bearer` requires
  * an `Authorization: Bearer <token>` the authenticator accepts.
  */
-export def enum Auth { None, Bearer };
+export def enum Auth {
+    None,
+    Bearer
+};
 
 /**
  * What a route produces, driving content negotiation. `Json` always answers
  * JSON, `Html` always HTML, `Negotiate` picks from the request's `Accept`.
  */
-export def enum Produces { Json, Html, Negotiate };
+export def enum Produces {
+    Json,
+    Html,
+    Negotiate
+};
 
 /**
  * The metadata attached to a route: what it needs and what it makes. A zero
@@ -288,13 +295,15 @@ export func limiter(a as Api, handler as func) {
 # that is not a top-level method), so no runtime existence check is needed.
 func addRoute(a as Api, method as string, pattern as string, handler as func, spec as Spec) {
     def out as Api init $a;
-    $out.routes = lists.push($out.routes, RouteDef{
-        method: $method,
-        pattern: $pattern,
-        handler: $handler,
-        feature: $method + " " + $pattern,
-        spec: $spec
-    });
+    $out.routes = lists.push(
+        $out.routes,
+        RouteDef{
+            method: $method,
+            pattern: $pattern,
+            handler: $handler,
+            feature: $method + " " + $pattern,
+            spec: $spec
+        });
     return $out;
 }
 
@@ -478,7 +487,12 @@ func findRoute(a as Api, method as string, path as string) {
                 def full as string init web.joinRoute($m.path, $r.pattern);
                 def params as map of string to string init matchSegs(pathSegs($full), $segs);
                 if (not maps.has($params, "__nomatch")) {
-                    return Matched{found: true, spec: $r.spec, feature: $r.feature, params: $params};
+                    return Matched{
+                        found: true,
+                        spec: $r.spec,
+                        feature: $r.feature,
+                        params: $params
+                    };
                 }
             }
         }
@@ -646,7 +660,12 @@ export func evaluate(spec as Spec, identity as Identity, data as map of string t
     match ($spec.auth) {
         when Bearer {
             if (not $identity.ok) {
-                return Decision{proceed: false, status: 401, message: "unauthorized", failures: $none};
+                return Decision{
+                    proceed: false,
+                    status: 401,
+                    message: "unauthorized",
+                    failures: $none
+                };
             }
         }
         when None {
@@ -665,7 +684,12 @@ export func evaluate(spec as Spec, identity as Identity, data as map of string t
     if (len($spec.rules) > 0) {
         def failures as list of validate.Failure init validate.check($data, $spec.rules);
         if (len($failures) > 0) {
-            return Decision{proceed: false, status: 422, message: "invalid request", failures: $failures};
+            return Decision{
+                proceed: false,
+                status: 422,
+                message: "invalid request",
+                failures: $failures
+            };
         }
     }
     return Decision{proceed: true, status: 200, message: "", failures: $none};
@@ -757,7 +781,11 @@ export func fail(ctx as web.Context, status as int, message as string) {
  * @param message {string} the error message
  * @param failures {list of validate.Failure} the per-field failures
  */
-export func failWith(ctx as web.Context, status as int, message as string, failures as list of validate.Failure) {
+export func failWith(
+    ctx as web.Context,
+    status as int,
+    message as string,
+    failures as list of validate.Failure) {
     def env as json.Value init json.set(json.map(), "/error", $message);
     $env = json.set($env, "/failures", json.list());
     for (def f in $failures) {

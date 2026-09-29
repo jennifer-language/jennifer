@@ -11,7 +11,7 @@ use task;
 # at its next loop checkpoint, and discard forgets it.
 def runaway as task of int init spawn {
     def n as int init 0;
-    while (true) {   # lint-disable: L105
+    while (true) { # lint-disable: L105
         $n = $n + 1;
     }
     return $n;
@@ -25,10 +25,10 @@ io.printf("cancelled a runaway spawn\n");
 def counter as task of int init spawn {
     def n as int init 0;
     try {
-        while (true) {   # lint-disable: L105
+        while (true) { # lint-disable: L105
             $n = $n + 1;
         }
-    } catch (e) {   # lint-disable: L103
+    } catch (e) { # lint-disable: L103
         # cancelled - fall through with the partial count
     }
     return $n;

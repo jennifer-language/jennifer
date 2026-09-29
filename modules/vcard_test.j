@@ -134,7 +134,13 @@ func testParseReadsTypeParameters() {
 # --- M23.6: full N, TYPE round-trip, common fields ---
 
 func testFullNameRoundTrip() {
-    def c as Card init withFullName(card("Dr. Pat O'Brien Jr."), "O'Brien", "Pat", "Q", "Dr.", "Jr.");
+    def c as Card init withFullName(
+        card("Dr. Pat O'Brien Jr."),
+        "O'Brien",
+        "Pat",
+        "Q",
+        "Dr.",
+        "Jr.");
     def back as Card init parse(encode($c))[0];
     testing.assertEqual($back.family, "O'Brien");
     testing.assertEqual($back.given, "Pat");
@@ -146,7 +152,8 @@ func testFullNameRoundTrip() {
 func testTypedContactsRoundTrip() {
     def c as Card init addPhoneTyped(
         addEmailTyped(addEmailTyped(card("T"), "w@x.com", "work"), "h@x.com", "home"),
-        "+15551234", "cell");
+        "+15551234",
+        "cell");
     $c = addAddress($c, addressTyped("1 St", "Town", "ST", "00000", "US", "home"));
     def text as string init encode($c);
     testing.assertContains($text, "EMAIL;TYPE=work:w@x.com\r\n");
@@ -171,7 +178,9 @@ func testTypeParameterQuotedWhenSpecial() {
 }
 
 func testCommonFieldsRoundTrip() {
-    def c as Card init withPhoto(withBday(withNickname(card("Ada"), "The Countess"), "18151210"), "https://x/ada.jpg");
+    def c as Card init withPhoto(
+        withBday(withNickname(card("Ada"), "The Countess"), "18151210"),
+        "https://x/ada.jpg");
     $c = addCategory(addCategory($c, "vip"), "math, science");
     def text as string init encode($c);
     testing.assertContains($text, "NICKNAME:The Countess\r\n");

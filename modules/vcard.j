@@ -162,7 +162,13 @@ export func withName(c as Card, family as string, given as string) {
  * @param suffixes {string} the honorific suffixes (e.g. "Jr.", "PhD")
  * @return {Card} a fresh card with the full name set
  */
-export func withFullName(c as Card, family as string, given as string, additional as string, prefixes as string, suffixes as string) {
+export func withFullName(
+    c as Card,
+    family as string,
+    given as string,
+    additional as string,
+    prefixes as string,
+    suffixes as string) {
     $c.family = $family;
     $c.given = $given;
     $c.additional = $additional;
@@ -482,8 +488,11 @@ func encodeLines(c as Card) {
     $lines[] = "VERSION:4.0";
     $lines[] = emitLine("FN", escapeText($c.formattedName));
     if (hasName($c)) {
-        $lines[] = emitLine("N", escapeText($c.family) + ";" + escapeText($c.given) + ";" +
-            escapeText($c.additional) + ";" + escapeText($c.prefixes) + ";" + escapeText($c.suffixes));
+        $lines[] = emitLine(
+            "N",
+            escapeText($c.family) + ";" + escapeText($c.given) + ";" +
+                escapeText($c.additional) + ";" + escapeText($c.prefixes) + ";" +
+                escapeText($c.suffixes));
     }
     if (not ($c.nickname == "")) {
         $lines[] = emitLine("NICKNAME", escapeText($c.nickname));
@@ -587,9 +596,7 @@ export func parse(text as string) {
             continue;
         }
         match ($name) {
-            when "FN" {
-                $cur.formattedName = unescapeText($value);
-            }
+            when "FN" { $cur.formattedName = unescapeText($value); }
             when "N" {
                 def parts as list of string init splitStructured($value);
                 $cur.family = component($parts, 0);
@@ -598,16 +605,12 @@ export func parse(text as string) {
                 $cur.prefixes = component($parts, 3);
                 $cur.suffixes = component($parts, 4);
             }
-            when "NICKNAME" {
-                $cur.nickname = unescapeText($value);
-            }
+            when "NICKNAME" { $cur.nickname = unescapeText($value); }
             when "ORG" {
                 # ORG is itself structured (org;unit;...); take the first component.
                 $cur.organization = component(splitStructured($value), 0);
             }
-            when "TITLE" {
-                $cur.title = unescapeText($value);
-            }
+            when "TITLE" { $cur.title = unescapeText($value); }
             when "EMAIL" {
                 $cur.emails = lists.push(
                     $cur.emails,
@@ -629,21 +632,11 @@ export func parse(text as string) {
                     paramValue($nameSection, "TYPE"));
                 $cur.addresses = lists.push($cur.addresses, $a);
             }
-            when "BDAY" {
-                $cur.bday = $value;
-            }
-            when "URL" {
-                $cur.url = unescapeText($value);
-            }
-            when "PHOTO" {
-                $cur.photo = $value;
-            }
-            when "CATEGORIES" {
-                $cur.categories = splitCategories($value);
-            }
-            when "NOTE" {
-                $cur.note = unescapeText($value);
-            }
+            when "BDAY" { $cur.bday = $value; }
+            when "URL" { $cur.url = unescapeText($value); }
+            when "PHOTO" { $cur.photo = $value; }
+            when "CATEGORIES" { $cur.categories = splitCategories($value); }
+            when "NOTE" { $cur.note = unescapeText($value); }
         }
     }
     return $cards;

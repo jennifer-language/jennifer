@@ -185,7 +185,9 @@ func testParseFoldedLine() {
 # --- M23.6: all-day / TZID / recurrence / VALARM / attendees / VTODO ---
 
 func testAllDayRoundTrip() {
-    def ev as Event init withAllDay(event("h", at("2024-06-15T00:00:00Z"), at("2024-06-16T00:00:00Z"), "Holiday"), true);
+    def ev as Event init withAllDay(
+        event("h", at("2024-06-15T00:00:00Z"), at("2024-06-16T00:00:00Z"), "Holiday"),
+        true);
     def text as string init encode(add(calendar(), $ev));
     testing.assertContains($text, "DTSTART;VALUE=DATE:20240615\r\n");
     def back as Event init parse($text).events[0];
@@ -193,7 +195,9 @@ func testAllDayRoundTrip() {
 }
 
 func testTzidRoundTrip() {
-    def ev as Event init withZone(event("z", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Local"), "Europe/London");
+    def ev as Event init withZone(
+        event("z", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Local"),
+        "Europe/London");
     def text as string init encode(add(calendar(), $ev));
     # a TZID value is floating (no trailing Z) and carries the zone parameter
     testing.assertContains($text, "DTSTART;TZID=Europe/London:20240615T130000\r\n");
@@ -208,13 +212,17 @@ func testRuleBuilder() {
 }
 
 func testRecurrenceRoundTrip() {
-    def ev as Event init recur(event("r", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Standup"), "FREQ=WEEKLY;COUNT=3");
+    def ev as Event init recur(
+        event("r", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Standup"),
+        "FREQ=WEEKLY;COUNT=3");
     def back as Event init parse(encode(add(calendar(), $ev))).events[0];
     testing.assertEqual($back.rrule, "FREQ=WEEKLY;COUNT=3");
 }
 
 func testOccurrencesWeekly() {
-    def ev as Event init recur(event("r", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "S"), rule("WEEKLY", 1, 3));
+    def ev as Event init recur(
+        event("r", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "S"),
+        rule("WEEKLY", 1, 3));
     def occ as list of time.Time init occurrences($ev, 10);
     testing.assertEqual(len($occ), 3);
     testing.assertTrue(time.equal($occ[0], at("2024-06-15T13:00:00Z")));
@@ -224,7 +232,9 @@ func testOccurrencesWeekly() {
 # MONTHLY clamps a too-large day per month, computed from DTSTART (not the
 # previous clamped instant): Jan 31 -> Feb 29 -> Mar 31 -> Apr 30.
 func testOccurrencesMonthlyClamp() {
-    def ev as Event init recur(event("m", at("2024-01-31T09:00:00Z"), at("2024-01-31T09:00:00Z"), "M"), rule("MONTHLY", 1, 4));
+    def ev as Event init recur(
+        event("m", at("2024-01-31T09:00:00Z"), at("2024-01-31T09:00:00Z"), "M"),
+        rule("MONTHLY", 1, 4));
     def occ as list of time.Time init occurrences($ev, 10);
     testing.assertEqual(len($occ), 4);
     testing.assertTrue(time.equal($occ[1], at("2024-02-29T09:00:00Z")));
@@ -233,7 +243,9 @@ func testOccurrencesMonthlyClamp() {
 }
 
 func testOccurrencesExdateAndRdate() {
-    def ev as Event init recur(event("d", at("2024-06-01T08:00:00Z"), at("2024-06-01T08:00:00Z"), "D"), rule("DAILY", 1, 5));
+    def ev as Event init recur(
+        event("d", at("2024-06-01T08:00:00Z"), at("2024-06-01T08:00:00Z"), "D"),
+        rule("DAILY", 1, 5));
     $ev = addExdate($ev, at("2024-06-03T08:00:00Z")); # remove day 3
     $ev = addRdate($ev, at("2024-06-20T08:00:00Z")); # add an extra
     def occ as list of time.Time init occurrences($ev, 20);
@@ -245,7 +257,9 @@ func testOccurrencesExdateAndRdate() {
 # A VALARM inside a VEVENT is parsed into the event's alarms (and its DESCRIPTION
 # still does not clobber the event's).
 func testValarmRoundTrip() {
-    def ev as Event init addAlarm(event("a", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Meet"), alarm("DISPLAY", "-PT15M", "Reminder"));
+    def ev as Event init addAlarm(
+        event("a", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Meet"),
+        alarm("DISPLAY", "-PT15M", "Reminder"));
     $ev = describe($ev, "Event body");
     def back as Event init parse(encode(add(calendar(), $ev))).events[0];
     testing.assertEqual($back.description, "Event body");
@@ -256,7 +270,9 @@ func testValarmRoundTrip() {
 }
 
 func testOrganizerAttendeeRoundTrip() {
-    def ev as Event init withOrganizer(event("o", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Sync"), "mailto:boss@x.com");
+    def ev as Event init withOrganizer(
+        event("o", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "Sync"),
+        "mailto:boss@x.com");
     $ev = addAttendee($ev, attendee("mailto:bob@x.com", "Bob", "REQ-PARTICIPANT"));
     def text as string init encode(add(calendar(), $ev));
     testing.assertContains($text, "ATTENDEE;CN=Bob;ROLE=REQ-PARTICIPANT:mailto:bob@x.com\r\n");
@@ -269,7 +285,9 @@ func testOrganizerAttendeeRoundTrip() {
 # An attendee CN containing a `:` is quoted, so it does not truncate the line at
 # the wrong colon (an unquoted CN colon otherwise corrupts the address).
 func testAttendeeCnQuotedWhenSpecial() {
-    def ev as Event init addAttendee(event("x", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "M"), attendee("mailto:b@x", "Bob: The 3rd", "REQ"));
+    def ev as Event init addAttendee(
+        event("x", at("2024-06-15T13:00:00Z"), at("2024-06-15T14:00:00Z"), "M"),
+        attendee("mailto:b@x", "Bob: The 3rd", "REQ"));
     def text as string init encode(add(calendar(), $ev));
     testing.assertContains($text, "ATTENDEE;CN=\"Bob: The 3rd\";ROLE=REQ:mailto:b@x\r\n");
     def back as Event init parse($text).events[0];
@@ -278,7 +296,9 @@ func testAttendeeCnQuotedWhenSpecial() {
 }
 
 func testVtodoRoundTrip() {
-    def td as Todo init withStatus(withDue(todo("t1", at("2024-06-15T13:00:00Z"), "Ship it"), at("2024-06-20T17:00:00Z")), "NEEDS-ACTION");
+    def td as Todo init withStatus(
+        withDue(todo("t1", at("2024-06-15T13:00:00Z"), "Ship it"), at("2024-06-20T17:00:00Z")),
+        "NEEDS-ACTION");
     def cal as Calendar init addTodo(calendar(), $td);
     def text as string init encode($cal);
     testing.assertContains($text, "BEGIN:VTODO\r\n");

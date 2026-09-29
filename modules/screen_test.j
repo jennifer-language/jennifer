@@ -307,12 +307,12 @@ func testAsyncInputPoll() {
 # Multi-byte UTF-8 keys assemble into a single "char" key; malformed or lone
 # lead bytes stay total ("unknown"), never a throw.
 func testDecodeKeyUtf8() {
-    def o as Key init decodeKey([195, 182]);          # o-umlaut, 2-byte
+    def o as Key init decodeKey([195, 182]); # o-umlaut, 2-byte
     testing.assertEqual($o.name, "char");
     testing.assertEqual($o.char, "ö");
     testing.assertEqual(len($o.char), 1);
-    testing.assertEqual(decodeKey([194, 167]).char, "§");   # section sign, 2-byte
+    testing.assertEqual(decodeKey([194, 167]).char, "§"); # section sign, 2-byte
     testing.assertEqual(len(decodeKey([240, 159, 152, 128]).char), 1); # emoji, 4-byte
-    testing.assertEqual(decodeKey([195]).name, "unknown");      # lone lead byte
-    testing.assertEqual(decodeKey([195, 40]).name, "unknown");  # bad continuation
+    testing.assertEqual(decodeKey([195]).name, "unknown"); # lone lead byte
+    testing.assertEqual(decodeKey([195, 40]).name, "unknown"); # bad continuation
 }

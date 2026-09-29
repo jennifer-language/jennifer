@@ -73,10 +73,12 @@ func testTagsSuffix() {
 
 func testBuildLineWithTags() {
     def t as map of string to string init {"env": "prod", "host": "h1"};
-    testing.assertEqual(buildLine("web", "hits", "1", "c", 1.0, $t),
+    testing.assertEqual(
+        buildLine("web", "hits", "1", "c", 1.0, $t),
         "web.hits:1|c|#env:prod,host:h1");
     # rate then tags: name:value|type|@rate|#tags
-    testing.assertEqual(buildLine("web", "hits", "1", "c", 0.1, $t),
+    testing.assertEqual(
+        buildLine("web", "hits", "1", "c", 0.1, $t),
         "web.hits:1|c|@0.1|#env:prod,host:h1");
 }
 
@@ -128,7 +130,7 @@ func testBatchPacket() {
 func testBatchValueSemantic() {
     def b as Batch init Batch{prefix: "", lines: []};
     def b2 as Batch init addCount($b, "a", 1);
-    testing.assertEqual(len($b.lines), 0);  # original untouched
+    testing.assertEqual(len($b.lines), 0); # original untouched
     testing.assertEqual(len($b2.lines), 1); # copy has the line
 }
 
@@ -154,7 +156,7 @@ func testMetricVerbsSendAndFormat() {
     count($c, "c", 5);
     decrement($c, "d");
     gauge($c, "g", 7);
-    gauge($c, "gneg", -3);          # negative gauge: set 0 then decrement
+    gauge($c, "gneg", -3); # negative gauge: set 0 then decrement
     timing($c, "t", 42);
     set($c, "s", "u1");
 
@@ -187,7 +189,7 @@ func testMetricVerbsSendAndFormat() {
 # client(host) joins the default port and sends over its own socket.
 func testDefaultPortClient() {
     def c as Client init client("127.0.0.1");
-    increment($c, "ping");   # fire-and-forget to the default statsd port
+    increment($c, "ping"); # fire-and-forget to the default statsd port
     close($c);
     testing.assertTrue(true);
 }

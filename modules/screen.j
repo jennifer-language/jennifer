@@ -434,7 +434,8 @@ export func diff(old as Buffer, new as Buffer) {
     def cols as int init $new.cols;
     for (def y as int init 0; $y < $new.rows; $y = $y + 1) {
         def x as int init 0;
-        for (; $x < $cols; ) {
+        for (; $x < $cols;
+        ) {
             def idx as int init $y * $cols + $x;
             if ($old.cells[$idx] == $new.cells[$idx]) {
                 $x = $x + 1;
@@ -442,8 +443,9 @@ export func diff(old as Buffer, new as Buffer) {
                 # Start of a changed run: emit one move, then every changed
                 # cell until the buffers agree again.
                 $parts[] = moveTo($x, $y);
-                for (; $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x]; $x = $x +
-                    1) {
+                for (;
+                    $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x];
+                    $x = $x + 1) {
                     $parts[] = $new.cells[$y * $cols + $x];
                 }
             }

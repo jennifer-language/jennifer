@@ -68,7 +68,8 @@ try {
     influxdb.write($client2, [$cpu, $status]);
     io.printf("wrote 2 points\n");
 
-    def csv as string init influxdb.queryFlux($client2,
+    def csv as string init influxdb.queryFlux(
+        $client2,
         "from(bucket:\"mybucket\") |> range(start:-1h)");
     io.printf("flux returned %d bytes of annotated CSV\n", len($csv));
 } catch (e) {

@@ -110,7 +110,9 @@ func testParseNextLink() {
 # URL is not (so paginate won't replay the client's credentials cross-origin).
 func testSameOrigin() {
     testing.assertTrue(sameOrigin("https://api.example.com/v1", "/items?page=2"));
-    testing.assertTrue(sameOrigin("https://api.example.com/v1", "https://api.example.com/items?p=2"));
+    testing.assertTrue(sameOrigin(
+        "https://api.example.com/v1",
+        "https://api.example.com/items?p=2"));
     testing.assertFalse(sameOrigin("https://api.example.com/v1", "https://evil.example.net/items"));
     testing.assertFalse(sameOrigin("https://api.example.com/v1", "http://api.example.com/items"));
 }

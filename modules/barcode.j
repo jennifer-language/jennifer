@@ -44,7 +44,10 @@ include "./barcode_ecc.inc.j";
  * The kind of an encoded symbol: `Matrix` (a 2D module grid, e.g. QR) or
  * `Linear` (a 1D run of bar / space widths).
  */
-export def enum SymbolKind { Matrix, Linear };
+export def enum SymbolKind {
+    Matrix,
+    Linear
+};
 
 /**
  * A device-independent encoded symbol.
@@ -83,7 +86,7 @@ export def struct Options {
 };
 
 func fail(msg as string) {
-    throw Error{ kind: "barcode", message: "barcode: " + $msg, file: "", line: 0, col: 0 };
+    throw Error{kind: "barcode", message: "barcode: " + $msg, file: "", line: 0, col: 0};
 }
 
 # MAX_SCALE / MAX_QUIET bound the render magnification so a caller-supplied
@@ -129,17 +132,33 @@ def struct Canvas {
  * @return {Options} the defaults
  */
 export func defaults() {
-    return Options{ scale: 8, height: 40, quiet: 4, ecLevel: "M", foreground: "#000000", background: "#ffffff", humanReadable: true };
+    return Options{
+        scale: 8,
+        height: 40,
+        quiet: 4,
+        ecLevel: "M",
+        foreground: "#000000",
+        background: "#ffffff",
+        humanReadable: true
+    };
 }
 
 # --- QR: tables (private) ---------------------------------------------------
 
 # ecLevelBits maps a QR EC level to its 2-bit format value.
 func ecLevelBits(level as string) {
-    if ($level == "L") { return 1; }
-    if ($level == "M") { return 0; }
-    if ($level == "Q") { return 3; }
-    if ($level == "H") { return 2; }
+    if ($level == "L") {
+        return 1;
+    }
+    if ($level == "M") {
+        return 0;
+    }
+    if ($level == "Q") {
+        return 3;
+    }
+    if ($level == "H") {
+        return 2;
+    }
     fail("unknown QR EC level: " + $level);
 }
 
@@ -147,46 +166,166 @@ func ecLevelBits(level as string) {
 # g1blocks, g1data, g2blocks, g2data] for versions 1-40 (all four EC levels).
 func blockTable() {
     def t as map of string to list of int init {};
-    $t["1-L"] = [7, 1, 19, 0, 0]; $t["1-M"] = [10, 1, 16, 0, 0]; $t["1-Q"] = [13, 1, 13, 0, 0]; $t["1-H"] = [17, 1, 9, 0, 0];
-    $t["2-L"] = [10, 1, 34, 0, 0]; $t["2-M"] = [16, 1, 28, 0, 0]; $t["2-Q"] = [22, 1, 22, 0, 0]; $t["2-H"] = [28, 1, 16, 0, 0];
-    $t["3-L"] = [15, 1, 55, 0, 0]; $t["3-M"] = [26, 1, 44, 0, 0]; $t["3-Q"] = [18, 2, 17, 0, 0]; $t["3-H"] = [22, 2, 13, 0, 0];
-    $t["4-L"] = [20, 1, 80, 0, 0]; $t["4-M"] = [18, 2, 32, 0, 0]; $t["4-Q"] = [26, 2, 24, 0, 0]; $t["4-H"] = [16, 4, 9, 0, 0];
-    $t["5-L"] = [26, 1, 108, 0, 0]; $t["5-M"] = [24, 2, 43, 0, 0]; $t["5-Q"] = [18, 2, 15, 2, 16]; $t["5-H"] = [22, 2, 11, 2, 12];
-    $t["6-L"] = [18, 2, 68, 0, 0]; $t["6-M"] = [16, 4, 27, 0, 0]; $t["6-Q"] = [24, 4, 19, 0, 0]; $t["6-H"] = [28, 4, 15, 0, 0];
-    $t["7-L"] = [20, 2, 78, 0, 0]; $t["7-M"] = [18, 4, 31, 0, 0]; $t["7-Q"] = [18, 2, 14, 4, 15]; $t["7-H"] = [26, 4, 13, 1, 14];
-    $t["8-L"] = [24, 2, 97, 0, 0]; $t["8-M"] = [22, 2, 38, 2, 39]; $t["8-Q"] = [22, 4, 18, 2, 19]; $t["8-H"] = [26, 4, 14, 2, 15];
-    $t["9-L"] = [30, 2, 116, 0, 0]; $t["9-M"] = [22, 3, 36, 2, 37]; $t["9-Q"] = [20, 4, 16, 4, 17]; $t["9-H"] = [24, 4, 12, 4, 13];
-    $t["10-L"] = [18, 2, 68, 2, 69]; $t["10-M"] = [26, 4, 43, 1, 44]; $t["10-Q"] = [24, 6, 19, 2, 20]; $t["10-H"] = [28, 6, 15, 2, 16];
-    $t["11-L"] = [20, 4, 81, 0, 0]; $t["11-M"] = [30, 1, 50, 4, 51]; $t["11-Q"] = [28, 4, 22, 4, 23]; $t["11-H"] = [24, 3, 12, 8, 13];
-    $t["12-L"] = [24, 2, 92, 2, 93]; $t["12-M"] = [22, 6, 36, 2, 37]; $t["12-Q"] = [26, 4, 20, 6, 21]; $t["12-H"] = [28, 7, 14, 4, 15];
-    $t["13-L"] = [26, 4, 107, 0, 0]; $t["13-M"] = [22, 8, 37, 1, 38]; $t["13-Q"] = [24, 8, 20, 4, 21]; $t["13-H"] = [22, 12, 11, 4, 12];
-    $t["14-L"] = [30, 3, 115, 1, 116]; $t["14-M"] = [24, 4, 40, 5, 41]; $t["14-Q"] = [20, 11, 16, 5, 17]; $t["14-H"] = [24, 11, 12, 5, 13];
-    $t["15-L"] = [22, 5, 87, 1, 88]; $t["15-M"] = [24, 5, 41, 5, 42]; $t["15-Q"] = [30, 5, 24, 7, 25]; $t["15-H"] = [24, 11, 12, 7, 13];
-    $t["16-L"] = [24, 5, 98, 1, 99]; $t["16-M"] = [28, 7, 45, 3, 46]; $t["16-Q"] = [24, 15, 19, 2, 20]; $t["16-H"] = [30, 3, 15, 13, 16];
-    $t["17-L"] = [28, 1, 107, 5, 108]; $t["17-M"] = [28, 10, 46, 1, 47]; $t["17-Q"] = [28, 1, 22, 15, 23]; $t["17-H"] = [28, 2, 14, 17, 15];
-    $t["18-L"] = [30, 5, 120, 1, 121]; $t["18-M"] = [26, 9, 43, 4, 44]; $t["18-Q"] = [28, 17, 22, 1, 23]; $t["18-H"] = [28, 2, 14, 19, 15];
-    $t["19-L"] = [28, 3, 113, 4, 114]; $t["19-M"] = [26, 3, 44, 11, 45]; $t["19-Q"] = [26, 17, 21, 4, 22]; $t["19-H"] = [26, 9, 13, 16, 14];
-    $t["20-L"] = [28, 3, 107, 5, 108]; $t["20-M"] = [26, 3, 41, 13, 42]; $t["20-Q"] = [30, 15, 24, 5, 25]; $t["20-H"] = [28, 15, 15, 10, 16];
-    $t["21-L"] = [28, 4, 116, 4, 117]; $t["21-M"] = [26, 17, 42, 0, 0]; $t["21-Q"] = [28, 17, 22, 6, 23]; $t["21-H"] = [30, 19, 16, 6, 17];
-    $t["22-L"] = [28, 2, 111, 7, 112]; $t["22-M"] = [28, 17, 46, 0, 0]; $t["22-Q"] = [30, 7, 24, 16, 25]; $t["22-H"] = [24, 34, 13, 0, 0];
-    $t["23-L"] = [30, 4, 121, 5, 122]; $t["23-M"] = [28, 4, 47, 14, 48]; $t["23-Q"] = [30, 11, 24, 14, 25]; $t["23-H"] = [30, 16, 15, 14, 16];
-    $t["24-L"] = [30, 6, 117, 4, 118]; $t["24-M"] = [28, 6, 45, 14, 46]; $t["24-Q"] = [30, 11, 24, 16, 25]; $t["24-H"] = [30, 30, 16, 2, 17];
-    $t["25-L"] = [26, 8, 106, 4, 107]; $t["25-M"] = [28, 8, 47, 13, 48]; $t["25-Q"] = [30, 7, 24, 22, 25]; $t["25-H"] = [30, 22, 15, 13, 16];
-    $t["26-L"] = [28, 10, 114, 2, 115]; $t["26-M"] = [28, 19, 46, 4, 47]; $t["26-Q"] = [28, 28, 22, 6, 23]; $t["26-H"] = [30, 33, 16, 4, 17];
-    $t["27-L"] = [30, 8, 122, 4, 123]; $t["27-M"] = [28, 22, 45, 3, 46]; $t["27-Q"] = [30, 8, 23, 26, 24]; $t["27-H"] = [30, 12, 15, 28, 16];
-    $t["28-L"] = [30, 3, 117, 10, 118]; $t["28-M"] = [28, 3, 45, 23, 46]; $t["28-Q"] = [30, 4, 24, 31, 25]; $t["28-H"] = [30, 11, 15, 31, 16];
-    $t["29-L"] = [30, 7, 116, 7, 117]; $t["29-M"] = [28, 21, 45, 7, 46]; $t["29-Q"] = [30, 1, 23, 37, 24]; $t["29-H"] = [30, 19, 15, 26, 16];
-    $t["30-L"] = [30, 5, 115, 10, 116]; $t["30-M"] = [28, 19, 47, 10, 48]; $t["30-Q"] = [30, 15, 24, 25, 25]; $t["30-H"] = [30, 23, 15, 25, 16];
-    $t["31-L"] = [30, 13, 115, 3, 116]; $t["31-M"] = [28, 2, 46, 29, 47]; $t["31-Q"] = [30, 42, 24, 1, 25]; $t["31-H"] = [30, 23, 15, 28, 16];
-    $t["32-L"] = [30, 17, 115, 0, 0]; $t["32-M"] = [28, 10, 46, 23, 47]; $t["32-Q"] = [30, 10, 24, 35, 25]; $t["32-H"] = [30, 19, 15, 35, 16];
-    $t["33-L"] = [30, 17, 115, 1, 116]; $t["33-M"] = [28, 14, 46, 21, 47]; $t["33-Q"] = [30, 29, 24, 19, 25]; $t["33-H"] = [30, 11, 15, 46, 16];
-    $t["34-L"] = [30, 13, 115, 6, 116]; $t["34-M"] = [28, 14, 46, 23, 47]; $t["34-Q"] = [30, 44, 24, 7, 25]; $t["34-H"] = [30, 59, 16, 1, 17];
-    $t["35-L"] = [30, 12, 121, 7, 122]; $t["35-M"] = [28, 12, 47, 26, 48]; $t["35-Q"] = [30, 39, 24, 14, 25]; $t["35-H"] = [30, 22, 15, 41, 16];
-    $t["36-L"] = [30, 6, 121, 14, 122]; $t["36-M"] = [28, 6, 47, 34, 48]; $t["36-Q"] = [30, 46, 24, 10, 25]; $t["36-H"] = [30, 2, 15, 64, 16];
-    $t["37-L"] = [30, 17, 122, 4, 123]; $t["37-M"] = [28, 29, 46, 14, 47]; $t["37-Q"] = [30, 49, 24, 10, 25]; $t["37-H"] = [30, 24, 15, 46, 16];
-    $t["38-L"] = [30, 4, 122, 18, 123]; $t["38-M"] = [28, 13, 46, 32, 47]; $t["38-Q"] = [30, 48, 24, 14, 25]; $t["38-H"] = [30, 42, 15, 32, 16];
-    $t["39-L"] = [30, 20, 117, 4, 118]; $t["39-M"] = [28, 40, 47, 7, 48]; $t["39-Q"] = [30, 43, 24, 22, 25]; $t["39-H"] = [30, 10, 15, 67, 16];
-    $t["40-L"] = [30, 19, 118, 6, 119]; $t["40-M"] = [28, 18, 47, 31, 48]; $t["40-Q"] = [30, 34, 24, 34, 25]; $t["40-H"] = [30, 20, 15, 61, 16];
+    $t["1-L"] = [7, 1, 19, 0, 0];
+    $t["1-M"] = [10, 1, 16, 0, 0];
+    $t["1-Q"] = [13, 1, 13, 0, 0];
+    $t["1-H"] = [17, 1, 9, 0, 0];
+    $t["2-L"] = [10, 1, 34, 0, 0];
+    $t["2-M"] = [16, 1, 28, 0, 0];
+    $t["2-Q"] = [22, 1, 22, 0, 0];
+    $t["2-H"] = [28, 1, 16, 0, 0];
+    $t["3-L"] = [15, 1, 55, 0, 0];
+    $t["3-M"] = [26, 1, 44, 0, 0];
+    $t["3-Q"] = [18, 2, 17, 0, 0];
+    $t["3-H"] = [22, 2, 13, 0, 0];
+    $t["4-L"] = [20, 1, 80, 0, 0];
+    $t["4-M"] = [18, 2, 32, 0, 0];
+    $t["4-Q"] = [26, 2, 24, 0, 0];
+    $t["4-H"] = [16, 4, 9, 0, 0];
+    $t["5-L"] = [26, 1, 108, 0, 0];
+    $t["5-M"] = [24, 2, 43, 0, 0];
+    $t["5-Q"] = [18, 2, 15, 2, 16];
+    $t["5-H"] = [22, 2, 11, 2, 12];
+    $t["6-L"] = [18, 2, 68, 0, 0];
+    $t["6-M"] = [16, 4, 27, 0, 0];
+    $t["6-Q"] = [24, 4, 19, 0, 0];
+    $t["6-H"] = [28, 4, 15, 0, 0];
+    $t["7-L"] = [20, 2, 78, 0, 0];
+    $t["7-M"] = [18, 4, 31, 0, 0];
+    $t["7-Q"] = [18, 2, 14, 4, 15];
+    $t["7-H"] = [26, 4, 13, 1, 14];
+    $t["8-L"] = [24, 2, 97, 0, 0];
+    $t["8-M"] = [22, 2, 38, 2, 39];
+    $t["8-Q"] = [22, 4, 18, 2, 19];
+    $t["8-H"] = [26, 4, 14, 2, 15];
+    $t["9-L"] = [30, 2, 116, 0, 0];
+    $t["9-M"] = [22, 3, 36, 2, 37];
+    $t["9-Q"] = [20, 4, 16, 4, 17];
+    $t["9-H"] = [24, 4, 12, 4, 13];
+    $t["10-L"] = [18, 2, 68, 2, 69];
+    $t["10-M"] = [26, 4, 43, 1, 44];
+    $t["10-Q"] = [24, 6, 19, 2, 20];
+    $t["10-H"] = [28, 6, 15, 2, 16];
+    $t["11-L"] = [20, 4, 81, 0, 0];
+    $t["11-M"] = [30, 1, 50, 4, 51];
+    $t["11-Q"] = [28, 4, 22, 4, 23];
+    $t["11-H"] = [24, 3, 12, 8, 13];
+    $t["12-L"] = [24, 2, 92, 2, 93];
+    $t["12-M"] = [22, 6, 36, 2, 37];
+    $t["12-Q"] = [26, 4, 20, 6, 21];
+    $t["12-H"] = [28, 7, 14, 4, 15];
+    $t["13-L"] = [26, 4, 107, 0, 0];
+    $t["13-M"] = [22, 8, 37, 1, 38];
+    $t["13-Q"] = [24, 8, 20, 4, 21];
+    $t["13-H"] = [22, 12, 11, 4, 12];
+    $t["14-L"] = [30, 3, 115, 1, 116];
+    $t["14-M"] = [24, 4, 40, 5, 41];
+    $t["14-Q"] = [20, 11, 16, 5, 17];
+    $t["14-H"] = [24, 11, 12, 5, 13];
+    $t["15-L"] = [22, 5, 87, 1, 88];
+    $t["15-M"] = [24, 5, 41, 5, 42];
+    $t["15-Q"] = [30, 5, 24, 7, 25];
+    $t["15-H"] = [24, 11, 12, 7, 13];
+    $t["16-L"] = [24, 5, 98, 1, 99];
+    $t["16-M"] = [28, 7, 45, 3, 46];
+    $t["16-Q"] = [24, 15, 19, 2, 20];
+    $t["16-H"] = [30, 3, 15, 13, 16];
+    $t["17-L"] = [28, 1, 107, 5, 108];
+    $t["17-M"] = [28, 10, 46, 1, 47];
+    $t["17-Q"] = [28, 1, 22, 15, 23];
+    $t["17-H"] = [28, 2, 14, 17, 15];
+    $t["18-L"] = [30, 5, 120, 1, 121];
+    $t["18-M"] = [26, 9, 43, 4, 44];
+    $t["18-Q"] = [28, 17, 22, 1, 23];
+    $t["18-H"] = [28, 2, 14, 19, 15];
+    $t["19-L"] = [28, 3, 113, 4, 114];
+    $t["19-M"] = [26, 3, 44, 11, 45];
+    $t["19-Q"] = [26, 17, 21, 4, 22];
+    $t["19-H"] = [26, 9, 13, 16, 14];
+    $t["20-L"] = [28, 3, 107, 5, 108];
+    $t["20-M"] = [26, 3, 41, 13, 42];
+    $t["20-Q"] = [30, 15, 24, 5, 25];
+    $t["20-H"] = [28, 15, 15, 10, 16];
+    $t["21-L"] = [28, 4, 116, 4, 117];
+    $t["21-M"] = [26, 17, 42, 0, 0];
+    $t["21-Q"] = [28, 17, 22, 6, 23];
+    $t["21-H"] = [30, 19, 16, 6, 17];
+    $t["22-L"] = [28, 2, 111, 7, 112];
+    $t["22-M"] = [28, 17, 46, 0, 0];
+    $t["22-Q"] = [30, 7, 24, 16, 25];
+    $t["22-H"] = [24, 34, 13, 0, 0];
+    $t["23-L"] = [30, 4, 121, 5, 122];
+    $t["23-M"] = [28, 4, 47, 14, 48];
+    $t["23-Q"] = [30, 11, 24, 14, 25];
+    $t["23-H"] = [30, 16, 15, 14, 16];
+    $t["24-L"] = [30, 6, 117, 4, 118];
+    $t["24-M"] = [28, 6, 45, 14, 46];
+    $t["24-Q"] = [30, 11, 24, 16, 25];
+    $t["24-H"] = [30, 30, 16, 2, 17];
+    $t["25-L"] = [26, 8, 106, 4, 107];
+    $t["25-M"] = [28, 8, 47, 13, 48];
+    $t["25-Q"] = [30, 7, 24, 22, 25];
+    $t["25-H"] = [30, 22, 15, 13, 16];
+    $t["26-L"] = [28, 10, 114, 2, 115];
+    $t["26-M"] = [28, 19, 46, 4, 47];
+    $t["26-Q"] = [28, 28, 22, 6, 23];
+    $t["26-H"] = [30, 33, 16, 4, 17];
+    $t["27-L"] = [30, 8, 122, 4, 123];
+    $t["27-M"] = [28, 22, 45, 3, 46];
+    $t["27-Q"] = [30, 8, 23, 26, 24];
+    $t["27-H"] = [30, 12, 15, 28, 16];
+    $t["28-L"] = [30, 3, 117, 10, 118];
+    $t["28-M"] = [28, 3, 45, 23, 46];
+    $t["28-Q"] = [30, 4, 24, 31, 25];
+    $t["28-H"] = [30, 11, 15, 31, 16];
+    $t["29-L"] = [30, 7, 116, 7, 117];
+    $t["29-M"] = [28, 21, 45, 7, 46];
+    $t["29-Q"] = [30, 1, 23, 37, 24];
+    $t["29-H"] = [30, 19, 15, 26, 16];
+    $t["30-L"] = [30, 5, 115, 10, 116];
+    $t["30-M"] = [28, 19, 47, 10, 48];
+    $t["30-Q"] = [30, 15, 24, 25, 25];
+    $t["30-H"] = [30, 23, 15, 25, 16];
+    $t["31-L"] = [30, 13, 115, 3, 116];
+    $t["31-M"] = [28, 2, 46, 29, 47];
+    $t["31-Q"] = [30, 42, 24, 1, 25];
+    $t["31-H"] = [30, 23, 15, 28, 16];
+    $t["32-L"] = [30, 17, 115, 0, 0];
+    $t["32-M"] = [28, 10, 46, 23, 47];
+    $t["32-Q"] = [30, 10, 24, 35, 25];
+    $t["32-H"] = [30, 19, 15, 35, 16];
+    $t["33-L"] = [30, 17, 115, 1, 116];
+    $t["33-M"] = [28, 14, 46, 21, 47];
+    $t["33-Q"] = [30, 29, 24, 19, 25];
+    $t["33-H"] = [30, 11, 15, 46, 16];
+    $t["34-L"] = [30, 13, 115, 6, 116];
+    $t["34-M"] = [28, 14, 46, 23, 47];
+    $t["34-Q"] = [30, 44, 24, 7, 25];
+    $t["34-H"] = [30, 59, 16, 1, 17];
+    $t["35-L"] = [30, 12, 121, 7, 122];
+    $t["35-M"] = [28, 12, 47, 26, 48];
+    $t["35-Q"] = [30, 39, 24, 14, 25];
+    $t["35-H"] = [30, 22, 15, 41, 16];
+    $t["36-L"] = [30, 6, 121, 14, 122];
+    $t["36-M"] = [28, 6, 47, 34, 48];
+    $t["36-Q"] = [30, 46, 24, 10, 25];
+    $t["36-H"] = [30, 2, 15, 64, 16];
+    $t["37-L"] = [30, 17, 122, 4, 123];
+    $t["37-M"] = [28, 29, 46, 14, 47];
+    $t["37-Q"] = [30, 49, 24, 10, 25];
+    $t["37-H"] = [30, 24, 15, 46, 16];
+    $t["38-L"] = [30, 4, 122, 18, 123];
+    $t["38-M"] = [28, 13, 46, 32, 47];
+    $t["38-Q"] = [30, 48, 24, 14, 25];
+    $t["38-H"] = [30, 42, 15, 32, 16];
+    $t["39-L"] = [30, 20, 117, 4, 118];
+    $t["39-M"] = [28, 40, 47, 7, 48];
+    $t["39-Q"] = [30, 43, 24, 22, 25];
+    $t["39-H"] = [30, 10, 15, 67, 16];
+    $t["40-L"] = [30, 19, 118, 6, 119];
+    $t["40-M"] = [28, 18, 47, 31, 48];
+    $t["40-Q"] = [30, 34, 24, 34, 25];
+    $t["40-H"] = [30, 20, 15, 61, 16];
     return $t;
 }
 
@@ -194,16 +333,47 @@ func blockTable() {
 # (1-40); the row/column combinations of these give the alignment centres.
 func alignPositions(version as int) {
     def t as list of list of int init [
-        [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42],
-        [6, 26, 46], [6, 28, 50], [6, 30, 54], [6, 32, 58], [6, 34, 62], [6, 26, 46, 66],
-        [6, 26, 48, 70], [6, 26, 50, 74], [6, 30, 54, 78], [6, 30, 56, 82], [6, 30, 58, 86],
-        [6, 34, 62, 90], [6, 28, 50, 72, 94], [6, 26, 50, 74, 98], [6, 30, 54, 78, 102],
-        [6, 28, 54, 80, 106], [6, 32, 58, 84, 110], [6, 30, 58, 86, 114], [6, 34, 62, 90, 118],
-        [6, 26, 50, 74, 98, 122], [6, 30, 54, 78, 102, 126], [6, 26, 52, 78, 104, 130],
-        [6, 30, 56, 82, 108, 134], [6, 34, 60, 86, 112, 138], [6, 30, 58, 86, 114, 142],
-        [6, 34, 62, 90, 118, 146], [6, 30, 54, 78, 102, 126, 150], [6, 24, 50, 76, 102, 128, 154],
-        [6, 28, 54, 80, 106, 132, 158], [6, 32, 58, 84, 110, 136, 162], [6, 26, 54, 82, 110, 138, 166],
-        [6, 30, 58, 86, 114, 142, 170]];
+        [],
+        [6, 18],
+        [6, 22],
+        [6, 26],
+        [6, 30],
+        [6, 34],
+        [6, 22, 38],
+        [6, 24, 42],
+        [6, 26, 46],
+        [6, 28, 50],
+        [6, 30, 54],
+        [6, 32, 58],
+        [6, 34, 62],
+        [6, 26, 46, 66],
+        [6, 26, 48, 70],
+        [6, 26, 50, 74],
+        [6, 30, 54, 78],
+        [6, 30, 56, 82],
+        [6, 30, 58, 86],
+        [6, 34, 62, 90],
+        [6, 28, 50, 72, 94],
+        [6, 26, 50, 74, 98],
+        [6, 30, 54, 78, 102],
+        [6, 28, 54, 80, 106],
+        [6, 32, 58, 84, 110],
+        [6, 30, 58, 86, 114],
+        [6, 34, 62, 90, 118],
+        [6, 26, 50, 74, 98, 122],
+        [6, 30, 54, 78, 102, 126],
+        [6, 26, 52, 78, 104, 130],
+        [6, 30, 56, 82, 108, 134],
+        [6, 34, 60, 86, 112, 138],
+        [6, 30, 58, 86, 114, 142],
+        [6, 34, 62, 90, 118, 146],
+        [6, 30, 54, 78, 102, 126, 150],
+        [6, 24, 50, 76, 102, 128, 154],
+        [6, 28, 54, 80, 106, 132, 158],
+        [6, 32, 58, 84, 110, 136, 162],
+        [6, 26, 54, 82, 110, 138, 166],
+        [6, 30, 58, 86, 114, 142, 170]
+    ];
     return $t[$version - 1];
 }
 
@@ -217,17 +387,39 @@ func totalDataCodewords(info as list of int) {
 # alnumValue maps an alphanumeric-mode character (byte) to its value 0..44, or -1
 # when the character is not in the QR alphanumeric set.
 func alnumValue(b as int) {
-    if ($b >= 48 and $b <= 57) { return $b - 48; }        # 0-9
-    if ($b >= 65 and $b <= 90) { return $b - 65 + 10; }   # A-Z
-    if ($b == 32) { return 36; }   # space
-    if ($b == 36) { return 37; }   # $
-    if ($b == 37) { return 38; }   # %
-    if ($b == 42) { return 39; }   # *
-    if ($b == 43) { return 40; }   # +
-    if ($b == 45) { return 41; }   # -
-    if ($b == 46) { return 42; }   # .
-    if ($b == 47) { return 43; }   # /
-    if ($b == 58) { return 44; }   # :
+    if ($b >= 48 and $b <= 57) {
+        return $b - 48;
+    } # 0-9
+    if ($b >= 65 and $b <= 90) {
+        return $b - 65 + 10;
+    } # A-Z
+    if ($b == 32) {
+        return 36;
+    } # space
+    if ($b == 36) {
+        return 37;
+    } # $
+    if ($b == 37) {
+        return 38;
+    } # %
+    if ($b == 42) {
+        return 39;
+    } # *
+    if ($b == 43) {
+        return 40;
+    } # +
+    if ($b == 45) {
+        return 41;
+    } # -
+    if ($b == 46) {
+        return 42;
+    } # .
+    if ($b == 47) {
+        return 43;
+    } # /
+    if ($b == 58) {
+        return 44;
+    } # :
     return -1;
 }
 
@@ -242,35 +434,57 @@ func chooseMode(data as bytes) {
     def i as int init 0;
     while ($i < len($data)) {
         def b as int init $data[$i];
-        if ($b < 48 or $b > 57) { $numeric = false; }
-        if (alnumValue($b) < 0) { $alnum = false; }
+        if ($b < 48 or $b > 57) {
+            $numeric = false;
+        }
+        if (alnumValue($b) < 0) {
+            $alnum = false;
+        }
         $i = $i + 1;
     }
-    if ($numeric) { return "numeric"; }
-    if ($alnum) { return "alphanumeric"; }
+    if ($numeric) {
+        return "numeric";
+    }
+    if ($alnum) {
+        return "alphanumeric";
+    }
     return "byte";
 }
 
 # qrModeIndicator is the 4-bit mode indicator value.
 func qrModeIndicator(mode as string) {
-    if ($mode == "numeric") { return 1; }
-    if ($mode == "alphanumeric") { return 2; }
+    if ($mode == "numeric") {
+        return 1;
+    }
+    if ($mode == "alphanumeric") {
+        return 2;
+    }
     return 4;
 }
 
 # qrCountBits is the character-count-indicator width for a mode and version.
 func qrCountBits(mode as string, version as int) {
     if ($mode == "numeric") {
-        if ($version <= 9) { return 10; }
-        if ($version <= 26) { return 12; }
+        if ($version <= 9) {
+            return 10;
+        }
+        if ($version <= 26) {
+            return 12;
+        }
         return 14;
     }
     if ($mode == "alphanumeric") {
-        if ($version <= 9) { return 9; }
-        if ($version <= 26) { return 11; }
+        if ($version <= 9) {
+            return 9;
+        }
+        if ($version <= 26) {
+            return 11;
+        }
         return 13;
     }
-    if ($version <= 9) { return 8; }
+    if ($version <= 9) {
+        return 8;
+    }
     return 16;
 }
 
@@ -280,7 +494,11 @@ func qrDataBits(mode as string, n as int) {
     if ($mode == "numeric") {
         def rem as int init $n % 3;
         def extra as int init 0;
-        if ($rem == 1) { $extra = 4; } elseif ($rem == 2) { $extra = 7; }
+        if ($rem == 1) {
+            $extra = 4;
+        } elseif ($rem == 2) {
+            $extra = 7;
+        }
         return ($n // 3) * 10 + $extra;
     }
     if ($mode == "alphanumeric") {
@@ -345,15 +563,15 @@ func encodeNumeric(bitList as list of int, data as bytes) {
     def i as int init 0;
     def n as int init len($data);
     while ($i + 3 <= $n) {
-        def v as int init ($data[$i] - 48) * 100 + ($data[$i + 1] - 48) * 10 + ($data[$i + 2] - 48);
+        def v as int init ($data[$i] -48) * 100 + ($data[$i + 1] -48) * 10 + ($data[$i + 2] -48);
         $out = pushBits($out, $v, 10);
         $i = $i + 3;
     }
     def rem as int init $n - $i;
     if ($rem == 2) {
-        $out = pushBits($out, ($data[$i] - 48) * 10 + ($data[$i + 1] - 48), 7);
+        $out = pushBits($out, ($data[$i] -48) * 10 + ($data[$i + 1] -48), 7);
     } elseif ($rem == 1) {
-        $out = pushBits($out, $data[$i] - 48, 4);
+        $out = pushBits($out, $data[$i] -48, 4);
     }
     return $out;
 }
@@ -522,7 +740,8 @@ func placeFinder(cv as Canvas, row as int, col as int) {
     while ($r < 7) {
         def c as int init 0;
         while ($c < 7) {
-            def dark as bool init ($r == 0 or $r == 6 or $c == 0 or $c == 6 or ($r >= 2 and $r <= 4 and $c >= 2 and $c <= 4));
+            def dark as bool init ($r == 0 or $r == 6 or $c == 0 or $c == 6 or
+                ($r >= 2 and $r <= 4 and $c >= 2 and $c <= 4));
             def bit as int init 0;
             if ($dark) {
                 $bit = 1;
@@ -560,13 +779,23 @@ func placeAlignment(cv as Canvas, cr as int, cc as int) {
         def dc as int init -2;
         while ($dc <= 2) {
             def ar as int init 2;
-            if ($dr < 0) { $ar = -$dr; }
-            if ($dr > 0) { $ar = $dr; }
+            if ($dr < 0) {
+                $ar = -$dr;
+            }
+            if ($dr > 0) {
+                $ar = $dr;
+            }
             def ac as int init 2;
-            if ($dc < 0) { $ac = -$dc; }
-            if ($dc > 0) { $ac = $dc; }
+            if ($dc < 0) {
+                $ac = -$dc;
+            }
+            if ($dc > 0) {
+                $ac = $dc;
+            }
             def ring as int init $ar;
-            if ($ac > $ring) { $ring = $ac; }
+            if ($ac > $ring) {
+                $ring = $ac;
+            }
             def bit as int init 0;
             if ($ring == 0 or $ring == 2) {
                 $bit = 1;
@@ -582,13 +811,27 @@ func placeAlignment(cv as Canvas, cr as int, cc as int) {
 
 # maskBit returns the mask condition for a cell under a given mask pattern.
 func maskBit(mask as int, r as int, c as int) {
-    if ($mask == 0) { return ($r + $c) % 2 == 0; }
-    if ($mask == 1) { return $r % 2 == 0; }
-    if ($mask == 2) { return $c % 3 == 0; }
-    if ($mask == 3) { return ($r + $c) % 3 == 0; }
-    if ($mask == 4) { return ($r // 2 + $c // 3) % 2 == 0; }
-    if ($mask == 5) { return ($r * $c) % 2 + ($r * $c) % 3 == 0; }
-    if ($mask == 6) { return (($r * $c) % 2 + ($r * $c) % 3) % 2 == 0; }
+    if ($mask == 0) {
+        return ($r + $c) % 2 == 0;
+    }
+    if ($mask == 1) {
+        return $r % 2 == 0;
+    }
+    if ($mask == 2) {
+        return $c % 3 == 0;
+    }
+    if ($mask == 3) {
+        return ($r + $c) % 3 == 0;
+    }
+    if ($mask == 4) {
+        return ($r // 2 + $c // 3) % 2 == 0;
+    }
+    if ($mask == 5) {
+        return ($r * $c) % 2 + ($r * $c) % 3 == 0;
+    }
+    if ($mask == 6) {
+        return (($r * $c) % 2 + ($r * $c) % 3) % 2 == 0;
+    }
     return (($r + $c) % 2 + ($r * $c) % 3) % 2 == 0;
 }
 
@@ -632,9 +875,9 @@ func placeVersion(cv as Canvas, version as int, size as int) {
         def b as int init ($bits >> $i) & 1;
         def a as int init $size - 11 + $i % 3;
         def c as int init $i // 3;
-        $cv.mods[$c][$a] = $b;        # top-right block
+        $cv.mods[$c][$a] = $b; # top-right block
         $cv.reserved[$c][$a] = true;
-        $cv.mods[$a][$c] = $b;        # bottom-left block
+        $cv.mods[$a][$c] = $b; # bottom-left block
         $cv.reserved[$a][$c] = true;
         $i = $i + 1;
     }
@@ -708,7 +951,8 @@ func buildFunctionPatterns(cv as Canvas, version as int, size as int) {
         while ($bpos < len($pos)) {
             def cr as int init $pos[$a];
             def cc as int init $pos[$bpos];
-            def onFinder as bool init ($cr == 6 and $cc == 6) or ($cr == 6 and $cc == $size - 7) or ($cr == $size - 7 and $cc == 6);
+            def onFinder as bool init ($cr == 6 and $cc == 6) or ($cr == 6 and $cc == $size - 7) or
+                ($cr == $size - 7 and $cc == 6);
             if (not $onFinder) {
                 $cv = placeAlignment($cv, $cr, $cc);
             }
@@ -777,19 +1021,27 @@ func penalty(mods as list of list of int, size as int) {
             if ($mods[$r][$c] == $mods[$r][$c - 1]) {
                 $runH = $runH + 1;
             } else {
-                if ($runH >= 5) { $score = $score + $runH - 2; }
+                if ($runH >= 5) {
+                    $score = $score + $runH - 2;
+                }
                 $runH = 1;
             }
             if ($mods[$c][$r] == $mods[$c - 1][$r]) {
                 $runV = $runV + 1;
             } else {
-                if ($runV >= 5) { $score = $score + $runV - 2; }
+                if ($runV >= 5) {
+                    $score = $score + $runV - 2;
+                }
                 $runV = 1;
             }
             $c = $c + 1;
         }
-        if ($runH >= 5) { $score = $score + $runH - 2; }
-        if ($runV >= 5) { $score = $score + $runV - 2; }
+        if ($runH >= 5) {
+            $score = $score + $runH - 2;
+        }
+        if ($runV >= 5) {
+            $score = $score + $runV - 2;
+        }
         $r = $r + 1;
     }
     # rule 2: 2x2 blocks of one colour
@@ -810,7 +1062,9 @@ func penalty(mods as list of list of int, size as int) {
     while ($r < $size) {
         def c as int init 0;
         while ($c <= $size - 11) {
-            if (finderLike($mods, $r, $c, true)) { $score = $score + 40; }
+            if (finderLike($mods, $r, $c, true)) {
+                $score = $score + 40;
+            }
             $c = $c + 1;
         }
         $r = $r + 1;
@@ -819,7 +1073,9 @@ func penalty(mods as list of list of int, size as int) {
     while ($r <= $size - 11) {
         def c as int init 0;
         while ($c < $size) {
-            if (finderLike($mods, $r, $c, false)) { $score = $score + 40; }
+            if (finderLike($mods, $r, $c, false)) {
+                $score = $score + 40;
+            }
             $c = $c + 1;
         }
         $r = $r + 1;
@@ -830,7 +1086,9 @@ func penalty(mods as list of list of int, size as int) {
     while ($r < $size) {
         def c as int init 0;
         while ($c < $size) {
-            if ($mods[$r][$c] == 1) { $dark = $dark + 1; }
+            if ($mods[$r][$c] == 1) {
+                $dark = $dark + 1;
+            }
             $c = $c + 1;
         }
         $r = $r + 1;
@@ -838,13 +1096,20 @@ func penalty(mods as list of list of int, size as int) {
     def total as int init $size * $size;
     def percent as int init ($dark * 100) // $total;
     def dev as int init $percent - 50;
-    if ($dev < 0) { $dev = -$dev; }
+    if ($dev < 0) {
+        $dev = -$dev;
+    }
     $score = $score + ($dev // 5) * 10;
     return $score;
 }
 
 # matchesPattern tests an 11-cell pattern at (r,c) along a row or column.
-func matchesPattern(mods as list of list of int, r as int, c as int, horizontal as bool, pat as list of int) {
+func matchesPattern(
+    mods as list of list of int,
+    r as int,
+    c as int,
+    horizontal as bool,
+    pat as list of int) {
     def i as int init 0;
     while ($i < 11) {
         def v as int init 0;
@@ -865,8 +1130,8 @@ func matchesPattern(mods as list of list of int, r as int, c as int, horizontal 
 # on *either* side, per the QR mask rule 3. Testing only the light-run-after form
 # would miss half the finder-like occurrences and skew mask selection.
 func finderLike(mods as list of list of int, r as int, c as int, horizontal as bool) {
-    return matchesPattern($mods, $r, $c, $horizontal, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0])
-        or matchesPattern($mods, $r, $c, $horizontal, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]);
+    return matchesPattern($mods, $r, $c, $horizontal, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]) or
+        matchesPattern($mods, $r, $c, $horizontal, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]);
 }
 
 # qrMatrix builds the final masked QR module grid for a payload.
@@ -875,7 +1140,10 @@ func qrMatrix(data as bytes, level as string) {
     def eci as bool init qrUsesEci($mode, $data);
     def version as int init selectVersion($mode, len($data), $eci, $level);
     def size as int init 17 + 4 * $version;
-    def codewords as list of int init interleave(encodeData($data, $mode, $eci, $version, $level), $version, $level);
+    def codewords as list of int init interleave(
+        encodeData($data, $mode, $eci, $version, $level),
+        $version,
+        $level);
 
     def reserved as list of list of bool init [];
     def r as int init 0;
@@ -889,7 +1157,7 @@ func qrMatrix(data as bytes, level as string) {
         $reserved[] = $row;
         $r = $r + 1;
     }
-    def cv as Canvas init Canvas{ mods: newGrid($size, 0), reserved: $reserved };
+    def cv as Canvas init Canvas{mods: newGrid($size, 0), reserved: $reserved};
     $cv = buildFunctionPatterns($cv, $version, $size);
     $cv = placeDataBits($cv, $codewords, $size);
     def baseMods as list of list of int init $cv.mods;
@@ -955,8 +1223,17 @@ func boolGrid(grid as list of list of int, size as int) {
 
 # dmSymbols returns the ECC200 square symbol table: [totalSize, dataCW, ecCW].
 func dmSymbols() {
-    return [[10, 3, 5], [12, 5, 7], [14, 8, 10], [16, 12, 12], [18, 18, 14],
-        [20, 22, 18], [22, 30, 20], [24, 36, 24], [26, 44, 28]];
+    return [
+        [10, 3, 5],
+        [12, 5, 7],
+        [14, 8, 10],
+        [16, 12, 12],
+        [18, 18, 14],
+        [20, 22, 18],
+        [22, 30, 20],
+        [24, 36, 24],
+        [26, 44, 28]
+    ];
 }
 
 # dmSymbolFor picks the smallest square symbol holding `nData` data codewords.
@@ -978,7 +1255,7 @@ func dmEncodeAscii(data as bytes) {
     while ($i < $n) {
         def b as int init $data[$i];
         if ($i + 1 < $n and $b >= 48 and $b <= 57 and $data[$i + 1] >= 48 and $data[$i + 1] <= 57) {
-            $cw[] = ($b - 48) * 10 + ($data[$i + 1] - 48) + 130;
+            $cw[] = ($b - 48) * 10 + ($data[$i + 1] -48) + 130;
             $i = $i + 2;
         } elseif ($b > 127) {
             $cw[] = 235;
@@ -1000,7 +1277,7 @@ func dmPad(cw as list of int, capacity as int) {
         $out[] = 129;
     }
     while (len($out) < $capacity) {
-        def pos as int init len($out) + 1;   # 1-based codeword position
+        def pos as int init len($out) + 1; # 1-based codeword position
         def r as int init ((149 * $pos) % 253) + 1;
         def v as int init 129 + $r;
         if ($v > 254) {
@@ -1033,10 +1310,25 @@ func dmBit(cw as list of int, chr as int, bitNum as int) {
 
 # dmPlaceUtah places the 8 bits of codeword `chr` in the standard L (utah) shape
 # around (row, col), wrapping off-grid coordinates. Returns the updated grid.
-func dmPlaceUtah(grid as list of list of int, row as int, col as int, chr as int, cw as list of int, nrow as int, ncol as int) {
+func dmPlaceUtah(
+    grid as list of list of int,
+    row as int,
+    col as int,
+    chr as int,
+    cw as list of int,
+    nrow as int,
+    ncol as int) {
     def g as list of list of int init $grid;
-    def off as list of list of int init [[-2, -2, 1], [-2, -1, 2], [-1, -2, 3],
-        [-1, -1, 4], [-1, 0, 5], [0, -2, 6], [0, -1, 7], [0, 0, 8]];
+    def off as list of list of int init [
+        [-2, -2, 1],
+        [-2, -1, 2],
+        [-1, -2, 3],
+        [-1, -1, 4],
+        [-1, 0, 5],
+        [0, -2, 6],
+        [0, -1, 7],
+        [0, 0, 8]
+    ];
     for (def o in $off) {
         def rc as list of int init dmWrap($row + $o[0], $col + $o[1], $nrow, $ncol);
         $g[$rc[0]][$rc[1]] = dmBit($cw, $chr, $o[2]);
@@ -1046,7 +1338,11 @@ func dmPlaceUtah(grid as list of list of int, row as int, col as int, chr as int
 
 # dmPlaceCorner places codeword `chr` at the 8 absolute [row, col, bit] positions
 # of a corner special case. Returns the updated grid.
-func dmPlaceCorner(grid as list of list of int, positions as list of list of int, chr as int, cw as list of int) {
+func dmPlaceCorner(
+    grid as list of list of int,
+    positions as list of list of int,
+    chr as int,
+    cw as list of int) {
     def g as list of list of int init $grid;
     for (def p in $positions) {
         $g[$p[0]][$p[1]] = dmBit($cw, $chr, $p[2]);
@@ -1058,14 +1354,46 @@ func dmPlaceCorner(grid as list of list of int, positions as list of list of int
 # ECC200 placement algorithm (Annex F).
 func dmPlace(cw as list of int, nrow as int, ncol as int) {
     def grid as list of list of int init newGrid($nrow, -1);
-    def c1 as list of list of int init [[$nrow - 1, 0, 1], [$nrow - 1, 1, 2], [$nrow - 1, 2, 3],
-        [0, $ncol - 2, 4], [0, $ncol - 1, 5], [1, $ncol - 1, 6], [2, $ncol - 1, 7], [3, $ncol - 1, 8]];
-    def c2 as list of list of int init [[$nrow - 3, 0, 1], [$nrow - 2, 0, 2], [$nrow - 1, 0, 3],
-        [0, $ncol - 4, 4], [0, $ncol - 3, 5], [0, $ncol - 2, 6], [0, $ncol - 1, 7], [1, $ncol - 1, 8]];
-    def c3 as list of list of int init [[$nrow - 3, 0, 1], [$nrow - 2, 0, 2], [$nrow - 1, 0, 3],
-        [0, $ncol - 2, 4], [0, $ncol - 1, 5], [1, $ncol - 1, 6], [2, $ncol - 1, 7], [3, $ncol - 1, 8]];
-    def c4 as list of list of int init [[$nrow - 1, 0, 1], [$nrow - 1, $ncol - 1, 2], [0, $ncol - 3, 3],
-        [0, $ncol - 2, 4], [0, $ncol - 1, 5], [1, $ncol - 3, 6], [1, $ncol - 2, 7], [1, $ncol - 1, 8]];
+    def c1 as list of list of int init [
+        [$nrow - 1, 0, 1],
+        [$nrow - 1, 1, 2],
+        [$nrow - 1, 2, 3],
+        [0, $ncol - 2, 4],
+        [0, $ncol - 1, 5],
+        [1, $ncol - 1, 6],
+        [2, $ncol - 1, 7],
+        [3, $ncol - 1, 8]
+    ];
+    def c2 as list of list of int init [
+        [$nrow - 3, 0, 1],
+        [$nrow - 2, 0, 2],
+        [$nrow - 1, 0, 3],
+        [0, $ncol - 4, 4],
+        [0, $ncol - 3, 5],
+        [0, $ncol - 2, 6],
+        [0, $ncol - 1, 7],
+        [1, $ncol - 1, 8]
+    ];
+    def c3 as list of list of int init [
+        [$nrow - 3, 0, 1],
+        [$nrow - 2, 0, 2],
+        [$nrow - 1, 0, 3],
+        [0, $ncol - 2, 4],
+        [0, $ncol - 1, 5],
+        [1, $ncol - 1, 6],
+        [2, $ncol - 1, 7],
+        [3, $ncol - 1, 8]
+    ];
+    def c4 as list of list of int init [
+        [$nrow - 1, 0, 1],
+        [$nrow - 1, $ncol - 1, 2],
+        [0, $ncol - 3, 3],
+        [0, $ncol - 2, 4],
+        [0, $ncol - 1, 5],
+        [1, $ncol - 3, 6],
+        [1, $ncol - 2, 7],
+        [1, $ncol - 1, 8]
+    ];
     def chr as int init 1;
     def row as int init 4;
     def col as int init 0;
@@ -1144,13 +1472,13 @@ func dmMatrix(data as bytes) {
         while ($c < $size) {
             def dark as bool init false;
             if ($c == 0 or $r == $size - 1) {
-                $dark = true;                       # left / bottom solid L
+                $dark = true; # left / bottom solid L
             } elseif ($r == 0) {
-                $dark = $c % 2 == 0;                # top timing
+                $dark = $c % 2 == 0; # top timing
             } elseif ($c == $size - 1) {
-                $dark = $r % 2 == 1;                # right timing
+                $dark = $r % 2 == 1; # right timing
             } else {
-                $dark = $placed[$r - 1][$c - 1] == 1;   # data region
+                $dark = $placed[$r - 1][$c - 1] == 1; # data region
             }
             $rowb[] = $dark;
             $c = $c + 1;
@@ -1179,13 +1507,25 @@ export func encode(data as string, symbology as string, opts as Options) {
             def raw as bytes init convert.bytesFromString($data, "utf-8");
             def m as list of list of bool init qrMatrix($raw, $opts.ecLevel);
             def noBars as list of int init [];
-            return Symbol{ kind: SymbolKind.Matrix, size: len($m), matrix: $m, bars: $noBars, text: $data };
+            return Symbol{
+                kind: SymbolKind.Matrix,
+                size: len($m),
+                matrix: $m,
+                bars: $noBars,
+                text: $data
+            };
         }
         when "datamatrix" {
             def raw as bytes init convert.bytesFromString($data, "utf-8");
             def m as list of list of bool init dmMatrix($raw);
             def noBars as list of int init [];
-            return Symbol{ kind: SymbolKind.Matrix, size: len($m), matrix: $m, bars: $noBars, text: $data };
+            return Symbol{
+                kind: SymbolKind.Matrix,
+                size: len($m),
+                matrix: $m,
+                bars: $noBars,
+                text: $data
+            };
         }
         when "code128" { return linearSymbol($data, code128Bars($data)); }
         when "code39" { return linearSymbol($data, code39Bars($data)); }
@@ -1202,7 +1542,7 @@ export func encode(data as string, symbology as string, opts as Options) {
 
 func linearSymbol(data as string, bars as list of int) {
     def empty as list of list of bool init [];
-    return Symbol{ kind: SymbolKind.Linear, size: 0, matrix: $empty, bars: $bars, text: $data };
+    return Symbol{kind: SymbolKind.Linear, size: 0, matrix: $empty, bars: $bars, text: $data};
 }
 
 # --- 1D symbologies (private) -----------------------------------------------
@@ -1231,7 +1571,7 @@ func bitsToBars(bitstr as string) {
 func code128Bars(data as string) {
     def patterns as list of string init code128Patterns();
     def cs as list of string init strings.chars($data);
-    def values as list of int init [104];   # Start B
+    def values as list of int init [104]; # Start B
     def sum as int init 104;
     def pos as int init 1;
     for (def ch in $cs) {
@@ -1243,15 +1583,15 @@ func code128Bars(data as string) {
         $sum = $sum + $code * $pos;
         $pos = $pos + 1;
     }
-    $values[] = $sum % 103;   # checksum
-    $values[] = 106;          # Stop
+    $values[] = $sum % 103; # checksum
+    $values[] = 106; # Stop
     # Patterns append in place and join once: growing a `+`-built bit string
     # re-copies the whole symbol per codeword (O(N^2) for a long payload).
     def parts as list of string init [];
     for (def v in $values) {
         $parts[] = $patterns[$v];
     }
-    $parts[] = "11";   # final bar of the stop pattern
+    $parts[] = "11"; # final bar of the stop pattern
     return bitsToBars(strings.join($parts, ""));
 }
 
@@ -1346,30 +1686,70 @@ func eanCheck(ds as list of int, digits as int) {
 
 # EAN L / G / R digit patterns (7 modules each).
 func eanL(d as int) {
-    def p as list of string init ["0001101", "0011001", "0010011", "0111101", "0100011",
-        "0110001", "0101111", "0111011", "0110111", "0001011"];
+    def p as list of string init [
+        "0001101",
+        "0011001",
+        "0010011",
+        "0111101",
+        "0100011",
+        "0110001",
+        "0101111",
+        "0111011",
+        "0110111",
+        "0001011"
+    ];
     return $p[$d];
 }
 
 func eanG(d as int) {
-    def p as list of string init ["0100111", "0110011", "0011011", "0100001", "0011101",
-        "0111001", "0000101", "0010001", "0001001", "0010111"];
+    def p as list of string init [
+        "0100111",
+        "0110011",
+        "0011011",
+        "0100001",
+        "0011101",
+        "0111001",
+        "0000101",
+        "0010001",
+        "0001001",
+        "0010111"
+    ];
     return $p[$d];
 }
 
 func eanR(d as int) {
-    def p as list of string init ["1110010", "1100110", "1101100", "1000010", "1011100",
-        "1001110", "1010000", "1000100", "1001000", "1110100"];
+    def p as list of string init [
+        "1110010",
+        "1100110",
+        "1101100",
+        "1000010",
+        "1011100",
+        "1001110",
+        "1010000",
+        "1000100",
+        "1001000",
+        "1110100"
+    ];
     return $p[$d];
 }
 
 # ean13Encode builds the module string for 13 digits (first digit sets the
 # L/G parity pattern of the left group).
 func ean13Encode(ds as list of int) {
-    def parity as list of string init ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG",
-        "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"];
+    def parity as list of string init [
+        "LLLLLL",
+        "LLGLGG",
+        "LLGGLG",
+        "LLGGGL",
+        "LGLLGG",
+        "LGGLLG",
+        "LGGGLL",
+        "LGLGLG",
+        "LGLGGL",
+        "LGGLGL"
+    ];
     def pat as string init $parity[$ds[0]];
-    def bits as string init "101";   # start guard
+    def bits as string init "101"; # start guard
     def i as int init 1;
     while ($i <= 6) {
         def ch as string init strings.substring($pat, $i - 1, $i);
@@ -1380,12 +1760,12 @@ func ean13Encode(ds as list of int) {
         }
         $i = $i + 1;
     }
-    $bits = $bits + "01010";   # centre guard
+    $bits = $bits + "01010"; # centre guard
     while ($i <= 12) {
         $bits = $bits + eanR($ds[$i]);
         $i = $i + 1;
     }
-    $bits = $bits + "101";     # end guard
+    $bits = $bits + "101"; # end guard
     return bitsToBars($bits);
 }
 
@@ -1413,9 +1793,19 @@ func itfBars(data as string) {
         fail("itf: needs an even number of digits");
     }
     # narrow=1 wide=3; patterns are 5 bars, N/W per digit.
-    def widths as list of string init ["NNWWN", "WNNNW", "NWNNW", "WWNNN", "NNWNW",
-        "WNWNN", "NWWNN", "NNNWW", "WNNWN", "NWNWN"];
-    def bars as list of int init [1, 1, 1, 1];   # start: narrow bar/space x2
+    def widths as list of string init [
+        "NNWWN",
+        "WNNNW",
+        "NWNNW",
+        "WWNNN",
+        "NNWNW",
+        "WNWNN",
+        "NWWNN",
+        "NNNWW",
+        "WNNWN",
+        "NWNWN"
+    ];
+    def bars as list of int init [1, 1, 1, 1]; # start: narrow bar/space x2
     def i as int init 0;
     while ($i < len($ds)) {
         def barW as string init $widths[$ds[$i]];
@@ -1446,15 +1836,51 @@ func itfWidth(nw as string) {
 func code39Char(ch as string) {
     def keys as string init "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%*";
     def pats as list of string init [
-        "101001101101", "110100101011", "101100101011", "110110010101", "101001101011",
-        "110100110101", "101100110101", "101001011011", "110100101101", "101100101101",
-        "110101001011", "101101001011", "110110100101", "101011001011", "110101100101",
-        "101101100101", "101010011011", "110101001101", "101101001101", "101011001101",
-        "110101010011", "101101010011", "110110101001", "101011010011", "110101101001",
-        "101101101001", "101010110011", "110101011001", "101101011001", "101011011001",
-        "110010101011", "100110101011", "110011010101", "100101101011", "110010110101",
-        "100110110101", "100101011011", "110010101101", "100110101101", "100100100101",
-        "100100101001", "100101001001", "101001001001", "100101101101"];
+        "101001101101",
+        "110100101011",
+        "101100101011",
+        "110110010101",
+        "101001101011",
+        "110100110101",
+        "101100110101",
+        "101001011011",
+        "110100101101",
+        "101100101101",
+        "110101001011",
+        "101101001011",
+        "110110100101",
+        "101011001011",
+        "110101100101",
+        "101101100101",
+        "101010011011",
+        "110101001101",
+        "101101001101",
+        "101011001101",
+        "110101010011",
+        "101101010011",
+        "110110101001",
+        "101011010011",
+        "110101101001",
+        "101101101001",
+        "101010110011",
+        "110101011001",
+        "101101011001",
+        "101011011001",
+        "110010101011",
+        "100110101011",
+        "110011010101",
+        "100101101011",
+        "110010110101",
+        "100110110101",
+        "100101011011",
+        "110010101101",
+        "100110101101",
+        "100100100101",
+        "100100101001",
+        "100101001001",
+        "101001001001",
+        "100101101101"
+    ];
     def idx as int init strings.indexOf($keys, $ch);
     if ($idx < 0) {
         fail("code39: unsupported character '" + $ch + "'");
@@ -1485,20 +1911,48 @@ func upceExpand(ns as int, six as list of int) {
     def x6 as int init $six[5];
     def out as list of int init [$ns];
     if ($x6 <= 2) {
-        $out[] = $x1; $out[] = $x2; $out[] = $x6;
-        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
-        $out[] = $x3; $out[] = $x4; $out[] = $x5;
+        $out[] = $x1;
+        $out[] = $x2;
+        $out[] = $x6;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = $x3;
+        $out[] = $x4;
+        $out[] = $x5;
     } elseif ($x6 == 3) {
-        $out[] = $x1; $out[] = $x2; $out[] = $x3;
-        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
-        $out[] = $x4; $out[] = $x5;
+        $out[] = $x1;
+        $out[] = $x2;
+        $out[] = $x3;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = $x4;
+        $out[] = $x5;
     } elseif ($x6 == 4) {
-        $out[] = $x1; $out[] = $x2; $out[] = $x3; $out[] = $x4;
-        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
+        $out[] = $x1;
+        $out[] = $x2;
+        $out[] = $x3;
+        $out[] = $x4;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
         $out[] = $x5;
     } else {
-        $out[] = $x1; $out[] = $x2; $out[] = $x3; $out[] = $x4; $out[] = $x5;
-        $out[] = 0; $out[] = 0; $out[] = 0; $out[] = 0;
+        $out[] = $x1;
+        $out[] = $x2;
+        $out[] = $x3;
+        $out[] = $x4;
+        $out[] = $x5;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
+        $out[] = 0;
         $out[] = $x6;
     }
     return $out;
@@ -1507,7 +1961,7 @@ func upceExpand(ns as int, six as list of int) {
 # upceCheck is the UPC-E check digit: the UPC-A check of the expanded number.
 func upceCheck(ns as int, six as list of int) {
     def upca as list of int init upceExpand($ns, $six);
-    def body as list of int init [0];   # UPC-A is EAN-13 with a leading 0
+    def body as list of int init [0]; # UPC-A is EAN-13 with a leading 0
     for (def d in $upca) {
         $body[] = $d;
     }
@@ -1517,8 +1971,18 @@ func upceCheck(ns as int, six as list of int) {
 # upceParity returns the 6-character L/G parity string for a number system and
 # check digit (number system 1 is the complement of number system 0).
 func upceParity(ns as int, check as int) {
-    def zero as list of string init ["EEEOOO", "EEOEOO", "EEOOEO", "EEOOOE", "EOEEOO",
-        "EOOEEO", "EOOOEE", "EOEOEO", "EOEOOE", "EOOEOE"];
+    def zero as list of string init [
+        "EEEOOO",
+        "EEOEOO",
+        "EEOOEO",
+        "EEOOOE",
+        "EOEEOO",
+        "EOOEEO",
+        "EOOOEE",
+        "EOEOEO",
+        "EOEOOE",
+        "EOOEOE"
+    ];
     def p as string init $zero[$check];
     if ($ns == 0) {
         return $p;
@@ -1562,7 +2026,7 @@ func upceBars(data as string) {
         fail("upce: check digit mismatch");
     }
     def parity as string init upceParity($ns, $computed);
-    def bits as string init "101";   # start guard
+    def bits as string init "101"; # start guard
     def i as int init 0;
     while ($i < 6) {
         if (strings.substring($parity, $i, $i + 1) == "O") {
@@ -1572,7 +2036,7 @@ func upceBars(data as string) {
         }
         $i = $i + 1;
     }
-    $bits = $bits + "010101";   # end guard
+    $bits = $bits + "010101"; # end guard
     return bitsToBars($bits);
 }
 
@@ -1589,13 +2053,56 @@ func code93Set() {
 func code93Widths() {
     # values 0..46 (the 43 printable characters then the four shift characters
     # ($) (%) (/) (+), which a check character may land on), then `*` at index 47.
-    return ["131112", "111213", "111312", "111411", "121113", "121212", "121311",
-        "111114", "131211", "141111", "211113", "211212", "211311", "221112",
-        "221211", "231111", "112113", "112212", "112311", "122112", "132111",
-        "111123", "111222", "111321", "121122", "131121", "212112", "212211",
-        "211122", "211221", "221121", "222111", "112122", "112221", "122121",
-        "123111", "121131", "311112", "311211", "321111", "112131", "113121",
-        "211131", "121221", "312111", "311121", "122211", "111141"];
+    return [
+        "131112",
+        "111213",
+        "111312",
+        "111411",
+        "121113",
+        "121212",
+        "121311",
+        "111114",
+        "131211",
+        "141111",
+        "211113",
+        "211212",
+        "211311",
+        "221112",
+        "221211",
+        "231111",
+        "112113",
+        "112212",
+        "112311",
+        "122112",
+        "132111",
+        "111123",
+        "111222",
+        "111321",
+        "121122",
+        "131121",
+        "212112",
+        "212211",
+        "211122",
+        "211221",
+        "221121",
+        "222111",
+        "112122",
+        "112221",
+        "122121",
+        "123111",
+        "121131",
+        "311112",
+        "311211",
+        "321111",
+        "112131",
+        "113121",
+        "211131",
+        "121221",
+        "312111",
+        "311121",
+        "122211",
+        "111141"
+    ];
 }
 
 # appendWidths appends a Code 93 element-width string's runs to a bar list.
@@ -1646,14 +2153,14 @@ func code93Bars(data as string) {
     $withC[] = $c;
     def k as int init code93Check($withC, 15);
     def bars as list of int init [];
-    $bars = appendWidths($bars, $widths[47]);   # start *
+    $bars = appendWidths($bars, $widths[47]); # start *
     for (def v in $values) {
         $bars = appendWidths($bars, $widths[$v]);
     }
     $bars = appendWidths($bars, $widths[$c]);
     $bars = appendWidths($bars, $widths[$k]);
-    $bars = appendWidths($bars, $widths[47]);   # stop *
-    $bars[] = 1;   # termination bar
+    $bars = appendWidths($bars, $widths[47]); # stop *
+    $bars[] = 1; # termination bar
     return $bars;
 }
 
@@ -1674,7 +2181,7 @@ func gs1FixedLength(ai as string) {
 # markers (code 102): a FNC1 leads the data, and separates a variable-length
 # element string from the next AI. The parentheses are display-only (not encoded).
 func gs1Elements(data as string) {
-    def out as list of int init [102];   # leading FNC1 marks a GS1 structure
+    def out as list of int init [102]; # leading FNC1 marks a GS1 structure
     def cs as list of string init strings.chars($data);
     def i as int init 0;
     def prevVariable as bool init false;
@@ -1693,7 +2200,7 @@ func gs1Elements(data as string) {
         if ($i >= len($cs)) {
             fail("gs1-128: unclosed Application Identifier");
         }
-        $i = $i + 1;   # skip ')'
+        $i = $i + 1; # skip ')'
         # a separator FNC1 precedes this AI when the previous value was variable
         if ($started and $prevVariable) {
             $out[] = 102;
@@ -1727,7 +2234,7 @@ func gs1Elements(data as string) {
 func gs1128Bars(data as string) {
     def patterns as list of string init code128Patterns();
     def elements as list of int init gs1Elements($data);
-    def values as list of int init [104];   # Start B
+    def values as list of int init [104]; # Start B
     def sum as int init 104;
     def pos as int init 1;
     for (def code in $elements) {
@@ -1735,8 +2242,8 @@ func gs1128Bars(data as string) {
         $sum = $sum + $code * $pos;
         $pos = $pos + 1;
     }
-    $values[] = $sum % 103;   # checksum
-    $values[] = 106;          # Stop
+    $values[] = $sum % 103; # checksum
+    $values[] = 106; # Stop
     def parts as list of string init [];
     for (def v in $values) {
         $parts[] = $patterns[$v];
@@ -1749,28 +2256,115 @@ func gs1128Bars(data as string) {
 # 0..106, 11 modules each; the encoder appends the 2-module termination bar
 # after the stop pattern, entry 106).
 func code128Patterns() {
-    return ["11011001100", "11001101100", "11001100110", "10010011000", "10010001100",
-        "10001001100", "10011001000", "10011000100", "10001100100", "11001001000",
-        "11001000100", "11000100100", "10110011100", "10011011100", "10011001110",
-        "10111001100", "10011101100", "10011100110", "11001110010", "11001011100",
-        "11001001110", "11011100100", "11001110100", "11101101110", "11101001100",
-        "11100101100", "11100100110", "11101100100", "11100110100", "11100110010",
-        "11011011000", "11011000110", "11000110110", "10100011000", "10001011000",
-        "10001000110", "10110001000", "10001101000", "10001100010", "11010001000",
-        "11000101000", "11000100010", "10110111000", "10110001110", "10001101110",
-        "10111011000", "10111000110", "10001110110", "11101110110", "11010001110",
-        "11000101110", "11011101000", "11011100010", "11011101110", "11101011000",
-        "11101000110", "11100010110", "11101101000", "11101100010", "11100011010",
-        "11101111010", "11001000010", "11110001010", "10100110000", "10100001100",
-        "10010110000", "10010000110", "10000101100", "10000100110", "10110010000",
-        "10110000100", "10011010000", "10011000010", "10000110100", "10000110010",
-        "11000010010", "11001010000", "11110111010", "11000010100", "10001111010",
-        "10100111100", "10010111100", "10010011110", "10111100100", "10011110100",
-        "10011110010", "11110100100", "11110010100", "11110010010", "11011011110",
-        "11011110110", "11110110110", "10101111000", "10100011110", "10001011110",
-        "10111101000", "10111100010", "11110101000", "11110100010", "10111011110",
-        "10111101110", "11101011110", "11110101110", "11010000100", "11010010000",
-        "11010011100", "11000111010"];
+    return [
+        "11011001100",
+        "11001101100",
+        "11001100110",
+        "10010011000",
+        "10010001100",
+        "10001001100",
+        "10011001000",
+        "10011000100",
+        "10001100100",
+        "11001001000",
+        "11001000100",
+        "11000100100",
+        "10110011100",
+        "10011011100",
+        "10011001110",
+        "10111001100",
+        "10011101100",
+        "10011100110",
+        "11001110010",
+        "11001011100",
+        "11001001110",
+        "11011100100",
+        "11001110100",
+        "11101101110",
+        "11101001100",
+        "11100101100",
+        "11100100110",
+        "11101100100",
+        "11100110100",
+        "11100110010",
+        "11011011000",
+        "11011000110",
+        "11000110110",
+        "10100011000",
+        "10001011000",
+        "10001000110",
+        "10110001000",
+        "10001101000",
+        "10001100010",
+        "11010001000",
+        "11000101000",
+        "11000100010",
+        "10110111000",
+        "10110001110",
+        "10001101110",
+        "10111011000",
+        "10111000110",
+        "10001110110",
+        "11101110110",
+        "11010001110",
+        "11000101110",
+        "11011101000",
+        "11011100010",
+        "11011101110",
+        "11101011000",
+        "11101000110",
+        "11100010110",
+        "11101101000",
+        "11101100010",
+        "11100011010",
+        "11101111010",
+        "11001000010",
+        "11110001010",
+        "10100110000",
+        "10100001100",
+        "10010110000",
+        "10010000110",
+        "10000101100",
+        "10000100110",
+        "10110010000",
+        "10110000100",
+        "10011010000",
+        "10011000010",
+        "10000110100",
+        "10000110010",
+        "11000010010",
+        "11001010000",
+        "11110111010",
+        "11000010100",
+        "10001111010",
+        "10100111100",
+        "10010111100",
+        "10010011110",
+        "10111100100",
+        "10011110100",
+        "10011110010",
+        "11110100100",
+        "11110010100",
+        "11110010010",
+        "11011011110",
+        "11011110110",
+        "11110110110",
+        "10101111000",
+        "10100011110",
+        "10001011110",
+        "10111101000",
+        "10111100010",
+        "11110101000",
+        "11110100010",
+        "10111011110",
+        "10111101110",
+        "11101011110",
+        "11110101110",
+        "11010000100",
+        "11010010000",
+        "11010011100",
+        "11000111010"
+    ];
 }
 
 # --- renderers (exported) ---------------------------------------------------
@@ -1836,13 +2430,13 @@ func termCell(m as list of list of bool, n as int, q as int, r as int, c as int)
 # convention full-block=dark; here dark=space-inverted: dark true -> filled.
 func halfBlock(top as bool, bot as bool) {
     if ($top and $bot) {
-        return convert.fromCodepoint(0x2588);   # full block
+        return convert.fromCodepoint(0x2588); # full block
     }
     if ($top) {
-        return convert.fromCodepoint(0x2580);   # upper half
+        return convert.fromCodepoint(0x2580); # upper half
     }
     if ($bot) {
-        return convert.fromCodepoint(0x2584);   # lower half
+        return convert.fromCodepoint(0x2584); # lower half
     }
     return " ";
 }
@@ -2005,7 +2599,8 @@ func rasterize(symbol as Symbol, opts as Options) {
             while ($px < $dim) {
                 def mx as int init $px // $s - $q;
                 def my as int init $py // $s - $q;
-                def dark as bool init $mx >= 0 and $my >= 0 and $mx < $n and $my < $n and $m[$my][$mx];
+                def dark as bool init $mx >= 0 and $my >= 0 and $mx < $n and $my < $n and
+                    $m[$my][$mx];
                 if ($dark) {
                     $row[] = 0;
                 } else {
@@ -2091,7 +2686,14 @@ func putLong(b as bytes, v as int) {
 
 func pngSignature() {
     def b as bytes;
-    $b[] = 137; $b[] = 80; $b[] = 78; $b[] = 71; $b[] = 13; $b[] = 10; $b[] = 26; $b[] = 10;
+    $b[] = 137;
+    $b[] = 80;
+    $b[] = 78;
+    $b[] = 71;
+    $b[] = 13;
+    $b[] = 10;
+    $b[] = 26;
+    $b[] = 10;
     return $b;
 }
 
@@ -2099,11 +2701,11 @@ func ihdr(width as int, height as int) {
     def b as bytes;
     $b = putLong($b, $width);
     $b = putLong($b, $height);
-    $b[] = 8;    # bit depth
-    $b[] = 0;    # colour type: grayscale
-    $b[] = 0;    # compression
-    $b[] = 0;    # filter
-    $b[] = 0;    # interlace
+    $b[] = 8; # bit depth
+    $b[] = 0; # colour type: grayscale
+    $b[] = 0; # compression
+    $b[] = 0; # filter
+    $b[] = 0; # interlace
     return $b;
 }
 

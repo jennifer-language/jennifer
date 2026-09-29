@@ -192,7 +192,11 @@ func escapeNewlines(v as string) {
 }
 
 # renderText: `<ts> <LEVEL> <message> k=v ...`.
-func renderText(level as string, message as string, fields as map of string to string, ts as string) {
+func renderText(
+    level as string,
+    message as string,
+    fields as map of string to string,
+    ts as string) {
     def parts as list of string init [
         $ts + " " + strings.upper(escapeNewlines($level)) + " " + escapeNewlines($message)
     ];
@@ -218,7 +222,11 @@ func renderLogfmt(
 }
 
 # renderJson: a JSON object `{"time":..,"level":..,"msg":..,<fields>}`.
-func renderJson(level as string, message as string, fields as map of string to string, ts as string) {
+func renderJson(
+    level as string,
+    message as string,
+    fields as map of string to string,
+    ts as string) {
     def rec as map of string to string init {};
     $rec["time"] = $ts;
     $rec["level"] = $level;

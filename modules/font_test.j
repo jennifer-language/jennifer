@@ -47,14 +47,14 @@ func testHeaderAndName() {
     testing.assertEqual(unitsPerEm($f), 1000);
     testing.assertEqual(name($f), "JenFixture");
     testing.assertEqual($f.numGlyphs, 4);
-    testing.assertEqual($f.cmapFmt, 4);              # BMP cmap
+    testing.assertEqual($f.cmapFmt, 4); # BMP cmap
 }
 
 func testAdvances() {
     def f as Font init loadFixture();
-    testing.assertEqual(advance($f, 65), 600);       # A
-    testing.assertEqual(advance($f, 66), 600);       # B
-    testing.assertEqual(advance($f, 67), 700);       # C
+    testing.assertEqual(advance($f, 65), 600); # A
+    testing.assertEqual(advance($f, 66), 600); # B
+    testing.assertEqual(advance($f, 67), 700); # C
     # A codepoint the font lacks maps to glyph 0 (.notdef, advance 600).
     testing.assertEqual(advance($f, 90), 600);
 }
@@ -64,7 +64,7 @@ func testAdvances() {
 # whole font once per character (they index the font bytes in a single pass).
 func testBatchAccessorsMatchPerChar() {
     def f as Font init loadFixture();
-    def cps as list of int init [65, 66, 67, 90];   # A, B, C, and an absent codepoint
+    def cps as list of int init [65, 66, 67, 90]; # A, B, C, and an absent codepoint
     def gids as list of int init glyphIds($f, $cps);
     def advs as list of int init advances($f, $gids);
     def i as int init 0;
@@ -73,25 +73,24 @@ func testBatchAccessorsMatchPerChar() {
         testing.assertEqual($advs[$i], advanceGid($f, $gids[$i]));
         $i = $i + 1;
     }
-    testing.assertEqual($gids[3], 0);                # absent codepoint -> .notdef
+    testing.assertEqual($gids[3], 0); # absent codepoint -> .notdef
 }
 
 func testSimpleGlyphPath() {
     # A is a triangle of three on-curve points, straight lines.
-    testing.assertEqual(glyphPath(loadFixture(), 65),
-        "M 100 0 L 500 0 L 300 700 L 100 0 Z");
+    testing.assertEqual(glyphPath(loadFixture(), 65), "M 100 0 L 500 0 L 300 700 L 100 0 Z");
 }
 
 func testQuadraticGlyphPath() {
     # B has two quadratic curves -> two Q commands.
-    testing.assertEqual(glyphPath(loadFixture(), 66),
+    testing.assertEqual(
+        glyphPath(loadFixture(), 66),
         "M 100 0 L 100 600 Q 450 600 450 300 Q 450 0 100 0 Z");
 }
 
 func testCompositeGlyphPath() {
     # C is glyph A translated +200 in x.
-    testing.assertEqual(glyphPath(loadFixture(), 67),
-        "M 300 0 L 700 0 L 500 700 L 300 0 Z");
+    testing.assertEqual(glyphPath(loadFixture(), 67), "M 300 0 L 700 0 L 500 700 L 300 0 Z");
 }
 
 func testGlyphContours() {
@@ -117,11 +116,15 @@ func testEmptyGlyphHasNoContours() {
 
 func testByteReaders() {
     def b as bytes;
-    $b[] = 0x12; $b[] = 0x34; $b[] = 0x56; $b[] = 0x78;
-    testing.assertEqual(ushort($b, 0), 4660);        # 0x1234
-    testing.assertEqual(ulong($b, 0), 305419896);    # 0x12345678
+    $b[] = 0x12;
+    $b[] = 0x34;
+    $b[] = 0x56;
+    $b[] = 0x78;
+    testing.assertEqual(ushort($b, 0), 4660); # 0x1234
+    testing.assertEqual(ulong($b, 0), 305419896); # 0x12345678
     def s as bytes;
-    $s[] = 0xFF; $s[] = 0xFE;                          # 0xFFFE -> -2 signed
+    $s[] = 0xFF;
+    $s[] = 0xFE; # 0xFFFE -> -2 signed
     testing.assertEqual(sshort($s, 0), -2);
     testing.assertEqual(ubyte($s, 0), 255);
 }
@@ -131,16 +134,36 @@ func testByteReaders() {
 func testCoverageLookupFmtTwelve() {
     # A minimal format-12 subtable mapping U+1F600 -> glyph 42.
     def sub as bytes;
-    $sub[] = 0; $sub[] = 12;                           # format 12
-    $sub[] = 0; $sub[] = 0;                            # reserved
-    $sub[] = 0; $sub[] = 0; $sub[] = 0; $sub[] = 0;    # length (unused)
-    $sub[] = 0; $sub[] = 0; $sub[] = 0; $sub[] = 0;    # language
-    $sub[] = 0; $sub[] = 0; $sub[] = 0; $sub[] = 1;    # nGroups = 1
-    $sub[] = 0; $sub[] = 1; $sub[] = 0xF6; $sub[] = 0; # startChar 0x1F600
-    $sub[] = 0; $sub[] = 1; $sub[] = 0xF6; $sub[] = 0; # endChar   0x1F600
-    $sub[] = 0; $sub[] = 0; $sub[] = 0; $sub[] = 42;   # startGID 42
-    testing.assertEqual(coverageLookup($sub, 0, 128512), 42);   # 0x1F600
-    testing.assertEqual(coverageLookup($sub, 0, 128513), 0);    # out of range
+    $sub[] = 0;
+    $sub[] = 12; # format 12
+    $sub[] = 0;
+    $sub[] = 0; # reserved
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 0; # length (unused)
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 0; # language
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 1; # nGroups = 1
+    $sub[] = 0;
+    $sub[] = 1;
+    $sub[] = 0xF6;
+    $sub[] = 0; # startChar 0x1F600
+    $sub[] = 0;
+    $sub[] = 1;
+    $sub[] = 0xF6;
+    $sub[] = 0; # endChar   0x1F600
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 0;
+    $sub[] = 42; # startGID 42
+    testing.assertEqual(coverageLookup($sub, 0, 128512), 42); # 0x1F600
+    testing.assertEqual(coverageLookup($sub, 0, 128513), 0); # out of range
 }
 
 # ---- error handling ----
@@ -150,7 +173,8 @@ func testRejectsTooShort() {
 }
 func parseTiny() {
     def b as bytes;
-    $b[] = 1; $b[] = 2;
+    $b[] = 1;
+    $b[] = 2;
     parse($b);
 }
 
@@ -162,7 +186,10 @@ func testRejectsMalformedCff() {
 func parseOtto() {
     def b as bytes;
     # "OTTO" then padding (no table directory)
-    $b[] = 0x4F; $b[] = 0x54; $b[] = 0x54; $b[] = 0x4F;
+    $b[] = 0x4F;
+    $b[] = 0x54;
+    $b[] = 0x54;
+    $b[] = 0x4F;
     for (def i as int init 0; $i < 12; $i = $i + 1) {
         $b[] = 0;
     }
@@ -173,21 +200,21 @@ func parseOtto() {
 
 func testVerticalMetrics() {
     def f as Font init loadFixture();
-    testing.assertEqual(ascender($f), 780);     # OS/2 sTypoAscender
-    testing.assertEqual(descender($f), -220);   # OS/2 sTypoDescender
-    testing.assertEqual(lineGap($f), 100);      # OS/2 sTypoLineGap
-    testing.assertEqual(capHeight($f), 700);    # OS/2 sCapHeight (v2)
-    testing.assertEqual(xHeight($f), 500);      # OS/2 sxHeight (v2)
+    testing.assertEqual(ascender($f), 780); # OS/2 sTypoAscender
+    testing.assertEqual(descender($f), -220); # OS/2 sTypoDescender
+    testing.assertEqual(lineGap($f), 100); # OS/2 sTypoLineGap
+    testing.assertEqual(capHeight($f), 700); # OS/2 sCapHeight (v2)
+    testing.assertEqual(xHeight($f), 500); # OS/2 sxHeight (v2)
 }
 
 # ---- kern table ----
 
 func testKerning() {
     def f as Font init loadFixture();
-    testing.assertEqual(kern($f, 65, 66), -50);   # A/B pair
-    testing.assertEqual(kern($f, 65, 67), -30);   # A/C pair
-    testing.assertEqual(kern($f, 66, 65), 0);     # B/A: no entry
-    testing.assertEqual(kern($f, 65, 90), 0);     # Z absent from the font
+    testing.assertEqual(kern($f, 65, 66), -50); # A/B pair
+    testing.assertEqual(kern($f, 65, 67), -30); # A/C pair
+    testing.assertEqual(kern($f, 66, 65), 0); # B/A: no entry
+    testing.assertEqual(kern($f, 65, 90), 0); # Z absent from the font
 }
 
 func testKernAbsentTable() {
@@ -200,9 +227,9 @@ func testKernAbsentTable() {
 func testCffParsesAndMetrics() {
     def f as Font init loadCff();
     testing.assertEqual(name($f), "JenFixtureCFF");
-    testing.assertTrue($f.cff != 0);            # CFF-backed
+    testing.assertTrue($f.cff != 0); # CFF-backed
     testing.assertEqual(unitsPerEm($f), 1000);
-    testing.assertEqual(advance($f, 65), 600);  # from hmtx, shared with glyf
+    testing.assertEqual(advance($f, 65), 600); # from hmtx, shared with glyf
     testing.assertEqual(capHeight($f), 700);
 }
 
@@ -213,7 +240,8 @@ func testCffGlyphPathLines() {
 }
 
 func testCffGlyphPathCurves() {
-    testing.assertEqual(glyphPath(loadCff(), 66),
+    testing.assertEqual(
+        glyphPath(loadCff(), 66),
         "M 100 0 L 100 600 C 450 600 450 300 450 150 C 450 0 250 0 100 0 Z");
 }
 
@@ -236,7 +264,7 @@ func testCffSubrBias() {
 
 # A codepoint the CFF font lacks maps to glyph 0 (.notdef, empty here) -> "".
 func testCffMissingGlyph() {
-    testing.assertEqual(glyphPath(loadCff(), 0x4E00), "");   # a CJK char absent from the fixture
+    testing.assertEqual(glyphPath(loadCff(), 0x4E00), ""); # a CJK char absent from the fixture
 }
 
 # A charstring with runaway subroutine recursion is rejected, not hung.
@@ -256,7 +284,7 @@ func testCompositeBudgetThrows() {
 }
 func outlineCompBomb() {
     def f as Font init parse(encoding.fromText(FIXTURE_COMPBOMB, "base64"));
-    glyphPath($f, 65);   # 'A' -> the bomb root glyph
+    glyphPath($f, 65); # 'A' -> the bomb root glyph
 }
 
 # A CFF charstring that pushes far more operands than the Type2 stack allows is
@@ -266,5 +294,5 @@ func testCffOperandStackThrows() {
 }
 func outlineCffBomb() {
     def f as Font init parse(encoding.fromText(FIXTURE_CFFBOMB, "base64"));
-    glyphPath($f, 66);   # the operand-bomb glyph
+    glyphPath($f, 66); # the operand-bomb glyph
 }

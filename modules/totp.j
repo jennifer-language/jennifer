@@ -33,7 +33,11 @@ import "./uri.j" as urilib;
  * The HMAC digest algorithm behind a TOTP code: `Sha1` (the default), `Sha256`,
  * or `Sha512`. Selected through `Options.algorithm`; the zero value is `Sha1`.
  */
-export def enum Algorithm { Sha1, Sha256, Sha512 };
+export def enum Algorithm {
+    Sha1,
+    Sha256,
+    Sha512
+};
 
 /**
  * TOTP parameters. A zero-value struct (`def o as totp.Options;`) means the
@@ -55,7 +59,13 @@ func digitsOf(opts as Options) {
         # Bound the code length: outside [6, 8] is non-standard and a large value
         # overflows powTen; reject it typed.
         if ($opts.digits < 6 or $opts.digits > 8) {
-            throw Error{kind: "totp", message: "totp: digits must be 6, 7, or 8", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "totp",
+                message: "totp: digits must be 6, 7, or 8",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         return $opts.digits;
     }
@@ -228,7 +238,14 @@ export func verifyWindowAt(
     window as int,
     opts as Options) {
     if ($window > MAX_VERIFY_WINDOW) {
-        throw Error{kind: "totp", message: "totp: verify window exceeds the maximum of " + convert.toString(MAX_VERIFY_WINDOW), file: "", line: 0, col: 0};
+        throw Error{
+            kind: "totp",
+            message: "totp: verify window exceeds the maximum of " +
+                convert.toString(MAX_VERIFY_WINDOW),
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     def key as bytes init decodeSecret($secret);
     def digits as int init digitsOf($opts);

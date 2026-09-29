@@ -912,7 +912,8 @@ func daysInMonth(y as int, m as int) {
 
 # buildUtc constructs a UTC instant from calendar components.
 func buildUtc(y as int, mo as int, d as int, h as int, mi as int, s as int) {
-    return time.parse(pad4($y) + pad2($mo) + pad2($d) + "T" + pad2($h) + pad2($mi) + pad2($s) + "Z",
+    return time.parse(
+        pad4($y) + pad2($mo) + pad2($d) + "T" + pad2($h) + pad2($mi) + pad2($s) + "Z",
         "%Y%m%dT%H%M%SZ");
 }
 

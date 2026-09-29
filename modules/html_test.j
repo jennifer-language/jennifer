@@ -202,15 +202,15 @@ func testParseSelectors() {
     testing.assertEqual(len(findAll($doc, "div/*")), 3);
     testing.assertEqual(get($doc, "div/p[2]").children[0].text, "b");
     testing.assertFalse(has($doc, "div/span"));
-    testing.assertEqual(get($doc, "div/span").tag, "");   # no match -> empty node
+    testing.assertEqual(get($doc, "div/span").tag, ""); # no match -> empty node
 }
 
 func testParseAttrs() {
     def doc as Node init parse('<a href="/x" data-id=42 disabled>hi</a>');
     def a as Node init get($doc, "a");
     testing.assertEqual(attrOf($a, "href"), "/x");
-    testing.assertEqual(attrOf($a, "data-id"), "42");   # unquoted value
-    testing.assertTrue(hasAttr($a, "disabled"));        # boolean attribute
+    testing.assertEqual(attrOf($a, "data-id"), "42"); # unquoted value
+    testing.assertTrue(hasAttr($a, "disabled")); # boolean attribute
     testing.assertFalse(hasAttr($a, "nope"));
     testing.assertEqual(attrOf($a, "nope"), "");
 }

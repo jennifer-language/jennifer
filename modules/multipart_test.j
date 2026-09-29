@@ -19,7 +19,8 @@ func asString(b as bytes) {
 # rejected, not silently accepted as a complete multipart.
 func testTornBodyRejected() {
     def torn as bytes init convert.bytesFromString(
-        "--Z\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n", "utf-8");
+        "--Z\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n",
+        "utf-8");
     def threw as bool init false;
     def kind as string init "";
     try {

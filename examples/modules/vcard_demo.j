@@ -17,7 +17,9 @@ $ada = vcard.withNickname($ada, "Countess of Lovelace");
 $ada = vcard.withOrg($ada, "Analytical Engines", "Mathematician");
 $ada = vcard.addEmailTyped($ada, "ada@example.com", "work");
 $ada = vcard.addPhoneTyped($ada, "+44-20-7946-0000", "home");
-$ada = vcard.addAddress($ada, vcard.addressTyped("12 St James's Sq", "London", "", "SW1Y 4LE", "UK", "home"));
+$ada = vcard.addAddress(
+    $ada,
+    vcard.addressTyped("12 St James's Sq", "London", "", "SW1Y 4LE", "UK", "home"));
 $ada = vcard.withBday($ada, "18151210");
 $ada = vcard.addCategory($ada, "mathematics");
 $ada = vcard.withNote($ada, "First programmer; note the comma, and semicolon.");

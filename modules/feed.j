@@ -120,7 +120,14 @@ export func hasEnclosure(e as Entry) {
  * @return {Feed} the new feed
  */
 export func feed(title as string, link as string) {
-    return Feed{title: $title, link: $link, updated: epoch(), entries: [], author: "", categories: []};
+    return Feed{
+        title: $title,
+        link: $link,
+        updated: epoch(),
+        entries: [],
+        author: "",
+        categories: []
+    };
 }
 /**
  * A copy of `f` with its `updated` instant set.
@@ -511,7 +518,10 @@ func buildRss(f as Feed) {
             $item = xml.append($item, el("description", $body));
         }
         if (hasEnclosure($e)) {
-            def enc as xml.Value init xml.setAttr(xml.element("enclosure"), "url", $e.enclosure.url);
+            def enc as xml.Value init xml.setAttr(
+                xml.element("enclosure"),
+                "url",
+                $e.enclosure.url);
             $enc = xml.setAttr($enc, "length", convert.toString($e.enclosure.length));
             $enc = xml.setAttr($enc, "type", $e.enclosure.type);
             $item = xml.append($item, $enc);
@@ -535,7 +545,9 @@ func buildAtom(f as Feed) {
     }
     for (def c as int init 0; $c < len($f.categories); $c = $c + 1) {
         if (len($f.categories[$c]) > 0) {
-            $root = xml.append($root, xml.setAttr(xml.element("category"), "term", $f.categories[$c]));
+            $root = xml.append(
+                $root,
+                xml.setAttr(xml.element("category"), "term", $f.categories[$c]));
         }
     }
     if (isSet($f.updated)) {
@@ -556,7 +568,9 @@ func buildAtom(f as Feed) {
         }
         for (def c as int init 0; $c < len($e.categories); $c = $c + 1) {
             if (len($e.categories[$c]) > 0) {
-                $item = xml.append($item, xml.setAttr(xml.element("category"), "term", $e.categories[$c]));
+                $item = xml.append(
+                    $item,
+                    xml.setAttr(xml.element("category"), "term", $e.categories[$c]));
             }
         }
         if (isSet($e.published)) {

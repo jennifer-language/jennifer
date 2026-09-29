@@ -19,12 +19,12 @@
 
 # The parsed CFF context: table offsets discovered once per glyph query.
 def struct Cff {
-    charStrings as int,     # CharStrings INDEX offset
-    gsubr as int,           # global subr INDEX offset
-    lsubr as int,           # local subr INDEX offset (non-CID; 0 when none)
+    charStrings as int, # CharStrings INDEX offset
+    gsubr as int, # global subr INDEX offset
+    lsubr as int, # local subr INDEX offset (non-CID; 0 when none)
     isCID as bool,
-    fdselect as int,        # FDSelect offset (CID)
-    fdarray as int          # FDArray INDEX offset (CID)
+    fdselect as int, # FDSelect offset (CID)
+    fdarray as int # FDArray INDEX offset (CID)
 };
 
 # slong reads a signed 32-bit big-endian integer.
@@ -137,7 +137,7 @@ func parseDict(b as bytes, start as int, end as int) {
             $stack[] = ($b0 - 247) * 256 + $b[$pos + 1] + 108;
             $pos = $pos + 2;
         } else {
-            $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] - 108;
+            $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] -108;
             $pos = $pos + 2;
         }
     }
@@ -167,15 +167,15 @@ func subrBias(count as int) {
 func cffContext(f as Font) {
     def b as bytes init $f.data;
     def cff as int init $f.cff;
-    def p as int init $cff + $b[$cff + 2];   # skip header (hdrSize at +2)
-    $p = cffIndexEnd($b, $p);                # Name INDEX
+    def p as int init $cff + $b[$cff + 2]; # skip header (hdrSize at +2)
+    $p = cffIndexEnd($b, $p); # Name INDEX
     def topRanges as list of list of int init cffIndex($b, $p);
-    $p = cffIndexEnd($b, $p);                # Top DICT INDEX
-    $p = cffIndexEnd($b, $p);                # String INDEX
-    def gsubr as int init $p;                # Global Subr INDEX
+    $p = cffIndexEnd($b, $p); # Top DICT INDEX
+    $p = cffIndexEnd($b, $p); # String INDEX
+    def gsubr as int init $p; # Global Subr INDEX
     def top as map of int to list of int init parseDict($b, $topRanges[0][0], $topRanges[0][1]);
     def charStrings as int init $cff + dictOp($top, 17, 0, 0);
-    def isCID as bool init maps.has($top, 1230);   # ROS operator marks a CID font
+    def isCID as bool init maps.has($top, 1230); # ROS operator marks a CID font
     def lsubr as int init 0;
     if (maps.has($top, 18)) {
         def privSize as int init $top[18][0];
@@ -233,7 +233,10 @@ func cffLocalSubr(f as Font, ctx as Cff, gid as int) {
     if ($fd >= len($fdRanges)) {
         return 0;
     }
-    def fdDict as map of int to list of int init parseDict($b, $fdRanges[$fd][0], $fdRanges[$fd][1]);
+    def fdDict as map of int to list of int init parseDict(
+        $b,
+        $fdRanges[$fd][0],
+        $fdRanges[$fd][1]);
     if (not maps.has($fdDict, 18)) {
         return 0;
     }
@@ -274,7 +277,16 @@ func cffGlyphById(f as Font, gid as int) {
             } else {
                 # cubic (px,py)->(cmd5,cmd6) via controls (cmd1,cmd2),(cmd3,cmd4):
                 # split into two quadratics so it fits the on/off-curve model.
-                $pts = appendCubicAsQuads($pts, $px, $py, $cmd[1], $cmd[2], $cmd[3], $cmd[4], $cmd[5], $cmd[6]);
+                $pts = appendCubicAsQuads(
+                    $pts,
+                    $px,
+                    $py,
+                    $cmd[1],
+                    $cmd[2],
+                    $cmd[3],
+                    $cmd[4],
+                    $cmd[5],
+                    $cmd[6]);
                 $px = $cmd[5];
                 $py = $cmd[6];
             }
@@ -282,10 +294,18 @@ func cffGlyphById(f as Font, gid as int) {
         if (len($pts) > 0) {
             $out[] = Contour{points: $pts};
             for (def k as int init 0; $k < len($pts); $k = $k + 1) {
-                if (not $seen or $pts[$k].x < $minx) { $minx = $pts[$k].x; }
-                if (not $seen or $pts[$k].y < $miny) { $miny = $pts[$k].y; }
-                if (not $seen or $pts[$k].x > $maxx) { $maxx = $pts[$k].x; }
-                if (not $seen or $pts[$k].y > $maxy) { $maxy = $pts[$k].y; }
+                if (not $seen or $pts[$k].x < $minx) {
+                    $minx = $pts[$k].x;
+                }
+                if (not $seen or $pts[$k].y < $miny) {
+                    $miny = $pts[$k].y;
+                }
+                if (not $seen or $pts[$k].x > $maxx) {
+                    $maxx = $pts[$k].x;
+                }
+                if (not $seen or $pts[$k].y > $maxy) {
+                    $maxy = $pts[$k].y;
+                }
                 $seen = true;
             }
         }
@@ -295,7 +315,16 @@ func cffGlyphById(f as Font, gid as int) {
 
 # appendCubicAsQuads splits a cubic Bezier into two quadratics and appends their
 # off-curve control + on-curve end points.
-func appendCubicAsQuads(pts as list of Point, p0x as int, p0y as int, c1x as int, c1y as int, c2x as int, c2y as int, p3x as int, p3y as int) {
+func appendCubicAsQuads(
+    pts as list of Point,
+    p0x as int,
+    p0y as int,
+    c1x as int,
+    c1y as int,
+    c2x as int,
+    c2y as int,
+    p3x as int,
+    p3y as int) {
     def out as list of Point init $pts;
     # de Casteljau split at t = 0.5
     def m0x as int init ($p0x + $c1x) // 2;
@@ -370,10 +399,22 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         }
         $ops = $ops + 1;
         if ($ops > CFF_MAX_OPS) {
-            throw Error{kind: "font", message: "font.glyph: charstring exceeds operation budget (malformed / hostile font)", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "font",
+                message: "font.glyph: charstring exceeds operation budget (malformed / hostile font)",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         if (len($stack) > CFF_MAX_STACK) {
-            throw Error{kind: "font", message: "font.glyph: charstring operand stack overflow", file: "", line: 0, col: 0};
+            throw Error{
+                kind: "font",
+                message: "font.glyph: charstring operand stack overflow",
+                file: "",
+                line: 0,
+                col: 0
+            };
         }
         def ti as int init len($frames) - 1;
         def fend as int init $frames[$ti][0];
@@ -391,7 +432,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         }
         if ($b0 == 255) {
             def fx as int init slong($b, $pos + 1);
-            $stack[] = ($fx + 32768) // 65536;   # 16.16 fixed, rounded to int
+            $stack[] = ($fx + 32768) // 65536; # 16.16 fixed, rounded to int
             $frames[$ti][1] = $pos + 5;
             continue;
         }
@@ -403,7 +444,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 $stack[] = ($b0 - 247) * 256 + $b[$pos + 1] + 108;
                 $frames[$ti][1] = $pos + 2;
             } else {
-                $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] - 108;
+                $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] -108;
                 $frames[$ti][1] = $pos + 2;
             }
             continue;
@@ -436,7 +477,9 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 $a = lists.slice($a, 1, len($a));
             }
             $haveWidth = true;
-            if ($open) { $contours[] = $cur; }
+            if ($open) {
+                $contours[] = $cur;
+            }
             $cur = [];
             $x = $x + $a[0];
             $y = $y + $a[1];
@@ -451,7 +494,9 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 $a = lists.slice($a, 1, len($a));
             }
             $haveWidth = true;
-            if ($open) { $contours[] = $cur; }
+            if ($open) {
+                $contours[] = $cur;
+            }
             $cur = [];
             if ($b0 == 22) {
                 $x = $x + $a[0];
@@ -632,7 +677,13 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 # past that is a malformed (or hostile) font trying to make the
                 # frame stack grow without end. Reject rather than hang.
                 if (len($frames) >= 64) {
-                    throw Error{kind: "font", message: "font.glyph: charstring subroutine nesting too deep", file: "", line: 0, col: 0};
+                    throw Error{
+                        kind: "font",
+                        message: "font.glyph: charstring subroutine nesting too deep",
+                        file: "",
+                        line: 0,
+                        col: 0
+                    };
                 }
                 def r as list of int init cffIndexEntry($b, $subOff, $si);
                 $frames[] = [$r[1], $r[0]];

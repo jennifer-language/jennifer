@@ -39,11 +39,15 @@ def ep as feed.Entry init feed.entryEnclosure(
     feed.entryCategory(
         feed.entryAuthor(
             feed.entryId(
-                feed.entry("Podcast: designing a small language", "https://jennifer-language.dev/pod/1"),
+                feed.entry(
+                    "Podcast: designing a small language",
+                    "https://jennifer-language.dev/pod/1"),
                 "pod-1"),
             "The Jennifer Team"),
         "Programming"),
-    "https://jennifer-language.dev/pod/1.mp3", 18452000, "audio/mpeg");
+    "https://jennifer-language.dev/pod/1.mp3",
+    18452000,
+    "audio/mpeg");
 
 $f = feed.feedAuthor($f, "The Jennifer Team");
 $f = feed.add(feed.add(feed.add($f, $one), $two), $ep);

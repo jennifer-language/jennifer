@@ -404,7 +404,8 @@ export func lock(dbPath as string) {
     throw Error{
         kind: "flatdb",
         message: "flatdb.lock: could not acquire the write lock at " + $lockPath +
-            " within " + convert.toString(LOCK_WAIT_MS) + "ms (holder: " + peekHolder($lockPath) + ")",
+            " within " + convert.toString(LOCK_WAIT_MS) + "ms (holder: " + peekHolder($lockPath) +
+            ")",
         file: "",
         line: 0,
         col: 0

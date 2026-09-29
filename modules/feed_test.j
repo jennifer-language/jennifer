@@ -220,8 +220,12 @@ func podcast() {
         entryCategory(
             entryCategory(entryAuthor(entry("Ep 1", "https://p.example/1"), "Jane Host"), "Tech"),
             "News"),
-        "https://p.example/1.mp3", 12345678, "audio/mpeg");
-    def f as Feed init feedCategory(feedAuthor(feed("Show", "https://p.example"), "Jane Host"), "Technology");
+        "https://p.example/1.mp3",
+        12345678,
+        "audio/mpeg");
+    def f as Feed init feedCategory(
+        feedAuthor(feed("Show", "https://p.example"), "Jane Host"),
+        "Technology");
     return add($f, $e);
 }
 

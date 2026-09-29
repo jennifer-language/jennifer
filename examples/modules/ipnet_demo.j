@@ -70,7 +70,8 @@ for (def client in ["10.4.5.6", "192.168.1.42", "8.8.8.8", "2001:db8:abcd::1"]) 
 # Subnetting: split a /24 into /26s, then aggregate the halves back.
 io.printf("=== split / aggregate ===\n");
 def block as ipnet.Network init ipnet.parse("192.168.1.0/24");
-io.printf("  %s has %d addresses; usable %s .. %s\n",
+io.printf(
+    "  %s has %d addresses; usable %s .. %s\n",
     ipnet.networkString($block),
     ipnet.hostCount($block),
     ipnet.toString(ipnet.firstUsable($block)),

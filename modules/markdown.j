@@ -39,8 +39,29 @@ use encoding;
 # The inline span kinds and block kinds, as sum types: the renderers `match` on
 # them, so adding a kind surfaces every place that must handle it (both the HTML
 # and the ANSI path) instead of silently falling through a string compare.
-def enum SpanKind { Text, Code, Strong, Em, Link, Image, Strike, Highlight, Sub, Sup };
-def enum BlockKind { Paragraph, Heading, Code, List, Table, Quote, Rule, Html, DefList };
+def enum SpanKind {
+    Text,
+    Code,
+    Strong,
+    Em,
+    Link,
+    Image,
+    Strike,
+    Highlight,
+    Sub,
+    Sup
+};
+def enum BlockKind {
+    Paragraph,
+    Heading,
+    Code,
+    List,
+    Table,
+    Quote,
+    Rule,
+    Html,
+    DefList
+};
 
 # An inline span: a run of Text, or an emphasised / code / link / image span.
 # Link and Image spans carry the target in `url` (and an optional `title`); the
@@ -438,8 +459,9 @@ func splitTrailingAttrs(s as string) {
     if ($open < 0) {
         return $none;
     }
-    def attrs as map of string to string init parseAttrList(
-        strings.join(lists.slice($cs, $open + 1, $n - 1), ""));
+    def attrs as map of string to string init parseAttrList(strings.join(
+        lists.slice($cs, $open + 1, $n - 1),
+        ""));
     if (len(maps.keys($attrs)) == 0) {
         return $none;
     }
@@ -455,10 +477,10 @@ func parseInline(s as string) {
     # `contains` checks short-circuit at the first marker for a marked-up run.
     # Highlight is `==`, so a lone `=` (very common in prose) does not leave the
     # fast path; `~` and `^` are single-char markers (sub / sup) so they do.
-    if (len($s) > 0 and not strings.contains($s, "`") and not strings.contains($s, "*")
-        and not strings.contains($s, "[") and not strings.contains($s, "!")
-        and not strings.contains($s, "<") and not strings.contains($s, "~")
-        and not strings.contains($s, "==") and not strings.contains($s, "^")) {
+    if (len($s) > 0 and not strings.contains($s, "`") and not strings.contains($s, "*") and
+        not strings.contains($s, "[") and not strings.contains($s, "!") and
+        not strings.contains($s, "<") and not strings.contains($s, "~") and
+        not strings.contains($s, "==") and not strings.contains($s, "^")) {
         $spans[] = span(SpanKind.Text, $s, "");
         return $spans;
     }
@@ -601,7 +623,10 @@ func parseInline(s as string) {
         }
         if ($bt >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             $spans[] = span(SpanKind.Code, strings.join(lists.slice($cs, $i + 1, $bt), ""), "");
             $i = $bt + 1;
@@ -620,7 +645,10 @@ func parseInline(s as string) {
         }
         if ($dbl >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             $spans[] = span(SpanKind.Strong, strings.join(lists.slice($cs, $i + 2, $dbl), ""), "");
             $i = $dbl + 2;
@@ -639,7 +667,10 @@ func parseInline(s as string) {
         }
         if ($em >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             $spans[] = span(SpanKind.Em, strings.join(lists.slice($cs, $i + 1, $em), ""), "");
             $i = $em + 1;
@@ -658,9 +689,15 @@ func parseInline(s as string) {
         }
         if ($strike >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
-            $spans[] = span(SpanKind.Strike, strings.join(lists.slice($cs, $i + 2, $strike), ""), "");
+            $spans[] = span(
+                SpanKind.Strike,
+                strings.join(lists.slice($cs, $i + 2, $strike), ""),
+                "");
             $i = $strike + 2;
             $bufStart = $i;
             continue;
@@ -676,9 +713,15 @@ func parseInline(s as string) {
         }
         if ($hl >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
-            $spans[] = span(SpanKind.Highlight, strings.join(lists.slice($cs, $i + 2, $hl), ""), "");
+            $spans[] = span(
+                SpanKind.Highlight,
+                strings.join(lists.slice($cs, $i + 2, $hl), ""),
+                "");
             $i = $hl + 2;
             $bufStart = $i;
             continue;
@@ -695,7 +738,10 @@ func parseInline(s as string) {
         }
         if ($sup >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             $spans[] = span(SpanKind.Sup, strings.join(lists.slice($cs, $i + 1, $sup), ""), "");
             $i = $sup + 1;
@@ -715,7 +761,10 @@ func parseInline(s as string) {
         }
         if ($sub >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             $spans[] = span(SpanKind.Sub, strings.join(lists.slice($cs, $i + 1, $sub), ""), "");
             $i = $sub + 1;
@@ -740,7 +789,10 @@ func parseInline(s as string) {
         }
         if ($imgEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             def altText as string init strings.join(lists.slice($cs, $i + 2, $irb), "");
             def imgDest as string init strings.join(lists.slice($cs, $irb + 2, $irp), "");
@@ -776,7 +828,10 @@ func parseInline(s as string) {
         }
         if ($linkEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
             # Slice the (short) text and destination here - lists.slice on the
             # rune list is O(slice length) regardless of position, unlike
@@ -788,7 +843,9 @@ func parseInline(s as string) {
             # An attribute list right after the link (`[t](u){.button target="_blank"}`).
             def lae as int init attrBraceEnd($cs, $linkEnd, $n);
             if ($lae >= 0) {
-                $linkSp.attrs = parseAttrList(strings.join(lists.slice($cs, $linkEnd + 1, $lae), ""));
+                $linkSp.attrs = parseAttrList(strings.join(
+                    lists.slice($cs, $linkEnd + 1, $lae),
+                    ""));
                 $linkEnd = $lae + 1;
             }
             $spans[] = $linkSp;
@@ -830,9 +887,18 @@ func parseInline(s as string) {
         }
         if ($autoEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $i), ""), "");
+                $spans[] = span(
+                    SpanKind.Text,
+                    strings.join(lists.slice($cs, $bufStart, $i), ""),
+                    "");
             }
-            $spans[] = Span{kind: SpanKind.Link, text: $autoText, url: $autoUrl, title: "", attrs: {}};
+            $spans[] = Span{
+                kind: SpanKind.Link,
+                text: $autoText,
+                url: $autoUrl,
+                title: "",
+                attrs: {}
+            };
             $i = $autoEnd;
             $bufStart = $i;
             continue;
@@ -1269,13 +1335,7 @@ func stripQuoteMarker(line as string) {
 # alerts; the rest of the world calls the box they produce an admonition. A
 # sixth word is a quotation that happens to start with a bracket, which is what
 # every renderer that has never heard of the syntax makes of all of them.
-def const ALERT_KINDS as list of string init [
-    "note",
-    "tip",
-    "important",
-    "warning",
-    "caution"
-];
+def const ALERT_KINDS as list of string init ["note", "tip", "important", "warning", "caution"];
 
 # What an admonition marker line opens: the kind, and the custom title that
 # followed it on the same line. An empty kind means the line is not a marker.
@@ -1594,7 +1654,10 @@ func collectFence(lines as list of string, open as int) {
     # ```python title="a.py"). It is carried verbatim in the Fence's `lang` field;
     # blockToPublic splits the leading word off as the language and keeps the full
     # string as the `info` attribute (for title= / hl_lines= and the like).
-    def info as string init strings.trim(strings.substring($trimmedOpen, $openLen, len($trimmedOpen)));
+    def info as string init strings.trim(strings.substring(
+        $trimmedOpen,
+        $openLen,
+        len($trimmedOpen)));
     def parts as list of string init [];
     def j as int init $open + 1;
     while ($j < $n) {
@@ -1710,9 +1773,7 @@ func inlineChildren(text as string, depth as int) {
 # Span, so the resolver checks it covers every SpanKind.
 func spanToPublic(sp as Span, depth as int) {
     match ($sp.kind) {
-        when Text {
-            return textNode(html.unescape($sp.text));
-        }
+        when Text { return textNode(html.unescape($sp.text)); }
         when Code {
             def n as Node init nodeOf("codespan");
             $n.text = $sp.text;
@@ -1830,9 +1891,9 @@ func listToPublic(b as Block, depth as int) {
         # GFM requires the marker to be followed by a space (or be the whole item),
         # so `[x]done` is an ordinary item. The marker is stripped and recorded as
         # task / checked attrs.
-        if ((strings.startsWith($itemText, "[ ]") or strings.startsWith($itemText, "[x]")
-            or strings.startsWith($itemText, "[X]"))
-            and (len($itemText) == 3 or strings.substring($itemText, 3, 4) == " ")) {
+        if ((strings.startsWith($itemText, "[ ]") or strings.startsWith($itemText, "[x]") or
+            strings.startsWith($itemText, "[X]")) and
+            (len($itemText) == 3 or strings.substring($itemText, 3, 4) == " ")) {
             $item.attrs["task"] = "true";
             if (strings.startsWith($itemText, "[ ]")) {
                 $item.attrs["checked"] = "false";
@@ -1899,12 +1960,8 @@ func blockToPublic(b as Block, depth as int) {
             }
             return $n;
         }
-        when List {
-            return listToPublic($b, $depth);
-        }
-        when Table {
-            return tableToPublic($b);
-        }
+        when List { return listToPublic($b, $depth); }
+        when Table { return tableToPublic($b); }
         when Quote {
             # A quotation opened by an alert marker is an admonition: a different
             # node kind rather than a flag on this one, so a renderer that draws
@@ -1923,9 +1980,7 @@ func blockToPublic(b as Block, depth as int) {
             $n.children = $kids;
             return $n;
         }
-        when Rule {
-            return nodeOf("thematic_break");
-        }
+        when Rule { return nodeOf("thematic_break"); }
         when Html {
             # A lone `<!-- pagebreak -->` comment is a page-break directive; any
             # other raw HTML block passes through as an html_block node.
@@ -2059,15 +2114,9 @@ export func text(node as Node) {
  */
 export func attr(node as Node, name as string) {
     match ($name) {
-        when "href", "url" {
-            return $node.url;
-        }
-        when "title" {
-            return $node.title;
-        }
-        when "lang", "language" {
-            return $node.lang;
-        }
+        when "href", "url" { return $node.url; }
+        when "title" { return $node.title; }
+        when "lang", "language" { return $node.lang; }
         when "kind" {
             # The alert kind of an admonition, and only that: on any other node
             # `kind` is not a meaningful attribute (a code block's language is
@@ -2077,18 +2126,12 @@ export func attr(node as Node, name as string) {
             }
             return "";
         }
-        when "align" {
-            return $node.align;
+        when "align" { return $node.align; }
+        when "ordered" { if ($node.ordered) {
+            return "true";
         }
-        when "ordered" {
-            if ($node.ordered) {
-                return "true";
-            }
-            return "false";
-        }
-        when "level" {
-            return convert.toString($node.level);
-        }
+        return "false"; }
+        when "level" { return convert.toString($node.level); }
         else {
             # Any other name falls back to the extra-attributes map: `id` / `class`
             # and custom `key="value"` from an attribute list, a fenced block's
@@ -2411,30 +2454,14 @@ export func toAnsi(md as string) {
 # so a `strong` / `emphasis` / `link` carries its text in a single `text` child).
 func inlineNodeToHtml(n as Node) {
     match ($n.kind) {
-        when "text" {
-            return html.text($n.text);
-        }
-        when "codespan" {
-            return wrapEl("code", $n.text);
-        }
-        when "strong" {
-            return html.element("strong", [], inlineNodesToHtml($n.children));
-        }
-        when "emphasis" {
-            return html.element("em", [], inlineNodesToHtml($n.children));
-        }
-        when "strikethrough" {
-            return html.element("del", [], inlineNodesToHtml($n.children));
-        }
-        when "highlight" {
-            return html.element("mark", [], inlineNodesToHtml($n.children));
-        }
-        when "subscript" {
-            return html.element("sub", [], inlineNodesToHtml($n.children));
-        }
-        when "superscript" {
-            return html.element("sup", [], inlineNodesToHtml($n.children));
-        }
+        when "text" { return html.text($n.text); }
+        when "codespan" { return wrapEl("code", $n.text); }
+        when "strong" { return html.element("strong", [], inlineNodesToHtml($n.children)); }
+        when "emphasis" { return html.element("em", [], inlineNodesToHtml($n.children)); }
+        when "strikethrough" { return html.element("del", [], inlineNodesToHtml($n.children)); }
+        when "highlight" { return html.element("mark", [], inlineNodesToHtml($n.children)); }
+        when "subscript" { return html.element("sub", [], inlineNodesToHtml($n.children)); }
+        when "superscript" { return html.element("sup", [], inlineNodesToHtml($n.children)); }
         when "link" {
             def attrs as list of html.Attr init [];
             $attrs[] = html.attr("href", safeHref($n.url));
@@ -2447,12 +2474,8 @@ func inlineNodeToHtml(n as Node) {
             }
             return html.element("a", $attrs, inlineNodesToHtml($n.children));
         }
-        when "image" {
-            return imageNode($n.text, $n.url, $n.title, mdAttrsToHtml($n));
-        }
-        else {
-            return html.text(text($n));
-        }
+        when "image" { return imageNode($n.text, $n.url, $n.title, mdAttrsToHtml($n)); }
+        else { return html.text(text($n)); }
     }
 }
 
@@ -2475,7 +2498,10 @@ func listNodeToHtml(n as Node, allowRaw as bool) {
         # `task-list-item` class on the <li> (what GFM and its stylesheets use).
         if (attr($item, "task") == "true") {
             $liAttrs[] = html.attr("class", "task-list-item");
-            def box as list of html.Attr init [html.attr("type", "checkbox"), html.boolAttr("disabled")];
+            def box as list of html.Attr init [
+                html.attr("type", "checkbox"),
+                html.boolAttr("disabled")
+            ];
             if (attr($item, "checked") == "true") {
                 $box[] = html.boolAttr("checked");
             }
@@ -2561,9 +2587,7 @@ func nodeToHtml(n as Node, allowRaw as bool) {
             def tag as string init "h" + convert.toString($n.level);
             return html.element($tag, mdAttrsToHtml($n), inlineNodesToHtml($n.children));
         }
-        when "paragraph" {
-            return html.element("p", [], inlineNodesToHtml($n.children));
-        }
+        when "paragraph" { return html.element("p", [], inlineNodesToHtml($n.children)); }
         when "code" {
             def codeKids as list of html.Node init [];
             $codeKids[] = html.text($n.text);
@@ -2577,9 +2601,7 @@ func nodeToHtml(n as Node, allowRaw as bool) {
             $pre[] = html.element("code", $codeAttrs, $codeKids);
             return html.element("pre", [], $pre);
         }
-        when "list" {
-            return listNodeToHtml($n, $allowRaw);
-        }
+        when "list" { return listNodeToHtml($n, $allowRaw); }
         when "definition_list" {
             def dkids as list of html.Node init [];
             for (def c in $n.children) {
@@ -2591,9 +2613,7 @@ func nodeToHtml(n as Node, allowRaw as bool) {
             }
             return html.element("dl", [], $dkids);
         }
-        when "table" {
-            return tableNodeToHtml($n);
-        }
+        when "table" { return tableNodeToHtml($n); }
         when "quote" {
             def kids as list of html.Node init [];
             for (def cb in $n.children) {
@@ -2637,9 +2657,7 @@ func nodeToHtml(n as Node, allowRaw as bool) {
             # A page break has no HTML representation; emit nothing.
             return html.raw("");
         }
-        else {
-            return inlineNodeToHtml($n);
-        }
+        else { return inlineNodeToHtml($n); }
     }
 }
 
@@ -2647,39 +2665,19 @@ func nodeToHtml(n as Node, allowRaw as bool) {
 # itself when stdout is not a TTY, so piped output is plain).
 func inlineNodeToAnsi(n as Node) {
     match ($n.kind) {
-        when "text" {
-            return $n.text;
-        }
-        when "codespan" {
-            return ansi.cyan($n.text);
-        }
-        when "strong" {
-            return ansi.bold(inlineChildrenToAnsi($n.children));
-        }
-        when "emphasis" {
-            return ansi.italic(inlineChildrenToAnsi($n.children));
-        }
-        when "strikethrough" {
-            return ansi.strike(inlineChildrenToAnsi($n.children));
-        }
-        when "highlight" {
-            return ansi.reverse(inlineChildrenToAnsi($n.children));
-        }
-        when "subscript" {
-            return inlineChildrenToAnsi($n.children);
-        }
-        when "superscript" {
-            return inlineChildrenToAnsi($n.children);
-        }
+        when "text" { return $n.text; }
+        when "codespan" { return ansi.cyan($n.text); }
+        when "strong" { return ansi.bold(inlineChildrenToAnsi($n.children)); }
+        when "emphasis" { return ansi.italic(inlineChildrenToAnsi($n.children)); }
+        when "strikethrough" { return ansi.strike(inlineChildrenToAnsi($n.children)); }
+        when "highlight" { return ansi.reverse(inlineChildrenToAnsi($n.children)); }
+        when "subscript" { return inlineChildrenToAnsi($n.children); }
+        when "superscript" { return inlineChildrenToAnsi($n.children); }
         when "link" {
             return ansi.underline(inlineChildrenToAnsi($n.children)) + " (" + $n.url + ")";
         }
-        when "image" {
-            return ansi.dim("[image] ") + $n.text + " (" + $n.url + ")";
-        }
-        else {
-            return text($n);
-        }
+        when "image" { return ansi.dim("[image] ") + $n.text + " (" + $n.url + ")"; }
+        else { return text($n); }
     }
 }
 
@@ -2801,18 +2799,10 @@ func listNodeToAnsi(n as Node, depth as int) {
 # nodeToAnsi renders one block Node to terminal text.
 func nodeToAnsi(n as Node) {
     match ($n.kind) {
-        when "table" {
-            return tableNodeToAnsi($n);
-        }
-        when "heading" {
-            return ansi.bold(inlineChildrenToAnsi($n.children));
-        }
-        when "code" {
-            return ansi.dim(indentLines($n.text, "    "));
-        }
-        when "list" {
-            return listNodeToAnsi($n, 0);
-        }
+        when "table" { return tableNodeToAnsi($n); }
+        when "heading" { return ansi.bold(inlineChildrenToAnsi($n.children)); }
+        when "code" { return ansi.dim(indentLines($n.text, "    ")); }
+        when "list" { return listNodeToAnsi($n, 0); }
         when "definition_list" {
             def parts as list of string init [];
             for (def c in $n.children) {
@@ -2840,22 +2830,14 @@ func nodeToAnsi(n as Node) {
             }
             return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
         }
-        when "paragraph" {
-            return inlineChildrenToAnsi($n.children);
-        }
-        when "thematic_break" {
-            return ansi.dim(strings.repeat("-", 40));
-        }
+        when "paragraph" { return inlineChildrenToAnsi($n.children); }
+        when "thematic_break" { return ansi.dim(strings.repeat("-", 40)); }
         when "html_block" {
             # Raw HTML has no terminal representation; drop it.
             return "";
         }
-        when "page_break" {
-            return "";
-        }
-        else {
-            return inlineChildrenToAnsi($n.children);
-        }
+        when "page_break" { return ""; }
+        else { return inlineChildrenToAnsi($n.children); }
     }
 }
 
@@ -3338,7 +3320,12 @@ func placeInlineLines(state as Layout, lines as list of list of IWord, size as i
 }
 
 # placePlainLines draws single-font wrapped lines (headings, code) at the current pen.
-func placePlainLines(state as Layout, lines as list of string, font as string, size as int, xOffset as int) {
+func placePlainLines(
+    state as Layout,
+    lines as list of string,
+    font as string,
+    size as int,
+    xOffset as int) {
     def lh as int init lineH($size);
     for (def line in $lines) {
         $state = ensureSpace($state, $lh);
@@ -3370,7 +3357,11 @@ func renderHeading(state as Layout, node as Node) {
     def size as int init headingSize($lvl, $state.opts);
     def raw as string init text($node);
     def htext as string init mdSanitize($state.opts, $raw);
-    def lines as list of string init pdf.wrapText($state.opts.headingFont, $size, $htext, $state.width);
+    def lines as list of string init pdf.wrapText(
+        $state.opts.headingFont,
+        $size,
+        $htext,
+        $state.width);
     def blockH as int init len($lines) * lineH($size);
     $state = ensureSpace($state, $blockH);
     # Record a bookmark for this heading when its level is within the option's
@@ -3384,14 +3375,22 @@ func renderHeading(state as Layout, node as Node) {
     # on the sidebar. A Cyrillic heading now reads as itself in the outline even
     # where the page beneath it shows the substitute.
     if ($state.opts.bookmarkLevel > 0 and $lvl <= $state.opts.bookmarkLevel) {
-        $state.bks = lists.push($state.bks, pdf.OutlineEntry{title: $raw, page: $state.pageNo, y: $state.y, level: $lvl});
+        $state.bks = lists.push(
+            $state.bks,
+            pdf.OutlineEntry{title: $raw, page: $state.pageNo, y: $state.y, level: $lvl});
     }
     # Optional shaded background bar behind the heading (drawn before the text; the
     # colour is reset to black so the text and later content stay black).
     def bg as Fill init headingBg($state.opts, $lvl);
     if ($bg.on) {
         $state.page = pdf.color($state.page, $bg.r, $bg.g, $bg.b);
-        $state.page = pdf.rect($state.page, $state.x - 3, $state.y - $blockH + 2, $state.width + 6, $blockH + 2, true);
+        $state.page = pdf.rect(
+            $state.page,
+            $state.x - 3,
+            $state.y - $blockH + 2,
+            $state.width + 6,
+            $blockH + 2,
+            true);
         $state.page = pdf.color($state.page, 0, 0, 0);
     }
     return placePlainLines($state, $lines, $state.opts.headingFont, $size, 0);
@@ -3399,7 +3398,11 @@ func renderHeading(state as Layout, node as Node) {
 
 func renderParagraph(state as Layout, node as Node) {
     def words as list of IWord init inlineWords(children($node), $state.opts);
-    def lines as list of list of IWord init packLines($words, $state.opts.bodySize, $state.width, $state.opts);
+    def lines as list of list of IWord init packLines(
+        $words,
+        $state.opts.bodySize,
+        $state.width,
+        $state.opts);
     return placeInlineLines($state, $lines, $state.opts.bodySize);
 }
 
@@ -3414,7 +3417,11 @@ func renderDefList(state as Layout, node as Node) {
             for (def k as int init 0; $k < len($words); $k = $k + 1) {
                 $words[$k].font = $state.opts.boldFont;
             }
-            def lines as list of list of IWord init packLines($words, $size, $state.width, $state.opts);
+            def lines as list of list of IWord init packLines(
+                $words,
+                $size,
+                $state.width,
+                $state.opts);
             $state = placeInlineLines($state, $lines, $size);
         } else {
             def savedX as int init $state.x;
@@ -3422,7 +3429,11 @@ func renderDefList(state as Layout, node as Node) {
             $state.x = $savedX + $indent;
             $state.width = $savedW - $indent;
             def words as list of IWord init inlineWords(children($c), $state.opts);
-            def lines as list of list of IWord init packLines($words, $size, $state.width, $state.opts);
+            def lines as list of list of IWord init packLines(
+                $words,
+                $size,
+                $state.width,
+                $state.opts);
             $state = placeInlineLines($state, $lines, $size);
             $state.x = $savedX;
             $state.width = $savedW;
@@ -3455,12 +3466,24 @@ func renderCode(state as Layout, node as Node) {
         def top as int init $state.y + 4;
         if ($fill.on) {
             $state.page = pdf.color($state.page, $fill.r, $fill.g, $fill.b);
-            $state.page = pdf.rect($state.page, $state.x - 3, $top - $blockH, $state.width + 6, $blockH, true);
+            $state.page = pdf.rect(
+                $state.page,
+                $state.x - 3,
+                $top - $blockH,
+                $state.width + 6,
+                $blockH,
+                true);
             $state.page = pdf.color($state.page, 0, 0, 0);
         }
         if ($border.on) {
             $state.page = pdf.color($state.page, $border.r, $border.g, $border.b);
-            $state.page = pdf.rect($state.page, $state.x - 3, $top - $blockH, $state.width + 6, $blockH, false);
+            $state.page = pdf.rect(
+                $state.page,
+                $state.x - 3,
+                $top - $blockH,
+                $state.width + 6,
+                $blockH,
+                false);
             $state.page = pdf.color($state.page, 0, 0, 0);
         }
     }
@@ -3499,14 +3522,24 @@ func renderList(state as Layout, node as Node, depth as int) {
         # Place the marker on the item's first line.
         $state = ensureSpace($state, lineH($state.opts.bodySize));
         def baseline as int init $state.y - $state.opts.bodySize;
-        $state.page = pdf.text($state.page, $state.x, $baseline, $state.opts.bodyFont, $state.opts.bodySize, $marker);
+        $state.page = pdf.text(
+            $state.page,
+            $state.x,
+            $baseline,
+            $state.opts.bodyFont,
+            $state.opts.bodySize,
+            $marker);
         # Item text flows in a column indented past the marker, starting on that line.
         def savedX as int init $state.x;
         def savedW as int init $state.width;
         $state.x = $savedX + $mw;
         $state.width = $savedW - $mw;
         def words as list of IWord init inlineWords($inlineKids, $state.opts);
-        def lines as list of list of IWord init packLines($words, $state.opts.bodySize, $state.width, $state.opts);
+        def lines as list of list of IWord init packLines(
+            $words,
+            $state.opts.bodySize,
+            $state.width,
+            $state.opts);
         if (len($lines) == 0) {
             $state.y = $state.y - lineH($state.opts.bodySize);
         } else {
@@ -3553,7 +3586,14 @@ func maxWordWidth(txt as string, font as string, size as int) {
 # remaining width is shared in proportion to the columns' natural (full-cell) widths -
 # so a long "Description" gets the extra room without starving a short "Type". Returns
 # ncols+1 cumulative x-offsets (0 .. avail), relative to the table's left.
-func columnEdges(rows as list of Node, ncols as int, avail as int, font as string, size as int, pad as int, unenc as string) {
+func columnEdges(
+    rows as list of Node,
+    ncols as int,
+    avail as int,
+    font as string,
+    size as int,
+    pad as int,
+    unenc as string) {
     def nat as list of int init [];
     def mins as list of int init [];
     def c as int init 0;
@@ -3611,7 +3651,14 @@ func columnEdges(rows as list of Node, ncols as int, avail as int, font as strin
 
 # wrapRow word-wraps each cell of a row to its column (from `edges`), padding short
 # rows to `ncols` empty cells, and reports the tallest cell so the row can be sized.
-func wrapRow(cells as list of Node, ncols as int, edges as list of int, pad as int, font as string, size as int, unenc as string) {
+func wrapRow(
+    cells as list of Node,
+    ncols as int,
+    edges as list of int,
+    pad as int,
+    font as string,
+    size as int,
+    unenc as string) {
     def lines as list of list of string init [];
     def maxLines as int init 1;
     def c as int init 0;
@@ -3620,7 +3667,7 @@ func wrapRow(cells as list of Node, ncols as int, edges as list of int, pad as i
         if ($c < len($cells)) {
             $txt = pdf.toWinAnsi(text($cells[$c]), $unenc);
         }
-        def colW as int init $edges[$c + 1] - $edges[$c];
+        def colW as int init $edges[$c + 1] -$edges[$c];
         def wl as list of string init pdf.wrapText($font, $size, $txt, $colW - 2 * $pad);
         if (len($wl) == 0) {
             def one as list of string init [""];
@@ -3637,7 +3684,14 @@ func wrapRow(cells as list of Node, ncols as int, edges as list of int, pad as i
 
 # cellX returns the x for one wrapped line within its column, honouring the cell's
 # markdown alignment ("right" / "center" / left).
-func cellX(cellLeft as int, colW as int, pad as int, align as string, font as string, size as int, line as string) {
+func cellX(
+    cellLeft as int,
+    colW as int,
+    pad as int,
+    align as string,
+    font as string,
+    size as int,
+    line as string) {
     if ($align == "right") {
         return $cellLeft + $colW - $pad - roundPt(pdf.measureText($font, $size, $line));
     }
@@ -3662,7 +3716,14 @@ func renderTable(state as Layout, node as Node) {
     def size as int init $state.opts.bodySize;
     def pad as int init $state.opts.tablePad;
     def lh as int init cellLineH($size);
-    def edges as list of int init columnEdges($rows, $ncols, $state.width, $state.opts.bodyFont, $size, $pad, $state.opts.unencodable);
+    def edges as list of int init columnEdges(
+        $rows,
+        $ncols,
+        $state.width,
+        $state.opts.bodyFont,
+        $size,
+        $pad,
+        $state.opts.unencodable);
     def r as int init 0;
     for (def row in $rows) {
         def cells as list of Node init children($row);
@@ -3670,7 +3731,14 @@ func renderTable(state as Layout, node as Node) {
         if ($r == 0) {
             $font = $state.opts.boldFont;
         }
-        def rc as RowCells init wrapRow($cells, $ncols, $edges, $pad, $font, $size, $state.opts.unencodable);
+        def rc as RowCells init wrapRow(
+            $cells,
+            $ncols,
+            $edges,
+            $pad,
+            $font,
+            $size,
+            $state.opts.unencodable);
         def rowH as int init $rc.maxLines * $lh + 2 * $pad;
         $state = ensureSpace($state, $rowH);
         def rowTop as int init $state.y;
@@ -3691,10 +3759,16 @@ func renderTable(state as Layout, node as Node) {
                 $align = attr($cells[$c], "align");
             }
             def cellLeft as int init $state.x + $edges[$c];
-            def colW as int init $edges[$c + 1] - $edges[$c];
+            def colW as int init $edges[$c + 1] -$edges[$c];
             def ly as int init $rowTop - $pad - $size;
             for (def ln in $rc.lines[$c]) {
-                $state.page = pdf.text($state.page, cellX($cellLeft, $colW, $pad, $align, $font, $size, $ln), $ly, $font, $size, $ln);
+                $state.page = pdf.text(
+                    $state.page,
+                    cellX($cellLeft, $colW, $pad, $align, $font, $size, $ln),
+                    $ly,
+                    $font,
+                    $size,
+                    $ln);
                 $ly = $ly - $lh;
             }
             $c = $c + 1;
@@ -3778,7 +3852,13 @@ func renderQuote(state as Layout, node as Node, depth as int) {
             def blockH as int init ($state.y - $probe.y) + 4;
             if ($fill.on) {
                 $state.page = pdf.color($state.page, $fill.r, $fill.g, $fill.b);
-                $state.page = pdf.rect($state.page, $savedX, $top - $blockH, $savedW, $blockH, true);
+                $state.page = pdf.rect(
+                    $state.page,
+                    $savedX,
+                    $top - $blockH,
+                    $savedW,
+                    $blockH,
+                    true);
                 $state.page = pdf.color($state.page, 0, 0, 0);
             }
             if ($rule.on) {
@@ -3879,9 +3959,7 @@ func renderBlock(state as Layout, node as Node, depth as int) {
         # shape for centuries. Giving the label to `renderQuote` as an ordinary
         # first child means it is measured with the rest, so the panel covers it
         # and a page-spanning callout falls back the same way a quotation does.
-        when "admonition" {
-            $state = renderQuote($state, titled($node, $state.opts), $depth);
-        }
+        when "admonition" { $state = renderQuote($state, titled($node, $state.opts), $depth); }
         when "thematic_break" { $state = renderRule($state); }
         when "page_break" {
             # Start a fresh page; no trailing gap.

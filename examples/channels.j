@@ -21,10 +21,10 @@ def producer as task of int init spawn {
 };
 def sum as int init 0;
 try {
-    while (true) {   # lint-disable: L105
+    while (true) { # lint-disable: L105
         $sum = $sum + channel.recv($ch);
     }
-} catch (e) {   # lint-disable: L103
+} catch (e) { # lint-disable: L103
     # channel closed and drained
 }
 task.wait($producer);
@@ -42,14 +42,22 @@ io.printf("sent copy = %v (sender mutated to %v)\n", $got, $xs);
 # 3. Fan-in with select: merge two producers into one consumer.
 def a as channel of int init channel.make(0);
 def b as channel of int init channel.make(0);
-def pa as task of int init spawn { channel.send($a, 100); channel.close($a); return 0; };
-def pb as task of int init spawn { channel.send($b, 200); channel.close($b); return 0; };
+def pa as task of int init spawn {
+    channel.send($a, 100);
+    channel.close($a);
+    return 0;
+};
+def pb as task of int init spawn {
+    channel.send($b, 200);
+    channel.close($b);
+    return 0;
+};
 def total as int init 0;
 try {
-    while (true) {   # lint-disable: L105
+    while (true) { # lint-disable: L105
         $total = $total + channel.select([$a, $b]);
     }
-} catch (e) {   # lint-disable: L103
+} catch (e) { # lint-disable: L103
     # both inputs closed
 }
 task.wait($pa);

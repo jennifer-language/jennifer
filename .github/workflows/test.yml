@@ -104,6 +104,23 @@ jobs:
       - name: Smoke-test the TinyGo binary (constrained)
         run: ./jennifer-tiny run examples/hello.j
 
+      - name: Check .j formatting (jennifer fmt)
+        # The `.j` counterpart to the gofmt gate above: `jennifer fmt -l` lists any
+        # file whose formatting differs from canonical, and a non-empty list fails
+        # the build - so the shipped modules and the examples never drift out of the
+        # formatter again (the absence of this gate is what let ~half of modules/
+        # fall out of `fmt`). `.inc.j` include-partials and `_test.j` overlays are
+        # ordinary source and are formatted too. Uses ./jennifer from `make build`
+        # above (fmt is a default-binary-only dev subcommand).
+        run: |
+          unformatted=$(./jennifer fmt -l modules/*.j examples/*.j examples/modules/*.j)
+          if [ -n "$unformatted" ]; then
+            echo "jennifer fmt found unformatted files:"
+            echo "$unformatted"
+            echo "fix with: jennifer fmt -w <file>..."
+            exit 1
+          fi
+
       - name: Lint the examples
         # Gate on the linter: any finding at or above the severity floor
         # (warning) fails the build. --format=github surfaces findings as

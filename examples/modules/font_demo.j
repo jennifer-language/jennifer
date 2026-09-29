@@ -22,8 +22,11 @@ def const WORD as string init "CAB";
 def f as font.Font init font.open(FONT);
 def upem as int init font.unitsPerEm($f);
 
-io.printf("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 -%d %d %d\">\n",
-    $upem, $upem * len(strings.chars(WORD)), $upem * 2);
+io.printf(
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 -%d %d %d\">\n",
+    $upem,
+    $upem * len(strings.chars(WORD)),
+    $upem * 2);
 # Flip y (font y-up -> screen y-down) and give the outlines a fill.
 io.printf("  <g transform=\"scale(1,-1)\" fill=\"#222\">\n");
 

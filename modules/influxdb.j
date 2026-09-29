@@ -54,7 +54,10 @@ def const DEFAULT_URL as string init "http://localhost:8086";
  * (InfluxDB 2.x / 3.x - `/api/v2/write?org=...&bucket=...` + Flux, token auth).
  * The backend selector `write` dispatches on; the zero value is `V1`.
  */
-export def enum Version { V1, V2 };
+export def enum Version {
+    V1,
+    V2
+};
 
 /**
  * A client for either API generation. A 1.x client carries `db` and optional
@@ -366,8 +369,6 @@ func joinBase(base as string, path as string) {
     return $base + $path;
 }
 
-
-
 # A built HTTP request: the URL, the Content-Type, the header map, and the
 # body. The pure output of the request builders (buildWrite / buildQuery /
 # buildFlux), so a test can assert the endpoint / params / auth / body without a
@@ -388,7 +389,9 @@ func authHeaders(c as Client) {
         when V1 {
             if (len($c.user) > 0) {
                 def creds as string init $c.user + ":" + $c.password;
-                def enc as string init encoding.toText(convert.bytesFromString($creds, "utf-8"), "base64");
+                def enc as string init encoding.toText(
+                    convert.bytesFromString($creds, "utf-8"),
+                    "base64");
                 $h["Authorization"] = "Basic " + $enc;
             }
         }
@@ -493,11 +496,7 @@ export func write(c as Client, points as list of Point) {
     }
     def body as string init strings.join($lines, "\n");
     def req as Req init buildWrite($c, $body);
-    def resp as http.Response init http.post(
-        $req.url,
-        $req.contentType,
-        $req.body,
-        $req.headers);
+    def resp as http.Response init http.post($req.url, $req.contentType, $req.body, $req.headers);
     if ($resp.status >= 300) {
         fail(redact($c, errorFrom($resp)));
     }
@@ -511,12 +510,10 @@ func cellString(node as json.Value, ptr as string) {
     def t as string init json.typeOf($node, $ptr);
     match ($t) {
         when "string" { return json.asString($node, $ptr); }
-        when "bool" {
-            if (json.asBool($node, $ptr)) {
-                return "true";
-            }
-            return "false";
+        when "bool" { if (json.asBool($node, $ptr)) {
+            return "true";
         }
+        return "false"; }
         when "int" { return convert.toString(json.asInt($node, $ptr)); }
         when "float" { return convert.toString(json.asFloat($node, $ptr)); }
         else { return ""; } # null and anything else -> ""
@@ -602,11 +599,7 @@ func parseQuery(node as json.Value) {
  */
 export func query(c as Client, influxql as string) {
     def req as Req init buildQuery($c, $influxql);
-    def resp as http.Response init http.post(
-        $req.url,
-        $req.contentType,
-        $req.body,
-        $req.headers);
+    def resp as http.Response init http.post($req.url, $req.contentType, $req.body, $req.headers);
     if ($resp.status >= 300) {
         fail(redact($c, errorFrom($resp)));
     }
@@ -632,11 +625,7 @@ export func query(c as Client, influxql as string) {
  */
 export func queryFlux(c as Client, flux as string) {
     def req as Req init buildFlux($c, $flux);
-    def resp as http.Response init http.post(
-        $req.url,
-        $req.contentType,
-        $req.body,
-        $req.headers);
+    def resp as http.Response init http.post($req.url, $req.contentType, $req.body, $req.headers);
     if ($resp.status >= 300) {
         fail(redact($c, errorFrom($resp)));
     }

@@ -38,7 +38,7 @@ func buildGFPrim(prim as int) {
         }
         $i = $i + 1;
     }
-    return GF{ exp: $exp, log: $log };
+    return GF{exp: $exp, log: $log};
 }
 
 # buildGF constructs the GF(256) tables with QR's primitive polynomial (0x11d).

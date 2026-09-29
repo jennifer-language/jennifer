@@ -12,7 +12,7 @@ use math;
 # Trigonometry (radians) and its inverses.
 io.printf("sin(PI/2)   = %v\n", math.sin(math.PI / 2));
 io.printf("cos(0)      = %v\n", math.cos(0));
-io.printf("atan2(1, 1) = %v\n", math.atan2(1, 1) * 4);        # = PI
+io.printf("atan2(1, 1) = %v\n", math.atan2(1, 1) * 4); # = PI
 
 # Exponentials and logarithms.
 io.printf("exp(0)      = %v\n", math.exp(0));
@@ -35,8 +35,8 @@ io.printf("lcm(4, 6)     = %v\n", math.lcm(4, 6));
 
 # Special functions: the error / gamma / beta family and the regularized
 # incomplete forms every distribution CDF is built on.
-io.printf("gamma(5)             = %v\n", math.gamma(5));       # = 4!
-io.printf("beta(2, 3)           = %v\n", math.beta(2, 3));     # = 1/12
+io.printf("gamma(5)             = %v\n", math.gamma(5)); # = 4!
+io.printf("beta(2, 3)           = %v\n", math.beta(2, 3)); # = 1/12
 io.printf("regGammaP(1, 1)      = %v\n", math.regGammaP(1, 1)); # 1 - 1/e
 io.printf("regBetaI(0.5, 2, 2)  = %v\n", math.regBetaI(0.5, 2, 2));
 

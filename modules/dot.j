@@ -29,7 +29,10 @@ use lists;
  * @field id {string} the node identifier
  * @field attrs {map of string to string} DOT attributes, in insertion order
  */
-export def struct Node { id as string, attrs as map of string to string };
+export def struct Node {
+    id as string,
+    attrs as map of string to string
+};
 
 /**
  * A directed or undirected edge between two node ids, with its own attributes.
@@ -37,7 +40,11 @@ export def struct Node { id as string, attrs as map of string to string };
  * @field to {string} the destination node id
  * @field attrs {map of string to string} DOT attributes, in insertion order
  */
-export def struct Edge { from as string, to as string, attrs as map of string to string };
+export def struct Edge {
+    from as string,
+    to as string,
+    attrs as map of string to string
+};
 
 /**
  * A whole graph: its kind (directed = digraph), name, ordered nodes and edges,
@@ -68,7 +75,15 @@ export def struct Graph {
  * @return {Graph} an empty directed graph
  */
 export func digraph(name as string) {
-    return Graph{directed: true, name: $name, nodes: [], edges: [], graphAttrs: {}, nodeAttrs: {}, edgeAttrs: {}};
+    return Graph{
+        directed: true,
+        name: $name,
+        nodes: [],
+        edges: [],
+        graphAttrs: {},
+        nodeAttrs: {},
+        edgeAttrs: {}
+    };
 }
 
 /**
@@ -77,7 +92,15 @@ export func digraph(name as string) {
  * @return {Graph} an empty undirected graph
  */
 export func graph(name as string) {
-    return Graph{directed: false, name: $name, nodes: [], edges: [], graphAttrs: {}, nodeAttrs: {}, edgeAttrs: {}};
+    return Graph{
+        directed: false,
+        name: $name,
+        nodes: [],
+        edges: [],
+        graphAttrs: {},
+        nodeAttrs: {},
+        edgeAttrs: {}
+    };
 }
 
 # --- builders (each returns a fresh Graph) -------------------------

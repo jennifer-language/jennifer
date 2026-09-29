@@ -314,12 +314,17 @@ use task;
 
 func testClientServerRoundTrip() {
     def dir as Directory init directory([
-        entry("uid=alice,ou=people,dc=example,dc=org", {
-            "objectClass": ["person"], "uid": ["alice"], "cn": ["Alice"], "mail": ["alice@example.org"]
-        }),
-        entry("uid=bob,ou=people,dc=example,dc=org", {
-            "objectClass": ["person"], "uid": ["bob"], "cn": ["Bob"]
-        })
+        entry(
+            "uid=alice,ou=people,dc=example,dc=org",
+            {
+                "objectClass": ["person"],
+                "uid": ["alice"],
+                "cn": ["Alice"],
+                "mail": ["alice@example.org"]
+            }),
+        entry(
+            "uid=bob,ou=people,dc=example,dc=org",
+            {"objectClass": ["person"], "uid": ["bob"], "cn": ["Bob"]})
     ]);
     def listener as net.Listener init listen("127.0.0.1:0");
     def addr as string init net.address($listener);
@@ -328,20 +333,35 @@ func testClientServerRoundTrip() {
     };
 
     def conn as Conn init connect($addr, transport.Security.None);
-    def br as Result init bind($conn, "", "");   # anonymous simple bind
+    def br as Result init bind($conn, "", ""); # anonymous simple bind
     testing.assertEqual($br.code, SUCCESS);
 
     # A single-entry match by uid, with an attribute read.
-    def found as list of Entry init search($conn, "dc=example,dc=org", SCOPE_SUB, parseFilter("(uid=alice)"), []);
+    def found as list of Entry init search(
+        $conn,
+        "dc=example,dc=org",
+        SCOPE_SUB,
+        parseFilter("(uid=alice)"),
+        []);
     testing.assertEqual(len($found), 1);
     testing.assertEqual(firstValue($found[0], "mail"), "alice@example.org");
 
     # A filter matching both entries.
-    def persons as list of Entry init search($conn, "dc=example,dc=org", SCOPE_SUB, parseFilter("(objectClass=person)"), []);
+    def persons as list of Entry init search(
+        $conn,
+        "dc=example,dc=org",
+        SCOPE_SUB,
+        parseFilter("(objectClass=person)"),
+        []);
     testing.assertEqual(len($persons), 2);
 
     # A filter matching nothing.
-    def none as list of Entry init search($conn, "dc=example,dc=org", SCOPE_SUB, parseFilter("(uid=carol)"), []);
+    def none as list of Entry init search(
+        $conn,
+        "dc=example,dc=org",
+        SCOPE_SUB,
+        parseFilter("(uid=carol)"),
+        []);
     testing.assertEqual(len($none), 0);
 
     unbind($conn);
@@ -353,10 +373,13 @@ func testClientServerRoundTrip() {
 # verification, plus the INVALID_CREDENTIALS path on a wrong password.
 func testPasswordBindRoundTrip() {
     def dir as Directory init directory([
-        entry("uid=carol,ou=people,dc=example,dc=org", {
-            "objectClass": ["person"], "uid": ["carol"],
-            "userPassword": [password("s3cret", "ssha256")]
-        })
+        entry(
+            "uid=carol,ou=people,dc=example,dc=org",
+            {
+                "objectClass": ["person"],
+                "uid": ["carol"],
+                "userPassword": [password("s3cret", "ssha256")]
+            })
     ]);
     def listener as net.Listener init listen("127.0.0.1:0");
     def addr as string init net.address($listener);

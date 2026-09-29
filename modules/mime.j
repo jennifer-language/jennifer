@@ -602,7 +602,9 @@ export func attachment(filename as string, contentType as string, body as string
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", $contentType);
     $hs[] = mkHeader("Content-Transfer-Encoding", "base64");
-    $hs[] = mkHeader("Content-Disposition", "attachment; " + dispositionFilename("filename", $filename));
+    $hs[] = mkHeader(
+        "Content-Disposition",
+        "attachment; " + dispositionFilename("filename", $filename));
     return Part{
         headers: $hs,
         body: $body,
@@ -626,7 +628,9 @@ export func attachmentBytes(filename as string, contentType as string, data as b
     def hs as list of Header init [];
     $hs[] = mkHeader("Content-Type", $contentType);
     $hs[] = mkHeader("Content-Transfer-Encoding", "base64");
-    $hs[] = mkHeader("Content-Disposition", "attachment; " + dispositionFilename("filename", $filename));
+    $hs[] = mkHeader(
+        "Content-Disposition",
+        "attachment; " + dispositionFilename("filename", $filename));
     return Part{headers: $hs, body: "", encoding: "base64", parts: [], boundary: "", data: $data};
 }
 
@@ -835,7 +839,10 @@ func splitParams(header as string) {
                     $out[] = mkHeader(strings.lower($t), "");
                 } else {
                     def nm as string init strings.lower(strings.trim(strings.substring($t, 0, $eq)));
-                    def vl as string init unquote(strings.trim(strings.substring($t, $eq + 1, len($t))));
+                    def vl as string init unquote(strings.trim(strings.substring(
+                        $t,
+                        $eq + 1,
+                        len($t))));
                     $out[] = mkHeader($nm, $vl);
                 }
             }
@@ -1024,10 +1031,7 @@ func pctEncode(s as string) {
 # carries non-ASCII characters.
 func dispositionFilename(key as string, name as string) {
     if (isAsciiText($name)) {
-        def safe as string init strings.replace(
-            strings.replace($name, "\\", "\\\\"),
-            "\"",
-            "\\\"");
+        def safe as string init strings.replace(strings.replace($name, "\\", "\\\\"), "\"", "\\\"");
         return $key + "=\"" + $safe + "\"";
     }
     return $key + "*=UTF-8''" + pctEncode($name);
