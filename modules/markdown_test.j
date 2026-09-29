@@ -1536,6 +1536,11 @@ func testStrikethrough() {
     testing.assertEqual(toHtml("a ~~ x ~~ b"), "<p>a ~~ x ~~ b</p>");
     # A space-flanked single tilde is neither strikethrough nor subscript.
     testing.assertEqual(toHtml("a ~ b"), "<p>a ~ b</p>");
+    # An empty span must not form: a run of delimiters (ASCII art - a tilde snake
+    # body, an `=` rule) stays literal instead of collapsing into empty <del>/<mark>.
+    testing.assertEqual(toHtml("~~~~~~"), "<p>~~~~~~</p>");
+    testing.assertEqual(toHtml("======"), "<p>======</p>");
+    testing.assertEqual(toHtml("<~~~~~~>"), "<p>&lt;~~~~~~&gt;</p>");
 }
 
 # task list items (GFM) -> a disabled checkbox + task-list-item class; the

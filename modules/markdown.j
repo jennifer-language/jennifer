@@ -639,7 +639,7 @@ func parseInline(s as string) {
         if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and
             not isFlankSpace($cs[$i + 2])) {
             def k as int init $nDblStar[$i + 2];
-            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+            if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
                 $dbl = $k;
             }
         }
@@ -661,7 +661,7 @@ func parseInline(s as string) {
         def em as int init -1;
         if ($c == "*" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
             def k as int init $nStar[$i + 1];
-            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1])) {
                 $em = $k;
             }
         }
@@ -683,7 +683,7 @@ func parseInline(s as string) {
         if ($c == "~" and $i + 1 < $n and $cs[$i + 1] == "~" and $i + 2 < $n and
             not isFlankSpace($cs[$i + 2])) {
             def k as int init $nDblTilde[$i + 2];
-            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+            if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
                 $strike = $k;
             }
         }
@@ -707,7 +707,7 @@ func parseInline(s as string) {
         if ($c == "=" and $i + 1 < $n and $cs[$i + 1] == "=" and $i + 2 < $n and
             not isFlankSpace($cs[$i + 2])) {
             def k as int init $nDblEq[$i + 2];
-            if ($k < $n and not isFlankSpace($cs[$k - 1])) {
+            if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
                 $hl = $k;
             }
         }
@@ -732,7 +732,7 @@ func parseInline(s as string) {
         def sup as int init -1;
         if ($c == "^" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
             def k as int init $nCaret[$i + 1];
-            if ($k < $n and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
+            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
                 $sup = $k;
             }
         }
@@ -755,7 +755,7 @@ func parseInline(s as string) {
         def sub as int init -1;
         if ($c == "~" and $i + 1 < $n and $cs[$i + 1] != "~" and not isFlankSpace($cs[$i + 1])) {
             def k as int init $nTilde[$i + 1];
-            if ($k < $n and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
+            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
                 $sub = $k;
             }
         }
