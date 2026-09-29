@@ -380,7 +380,7 @@ flat lookup view, not authoritative.
 | [`stats`](stats.md)`.histogram(data, binEdges)` | Bin counts (Excel `FREQUENCY`); `k+1` ascending edges -> `k` counts (`list of int`). |
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
-| [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`).                                                                          |
+| [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Non-terminal errors** (catchable); `0`/`0` when the terminal has no window size set - fall back.  |
 | [`term`](term.md)`.readByte()`                        | Next raw byte from stdin (`0`-`255`), or `-1` at end of input. Bytes, not decoded keys. Refused in the REPL.                        |
 | [`testing`](testing.md)`.assertContains(hay, needle)` | Throw `Error{kind:"assertion"}` unless hay contains needle: substring / list element / map key.                                     |
 | [`testing`](testing.md)`.assertEqual(actual, expected)` | Throw unless deeply equal (lists / maps / structs compare by value).                                                              |

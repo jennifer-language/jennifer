@@ -21,7 +21,7 @@ error (a minimal / embedded target may have no controlling terminal).
 | ---- | ------- | ----- |
 | `term.makeRaw(stream)` | `term.State` | Put the terminal into raw mode; `stream` must be `"stdin"` (raw mode governs input). Returns a handle for `restore`. |
 | `term.restore(state)` | `null` | Undo `makeRaw`, restoring the terminal. The handle is single-use. |
-| `term.size(stream)` | `term.Size` | The terminal's `{rows, cols}` (query `"stdout"`). |
+| `term.size(stream)` | `term.Size` | The terminal's `{rows, cols}` (query `"stdout"`). Catchable error off a terminal; `0`/`0` for a terminal with no window size set (see [Terminal size](#terminal-size)). |
 | `term.readByte()` | `int` | The next raw byte from stdin (`0`-`255`), or `-1` at end of input. |
 
 `stream` is `"stdin"` / `"stdout"` / `"stderr"` (the same names as
@@ -99,6 +99,27 @@ io.printf("%d rows x %d cols\n", $dim.rows, $dim.cols);
 
 The size is a snapshot; a terminal can be resized after the call, so re-query it
 when you need the current value.
+
+Two outcomes a caller that draws must handle. `term.size` **errors** (catchable)
+when `stream` is not a terminal - a pipe, a redirect, or `jennifer test`'s stdout -
+so wrap it in a `try` if the program can run non-interactively. Separately, a real
+terminal with **no window size set** - a pty opened without one, as under
+`script(1)` or some CI runners - reports `0` for both `rows` and `cols` rather than
+erroring, so treat `0` as "unknown" and fall back (e.g. 80x24):
+
+```jennifer
+def rows as int init 24;
+def cols as int init 80;
+try {
+    def dim as term.Size init term.size("stdout");
+    if ($dim.rows > 0 and $dim.cols > 0) {
+        $rows = $dim.rows;
+        $cols = $dim.cols;
+    }
+} catch (e) {
+    # not a terminal - keep the 80x24 fallback
+}
+```
 
 ## See also
 
