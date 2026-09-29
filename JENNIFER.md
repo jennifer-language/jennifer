@@ -120,6 +120,18 @@ an assistant usually guesses wrong:
   Legal: `MAX`, `MAX_RETRIES`, `HTTP_OK`, `SHA256`, `HTTP2`, `SCRAM_SHA256`.
   Illegal: `_MAX`, `MAX_`, `MAX__INT`, `maxInt`, `AES_256` (write `AES256`).
 - **`.j` import paths** are strings and may contain digits, `_`, `/`.
+- **Reserved words** (cannot be a variable, method, parameter, or library name):
+  `and` `as` `break` `catch` `const` `continue` `def` `defer` `else` `elseif`
+  `enum` `errdefer` `exit` `export` `false` `for` `func` `if` `import` `in`
+  `include` `init` `len` `list` `map` `match` `not` `null` `of` `or` `repeat`
+  `return` `spawn` `struct` `task` `throw` `to` `true` `try` `until` `use` `when`
+  `while`, plus the type keywords `int` `float` `string` `bool` `bytes` (legal only
+  after `as`). Note the ones that read like they might be contextual but are **not**:
+  `list` / `map` (unlike `channel`, they are hard keywords even outside `list of T`
+  / `map of K to V`), and `to` / `of` / `in` (keywords everywhere, not just in a
+  type or `for`-each). `channel` is the one genuinely contextual word - a type only
+  in `channel of T`, a valid identifier elsewhere. So `from`/`to` as a parameter
+  pair fails on `to`; use `to2` / `hi` / `end` instead.
 - A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`. A
   file with a shebang may also be run **without a `.j` extension** (as an
   executable installed under a bare command name); `import` / `include` targets
