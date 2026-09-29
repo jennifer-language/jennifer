@@ -198,12 +198,12 @@ func readN(socket as net.Conn, n as int) {
     def got as int init 0;
     # Clear the read deadline on every exit path (normal return, and the throw
     # from a mid-sentence close), so the bounded read window armed below never
-    # leaks a stale deadline to a later read/write on this socket - which would
-    # otherwise inherit it and spuriously time out. `defer` captures $socket now
-    # and runs `net.setDeadline($socket, 0)` when this block exits (0 clears it).
-    defer net.setDeadline($socket, 0);
+    # leaks a stale deadline to a later read on this socket - which would otherwise
+    # inherit it and spuriously time out. `defer` captures $socket now and runs
+    # `net.setReadDeadline($socket, 0)` when this block exits (0 clears it).
+    defer net.setReadDeadline($socket, 0);
     while ($got < $n) {
-        net.setDeadline($socket, CONNECT_TIMEOUT_MS);
+        net.setReadDeadline($socket, CONNECT_TIMEOUT_MS);
         def chunk as bytes init net.readBytes($socket, $n - $got);
         if (len($chunk) == 0) {
             fail("connection closed mid-sentence");

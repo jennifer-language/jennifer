@@ -233,7 +233,7 @@ func readLine(conn as net.Conn) {
     def buf as bytes;
     def nl as int init -1;
     while ($nl < 0) {
-        net.setDeadline($conn, TIMEOUT_MS);
+        net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return stripCR(convert.stringFromBytes($buf, "utf-8"));
@@ -282,7 +282,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
     def buf as bytes;
     def nl as int init -1;
     while ($nl < 0) {
-        net.setDeadline($conn, TIMEOUT_MS);
+        net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return "";
@@ -319,7 +319,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
         if ($found) {
             return parseDotBody(convert.stringFromBytes($body, "utf-8"));
         }
-        net.setDeadline($conn, TIMEOUT_MS);
+        net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             return parseDotBody(convert.stringFromBytes($body, "utf-8"));

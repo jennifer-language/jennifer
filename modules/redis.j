@@ -337,7 +337,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     def nl as int init -1;
     while ($nl < 0) {
         if ($timeoutMs > 0) {
-            net.setDeadline($conn, $timeoutMs);
+            net.setReadDeadline($conn, $timeoutMs);
         }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
@@ -446,7 +446,7 @@ func readReply(conn as net.Conn, timeoutMs as int) {
             return $pr.reply;
         }
         if ($timeoutMs > 0) {
-            net.setDeadline($conn, $timeoutMs);
+            net.setReadDeadline($conn, $timeoutMs);
         }
         def chunk as bytes init net.readBytes($conn, 1024);
         if (len($chunk) == 0) {
@@ -483,7 +483,7 @@ func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
             continue;
         }
         if ($timeoutMs > 0) {
-            net.setDeadline($conn, $timeoutMs);
+            net.setReadDeadline($conn, $timeoutMs);
         }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
@@ -974,7 +974,7 @@ export func receiveMessage(session as Session) {
             continue;
         }
         if ($session.timeout > 0) {
-            net.setDeadline($session.conn, $session.timeout);
+            net.setReadDeadline($session.conn, $session.timeout);
         }
         def chunk as bytes init net.readBytes($session.conn, 4096);
         if (len($chunk) == 0) {

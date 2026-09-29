@@ -16,7 +16,7 @@ import (
 // TestRedisTimeout proves the read timeout on a net-based protocol client: a
 // server that accepts the connection but never answers a command must make the
 // client fail (a catchable error) rather than block a worker forever. The same
-// net.setDeadline mechanism backs memcache / smtp / pop / imap / mqtt. The .j
+// net.setReadDeadline mechanism backs memcache / smtp / pop / imap / mqtt. The .j
 // program lowers Session.timeout, wraps the command in try / catch, and asserts
 // it was caught; a watchdog fails the test if the command ever hangs.
 func TestRedisTimeout(t *testing.T) {

@@ -70,7 +70,7 @@ returns UIDs, and every message verb takes one.
 | `imap.supportsIdle(session)`         | `CAPABILITY` gate - true when the server advertises IDLE (RFC 2177). |
 | `imap.idle(session)`                 | Enter IDLE (`IDLE` -> `+ idling`); the server now pushes mailbox changes. |
 | `imap.receiveNotification(session)` | Block for the next push -> `imap.Notification` (empty sentinel when IDLE ends). |
-| `imap.pollNotification(session, timeoutMs)` | Like `receiveNotification`, but wait at most `timeoutMs` ms (`net.setDeadline`), then the empty sentinel. |
+| `imap.pollNotification(session, timeoutMs)` | Like `receiveNotification`, but wait at most `timeoutMs` ms (`net.setReadDeadline`), then the empty sentinel. |
 | `imap.done(session)`                 | Leave IDLE (`DONE` + tagged completion), back to command mode.   |
 
 `Options.security` is a [`transport.Security`](transport.md): `.None` (143),

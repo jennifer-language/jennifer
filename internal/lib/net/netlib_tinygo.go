@@ -61,8 +61,11 @@ func readNFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 func writeBytesFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.writeBytes")
 }
-func setDeadlineFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
-	return unavailable("net.setDeadline")
+func setReadDeadlineFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.setReadDeadline")
+}
+func setWriteDeadlineFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.setWriteDeadline")
 }
 func eofFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.eof")

@@ -131,7 +131,7 @@ func recvLine(session as Session, buf as bytes) {
             };
         }
         if ($session.timeout > 0) {
-            net.setDeadline($session.conn, $session.timeout);
+            net.setReadDeadline($session.conn, $session.timeout);
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
@@ -156,7 +156,7 @@ func fillBytes(session as Session, buf as bytes, n as int) {
     def b as bytes init $buf;
     while (len($b) < $n) {
         if ($session.timeout > 0) {
-            net.setDeadline($session.conn, $session.timeout);
+            net.setReadDeadline($session.conn, $session.timeout);
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {

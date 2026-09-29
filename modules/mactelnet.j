@@ -342,11 +342,10 @@ func bindDevice(sock as net.UDPSocket, iface as string) {
 
 # recvPacket waits up to timeoutMs for a datagram. Returns the raw bytes, or an
 # empty bytes on timeout. The read deadline is cleared on every exit path (0
-# clears it) so it never leaks onto the next send - net.setDeadline arms the
-# write side too, and a stale deadline would fail the following sendTo.
+# clears it) so it never leaks onto a later recv on this socket.
 func recvPacket(s as Session, timeoutMs as int) {
-    defer net.setDeadline($s.sock, 0);
-    net.setDeadline($s.sock, $timeoutMs);
+    defer net.setReadDeadline($s.sock, 0);
+    net.setReadDeadline($s.sock, $timeoutMs);
     try {
         def dg as net.Datagram init net.recvFrom($s.sock, MAX_DATAGRAM);
         return $dg.data;

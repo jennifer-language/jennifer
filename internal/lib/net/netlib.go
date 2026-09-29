@@ -72,7 +72,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "readAll", readAllFn)
 	in.RegisterNamespaced(LibraryName, "readN", readNFn)
 	in.RegisterNamespaced(LibraryName, "writeBytes", writeBytesFn)
-	in.RegisterNamespaced(LibraryName, "setDeadline", setDeadlineFn)
+	in.RegisterNamespaced(LibraryName, "setReadDeadline", setReadDeadlineFn)
+	in.RegisterNamespaced(LibraryName, "setWriteDeadline", setWriteDeadlineFn)
 	in.RegisterNamespaced(LibraryName, "eof", eofFn)
 	in.RegisterNamespaced(LibraryName, "address", addressFn)
 

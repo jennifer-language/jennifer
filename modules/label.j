@@ -516,7 +516,7 @@ export func send(host as string, port as int, rendered as string) {
         $host + ":" + convert.toString($port),
         CONNECT_TIMEOUT_MS);
     defer net.close($conn); # closed even when the write throws
-    net.setDeadline($conn, CONNECT_TIMEOUT_MS); # bound the write too
+    net.setWriteDeadline($conn, CONNECT_TIMEOUT_MS); # bound the write
     net.writeBytes($conn, convert.bytesFromString($rendered, "utf-8"));
     return null;
 }

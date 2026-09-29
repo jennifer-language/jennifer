@@ -533,7 +533,7 @@ func encodeMessage(id as int, op as asn1.Value, controls as list of asn1.Value) 
 # server conn (0) blocks for the next request.
 func readMessage(conn as Conn) {
     if ($conn.timeoutMs > 0) {
-        net.setDeadline($conn.handle, $conn.timeoutMs);
+        net.setReadDeadline($conn.handle, $conn.timeoutMs);
     }
     def header as bytes init net.readN($conn.handle, 2);
     def lenByte as int init $header[1];
@@ -565,7 +565,7 @@ func readMessage(conn as Conn) {
 }
 
 func sendOp(conn as Conn, id as int, op as asn1.Value, controls as list of asn1.Value) {
-    net.setDeadline($conn.handle, $conn.timeoutMs);
+    net.setWriteDeadline($conn.handle, $conn.timeoutMs);
     net.writeBytes($conn.handle, encodeMessage($id, $op, $controls));
 }
 
@@ -654,7 +654,7 @@ export func close(conn as Conn) {
  */
 export func unbind(conn as Conn) {
     def id as int init nextId();
-    net.setDeadline($conn.handle, $conn.timeoutMs);
+    net.setWriteDeadline($conn.handle, $conn.timeoutMs);
     net.writeBytes(
         $conn.handle,
         encodeMessage($id, asn1.retag("application", APP_UNBIND, asn1.null()), []));

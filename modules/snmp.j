@@ -336,7 +336,7 @@ export func serveOn(a as Agent, socket as net.UDPSocket, stop as channel of bool
         # Bound the wait so the loop periodically re-checks the shutdown channel;
         # a real datagram still returns immediately, so request latency is
         # unaffected.
-        net.setDeadline($socket, SHUTDOWN_POLL_MS);
+        net.setReadDeadline($socket, SHUTDOWN_POLL_MS);
         def dg as net.Datagram;
         try {
             $dg = net.recvFrom($socket, 65535);
@@ -581,7 +581,7 @@ func exchange(c as Client, payload as bytes) {
     defer net.close($sock);
     def attempt as int init 0;
     while ($attempt <= $c.retries) {
-        net.setDeadline($sock, $c.timeoutMs);
+        net.setReadDeadline($sock, $c.timeoutMs);
         net.sendTo($sock, $c.address, $payload);
         try {
             def dg as net.Datagram init net.recvFrom($sock, 65535);

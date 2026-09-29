@@ -57,7 +57,7 @@ real deadline on the UDP socket, so a lost reply fails fast instead of hanging.
 ## See also
 
 - [net.md](../libraries/net.md) - the UDP surface (`listenUDP` / `sendTo` /
-  `recvFrom` / `setDeadline`) the client is built on.
+  `recvFrom` / `setReadDeadline`) the client is built on.
 - [time.md](../libraries/time.md) - the `time.Time` / `time.Duration` the result
   is expressed in.
 - [modules/index.md](index.md) - the module catalog and import rules.

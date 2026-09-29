@@ -399,17 +399,21 @@ export func connectWith(url as string, timeoutMs as int) {
     # A failed HTTP upgrade must not leak the socket; on success the caller
     # owns the open connection.
     errdefer net.close($socket);
-    net.setDeadline($socket, HANDSHAKE_TIMEOUT_MS);
+    # The handshake both writes the upgrade request and reads the response, so
+    # bound each direction.
+    net.setWriteDeadline($socket, HANDSHAKE_TIMEOUT_MS);
+    net.setReadDeadline($socket, HANDSHAKE_TIMEOUT_MS);
     handshake($socket, $t, makeKey());
-    net.setDeadline($socket, 0);
+    net.setWriteDeadline($socket, 0);
+    net.setReadDeadline($socket, 0);
     return Conn{socket: $socket, timeoutMs: $timeoutMs};
 }
 
 # sendFrame writes one masked frame, bounded by the connection timeout.
 func sendFrame(c as Conn, opcode as int, payload as bytes) {
-    net.setDeadline($c.socket, $c.timeoutMs);
+    net.setWriteDeadline($c.socket, $c.timeoutMs);
     net.writeBytes($c.socket, encodeFrame($opcode, $payload));
-    net.setDeadline($c.socket, 0);
+    net.setWriteDeadline($c.socket, 0);
 }
 
 /**
@@ -448,7 +452,7 @@ export func ping(c as Conn) {
  * @throws {Error} kind "websocket" on a protocol error or dropped connection
  */
 export func receive(c as Conn) {
-    net.setDeadline($c.socket, $c.timeoutMs);
+    net.setReadDeadline($c.socket, $c.timeoutMs);
     def acc as bytes;
     def dataOpcode as int init OP_TEXT;
     # `started` marks that a data message is being reassembled, so a control
@@ -514,7 +518,7 @@ export func receive(c as Conn) {
             }
         }
     } until ($done);
-    net.setDeadline($c.socket, 0);
+    net.setReadDeadline($c.socket, 0);
     if ($isControl) {
         return $control;
     }

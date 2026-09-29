@@ -253,7 +253,7 @@ func readReply(conn as net.Conn) {
                 text: convert.stringFromBytes(binary.join($pieces), "utf-8")
             };
         }
-        net.setDeadline($conn, TIMEOUT_MS);
+        net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             def etext as string init convert.stringFromBytes(binary.join($pieces), "utf-8");

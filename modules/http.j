@@ -582,7 +582,7 @@ func sendCore(
     # hitting timeouts would otherwise exhaust file descriptors).
     defer net.close($conn);
     if ($timeoutMs > 0) {
-        net.setDeadline($conn, $timeoutMs); # covers the write and the first read
+        net.setWriteDeadline($conn, $timeoutMs); # bound the write; readSock arms each response read
     }
     net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
     # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
@@ -610,7 +610,7 @@ func sendCoreRaw(
     def conn as net.Conn init dial($u, $tls);
     defer net.close($conn);
     if ($timeoutMs > 0) {
-        net.setDeadline($conn, $timeoutMs);
+        net.setWriteDeadline($conn, $timeoutMs); # bound the head + body writes; readSock arms the reads
     }
     net.writeBytes($conn, convert.bytesFromString($head, "utf-8"));
     if (len($body) > 0) {
@@ -1248,7 +1248,7 @@ export func send(
 # EOF.
 func readSock(conn as net.Conn, timeoutMs as int) {
     if ($timeoutMs > 0) {
-        net.setDeadline($conn, $timeoutMs);
+        net.setReadDeadline($conn, $timeoutMs);
     }
     return net.readBytes($conn, 4096);
 }
@@ -1541,12 +1541,11 @@ export func exchange(
         $blen = len(convert.bytesFromString($body, "utf-8"));
     }
     def wire as string init buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body;
-    # Arm the deadline for this write: a deadline left over from the previous
-    # exchange's last read would otherwise expire the write if time passed
-    # between exchanges (setDeadline covers read and write). readSock re-arms it
-    # before each read of the response.
+    # Arm a write deadline for this request write; readSock re-arms the read
+    # deadline before each read of the response. A read and a write deadline are
+    # independent now, so a prior read's deadline can never expire this write.
     if ($timeoutMs > 0) {
-        net.setDeadline($s.conn, $timeoutMs);
+        net.setWriteDeadline($s.conn, $timeoutMs);
     }
     net.writeBytes($s.conn, convert.bytesFromString($wire, "utf-8"));
     def raw as bytes init readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes);

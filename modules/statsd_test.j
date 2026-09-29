@@ -146,7 +146,7 @@ func testMetricVerbsSendAndFormat() {
 
     # End-to-end: an increment reaches the listener with the right wire format.
     increment($c, "hits");
-    net.setDeadline($listener, 2000);
+    net.setReadDeadline($listener, 2000);
     def dg as net.Datagram init net.recvFrom($listener, 1024);
     testing.assertEqual(convert.stringFromBytes($dg.data, "utf-8"), "app.hits:1|c");
 

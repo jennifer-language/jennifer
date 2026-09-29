@@ -268,7 +268,7 @@ func readResponse(conn as net.Conn, tag as string) {
             $si = $si + 1;
         }
         if ($nl < 0) {
-            net.setDeadline($conn, TIMEOUT_MS);
+            net.setReadDeadline($conn, TIMEOUT_MS);
             def chunk as bytes init net.readBytes($conn, 512);
             if (len($chunk) == 0) {
                 return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
@@ -346,7 +346,7 @@ func readLine(conn as net.Conn) {
     def nl as int init -1;
     def scanFrom as int init 0;
     while ($nl < 0) {
-        net.setDeadline($conn, TIMEOUT_MS);
+        net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
             $nl = len($buf);
@@ -1333,12 +1333,10 @@ func idleReadChunk(conn as net.Conn) {
 # "no push yet" signal the receive loop reads. The deadline is absolute (armed
 # once), so the whole line must arrive within `timeoutMs`.
 func idleReadLine(conn as net.Conn, timeoutMs as int) {
-    # Clear the read deadline on every exit path (like net.setDeadline maps to
-    # Go's SetDeadline, which governs writes too): a timed-out poll would otherwise
-    # leave an expired deadline that makes the next write - e.g. `done`'s DONE -
-    # fail with a spurious i/o timeout.
-    defer net.setDeadline($conn, 0);
-    net.setDeadline($conn, $timeoutMs);
+    # Clear the read deadline on every exit path so a timed-out poll does not leave
+    # one armed for a later read on this connection (e.g. `done`'s tagged reply).
+    defer net.setReadDeadline($conn, 0);
+    net.setReadDeadline($conn, $timeoutMs);
     def buf as bytes;
     def nl as int init -1;
     def scanFrom as int init 0;
@@ -1440,7 +1438,7 @@ export func receiveNotification(session as Session) {
 
 /**
  * Like `receiveNotification`, but wait at most `timeoutMs` milliseconds (armed
- * with `net.setDeadline`): return the next push if one arrives in time, else the
+ * with `net.setReadDeadline`): return the next push if one arrives in time, else the
  * empty sentinel (`kind == ""`) so a poll loop can do other work between checks.
  * Requires an `idle` first.
  * @param session {Session} the idling session

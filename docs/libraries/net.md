@@ -33,7 +33,8 @@ arrived.
 | `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap; a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
 | `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable "closed mid-frame" error, never a truncated return. `idleTimeoutMs` as in `readAll`. |
 | `net.writeBytes($conn, b)`       | `null`          | Blocking write of every byte.                                                             |
-| `net.setDeadline($conn, ms)`     | `null`          | Arm a read/write deadline `ms` milliseconds out; `0` clears it. A read past the deadline fails with a distinguishable `read timed out` error. Accepts a `net.Conn` or a `net.UDPSocket` (so a `recvFrom` can time out). |
+| `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a distinguishable `read timed out` error; the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
+| `net.setWriteDeadline($conn, ms)` | `null`         | Arm a **write** deadline `ms` out; `0` clears it. Bounds a slow / stalled send; reads are untouched. Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.eof($conn)`                 | `bool`          | Looks ahead: true iff the next read would return partial or fail.                        |
 | `net.address($conn)`             | `string`        | Peer's `"host:port"` (for logs). Polymorphic - see [Address helpers](#address-helpers).  |
 
@@ -89,43 +90,54 @@ result once it is in hand, use [`binary`](binary.md) (`indexOf` / `split` /
 `slice`).
 
 With `idleTimeoutMs > 0` both calls re-arm the connection's read deadline
-before each chunk, and restore the `net.setDeadline` state (no deadline when
+before each chunk, and restore the `net.setReadDeadline` state (no deadline when
 none was set) on return - the idle timeout never leaks into a later read on
 the same connection.
 
 ### Deadlines: single-threaded poll with timeout
 
-`net.setDeadline($conn, ms)` arms a read/write deadline `ms`
-milliseconds in the future; a read that reaches the deadline before
-data arrives fails with a distinguishable `net.readBytes: read timed
-out` error you can `catch`, rather than blocking forever or crashing.
-`net.setDeadline($conn, 0)` clears the deadline again. This turns a
-blocking read into a poll-with-timeout, so a protocol client can wait
-for a packet and, on a timeout, do idle work (send a keepalive) - all
-on one flow, without dedicating a `spawn`ed reader. The same call
-accepts a `net.UDPSocket`, so a datagram `recvFrom` can be bounded by a
-timeout the same way (an SNTP client that must not hang on a lost reply).
+`net.setReadDeadline($conn, ms)` arms a read deadline `ms` milliseconds in the
+future; a read that reaches it before data arrives fails with a distinguishable
+`net.readBytes: read timed out` error you can `catch`, rather than blocking
+forever or crashing. `net.setReadDeadline($conn, 0)` clears it again. This turns
+a blocking read into a poll-with-timeout, so a protocol client can wait for a
+packet and, on a timeout, do idle work - all on one flow, without dedicating a
+`spawn`ed reader. The same call accepts a `net.UDPSocket`, so a datagram
+`recvFrom` can be bounded the same way (an SNTP client that must not hang on a
+lost reply).
+
+A read deadline and a write deadline are **separate** (there is no combined
+call): `net.setReadDeadline` bounds only the read, so a write after a read
+timeout still succeeds - the keepalive or reply you send on a timeout goes out.
+Use `net.setWriteDeadline` to bound a send; to bound both directions of an
+exchange, arm both. This split is deliberate: a single combined deadline left
+expired by the poll idiom would silently block the next write with `i/o timeout`.
 
 ```jennifer
 use net;
+use strings;
 
 # Wait up to 1s for a packet; on timeout, send a keepalive and retry.
 def running as bool init true;
 while ($running) {
-    net.setDeadline($c, 1000);
+    net.setReadDeadline($c, 1000);   # read-only: a timeout does not block the write below
     try {
         def head as bytes init net.readBytes($c, 1);
-        net.setDeadline($c, 0);     # clear while we read the rest of the packet
+        net.setReadDeadline($c, 0);  # clear while we read the rest of the packet
         # ... read and dispatch the rest of the message ...
     } catch (err) {
         if (strings.contains($err.message, "timed out")) {
-            # idle - send a keepalive and loop
+            net.writeBytes($c, $keepalive);   # works: the read deadline never touched the write side
         } else {
-            $running = false;       # a real failure (closed conn, etc.)
+            $running = false;                 # a real failure (closed conn, etc.)
         }
     }
 }
 ```
+
+Clear a deadline on every exit path from the read that armed it with
+`defer net.setReadDeadline($conn, 0);` so it never leaks into a later read on
+the same connection.
 
 The deadline is absolute and is **not** rearmed automatically: reset it
 (or clear it with `0`) before the next read. It applies to writes too.

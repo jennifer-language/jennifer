@@ -491,10 +491,10 @@ func TestUseAfterClose(t *testing.T) {
 	}
 }
 
-// TestSetDeadlineTimesOut - a server that accepts but stays silent, so a
+// TestSetReadDeadlineTimesOut - a server that accepts but stays silent, so a
 // short read deadline elapses and readBytes fails with the distinguishable
 // "timed out" message (catchable in .j), not a crash.
-func TestSetDeadlineTimesOut(t *testing.T) {
+func TestSetReadDeadlineTimesOut(t *testing.T) {
 	addr := pickListenerAddr(t)
 	l, err := stdnet.Listen("tcp", addr)
 	if err != nil {
@@ -515,7 +515,7 @@ func TestSetDeadlineTimesOut(t *testing.T) {
 	_, runErr := runProg(t, fmt.Sprintf(`
 		use net;
 		def c as net.Conn init net.connect(%q);
-		net.setDeadline($c, 50);
+		net.setReadDeadline($c, 50);
 		def x as bytes init net.readBytes($c, 1);
 	`, addr))
 	if runErr == nil {
@@ -526,9 +526,9 @@ func TestSetDeadlineTimesOut(t *testing.T) {
 	}
 }
 
-// TestSetDeadlineClearRestoresRead - arm a deadline, clear it with ms 0,
+// TestSetReadDeadlineClearRestoresRead - arm a deadline, clear it with ms 0,
 // then a read that arrives after the original deadline still succeeds.
-func TestSetDeadlineClearRestoresRead(t *testing.T) {
+func TestSetReadDeadlineClearRestoresRead(t *testing.T) {
 	addr := pickListenerAddr(t)
 	l, err := stdnet.Listen("tcp", addr)
 	if err != nil {
@@ -550,8 +550,8 @@ func TestSetDeadlineClearRestoresRead(t *testing.T) {
 		use net;
 		use convert;
 		def c as net.Conn init net.connect(%q);
-		net.setDeadline($c, 50);
-		net.setDeadline($c, 0);
+		net.setReadDeadline($c, 50);
+		net.setReadDeadline($c, 0);
 		def x as bytes init net.readBytes($c, 1);
 		net.close($c);
 		io.printf("%%s", convert.stringFromBytes($x, "utf-8"));
@@ -564,10 +564,61 @@ func TestSetDeadlineClearRestoresRead(t *testing.T) {
 	}
 }
 
+// TestSetReadDeadlineDoesNotBlockWrite is the regression test for the read
+// deadline leaking into writes: the documented poll idiom (arm a short deadline,
+// read, catch the timeout) leaves the deadline expired, and a write after it must
+// still succeed. net.setReadDeadline governs only reads, so the reply goes out.
+func TestSetReadDeadlineDoesNotBlockWrite(t *testing.T) {
+	out, runErr := runProg(t, `
+		use io;
+		use net;
+		use convert;
+		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		net.sendTo($b, net.address($a), convert.bytesFromString("hi", "utf-8"));
+		net.setReadDeadline($a, 50);
+		def d as net.Datagram init net.recvFrom($a, 1024);
+		net.setReadDeadline($a, 2);
+		try { def x as net.Datagram init net.recvFrom($a, 1024); } catch (e) { }
+		net.sendTo($a, $d.peer, convert.bytesFromString("reply", "utf-8"));
+		io.printf("sent");
+	`)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != "sent" {
+		t.Errorf("got %q, want %q (write after an expired read deadline must succeed)", out, "sent")
+	}
+}
+
+// TestSetWriteDeadlineDoesNotBlockRead is the mirror: a write-only deadline does
+// not govern reads, and it never becomes the read baseline the eof probe /
+// readAll / readN restore.
+func TestSetWriteDeadlineDoesNotBlockRead(t *testing.T) {
+	out, runErr := runProg(t, `
+		use io;
+		use net;
+		use convert;
+		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		net.setWriteDeadline($a, 1);
+		net.sendTo($b, net.address($a), convert.bytesFromString("hi", "utf-8"));
+		net.setReadDeadline($a, 500);
+		def d as net.Datagram init net.recvFrom($a, 1024);
+		io.printf("%s", convert.stringFromBytes($d.data, "utf-8"));
+	`)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != "hi" {
+		t.Errorf("got %q, want %q (a write deadline must not govern reads)", out, "hi")
+	}
+}
+
 // The eof probe arms its own short read deadline on the shared conn. It must
-// restore the deadline set via net.setDeadline afterwards - if it cleared it,
+// restore the deadline set via net.setReadDeadline afterwards - if it cleared it,
 // a subsequent read on a stalled peer would block forever, the exact hang
-// setDeadline exists to prevent.
+// setReadDeadline exists to prevent.
 func TestEOFRestoresUserDeadline(t *testing.T) {
 	addr := pickListenerAddr(t)
 	l, err := stdnet.Listen("tcp", addr)
@@ -592,7 +643,7 @@ func TestEOFRestoresUserDeadline(t *testing.T) {
 			use io;
 			use net;
 			def c as net.Conn init net.connect(%q);
-			net.setDeadline($c, 200);
+			net.setReadDeadline($c, 200);
 			io.printf("eof=%%t\n", net.eof($c));
 			try {
 				def b as bytes init net.readBytes($c, 1);
@@ -922,7 +973,7 @@ func TestReadNCapRejectsHugeN(t *testing.T) {
 
 // TestReadNRestoresDeadlineAfterIdle pins the deadline-restore contract for the
 // idle-timeout path: readN(conn, n, idleTimeoutMs) re-arms the conn's read
-// deadline per chunk, and MUST restore the net.setDeadline state (zero when
+// deadline per chunk, and MUST restore the net.setReadDeadline state (zero when
 // none was set) on return. Before the fix the last idle deadline stayed armed,
 // so the plain readBytes below - whose data arrives 400ms later, past the
 // stale 150ms deadline - spuriously failed with "read timed out".

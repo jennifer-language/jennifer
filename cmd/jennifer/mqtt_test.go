@@ -96,7 +96,7 @@ func fakeBroker(ln net.Listener) {
 
 // TestMqttPubSub drives the mqtt client end to end against the in-process fake
 // broker: connect, subscribe, a publish/receive round-trip, a publish/poll
-// round-trip, a poll that times out (net.setDeadline), ping, and disconnect. A
+// round-trip, a poll that times out (net.setReadDeadline), ping, and disconnect. A
 // mismatch throws in the .j program and fails loadForTest, so this runs the
 // real binary MQTT dialogue in CI with no broker install.
 func TestMqttPubSub(t *testing.T) {

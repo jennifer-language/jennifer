@@ -34,7 +34,7 @@ type connState struct {
 	// mu guards the mutable fields below (c / r swap on startTLS, sticky) so a
 	// spawned reader task and a main-task startTLS don't race on them. It is
 	// held only for the short field-access critical sections, never across a
-	// blocking read/write, so a concurrent net.setDeadline can still interrupt
+	// blocking read/write, so a concurrent net.setReadDeadline can still interrupt
 	// an in-flight read.
 	mu     sync.Mutex
 	c      stdnet.Conn
@@ -48,7 +48,7 @@ type connState struct {
 	// with a spurious timeout. eof only TryLocks it, so a conn with a read
 	// in flight reports "not EOF" instead of blocking.
 	readMu sync.Mutex
-	// deadline is the deadline last armed via net.setDeadline (zero when
+	// deadline is the read deadline last armed via net.setReadDeadline (zero when
 	// cleared), so the eof probe can restore it instead of wiping it.
 	deadline time.Time
 }
@@ -250,7 +250,7 @@ func tlsOptions(fnName string, args []Value, idx int) (skipVerify bool, caCert [
 // args[idx]. Absent (idx past the end) -> 0, a blocking dial with no timeout; 0
 // passed explicitly means the same. A negative value is a positioned error. This
 // is the connect-establishment bound (a slow / unreachable peer otherwise blocks
-// forever); post-connect stream reads are bounded separately by net.setDeadline.
+// forever); post-connect stream reads are bounded separately by net.setReadDeadline.
 func optTimeoutMs(fnName string, args []Value, idx int) (time.Duration, error) {
 	if len(args) <= idx {
 		return 0, nil
@@ -369,7 +369,7 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // value > 0 sets an explicit cap; a *negative* value is the explicit "no limit"
 // sentinel for the rare trusted-peer case. idleTimeoutMs > 0 re-arms a read
 // deadline before each chunk (the same idle-timeout a `.j` loop gets from
-// net.setDeadline); a timeout is a distinct catchable error.
+// net.setReadDeadline); a timeout is a distinct catchable error.
 func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.readAll expects 1 to 3 arguments (net.Conn[, maxBytes[, idleTimeoutMs]]), got %d", len(args))
@@ -422,7 +422,7 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	defer s.readMu.Unlock()
 	if idle > 0 {
 		// The idle re-arm below overwrites the conn's read deadline; restore
-		// the one armed via net.setDeadline (zero when none) on every exit so a
+		// the one armed via net.setReadDeadline (zero when none) on every exit so a
 		// later plain read doesn't inherit a stale idle deadline and spuriously
 		// time out. Same restore contract as the eof probe.
 		s.mu.Lock()
@@ -506,7 +506,7 @@ func readNFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
 	if idle > 0 {
-		// Restore the net.setDeadline deadline (zero when none) on every exit,
+		// Restore the net.setReadDeadline deadline (zero when none) on every exit,
 		// as in readAll: the per-chunk idle re-arm must not leak into later
 		// reads on this conn.
 		s.mu.Lock()
@@ -583,7 +583,7 @@ func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// keeps its snapshot of the pre-upgrade *bufio.Reader and would consume raw
 	// TLS record bytes as if they were plaintext after the swap. Snapshot the
 	// mutable fields under s.mu rather than reading them unlocked - a concurrent
-	// net.setDeadline writes s.deadline under mu, so an unlocked read races it.
+	// net.setReadDeadline writes s.deadline under mu, so an unlocked read races it.
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
 	s.mu.Lock()
@@ -594,15 +594,19 @@ func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 
 	// Hand the handshake the buffered reader + raw conn so no read-ahead
 	// plaintext is lost, then swap the registry entry to the TLS conn. A
-	// timeout arms a handshake deadline on the underlying conn (a stalled peer
-	// otherwise hangs the upgrade), restored to the user's own deadline after.
+	// timeout arms a combined handshake deadline on the underlying conn (a stalled
+	// peer otherwise hangs the upgrade, which reads and writes), then restores it:
+	// the read deadline to the user's baseline (s.deadline), and the write deadline
+	// cleared - connState tracks only the read deadline, so restoring both to the
+	// read value (a single SetDeadline) would leave a spurious write deadline.
 	tlsConn := tls.Client(&bufferedConn{r: r, Conn: c}, cfg)
 	if timeout > 0 {
 		_ = c.SetDeadline(time.Now().Add(timeout))
 	}
 	hErr := tlsConn.Handshake()
 	if timeout > 0 {
-		_ = c.SetDeadline(deadline)
+		_ = c.SetReadDeadline(deadline)
+		_ = c.SetWriteDeadline(time.Time{})
 	}
 	if hErr != nil {
 		return interpreter.Null(), fmt.Errorf("net.startTLS: %v", hErr)
@@ -697,7 +701,7 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	buf := make([]byte, n)
 	// Snapshot the reader pointer under the lock (a concurrent startTLS may
-	// swap it); do the blocking read outside the lock so net.setDeadline can
+	// swap it); do the blocking read outside the lock so net.setReadDeadline can
 	// still interrupt it.
 	s.mu.Lock()
 	r := s.r
@@ -712,7 +716,7 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 			s.mu.Unlock()
 			return interpreter.BytesVal(buf[:read]), nil
 		}
-		// A deadline set by net.setDeadline surfaces as a timeout error.
+		// A deadline set by net.setReadDeadline surfaces as a timeout error.
 		// Report it with a distinct, catchable message (not a crash) so a
 		// poll-with-timeout loop can tell "no data yet, send a keepalive"
 		// apart from a real connection failure. The deadline is not cleared;
@@ -726,18 +730,43 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(buf[:read]), nil
 }
 
-// setDeadlineFn arms or clears a read/write deadline on a net.Conn. A
-// positive `ms` sets an absolute deadline that many milliseconds from now;
-// once it passes, a pending or subsequent readBytes / writeBytes fails with
-// a distinguishable "read timed out" error until the deadline is reset.
-// `ms == 0` clears the deadline (reads block indefinitely again). This is
-// what lets a single-threaded client poll for a packet with a timeout
-// instead of dedicating a spawned reader / pinger.
-func setDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("net.setDeadline expects 2 arguments (net.Conn or net.UDPSocket, ms), got %d", len(args))
+// deadlineKind selects which direction a deadline governs. There is no combined
+// form: a read deadline and a write deadline are separate things (stance 1), so a
+// caller that wants both arms both. This is deliberate - a single combined
+// deadline left expired by the poll idiom would silently break the next write.
+type deadlineKind int
+
+const (
+	dlRead  deadlineKind = iota // read only (net.setReadDeadline)
+	dlWrite                     // write only (net.setWriteDeadline)
+)
+
+// deadlineSetter is the deadline surface shared by a stream net.Conn and a
+// datagram net.PacketConn, so one helper arms either handle.
+type deadlineSetter interface {
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+}
+
+func armDeadline(d deadlineSetter, when time.Time, kind deadlineKind) error {
+	if kind == dlRead {
+		return d.SetReadDeadline(when)
 	}
-	ms, err := takeIntArg("net.setDeadline", args, 1, "ms")
+	return d.SetWriteDeadline(when)
+}
+
+// applyDeadline is the shared body of net.setReadDeadline / setWriteDeadline. A
+// positive `ms` sets an absolute deadline that many milliseconds from now; once
+// it passes, a pending or subsequent operation in the governed direction fails
+// with a distinguishable timeout error until the deadline is reset. `ms == 0`
+// clears it. `kind` selects the direction: the read-only form is what lets a
+// single-threaded client poll for a packet with a timeout WITHOUT arming a write
+// deadline - so a keepalive / reply after a read timeout still succeeds.
+func applyDeadline(fnName string, args []Value, kind deadlineKind) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (net.Conn or net.UDPSocket, ms), got %d", fnName, len(args))
+	}
+	ms, err := takeIntArg(fnName, args, 1, "ms")
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -746,38 +775,56 @@ func setDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		when = time.Now().Add(time.Duration(ms) * time.Millisecond)
 	}
 	// Dispatch on the handle kind: a stream net.Conn or a datagram
-	// net.UDPSocket (its PacketConn also honours SetDeadline).
+	// net.UDPSocket (its PacketConn honours the same deadline methods).
 	v := args[0]
 	if v.Kind == interpreter.KindStruct && v.StructNS == LibraryName && v.StructName == "UDPSocket" {
-		id, err := extractID("net.setDeadline", "UDPSocket", v)
+		id, err := extractID(fnName, "UDPSocket", v)
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		s, err := resolveUDP("net.setDeadline", id)
+		s, err := resolveUDP(fnName, id)
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		if derr := s.c.SetDeadline(when); derr != nil {
-			return interpreter.Null(), fmt.Errorf("net.setDeadline: %v", derr)
+		if derr := armDeadline(s.c, when, kind); derr != nil {
+			return interpreter.Null(), fmt.Errorf("%s: %v", fnName, derr)
 		}
 		return interpreter.Null(), nil
 	}
-	id, err := extractID("net.setDeadline", "Conn", v)
+	id, err := extractID(fnName, "Conn", v)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	s, err := resolveConn("net.setDeadline", id)
+	s, err := resolveConn(fnName, id)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	s.mu.Lock()
 	c := s.c
-	s.deadline = when
+	// s.deadline is the read-deadline baseline the eof probe / readAll / readN
+	// save and restore (they only ever touch the read side), so a write-only call
+	// must not update it - else a later read would inherit the write deadline.
+	if kind == dlRead {
+		s.deadline = when
+	}
 	s.mu.Unlock()
-	if derr := c.SetDeadline(when); derr != nil {
-		return interpreter.Null(), fmt.Errorf("net.setDeadline: %v", derr)
+	if derr := armDeadline(c, when, kind); derr != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, derr)
 	}
 	return interpreter.Null(), nil
+}
+
+// setReadDeadlineFn arms or clears a read-only deadline: the poll-with-timeout
+// primitive. On a timeout the write side is untouched, so a reply / keepalive
+// still goes out.
+func setReadDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return applyDeadline("net.setReadDeadline", args, dlRead)
+}
+
+// setWriteDeadlineFn arms or clears a write-only deadline, bounding a slow / stalled
+// send without affecting reads.
+func setWriteDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return applyDeadline("net.setWriteDeadline", args, dlWrite)
 }
 
 func writeBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -843,7 +890,7 @@ func eofFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// turn to write. A short read deadline makes Peek return io.EOF when the
 	// peer has closed (the pending FIN surfaces at once, well inside the
 	// window) or a timeout ("no data yet", not EOF) on an open, idle
-	// connection. Afterwards the deadline armed via net.setDeadline (if any)
+	// connection. Afterwards the deadline armed via net.setReadDeadline (if any)
 	// is restored.
 	s.mu.Lock()
 	userDeadline := s.deadline

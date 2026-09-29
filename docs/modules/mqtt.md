@@ -133,7 +133,7 @@ keepalive.
 ## Single-threaded poll with timeout
 
 Jennifer has no handler callbacks, so a subscriber drives its own loop. `poll`
-arms a read deadline (via [`net.setDeadline`](../libraries/net.md)) so one flow
+arms a read deadline (via [`net.setReadDeadline`](../libraries/net.md)) so one flow
 can wait for a message and, when idle, do other work - send a keepalive, check a
 clock - without dedicating a `spawn`ed reader. It returns a list of zero or one
 message: empty when nothing arrived in the window, one `Message` when a PUBLISH
@@ -219,6 +219,6 @@ with a catchable error rather than an unbounded allocation.
 ## See also
 
 - [net.md](../libraries/net.md) - the transport `mqtt` builds on, including
-  `net.setDeadline` for the poll loop.
+  `net.setReadDeadline` for the poll loop.
 - [idna.md](idna.md) - the other module doing bit-level `bytes` work (Punycode).
 - [modules/index.md](index.md) - the module catalog and import rules.

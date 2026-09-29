@@ -658,7 +658,12 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `fs.Watcher` (`next` / `hasEvent` / `close`). Path- vs handle-form verbs dispatch
   on the first arg.
 - **`net`** - sockets. TCP `connect` / `listen` / `accept` / `readBytes` /
-  `writeBytes`, bulk `readAll` / `readN`; TLS `connectTLS` / `startTLS` (opt-out
+  `writeBytes`, bulk `readAll` / `readN`; per-direction timeouts
+  `setReadDeadline` / `setWriteDeadline` (`$conn`/`$udp`, ms out; `0` clears) -
+  a read deadline is the poll-with-timeout primitive (a read past it throws a
+  catchable `read timed out`) and never blocks a later write, so a keepalive /
+  reply after a read timeout still goes out; there is no combined call, arm both
+  to bound an exchange; TLS `connectTLS` / `startTLS` (opt-out
   verify via `net.TLSOptions{skipVerify, caCert}`); UDP `listenUDP` / `sendTo` /
   `recvFrom` / `setBroadcast` / `bindToDevice` (pin a UDP socket to one interface
   via `SO_BINDTODEVICE` - Linux-only, needs root; the multi-homed-host fix a
@@ -984,8 +989,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `json.Value` (`webapi.discovery`). Over `web` + `validate` + `json`; **default
   `jennifer` binary only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
-  lists, code, GFM tables) to HTML (`markdown.toHtml`, via `html`) and styled
-  terminal text (`toAnsi`, via `ansi`). `toHtml` is **safe by default** - raw HTML
+  lists, code, GFM tables) plus common extensions - GFM strikethrough (`~~x~~`),
+  task lists (`- [ ]` / `- [x]`), highlight (`==x==`), sub/superscript
+  (`~x~` / `^x^`), definition lists (`term` / `: def`), and attribute lists
+  (`## H {#id .class}`, `[t](u){.class key="v"}` for anchors / classes / button
+  links / image sizing); a fenced block's language becomes `class="language-x"`
+  with the full info string kept as `attr "info"` - to HTML (`markdown.toHtml`,
+  via `html`) and styled terminal text (`toAnsi`, via `ansi`). `toHtml` is
+  **safe by default** - raw HTML
   in the source is escaped, so untrusted Markdown (a README, a comment) cannot
   inject `<script>` / event handlers; `toHtmlWith(md, HtmlOptions{allowRawHtml:
   true})` opts trusted input back into verbatim passthrough. `toXhtml(md)` (or

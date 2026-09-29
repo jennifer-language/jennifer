@@ -11,7 +11,7 @@
  * parsed here with Jennifer's bitwise operators and `bytes`. QoS 0 and QoS 1
  * publish / subscribe (a synchronous PUBACK handshake), retained messages, a
  * Last-Will set in the CONNECT, and `reconnect` for session resumption, on top
- * of a single-threaded `poll` with timeout (via `net.setDeadline`) so one flow
+ * of a single-threaded `poll` with timeout (via `net.setReadDeadline`) so one flow
  * can wait for a packet and send keepalives without a spawned reader, plus
  * blocking `receive`, `ping`, and `disconnect`. QoS 2 and MQTT 5 properties are
  * out of scope. Needs the default `jennifer` binary (uses `net`).
@@ -487,10 +487,10 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     # caller owns the open client.
     errdefer net.close($conn);
     net.writeBytes($conn, buildConnectFull($opts, $will, $cleanSession));
-    net.setDeadline($conn, HANDSHAKE_TIMEOUT_MS);
+    net.setReadDeadline($conn, HANDSHAKE_TIMEOUT_MS);
     def h as bytes init readN($conn, 1);
     def pkt as Packet init readPacketBody($conn, $h[0]);
-    net.setDeadline($conn, 0);
+    net.setReadDeadline($conn, 0);
     if (not ($pkt.typ == 2)) {
         throw Error{
             kind: "mqtt",
@@ -649,7 +649,7 @@ export func publishQos1(client as Client, topic as string, payload as bytes, ret
 # is acknowledged so the broker stays satisfied; other control packets (a
 # PINGRESP) are consumed. Non-timeout I/O errors propagate.
 func awaitPuback(client as Client, pid as int, timeoutMs as int) {
-    net.setDeadline($client.conn, $timeoutMs);
+    net.setReadDeadline($client.conn, $timeoutMs);
     def result as bool init false;
     def waiting as bool init true;
     try {
@@ -666,13 +666,13 @@ func awaitPuback(client as Client, pid as int, timeoutMs as int) {
             }
         }
     } catch (e) {
-        net.setDeadline($client.conn, 0);
+        net.setReadDeadline($client.conn, 0);
         if (strings.contains($e.message, "timed out")) {
             return false;
         }
         throw $e;
     }
-    net.setDeadline($client.conn, 0);
+    net.setReadDeadline($client.conn, 0);
     return $result;
 }
 
@@ -714,10 +714,10 @@ func subscribeAt(client as Client, topic as string, qos as int) {
     $pl = putString($pl, $topic);
     $pl[] = $qos & 0x03;
     net.writeBytes($client.conn, frame(0x82, $vh, $pl));
-    net.setDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
+    net.setReadDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
     def h as bytes init readN($client.conn, 1);
     def pkt as Packet init readPacketBody($client.conn, $h[0]);
-    net.setDeadline($client.conn, 0);
+    net.setReadDeadline($client.conn, 0);
     if (not ($pkt.typ == 9)) {
         throw Error{
             kind: "mqtt",
@@ -750,7 +750,7 @@ func subscribeAt(client as Client, topic as string, qos as int) {
  * @return {Message} the next received message
  */
 export func receive(client as Client) {
-    net.setDeadline($client.conn, 0);
+    net.setReadDeadline($client.conn, 0);
     def msg as Message init Message{topic: "", payload: emptyBytes()};
     def waiting as bool init true;
     while ($waiting) {
@@ -777,14 +777,14 @@ export func receive(client as Client) {
  */
 export func poll(client as Client, timeoutMs as int) {
     def out as list of Message init [];
-    net.setDeadline($client.conn, $timeoutMs);
+    net.setReadDeadline($client.conn, $timeoutMs);
     def hb as int init 0;
     def gotByte as bool init true;
     try {
         def h as bytes init readN($client.conn, 1);
         $hb = $h[0];
     } catch (err) {
-        net.setDeadline($client.conn, 0);
+        net.setReadDeadline($client.conn, 0);
         if (strings.contains($err.message, "timed out")) {
             $gotByte = false;
         } else {
@@ -797,9 +797,9 @@ export func poll(client as Client, timeoutMs as int) {
     # Keep a read deadline active while reading the body: a broker that sends the
     # fixed-header byte then stalls must not hang poll forever (the body read would
     # block with no deadline). Cleared once the whole packet is in.
-    net.setDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
+    net.setReadDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
     def pkt as Packet init readPacketBody($client.conn, $hb);
-    net.setDeadline($client.conn, 0);
+    net.setReadDeadline($client.conn, 0);
     if ($pkt.typ == 3) {
         ackIfQos1($client, $pkt);
         $out[] = parsePublish($pkt);

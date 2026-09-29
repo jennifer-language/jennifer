@@ -42,9 +42,9 @@ def const READ_TIMEOUT_MS as int init 300;
 export func readN(sock as net.Conn, n as int) {
     def parts as list of bytes init [];
     def got as int init 0;
-    defer net.setDeadline($sock, 0);
+    defer net.setReadDeadline($sock, 0);
     while ($got < $n) {
-        net.setDeadline($sock, READ_TIMEOUT_MS);
+        net.setReadDeadline($sock, READ_TIMEOUT_MS);
         def chunk as bytes init net.readBytes($sock, $n - $got);
         if (len($chunk) == 0) {
             throw Error{kind: "mikrotik", message: "connection closed mid-sentence", file: "", line: 0, col: 0};
@@ -60,7 +60,7 @@ export func readN(sock as net.Conn, n as int) {
 	middle := `use net;
 import "./inner.j" as inner;
 export func identity(sock as net.Conn) {
-    errdefer net.setDeadline($sock, 0);
+    errdefer net.setReadDeadline($sock, 0);
     def b as bytes init inner.readN($sock, 8);
     return len($b);
 }

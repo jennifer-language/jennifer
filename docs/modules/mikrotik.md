@@ -189,13 +189,13 @@ into the `{}` stop signal, so the receive loop exits cleanly. A genuine `!trap` 
 
 ## Read deadlines
 
-Every bounded read arms a `net.setDeadline` window (`CONNECT_TIMEOUT_MS`) so a
+Every bounded read arms a `net.setReadDeadline` window (`CONNECT_TIMEOUT_MS`) so a
 blackholed or mid-sentence router fails instead of hanging. That window is
-**cleared** (`net.setDeadline(conn, 0)`) on every exit path of the read - a
+**cleared** (`net.setReadDeadline(conn, 0)`) on every exit path of the read - a
 `defer` in `readN` runs it on both the normal return and a throw - so a stale
-deadline never leaks to the next read or write on the socket (which would
-otherwise inherit it and spuriously time out, a hazard that matters once a
-long-lived streaming session interleaves reads and writes).
+deadline never leaks to the next read on the socket (which would otherwise inherit
+it and spuriously time out, a hazard that matters once a long-lived streaming
+session interleaves reads and writes).
 
 ## Scope
 

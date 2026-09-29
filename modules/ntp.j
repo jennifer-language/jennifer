@@ -110,7 +110,7 @@ export func query(host as string) {
 export func queryWith(address as string, timeoutMs as int) {
     def sock as net.UDPSocket init net.listenUDP(":0");
     defer net.close($sock); # closed however the query exits
-    net.setDeadline($sock, $timeoutMs);
+    net.setReadDeadline($sock, $timeoutMs);
     def orig as time.Time init time.now();
     net.sendTo($sock, $address, buildRequest($orig));
     def resp as bytes;
