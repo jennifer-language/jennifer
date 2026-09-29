@@ -679,6 +679,37 @@ func TestFmtNeverAuthorsLongLine(t *testing.T) {
 	}
 }
 
+// TestFmtForHeaderWrap covers a for-header too wide for one line: it breaks at
+// its `;` separators (one clause per line) instead of wrapping an expression
+// clause at a binary joiner, which used to split `$x = $x + 1` across two lines
+// (`$x = $x +` then `1`) - both over the column limit and unreadable. A header
+// that fits stays on one line.
+func TestFmtForHeaderWrap(t *testing.T) {
+	// Deeply nested so the header cannot fit; the cond clause is long but each
+	// clause fits on its own continuation line.
+	long := `func f() { def parts as list of int init []; for (def a as int init 0; $a < $n; $a = $a + 1) { for (def b as int init 0; $b < $n; $b = $b + 1) { for (; $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x]; $x = $x + 1) { $parts[] = 1; } } } }`
+	out := fmtSource(t, long)
+	for _, line := range strings.Split(out, "\n") {
+		if w := len([]rune(line)); w > maxLineLength {
+			t.Errorf("fmt authored a %d-column line (over %d):\n%s", w, maxLineLength, line)
+		}
+		if strings.HasSuffix(strings.TrimRight(line, " "), "= $x +") {
+			t.Errorf("fmt split the step assignment mid-expression:\n%s", line)
+		}
+	}
+	if !strings.Contains(out, "$x = $x + 1) {") {
+		t.Errorf("expected the step clause intact and closing the header; got:\n%s", out)
+	}
+	if again := fmtSource(t, out); again != out {
+		t.Errorf("not idempotent:\n--- once ---\n%s--- twice ---\n%s", out, again)
+	}
+	// A short header stays on one line.
+	short := fmtSource(t, `func f() { for (def i as int init 0; $i < 10; $i = $i + 1) { } }`)
+	if strings.Count(short, "for (") != 1 || !strings.Contains(short, "$i < 10; $i = $i + 1) {") {
+		t.Errorf("short for-header should stay inline; got:\n%s", short)
+	}
+}
+
 // TestFmtWriteInPlace covers `jennifer fmt -w`: it rewrites a file to its
 // canonical form, leaves an already-canonical file untouched, and refuses to
 // send several files to stdout without -w.

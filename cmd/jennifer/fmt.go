@@ -366,6 +366,13 @@ type wrapFrame struct {
 	// two header `;`s stay inline. Set only on paren frames whose `(` follows a
 	// `for` keyword; a stray identifier ending in "for" can never set it.
 	forHeader bool
+	// forHeaderWraps is set when a for-header does not fit on one line: its two
+	// `;`s then break to continuation lines (one clause per line) instead of
+	// staying inline, and its expression clauses never wrap at a binary joiner -
+	// so a header that cannot fit reads as three clauses rather than an assignment
+	// split mid-expression (`$x = $x +` / `1`), which is both over the limit and
+	// unreadable.
+	forHeaderWraps bool
 }
 
 const (
@@ -489,6 +496,15 @@ func (f *fmtState) emit(t, next lexer.Token) {
 		f.pushWrap(wraps)
 		if f.hasPrev && f.prev.Type == lexer.TOKEN_FOR {
 			f.wrapStack[len(f.wrapStack)-1].forHeader = true
+			// A header wider than the limit breaks at its `;`s (below) rather than
+			// at an operator inside a clause.
+			end := spanEnd(f.tokens, f.tokenIdx)
+			if end > f.tokenIdx+1 {
+				w := inlineContainerWidth(f.tokens, f.tokenIdx, end)
+				if f.effectiveStartCol()+w+trailingWidth(f.tokens, end) > maxLineLength {
+					f.wrapStack[len(f.wrapStack)-1].forHeaderWraps = true
+				}
+			}
 		}
 		f.parenDepth++
 	}
@@ -715,7 +731,7 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	// end-of-line (matches the string-concat idiom in the wild). One
 	// extra indent level per hanging continuation line, matching what
 	// the style guide recommends.
-	if isBinaryJoiner(f.prev.Type) && !f.prevIsUnaryMinus {
+	if isBinaryJoiner(f.prev.Type) && !f.prevIsUnaryMinus && !f.insideForHeader() {
 		// Break when the source broke here, when the line is already over the
 		// limit, or when appending the next operand would push it over - the
 		// last case fills the line before wrapping and is what stops a long
@@ -738,6 +754,13 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	// keeps its single statement's `;` on the same line as the closing `}`.
 	if f.prev.Type == lexer.TOKEN_SEMI {
 		if f.insideForHeader() {
+			// A header too wide for one line breaks after each `;` so its three
+			// clauses stack (one per line) instead of an operator split inside one.
+			// An empty trailing clause (`; )`) keeps the tight `)` inline.
+			if f.insideForHeaderWraps() && t.Type != lexer.TOKEN_RPAREN {
+				f.continuationLine()
+				return
+			}
 			f.writeByte(' ')
 			return
 		}
@@ -1057,6 +1080,13 @@ func (f *fmtState) finish() string {
 // `for` keyword (no output-string scan, no `waitfor`-style false match).
 func (f *fmtState) insideForHeader() bool {
 	return len(f.wrapStack) > 0 && f.wrapStack[len(f.wrapStack)-1].forHeader
+}
+
+// insideForHeaderWraps reports whether we're directly inside a for-header that did
+// not fit on one line, so its `;`s break to continuation lines and its clauses do
+// not wrap at a binary joiner.
+func (f *fmtState) insideForHeaderWraps() bool {
+	return len(f.wrapStack) > 0 && f.wrapStack[len(f.wrapStack)-1].forHeaderWraps
 }
 
 // canonicalLexeme returns the source-form spelling of a token. For a numeric
