@@ -36,6 +36,8 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 
 | Call                             | Returns        | Notes                                                                              |
 | -------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| `binary.make(n)`                 | bytes          | Allocate `n` zero bytes - the fixed-size buffer allocator (`bytes` has no literal). `n` in `[0, 256 MiB]`. |
+| `binary.make(n, fill)`           | bytes          | As above, every byte set to `fill` (a byte value in `[0, 255]`).                    |
 | `binary.concat(a, b)`            | bytes          | Join two byte sequences. See [Building buffers](#building-buffers) for the loop caveat. |
 | `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. |
 | `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |

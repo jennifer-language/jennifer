@@ -33,6 +33,39 @@ func runProg(t *testing.T, src string) (string, error) {
 	return buf.String(), runErr
 }
 
+// TestMake covers the bytes allocator: zeroed by default, filled on request,
+// empty at n=0, and catchable errors for a bad size or fill.
+func TestMake(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use binary;
+		def z as bytes init binary.make(3);
+		def f as bytes init binary.make(2, 255);
+		def e as bytes init binary.make(0);
+		io.printf("%d,%d,%d,%d/", len($z), $z[0], $z[1], $z[2]);
+		io.printf("%d,%d,%d/", len($f), $f[0], $f[1]);
+		io.printf("%d", len($e));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "3,0,0,0/2,255,255/0" {
+		t.Fatalf("got %q", out)
+	}
+	// A negative size, an oversized size, and an out-of-range fill each throw a
+	// catchable, distinguishable error rather than panicking.
+	for _, c := range []struct{ src, want string }{
+		{`use binary; def b as bytes init binary.make(-1);`, "n must be >= 0"},
+		{`use binary; def b as bytes init binary.make(268435457);`, "exceeds the"},
+		{`use binary; def b as bytes init binary.make(2, 256);`, "fill must be a byte value"},
+		{`use binary; def b as bytes init binary.make(2, -1);`, "fill must be a byte value"},
+	} {
+		_, e := runProg(t, c.src)
+		if e == nil || !strings.Contains(e.Error(), c.want) {
+			t.Errorf("make(%q): want error containing %q, got %v", c.src, c.want, e)
+		}
+	}
+}
+
 // TestConcatSliceFind covers the core one-shot byte ops.
 func TestConcatSliceFind(t *testing.T) {
 	out, err := runProg(t, `
@@ -73,20 +106,30 @@ func TestSplitAndPrefix(t *testing.T) {
 	}
 }
 
-// TestValueSemanticsPreserved - binary ops never alias or mutate their inputs.
+// TestValueSemanticsPreserved - binary ops never alias their inputs: mutating a
+// concat result, a slice result, or a split part must not leak into the source.
+// slice and split are the ones that matter - Go's b[lo:hi] and bytes.Split both
+// return windows into the source backing array, so each result MUST be copied.
 func TestValueSemanticsPreserved(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def a as bytes init convert.bytesFromString("abc", "utf-8");
+		def a as bytes init convert.bytesFromString("abcdef", "utf-8");
+		# concat result is independent of both inputs
 		def c as bytes init binary.concat($a, convert.bytesFromString("XYZ", "utf-8"));
 		$c[0] = 122;
+		# slice result is a copy, not a window into $a
+		def s as bytes init binary.slice($a, 1, 4);
+		$s[0] = 122;
+		# a split part is a copy, not a window into $a
+		def parts as list of bytes init binary.split($a, convert.bytesFromString("c", "utf-8"));
+		$parts[0][0] = 122;
 		io.printf("%s", convert.stringFromBytes($a, "utf-8"));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out != "abc" {
-		t.Fatalf("mutation of concat result leaked into source: got %q", out)
+	if out != "abcdef" {
+		t.Fatalf("a binary result aliased its source (got %q, want \"abcdef\")", out)
 	}
 }
 

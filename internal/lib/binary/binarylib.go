@@ -26,12 +26,18 @@ import (
 // LibraryName is the Jennifer name programs `use` to enable these functions.
 const LibraryName = "binary"
 
+// maxMakeBytes caps binary.make's allocation so a negative or oversized `n`
+// (often wire- or caller-derived) is a catchable error instead of a Go panic /
+// OOM in the recover-less interpreter. Mirrors net's per-call read ceiling.
+const maxMakeBytes = 256 << 20
+
 // Value type-alias keeps signatures short.
 type Value = interpreter.Value
 
 // Install registers the binary library functions on an interpreter. Namespaced:
 // every name lives behind the `binary.` prefix.
 func Install(in *interpreter.Interpreter) {
+	in.RegisterNamespaced(LibraryName, "make", makeFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
 	in.RegisterNamespaced(LibraryName, "join", joinFn)
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
@@ -56,6 +62,45 @@ func takeInt(fn string, args []Value, idx int, role string) (int64, error) {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fn, role, args[idx].Kind)
 	}
 	return args[idx].Int, nil
+}
+
+// makeFn allocates a fresh bytes of `n` bytes, each set to `fill` (default 0):
+// binary.make(n[, fill]). This is the byte-buffer allocator - `bytes` has no
+// literal, so a fixed-size buffer (a disk-image block, a zeroed frame) otherwise
+// has to be conjured through convert.bytesFromString(strings.repeat("\0", n), ...).
+// `n` must be in [0, maxMakeBytes] and `fill` a byte value in [0, 255] (matching
+// the `$b[] = byte` element rule); a bad size or fill is a positioned error.
+func makeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("binary.make expects 1 or 2 arguments (n[, fill]), got %d", len(args))
+	}
+	n, err := takeInt("binary.make", args, 0, "n")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if n < 0 {
+		return interpreter.Null(), fmt.Errorf("binary.make: n must be >= 0, got %d", n)
+	}
+	if n > maxMakeBytes {
+		return interpreter.Null(), fmt.Errorf("binary.make: %d exceeds the %d-byte limit", n, maxMakeBytes)
+	}
+	fill := int64(0)
+	if len(args) == 2 {
+		fill, err = takeInt("binary.make", args, 1, "fill")
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if fill < 0 || fill > 255 {
+			return interpreter.Null(), fmt.Errorf("binary.make: fill must be a byte value in [0, 255], got %d", fill)
+		}
+	}
+	out := make([]byte, n)
+	if fill != 0 {
+		for i := range out {
+			out[i] = byte(fill)
+		}
+	}
+	return interpreter.BytesVal(out), nil
 }
 
 // concatFn joins two byte sequences into a fresh bytes: binary.concat(a, b).

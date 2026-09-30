@@ -410,6 +410,26 @@ the whole list, so the same loop is O(N^2). Use `$xs[]` to build a list element
 by element (a raster, a buffer, a big result set); use `lists.push` only when you
 want a fresh list and keep the original.
 
+**Never thread a growing accumulator through a function call.** A `list` / `bytes`
+argument is deep-copied on every call (value semantics), so passing a growing
+accumulator into a helper each iteration is O(N^2). The tell is that it scales
+*backwards* - smaller batches run slower, because each call re-copies a larger
+accumulator. Keep the accumulator in the caller and append the small per-batch
+result with `$xs[]`; return the piece, don't pass the whole down:
+
+```jennifer
+# quadratic: each call copies the whole growing accumulator
+func addTo(acc as list of int, v as int) {
+    def out as list of int init $acc;   # copies every element
+    $out[] = $v;
+    return $out;
+}
+# linear: helper returns just the piece; the caller owns the accumulator
+for (def v in $items) { $results[] = compute($v); }
+```
+
+`jennifer profile --allocs` names the offending line when a copy like this shows up.
+
 `len(EXPR)` is a language built-in (not a library): rune count of a string,
 element count of a list, entry count of a map, byte count of bytes.
 
@@ -544,17 +564,21 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   error, not a NaN.
 - **`strings`** - `upper lower fold contains startsWith endsWith indexOf
   trim trimLeft trimRight replace repeat substring split chars join`.
-  Rune-indexed (`fold` = case-insensitive compare).
+  Rune-indexed. `fold` folds Latin diacritics / ligatures for a sort or search
+  key (`Straße` -> `Strasse`) and **preserves case** - it is not a compare; for
+  case-insensitive matching use `lower` (`lower(fold(a)) == lower(fold(b))`).
 - **`lists`** - `push pop first last head tail reverse sort contains concat
   slice shuffle range`, plus higher-order `map filter reduce find any all sortBy`
   (each takes a `func` value). Non-mutating (they return new lists).
 - **`binary`** - bulk operations on `bytes` (the byte-data counterpart to
-  `strings`/`lists`): `concat slice find split startsWith endsWith`.
+  `strings`/`lists`): `make concat join slice indexOf contains split startsWith endsWith`
+  (`make(n[, fill])` allocates a fixed-size buffer - `bytes` has no literal, so this
+  is how you get one; `join(parts)` / `join(parts, sep)` over a `list of bytes`).
   Non-mutating, value-semantic; each pushes a per-byte loop into Go for
   throughput. `indexOf`/`split` scan at native speed (a MIME boundary, a
   delimiter). Named `binary` because `bytes` is a reserved type keyword.
-  For building a buffer from a stream use `net.readAll`/`readN`, not
-  `binary.concat` in a loop (O(n^2)).
+  To build a buffer, use `net.readAll`/`readN` for a stream or `binary.join` for a
+  `list of bytes` - never `binary.concat` (or `$out[]` per byte) in a loop (O(n^2)).
 - **`maps`** - `keys values has delete merge`. `has` before a missing-key read.
 - **`os`** - `getEnv`, `hasFlag`/`flag`, `isTerminal`, `run`/`spawn`,
   `cwd`/`homeDir`/`tempDir`; `catchSignal(name)`/`gotSignal(name)` to trap and poll
@@ -654,11 +678,15 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `begin`/`commit`/`rollback`, prepared statements. Values bind **only through
   placeholders** (no string interpolation -> injection-safe). Default `jennifer`
   binary only; `jennifer-tiny` stubs it.
-- **`time`** - dates, durations, zones. Structs `time.Time` / `Duration` / `Zone`;
-  constructors + accessors, arithmetic (`add` / `sub` / `before` / `after` /
-  `equal`), `inZone`, `sleep`, strftime `format` / `parse`, ISO 8601 `iso` /
-  `fromIso`. Constants `UTC`, `PROGRAM_START`. Fixed-offset zones (no IANA / DST
-  yet).
+- **`time`** - dates, durations, zones. Structs `time.Time` / `Duration` / `Zone`.
+  `now`; epoch `unix` / `unixMillis` / `unixNanos` and `fromUnix` / `fromUnixMillis`
+  / `fromUnixNanos`; accessors `year` `month` `day` `hour` `minute` `second`
+  `nanosecond` `weekday`; `Duration` builders `fromSeconds` / `fromMilliseconds` /
+  `fromMinutes` / `fromHours` and readers `seconds` / `milliseconds` / `minutes` /
+  `hours` (note: `milliseconds`, not `toMillis`); arithmetic `add` / `sub` /
+  `before` / `after` / `equal`; zones `zone` / `inZone` / `local` / `utc`; `sleep`;
+  strftime `format` / `parse`; ISO 8601 `iso` / `fromIso`. Constants `UTC`,
+  `PROGRAM_START`. Fixed-offset zones (no IANA / DST yet).
 - **`fs`** - blocking filesystem I/O. Whole-file `read` / `write` / `append`
   (String / Bytes), plus `writeNew(path, content)` (create, failing if it exists -
   `O_EXCL`, the atomic test-and-set a file lock builds on); metadata `exists` /

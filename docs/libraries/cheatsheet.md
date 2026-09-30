@@ -23,11 +23,12 @@ flat lookup view, not authoritative.
 | [`asn1`](asn1.md)`.utf8String/printableString/ia5String/oid(s)` | Build a string / OID element.                                                                                         |
 | [`asn1`](asn1.md)`.sequence(items)` / `.set(items)`  | Build a constructed element from a `list of asn1.Value`.                                                                           |
 | [`asn1`](asn1.md)`.tagged(class, n, v)` / `.retag(class, n, v)` | EXPLICIT (wrap) / IMPLICIT (overwrite tag) context/application tagging; `class` `"context"`/`"application"`/... |
-| [`binary`](binary.md)`.concat(a, b)`                 | Join two `bytes` into a fresh `bytes` (O(len a + len b); avoid in an accumulation loop - use `net.readAll`/`readN`).                |
+| [`binary`](binary.md)`.concat(a, b)`                 | Join two `bytes` into a fresh `bytes` (O(len a + len b); avoid in an accumulation loop - use `binary.join`, or `net.readAll`/`readN` for a stream). |
 | [`binary`](binary.md)`.contains(haystack, needle)`   | Whether `needle` occurs in `bytes` `haystack` (boolean sibling of `indexOf`).                                                       |
 | [`binary`](binary.md)`.endsWith(b, suffix)`          | True iff `bytes` `b` ends with `suffix`.                                                                                            |
 | [`binary`](binary.md)`.indexOf(haystack, needle)`       | Byte index of the first `needle` in `haystack`; `-1` if absent, `0` for an empty needle. Native-speed scan.                        |
 | [`binary`](binary.md)`.join(parts [, sep])`          | Concatenate a `list of bytes` into one `bytes` in O(n) (optional `bytes` `sep` between pieces). The byte-data `strings.join`.       |
+| [`binary`](binary.md)`.make(n [, fill])`             | Allocate `n` `bytes` each `fill` (byte `0`-`255`; default `0`) - the `bytes` allocator (no literal). `n` capped at 256 MiB.          |
 | [`binary`](binary.md)`.slice(b, start [, end])`      | Half-open byte range `[start, end)`; `end` defaults to `len(b)`. Out-of-range / `start>end` errors.                                |
 | [`binary`](binary.md)`.split(b, sep)`                | Split `bytes` on a non-empty `sep` -> `list of bytes` (e.g. a MIME body on its boundary, one Go pass).                             |
 | [`binary`](binary.md)`.startsWith(b, prefix)`        | True iff `bytes` `b` begins with `prefix`.                                                                                         |
