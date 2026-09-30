@@ -44,6 +44,7 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.slice(b, start)`         | bytes          | From `start` to the end of `b`.                                                    |
 | `binary.slice(b, start, end)`    | bytes          | The half-open range `[start, end)`; **exclusive end**.                             |
 | `binary.indexOf(haystack, needle)`  | int            | Byte index of the first occurrence of `needle`; `-1` if absent. An empty `needle` returns `0`. Same shape as `strings.indexOf`. |
+| `binary.indexOf(haystack, needle, from)` | int       | As above but searching from byte offset `from` (in `[0, len]`); returns the absolute index, `-1` if none, `from` for an empty `needle`. `from = idx + 1` each step makes find-all one O(n) pass. |
 | `binary.contains(haystack, needle)` | bool           | Whether `needle` occurs in `haystack` (the boolean sibling of `indexOf`, like `strings.contains`). |
 | `binary.split(b, sep)`           | list of bytes  | Split on every occurrence of a non-empty `sep`; preserves empty segments.          |
 | `binary.startsWith(b, prefix)`   | bool           | True iff `b` begins with `prefix`.                                                 |

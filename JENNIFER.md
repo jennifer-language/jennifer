@@ -573,7 +573,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`binary`** - bulk operations on `bytes` (the byte-data counterpart to
   `strings`/`lists`): `make concat join slice indexOf contains split startsWith endsWith`
   (`make(n[, fill])` allocates a fixed-size buffer - `bytes` has no literal, so this
-  is how you get one; `join(parts)` / `join(parts, sep)` over a `list of bytes`).
+  is how you get one; `join(parts)` / `join(parts, sep)` over a `list of bytes`;
+  `indexOf(haystack, needle[, from])` - a byte offset, so find-all is one O(n) pass
+  with `from = idx + 1`).
   Non-mutating, value-semantic; each pushes a per-byte loop into Go for
   throughput. `indexOf`/`split` scan at native speed (a MIME boundary, a
   delimiter). Named `binary` because `bytes` is a reserved type keyword.

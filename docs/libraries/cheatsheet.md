@@ -26,7 +26,7 @@ flat lookup view, not authoritative.
 | [`binary`](binary.md)`.concat(a, b)`                 | Join two `bytes` into a fresh `bytes` (O(len a + len b); avoid in an accumulation loop - use `binary.join`, or `net.readAll`/`readN` for a stream). |
 | [`binary`](binary.md)`.contains(haystack, needle)`   | Whether `needle` occurs in `bytes` `haystack` (boolean sibling of `indexOf`).                                                       |
 | [`binary`](binary.md)`.endsWith(b, suffix)`          | True iff `bytes` `b` ends with `suffix`.                                                                                            |
-| [`binary`](binary.md)`.indexOf(haystack, needle)`       | Byte index of the first `needle` in `haystack`; `-1` if absent, `0` for an empty needle. Native-speed scan.                        |
+| [`binary`](binary.md)`.indexOf(haystack, needle [, from])` | Byte index of the first `needle` at/after `from` (default `0`, in `[0, len]`); `-1` if absent. `from = idx + 1` makes find-all one O(n) pass.  |
 | [`binary`](binary.md)`.join(parts [, sep])`          | Concatenate a `list of bytes` into one `bytes` in O(n) (optional `bytes` `sep` between pieces). The byte-data `strings.join`.       |
 | [`binary`](binary.md)`.make(n [, fill])`             | Allocate `n` `bytes` each `fill` (byte `0`-`255`; default `0`) - the `bytes` allocator (no literal). `n` capped at 256 MiB.          |
 | [`binary`](binary.md)`.slice(b, start [, end])`      | Half-open byte range `[start, end)`; `end` defaults to `len(b)`. Out-of-range / `start>end` errors.                                |

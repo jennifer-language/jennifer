@@ -66,6 +66,41 @@ func TestMake(t *testing.T) {
 	}
 }
 
+// TestIndexOfFrom covers the optional start offset: find-all in one linear pass,
+// resume semantics, an empty needle at the offset, and out-of-range errors.
+func TestIndexOfFrom(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use convert; use binary;
+		def b as bytes init convert.bytesFromString("a.b.c.d", "utf-8");
+		def dot as bytes init convert.bytesFromString(".", "utf-8");
+		def count as int init 0;
+		def i as int init binary.indexOf($b, $dot, 0);
+		while ($i >= 0) {
+			$count = $count + 1;
+			$i = binary.indexOf($b, $dot, $i + 1);
+		}
+		# count / first (2-arg) / resume at 2 / at end / empty needle at 3
+		io.printf("%d/%d/%d/%d/%d", $count, binary.indexOf($b, $dot),
+			binary.indexOf($b, $dot, 2), binary.indexOf($b, $dot, 7),
+			binary.indexOf($b, convert.bytesFromString("", "utf-8"), 3));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "3/1/3/-1/3" {
+		t.Fatalf("got %q, want %q", out, "3/1/3/-1/3")
+	}
+	for _, c := range []struct{ src, want string }{
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, -1);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 3);`, "out of range"},
+	} {
+		_, e := runProg(t, c.src)
+		if e == nil || !strings.Contains(e.Error(), c.want) {
+			t.Errorf("indexOf bounds: want error containing %q, got %v", c.want, e)
+		}
+	}
+}
+
 // TestConcatSliceFind covers the core one-shot byte ops.
 func TestConcatSliceFind(t *testing.T) {
 	out, err := runProg(t, `
