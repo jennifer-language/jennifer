@@ -566,6 +566,16 @@ export func decodeKey(seq as list of int) {
         if ($c >= 32 and $c <= 126) {
             return Key{name: "alt-" + charOf($c), char: charOf($c)};
         }
+        # ESC then a lone control byte (Ctrl-C, another Escape, Enter, ...) is the
+        # blocking-read merge of a lone Escape with the user's *next* key: with no
+        # timed read, nextKey reads the following key into this escape sequence (see
+        # the nextKey docblock). The two cannot be un-merged, but decoding the second
+        # byte as its own key keeps a working exit - ESC then Ctrl-C yields ctrl-c,
+        # ESC then Escape yields escape - instead of collapsing the pair to an
+        # ignored "unknown" and leaving the user no way out.
+        if (len($seq) == 2) {
+            return decodeKey([$c]);
+        }
     }
     # A UTF-8 encoded character: a lead byte 0xC0-0xF7 plus its continuation
     # bytes (an accented letter, the section sign, an emoji). Decode the whole
@@ -591,9 +601,16 @@ export func decodeKey(seq as list of int) {
  * decoding, and returns the `Key`. At end of input the name is `"eof"`.
  * Requires raw mode (see `begin`) and the `term` library (default binary).
  *
- * A lone Escape press is only reported once the next byte arrives, because
- * `term.readByte` has no timeout to distinguish it from the start of an escape
- * sequence; prefer a named key (or Ctrl-C) to quit an event loop.
+ * Caveat: a lone Escape is not just delayed, it is **merged** with the next key
+ * and both are consumed together, because `term.readByte` has no timeout to tell a
+ * bare Escape from the start of an escape sequence. After Escape, the key the user
+ * presses next is read into the sequence: `ESC` then `q` decodes as `alt-q` (the q
+ * is gone), and `ESC` then an arrow steers off the merged bytes. An ESC-merged
+ * *control* key is at least recovered - `ESC` then `Ctrl-C` yields `ctrl-c`, `ESC`
+ * then `Escape` yields `escape` - so a quit always works; but an application
+ * **cannot rely on Escape, or on Alt-combinations, immediately after an Escape**.
+ * Advertise a named key (`q`, Ctrl-C) rather than Escape to leave a loop. A timed
+ * read that delivers a lone Escape cleanly is planned (milestones M28.2).
  * @return {Key} the next key event
  */
 export func nextKey() {

@@ -262,6 +262,18 @@ func testDecodeAltAndEdges() {
     testing.assertEqual(decodeKey([27, 91, 122]).name, "unknown"); # unknown final
 }
 
+# An ESC merged with a following CONTROL key (the no-timeout blocking-read merge)
+# recovers the second key rather than collapsing to "unknown", so a quit always
+# works: ESC+Ctrl-C -> ctrl-c, ESC+ESC -> escape, ESC+Enter -> enter. ESC followed
+# by a printable byte stays alt-<char> (the real terminal meaning of that pair).
+func testDecodeEscMergedControlRecovers() {
+    testing.assertEqual(decodeKey([27, 3]).name, "ctrl-c");
+    testing.assertEqual(decodeKey([27, 27]).name, "escape");
+    testing.assertEqual(decodeKey([27, 13]).name, "enter");
+    testing.assertEqual(decodeKey([27, 127]).name, "backspace");
+    testing.assertEqual(decodeKey([27, 113]).name, "alt-q"); # printable: unchanged
+}
+
 # ---- private helpers ----
 
 func testCharOf() {
