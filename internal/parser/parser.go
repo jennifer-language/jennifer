@@ -1520,6 +1520,11 @@ func (p *parser) parseType() (Type, error) {
 	return Type{}, &ParseError{Msg: fmt.Sprintf("expected type, got %s (%q)", t.Type, t.Lexeme), File: t.File, Line: t.Line, Col: t.Col}
 }
 
+// IsValidConstName reports whether s is spelled like a constant (the exported
+// view of isValidConstName), so other passes - the linter's undefined-constant
+// check - can tell a constant reference from a method-value reference by name.
+func IsValidConstName(s string) bool { return isValidConstName(s) }
+
 // isValidConstName reports whether s matches the constant naming rule:
 // `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` - one or more chunks separated by single
 // `_` characters, where each chunk starts with an uppercase letter and then

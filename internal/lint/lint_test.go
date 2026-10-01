@@ -428,11 +428,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 18 {
-		t.Fatalf("expected 18 known IDs (4 source + 14 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 21 {
+		t.Fatalf("expected 21 known IDs (4 source + 17 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 18 {
-		t.Fatalf("catalog should list all 18 IDs")
+	if len(lint.Catalog()) != 21 {
+		t.Fatalf("catalog should list all 21 IDs")
 	}
 }
 
@@ -502,6 +502,113 @@ func classify(sh as Shape) {
 func c() { return FOO(); }`
 		if got := countID(lintSrc(t, src, only("L107"), cfg), "L107"); got != 0 {
 			t.Fatalf("call to a known top-level binding flagged as undefined: %d", got)
+		}
+	})
+}
+
+func TestUndefinedConstant(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("undefined constant read is flagged, defined one is not", func(t *testing.T) {
+		src := `use io;
+def const MAX as int init 10;
+func f() { return MISSING_CONSTANT; }
+func g() { return MAX; }`
+		diags := lintSrc(t, src, only("L108"), cfg)
+		if got := countID(diags, "L108"); got != 1 {
+			t.Fatalf("L108 count = %d, want 1 (only MISSING_CONSTANT is undefined): %v", got, diags)
+		}
+		if !strings.Contains(diags[0].Message, "MISSING_CONSTANT") {
+			t.Fatalf("L108 should name MISSING_CONSTANT, got %q", diags[0].Message)
+		}
+	})
+	t.Run("a local constant and a func-value reference are not undefined", func(t *testing.T) {
+		src := `func greet() { return 1; }
+func a() { def const INNER as int init 2; return INNER; }
+func b() { def h as func init greet; return $h(); }`
+		if got := countID(lintSrc(t, src, only("L108"), cfg), "L108"); got != 0 {
+			t.Fatalf("local const / func-value ref flagged as undefined constant: %d", got)
+		}
+	})
+	t.Run("a lowercase bare name is not treated as a constant", func(t *testing.T) {
+		// A bare lowercase name is a method-value reference, not a constant, so it
+		// is never an undefined *constant* (a mistyped one is out of L108's scope).
+		src := `func f() { def g as func init notdefined; return $g(); }`
+		if got := countID(lintSrc(t, src, only("L108"), cfg), "L108"); got != 0 {
+			t.Fatalf("lowercase bare name flagged as undefined constant: %d", got)
+		}
+	})
+}
+
+func TestUndeclaredNamespace(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("a namespace used without use/import is flagged once", func(t *testing.T) {
+		src := `export func shout(s as string) { return strings.upper(strings.trim($s)); }`
+		diags := lintSrc(t, src, only("L112"), cfg)
+		if got := countID(diags, "L112"); got != 1 {
+			t.Fatalf("L112 count = %d, want 1 (one report for `strings`): %v", got, diags)
+		}
+		if !strings.Contains(diags[0].Message, "strings") {
+			t.Fatalf("L112 should name `strings`, got %q", diags[0].Message)
+		}
+	})
+	t.Run("a declared use / import is not flagged", func(t *testing.T) {
+		src := `use strings;
+import "./lib.j" as lib;
+func f() { return strings.upper(lib.pack("x")); }`
+		if got := countID(lintSrc(t, src, only("L112"), cfg), "L112"); got != 0 {
+			t.Fatalf("declared namespace flagged as undeclared: %d", got)
+		}
+	})
+	t.Run("a local enum value and struct literal are not undeclared namespaces", func(t *testing.T) {
+		src := `def enum Shape { Circle, Square };
+def struct Point { x as int };
+func f() { def s as Shape init Shape.Circle; def p as Point init Point{x: 1}; return $p.x; }`
+		if got := countID(lintSrc(t, src, only("L112"), cfg), "L112"); got != 0 {
+			t.Fatalf("local enum/struct prefix flagged as undeclared namespace: %d", got)
+		}
+	})
+	t.Run("an aliased use is matched by its alias, and the canonical name is undeclared", func(t *testing.T) {
+		src := `use strings as str;
+func f() { return str.upper("x"); }`
+		if got := countID(lintSrc(t, src, only("L112"), cfg), "L112"); got != 0 {
+			t.Fatalf("aliased namespace flagged: %d", got)
+		}
+	})
+}
+
+func TestCallArity(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("too few and too many args are both flagged; a correct call is not", func(t *testing.T) {
+		src := `func paint(title as string, rows as int) { return $title; }
+func ok() { return paint("x", 3); }
+func few() { return paint("x"); }
+func many() { return paint("x", 3, 9); }`
+		diags := lintSrc(t, src, only("L109"), cfg)
+		if got := countID(diags, "L109"); got != 2 {
+			t.Fatalf("L109 count = %d, want 2 (few + many): %v", got, diags)
+		}
+	})
+	t.Run("a func-value binding call and an undefined call are not arity-checked", func(t *testing.T) {
+		// A `def ... as func` call has no static arity; an undefined bare call is
+		// L107's domain. Neither should produce an L109.
+		src := `func greet(a as int) { return $a; }
+func f() { def g as func init greet; return $g(1, 2, 3); }
+func h() { return nope(1, 2); }`
+		if got := countID(lintSrc(t, src, only("L109"), cfg), "L109"); got != 0 {
+			t.Fatalf("func-value / undefined call flagged for arity: %d", got)
+		}
+	})
+	t.Run("an enum variant pattern in a match arm is not an arity error", func(t *testing.T) {
+		src := `def enum Shape { Circle { r as int }, Square { s as int } };
+func classify(sh as Shape) {
+    match ($sh) {
+        when Circle(c) { return 1; }
+        when Square(s) { return 2; }
+    }
+    return 0;
+}`
+		if got := countID(lintSrc(t, src, only("L109"), cfg), "L109"); got != 0 {
+			t.Fatalf("enum variant pattern flagged for arity: %d", got)
 		}
 	})
 }

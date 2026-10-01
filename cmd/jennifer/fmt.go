@@ -237,38 +237,50 @@ func codeTokens(src string) ([]lexer.Token, bool) {
 
 // writeFileAtomic writes data to a temp file in path's directory, fsyncs and
 // chmods it, then renames it over path. The rename is atomic on POSIX, so a
-// reader (or a crash) never observes a partially written source file; the temp
-// file is cleaned up on any error before the rename.
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+// reader (or a crash) never observes a partially written source file.
+//
+// The temp file is removed on EVERY exit path except a successful rename - via a
+// single deferred cleanup rather than per-error calls - so it also runs when the
+// write syscall itself panics. A broken filesystem can make write(2) report a
+// byte count larger than it was given (a VirtualBox `vboxsf` shared folder does
+// this intermittently), which Go's runtime turns into a `panic` deep in
+// internal/poll; the defer both removes the half-written (NUL-padded, corrupt)
+// temp and recovers the panic into an ordinary error, so one bad file reports a
+// message and lets `fmt -w` move on instead of aborting the run with a stack
+// trace and a hidden leftover.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) (retErr error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".jfmt-*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
+	committed := false
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("write failed (the filesystem may be returning invalid results): %v", r)
+		}
+		if !committed {
+			_ = tmp.Close() // harmless no-op if already closed above
+			_ = os.Remove(tmpName)
+		}
+	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		cleanup()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		cleanup()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		cleanup()
 		return err
 	}
 	if err := os.Chmod(tmpName, mode); err != nil {
-		cleanup()
 		return err
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
 		return err
 	}
+	committed = true
 	return nil
 }
 

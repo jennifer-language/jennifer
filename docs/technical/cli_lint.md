@@ -26,6 +26,9 @@ style, **L3nn** API lifecycle.
 | `L105` | constant-condition          | warning  | `if (true)`, `while (true)` with no escape, `if ($x == $x)`, ...   |
 | `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
 | `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined method (the call analogue of L002; namespaced / `$f()` calls excluded) |
+| `L108` | undefined-constant          | warning  | an unqualified, constant-spelled name read where no such constant is defined anywhere (the constant analogue of L107; `ns.CONST` excluded) |
+| `L109` | call-arity                  | warning  | a bare call to a same-file method with the wrong argument count (exact: no default / variadic params); func-value and namespaced calls excluded |
+| `L112` | undeclared-namespace        | warning  | a `ns.name` reference whose namespace has no `use` / `import` (the inverse of L106; local enum / struct type prefixes excluded) |
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100)                  |
@@ -46,7 +49,7 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L107/L201/L202/L105 - L106 also
+checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L201/L202/L105 - L106 also
 walks declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model

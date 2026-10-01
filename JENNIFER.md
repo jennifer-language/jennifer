@@ -382,6 +382,11 @@ def xs as list of int init [1, 2, 3];
 $xs[0];            # read -> 1
 $xs[0] = 9;        # write
 $xs[] = 4;         # append (write-only; lists and bytes only)
+# The append form takes ONLY a bare variable - it does not nest through a chain.
+# `$box.items[] = v;` and `$grid[0][] = v;` are parse errors (unlike `$box.items[0] = v;`,
+# which works). For a list in a struct field, append into a local then assign the
+# field once; appending through a copy each time (`$box.items = lists.push($box.items, v)`)
+# is O(n^2). See the accumulator note under "Prefer $xs[]".
 
 def m as map of string to int init {"a": 1};
 $m["a"];           # read (missing key is an error - test with maps.has)

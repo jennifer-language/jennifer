@@ -617,6 +617,172 @@ func checkUndefinedCall(c *checkCtx) {
 	check.program(c.prog)
 }
 
+// checkUndefinedConstant (L108) flags an unqualified reference to a
+// constant-spelled name that is defined nowhere - the constant analogue of L107
+// and of L002's undefined variable. A `$var` typo is a parse error and a
+// `method()` typo is L107, but a bare constant read (`MISSING_CONSTANT`) is
+// resolved only at runtime, so a `def const` deleted while a reader survives
+// escapes a clean fmt + lint + ast and fails on the first line that reaches it.
+//
+// Only a *constant-spelled* bare name is checked (parser.IsValidConstName): a
+// lowercase bare name is a method-value reference or an enum variant, not a
+// constant. The defined set is every constant declared ANYWHERE in the program
+// (top level or local) plus every method name - a superset of what is actually in
+// scope at the reference, so the check only ever MISSES an out-of-scope reference,
+// never falsely flags one. That keeps it sound (no false positives) while still
+// catching the real failure: a name that exists nowhere. A constant-spelled
+// method (a func-value target named like a constant) stays allowed. Namespaced
+// constants (`ns.CONST`) are a different node and are not touched; includes and the
+// `MODULE_test.j` overlay are already spliced, so cross-file constants resolve.
+// Match-arm heads are skipped, as in L107, so a `when SOME_VARIANT` enum pattern is
+// never misread as an undefined constant.
+func checkUndefinedConstant(c *checkCtx) {
+	defined := map[string]bool{}
+	collectDefs := walker{stmt: func(s parser.Stmt) {
+		if d, ok := s.(*parser.DefineStmt); ok && d.IsConst {
+			defined[d.VarName] = true
+		}
+	}}
+	collectDefs.program(c.prog)
+	for _, m := range c.prog.Methods {
+		defined[m.Name] = true // a constant-spelled bare name may be a func-value ref to a method
+	}
+
+	skip := map[parser.Expr]bool{}
+	collectArms := walker{stmt: func(s parser.Stmt) {
+		if m, ok := s.(*parser.MatchStmt); ok {
+			for i := range m.Arms {
+				for _, v := range m.Arms[i].Values {
+					skip[v] = true
+				}
+			}
+		}
+	}}
+	collectArms.program(c.prog)
+
+	check := walker{expr: func(e parser.Expr) {
+		ref, ok := e.(*parser.ConstRefExpr)
+		if !ok || skip[e] || defined[ref.Name] || !parser.IsValidConstName(ref.Name) {
+			return
+		}
+		c.report("L108", ref, fmt.Sprintf("reference to undefined constant `%s`", ref.Name))
+	}}
+	check.program(c.prog)
+}
+
+// checkUndeclaredNamespace (L112) flags a `ns.name` reference whose namespace is
+// never declared with a `use` / `import` - the inverse of L106 (unused-import),
+// and the one direction lint did not track. A library call in a file that forgot
+// its `use` (`strings.upper(...)` with no `use strings;`) is a runtime error
+// ("namespace strings requires use strings"), invisible to lint, fmt, and ast; and
+// a module's own `_test.j` overlay cannot catch it, because the overlay's own
+// `use` satisfies the lookup when the two are spliced. Linting the module file on
+// its own does catch it - which is exactly what the CI module gate does.
+//
+// False-positive-free: the "declared" set is every `use` / `import` namespace plus
+// every local enum and struct type name (an enum value `Shape.Circle` or a struct
+// literal `Point{...}` carries the type name as its prefix, and those are declared
+// by their definition, not a `use`). Only expression-position references with a
+// real source position are checked (a namespace used solely in a type annotation is
+// left to the other checks). A file with a vendored-deck import (`@scope/pkg/`)
+// whose bound prefix lint cannot compute is skipped entirely rather than risk
+// flagging a reference to that deck. Each undeclared namespace is reported once.
+func checkUndeclaredNamespace(c *checkCtx) {
+	// An undeterminable import prefix means the declared set is unknown; stay silent
+	// for the whole file rather than risk a false positive.
+	for _, mi := range c.prog.ModuleImports {
+		if _, ok := moduleImportPrefix(mi); !ok {
+			return
+		}
+	}
+	declared := map[string]bool{}
+	for _, im := range c.prog.Imports {
+		if im.AsName != "" {
+			declared[im.AsName] = true
+		} else {
+			declared[im.Name] = true
+		}
+	}
+	for _, mi := range c.prog.ModuleImports {
+		if p, ok := moduleImportPrefix(mi); ok {
+			declared[p] = true
+		}
+	}
+	for _, ed := range c.prog.Enums {
+		declared[ed.Name] = true
+	}
+	for _, sd := range c.prog.Structs {
+		declared[sd.Name] = true
+	}
+
+	reported := map[string]bool{}
+	flag := func(prefix string, node parser.Node) {
+		if prefix == "" || declared[prefix] || reported[prefix] {
+			return
+		}
+		reported[prefix] = true
+		c.report("L112", node, fmt.Sprintf("namespace `%s` is referenced but never declared (add `use %s;` or the matching `import`)", prefix, prefix))
+	}
+	w := walker{expr: func(e parser.Expr) {
+		switch n := e.(type) {
+		case *parser.QualifiedCallExpr:
+			flag(n.Prefix, n)
+		case *parser.QualifiedConstRefExpr:
+			flag(n.Prefix, n)
+		case *parser.StructLit:
+			flag(n.NS, n)
+		}
+	}}
+	w.program(c.prog)
+}
+
+// checkCallArity (L109) flags a bare call to a same-file user method with the
+// wrong number of arguments - the arity drift (a parameter added, one of several
+// call sites missed) that today fails only when that call executes. Arity is fully
+// decidable from the AST (Jennifer has no default or variadic parameters: an
+// argument count must equal the parameter count exactly), so this is
+// false-positive-free. This is Tier 1 of the broader static call-site checking
+// (horizon DRAFT#27); argument *types*, cross-module calls, and library-builtin
+// signatures are the remaining tiers.
+//
+// Only a bare call resolving to a known same-file method is checked: a call to a
+// func-valued binding (a `def ... as func`) has no statically known arity and is
+// not in the method set; a namespaced call (`ns.fn(...)`) is a different node; and
+// an undefined bare call is L107's job. Match-arm heads are skipped, as in L107, so
+// a `when Variant(bind)` enum pattern (which parses as a call) is never measured.
+func checkCallArity(c *checkCtx) {
+	methods := map[string]*parser.MethodDef{}
+	for _, m := range c.prog.Methods {
+		methods[m.Name] = m
+	}
+	skip := map[parser.Expr]bool{}
+	collectArms := walker{stmt: func(s parser.Stmt) {
+		if m, ok := s.(*parser.MatchStmt); ok {
+			for i := range m.Arms {
+				for _, v := range m.Arms[i].Values {
+					skip[v] = true
+				}
+			}
+		}
+	}}
+	collectArms.program(c.prog)
+
+	check := walker{expr: func(e parser.Expr) {
+		call, ok := e.(*parser.CallExpr)
+		if !ok || skip[e] {
+			return
+		}
+		m, ok := methods[call.Callee]
+		if !ok {
+			return // undefined (L107) or a func-value binding - not an arity question
+		}
+		if len(call.Args) != len(m.Params) {
+			c.report("L109", call, fmt.Sprintf("method `%s` takes %d argument(s), got %d", call.Callee, len(m.Params), len(call.Args)))
+		}
+	}}
+	check.program(c.prog)
+}
+
 // checkConstantCondition (L105) flags conditions a reader can see are
 // statically constant: a bool literal, or a comparison of a value with
 // itself. `while (true)` is left alone when the body can break or otherwise
