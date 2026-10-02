@@ -454,6 +454,12 @@ won't be able to read `.kind` / `.message` off it. Use
   runtime errors. The runtime wraps them into the canonical `Error`
   struct with `kind = "runtime"` (more specific tags will land per
   site over time) and the original file / line / col preserved.
+- **Resource-exhaustion errors** carry `kind = "limit"` instead of
+  `"runtime"`, so a caller can tell "the input was too big / too deep"
+  from "something inside me is broken" and a library can re-raise it in
+  its own vocabulary. Today this covers the call-depth cap ("call stack
+  too deep") and `archive.unpack` / `unpackWith` exceeding their size /
+  entry caps; more cap sites move to `"limit"` over time.
 
 ### What can NOT be caught
 

@@ -14,7 +14,8 @@ flat lookup view, not authoritative.
 | Call                                                  | What it does                                                                                                                        |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [`archive`](archive.md)`.pack(entries, format)`      | Bundle a `list of archive.Entry` into `bytes`; `format` `"tar"`/`"zip"`/`"tar.gz"`.                                              |
-| [`archive`](archive.md)`.unpack(b, format)`          | Read a bundle back into a `list of archive.Entry`.                                                                                 |
+| [`archive`](archive.md)`.unpack(b, format)`          | Read a bundle back into a `list of archive.Entry` (256 MiB / 65536-entry caps; over a cap raises `Error{kind:"limit"}`).            |
+| [`archive`](archive.md)`.unpackWith(b, format, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries}`; `0`=default, `<0`=unlimited).         |
 | [`asn1`](asn1.md)`.decode(b)` / `.encode(v)`         | Parse BER `bytes` into an opaque `asn1.Value` / serialise one back to DER `bytes`.                                                 |
 | [`asn1`](asn1.md)`.typeOf/tagClass/tagNumber/isConstructed(v[, ptr])` | Element type name / class / numeric tag / constructed-ness; pointer tokens are child indices (`"/0/2"`).       |
 | [`asn1`](asn1.md)`.get(v[, ptr])` / `.has(v, ptr)` / `.length(v[, ptr])` | Sub-element as `asn1.Value` / whether a pointer resolves / child count of a constructed node.               |

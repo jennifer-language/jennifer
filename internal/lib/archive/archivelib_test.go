@@ -194,3 +194,46 @@ func TestUnpackAggregateCaps(t *testing.T) {
 		t.Errorf("in-budget unpack failed: %v", err)
 	}
 }
+
+// TestUnpackWithCaps covers caller-set caps and the kind:"limit" contract: each
+// dimension trips its own cap, a breach classifies as kind "limit", a 0 field
+// takes the default, and a negative field disables the cap.
+func TestUnpackWithCaps(t *testing.T) {
+	opts := func(total, entryBytes, entries int64) interpreter.Value {
+		return interpreter.NamespacedStructVal("archive", "UnpackOptions", []interpreter.StructField{
+			{Name: "maxTotalBytes", Value: interpreter.IntVal(total)},
+			{Name: "maxEntryBytes", Value: interpreter.IntVal(entryBytes)},
+			{Name: "maxEntries", Value: interpreter.IntVal(entries)},
+		})
+	}
+	es := []entry{
+		{name: "a", data: make([]byte, 600), mtime: 1700000000},
+		{name: "b", data: make([]byte, 600), mtime: 1700000000},
+	}
+	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(es), str("tar")})
+	if err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	// Each cap trips, and the breach classifies as kind "limit".
+	check := func(name string, o interpreter.Value) {
+		_, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar"), o})
+		if err == nil {
+			t.Errorf("%s: expected a cap error", name)
+			return
+		}
+		if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "limit" {
+			t.Errorf("%s: kind = %q, want limit", name, kind)
+		}
+	}
+	check("entries", opts(0, 0, 1))
+	check("per-entry", opts(0, 100, 0))
+	check("total", opts(1000, 0, 0))
+	// A 0 field = default, so a bare options unpacks fine.
+	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar"), opts(0, 0, 0)}); err != nil {
+		t.Errorf("default (all-zero) options should unpack: %v", err)
+	}
+	// A negative field disables that cap (unlimited): a tiny entry cap of -1 passes.
+	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar"), opts(-1, -1, -1)}); err != nil {
+		t.Errorf("unlimited (negative) options should unpack: %v", err)
+	}
+}

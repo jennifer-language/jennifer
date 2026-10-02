@@ -12,7 +12,8 @@ archive/zip; works on both binaries.
 | Call                            | Returns                 | Notes                                          |
 | ------------------------------- | ----------------------- | ---------------------------------------------- |
 | `archive.pack(entries, format)` | `bytes`                 | Bundle a `list of archive.Entry`.              |
-| `archive.unpack(b, format)`     | `list of archive.Entry` | Read a bundle back.                            |
+| `archive.unpack(b, format)`     | `list of archive.Entry` | Read a bundle back (default caps).             |
+| `archive.unpackWith(b, format, opts)` | `list of archive.Entry` | Read a bundle with caller-set caps (`archive.UnpackOptions`). |
 
 `format` is `"tar"`, `"zip"`, or the gzip combo `"tar.gz"` (alias
 `"tgz"`). An unknown format, or corrupt input to `unpack`, is a
@@ -20,12 +21,32 @@ positioned runtime error (catchable with `try` / `catch`).
 
 `unpack` bounds untrusted input: the total decompressed payload of one
 call (summed across every entry) is capped at 256 MiB and the member
-count at 65536; past either cap it raises a normal catchable error
+count at 65536; past either cap it raises a catchable `Error{kind:
+"limit"}` (resource exhaustion, distinct from a `"runtime"` bug)
 instead of expanding a small "zip bomb" into gigabytes of memory. It
 also rejects any member whose name is an absolute path or escapes with
 `..` (a "zip-slip" name), so a naive extraction loop
 (`fs.writeBytes($dir + "/" + $e.name, $e.data)`) can't be tricked into
 writing outside the target directory.
+
+### `archive.UnpackOptions`
+
+`archive.unpackWith(b, format, opts)` is `unpack` with caller-set caps,
+for an input whose trusted size differs from the defaults:
+
+```jennifer
+def opts as archive.UnpackOptions init archive.UnpackOptions{
+    maxTotalBytes: 50 * 1024 * 1024,   # 50 MiB total across all entries
+    maxEntryBytes: 10 * 1024 * 1024,   # 10 MiB per entry
+    maxEntries: 1000
+};
+def entries as list of archive.Entry init archive.unpackWith($kmz, "zip", $opts);
+```
+
+Each field: **`0` takes the default** (so a bare `UnpackOptions{}` behaves
+exactly like `unpack`), **a positive value** sets that cap, and **a
+negative value disables it** (unlimited - for a fully trusted archive).
+Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
 
 ## `archive.Entry`
 

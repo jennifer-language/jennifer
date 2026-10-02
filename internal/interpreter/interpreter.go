@@ -960,7 +960,8 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int,
 		*dc--
 		releaseBlockEnv(callFrame)
 		return Value{}, &runtimeError{
-			Msg: fmt.Sprintf("call stack too deep: exceeded %d nested method calls (possible infinite recursion)", limits.MaxCallDepth),
+			Kind: "limit",
+			Msg:  fmt.Sprintf("call stack too deep: exceeded %d nested method calls (possible infinite recursion)", limits.MaxCallDepth),
 		}
 	}
 	res, err := i.execBlock(m.Body, callFrame)
@@ -4930,6 +4931,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 		releaseBlockEnv(callFrame)
 		file, line, col := posFor(node)
 		return Value{}, &runtimeError{
+			Kind: "limit",
 			Msg:  fmt.Sprintf("call stack too deep: exceeded %d nested method calls (possible infinite recursion)", limits.MaxCallDepth),
 			File: file, Line: line, Col: col,
 		}
@@ -5090,6 +5092,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			releaseBlockEnv(callFrame)
 			file, line, col := posFor(c)
 			return Value{}, &runtimeError{
+				Kind: "limit",
 				Msg:  fmt.Sprintf("call stack too deep: exceeded %d nested method calls (possible infinite recursion)", limits.MaxCallDepth),
 				File: file, Line: line, Col: col,
 			}

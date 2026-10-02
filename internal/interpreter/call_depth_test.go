@@ -54,8 +54,8 @@ io.printf("survived=%t\n", $caught);`)
 	if !strings.Contains(out, "survived=true") {
 		t.Fatalf("expected the catch to run, got: %q", out)
 	}
-	if !strings.Contains(out, "kind=runtime") {
-		t.Fatalf("depth error should present as kind=runtime, got: %q", out)
+	if !strings.Contains(out, "kind=limit") {
+		t.Fatalf("depth error should present as kind=limit (resource exhaustion), got: %q", out)
 	}
 }
 
