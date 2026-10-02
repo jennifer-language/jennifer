@@ -108,7 +108,23 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
   those. The one root element is required (XML has exactly one).
 - **Namespaces are lexical**: prefixes are kept as written, not resolved to
   their `xmlns` URIs. Full namespace resolution and richer XPath (predicates,
-  `@attr` / `text()` path steps) are future extensions.
+  `@attr` / `text()` path steps) are future extensions. The practical
+  consequence for real-world KML / GML / GPX, which use prefixes: a name must be
+  matched **verbatim, including the prefix**. `xml.get($root, "Document")`
+  silently matches nothing on a `<kml:Document>` (use `"kml:Document"`), and
+  `xml.attr($el, "lat")` *raises* on a `gpx:lat` attribute (use
+  `xml.attr($el, "gpx:lat")`). To accept either form, match on the local name
+  yourself - split each tag / attribute name on `":"` and compare the last part:
+
+  ```jennifer
+  use strings;
+  # local name of "kml:Document" or "Document" -> "Document"
+  func localName(name as string) {
+      def i as int init strings.indexOf($name, ":");
+      if ($i < 0) { return $name; }
+      return strings.substring($name, $i + 1, len($name));
+  }
+  ```
 - **Element nesting is capped** on both decode and encode: a deeper document
   (or a tree built that deep with `xml.append`) raises a catchable error rather
   than overflowing the stack. The limit is shared by every parser in the
