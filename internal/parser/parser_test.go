@@ -248,6 +248,8 @@ func TestParseErrors(t *testing.T) {
 		{"library name rejects underscore", `use my_lib;`, "may not contain"},
 		{"call site rejects underscore", `foo_bar();`, "may not contain"},
 		{"const needs init", `func app() { def const X as int; }`, "constants require"},
+		{"reserved word as var name", `func app() { def when as int init 1; }`, "`when` is a reserved word"},
+		{"reserved word as func name", `func to() {}`, "`to` is a reserved word"},
 	}
 	for _, c := range bad {
 		_, err := Parse(c.src)

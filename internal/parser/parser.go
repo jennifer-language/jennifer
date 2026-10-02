@@ -208,12 +208,27 @@ func numErrReason(err error) string {
 func (p *parser) expect(tt lexer.TokenType, ctx string) (lexer.Token, error) {
 	t := p.peek()
 	if t.Type != tt {
-		return t, &ParseError{
-			Msg:  fmt.Sprintf("expected %s %s, got %s (%q)", tt, ctx, t.Type, describeLexeme(t.Lexeme)),
-			File: t.File, Line: t.Line, Col: t.Col,
+		msg := fmt.Sprintf("expected %s %s, got %s (%q)", tt, ctx, t.Type, describeLexeme(t.Lexeme))
+		// When a name was expected but a reserved word turned up (`def when ...`,
+		// `func to() ...`), name the cause - the bare "expected IDENT, got WHEN"
+		// reads oddly far from "`when` cannot be a name".
+		if tt == lexer.TOKEN_IDENT && isReservedWordToken(t) {
+			msg = fmt.Sprintf("%s - `%s` is a reserved word and cannot be used as a name", msg, t.Lexeme)
 		}
+		return t, &ParseError{Msg: msg, File: t.File, Line: t.Line, Col: t.Col}
 	}
 	return p.advance(), nil
+}
+
+// isReservedWordToken reports whether t is a reserved word (a keyword or type
+// keyword) sitting where an identifier was expected: its lexeme is
+// identifier-shaped but its token type is not TOKEN_IDENT.
+func isReservedWordToken(t lexer.Token) bool {
+	if t.Type == lexer.TOKEN_IDENT || t.Lexeme == "" {
+		return false
+	}
+	c := t.Lexeme[0]
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 // ---- Grammar ----
