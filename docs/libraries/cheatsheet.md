@@ -48,7 +48,7 @@ flat lookup view, not authoritative.
 | [`convert`](convert.md)`.toBool(v)`                   | Canonical conversion to `bool` (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`).                                                          |
 | [`convert`](convert.md)`.toCodepoint(char)`           | Unicode code point (int) of a one-rune string; errors unless exactly one code point (not a grapheme cluster).                       |
 | [`convert`](convert.md)`.toFloat(v)`                  | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).                                                          |
-| [`convert`](convert.md)`.toInt(v)`                    | Convert to int (float truncates toward zero, string parses, bool→1/0).                                                              |
+| [`convert`](convert.md)`.toInt(v [, radix])`          | Convert to int (float truncates, string parses, bool→1/0); optional `radix` 2/8/10/16 parses a string's bare digits (strip any `0x`/`0o`/`0b` prefix first). |
 | [`convert`](convert.md)`.toString(v)`                 | Convert to string (always succeeds; uses the value's display form).                                                                 |
 | [`convert`](convert.md)`.typeOf(v)`                   | Runtime kind as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"list"`, `"map"`, `"object"`).                         |
 | [`convert`](convert.md)`.objectType(v)`               | Specific registered name of an opaque object (e.g. `"json.Value"`); errors on a non-object.                                         |

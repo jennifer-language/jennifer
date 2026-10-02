@@ -21,7 +21,8 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 
 | Call                                       | Source kinds                | Behavior                                                              |
 | ------------------------------------------ | --------------------------- | --------------------------------------------------------------------- |
-| `convert.toInt(v)`                         | int / float / string / bool | identity / truncate / parse / `true`=1, `false`=0                     |
+| `convert.toInt(v)`                         | int / float / string / bool | identity / truncate / parse (base 10) / `true`=1, `false`=0            |
+| `convert.toInt(s, radix)`                  | string                      | parse `s` in `radix` 2 / 8 / 10 / 16 (bare digits; strip any `0x` / `0o` / `0b` prefix first) |
 | `convert.toFloat(v)`                       | int / float / string / bool | convert / identity / parse / `true`=1.0, `false`=0.0                  |
 | `convert.toString(v)`                      | any                         | always succeeds; uses the value's display form                        |
 | `convert.toBool(v)`                        | bool / int / float / string | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`)  |
@@ -66,6 +67,7 @@ details matter here:
 ## Errors
 
 - `convert.toInt("abc")` - parse failure (string doesn't represent a valid integer).
+- `convert.toInt("41", 16)` is `65`. An unsupported radix, a digit out of range for the base, a radix on a non-string value, or a `0x` / `0o` / `0b` prefix (strip it first) is an error.
 - `convert.toInt(null)` - no conversion defined.
 - `convert.toInt(f)` for a NaN, +/-Infinity, or out-of-int64-range float - the value has no representable integer (truncation would be garbage).
 - `convert.toBool("maybe")` - strings: only `"true"` and `"false"` accepted.

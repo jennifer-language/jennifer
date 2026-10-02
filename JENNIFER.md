@@ -513,7 +513,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `%verb[|key=value]` modifiers (`pad`, `align`, `base`, `prec`, `sign`,
   `group`, `case`, ...); `readLine`, `eof`, `readBytes`.
 - **`convert`** - `toInt toFloat toString toBool`, `typeOf`, `objectType`,
-  `bytesFromString` / `stringFromBytes` (utf-8). Note: the callees are
+  `fromCodepoint` / `toCodepoint`, `bytesFromString` / `stringFromBytes` (utf-8).
+  `toInt(s, radix)` parses a string's bare digits in base 2/8/10/16 (strip any
+  `0x`/`0o`/`0b` prefix first). Note: the callees are
   `toInt` etc. because `int`/`float`/`string`/`bool`/`bytes` are reserved type
   keywords (they appear only after `as`).
 - **`math`** - arithmetic `abs min max sqrt pow floor ceil round trunc sign

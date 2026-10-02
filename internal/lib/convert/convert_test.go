@@ -5,6 +5,7 @@ package convert
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -75,9 +76,43 @@ func TestToIntAcrossKinds(t *testing.T) {
 		t.Errorf("toInt(false) = %d, want 0", v.Int)
 	}
 	mustErr(t, "toInt(\"abc\")", toIntFn, S("abc"))
-	mustErr(t, "toInt(\"3.5\")", toIntFn, S("3.5")) // not an integer string
+	mustErr(t, "toInt(\"3.5\")", toIntFn, S("3.5"))   // not an integer string
+	mustErr(t, "toInt(\"0xff\")", toIntFn, S("0xff")) // one-arg is decimal; a prefix errors
+	// ... with a hint pointing at the radix form.
+	if _, err := toIntFn(interpreter.BuiltinCtx{}, []interpreter.Value{S("0xff")}); err == nil || !strings.Contains(err.Error(), "toInt(s, radix)") {
+		t.Errorf("toInt(\"0xff\") should hint at the radix form, got %v", err)
+	}
 	mustErr(t, "toInt(null)", toIntFn, interpreter.Null())
 	mustErr(t, "toInt() arity", toIntFn)
+}
+
+func TestToIntRadix(t *testing.T) {
+	I, S := interpreter.IntVal, interpreter.StringVal
+	// Bases 2 / 8 / 10 / 16 parse bare digits; a sign is allowed.
+	for _, c := range []struct {
+		s    string
+		base int64
+		want int64
+	}{
+		{"41", 16, 65}, {"ff", 16, 255}, {"-ff", 16, -255},
+		{"17", 8, 15}, {"101", 2, 5}, {"42", 10, 42},
+	} {
+		if v := mustVal(t, toIntFn, S(c.s), I(c.base)); v.Int != c.want {
+			t.Errorf("toInt(%q, %d) = %d, want %d", c.s, c.base, v.Int, c.want)
+		}
+	}
+	// Errors: bad digit for the base, an unsupported radix, a radix on a non-string,
+	// and a `0x`-prefixed string (prefixes are not accepted - strip them first).
+	mustErr(t, "toInt(\"zz\",16)", toIntFn, S("zz"), I(16))
+	mustErr(t, "toInt(\"10\",7)", toIntFn, S("10"), I(7))
+	mustErr(t, "toInt(\"10\",0)", toIntFn, S("10"), I(0))
+	mustErr(t, "toInt(int,16)", toIntFn, I(255), I(16))
+	mustErr(t, "toInt(\"0x41\",16)", toIntFn, S("0x41"), I(16))
+	// A prefixed string errors with an actionable hint (not a bare "invalid"),
+	// since 0x/0o/0b is never accepted under an explicit radix.
+	if _, err := toIntFn(interpreter.BuiltinCtx{}, []interpreter.Value{S("0x41"), I(16)}); err == nil || !strings.Contains(err.Error(), "prefix is not accepted") {
+		t.Errorf("toInt(\"0x41\", 16) should hint about the prefix, got %v", err)
+	}
 }
 
 func TestToFloatAcrossKinds(t *testing.T) {

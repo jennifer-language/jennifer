@@ -96,10 +96,41 @@ func arityOne(name string, args []interpreter.Value) error {
 //   - bool   -> true=1, false=0
 //   - null   -> error
 func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("toInt", args); err != nil {
-		return interpreter.Null(), err
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("toInt expects 1 or 2 arguments (value[, radix]), got %d", len(args))
 	}
 	v := args[0]
+	// An optional radix parses a STRING's digits in a chosen base - a hex numeric
+	// character reference, an octal permission mask, a binary flag word. The base
+	// is one of 2, 8, 10, 16 (the bases Jennifer's int literals use), applied to
+	// bare digits with no `0x` / `0o` / `0b` prefix (strip the prefix first). A
+	// radix is meaningless for a non-string value, so passing one there is a misuse
+	// rather than a silent no-op.
+	if len(args) == 2 {
+		if v.Kind != interpreter.KindString {
+			return interpreter.Null(), fmt.Errorf("toInt(): a radix is only valid when converting a string, not %s", v.Kind)
+		}
+		if args[1].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("toInt(): radix must be int, got %s", args[1].Kind)
+		}
+		radix := args[1].Int
+		switch radix {
+		case 2, 8, 10, 16:
+		default:
+			return interpreter.Null(), fmt.Errorf("toInt(): radix must be 2, 8, 10, or 16, got %d", radix)
+		}
+		n, err := strconv.ParseInt(v.Str, int(radix), 64)
+		if err != nil {
+			// A 0x / 0o / 0b prefix is never accepted under an explicit radix (its
+			// letter is not a digit in the base), so the parse fails rather than
+			// misreads - point the caller at the fix instead of a bare "invalid".
+			if hasBasePrefix(v.Str) {
+				return interpreter.Null(), fmt.Errorf("toInt(%q, %d): a 0x / 0o / 0b prefix is not accepted; pass the bare digits", v.Str, radix)
+			}
+			return interpreter.Null(), fmt.Errorf("toInt(%q, %d): not a valid base-%d integer", v.Str, radix, radix)
+		}
+		return interpreter.IntVal(n), nil
+	}
 	switch v.Kind {
 	case interpreter.KindInt:
 		return v, nil
@@ -118,6 +149,11 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	case interpreter.KindString:
 		n, err := strconv.ParseInt(v.Str, 10, 64)
 		if err != nil {
+			// The one-arg form is decimal only, so a 0x / 0o / 0b number lands here;
+			// point at the radix form rather than a bare "invalid".
+			if hasBasePrefix(v.Str) {
+				return interpreter.Null(), fmt.Errorf("toInt(%q): not a decimal integer; for a 0x / 0o / 0b number use toInt(s, radix) with the bare digits", v.Str)
+			}
 			return interpreter.Null(), fmt.Errorf("toInt(%q): not a valid integer", v.Str)
 		}
 		return interpreter.IntVal(n), nil
@@ -128,6 +164,23 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.IntVal(0), nil
 	}
 	return interpreter.Null(), fmt.Errorf("toInt(): cannot convert %s to int", v.Kind)
+}
+
+// hasBasePrefix reports whether s, after an optional leading + or -, begins with a
+// 0x / 0o / 0b base prefix - the shape toInt's explicit-radix form rejects, so its
+// error can say why.
+func hasBasePrefix(s string) bool {
+	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
+		s = s[1:]
+	}
+	if len(s) < 2 || s[0] != '0' {
+		return false
+	}
+	switch s[1] {
+	case 'x', 'X', 'o', 'O', 'b', 'B':
+		return true
+	}
+	return false
 }
 
 // toFloatFn implements `convert.toFloat(v)`:
