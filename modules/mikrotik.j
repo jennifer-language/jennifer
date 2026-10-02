@@ -275,7 +275,8 @@ func decodeLen(buf as bytes, off as int) {
         return (($head & 0x1f) << 16) | ($buf[$off + 1] << 8) | $buf[$off + 2];
     }
     if ($size == 4) {
-        return (($head & 0x0f) << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off +
+        return (($head & 0x0f) << 24) |
+            ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off +
             3];
     }
     return ($buf[$off + 1] << 24) | ($buf[$off + 2] << 16) | ($buf[$off + 3] << 8) | $buf[$off + 4];

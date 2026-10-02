@@ -294,8 +294,10 @@ func testStripCredentialHeaders() {
 # Origin comparison drives the cross-origin decision: same host/scheme = same
 # origin; a different host is cross-origin (credentials would be dropped).
 func testOriginComparison() {
-    testing.assertTrue(originOf("https://api.example.com/a") == originOf("https://api.example.com/b"));
-    testing.assertFalse(originOf("https://api.example.com/a") == originOf("https://evil.example.net/a"));
+    testing.assertTrue(originOf("https://api.example.com/a") ==
+        originOf("https://api.example.com/b"));
+    testing.assertFalse(originOf("https://api.example.com/a") ==
+        originOf("https://evil.example.net/a"));
 }
 
 func testResolveLocationAbsolute() {

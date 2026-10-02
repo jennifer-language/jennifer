@@ -1176,7 +1176,18 @@ func isBlockOpener(tt lexer.TokenType) bool {
 // otherwise need to be re-checked at every reflow point.
 func isBinaryJoiner(tt lexer.TokenType) bool {
 	switch tt {
-	case lexer.TOKEN_PLUS, lexer.TOKEN_AND, lexer.TOKEN_OR:
+	// Every binary operator is a wrap point, so a long expression of any kind -
+	// not just a `+` / `and` / `or` chain - breaks after an operator instead of
+	// being joined past the column limit (which `lint` L203 then rejects, leaving
+	// fmt and lint unable to agree). A binary `-` is included; the caller guards
+	// the unary case with prevIsUnaryMinus. Unary `~` / `not` are not joiners.
+	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+		lexer.TOKEN_DIV, lexer.TOKEN_PERCENT,
+		lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LE, lexer.TOKEN_GE,
+		lexer.TOKEN_EQ, lexer.TOKEN_NEQ,
+		lexer.TOKEN_AND, lexer.TOKEN_OR,
+		lexer.TOKEN_BIT_AND, lexer.TOKEN_BIT_OR, lexer.TOKEN_BIT_XOR,
+		lexer.TOKEN_SHL, lexer.TOKEN_SHR:
 		return true
 	}
 	return false

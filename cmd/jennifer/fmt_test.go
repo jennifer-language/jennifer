@@ -664,6 +664,11 @@ func TestFmtNeverAuthorsLongLine(t *testing.T) {
 		`def s as string init "prefix aaaaaaaaaaaaaaaaaaaaaaaaaaaa" + $x + " middle bbbbbbbbbbbbbbbbbbbbbbbb " + $y + " suffix cccccccccccccccccccccccccccc";`,
 		// nested literals inside a block (extra indent), decided independently
 		`func f() { def c as Cfg init Cfg{name:"service",tags:["a","b","c"],limits:Limits{max:100,min:1},note:"some longer note to push the width over the limit"}; }`,
+		// long arithmetic chain (*, -): wraps at an operator, not only +/and/or - the
+		// case where fmt used to join past the limit and lint (L203) then rejected it.
+		`func h(phi1 as float, phi2 as float, dLambda as float) { def x as float init math.cos($phi1) * math.sin($phi2) - math.sin($phi1) * math.cos($phi2) * math.cos($dLambda); return $x; }`,
+		// long comparison / bitwise chain also wraps.
+		`func b(a as int, b as int, c as int, d as int) { def m as int init ($a << 24) | ($b << 16) | ($c << 8) | $d | ($a & 255) | ($b & 255) | ($c & 255); return $m; }`,
 	}
 	for i, src := range srcs {
 		out := fmtSource(t, src)

@@ -587,7 +587,8 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
             $out[] = $gid;
         }
     } elseif ($fmt == 12) {
-        def nGroups as int init ($d[$sub + 12] << 24) | ($d[$sub + 13] << 16) | ($d[$sub + 14] << 8) | $d[$sub +
+        def nGroups as int init ($d[$sub + 12] << 24) |
+            ($d[$sub + 13] << 16) | ($d[$sub + 14] << 8) | $d[$sub +
             15];
         for (def cp in $cps) {
             def gid as int init 0;
@@ -596,16 +597,19 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
             while ($lo <= $hi) {
                 def mid as int init ($lo + $hi) // 2;
                 def g as int init $sub + 16 + $mid * 12;
-                def startc as int init ($d[$g] << 24) | ($d[$g + 1] << 16) | ($d[$g + 2] << 8) | $d[$g +
+                def startc as int init ($d[$g] << 24) |
+                    ($d[$g + 1] << 16) | ($d[$g + 2] << 8) | $d[$g +
                     3];
-                def endc as int init ($d[$g + 4] << 24) | ($d[$g + 5] << 16) | ($d[$g + 6] << 8) | $d[$g +
+                def endc as int init ($d[$g + 4] << 24) |
+                    ($d[$g + 5] << 16) | ($d[$g + 6] << 8) | $d[$g +
                     7];
                 if ($cp < $startc) {
                     $hi = $mid - 1;
                 } elseif ($cp > $endc) {
                     $lo = $mid + 1;
                 } else {
-                    $gid = (($d[$g + 8] << 24) | ($d[$g + 9] << 16) | ($d[$g + 10] << 8) | $d[$g +
+                    $gid = (($d[$g + 8] << 24) |
+                        ($d[$g + 9] << 16) | ($d[$g + 10] << 8) | $d[$g +
                         11]) + ($cp - $startc);
                     $lo = $hi + 1;
                 }

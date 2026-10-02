@@ -144,7 +144,8 @@ func counterBytes(counter as int) {
 func hotpKey(key as bytes, counter as int, digits as int, algorithm as string) {
     def mac as bytes init hash.hmac($key, counterBytes($counter), $algorithm);
     def offset as int init $mac[len($mac) - 1] & 0x0F;
-    def bin as int init ((($mac[$offset] & 0x7F) << 24) | ($mac[$offset + 1] << 16) | ($mac[$offset +
+    def bin as int init ((($mac[$offset] & 0x7F) << 24) |
+        ($mac[$offset + 1] << 16) | ($mac[$offset +
         2] << 8) | $mac[$offset + 3]);
     return padCode($bin % powTen($digits), $digits);
 }
