@@ -57,6 +57,8 @@ io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
 | `strings.startsWith(s, prefix)`               | bool           |                                                           |
 | `strings.endsWith(s, suffix)`                 | bool           |                                                           |
 | `strings.indexOf(s, sub)`                     | int            | Rune index of first occurrence; `-1` if not found         |
+| `strings.indexOf(s, sub, from)`               | int            | As above but searching from rune offset `from` (in `[0, len]`); `from = idx + 1` walks every occurrence in one pass |
+| `strings.lastIndexOf(s, sub)`                 | int            | Rune index of the *last* occurrence; `-1` if not found    |
 | `strings.trim(s)`                             | string         | Strip leading and trailing whitespace                     |
 | `strings.trimLeft(s)`, `strings.trimRight(s)` | string         | One-sided trim                                            |
 | `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`           |

@@ -44,6 +44,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "startsWith", startsWithFn)
 	in.RegisterNamespaced(LibraryName, "endsWith", endsWithFn)
 	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
+	in.RegisterNamespaced(LibraryName, "lastIndexOf", lastIndexOfFn)
 	in.RegisterNamespaced(LibraryName, "trim", trimFn)
 	in.RegisterNamespaced(LibraryName, "trimLeft", trimLeftFn)
 	in.RegisterNamespaced(LibraryName, "trimRight", trimRightFn)
@@ -262,11 +263,14 @@ func endsWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	return interpreter.BoolVal(gostrings.HasSuffix(s, suffix)), nil
 }
 
-// indexOfFn returns the rune index of the first occurrence of sub in s, or
-// -1 if sub is not present.
+// indexOfFn returns the rune index of the first occurrence of sub in s at or
+// after the rune offset `from` (default 0), or -1 if sub is not present in that
+// range. `from` must be in [0, len(s)] (runes); it carries the offset so finding
+// every occurrence is a single left-to-right walk (`from = idx + 1` each step),
+// matching binary.indexOf's offset.
 func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityN("indexOf", args, 2); err != nil {
-		return interpreter.Null(), err
+	if len(args) != 2 && len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("indexOf(): expects 2 or 3 arguments (s, sub[, from]), got %d", len(args))
 	}
 	s, err := requireString("indexOf", args, 0)
 	if err != nil {
@@ -276,8 +280,39 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	byteIdx := gostrings.Index(s, sub)
-	return interpreter.IntVal(int64(runeIndex(s, byteIdx))), nil
+	if len(args) == 2 {
+		return interpreter.IntVal(int64(runeIndex(s, gostrings.Index(s, sub)))), nil
+	}
+	from, err := requireInt("indexOf", args, 2)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	byteFrom, err := byteOffsetForRune(s, int(from))
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("indexOf(): from %v", err)
+	}
+	rel := gostrings.Index(s[byteFrom:], sub)
+	if rel < 0 {
+		return interpreter.IntVal(-1), nil
+	}
+	return interpreter.IntVal(int64(runeIndex(s, byteFrom+rel))), nil
+}
+
+// lastIndexOfFn returns the rune index of the last occurrence of sub in s, or
+// -1 if absent - the trailing-edge mirror of indexOf.
+func lastIndexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if err := arityN("lastIndexOf", args, 2); err != nil {
+		return interpreter.Null(), err
+	}
+	s, err := requireString("lastIndexOf", args, 0)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	sub, err := requireString("lastIndexOf", args, 1)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.IntVal(int64(runeIndex(s, gostrings.LastIndex(s, sub)))), nil
 }
 
 // trimFn strips leading and trailing whitespace (Unicode-aware).

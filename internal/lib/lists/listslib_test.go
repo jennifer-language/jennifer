@@ -79,6 +79,21 @@ func TestContainsHaystackNeedleOrder(t *testing.T) {
 	}
 }
 
+func TestIndexOf(t *testing.T) {
+	xs := intList(10, 20, 30, 20)
+	got, _ := indexOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs, interpreter.IntVal(20)})
+	if got.Int != 1 {
+		t.Errorf("indexOf first match: got %d, want 1", got.Int)
+	}
+	got, _ = indexOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs, interpreter.IntVal(99)})
+	if got.Int != -1 {
+		t.Errorf("indexOf absent: got %d, want -1", got.Int)
+	}
+	if _, err := indexOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs}); err == nil {
+		t.Errorf("indexOf arity: expected error")
+	}
+}
+
 func TestSliceBoundsErrors(t *testing.T) {
 	xs := intList(1, 2, 3)
 	for _, c := range []struct {

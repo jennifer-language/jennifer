@@ -150,6 +150,33 @@ func TestToString(t *testing.T) {
 	mustErr(t, "toString() arity", toStringFn)
 }
 
+func TestToStringRadix(t *testing.T) {
+	I, S := interpreter.IntVal, interpreter.StringVal
+	cases := []struct {
+		n, radix int64
+		want     string
+	}{
+		{204, 16, "cc"}, // a colour channel, the report's case
+		{255, 16, "ff"},
+		{10, 2, "1010"},
+		{64, 8, "100"},
+		{42, 10, "42"},
+		{-255, 16, "-ff"},
+	}
+	for _, c := range cases {
+		if v := mustVal(t, toStringFn, I(c.n), I(c.radix)); v.Str != c.want {
+			t.Errorf("toString(%d, %d) = %q, want %q", c.n, c.radix, v.Str, c.want)
+		}
+	}
+	// round-trip through toInt
+	if v := mustVal(t, toIntFn, S("cc"), I(16)); v.Int != 204 {
+		t.Errorf("toInt(toString(204,16),16) = %d, want 204", v.Int)
+	}
+	mustErr(t, "radix on non-int", toStringFn, S("hi"), I(16))
+	mustErr(t, "bad radix", toStringFn, I(5), I(36))
+	mustErr(t, "non-int radix", toStringFn, I(5), S("16"))
+}
+
 func TestToBoolCanonicalOnly(t *testing.T) {
 	I, F, S, B := interpreter.IntVal, interpreter.FloatVal, interpreter.StringVal, interpreter.BoolVal
 	if v := mustVal(t, toBoolFn, B(true)); !v.Bool {

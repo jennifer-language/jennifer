@@ -220,11 +220,31 @@ func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	return interpreter.Null(), fmt.Errorf("toFloat(): cannot convert %s to float", v.Kind)
 }
 
-// toStringFn implements `convert.toString(v)`: returns the value's
-// display form. Never fails (every kind has a defined Display).
+// toStringFn implements `convert.toString(v[, radix])`. One argument returns the
+// value's display form (never fails; every kind has a defined Display). A second
+// argument renders an int's digits in a chosen base - the print half of
+// toInt(s, radix), so a value round-trips through either direction. The base is
+// one of 2, 8, 10, 16 (toInt's set), produces bare lowercase digits with no 0x /
+// 0o / 0b prefix, and is valid only for an int (a radix on any other kind is a
+// misuse, mirroring toInt's string-only radix).
 func toStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("toString", args); err != nil {
-		return interpreter.Null(), err
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("toString expects 1 or 2 arguments (value[, radix]), got %d", len(args))
+	}
+	if len(args) == 2 {
+		if args[0].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("toString(): a radix is only valid when converting an int, not %s", args[0].Kind)
+		}
+		if args[1].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("toString(): radix must be int, got %s", args[1].Kind)
+		}
+		radix := args[1].Int
+		switch radix {
+		case 2, 8, 10, 16:
+		default:
+			return interpreter.Null(), fmt.Errorf("toString(): radix must be 2, 8, 10, or 16, got %d", radix)
+		}
+		return interpreter.StringVal(strconv.FormatInt(args[0].Int, int(radix))), nil
 	}
 	return interpreter.StringVal(args[0].Display()), nil
 }

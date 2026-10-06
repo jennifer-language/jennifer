@@ -51,6 +51,7 @@ flat lookup view, not authoritative.
 | [`convert`](convert.md)`.toFloat(v)`                  | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).                                                          |
 | [`convert`](convert.md)`.toInt(v [, radix])`          | Convert to int (float truncates, string parses, bool→1/0); optional `radix` 2/8/10/16 parses a string's bare digits (strip any `0x`/`0o`/`0b` prefix first). |
 | [`convert`](convert.md)`.toString(v)`                 | Convert to string (always succeeds; uses the value's display form).                                                                 |
+| [`convert`](convert.md)`.toString(n, radix)`          | Render an int in base 2/8/10/16 (bare lowercase digits); the print half of `toInt(s, radix)`.                                       |
 | [`convert`](convert.md)`.typeOf(v)`                   | Runtime kind as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"list"`, `"map"`, `"object"`).                         |
 | [`convert`](convert.md)`.objectType(v)`               | Specific registered name of an opaque object (e.g. `"json.Value"`); errors on a non-object.                                         |
 | [`crc`](crc.md)`.compute(b, algo)`                    | One-shot checksum. `algo` is `"crc32"` or `"crc64"`. Returns big-endian bytes (4 or 8).                                             |
@@ -192,6 +193,7 @@ flat lookup view, not authoritative.
 | [`lists`](lists.md)`.any(xs, fn)`                     | True if the `func` `fn(x)` is true for any element. Short-circuits.                                                                 |
 | [`lists`](lists.md)`.concat(a, b)`                    | New list with `a`'s elements followed by `b`'s.                                                                                     |
 | [`lists`](lists.md)`.contains(xs, item)`              | True if `item` appears in `xs` (haystack, needle).                                                                                  |
+| [`lists`](lists.md)`.indexOf(xs, item)`               | Index of the first element equal to `item`, or `-1` (haystack, needle).                                                             |
 | [`lists`](lists.md)`.filter(xs, fn)`                  | New list of the elements where the `func` `fn(x)` returns true.                                                                     |
 | [`lists`](lists.md)`.find(xs, fn)`                    | First element where the `func` `fn(x)` is true; errors (catchable) if none.                                                          |
 | [`lists`](lists.md)`.first(xs)`                       | Element at index 0. Empty input errors.                                                                                             |
@@ -399,7 +401,8 @@ flat lookup view, not authoritative.
 | [`strings`](strings.md)`.contains(s, sub)`            | True if `s` contains the substring `sub`.                                                                                           |
 | [`strings`](strings.md)`.endsWith(s, suffix)`         | True if `s` ends with `suffix`.                                                                                                     |
 | [`strings`](strings.md)`.fold(s)`                     | Remove common Latin diacritics for a sort / search key (`Österreich` -> `Osterreich`); case preserved. Not full Unicode collation. |
-| [`strings`](strings.md)`.indexOf(s, sub)`             | Rune index of first `sub` in `s`, or `-1` if absent.                                                                                |
+| [`strings`](strings.md)`.indexOf(s, sub [, from])`    | Rune index of first `sub` in `s` at/after `from` (default `0`), or `-1`.                                                            |
+| [`strings`](strings.md)`.lastIndexOf(s, sub)`         | Rune index of the last `sub` in `s`, or `-1` if absent.                                                                             |
 | [`strings`](strings.md)`.join(parts, sep)`            | Concatenate `list of string` `parts` separated by `sep`. Inverse of `strings.split`.                                                |
 | [`strings`](strings.md)`.lower(s)`                    | Lowercase `s` (Unicode-aware).                                                                                                      |
 | [`strings`](strings.md)`.repeat(s, n)`                | `n` non-negative copies of `s` concatenated.                                                                                        |

@@ -40,6 +40,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "reverse", reverseFn)
 	in.RegisterNamespaced(LibraryName, "sort", sortFn)
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
+	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "shuffle", shuffleFn)
@@ -513,6 +514,24 @@ func containsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		}
 	}
 	return interpreter.BoolVal(false), nil
+}
+
+// indexOfFn returns the index of the first element equal to `item` (by the same
+// deep structural equality as `contains` / `==`), or -1 if absent - the
+// position-returning sibling of contains, mirroring strings.indexOf.
+func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.indexOf expects 2 arguments (list, item), got %d", len(args))
+	}
+	if err := requireList("indexOf", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	for i, v := range args[0].List {
+		if v.Equal(args[1]) {
+			return interpreter.IntVal(int64(i)), nil
+		}
+	}
+	return interpreter.IntVal(-1), nil
 }
 
 // concatFn returns a new list with `a`'s elements followed by `b`'s.

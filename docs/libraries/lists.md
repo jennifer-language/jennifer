@@ -40,6 +40,7 @@ original.
 | `lists.reverse(xs)`             | list         | New list, elements in reverse order.                               |
 | `lists.sort(xs)`                | list         | New list sorted ascending. See "Sort" below.                       |
 | `lists.contains(xs, item)`      | bool         | True iff `item` appears in `xs` under structural equality.         |
+| `lists.indexOf(xs, item)`       | int          | Index of the first element equal to `item` (same structural equality as `contains`); `-1` if absent. |
 | `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s.                                  |
 | `lists.slice(xs, start)`        | list         | Elements from `start` to end (exclusive `end` = `len(xs)`).        |
 | `lists.slice(xs, start, end)`   | list         | Elements `[start, end)`. Out-of-range bounds error.                |

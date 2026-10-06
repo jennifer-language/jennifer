@@ -88,6 +88,38 @@ func TestIndexOfRuneIndexed(t *testing.T) {
 	}
 }
 
+func TestIndexOfFrom(t *testing.T) {
+	in := newLib(t)
+	// first "b" is rune 2; resuming at 3 finds the second at rune 6; é is one rune.
+	if got := callFn(t, in, "indexOf", sv("héllo"), sv("l"), iv(3)).Int; got != 3 {
+		t.Errorf("indexOf from: got %d, want 3", got)
+	}
+	if got := callFn(t, in, "indexOf", sv("a.b.c.b"), sv("b"), iv(3)).Int; got != 6 {
+		t.Errorf("indexOf from offset: got %d, want 6", got)
+	}
+	if got := callFn(t, in, "indexOf", sv("abc"), sv("a"), iv(1)).Int; got != -1 {
+		t.Errorf("indexOf from past match: got %d, want -1", got)
+	}
+	// from == len (rune count) is allowed: an empty-tail resume finds nothing.
+	if got := callFn(t, in, "indexOf", sv("abc"), sv("x"), iv(3)).Int; got != -1 {
+		t.Errorf("indexOf from at end: got %d, want -1", got)
+	}
+}
+
+func TestLastIndexOf(t *testing.T) {
+	in := newLib(t)
+	if got := callFn(t, in, "lastIndexOf", sv("a.b.c.b"), sv("b")).Int; got != 6 {
+		t.Errorf("lastIndexOf: got %d, want 6", got)
+	}
+	// rune-indexed: two "héllo", the last starts at rune 6.
+	if got := callFn(t, in, "lastIndexOf", sv("héllo.héllo"), sv("héllo")).Int; got != 6 {
+		t.Errorf("lastIndexOf rune index: got %d, want 6", got)
+	}
+	if got := callFn(t, in, "lastIndexOf", sv("abc"), sv("z")).Int; got != -1 {
+		t.Errorf("lastIndexOf absent: got %d, want -1", got)
+	}
+}
+
 func TestTrim(t *testing.T) {
 	in := newLib(t)
 	if got := callFn(t, in, "trim", sv("  hi \t ")).Str; got != "hi" {

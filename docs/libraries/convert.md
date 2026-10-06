@@ -25,6 +25,7 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 | `convert.toInt(s, radix)`                  | string                      | parse `s` in `radix` 2 / 8 / 10 / 16 (bare digits; strip any `0x` / `0o` / `0b` prefix first) |
 | `convert.toFloat(v)`                       | int / float / string / bool | convert / identity / parse / `true`=1.0, `false`=0.0                  |
 | `convert.toString(v)`                      | any                         | always succeeds; uses the value's display form                        |
+| `convert.toString(n, radix)`               | int                         | render an int's digits in base 2, 8, 10, or 16 (bare lowercase, no prefix) - the print half of `toInt(s, radix)` |
 | `convert.toBool(v)`                        | bool / int / float / string | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`)  |
 | `convert.typeOf(v)`                        | any                         | returns the kind as a string: `"int"`, `"float"`, ..., `"list"`, `"map"`, `"object"` |
 | `convert.objectType(v)`                    | object                      | specific registered name of an opaque object, e.g. `"json.Value"`; errors on a non-object |

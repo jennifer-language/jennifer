@@ -515,7 +515,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`convert`** - `toInt toFloat toString toBool`, `typeOf`, `objectType`,
   `fromCodepoint` / `toCodepoint`, `bytesFromString` / `stringFromBytes` (utf-8).
   `toInt(s, radix)` parses a string's bare digits in base 2/8/10/16 (strip any
-  `0x`/`0o`/`0b` prefix first). Note: the callees are
+  `0x`/`0o`/`0b` prefix first), and `toString(n, radix)` is the inverse (renders
+  an int in those bases, bare lowercase). Note: the callees are
   `toInt` etc. because `int`/`float`/`string`/`bool`/`bytes` are reserved type
   keywords (they appear only after `as`).
 - **`math`** - arithmetic `abs min max sqrt pow floor ceil round trunc sign
@@ -570,11 +571,12 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   zero vector to `normalize`, or a non-finite (overflow) result is a catchable
   error, not a NaN.
 - **`strings`** - `upper lower fold contains startsWith endsWith indexOf
-  trim trimLeft trimRight replace repeat substring split chars join`.
+  lastIndexOf trim trimLeft trimRight replace repeat substring split chars join`
+  (`indexOf(s, sub[, from])` carries an optional rune offset).
   Rune-indexed. `fold` folds Latin diacritics / ligatures for a sort or search
   key (`Straße` -> `Strasse`) and **preserves case** - it is not a compare; for
   case-insensitive matching use `lower` (`lower(fold(a)) == lower(fold(b))`).
-- **`lists`** - `push pop first last head tail reverse sort contains concat
+- **`lists`** - `push pop first last head tail reverse sort contains indexOf concat
   slice shuffle range`, plus higher-order `map filter reduce find any all sortBy`
   (each takes a `func` value). Non-mutating (they return new lists).
 - **`binary`** - bulk operations on `bytes` (the byte-data counterpart to
