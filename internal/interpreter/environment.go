@@ -42,6 +42,7 @@ func borrowBlockEnv(parent *Environment, numSlots int) *Environment {
 	e.parent = parent
 	e.root = rootFor(parent, e)
 	e.depth = inheritDepth(parent)
+	e.borrowDefs = parent != nil && parent.borrowDefs
 	// releaseBlockEnv zeroes every used slot before returning the env
 	// to the pool, so the backing array's [0, cap) range is Binding{}
 	// on entry - we just re-slice to the requested length. When
@@ -76,6 +77,7 @@ func releaseBlockEnv(e *Environment) {
 	e.depth = nil
 	e.profChild.Store(0)
 	e.cancel = nil
+	e.borrowDefs = false
 	e.slots = e.slots[:0]
 	// Drop any deferred calls so a pooled frame never carries a stale one into
 	// its next use. finishFrame runs them before release, so this is normally
@@ -164,6 +166,13 @@ type Environment struct {
 	// (i.global) and on pooled block frames (they read through env.root, never
 	// carry their own).
 	cancel *TaskState
+	// borrowDefs enables local-binding borrow (DefineStmt.Borrow) for defs run
+	// in this frame. Set true on a method call frame whose borrow context holds
+	// (methodBorrowCtx) and inherited by the body's nested block frames, so an
+	// in-method `def` can alias its initializer instead of copying it under the
+	// same soundness gate as a borrowed parameter. False on the global root, a
+	// spawn snapshot root, and every top-level frame, so those defs always copy.
+	borrowDefs bool
 }
 
 // rootCancel returns this frame's goroutine-local task state (the running spawn's
@@ -210,6 +219,7 @@ func NewEnvironment(parent *Environment) *Environment {
 	}
 	env.root = rootFor(parent, env)
 	env.depth = inheritDepth(parent)
+	env.borrowDefs = parent != nil && parent.borrowDefs
 	return env
 }
 
@@ -224,6 +234,7 @@ func NewEnvironmentSized(parent *Environment, numSlots int) *Environment {
 	}
 	env.root = rootFor(parent, env)
 	env.depth = inheritDepth(parent)
+	env.borrowDefs = parent != nil && parent.borrowDefs
 	if numSlots > 0 {
 		env.slots = make([]Binding, numSlots)
 	}

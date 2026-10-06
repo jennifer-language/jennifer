@@ -69,6 +69,100 @@ func TestBorrowableParamAnalysis(t *testing.T) {
 	}
 }
 
+// findDef returns the first DefineStmt named `name` anywhere in stmts (recursing
+// through control-flow blocks, not expressions).
+func findDef(stmts []Stmt, name string) *DefineStmt {
+	for _, s := range stmts {
+		switch st := s.(type) {
+		case *DefineStmt:
+			if st.VarName == name {
+				return st
+			}
+		case *IfStmt:
+			if d := findDef(st.Then.Stmts, name); d != nil {
+				return d
+			}
+			for _, b := range st.ElseIfBodies {
+				if d := findDef(b.Stmts, name); d != nil {
+					return d
+				}
+			}
+			if st.Else != nil {
+				if d := findDef(st.Else.Stmts, name); d != nil {
+					return d
+				}
+			}
+		case *WhileStmt:
+			if d := findDef(st.Body.Stmts, name); d != nil {
+				return d
+			}
+		case *ForStmt:
+			if d := findDef(st.Body.Stmts, name); d != nil {
+				return d
+			}
+		case *ForEachStmt:
+			if d := findDef(st.Body.Stmts, name); d != nil {
+				return d
+			}
+		case *RepeatStmt:
+			if d := findDef(st.Body.Stmts, name); d != nil {
+				return d
+			}
+		case *TryStmt:
+			if d := findDef(st.Body.Stmts, name); d != nil {
+				return d
+			}
+			if d := findDef(st.CatchBody.Stmts, name); d != nil {
+				return d
+			}
+		}
+	}
+	return nil
+}
+
+// Local-binding borrow analysis. markBorrowableDefs flags an in-method `def`
+// borrowable when its type is borrow-safe, the binding is never written, and its
+// initializer aliases only never-written roots. A false positive would alias a
+// local whose source is later mutated (a value-semantics hole), so the write-
+// scan over the init's roots and the fail-closed unbounded-initializer default
+// are pinned here; the runtime borrow gate is covered in interpreter tests.
+func TestBorrowableDefAnalysis(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		def  string
+		want bool
+	}{
+		{"field of read-only param", `def struct P { xs as list of int }; func f(p as P) { def s as list of int init $p.xs; def n as int init len($s); }`, "s", true},
+		{"index of read-only param", `func f(xs as list of list of int) { def s as list of int init $xs[0]; def n as int init len($s); }`, "s", true},
+		{"user call, no args", `func g() { return [1]; } func f() { def s as list of int init g(); def n as int init len($s); }`, "s", true},
+		{"user call, read-only arg", `func g(ys as list of int) { return $ys; } func f(xs as list of int) { def s as list of int init g($xs); def n as int init len($s); }`, "s", true},
+		{"source var written later", `func f() { def a as list of int init [1]; def s as list of int init $a; $a[0] = 9; }`, "s", false},
+		{"param root written later", `func f(p as list of int) { def s as list of int init $p; $p[0] = 9; }`, "s", false},
+		{"binding itself written", `func f(p as list of int) { def s as list of int init $p; $s[0] = 9; }`, "s", false},
+		{"nested-list type unsafe", `func f(p as list of list of int) { def s as list of list of int init $p; def n as int init len($s); }`, "s", false},
+		{"scalar type", `func f(p as list of int) { def s as int init $p[0]; }`, "s", false},
+		{"const ref", `def const K as list of int init [1, 2]; func f() { def s as list of int init K; def n as int init len($s); }`, "s", true},
+		{"unbounded builtin call", `func f(xs as list of int) { def s as list of int init lists.slice($xs, 0, 1); def n as int init len($s); }`, "s", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			prog := mustResolve(t, c.src)
+			m := methodNamed(prog, "f")
+			if m == nil {
+				t.Fatal("method f not found")
+			}
+			d := findDef(m.Body.Stmts, c.def)
+			if d == nil {
+				t.Fatalf("def %q not found", c.def)
+			}
+			if d.Borrow != c.want {
+				t.Errorf("def %q: Borrow = %v, want %v", c.def, d.Borrow, c.want)
+			}
+		})
+	}
+}
+
 // Re-resolving is idempotent: the borrow flags come out the same, never
 // accumulating (the flag is assigned, not OR-ed).
 func TestBorrowAnalysisIdempotent(t *testing.T) {

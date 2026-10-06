@@ -991,6 +991,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 	}
 	callFrame.depth = dc
 	borrowCtx := i.methodBorrowCtx(m)
+	callFrame.borrowDefs = borrowCtx
 	for idx, p := range m.Params {
 		if !args[idx].MatchesDeclared(p.Type) {
 			releaseBlockEnv(callFrame)
@@ -1857,6 +1858,15 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		// private (its evaluator copied every element), so skip the
 		// redundant whole-value copy - only the stamp is needed.
 		if rhsFreshLiteral(st.InitExpr) {
+			val = stampDeclaredType(v, st.VarType)
+		} else if st.Borrow && env.borrowDefs {
+			// Local-binding borrow: alias the initializer instead of copying it.
+			// The resolver proved the binding read-only and every root its
+			// initializer aliases unwritten in the method, and the method's borrow
+			// context (env.borrowDefs) rules out a mutable global being aliased and
+			// mutated during the binding's life - so the alias is observationally
+			// identical to a copy. The type is borrow-safe, so the stamp only sets
+			// header tags and never recurses into the shared backing.
 			val = stampDeclaredType(v, st.VarType)
 		} else {
 			val = stampDeclaredType(i.eagerCopy(v, st), st.VarType)
@@ -5066,6 +5076,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	numParams := len(m.Params)
 	callFrame := borrowBlockEnv(effectiveGlobal(env), numParams)
 	borrowCtx := i.methodBorrowCtx(m)
+	callFrame.borrowDefs = borrowCtx
 	for idx, p := range m.Params {
 		a := argExprs[idx]
 		v, err := i.evalExpr(a, env)
@@ -5240,6 +5251,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		numParams := len(m.Params)
 		callFrame := borrowBlockEnv(effectiveGlobal(env), numParams)
 		borrowCtx := i.methodBorrowCtx(m)
+		callFrame.borrowDefs = borrowCtx
 		for idx, p := range m.Params {
 			a := c.Args[idx]
 			v, err := i.evalExpr(a, env)

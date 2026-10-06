@@ -367,6 +367,11 @@ type DefineStmt struct {
 	// Slot the binding will occupy in its enclosing frame.
 	// Populated by Resolve(); default -1 means "not resolved".
 	Slot int
+	// Borrow is set by markBorrowableDefs when this in-method `def` can store
+	// its initializer by alias instead of deep-copying it (the local-binding
+	// analogue of Param.Borrow). The interpreter still gates it on the method's
+	// borrow context (env.borrowDefs) at execDefine.
+	Borrow bool
 }
 
 func (*DefineStmt) stmtNode() {}

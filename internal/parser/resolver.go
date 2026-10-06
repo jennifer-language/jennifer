@@ -233,6 +233,7 @@ func (r *resolver) resolveMethod(m *MethodDef, numGlobals int, globals *scopeFra
 		return err
 	}
 	markBorrowableParams(m)
+	markBorrowableDefs(m)
 	return nil
 }
 
@@ -259,6 +260,166 @@ func markBorrowableParams(m *MethodDef) {
 		// interpreter-side hazard scan (globalsafe.go), so a future write-capable
 		// grammar node cannot silently leave a mutated parameter borrowable.
 		p.Borrow = !w.conservative && borrowSafeType(&p.Type) && !w.written[p.Name]
+	}
+}
+
+// markBorrowableDefs flags each in-method `def x as T init EXPR;` whose value
+// can be stored by alias instead of deep-copied - the local-binding analogue of
+// markBorrowableParams. The copy at a bind exists only to stop a later mutation
+// from reaching the binding through a shared backing; it is unnecessary when the
+// binding is never written and the value it aliases cannot be mutated while the
+// binding is live. All conditions are static within the method body:
+//
+//   - T is a borrow-safe compound type (borrowSafeType), so stampDeclaredType
+//     sets only header tags and never recurses into the shared backing.
+//   - x is never written anywhere in the method (no-shadowing makes the name
+//     unambiguous), so the alias stays read-only.
+//   - every binding the initializer could alias (aliasRoots) is a parameter /
+//     local / const the method never writes. A global among the roots is covered
+//     at runtime by the borrow gate (methodBorrowCtx: the method mutates no
+//     global, so none is mutated during the binding's life), and an unbounded
+//     initializer - a builtin / module / func-value call - is not borrowable.
+//
+// The runtime gates the flag on env.borrowDefs (methodBorrowCtx), exactly as a
+// borrowable parameter is gated at its call site, so a method that is not
+// globals-safe copies as before. A fresh-literal initializer is already elided
+// at the bind site (rhsFreshLiteral), so the flag matters only for the reference
+// shapes: a field / index extraction or a user-method return bound to a local.
+func markBorrowableDefs(m *MethodDef) {
+	w := writeScan{written: map[string]bool{}}
+	w.stmts(m.Body.Stmts)
+	if w.conservative {
+		return // an unrecognised write shape: borrow nothing, as params do
+	}
+	markDefsIn(m.Body.Stmts, &w)
+}
+
+// markDefsIn walks the statement tree stamping each borrowable DefineStmt. It
+// does not descend into expressions, so a `def` inside a spawn body (reached
+// through a SpawnExpr) is never visited - that def runs against the spawn's own
+// deep-copied snapshot and is left to copy, matching the write-scan.
+func markDefsIn(stmts []Stmt, w *writeScan) {
+	for _, s := range stmts {
+		switch st := s.(type) {
+		case *DefineStmt:
+			markOneDef(st, w)
+		case *IfStmt:
+			markDefsIn(st.Then.Stmts, w)
+			for _, b := range st.ElseIfBodies {
+				markDefsIn(b.Stmts, w)
+			}
+			if st.Else != nil {
+				markDefsIn(st.Else.Stmts, w)
+			}
+		case *MatchStmt:
+			for _, arm := range st.Arms {
+				markDefsIn(arm.Body.Stmts, w)
+			}
+			if st.Else != nil {
+				markDefsIn(st.Else.Stmts, w)
+			}
+		case *WhileStmt:
+			markDefsIn(st.Body.Stmts, w)
+		case *ForStmt:
+			if st.Init != nil {
+				markDefsIn([]Stmt{st.Init}, w)
+			}
+			markDefsIn(st.Body.Stmts, w)
+		case *ForEachStmt:
+			markDefsIn(st.Body.Stmts, w)
+		case *RepeatStmt:
+			markDefsIn(st.Body.Stmts, w)
+		case *TryStmt:
+			markDefsIn(st.Body.Stmts, w)
+			markDefsIn(st.CatchBody.Stmts, w)
+		case *Block:
+			markDefsIn(st.Stmts, w)
+		}
+	}
+}
+
+func markOneDef(st *DefineStmt, w *writeScan) {
+	if st.IsConst || st.InitExpr == nil {
+		return
+	}
+	if !borrowSafeType(&st.VarType) || w.written[st.VarName] {
+		return
+	}
+	roots, bounded := aliasRoots(st.InitExpr)
+	if !bounded {
+		return
+	}
+	for r := range roots {
+		if w.written[r] {
+			return
+		}
+	}
+	st.Borrow = true
+}
+
+// aliasRoots returns the set of binding names whose backing the value of e could
+// alias, and whether that set is bounded. A fresh rvalue (a literal, range,
+// slice, or the scalar result of arithmetic / comparison / len) aliases nothing.
+// A var / const reference aliases that binding; an index / field access aliases
+// its target's root; a user-method call may return a value aliasing any of its
+// arguments (union their roots) or a global (left to the runtime borrow gate).
+// Anything the scan cannot bound - a builtin or module call, a func-value call,
+// a spawn, or an unrecognised node - returns bounded = false so the caller
+// copies.
+func aliasRoots(e Expr) (roots map[string]bool, bounded bool) {
+	roots = map[string]bool{}
+	if collectAliasRoots(e, roots) {
+		return roots, true
+	}
+	return nil, false
+}
+
+func collectAliasRoots(e Expr, roots map[string]bool) bool {
+	switch n := e.(type) {
+	case nil:
+		return true
+	case *IntLit, *FloatLit, *StringLit, *BoolLit, *NullLit,
+		*ListLit, *MapLit, *StructLit, *RangeExpr, *SliceExpr,
+		*InterpStringExpr, *PreEval:
+		// Fresh rvalue: a new container whose evaluator copies every element in,
+		// or a scalar. Aliases no existing binding.
+		return true
+	case *BinaryExpr, *UnaryExpr, *LenExpr:
+		// Produce a fresh scalar or concatenated string; the result aliases
+		// neither operand.
+		return true
+	case *VarExpr:
+		roots[n.Name] = true
+		return true
+	case *ConstRefExpr:
+		// A user const (deep-immutable, so aliasing it is always stable) or a
+		// bare method name used as a func value (immutable, and not a borrow-safe
+		// type). The never-written check always passes for a const.
+		roots[n.Name] = true
+		return true
+	case *IndexExpr:
+		return collectAliasRoots(n.Target, roots)
+	case *FieldAccessExpr:
+		return collectAliasRoots(n.Target, roots)
+	case *CallExpr:
+		// A user-method return may alias any argument's backing (if the callee
+		// borrows a parameter and returns a value into it); union the argument
+		// roots. A global the callee returns an alias to is covered by the borrow
+		// gate. An unresolved callee (a bare builtin-shaped call) is unbounded.
+		if n.Method == nil {
+			return false
+		}
+		for _, a := range n.Args {
+			if !collectAliasRoots(a, roots) {
+				return false
+			}
+		}
+		return true
+	default:
+		// QualifiedCallExpr (builtin / module), CallValueExpr (func value),
+		// SpawnExpr, and any unrecognised node: the result's aliasing cannot be
+		// bounded, so fail closed.
+		return false
 	}
 }
 
