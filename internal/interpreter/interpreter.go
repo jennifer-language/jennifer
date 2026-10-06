@@ -2774,7 +2774,9 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 		// returns: Jennifer has no closure that could retain the frame, and a
 		// spawn in the body captures a deep-copied snapshot, not this env.
 		iterEnv := borrowBlockEnv(env, st.Body.NumSlots)
-		if err := iterEnv.DefineAt(st.IterSlot, st.VarName, iter.Copy(), iterType, false); err != nil {
+		// iter comes from the loop's own deep-copied snapshot (below), so it is
+		// already private - no second copy needed here.
+		if err := iterEnv.DefineAt(st.IterSlot, st.VarName, iter, iterType, false); err != nil {
 			releaseBlockEnv(iterEnv)
 			file, line, col := posFor(st)
 			return blockResult{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
@@ -2787,15 +2789,17 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 		return res, err
 	}
 
-	// Iterate a snapshot of the collection's header so the loop is
-	// independent of in-loop mutation to the same binding: an in-place
-	// element write or an append (which may or may not reallocate the
-	// backing) must not change what the current loop yields. Without the
-	// snapshot, iteration behaviour would depend on Go slice capacity.
+	// Iterate a deep copy of the collection so the loop is fully independent of
+	// in-loop mutation to the same binding. A shallow header copy is not enough:
+	// a nested in-place write (`$grid[1][0] = 99`) mutates backing the header
+	// still points at, so a later iteration would yield the mutated value - the
+	// value-semantics violation the per-iteration copy could not prevent (it
+	// copies too late, after the mutation). One deep copy up front is O(n) once
+	// and always consistent; the per-iteration bind then needs no further copy.
+	snap := coll.Copy()
 	switch coll.Kind {
 	case KindList:
-		snapshot := make([]Value, len(coll.List))
-		copy(snapshot, coll.List)
+		snapshot := snap.List
 		for _, elem := range snapshot {
 			res, err := emit(elem)
 			if err != nil {
@@ -2809,8 +2813,7 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 			}
 		}
 	case KindMap:
-		snapshot := make([]MapEntry, len(coll.Map))
-		copy(snapshot, coll.Map)
+		snapshot := snap.Map
 		for _, entry := range snapshot {
 			res, err := emit(entry.Key)
 			if err != nil {
@@ -4159,7 +4162,30 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 		copy(b, coll.Bytes[lo:hi])
 		return BytesVal(b), nil
 	default: // KindString
-		return StringVal(string([]rune(coll.Str)[lo:hi])), nil
+		s := coll.Str
+		if len(s) == n {
+			// Pure ASCII (byte length equals rune count): rune offsets are byte
+			// offsets, so slice the backing directly. The substring shares backing,
+			// so this allocates nothing - unlike `[]rune(s)`, which allocated a
+			// 4-byte-per-rune copy of the whole string on every slice (a per-char
+			// loop was quadratic in allocation).
+			return StringVal(s[lo:hi]), nil
+		}
+		// Non-ASCII: find the byte offsets of rune lo and rune hi by decoding
+		// forward, rather than materialising the whole string as []rune.
+		bi, ri := 0, 0
+		for ri < lo {
+			_, sz := utf8.DecodeRuneInString(s[bi:])
+			bi += sz
+			ri++
+		}
+		blo := bi
+		for ri < hi {
+			_, sz := utf8.DecodeRuneInString(s[bi:])
+			bi += sz
+			ri++
+		}
+		return StringVal(s[blo:bi]), nil
 	}
 }
 

@@ -409,6 +409,17 @@ func (v *Value) UpsertKey(key, val Value) {
 // or falls back to the linear scan.
 func (v *Value) DropMapIndex() { v.mapIdx = nil }
 
+// BuildMapIndex builds the hash index of a KindMap Value so later LookupKey
+// calls are O(1). Exported for a library that constructs a map once and then
+// reads it by key many times (the json / toml / yaml decoders, so iterating keys
+// plus per-key get is not O(n^2)). A no-op on a non-map; declines (leaves the map
+// linear-scanned) on a duplicate or non-hashable key, like the internal builder.
+func (v *Value) BuildMapIndex() {
+	if v.Kind == KindMap {
+		v.buildMapIndex()
+	}
+}
+
 // Value semantics rest entirely on eager deep copies at every binding site:
 // execDefine / execAssign (via eagerCopy), parameter binding (bindParamValue),
 // and the spawn snapshot (DeepCopy) all take a private copy, and library
@@ -674,50 +685,61 @@ func ZeroFor(t parser.Type) Value {
 
 // Display formats the value the way `printf` should render it.
 func (v Value) Display() string {
+	var b strings.Builder
+	v.display(&b, false)
+	return b.String()
+}
+
+// display writes v's representation into b. One shared builder is threaded
+// through the whole tree, so a leaf is written once - not re-materialised and
+// re-copied at every enclosing level (the old Display-returns-a-string-per-child
+// shape was O(depth x size)). `quoted` quotes a string value (the element form,
+// so `[1, "2", 3]` is unambiguous); container children always recurse quoted.
+func (v Value) display(b *strings.Builder, quoted bool) {
 	switch v.Kind {
 	case KindNull:
-		return "null"
+		b.WriteString("null")
 	case KindInt:
-		return strconv.FormatInt(v.Int, 10)
+		b.WriteString(strconv.FormatInt(v.Int, 10))
 	case KindFloat:
-		return DisplayFloat(v.Float)
+		b.WriteString(DisplayFloat(v.Float))
 	case KindString:
-		return v.Str
+		if quoted {
+			b.WriteString(strconv.Quote(v.Str))
+		} else {
+			b.WriteString(v.Str)
+		}
 	case KindBool:
 		if v.Bool {
-			return "true"
+			b.WriteString("true")
+		} else {
+			b.WriteString("false")
 		}
-		return "false"
 	case KindList:
-		var b strings.Builder
 		b.WriteByte('[')
-		for i, e := range v.List {
+		for i := range v.List {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(displayElement(e))
+			v.List[i].display(b, true)
 		}
 		b.WriteByte(']')
-		return b.String()
 	case KindMap:
-		var b strings.Builder
 		b.WriteByte('{')
-		for i, e := range v.Map {
+		for i := range v.Map {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(displayElement(e.Key))
+			v.Map[i].Key.display(b, true)
 			b.WriteString(": ")
-			b.WriteString(displayElement(e.Value))
+			v.Map[i].Value.display(b, true)
 		}
 		b.WriteByte('}')
-		return b.String()
 	case KindBytes:
 		// bytes display as hex pairs separated by spaces, wrapped
 		// in `bytes[...]`. Picked over a string-decoded form because
 		// bytes are explicitly not assumed to be valid UTF-8 - the
 		// hex form is unambiguous and round-trippable in `%v` output.
-		var b strings.Builder
 		b.WriteString("bytes[")
 		for i, by := range v.Bytes {
 			if i > 0 {
@@ -728,13 +750,11 @@ func (v Value) Display() string {
 			b.WriteByte(hex[by&0x0f])
 		}
 		b.WriteByte(']')
-		return b.String()
 	case KindStruct:
 		// struct display reuses the literal-shaped form so a
 		// printed value reads as the source code the user would write
 		// to reproduce it. `Name{field: value, ...}` for non-empty
 		// fields; `Name{}` for empty.
-		var b strings.Builder
 		// matchPayloadNS is an internal tag on a match-bound variant payload; it
 		// is not a user-visible namespace, so render just `Variant{...}`.
 		if v.StructNS != "" && v.StructNS != matchPayloadNS {
@@ -743,21 +763,19 @@ func (v Value) Display() string {
 		}
 		b.WriteString(v.StructName)
 		b.WriteByte('{')
-		for i, f := range v.Fields {
+		for i := range v.Fields {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(f.Name)
+			b.WriteString(v.Fields[i].Name)
 			b.WriteString(": ")
-			b.WriteString(displayElement(f.Value))
+			v.Fields[i].Value.display(b, true)
 		}
 		b.WriteByte('}')
-		return b.String()
 	case KindEnum:
 		// enum display reproduces the construction syntax:
 		// `[NS.]Enum.Variant` for a payload-less variant, and
 		// `[NS.]Enum.Variant{field: value, ...}` for a payloaded one.
-		var b strings.Builder
 		if v.StructNS != "" {
 			b.WriteString(v.StructNS)
 			b.WriteByte('.')
@@ -767,32 +785,31 @@ func (v Value) Display() string {
 		b.WriteString(v.Variant)
 		if len(v.Fields) > 0 {
 			b.WriteByte('{')
-			for i, f := range v.Fields {
+			for i := range v.Fields {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				b.WriteString(f.Name)
+				b.WriteString(v.Fields[i].Name)
 				b.WriteString(": ")
-				b.WriteString(displayElement(f.Value))
+				v.Fields[i].Value.display(b, true)
 			}
 			b.WriteByte('}')
 		}
-		return b.String()
 	case KindTask:
 		// tasks are opaque handles - the display form just
 		// labels the task as pending or done, without exposing the
 		// captured frame or the result (which printf already covers
 		// via task.wait + a primitive print).
-		if v.Task == nil {
-			return "task<?>"
+		switch {
+		case v.Task == nil:
+			b.WriteString("task<?>")
+		case !v.Task.IsDone():
+			b.WriteString("task<pending>")
+		case v.Task.Err != nil:
+			b.WriteString("task<error>")
+		default:
+			b.WriteString("task<done>")
 		}
-		if !v.Task.IsDone() {
-			return "task<pending>"
-		}
-		if v.Task.Err != nil {
-			return "task<error>"
-		}
-		return "task<done>"
 	case KindObject:
 		// opaque - the payload is reachable only through the owning
 		// library's accessors, but a library may register a displayer so
@@ -803,40 +820,42 @@ func (v Value) Display() string {
 			if v.Obj != nil {
 				inner = *v.Obj
 			}
-			return d(inner)
+			b.WriteString(d(inner))
+			return
 		}
-		return "<" + v.StructNS + "." + v.StructName + ">"
+		b.WriteString("<" + v.StructNS + "." + v.StructName + ">")
 	case KindFunc:
 		// A function value is opaque; display the referenced method name so a
 		// printed value is recognizable (`<func greet>`), or `<func null>` for the
 		// uninitialized zero.
 		if v.Fn == nil {
-			return "<func null>"
+			b.WriteString("<func null>")
+		} else {
+			b.WriteString("<func " + v.Fn.Name + ">")
 		}
-		return "<func " + v.Fn.Name + ">"
 	case KindChannel:
 		// A channel is an opaque handle; label it open / closed rather than
 		// exposing the buffered contents.
-		if v.Chan == nil {
-			return "channel<?>"
+		switch {
+		case v.Chan == nil:
+			b.WriteString("channel<?>")
+		case v.Chan.IsClosed():
+			b.WriteString("channel<closed>")
+		default:
+			b.WriteString("channel<open>")
 		}
-		if v.Chan.IsClosed() {
-			return "channel<closed>"
-		}
-		return "channel<open>"
+	default:
+		b.WriteString("<unknown>")
 	}
-	return "<unknown>"
 }
 
-// displayElement is Display() but with string values quoted, so that
+// displayElement is Display() but with a string value quoted, so that
 // list / map representations are unambiguous (`[1, "2", 3]` rather than
-// `[1, 2, 3]` when the middle entry is a string). Nested lists/maps
-// recurse through the regular Display() so they stay unquoted.
+// `[1, 2, 3]` when the middle entry is a string).
 func displayElement(v Value) string {
-	if v.Kind == KindString {
-		return strconv.Quote(v.Str)
-	}
-	return v.Display()
+	var b strings.Builder
+	v.display(&b, true)
+	return b.String()
 }
 
 // MatchesDeclared reports whether v's runtime kind matches a declared

@@ -113,10 +113,8 @@ func toNode(v interpreter.Value) (interpreter.Value, error) {
 // ----- copy-on-write container helpers -------------------------------------
 
 func mapGet(m interpreter.Value, key string) (interpreter.Value, bool) {
-	for _, e := range m.Map {
-		if e.Key.Str == key {
-			return e.Value, true
-		}
+	if pos := m.LookupKey(interpreter.StringVal(key)); pos >= 0 {
+		return m.Map[pos].Value, true
 	}
 	return interpreter.Value{}, false
 }

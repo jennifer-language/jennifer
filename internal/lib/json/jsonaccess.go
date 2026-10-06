@@ -108,17 +108,14 @@ func walkPointer(fnName string, node interpreter.Value, tokens []string) (interp
 	for _, tok := range tokens {
 		switch cur.Kind {
 		case interpreter.KindMap:
-			found := false
-			for _, e := range cur.Map {
-				if e.Key.Str == tok {
-					cur = e.Value
-					found = true
-					break
-				}
-			}
-			if !found {
+			// O(1) via the key index built at decode time (linear scan fallback
+			// inside LookupKey if the index is absent), so walking keys + get is
+			// O(n), not O(n^2).
+			pos := cur.LookupKey(interpreter.StringVal(tok))
+			if pos < 0 {
 				return interpreter.Value{}, fmt.Errorf("%s: no key %q", fnName, tok)
 			}
+			cur = cur.Map[pos].Value
 		case interpreter.KindList:
 			idx, ok := arrayIndex(tok)
 			if !ok {

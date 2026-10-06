@@ -422,5 +422,10 @@ func listVal(elems []interpreter.Value) interpreter.Value {
 
 func mapVal(entries []interpreter.MapEntry) interpreter.Value {
 	st := parser.PrimitiveType(parser.TypeString)
-	return interpreter.Value{Kind: interpreter.KindMap, Map: entries, KeyTyp: &st}
+	m := interpreter.Value{Kind: interpreter.KindMap, Map: entries, KeyTyp: &st}
+	// Build the key index once at decode time so walking keys + json.get per key
+	// is O(n), not O(n^2): the handle shares this tree by pointer across accessor
+	// calls, so the index persists.
+	m.BuildMapIndex()
+	return m
 }

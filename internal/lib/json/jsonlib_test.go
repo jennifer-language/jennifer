@@ -5,6 +5,7 @@ package jsonlib
 
 import (
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -319,5 +320,36 @@ func TestEncodeEnum(t *testing.T) {
 	list := interpreter.ListVal(parser.Type{}, []interpreter.Value{payload, bare})
 	if got := enc(t, list); got != `[{"Circle":{"r":2.5,"n":3}},"Empty"]` {
 		t.Errorf("list of variants: got %s", got)
+	}
+}
+
+// TestDecodedObjectIndexedLookup proves a decoded object reads back every key
+// correctly - the decode-time key index (which makes keys + get O(n), not
+// O(n^2)) must agree with the plain lookup.
+func TestDecodedObjectIndexedLookup(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	const n = 500
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(`"k` + strconv.Itoa(i) + `":` + strconv.Itoa(i))
+	}
+	sb.WriteByte('}')
+	tree, err := decodeFn([]interpreter.Value{interpreter.StringVal(sb.String())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := interpreter.ObjectVal("json", "Value", tree)
+	ctx := interpreter.BuiltinCtx{}
+	for i := 0; i < n; i++ {
+		v, err := asIntFn(ctx, []interpreter.Value{doc, interpreter.StringVal("/k" + strconv.Itoa(i))})
+		if err != nil || v.Int != int64(i) {
+			t.Fatalf("key k%d: got %d (err %v)", i, v.Int, err)
+		}
+	}
+	if _, err := asIntFn(ctx, []interpreter.Value{doc, interpreter.StringVal("/missing")}); err == nil {
+		t.Error("a missing key must error")
 	}
 }
