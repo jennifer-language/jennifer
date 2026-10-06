@@ -46,6 +46,64 @@ func TestFormatBasicVerbs(t *testing.T) {
 	}
 }
 
+// TestFormat12Hour: %I is the 12-hour clock (12 at midnight and noon) and %p is
+// the AM/PM marker.
+func TestFormat12Hour(t *testing.T) {
+	cases := []struct {
+		hour         int
+		layout, want string
+	}{
+		{0, "%I:%M %p", "12:00 AM"},
+		{9, "%I %p", "09 AM"},
+		{12, "%I:%M %p", "12:00 PM"},
+		{13, "%I %p", "01 PM"},
+		{23, "%I %p", "11 PM"},
+	}
+	for _, tc := range cases {
+		instant := stdtime.Date(2024, 1, 1, tc.hour, 0, 0, 0, stdtime.UTC)
+		got, err := strftimeFormat(instant, 0, tc.layout)
+		if err != nil {
+			t.Errorf("hour %d layout %q: %v", tc.hour, tc.layout, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("hour %d layout %q: got %q, want %q", tc.hour, tc.layout, got, tc.want)
+		}
+	}
+}
+
+// TestParse12Hour: %I + %p parse back to a 24-hour hour, in either verb order,
+// and reject a non-meridiem / out-of-range input.
+func TestParse12Hour(t *testing.T) {
+	ok := []struct {
+		layout, input string
+		wantHour      int
+	}{
+		{"%I:%M %p", "01:05 PM", 13},
+		{"%I %p", "12 AM", 0},
+		{"%I %p", "12 PM", 12},
+		{"%p %I", "pm 11", 23}, // either order; case-insensitive
+	}
+	for _, tc := range ok {
+		got, err := strftimeParse(tc.layout, tc.input)
+		if err != nil {
+			t.Errorf("parse %q/%q: %v", tc.layout, tc.input, err)
+			continue
+		}
+		if got.Hour() != tc.wantHour {
+			t.Errorf("parse %q/%q: hour %d, want %d", tc.layout, tc.input, got.Hour(), tc.wantHour)
+		}
+	}
+	for _, bad := range []struct{ layout, input string }{
+		{"%I %p", "13 PM"}, // %I out of 1..12
+		{"%I %p", "01 XX"}, // not AM/PM
+	} {
+		if _, err := strftimeParse(bad.layout, bad.input); err == nil {
+			t.Errorf("parse %q/%q: want error, got nil", bad.layout, bad.input)
+		}
+	}
+}
+
 // TestFormatOffsetCET: %z for a +01:00 zone is +0100, not Z.
 func TestFormatOffsetCET(t *testing.T) {
 	instant := stdtime.Unix(1718454896, 0).In(stdtime.FixedZone("CET", 3600))

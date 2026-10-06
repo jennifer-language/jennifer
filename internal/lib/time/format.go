@@ -122,6 +122,18 @@ func strftimeFormat(t stdtime.Time, offset int64, layout string) (string, error)
 			fmt.Fprintf(&b, "%02d", t.Day())
 		case 'H':
 			fmt.Fprintf(&b, "%02d", t.Hour())
+		case 'I':
+			h := t.Hour() % 12
+			if h == 0 {
+				h = 12
+			}
+			fmt.Fprintf(&b, "%02d", h)
+		case 'p':
+			if t.Hour() < 12 {
+				b.WriteString("AM")
+			} else {
+				b.WriteString("PM")
+			}
 		case 'M':
 			fmt.Fprintf(&b, "%02d", t.Minute())
 		case 'S':
@@ -181,6 +193,11 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 		second = 0
 		nano   = 0
 		offset = 0
+		// 12-hour clock state: %I fills hour12 (1..12), %p fills pmMark
+		// (0 = AM, 1 = PM); both -1 until seen. Combined into `hour` after the
+		// walk so the two verbs compose regardless of order.
+		hour12 = -1
+		pmMark = -1
 	)
 
 	li, si := 0, 0
@@ -241,6 +258,29 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			}
 			hour = n
 			si += consumed
+		case 'I':
+			n, consumed, err := readFixedDigits(input, si, 2)
+			if err != nil {
+				return stdtime.Time{}, fmt.Errorf("%%I: %v", err)
+			}
+			if n < 1 || n > 12 {
+				return stdtime.Time{}, fmt.Errorf("%%I: hour %d out of range 1..12", n)
+			}
+			hour12 = n
+			si += consumed
+		case 'p':
+			if si+2 > len(input) {
+				return stdtime.Time{}, fmt.Errorf("%%p: need AM or PM at position %d", si)
+			}
+			switch strings.ToUpper(input[si : si+2]) {
+			case "AM":
+				pmMark = 0
+			case "PM":
+				pmMark = 1
+			default:
+				return stdtime.Time{}, fmt.Errorf("%%p: %q is not AM or PM", input[si:si+2])
+			}
+			si += 2
 		case 'M':
 			n, consumed, err := readFixedDigits(input, si, 2)
 			if err != nil {
@@ -315,6 +355,18 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 	}
 	if si != len(input) {
 		return stdtime.Time{}, fmt.Errorf("trailing input %q after layout consumed", input[si:])
+	}
+
+	// Fold the 12-hour clock into `hour`: %I gives 1..12 (12 is midnight/noon,
+	// i.e. 0 within its half), and %p selects the half (no %p means AM). Applied
+	// after the walk so %I and %p compose in either order; it overrides a %H in
+	// the same layout (mixing the two is a caller error).
+	if hour12 >= 0 {
+		h := hour12 % 12
+		if pmMark == 1 {
+			h += 12
+		}
+		hour = h
 	}
 
 	loc := stdtime.FixedZone("", offset)

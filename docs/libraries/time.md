@@ -253,6 +253,8 @@ def back as time.Time init time.parse($s, "%Y-%m-%dT%H:%M:%S%z");
 | `%m` | Month 01-12                              | `06`             | exactly 2 digits, 1..12 |
 | `%d` | Day of month 01-31                       | `15`             | exactly 2 digits, 1..31 |
 | `%H` | Hour 00-23                               | `12`             | exactly 2 digits, 0..23 |
+| `%I` | Hour 01-12 (12-hour clock)               | `01`             | exactly 2 digits, 1..12; combine with `%p` |
+| `%p` | Meridiem `AM` / `PM`                     | `PM`             | `AM`/`PM`, case-insensitive; selects the half for `%I` |
 | `%M` | Minute 00-59                             | `34`             | exactly 2 digits, 0..59 |
 | `%S` | Second 00-59                             | `56`             | exactly 2 digits, 0..59 |
 | `%z` | UTC offset                               | `+0000`, `+0100` | `+HHMM`, `-HHMM`, or `Z` (lenient) |
@@ -264,9 +266,17 @@ def back as time.Time init time.parse($s, "%Y-%m-%dT%H:%M:%S%z");
 | `%u` | ISO weekday 1-7 (Mon=1, Sun=7)           | `6`              | format-only in v1       |
 | `%%` | Literal `%`                              | `%`              | matches `%` in input    |
 
-Codes not listed (e.g. `%I`, `%p`, `%y`, `%e`) are reserved and
-error if used in a layout - the v1 set deliberately stays small
-and adds only when a use case appears.
+Codes not listed (e.g. `%y`, `%e`) are reserved and error if used
+in a layout - the v1 set deliberately stays small and adds only
+when a use case appears.
+
+**Weekday and month names are English only.** `%a` / `%A` / `%b` /
+`%B` render (and parse) the English names regardless of the process
+locale - `time` ships no locale data (CLDR), by design. To render a
+regional name, read the numeric field - `time.month($t)` (1..12) or
+`time.weekday($t)` (1..7, ISO), or the `%m` / `%u` format verbs - and
+index your own name table; a `.j` library can offer regional
+formatting on top of that without `time` carrying the data.
 
 Missing parts default to year 1970, month 1, day 1, all the
 time-of-day at zero, offset 0 (UTC). Trailing input after the
