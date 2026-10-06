@@ -8,8 +8,9 @@ with YAML. Like TOML, YAML has a timestamp scalar JSON lacks, surfaced through
 `yaml.asDatetime` (backed by [`time`](time.md)).
 
 `yaml.decode(text)` returns an opaque `yaml.Value` (a `KindObject`, the sibling
-of `json.Value` / `toml.Value`); operators, `[index]`, and `.field` all reject
-it, so the accessors below are the only way inside. `convert.typeOf` reports
+of `json.Value` / `toml.Value`); `[index]` and `.field` reject it (and `==` /
+`!=` compare two handles by value), so the accessors below are the way inside.
+`convert.typeOf` reports
 `"object"`; `convert.objectType` reports `"yaml.Value"`.
 
 Unlike `json` / `toml` / `xml`, which are hand-rolled, `yaml` is backed by a Go

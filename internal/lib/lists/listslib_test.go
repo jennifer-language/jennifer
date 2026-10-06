@@ -9,6 +9,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 func intList(vs ...int64) interpreter.Value {
@@ -320,5 +321,20 @@ func TestRangeElementCap(t *testing.T) {
 	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5)})
 	if err != nil || len(out.List) != 5 {
 		t.Errorf("small range should build, got len=%d err=%v", len(out.List), err)
+	}
+}
+
+func TestSortLargeInts(t *testing.T) {
+	// Two ints that round to the same float64 must still sort by exact value.
+	out, err := sortFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), []interpreter.Value{
+			interpreter.IntVal(9007199254740993), interpreter.IntVal(9007199254740992),
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.List[0].Int != 9007199254740992 || out.List[1].Int != 9007199254740993 {
+		t.Errorf("large ints sorted wrong: %d, %d", out.List[0].Int, out.List[1].Int)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 func intList(ns ...int64) interpreter.Value {
@@ -300,5 +301,24 @@ func TestGeometricHarmonicMean(t *testing.T) {
 		if _, err := fn(interpreter.BuiltinCtx{}, []interpreter.Value{floatList(1, -2, 3)}); err == nil {
 			t.Error("mean of a non-positive element should error")
 		}
+	}
+}
+
+func TestSelectionLargeInts(t *testing.T) {
+	// min/max/range/mode on ints above 2^53 must use exact comparison, not a
+	// lossy float64 view that merges or mis-orders them.
+	xs := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), []interpreter.Value{
+		interpreter.IntVal(9007199254740993), interpreter.IntVal(9007199254740992),
+		interpreter.IntVal(1), interpreter.IntVal(1),
+	})
+	args := []interpreter.Value{xs}
+	if mx, err := maxFn(interpreter.BuiltinCtx{}, args); err != nil || mx.Int != 9007199254740993 {
+		t.Errorf("max = %d (err %v), want 9007199254740993", mx.Int, err)
+	}
+	if mn, err := minFn(interpreter.BuiltinCtx{}, args); err != nil || mn.Int != 1 {
+		t.Errorf("min = %d (err %v), want 1", mn.Int, err)
+	}
+	if md, err := modeFn(interpreter.BuiltinCtx{}, args); err != nil || md.Int != 1 {
+		t.Errorf("mode = %d (err %v), want 1", md.Int, err)
 	}
 }

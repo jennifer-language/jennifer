@@ -271,23 +271,34 @@ func medianFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 
 // modeFn returns the most frequent element (by exact equality), preserving its
 // int/float kind. On a tie the first element to reach the winning count wins.
+// modeKey returns a comparable key that distinguishes values exactly for the
+// mode counts: an int keys on its int64 (so two distinct ints above 2^53 are not
+// merged into one bucket by a shared float64), a float on its float64.
+func modeKey(e interpreter.Value) any {
+	if e.Kind == interpreter.KindInt {
+		return e.Int
+	}
+	return e.Float
+}
+
 func modeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if err := arity1("mode", args); err != nil {
 		return interpreter.Null(), err
 	}
-	raw, fs, err := numbers("mode", args, 0)
+	raw, _, err := numbers("mode", args, 0)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if len(fs) == 0 {
+	if len(raw) == 0 {
 		return interpreter.Null(), fmt.Errorf("stats.mode: list is empty")
 	}
-	counts := make(map[float64]int, len(fs))
+	counts := make(map[any]int, len(raw))
 	bestIdx, bestCount := 0, 0
-	for i, f := range fs {
-		counts[f]++
-		if counts[f] > bestCount {
-			bestCount = counts[f]
+	for i, e := range raw {
+		k := modeKey(e)
+		counts[k]++
+		if counts[k] > bestCount {
+			bestCount = counts[k]
 			bestIdx = i
 		}
 	}
@@ -367,7 +378,10 @@ func extremum(name string, args []interpreter.Value, wantMax bool) (interpreter.
 	}
 	bestIdx := 0
 	for i := 1; i < len(fs); i++ {
-		if (wantMax && fs[i] > fs[bestIdx]) || (!wantMax && fs[i] < fs[bestIdx]) {
+		// Compare the original values exactly (not the lossy float64 view), so two
+		// distinct ints above 2^53 are ordered correctly.
+		cmp := interpreter.CompareNumeric(raw[i], raw[bestIdx])
+		if (wantMax && cmp > 0) || (!wantMax && cmp < 0) {
 			bestIdx = i
 		}
 	}
@@ -508,10 +522,12 @@ func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	loIdx, hiIdx := 0, 0
 	for i := 1; i < len(fs); i++ {
-		if fs[i] < fs[loIdx] {
+		// Select the extremes by exact comparison of the original values, so a
+		// large-int min/max is not mis-picked through the lossy float64 view.
+		if interpreter.CompareNumeric(raw[i], raw[loIdx]) < 0 {
 			loIdx = i
 		}
-		if fs[i] > fs[hiIdx] {
+		if interpreter.CompareNumeric(raw[i], raw[hiIdx]) > 0 {
 			hiIdx = i
 		}
 	}
@@ -806,26 +822,28 @@ func modesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err := arity1("modes", args); err != nil {
 		return interpreter.Null(), err
 	}
-	raw, fs, err := numbers("modes", args, 0)
+	raw, _, err := numbers("modes", args, 0)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if len(fs) == 0 {
+	if len(raw) == 0 {
 		return interpreter.Null(), fmt.Errorf("stats.modes: list is empty")
 	}
-	counts := make(map[float64]int, len(fs))
+	counts := make(map[any]int, len(raw))
 	maxCount := 0
-	for _, f := range fs {
-		counts[f]++
-		if counts[f] > maxCount {
-			maxCount = counts[f]
+	for _, e := range raw {
+		k := modeKey(e)
+		counts[k]++
+		if counts[k] > maxCount {
+			maxCount = counts[k]
 		}
 	}
-	seen := make(map[float64]bool, len(counts))
+	seen := make(map[any]bool, len(counts))
 	out := make([]interpreter.Value, 0)
-	for i, f := range fs {
-		if counts[f] == maxCount && !seen[f] {
-			seen[f] = true
+	for i, e := range raw {
+		k := modeKey(e)
+		if counts[k] == maxCount && !seen[k] {
+			seen[k] = true
 			out = append(out, raw[i].Copy())
 		}
 	}

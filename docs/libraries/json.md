@@ -92,9 +92,11 @@ io.printf("%s\n", json.encode({"id": 1, "tags": ["a", "b"], "ok": true}));
 ## Decoding
 
 `json.decode` returns an opaque **`json.Value`** - a handle onto the
-parsed tree. It is deliberately opaque: operators, `[index]`, and
-`.field` all reject it (with a hint to the accessors), so you never mix
-a still-generic JSON node into typed code by accident. You reach inside
+parsed tree. It is deliberately opaque: `[index]` and `.field` reject it
+(with a hint to the accessors), so you never mix a still-generic JSON node
+into typed code by accident. `==` / `!=` are the exception - they compare two
+handles by value (same type and equal content), so decoded documents can be
+de-duplicated or matched. You reach inside
 with the accessors, addressing nodes by **JSON Pointer** - the same paths
 the (planned) write surface uses, so reads and writes are mirror images.
 

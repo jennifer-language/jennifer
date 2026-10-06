@@ -8,8 +8,9 @@ TOML. The one thing TOML has that JSON does not, its four date-time forms,
 is surfaced through `toml.asDatetime` (backed by [`time`](time.md)).
 
 `toml.decode(text)` returns an opaque `toml.Value` (a `KindObject`, the
-sibling of `json.Value`); operators, `[index]`, and `.field` all reject it,
-so the accessors below are the only way inside. `convert.typeOf` reports
+sibling of `json.Value`); `[index]` and `.field` reject it (and `==` / `!=`
+compare two handles by value), so the accessors below are the way inside.
+`convert.typeOf` reports
 `"object"`; `convert.objectType` reports `"toml.Value"`.
 
 ## Surface

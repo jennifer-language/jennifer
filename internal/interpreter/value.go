@@ -4,6 +4,7 @@
 package interpreter
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -239,18 +240,75 @@ type Value struct {
 	mapIdx map[string]int
 }
 
-// mapKeyEncode returns a canonical string encoding for a hashable scalar map
-// key (string / int / bool / null), plus ok. It mirrors Value.Equal exactly
-// (which requires equal Kind), so distinct keys never collide. Float is
-// deliberately excluded - NaN != NaN, -0.0 == 0.0, and precision make a string
-// encoding disagree with == - as is every compound kind; those fall back to a
-// linear scan.
+// CompareNumeric orders two numeric Values (int or float), returning -1, 0, or
+// 1. Two ints compare by int64 and a mixed int/float compares exactly (the int
+// is never promoted to a lossy float64), matching the language's == / < at the
+// 2^53 boundary; two floats compare by float64. A non-numeric operand falls back
+// to the lossy float view (callers pass only numerics). Shared so library sorts
+// and selections (lists.sort, stats.min/max/...) order large ints correctly
+// rather than through float64.
+func CompareNumeric(a, b Value) int {
+	switch {
+	case a.Kind == KindInt && b.Kind == KindInt:
+		switch {
+		case a.Int < b.Int:
+			return -1
+		case a.Int > b.Int:
+			return 1
+		}
+		return 0
+	case a.Kind == KindFloat && b.Kind == KindFloat:
+		switch {
+		case a.Float < b.Float:
+			return -1
+		case a.Float > b.Float:
+			return 1
+		}
+		return 0
+	case a.Kind == KindInt && b.Kind == KindFloat:
+		return compareIntFloat(a.Int, b.Float)
+	case a.Kind == KindFloat && b.Kind == KindInt:
+		return -compareIntFloat(b.Int, a.Float)
+	}
+	af, _ := a.AsFloat()
+	bf, _ := b.AsFloat()
+	switch {
+	case af < bf:
+		return -1
+	case af > bf:
+		return 1
+	}
+	return 0
+}
+
+// mapKeyEncode returns a canonical string encoding for a hashable map key, plus
+// ok. It mirrors Value.Equal exactly, so distinct keys never collide and two
+// keys that compare == encode alike (including an int and an integer-valued
+// float). Encodes string / int / bool / null / float; every compound kind, and
+// a func / task / channel handle, returns ok=false and falls back to the linear
+// scan Value.Equal drives.
 func mapKeyEncode(v Value) (string, bool) {
 	switch v.Kind {
 	case KindString:
 		return "s" + v.Str, true
 	case KindInt:
 		return "i" + strconv.FormatInt(v.Int, 10), true
+	case KindFloat:
+		f := v.Float
+		if f != f { // NaN is unreachable in Jennifer (non-finite results raise); stay off the index if one appears, so this never disagrees with Equal
+			return "", false
+		}
+		// Encode an integer-valued, in-int64-range float like the equal int, so a
+		// float key hashes the same as an int key it compares == to (1.0 and 1) -
+		// keeping the index consistent with Value.Equal's exact cross-kind numeric
+		// equality (compareIntFloat). This also normalises -0.0 to 0. Any other
+		// float encodes its bit pattern.
+		if f >= -9223372036854775808.0 && f < 9223372036854775808.0 {
+			if tf := int64(f); float64(tf) == f {
+				return "i" + strconv.FormatInt(tf, 10), true
+			}
+		}
+		return "f" + strconv.FormatUint(math.Float64bits(f), 16), true
 	case KindBool:
 		if v.Bool {
 			return "b1", true
@@ -970,6 +1028,30 @@ func (v Value) Equal(o Value) bool {
 				}
 			}
 			return true
+		case KindFunc:
+			// A func value is an immutable handle to a top-level method; two are
+			// equal when they reference the same method (copies share the pointer).
+			// FnHome follows Fn (a method has one defining interpreter), so Fn
+			// identity is sufficient.
+			return v.Fn == o.Fn
+		case KindTask:
+			// task / channel handles are shared by pointer across copies, so
+			// identity is the natural equality - a copy equals its original.
+			return v.Task == o.Task
+		case KindChannel:
+			return v.Chan == o.Chan
+		case KindObject:
+			// Opaque library handle (json.Value, ...): equal when the same type
+			// and the wrapped tree compares equal, so copies and independently
+			// decoded-but-identical documents are equal (not the old
+			// silently-false-even-with-itself). The inner Obj is plain Values.
+			if v.StructNS != o.StructNS || v.StructName != o.StructName {
+				return false
+			}
+			if v.Obj == nil || o.Obj == nil {
+				return v.Obj == o.Obj
+			}
+			return v.Obj.Equal(*o.Obj)
 		case KindList:
 			if len(v.List) != len(o.List) {
 				return false

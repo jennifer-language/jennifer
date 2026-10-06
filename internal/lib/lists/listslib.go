@@ -491,9 +491,9 @@ func less(a, b interpreter.Value) bool {
 	if a.Kind == interpreter.KindBool {
 		return !a.Bool && b.Bool
 	}
-	af, _ := a.AsFloat()
-	bf, _ := b.AsFloat()
-	return af < bf
+	// Compare numerics exactly (not through a lossy float64), so a list of large
+	// ints - IDs, hashes, nanosecond timestamps above 2^53 - sorts correctly.
+	return interpreter.CompareNumeric(a, b) < 0
 }
 
 // containsFn reports whether `item` appears in `xs` under structural
