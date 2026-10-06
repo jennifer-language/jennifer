@@ -100,6 +100,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "assertFalse", assertFalseFn)
 	in.RegisterNamespaced(LibraryName, "assertContains", assertContainsFn)
 	in.RegisterNamespaced(LibraryName, "assertThrows", makeAssertThrowsFn(in))
+	in.RegisterNamespaced(LibraryName, "assertThrowsWith", makeAssertThrowsWithFn(in))
 }
 
 // -------- Helpers --------

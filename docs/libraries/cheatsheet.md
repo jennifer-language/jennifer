@@ -389,6 +389,7 @@ flat lookup view, not authoritative.
 | [`testing`](testing.md)`.assertFalse(cond)`           | Throw unless `cond` (a bool) is false.                                                                                              |
 | [`testing`](testing.md)`.assertNotEqual(actual, expected)` | Throw unless not deeply equal.                                                                                                 |
 | [`testing`](testing.md)`.assertThrows(name, kind)`    | Throw unless the named zero-arg method throws an `Error` of that `kind`.                                                            |
+| [`testing`](testing.md)`.assertThrowsWith(name, args, kind)` | As `assertThrows`, binding the list `args` to the method's parameters (no per-case wrapper method).                          |
 | [`testing`](testing.md)`.assertTrue(cond)`            | Throw unless `cond` (a bool) is true.                                                                                              |
 | [`testing`](testing.md)`.report(results, format)`     | Render results to `"text"`, `"tap"`, or `"junit"` (returns string).                                                                 |
 | [`testing`](testing.md)`.reset()`                     | Clear the process-wide result accumulator.                                                                                          |

@@ -758,7 +758,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   module can dispatch to handlers its host defined).
 - **`testing`** - test-runner primitives: `run(name)` (invoke a user method by
   name; the one place `exit` is caught), assertions `assertEqual` / ... /
-  `assertThrows` (throw `Error{kind: "assertion"}`), `results` / `reset`, and
+  `assertThrows` / `assertThrowsWith(name, args, kind)` (throw `Error{kind:
+  "assertion"}`), `results` / `reset`, and
   `report` (`text` / `tap` / `junit`). The `.j` test framework and the `jennifer
   test` subcommand build on top.
 - **`kv`** - in-process key/value store with per-key TTL (the no-server local

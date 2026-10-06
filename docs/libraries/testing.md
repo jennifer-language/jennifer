@@ -96,6 +96,7 @@ assertion call, which `testing.run` catches and records.
 | `testing.assertFalse(cond)`                | `cond` is `true` (`cond` must be `bool`).                                                |
 | `testing.assertContains(haystack, needle)` | `needle` is absent: substring for a string, element for a list, key for a map (by haystack kind). |
 | `testing.assertThrows(name, kind)`         | the named zero-arg method doesn't throw, or throws an `Error` whose `kind` differs.      |
+| `testing.assertThrowsWith(name, args, kind)` | as `assertThrows`, but binds the list `args` to the method's parameters - no per-case zero-arg wrapper method needed. |
 
 ```jennifer
 use testing;
@@ -106,8 +107,13 @@ func testAdd() {
     testing.assertEqual(add(2, 3), 5);
     testing.assertContains([1, 2, 3], 2);
     testing.assertThrows("mustFail", "boom");
+    testing.assertThrowsWith("parse", ["1 ~ 2"], "syntax");
 }
 ```
+
+`assertThrowsWith` is the argument-passing form: where `assertThrows` needs a
+zero-arg wrapper method per failing input, `assertThrowsWith("parse", [input],
+kind)` calls `parse(input)` directly, so one helper covers every case.
 
 ### Table-driven tests
 

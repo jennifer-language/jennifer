@@ -16,7 +16,7 @@ import "jennifer-lang.dev/jennifer/internal/parser"
 // can re-enter and run *arbitrary .j code* - the higher-order `lists` layer
 // (each invokes its func-value argument via BuiltinCtx.Invoke) and the by-name
 // dispatchers (meta.call / meta.callMain via CallByName* / CallHostWith*;
-// testing.run / runWith / assertThrows via CallByName*). A method calling one of
+// testing.run / runWith / assertThrows / assertThrowsWith via CallByName*). A method calling one of
 // these can reach code that mutates a global, so it is not GlobalSafe.
 //
 // INVARIANT: any builtin that calls BuiltinCtx.Invoke or Interpreter.CallByName* /
@@ -25,18 +25,19 @@ import "jennifer-lang.dev/jennifer/internal/parser"
 // can in fact reach a global write, making borrow in a mutable-globals script
 // unsound. Verified against a grep for those entry points accross internal/lib.
 var jCallbackBuiltins = map[[2]string]bool{
-	{"meta", "call"}:            true,
-	{"meta", "callMain"}:        true,
-	{"testing", "run"}:          true,
-	{"testing", "runWith"}:      true,
-	{"testing", "assertThrows"}: true,
-	{"lists", "map"}:            true,
-	{"lists", "filter"}:         true,
-	{"lists", "reduce"}:         true,
-	{"lists", "find"}:           true,
-	{"lists", "any"}:            true,
-	{"lists", "all"}:            true,
-	{"lists", "sortBy"}:         true,
+	{"meta", "call"}:                true,
+	{"meta", "callMain"}:            true,
+	{"testing", "run"}:              true,
+	{"testing", "runWith"}:          true,
+	{"testing", "assertThrows"}:     true,
+	{"testing", "assertThrowsWith"}: true,
+	{"lists", "map"}:                true,
+	{"lists", "filter"}:             true,
+	{"lists", "reduce"}:             true,
+	{"lists", "find"}:               true,
+	{"lists", "any"}:                true,
+	{"lists", "all"}:                true,
+	{"lists", "sortBy"}:             true,
 }
 
 // computeEntryGlobalSafe stamps GlobalSafe on every method that (transitively

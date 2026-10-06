@@ -149,3 +149,39 @@ func makeAssertThrowsFn(in *interpreter.Interpreter) interpreter.Builtin {
 		return interpreter.Null(), nil
 	}
 }
+
+// makeAssertThrowsWithFn is assertThrows for a method that takes arguments: it
+// binds the list's elements to the method's parameters (via CallByNameWith, the
+// runWith path) and asserts the call throws an Error whose `kind` matches. It
+// removes the per-case zero-arg wrapper method that assertThrows otherwise
+// forces - one named helper plus an argument list covers every case.
+func makeAssertThrowsWithFn(in *interpreter.Interpreter) interpreter.Builtin {
+	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+		if len(args) != 3 {
+			return interpreter.Null(), fmt.Errorf("testing.assertThrowsWith expects 3 arguments (name, args, kind), got %d", len(args))
+		}
+		name, err := takeStringArg("testing.assertThrowsWith", args, 0, "name")
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if args[1].Kind != interpreter.KindList {
+			return interpreter.Null(), fmt.Errorf("testing.assertThrowsWith: args must be a list, got %s", args[1].Kind)
+		}
+		callArgs := args[1].List
+		wantKind, err := takeStringArg("testing.assertThrowsWith", args, 2, "kind")
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		_, callErr := in.CallByNameWith(name, callArgs...)
+		if callErr == nil {
+			return interpreter.Null(), assertFail(ctx,
+				fmt.Sprintf("assertThrowsWith: %q did not throw", name))
+		}
+		gotKind, _, _, _, _ := interpreter.ClassifyError(callErr)
+		if gotKind != wantKind {
+			return interpreter.Null(), assertFail(ctx,
+				fmt.Sprintf("assertThrowsWith: %q threw kind %q, expected %q", name, gotKind, wantKind))
+		}
+		return interpreter.Null(), nil
+	}
+}

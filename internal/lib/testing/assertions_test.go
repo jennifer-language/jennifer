@@ -104,6 +104,29 @@ func TestAssertThrows(t *testing.T) {
 	}
 }
 
+func TestAssertThrowsWith(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use testing;
+		func parse(src as string) {
+			if ($src == "bad") { throw Error{kind: "syntax", message: "x", file: "", line: 0, col: 0}; }
+			return 0;
+		}
+		func matches()   { testing.assertThrowsWith("parse", ["bad"], "syntax"); }
+		func wrongKind() { testing.assertThrowsWith("parse", ["bad"], "other"); }
+		func noThrow()   { testing.assertThrowsWith("parse", ["ok"], "syntax"); }
+		def a as testing.Result init testing.run("matches");
+		def b as testing.Result init testing.run("wrongKind");
+		def c as testing.Result init testing.run("noThrow");
+		io.printf("%t %t %t", $a.passed, $b.passed, $c.passed);
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "true false false" {
+		t.Errorf("got %q", out)
+	}
+}
+
 func TestRunWithBindsArgs(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use testing;
