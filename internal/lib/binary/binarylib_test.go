@@ -93,11 +93,41 @@ func TestIndexOfFrom(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, -1);`, "out of range"},
 		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 3);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 0, 3);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 2, 1);`, "out of range"},
 	} {
 		_, e := runProg(t, c.src)
 		if e == nil || !strings.Contains(e.Error(), c.want) {
 			t.Errorf("indexOf bounds: want error containing %q, got %v", c.want, e)
 		}
+	}
+}
+
+// TestIndexOfLimit covers the half-open [from, limit) search window: a match is
+// reported only when it lies wholly inside it, and the scan never reads past
+// limit - so an absent probe in a short range does not overscan the rest of the
+// buffer.
+func TestIndexOfLimit(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use convert; use binary;
+		def b as bytes init convert.bytesFromString("a.b.c.d", "utf-8");
+		def dot as bytes init convert.bytesFromString(".", "utf-8");
+		def ab as bytes init convert.bytesFromString("ab", "utf-8");
+		# first dot within [0,3) is index 1; within [2,3) none (-1);
+		# a two-byte needle straddling the boundary does not match within [0,2) (-1);
+		# full buffer via explicit limit finds it; empty needle matches at from.
+		io.printf("%d/%d/%d/%d/%d",
+			binary.indexOf($b, $dot, 0, 3),
+			binary.indexOf($b, $dot, 2, 3),
+			binary.indexOf(convert.bytesFromString("xabx","utf-8"), $ab, 0, 2),
+			binary.indexOf($b, $dot, 0, 7),
+			binary.indexOf($b, convert.bytesFromString("","utf-8"), 4, 7));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "1/-1/-1/1/4" {
+		t.Fatalf("got %q, want %q", out, "1/-1/-1/1/4")
 	}
 }
 

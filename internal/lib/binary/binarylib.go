@@ -201,18 +201,24 @@ func sliceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // indexOfFn returns the byte index of the first occurrence of needle in haystack
-// at or after `from`, or -1 if absent: binary.indexOf(haystack, needle[, from]).
-// `from` defaults to 0; it must be in [0, len(haystack)] (a search may resume at
-// the end - an empty tail - but not past it). This is what makes finding every
-// occurrence a single O(n) pass: `from = idx + 1` each step, instead of re-slicing
-// the unsearched tail (O(n * matches)). An empty needle matches at `from`. Named
-// to match strings.indexOf (same argument order, -1-on-absent); byte-indexed, so
-// unlike the rune-indexed strings.indexOf it carries the offset. Runs at native
-// speed (bytes.Index) - scanning a large buffer for a delimiter (a MIME boundary,
-// a CRLF) does not pay a per-byte interpreted loop.
+// at or after `from`, or -1 if absent:
+// binary.indexOf(haystack, needle[, from[, limit]]). `from` defaults to 0 and
+// `limit` to len(haystack); the search is the half-open window [from, limit), so
+// a match is reported only when it lies wholly inside it. Bounds are strict:
+// 0 <= from <= limit <= len(haystack) (a search may resume at the end - an empty
+// tail - but not past it). The `limit` is what keeps a reader that probes a short
+// range from overscanning the whole rest of the buffer when the needle is absent:
+// `indexOf(src, probe, from, limit)` is `indexOf(slice(src, from, limit), probe)`
+// without the slice copy. The `from = idx + 1` idiom makes finding every
+// occurrence a single O(n) pass instead of re-slicing the unsearched tail (O(n *
+// matches)). An empty needle matches at `from`. Named to match strings.indexOf
+// (same argument order, -1-on-absent); byte-indexed, so unlike the rune-indexed
+// strings.indexOf it carries the offset. Runs at native speed (bytes.Index) - a
+// large-buffer delimiter scan (a MIME boundary, a CRLF) pays no per-byte
+// interpreted loop.
 func indexOfFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("binary.indexOf expects 2 or 3 arguments (haystack, needle[, from]), got %d", len(args))
+	if len(args) < 2 || len(args) > 4 {
+		return interpreter.Null(), fmt.Errorf("binary.indexOf expects 2 to 4 arguments (haystack, needle[, from[, limit]]), got %d", len(args))
 	}
 	hay, err := takeBytes("binary.indexOf", args, 0, "haystack")
 	if err != nil {
@@ -223,7 +229,7 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	from := int64(0)
-	if len(args) == 3 {
+	if len(args) >= 3 {
 		from, err = takeInt("binary.indexOf", args, 2, "from")
 		if err != nil {
 			return interpreter.Null(), err
@@ -232,7 +238,17 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 			return interpreter.Null(), fmt.Errorf("binary.indexOf: from %d out of range for %d bytes", from, len(hay))
 		}
 	}
-	rel := bytes.Index(hay[from:], needle)
+	limit := int64(len(hay))
+	if len(args) == 4 {
+		limit, err = takeInt("binary.indexOf", args, 3, "limit")
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if limit < from || limit > int64(len(hay)) {
+			return interpreter.Null(), fmt.Errorf("binary.indexOf: limit %d out of range for from %d and %d bytes", limit, from, len(hay))
+		}
+	}
+	rel := bytes.Index(hay[from:limit], needle)
 	if rel < 0 {
 		return interpreter.IntVal(-1), nil
 	}
