@@ -23,8 +23,20 @@ import (
 	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// durationFromUnits scales a signed count of a time unit into nanoseconds,
+// raising the language's int64-overflow error (rather than wrapping to a
+// negative/tiny duration) when the product does not fit.
+func durationFromUnits(fnName, what string, n int64, unit stdtime.Duration) (int64, error) {
+	ns, ok := limits.DurationFromUnits(n, unit)
+	if !ok {
+		return 0, fmt.Errorf("%s: %d %s overflows the representable duration range", fnName, n, what)
+	}
+	return ns, nil
+}
 
 // LibraryName is the Jennifer name programs `use` to enable these names,
 // and doubles as the namespace prefix.
@@ -365,7 +377,11 @@ func fromSecondsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return makeDuration(n * int64(stdtime.Second)), nil
+	ns, err := durationFromUnits("time.fromSeconds", "seconds", n, stdtime.Second)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return makeDuration(ns), nil
 }
 
 func fromMillisecondsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -373,7 +389,11 @@ func fromMillisecondsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (int
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return makeDuration(n * int64(stdtime.Millisecond)), nil
+	ns, err := durationFromUnits("time.fromMilliseconds", "milliseconds", n, stdtime.Millisecond)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return makeDuration(ns), nil
 }
 
 func fromMinutesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -381,7 +401,11 @@ func fromMinutesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return makeDuration(n * int64(stdtime.Minute)), nil
+	ns, err := durationFromUnits("time.fromMinutes", "minutes", n, stdtime.Minute)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return makeDuration(ns), nil
 }
 
 func fromHoursFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -389,7 +413,11 @@ func fromHoursFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return makeDuration(n * int64(stdtime.Hour)), nil
+	ns, err := durationFromUnits("time.fromHours", "hours", n, stdtime.Hour)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return makeDuration(ns), nil
 }
 
 // ----- duration accessors --------------------------------------------
@@ -458,7 +486,13 @@ func subFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return makeDuration(an - bn), nil
+	// Detect int64 wrap in the nanosecond difference (two in-range instants far
+	// apart in sign can still overflow), mirroring time.add.
+	diff := an - bn
+	if (an >= 0 && bn < 0 && diff < 0) || (an < 0 && bn >= 0 && diff >= 0) {
+		return interpreter.Null(), fmt.Errorf("time.sub: result overflows the representable duration range")
+	}
+	return makeDuration(diff), nil
 }
 
 func cmpFn(fnName string, args []interpreter.Value, pick func(a, b int64) bool) (interpreter.Value, error) {

@@ -23,7 +23,20 @@ import (
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
+
+// clampMillis converts a non-negative millisecond count to a time.Duration,
+// clamping a value so large it would overflow int64 nanoseconds to the maximum
+// representable duration (~292 years) instead of wrapping to a negative one. A
+// "never time out" value thus behaves as an effectively-unbounded deadline, not
+// the instant-timeout or infinite-wait the wrap produced.
+func clampMillis(ms int64) time.Duration {
+	if !limits.DurationFitsUnits(ms, time.Millisecond) {
+		return time.Duration(limits.MaxDurationUnits(time.Millisecond)) * time.Millisecond
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 // -------- Registries --------
 
@@ -262,7 +275,7 @@ func optTimeoutMs(fnName string, args []Value, idx int) (time.Duration, error) {
 	if v.Int < 0 {
 		return 0, fmt.Errorf("%s: timeout must be >= 0 milliseconds, got %d", fnName, v.Int)
 	}
-	return time.Duration(v.Int) * time.Millisecond, nil
+	return clampMillis(v.Int), nil
 }
 
 // tlsArgLayout classifies the optional trailing args of connectTLS / startTLS,
@@ -415,7 +428,7 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if sticky {
 		return interpreter.BytesVal([]byte{}), nil
 	}
-	idle := time.Duration(idleMs) * time.Millisecond
+	idle := clampMillis(idleMs)
 	var out []byte
 	tmp := make([]byte, 32*1024)
 	s.readMu.Lock()
@@ -500,7 +513,7 @@ func readNFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	r := s.r
 	c := s.c
 	s.mu.Unlock()
-	idle := time.Duration(idleMs) * time.Millisecond
+	idle := clampMillis(idleMs)
 	buf := make([]byte, n)
 	got := int64(0)
 	s.readMu.Lock()
@@ -772,7 +785,7 @@ func applyDeadline(fnName string, args []Value, kind deadlineKind) (Value, error
 	}
 	var when time.Time // the zero Time clears any existing deadline
 	if ms > 0 {
-		when = time.Now().Add(time.Duration(ms) * time.Millisecond)
+		when = time.Now().Add(clampMillis(ms))
 	}
 	// Dispatch on the handle kind: a stream net.Conn or a datagram
 	// net.UDPSocket (its PacketConn honours the same deadline methods).

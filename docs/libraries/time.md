@@ -43,7 +43,11 @@ def struct time.Zone { offset as int, name as string };
 - `time.Time.offset` - seconds east of UTC. The calendar accessors
   use this to compute wall-clock parts.
 - `time.Duration.nanos` - signed nanosecond span. Subtracting a
-  later time from an earlier one produces a negative duration.
+  later time from an earlier one produces a negative duration. A duration is an
+  int64 nanosecond count, so a constructor given a count too large to represent
+  (e.g. `time.fromSeconds` of ~9.2e9 or more), and a `time.sub` whose difference
+  overflows, raise a catchable error rather than wrapping - the same strictness
+  as the language's integer arithmetic.
 - `time.Zone.offset` - seconds east of UTC (`3600` for CET,
   `-28800` for PST, `0` for UTC). Capped at +/- 26 hours to catch
   obvious mistakes.

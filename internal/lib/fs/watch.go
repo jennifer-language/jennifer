@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // Polling filesystem watch. Deliberately mtime-polling (pure stdlib,
@@ -142,6 +143,13 @@ func watchFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if intervalMs < minWatchIntervalMs {
 			return interpreter.Null(), fmt.Errorf("fs.watch: intervalMs must be >= %d, got %d", minWatchIntervalMs, intervalMs)
 		}
+		// An interval so large that intervalMs-ms overflows a time.Duration would
+		// wrap negative and panic time.NewTicker inside the watcher goroutine - an
+		// asynchronous, uncatchable crash. Reject it here, before the goroutine
+		// starts, as a catchable error.
+		if !limits.DurationFitsUnits(intervalMs, time.Millisecond) {
+			return interpreter.Null(), fmt.Errorf("fs.watch: intervalMs %d is too large", intervalMs)
+		}
 	}
 
 	watchMu.Lock()
@@ -231,6 +239,16 @@ func closeWatcher(id int64) error {
 // run is the poll loop: every `interval`, re-scan the tree, diff against the
 // last snapshot, and deliver the change events.
 func (w *watcher) run(interval time.Duration) {
+	// Defence in depth: the interpreter has no top-level recover, so any panic on
+	// this goroutine would crash the whole process. Convert one into a clean stop
+	// (fs.next / hasEvent then report the watcher closed) rather than a crash. The
+	// known trigger - a NewTicker panic from an overflowing interval - is already
+	// rejected in fs.watch before this goroutine starts.
+	defer func() {
+		if recover() != nil {
+			w.stop()
+		}
+	}()
 	snap := scanTree(w.root)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

@@ -106,6 +106,13 @@ packet and, on a timeout, do idle work - all on one flow, without dedicating a
 `recvFrom` can be bounded the same way (an SNTP client that must not hang on a
 lost reply).
 
+A millisecond value so large it would overflow an internal duration (the natural
+way to say "effectively never") is clamped to the largest representable deadline,
+not wrapped - so a huge timeout or idle value behaves as unbounded, never as the
+instant timeout or infinite wait a wrap would produce. This applies to
+`setReadDeadline` / `setWriteDeadline`, the `connect` / `connectTLS` `timeoutMs`,
+and `readAll` / `readN`'s `idleTimeoutMs`.
+
 A read deadline and a write deadline are **separate** (there is no combined
 call): `net.setReadDeadline` bounds only the read, so a write after a read
 timeout still succeeds - the keepalive or reply you send on a timeout goes out.

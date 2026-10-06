@@ -162,3 +162,25 @@ func TestWatchBuiltinSurface(t *testing.T) {
 		t.Error("fs.next on a closed watcher should error, not block")
 	}
 }
+
+// TestWatchOverflowInterval proves an interval so large it would overflow a
+// time.Duration (and panic NewTicker inside the watcher goroutine) is rejected
+// up front as a catchable error, before any goroutine starts.
+func TestWatchOverflowInterval(t *testing.T) {
+	dir := t.TempDir()
+	watchMu.Lock()
+	before := len(watchers)
+	watchMu.Unlock()
+	_, err := watchFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		interpreter.StringVal(dir), interpreter.IntVal(18014398509481984),
+	})
+	if err == nil {
+		t.Fatal("expected an error for an overflowing interval")
+	}
+	watchMu.Lock()
+	after := len(watchers)
+	watchMu.Unlock()
+	if after != before {
+		t.Errorf("a rejected watch must not register a watcher: before=%d after=%d", before, after)
+	}
+}

@@ -306,7 +306,7 @@ other work (a dev server rebuilding on save, a live reloader).
 | Call                     | Returns      | Notes                                                                        |
 | ------------------------ | ------------ | ---------------------------------------------------------------------------- |
 | `fs.watch(path)`         | `fs.Watcher` | Watch a file, or a directory recursively. Default poll ~300 ms.              |
-| `fs.watch(path, intervalMs)` | `fs.Watcher` | Same, with an explicit poll interval (>= 20 ms).                         |
+| `fs.watch(path, intervalMs)` | `fs.Watcher` | Same, with an explicit poll interval (>= 20 ms, and small enough to fit a duration - an absurdly large value is a catchable error, not a crashed watcher). |
 | `fs.next($w)`            | `fs.Event`   | Block until the next change; errors if the watcher is closed (which is how a blocked loop is released). |
 | `fs.hasEvent($w)`        | `bool`       | Whether an event is queued (non-blocking peek).                              |
 | `fs.close($w)`           | `null`       | Stop the watcher. `fs.close` is polymorphic over `fs.File` and `fs.Watcher`. |

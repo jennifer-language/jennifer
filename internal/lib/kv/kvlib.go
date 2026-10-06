@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -273,6 +274,13 @@ func live(s *store, key string, now time.Time) (entry, bool) {
 // expiryFor turns a ttl in seconds (0 = no expiry) into an absolute deadline.
 func expiryFor(ttl int64, now time.Time) time.Time {
 	if ttl <= 0 {
+		return time.Time{}
+	}
+	// A TTL so large that ttl-seconds overflows a time.Duration would wrap to a
+	// past deadline and evict the key immediately. Such a value means
+	// "effectively never expires", so treat it as no expiry (the ttl <= 0 case)
+	// rather than wrapping.
+	if !limits.DurationFitsUnits(ttl, time.Second) {
 		return time.Time{}
 	}
 	return now.Add(time.Duration(ttl) * time.Second)

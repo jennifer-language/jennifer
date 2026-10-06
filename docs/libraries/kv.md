@@ -44,7 +44,8 @@ io.printf("%s\n", kv.get($store, "greeting"));
   few hundred mutations). Without the sweep, a flood of distinct short-lived keys
   that are never accessed again (a rate limiter keyed by an untrusted IP) would
   pile up expired entries forever; the sweep bounds memory to the *unexpired*
-  working set.
+  working set. A TTL so large it would overflow an internal duration is treated
+  as no expiry (like `0`), never as an immediate expiry.
 - **No hard size cap on live data.** There is no ceiling on *unexpired* entries -
   storing unbounded live data OOMs the process, exactly as an unbounded `list`
   would. That is the program's own responsibility. For an **adversarial or
