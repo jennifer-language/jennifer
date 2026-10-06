@@ -109,3 +109,36 @@ io.printf("%d\n", $sum);
 		t.Errorf("got %q, want %q", got, "4000")
 	}
 }
+
+// A spawn body that reads only some globals now captures only those (the
+// capture analysis), but the snapshot must still be taken eagerly at launch so
+// value semantics hold: a post-launch mutation of a captured global is invisible
+// to the spawned body. This pins that the narrowed snapshot is still a launch-
+// time copy, not a live view.
+func TestSpawnCaptureIsLaunchTimeSnapshot(t *testing.T) {
+	src := `
+use io;
+use task;
+def g as int init 5;
+def other as int init 100;
+def t as task of int init spawn { return $g; };
+$g = 999;
+$other = 1;
+io.printf("%d %d\n", task.wait($t), $g);
+`
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	in := interpreter.New()
+	var buf bytes.Buffer
+	in.Out = &buf
+	iolib.Install(in)
+	tasklib.Install(in)
+	if err := in.Run(prog); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "5 999" {
+		t.Errorf("got %q, want %q (spawn must see the launch-time value)", got, "5 999")
+	}
+}

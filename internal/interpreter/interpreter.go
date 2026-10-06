@@ -1303,6 +1303,11 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// re-resolve in execDefine is a guarded no-op and a shared type node
 	// reached from concurrent goroutines never write-races.
 	i.resolveDeclaredTypesOnce(prog)
+	// Stamp each spawn with the globals it needs so the snapshot copies only
+	// those, not the whole global frame. Runs after resolveQualifiedRefs (the
+	// analysis consults module aliases + namespaces). Single-threaded here,
+	// before any spawn; falls back to copy-all for any body it cannot bound.
+	i.computeSpawnCaptures(prog)
 	// Finish the enum-pattern matches the resolver had to defer: their subject's
 	// enum is declared in a module, which only exists now that the imports are
 	// loaded and the declared types are stamped. This is where a cross-module
@@ -4759,11 +4764,11 @@ func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, 
 	var spawnEnv *Environment
 	if i.prof != nil && i.profAllocs {
 		start := time.Now()
-		spawnEnv = i.snapshotForSpawn(env)
+		spawnEnv = i.snapshotForSpawn(env, ex.Captures)
 		file, line, col := posFor(ex)
 		i.prof.RecordSpawnCopy(file, line, col, time.Since(start))
 	} else {
-		spawnEnv = i.snapshotForSpawn(env)
+		spawnEnv = i.snapshotForSpawn(env, ex.Captures)
 	}
 	state := &TaskState{Done: make(chan struct{})}
 	i.registerTask(state)
@@ -4972,7 +4977,7 @@ func effectiveGlobal(env *Environment) *Environment {
 // regular evalCall / evalQualified* paths. The no-shadowing rule
 // prevents collisions; we keep the innermost binding (most-specific
 // wins) if a name somehow appears twice.
-func (i *Interpreter) snapshotForSpawn(env *Environment) *Environment {
+func (i *Interpreter) snapshotForSpawn(env *Environment, caps *parser.SpawnCaptures) *Environment {
 	// Two-frame snapshot:
 	//   1. globals - copies of i.global's bindings only. effectiveGlobal
 	//      walks here, so user-method calls inside the spawn see exactly
@@ -4994,7 +4999,14 @@ func (i *Interpreter) snapshotForSpawn(env *Environment) *Environment {
 	root := effectiveGlobal(env)
 	globalSnap := NewEnvironment(nil)
 	if root != nil {
-		// Globals are slot-backed, so copyBindingsInto reconstructs their
+		// The spawn-capture analysis names the globals this body (transitively)
+		// needs, so copy only those; a nil caps or AllGlobals copies the whole
+		// frame (the always-correct fallback).
+		var want map[string]bool
+		if caps != nil && !caps.AllGlobals {
+			want = caps.Globals
+		}
+		// Globals are slot-backed, so copyBindingsFilteredInto reconstructs their
 		// name->value view from root.slots (plus any name-map fallback bindings).
 		//
 		// The launching goroutine owns `root` EXCEPT when it is the shared host
@@ -5005,10 +5017,10 @@ func (i *Interpreter) snapshotForSpawn(env *Environment) *Environment {
 		// dispatch uses, so a handler that itself spawns does not deadlock.
 		if host := i.Host(); root == host.global {
 			host.enterHostDispatch(env.depth)
-			root.copyBindingsInto(globalSnap.vars)
+			root.copyBindingsFilteredInto(globalSnap.vars, want)
 			host.exitHostDispatch(env.depth)
 		} else {
-			root.copyBindingsInto(globalSnap.vars)
+			root.copyBindingsFilteredInto(globalSnap.vars, want)
 		}
 	}
 	localSnap := NewEnvironment(globalSnap)

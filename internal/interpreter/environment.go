@@ -440,9 +440,20 @@ func (e *Environment) GetBinding(name string) (Binding, error) {
 // untouched. This is the one place a spawn snapshot reconstructs a frame's
 // name->value view from its slots.
 func (e *Environment) copyBindingsInto(dst map[string]Binding) {
+	e.copyBindingsFilteredInto(dst, nil)
+}
+
+// copyBindingsFilteredInto copies this frame's bindings into dst, skipping names
+// already present. When want is non-nil, only bindings whose name is in want are
+// copied - the spawn-capture optimization uses this to copy just the globals a
+// spawn body needs, instead of the whole global frame. A nil want copies all.
+func (e *Environment) copyBindingsFilteredInto(dst map[string]Binding, want map[string]bool) {
 	for i := range e.slots {
 		b := e.slots[i]
 		if b.Name == "" {
+			continue
+		}
+		if want != nil && !want[b.Name] {
 			continue
 		}
 		if _, exists := dst[b.Name]; exists {
@@ -451,6 +462,9 @@ func (e *Environment) copyBindingsInto(dst map[string]Binding) {
 		dst[b.Name] = Binding{Value: b.Value.Copy(), DeclType: b.DeclType, IsConst: b.IsConst, Slot: -1, Name: b.Name}
 	}
 	for name, b := range e.vars {
+		if want != nil && !want[name] {
+			continue
+		}
 		if _, exists := dst[name]; exists {
 			continue
 		}

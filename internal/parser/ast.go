@@ -891,6 +891,19 @@ func (*LenExpr) exprNode() {}
 type SpawnExpr struct {
 	pos
 	Body []Stmt
+	// Captures names the globals this spawn body (transitively, through the
+	// methods it calls) actually references, so the spawn snapshot copies only
+	// those rather than every top-level binding. Set by the interpreter's
+	// spawn-capture analysis in Run's setup; the parser never populates it. nil
+	// means "not analysed" and AllGlobals means "could not bound the set" - both
+	// fall back to copying all globals, so the default is always correct.
+	Captures *SpawnCaptures
+}
+
+// SpawnCaptures is the result of the spawn-capture analysis for one SpawnExpr.
+type SpawnCaptures struct {
+	AllGlobals bool            // copy every global (a dynamic/unresolved call reaches unknown globals)
+	Globals    map[string]bool // the specific global names needed, when AllGlobals is false
 }
 
 func (*SpawnExpr) exprNode() {}

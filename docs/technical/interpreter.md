@@ -1073,6 +1073,25 @@ Deep-copy reuses the same `Value.Copy()` path as `$ys = $xs;` and
 function-parameter binding, so lists, maps, bytes, and structs
 copy at any depth.
 
+The globals frame is copied **filtered**: a parse-time pass
+(`computeSpawnCaptures` in `spawncapture.go`) stamps each
+`SpawnExpr` with the global names its body reads - directly, and
+transitively through the user methods it calls by name - and
+`snapshotForSpawn` copies only those. A body that reads no global
+copies none, so a program holding a large global (a cache, a config,
+a per-request server worker) no longer pays that copy per spawn. The
+pass is sound by over-approximation: any shape it cannot bound - a
+call through a func value, a module call (which can re-enter the
+host), a callback builtin, or an unrecognised node - stamps
+`AllGlobals`, and the snapshot copies the whole frame exactly as
+before. It reuses the call-graph fixpoint of the borrow pass's
+`computeEntryGlobalSafe`, resolving callees in a spawn body against
+the method table (the resolver skips spawn bodies, so
+`CallExpr.Method` is nil there). The locals frame is always copied
+whole - the body may reference any of them and they are cheap. The
+snapshot is still built on the launching goroutine before the body
+runs, so the narrowed set stays a launch-time copy, not a live view.
+
 The one exception is `KindTask` itself. A `task of T` value
 deliberately copies the *pointer* to the underlying `TaskState`,
 not the state - multiple variables pointing at "the same spawn"
