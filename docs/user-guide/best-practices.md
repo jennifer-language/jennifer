@@ -50,6 +50,7 @@ complexity and style, **L3nn** API lifecycle:
 | `L201` | a method with too many statements (default over 60)                    |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
+| `L205` | a method that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator - keep it in the caller) |
 | `L301` | use of a deprecated API (reserved, empty until an API is deprecated)   |
 | `L302` | use of a removed API (e.g. an old `use core;`)                         |
 

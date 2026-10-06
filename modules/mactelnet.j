@@ -413,19 +413,20 @@ func markEnd(s as Session) {
     return Frame{plain: "", salt: emptyBytes(), endAuth: false, ended: true};
 }
 
-# dispatch handles one received packet, appending any resulting Frame to frames
-# and returning whether it was the ACK we were waiting for.
-func dispatch(s as Session, pkt as bytes, frames as list of Frame) {
+# dispatch handles one received packet, returning the Frame(s) it produced (a
+# DATA or END frame, or none) for the caller to collect in its own accumulator.
+func dispatch(s as Session, pkt as bytes) {
+    def out as list of Frame init [];
     def h as Header init parseHeader($pkt);
     if ($h.seskey != $s.seskey) {
-        return frames;
+        return $out;
     }
     if ($h.ptype == PTYPE_DATA) {
-        $frames[] = processData($s, $pkt);
+        $out[] = processData($s, $pkt);
     } elseif ($h.ptype == PTYPE_END) {
-        $frames[] = markEnd($s);
+        $out[] = markEnd($s);
     }
-    return $frames;
+    return $out;
 }
 
 # sendReliable sends a packet and resends it on the retransmit schedule until an
@@ -441,7 +442,9 @@ func sendReliable(s as Session, packet as bytes) {
             if ($h.seskey == $s.seskey and $h.ptype == PTYPE_ACK) {
                 return $frames;
             }
-            $frames = dispatch($s, $pkt, $frames);
+            for (def fr in dispatch($s, $pkt)) {
+                $frames[] = $fr;
+            }
             $pkt = recvPacket($s, POLL_MS);
         }
     }
@@ -454,7 +457,9 @@ func pump(s as Session, timeoutMs as int) {
     def frames as list of Frame init [];
     def pkt as bytes init recvPacket($s, $timeoutMs);
     while (len($pkt) > 0) {
-        $frames = dispatch($s, $pkt, $frames);
+        for (def fr in dispatch($s, $pkt)) {
+            $frames[] = $fr;
+        }
         $pkt = recvPacket($s, POLL_MS);
     }
     return $frames;

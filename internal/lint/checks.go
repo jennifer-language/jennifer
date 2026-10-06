@@ -440,8 +440,136 @@ func (c *checkCtx) nestExpr(e parser.Expr, depth int) {
 func (c *checkCtx) maybeReportNest(anchor parser.Node, depth int) {
 	if depth == c.cfg.MaxNesting+1 {
 		c.report("L202", anchor, fmt.Sprintf(
-			"block nesting reaches depth %d, over the limit of %d; flatten with early returns or helper methods",
+			"block nesting reaches depth %d, over the limit of %d; flatten with early returns or helper methods, keeping any accumulator in the caller (a helper that takes, mutates, and returns a list/map is quadratic - see L205)",
 			depth, c.cfg.MaxNesting))
+	}
+}
+
+// checkAccumulatorParam (L205) flags a method that takes a `list` / `map`
+// parameter, mutates it (append, index-write, field-write, or reassign), and
+// returns it. Value semantics make that a copy-in / copy-out accumulator: each
+// call copies the argument in and the result back out, so calling it in a loop
+// over N elements is O(N^2). It is the shape L202 steers people toward when they
+// "flatten with a helper" an inner block that appends to an accumulator - the
+// callee cannot mutate the caller's value, so the accumulator has to be passed
+// and returned. The non-quadratic fix keeps the accumulator in the caller and
+// mutates it in place. The scan descends control-flow blocks but not `spawn`
+// bodies (a write there hits the snapshot, and a `return` there exits the spawn,
+// not the method), matching the borrow write-scan.
+// accumState tracks, per candidate parameter, whether the method body writes it
+// and whether it returns it bare - both true is the quadratic-accumulator shape.
+type accumState struct{ written, returned bool }
+
+func checkAccumulatorParam(c *checkCtx) {
+	for mi := range c.prog.Methods {
+		m := c.prog.Methods[mi]
+		cand := map[string]*accumState{}
+		for _, p := range m.Params {
+			if p.Type.Kind == parser.TypeList || p.Type.Kind == parser.TypeMap {
+				cand[p.Name] = &accumState{}
+			}
+		}
+		if len(cand) == 0 {
+			continue
+		}
+		scanAccumStmts(m.Body.Stmts, cand)
+		for _, p := range m.Params { // declaration order -> deterministic output
+			ps := cand[p.Name]
+			if ps == nil || !ps.written || !ps.returned {
+				continue
+			}
+			c.report("L205", m, fmt.Sprintf(
+				"method `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator that is O(n^2) when called in a loop; keep the accumulator in the caller and mutate it in place",
+				m.Name, p.Type.Kind, p.Name))
+		}
+	}
+}
+
+// scanAccumStmts walks statements (through control-flow blocks, not into
+// expressions, so not into a spawn body) recording, per candidate parameter
+// name, whether it is written and whether it is returned bare.
+func scanAccumStmts(ss []parser.Stmt, cand map[string]*accumState) {
+	for _, s := range ss {
+		scanAccumStmt(s, cand)
+	}
+}
+
+func scanAccumStmt(s parser.Stmt, cand map[string]*accumState) {
+	mark := func(name string, ret bool) {
+		if ps := cand[name]; ps != nil {
+			if ret {
+				ps.returned = true
+			} else {
+				ps.written = true
+			}
+		}
+	}
+	switch st := s.(type) {
+	case *parser.AssignStmt:
+		mark(st.VarName, false)
+	case *parser.AppendStmt:
+		if st.Target != nil {
+			mark(st.Target.Name, false)
+		}
+	case *parser.IndexAssignStmt:
+		mark(accumLvalueRoot(st.Target), false)
+	case *parser.FieldAssignStmt:
+		mark(accumLvalueRoot(st.Target), false)
+	case *parser.ReturnStmt:
+		if ve, ok := st.Value.(*parser.VarExpr); ok {
+			mark(ve.Name, true)
+		}
+	case *parser.IfStmt:
+		scanAccumStmts(st.Then.Stmts, cand)
+		for _, b := range st.ElseIfBodies {
+			scanAccumStmts(b.Stmts, cand)
+		}
+		if st.Else != nil {
+			scanAccumStmts(st.Else.Stmts, cand)
+		}
+	case *parser.MatchStmt:
+		for _, a := range st.Arms {
+			scanAccumStmts(a.Body.Stmts, cand)
+		}
+		if st.Else != nil {
+			scanAccumStmts(st.Else.Stmts, cand)
+		}
+	case *parser.WhileStmt:
+		scanAccumStmts(st.Body.Stmts, cand)
+	case *parser.ForStmt:
+		if st.Init != nil {
+			scanAccumStmt(st.Init, cand)
+		}
+		if st.Step != nil {
+			scanAccumStmt(st.Step, cand)
+		}
+		scanAccumStmts(st.Body.Stmts, cand)
+	case *parser.ForEachStmt:
+		scanAccumStmts(st.Body.Stmts, cand)
+	case *parser.RepeatStmt:
+		scanAccumStmts(st.Body.Stmts, cand)
+	case *parser.TryStmt:
+		scanAccumStmts(st.Body.Stmts, cand)
+		scanAccumStmts(st.CatchBody.Stmts, cand)
+	case *parser.Block:
+		scanAccumStmts(st.Stmts, cand)
+	}
+}
+
+// accumLvalueRoot returns the base variable name of an index / field lvalue
+// chain (`$p[i].f` -> "p"), or "" if the root is not a plain variable.
+func accumLvalueRoot(e parser.Expr) string {
+	for {
+		switch n := e.(type) {
+		case *parser.VarExpr:
+			return n.Name
+		case *parser.IndexExpr:
+			e = n.Target
+		case *parser.FieldAccessExpr:
+			e = n.Target
+		default:
+			return ""
+		}
 	}
 }
 

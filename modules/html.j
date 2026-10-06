@@ -588,14 +588,16 @@ func readStartTag(cs as list of string, i as int, n as int) {
     return ScanTag{tag: $tag, attrs: $attrs, selfClose: $selfClose, i: $j};
 }
 
-# addChild appends a node to the top frame's children (a read-modify-write, since
-# a chained append `$stack[top].children[] = ...` is not supported).
-func addChild(stack as list of Frame, child as Node) {
-    def top as int init len($stack) - 1;
-    def kids as list of Node init $stack[$top].children;
+# appendChild returns `frame` with `child` appended to its children (a
+# read-modify-write, since a chained append `frame.children[] = ...` is not
+# supported). It takes the frame, not the whole stack, so the caller writes the
+# result back into `$stack[top]` in place - the per-element stack copy that an
+# accumulator over the stack would cost is avoided.
+func appendChild(frame as Frame, child as Node) {
+    def kids as list of Node init $frame.children;
     $kids[] = $child;
-    $stack[$top].children = $kids;
-    return $stack;
+    $frame.children = $kids;
+    return $frame;
 }
 
 # closeTag closes the nearest open frame matching `name` (an empty name closes just
@@ -635,7 +637,8 @@ func closeTag(stack as list of Frame, name as string) {
             text: ""
         };
         $s = lists.slice($s, 0, $t2);
-        $s = addChild($s, $node);
+        def st2 as int init len($s) - 1;
+        $s[$st2] = appendChild($s[$st2], $node);
     }
     return $s;
 }
@@ -680,8 +683,8 @@ export func parse(src as string) {
                 failParse("document exceeds the node budget");
             }
             if ($st.selfClose or isVoidTag($st.tag)) {
-                $stack = addChild(
-                    $stack,
+                $stack[len($stack) - 1] = appendChild(
+                    $stack[len($stack) - 1],
                     Node{
                         kind: NodeKind.Element,
                         tag: $st.tag,
@@ -703,8 +706,8 @@ export func parse(src as string) {
                         text: $rawText
                     };
                 }
-                $stack = addChild(
-                    $stack,
+                $stack[len($stack) - 1] = appendChild(
+                    $stack[len($stack) - 1],
                     Node{
                         kind: NodeKind.Element,
                         tag: $st.tag,
@@ -737,8 +740,8 @@ export func parse(src as string) {
                 if ($budget > MAX_PARSE_NODES) {
                     failParse("document exceeds the node budget");
                 }
-                $stack = addChild(
-                    $stack,
+                $stack[len($stack) - 1] = appendChild(
+                    $stack[len($stack) - 1],
                     Node{
                         kind: NodeKind.Text,
                         tag: "",

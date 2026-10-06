@@ -545,14 +545,17 @@ func selectVersion(mode as string, n as int, eci as bool, level as string) {
     fail("data too large for QR (max version 40, level " + $level + ")");
 }
 
-# pushBits appends the low `count` bits of `value` (MSB first) to a bit list.
-func pushBits(bitList as list of int, value as int, count as int) {
+# bitsOf returns the low `count` bits of `value`, MSB first. The caller appends
+# the result into its own bit list, so the growing accumulator is not copied in
+# and out on every push.
+func bitsOf(value as int, count as int) {
+    def out as list of int init [];
     def i as int init $count - 1;
     while ($i >= 0) {
-        $bitList[] = ($value >> $i) & 1;
+        $out[] = ($value >> $i) & 1;
         $i = $i - 1;
     }
-    return $bitList;
+    return $out;
 }
 
 # encodeData builds the padded data codewords for a byte-mode payload.
@@ -564,14 +567,20 @@ func encodeNumeric(bitList as list of int, data as bytes) {
     def n as int init len($data);
     while ($i + 3 <= $n) {
         def v as int init ($data[$i] -48) * 100 + ($data[$i + 1] -48) * 10 + ($data[$i + 2] -48);
-        $out = pushBits($out, $v, 10);
+        for (def b in bitsOf($v, 10)) {
+            $out[] = $b;
+        }
         $i = $i + 3;
     }
     def rem as int init $n - $i;
     if ($rem == 2) {
-        $out = pushBits($out, ($data[$i] -48) * 10 + ($data[$i + 1] -48), 7);
+        for (def b in bitsOf(($data[$i] -48) * 10 + ($data[$i + 1] -48), 7)) {
+            $out[] = $b;
+        }
     } elseif ($rem == 1) {
-        $out = pushBits($out, $data[$i] -48, 4);
+        for (def b in bitsOf($data[$i] -48, 4)) {
+            $out[] = $b;
+        }
     }
     return $out;
 }
@@ -583,11 +592,15 @@ func encodeAlphanumeric(bitList as list of int, data as bytes) {
     def i as int init 0;
     def n as int init len($data);
     while ($i + 2 <= $n) {
-        $out = pushBits($out, alnumValue($data[$i]) * 45 + alnumValue($data[$i + 1]), 11);
+        for (def b in bitsOf(alnumValue($data[$i]) * 45 + alnumValue($data[$i + 1]), 11)) {
+            $out[] = $b;
+        }
         $i = $i + 2;
     }
     if ($n - $i == 1) {
-        $out = pushBits($out, alnumValue($data[$i]), 6);
+        for (def b in bitsOf(alnumValue($data[$i]), 6)) {
+            $out[] = $b;
+        }
     }
     return $out;
 }
@@ -600,11 +613,19 @@ func encodeData(data as bytes, mode as string, eci as bool, version as int, leve
     if ($eci) {
         # ECI mode indicator (0111) + a one-byte designator for assignment 26
         # (UTF-8): a strict reader then decodes the byte segment as UTF-8.
-        $bitList = pushBits($bitList, 7, 4);
-        $bitList = pushBits($bitList, 26, 8);
+        for (def b in bitsOf(7, 4)) {
+            $bitList[] = $b;
+        }
+        for (def b in bitsOf(26, 8)) {
+            $bitList[] = $b;
+        }
     }
-    $bitList = pushBits($bitList, qrModeIndicator($mode), 4);
-    $bitList = pushBits($bitList, len($data), qrCountBits($mode, $version));
+    for (def b in bitsOf(qrModeIndicator($mode), 4)) {
+        $bitList[] = $b;
+    }
+    for (def b in bitsOf(len($data), qrCountBits($mode, $version))) {
+        $bitList[] = $b;
+    }
     if ($mode == "numeric") {
         $bitList = encodeNumeric($bitList, $data);
     } elseif ($mode == "alphanumeric") {
@@ -612,7 +633,9 @@ func encodeData(data as bytes, mode as string, eci as bool, version as int, leve
     } else {
         def i as int init 0;
         while ($i < len($data)) {
-            $bitList = pushBits($bitList, $data[$i], 8);
+            for (def b in bitsOf($data[$i], 8)) {
+                $bitList[] = $b;
+            }
             $i = $i + 1;
         }
     }
@@ -621,7 +644,9 @@ func encodeData(data as bytes, mode as string, eci as bool, version as int, leve
     if ($totalBits - len($bitList) < 4) {
         $term = $totalBits - len($bitList);
     }
-    $bitList = pushBits($bitList, 0, $term);
+    for (def b in bitsOf(0, $term)) {
+        $bitList[] = $b;
+    }
     # pad to a byte boundary
     while (len($bitList) % 8 > 0) {
         $bitList[] = 0;
@@ -882,39 +907,6 @@ func placeVersion(cv as Canvas, version as int, size as int) {
         $i = $i + 1;
     }
     return $cv;
-}
-
-# placeFormat writes the 15 format bits (two copies) for (level, mask) and
-# returns the updated grid.
-func placeFormat(mods as list of list of int, level as string, mask as int, size as int) {
-    def bits as int init formatValue($level, $mask);
-    # first copy: bits 0-8 down column 8, bits 9-14 leftward along row 8
-    def i as int init 0;
-    while ($i <= 5) {
-        $mods[$i][8] = ($bits >> $i) & 1;
-        $i = $i + 1;
-    }
-    $mods[7][8] = ($bits >> 6) & 1;
-    $mods[8][8] = ($bits >> 7) & 1;
-    $mods[8][7] = ($bits >> 8) & 1;
-    $i = 9;
-    while ($i <= 14) {
-        $mods[8][14 - $i] = ($bits >> $i) & 1;
-        $i = $i + 1;
-    }
-    # second copy: bits 0-7 rightward along row 8, bits 8-14 up column 8
-    $i = 0;
-    while ($i <= 7) {
-        $mods[8][$size - 1 - $i] = ($bits >> $i) & 1;
-        $i = $i + 1;
-    }
-    $i = 8;
-    while ($i <= 14) {
-        $mods[$size - 15 + $i][8] = ($bits >> $i) & 1;
-        $i = $i + 1;
-    }
-    $mods[$size - 8][8] = 1;
-    return $mods;
 }
 
 # buildFunctionPatterns places finders, separators, timing, alignment, and the
@@ -1179,7 +1171,33 @@ func qrMatrix(data as bytes, level as string) {
             }
             $rr = $rr + 1;
         }
-        $trial = placeFormat($trial, $level, $mask, $size);
+        # Write the 15 format bits (two copies) for (level, mask) into $trial in
+        # place - the grid stays in this frame, so it is not copied per mask.
+        def fbits as int init formatValue($level, $mask);
+        def fi as int init 0;
+        while ($fi <= 5) {
+            $trial[$fi][8] = ($fbits >> $fi) & 1;
+            $fi = $fi + 1;
+        }
+        $trial[7][8] = ($fbits >> 6) & 1;
+        $trial[8][8] = ($fbits >> 7) & 1;
+        $trial[8][7] = ($fbits >> 8) & 1;
+        $fi = 9;
+        while ($fi <= 14) {
+            $trial[8][14 - $fi] = ($fbits >> $fi) & 1;
+            $fi = $fi + 1;
+        }
+        $fi = 0;
+        while ($fi <= 7) {
+            $trial[8][$size - 1 - $fi] = ($fbits >> $fi) & 1;
+            $fi = $fi + 1;
+        }
+        $fi = 8;
+        while ($fi <= 14) {
+            $trial[$size - 15 + $fi][8] = ($fbits >> $fi) & 1;
+            $fi = $fi + 1;
+        }
+        $trial[$size - 8][8] = 1;
         def sc as int init penalty($trial, $size);
         if ($bestScore < 0 or $sc < $bestScore) {
             $bestScore = $sc;

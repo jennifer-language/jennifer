@@ -2398,15 +2398,6 @@ func displayWidth(s as string) {
     return $w;
 }
 
-# widenAt grows column `c`'s width to at least `w` (columns past the header
-# count are ignored).
-func widenAt(widths as list of int, c as int, w as int) {
-    if ($c < len($widths) and $w > $widths[$c]) {
-        $widths[$c] = $w;
-    }
-    return $widths;
-}
-
 # padCell pads `styled` (whose visible width is `plain`) to `width` per
 # alignment.
 func padCell(styled as string, plain as int, width as int, align as string) {
@@ -2707,7 +2698,12 @@ func colWidthsNode(table as Node) {
     while ($r < len($table.children)) {
         def c as int init 0;
         for (def cell in $table.children[$r].children) {
-            $widths = widenAt($widths, $c, cellVisWidthNode($cell));
+            # Widen column c in place (columns past the header count are ignored),
+            # keeping the accumulator in this frame rather than copying it per cell.
+            def w as int init cellVisWidthNode($cell);
+            if ($c < len($widths) and $w > $widths[$c]) {
+                $widths[$c] = $w;
+            }
             $c = $c + 1;
         }
         $r = $r + 1;

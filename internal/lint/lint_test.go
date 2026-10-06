@@ -428,11 +428,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 21 {
-		t.Fatalf("expected 21 known IDs (4 source + 17 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 22 {
+		t.Fatalf("expected 22 known IDs (4 source + 18 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 21 {
-		t.Fatalf("catalog should list all 21 IDs")
+	if len(lint.Catalog()) != 22 {
+		t.Fatalf("catalog should list all 22 IDs")
 	}
 }
 
@@ -611,4 +611,32 @@ func classify(sh as Shape) {
 			t.Fatalf("enum variant pattern flagged for arity: %d", got)
 		}
 	})
+}
+
+func TestAccumulatorParam(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"append and return", `func f(out as list of int, x as int) { $out[] = $x; return $out; }`, 1},
+		{"map index-write and return", `func f(acc as map of string to int, k as string, v as int) { $acc[$k] = $v; return $acc; }`, 1},
+		{"reassign and return", `func f(xs as list of int) { $xs = [1]; return $xs; }`, 1},
+		{"chained field-write and return", `func f(rows as list of int, i as int) { $rows[$i] = 9; return $rows; }`, 1},
+		{"return fresh, not the param", `func f(xs as list of int) { def ys as list of int init []; for (def x in $xs) { $ys[] = $x; } return $ys; }`, 0},
+		{"mutates but does not return it", `func f(out as list of int, n as int) { def i as int init 0; while ($i < $n) { $out[] = $i; $i = $i + 1; } }`, 0},
+		{"returns but never mutates it", `func f(xs as list of int) { if (len($xs) > 0) { return $xs; } return [0]; }`, 0},
+		{"scalar param not flagged", `func f(n as int) { return $n; }`, 0},
+		{"write inside spawn body does not count", `func f(out as list of int) { def t as task of int init spawn { $out[] = 1; return 0; }; return $out; }`, 0},
+		{"write in nested block counts", `func f(out as list of int, b as bool) { if ($b) { for (def i in 0..3) { $out[] = $i; } } return $out; }`, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrc(t, c.src, only("L205"), cfg)
+			if got := countID(diags, "L205"); got != c.want {
+				t.Errorf("L205 count = %d, want %d", got, c.want)
+			}
+		})
+	}
 }

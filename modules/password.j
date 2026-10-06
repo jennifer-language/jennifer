@@ -261,33 +261,38 @@ func alphabet(s as Schema) {
     return $a;
 }
 
-# pushRandom appends `n` characters drawn uniformly at random from `pool`.
-func pushRandom(acc as list of string, pool as string, n as int) {
+# drawRandom returns `n` characters drawn uniformly at random from `pool`
+# (empty if the pool is empty). The caller appends the result into its own
+# accumulator, so no per-draw copy of the growing list is made.
+func drawRandom(pool as string, n as int) {
+    def out as list of string;
     if (len($pool) == 0) {
-        return $acc;
+        return $out;
     }
     def i as int init 0;
     while ($i < $n) {
         def idx as int init crypto.randInt(0, len($pool) - 1);
-        $acc[] = strings.substring($pool, $idx, $idx + 1);
+        $out[] = strings.substring($pool, $idx, $idx + 1);
         $i = $i + 1;
     }
-    return $acc;
+    return $out;
 }
 
-# shuffleChars returns a crypto-grade Fisher-Yates shuffle of `xs`. Used
-# instead of `lists.shuffle` (which draws from math's non-crypto RNG) so the
-# arrangement of a generated password is as unpredictable as its characters.
+# shuffleChars returns a crypto-grade Fisher-Yates shuffle of `xs` (a fresh
+# list; the input is left unchanged). Used instead of `lists.shuffle` (which
+# draws from math's non-crypto RNG) so the arrangement of a generated password
+# is as unpredictable as its characters.
 func shuffleChars(xs as list of string) {
-    def i as int init len($xs) - 1;
+    def out as list of string init $xs;
+    def i as int init len($out) - 1;
     while ($i > 0) {
         def j as int init crypto.randInt(0, $i);
-        def tmp as string init $xs[$i];
-        $xs[$i] = $xs[$j];
-        $xs[$j] = $tmp;
+        def tmp as string init $out[$i];
+        $out[$i] = $out[$j];
+        $out[$j] = $tmp;
         $i = $i - 1;
     }
-    return $xs;
+    return $out;
 }
 
 # countIn counts how many characters of `pw` appear in `pool`.
@@ -346,11 +351,21 @@ export func generate(s as Schema) {
         $target = crypto.randInt($minTarget, $s.maxLength);
     }
     def chars as list of string;
-    $chars = pushRandom($chars, classPool($s, "lower"), $minLo);
-    $chars = pushRandom($chars, classPool($s, "upper"), $minUp);
-    $chars = pushRandom($chars, classPool($s, "digits"), $minDig);
-    $chars = pushRandom($chars, classPool($s, "symbols"), $minSym);
-    $chars = pushRandom($chars, alphabet($s), $target - $required);
+    for (def ch in drawRandom(classPool($s, "lower"), $minLo)) {
+        $chars[] = $ch;
+    }
+    for (def ch in drawRandom(classPool($s, "upper"), $minUp)) {
+        $chars[] = $ch;
+    }
+    for (def ch in drawRandom(classPool($s, "digits"), $minDig)) {
+        $chars[] = $ch;
+    }
+    for (def ch in drawRandom(classPool($s, "symbols"), $minSym)) {
+        $chars[] = $ch;
+    }
+    for (def ch in drawRandom(alphabet($s), $target - $required)) {
+        $chars[] = $ch;
+    }
     $chars = shuffleChars($chars);
     return strings.join($chars, "");
 }
