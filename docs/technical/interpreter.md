@@ -71,6 +71,22 @@ eager deep copies at every store site, not on copy-on-write:
   (`rhsFreshLiteral`) and only stamp the declared type. Var / index
   / field reads, const refs, and calls can hand back a reference
   into a live binding, so those are still eager-copied.
+- The same reasoning applies one level in: a list element / map value
+  / struct or enum **field** whose source is itself a fresh literal is
+  already private, so the literal evaluator stores it without a second
+  copy (`literalElementValue`). This stops a nested literal from being
+  deep-copied once by its own evaluator and again by the enclosing one.
+- `literalElementValue` also performs **move-on-last-use**: for
+  `$v = <fresh literal embedding $v>` the resolver marks the single
+  embedded `$v` reference `VarExpr.Move` (`markMoveableAssign`), and the
+  evaluator stores its backing by move instead of copying - sound because
+  the assignment overwrites `$v` immediately after, so the new structure
+  solely owns the backing (a reassigned name is never a borrowed binding,
+  and the eager-copy model gives every other binding its own backing).
+  Exactly one occurrence is moved; any other is copied, so the result
+  never references the moved backing twice. This turns incremental
+  left-leaning construction (`$acc = Node{ parts: [$acc, ...] }`, a
+  parser AST or expression tree) from quadratic into linear.
 
 **Read-only-parameter borrow.** The one carve-out to "parameter
 binding always copies": when a method never writes a parameter, its
@@ -129,6 +145,22 @@ gate), `internal/interpreter/borrow_test.go` (soundness gates + value-
 semantics parity for module, globals-free script, and mutable-globals
 script), and `globalsafe_internal_test.go` / `borrow_internal_test.go`
 (the `GlobalSafe` fixpoint and the `entryGlobalsImmutable` wiring).
+
+The same borrow extends to **in-method local bindings**: `markBorrowableDefs`
+flags a `def x as T init EXPR;` when `T` is borrow-safe, `x` is never written,
+and every binding the initializer could alias (`aliasRoots`) is a never-written
+parameter / local / const (a global among them is covered by the gate; an
+unbounded initializer - a builtin, module, or func-value call - is not
+borrowable). `execDefine` then stores the value by alias instead of
+`eagerCopy`, gated at runtime on `env.borrowDefs` (set from `methodBorrowCtx`
+on the method call frame and inherited by its block frames), exactly as a
+parameter is gated by `bindArg`. This makes the idiomatic "bind a nested value
+to a local, then read it" as cheap as indexing the chain in place - a read-only
+`def s as Sh init byName($bk, $nm);` no longer copies the whole struct - and it
+removes the forced copy behind a `match` whose subject must first be bound to a
+variable. Pinned by `TestBorrowableDefAnalysis` (the static decision) and
+`internal/interpreter/borrow_local_test.go` (value-semantics parity and every
+disqualifier).
 
 A shared-marker copy-on-write protocol (`Value.shared *bool` +
 `Share()` / `Ensure()`) was tried here and removed. It was inert: a

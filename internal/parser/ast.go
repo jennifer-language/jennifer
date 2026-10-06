@@ -824,6 +824,13 @@ type VarExpr struct {
 	// tests keep working. Populated by Resolve() during parse.
 	Depth int
 	Slot  int
+	// Move is set by markMoveableAssign when this reference is the sole read of
+	// a variable that the enclosing assignment overwrites with a fresh literal
+	// embedding it (`$v = ...{ $v }...`). A literal evaluator then stores the
+	// value by move (no copy): the binding is replaced right after, so the old
+	// backing is solely owned by the new structure. Makes incremental tree
+	// construction linear instead of quadratic.
+	Move bool
 }
 
 func (*VarExpr) exprNode() {}

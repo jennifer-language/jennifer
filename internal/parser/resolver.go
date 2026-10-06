@@ -1518,6 +1518,85 @@ func (r *resolver) resolveAssign(st *AssignStmt) error {
 	}
 	st.Depth = depth
 	st.Slot = slot
+	markMoveableAssign(st)
+	return nil
+}
+
+// markMoveableAssign enables move-on-last-use for `$v = EXPR` where EXPR is a
+// fresh literal embedding $v as a direct element (at any depth through nested
+// list / map-value / struct / enum literals). That read is the variable's last
+// use before the assignment overwrites it, so the literal evaluator stores $v's
+// backing by move instead of copying it (VarExpr.Move). Exactly one occurrence
+// is marked - the first in a movable position; any other occurrence (a second
+// element, a call argument) copies as usual, so the result never references the
+// moved backing twice. The fresh-literal RHS means execAssign stores the result
+// without a top-level copy, so the whole chain to the embedded $v copies
+// nothing, turning `$acc = Node{ parts: [$acc, ...] }` from quadratic to linear.
+//
+// Soundness: after the assignment $v holds the new structure, which solely owns
+// the moved backing - no other live binding aliases it, because a reassigned
+// variable is never a borrowed binding (markBorrowableParams / markBorrowableDefs
+// both disqualify a written name) and the eager-copy model gives every other
+// binding its own backing.
+func markMoveableAssign(st *AssignStmt) {
+	if !freshLiteralRHS(st.Value) {
+		return
+	}
+	if ve := firstMoveable(st.Value, st.VarName); ve != nil {
+		ve.Move = true
+	}
+}
+
+// freshLiteralRHS mirrors the interpreter's rhsFreshLiteral: a literal / range /
+// slice RHS yields a private value the bind site stores without a top-level copy.
+func freshLiteralRHS(e Expr) bool {
+	switch e.(type) {
+	case *ListLit, *MapLit, *StructLit, *RangeExpr, *SliceExpr:
+		return true
+	}
+	return false
+}
+
+// firstMoveable returns the first VarExpr(name) reachable from e through nested
+// fresh-literal containers (a list element, a map value, or a struct / enum
+// field value), or nil if none sits in such a movable position.
+func firstMoveable(e Expr, name string) *VarExpr {
+	switch ex := e.(type) {
+	case *ListLit:
+		for _, el := range ex.Elements {
+			if v := moveCandidate(el, name); v != nil {
+				return v
+			}
+		}
+	case *MapLit:
+		for _, val := range ex.Values {
+			if v := moveCandidate(val, name); v != nil {
+				return v
+			}
+		}
+	case *StructLit:
+		for k := range ex.Fields {
+			if v := moveCandidate(ex.Fields[k].Expr, name); v != nil {
+				return v
+			}
+		}
+	}
+	return nil
+}
+
+// moveCandidate returns el when it is a movable VarExpr(name), or recurses into
+// a nested fresh literal to find one deeper. Any other shape stops the search:
+// its value is produced fresh or copied by its own evaluator, so there is no
+// live backing to move through it.
+func moveCandidate(el Expr, name string) *VarExpr {
+	switch x := el.(type) {
+	case *VarExpr:
+		if x.Name == name {
+			return x
+		}
+	case *ListLit, *MapLit, *StructLit:
+		return firstMoveable(x, name)
+	}
 	return nil
 }
 

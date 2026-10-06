@@ -1821,6 +1821,29 @@ func rhsFreshLiteral(e parser.Expr) bool {
 	return false
 }
 
+// literalElementValue returns the value to store for a list element / map value
+// / struct or enum field whose source expression is src and whose evaluated
+// value is v. A copy keeps value semantics, but is skipped in two cases where
+// the value is already private: a nested fresh literal (its own evaluator copied
+// every element in, and nothing else references it), and a move-marked variable
+// reference (VarExpr.Move - the sole read of a binding the enclosing assignment
+// overwrites immediately after, so its backing can be moved in). Both drop a
+// redundant deep copy of a nested compound; together they make incremental
+// construction (`$acc = Node{ parts: [$acc, ...] }`) linear instead of
+// quadratic. Everything else is copied.
+func literalElementValue(src parser.Expr, v Value) Value {
+	switch e := src.(type) {
+	case *parser.ListLit, *parser.MapLit, *parser.StructLit,
+		*parser.RangeExpr, *parser.SliceExpr:
+		return v
+	case *parser.VarExpr:
+		if e.Move {
+			return v
+		}
+	}
+	return v.Copy()
+}
+
 func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error {
 	// if the declared type names a struct, verify the
 	// struct exists before any other check so an unknown name surfaces
@@ -3489,7 +3512,7 @@ func (i *Interpreter) evalListLit(ex *parser.ListLit, env *Environment) (Value, 
 		if err != nil {
 			return Value{}, err
 		}
-		out = append(out, v.Copy())
+		out = append(out, literalElementValue(e, v))
 	}
 	// Element type is left unset on the raw literal; the receiving
 	// binding's MatchesDeclared check stamps it on via type inference at
@@ -3534,7 +3557,7 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 		if err != nil {
 			return Value{}, err
 		}
-		entries = append(entries, MapEntry{Key: key.Copy(), Value: val.Copy()})
+		entries = append(entries, MapEntry{Key: key.Copy(), Value: literalElementValue(ex.Values[k], val)})
 	}
 	out := Value{Kind: KindMap, Map: entries}
 	// Index the literal up front: `def m init {...}` skips the binding-site
@@ -3658,7 +3681,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		if !v.MatchesDeclared(declType) {
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, declType, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
-		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), declType)})
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
 	}
 	if resolvedNS != "" {
 		sv := NamespacedStructVal(resolvedNS, ex.Name, out)
@@ -3934,7 +3957,7 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		if !v.MatchesDeclared(declType) {
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of variant %s.%s expects %s, got %s", decl.Name, def.Name, ex.Name, declType, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
-		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(v.Copy(), declType)})
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
 	}
 	return EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out), nil
 }
