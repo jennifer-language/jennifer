@@ -133,6 +133,9 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
   beyond the five predefined names and numeric references, so there is no
   entity-expansion ("billion laughs") blow-up, and nothing is fetched
   externally - an unknown or external entity is simply an error.
+- **Node count is capped** on decode: a document with a huge number of elements,
+  attributes, or text nodes raises a catchable error rather than amplifying a
+  few MB of markup into gigabytes of memory.
 
 ## See also
 

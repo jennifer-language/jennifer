@@ -47,7 +47,10 @@ same shape lists and maps use.
 fixed depth with a normal (catchable) decode error, so hostile deeply-nested
 input can't exhaust the interpreter's stack. The limit is shared by every parser
 in the toolchain and is set per binary: 1000 levels on the default `jennifer`
-(Go's growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack).
+(Go's growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). `decode`
+also caps the total number of value nodes it will materialise, so a flat few-MB
+document (a huge array) raises a catchable error instead of amplifying into
+gigabytes of memory.
 
 ## Decoding
 

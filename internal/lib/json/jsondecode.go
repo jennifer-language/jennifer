@@ -44,11 +44,17 @@ func decodeFn(args []interpreter.Value) (interpreter.Value, error) {
 // binary's fixed-stack crash point (see internal/limits).
 const maxNestingDepth = limits.MaxNestingDepth
 
+// maxDecodedNodes bounds how many value nodes one decode may materialise, so a
+// few-MB document cannot amplify into gigabytes of Value (depth alone was
+// bounded). A package var so tests can lower it.
+var maxDecodedNodes = limits.MaxDecodedNodes
+
 // decoder is a recursive-descent JSON reader over a byte-indexed string.
 type decoder struct {
 	s     string
 	pos   int
 	depth int // current container nesting, gated in parseValue
+	nodes int // value nodes materialised so far, gated in parseValue
 	// Memoized line/column for errf: lineOff is how far into s the (line, col)
 	// pair has been advanced. d.pos moves forward during a decode, so errf walks
 	// the cache from lineOff to d.pos instead of rescanning from the start each
@@ -92,6 +98,10 @@ func (d *decoder) skipWS() {
 func (d *decoder) parseValue() (interpreter.Value, error) {
 	if d.pos >= len(d.s) {
 		return interpreter.Null(), d.errf("unexpected end of input")
+	}
+	d.nodes++
+	if d.nodes > maxDecodedNodes {
+		return interpreter.Null(), d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
 	}
 	switch c := d.s[d.pos]; {
 	case c == '{':

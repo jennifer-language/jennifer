@@ -200,6 +200,11 @@ entries). Hot loops that reuse a pattern string pay the RE2
 compile cost once. Distinct patterns beyond 128 evict the
 oldest silently; correctness is unaffected.
 
+A pattern that compiles to an excessively large program (a short pattern can
+expand to millions of instructions through nested bounded repeats) is a
+catchable error rather than a multi-hundred-MB compiled regexp, so the cache
+stays bounded in memory even under attacker-supplied patterns.
+
 You don't need to think about this. A future `regex.compile`
 verb would expose explicit control if a benchmark ever showed
 the implicit cache wasn't enough.

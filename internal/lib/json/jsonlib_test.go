@@ -181,6 +181,20 @@ func TestDecodeErrors(t *testing.T) {
 // Nesting beyond the decoder's depth cap must surface as a normal, catchable
 // decode error. Unbounded recursion exhausts the Go stack, which is fatal and
 // uncatchable - a remote DoS wherever untrusted JSON is decoded (web.bodyJson).
+func TestDecodeNodeBudget(t *testing.T) {
+	saved := maxDecodedNodes
+	maxDecodedNodes = 100
+	defer func() { maxDecodedNodes = saved }()
+	bomb := "[" + strings.Repeat("0,", 200) + "0]"
+	if _, err := decodeFn([]interpreter.Value{interpreter.StringVal(bomb)}); err == nil || !strings.Contains(err.Error(), "decode bomb") {
+		t.Errorf("over-budget array: expected a decode-bomb error, got %v", err)
+	}
+	small := "[" + strings.Repeat("0,", 10) + "0]"
+	if _, err := decodeFn([]interpreter.Value{interpreter.StringVal(small)}); err != nil {
+		t.Errorf("within-budget array should decode, got %v", err)
+	}
+}
+
 func TestDecodeDepthCap(t *testing.T) {
 	deepArr := strings.Repeat("[", maxNestingDepth+1) + strings.Repeat("]", maxNestingDepth+1)
 	if _, err := decodeFn([]interpreter.Value{interpreter.StringVal(deepArr)}); err == nil || !strings.Contains(err.Error(), "nesting") {

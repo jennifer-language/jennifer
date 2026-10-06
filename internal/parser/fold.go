@@ -9,6 +9,11 @@ import "math"
 // positive image, so `MinInt64 // -1` and `MinInt64 * -1` are left unfolded.
 const foldMinInt64 = -1 << 63
 
+// maxFoldStringBytes caps the size of a folded string-concatenation result.
+// Above it the chain is left for the runtime, keeping constant folding off the
+// quadratic path a long `"a"+"a"+...` chain would otherwise take at parse time.
+const maxFoldStringBytes = 64 << 10
+
 // foldFloat builds a folded FloatLit, but leaves the node UNFOLDED (returns nil)
 // when the result is non-finite (+/-Inf or NaN), so the runtime raises the strict
 // "float overflow" error at the original position - the exact discipline the int
@@ -145,10 +150,16 @@ func tryFoldBinary(ex *BinaryExpr) Expr {
 		return nil
 	}
 
-	// String concat with `+`.
+	// String concat with `+`. Folding a long left-nested chain is quadratic
+	// (each step copies the whole prefix built so far), so leave an oversized
+	// concat unfolded and let the runtime join it in one pass; correctness is
+	// unchanged, only where the work happens.
 	if ex.Op == OpAdd {
 		if l, ok := litString(left); ok {
 			if r, ok := litString(right); ok {
+				if len(l)+len(r) > maxFoldStringBytes {
+					return nil
+				}
 				return &StringLit{pos: ex.pos, Value: l + r}
 			}
 		}

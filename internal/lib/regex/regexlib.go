@@ -19,6 +19,7 @@ import (
 	"container/list"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"sync"
 	"unicode/utf8"
 
@@ -37,6 +38,14 @@ type Value = interpreter.Value
 // cacheCap bounds the LRU. Chosen to comfortably cover real
 // programs' distinct patterns without unbounded memory growth.
 const cacheCap = 128
+
+// maxProgramSize bounds the compiled size (instruction count) of a single
+// pattern. The LRU bounds entry count, not size, and Go's regexp allows a
+// program of millions of instructions (~200 MB each) from a short attacker
+// pattern, so cacheCap alone let a search feature be driven to many GB. A pattern
+// over this is a catchable error. 50000 is far past any real pattern; the whole
+// cache then stays bounded at cacheCap * this.
+var maxProgramSize = 50000
 
 type cacheEntry struct {
 	pattern string
@@ -68,6 +77,13 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 		cacheLRU.MoveToFront(elem)
 		return elem.Value.(*cacheEntry).re, nil
 	}
+	// Bound the compiled program size before committing. regexp.Compile itself
+	// has no instruction cap (only a per-{n} repeat limit), so nested repeats can
+	// expand a short pattern into a huge machine; measure via the syntax package
+	// (the same parse regexp.Compile does) and reject an oversized one.
+	if err := checkProgramSize(fnName, pattern); err != nil {
+		return nil, err
+	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("%s: invalid pattern %q: %v", fnName, pattern, err)
@@ -82,6 +98,26 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 		}
 	}
 	return re, nil
+}
+
+// checkProgramSize parses and compiles pattern through the syntax package (the
+// same path regexp.Compile takes: Perl flags, simplify, compile) and rejects a
+// program whose instruction count exceeds maxProgramSize, before the full
+// regexp machine is built and cached. A parse error here is left to
+// regexp.Compile so the one error message is used.
+func checkProgramSize(fnName, pattern string) error {
+	re, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return nil
+	}
+	prog, err := syntax.Compile(re.Simplify())
+	if err != nil {
+		return nil
+	}
+	if len(prog.Inst) > maxProgramSize {
+		return fmt.Errorf("%s: pattern %q compiles to %d instructions, over the limit of %d", fnName, pattern, len(prog.Inst), maxProgramSize)
+	}
+	return nil
 }
 
 // -------- Install --------

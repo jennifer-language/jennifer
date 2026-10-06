@@ -297,3 +297,16 @@ func TestAttrWhitespaceNormalization(t *testing.T) {
 		t.Errorf("round-trip lost the newline: %q", got)
 	}
 }
+
+func TestDecodeNodeBudget(t *testing.T) {
+	saved := maxDecodedNodes
+	maxDecodedNodes = 50
+	defer func() { maxDecodedNodes = saved }()
+	bomb := "<a>" + strings.Repeat("<b/>", 200) + "</a>"
+	if _, err := decodeXML(bomb); err == nil || !strings.Contains(err.Error(), "decode bomb") {
+		t.Errorf("over-budget document: expected a decode-bomb error, got %v", err)
+	}
+	if _, err := decodeXML("<a><b/></a>"); err != nil {
+		t.Errorf("within-budget document should decode, got %v", err)
+	}
+}

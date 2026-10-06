@@ -463,3 +463,16 @@ func TestDecodeUnderscoreBaseAware(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeNodeBudget(t *testing.T) {
+	saved := maxDecodedNodes
+	maxDecodedNodes = 50
+	defer func() { maxDecodedNodes = saved }()
+	bomb := "a = [" + strings.Repeat("0,", 200) + "0]"
+	if _, err := decodeToml(bomb); err == nil || !strings.Contains(err.Error(), "decode bomb") {
+		t.Errorf("over-budget array: expected a decode-bomb error, got %v", err)
+	}
+	if _, err := decodeToml("a = [1, 2, 3]"); err != nil {
+		t.Errorf("within-budget document should decode, got %v", err)
+	}
+}

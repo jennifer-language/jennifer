@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 func intList(vs ...int64) interpreter.Value {
@@ -305,5 +306,19 @@ func TestRangeNearMaxIntTerminates(t *testing.T) {
 	// [max-2, max) with step 3 contains only max-2.
 	if len(out.List) != 1 || out.List[0].Int != max-2 {
 		t.Errorf("got %d elements (%+v), want [max-2]", len(out.List), out.List)
+	}
+}
+
+func TestRangeElementCap(t *testing.T) {
+	// The element count is checked before any allocation, so a huge span errors
+	// cheaply rather than exhausting memory.
+	_, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		interpreter.IntVal(0), interpreter.IntVal(int64(limits.MaxRangeElements) + 1)})
+	if err == nil || !strings.Contains(err.Error(), "exceeds the limit") {
+		t.Errorf("over-cap range: expected a limit error, got %v", err)
+	}
+	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5)})
+	if err != nil || len(out.List) != 5 {
+		t.Errorf("small range should build, got len=%d err=%v", len(out.List), err)
 	}
 }

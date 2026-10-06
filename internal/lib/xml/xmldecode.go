@@ -31,6 +31,24 @@ type decoder struct {
 	lineOff int
 	line    int
 	col     int
+	nodes   int // map entries / text nodes materialised so far, gated by addNodes
+}
+
+// maxDecodedNodes bounds how many value nodes one decode may materialise. An
+// element is a 4-entry map (~several KB), so depth alone did not stop a few-MB
+// document from amplifying into gigabytes of Value. Counted in units comparable
+// to the other decoders (map entries), so the shared cap bounds memory similarly.
+// A package var so tests can lower it.
+var maxDecodedNodes = limits.MaxDecodedNodes
+
+// addNodes charges n materialised nodes and errors once the running total passes
+// the cap.
+func (d *decoder) addNodes(n int) error {
+	d.nodes += n
+	if d.nodes > maxDecodedNodes {
+		return d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+	}
+	return nil
 }
 
 // maxDepth caps element nesting. parseElement/parseContent recurse one Go frame
@@ -193,6 +211,10 @@ func (d *decoder) parseElement(depth int) (interpreter.Value, error) {
 	if depth >= maxDepth {
 		return interpreter.Value{}, d.errf("element nesting exceeds %d levels", maxDepth)
 	}
+	// An element node is a 4-entry map (kind / name / attrs / children).
+	if err := d.addNodes(4); err != nil {
+		return interpreter.Value{}, err
+	}
 	d.pos++ // '<'
 	name, err := d.parseName()
 	if err != nil {
@@ -273,6 +295,9 @@ func (d *decoder) parseAttributes() (attrs []interpreter.MapEntry, selfClose boo
 			return nil, false, d.errf("duplicate attribute %q", aname)
 		}
 		seen[aname] = true
+		if err := d.addNodes(1); err != nil {
+			return nil, false, err
+		}
 		attrs = append(attrs, interpreter.MapEntry{Key: sv(aname), Value: sv(aval)})
 	}
 }
@@ -335,6 +360,9 @@ func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, err
 			if err != nil {
 				return nil, err
 			}
+			if err := d.addNodes(2); err != nil {
+				return nil, err
+			}
 			children = append(children, textNode(txt))
 			continue
 		}
@@ -351,6 +379,9 @@ func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, err
 		case d.startsWith("<![CDATA["):
 			txt, err := d.parseCDATA()
 			if err != nil {
+				return nil, err
+			}
+			if err := d.addNodes(2); err != nil {
 				return nil, err
 			}
 			children = append(children, textNode(txt))

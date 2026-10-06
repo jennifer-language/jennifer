@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -32,8 +33,19 @@ const maxNestingDepth = 1000
 // maxNodes caps the number of tree nodes materialised from one decode. An alias
 // bomb (a chain of anchors that each reference the previous one twice) expands
 // exponentially when followed by value; this budget turns that into a bounded,
-// catchable error rather than an out-of-memory kill.
-const maxNodes = 5_000_000
+// catchable error rather than an out-of-memory kill. Shared with the other
+// decoders. A var so tests can lower it.
+var maxNodes = limits.MaxDecodedNodes
+
+// maxDecodeBytes caps the raw input one decode accepts, checked before yaml.v3
+// runs. The converter's maxNodes budget bounds the Value tree, but yaml.v3 builds
+// its own yaml.Node tree for the whole document first, so without a byte cap a
+// large flat document reaches multi-GB RSS (and a possible OOM kill) before the
+// node budget is ever consulted. Sized so the densest input (~2 bytes per node)
+// cannot build far past maxNodes yaml.Node before the converter stops it; a larger
+// document is a catchable error. Config YAML is KB-MB, so this never rejects a
+// real one.
+var maxDecodeBytes = 4 << 20
 
 // maxParseDepth caps structural nesting *before* the input reaches yaml.v3.
 // yaml.v3 is a recursive-descent parser that recurses once per nesting level as
@@ -112,6 +124,9 @@ func decodeAllYaml(src string) ([]interpreter.Value, error) {
 
 // decodeStream runs the yaml.v3 streaming decoder and converts each document.
 func decodeStream(src string) ([]interpreter.Value, error) {
+	if len(src) > maxDecodeBytes {
+		return nil, fmt.Errorf("yaml.decode: input is %d bytes, over the %d-byte limit (input rejected as a decode bomb)", len(src), maxDecodeBytes)
+	}
 	if err := guardDepth(src); err != nil {
 		return nil, err
 	}

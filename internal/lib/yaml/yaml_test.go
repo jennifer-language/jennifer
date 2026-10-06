@@ -506,3 +506,29 @@ func TestHugeIntKeepsExactDigits(t *testing.T) {
 		t.Errorf("42 type = %s, want int", got)
 	}
 }
+
+func TestDecodeNodeBudget(t *testing.T) {
+	savedN := maxNodes
+	maxNodes = 50
+	defer func() { maxNodes = savedN }()
+	bomb := "[" + strings.Repeat("0,", 200) + "0]"
+	if _, err := decodeYaml(bomb); err == nil || !strings.Contains(err.Error(), "too many nodes") {
+		t.Errorf("over-budget sequence: expected a too-many-nodes error, got %v", err)
+	}
+	if _, err := decodeYaml("[1, 2, 3]"); err != nil {
+		t.Errorf("within-budget document should decode, got %v", err)
+	}
+}
+
+func TestDecodeByteCap(t *testing.T) {
+	savedB := maxDecodeBytes
+	maxDecodeBytes = 64
+	defer func() { maxDecodeBytes = savedB }()
+	big := "[" + strings.Repeat("0,", 100) + "0]"
+	if _, err := decodeYaml(big); err == nil || !strings.Contains(err.Error(), "over the") {
+		t.Errorf("over-cap input: expected a byte-cap error, got %v", err)
+	}
+	if _, err := decodeYaml("a: 1"); err != nil {
+		t.Errorf("small input should decode, got %v", err)
+	}
+}

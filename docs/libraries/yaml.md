@@ -84,9 +84,10 @@ complex key) and a **duplicate mapping key** are both rejected.
 decode errors: a raw-text pre-scan rejects structural nesting deeper than 128
 levels **before** the parse runs (the underlying parser is recursive, and a
 deeply-nested document would otherwise overflow the interpreter's stack - fatal
-on the fixed-stack `jennifer-tiny`), and a five-million-node budget stops an
-alias bomb (anchors that each reference the previous one twice) from exhausting
-memory.
+on the fixed-stack `jennifer-tiny`); an input-byte cap rejects an oversized
+document before the backing parser materialises its whole node tree; and a node
+budget (shared with the other decoders) stops an alias bomb (anchors that each
+reference the previous one twice) from exhausting memory.
 
 ### Anchors, aliases, and merge keys
 

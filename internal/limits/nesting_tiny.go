@@ -42,6 +42,14 @@ const MaxRangeElements = 1 << 20
 // error. See the std-build note for the full rationale.
 const MaxChannelCapacity = 1 << 16
 
+// MaxDecodedNodes caps how many value nodes one decode of untrusted text may
+// materialise on jennifer-tiny, shared by the json / xml / toml decoders and the
+// yaml converter. Lower than the default binary's because the heap is far
+// smaller: at 1<<16 (~65k) nodes the decode peaks at tens of MiB (a node costs
+// ~1 KB at the peak), well past any realistic document on a constrained target.
+// Exceeding it is a catchable "too many nodes" error. See the std-build note.
+const MaxDecodedNodes = 1 << 16
+
 // MaxMatrixElements caps how many elements a single `linalg` vector or matrix may
 // hold on jennifer-tiny, whose heap is far smaller than the default binary's, so
 // the ceiling is lower. Like its std sibling it is enforced at both the

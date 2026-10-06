@@ -36,6 +36,17 @@ const MaxNestingDepth = 1000
 // docs/user-guide/control-flow.md).
 const MaxCallDepth = 10000
 
+// MaxDecodedNodes caps how many value nodes one decode of untrusted text may
+// materialise, shared by the hand-rolled json / xml / toml decoders and the
+// yaml converter. A node is an interpreter.Value (~272 bytes) plus container
+// slice-growth transients, so it costs closer to ~1 KB at the decode peak; a
+// few-MB document would otherwise amplify into gigabytes and an uncatchable OOM
+// (only nesting depth was bounded before). At 1<<19 (~524k nodes) the decode
+// peaks at a few hundred MB - far past any real document yet well below the OOM
+// cliff - and exceeding it is a catchable "too many nodes" error. (asn1 keeps
+// its own lower 200k cap.)
+const MaxDecodedNodes = 1 << 19
+
 // MaxRangeElements caps how many elements a range expression will materialise
 // into a `list of int` in one evaluation - the value forms `0..n` and
 // `$xs = 0..n`, not the lazy `for (def i in 0..n)` iteration, which allocates
@@ -45,10 +56,11 @@ const MaxCallDepth = 10000
 // huge (or, on int64 span overflow, negative) capacity and trigger Go's
 // "makeslice: cap out of range" panic - which the interpreter, having no
 // recover(), cannot catch - or a multi-gigabyte single allocation just below
-// it. The default binary allows ~16.7M ints, far past any reasonable
-// materialised range yet well below the allocation cliff; a larger span should
-// iterate lazily.
-const MaxRangeElements = 1 << 24
+// it. At 1<<22 (~4.2M ints) the materialised list is ~1.1 GB of Value (272 bytes
+// each), far past any reasonable materialised range yet bounded and catchable;
+// a larger span should iterate lazily with `for (def i in lo..hi)`, which
+// allocates nothing. lists.range shares this cap.
+const MaxRangeElements = 1 << 22
 
 // MaxChannelCapacity caps the buffer a single channel.make can allocate, in the
 // same spirit as MaxRangeElements: a buffered `chan Value` (Value is ~272 bytes)

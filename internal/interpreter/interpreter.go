@@ -1707,6 +1707,11 @@ func rhsFreshLiteral(e parser.Expr) bool {
 	switch e.(type) {
 	case *parser.ListLit, *parser.MapLit, *parser.StructLit:
 		return true
+	case *parser.RangeExpr, *parser.SliceExpr:
+		// A range materialises a new list and a slice returns a fresh copy, so
+		// the binding site need not copy again - `def r init 0..n` would
+		// otherwise allocate the whole range twice.
+		return true
 	}
 	return false
 }

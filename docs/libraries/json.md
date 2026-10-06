@@ -17,7 +17,9 @@ both binaries.
 interpreter's stack. The limit is shared by every parser in the toolchain and
 is set per binary: 1000 levels on the default `jennifer` (Go's growable stack),
 64 on `jennifer-tiny` (its fixed 4 MB stack). Both are far past any real
-document.
+document. `decode` also caps the total number of value nodes it will
+materialise, so a flat few-MB document (a huge array) raises a catchable error
+instead of amplifying into gigabytes of memory.
 
 Accessors over a decoded `json.Value`. Every one takes an optional
 trailing **JSON Pointer** (RFC 6901) string, relative to the passed node

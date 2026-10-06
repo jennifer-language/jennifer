@@ -21,6 +21,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	mathlib "jennifer-lang.dev/jennifer/internal/lib/math"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -637,9 +638,26 @@ func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 			step = -1
 		}
 	}
+	// Cap the element count up front, like the `..` operator: each element is a
+	// ~272-byte Value, so an input-derived count would otherwise allocate until
+	// the process dies (an uncatchable OOM, not a Jennifer error). Computed
+	// overflow-safe in uint64 so a huge span cannot wrap.
+	var span uint64
+	if step > 0 {
+		if end > start {
+			span = (uint64(end)-uint64(start)-1)/uint64(step) + 1
+		}
+	} else {
+		if start > end {
+			span = (uint64(start)-uint64(end)-1)/uint64(-step) + 1
+		}
+	}
+	if span > uint64(limits.MaxRangeElements) {
+		return interpreter.Null(), fmt.Errorf("lists.range: %d elements exceeds the limit of %d; iterate lazily with `for (def i in lo..hi)` instead", span, limits.MaxRangeElements)
+	}
 	// Advance with overflow detection: near MaxInt64 / MinInt64, `v += step`
 	// can wrap around and stay on the correct side of `end`, looping forever.
-	var data []interpreter.Value
+	data := make([]interpreter.Value, 0, span)
 	if step > 0 {
 		for v := start; v < end; {
 			data = append(data, interpreter.IntVal(v))

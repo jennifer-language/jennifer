@@ -89,11 +89,18 @@ func decodeToml(src string) (interpreter.Value, error) {
 // fixed-stack crash point (see internal/limits).
 const maxNestingDepth = limits.MaxNestingDepth
 
+// maxDecodedNodes bounds how many value nodes one decode may materialise, so a
+// flat document (e.g. a huge array) cannot amplify a few MB into gigabytes of
+// Value; only nesting depth was bounded before. A package var so tests can lower
+// it.
+var maxDecodedNodes = limits.MaxDecodedNodes
+
 type decoder struct {
 	src   string
 	pos   int
 	line  int // 0-based; +1 for messages
 	depth int // current container nesting, gated in parseValue
+	nodes int // value nodes materialised so far, gated in parseValue
 
 	// Table-definition state (keyed by encoded dotted path) enforces TOML 1.0's
 	// MUST-error redefinition rules that a plain tree build would silently merge:
@@ -471,6 +478,10 @@ func isBareKeyChar(c byte) bool {
 // ----- values --------------------------------------------------------------
 
 func (d *decoder) parseValue() (interpreter.Value, error) {
+	d.nodes++
+	if d.nodes > maxDecodedNodes {
+		return interpreter.Value{}, d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+	}
 	switch c := d.peek(); {
 	case c == '"':
 		if d.at(1) == '"' && d.at(2) == '"' {

@@ -196,6 +196,10 @@ strictly before `end`. Positive step requires `start <= end`;
 negative step requires `start >= end`; step must be non-zero
 (positional error).
 
+`lists.range` materialises its whole list, so the element count is capped (the
+same cap as the `..` operator); a span over it is a catchable error. For a very
+large range, iterate lazily with `for (def i in lo..hi)`, which builds no list.
+
 ```jennifer
 lists.range(0, 9, 3);       # [0, 3, 6]          - 9 excluded
 lists.range(1, 9, 3);       # [1, 4, 7]          - 10 past 9, stop at 7
