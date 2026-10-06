@@ -9,9 +9,41 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// valueCellBytes is the in-memory size of one Value cell. A compound's backing
+// is a slice of these (a list's elements, a map's entries, a struct's fields),
+// so the cell size dominates the heap cost of a copied collection - a `list of
+// int` is len*valueCellBytes of slice, not len*8. Used by shallowValueBytes for
+// the recursion memory guard.
+const valueCellBytes = int64(unsafe.Sizeof(Value{}))
+
+// shallowValueBytes estimates the heap a copy of v holds in its own immediate
+// backing, without recursing into nested containers. Deliberately crude and
+// O(1): it captures the dominant cost (a big flat list / map / struct, or a long
+// string / bytes) and undercounts nested backing, which only ever makes the
+// recursion memory guard more conservative (it never over-reports, so a legal
+// program is never falsely stopped). Scalars hold no separate backing and report
+// zero.
+func shallowValueBytes(v Value) int64 {
+	switch v.Kind {
+	case KindList:
+		return valueCellBytes * int64(len(v.List))
+	case KindMap:
+		return valueCellBytes * 2 * int64(len(v.Map))
+	case KindStruct, KindEnum:
+		return valueCellBytes * int64(len(v.Fields))
+	case KindString:
+		return int64(len(v.Str))
+	case KindBytes:
+		return int64(len(v.Bytes))
+	default:
+		return 0
+	}
+}
 
 // DisplayFloat formats a float64 for human output. Unlike `strconv.FormatFloat`
 // with verb 'g', it guarantees the result is recognisable as a float: if the

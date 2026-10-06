@@ -31,10 +31,30 @@ const MaxNestingDepth = 1000
 // overflow well below it. Block and expression steps increment without their own
 // check (bounded by the parser's stmtDepth / exprDepth caps, they only run away
 // through a checked call). A simple recursion reaches a few thousand levels here
-// and peaks near 120 MB of stack. Bounds the stack, not the heap: frames each
-// holding a large copied value can still exhaust memory first (see
-// docs/user-guide/control-flow.md).
+// and peaks near 120 MB of stack. Bounds the stack; the heap a recursion holds
+// in per-frame value copies is bounded separately by MaxCopyChainBytes.
 const MaxCallDepth = 10000
+
+// MaxCopyChainBytes caps the estimated heap held by the value copies live along
+// one call chain - the companion to MaxCallDepth for the heap, not the stack.
+// The depth cap bounds frame *count*, but a frame's cost is unbounded: a
+// recursion that copies a large value per frame (a parser carrying its token
+// list, a tree-walker holding a node list) exhausts memory long before the
+// frame count reaches MaxCallDepth, and a Go OOM is a fatal, uncatchable crash
+// the interpreter has no recover() to trap. Each store that allocates a new
+// compound backing (a copying parameter bind, a copying local `def`) adds its
+// estimated size (shallowValueBytes) to a goroutine-local counter shared by
+// every live frame, and the counter drops as each frame is released; crossing
+// this budget at a call site raises the same catchable "limit" error as the
+// depth cap. The accounting is deliberately crude and conservative (it
+// undercounts nested backing and ignores non-recursive single-frame growth), so
+// it never stops a legal program early; its job is only to convert the
+// uncatchable kill into the catchable error that already exists. At 1 GiB the
+// budget is far above any reasonable recursive working set yet below the OOM
+// cliff on a typical host; a deeper machine can carry more real memory than this
+// in globals, which is why a larger single value or a non-recursive loop is not
+// bounded here (that is the host's own memory limit's job).
+const MaxCopyChainBytes = 1 << 30
 
 // MaxDecodedNodes caps how many value nodes one decode of untrusted text may
 // materialise, shared by the hand-rolled json / xml / toml decoders and the

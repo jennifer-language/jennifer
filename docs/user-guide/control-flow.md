@@ -464,11 +464,17 @@ won't be able to read `.kind` / `.message` off it. Use
   The call-depth cap counts method calls, block nesting, and expression
   nesting together, so recursion through several nested `if` blocks or a
   recursive call wrapped in many parentheses raises a catchable `"limit"`
-  error rather than crashing. One caveat: **the cap bounds the call stack, not
-  the heap.** A recursion whose every frame holds a large value - a parameter
-  or local copying a big `list` / `map` / `string` per level - can exhaust
-  memory before the depth cap fires, and that is not catchable. Bound such a
-  recursion's depth yourself, or rewrite it to iterate.
+  error rather than crashing. A companion **recursion memory guard** covers
+  the heap the depth cap does not: a recursion whose every frame copies a large
+  value - a parameter or local holding a big `list` / `map` / `string` per
+  level - would otherwise exhaust memory (an uncatchable crash) long before the
+  depth cap fires, so the live per-frame copies are bounded too, raising the
+  same catchable `"limit"` error. The accounting is deliberately crude: it
+  counts the value copies made into recursive frames, not every allocation, so
+  a single huge value or a non-recursive loop that grows one is still bounded
+  only by the host's own memory. The fix for a tripped recursion is the one the
+  error names - pass the big value as a read-only parameter (which is borrowed,
+  not copied) or index it in place, rather than binding a fresh copy per frame.
 
 ### What can NOT be caught
 

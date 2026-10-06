@@ -23,8 +23,17 @@ const MaxNestingDepth = 64
 // simple recursion spends ~2 budget units per level, so 120 stays under that
 // floor while clearing the deepest recursion a shipped example reaches
 // (examples/benchmark.j's serial fib(23), depth 24 / ~70 units). Bounds the
-// stack, not the heap.
+// stack; per-frame value-copy heap is bounded separately by MaxCopyChainBytes.
 const MaxCallDepth = 120
+
+// MaxCopyChainBytes caps the estimated heap held by the value copies live along
+// one call chain on jennifer-tiny - the heap companion to MaxCallDepth. Lower
+// than the default binary's because the target's heap is far smaller: at 64 MiB
+// a recursion that copies a large value per frame trips the catchable "limit"
+// error well before exhausting a constrained host, instead of a fatal,
+// uncatchable OOM. See the std-build note for the full rationale and the
+// accounting's conservative, crude nature.
+const MaxCopyChainBytes = 64 << 20
 
 // MaxRangeElements caps range-literal materialisation for jennifer-tiny, whose
 // heap is far smaller than the default binary's. It turns the same otherwise

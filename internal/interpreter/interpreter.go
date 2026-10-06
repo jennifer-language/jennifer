@@ -1003,6 +1003,9 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 			}
 		}
 		bound := i.bindArg(args[idx], p, borrowCtx)
+		if !(p.Borrow && borrowCtx) {
+			i.accountCopy(callFrame, bound)
+		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 			releaseBlockEnv(callFrame)
 			return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
@@ -1021,6 +1024,11 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 			Kind: "limit",
 			Msg:  fmt.Sprintf("call stack too deep: exceeded the depth limit of %d nested calls, blocks, and expressions (possible infinite recursion)", limits.MaxCallDepth),
 		}
+	}
+	if err := chainBytesLimitErr(callFrame); err != nil {
+		*dc--
+		releaseBlockEnv(callFrame)
+		return Value{}, err
 	}
 	res, err := i.execBlock(m.Body, callFrame)
 	*dc--
@@ -1882,6 +1890,7 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		// redundant whole-value copy - only the stamp is needed.
 		if rhsFreshLiteral(st.InitExpr) {
 			val = stampDeclaredType(v, st.VarType)
+			i.accountCopy(env, val)
 		} else if st.Borrow && env.borrowDefs {
 			// Local-binding borrow: alias the initializer instead of copying it.
 			// The resolver proved the binding read-only and every root its
@@ -1893,6 +1902,7 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 			val = stampDeclaredType(v, st.VarType)
 		} else {
 			val = stampDeclaredType(i.eagerCopy(v, st), st.VarType)
+			i.accountCopy(env, val)
 		}
 	} else {
 		// Spec decision: uninitialized variables get the zero value of
@@ -2038,6 +2048,42 @@ func bindParamValue(v Value, declType parser.Type) Value {
 // transitively (m.GlobalSafe), even in a script that has mutable globals
 // elsewhere. Combined with Param.Borrow (never-written, borrow-safe type) at the
 // bind site.
+// accountCopy records that storing v into env's own binding added heap along
+// the call chain, for the recursion memory guard (MaxCopyChainBytes). Scalars
+// hold no separate backing (shallowValueBytes 0) and are skipped, so the
+// common hot path pays nothing. Balanced by releaseBlockEnv, which returns
+// env.frameBytes to the shared counter when the frame is recycled.
+func (i *Interpreter) accountCopy(env *Environment, v Value) {
+	if env.chainBytes == nil {
+		return
+	}
+	if n := shallowValueBytes(v); n != 0 {
+		env.frameBytes += n
+		atomic.AddInt64(env.chainBytes, n)
+	}
+}
+
+// copyChainBudget is the live recursion-copy byte budget the guard enforces,
+// sourced from limits.MaxCopyChainBytes. A package var (not the const directly)
+// so a test can lower it to exercise the guard without allocating a real
+// gigabyte; production never writes it.
+var copyChainBudget int64 = limits.MaxCopyChainBytes
+
+// chainBytesLimitErr returns a catchable "limit" error when the live
+// recursion-copy memory has topped the budget, else nil. Checked at the
+// call-depth guard sites so a recursion that copies a large value per frame
+// raises the same catchable error as plain deep recursion, instead of growing
+// the heap to a fatal, uncatchable OOM.
+func chainBytesLimitErr(env *Environment) *runtimeError {
+	if env.chainBytes == nil || atomic.LoadInt64(env.chainBytes) <= copyChainBudget {
+		return nil
+	}
+	return &runtimeError{
+		Kind: "limit",
+		Msg:  fmt.Sprintf("recursion used too much memory: live value copies exceeded the %d-byte limit (a large value copied on each of many recursive frames; pass it as a read-only parameter, or index it in place, to avoid the per-frame copy)", copyChainBudget),
+	}
+}
+
 func (i *Interpreter) methodBorrowCtx(m *parser.MethodDef) bool {
 	// No i.isModule short-circuit: a module method is not automatically
 	// borrow-safe, because meta.callMain can mutate a host global its borrowed
@@ -5122,9 +5168,12 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 		// for a borrowable parameter (a read-only alias - no copy happens, so no
 		// eager-copy is recorded).
 		bound := i.bindArg(v, p, borrowCtx)
-		if !(p.Borrow && borrowCtx) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-			pf, pl, pcol := posFor(a)
-			i.prof.RecordEagerCopy(pf, pl, pcol)
+		if !(p.Borrow && borrowCtx) {
+			i.accountCopy(callFrame, bound)
+			if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+				pf, pl, pcol := posFor(a)
+				i.prof.RecordEagerCopy(pf, pl, pcol)
+			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 			releaseBlockEnv(callFrame)
@@ -5150,6 +5199,17 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 			Msg:  fmt.Sprintf("call stack too deep: exceeded the depth limit of %d nested calls, blocks, and expressions (possible infinite recursion)", limits.MaxCallDepth),
 			File: file, Line: line, Col: col,
 		}
+	}
+	// Recursion memory guard: the heap companion to the depth cap (see
+	// chainBytesLimitErr). A large value copied on each of many frames OOMs the
+	// process - a fatal, uncatchable crash - long before the frame count trips the
+	// depth cap; raise the same catchable "limit" instead.
+	if cbErr := chainBytesLimitErr(callFrame); cbErr != nil {
+		*dc--
+		releaseBlockEnv(callFrame)
+		file, line, col := posFor(node)
+		cbErr.File, cbErr.Line, cbErr.Col = file, line, col
+		return Value{}, cbErr
 	}
 	if i.prof != nil && i.profStmts {
 		pf, pl, pc := posFor(node)
@@ -5291,9 +5351,12 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				}
 			}
 			bound := i.bindArg(v, p, borrowCtx)
-			if !(p.Borrow && borrowCtx) && i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-				pf, pl, pcol := posFor(a)
-				i.prof.RecordEagerCopy(pf, pl, pcol)
+			if !(p.Borrow && borrowCtx) {
+				i.accountCopy(callFrame, bound)
+				if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+					pf, pl, pcol := posFor(a)
+					i.prof.RecordEagerCopy(pf, pl, pcol)
+				}
 			}
 			if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 				releaseBlockEnv(callFrame)
@@ -5312,6 +5375,13 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				Msg:  fmt.Sprintf("call stack too deep: exceeded the depth limit of %d nested calls, blocks, and expressions (possible infinite recursion)", limits.MaxCallDepth),
 				File: file, Line: line, Col: col,
 			}
+		}
+		if cbErr := chainBytesLimitErr(callFrame); cbErr != nil {
+			*dc--
+			releaseBlockEnv(callFrame)
+			file, line, col := posFor(c)
+			cbErr.File, cbErr.Line, cbErr.Col = file, line, col
+			return Value{}, cbErr
 		}
 		if i.prof != nil && i.profStmts {
 			pf, pl, pc := posFor(c)

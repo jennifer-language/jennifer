@@ -42,6 +42,7 @@ func borrowBlockEnv(parent *Environment, numSlots int) *Environment {
 	e.parent = parent
 	e.root = rootFor(parent, e)
 	e.depth = inheritDepth(parent)
+	e.chainBytes = inheritChainBytes(parent)
 	e.borrowDefs = parent != nil && parent.borrowDefs
 	// releaseBlockEnv zeroes every used slot before returning the env
 	// to the pool, so the backing array's [0, cap) range is Binding{}
@@ -66,6 +67,13 @@ func borrowBlockEnv(parent *Environment, numSlots int) *Environment {
 // closure form that could capture the env. Slot entries are zeroed
 // so the pool doesn't hold compound-value backings live between uses.
 func releaseBlockEnv(e *Environment) {
+	// Return this frame's recursion-memory contribution to the shared counter
+	// before the frame is recycled, so *chainBytes tracks live memory. Tied to
+	// the single release path, so it balances every add exactly as the pool's
+	// own borrow/release does.
+	if e.chainBytes != nil && e.frameBytes != 0 {
+		atomic.AddInt64(e.chainBytes, -e.frameBytes)
+	}
 	for k := range e.vars {
 		delete(e.vars, k)
 	}
@@ -77,6 +85,8 @@ func releaseBlockEnv(e *Environment) {
 	e.depth = nil
 	e.profChild.Store(0)
 	e.cancel = nil
+	e.chainBytes = nil
+	e.frameBytes = 0
 	e.borrowDefs = false
 	e.slots = e.slots[:0]
 	// Drop any deferred calls so a pooled frame never carries a stale one into
@@ -166,6 +176,20 @@ type Environment struct {
 	// (i.global) and on pooled block frames (they read through env.root, never
 	// carry their own).
 	cancel *TaskState
+	// chainBytes points at the goroutine-local recursion memory counter: the sum
+	// of shallowValueBytes over every value copy currently live along this call
+	// chain. Every frame in a goroutine shares one counter (a call frame parents
+	// at the goroutine root via effectiveGlobal, so the pointer is inherited
+	// transitively), and a fresh one is minted at each goroutine root (i.global, a
+	// spawn snapshot root). Accessed atomically because concurrent meta.callMain
+	// handlers re-root at the shared host global and so share its counter. The
+	// call-site guard raises a catchable "limit" when it tops MaxCopyChainBytes.
+	chainBytes *int64
+	// frameBytes is how much this frame added to *chainBytes (copying stores into
+	// its own bindings), subtracted back when the frame is released - so the
+	// counter tracks live memory, not cumulative. Frame-local (one goroutine owns
+	// its frame), so it needs no atomic.
+	frameBytes int64
 	// borrowDefs enables local-binding borrow (DefineStmt.Borrow) for defs run
 	// in this frame. Set true on a method call frame whose borrow context holds
 	// (methodBorrowCtx) and inherited by the body's nested block frames, so an
@@ -212,6 +236,17 @@ func inheritDepth(parent *Environment) *int {
 	return &d
 }
 
+// inheritChainBytes returns the recursion-memory counter a new frame carries:
+// the parent's (so every frame in a goroutine shares one counter) or, at a
+// goroutine root (parent == nil), a fresh one. Mirrors inheritDepth.
+func inheritChainBytes(parent *Environment) *int64 {
+	if parent != nil && parent.chainBytes != nil {
+		return parent.chainBytes
+	}
+	b := int64(0)
+	return &b
+}
+
 func NewEnvironment(parent *Environment) *Environment {
 	env := &Environment{
 		parent: parent,
@@ -219,6 +254,7 @@ func NewEnvironment(parent *Environment) *Environment {
 	}
 	env.root = rootFor(parent, env)
 	env.depth = inheritDepth(parent)
+	env.chainBytes = inheritChainBytes(parent)
 	env.borrowDefs = parent != nil && parent.borrowDefs
 	return env
 }
@@ -234,6 +270,7 @@ func NewEnvironmentSized(parent *Environment, numSlots int) *Environment {
 	}
 	env.root = rootFor(parent, env)
 	env.depth = inheritDepth(parent)
+	env.chainBytes = inheritChainBytes(parent)
 	env.borrowDefs = parent != nil && parent.borrowDefs
 	if numSlots > 0 {
 		env.slots = make([]Binding, numSlots)
