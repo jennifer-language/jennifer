@@ -263,6 +263,37 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
+// TestExpressionChainDepthCap proves a flat operator chain and a prefix-operator
+// run deeper than limits.MaxNestingDepth are rejected with a catchable parse
+// error, not built into an unbounded AST a later walk overflows on. Moderate
+// chains still parse.
+func TestExpressionChainDepthCap(t *testing.T) {
+	big := limits.MaxNestingDepth + 50
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"flat additive chain", "def x as int init 1" + strings.Repeat("+1", big) + ";"},
+		{"flat bitor chain", "def x as int init 1" + strings.Repeat("|1", big) + ";"},
+		{"prefix minus run", "def x as int init " + strings.Repeat("-", big) + "1;"},
+		{"prefix not run", "def x as bool init " + strings.Repeat("not ", big) + "true;"},
+	}
+	for _, c := range cases {
+		_, err := Parse(c.src)
+		if err == nil {
+			t.Errorf("%s: expected a nesting-depth parse error, got nil", c.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "nesting exceeds") {
+			t.Errorf("%s: error %q is not the nesting-depth cap", c.name, err.Error())
+		}
+	}
+	// A chain well under the cap still parses.
+	if _, err := Parse("def x as int init 1" + strings.Repeat("+1", 100) + ";"); err != nil {
+		t.Errorf("a 100-operator chain should parse, got: %v", err)
+	}
+}
+
 // TestConstNameAccepts exercises the constant naming rule's accepting side:
 // uppercase chunks separated by single `_` characters. The rule is
 // `[A-Z]+(_[A-Z]+)*`, so consecutive underscores like `MAX__INT` are

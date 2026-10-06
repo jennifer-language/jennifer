@@ -71,21 +71,72 @@ def r as int init ping(1);`)
 	}
 }
 
-// TestCallDepthUnderLimitRuns proves recursion whose depth stays at or below
-// the cap completes normally - the guard fires strictly above the limit.
+// TestCallDepthUnderLimitRuns proves recursion whose depth stays comfortably
+// below the cap completes normally. The budget counts block and expression
+// nesting as well as calls (so a `rec` body spends several budget units per
+// level, not one); this recurses to a depth whose total budget use stays well
+// under MaxCallDepth so it must succeed.
 func TestCallDepthUnderLimitRuns(t *testing.T) {
-	// rec(N) nests N+1 calls (rec(N)..rec(0)); N = MaxCallDepth-1 peaks at
-	// exactly MaxCallDepth, which is allowed (the guard fires only above it).
+	// Each rec level costs a handful of budget units (the call, the body block,
+	// the `if` block, the operand descents); MaxCallDepth/8 levels stays safely
+	// under the cap for any realistic per-level cost.
+	depth := limits.MaxCallDepth / 8
 	src := fmt.Sprintf(`use io;
 func rec(n as int) { if ($n <= 0) { return 0; } return rec($n - 1); }
 def r as int init rec(%d);
-io.printf("ok=%%d\n", $r);`, limits.MaxCallDepth-1)
+io.printf("ok=%%d\n", $r);`, depth)
 	out, err := run(t, src)
 	if err != nil {
-		t.Fatalf("recursion at the cap should run, got error: %v", err)
+		t.Fatalf("recursion well under the cap should run, got error: %v", err)
 	}
 	if !strings.Contains(out, "ok=0") {
 		t.Fatalf("expected ok=0, got: %q", out)
+	}
+}
+
+// TestCallDepthCountsBlockNesting proves recursion through a body with several
+// nested blocks trips the catchable guard instead of overflowing the Go stack:
+// the depth budget counts block entry, not just the call.
+func TestCallDepthCountsBlockNesting(t *testing.T) {
+	out, err := run(t, `use io;
+func f(n as int) {
+    if (true) { if (true) { if (true) { if (true) { if (true) {
+    if (true) { if (true) { if (true) { if (true) { if (true) {
+        return f($n + 1);
+    } } } } } } } } } }
+    return 0;
+}
+def caught as bool init false;
+try { def r as int init f(0); } catch (e) { $caught = true; io.printf("kind=%s\n", $e.kind); }
+io.printf("survived=%t\n", $caught);`)
+	if err != nil {
+		t.Fatalf("deeply-nested-block recursion should be catchable, got error: %v", err)
+	}
+	if !strings.Contains(out, "survived=true") || !strings.Contains(out, "kind=limit") {
+		t.Fatalf("expected catchable kind=limit, got: %q", out)
+	}
+}
+
+// TestCallDepthCountsExpressionNesting proves a recursive call wrapped in many
+// parentheses trips the catchable guard: the budget counts expression-operand
+// descent, so the stack cannot overflow at a call depth far below the call cap.
+func TestCallDepthCountsExpressionNesting(t *testing.T) {
+	// 200 nested `(1 + ...)` around the recursive call; parses (under the
+	// expression-nesting cap) but each frame carries 200 expression frames, so
+	// unbounded recursion would overflow the Go stack without expression counting.
+	open := strings.Repeat("(1 + ", 200)
+	closeP := strings.Repeat(")", 200)
+	src := `use io;
+func f(n as int) { return ` + open + `f($n + 1)` + closeP + `; }
+def caught as bool init false;
+try { def r as int init f(0); } catch (e) { $caught = true; io.printf("kind=%s\n", $e.kind); }
+io.printf("survived=%t\n", $caught);`
+	out, err := run(t, src)
+	if err != nil {
+		t.Fatalf("paren-wrapped recursion should be catchable, got error: %v", err)
+	}
+	if !strings.Contains(out, "survived=true") || !strings.Contains(out, "kind=limit") {
+		t.Fatalf("expected catchable kind=limit, got: %q", out)
 	}
 }
 

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestAstJSONIsValid(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse %q: %v", src, err)
 		}
-		var b strings.Builder
+		var b bytes.Buffer
 		emitNode(&b, prog, 0)
 		var v any
 		if err := json.Unmarshal([]byte(b.String()), &v); err != nil {
@@ -49,7 +50,7 @@ func TestAstJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	emitNode(&b, prog, 0)
 	out := b.String()
 
@@ -85,7 +86,7 @@ for (def x in $xs) { return; }
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	emitNode(&b, prog, 0)
 	out := b.String()
 

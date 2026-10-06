@@ -14,18 +14,17 @@ package limits
 // magnitude past the point where nesting is a code smell.
 const MaxNestingDepth = 64
 
-// MaxCallDepth caps nested Jennifer method calls for jennifer-tiny. A method
-// call is far heavier per level than a single nesting step - the tree-walker
-// stacks many Go frames per Jennifer call - so the stack overflows much sooner
-// than for structural nesting. On the 4 MB stack a minimal recursive body
-// segfaults near depth 100, a fib-shaped or heavy one (several locals, nested
-// blocks) near depth 75. 48 sits well below that floor while clearing the
-// deepest recursion a shipped example reaches with room to spare
-// (examples/benchmark.j's serial fib(23) peaks at depth 24), turning what is
-// otherwise an uncatchable SIGSEGV into a positioned, catchable error. It is
-// deliberately lower than MaxNestingDepth: call frames cost more stack than the
-// single deep expression chain the nesting cap governs.
-const MaxCallDepth = 48
+// MaxCallDepth caps interpreter recursion for jennifer-tiny, whose fixed 4 MB
+// stack overflows far sooner than the default binary's growable one. The budget
+// counts every major tree-walker recursion step - a method call, a block entry
+// (execBlock), and an expression-operand descent (evalExprDeep) - so the cap
+// bounds real stack depth regardless of per-frame nesting. A heavy recursive body
+// segfaults near call depth 75 on this stack; counting blocks and expressions a
+// simple recursion spends ~2 budget units per level, so 120 stays under that
+// floor while clearing the deepest recursion a shipped example reaches
+// (examples/benchmark.j's serial fib(23), depth 24 / ~70 units). Bounds the
+// stack, not the heap.
+const MaxCallDepth = 120
 
 // MaxRangeElements caps range-literal materialisation for jennifer-tiny, whose
 // heap is far smaller than the default binary's. It turns the same otherwise

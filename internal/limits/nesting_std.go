@@ -20,15 +20,20 @@ package limits
 // even a pathologically deep serialized document.
 const MaxNestingDepth = 1000
 
-// MaxCallDepth caps the number of nested Jennifer method calls the interpreter
-// will execute before raising a positioned, catchable runtime error - the
-// analogue of Python's RecursionError. Unbounded recursion otherwise grows the
-// Go goroutine stack until the runtime's ~1 GB ceiling triggers a fatal,
-// uncatchable "stack overflow". The default binary crashes a heavy method body
-// (many locals, nested blocks) near 50k nested calls and a minimal one near
-// 100k; 10000 sits well below the tighter floor with room for even heavier
-// frames, while still allowing an order of magnitude more recursion than a
-// typical tree-walking language (CPython defaults to 1000).
+// MaxCallDepth caps interpreter recursion before a positioned, catchable runtime
+// error is raised - the analogue of Python's RecursionError. Unbounded recursion
+// otherwise grows the Go goroutine stack to the runtime's ~1 GB ceiling and
+// triggers a fatal, uncatchable "stack overflow". The budget counts every major
+// tree-walker recursion step - a method call, a block entry (execBlock), and an
+// expression-operand descent (evalExprDeep) - so the cap bounds real Go-stack
+// depth regardless of how a frame mixes recursion with per-frame nesting; a
+// call-only count let ~10 nested blocks, or a call wrapped in many parens,
+// overflow well below it. Block and expression steps increment without their own
+// check (bounded by the parser's stmtDepth / exprDepth caps, they only run away
+// through a checked call). A simple recursion reaches a few thousand levels here
+// and peaks near 120 MB of stack. Bounds the stack, not the heap: frames each
+// holding a large copied value can still exhaust memory first (see
+// docs/user-guide/control-flow.md).
 const MaxCallDepth = 10000
 
 // MaxRangeElements caps how many elements a range expression will materialise

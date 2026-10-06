@@ -461,6 +461,15 @@ won't be able to read `.kind` / `.message` off it. Use
   too deep") and `archive.unpack` / `unpackWith` exceeding their size /
   entry caps; more cap sites move to `"limit"` over time.
 
+  The call-depth cap counts method calls, block nesting, and expression
+  nesting together, so recursion through several nested `if` blocks or a
+  recursive call wrapped in many parentheses raises a catchable `"limit"`
+  error rather than crashing. One caveat: **the cap bounds the call stack, not
+  the heap.** A recursion whose every frame holds a large value - a parameter
+  or local copying a big `list` / `map` / `string` per level - can exhaust
+  memory before the depth cap fires, and that is not catchable. Bound such a
+  recursion's depth yourself, or rewrite it to iterate.
+
 ### What can NOT be caught
 
 - **`exit` / `exit EXPR;`** - the program-level escape hatch stays

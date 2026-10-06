@@ -6,11 +6,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	"jennifer-lang.dev/jennifer/internal/module"
@@ -147,7 +147,7 @@ func dumpAST(path string) int {
 		printErrorContext(src, absPath, err)
 		return 1
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	emitNode(&b, prog, 0)
 	b.WriteByte('\n')
 	io.WriteString(os.Stdout, b.String())

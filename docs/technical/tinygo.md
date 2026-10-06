@@ -174,25 +174,32 @@ margin). Exceeding the cap is a positioned parse error / catchable decode
 error on both binaries. `yaml` keeps its own pre-parse guard (it is
 backed by a Go dependency, not a hand-rolled descent).
 
-The same 4 MB ceiling limits how deep *Jennifer method calls* can nest at
-runtime - each call stacks many Go frames in the tree-walker - so the
-interpreter enforces a second, sibling cap in the same package,
-`internal/limits.MaxCallDepth`. The counter is a per-call-chain `*int` threaded
-down the frames (fresh at each goroutine root) and bumped on **every** method
-entry - both an ordinary call (`evalCall`) and a cross-boundary dispatch (a
-module call, `meta.call` / `meta.callMain`) - so recursion that bounces through a
-dispatch boundary accumulates on one chain and is caught too, rather than
-resetting per hop and segfaulting (which matters most on `jennifer-tiny`'s low
-cap). It too is build-tag split, but
-lower than the nesting cap because a call frame is heavier than one nesting
-step: 10000 on the default binary (a heavy recursive body crashes Go's growable
-stack near 50k), and 48 on `jennifer-tiny` (whose stack was raised from 2 MB to
-4 MB for this, on which a fib-shaped or heavy body segfaults near depth 75, while
-the deepest recursion a shipped example reaches - `examples/benchmark.j`'s serial
-`fib(23)` - is depth 24). Exceeding it
-is a catchable "call stack too deep" runtime
-error - the analogue of Python's `RecursionError` - instead of a segfault; each
-`spawn` body gets its own counter on its goroutine.
+The same 4 MB ceiling limits how deep the tree-walker can recurse at runtime.
+Method calls are not the only thing that stacks Go frames - nested blocks and
+nested expression operands do too - so `internal/limits.MaxCallDepth` counts all
+three: a per-call-chain `*int` (fresh at each goroutine root) bumped on every
+method entry (`evalCall` and the cross-boundary dispatch `meta.call` /
+`meta.callMain`), block entry (`execBlock`), and expression-operand descent
+(`evalExprDeep`, from `evalBinary` / `evalUnary` / `evalLogical`). The cap thus
+bounds real Go-stack depth however a frame mixes recursion with nesting; a
+call-only count let ~10 nested blocks, or a call wrapped in many parens, overflow
+below it. The **check** runs only at the call sites - block and expression nesting
+alone are bounded by the parser's `MaxNestingDepth` caps, so the counter only runs
+away through a checked call. Build-tag split: 10000 on the default binary (a simple
+recursion reaches a few thousand levels, ~120 MB of stack), 120 on `jennifer-tiny`
+(4 MB stack, where a heavy body segfaults near call depth 75; at ~2 budget units
+per simple-recursion level, 120 stays under that floor while clearing
+`examples/benchmark.j`'s serial `fib(23)`, depth 24 / ~70 units). Exceeding it is
+a catchable "call stack too deep" error instead of a segfault; each `spawn` body
+gets its own counter. Bounds the stack, not the heap: frames each holding a large
+copied value can still exhaust memory first.
+
+The parser has the matching front-end guard. Flat operator chains (`a+a+...`) and
+prefix runs (`---...`) are parsed by loops / self-recursion that do not re-enter
+the general expression entry, so without a cap they build an AST far deeper than
+`MaxNestingDepth` for a later walk to overflow on. Each binary-loop iteration and
+prefix recursion counts against `exprDepth` (`deepenExpr`), so an over-long chain
+is a positioned parse error.
 
 **TinyGo scheduler**. `jennifer-tiny` pins the cooperative
 single-thread scheduler (`-scheduler=tasks` in the Makefile).

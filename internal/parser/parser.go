@@ -135,6 +135,14 @@ type parser struct {
 	// generated input; the counters cap them at limits.MaxNestingDepth.
 	stmtDepth int
 	typeDepth int
+	// sublexBudget bounds the cumulative bytes re-lexed across one top-level
+	// interpolated string's nesting. Each `{expr}` slot is re-tokenised by a
+	// sub-parser; a slot that is itself an interpolated string repeats that, so a
+	// nested `"{"{...}"}"` re-scans a copy of everything beneath it per level -
+	// cost is depth times payload, which exprDepth alone does not bound. Shared
+	// down the nesting via the sub-parser and reset per top-level string: nil on
+	// the root parser, set on the sub-parsers a nested interpolation spawns.
+	sublexBudget *int
 	// noStructLit suppresses parsing a trailing `Name{...}` as a struct literal in
 	// a header position where the `{` must instead open a block - specifically a
 	// `match` subject and a `when` value. Zero value (false) = struct literals
@@ -1662,6 +1670,24 @@ func (p *parser) parseExpr() (Expr, error) {
 	return e, err
 }
 
+// deepenExpr charges one operator level against exprDepth, erroring at the cap.
+// The binary-operator loops and the prefix-operator recursions build one AST
+// level per step without re-entering parseExpr, so without this a flat `a+a+...`
+// chain or a `---...` run would build an AST deeper than MaxNestingDepth that a
+// later recursive walk overflows the Go stack on. Callers restore the counter (a
+// deferred reset in the loops, an explicit decrement in the prefix recursion).
+func (p *parser) deepenExpr() error {
+	if p.exprDepth >= limits.MaxNestingDepth {
+		t := p.peek()
+		return &ParseError{
+			Msg:  fmt.Sprintf("expression nesting exceeds %d levels", limits.MaxNestingDepth),
+			File: t.File, Line: t.Line, Col: t.Col,
+		}
+	}
+	p.exprDepth++
+	return nil
+}
+
 // parseRange parses a half-open range `lo..hi` (M21.11). It sits at the top of
 // the precedence ladder (looser than every operator), so the endpoints are full
 // parseOr expressions and `a+1..b*2` parses as `(a+1)..(b*2)`. `..` is
@@ -1735,7 +1761,12 @@ func (p *parser) parseOr() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for p.check(lexer.TOKEN_OR) {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		p.advance()
 		right, err := p.parseAnd()
 		if err != nil {
@@ -1752,7 +1783,12 @@ func (p *parser) parseAnd() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for p.check(lexer.TOKEN_AND) {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		p.advance()
 		right, err := p.parseNot()
 		if err != nil {
@@ -1773,7 +1809,11 @@ func (p *parser) parseNot() (Expr, error) {
 		return p.parseComparison()
 	}
 	if t, ok := p.match(lexer.TOKEN_NOT); ok {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		operand, err := p.parseNot()
+		p.exprDepth--
 		if err != nil {
 			return nil, err
 		}
@@ -1805,6 +1845,8 @@ func (p *parser) parseComparison() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for {
 		var op BinaryOp
 		t := p.peek()
@@ -1824,6 +1866,9 @@ func (p *parser) parseComparison() (Expr, error) {
 		default:
 			return left, nil
 		}
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		p.advance()
 		right, err := p.parseBitOr()
 		if err != nil {
@@ -1839,7 +1884,12 @@ func (p *parser) parseBitOr() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for p.peek().Type == lexer.TOKEN_BIT_OR {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		p.advance()
 		right, err := p.parseBitXor()
 		if err != nil {
@@ -1856,7 +1906,12 @@ func (p *parser) parseBitXor() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for p.peek().Type == lexer.TOKEN_BIT_XOR {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		p.advance()
 		right, err := p.parseBitAnd()
 		if err != nil {
@@ -1873,7 +1928,12 @@ func (p *parser) parseBitAnd() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for p.peek().Type == lexer.TOKEN_BIT_AND {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		p.advance()
 		right, err := p.parseShift()
 		if err != nil {
@@ -1890,6 +1950,8 @@ func (p *parser) parseShift() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for {
 		var op BinaryOp
 		switch p.peek().Type {
@@ -1899,6 +1961,9 @@ func (p *parser) parseShift() (Expr, error) {
 			op = OpShr
 		default:
 			return left, nil
+		}
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
 		}
 		p.advance()
 		right, err := p.parseAdd()
@@ -1915,6 +1980,8 @@ func (p *parser) parseAdd() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for {
 		var op BinaryOp
 		t := p.peek()
@@ -1925,6 +1992,9 @@ func (p *parser) parseAdd() (Expr, error) {
 			op = OpSub
 		default:
 			return left, nil
+		}
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
 		}
 		p.advance()
 		right, err := p.parseMul()
@@ -1941,6 +2011,8 @@ func (p *parser) parseMul() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved := p.exprDepth
+	defer func() { p.exprDepth = saved }()
 	for {
 		var op BinaryOp
 		t := p.peek()
@@ -1955,6 +2027,9 @@ func (p *parser) parseMul() (Expr, error) {
 			op = OpMod
 		default:
 			return left, nil
+		}
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
 		}
 		p.advance()
 		right, err := p.parseUnaryMinus()
@@ -2214,14 +2289,22 @@ func (p *parser) parseUnaryMinus() (Expr, error) {
 				return lit, nil
 			}
 		}
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		operand, err := p.parseUnaryMinus()
+		p.exprDepth--
 		if err != nil {
 			return nil, err
 		}
 		return &UnaryExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}, Op: OpNeg, Operand: operand}, nil
 	}
 	if t, ok := p.match(lexer.TOKEN_BIT_NOT); ok {
+		if err := p.deepenExpr(); err != nil {
+			return nil, err
+		}
 		operand, err := p.parseUnaryMinus()
+		p.exprDepth--
 		if err != nil {
 			return nil, err
 		}
@@ -2327,6 +2410,14 @@ func (p *parser) parsePrimary() (Expr, error) {
 // statement keyword in a slot is rejected. An empty slot `{}` is likewise an
 // error.
 func (p *parser) buildInterpString(t lexer.Token) (Expr, error) {
+	// Cumulative byte budget bounding the depth-times-payload blow-up of nested
+	// interpolation (see the sublexBudget field): fresh per top-level string,
+	// threaded onto each sub-parser so nested slots share the remaining budget.
+	budget := p.sublexBudget
+	if budget == nil {
+		n := limits.MaxSourceBytes
+		budget = &n
+	}
 	node := &InterpStringExpr{pos: pos{File: t.File, Line: t.Line, Col: t.Col}}
 	for _, sp := range t.Parts {
 		if !sp.IsExpr {
@@ -2336,11 +2427,18 @@ func (p *parser) buildInterpString(t lexer.Token) (Expr, error) {
 		if strings.TrimSpace(sp.Text) == "" {
 			return nil, &ParseError{Msg: "empty interpolation slot `{}`; a slot must hold one expression", File: t.File, Line: sp.Line, Col: sp.Col}
 		}
+		*budget -= len(sp.Text)
+		if *budget < 0 {
+			return nil, &ParseError{
+				Msg:  fmt.Sprintf("nested string interpolation re-lexes more than %d bytes; flatten the interpolation", limits.MaxSourceBytes),
+				File: t.File, Line: sp.Line, Col: sp.Col,
+			}
+		}
 		toks, err := lexer.TokenizeAt(sp.Text, t.File, sp.Line, sp.Col)
 		if err != nil {
 			return nil, err
 		}
-		sub := &parser{tokens: stripTrivia(toks), exprDepth: p.exprDepth}
+		sub := &parser{tokens: stripTrivia(toks), exprDepth: p.exprDepth, sublexBudget: budget}
 		expr, err := sub.parseExpr()
 		if err != nil {
 			return nil, err

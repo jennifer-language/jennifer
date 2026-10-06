@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,12 +14,16 @@ import (
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
+// commaNL is the ",\n" suffix every object field emitter leaves behind; endObj
+// strips it before the closing brace.
+var commaNL = []byte(",\n")
+
 // emitNode writes the JSON form of any AST node into b, with the given
 // indent level (each level = two spaces). The format mirrors the AST
 // struct shapes so the output is one-to-one with what the parser built;
 // every node carries a "type" tag and source position. Hand-rolled (no
 // reflect / no encoding/json) so the dump path stays TinyGo-friendly.
-func emitNode(b *strings.Builder, n parser.Node, indent int) {
+func emitNode(b *bytes.Buffer, n parser.Node, indent int) {
 	switch v := n.(type) {
 	case *parser.Program:
 		startObj(b, indent)
@@ -425,31 +430,30 @@ const indentUnit = "  "
 // and tracking comma state with a helper that strips/appends as needed.
 // startObj resets the per-object pending state.
 
-func startObj(b *strings.Builder, indent int) {
+func startObj(b *bytes.Buffer, indent int) {
 	b.WriteByte('{')
 	b.WriteByte('\n')
 }
 
-func endObj(b *strings.Builder, indent int) {
+func endObj(b *bytes.Buffer, indent int) {
 	// Drop the trailing ",\n" that the last field left behind, if any.
 	trimTrailingComma(b)
 	writeIndent(b, indent)
 	b.WriteByte('}')
 }
 
-// trimTrailingComma removes a trailing ",\n" (the suffix every field
-// emitter writes) so the closing `}` doesn't produce invalid JSON.
-func trimTrailingComma(b *strings.Builder) {
-	s := b.String()
-	if strings.HasSuffix(s, ",\n") {
-		// strings.Builder doesn't have a truncate method - rebuild.
-		shortened := s[:len(s)-2] + "\n"
-		b.Reset()
-		b.WriteString(shortened)
+// trimTrailingComma removes a trailing ",\n" (the suffix every field emitter
+// writes) so the closing `}` stays valid JSON. bytes.Buffer.Truncate drops the
+// two bytes in O(1); a strings.Builder has no truncate and would rebuild the
+// whole buffer per object close, making the dump O(n^2) in its own size.
+func trimTrailingComma(b *bytes.Buffer) {
+	if bytes.HasSuffix(b.Bytes(), commaNL) {
+		b.Truncate(b.Len() - 2)
+		b.WriteByte('\n')
 	}
 }
 
-func writeIndent(b *strings.Builder, indent int) {
+func writeIndent(b *bytes.Buffer, indent int) {
 	for i := 0; i < indent; i++ {
 		b.WriteString(indentUnit)
 	}
@@ -458,16 +462,16 @@ func writeIndent(b *strings.Builder, indent int) {
 // emitField writes `"key": rawValue,\n` at the given indent. `rawValue`
 // is already in JSON form (e.g. a quoted string, a number, true/false,
 // null, or a serialized object/array).
-func emitField(b *strings.Builder, key, rawValue string, indent int) {
+func emitField(b *bytes.Buffer, key, rawValue string, indent int) {
 	writeIndent(b, indent)
 	fmt.Fprintf(b, "%q: %s,\n", key, rawValue)
 }
 
-func emitStringField(b *strings.Builder, key, value string, indent int) {
+func emitStringField(b *bytes.Buffer, key, value string, indent int) {
 	emitField(b, key, jsonString(value), indent)
 }
 
-func emitBoolField(b *strings.Builder, key string, value bool, indent int) {
+func emitBoolField(b *bytes.Buffer, key string, value bool, indent int) {
 	if value {
 		emitField(b, key, "true", indent)
 	} else {
@@ -475,11 +479,11 @@ func emitBoolField(b *strings.Builder, key string, value bool, indent int) {
 	}
 }
 
-func emitNullField(b *strings.Builder, key string, indent int) {
+func emitNullField(b *bytes.Buffer, key string, indent int) {
 	emitField(b, key, "null", indent)
 }
 
-func emitTypeAndPos(b *strings.Builder, kind string, n parser.Node, indent int) {
+func emitTypeAndPos(b *bytes.Buffer, kind string, n parser.Node, indent int) {
 	line, col := n.Pos()
 	emitStringField(b, "type", kind, indent)
 	if file := n.Filename(); file != "" {
@@ -490,7 +494,7 @@ func emitTypeAndPos(b *strings.Builder, kind string, n parser.Node, indent int) 
 }
 
 // emitNodeField writes a "key": <object> pair for a single node value.
-func emitNodeField(b *strings.Builder, key string, n parser.Node, indent int) {
+func emitNodeField(b *bytes.Buffer, key string, n parser.Node, indent int) {
 	writeIndent(b, indent)
 	fmt.Fprintf(b, "%q: ", key)
 	emitNode(b, n, indent)
@@ -502,7 +506,7 @@ func emitNodeField(b *strings.Builder, key string, n parser.Node, indent int) {
 // emitOptionalNodeField writes either the node's object form or "null".
 // Used for optional AST positions (return.Value, for.Init/Cond/Step, etc.)
 // where the parser may have left nil.
-func emitOptionalNodeField(b *strings.Builder, key string, n parser.Node, indent int) {
+func emitOptionalNodeField(b *bytes.Buffer, key string, n parser.Node, indent int) {
 	if n == nil {
 		emitNullField(b, key, indent)
 		return
@@ -515,7 +519,7 @@ func emitOptionalNodeField(b *strings.Builder, key string, n parser.Node, indent
 
 // emitNodeListField writes a JSON array of node objects. Empty arrays
 // emit as `[]` on one line; non-empty arrays are pretty-printed.
-func emitNodeListField(b *strings.Builder, key string, items []parser.Node, indent int) {
+func emitNodeListField(b *bytes.Buffer, key string, items []parser.Node, indent int) {
 	writeIndent(b, indent)
 	fmt.Fprintf(b, "%q: ", key)
 	if len(items) == 0 {
@@ -536,7 +540,7 @@ func emitNodeListField(b *strings.Builder, key string, items []parser.Node, inde
 	b.WriteString("],\n")
 }
 
-func emitStmtListField(b *strings.Builder, key string, items []parser.Stmt, indent int) {
+func emitStmtListField(b *bytes.Buffer, key string, items []parser.Stmt, indent int) {
 	nodes := make([]parser.Node, len(items))
 	for i, s := range items {
 		nodes[i] = s
@@ -546,7 +550,7 @@ func emitStmtListField(b *strings.Builder, key string, items []parser.Stmt, inde
 
 // emitFieldsField renders a declared field list (a struct's fields, or an enum
 // variant's payload) as name/type pairs.
-func emitFieldsField(b *strings.Builder, key string, fields []parser.StructField, indent int) {
+func emitFieldsField(b *bytes.Buffer, key string, fields []parser.StructField, indent int) {
 	writeIndent(b, indent)
 	fmt.Fprintf(b, "%q: ", key)
 	if len(fields) == 0 {
@@ -572,7 +576,7 @@ func emitFieldsField(b *strings.Builder, key string, fields []parser.StructField
 	b.WriteString("],\n")
 }
 
-func emitParamsField(b *strings.Builder, key string, params []parser.Param, indent int) {
+func emitParamsField(b *bytes.Buffer, key string, params []parser.Param, indent int) {
 	writeIndent(b, indent)
 	fmt.Fprintf(b, "%q: ", key)
 	if len(params) == 0 {
