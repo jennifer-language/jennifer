@@ -463,7 +463,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 		if root == nil {
 			root = env
 		}
-		root.profChild += dur
+		root.profChild.Add(int64(dur))
 	} else {
 		v, err = m.interp.callMethodWithDepth(md, env.depth, args...)
 	}
@@ -706,6 +706,18 @@ func (i *Interpreter) declTypesStmt(s parser.Stmt) {
 	case *parser.TryStmt:
 		i.declTypesBlock(st.Body)
 		i.declTypesBlock(st.CatchBody)
+	case *parser.MatchStmt:
+		// A `def x as T` inside a `when` / `else` arm must be stamped here, not
+		// lazily at execution: lazy stamping writes the shared AST node and races
+		// when the arm runs in concurrent spawn bodies.
+		i.declTypesExpr(st.Subject)
+		for idx := range st.Arms {
+			for _, v := range st.Arms[idx].Values {
+				i.declTypesExpr(v)
+			}
+			i.declTypesBlock(st.Arms[idx].Body)
+		}
+		i.declTypesBlock(st.Else)
 	case *parser.ExprStmt:
 		i.declTypesExpr(st.Expr)
 	case *parser.Block:

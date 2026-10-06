@@ -50,6 +50,46 @@ func TestBorrowWalkersCoverAllNodes(t *testing.T) {
 	assertCovers(t, "walkExpr", exprKinds, exprCovered)
 }
 
+// TestBodyWalkersCoverAllNodes enforces that the two AST walkers which descend
+// into method / block bodies without a conservative default - declTypesStmt
+// (module-struct type stamping) and walkStmtForQualifiedRefs (namespaced-call
+// pre-stamping) - enumerate every statement kind that can appear in a body. A
+// miss is not a lost optimization but a correctness bug: a `def` left unstamped
+// is resolved lazily on the shared AST (a data race under concurrent spawns),
+// and a qualified call left un-prestamped silently takes the slow path. The
+// skip-list is the statements that never appear in a body (top-level
+// declarations) or carry nothing to descend into (bare control-flow leaves).
+func TestBodyWalkersCoverAllNodes(t *testing.T) {
+	root := repoRoot(t)
+	astFile := filepath.Join(root, "internal", "parser", "ast.go")
+	moduleFile := filepath.Join(root, "internal", "interpreter", "module.go")
+	interpFile := filepath.Join(root, "internal", "interpreter", "interpreter.go")
+
+	stmtKinds := nodeKindsWithMethod(t, astFile, "stmtNode")
+	skip := map[string]bool{
+		"BreakStmt":        true, // leaf: no sub-expression or block
+		"ContinueStmt":     true, // leaf: no sub-expression or block
+		"StructDef":        true, // top-level only
+		"EnumDef":          true, // top-level only
+		"MethodDef":        true, // top-level only
+		"ImportStmt":       true, // top-level only (preprocessed away)
+		"ModuleImportStmt": true, // top-level only
+	}
+	want := map[string]bool{}
+	for k := range stmtKinds {
+		if !skip[k] {
+			want[k] = true
+		}
+	}
+	for _, wk := range []struct{ file, fn string }{
+		{moduleFile, "declTypesStmt"},
+		{interpFile, "walkStmtForQualifiedRefs"},
+	} {
+		covered := switchCaseTypes(t, wk.file, wk.fn)
+		assertCovers(t, wk.fn, want, covered)
+	}
+}
+
 func assertCovers(t *testing.T, walker string, want, have map[string]bool) {
 	t.Helper()
 	var missing []string

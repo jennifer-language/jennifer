@@ -8,11 +8,20 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// inputMu guards the shared stdin reader state below. The stdin reader is one
+// shared resource, so two spawned tasks reading concurrently (io.readLine /
+// readBytes / readChars / readLines / eof) must serialise or they tear the
+// buffer and the eof flag. Holding it across the (blocking) read serialises
+// readers, which is the intended behaviour for one shared stream. None of the
+// guarded functions calls another, so a plain mutex cannot self-deadlock.
+var inputMu sync.Mutex
 
 // Package-level stdin state. The interpreter is single-instance per
 // process today, so this is safe. If multi-interpreter ever lands, move
@@ -87,6 +96,8 @@ func readLine(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 			return interpreter.Null(), fmt.Errorf("readLine: writing prompt: %v", err)
 		}
 	}
+	inputMu.Lock()
+	defer inputMu.Unlock()
 	r := getReader(ctx.In)
 	if r == nil {
 		return interpreter.Null(), fmt.Errorf("readLine: no input source")
@@ -125,6 +136,8 @@ func readBytes(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("`readBytes` count must be non-negative, got %d", n)
 	}
+	inputMu.Lock()
+	defer inputMu.Unlock()
 	r := getReader(ctx.In)
 	if r == nil {
 		return interpreter.Null(), fmt.Errorf("readBytes: no input source")
@@ -176,6 +189,8 @@ func readChars(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("`readChars` count must be non-negative, got %d", n)
 	}
+	inputMu.Lock()
+	defer inputMu.Unlock()
 	r := getReader(ctx.In)
 	if r == nil {
 		return interpreter.Null(), fmt.Errorf("readChars: no input source")
@@ -221,6 +236,8 @@ func readLines(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if len(args) != 0 {
 		return interpreter.Null(), fmt.Errorf("`readLines` takes no arguments, got %d", len(args))
 	}
+	inputMu.Lock()
+	defer inputMu.Unlock()
 	r := getReader(ctx.In)
 	if r == nil {
 		return interpreter.Null(), fmt.Errorf("readLines: no input source")
@@ -253,6 +270,8 @@ func eofFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if len(args) != 0 {
 		return interpreter.Null(), fmt.Errorf("`eof` takes no arguments, got %d", len(args))
 	}
+	inputMu.Lock()
+	defer inputMu.Unlock()
 	if eofState {
 		return interpreter.BoolVal(true), nil
 	}

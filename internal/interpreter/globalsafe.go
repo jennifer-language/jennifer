@@ -39,10 +39,12 @@ var jCallbackBuiltins = map[[2]string]bool{
 	{"lists", "sortBy"}:         true,
 }
 
-// computeEntryGlobalSafe stamps GlobalSafe on every entry-program method that
-// (transitively over its named calls) mutates no global. Only meaningful for the
-// entry program (a module borrows via isModule); it reads moduleAliases and the
-// namespace table, so it runs after module load.
+// computeEntryGlobalSafe stamps GlobalSafe on every method that (transitively
+// over its named calls) mutates no global. Runs for the entry program and for
+// module sub-interpreters: a module method that reaches meta.callMain can mutate
+// a host global a borrowed argument aliases, and the callback-builtin hazard set
+// catches that. It reads moduleAliases and the namespace table, so it runs after
+// module load.
 //
 // Concurrency: GlobalSafe is written onto the shared *parser.MethodDef here, so
 // it is (like the resolveQualifiedRefs / resolveDeclaredTypesOnce stamps) valid

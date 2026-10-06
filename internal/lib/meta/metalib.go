@@ -94,10 +94,11 @@ func Install(in *interpreter.Interpreter) {
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("meta.call: name must be string, got %s", args[0].Kind)
 		}
-		// Thread the caller's call-depth counter so recursion that bounces
-		// through meta.call still trips the catchable guard (not a fatal
-		// Go-stack overflow).
-		return in.CallByNameWithDepth(args[0].Str, ctx.Depth, args[1:]...)
+		// Thread the caller's call-depth counter and global frame (ctx handles
+		// both) so recursion that bounces through meta.call still trips the
+		// catchable guard, and a meta.call inside a spawn body resolves against
+		// that goroutine's snapshot rather than the live globals.
+		return ctx.CallByName(args[0].Str, args[1:]...)
 	})
 
 	// meta.defined(name) reports whether a top-level user method exists, so a

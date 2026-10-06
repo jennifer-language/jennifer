@@ -50,6 +50,14 @@ type BuiltinCtx struct {
 	// function-value argument without every library importing the dispatch core.
 	// Unexported: libraries receive a BuiltinCtx, they never construct one.
 	interp *Interpreter
+	// root is the caller's effective global frame (effectiveGlobal(env) at the
+	// call site): the goroutine-local spawn snapshot inside a spawn body, i.global
+	// otherwise. A builtin that re-enters the interpreter in the SAME interpreter
+	// (Invoke of a func-value argument, meta.call) threads it so the callee frame
+	// parents there rather than at the live i.global - without it a callback or
+	// meta.call inside a spawn body reads and writes the main goroutine's globals,
+	// an unsynchronised data race. nil when unknown (then i.global is used).
+	root *Environment
 	// Cancel is the caller goroutine's running task state (env.root.cancel):
 	// non-nil inside a spawn body, nil on the main goroutine. task.cancelled()
 	// reads its Cancelled flag as a non-raising poll, so a spawn body can check for
@@ -72,7 +80,18 @@ func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
 	if c.interp == nil {
 		return Value{}, fmt.Errorf("no interpreter bound to this call context")
 	}
-	return c.interp.callMethodWithDepth(fn.Fn, c.Depth, args...)
+	return c.interp.callMethodWithDepthRoot(fn.Fn, c.Depth, c.root, args...)
+}
+
+// CallByName invokes a top-level method of this call's interpreter by name,
+// threading the caller's depth counter and global frame so re-entry from inside
+// a spawn body resolves against that goroutine's snapshot rather than the live
+// i.global. Backs meta.call, which cannot reach the unexported root field.
+func (c BuiltinCtx) CallByName(name string, args ...Value) (Value, error) {
+	if c.interp == nil {
+		return Value{}, fmt.Errorf("no interpreter bound to this call context")
+	}
+	return c.interp.CallByNameWithRoot(name, c.Depth, c.root, args...)
 }
 
 // HostSharedState exposes the owning interpreter's run-scoped shared state to a
@@ -206,6 +225,20 @@ type Interpreter struct {
 	// (intl) keeps closing over its own state and does not touch this.
 	sharedMu    sync.Mutex
 	sharedState map[string]any
+
+	// Host re-entry serialization. A module dispatched from several concurrent
+	// spawn workers (a web server spawns a worker per request) re-enters the
+	// entry program through meta.callMain, all running on the one shared host
+	// global frame - so a handler doing `$hits = $hits + 1` or a global-map write
+	// races, and the map write is a fatal `concurrent map writes` crash. hostMu
+	// serializes those dispatches; it lives on the host interpreter (the shared
+	// re-entry target). hostOwner / hostReentry make it reentrant per call chain
+	// (identified by its goroutine-local depth counter) so a host -> module ->
+	// callMain chain on one worker does not deadlock against itself. Only ever
+	// touched through enterHostDispatch / exitHostDispatch.
+	hostMu      sync.Mutex
+	hostOwner   atomic.Pointer[int]
+	hostReentry int
 
 	// spawned task registry. Every `spawn { ... }` appends its
 	// TaskState here; the CLI scans the slice on shutdown to surface
@@ -885,11 +918,19 @@ func (i *Interpreter) CallByNameWith(name string, args ...Value) (Value, error) 
 // catchable depth guard instead of overflowing the Go stack. A nil counter
 // starts fresh (a true root entry).
 func (i *Interpreter) CallByNameWithDepth(name string, callerDepth *int, args ...Value) (Value, error) {
+	return i.CallByNameWithRoot(name, callerDepth, nil, args...)
+}
+
+// CallByNameWithRoot is CallByNameWithDepth with an explicit caller global frame
+// (see callMethodWithDepthRoot). meta.call threads BuiltinCtx.root so a by-name
+// call from inside a spawn body resolves against that goroutine's snapshot, not
+// the live i.global.
+func (i *Interpreter) CallByNameWithRoot(name string, callerDepth *int, callerRoot *Environment, args ...Value) (Value, error) {
 	m, ok := i.methods[name]
 	if !ok {
 		return Value{}, fmt.Errorf("method %q is not defined", name)
 	}
-	return i.callMethodWithDepth(m, callerDepth, args...)
+	return i.callMethodWithDepthRoot(m, callerDepth, callerRoot, args...)
 }
 
 // CallMethodWith dispatches an already-resolved *MethodDef with the given args,
@@ -911,6 +952,18 @@ func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value,
 // (the CLI invoking the entry program, a `testing` harness) where there is no
 // caller chain to continue and each entry should stand alone.
 func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int, args ...Value) (Value, error) {
+	return i.callMethodWithDepthRoot(m, callerDepth, nil, args...)
+}
+
+// callMethodWithDepthRoot is callMethodWithDepth with an explicit caller global
+// frame. callerRoot is the effective global the callee frame should parent at:
+// the caller's goroutine-local snapshot when a builtin re-enters the SAME
+// interpreter from inside a spawn body (Invoke of a func-value argument,
+// meta.call), so the callee reads and writes that snapshot rather than the live
+// i.global (which another goroutine's spawn body would otherwise race). nil
+// parents at i.global, the right frame for a cross-interpreter dispatch (a module
+// call, meta.callMain), which must use the callee interpreter's own global.
+func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *int, callerRoot *Environment, args ...Value) (Value, error) {
 	if len(args) != len(m.Params) {
 		// A *runtimeError (not a plain fmt.Errorf) so this is catchable by a
 		// surrounding try/catch, exactly like the same-interpreter callUserMethod
@@ -926,7 +979,11 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int,
 	if i.global == nil {
 		i.global = NewEnvironment(nil)
 	}
-	callFrame := borrowBlockEnv(effectiveGlobal(i.global), len(m.Params))
+	parent := effectiveGlobal(i.global)
+	if callerRoot != nil {
+		parent = callerRoot
+	}
+	callFrame := borrowBlockEnv(parent, len(m.Params))
 	dc := callerDepth
 	if dc == nil {
 		entryDepth := 0
@@ -1061,11 +1118,50 @@ func (i *Interpreter) CallHostWithDepth(name string, callerDepth *int, args ...V
 	for idx, a := range args {
 		retagged[idx] = retagStructs(a, "", i.moduleNS, "", i.modulePath, i.isOwnStructName)
 	}
+	// Serialize this cross-interpreter re-entry: concurrent workers (a web server
+	// spawns one per request) all land on the single host global frame, so an
+	// unserialized handler mutating a global is a fatal `concurrent map writes`.
+	// Reentrant per call chain, so a host -> module -> callMain chain on one
+	// worker does not deadlock.
+	host.enterHostDispatch(callerDepth)
+	defer host.exitHostDispatch(callerDepth)
 	res, err := host.CallByNameWithDepth(name, callerDepth, retagged...)
 	if err != nil {
 		return res, err
 	}
 	return retagStructs(res, i.moduleNS, "", i.modulePath, "", i.isOwnStructName), nil
+}
+
+// enterHostDispatch / exitHostDispatch serialize cross-interpreter re-entry into
+// this (host) interpreter, reentrant per call chain. chain is the caller's
+// goroutine-local depth counter, unique per worker goroutine and threaded
+// unchanged through a chain's nested host dispatches; comparing it detects a
+// chain re-entering the host (host -> module -> callMain) so it does not block
+// on the lock it already holds. A nil chain (a root entry, never a concurrent
+// worker) skips serialization. hostReentry is only ever read/written by the
+// chain that holds hostMu, so it needs no separate guard.
+func (i *Interpreter) enterHostDispatch(chain *int) {
+	if chain == nil {
+		return
+	}
+	if i.hostOwner.Load() == chain {
+		i.hostReentry++
+		return
+	}
+	i.hostMu.Lock()
+	i.hostOwner.Store(chain)
+	i.hostReentry = 1
+}
+
+func (i *Interpreter) exitHostDispatch(chain *int) {
+	if chain == nil || i.hostOwner.Load() != chain {
+		return
+	}
+	i.hostReentry--
+	if i.hostReentry == 0 {
+		i.hostOwner.Store(nil)
+		i.hostMu.Unlock()
+	}
 }
 
 // isOwnStructName reports whether name is a struct declared in this
@@ -1188,15 +1284,18 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// module-const stamping needs the imported module's constants to exist.
 	i.resolveQualifiedRefs(prog)
 	// Per-function escape analysis for read-only-parameter borrow: mark each
-	// entry-program method that (transitively over its named calls) mutates no
-	// global, so its never-written params may be borrowed even when the script
-	// holds mutable globals elsewhere. Runs after loadModuleImports +
+	// method that (transitively over its named calls) mutates no global, so its
+	// never-written params may be borrowed. Runs after loadModuleImports +
 	// resolveQualifiedRefs so module-alias and namespace tables are populated
-	// (module calls and callback builtins are the analysis's unsafe cases). A
-	// module borrows via isModule, so this is entry-program-only.
+	// (module calls and callback builtins are the analysis's unsafe cases). It
+	// runs for modules too: a module has no mutable top-level global of its own,
+	// but a method that reaches meta.callMain can mutate a *host* global its
+	// borrowed argument aliases, and only this analysis (which flags callMain /
+	// meta.call / callback builtins) catches that - entryGlobalsImmutable is
+	// about the local interpreter's globals and would miss it.
 	if !i.isModule && !hasMutableTopLevelGlobal(prog) {
 		i.entryGlobalsImmutable = true
-	} else if !i.isModule {
+	} else {
 		i.computeEntryGlobalSafe()
 	}
 	// Stamp every declared struct type once, single-threaded, before any
@@ -1630,12 +1729,12 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 	}
 	file, line, col := posFor(s)
 	start := time.Now()
-	savedChild := root.profChild
-	root.profChild = 0
+	savedChild := root.profChild.Load()
+	root.profChild.Store(0)
 	res, err := i.execStmtRaw(s, env)
 	elapsed := time.Since(start)
-	i.prof.RecordStmt(file, line, col, elapsed-root.profChild, elapsed)
-	root.profChild = savedChild + elapsed
+	i.prof.RecordStmt(file, line, col, elapsed-time.Duration(root.profChild.Load()), elapsed)
+	root.profChild.Store(savedChild + int64(elapsed))
 	return res, err
 }
 
@@ -1902,7 +2001,11 @@ func bindParamValue(v Value, declType parser.Type) Value {
 // elsewhere. Combined with Param.Borrow (never-written, borrow-safe type) at the
 // bind site.
 func (i *Interpreter) methodBorrowCtx(m *parser.MethodDef) bool {
-	return i.isModule || i.entryGlobalsImmutable || m.GlobalSafe
+	// No i.isModule short-circuit: a module method is not automatically
+	// borrow-safe, because meta.callMain can mutate a host global its borrowed
+	// argument aliases. A module relies on m.GlobalSafe (computed for modules
+	// too), which is false for any method reaching callMain / a callback builtin.
+	return i.entryGlobalsImmutable || m.GlobalSafe
 }
 
 // hasMutableTopLevelGlobal reports whether the program declares a mutable
@@ -4867,7 +4970,20 @@ func (i *Interpreter) snapshotForSpawn(env *Environment) *Environment {
 	if root != nil {
 		// Globals are slot-backed, so copyBindingsInto reconstructs their
 		// name->value view from root.slots (plus any name-map fallback bindings).
-		root.copyBindingsInto(globalSnap.vars)
+		//
+		// The launching goroutine owns `root` EXCEPT when it is the shared host
+		// global: a concurrent worker handler can be writing it through
+		// meta.callMain at this instant (a web server snapshots a per-request
+		// worker while earlier handlers run), which would race this read. Serialize
+		// that one case against host dispatch on the same reentrant lock the
+		// dispatch uses, so a handler that itself spawns does not deadlock.
+		if host := i.Host(); root == host.global {
+			host.enterHostDispatch(env.depth)
+			root.copyBindingsInto(globalSnap.vars)
+			host.exitHostDispatch(env.depth)
+		} else {
+			root.copyBindingsInto(globalSnap.vars)
+		}
 	}
 	localSnap := NewEnvironment(globalSnap)
 	for cur := env; cur != nil && cur != root; cur = cur.parent {
@@ -5166,7 +5282,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			args = append(args, v)
 		}
 		pf, pl, pc := posFor(c)
-		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel()}
+		ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel(), root: effectiveGlobal(env)}
 		v, err := b.Fn(ctx, args)
 		if err != nil {
 			return Value{}, builtinError(err, pf, pl, pc)
@@ -5270,7 +5386,7 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 		args = append(args, v)
 	}
 	pf, pl, pc := posFor(c)
-	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel()}
+	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel(), root: effectiveGlobal(env)}
 	v, err := fn(ctx, args)
 	if err != nil {
 		return Value{}, builtinError(err, pf, pl, pc)
@@ -5417,6 +5533,17 @@ func (i *Interpreter) walkStmtForQualifiedRefs(s parser.Stmt) {
 	case *parser.TryStmt:
 		i.walkBlockForQualifiedRefs(st.Body)
 		i.walkBlockForQualifiedRefs(st.CatchBody)
+	case *parser.MatchStmt:
+		i.walkExprForQualifiedRefs(st.Subject)
+		for idx := range st.Arms {
+			for _, v := range st.Arms[idx].Values {
+				i.walkExprForQualifiedRefs(v)
+			}
+			i.walkBlockForQualifiedRefs(st.Arms[idx].Body)
+		}
+		i.walkBlockForQualifiedRefs(st.Else)
+	case *parser.DeferStmt:
+		i.walkExprForQualifiedRefs(st.Call)
 	case *parser.ExprStmt:
 		i.walkExprForQualifiedRefs(st.Expr)
 	case *parser.Block:

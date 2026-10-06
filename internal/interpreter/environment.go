@@ -6,7 +6,7 @@ package interpreter
 import (
 	"fmt"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
@@ -74,7 +74,7 @@ func releaseBlockEnv(e *Environment) {
 	e.parent = nil
 	e.root = nil
 	e.depth = nil
-	e.profChild = 0
+	e.profChild.Store(0)
 	e.cancel = nil
 	e.slots = e.slots[:0]
 	// Drop any deferred calls so a pooled frame never carries a stale one into
@@ -126,13 +126,15 @@ type Environment struct {
 	// and inherited from the parent, so effectiveGlobal() becomes an
 	// O(1) field read instead of an O(depth) parent-chain walk.
 	root *Environment
-	// profChild accumulates nested-statement wall-clock time for the
-	// statement profiler's self/cumulative split. It lives on the root
-	// env, not the Interpreter, so each `spawn` goroutine (which gets its
-	// own snapshot root) accumulates independently - a shared field on the
-	// interpreter would be raced by parallel spawn bodies. Only ever
-	// touched through env.root while statement profiling is active.
-	profChild time.Duration
+	// profChild accumulates nested-statement wall-clock time (nanoseconds) for
+	// the statement profiler's self/cumulative split. It lives on the root env,
+	// not the Interpreter, so each `spawn` goroutine (which gets its own snapshot
+	// root) accumulates independently. One root is still shared: a module
+	// sub-interpreter's single global, which several goroutines dispatch into
+	// concurrently - so the field is atomic to keep that access race-free (the
+	// self/cumulative split is approximate under concurrent module profiling, but
+	// defined). Only ever touched through env.root while profiling is active.
+	profChild atomic.Int64
 	// depth points at the call-depth counter for this frame's logical call
 	// chain: the number of Jennifer method calls currently nested on the Go
 	// stack. evalCall bumps it on entry and drops it on exit, raising a
