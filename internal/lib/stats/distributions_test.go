@@ -252,3 +252,24 @@ func TestHistogram(t *testing.T) {
 	// Non-ascending edges error.
 	callFail(t, histogramFn, floatList(1, 2, 3), floatList(3, 2, 1))
 }
+
+// TestLargeParamAndTailPrecision covers two numeric properties of the stats
+// layer: a large-df / large-rate CDF converges instead of erroring, and an
+// extreme upper-tail p-value keeps its precision instead of flushing to 0.
+func TestLargeParamAndTailPrecision(t *testing.T) {
+	// chiSquareCdf at df=4000 (near the median) converges, ~0.5.
+	cdf := call(t, chiSquareCdfFn, sf(4000.0), sf(4000))
+	if !near(cdf.Float, 0.5, 0.02) {
+		t.Errorf("chiSquareCdf(4000,4000) = %v, want ~0.5", cdf.Float)
+	}
+	// A Poisson rate of 2000 converges (large-parameter path).
+	call(t, poissonCdfFn, interpreter.IntVal(2000), sf(2000.0))
+
+	// A far-from-expected chi-square test yields a tiny, nonzero p-value
+	// (stat = 100, df = 1); 1 - CDF would have flushed it to exactly 0.
+	cs := call(t, chiSquareTestFn, floatList(100, 0), floatList(50, 50))
+	p := field(t, cs, "pValue").Float
+	if p <= 0 || p > 1e-15 {
+		t.Errorf("chiSquareTest tiny-p = %v, want a small positive value (not flushed to 0)", p)
+	}
+}

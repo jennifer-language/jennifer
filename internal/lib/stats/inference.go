@@ -97,15 +97,15 @@ func solveLinearSystem(a [][]float64, b []float64) ([]float64, bool) {
 // returns ok=false on a non-finite result, so a caller never embeds a NaN
 // p-value.
 func twoSidedT(t, df float64) (float64, bool) {
-	v, ok := tCdfStd(math.Abs(t), df)
+	// The two-sided tail is exactly I_x(df/2, 1/2) with x = df/(df + t^2): for
+	// t != 0, 2*(1 - tCdf(|t|)) = 2*(0.5*I_x) = I_x. tSfTwoSidedStd takes the
+	// incomplete beta directly, avoiding the 1 - CDF cancellation that flushed a
+	// tiny p-value to 0.
+	p, ok := tSfTwoSidedStd(t, df)
 	if !ok {
 		return 0, false
 	}
-	p := 2 * (1 - v)
-	if !isFinite(p) {
-		return 0, false
-	}
-	return p, true
+	return clamp01(p), true
 }
 
 // registerInferenceStructs registers the result structs the inference functions
@@ -496,11 +496,11 @@ func chiSquareTestFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interp
 		return interpreter.Null(), fmt.Errorf("stats.chiSquareTest: input magnitudes overflow the computation")
 	}
 	df := float64(len(obs) - 1)
-	cdf, ok := chiSquareCdfStd(stat, df)
+	sf, ok := chiSquareSfStd(stat, df)
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("stats.chiSquareTest: p-value did not converge")
 	}
-	return testVal(stat, df, 0, clamp01(1-cdf)), nil
+	return testVal(stat, df, 0, clamp01(sf)), nil
 }
 
 // --- F-test for equality of variances ---
@@ -536,8 +536,13 @@ func fTestFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("stats.fTest: p-value did not converge")
 	}
-	// Two-sided: twice the smaller tail.
-	p := 2 * math.Min(cdf, 1-cdf)
+	// Two-sided: twice the smaller tail. The upper tail comes straight from
+	// fSfStd (not 1 - cdf), so when f is large the small tail keeps its precision.
+	sf, ok := fSfStd(f, df1, df2)
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("stats.fTest: p-value did not converge")
+	}
+	p := 2 * math.Min(cdf, sf)
 	return testVal(f, df1, df2, clamp01(p)), nil
 }
 
@@ -589,11 +594,11 @@ func anovaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if !isFinite(f) {
 		return interpreter.Null(), fmt.Errorf("stats.anova: input magnitudes overflow the computation")
 	}
-	cdf, ok := fCdfStd(f, df1, df2)
+	sf, ok := fSfStd(f, df1, df2)
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("stats.anova: p-value did not converge")
 	}
-	return testVal(f, df1, df2, clamp01(1-cdf)), nil
+	return testVal(f, df1, df2, clamp01(sf)), nil
 }
 
 // --- Histogram (Excel FREQUENCY) ---

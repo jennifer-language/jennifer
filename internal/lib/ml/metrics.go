@@ -155,7 +155,11 @@ func confusionMatrixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inte
 	}
 	li := make([]int64, len(labels))
 	for i, l := range labels {
-		li[i] = int64(math.Round(l))
+		v, err := labelToInt("ml.confusionMatrix", l)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		li[i] = v
 	}
 	return interpreter.NamespacedStructVal(LibraryName, "Confusion", []interpreter.StructField{
 		{Name: "labels", Value: intVec(li)},

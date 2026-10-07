@@ -136,7 +136,7 @@ func encodePoint(c *mtweiCurve, p *ecPoint) []byte {
 	return out
 }
 
-// TestMtweiClientKeyRejectsDegeneratePoint pins K-1: a crafted serverKey equal to
+// TestMtweiClientKeyRejectsDegeneratePoint pins a crafted serverKey equal to
 // -mixed makes tangle's point addition collapse to infinity; mtweiClientKey must
 // return a catchable error, not dereference the nil coordinate (a fatal crash).
 func TestMtweiClientKeyRejectsDegeneratePoint(t *testing.T) {

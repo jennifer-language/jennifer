@@ -363,6 +363,13 @@ func TestPrintfModifierErrors(t *testing.T) {
 		{"%a on a non-aggregate is rejected", vals("%a", interpreter.IntVal(42)), "requires list or map"},
 		{"unterminated quoted value", vals(`%a|sep="abc`, listOfInts(1, 2)), "unterminated quoted modifier value"},
 		{"unknown escape in quoted value", vals(`%a|sep="\q"`, listOfInts(1, 2)), "unknown escape"},
+		// %a takes only null=skip; the scalar null renderings are rejected.
+		{"null=empty on %a rejected", vals("%a|null=empty", listOfInts(1, 2)), "not valid on `%a`"},
+		{"null=literal on %a rejected", vals(`%a|null=literal("X")`, listOfInts(1, 2)), "not valid on `%a`"},
+		// %v takes no modifiers, including null=.
+		{"null=empty on %v rejected", vals("%v|null=empty", interpreter.IntVal(1)), "no modifiers"},
+		// depth must be non-negative.
+		{"negative depth rejected", vals("%a|depth=-1", listOfInts(1, 2)), "depth must be >= 0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

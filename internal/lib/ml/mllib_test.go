@@ -422,3 +422,19 @@ func TestTreeSweepSplits(t *testing.T) {
 		t.Fatalf("regression step not recovered: got %v, want [0 10]", rp)
 	}
 }
+
+// TestLabelToIntRejectsOutOfRange pins an out-of-int64 class label is a
+// catchable error, not a silent MinInt64. confusionMatrix is the registered
+// entry point that converts user labels; predict shares labelToInt.
+func TestLabelToIntRejectsOutOfRange(t *testing.T) {
+	fails(t, confusionMatrixFn, vec(1e300, 0), vec(1e300, 0))
+	// Integral in-range labels still work.
+	ok(t, confusionMatrixFn, vec(0, 1, 1), vec(0, 1, 0))
+	// The helper rounds in range and rejects out of range.
+	if v, err := labelToInt("t", 2.6); err != nil || v != 3 {
+		t.Errorf("labelToInt(2.6) = %d, %v; want 3, nil", v, err)
+	}
+	if _, err := labelToInt("t", 1e300); err == nil {
+		t.Error("labelToInt(1e300) should error")
+	}
+}

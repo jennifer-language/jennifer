@@ -771,7 +771,7 @@ func TestResolveRejectsDuplicateDeclarations(t *testing.T) {
 	}
 }
 
-// TestNestedInterpolationBudget pins P-1: a `{...}` slot's text is re-lexed per
+// TestNestedInterpolationBudget pins a `{...}` slot's text is re-lexed per
 // nesting level, so deeply nested interpolation re-lexes depth*payload bytes.
 // A cumulative byte budget (threaded across the sub-parsers) must stop that with
 // a positioned parse error before it exhausts memory, while ordinary nesting
@@ -796,5 +796,17 @@ func TestNestedInterpolationBudget(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "re-lexes more than") {
 		t.Fatalf("want a re-lex-budget error, got: %v", err)
+	}
+}
+
+// TestChainedAppendHint pins a chained append `$xs[i][] = v` (unsupported)
+// gives the dedicated append-form diagnostic, not a generic "unexpected token]".
+func TestChainedAppendHint(t *testing.T) {
+	_, err := Parse(`def xs as list of list of int init [[]]; $xs[0][] = 1;`)
+	if err == nil {
+		t.Fatal("chained append should be a parse error")
+	}
+	if !strings.Contains(err.Error(), "append form") {
+		t.Fatalf("want the append-form hint, got: %v", err)
 	}
 }

@@ -344,6 +344,15 @@ func setNull(spec *FormatSpec, value string) error {
 		spec.NullSet = true
 		return nil
 	}
+	// empty / null / literal(...) are the scalar null-renderings. `%a` takes only
+	// the per-element null=skip above, and `%v` takes no modifiers at all, so
+	// reject them there rather than silently rendering a null aggregate as "" / "X".
+	switch spec.Verb {
+	case 'a':
+		return fmt.Errorf("null=%q is not valid on `%%a`; use null=skip to omit null elements", value)
+	case 'v':
+		return fmt.Errorf("verb `%%v` takes no modifiers (got null=%q)", value)
+	}
 	spec.NullSet = true
 	switch {
 	case value == "empty":
@@ -567,6 +576,9 @@ func validateSpec(spec *FormatSpec) error {
 	}
 	if spec.HasMax && spec.Max < 0 {
 		return fmt.Errorf("max must be >= 0")
+	}
+	if spec.HasDepth && spec.Depth < 0 {
+		return fmt.Errorf("depth must be >= 0")
 	}
 	if spec.Fill == '0' && spec.Verb == 'd' && spec.Align == alignLeft {
 		return fmt.Errorf("`fill=0` requires `align=right` (the default)")

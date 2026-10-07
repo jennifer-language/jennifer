@@ -814,7 +814,7 @@ func TestWriteNewExclusive(t *testing.T) {
 	}
 }
 
-// TestWalkSymlinkedRoot pins S-7: fs.walk of a root that is a symlink to a
+// TestWalkSymlinkedRoot pins fs.walk of a root that is a symlink to a
 // directory must descend (resolving only the root), not return an empty list,
 // and must report entries under the caller's original path.
 func TestWalkSymlinkedRoot(t *testing.T) {
@@ -848,7 +848,7 @@ func TestWalkSymlinkedRoot(t *testing.T) {
 	}
 }
 
-// TestChmodSpecialBits pins S-2: fs.chmod must honour the setuid / setgid /
+// TestChmodSpecialBits pins fs.chmod must honour the setuid / setgid /
 // sticky bits in the 0o7777 mode (not silently drop them), and fs.stat must
 // report them back.
 func TestChmodSpecialBits(t *testing.T) {

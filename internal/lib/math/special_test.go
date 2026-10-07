@@ -257,3 +257,31 @@ func TestErf(t *testing.T) {
 		t.Errorf("erf + erfc = %v, want 1", e.Float+ec.Float)
 	}
 }
+
+// TestIncGammaLargeParamConverges pins the iteration budget scales with the
+// parameter, so a large-a regularized incomplete gamma converges instead of
+// spuriously erroring "did not converge" (the fixed 300-iteration cap stopped
+// around a ~ 2000).
+func TestIncGammaLargeParamConverges(t *testing.T) {
+	// a = x = 2000 is the median region, the hardest to converge; P ~ 0.5.
+	if v := callOK(t, regGammaPFn, f(2000), f(2000)); !closeTo(v.Float, 0.5, 0.02) {
+		t.Errorf("regGammaP(2000,2000) = %v, want ~0.5", v.Float)
+	}
+	if v := callOK(t, regGammaPFn, f(5000), f(5000)); !closeTo(v.Float, 0.5, 0.02) {
+		t.Errorf("regGammaP(5000,5000) = %v, want ~0.5", v.Float)
+	}
+}
+
+// TestRegGammaQSmallTail pins the upper tail is computed directly from the
+// continued fraction, so a tiny Q keeps its precision instead of the 1 - P double
+// subtraction flushing it to 0. Q(1, 50) = e^-50.
+func TestRegGammaQSmallTail(t *testing.T) {
+	q := callOK(t, regGammaQFn, f(1), f(50))
+	want := math.Exp(-50)
+	if q.Float <= 0 {
+		t.Fatalf("regGammaQ(1,50) = %v, want ~%v (not flushed to 0)", q.Float, want)
+	}
+	if !closeTo(q.Float, want, want*1e-6) {
+		t.Errorf("regGammaQ(1,50) = %v, want %v", q.Float, want)
+	}
+}

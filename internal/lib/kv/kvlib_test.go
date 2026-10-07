@@ -271,7 +271,7 @@ func TestConcurrentCrossProcessFlush(t *testing.T) {
 	}
 }
 
-// TestOpenFilePreservesPermissions pins S-6: a flush (write temp + rename) must
+// TestOpenFilePreservesPermissions pins a flush (write temp + rename) must
 // keep an existing store file's permissions rather than resetting it to the
 // temp's 0600, and a brand-new store defaults to 0644.
 func TestOpenFilePreservesPermissions(t *testing.T) {

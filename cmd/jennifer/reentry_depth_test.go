@@ -49,7 +49,7 @@ func outerLeg() { return innerLeg(); }
 func hostBounce() { return rm.bounce(); }
 
 def caught1 as bool init false;
-try { pureCall(); } catch (e) { $caught1 = true; testing.assertEqual($e.kind, "runtime"); }
+try { pureCall(); } catch (e) { $caught1 = true; testing.assertEqual($e.kind, "limit"); }
 testing.assertTrue($caught1);
 
 def caught2 as bool init false;

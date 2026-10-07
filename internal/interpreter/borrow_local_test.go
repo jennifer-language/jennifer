@@ -34,8 +34,8 @@ func TestDefBorrowReadOnlyLocalIsCorrect(t *testing.T) {
 			def s as Sh init byName($bk, $nm);
 			return cellOf($s, $key);
 		}
-		def bk as Bk init Bk{sheets: [Sh{name: "a", cells: {"x": 7}}, Sh{name: "b", cells: {"x": 9}}]};
-		io.printf("%d", read($bk, "b", "x"));
+		def wb as Bk init Bk{sheets: [Sh{name: "a", cells: {"x": 7}}, Sh{name: "b", cells: {"x": 9}}]};
+		io.printf("%d", read($wb, "b", "x"));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -175,8 +175,8 @@ func TestDefBorrowMatchSubject(t *testing.T) {
 			}
 			return -2;
 		}
-		def sh as Sheet init Sheet{cells: [Cell.Empty, Cell.Num{v: 42}]};
-		io.printf("%d %d", valueAt($sh, 1), valueAt($sh, 0));
+		def sheet as Sheet init Sheet{cells: [Cell.Empty, Cell.Num{v: 42}]};
+		io.printf("%d %d", valueAt($sheet, 1), valueAt($sheet, 0));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)

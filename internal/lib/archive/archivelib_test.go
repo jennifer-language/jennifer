@@ -238,7 +238,7 @@ func TestUnpackWithCaps(t *testing.T) {
 	}
 }
 
-// TestCheckEntryNameDriveLetter pins S-4: the Windows drive-letter guard must
+// TestCheckEntryNameDriveLetter pins the Windows drive-letter guard must
 // reject only a real drive reference (letter + ':' + separator/end), not any
 // Unix name whose second character is ':'.
 func TestCheckEntryNameDriveLetter(t *testing.T) {
@@ -256,7 +256,7 @@ func TestCheckEntryNameDriveLetter(t *testing.T) {
 	}
 }
 
-// TestUnpackTarMasksSpecialBits pins S-5: a tar header's setuid / setgid / sticky
+// TestUnpackTarMasksSpecialBits pins a tar header's setuid / setgid / sticky
 // and type bits must be masked to plain permission bits on unpack, matching the
 // zip path, so an untrusted tar cannot yield a setuid Entry.mode.
 func TestUnpackTarMasksSpecialBits(t *testing.T) {

@@ -972,8 +972,10 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 		// error here escapes every try/catch (execTry catches only *runtimeError /
 		// *ErrorSignal), so a wrong-arity handler passed to, e.g., web.onError would
 		// leave the request unanswered instead of raising a catchable error.
+		mf, ml, mc := posFor(m)
 		return Value{}, &runtimeError{
-			Msg: fmt.Sprintf("method %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args)),
+			Msg:  fmt.Sprintf("method %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args)),
+			File: mf, Line: ml, Col: mc,
 		}
 	}
 	if i.global == nil {
@@ -999,7 +1001,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 			// would escape a surrounding try/catch on the cross-boundary path.
 			return Value{}, &runtimeError{
 				Msg:  fmt.Sprintf("argument %d to %q must be %s, got %s", idx+1, m.Name, p.Type, args[idx].Kind),
-				Line: p.Line, Col: p.Col,
+				File: p.File, Line: p.Line, Col: p.Col,
 			}
 		}
 		bound := i.bindArg(args[idx], p, borrowCtx)
@@ -5543,9 +5545,24 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 // (testing assertions, RaiseError). Any other Go error is wrapped into a
 // positioned runtimeError at the call site, the long-standing behavior.
 func builtinError(err error, file string, line, col int) error {
-	switch err.(type) {
+	switch e := err.(type) {
 	case *ErrorSignal, *ExitSignal:
 		return err
+	case *runtimeError:
+		// Already a positioned, classified runtime error - e.g. a Kind:"limit"
+		// depth error raised inside a lists.map callback / meta.call, or a
+		// cross-boundary dispatch arity/type error. Preserve it rather than
+		// re-wrapping: re-wrapping dropped the Kind (catch saw "runtime") and
+		// doubled the "runtime error at FILE:L:C: runtime error at ..." prefix.
+		// Backfill only a missing position so an error with none still points
+		// somewhere (the callback call site).
+		if e.File == "" {
+			e.File = file
+		}
+		if e.Line == 0 {
+			e.Line, e.Col = line, col
+		}
+		return e
 	}
 	return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 }

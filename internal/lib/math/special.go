@@ -45,6 +45,15 @@ func lgammaVal(x float64) float64 {
 // the caller turns a false into a catchable error, mirroring regGammaP.
 func RegularizedGammaP(a, x float64) (float64, bool) { return regularizedGammaP(a, x) }
 
+// RegularizedGammaQ exposes the upper tail Q(a, x) = 1 - P(a, x), computed
+// directly from the continued fraction (not as 1 - P), so a small tail
+// probability keeps its precision. Used by the gamma / chi-square / Poisson
+// survival functions that would otherwise flush a p-value below ~1e-16 to 0.
+func RegularizedGammaQ(a, x float64) (float64, bool) {
+	_, q, ok := regularizedGammaPQ(a, x)
+	return q, ok
+}
+
 // RegularizedIncBeta exposes the regularized incomplete beta I_x(a, b) to
 // sibling Go libraries (the CDF engine for `stats`' t / F / beta / binomial).
 // Requires 0 <= x <= 1, a > 0, b > 0. The second return reports convergence.
@@ -121,14 +130,33 @@ func lbetaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 // near float64 relative precision; FPMIN guards a divide-by-tiny in the
 // modified Lentz continued-fraction evaluation.
 const (
-	incMaxIter = 300
+	incMinIter = 300    // floor: enough for small parameters
+	incMaxIter = 100000 // ceiling: bounds a pathological parameter
 	incEPS     = 3.0e-14
 	incFPMIN   = 1.0e-300
 )
 
+// incIters scales the series / continued-fraction iteration budget with the
+// distribution parameter. Convergence near the bulk of the distribution needs
+// roughly O(sqrt(param)) iterations, so a fixed 300 made large-parameter CDFs
+// (chi-square with thousands of df, a Poisson rate in the thousands, a gamma
+// with a in the thousands) spuriously report "did not converge" for ordinary
+// inputs. Floored at incMinIter and capped at incMaxIter so an absurd parameter
+// still terminates.
+func incIters(param float64) int {
+	n := int(10*math.Sqrt(param)) + 100
+	if n < incMinIter {
+		return incMinIter
+	}
+	if n > incMaxIter {
+		return incMaxIter
+	}
+	return n
+}
+
 // gammaSeries evaluates the regularized lower incomplete gamma P(a, x) by its
 // series expansion, accurate for x < a+1. The second return reports whether the
-// series converged within incMaxIter iterations; a false there means the result
+// series converged within the parameter-scaled iteration budget; a false there means the result
 // is not trustworthy and the caller turns it into an error.
 func gammaSeries(a, x float64) (float64, bool) {
 	if x <= 0 {
@@ -138,7 +166,8 @@ func gammaSeries(a, x float64) (float64, bool) {
 	del := 1.0 / a
 	sum := del
 	converged := false
-	for n := 0; n < incMaxIter; n++ {
+	maxIter := incIters(a)
+	for n := 0; n < maxIter; n++ {
 		ap++
 		del *= x / ap
 		sum += del
@@ -159,7 +188,8 @@ func gammaContinued(a, x float64) (float64, bool) {
 	d := 1.0 / b
 	h := d
 	converged := false
-	for i := 1; i < incMaxIter; i++ {
+	maxIter := incIters(a)
+	for i := 1; i < maxIter; i++ {
 		an := -float64(i) * (float64(i) - a)
 		b += 2
 		d = an*d + b
@@ -185,11 +215,22 @@ func gammaContinued(a, x float64) (float64, bool) {
 // in [0, 1], plus a convergence flag. Requires a > 0 and x >= 0 (checked by the
 // caller).
 func regularizedGammaP(a, x float64) (float64, bool) {
+	p, _, ok := regularizedGammaPQ(a, x)
+	return p, ok
+}
+
+// regularizedGammaPQ returns both P(a, x) and its complement Q(a, x), each from
+// the branch that computes it directly (series for P when x < a+1, continued
+// fraction for Q otherwise), so the upper tail Q is never formed as 1 - P. That
+// double subtraction flushed a p-value below ~1e-16 to exactly 0; Q straight from
+// the continued fraction keeps the small tail (e.g. Q(1, 50) = e^-50).
+func regularizedGammaPQ(a, x float64) (p, q float64, ok bool) {
 	if x < a+1 {
-		return gammaSeries(a, x)
+		p, ok = gammaSeries(a, x)
+		return p, 1 - p, ok
 	}
-	q, ok := gammaContinued(a, x)
-	return 1 - q, ok
+	q, ok = gammaContinued(a, x)
+	return 1 - q, q, ok
 }
 
 // betaContinued is the continued fraction for the regularized incomplete beta,
@@ -207,7 +248,8 @@ func betaContinued(x, a, b float64) (float64, bool) {
 	d = 1 / d
 	h := d
 	converged := false
-	for m := 1; m < incMaxIter; m++ {
+	maxIter := incIters(math.Max(a, b))
+	for m := 1; m < maxIter; m++ {
 		fm := float64(m)
 		m2 := 2 * fm
 		aa := fm * (b - fm) * x / ((qam + m2) * (a + m2))
@@ -306,8 +348,8 @@ func regGammaQFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	p, ok := regularizedGammaP(a, x)
-	return finiteCDF(fmt.Sprintf("regGammaQ(%s, %s)", interpreter.DisplayFloat(a), interpreter.DisplayFloat(x)), 1-p, ok)
+	_, q, ok := regularizedGammaPQ(a, x)
+	return finiteCDF(fmt.Sprintf("regGammaQ(%s, %s)", interpreter.DisplayFloat(a), interpreter.DisplayFloat(x)), q, ok)
 }
 
 // gammaArgs validates (a, x) for the regularized incomplete gamma: a > 0 and

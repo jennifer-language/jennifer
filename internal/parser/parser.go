@@ -1099,6 +1099,16 @@ func (p *parser) tryParseIndexAssign() (Stmt, bool, error) {
 	for {
 		switch p.peek().Type {
 		case lexer.TOKEN_LBRACKET:
+			if p.peekN(1).Type == lexer.TOKEN_RBRACKET {
+				// A chained append `$xs[0][] = v` is not supported; the append
+				// form takes only a bare variable. Point at the `[` with the rule
+				// rather than failing later inside expression parsing on the `]`.
+				br := p.peek()
+				return nil, false, &ParseError{
+					Msg:  "append form `[]` takes only a bare variable (`$xs[] = v`); a chained append like `$xs[i][] = v` is not supported",
+					File: br.File, Line: br.Line, Col: br.Col,
+				}
+			}
 			sfx, err := p.parseBracketSuffix(target)
 			if err != nil {
 				return nil, false, err

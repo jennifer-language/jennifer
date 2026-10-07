@@ -453,7 +453,17 @@ func trimTrailingComma(b *bytes.Buffer) {
 	}
 }
 
+// maxIndentDepth caps the cosmetic indentation so the dump stays O(nodes), not
+// O(nodes * depth): without it, a pathologically deep tree (a 50k-operator
+// chain) indents each node by its depth and OOMs. Indentation past this adds no
+// clarity, and JSON ignores whitespace, so a deeper node is still valid - just
+// no further indented.
+const maxIndentDepth = 64
+
 func writeIndent(b *bytes.Buffer, indent int) {
+	if indent > maxIndentDepth {
+		indent = maxIndentDepth
+	}
 	for i := 0; i < indent; i++ {
 		b.WriteString(indentUnit)
 	}

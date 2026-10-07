@@ -324,7 +324,11 @@ func (r *registry) predictFn(_ interpreter.BuiltinCtx, args []interpreter.Value)
 			if !isFinite(v) {
 				return interpreter.Null(), fmt.Errorf("ml.predict: prediction is undefined or infinite")
 			}
-			out[i] = int64(math.Round(v))
+			li, err := labelToInt("ml.predict", v)
+			if err != nil {
+				return interpreter.Null(), err
+			}
+			out[i] = li
 		}
 		return intVec(out), nil
 	}
@@ -421,6 +425,19 @@ func (r *registry) freeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 
 // isFinite reports whether r is neither NaN nor infinite.
 func isFinite(r float64) bool { return !math.IsNaN(r) && !math.IsInf(r, 0) }
+
+// labelToInt rounds a class label (a user-supplied float) to int64, rejecting a
+// value outside the int64 range instead of Go's silent, platform-defined
+// out-of-range conversion (which turns a 1e300 label into MinInt64 - a wrong
+// result rather than an error). Rounding matches the prior behaviour for
+// in-range labels; fn names the caller for the error text.
+func labelToInt(fn string, v float64) (int64, error) {
+	r := math.Round(v)
+	if math.IsNaN(r) || math.IsInf(r, 0) || r >= 9223372036854775808.0 || r < -9223372036854775808.0 {
+		return 0, fmt.Errorf("%s: class label %g is out of the integer range", fn, v)
+	}
+	return int64(r), nil
+}
 
 // euclid2 is the squared Euclidean distance between two equal-length vectors.
 func euclid2(a, b []float64) float64 {

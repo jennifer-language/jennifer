@@ -20,7 +20,7 @@ gpio.release(17);
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `gpio.chip(path)` | `null` | Selects the gpiochip device for later setups (default `/dev/gpiochip0`; env `JENNIFER_GPIO_CHIP` also honoured). |
-| `gpio.setup(pin, direction)` | `null` | Requests `pin` (0..63) with `gpio.IN` or `gpio.OUT`. Errors if the pin is already set up. |
+| `gpio.setup(pin, direction)` | `null` | Requests the chip line `pin` (a u32 offset; many SoC gpiochips expose 100+ lines) with `gpio.IN` or `gpio.OUT`. An offset the chip does not have surfaces as the kernel's error. Errors if the pin is already set up. |
 | `gpio.read(pin)` | `int` | 0 or 1. |
 | `gpio.write(pin, value)` | `null` | `value` is 0 or 1; the pin must be set up as `gpio.OUT`. |
 | `gpio.release(pin)` | `null` | Releases the line back to the kernel. |

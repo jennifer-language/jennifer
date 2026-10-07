@@ -221,6 +221,18 @@ func tCdfStd(t, df float64) (float64, bool) {
 	return 1 - 0.5*ib, true
 }
 
+// tSfTwoSidedStd returns the two-sided t tail 2*(1 - tCdf(|t|)) at t, computed
+// directly as I_x(df/2, 1/2) with x = df/(df + t^2) - the identity that lets the
+// incomplete beta compute the small tail without the 1 - CDF cancellation.
+func tSfTwoSidedStd(t, df float64) (float64, bool) {
+	x := df / (df + t*t)
+	ib, ok := mathlib.RegularizedIncBeta(x, df/2, 0.5)
+	if !ok || !isFinite(ib) {
+		return 0, false
+	}
+	return ib, true
+}
+
 func tPdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	a, err := scalars("tPdf", args, 2)
 	if err != nil {
@@ -305,6 +317,18 @@ func chiSquareCdfStd(x, df float64) (float64, bool) {
 	return v, ok && isFinite(v)
 }
 
+// chiSquareSfStd returns the chi-square upper tail (survival function) 1 - CDF at
+// x, computed directly as Q(df/2, x/2) rather than 1 - P, so an extreme-tail
+// p-value (a chi-square goodness-of-fit far from the mean) keeps its precision
+// instead of flushing to 0.
+func chiSquareSfStd(x, df float64) (float64, bool) {
+	if x <= 0 {
+		return 1, true
+	}
+	v, ok := mathlib.RegularizedGammaQ(df/2, x/2)
+	return v, ok && isFinite(v)
+}
+
 func chiSquareCdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	a, err := scalars("chiSquareCdf", args, 2)
 	if err != nil {
@@ -353,6 +377,19 @@ func fCdfStd(x, d1, d2 float64) (float64, bool) {
 		return 0, true
 	}
 	v, ok := mathlib.RegularizedIncBeta(d1*x/(d1*x+d2), d1/2, d2/2)
+	return v, ok && isFinite(v)
+}
+
+// fSfStd returns the F upper tail (survival function) 1 - CDF at x, computed
+// directly as the complement incomplete beta I_{1-z}(d2/2, d1/2) with
+// z = d1*x/(d1*x+d2), i.e. with the arguments swapped, so a small upper-tail
+// p-value (fTest / anova) is formed by the beta branch that computes it directly
+// rather than as 1 - CDF (which would cancel a value below ~1e-16 to 0).
+func fSfStd(x, d1, d2 float64) (float64, bool) {
+	if x <= 0 {
+		return 1, true
+	}
+	v, ok := mathlib.RegularizedIncBeta(d2/(d1*x+d2), d2/2, d1/2)
 	return v, ok && isFinite(v)
 }
 
@@ -482,9 +519,10 @@ func poissonCdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	if k < 0 {
 		return interpreter.FloatVal(0), nil
 	}
-	// P(X <= k) = Q(k+1, lambda) = 1 - P(k+1, lambda).
-	p, ok := mathlib.RegularizedGammaP(float64(k)+1, lambda)
-	return cdfResult("poissonCdf", 1-p, ok)
+	// P(X <= k) = Q(k+1, lambda), taken straight from the continued fraction
+	// (not as 1 - P) so a small CDF for small k / large lambda keeps its precision.
+	q, ok := mathlib.RegularizedGammaQ(float64(k)+1, lambda)
+	return cdfResult("poissonCdf", q, ok)
 }
 
 // poissonArgs reads (k int, lambda float) with lambda > 0.

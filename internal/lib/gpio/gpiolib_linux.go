@@ -12,6 +12,7 @@ package gpiolib
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"unsafe"
@@ -154,8 +155,12 @@ func setupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if pin < 0 || pin >= 64 {
-		return interpreter.Null(), fmt.Errorf("gpio.setup: pin %d out of range (0..63 per request)", pin)
+	// A line offset is a u32 on the chip; the 64 in the ABI is GPIO_V2_LINES_MAX
+	// (lines per request), not the offset range, and we always request one line.
+	// Many SoC gpiochips expose 100+ lines, so bound by the u32 range and let the
+	// kernel's EINVAL surface for an offset the chip does not have.
+	if pin < 0 || pin > math.MaxUint32 {
+		return interpreter.Null(), fmt.Errorf("gpio.setup: pin %d out of range (0..%d)", pin, math.MaxUint32)
 	}
 	var flags uint64
 	switch dir {

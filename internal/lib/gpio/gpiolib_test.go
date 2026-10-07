@@ -33,7 +33,9 @@ func run(t *testing.T, src string) error {
 func TestGpioErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{"bad direction", `use gpio; gpio.setup(17, "sideways");`, "gpio.IN"},
-		{"pin out of range", `use gpio; gpio.setup(999, gpio.OUT);`, "out of range"},
+		// A line offset is a u32; only a pin beyond that is out of range (a pin like
+		// 100, valid on many SoC gpiochips, must reach the device, not be rejected).
+		{"pin out of range", `use gpio; gpio.setup(5000000000, gpio.OUT);`, "out of range"},
 		{"read not set up", `use gpio; def v as int init gpio.read(17);`, "not set up"},
 		{"write not set up", `use gpio; gpio.write(17, 1);`, "not set up"},
 		{"release not set up", `use gpio; gpio.release(17);`, "not set up"},

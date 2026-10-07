@@ -425,7 +425,7 @@ func TestRunRejectsNonStringArgv(t *testing.T) {
 	}
 }
 
-// TestRunReturnsPromptlyWhenChildBackgrounds pins S-1: os.run must not block
+// TestRunReturnsPromptlyWhenChildBackgrounds pins os.run must not block
 // until a backgrounded grandchild exits. `sh` forks a 30s sleep that inherits
 // the stdout pipe, then exits 0; run must return within the WaitDelay grace
 // (~0.5s), not after 30s, with the process's own output and exit code.
