@@ -17,6 +17,12 @@ io.printf("%s\n", ansi.green("ok") + " / " + ansi.yellow("warn"));
 io.printf("%s\n", ansi.rgb("truecolor orange", 255, 128, 0));
 io.printf("%s\n", ansi.underline(ansi.cyan("nested + underlined")));
 
+# 256-colour palette: a direct index, and an RGB triple degraded to the
+# nearest palette index for a terminal without truecolor.
+io.printf("%s\n", ansi.color256("palette index 208", 208));
+def idx as int init ansi.rgbToColor256(255, 128, 0);
+io.printf("%s\n", ansi.color256("orange via rgbToColor256", $idx));
+
 # strip is the inverse of the wrappers, whether or not colour is on.
 def styled as string init ansi.bold(ansi.blue("styled"));
 io.printf("stripped: [%s]\n", ansi.strip($styled));

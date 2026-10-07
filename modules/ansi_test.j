@@ -89,3 +89,33 @@ func testColourGatingDisabled() {
     testing.assertEqual(bold("x"), "x");
     testing.assertEqual(bgColor("x", "red"), "x");
 }
+
+# The 256-colour wrappers emit the indexed SGR form and strip round-trips.
+func testColor256RoundTrips() {
+    os.setEnv("NO_COLOR", "");
+    os.setEnv("FORCE_COLOR", "1");
+    testing.assertContains(color256("x", 196), "38;5;196m"); # foreground form
+    testing.assertContains(bgColor256("x", 21), "48;5;21m"); # background form
+    testing.assertEqual(strip(color256("x", 196)), "x");
+    testing.assertEqual(strip(bgColor256("hi", 21)), "hi");
+}
+
+# An out-of-range palette index clamps to [0, 255] rather than emitting a
+# malformed sequence.
+func testColor256Clamps() {
+    os.setEnv("NO_COLOR", "");
+    os.setEnv("FORCE_COLOR", "1");
+    testing.assertContains(color256("x", 300), "38;5;255m"); # clamped high
+    testing.assertContains(color256("x", -5), "38;5;0m"); # clamped low
+}
+
+# rgbToColor256 picks the nearest palette index: cube primaries and corners,
+# and the grayscale ramp for a neutral mid-gray.
+func testRgbToColor256() {
+    testing.assertEqual(rgbToColor256(255, 0, 0), 196); # pure red (cube corner)
+    testing.assertEqual(rgbToColor256(0, 0, 0), 16); # black (cube origin)
+    testing.assertEqual(rgbToColor256(255, 255, 255), 231); # white (cube corner)
+    testing.assertEqual(rgbToColor256(128, 128, 128), 244); # mid-gray (ramp beats cube)
+    # Out-of-range channels clamp to (255, 0, 255) = magenta before quantizing.
+    testing.assertEqual(rgbToColor256(300, -10, 999), 201);
+}

@@ -159,6 +159,104 @@ func clampChannel(v as int) {
 }
 
 /**
+ * Wrap a string in a 256-colour palette foreground (xterm `38;5;n`), the
+ * indexed middle rung between the named colours and 24-bit rgb.
+ * @param s {string} the text to colourize
+ * @param n {int} the palette index (0-15 base, 16-231 cube, 232-255 grayscale)
+ * @return {string} the wrapped text, or s unchanged when colour is off
+ */
+export func color256(s as string, n as int) {
+    return wrap($s, "38;5;" + convert.toString(clampChannel($n)));
+}
+/**
+ * Wrap a string in a 256-colour palette background (xterm `48;5;n`).
+ * @param s {string} the text to colourize
+ * @param n {int} the palette index (0-255)
+ * @return {string} the wrapped text, or s unchanged when colour is off
+ */
+export func bgColor256(s as string, n as int) {
+    return wrap($s, "48;5;" + convert.toString(clampChannel($n)));
+}
+/**
+ * Map a 24-bit RGB triple to the nearest 256-colour index, for terminals
+ * without truecolor. Picks the closer of the 6x6x6 colour cube (16-231) and
+ * the 24-step grayscale ramp (232-255).
+ * @param r {int} the red channel (0-255)
+ * @param g {int} the green channel (0-255)
+ * @param b {int} the blue channel (0-255)
+ * @return {int} a palette index in [16, 255]
+ */
+export func rgbToColor256(r as int, g as int, b as int) {
+    def rc as int init clampChannel($r);
+    def gc as int init clampChannel($g);
+    def bc as int init clampChannel($b);
+
+    # Colour-cube candidate: quantize each channel to one of six levels.
+    def ri as int init channelTo6($rc);
+    def gi as int init channelTo6($gc);
+    def bi as int init channelTo6($bc);
+    def cubeIdx as int init 16 + 36 * $ri + 6 * $gi + $bi;
+    def cubeDist as int init dist2($rc, $gc, $bc, cubeLevel($ri), cubeLevel($gi), cubeLevel($bi));
+
+    # Grayscale candidate: ramp values 8, 18, ... 238 (step 10).
+    def avg as int init ($rc + $gc + $bc) // 3;
+    def step as int init ($avg - 8 + 5) // 10;
+    if ($step < 0) {
+        $step = 0;
+    }
+    if ($step > 23) {
+        $step = 23;
+    }
+    def grayVal as int init 8 + 10 * $step;
+    def grayDist as int init dist2($rc, $gc, $bc, $grayVal, $grayVal, $grayVal);
+
+    if ($grayDist < $cubeDist) {
+        return 232 + $step;
+    }
+    return $cubeIdx;
+}
+
+# channelTo6 quantizes a 0-255 channel to the nearest of the six xterm cube
+# levels (0, 95, 135, 175, 215, 255), returning its index 0..5.
+func channelTo6(v as int) {
+    if ($v < 48) {
+        return 0;
+    }
+    if ($v < 115) {
+        return 1;
+    }
+    return ($v - 35) // 40;
+}
+
+# cubeLevel is the channel value for a cube level index 0..5.
+func cubeLevel(i as int) {
+    if ($i <= 0) {
+        return 0;
+    }
+    if ($i == 1) {
+        return 95;
+    }
+    if ($i == 2) {
+        return 135;
+    }
+    if ($i == 3) {
+        return 175;
+    }
+    if ($i == 4) {
+        return 215;
+    }
+    return 255;
+}
+
+# dist2 is the squared Euclidean distance between two RGB points.
+func dist2(r1 as int, g1 as int, b1 as int, r2 as int, g2 as int, b2 as int) {
+    def dr as int init $r1 - $r2;
+    def dg as int init $g1 - $g2;
+    def db as int init $b1 - $b2;
+    return $dr * $dr + $dg * $dg + $db * $db;
+}
+
+/**
  * Remove every SGR escape - the inverse of the wrappers, regardless of whether
  * colour is currently enabled.
  * @param s {string} the text to strip

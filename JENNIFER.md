@@ -801,9 +801,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   binary.
 - **`ansi`** - terminal styling as string wrappers: `ansi.color(s, name)` /
   `bgColor` / `style(s, name)` (bold / dim / italic / underline / reverse) /
-  `rgb` / `strip`, plus per-colour and per-style shortcuts (`ansi.red(s)`,
-  `ansi.bold(s)`). TTY-aware: styling suppresses itself off a terminal or under
-  `NO_COLOR`, and is forced on by `FORCE_COLOR`.
+  `color256(s, n)` / `bgColor256(s, n)` (256-colour palette) /
+  `rgbToColor256(r, g, b)` / `rgb` / `strip`, plus per-colour and per-style
+  shortcuts (`ansi.red(s)`, `ansi.bold(s)`). TTY-aware: styling suppresses
+  itself off a terminal or under `NO_COLOR`, and is forced on by `FORCE_COLOR`.
 - **`args`** - a declarative CLI argument parser (argparse-style) over `os.ARGS`.
   Build a value-semantic `Parser` with copy-returning builders: `args.parser(prog,
   help)` then `args.flag` / `intFlag` / `floatFlag` / `boolFlag` (long + short,
