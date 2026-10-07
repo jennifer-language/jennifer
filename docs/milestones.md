@@ -686,8 +686,10 @@ the milestone-number index (numbers were assigned in rough priority order).
 **Enabling changes** these modules pulled into the system side (each documented
 under its library):
 
-- **`net.setDeadline`** - a read/write deadline for socket timeouts (M18.13; later
-  extended to UDP sockets for `ntp`, M18.27).
+- **`net.setReadDeadline` / `net.setWriteDeadline`** - separate read and write
+  deadlines for socket timeouts (M18.13, first shipped as a combined `setDeadline`;
+  extended to UDP sockets for `ntp`, M18.27; split into independent read/write
+  calls so a read timeout cannot block a later write).
 - **`io.eprintf`** - the stdout-`printf` twin that writes to stderr (a new
   `Interpreter.Err` / `BuiltinCtx.Err` writer), the stderr sink `log` builds on
   (M18.22).
@@ -795,7 +797,7 @@ docs - this table is the milestone-number index.
 | M21.10 | byte-oriented throughput | The `binary` library (`concat` / `slice` / `indexOf` / `contains` / `split` / `startsWith` / `endsWith` - the byte counterpart to `strings`, value-semantic, TinyGo-clean) plus `net.readAll` / `readN` (bulk reads with catchable size / close-mid-frame caps). Reworked `http` / `mqtt` / `imap` onto bulk reads; a `binary.indexOf` benchmark fixture. |
 | M21.11 | range syntax (`..`) | Half-open `lo..hi` (int bounds), three materializing / value-semantic uses: list construction (`0..n`), lazy for-each (`for i in 0..n`, no list built), and slicing (`$xs[a..b]` + open forms, over list / bytes / string). `lo > hi` a positioned error; materialisation bounded by a catchable `limits.MaxRangeElements` (int64-span-overflow-safe, not the uncatchable `makeslice` panic). New `RangeExpr` / `SliceExpr` AST; `fmt` emits `..` tight. |
 | M21.12 | per-frame allocation elimination | A call / block frame now does **no** per-binding or per-call heap allocation: a slot-backed binding (`Slot >= 0`) writes only the pooled `slots` slice (the identifier travels in `Binding.Name`; the rare name-based readers scan the small slot slice via `lookupLocal`), and `evalCall` binds args interleaved with no intermediate `[]Value`. Recursive fib ~300k -> ~59 allocs/op; Go's minor page faults fell ~7x. Value semantics and the `vars` fallback (REPL) intact; guarded by `TestFrameAllocationsStayLow`. |
-| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M28.1`. |
+| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M29.1`. |
 
 Cross-cutting threads:
 
@@ -1081,10 +1083,12 @@ never-written parameter in any method proven not to mutate a global
 ## M26 - `jvc` package manager (decks)
 
 **Planned.** The package manager for Jennifer and its distribution: the tool
-itself (`M26.1`), shipping a known-good copy inside every interpreter release
-(`M26.2`), gating that release on jvc's own test suite (`M26.3`), and the
-lockfile forward-compatibility guard the two programs need once the interpreter
-reads jvc's output (`M26.4`).
+itself (`M26.1`), distributing it so a Jennifer install can reach a working deck
+manager - jvc as its own OS package that depends on the interpreter, plus a copy
+baked into the OCI image (`M26.2`), gating each interpreter release on jvc's own
+test suite (`M26.3`), and keeping the language core package-manager-agnostic - the
+core reads no manager's lockfile, and engine enforcement stays the per-file pragma
+(`M26.4`).
 
 ### M26.1 - the package manager itself
 
@@ -1128,25 +1132,37 @@ constraints.
   the version `jvc` resolved (declared in `deck.toml`, pinned in the lockfile),
   version-transparent, which is what almost every script wants. The opt-in for
   side-by-side versions is a **per-import selector** matched against the installed
-  set (never triggering a fetch): `@jennifer/supercms=1.2.3` (exact), `>=1.2.3` / `~`
-  / `^` (a `semver` constraint over what is installed), or `#cefa234` (a git
-  commit); one script can pin `=1.x` while another pins `=2.x`, and two versions
-  in one file take distinct `as` aliases. An unsatisfiable selector errors
-  pointing at `jvc install`, not a silent download. **Cost:** the selector is
-  **new grammar** (the lexer reads `@vendor/deck` + `semver` op + `#commit` as one
-  token up to `;`); the plain M19.7 string-path form is the no-new-grammar
-  fallback that loses only the inline selector.
+  set (never triggering a fetch): `@jennifer/supercms=1.2.3` (exact) or a `semver`
+  range (`>=1.2.3` / `~` / `^`) over what is installed; one script can pin `=1.x`
+  while another pins `=2.x`, and two versions in one file take distinct `as`
+  aliases. An unsatisfiable selector errors pointing at `jvc install`, not a
+  silent download. **The range operators are not redefined here:** they reference
+  the registry's `specs-server.md` section 2.4 (normative for `^` / `~`, including
+  `^1` / `^1.2` / `^0` / `^0.0` / `~1`), so a string means the same thing in a
+  `deck.toml` and in an import - the drift between deck-spec and the registry specs
+  is exactly what a parallel definition would reintroduce. A `#commit` selector is
+  **out of v1**: git decks are already pinned by commit through `[sources]` + the
+  lockfile, and `#commit` is the one form with no home in the shared grammar.
+  **Cost:** the selector is still **new grammar** (the lexer reads `@vendor/deck` +
+  a `semver` op as one token up to `;`); the plain M19.7 string-path form is the
+  no-new-grammar fallback that loses only the inline selector.
 - **`deck.toml` manifest + lockfile.** `deck.toml` (TOML, so it needs the `toml`
   library) declares required decks and constraints (`bitcoin = ">=1.2.0"`), and
-  `jvc` produces a **`camcorder.lock`** pinning exact resolved versions (content
-  hash per deck) so `git clone` + `jvc install` is reproducible. Dependency sets
-  split by section (`[prod]` / `[dev]`, `jvc install --prod`), with a **taxative**
-  (the section is the exact set) vs **additive** (base plus the section's extras)
-  mode still to design.
+  `jvc` produces a **`camcorder.lock`** so `git clone` + `jvc install` is
+  reproducible: each lock entry pins **either** a `sha256:` checksum (a `tar.gz`
+  deck) **or** a commit (a `git` deck), exactly one of the two - a git deck has no
+  content hash. Dependency sets split by section (`[decks]` / `[dev-decks]`), with
+  a **taxative** (the section is the exact set) vs **additive** (base plus the
+  section's extras) mode still to design.
 - **`jvc` owns the lifecycle:** dependency resolution (semver constraint
   solving across the graph), downloading, `jvc update` (advance to the
   newest constraint-satisfying versions, rewrite `camcorder.lock`), integrity
-  pinning, and the publish flow to the registry.
+  pinning, and the publish flow to the registry. What jvc does **not** own is the
+  authoritative engine check: jvc's install-time `[engines]` check runs against the
+  *installing* interpreter, which may not be the one that later runs the app, so it
+  is fail-fast advice; the binding check - run against the *running* engine - is
+  the interpreter's per-file `# pragma-jennifer-*` header (`M24.20`), which stays
+  package-manager-agnostic (`M26.4`).
 
 **Migrating bundled modules out to decks.** Once decks exist, niche or
 product-specific modules that ship bundled today should graduate *out* into
@@ -1166,56 +1182,99 @@ later); its language-side prerequisites - the `@scope/package` resolver + vendor
 root (`M19.7`), `toml`, the module system, and `semver`'s range surface - have
 shipped.
 
-### M26.2 - bundle jvc in tagged releases
+### M26.2 - distributing jvc with Jennifer
 
-**Planned.** Ship a known-good jvc inside every tagged `jennifer` release, so
-`install Jennifer` yields a working deck manager with no second step, while
-`jvc app install` can still shadow the bundled copy for anyone who needs a fix
-ahead of the next language release (the bundled copy is then the rescue path if a
-self-installed jvc breaks). jvc is **Jennifer source** (`.j` files, ~17 modules,
-no build step, no per-platform artifact), so bundling is copying text - but it
-uses `http` / `os.run` / `archive`, so it runs on the **default `jennifer` binary
-only**; `jennifer-tiny` (no net / exec) does not carry it, and the launcher must
-`exec jennifer`, never the tiny build.
+**Planned.** Make a Jennifer install able to reach a working deck manager without
+a manual source fetch, while keeping jvc a separate project on its own release
+cadence. jvc is **Jennifer source** (`src/*.j` with co-located `*_test.j`, a
+`bin/jvc` launcher, `completions/`, a `deck.toml`) - no build step, no
+per-platform artifact - but it uses `http` / `os.run` / `archive`, so it runs on
+the **default `jennifer` binary only**: `jennifer-tiny` (no net / exec) never
+carries it, and every launcher must `exec jennifer`, never the tiny build.
 
-- **Vendored copy, pinned to a commit.** The jvc source is vendored into the
-  jennifer tree (a `sync` script refreshes it) with a CI check that the copy
-  matches a **pinned jvc commit SHA** - a commit, never a branch or a tag, since a
-  tag is a mutable pointer (the same rule the deck resolver applies to git-sourced
-  decks). A git submodule is the alternative if keeping upstream canonical and the
-  pin visible in `git log` outweighs the `--recursive` friction. Fetch-at-build is
-  rejected (a release build must stay offline / air-gapped, and packagers dislike
-  network); a separate companion tarball is rejected (it leaves a fresh install
-  with no jvc, so it does not meet the goal).
-- **Install as source, beside the bundled modules.** `$PREFIX/share/jennifer/jvc/`
-  holds jvc's `cli/*.j`, and `$PREFIX/bin/jvc` is a one-line launcher
-  (`exec jennifer run $PREFIX/share/jennifer/jvc/cli/jvc.j "$@"`), threaded through
-  the `.deb` / OCI image / tarball / Homebrew packaging the same way the system
-  modules already are. The shippable set is the clean `cli/` directory once jvc
-  moves its registry-writing `publish` path off the `server/` maintenance verbs (a
-  client CLI should not bundle the registry server's admin code); until then it is
-  `cli/*.j` plus `server/{store,admin}.j`.
-- **Report the pair in `jennifer version`.** `jennifer 0.25.0 (jvc 0.3.0)`, so a
-  bug report names both halves. The jvc pin is stamped at build time through the
-  **version codegen path** (`gen-version.sh` -> `internal/version/version_gen.go`),
-  **not** `-ldflags -X`, which TinyGo silently ignores (implementation-note 7). jvc's
-  own `jvc version` stays the authority on which copy is running vs installed (PATH
-  order decides silently; its provenance report is the mitigation for that and for
-  a `~/.local/bin` shadow).
+The delivery path is chosen by whether the channel has a dependency resolver:
 
-**Requires:** `M26.1` (a taggable jvc to pin). Do not bundle ahead of it.
+- **OS packages: jvc is its own package that depends on the interpreter.** The
+  `.deb` / Arch / Homebrew jvc packages declare `jennifer >= <floor>` (the floor
+  is jvc's `deck.toml` `engines.jennifer`); installing jvc pulls the interpreter,
+  and the interpreter package advertises jvc (`optdepends` / `Recommends`) for
+  discovery. Compatibility needs no bundling: the `M24.20`
+  `# pragma-jennifer-version:` header already fails a too-old interpreter loud at
+  read time. On Debian and Homebrew the package `Depends` also carries a real
+  floor, so there the dependency and the pragma are belt and suspenders. On
+  **Arch** a versioned floor is not expressible until the interpreter package
+  declares a **versioned `provides`** - `provides=("jennifer=$pkgver")` on
+  `jennifer-bin` / `jennifer-git`, replacing the bare `provides=(jennifer)` that
+  makes `depends=('jennifer>=0.25.0')` unsatisfiable (pacman refuses it outright);
+  until that lands, jvc's Arch package depends on an unversioned `jennifer` and the
+  pragma is the sole floor there. jvc owns `/usr/bin/jvc` and its own packaging
+  (its repo already carries `packaging/archlinux/`; a `packaging/debian/` and a
+  Homebrew formula join it), so there is no `provides` / `conflicts` dance with the
+  interpreter. This drops the whole
+  vendoring surface an earlier design carried: no copy of jvc in the jennifer
+  tree, no sync script, no pinned-SHA drift check, and no `jennifer version` ->
+  `(jvc X)` codegen stamp. `jvc version` stays the sole authority on which copy is
+  running - a self-installed `~/.local/bin/jvc` shadows the packaged one by PATH
+  order, and its provenance report is the mitigation.
+- **The OCI image bakes jvc in.** A container image has no dependency resolver -
+  `FROM jennifer` then `RUN jvc install` in an app build is the core workflow, so
+  the image itself must carry jvc, or vendored-package installs are impossible in
+  it. The Dockerfile fetches jvc at a **pinned ref** (a commit, or a tag once jvc
+  cuts one; never a mutable branch) in its build stage - the image build is
+  already online (it pulls the base image and `wget`s TinyGo), so a fetch-at-build
+  here does not touch the interpreter's own offline release build - and stages jvc
+  under **the same layout its OS package uses** (`/usr/share/jvc/` with `src/`
+  minus `*_test.j` + `bin/jvc`, and `/usr/bin/jvc` a symlink to the launcher), so
+  that if the slim image later installs the jvc `.deb` instead of fetching source,
+  the two layouts already agree and `jvc` keeps resolving. (jvc's package ships
+  exactly this symlink layout and relies on the launcher's relative
+  `import "../src/cli.j"` resolving through it - confirm that resolution rather
+  than re-inventing a wrapper.) Only the **slim** stage carries it (the full host
+  build). Registry-deck installs are **git-free** (jvc's `git` calls sit only in
+  the publish / `[sources]` paths), so the base image does not strictly need
+  `git`; add it for the two cases that do - a project with a `[sources]` git deck,
+  and `jvc app install` - and document those. `ca-certificates` for the https
+  registry are already present. The **static / distroless** stage does not carry
+  jvc (no `/bin/sh`, no `git`) - that is the shape, not a gap: the recommended
+  deploy is multi-stage, `jvc install` in a `jennifer:slim` build stage to
+  populate `./vendor`, then `COPY` the app plus `vendor/` into `jennifer:static`
+  for a small runtime image. The `JVC_REF` pin lives as a build-arg in
+  `docker.yml`; once jvc ships a `.deb`, the slim stage may instead install that
+  package, so the image jvc and the OS-package jvc are the same artifact.
+- **The raw tarball / `curl` install** has no resolver and is not a container, so
+  it points at **jvc's own plain tarball** (which jvc will ship) for the first
+  install - `jvc app install` / `jvc app update` cover the channel afterward but
+  are chicken-and-egg for the first - with no bespoke installer script. Bundling
+  jvc into the interpreter tarball is the one place bundling could still earn its
+  keep, deferred until there is demand.
+
+Rejected: **vendoring jvc's source into the jennifer tree** (a `third_party/` copy
+or a git submodule, with a sync script and a CI drift check) - it couples two
+repositories that want independent cadences and adds a maintenance surface the
+pragma + package dependency make unnecessary; and **stamping jvc's version into
+`jennifer version`** - redundant once jvc is its own package carrying its own
+`version`.
+
+Sequencing: jvc's `deck.toml` sets `engines.jennifer = ">=0.25.0"`, so the first
+release wiring any of this ships at or after `0.25.0`; jvc has no tags yet, so the
+OCI pin is a commit SHA until it does.
+
+**Requires:** `M26.1` (a jvc to distribute). Do not wire the OCI pin ahead of a
+jvc that runs against the target interpreter.
 
 ### M26.3 - jvc suite as a release gate
 
 **Planned.** Run jvc's test overlays against the release-candidate interpreter in
-`release.yml`; a red suite blocks the tag. jvc is the language's most complete
-integration test - its assertions exercise `toml` / `json` / `semver` / `archive`
-/ `http` / `fs` / `os` / `path` / `hash` / `encoding` / `convert` / `strings` /
-`lists` / `maps` / `docblock` / `flatdb`, git through `exec`, and the module
-system itself (cross-module struct identity, the `@vendor` resolver, the
-capability pragmas), so a change that breaks the language's own package manager
-cannot ship. This gate is what makes bundling valuable rather than merely
-convenient.
+`release.yml` - jennifer's CI checks jvc out at a pinned commit and runs its suite
+against the RC binary; a red suite blocks the tag. This is independent of how jvc
+is distributed (`M26.2`): the gate protects the language's own package manager
+whether jvc ships as its own OS package or baked into an image, so no vendored
+copy is needed for it. jvc is the language's most complete integration test - its
+assertions exercise `toml` / `json` / `semver` / `archive` / `http` / `fs` / `os`
+/ `path` / `hash` / `encoding` / `convert` / `strings` / `lists` / `maps` /
+`docblock` / `flatdb`, git through `exec`, and the module system itself
+(cross-module struct identity, the `@vendor` resolver, the capability pragmas), so
+a change that breaks the language's own package manager cannot ship.
 
 - **jvc is a first-class caller.** The gate fits the existing breaking-change
   discipline (one batch updates a library, its overlays, docs, and every caller):
@@ -1230,32 +1289,80 @@ convenient.
   waits or holds the pin back and documents the incompatibility. The language cut
   thereby depends on jvc being green - an acceptable reverse dependency for one
   maintainer who owns both repositories, named here so it is a deliberate choice.
+- **The gate needs `git` and a writable temp.** 65 of jvc's 538 overlay tests
+  shell out to the real `git` binary (its `[sources]` / publish paths); the rest
+  are hermetic - no network, no credentials, no fixtures outside the temp dir. The
+  CI job must have `git` on `PATH` and a writable temp, or those 65 fail for
+  reasons unrelated to the RC (the worst kind of gate failure); GitHub's
+  `ubuntu-latest` supplies both. The suite is green on `0.24.0-dev` (538 passed,
+  lint clean), and jvc's HEAD is pinnable today - move the pin to the `0.1.0`
+  tag's commit once jvc tags.
 
-**Requires:** `M26.2` (a pinned, bundled jvc) and jvc's overlay suite. The two
-recent breaks it would have caught - cooked-string `{expr}` interpolation turning
-embedded JSON literals into lex errors, and the `fmt` / `lint` line-width
-disagreement (`fmt` not counting a trailing ` {`) - motivate it; the latter is
-already fixed in the tree, which the gate would confirm ships.
+**Requires:** `M26.1` and jvc's overlay suite (the pin is a jvc commit in
+jennifer's CI config, not vendored source). The two recent breaks it would have
+caught - cooked-string `{expr}` interpolation turning embedded JSON literals into
+lex errors, and the `fmt` / `lint` line-width disagreement on a `func` signature
+(fmt joining one past 100 without counting the trailing ` {`, and never wrapping a
+single-parameter signature at all) - motivate it; both halves are now fixed in the
+tree (fmt wraps an overflowing signature of any arity), which the gate would
+confirm ships.
 
-### M26.4 - lockfile forward-compatibility guard (design-open)
+### M26.4 - the core stays package-manager-agnostic
 
-**Planned.** Once the interpreter's vendor resolver reads jvc's `camcorder.lock`
-at import time, a newer jvc can write a `lockfileVersion` the bundled resolver
-predates. The forward-compat rule both sides agree on: the interpreter **refuses
-an unknown `lockfileVersion` with a clear message** rather than misreading it,
-settled before the first jvc that changes the format ships.
+**Planned.** The language core reads **no package-manager lockfile** - not
+`camcorder.lock`, not any alternative manager's. jvc is the *endorsed* package
+manager, not a *required* one: a lockfile is the manager's private artifact (jvc
+reads and writes `camcorder.lock`; a different manager would carry its own), and
+teaching the core to parse one would both couple the language to jvc and foreclose
+the alternative managers an ecosystem should stay free to grow. So no jvc-specific
+file or requirement enters the core.
 
-- **Open design question, deliberately deferred.** Nothing in `internal/` reads
-  `camcorder.lock` today; the lockfile contract is spec, not code. Whether the
-  **core resolver** should parse jvc's lockfile `[engines]` at all is unsettled -
-  the interpreter already enforces version floors per file via the
-  `# pragma-jennifer-version:` header and exposes `meta.CAPABILITIES`, so
-  engine-floor enforcement may stay jvc's job and the interpreter's only lockfile
-  duty be the `lockfileVersion` refusal above. Enforcing package-manager policy in
-  the core resolver runs against the minimal-core stance, so this is resolved when
-  `M26.1`'s resolver work is designed, not as part of bundling.
+- **Enforcement is the per-file pragma, not a lockfile - with the flavour split
+  spelled out.** The M24.20 `# pragma-jennifer-version:` /
+  `# pragma-jennifer-capability:` headers are enforced at every import seam
+  (CLI / `include` / `loadModule`), against the *running* engine (authoritative in
+  the way an *installing* manager's check cannot be) and manager-agnostic (they
+  fire the same for a jvc-installed deck, an alternative manager's, a
+  hand-populated `vendor/`, or a `git clone`). But the pragma checks **version and
+  capability, not a general flavour**, so `jennifer` vs `jennifer-tiny` separates
+  in three parts:
+  - **Version** - the pragma refuses a too-old engine at import.
+  - **`net` / `exec` / `sql`** - the capability axis (`meta.CAPABILITIES`, `[]` on
+    tiny) *is* the flavour gate for the common case: a deck that needs one declares
+    it and is refused on tiny at import. Core, authoritative, neutral.
+  - **The other default-only surfaces** (`term` / `serial` / `spi` / `i2c` /
+    `gpio`, and `crypto` RSA/ECDSA) are not capabilities, so the pragma does not
+    reject such a deck at import; each library's `jennifer-tiny` build-tag **stub**
+    catches it instead, with a friendly "not available on this build" error at the
+    first call - tiny never silently mis-runs a default-only deck, it just fails at
+    call time rather than import time. **This gap is jvc's to cover, as fail-fast
+    install-time advice** (its `[engines]` naming `jennifer`, refusing the install
+    under tiny before the app runs) - the flavour separation that falls to jvc,
+    mirroring how its version check is advice while the pragma is binding. An
+    *authoritative* import-time gate for these surfaces would instead be a neutral
+    **core** follow-on (widen the capability set to name them, or a coarse engine
+    key), kept in the core because flavour is the language's own distinction and
+    only the running engine can check it - never a jvc-specific read. **The lean is
+    to defer that:** the tiny stubs already stop a silent mis-run, so the capability
+    pragma (cases 1-2) plus the stubs plus jvc's install-time advice cover case 3
+    well enough; add the core axis only if an import-time miss actually bites, not
+    preemptively.
+- **What the core does at a `@scope/deck/` import** stays the M19.7 job: resolve
+  the path in the `vendor/` tree and load it, enforcing each file's pragma. No
+  manifest, no lockfile, no package-manager knowledge - which is what lets a
+  second manager write into the same `vendor/` tree and Just Work.
+- **Coordination with jvc.** jvc's `deck-spec.md` currently makes the resolver
+  reading `camcorder.lock` normative (section 5 "the authoritative check", section
+  11.2 "SHOULD consult the nearest `camcorder.lock`"). That is the one point where
+  the two documents disagree, and it resolves on jvc's side: **deck-spec is revised
+  (and minor-bumped)** so the authoritative run-time check is the interpreter's (the
+  per-file pragma, backed by the tiny build-tag stubs) and `camcorder.lock` stays
+  jvc's reproducibility / integrity artifact, not a file the core is required to
+  read. jvc's install-time `[engines]` check remains, as fail-fast advice (version
+  *and* flavour), as an input to resolution.
 
-**Requires:** `M26.1` (the lockfile format and the resolver that would read it).
+**Requires:** nothing new in the core (the M24.20 pragma already ships); a
+`deck-spec` revision on jvc's side dropping the core-reads-lockfile requirement.
 
 ---
 
@@ -1445,7 +1552,349 @@ whose standalone value is limited without the downstream compute the deck omits.
 
 ---
 
-## M28 - multiplatform: promote macOS / Windows to supported
+## M28
+
+### M28.1 - runtime `.j` module loader (`plugin` library)
+
+**Planned.** Load a `.j` module from a path computed at run time and dispatch into
+it, so a plugin needs no `os.run` + stdio bridge - the three current loaders resolve
+before execution from a string literal (`use` compiles a library in; `include`
+splices tokens in preproc; `import` resolves at `Run()` start), so no
+runtime-chosen module can be loaded today. This is a system library over the
+existing M17 `loadModule`, not a new keyword: `include` / `import` are compile /
+load-time (token splice, parse-time type stamping, pre-execution resolution),
+whereas a runtime load is side-effecting and takes the handle-returning shape of
+`fs.open` / `kv.open`.
+
+- **Surface.** `plugin.load(path) -> plugin.Module` (resolve + run once, cached);
+  `plugin.func(m, name) -> func`; `plugin.call(m, name, args...)`;
+  `plugin.const(m, name)`; `plugin.has(m, name)`;
+  `plugin.exports(m) -> list of string`.
+- **Dispatch.** `plugin.func` returns a `func` value whose `FnHome` runs the body
+  in the module's context with argument / return struct retagging; `plugin.call`
+  is the by-name wrapper (`meta.call` path).
+- **Reuse.** `loadModule` supplies run-once caching, the `@vendor` / search-path
+  sandbox (`module.Resolve`), and the M24.20 version / capability pragma gates
+  unchanged (a `net` plugin fails to load on `jennifer-tiny`). Run-once, no unload
+  or reload.
+- **Interpreter deltas.** Expose `loadModule` through `BuiltinCtx`; skip the
+  static-import compile-time steps (`bindModuleAlias`, `resolveDeclaredTypesOnce`).
+  Add a mutex to the module registry (`cache` / `stack` / `resolved`) - lock-free
+  today, correct only because imports load single-threaded before any `spawn`,
+  which a runtime load breaks.
+- **Type boundary.** A plugin's struct types are unknown at parse time, so the host
+  cannot write `def x as plugin.T`. Contract: a shared interface module, imported
+  normally, declares the struct types and the plugin implements funcs over them
+  (values retag at the boundary); primitives, collections, and opaque handles cross
+  without a shared declaration.
+- **Trust.** Loading `.j` runs code; no new sandbox (untrusted code stays
+  `DRAFT#11`), and path resolution is the `import` sandbox.
+
+**Requires:** M17 (`loadModule`), M19.7 (`@vendor` resolver), M24.20
+(version / capability pragma), `FnHome` func values. Open: handle as an integer
+registry (`kv.Store` pattern, survives `spawn` / boundaries) vs `KindObject`;
+runtime load inside a `spawn` vs main-goroutine-only; a stricter `plugin.load` path
+allowlist than `import`.
+
+### M28.2 - non-blocking / timed terminal read
+
+**Planned.** A bounded terminal-read primitive that fixes two coupled defects: a
+free-running TUI loop stalls in the blocking `term.readByte`, and `screen.nextKey`
+cannot deliver a lone `Escape` (it reads a second byte unconditionally to tell a
+bare `Escape` from a CSI / SS3 opener, and that read blocks until the *next*
+keypress - which is then swallowed into the sequence, so `Escape` then `x` arrives
+as one `alt-x`). The `"escape"` name the `screen.Key` docblock advertises is
+therefore reachable only through `decodeKey` directly, never from `nextKey`.
+
+- **Primitive.** `term.readByteTimeout(ms) -> int`: the byte `0..255`, `-1` at EOF,
+  `-2` on timeout (a distinct sentinel, not conflated with EOF). `ms == 0` polls
+  (return immediately). The blocking `term.readByte` stays as the simple path.
+- **Implementation.** It cannot use the `ctx.In` `io.Reader` abstraction (what the
+  injected-input tests feed; it has no deadline), so it reaches the raw fd and
+  either `poll(2)`s it with a timeout or sets termios `VMIN` / `VTIME`. That
+  conflicts with `term.makeRaw`'s blocking `VMIN=1`, so entry into raw mode and the
+  timed read must be reconciled (the timed call sets `VMIN=0` / `VTIME` for its
+  duration, or `poll`s without touching termios). Unix-only, `x/sys/unix`-backed,
+  build-tag split like the rest of `term` (real on `linux && !tinygo`, friendly
+  stub elsewhere).
+- **`screen` fix.** `nextKey` reads the escape-disambiguation byte with a short
+  timeout (25-50 ms) and returns `Key{name: "escape"}` when it expires, so a lone
+  `Escape` is delivered and the following keypress is no longer consumed. This makes
+  the documented `"escape"` name reachable from `nextKey` and removes the docblock
+  caveat.
+- **Bonus.** The primitive also lets an app stop raw input and return to line mode
+  mid-program (the `screen` background-reader task blocks in the syscall and cannot
+  be interrupted by `task.cancel` or a channel close today), and lets a caller bound
+  a single read without a dedicated reader goroutine.
+
+**Requires:** M20.5 (`term` library), M21's `screen` module. Graduated from
+`DRAFT#29` (retired). Open: whether to also expose `term.pollByte()` as sugar for
+`readByteTimeout(0)`.
+
+### M28.3 - append sugar for any place expression
+
+**Planned.** Extend the `$xs[] = v` append target from a bare variable to any
+assignable place expression - `$obj.field[]`, `$xs[i][]`, `$obj.a.b[]` - the same
+lvalues indexed assignment already accepts (`$grid[i][j] = v` is legal today). The
+sugar currently rejects them at parse time (`unexpected token RBRACKET`), so a list
+that lives in a struct field has no in-place append and the only direct fill is
+`$obj.field = lists.push($obj.field, v)`, which copies the whole list each pass -
+O(N^2), measured at roughly 1000x slower over 20,000 appends. That collides with
+JENNIFER.md's active "prefer `$xs[]` over `lists.push` in loops" recommendation,
+which is unfollowable for the struct field where most real data lives.
+
+- **Lowering.** An append into a place expression resolves the target the same way
+  indexed assignment does (walk to the innermost backing, mutate in place), then
+  appends - reusing `execIndexAssign` / `execFieldAssign`'s lvalue resolution rather
+  than adding a parallel path. Element-type checked and const-rejected like the
+  bare-variable form.
+- **Surface.** Additive and non-breaking (it only accepts input that errors today).
+  Removes the "Chained forms (`$xs[0][]`) are not supported" limitation.
+- **Touches.** Parser append-target grammar, the resolver, the interpreter append
+  path, the grammar EBNF in `docs/technical/`, and the CLAUDE.md / JENNIFER.md notes
+  that currently document the limitation and the workaround.
+
+**Requires:** M13.1 (structs), the existing indexed / field-assignment lvalue
+machinery.
+
+### M28.4 - streaming `xml` decode
+
+**Planned.** `xml.decode` builds a full DOM up front - every element a `KindObject`
+wrapping a `{tag, attrs, children}` map, every node / attr / text a 280-byte
+interpreter `Value` - so the tree runs ~150x the source and is all live at once: a
+10 MB GPX measures ~1.5 GB RSS, and 3 copies do not fit in 4 GB. Reported twice
+(the geo deck wrote a ~900-line hand scanner to avoid it); the whole XML family is a
+long flat list of small records, the exact shape a pull parser handles in constant
+memory. Keep `xml.decode` for small documents; add a streaming reader for large ones.
+
+- **Primitive (pull loop, no callbacks - the M23.1 shape).**
+  `xml.reader(bytes) -> xml.Reader` (operates on `bytes`, so a caller that scanned a
+  buffer hands it over without a string copy, leaning on the no-copy `bytes`-arg
+  guarantee), then `xml.next(reader) -> xml.Event` yielding start / text / end / eof.
+  Memory is O(depth) + the source, not O(document).
+- **`xml.Event`** is small (`kind`, `tag`, `text`, `depth`); attributes read through
+  the existing `xml.attr` / `xml.attrs` accessors (no new vocabulary).
+- **Subtree iterator (the ergonomic layer):** `xml.nextElement(reader, name) ->
+  xml.Value` yields one small per-element DOM at a time (the "iterparse" shape), so
+  `for each trkpt` holds O(one trackpoint), reusing every existing accessor.
+- **Local-name matching.** The reader matches `trkpt` / `lat` on a `gpx:`-prefixed
+  real-world file (today `xml.attr` *raises* on `gpx:lat`), closing the namespace
+  pain the geo report also hit.
+- **Handle** is an integer-registry entry (the `net.Conn` / `fs.File` pattern), closed
+  with the polymorphic `close`; hand-rolled over the existing position-based scanner,
+  so TinyGo-clean. Malformed markup is a positioned catchable error.
+
+**Requires:** M20.2 (`xml` library). Follow-on: the same DOM blowup is shared by
+`json` / `toml` / `yaml` (all 280-byte-`Value` trees); a streaming decode there is a
+later generalization, not part of this.
+
+### M28.5 - `strings` cutset / affix trim
+
+**Planned.** `trim` / `trimLeft` / `trimRight` strip Unicode whitespace only, so
+there is no way to strip a chosen trailing character - writing a fixed-precision
+number without trailing zeros, stripping a `\r` from a CRLF line where leading /
+trailing spaces are significant, peeling a known prefix. Requested in three deck
+reports; each hand-rolled a loop.
+
+- **Add** `strings.trimPrefix(s, prefix)` / `strings.trimSuffix(s, suffix)` (exact
+  affixes, the most-used Go pair) and the cutset family `trimSet(s, cutset)` /
+  `trimLeftSet` / `trimRightSet` (strip any rune in `cutset`).
+- **One way per thing:** the existing `trim*` stay whitespace-only (their canonical
+  job); the new names are distinct operations, not an overload - no arity change to
+  the current trio (consistent with how `toInt` took a *parameter* rather than
+  spawning `parseHex`-style siblings).
+
+**Requires:** none (additive `strings` surface).
+
+### M28.6 - value-semantics copy elision (return / const read)
+
+**Planned.** Value semantics deep-copy a compound on every store, which is correct
+but compounds: reading 50,000 points into a nested `Document` copies the point list
+~7 times (out of the reader, into each literal, into each enclosing list), and a
+`def const ... as bytes` probe profiled **11,486 eager copies** of an immutable
+value. `GOGC=20` barely moves peak RSS (1.23 -> 0.93 GB), confirming retention from
+copying rather than collectable garbage. The read-only-parameter borrow (note 24)
+already removes the argument-binding copy; this extends that reasoning to two more
+hand-off shapes, keeping value semantics observably intact (a borrow of an
+immutable source is identical to a copy).
+
+- **`const` compound read.** A `def x as T init SOME_CONST` copies a deeply-immutable
+  value for no semantic reason. Elide it where the target cannot mutate the shared
+  backing (the borrow analysis already in place), or mark const-sourced bindings
+  copy-on-write.
+- **Return-then-store hand-off.** A value returned and immediately stored
+  (`def xs init readSegment(...)` then `$segs[] = Segment{points: $xs}`) has one live
+  reference throughout; an escape analysis narrow enough to catch `return $local`
+  removes most of the seven copies without weakening any guarantee.
+- **Document the existing guarantee** the geo report verified as a positive: a large
+  `bytes` argument is *not* deep-copied (note-24 borrow) - state it as a contract, not
+  an observation.
+
+**Requires:** the note-24 borrow/escape machinery. Pin value-semantics parity with
+the `value_alias` stress tests (note 10) for every elision.
+
+### M28.7 - unify resource-exhaustion errors under `kind: "limit"`
+
+**Planned.** A caught cap breach should tell a caller "your input was too big / too
+deep" apart from "something inside me is broken" - so a library walking a
+user-supplied tree can re-raise it in its own vocabulary and a deck can keep its
+`kind` contract without first imposing its own limit. The `"limit"` kind and the
+boundary mechanism already exist (the call-depth cap and `archive.unpack` /
+`unpackWith` raise it); this sweep moves the remaining size / depth / count caps -
+which today raise a generic `kind: "runtime"` - onto it, each with a regression
+test asserting the kind.
+
+Scope, highest-value first:
+
+- **Tier A - input-driven decode / expansion bombs** (the clearest win, untrusted
+  input): `json` / `toml` / `yaml` / `xml` nesting caps, the `yaml` alias-bomb node
+  budget, `asn1` depth + node-count, `compress` decompressed-size, `intl`
+  translation amplification, and the `net.readAll` / `readBytes` / `readN` /
+  `recvFrom` byte caps.
+- **Tier B - explicit size / allocation caps** (caller asked for too much):
+  `binary.make`, `channel.make`, `crypto.randBytes` / `hkdf` / `pbkdf2` (size +
+  work), `devio` read, `fs.readBytes`, the `io` printf field cap, `linalg` matrix /
+  vector element cap.
+- **Tier C - handle-leak guards** (`fs` / `net` / `httpd` / `compress` "too many
+  open ...", the `httpd` buffer budget): deliberately **out of scope** - these
+  signal a lifecycle leak, not oversized data, so they stay `"runtime"` (revisit if
+  a distinct lifecycle kind is ever wanted).
+
+- **Mechanism.** A shared helper so each site is one call, not per-builtin
+  boilerplate: a library returns a sentinel/typed cap error (the `archive` `capError`
+  pattern) and a common boundary translator raises `interpreter.RaiseError("limit",
+  ...)` with the call-site position - or a direct `raiseLimit(ctx, msg)` where the
+  builtin has `ctx`. Interpreter-core caps set `runtimeError.Kind = "limit"` directly
+  (as the call-depth sites do). Pure error-kind reclassification: no message or
+  control-flow change, each paired with a `kind == "limit"` test.
+
+**Requires:** none hard (the `"limit"` kind + `RaiseError` boundary shipped with the
+archive / call-depth work). Breaking only for code that catches these and branches on
+`kind == "runtime"` (pre-1.0, documented per site).
+
+### M28.8 - scope-rule and binder diagnostics
+
+**Planned.** Three small, independent refinements at the edges of the scope rules.
+
+- **A parameter may shadow a global (decide: forbid, or formally allow).** The
+  no-shadowing rule rejects a `def` local, a for-each iterator, a `catch` binding,
+  and a `match` binder that collides with a visible global, but a method parameter
+  is not checked - `def x ...; func f(x as int) { ... }` is accepted and `$x` inside
+  `f` silently means the parameter. The behaviour is well-defined (innermost binding
+  wins, and the borrow scan relies on that), so this is an inconsistency, not a
+  correctness bug. The decision is which way to make it consistent: **forbid** it (as
+  the sibling binders are) or **formally allow** it (a parameter may shadow a global,
+  innermost-wins, narrowing the written rule to local-over-local). Evidence leans
+  toward allowing - several shipped examples name handler parameters (`token` /
+  `user` / `params` / `srv` / `driver` / `data`) that coincidentally match a global,
+  so a ban is a pre-1.0 break rejecting a natural, unambiguous pattern. Either way
+  the fix is a few lines in `resolveMethod` plus a one-direction spec wording change,
+  so the rule and the implementation finally agree.
+- **A read-only `match` binder reports the wrong rule on mutation.** An enum payload
+  binder (`when Circle(c) { ... }`) is read-only - it binds a copy - but is
+  registered as an ordinary non-const untyped variable, so an attempt to reassign or
+  mutate it is caught late with a message that does not describe why: `$c.r = 99`
+  reports "cannot mutate contents of constant" and `$c = ...` reports "cannot assign
+  enum to `<invalid>` variable" (the `<invalid>` is the binder's absent declared type
+  leaking into the text). Registering it as a constant is wrong - a binder is
+  referenced with the `$` sigil like a variable, and the constant machinery would
+  demand the bare form - so it needs a distinct **read-only variable** flag on the
+  binding (a `slotInfo` bit plus an assign-time check), yielding one accurate message
+  ("the match binder `c` is read-only; its payload is a copy"). This adds a third
+  binding mode (mutable / `const` / read-only-binder) the resolver and interpreter
+  thread consistently.
+- **A hoisted method can read a global before its `def` has run.** Top-level
+  statements execute in source order and methods are hoisted, so a method called
+  above the `def` of a global it references reads the pre-sized zero slot (a `null`)
+  rather than the eventual value - and for a `def const` the empty slot is
+  misclassified, emitting the wrong hint ("`MAX` is a variable; use `$MAX`"). The
+  behaviour is order-dependent by design, but a cleaner outcome is an explicit "used
+  before its definition" diagnostic naming the later `def`'s line, which needs a
+  per-global "initialised yet?" flag checked on read. The largest of the three and
+  the smallest payoff (a rare, order-dependent footgun); recorded mainly so the
+  misleading constant hint is not forgotten.
+
+**Requires:** none. The first two are self-contained resolver / interpreter changes
+(the first also needs a one-line spec decision); the third is additive init-order
+tracking.
+
+---
+
+### M28.9 - static call-site checking in `jennifer lint`
+
+**Planned.** `jennifer lint` resolves a call's name (`L107`) but not its arity or
+argument types, so compile-legal code that cannot run - a `bytes` passed to a
+`string` parameter, a call left one argument short after a signature changed -
+clears a CI lint gate and surfaces only as a runtime error. The runtime diagnostic
+is already precise (`argument 3 to "token" must be string, got bytes`); this
+surfaces the decidable subset at lint time, emitting **only where the type is
+statically known** so the checks stay false-positive-free (the property that earns
+a place in a CI gate). New IDs in the `L1nn` correctness band: `L109` (arity),
+`L110` (argument type), `L111` (initializer type). Same-file `L109` has shipped;
+the remainder:
+
+- **Same-file argument / initializer types (`L110` / `L111`).** Compare an
+  argument's, or a `def ... init` expression's, static type to the declared
+  parameter / binding type, but only when that type is knowable without inference:
+  a literal, or a variable / parameter / constant / struct-field reference the lint
+  scope pass (`scope.go`) already resolves. Catches arity-drift and same-file type
+  mismatches with zero false positives; additive over the existing AST and scope
+  machinery.
+- **Cross-module tier.** Extend the same three checks across an `import` boundary,
+  so `callee.wantsString(42)` is caught the way a same-file call is. Lint sees the
+  import declarations today but never loads the target file; parsing the imported
+  module's AST to read callee parameter types (reusing the interpreter's module
+  resolver) closes that gap, making lint a trustworthy gate for a module-heavy repo
+  whose checked logic sits behind module boundaries.
+- **Library-builtin signatures.** The tier that catches a library return type
+  flowing into a typed slot (`web.body(ctx)`, a `bytes`, passed to a `string`
+  parameter). Builtins carry no static signature (each validates its own arguments
+  at runtime), so this adds a static signature table (arity + argument kinds +
+  return kind), attached at registration or as a declarative side table, across the
+  ~40 libraries - TinyGo-clean and without bloating `RegisterNamespaced`.
+  Independently valuable for editor tooling and doc / cheatsheet generation. How to
+  attach signatures without that bloat earns a `design-decisions.md` record.
+
+A user method declares no return type by design, so `f(g())` with `g` a user method
+stays undecidable in one pass and is deliberately skipped (inferring a return type,
+or an optional annotation, is a separate decision).
+
+**Requires:** none hard; builds on the shipped `L107` / `L109` lint and scope
+machinery.
+
+---
+
+### M28.10 - compile-time validation of literal `printf` format strings
+
+**Planned.** `io.printf` / `sprintf` / `eprintf` parse their format string at
+runtime, so a malformed verb or modifier in a string literal fails on the line that
+runs rather than when the file is checked. The sharpest edge is the modifier
+grammar: a value runs to the next whitespace, so a trailing comma or period is
+swallowed into it - `io.printf("flags 0x%d|base=16, %d\n", $f, $n)` fails at runtime
+with `base="16,": expected 2, 8, 10, or 16` inside what reads as a constant format
+string, a mistake hard to spot in review.
+
+When the format argument is a string literal the whole spec is statically known, so
+the same `io`/`format.go` parser that runs at call time can run at check time. Two
+shippable shapes: a `jennifer lint` rule that re-parses each literal format and
+reports a bad verb or modifier at its source position (additive, false-positive-free
+- a non-literal format is simply not checked); or, stronger, a parse-time error for
+a statically-known format whose spec cannot parse (the "undefined results error"
+stance applied to a format string). The lint form is the lower-risk first step and
+turns a whole class of runtime surprise into a pre-commit finding.
+
+Widening the modifier terminator set (end a value at any character outside
+`[A-Za-z0-9_-]`) would remove the footgun directly, but it collides with the
+unquoted single-character separator values the grammar supports (`sep=,`,
+`group=.`), so the static check is the safer fix and the runtime grammar stays as
+is.
+
+**Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
+`jennifer lint` framework.
+
+---
+
+## M29 - multiplatform: promote macOS / Windows to supported
 
 Linux is the only *supported* platform, but best-effort **unsupported** macOS /
 Windows binaries (the standard-Go `jennifer`, via cross-compile) already ship each
@@ -1460,7 +1909,7 @@ packaging** (a Homebrew tap, Snap, Nix flake, Flatpak / AppImage) stays a
 per-format nice-to-have, shipped only when a user asks and a maintainer keeps it
 green - none blocks a release.
 
-### M28.1 - Windows: promote to supported
+### M29.1 - Windows: promote to supported
 
 **Planned.** The **Windows** track is a handful of concrete gaps, not a rewrite:
 
@@ -1488,19 +1937,19 @@ green - none blocks a release.
 
 **Requires:** none.
 
-### M28.2 - macOS: promote to supported
+### M29.2 - macOS: promote to supported
 
 **Planned.** The parallel case: the same "already ships unsupported, promote it"
-shape as `M28.1`, and simpler - macOS lacks even the module-path blocker Windows
+shape as `M29.1`, and simpler - macOS lacks even the module-path blocker Windows
 has (the POSIX exe-relative default resolves cleanly), and its separators / EOL /
 `$HOME` match Linux. A `macos-latest` CI test job running `go test ./...` verifies
-correctness (reusing the per-OS osinfo golden strategy from `M28.1`); once green,
+correctness (reusing the per-OS osinfo golden strategy from `M29.1`); once green,
 move darwin/amd64 + darwin/arm64 out of the `build-unsupported` matrix into the
 supported set and drop the "unsupported" labelling. **Requires:** none.
 
 ---
 
-## M29 - project governance, licensing, and contribution policy
+## M30 - project governance, licensing, and contribution policy
 
 **Planned. A hard requirement for 1.0.0 stable** (also listed under
 [Requirements for 1.0.0 stable](#requirements-for-100-stable)). The rules for
@@ -1562,13 +2011,13 @@ settled at any time before the first outside PR.
 
 ## Requirements for 1.0.0 stable
 
-- **Project governance, licensing, and contribution policy** - the `M29`
+- **Project governance, licensing, and contribution policy** - the `M30`
   work: the copyright-holder model, copyright notice, relicensing headroom,
   `CONTRIBUTING.md` / sign-off, governance, and name / mark. A **hard
   requirement** for 1.0.0, and it must be settled before the first external
   contribution is merged (whichever comes first).
-- **Cross-build for macOS / Windows.** The `M28` multiplatform track
-  (`M28.1` Windows, `M28.2` macOS) does this; ships as soon as it lands.
+- **Cross-build for macOS / Windows.** The `M29` multiplatform track
+  (`M29.1` Windows, `M29.2` macOS) does this; ships as soon as it lands.
 - **Real apt repository** (replacing the "GitHub Release
   artifact" install of the M15.8 `.deb`) if user demand
   warrants the maintenance.
