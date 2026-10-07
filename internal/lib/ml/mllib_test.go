@@ -376,3 +376,49 @@ func TestSplitAndFold(t *testing.T) {
 	fails(t, kFoldFn, iv(10), iv(1)) // k < 2
 	fails(t, kFoldFn, iv(3), iv(10)) // k > n
 }
+
+// TestTreeSweepSplits exercises the CART sort-and-sweep split finder on a larger
+// node than the cluster tests: an axis-aligned classification boundary must be
+// learned exactly, and a piecewise-constant regression target must be recovered.
+// This pins the running-impurity sweep (a sign or off-by-one error in the
+// incremental counts would mis-split on a dataset this size but still pass the
+// tiny cluster tests).
+func TestTreeSweepSplits(t *testing.T) {
+	r := newReg()
+	// 60 rows, label = (feature 0 >= 0.5); feature 1 is pure noise.
+	var rows [][]float64
+	var cls []float64
+	for i := 0; i < 60; i++ {
+		f0 := float64(i) / 60.0
+		rows = append(rows, []float64{f0, float64((i * 7) % 11)})
+		if f0 >= 0.5 {
+			cls = append(cls, 1)
+		} else {
+			cls = append(cls, 0)
+		}
+	}
+	X := mat(rows...)
+	tree := ok(t, r.decisionTreeFn, X, vec(cls...))
+	pred := fvals(ok(t, r.predictFn, tree, X))
+	for i := range cls {
+		if pred[i] != cls[i] {
+			t.Fatalf("axis-aligned split not learned: row %d pred %v want %v", i, pred[i], cls[i])
+		}
+	}
+
+	// Regression: a step target (0 below 0.5, 10 at/above) is recovered exactly
+	// by a depth-1 split at the step.
+	var reg []float64
+	for i := 0; i < 60; i++ {
+		if float64(i)/60.0 >= 0.5 {
+			reg = append(reg, 10)
+		} else {
+			reg = append(reg, 0)
+		}
+	}
+	rt := ok(t, r.decisionTreeRegressorFn, X, vec(reg...))
+	rp := fvals(ok(t, r.predictFn, rt, mat([]float64{0.1, 3}, []float64{0.9, 3})))
+	if !near(rp[0], 0, 1e-9) || !near(rp[1], 10, 1e-9) {
+		t.Fatalf("regression step not recovered: got %v, want [0 10]", rp)
+	}
+}

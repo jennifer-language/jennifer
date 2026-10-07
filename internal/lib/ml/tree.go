@@ -5,6 +5,7 @@ package mllib
 
 import (
 	"fmt"
+	"sort"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
@@ -88,9 +89,10 @@ func majority(y []float64) float64 {
 // leaf rule (leaf). featSubset, when non-nil, is the random feature subset a
 // random-forest tree considers at each split.
 func buildTree(x [][]float64, y []float64, depth, maxDepth int, featSubset []int,
-	impurity func([]float64) float64, leaf func([]float64) float64) *treeNode {
+	impurity func([]float64) float64, leaf func([]float64) float64, regress bool) *treeNode {
 	node := &treeNode{n: len(y)}
-	if depth >= maxDepth || impurity(y) == 0 || len(y) < 2 {
+	parentImp := impurity(y)
+	if depth >= maxDepth || parentImp == 0 || len(y) < 2 {
 		node.value = leaf(y)
 		return node
 	}
@@ -101,34 +103,7 @@ func buildTree(x [][]float64, y []float64, depth, maxDepth int, featSubset []int
 			feats[i] = i
 		}
 	}
-	parentImp := impurity(y)
-	bestScore, bestFeat, bestThr := parentImp, -1, 0.0
-	parentN := float64(len(y))
-	for _, f := range feats {
-		vals := make([]float64, len(x))
-		for i := range x {
-			vals[i] = x[i][f]
-		}
-		uniq := uniqueSorted(vals)
-		for t := 0; t+1 < len(uniq); t++ {
-			thr := (uniq[t] + uniq[t+1]) / 2
-			var ly, ry []float64
-			for i := range x {
-				if x[i][f] < thr {
-					ly = append(ly, y[i])
-				} else {
-					ry = append(ry, y[i])
-				}
-			}
-			if len(ly) == 0 || len(ry) == 0 {
-				continue
-			}
-			w := (float64(len(ly))*impurity(ly) + float64(len(ry))*impurity(ry)) / parentN
-			if w < bestScore {
-				bestScore, bestFeat, bestThr = w, f, thr
-			}
-		}
-	}
+	bestFeat, bestThr := bestSplit(x, y, feats, parentImp, regress)
 	if bestFeat == -1 {
 		node.value = leaf(y)
 		return node
@@ -146,11 +121,116 @@ func buildTree(x [][]float64, y []float64, depth, maxDepth int, featSubset []int
 	}
 	node.feature = bestFeat
 	node.threshold = bestThr
+	parentN := float64(len(y))
 	// Impurity decrease (weighted by samples), for feature importance.
 	node.decrease = parentN*parentImp - float64(len(ly))*impurity(ly) - float64(len(ry))*impurity(ry)
-	node.left = buildTree(lx, ly, depth+1, maxDepth, featSubset, impurity, leaf)
-	node.right = buildTree(rx, ry, depth+1, maxDepth, featSubset, impurity, leaf)
+	node.left = buildTree(lx, ly, depth+1, maxDepth, featSubset, impurity, leaf, regress)
+	node.right = buildTree(rx, ry, depth+1, maxDepth, featSubset, impurity, leaf, regress)
 	return node
+}
+
+// bestSplit finds the (feature, threshold) with the lowest weighted child
+// impurity that also beats the parent impurity, or (-1, 0) if none does. Each
+// feature is sorted once and swept in order with running impurity - running
+// per-class counts for Gini, running sum and sum-of-squares for variance - so a
+// node costs O(features * n log n) instead of re-partitioning the whole node for
+// every candidate threshold (the O(features * unique * n), ~O(d * n^2) cost the
+// per-threshold search had). Thresholds are midpoints of adjacent distinct
+// feature values and the first lowest-scoring split wins, matching the search it
+// replaces.
+func bestSplit(x [][]float64, y []float64, feats []int, parentImp float64, regress bool) (int, float64) {
+	n := len(y)
+	parentN := float64(n)
+	bestScore, bestFeat, bestThr := parentImp, -1, 0.0
+
+	// Classification sweeps per-class counts; index the labels seen at this node.
+	var classOf map[float64]int
+	nClasses := 0
+	if !regress {
+		classOf = make(map[float64]int, 8)
+		for _, v := range y {
+			if _, ok := classOf[v]; !ok {
+				classOf[v] = nClasses
+				nClasses++
+			}
+		}
+	}
+
+	order := make([]int, n)
+	cntL := make([]int, nClasses)
+	cntR := make([]int, nClasses)
+	for _, f := range feats {
+		ff := f
+		for i := range order {
+			order[i] = i
+		}
+		sort.Slice(order, func(a, b int) bool { return x[order[a]][ff] < x[order[b]][ff] })
+
+		if regress {
+			// gain is tracked as the weighted child variance; move one sample from
+			// the right side to the left at each step, updating sum / sum-of-squares.
+			var sumL, sqL, sumR, sqR float64
+			for _, v := range y {
+				sumR += v
+				sqR += v * v
+			}
+			nL := 0
+			for i := 0; i+1 < n; i++ {
+				oi := order[i]
+				v := y[oi]
+				sumL += v
+				sqL += v * v
+				sumR -= v
+				sqR -= v * v
+				nL++
+				// A split is valid only between two distinct feature values.
+				if x[oi][ff] == x[order[i+1]][ff] {
+					continue
+				}
+				nR := n - nL
+				// nSide * variance(side) = sumSq - sum^2 / nSide.
+				wImp := ((sqL - sumL*sumL/float64(nL)) + (sqR - sumR*sumR/float64(nR))) / parentN
+				if wImp < bestScore {
+					bestScore, bestFeat, bestThr = wImp, ff, (x[oi][ff]+x[order[i+1]][ff])/2
+				}
+			}
+			continue
+		}
+
+		for c := range cntL {
+			cntL[c] = 0
+			cntR[c] = 0
+		}
+		var sqL, sqR float64
+		for _, v := range y {
+			cntR[classOf[v]]++
+		}
+		for _, c := range cntR {
+			sqR += float64(c) * float64(c)
+		}
+		nL := 0
+		for i := 0; i+1 < n; i++ {
+			oi := order[i]
+			c := classOf[y[oi]]
+			// (k+1)^2 - k^2 = 2k+1 on the left; (k-1)^2 - k^2 = 1-2k on the right.
+			sqL += float64(2*cntL[c] + 1)
+			cntL[c]++
+			sqR += float64(1 - 2*cntR[c])
+			cntR[c]--
+			nL++
+			if x[oi][ff] == x[order[i+1]][ff] {
+				continue
+			}
+			nR := n - nL
+			// nSide * gini(side) = nSide - sumSq(counts) / nSide, so the weighted
+			// child Gini is parentN - sqL/nL - sqR/nR, all over parentN.
+			wImp := (parentN - sqL/float64(nL) - sqR/float64(nR)) / parentN
+			if wImp < bestScore {
+				bestScore, bestFeat, bestThr = wImp, ff, (x[oi][ff]+x[order[i+1]][ff])/2
+			}
+		}
+	}
+	return bestFeat, bestThr
 }
 
 // treeCriteria returns the (impurity, leaf) pair for a classification or
@@ -195,7 +275,7 @@ func (r *registry) fitTree(name string, args []interpreter.Value, regress bool) 
 		maxDepth = int(args[2].Int)
 	}
 	imp, leaf := treeCriteria(regress)
-	return r.store(&treeModel{root: buildTree(x, y, 0, maxDepth, nil, imp, leaf), nf: len(x[0]), regress: regress}), nil
+	return r.store(&treeModel{root: buildTree(x, y, 0, maxDepth, nil, imp, leaf, regress), nf: len(x[0]), regress: regress}), nil
 }
 
 // --- random forest ---
@@ -261,7 +341,7 @@ func (r *registry) fitForest(name string, args []interpreter.Value, regress bool
 			s := randIntN(n)
 			bx[i], by[i] = x[s], y[s]
 		}
-		trees[t] = buildTree(bx, by, 0, maxDepth, sampleFeatures(d, mtry), imp, leaf)
+		trees[t] = buildTree(bx, by, 0, maxDepth, sampleFeatures(d, mtry), imp, leaf, regress)
 	}
 	return r.store(&forestModel{trees: trees, nf: d, regress: regress}), nil
 }
