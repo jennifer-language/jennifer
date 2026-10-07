@@ -424,3 +424,29 @@ func TestRunRejectsNonStringArgv(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+// TestRunReturnsPromptlyWhenChildBackgrounds pins S-1: os.run must not block
+// until a backgrounded grandchild exits. `sh` forks a 30s sleep that inherits
+// the stdout pipe, then exits 0; run must return within the WaitDelay grace
+// (~0.5s), not after 30s, with the process's own output and exit code.
+func TestRunReturnsPromptlyWhenChildBackgrounds(t *testing.T) {
+	skipIfNotLinux(t)
+	start := time.Now()
+	v, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		stringList("/bin/sh", "-c", "sleep 30 & echo hi"),
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("os.run blocked on the backgrounded child: took %v", elapsed)
+	}
+	out, code := resultStdout(v)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("stdout = %q, want to contain %q", out, "hi")
+	}
+}

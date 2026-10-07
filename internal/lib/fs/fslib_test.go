@@ -813,3 +813,37 @@ func TestWriteNewExclusive(t *testing.T) {
 		t.Fatalf("got %q, want %q (second create refused, first content intact)", out, "true holder-a")
 	}
 }
+
+// TestWalkSymlinkedRoot pins S-7: fs.walk of a root that is a symlink to a
+// directory must descend (resolving only the root), not return an empty list,
+// and must report entries under the caller's original path.
+func TestWalkSymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "realdir")
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "linkdir")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runProg(t, fmt.Sprintf(`
+		use io; use fs;
+		def es as list of fs.Stat init fs.walk(%q);
+		io.printf("%%d\n", len($es));
+		io.printf("%%s\n", $es[0].path);
+	`, link))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if lines[0] != "3" { // root + sub + a.txt
+		t.Fatalf("walk(symlinked root) entry count = %q, want 3 (got %q)", lines[0], out)
+	}
+	if lines[1] != link {
+		t.Errorf("first entry path = %q, want the caller's root %q", lines[1], link)
+	}
+}

@@ -237,3 +237,21 @@ func TestUnpackWithCaps(t *testing.T) {
 		t.Errorf("unlimited (negative) options should unpack: %v", err)
 	}
 }
+
+// TestCheckEntryNameDriveLetter pins S-4: the Windows drive-letter guard must
+// reject only a real drive reference (letter + ':' + separator/end), not any
+// Unix name whose second character is ':'.
+func TestCheckEntryNameDriveLetter(t *testing.T) {
+	ok := []string{"a:b.txt", "1:1.log", "dir/a:b", "a.txt", "sub/x"}
+	for _, n := range ok {
+		if err := checkEntryName(n); err != nil {
+			t.Errorf("checkEntryName(%q) = %v, want nil (legal Unix name)", n, err)
+		}
+	}
+	bad := []string{"C:/x.txt", "c:\\x", "D:", "/abs/path", "../up", "x/../../y"}
+	for _, n := range bad {
+		if err := checkEntryName(n); err == nil {
+			t.Errorf("checkEntryName(%q) = nil, want rejection", n)
+		}
+	}
+}

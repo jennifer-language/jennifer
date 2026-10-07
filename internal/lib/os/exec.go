@@ -5,16 +5,28 @@ package oslib
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	stdos "os"
 	"os/exec"
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// procWaitDelay bounds how long cmd.Wait waits for a child's stdout / stderr
+// pipes to close after the child process itself has exited. Without it, Wait
+// blocks until every descendant that inherited the pipes exits - so os.wait
+// after os.kill, and os.run of a command that backgrounds a process, hang for as
+// long as a grandchild lives (forever for a daemon). The grace is generous
+// enough never to truncate a normal command's own output (which flushes at
+// exit), and short enough to bound the pathological case; when it fires the
+// process has already reported its exit code, so the result stays valid.
+const procWaitDelay = 500 * time.Millisecond
 
 // execSupported reports whether the host's Go runtime actually
 // supports `os/exec`. TinyGo (today) compiles `os/exec` but the
@@ -204,11 +216,18 @@ func runFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	var outBuf, errBuf capBuffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
+	cmd.WaitDelay = procWaitDelay
 	if err := cmd.Run(); err != nil {
 		// ExitError means the process ran and reported non-zero exit;
 		// that's a result, not a boundary error.
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return makeResult(int64(exitErr.ExitCode()), outBuf.String(), errBuf.String()), nil
+		}
+		// WaitDelay fired: the process exited and reported a code, but a
+		// backgrounded descendant kept the pipes open past the grace. The
+		// process's own result is valid - return it rather than a boundary error.
+		if cmd.ProcessState != nil && errors.Is(err, exec.ErrWaitDelay) {
+			return makeResult(int64(cmd.ProcessState.ExitCode()), outBuf.String(), errBuf.String()), nil
 		}
 		return interpreter.Null(), fmt.Errorf("os.run: %v", err)
 	}
@@ -231,6 +250,7 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.Null(), err
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.WaitDelay = procWaitDelay
 	state := &processState{
 		cmd:    cmd,
 		stdout: &capBuffer{},
@@ -260,10 +280,16 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	go func() {
 		err := cmd.Wait()
 		handlesMu.Lock()
-		state.waitErr = err
 		if cmd.ProcessState != nil {
 			state.exitCode = int64(cmd.ProcessState.ExitCode())
+			// WaitDelay fired because a descendant held the pipes open past the
+			// grace; the process itself exited and reported a code, so this is a
+			// clean result, not a wait failure (os.wait must not report it as one).
+			if errors.Is(err, exec.ErrWaitDelay) {
+				err = nil
+			}
 		}
+		state.waitErr = err
 		// Drain the buffers into strings and drop them (idempotent os.wait
 		// returns these). Ordered before close(done) under the lock, so a
 		// waiter that unblocks on <-done sees the drained strings.

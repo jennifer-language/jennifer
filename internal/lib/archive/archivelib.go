@@ -365,12 +365,27 @@ func packTar(entries []entry) ([]byte, error) {
 // `..\..\x` is caught too. The library never touches the filesystem, but the
 // obvious extraction loop (fs.write(dir + "/" + name)) with such a name is the
 // zip-slip hole, so it's closed at the decode source.
+// hasDriveLetter reports whether s (already slash-normalized) begins with a
+// Windows drive reference - an ASCII letter, a `:`, then a separator or the end
+// of the string (`C:`, `C:/foo`). A bare `:` at index 1 is not enough: ordinary
+// Unix names like `a:b.txt` or `1:1.log` are legal and must unpack.
+func hasDriveLetter(s string) bool {
+	if len(s) < 2 || s[1] != ':' {
+		return false
+	}
+	c := s[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+		return false
+	}
+	return len(s) == 2 || s[2] == '/'
+}
+
 func checkEntryName(name string) error {
 	if name == "" {
 		return fmt.Errorf("archive entry has an empty name")
 	}
 	norm := strings.ReplaceAll(name, "\\", "/")
-	if strings.HasPrefix(norm, "/") || (len(norm) >= 2 && norm[1] == ':') {
+	if strings.HasPrefix(norm, "/") || hasDriveLetter(norm) {
 		return fmt.Errorf("archive entry %q has an absolute path", name)
 	}
 	clean := path.Clean(norm)

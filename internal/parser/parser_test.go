@@ -770,3 +770,31 @@ func TestResolveRejectsDuplicateDeclarations(t *testing.T) {
 		})
 	}
 }
+
+// TestNestedInterpolationBudget pins P-1: a `{...}` slot's text is re-lexed per
+// nesting level, so deeply nested interpolation re-lexes depth*payload bytes.
+// A cumulative byte budget (threaded across the sub-parsers) must stop that with
+// a positioned parse error before it exhausts memory, while ordinary nesting
+// still parses.
+func TestNestedInterpolationBudget(t *testing.T) {
+	// A shallow nest must still parse.
+	if _, err := Parse(`def v as int init 1; def s as string init "a={"b {$v}"}";`); err != nil {
+		t.Fatalf("shallow nested interpolation should parse: %v", err)
+	}
+
+	// Nest a 100 KB-payload interp string deep enough that the re-lexed total
+	// crosses MaxSourceBytes; the guard must fire with the documented message.
+	payload := strings.Repeat("a", 100000)
+	depth := limits.MaxSourceBytes/len(payload) + 50 // cumulative ~ depth*payload > cap
+	s := `"` + payload + `{$v}"`
+	for i := 0; i < depth; i++ {
+		s = `"{` + s + `}"`
+	}
+	_, err := Parse(`def v as int init 1; def big as string init ` + s + `;`)
+	if err == nil {
+		t.Fatal("deeply nested interpolation should be rejected by the re-lex budget")
+	}
+	if !strings.Contains(err.Error(), "re-lexes more than") {
+		t.Fatalf("want a re-lex-budget error, got: %v", err)
+	}
+}

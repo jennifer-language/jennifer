@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -596,17 +597,36 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// filepath.Walk Lstats the root, so a symlinked root is seen as a symlink
+	// and filtered out below, yielding an empty result instead of the tree.
+	// Resolve the root (only the root) and walk the target, then report each
+	// entry back under the caller's original path so a symlinked current-release
+	// directory still walks and the paths read as the caller gave them.
+	walkRoot := path
+	if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		resolved, rerr := filepath.EvalSymlinks(path)
+		if rerr != nil {
+			return interpreter.Null(), fmt.Errorf("fs.walk: %s: %v", path, rerr)
+		}
+		walkRoot = resolved
+	}
 	var results []Value
-	walkErr := filepath.Walk(path, func(p string, info os.FileInfo, werr error) error {
+	walkErr := filepath.Walk(walkRoot, func(p string, info os.FileInfo, werr error) error {
 		if werr != nil {
 			return werr
 		}
 		// Skip symlinks entirely - Walk already dereferences them
-		// via Lstat / Stat; we filter the result out.
+		// via Lstat / Stat; we filter the result out. The resolved root is a
+		// real directory now, so it is not filtered (it is reported as the first
+		// entry, as documented).
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
-		results = append(results, makeStat(p, info))
+		reported := p
+		if walkRoot != path {
+			reported = path + strings.TrimPrefix(p, walkRoot)
+		}
+		results = append(results, makeStat(reported, info))
 		return nil
 	})
 	if walkErr != nil {
