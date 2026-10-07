@@ -5,7 +5,9 @@ package cryptolib
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"math/big"
+	"strings"
 	"testing"
 )
 
@@ -97,4 +99,60 @@ func (c *mtweiCurve) onCurve(p *ecPoint) bool {
 	rhs.Add(rhs, c.b)
 	rhs.Mod(rhs, c.p)
 	return lhs.Cmp(rhs) == 0
+}
+
+// mixedPoint replicates the validator-derived `mixed` point tangle computes
+// internally, so a test can craft serverKey = compress(-mixed) - the input that
+// collapses tangle's sum to the point at infinity.
+func mixedPoint(c *mtweiCurve, validator []byte, negate int) *ecPoint {
+	v := new(big.Int).SetBytes(validator)
+	vpt := c.mul(&ecPoint{x: c.gx, y: c.gy}, v)
+	vpubX := new(big.Int).Add(vpt.x, c.w2m)
+	vpubX.Mod(vpubX, c.p)
+	sum := sha256.Sum256(pad32(vpubX))
+	edpx := new(big.Int).SetBytes(sum[:])
+	for {
+		h := sha256.Sum256(pad32(edpx))
+		edpxm := new(big.Int).SetBytes(h[:])
+		edpxm.Add(edpxm, c.m2w)
+		edpxm.Mod(edpxm, c.p)
+		if pt, ok := c.decompress(edpxm, negate); ok {
+			return pt
+		}
+		edpx.Add(edpx, big.NewInt(1))
+	}
+}
+
+// encodePoint renders a point as the 33-byte compressed public key (same format
+// as mtweiKeygen's output).
+func encodePoint(c *mtweiCurve, p *ecPoint) []byte {
+	x := new(big.Int).Add(p.x, c.w2m)
+	x.Mod(x, c.p)
+	out := make([]byte, 33)
+	copy(out[:32], pad32(x))
+	if p.y.Bit(0) == 1 {
+		out[32] = 1
+	}
+	return out
+}
+
+// TestMtweiClientKeyRejectsDegeneratePoint pins K-1: a crafted serverKey equal to
+// -mixed makes tangle's point addition collapse to infinity; mtweiClientKey must
+// return a catchable error, not dereference the nil coordinate (a fatal crash).
+func TestMtweiClientKeyRejectsDegeneratePoint(t *testing.T) {
+	c := mtweiInit()
+	validator := mtweiID("admin", "s3cret", []byte("0123456789abcdef"))
+	mixed := mixedPoint(c, validator, 1)
+	neg := &ecPoint{x: new(big.Int).Set(mixed.x), y: new(big.Int).Sub(c.p, mixed.y)}
+	neg.y.Mod(neg.y, c.p)
+	serverKey := encodePoint(c, neg)
+
+	clientPriv, clientPub := mtweiKeygen(nil)
+	_, err := mtweiClientKey(clientPriv, serverKey, clientPub, validator)
+	if err == nil {
+		t.Fatal("crafted degenerate serverKey must be rejected, not crash")
+	}
+	if !strings.Contains(err.Error(), "degenerate") {
+		t.Fatalf("want a degenerate-point error, got: %v", err)
+	}
 }

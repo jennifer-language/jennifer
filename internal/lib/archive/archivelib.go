@@ -420,7 +420,12 @@ func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, entry{name: hdr.Name, data: data, mode: hdr.Mode, mtime: hdr.ModTime.Unix()})
+		// Mask to permission bits (0o777) like the zip path (f.Mode().Perm()): a
+		// tar header carries setuid / setgid / sticky and file-type bits verbatim,
+		// and Entry.mode is documented as plain permission bits. Dropping the
+		// special bits keeps an untrusted archive from yielding a setuid mode an
+		// extraction loop would then fs.chmod onto disk.
+		entries = append(entries, entry{name: hdr.Name, data: data, mode: hdr.Mode & 0o777, mtime: hdr.ModTime.Unix()})
 	}
 	return entries, nil
 }

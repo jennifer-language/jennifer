@@ -95,7 +95,7 @@ that must not be world-readable. `fs.chown` sets owner and group.
 
 | Call                     | Returns | Notes                                                                                         |
 | ------------------------ | ------- | --------------------------------------------------------------------------------------------- |
-| `fs.chmod(path, mode)`   | `null`  | Sets the permission bits; `mode` is the low 12 bits (e.g. `0o600`, `0o755`), rejected outside `[0, 0o7777]`. |
+| `fs.chmod(path, mode)`   | `null`  | Sets the permission bits; `mode` is the low 12 bits (e.g. `0o600`, `0o755`), rejected outside `[0, 0o7777]`. The setuid / setgid / sticky bits (`0o4000` / `0o2000` / `0o1000`) are applied, and `fs.stat(...).mode` reports them back. |
 | `fs.chown(path, uid, gid)` | `null` | Sets owner / group; `-1` leaves that id unchanged. Usually needs privilege.                   |
 
 ```jennifer

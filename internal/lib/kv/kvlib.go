@@ -123,6 +123,26 @@ func (s *store) flushLocked() error {
 		_ = os.Remove(tmpName)
 		return err
 	}
+	// Preserve the existing store file's permissions: os.CreateTemp makes the temp
+	// 0600, so a store deliberately created 0664 for a shared group would lose
+	// group access after the first write. A brand-new store defaults to 0644.
+	perm := os.FileMode(0o644)
+	if fi, serr := os.Stat(s.path); serr == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	// fsync the data to disk before the rename so a crash just after the rename
+	// cannot leave a zero-length store (metadata persisted, data not) - the
+	// "crash-atomic" contract the docs promise.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
 		return err
@@ -130,6 +150,12 @@ func (s *store) flushLocked() error {
 	if err := os.Rename(tmpName, s.path); err != nil {
 		_ = os.Remove(tmpName)
 		return err
+	}
+	// fsync the directory so the rename entry itself survives a crash. Best-effort:
+	// some filesystems do not support directory sync, which is not a flush failure.
+	if dir, derr := os.Open(filepath.Dir(s.path)); derr == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
 	}
 	return nil
 }

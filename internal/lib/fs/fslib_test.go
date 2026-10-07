@@ -847,3 +847,29 @@ func TestWalkSymlinkedRoot(t *testing.T) {
 		t.Errorf("first entry path = %q, want the caller's root %q", lines[1], link)
 	}
 }
+
+// TestChmodSpecialBits pins S-2: fs.chmod must honour the setuid / setgid /
+// sticky bits in the 0o7777 mode (not silently drop them), and fs.stat must
+// report them back.
+func TestChmodSpecialBits(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "s.bin")
+	out, err := runProg(t, fmt.Sprintf(`
+		use io; use fs;
+		fs.writeString(%q, "x");
+		fs.chmod(%q, 3565);
+		io.printf("%%d", fs.stat(%q).mode);
+	`, f, f, f)) // 3565 = 0o6755 (setuid+setgid+rwxr-xr-x)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "3565" {
+		t.Fatalf("fs.stat mode = %q, want 3565 (0o6755)", out)
+	}
+	fi, serr := os.Stat(f)
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if fi.Mode()&os.ModeSetuid == 0 || fi.Mode()&os.ModeSetgid == 0 {
+		t.Errorf("os mode = %v, want setuid+setgid set on disk", fi.Mode())
+	}
+}

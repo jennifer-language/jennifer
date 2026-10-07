@@ -55,6 +55,9 @@ A struct `{ name as string, data as bytes, mode as int, mtime as int }`:
 - **`name`** - the path within the archive (subdirectories with `/`).
 - **`data`** - the file contents.
 - **`mode`** - unix permission bits (e.g. `0o644`); `0` means the default `0o644`.
+  On `unpack`, the special bits (setuid / setgid / sticky) and tar file-type bits
+  are masked off to the permission bits, so an untrusted archive never yields a
+  setuid `mode` an extraction loop would apply.
 - **`mtime`** - modification time, unix seconds.
 
 Only regular files map to an `Entry`; directory members are skipped on

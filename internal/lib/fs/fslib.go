@@ -415,7 +415,7 @@ func makeStat(path string, info os.FileInfo) Value {
 		{Name: "size", Value: interpreter.IntVal(size)},
 		{Name: "isDir", Value: interpreter.BoolVal(info.IsDir())},
 		{Name: "mtimeNanos", Value: interpreter.IntVal(info.ModTime().UnixNano())},
-		{Name: "mode", Value: interpreter.IntVal(int64(info.Mode().Perm()))},
+		{Name: "mode", Value: interpreter.IntVal(unixMode(info.Mode()))},
 	})
 }
 
@@ -455,10 +455,46 @@ func chmodFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if mode < 0 || mode > 0o7777 {
 		return interpreter.Null(), fmt.Errorf("fs.chmod: mode %d out of range [0, 0o7777]", mode)
 	}
-	if cerr := os.Chmod(path, os.FileMode(mode)); cerr != nil {
+	if cerr := os.Chmod(path, toGoFileMode(mode)); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("fs.chmod: %s: %v", path, cerr)
 	}
 	return interpreter.Null(), nil
+}
+
+// toGoFileMode translates a Unix 12-bit mode (0o7777: rwx + setuid / setgid /
+// sticky) into Go's os.FileMode, which carries the special bits as named high-bit
+// flags (ModeSetuid / ModeSetgid / ModeSticky), not the raw 0o4000 / 0o2000 /
+// 0o1000. os.Chmod honours only the named flags, so a straight cast would
+// silently drop the special bits the docs and range check admit.
+func toGoFileMode(mode int64) os.FileMode {
+	m := os.FileMode(mode & 0o777)
+	if mode&0o4000 != 0 {
+		m |= os.ModeSetuid
+	}
+	if mode&0o2000 != 0 {
+		m |= os.ModeSetgid
+	}
+	if mode&0o1000 != 0 {
+		m |= os.ModeSticky
+	}
+	return m
+}
+
+// unixMode is the inverse of toGoFileMode: the 0o7777 Unix encoding of a Go
+// FileMode's permission and special bits, so fs.stat reports the setuid / setgid
+// / sticky bits fs.chmod can set (a straight Perm() masks them off).
+func unixMode(m os.FileMode) int64 {
+	u := int64(m.Perm())
+	if m&os.ModeSetuid != 0 {
+		u |= 0o4000
+	}
+	if m&os.ModeSetgid != 0 {
+		u |= 0o2000
+	}
+	if m&os.ModeSticky != 0 {
+		u |= 0o1000
+	}
+	return u
 }
 
 // chownFn sets a file's owner and group: fs.chown(path, uid, gid). A uid or gid

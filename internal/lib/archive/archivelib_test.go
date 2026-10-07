@@ -255,3 +255,23 @@ func TestCheckEntryNameDriveLetter(t *testing.T) {
 		}
 	}
 }
+
+// TestUnpackTarMasksSpecialBits pins S-5: a tar header's setuid / setgid / sticky
+// and type bits must be masked to plain permission bits on unpack, matching the
+// zip path, so an untrusted tar cannot yield a setuid Entry.mode.
+func TestUnpackTarMasksSpecialBits(t *testing.T) {
+	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{
+		entriesVal([]entry{{name: "suid", data: []byte("x"), mode: 0o4755, mtime: 1700000000}}),
+		str("tar"),
+	})
+	if err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	entries, err := unpackTar(packed.Bytes, defaultUnpackCaps())
+	if err != nil {
+		t.Fatalf("unpackTar: %v", err)
+	}
+	if len(entries) != 1 || entries[0].mode != 0o755 {
+		t.Fatalf("tar entry mode = 0o%o, want 0o755 (special bits stripped)", entries[0].mode)
+	}
+}

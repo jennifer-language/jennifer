@@ -306,6 +306,13 @@ func mtweiClientKey(priv, serverKey, clientKey, validator []byte) ([]byte, error
 	}
 
 	v := c.tangle(serverPub, validator, 1)
+	// tangle adds a validator-derived point to serverPub in place; a crafted
+	// serverKey equal to its negation collapses the sum to the point at infinity.
+	// Reject it instead of dereferencing the nil coordinate below (a fatal,
+	// uncatchable crash otherwise - DoS from an untrusted / MITM server).
+	if serverPub.inf {
+		return nil, fmt.Errorf("server public key produced a degenerate shared point")
+	}
 
 	h := sha256.New()
 	h.Write(clientKey[:32])
@@ -319,6 +326,9 @@ func mtweiClientKey(priv, serverKey, clientKey, validator []byte) ([]byte, error
 	vh.Mod(vh, c.order)
 
 	pt := c.mul(serverPub, vh)
+	if pt.inf {
+		return nil, fmt.Errorf("server public key produced a degenerate shared point")
+	}
 	zin := new(big.Int).Add(pt.x, c.w2m)
 	zin.Mod(zin, c.p)
 
@@ -349,8 +359,16 @@ func mtweiServerKey(priv, clientKey, serverKey, validator []byte) ([]byte, error
 	vpt := c.mul(&ecPoint{x: c.gx, y: c.gy}, v)
 	hv := c.mul(vpt, new(big.Int).SetBytes(buf))
 	clientPub = c.add(clientPub, hv)
+	// Same degenerate-point guard as the client half (see mtweiClientKey): a
+	// crafted clientKey could collapse the sum / product to infinity.
+	if clientPub.inf {
+		return nil, fmt.Errorf("client public key produced a degenerate shared point")
+	}
 
 	pt := c.mul(clientPub, new(big.Int).SetBytes(priv))
+	if pt.inf {
+		return nil, fmt.Errorf("client public key produced a degenerate shared point")
+	}
 	zin := new(big.Int).Add(pt.x, c.w2m)
 	zin.Mod(zin, c.p)
 

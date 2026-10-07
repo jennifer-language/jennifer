@@ -263,7 +263,7 @@ directly.
 | --- | --- | --- |
 | `crypto.mtweiKeygen()` | `crypto.Keypair` | A client keypair: 32-byte `private` scalar, 33-byte compressed `public` key. |
 | `crypto.mtweiId(user, password, salt)` | `bytes` | The 32-byte SRP validator `SHA256(salt + SHA256(user ":" password))`; `salt` is the router's 16-byte salt. |
-| `crypto.mtweiClientKey(private, serverKey, clientKey, validator)` | `bytes` | The 32-byte authenticator sent as the login proof, from your `private`, the router's 33-byte `serverKey`, your 33-byte `clientKey`, and the `validator`. |
+| `crypto.mtweiClientKey(private, serverKey, clientKey, validator)` | `bytes` | The 32-byte authenticator sent as the login proof, from your `private`, the router's 33-byte `serverKey`, your 33-byte `clientKey`, and the `validator`. A `serverKey` off the curve, or one crafted to collapse the shared point to infinity, is a catchable error, not a crash. |
 
 The password itself never crosses the wire; only the derived proof does, and a
 wrong password yields a proof the router will not match.

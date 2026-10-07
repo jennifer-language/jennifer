@@ -5,6 +5,7 @@ package kv
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -267,5 +268,51 @@ func TestConcurrentCrossProcessFlush(t *testing.T) {
 	// The file must still be a well-formed store afterwards (never torn).
 	if _, err := loadFile(path); err != nil {
 		t.Fatalf("file was corrupted by concurrent writers: %v", err)
+	}
+}
+
+// TestOpenFilePreservesPermissions pins S-6: a flush (write temp + rename) must
+// keep an existing store file's permissions rather than resetting it to the
+// temp's 0600, and a brand-new store defaults to 0644.
+func TestOpenFilePreservesPermissions(t *testing.T) {
+	// Existing 0664 store keeps 0664 after a write.
+	path := filepath.Join(t.TempDir(), "shared.db")
+	if err := os.WriteFile(path, nil, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	// WriteFile's mode is subject to umask; chmod sets it exactly so the test's
+	// premise (a 0664 shared store) holds regardless of the runner's umask.
+	if err := os.Chmod(path, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	r := &registry{stores: map[int64]*store{}}
+	st, err := r.openFileFn(ctx, []interpreter.Value{str(path)})
+	if err != nil {
+		t.Fatalf("openFile: %v", err)
+	}
+	call(t, r.setFn, st, str("k"), str("v"), iv(0))
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o664 {
+		t.Errorf("existing store perms = %o after write, want 664", fi.Mode().Perm())
+	}
+
+	// A new store defaults to 0644 (umask may clear group/other write; check the
+	// owner-read/write floor and that it is not the temp-file 0600).
+	newPath := filepath.Join(t.TempDir(), "fresh.db")
+	r2 := &registry{stores: map[int64]*store{}}
+	st2, err := r2.openFileFn(ctx, []interpreter.Value{str(newPath)})
+	if err != nil {
+		t.Fatalf("openFile: %v", err)
+	}
+	call(t, r2.setFn, st2, str("a"), str("b"), iv(0))
+	fi2, err := os.Stat(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi2.Mode().Perm() != 0o644 {
+		t.Errorf("new store perms = %o, want 644", fi2.Mode().Perm())
 	}
 }
