@@ -4226,7 +4226,7 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 	case KindBytes:
 		n = len(coll.Bytes)
 	case KindString:
-		n = utf8.RuneCountInString(coll.Str)
+		n = coll.runeLen()
 	default:
 		file, line, col := posFor(ex)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("cannot slice a %s; `[a..b]` works on a list, bytes, or string", coll.Kind), File: file, Line: line, Col: col}
@@ -4799,8 +4799,9 @@ func (i *Interpreter) evalLen(ex *parser.LenExpr, env *Environment) (Value, erro
 	}
 	switch v.Kind {
 	case KindString:
-		// Rune count (Unicode code points), not byte count.
-		return IntVal(int64(utf8.RuneCountInString(v.Str))), nil
+		// Rune count (Unicode code points), not byte count. Uses the strRunes
+		// cache so len() is O(1) on a string built via StringVal.
+		return IntVal(int64(v.runeLen())), nil
 	case KindList:
 		return IntVal(int64(len(v.List))), nil
 	case KindMap:

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 	"unsafe"
 
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -270,6 +271,17 @@ type Value struct {
 	// or a map holding a non-hashable key all fail the check and scan. Built
 	// by DeepCopy / evalMapLit / lazily in writeIndexedSlot; never relied on.
 	mapIdx map[string]int
+
+	// strRunes is an unexported acceleration cache for KindString: the number
+	// of runes (code points) in Str. A string is immutable, so the count is
+	// computed once in StringVal and is valid for the value and every copy of
+	// it (a plain field travels with the by-value struct copy). It turns
+	// `len($s)` and each `$s[a..b]` slice from O(len) into O(1), so a loop that
+	// walks a string by index is O(n) instead of O(n^2). The value 0 means
+	// "empty string or not computed"; runeLen() falls back to a direct count in
+	// that case, which is correct and cheap (0 for the empty string). A string
+	// Value built without StringVal simply misses the cache and counts on use.
+	strRunes int
 }
 
 // CompareNumeric orders two numeric Values (int or float), returning -1, 0, or
@@ -466,8 +478,22 @@ func (v *Value) BuildMapIndex() {
 func Null() Value              { return Value{Kind: KindNull} }
 func IntVal(n int64) Value     { return Value{Kind: KindInt, Int: n} }
 func FloatVal(f float64) Value { return Value{Kind: KindFloat, Float: f} }
-func StringVal(s string) Value { return Value{Kind: KindString, Str: s} }
-func BoolVal(b bool) Value     { return Value{Kind: KindBool, Bool: b} }
+func StringVal(s string) Value {
+	return Value{Kind: KindString, Str: s, strRunes: utf8.RuneCountInString(s)}
+}
+
+// runeLen returns the rune (code-point) count of a KindString value, using the
+// strRunes cache when present and otherwise counting directly. Safe on any
+// Value: it only consults Str. The strRunes==0 sentinel means "empty or
+// uncomputed", so the empty string and any string not built via StringVal fall
+// back to a direct count (O(len), but correct).
+func (v Value) runeLen() int {
+	if v.strRunes != 0 {
+		return v.strRunes
+	}
+	return utf8.RuneCountInString(v.Str)
+}
+func BoolVal(b bool) Value { return Value{Kind: KindBool, Bool: b} }
 
 // BytesVal constructs a bytes value with the given data. The slice is
 // taken by reference; callers needing value-semantics guarantees

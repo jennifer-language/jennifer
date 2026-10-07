@@ -122,6 +122,12 @@ func tryFoldUnary(ex *UnaryExpr) Expr {
 	switch ex.Op {
 	case OpNeg:
 		if v, ok := litInt(operand); ok {
+			if v == foldMinInt64 {
+				// -(MinInt64) overflows int64, so leave it unfolded and let the
+				// runtime raise the strict overflow error (JENNIFER.md rule 4) -
+				// matching the existing MinInt64 handling for `//` and `*`.
+				return nil
+			}
 			return &IntLit{pos: ex.pos, Value: -v}
 		}
 		if v, ok := litFloat(operand); ok {

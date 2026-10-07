@@ -8,7 +8,8 @@
 # TinyGo release yet produces a working jennifer-tiny: an older TinyGo rejects
 # Go 1.27 at its version check ("requires go version 1.19 through 1.26, got
 # go1.27"), and TinyGo 0.42 accepts Go 1.27 but fails to link with
-# `duplicate symbol: tinygo_task_exit` (tinygo#5652).
+# `duplicate symbol: tinygo_task_exit` (tinygo#5652; fixed on dev via #5656,
+# awaiting a release after 0.42.0 - retest when 0.43.0 ships).
 #
 # The skip is gated on a PROBE build of a trivial goroutine program with the same
 # flags, NOT on swallowing the real build's errors. Both failure modes above
@@ -62,7 +63,8 @@ if ! probe_err="$(tinygo build "$@" -o "$PROBE_DIR/probe" "$PROBE_DIR/main.go" 2
     {
         echo "build-tinygo: this TinyGo/Go toolchain cannot build $OUT; skipping it."
         echo "  $(tinygo version 2>/dev/null || echo 'tinygo version unknown')"
-        echo "  No TinyGo release yet builds a working jennifer-tiny on Go 1.27 (tinygo#5652);"
+        echo "  No TinyGo release yet builds a working jennifer-tiny on Go 1.27 (tinygo#5652,"
+        echo "  fixed on dev via #5656, awaiting a release after 0.42.0);"
         echo "  the standard 'jennifer' binary is unaffected. Probe error:"
         printf '%s\n' "$probe_err" | sed 's/^/    /'
     } >&2
