@@ -494,3 +494,21 @@ func testScopeMatch() {
     testing.assertEqual(scopeName(parseAddress("240.0.0.1")), "reserved");
     testing.assertEqual(scopeName(parseAddress("ff02::1")), "multicast");
 }
+
+# PERFORMANCE: aggregate() must be ~O(n log n), not super-quadratic. A contiguous
+# run of 2048 /32s covers exactly 10.0.0.0/21 and collapses to that one block;
+# this was ~18 s for 2000 entries under the old per-round re-sort + re-cover
+# (sortNets rebuilt per insert, dropCovered O(n^2), aggregateSame re-normalised
+# every round) and is prompt now.
+func testAggregateLargeFast() {
+    def parts as list of Network init [];
+    def i as int init 0;
+    while ($i < 2048) {
+        $parts[] = parse("10.0." + convert.toString($i // 256) + "." +
+            convert.toString($i % 256) + "/32");
+        $i = $i + 1;
+    }
+    def agg as list of Network init aggregate($parts);
+    testing.assertEqual(len($agg), 1);
+    testing.assertEqual(networkString($agg[0]), "10.0.0.0/21");
+}

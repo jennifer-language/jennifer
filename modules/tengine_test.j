@@ -429,3 +429,15 @@ func runawayExpansion() {
 func testExpansionBudgetTrips() {
     testing.assertThrows("runawayExpansion", "tengine");
 }
+
+# PERFORMANCE: N sequential control blocks ({{if}} / {{range}} / {{with}} /
+# {{block}}) must not be O(N^2). takeBlock scans the shared rune list by index and
+# returns the remainder as a cursor position, so exec advances `$pos` instead of
+# re-chars-ing the whole tail per block. This large template renders promptly
+# (tens of seconds before) and correctly.
+func testManyControlBlocksLinear() {
+    def s as Set init newSet();
+    $s = add($s, "p", strings.repeat('{{ if .x }}a{{ end }}', 4000));
+    def out as string init render($s, "p", json.decode('{"x":true}'));
+    testing.assertEqual($out, strings.repeat("a", 4000));
+}

@@ -54,11 +54,13 @@ export def struct Set {
     sources as list of string
 };
 
-# The two halves of a control body, plus the source after the closing `{{ end }}`.
+# The two halves of a control body, plus the index of the source just after the
+# closing `{{ end }}` (into the shared rune list, so the caller resumes by setting
+# its cursor - not by rebuilding the remaining template).
 def struct BlockParts {
     thenPart as string,
     elsePart as string,
-    remainder as string
+    remainderStart as int
 };
 
 # A parsed `"name" arg` tail of a template / block / define action.
@@ -226,11 +228,9 @@ export func add(set as Set, name as string, src as string) {
         if (actionKind($action) == "define") {
             $residual[] = $pre;
             def na as NameArg init parseNameArg($action);
-            def bp as BlockParts init takeBlock(tSlice($cs, $tailStart, $n));
+            def bp as BlockParts init takeBlock($cs, $tailStart, $n);
             $s = addRaw($s, $na.name, $bp.thenPart);
-            $cs = strings.chars($bp.remainder);
-            $n = len($cs);
-            $pos = 0;
+            $pos = $bp.remainderStart;
         } else {
             $residual[] = $pre + '{{' + $action + '}}';
             $pos = $tailStart;
@@ -321,18 +321,14 @@ func exec(
         def tailStart as int init $j + 2;
         def kind as string init actionKind($action);
         if ($kind == "if" or $kind == "range" or $kind == "with" or $kind == "block") {
-            def bp as BlockParts init takeBlock(tSlice($cs, $tailStart, $n));
+            def bp as BlockParts init takeBlock($cs, $tailStart, $n);
             $parts[] = execControl($set, $kind, $action, $bp, $node, $root, $env, $depth, $budget);
-            $cs = strings.chars($bp.remainder);
-            $n = len($cs);
-            $pos = 0;
+            $pos = $bp.remainderStart;
         } elseif ($kind == "assign") {
             $env = execAssign($action, $node, $root, $env);
             $pos = $tailStart;
         } elseif ($kind == "define") {
-            $cs = strings.chars(takeBlock(tSlice($cs, $tailStart, $n)).remainder);
-            $n = len($cs);
-            $pos = 0;
+            $pos = takeBlock($cs, $tailStart, $n).remainderStart;
         } elseif ($kind == "template") {
             def na as NameArg init parseNameArg($action);
             def argNode as json.Value init $node;
@@ -499,17 +495,17 @@ func bindLoop(
 # `{{ end }}`, splitting on a depth-0 `{{ else }}`. A depth-0 `{{ else if C }}`
 # is desugared into a nested `{{ if C }}` inside the else part. Nested openers
 # bump depth.
-func takeBlock(src as string) {
+func takeBlock(cs as list of string, start as int, n as int) {
     def depth as int init 0;
     def inElse as bool init false;
     def opened as int init 0;
     # Parts accumulate in lists and join once at the end; appending to a string
-    # per action is O(N^2) in the block body size.
+    # per action is O(N^2) in the block body size. The scan runs over the shared
+    # rune list `cs` from `start` (no re-chars of the tail), and the remainder is
+    # returned as an index so the caller resumes by moving its cursor.
     def thenList as list of string init [];
     def elseList as list of string init [];
-    def cs as list of string init strings.chars($src);
-    def n as int init len($cs);
-    def pos as int init 0;
+    def pos as int init $start;
     while (true) {
         def i as int init tNextOpen($cs, $pos);
         if ($i < 0) {
@@ -554,7 +550,7 @@ func takeBlock(src as string) {
                 return BlockParts{
                     thenPart: strings.join($thenList, ""),
                     elsePart: repeatEnds(strings.join($elseList, ""), $opened),
-                    remainder: tSlice($cs, $tailStart, $n)
+                    remainderStart: $tailStart
                 };
             }
             $depth = $depth - 1;

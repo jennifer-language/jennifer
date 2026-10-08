@@ -4090,14 +4090,18 @@ export func renderPdfDoc(doc as Node, opts as PdfOptions) {
     $slim.images = {};
     def state as Layout init newLayout($slim);
     $state.placements = $placements;
+    # Collect every finalised page into a local list and attach them all with one
+    # pdf.addPages at the end: pdf.addPage copies the whole document (all prior
+    # pages' content streams) per call, so adding them one-by-one here was
+    # O(pages^2) over a long report. Bookmarks stay interleaved - they only push a
+    # small outline entry and the document carries no pages during the loop, so a
+    # bookmark copy is cheap - and the page NUMBER each references is independent
+    # of when the page is attached.
+    def allPages as list of pdf.Page init [];
     for (def block in children($doc)) {
         $state = renderBlock($state, $block, 0);
-        # Fold the pages this block finalised (and any bookmarks it produced)
-        # into the document. `done` / `bks` never grow large here - they are
-        # drained after every top-level block, so the document itself is never
-        # carried (and thus never deep-copied) through the render tree.
         for (def p in $state.done) {
-            $outdoc = pdf.addPage($outdoc, $p);
+            $allPages[] = $p;
         }
         $state.done = [];
         for (def b in $state.bks) {
@@ -4105,7 +4109,8 @@ export func renderPdfDoc(doc as Node, opts as PdfOptions) {
         }
         $state.bks = [];
     }
-    $outdoc = pdf.addPage($outdoc, $state.page);
+    $allPages[] = $state.page;
+    $outdoc = pdf.addPages($outdoc, $allPages);
     return $outdoc;
 }
 

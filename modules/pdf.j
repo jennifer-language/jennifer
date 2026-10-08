@@ -1263,6 +1263,26 @@ export func addPage(doc as Document, pg as Page) {
     return $doc;
 }
 
+/**
+ * Append several pages at once, returning the updated document. `addPage` copies
+ * the whole document (every prior page's content streams included) on each call,
+ * so building an N-page document with `addPage` in a loop is O(N^2); collect the
+ * pages into a `list of Page` and attach them with one `addPages` call to stay
+ * linear.
+ * @param doc {Document} the document to extend
+ * @param pgs {list of Page} the pages to append, in order
+ * @return {Document} a new document with the pages appended
+ */
+export func addPages(doc as Document, pgs as list of Page) {
+    def d as Document init $doc;
+    def all as list of Page init $d.pages;
+    for (def pg in $pgs) {
+        $all[] = $pg;
+    }
+    $d.pages = $all;
+    return $d;
+}
+
 # --- text layout (exported) -------------------------------------------------
 
 # measureEm sums a standard-14 font's glyph advances (1000-em units) over a

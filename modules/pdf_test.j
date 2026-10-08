@@ -764,3 +764,22 @@ func testFooterSlotBecomesLink() {
     testing.assertFalse(pdfContains(render(setFooter($d2, $f2)), "/Annots"));
 }
 
+# PERFORMANCE: addPage copies the whole document (every prior page's content
+# streams) per call, so building an N-page document with addPage in a loop is
+# O(N^2). addPages attaches a batch in one copy; this builds a large document
+# promptly (the loop here would be the quadratic the audit flagged) and produces
+# the same page count as the one-by-one form.
+func testAddPagesBatch() {
+    def pgs as list of Page init [];
+    def i as int init 0;
+    while ($i < 300) {
+        $pgs[] = text(page(612, 792), 72, 720, "Helvetica", 12, "x");
+        $i = $i + 1;
+    }
+    def doc as Document init addPages(document(), $pgs);
+    testing.assertEqual(len($doc.pages), 300);
+    # equivalence with the single-page form
+    def a as Document init addPages(document(), [page(612, 792), page(612, 792)]);
+    def b as Document init addPage(addPage(document(), page(612, 792)), page(612, 792));
+    testing.assertEqual(len($a.pages), len($b.pages));
+}

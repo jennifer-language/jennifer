@@ -10,6 +10,7 @@
 # identifier. The networked session is verified end to end against an in-process
 # RESP server in the Go suite (TestRedisCommands).
 use testing;
+use task;
 
 # The RESP parser frames over bytes; these helpers keep the string-literal
 # test inputs readable by converting at the call boundary.
@@ -222,4 +223,35 @@ func testEncodeCommandBytesBinary() {
     $expected = binary.concat($expected, $val);
     $expected = binary.concat($expected, convert.bytesFromString("\r\n", "utf-8"));
     testing.assertEqual($enc, $expected);
+}
+
+# PERFORMANCE/DOS: readReply must decode an N-element array reply in O(N), not
+# re-parse the whole accumulated buffer after every socket chunk (the old reader
+# was O(N^2) - tens of seconds for a 20k-element LRANGE / SMEMBERS / KEYS). A fake
+# server sends a large array; the incremental reader decodes it promptly and
+# correctly, including the overshoot-carrying path.
+func testReadOneValueLargeArrayFast() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def n as int init 20000;
+    def server as task of null init spawn {
+        def srv as net.Conn init net.accept($listener);
+        def parts as list of string init ["*" + convert.toString($n) + "\r\n"];
+        def i as int init 0;
+        while ($i < $n) {
+            $parts[] = "$1\r\na\r\n";
+            $i = $i + 1;
+        }
+        net.writeBytes($srv, convert.bytesFromString(strings.join($parts, ""), "utf-8"));
+        net.close($srv);
+    };
+    def conn as net.Conn init net.connect($addr, 2000);
+    def rv as ReadValue init readOneValue($conn, emptyBytes(), 2000);
+    testing.assertEqual($rv.reply.kind, "array");
+    testing.assertEqual(len($rv.reply.items), $n);
+    testing.assertEqual($rv.reply.items[0].str, "a");
+    testing.assertEqual($rv.reply.items[$n - 1].str, "a");
+    net.close($conn);
+    net.close($listener);
+    task.wait($server);
 }

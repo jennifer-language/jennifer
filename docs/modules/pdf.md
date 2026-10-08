@@ -75,6 +75,7 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | `pdf.color(pg, red, green, blue)` | `Page` | set fill + stroke colour for what follows |
 | `pdf.draw(pg, ops)` | `Page` | apply a `list of DrawOp` in order (batch form of the per-op draws; see below) |
 | `pdf.addPage(doc, pg)` | `Document` | append a page |
+| `pdf.addPages(doc, pgs)` | `Document` | append a batch of pages in one copy; use this (collecting pages into a `list of Page`) instead of `addPage` in a loop, which is O(pages squared) |
 | `pdf.pageLabel()` | `PageLabel` | a blank running header / footer spec (Helvetica 9pt, 36pt margin) |
 | `pdf.setHeader(doc, label)` | `Document` | attach a running header, drawn on every page at render |
 | `pdf.setFooter(doc, label)` | `Document` | attach a running footer, drawn on every page at render |

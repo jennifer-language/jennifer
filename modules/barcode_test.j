@@ -478,3 +478,14 @@ func testUnknownSymbologyThrows() {
     }
     testing.assertTrue($threw);
 }
+
+# PERFORMANCE/DOS: QR mask-penalty rule 3 must not forward the whole grid per cell
+# (a `list of list` is not borrow-safe, so each forward deep-copied the grid,
+# making mask scoring O(size^4)). Testing against a 1-D line lifted once per
+# row / column keeps it O(size^2), so a larger QR encodes promptly (~11 s before).
+func testQrLargePayloadFast() {
+    def o as Options init defaults();
+    def qr as Symbol init encode(strings.repeat("x", 120), "qr", $o);
+    testing.assertEqual($qr.kind, SymbolKind.Matrix);
+    testing.assertTrue($qr.size >= 41); # a larger version than the "HI" (size 21) case
+}

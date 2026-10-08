@@ -130,6 +130,14 @@ def struct ParseResult {
     complete as bool
 };
 
+# ReadValue carries one decoded reply plus any bytes the socket read past it
+# (overshoot from the last chunk), so a pipelined batch keeps the leftover for the
+# next reply instead of dropping it.
+def struct ReadValue {
+    reply as Reply,
+    rest as bytes
+};
+
 # --- reply constructors (private) ----------------------------------
 
 func replyStr(kind as string, s as string) {
@@ -436,72 +444,172 @@ func scanResultFromReply(reply as Reply) {
 
 # --- net dialogue (private) ----------------------------------------
 
-# readReply reads bytes until a complete RESP reply has arrived, then returns it.
-# `timeoutMs` re-arms a read deadline before each read (0 disables it).
-func readReply(conn as net.Conn, timeoutMs as int) {
-    def buf as bytes;
-    while (true) {
-        def pr as ParseResult init parseComplete($buf);
-        if ($pr.complete) {
-            return $pr.reply;
-        }
-        if ($timeoutMs > 0) {
-            net.setReadDeadline($conn, $timeoutMs);
-        }
-        def chunk as bytes init net.readBytes($conn, 1024);
-        if (len($chunk) == 0) {
-            return $pr.reply;
-        }
-        # Append the raw chunk into the byte buffer (never round-trip through a
-        # string mid-stream: a chunk boundary can fall inside a multi-byte
-        # sequence, and stringFromBytes on a partial rune would corrupt it).
-        def j as int init 0;
-        while ($j < len($chunk)) {
-            $buf[] = $chunk[$j];
-            $j = $j + 1;
-        }
-        capReply(len($buf));
-    }
-    return replyNil();
-}
-
-# readReplies reads exactly `count` complete replies, buffering across socket
-# reads so that replies the server coalesced into one TCP segment are all parsed.
-# A single `readReply` per reply drops any bytes past the first complete reply,
-# which silently loses the rest of a pipelined batch (and blocks the next read).
-# `ParseResult.pos` gives the bytes one reply consumed, so the leftover is kept
-# and re-parsed. Over-read is the only hazard here - the next request has not been
-# sent - so buffering within this one call is sufficient.
-func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
-    def replies as list of Reply init [];
-    def buf as bytes;
-    while (len($replies) < $count) {
-        def pr as ParseResult init parseComplete($buf);
-        if ($pr.complete) {
-            $replies[] = $pr.reply;
-            $buf = $buf[$pr.pos..];
+# readOneValue reads one complete RESP reply, decoding it incrementally as bytes
+# arrive so the accumulated buffer is never re-parsed from the start (the old
+# reader called parseComplete from offset 0 after every chunk, making an
+# N-element reply O(N^2)). It parses with a flat value buffer plus an array stack:
+# each scalar / bulk is produced once and pushed, and a `*` header opens a frame
+# recording where its elements begin; when a frame's count is met, its elements
+# are lifted out of the buffer in one window into a `replyArray` and that array is
+# itself produced (cascading for nested arrays). `pos` only advances past a fully
+# decoded value, so a short buffer re-reads just the current value's header, not
+# the whole reply. Returns the reply plus any overshoot bytes read past it, so a
+# pipelined caller keeps the leftover. `pending` seeds the buffer with a prior
+# call's overshoot.
+func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
+    def buf as bytes init $pending;
+    def pos as int init 0;
+    def output as list of Reply init [];
+    def outLen as int init 0;
+    def arrBase as list of int init [];
+    def arrRemain as list of int init [];
+    def asp as int init 0;
+    def result as Reply;
+    def haveResult as bool init false;
+    while (not $haveResult) {
+        def nl as int init crlfIndex($buf, $pos);
+        if ($nl < 0) {
+            $buf = refillReply($conn, $buf, $timeoutMs);
             continue;
         }
-        if ($timeoutMs > 0) {
-            net.setReadDeadline($conn, $timeoutMs);
+        def typ as int init $buf[$pos];
+        def payload as string init convert.stringFromBytes(byteSlice($buf, $pos + 1, $nl), "utf-8");
+        def after as int init $nl + 2;
+        def v as Reply;
+        def haveV as bool init false;
+        if ($typ == 42) { # '*' array header
+            def count as int init convert.toInt($payload);
+            $pos = $after;
+            if ($count < 0) {
+                $v = replyNil();
+                $haveV = true;
+            } elseif ($count == 0) {
+                $v = replyArray([]);
+                $haveV = true;
+            } else {
+                if ($asp < len($arrBase)) {
+                    $arrBase[$asp] = $outLen;
+                    $arrRemain[$asp] = $count;
+                } else {
+                    $arrBase[] = $outLen;
+                    $arrRemain[] = $count;
+                }
+                $asp = $asp + 1;
+            }
+        } elseif ($typ == 36) { # '$' bulk string
+            def n as int init convert.toInt($payload);
+            if ($n < 0) {
+                $pos = $after;
+                $v = replyNil();
+                $haveV = true;
+            } elseif (len($buf) - $after < $n + 2) {
+                $buf = refillReply($conn, $buf, $timeoutMs);
+                # pos unchanged: retry this value once the payload is in hand
+            } else {
+                def data as bytes init byteSlice($buf, $after, $after + $n);
+                $v = replyStr("string", convert.stringFromBytes($data, "utf-8"));
+                $pos = $after + $n + 2;
+                $haveV = true;
+            }
+        } elseif ($typ == 43) { # '+' simple string
+            $v = replyStr("string", $payload);
+            $pos = $after;
+            $haveV = true;
+        } elseif ($typ == 45) { # '-' error
+            $v = replyStr("error", $payload);
+            $pos = $after;
+            $haveV = true;
+        } elseif ($typ == 58) { # ':' integer
+            $v = replyInt(convert.toInt($payload));
+            $pos = $after;
+            $haveV = true;
+        } else {
+            $v = replyStr("string", convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8"));
+            $pos = $after;
+            $haveV = true;
         }
-        def chunk as bytes init net.readBytes($conn, 4096);
-        if (len($chunk) == 0) {
-            throw Error{
-                kind: "redis",
-                message: "redis: connection closed after " + convert.toString(len($replies)) +
-                    " of " + convert.toString($count) + " replies",
-                file: "",
-                line: 0,
-                col: 0
-            };
+        if ($haveV) {
+            # Produce `v`, folding it into the open array (if any); a completed
+            # array becomes a produced value in turn, cascading outward.
+            def cur as Reply init $v;
+            def settling as bool init true;
+            while ($settling) {
+                $settling = false;
+                if ($asp == 0) {
+                    $result = $cur;
+                    $haveResult = true;
+                } else {
+                    if ($outLen < len($output)) {
+                        $output[$outLen] = $cur;
+                    } else {
+                        $output[] = $cur;
+                    }
+                    $outLen = $outLen + 1;
+                    $arrRemain[$asp - 1] = $arrRemain[$asp - 1] -1;
+                    if ($arrRemain[$asp - 1] == 0) {
+                        def base as int init $arrBase[$asp - 1];
+                        def items as list of Reply init [];
+                        def k as int init $base;
+                        while ($k < $outLen) {
+                            $items[] = $output[$k];
+                            $k = $k + 1;
+                        }
+                        $outLen = $base;
+                        $asp = $asp - 1;
+                        $cur = replyArray($items);
+                        $settling = true;
+                    }
+                }
+            }
         }
-        def k as int init 0;
-        while ($k < len($chunk)) {
-            $buf[] = $chunk[$k];
-            $k = $k + 1;
-        }
-        capReply(len($buf));
+    }
+    return ReadValue{reply: $result, rest: byteSlice($buf, $pos, len($buf))};
+}
+
+# refillReply appends one socket read onto the reply buffer (byte-by-byte, so a
+# chunk boundary never round-trips through a partial-rune stringFromBytes, and the
+# owned buffer grows amortised O(1) per byte - a binary.concat per chunk would be
+# O(N^2) in the reply size). Throws on a closed connection.
+func refillReply(conn as net.Conn, buf as bytes, timeoutMs as int) {
+    if ($timeoutMs > 0) {
+        net.setReadDeadline($conn, $timeoutMs);
+    }
+    def chunk as bytes init net.readBytes($conn, 4096);
+    if (len($chunk) == 0) {
+        throw Error{
+            kind: "redis",
+            message: "redis: connection closed before a complete reply",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    def out as bytes init $buf;
+    def j as int init 0;
+    while ($j < len($chunk)) {
+        $out[] = $chunk[$j];
+        $j = $j + 1;
+    }
+    capReply(len($out));
+    return $out;
+}
+
+# readReply reads one complete RESP reply. Over-read past the reply is discarded
+# (a single-command caller sends one command and reads one reply).
+func readReply(conn as net.Conn, timeoutMs as int) {
+    return readOneValue($conn, emptyBytes(), $timeoutMs).reply;
+}
+
+# readReplies reads exactly `count` complete replies, threading any bytes read
+# past one reply into the next (a pipelined batch coalesced into one TCP segment),
+# so the leftover is never dropped.
+func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
+    def replies as list of Reply init [];
+    def pending as bytes init emptyBytes();
+    while (len($replies) < $count) {
+        def rv as ReadValue init readOneValue($conn, $pending, $timeoutMs);
+        $replies[] = $rv.reply;
+        $pending = $rv.rest;
     }
     return $replies;
 }

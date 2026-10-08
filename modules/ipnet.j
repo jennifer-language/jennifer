@@ -20,6 +20,7 @@
  */
 use strings;
 use convert;
+use lists;
 
 /**
  * An IP address as raw bytes.
@@ -808,61 +809,53 @@ export func subnetOf(child as Network, parent as Network) {
 
 # --- aggregation (exported) -------------------------------------------------
 
-# netLess orders networks by base address then prefix (broader block first on an
-# equal base), so a covering block sorts ahead of what it covers.
-func netLess(a as Network, b as Network) {
-    def c as int init compare($a.addr, $b.addr);
-    if ($c < 0) {
-        return true;
+# netSortKey builds a string sort key that orders networks by base address then
+# prefix (the `netLess` order), for one `lists.sortBy` pass. Each octet is a
+# 3-digit zero-padded decimal, so lexicographic key order equals the
+# bytewise-unsigned `compare` order - an int key cannot hold a 128-bit IPv6
+# address - and the padded prefix sorts a broader block first on an equal base.
+# Within one aggregateSame call every network is the same version, so octet counts
+# are uniform and the keys are mutually comparable.
+func pad3(n as int) {
+    def s as string init convert.toString($n);
+    while (len($s) < 3) {
+        $s = "0" + $s;
     }
-    if ($c > 0) {
-        return false;
-    }
-    return $a.prefix < $b.prefix;
+    return $s;
 }
 
-# sortNets returns the networks in `netLess` order (insertion sort; the lists are
-# small and lists.sort has no Network comparator).
-func sortNets(nets as list of Network) {
-    def out as list of Network init [];
-    for (def nw in $nets) {
-        def inserted as bool init false;
-        def acc as list of Network init [];
-        for (def e in $out) {
-            if (not $inserted and netLess($nw, $e)) {
-                $acc[] = $nw;
-                $inserted = true;
-            }
-            $acc[] = $e;
-        }
-        if (not $inserted) {
-            $acc[] = $nw;
-        }
-        $out = $acc;
+func netSortKey(nw as Network) {
+    def parts as list of string init [];
+    def i as int init 0;
+    while ($i < len($nw.addr.octets)) {
+        $parts[] = pad3($nw.addr.octets[$i]);
+        $i = $i + 1;
     }
-    return $out;
+    $parts[] = pad3($nw.prefix);
+    return strings.join($parts, "");
 }
 
-# dropCovered removes any network already contained in another kept (broader or
-# equal) network - after sorting, a cover always precedes what it covers.
+# dropCovered removes any network contained in another kept (broader-or-equal)
+# network in one linear pass over the netLess-sorted list. After the sort a cover
+# immediately precedes every block it covers and is itself uncovered, so testing
+# each network against the most recent kept block suffices: an earlier cover would
+# also have covered that kept block, so it could not have been kept.
 func dropCovered(sorted as list of Network) {
     def kept as list of Network init [];
+    def last as Network;
+    def haveLast as bool init false;
     for (def nw in $sorted) {
         def covered as bool init false;
-        for (def k in $kept) {
-            if ($k.prefix <= $nw.prefix and contains($k, $nw.addr)) {
-                $covered = true;
-            }
+        if ($haveLast and $last.prefix <= $nw.prefix and contains($last, $nw.addr)) {
+            $covered = true;
         }
         if (not $covered) {
             $kept[] = $nw;
+            $last = $nw;
+            $haveLast = true;
         }
     }
     return $kept;
-}
-
-func normalizeNets(nets as list of Network) {
-    return dropCovered(sortNets($nets));
 }
 
 # siblings: two equal-prefix networks that are the two halves of one shorter
@@ -892,44 +885,52 @@ func parentOf(nw as Network) {
     };
 }
 
-# aggregateSame merges one version's networks to the minimal covering set: drop
-# contained blocks, then repeatedly fold sibling pairs into their parent until no
-# pair remains.
+# aggregateSame merges one version's networks to the minimal covering set in
+# O(n log n): sort once, drop contained blocks in one linear pass, then fold
+# sibling pairs with a stack in one pass. The old code rescanned for one pair per
+# round and re-normalised the whole list each round (O(k * n^2)).
 func aggregateSame(nets as list of Network) {
-    def cur as list of Network init normalizeNets($nets);
-    def changed as bool init true;
-    while ($changed) {
-        $changed = false;
-        def ai as int init -1;
-        def bi as int init -1;
-        def i as int init 0;
-        while ($i < len($cur) and $ai < 0) {
-            def j as int init $i + 1;
-            while ($j < len($cur) and $ai < 0) {
-                if (siblings($cur[$i], $cur[$j])) {
-                    $ai = $i;
-                    $bi = $j;
-                }
-                $j = $j + 1;
-            }
-            $i = $i + 1;
-        }
-        if ($ai >= 0) {
-            def parent as Network init parentOf($cur[$ai]);
-            def rest as list of Network init [];
-            def k as int init 0;
-            while ($k < len($cur)) {
-                if (not ($k == $ai) and not ($k == $bi)) {
-                    $rest[] = $cur[$k];
-                }
-                $k = $k + 1;
-            }
-            $rest[] = $parent;
-            $cur = normalizeNets($rest);
-            $changed = true;
-        }
+    if (len($nets) == 0) {
+        return $nets;
     }
-    return $cur;
+    def sorted as list of Network init lists.sortBy($nets, netSortKey);
+    def kept as list of Network init dropCovered($sorted);
+    return mergeSiblings($kept);
+}
+
+# mergeSiblings folds adjacent sibling pairs (the two halves of one shorter block)
+# into their parent using a stack. The sorted, covered-dropped input puts the two
+# halves of a parent adjacent, and a freshly formed parent may itself be the
+# sibling of the block now on top, so the merge re-checks the top after each fold.
+# `sp` is the logical stack height (the backing list is never sliced).
+func mergeSiblings(nets as list of Network) {
+    def stack as list of Network init [];
+    def sp as int init 0;
+    for (def nw in $nets) {
+        def cur as Network init $nw;
+        def merging as bool init true;
+        while ($merging) {
+            $merging = false;
+            if ($sp > 0 and siblings($stack[$sp - 1], $cur)) {
+                $cur = parentOf($cur);
+                $sp = $sp - 1;
+                $merging = true;
+            }
+        }
+        if ($sp < len($stack)) {
+            $stack[$sp] = $cur;
+        } else {
+            $stack[] = $cur;
+        }
+        $sp = $sp + 1;
+    }
+    def out as list of Network init [];
+    def i as int init 0;
+    while ($i < $sp) {
+        $out[] = $stack[$i];
+        $i = $i + 1;
+    }
+    return $out;
 }
 
 /**

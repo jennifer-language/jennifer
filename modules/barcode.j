@@ -1049,28 +1049,39 @@ func penalty(mods as list of list of int, size as int) {
         }
         $r = $r + 1;
     }
-    # rule 3: 1:1:3:1:1 finder-like patterns (with 4 light on one side) in rows/cols
+    # rule 3: 1:1:3:1:1 finder-like patterns (with 4 light on one side) in rows/cols.
+    # The pattern is tested against a 1-D line (a flat `list of int`, which binds by
+    # borrow) lifted out once per row / column, so each test is O(11). Forwarding
+    # the whole grid per cell deep-copied it (a `list of list` is not borrow-safe),
+    # which made mask scoring O(size^4).
     $r = 0;
     while ($r < $size) {
+        def row as list of int init $mods[$r];
         def c as int init 0;
         while ($c <= $size - 11) {
-            if (finderLike($mods, $r, $c, true)) {
+            if (finderLikeLine($row, $c)) {
                 $score = $score + 40;
             }
             $c = $c + 1;
         }
         $r = $r + 1;
     }
-    $r = 0;
-    while ($r <= $size - 11) {
-        def c as int init 0;
-        while ($c < $size) {
-            if (finderLike($mods, $r, $c, false)) {
+    def cc as int init 0;
+    while ($cc < $size) {
+        def col as list of int init [];
+        def rr as int init 0;
+        while ($rr < $size) {
+            $col[] = $mods[$rr][$cc];
+            $rr = $rr + 1;
+        }
+        def r2 as int init 0;
+        while ($r2 <= $size - 11) {
+            if (finderLikeLine($col, $r2)) {
                 $score = $score + 40;
             }
-            $c = $c + 1;
+            $r2 = $r2 + 1;
         }
-        $r = $r + 1;
+        $cc = $cc + 1;
     }
     # rule 4: dark-module proportion deviation from 50%
     def dark as int init 0;
@@ -1095,22 +1106,13 @@ func penalty(mods as list of list of int, size as int) {
     return $score;
 }
 
-# matchesPattern tests an 11-cell pattern at (r,c) along a row or column.
-func matchesPattern(
-    mods as list of list of int,
-    r as int,
-    c as int,
-    horizontal as bool,
-    pat as list of int) {
+# matchesLine tests an 11-cell pattern starting at `start` in a 1-D line (a row or
+# column already lifted out of the grid). `line` is a flat list, so it binds by
+# borrow - there is no per-cell grid copy.
+func matchesLine(line as list of int, start as int, pat as list of int) {
     def i as int init 0;
     while ($i < 11) {
-        def v as int init 0;
-        if ($horizontal) {
-            $v = $mods[$r][$c + $i];
-        } else {
-            $v = $mods[$r + $i][$c];
-        }
-        if (not ($v == $pat[$i])) {
+        if (not ($line[$start + $i] == $pat[$i])) {
             return false;
         }
         $i = $i + 1;
@@ -1118,12 +1120,12 @@ func matchesPattern(
     return true;
 }
 
-# finderLike tests the 11-cell 1:1:3:1:1 finder pattern with the 4-cell light run
-# on *either* side, per the QR mask rule 3. Testing only the light-run-after form
-# would miss half the finder-like occurrences and skew mask selection.
-func finderLike(mods as list of list of int, r as int, c as int, horizontal as bool) {
-    return matchesPattern($mods, $r, $c, $horizontal, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]) or
-        matchesPattern($mods, $r, $c, $horizontal, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]);
+# finderLikeLine tests the 11-cell 1:1:3:1:1 finder pattern with the 4-cell light
+# run on *either* side (per QR mask rule 3) at `start` in the line. Testing only
+# the light-run-after form would miss half the occurrences and skew mask selection.
+func finderLikeLine(line as list of int, start as int) {
+    return matchesLine($line, $start, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]) or
+        matchesLine($line, $start, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]);
 }
 
 # qrMatrix builds the final masked QR module grid for a payload.
