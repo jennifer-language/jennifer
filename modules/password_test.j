@@ -123,3 +123,18 @@ func testComplexityEmptyIsZero() {
     testing.assertEqual($c.poolSize, 0);
     testing.assertEqual($c.entropy, 0.0);
 }
+
+# CORRECTNESS: validate() counts symbols against the schema's own symbolSet (what
+# generate draws from), not the default SYMBOLS - so a custom symbol set round
+# trips: a generated password satisfies its own schema, and symbols inside the set
+# are recognised.
+func testValidateUsesSchemaSymbolSet() {
+    def s as Schema init withSymbolSet(schema(), "€§");
+    # generate draws symbols from the set; its output must satisfy validate
+    def pw as string init generate($s);
+    testing.assertTrue(validate($s, $pw).valid);
+    # a 16-char password whose only "symbol" is in the custom set counts; the same
+    # with a default-set symbol (not in "€§") fails minSymbols
+    testing.assertTrue(validate($s, "Abcdefghij12345€").valid);
+    testing.assertFalse(validate($s, "Abcdefghij12345!").valid);
+}

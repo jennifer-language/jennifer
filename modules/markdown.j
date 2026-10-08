@@ -1782,13 +1782,143 @@ func textNode(s as string) {
 # flat, so the walk always terminates.
 func inlineChildren(text as string, depth as int) {
     if ($depth <= 0) {
-        return [textNode(html.unescape($text))];
+        return [textNode(decodeEntities($text))];
     }
     def out as list of Node init [];
     for (def sp in parseInline($text)) {
         $out[] = spanToPublic($sp, $depth - 1);
     }
     return $out;
+}
+
+# Common HTML named entities (name -> Unicode code point). Not the full ~2000-entry
+# HTML5 set - just the references that occur in ordinary prose - alongside the five
+# metacharacters. Stored as code points (not literal characters) so this source
+# stays ASCII; decodeEntities turns them into the actual character.
+def const NAMED_ENTITIES as map of string to int init {
+    "lt": 60,
+    "gt": 62,
+    "amp": 38,
+    "quot": 34,
+    "apos": 39,
+    "nbsp": 160,
+    "copy": 169,
+    "reg": 174,
+    "trade": 8482,
+    "mdash": 8212,
+    "ndash": 8211,
+    "hellip": 8230,
+    "laquo": 171,
+    "raquo": 187,
+    "ldquo": 8220,
+    "rdquo": 8221,
+    "lsquo": 8216,
+    "rsquo": 8217,
+    "deg": 176,
+    "plusmn": 177,
+    "times": 215,
+    "divide": 247,
+    "frac12": 189,
+    "frac14": 188,
+    "frac34": 190,
+    "sup2": 178,
+    "sup3": 179,
+    "micro": 181,
+    "para": 182,
+    "middot": 183,
+    "sect": 167,
+    "bull": 8226,
+    "dagger": 8224,
+    "euro": 8364,
+    "pound": 163,
+    "cent": 162,
+    "yen": 165
+};
+
+# entityChar decodes one entity name (the text between `&` and `;`) to its
+# character, or "" when it is not a recognised numeric or common-named reference.
+# A numeric reference out of the Unicode range (or a surrogate) is treated as
+# unrecognised, so a crafted `&#...;` can never produce an invalid value.
+func entityChar(name as string) {
+    if (len($name) == 0) {
+        return "";
+    }
+    if (strings.startsWith($name, "#")) {
+        def rest as string init strings.substring($name, 1, len($name));
+        def cp as int init -1;
+        try {
+            if (strings.startsWith($rest, "x") or strings.startsWith($rest, "X")) {
+                $cp = convert.toInt(strings.substring($rest, 1, len($rest)), 16);
+            } else {
+                $cp = convert.toInt($rest, 10);
+            }
+        } catch (e) {
+            return "";
+        }
+        if ($cp < 0 or $cp > 1114111) {
+            return "";
+        }
+        try {
+            return convert.fromCodepoint($cp);
+        } catch (e2) {
+            return "";
+        }
+    }
+    if (maps.has(NAMED_ENTITIES, $name)) {
+        return convert.fromCodepoint(NAMED_ENTITIES[$name]);
+    }
+    return "";
+}
+
+# decodeEntities replaces every recognised HTML entity reference in `s` with its
+# actual character, in one left-to-right pass over the raw text. Decoding to the
+# character (rather than passing the reference through) is what keeps it both
+# correct and safe: a reference is resolved once here, and the renderer re-escapes
+# the result, so `&#60;` becomes `&lt;` (never an injected `<`) and a plain text
+# `&copy;` becomes the character (not the double-escaped `&amp;copy;`). Processing
+# the raw text in a single pass keeps `&amp;copy;` (an escaped ampersand followed
+# by literal text) distinct from `&copy;` (an entity). An unrecognised reference
+# is left verbatim (its `&` escapes normally).
+func decodeEntities(s as string) {
+    if (not strings.contains($s, "&")) {
+        return $s;
+    }
+    def cs as list of string init strings.chars($s);
+    def n as int init len($cs);
+    def out as list of string init [];
+    def i as int init 0;
+    while ($i < $n) {
+        if ($cs[$i] == "&") {
+            # entity names are short: look for the terminating `;` in a bounded window.
+            def semi as int init -1;
+            def limit as int init $i + 32;
+            if ($limit > $n) {
+                $limit = $n;
+            }
+            def j as int init $i + 1;
+            while ($j < $limit and $semi < 0) {
+                if ($cs[$j] == ";") {
+                    $semi = $j;
+                }
+                $j = $j + 1;
+            }
+            def decoded as string init "";
+            if ($semi > $i + 1) {
+                $decoded = entityChar(strings.join(lists.slice($cs, $i + 1, $semi), ""));
+            }
+            if ($decoded == "") {
+                $out[] = "&";
+                $i = $i + 1;
+            } else {
+                $out[] = $decoded;
+                $i = $semi + 1;
+            }
+        } else {
+            $out[] = $cs[$i];
+            $i = $i + 1;
+        }
+    }
+    return strings.join($out, "");
 }
 
 # spanToPublic maps one inline Span to a public inline Node, decoding HTML entities
@@ -1798,7 +1928,7 @@ func inlineChildren(text as string, depth as int) {
 # Span, so the resolver checks it covers every SpanKind.
 func spanToPublic(sp as Span, depth as int) {
     match ($sp.kind) {
-        when Text { return textNode(html.unescape($sp.text)); }
+        when Text { return textNode(decodeEntities($sp.text)); }
         when Code {
             def n as Node init nodeOf("codespan");
             $n.text = $sp.text;

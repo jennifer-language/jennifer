@@ -392,9 +392,12 @@ export func validate(s as Schema, pw as string) {
     def lo as int init countIn(LOWER, $pw);
     def up as int init countIn(UPPER, $pw);
     def dig as int init countIn(DIGITS, $pw);
-    # Count only real symbols (the defined set): `n - lo - up - dig` would count a
-    # space / newline / other char as a "symbol", so "   " would satisfy minSymbols.
-    def sym as int init countIn(SYMBOLS, $pw);
+    # Count only real symbols, and against THIS schema's set (what generate draws
+    # from), not the default SYMBOLS: a schema built with withSymbolSet would
+    # otherwise reject its own generated passwords (and accept symbols outside its
+    # policy). Counting a fixed set also avoids `n - lo - up - dig` treating a
+    # space / newline as a "symbol", so "   " cannot satisfy minSymbols.
+    def sym as int init countIn($s.symbolSet, $pw);
     if ($lo < effMin($s.lower, $s.minLower)) {
         $reasons[] = "needs at least " + convert.toString($s.minLower) + " lowercase";
     }

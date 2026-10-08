@@ -257,3 +257,14 @@ func testMismatchedNestingFold() {
     testing.assertEqual(render(parse("<b><i>x</b>y").children[0]), "<b><i>x</i></b>");
     testing.assertEqual(parse("<b><i>x</b>y").children[1].text, "y");
 }
+
+# CORRECTNESS: a raw-text element (script / style) closes on its end tag
+# regardless of case, so </SCRIPT> ends a <script> (the start tag is normalised to
+# lowercase) and the rest of the document is parsed rather than swallowed into the
+# raw body.
+func testRawTextCaseInsensitiveClose() {
+    def t as Node init parse("<SCRIPT>var a=1;</SCRIPT><p>after</p>");
+    testing.assertEqual(len($t.children), 2);
+    testing.assertEqual(render($t.children[0]), "<script>var a=1;</script>");
+    testing.assertEqual(render($t.children[1]), "<p>after</p>");
+}

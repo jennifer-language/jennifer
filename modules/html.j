@@ -449,6 +449,40 @@ func findLit(cs as list of string, from as int, lit as string) {
     return $n;
 }
 
+# matchLitCI / findLitCI are the ASCII-case-insensitive variants, for the raw-text
+# element terminator: HTML closes a `<script>` / `<style>` on `</script` /
+# `</style` regardless of the end tag's case, so `</SCRIPT>` must close a `<script>`
+# just as `</script>` does (otherwise the raw body swallows the rest of the
+# document). `lit` is the lowercase terminator; each `cs` char is lowercased to
+# compare.
+func matchLitCI(cs as list of string, i as int, lit as string) {
+    def ls as list of string init strings.chars($lit);
+    def m as int init len($ls);
+    if ($i + $m > len($cs)) {
+        return false;
+    }
+    def k as int init 0;
+    while ($k < $m) {
+        if (strings.lower($cs[$i + $k]) != strings.lower($ls[$k])) {
+            return false;
+        }
+        $k = $k + 1;
+    }
+    return true;
+}
+
+func findLitCI(cs as list of string, from as int, lit as string) {
+    def i as int init $from;
+    def n as int init len($cs);
+    while ($i < $n) {
+        if (matchLitCI($cs, $i, $lit)) {
+            return $i;
+        }
+        $i = $i + 1;
+    }
+    return $n;
+}
+
 # joinRange returns cs[a..b) joined into a string.
 func joinRange(cs as list of string, a as int, b as int) {
     def parts as list of string init [];
@@ -705,7 +739,7 @@ export func parse(src as string) {
                 $outLen = $outLen + 1;
             } elseif ($st.tag == "script" or $st.tag == "style") {
                 def close as string init "</" + $st.tag;
-                def end as int init findLit($cs, $i, $close);
+                def end as int init findLitCI($cs, $i, $close);
                 def body as list of Node init [];
                 def rawText as string init joinRange($cs, $i, $end);
                 if (len($rawText) > 0) {

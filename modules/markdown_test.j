@@ -1658,3 +1658,23 @@ func testUnmatchedBracketsLinear() {
 func testNestedBracketLink() {
     testing.assertEqual(toHtml("[a [b] c](http://x)"), '<p><a href="http://x">a [b] c</a></p>');
 }
+
+# CORRECTNESS + SECURITY: HTML entity references in text are decoded to their
+# character in one pass over the raw text (then re-escaped by the renderer), so a
+# named / numeric reference is no longer double-escaped - and the decode is safe:
+# a numeric reference to a metacharacter becomes the escaped form, never an
+# injected tag, and an escaped ampersand stays literal.
+func testEntityDecoding() {
+    testing.assertEqual(toHtml("&copy; 2026"), "<p>© 2026</p>"); # named -> character
+    testing.assertEqual(toHtml("a&nbsp;b"), "<p>a b</p>"); # named nbsp
+    # numeric reference to '<' decodes then RE-ESCAPES (never an injected '<')
+    testing.assertEqual(toHtml("x &#60; y"), "<p>x &lt; y</p>");
+    testing.assertEqual(toHtml("x &#x3c; y"), "<p>x &lt; y</p>"); # hex numeric
+    # an escaped ampersand stays literal (not conflated with an entity)
+    testing.assertEqual(toHtml("&amp;copy;"), "<p>&amp;copy;</p>");
+    # metacharacter named entities decode then re-escape (safe)
+    testing.assertEqual(toHtml("&lt;script&gt;"), "<p>&lt;script&gt;</p>");
+    # an unrecognised reference is left verbatim (its & escapes)
+    testing.assertEqual(toHtml("&notreal;"), "<p>&amp;notreal;</p>");
+    testing.assertEqual(toHtml("a & b"), "<p>a &amp; b</p>"); # bare ampersand
+}
