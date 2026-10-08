@@ -179,6 +179,25 @@ export func add(f as Feed, e as Entry) {
 }
 
 /**
+ * A copy of `f` with every entry in `entries` appended, in order. Prefer this
+ * over calling `add` in a loop: `add` copies the whole feed each call, so adding
+ * N entries one at a time is O(N^2), while `addAll` appends them all under a
+ * single copy (collect your entries into a list, then one `addAll`).
+ * @param f {Feed} the source feed
+ * @param entries {list of Entry} the entries to append
+ * @return {Feed} the feed with the entries added
+ */
+export func addAll(f as Feed, entries as list of Entry) {
+    def out as Feed init $f;
+    def es as list of Entry init $out.entries;
+    for (def e in $entries) {
+        $es[] = $e;
+    }
+    $out.entries = $es;
+    return $out;
+}
+
+/**
  * A new `Entry` with the given title and link (empty id / summary / content,
  * unset dates).
  * @param title {string} the entry title

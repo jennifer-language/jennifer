@@ -51,6 +51,7 @@ omitted.
 | `feed.feed(title, link)`     | `Feed`    | A new empty feed (no entries, unset date).               |
 | `feed.feedUpdated(f, t)`     | `Feed`    | A copy with the feed's `updated` instant set.            |
 | `feed.add(f, e)`             | `Feed`    | A copy with `e` appended to the entries.                 |
+| `feed.addAll(f, entries)`    | `Feed`    | A copy with every entry in the list appended, in order.  |
 | `feed.entry(title, link)`    | `Entry`   | A new entry (empty id / summary / content, unset dates). |
 | `feed.entryId(e, id)`        | `Entry`   | A copy with the stable id set.                           |
 | `feed.entryPublished(e, t)`  | `Entry`   | A copy with the published instant set.                   |
@@ -68,6 +69,19 @@ omitted.
 RSS uses RFC 822 dates (`pubDate` / `lastBuildDate`); Atom uses RFC 3339
 (`published` / `updated`). All text is XML-escaped, so `&`, `<`, and `>` in
 titles or summaries round-trip.
+
+Each builder returns a fresh copy of its input (value semantics), so `add`
+copies the whole feed on every call. To attach many entries, collect them in a
+list and call `addAll` once, rather than calling `add` in a loop: `add` in a
+loop is O(entries²), while `addAll` appends them all under a single copy.
+
+```jennifer
+def entries as list of feed.Entry init [];
+for (def row in $rows) {
+    $entries[] = feed.entry($row.title, $row.link);
+}
+def out as feed.Feed init feed.addAll($f, $entries);
+```
 
 ### Podcasts and metadata
 
