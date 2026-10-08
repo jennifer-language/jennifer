@@ -271,18 +271,29 @@ func isFlankSpace(c as string) {
 # parseInline scans a line of text into spans. Markers: `` ` `` for code,
 # `**` for strong, `*` for emphasis, and `[text](url)` for a link. Span
 # content is not re-scanned (no nesting).
-# matchLinkLabel finds the `]` that closes a link / image label opened by the `[`
-# at `open`, balancing nested `[...]` and skipping code spans (a `]` inside
-# backticks is not a delimiter), so a label that mentions bracket syntax
-# (`$xs[]`, `argv[0]`) or contains a nested bracket pair parses correctly.
-# Returns the index of the closing `]`, or -1 if the label never closes.
-func matchLinkLabel(cs as list of string, open as int, n as int) {
-    def depth as int init 1;
-    def i as int init $open + 1;
+# computeCloseBrackets returns, for every position holding a `[`, the index of
+# the `]` that balances it (or -1 when it never closes), computed in one stack
+# pass. A link / image label then resolves in O(1) at scan time instead of a
+# forward re-scan per `[`, which made a run of unmatched `[` / `![` O(N^2) on
+# adversarial input. Code spans are skipped so a `]` inside backticks is not a
+# delimiter (matching the inline scanner), and nested pairs balance so a label
+# mentioning bracket syntax (`$xs[]`, `argv[0]`) parses correctly. The stack uses
+# an explicit top index `sp` and never slices, so push / pop stay O(1) (a
+# `lists.slice` pop would be O(N) per pop, quadratic on deep nesting). Positions
+# without a `[` hold -1 and are never read.
+func computeCloseBrackets(cs as list of string, n as int) {
+    def close as list of int init [];
+    def k as int init 0;
+    while ($k < $n) {
+        $close[] = -1;
+        $k = $k + 1;
+    }
+    def stack as list of int init [];
+    def sp as int init 0;
+    def i as int init 0;
     while ($i < $n) {
         def c as string init $cs[$i];
         if ($c == "`") {
-            # Skip a code span so brackets inside it are literal.
             def j as int init $i + 1;
             def closed as bool init false;
             while ($j < $n) {
@@ -297,16 +308,21 @@ func matchLinkLabel(cs as list of string, open as int, n as int) {
                 continue;
             }
         } elseif ($c == "[") {
-            $depth = $depth + 1;
+            if ($sp < len($stack)) {
+                $stack[$sp] = $i;
+            } else {
+                $stack[] = $i;
+            }
+            $sp = $sp + 1;
         } elseif ($c == "]") {
-            $depth = $depth - 1;
-            if ($depth == 0) {
-                return $i;
+            if ($sp > 0) {
+                $sp = $sp - 1;
+                $close[$stack[$sp]] = $i;
             }
         }
         $i = $i + 1;
     }
-    return -1;
+    return $close;
 }
 
 # matchLinkDest finds the `)` that closes a `[text](dest)` destination opened at
@@ -502,6 +518,15 @@ func parseInline(s as string) {
     def hasTilde as bool init strings.contains($s, "~");
     def hasEq as bool init strings.contains($s, "==");
     def hasCaret as bool init strings.contains($s, "^");
+    # Bracket matches for links / images, precomputed once (gated on a `[` being
+    # present) so each label resolves in O(1) - see computeCloseBrackets. Empty
+    # when there is no `[`, and then never indexed (the link / image branches
+    # require a `[` at the position).
+    def hasBracket as bool init strings.contains($s, "[");
+    def closeBracket as list of int init [];
+    if ($hasBracket) {
+        $closeBracket = computeCloseBrackets($cs, $n);
+    }
     # One backward pass builds every needed next-index array at once - each char
     # is visited once instead of once per present marker, keeping the build
     # (and the per-column append) gated on the marker's presence flag. The tilde /
@@ -776,7 +801,7 @@ func parseInline(s as string) {
         def irb as int init -1;
         def irp as int init -1;
         if ($c == "!" and $hasParen and $i + 1 < $n and $cs[$i + 1] == "[") {
-            def kb as int init matchLinkLabel($cs, $i + 1, $n);
+            def kb as int init $closeBracket[$i + 1];
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
                 $kp = matchLinkDest($cs, $kb + 1, $n);
@@ -815,7 +840,7 @@ func parseInline(s as string) {
         def rb as int init -1;
         def rp as int init -1;
         if ($c == "[" and $hasParen) {
-            def kb as int init matchLinkLabel($cs, $i, $n);
+            def kb as int init $closeBracket[$i];
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
                 $kp = matchLinkDest($cs, $kb + 1, $n);

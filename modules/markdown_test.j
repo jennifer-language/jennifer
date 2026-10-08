@@ -1639,3 +1639,22 @@ func testDefinitionList() {
     # A mid-line colon is not a definition.
     testing.assertEqual(toHtml("a line\nwith a colon: here\n"), "<p>a line with a colon: here</p>");
 }
+
+# PERFORMANCE/DOS: a run of unmatched `[` / `![` must not make parseInline
+# O(N^2) - toHtml is documented safe for untrusted Markdown. Bracket matches are
+# precomputed in one pass, so a large adversarial run renders promptly (this test
+# would time out under the old per-`[` forward re-scan) and the brackets stay
+# literal text, with no link / image produced.
+func testUnmatchedBracketsLinear() {
+    def out as string init toHtml(strings.repeat("[", 4000) + ")");
+    testing.assertContains($out, "[[[");
+    testing.assertTrue(not strings.contains($out, "<a "));
+    def out2 as string init toHtml(strings.repeat("![", 4000) + ")");
+    testing.assertTrue(not strings.contains($out2, "<img "));
+}
+
+# A nested bracket pair inside a link label still parses (the precompute balances
+# nested `[...]` exactly as the old counter did).
+func testNestedBracketLink() {
+    testing.assertEqual(toHtml("[a [b] c](http://x)"), '<p><a href="http://x">a [b] c</a></p>');
+}

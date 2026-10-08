@@ -236,16 +236,20 @@ export func safeUrl(url as string) {
     if (len($probe) == 0) {
         return $url;
     }
-    def probeStr as string init strings.join($probe, "");
     # The scheme is the run before the first ':', but only if that ':' comes
     # before any '/', '?', or '#' (else there is no scheme and the reference is
-    # relative, hence safe).
-    def scheme as string init "";
+    # relative, hence safe). Index the char list directly (O(1) per char) and
+    # collect the scheme into a list joined once, so a long or delimiter-less URL
+    # is O(n) - the old substring-per-char recount plus `+=` concat was O(n^2).
+    # No allowed scheme is more than a few characters, so the run is also capped:
+    # a longer prefix cannot match and is not accumulated (the scan still walks to
+    # the delimiter to decide hasScheme correctly).
+    def scheme as list of string init [];
     def hasScheme as bool init false;
     def j as int init 0;
-    def pn as int init len($probeStr);
+    def pn as int init len($probe);
     while ($j < $pn) {
-        def ch as string init strings.substring($probeStr, $j, $j + 1);
+        def ch as string init $probe[$j];
         if ($ch == ":") {
             $hasScheme = true;
             break;
@@ -253,13 +257,15 @@ export func safeUrl(url as string) {
         if ($ch == "/" or $ch == "?" or $ch == "#") {
             break;
         }
-        $scheme = $scheme + $ch;
+        if (len($scheme) <= 64) {
+            $scheme[] = $ch;
+        }
         $j = $j + 1;
     }
     if (not $hasScheme) {
         return $url;
     }
-    def low as string init strings.lower($scheme);
+    def low as string init strings.lower(strings.join($scheme, ""));
     if ($low == "http" or $low == "https" or $low == "mailto") {
         return $url;
     }
@@ -384,14 +390,6 @@ export func renderAllXhtml(nodes as list of Node) {
 
 def const MAX_PARSE_DEPTH as int init 512;
 def const MAX_PARSE_NODES as int init 200000;
-
-# Frame is a partially-built element on the parse stack: the tree is built
-# bottom-up, so on close a frame is folded into a Node and appended to its parent.
-def struct Frame {
-    tag as string,
-    attrs as list of Attr,
-    children as list of Node
-};
 
 # The Scan* structs carry a sub-scan's result plus the new cursor, so the
 # closure-free parser can thread the scan position through return values.
@@ -588,61 +586,6 @@ func readStartTag(cs as list of string, i as int, n as int) {
     return ScanTag{tag: $tag, attrs: $attrs, selfClose: $selfClose, i: $j};
 }
 
-# appendChild returns `frame` with `child` appended to its children (a
-# read-modify-write, since a chained append `frame.children[] = ...` is not
-# supported). It takes the frame, not the whole stack, so the caller writes the
-# result back into `$stack[top]` in place - the per-element stack copy that an
-# accumulator over the stack would cost is avoided.
-func appendChild(frame as Frame, child as Node) {
-    def kids as list of Node init $frame.children;
-    $kids[] = $child;
-    $frame.children = $kids;
-    return $frame;
-}
-
-# closeTag closes the nearest open frame matching `name` (an empty name closes just
-# the top frame, for EOF). Mismatched nesting is tolerated: frames above the match
-# are folded closed too, and an end tag with no open match is ignored.
-func closeTag(stack as list of Frame, name as string) {
-    def top as int init len($stack) - 1;
-    if ($top < 1) {
-        return $stack;
-    }
-    def target as int init -1;
-    if ($name == "") {
-        $target = $top;
-    } else {
-        def k as int init $top;
-        while ($k >= 1) {
-            if ($stack[$k].tag == $name) {
-                $target = $k;
-                $k = 0;
-            } else {
-                $k = $k - 1;
-            }
-        }
-    }
-    if ($target < 0) {
-        return $stack;
-    }
-    def s as list of Frame init $stack;
-    while (len($s) - 1 >= $target) {
-        def t2 as int init len($s) - 1;
-        def f as Frame init $s[$t2];
-        def node as Node init Node{
-            kind: NodeKind.Element,
-            tag: $f.tag,
-            attrs: $f.attrs,
-            children: $f.children,
-            text: ""
-        };
-        $s = lists.slice($s, 0, $t2);
-        def st2 as int init len($s) - 1;
-        $s[$st2] = appendChild($s[$st2], $node);
-    }
-    return $s;
-}
-
 /**
  * Parse an HTML string into a `Node` tree. The result is a synthetic `#root`
  * element whose `children` are the document's top-level nodes; walk it with
@@ -656,8 +599,29 @@ func closeTag(stack as list of Frame, name as string) {
 export func parse(src as string) {
     def cs as list of string init strings.chars($src);
     def n as int init len($cs);
-    def stack as list of Frame init [];
-    $stack[] = Frame{tag: "#root", attrs: [], children: []};
+    # The tree is built with a flat sibling buffer, not a stack of Frames whose
+    # children lists were re-copied on every append. A value-semantic
+    # `$stack[top] = appendChild(...)` copied the whole growing subtree per
+    # sibling, so N siblings under one parent cost O(N^2). Here `output` is a flat
+    # top-level list of completed sibling nodes - a leaf / closed-child append is
+    # O(1) - and each open element records where its children begin (`baseStack`).
+    # On close, that element's children are lifted out of `output` as one window
+    # and folded into a single node, so every node is copied into its parent
+    # exactly once (O(total nodes), vs the old O(siblings^2)). `outLen` is a
+    # logical top: nothing is ever physically truncated (a `lists.slice` would copy
+    # the kept prefix and its subtrees), so push / pop / close stay O(1) amortised.
+    # The ancestor stacks (tag / attrs / base) are indexed by `sp` and never
+    # sliced for the same reason. A `#root` sentinel sits at depth 0 so the close
+    # path also produces the document node.
+    def output as list of Node init [];
+    def outLen as int init 0;
+    def tagStack as list of string init [];
+    def attrStack as list of list of Attr init [];
+    def baseStack as list of int init [];
+    $tagStack[] = "#root";
+    $attrStack[] = [];
+    $baseStack[] = 0;
+    def sp as int init 1;
     def budget as int init 0;
     def i as int init 0;
     while ($i < $n) {
@@ -674,7 +638,50 @@ export func parse(src as string) {
         } elseif ($cs[$i] == "<" and $i + 1 < $n and $cs[$i + 1] == "/") {
             def et as ScanEnd init readEndTag($cs, $i + 2, $n);
             $i = $et.i;
-            $stack = closeTag($stack, $et.tag);
+            # Close the nearest open element matching the end tag; mismatched
+            # nesting is tolerated by folding every open element above the match
+            # closed too, and an end tag with no open match is ignored. #root
+            # (index 0) is never closed by a name.
+            def target as int init -1;
+            if ($et.tag == "") {
+                if ($sp > 1) {
+                    $target = $sp - 1;
+                }
+            } else {
+                def k as int init $sp - 1;
+                while ($k >= 1) {
+                    if ($tagStack[$k] == $et.tag) {
+                        $target = $k;
+                        $k = 0;
+                    } else {
+                        $k = $k - 1;
+                    }
+                }
+            }
+            while ($target >= 0 and $sp > $target) {
+                $sp = $sp - 1;
+                def base as int init $baseStack[$sp];
+                def kids as list of Node init [];
+                def c as int init $base;
+                while ($c < $outLen) {
+                    $kids[] = $output[$c];
+                    $c = $c + 1;
+                }
+                $outLen = $base;
+                def elem as Node init Node{
+                    kind: NodeKind.Element,
+                    tag: $tagStack[$sp],
+                    attrs: $attrStack[$sp],
+                    children: $kids,
+                    text: ""
+                };
+                if ($outLen < len($output)) {
+                    $output[$outLen] = $elem;
+                } else {
+                    $output[] = $elem;
+                }
+                $outLen = $outLen + 1;
+            }
         } elseif ($cs[$i] == "<" and $i + 1 < $n and validName($cs[$i + 1])) {
             def st as ScanTag init readStartTag($cs, $i + 1, $n);
             $i = $st.i;
@@ -683,15 +690,19 @@ export func parse(src as string) {
                 failParse("document exceeds the node budget");
             }
             if ($st.selfClose or isVoidTag($st.tag)) {
-                $stack[len($stack) - 1] = appendChild(
-                    $stack[len($stack) - 1],
-                    Node{
-                        kind: NodeKind.Element,
-                        tag: $st.tag,
-                        attrs: $st.attrs,
-                        children: [],
-                        text: ""
-                    });
+                def leaf as Node init Node{
+                    kind: NodeKind.Element,
+                    tag: $st.tag,
+                    attrs: $st.attrs,
+                    children: [],
+                    text: ""
+                };
+                if ($outLen < len($output)) {
+                    $output[$outLen] = $leaf;
+                } else {
+                    $output[] = $leaf;
+                }
+                $outLen = $outLen + 1;
             } elseif ($st.tag == "script" or $st.tag == "style") {
                 def close as string init "</" + $st.tag;
                 def end as int init findLit($cs, $i, $close);
@@ -706,24 +717,37 @@ export func parse(src as string) {
                         text: $rawText
                     };
                 }
-                $stack[len($stack) - 1] = appendChild(
-                    $stack[len($stack) - 1],
-                    Node{
-                        kind: NodeKind.Element,
-                        tag: $st.tag,
-                        attrs: $st.attrs,
-                        children: $body,
-                        text: ""
-                    });
+                def se as Node init Node{
+                    kind: NodeKind.Element,
+                    tag: $st.tag,
+                    attrs: $st.attrs,
+                    children: $body,
+                    text: ""
+                };
+                if ($outLen < len($output)) {
+                    $output[$outLen] = $se;
+                } else {
+                    $output[] = $se;
+                }
+                $outLen = $outLen + 1;
                 $i = findLit($cs, $end, ">");
                 if ($i < $n) {
                     $i = $i + 1;
                 }
             } else {
-                if (len($stack) + 1 > MAX_PARSE_DEPTH) {
+                if ($sp + 1 > MAX_PARSE_DEPTH) {
                     failParse("document exceeds the nesting depth");
                 }
-                $stack[] = Frame{tag: $st.tag, attrs: $st.attrs, children: []};
+                if ($sp < len($tagStack)) {
+                    $tagStack[$sp] = $st.tag;
+                    $attrStack[$sp] = $st.attrs;
+                    $baseStack[$sp] = $outLen;
+                } else {
+                    $tagStack[] = $st.tag;
+                    $attrStack[] = $st.attrs;
+                    $baseStack[] = $outLen;
+                }
+                $sp = $sp + 1;
             }
         } else {
             def tx as ScanText init readText($cs, $i, $n);
@@ -740,29 +764,50 @@ export func parse(src as string) {
                 if ($budget > MAX_PARSE_NODES) {
                     failParse("document exceeds the node budget");
                 }
-                $stack[len($stack) - 1] = appendChild(
-                    $stack[len($stack) - 1],
-                    Node{
-                        kind: NodeKind.Text,
-                        tag: "",
-                        attrs: [],
-                        children: [],
-                        text: unescape($content)
-                    });
+                def tnode as Node init Node{
+                    kind: NodeKind.Text,
+                    tag: "",
+                    attrs: [],
+                    children: [],
+                    text: unescape($content)
+                };
+                if ($outLen < len($output)) {
+                    $output[$outLen] = $tnode;
+                } else {
+                    $output[] = $tnode;
+                }
+                $outLen = $outLen + 1;
             }
         }
     }
-    while (len($stack) > 1) {
-        $stack = closeTag($stack, "");
+    # EOF: fold every still-open element closed (innermost first), including the
+    # #root sentinel, whose folded node is the document root. Mirrors the close
+    # loop above (no shared helper, since it would copy the whole output buffer).
+    while ($sp > 0) {
+        $sp = $sp - 1;
+        def base as int init $baseStack[$sp];
+        def kids as list of Node init [];
+        def c as int init $base;
+        while ($c < $outLen) {
+            $kids[] = $output[$c];
+            $c = $c + 1;
+        }
+        $outLen = $base;
+        def elem as Node init Node{
+            kind: NodeKind.Element,
+            tag: $tagStack[$sp],
+            attrs: $attrStack[$sp],
+            children: $kids,
+            text: ""
+        };
+        if ($outLen < len($output)) {
+            $output[$outLen] = $elem;
+        } else {
+            $output[] = $elem;
+        }
+        $outLen = $outLen + 1;
     }
-    def root as Frame init $stack[0];
-    return Node{
-        kind: NodeKind.Element,
-        tag: "#root",
-        attrs: [],
-        children: $root.children,
-        text: ""
-    };
+    return $output[0];
 }
 
 # --- node queries (exported) --------------------------------------------------

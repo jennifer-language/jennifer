@@ -236,3 +236,24 @@ func testParseDoctype() {
     testing.assertTrue(has($doc, "html/body"));
     testing.assertEqual(get($doc, "html/body").children[0].text, "hi");
 }
+
+# PERFORMANCE/DOS: many sibling nodes under one parent must not make parse()
+# O(N^2) - html.parse is a tolerant reader for untrusted documents. The flat
+# sibling buffer makes each append O(1), so this large document (tens of seconds
+# under the old per-append subtree copy) parses promptly and correctly. Reaching
+# the assertions at all is the non-quadratic signal.
+func testManySiblingsLinear() {
+    def doc as string init strings.repeat("<p class=\"x\">hi <b>w</b></p>", 4000);
+    def t as Node init parse($doc);
+    testing.assertEqual(len($t.children), 4000);
+    testing.assertEqual(render($t.children[0]), "<p class=\"x\">hi <b>w</b></p>");
+    testing.assertEqual(render($t.children[3999]), "<p class=\"x\">hi <b>w</b></p>");
+}
+
+# The flat-buffer rewrite preserves tolerant mismatched-nesting folding: an end
+# tag closes every open element above its match, and the stray content becomes a
+# following sibling.
+func testMismatchedNestingFold() {
+    testing.assertEqual(render(parse("<b><i>x</b>y").children[0]), "<b><i>x</i></b>");
+    testing.assertEqual(parse("<b><i>x</b>y").children[1].text, "y");
+}
