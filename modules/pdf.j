@@ -223,6 +223,32 @@ export def struct Page {
     annots as list of LinkAnnot
 };
 
+/**
+ * One drawing operation for the batch `draw`, mirroring the per-op functions:
+ * `Text` (a standard-font string, like `text`), `TextUnicode` (an embedded-font
+ * string, like `textUnicode`), `Line`, `Rect` (stroked or filled), `Color` (sets
+ * the stroke + fill colour for subsequent ops), `Image` (draws a loaded image,
+ * like `drawImage`), and `Link` (a URI rectangle, like `link`). Build a list of
+ * these and apply them in order with `draw`, which copies the page once instead
+ * of once per op - so drawing N elements is O(N) rather than O(N^2).
+ */
+export def enum DrawOp {
+    Text{x as int, y as int, font as string, size as int, str as string},
+    TextUnicode{x as int, y as int, lf as LoadedFont, size as int, str as string},
+    Line{fromX as int, fromY as int, toX as int, toY as int},
+    Rect{x as int, y as int, width as int, height as int, filled as bool},
+    Color{red as int, green as int, blue as int},
+    Image{img as Image, x as int, y as int, width as int, height as int},
+    Link{x as int, y as int, width as int, height as int, uri as string}
+};
+
+# GlyphRun is the shared result of laying out a unicode string: the hex glyph ids
+# for the content stream, and the per-glyph GlyphUse records for font subsetting.
+def struct GlyphRun {
+    hex as string,
+    uses as list of GlyphUse
+};
+
 func fail(msg as string) {
     throw Error{kind: "pdf", message: $msg, file: "", line: 0, col: 0};
 }
@@ -457,6 +483,71 @@ export func link(pg as Page, x as int, y as int, width as int, height as int, ur
     return $pg;
 }
 
+/**
+ * Apply a list of `DrawOp`s to a page in order, returning the updated page. This
+ * is the batch form of the per-op draw functions (`text` / `textUnicode` /
+ * `line` / `rect` / `color` / `drawImage` / `link`) and produces byte-identical
+ * output to calling them one after another. Prefer it when emitting many
+ * elements (table cells, a long run of lines or text): each per-op call copies
+ * the whole page, so a loop of them is O(ops^2), whereas `draw` copies the page
+ * once and appends every op's content under that single copy, which is O(ops).
+ * A `Color` op sets the colour for the ops after it, exactly as a `color` call
+ * would. `Image` ops reference an image you have already registered on the
+ * document with `addImage`.
+ * @param pg {Page} the page to draw onto
+ * @param ops {list of DrawOp} the operations to apply, in order
+ * @return {Page} a copy of the page with every op applied
+ */
+export func draw(pg as Page, ops as list of DrawOp) {
+    def out as Page init $pg;
+    # Accumulate every op's content fragment in a list joined once, and append
+    # font / glyph / annotation records to local lists, so the whole batch costs
+    # one page copy instead of one per op.
+    def parts as list of string init [$out.content];
+    def fonts as list of string init $out.fonts;
+    def glyphUses as list of GlyphUse init $out.glyphUses;
+    def annots as list of LinkAnnot init $out.annots;
+    for (def op in $ops) {
+        def o as DrawOp init $op;
+        match ($o) {
+            when Text(t) {
+                if (not isStandardFont($t.font)) {
+                    fail("unknown font '" + $t.font + "' (use a standard-14 base font)");
+                }
+                if (not lists.contains($fonts, $t.font)) {
+                    $fonts[] = $t.font;
+                }
+                $parts[] = textChunk($t.x, $t.y, $t.font, $t.size, $t.str);
+            }
+            when TextUnicode(u) {
+                def gr as GlyphRun init glyphRun($u.lf, $u.str);
+                for (def gu in $gr.uses) {
+                    $glyphUses[] = $gu;
+                }
+                $parts[] = textUnicodeChunk($u.x, $u.y, $u.lf.name, $u.size, $gr.hex);
+            }
+            when Line(l) { $parts[] = lineChunk($l.fromX, $l.fromY, $l.toX, $l.toY); }
+            when Rect(r) { $parts[] = rectChunk($r.x, $r.y, $r.width, $r.height, $r.filled); }
+            when Color(c) { $parts[] = colorChunk($c.red, $c.green, $c.blue); }
+            when Image(im) { $parts[] = imageChunk($im.img, $im.x, $im.y, $im.width, $im.height); }
+            when Link(lk) {
+                $annots[] = LinkAnnot{
+                    x: $lk.x,
+                    y: $lk.y,
+                    width: $lk.width,
+                    height: $lk.height,
+                    uri: $lk.uri
+                };
+            }
+        }
+    }
+    $out.content = strings.join($parts, "");
+    $out.fonts = $fonts;
+    $out.glyphUses = $glyphUses;
+    $out.annots = $annots;
+    return $out;
+}
+
 # hexByte renders a byte as two uppercase hex digits.
 func hexByte(b as int) {
     def one as bytes;
@@ -590,16 +681,17 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
     if (not lists.contains($pg.fonts, $font)) {
         $pg.fonts = lists.push($pg.fonts, $font);
     }
-    # Build this draw's chunk in its own parenthesised sub-expression, then one
-    # concat onto the page content. Without the parens, `$pg.content + a + b + ...`
-    # re-copies the whole (growing) content string at every `+`; grouping the
-    # chunk makes it a single append. Every draw op below follows the same shape -
-    # keep the parens.
-    $pg.content = $pg.content +
-        ("BT\n/" + $font + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n(" + escapeString($str) +
-        ") Tj\nET\n");
+    $pg.content = $pg.content + textChunk($x, $y, $font, $size, $str);
     return $pg;
+}
+
+# textChunk is the content-stream fragment for one standard-font string draw.
+# Shared by `text` and the `DrawOp.Text` arm of `draw` so both emit identical
+# bytes.
+func textChunk(x as int, y as int, font as string, size as int, str as string) {
+    return "BT\n/" + $font + " " + convert.toString($size) + " Tf\n" +
+        convert.toString($x) + " " + convert.toString($y) + " Td\n(" + escapeString($str) +
+        ") Tj\nET\n";
 }
 
 /**
@@ -667,25 +759,39 @@ export func textUnicode(
     lf as LoadedFont,
     size as int,
     str as string) {
+    def gr as GlyphRun init glyphRun($lf, $str);
+    for (def gu in $gr.uses) {
+        $pg.glyphUses = lists.push($pg.glyphUses, $gu);
+    }
+    $pg.content = $pg.content + textUnicodeChunk($x, $y, $lf.name, $size, $gr.hex);
+    return $pg;
+}
+
+# glyphRun lays out a unicode string against an embedded font: the hex glyph ids
+# for the content stream and the GlyphUse records for subsetting. Shared by
+# `textUnicode` and the `DrawOp.TextUnicode` arm of `draw`.
+func glyphRun(lf as LoadedFont, str as string) {
     def cps as list of int init [];
     for (def ch in strings.chars($str)) {
         $cps[] = convert.toCodepoint($ch);
     }
     def gids as list of int init font.glyphIds($lf.f, $cps); # one font copy, not one per char
     def hex as list of string init [];
+    def uses as list of GlyphUse init [];
     def i as int init 0;
     while ($i < len($cps)) {
         $hex[] = hexGid($gids[$i]);
-        $pg.glyphUses = lists.push(
-            $pg.glyphUses,
-            GlyphUse{font: $lf.name, gid: $gids[$i], cp: $cps[$i]});
+        $uses[] = GlyphUse{font: $lf.name, gid: $gids[$i], cp: $cps[$i]};
         $i = $i + 1;
     }
-    $pg.content = $pg.content +
-        ("BT\n/" + $lf.name + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + strings.join($hex, "") +
-        "> Tj\nET\n");
-    return $pg;
+    return GlyphRun{hex: strings.join($hex, ""), uses: $uses};
+}
+
+# textUnicodeChunk is the content-stream fragment for one embedded-font string.
+func textUnicodeChunk(x as int, y as int, name as string, size as int, hex as string) {
+    return "BT\n/" + $name + " " + convert.toString($size) + " Tf\n" +
+        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex +
+        "> Tj\nET\n";
 }
 
 /**
@@ -698,10 +804,13 @@ export func textUnicode(
  * @return {Page} a fresh page with the line added
  */
 export func line(pg as Page, fromX as int, fromY as int, toX as int, toY as int) {
-    $pg.content = $pg.content +
-        (convert.toString($fromX) + " " + convert.toString($fromY) + " m\n" +
-        convert.toString($toX) + " " + convert.toString($toY) + " l\nS\n");
+    $pg.content = $pg.content + lineChunk($fromX, $fromY, $toX, $toY);
     return $pg;
+}
+
+func lineChunk(fromX as int, fromY as int, toX as int, toY as int) {
+    return convert.toString($fromX) + " " + convert.toString($fromY) + " m\n" +
+        convert.toString($toX) + " " + convert.toString($toY) + " l\nS\n";
 }
 
 /**
@@ -716,14 +825,17 @@ export func line(pg as Page, fromX as int, fromY as int, toX as int, toY as int)
  * @return {Page} a fresh page with the rectangle added
  */
 export func rect(pg as Page, x as int, y as int, width as int, height as int, filled as bool) {
+    $pg.content = $pg.content + rectChunk($x, $y, $width, $height, $filled);
+    return $pg;
+}
+
+func rectChunk(x as int, y as int, width as int, height as int, filled as bool) {
     def op as string init "S";
     if ($filled) {
         $op = "f";
     }
-    $pg.content = $pg.content +
-        (convert.toString($x) + " " + convert.toString($y) + " " +
-        convert.toString($width) + " " + convert.toString($height) + " re\n" + $op + "\n");
-    return $pg;
+    return convert.toString($x) + " " + convert.toString($y) + " " +
+        convert.toString($width) + " " + convert.toString($height) + " re\n" + $op + "\n";
 }
 
 # colorComp formats a 0-255 component as a PDF 0..1 number.
@@ -749,13 +861,16 @@ func colorComp(v as int) {
  * @return {Page} a fresh page with the colour set
  */
 export func color(pg as Page, red as int, green as int, blue as int) {
+    $pg.content = $pg.content + colorChunk($red, $green, $blue);
+    return $pg;
+}
+
+func colorChunk(red as int, green as int, blue as int) {
     def r as string init colorComp($red);
     def g as string init colorComp($green);
     def b as string init colorComp($blue);
-    $pg.content = $pg.content +
-        ($r + " " + $g + " " + $b + " rg\n" + $r + " " + $g + " " + $b +
-        " RG\n");
-    return $pg;
+    return $r + " " + $g + " " + $b + " rg\n" + $r + " " + $g + " " + $b +
+        " RG\n";
 }
 
 # beU16 reads a big-endian unsigned 16-bit integer at off.
@@ -1127,11 +1242,14 @@ export func addImage(doc as Document, img as Image) {
  * @return {Page} a fresh page with the image drawn
  */
 export func drawImage(pg as Page, img as Image, x as int, y as int, width as int, height as int) {
-    $pg.content = $pg.content +
-        ("q\n" + convert.toString($width) + " 0 0 " +
-        convert.toString($height) + " " + convert.toString($x) + " " + convert.toString($y) +
-        " cm\n/" + $img.name + " Do\nQ\n");
+    $pg.content = $pg.content + imageChunk($img, $x, $y, $width, $height);
     return $pg;
+}
+
+func imageChunk(img as Image, x as int, y as int, width as int, height as int) {
+    return "q\n" + convert.toString($width) + " 0 0 " +
+        convert.toString($height) + " " + convert.toString($x) + " " + convert.toString($y) +
+        " cm\n/" + $img.name + " Do\nQ\n";
 }
 
 /**

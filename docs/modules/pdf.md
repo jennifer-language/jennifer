@@ -31,6 +31,25 @@ integers. Common page sizes: US Letter `612 x 792`, A4 `595 x 842`. Colours are
 Every builder is **value-semantic** - it returns a fresh copy and never mutates
 its argument, so you thread them (`$p = pdf.text($p, ...)`).
 
+Because each per-op call copies the whole page, drawing many elements one call at
+a time is O(ops²). For a page with lots of content (a table, a long run of lines
+or text), build a `list of DrawOp` and apply it once with `pdf.draw`, which
+copies the page a single time and is O(ops). It produces byte-identical output to
+the equivalent sequential calls.
+
+```jennifer
+def ops as list of pdf.DrawOp init [];
+for (def row in $rows) {
+    $ops[] = pdf.DrawOp.Text{x: 72, y: $row.y, font: "Helvetica", size: 10, str: $row.text};
+}
+def p as pdf.Page init pdf.draw(pdf.page(612, 792), $ops);
+```
+
+The variants mirror the per-op functions: `DrawOp.Text` / `DrawOp.TextUnicode`
+(embedded font), `DrawOp.Line`, `DrawOp.Rect` (`filled`), `DrawOp.Color` (sets
+the colour for ops after it), `DrawOp.Image` (an image already registered with
+`addImage`), and `DrawOp.Link`.
+
 | Call | Returns | |
 | ---- | ------- | - |
 | `pdf.document()` | `Document` | an empty document |
@@ -54,6 +73,7 @@ its argument, so you thread them (`$p = pdf.text($p, ...)`).
 | `pdf.rect(pg, x, y, width, height, filled)` | `Page` | draw a rectangle (fill or stroke) |
 | `pdf.link(pg, x, y, width, height, uri)` | `Page` | a clickable link annotation (`/Link` + `/URI`); an invisible rect over drawn text makes it a hyperlink |
 | `pdf.color(pg, red, green, blue)` | `Page` | set fill + stroke colour for what follows |
+| `pdf.draw(pg, ops)` | `Page` | apply a `list of DrawOp` in order (batch form of the per-op draws; see below) |
 | `pdf.addPage(doc, pg)` | `Document` | append a page |
 | `pdf.pageLabel()` | `PageLabel` | a blank running header / footer spec (Helvetica 9pt, 36pt margin) |
 | `pdf.setHeader(doc, label)` | `Document` | attach a running header, drawn on every page at render |
