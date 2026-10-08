@@ -1780,15 +1780,15 @@ func renderWhereClause(q as Query, startN as int) {
             $stmt = $stmt + " " + $c.connector + " ";
         }
         if ($c.op == "IN" or $c.op == "NOT IN") {
-            $stmt = $stmt + $c.column + " " + $c.op + " (";
+            # Collect placeholders into a list and join once: accumulating the
+            # list into the local string per value is O(values^2) for a large
+            # whereIn / batch-key set.
+            def phs as list of string init [];
             for (def k as int init 0; $k < $c.valueCount; $k = $k + 1) {
-                if ($k > 0) {
-                    $stmt = $stmt + ", ";
-                }
-                $stmt = $stmt + ph($q.dialect, $n);
+                $phs[] = ph($q.dialect, $n);
                 $n = $n + 1;
             }
-            $stmt = $stmt + ")";
+            $stmt = $stmt + $c.column + " " + $c.op + " (" + strings.join($phs, ", ") + ")";
         } elseif ($c.op == "IS NULL" or $c.op == "IS NOT NULL") {
             $stmt = $stmt + $c.column + " " + $c.op; # no placeholder
         } elseif ($c.op == "BETWEEN") {

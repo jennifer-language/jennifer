@@ -166,16 +166,18 @@ export func add(set as Set, name as string, src as string) {
     # accumulates in a list and joins once, so a template with many actions is
     # not re-copied per action (O(N^2) in the source size).
     def residual as list of string init [];
-    def rest as string init trimMarkers($src);
+    def cs as list of string init strings.chars(trimMarkers($src));
+    def n as int init len($cs);
+    def pos as int init 0;
     while (true) {
-        def i as int init strings.indexOf($rest, '{{');
+        def i as int init tNextOpen($cs, $pos);
         if ($i < 0) {
-            $residual[] = $rest;
+            $residual[] = tSlice($cs, $pos, $n);
             break;
         }
-        def pre as string init strings.substring($rest, 0, $i);
-        def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
-        def j as int init closeActionIndex($afterOpen);
+        def pre as string init tSlice($cs, $pos, $i);
+        def actionStart as int init $i + 2;
+        def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
             throw Error{
                 kind: "tengine",
@@ -185,17 +187,19 @@ export func add(set as Set, name as string, src as string) {
                 col: 0
             };
         }
-        def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
-        def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
+        def action as string init strings.trim(tSlice($cs, $actionStart, $j));
+        def tailStart as int init $j + 2;
         if (actionKind($action) == "define") {
             $residual[] = $pre;
             def na as NameArg init parseNameArg($action);
-            def bp as BlockParts init takeBlock($tail);
+            def bp as BlockParts init takeBlock(tSlice($cs, $tailStart, $n));
             $s = addRaw($s, $na.name, $bp.thenPart);
-            $rest = $bp.remainder;
+            $cs = strings.chars($bp.remainder);
+            $n = len($cs);
+            $pos = 0;
         } else {
             $residual[] = $pre + '{{' + $action + '}}';
-            $rest = $tail;
+            $pos = $tailStart;
         }
     }
     return addRaw($s, $name, strings.join($residual, ""));
@@ -248,17 +252,19 @@ func exec(
     # Collect output fragments and join once: an accumulating `+` over a large
     # template (or a big rendered sub-block) is O(N^2) in the output size.
     def parts as list of string init [];
-    def rest as string init $src;
+    def cs as list of string init strings.chars($src);
+    def n as int init len($cs);
+    def pos as int init 0;
     def env as map of string to json.Value init $vars;
     while (true) {
-        def i as int init strings.indexOf($rest, '{{');
+        def i as int init tNextOpen($cs, $pos);
         if ($i < 0) {
-            $parts[] = $rest;
+            $parts[] = tSlice($cs, $pos, $n);
             break;
         }
-        $parts[] = strings.substring($rest, 0, $i);
-        def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
-        def j as int init closeActionIndex($afterOpen);
+        $parts[] = tSlice($cs, $pos, $i);
+        def actionStart as int init $i + 2;
+        def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
             throw Error{
                 kind: "tengine",
@@ -268,18 +274,22 @@ func exec(
                 col: 0
             };
         }
-        def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
-        def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
+        def action as string init strings.trim(tSlice($cs, $actionStart, $j));
+        def tailStart as int init $j + 2;
         def kind as string init actionKind($action);
         if ($kind == "if" or $kind == "range" or $kind == "with" or $kind == "block") {
-            def bp as BlockParts init takeBlock($tail);
+            def bp as BlockParts init takeBlock(tSlice($cs, $tailStart, $n));
             $parts[] = execControl($set, $kind, $action, $bp, $node, $root, $env, $depth);
-            $rest = $bp.remainder;
+            $cs = strings.chars($bp.remainder);
+            $n = len($cs);
+            $pos = 0;
         } elseif ($kind == "assign") {
             $env = execAssign($action, $node, $root, $env);
-            $rest = $tail;
+            $pos = $tailStart;
         } elseif ($kind == "define") {
-            $rest = takeBlock($tail).remainder;
+            $cs = strings.chars(takeBlock(tSlice($cs, $tailStart, $n)).remainder);
+            $n = len($cs);
+            $pos = 0;
         } elseif ($kind == "template") {
             def na as NameArg init parseNameArg($action);
             def argNode as json.Value init $node;
@@ -302,12 +312,12 @@ func exec(
                 $argNode,
                 emptyVars(),
                 $depth + 1);
-            $rest = $tail;
+            $pos = $tailStart;
         } elseif ($kind == "comment" or $kind == "end" or $kind == "else") {
-            $rest = $tail;
+            $pos = $tailStart;
         } else {
             $parts[] = evalOutput($action, $node, $root, $env);
-            $rest = $tail;
+            $pos = $tailStart;
         }
     }
     return strings.join($parts, "");
@@ -438,11 +448,15 @@ func takeBlock(src as string) {
     def depth as int init 0;
     def inElse as bool init false;
     def opened as int init 0;
-    def thenPart as string init "";
-    def elsePart as string init "";
-    def rest as string init $src;
+    # Parts accumulate in lists and join once at the end; appending to a string
+    # per action is O(N^2) in the block body size.
+    def thenList as list of string init [];
+    def elseList as list of string init [];
+    def cs as list of string init strings.chars($src);
+    def n as int init len($cs);
+    def pos as int init 0;
     while (true) {
-        def i as int init strings.indexOf($rest, '{{');
+        def i as int init tNextOpen($cs, $pos);
         if ($i < 0) {
             throw Error{
                 kind: "tengine",
@@ -452,14 +466,14 @@ func takeBlock(src as string) {
                 col: 0
             };
         }
-        def pre as string init strings.substring($rest, 0, $i);
+        def pre as string init tSlice($cs, $pos, $i);
         if ($inElse) {
-            $elsePart = $elsePart + $pre;
+            $elseList[] = $pre;
         } else {
-            $thenPart = $thenPart + $pre;
+            $thenList[] = $pre;
         }
-        def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
-        def j as int init closeActionIndex($afterOpen);
+        def actionStart as int init $i + 2;
+        def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
             throw Error{
                 kind: "tengine",
@@ -469,44 +483,48 @@ func takeBlock(src as string) {
                 col: 0
             };
         }
-        def action as string init strings.trim(strings.substring($afterOpen, 0, $j));
-        def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
+        def action as string init strings.trim(tSlice($cs, $actionStart, $j));
+        def tailStart as int init $j + 2;
         def fw as string init firstWord($action);
         def literal as string init '{{' + $action + '}}';
         if ($fw == "if" or $fw == "range" or $fw == "with" or $fw == "block" or $fw == "define") {
             $depth = $depth + 1;
             if ($inElse) {
-                $elsePart = $elsePart + $literal;
+                $elseList[] = $literal;
             } else {
-                $thenPart = $thenPart + $literal;
+                $thenList[] = $literal;
             }
         } elseif ($action == "end") {
             if ($depth == 0) {
                 return BlockParts{
-                    thenPart: $thenPart,
-                    elsePart: repeatEnds($elsePart, $opened),
-                    remainder: $tail
+                    thenPart: strings.join($thenList, ""),
+                    elsePart: repeatEnds(strings.join($elseList, ""), $opened),
+                    remainder: tSlice($cs, $tailStart, $n)
                 };
             }
             $depth = $depth - 1;
             if ($inElse) {
-                $elsePart = $elsePart + $literal;
+                $elseList[] = $literal;
             } else {
-                $thenPart = $thenPart + $literal;
+                $thenList[] = $literal;
             }
         } elseif ($fw == "else" and $depth == 0) {
-            def es as ElseState init handleElse($action, $inElse, $opened, $elsePart);
+            def es as ElseState init handleElse(
+                $action,
+                $inElse,
+                $opened,
+                strings.join($elseList, ""));
             $inElse = $es.inElse;
             $opened = $es.opened;
-            $elsePart = $es.elsePart;
+            $elseList = [$es.elsePart];
         } else {
             if ($inElse) {
-                $elsePart = $elsePart + $literal;
+                $elseList[] = $literal;
             } else {
-                $thenPart = $thenPart + $literal;
+                $thenList[] = $literal;
             }
         }
-        $rest = $tail;
+        $pos = $tailStart;
     }
 }
 
@@ -605,26 +623,46 @@ func lookup(base as json.Value, dotted as string) {
     return nullVal();
 }
 
-# tokenize splits an expression into terms, honoring quotes and parentheses.
-# closeActionIndex returns the rune index within `s` (the text right after a
-# `{{`) of the `}}` that ends the action, or -1 if it is unterminated. A `}}`
-# inside a quoted string does not count; when the action is a `{{/* ... */}}`
-# comment the scan runs to the `*/}}` terminator, so a `}}` inside the comment
-# body is ignored too. This replaces a naive `indexOf("}}")` that cut on the
-# first `}}` regardless of quoting or comments.
-func closeActionIndex(s as string) {
-    def cs as list of string init strings.chars($s);
+# The template scanners below walk a precomputed rune list (`strings.chars` once
+# per source) with an integer cursor, instead of repeatedly re-slicing a
+# shrinking `rest` string. `strings.substring` is O(source length) on every call
+# (it recounts the runes), so threading the remainder made a template with N
+# actions O(N^2); indexing a shared rune list keeps each step proportional to the
+# token it consumes, so scanning is linear in the source size.
+
+# tNextOpen returns the absolute index of the next `{{` at or after `from`, or -1.
+func tNextOpen(cs as list of string, from as int) {
+    def n as int init len($cs);
+    def i as int init $from;
+    while ($i + 1 < $n) {
+        if ($cs[$i] == '{' and $cs[$i + 1] == '{') {
+            return $i;
+        }
+        $i = $i + 1;
+    }
+    return -1;
+}
+
+# tSlice returns the substring cs[a..b) as a string (b-a work, not source-length).
+func tSlice(cs as list of string, a as int, b as int) {
+    return strings.join(lists.slice($cs, $a, $b), "");
+}
+
+# closeActionAt finds the `}}` that ends an action, scanning a shared rune list
+# from `from` (the index just after an opening `{{`) and returning the absolute
+# index of the matching top-level `}}` (its first `}`), or -1 if unterminated. A
+# `}}` inside a quoted string does not count; in a `{{/* ... */}}` comment the
+# scan runs to the `*/}}` terminator, so a `}}` in the comment body is ignored.
+func closeActionAt(cs as list of string, from as int) {
     def n as int init len($cs);
     # Detect a comment: skip leading whitespace and an optional `-` trim marker,
     # then look for `/*`.
-    def k as int init 0;
+    def k as int init $from;
     while ($k < $n and
         ($cs[$k] == " " or $cs[$k] == "\t" or $cs[$k] == "\r" or $cs[$k] == "\n" or $cs[$k] == "-")) {
         $k = $k + 1;
     }
     if ($k + 1 < $n and $cs[$k] == "/" and $cs[$k + 1] == "*") {
-        # Comment body: find `*/`, then the `}}` after it (allowing a trailing
-        # `-` trim marker and whitespace in between).
         def i as int init $k + 2;
         while ($i + 1 < $n) {
             if ($cs[$i] == "*" and $cs[$i + 1] == "/") {
@@ -640,9 +678,8 @@ func closeActionIndex(s as string) {
         }
         return -1;
     }
-    # Non-comment: the first top-level `}}` outside a quoted string.
     def quote as string init "";
-    def i as int init 0;
+    def i as int init $from;
     while ($i < $n) {
         def c as string init $cs[$i];
         if (len($quote) > 0) {
@@ -1401,16 +1438,18 @@ func trimMarkers(src as string) {
     # Pieces accumulate and join once: growing `out` with `+` per action is
     # O(N^2) over the action count of a large template.
     def pieces as list of string init [];
-    def rest as string init $src;
+    def cs as list of string init strings.chars($src);
+    def n as int init len($cs);
+    def pos as int init 0;
     while (true) {
-        def i as int init strings.indexOf($rest, '{{');
+        def i as int init tNextOpen($cs, $pos);
         if ($i < 0) {
-            $pieces[] = $rest;
+            $pieces[] = tSlice($cs, $pos, $n);
             break;
         }
-        def pre as string init strings.substring($rest, 0, $i);
-        def afterOpen as string init strings.substring($rest, $i + 2, len($rest));
-        def j as int init closeActionIndex($afterOpen);
+        def pre as string init tSlice($cs, $pos, $i);
+        def actionStart as int init $i + 2;
+        def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
             throw Error{
                 kind: "tengine",
@@ -1420,8 +1459,8 @@ func trimMarkers(src as string) {
                 col: 0
             };
         }
-        def inner as string init strings.substring($afterOpen, 0, $j);
-        def tail as string init strings.substring($afterOpen, $j + 2, len($afterOpen));
+        def inner as string init tSlice($cs, $actionStart, $j);
+        def tailStart as int init $j + 2;
         def trimLeft as bool init strings.startsWith($inner, "-");
         def trimRight as bool init strings.endsWith($inner, "-");
         def clean as string init $inner;
@@ -1435,10 +1474,13 @@ func trimMarkers(src as string) {
             $pre = strings.trimRight($pre);
         }
         $pieces[] = $pre + '{{' + $clean + '}}';
+        $pos = $tailStart;
         if ($trimRight) {
-            $tail = strings.trimLeft($tail);
+            while ($pos < $n and
+                ($cs[$pos] == " " or $cs[$pos] == "\t" or $cs[$pos] == "\r" or $cs[$pos] == "\n")) {
+                $pos = $pos + 1;
+            }
         }
-        $rest = $tail;
     }
     return strings.join($pieces, "");
 }
