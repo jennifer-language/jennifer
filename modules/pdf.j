@@ -253,6 +253,24 @@ func fail(msg as string) {
     throw Error{kind: "pdf", message: $msg, file: "", line: 0, col: 0};
 }
 
+# throwPdfImage re-raises an image-parse failure with the module's own kind "pdf"
+# (the documented contract). parseJpeg / parsePng walk attacker-shaped bytes, so a
+# truncated segment or an oversized declared dimension surfaces from deep in the
+# reader as kind "runtime" (an index-out-of-bounds or an integer overflow); a
+# kind "pdf" error (from fail) is already correct and passes through unchanged.
+func throwPdfImage(e as Error, name as string) {
+    if ($e.kind == "pdf") {
+        throw $e;
+    }
+    throw Error{
+        kind: "pdf",
+        message: "loadImage: '" + $name + "' is a malformed image: " + $e.message,
+        file: "",
+        line: 0,
+        col: 0
+    };
+}
+
 # checkName validates a font / image resource name: a letter, then letters or
 # digits (the documented contract). Resource names are written into the PDF
 # content stream and the /Font / /XObject resource dictionaries UNESCAPED, so
@@ -1206,11 +1224,19 @@ export func loadImage(name as string, data as bytes) {
         fail("loadImage: '" + $name + "' is too short to be an image");
     }
     if ($data[0] == 0xFF and $data[1] == 0xD8 and $data[2] == 0xFF) {
-        return parseJpeg($name, $data);
+        try {
+            return parseJpeg($name, $data);
+        } catch (e) {
+            throwPdfImage($e, $name);
+        }
     }
     if ($data[0] == 0x89 and $data[1] == 0x50 and $data[2] == 0x4E and $data[3] == 0x47 and
         $data[4] == 0x0D and $data[5] == 0x0A and $data[6] == 0x1A and $data[7] == 0x0A) {
-        return parsePng($name, $data);
+        try {
+            return parsePng($name, $data);
+        } catch (e) {
+            throwPdfImage($e, $name);
+        }
     }
     fail("loadImage: '" + $name + "' is not a PNG or JPEG");
 }

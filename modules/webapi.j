@@ -901,7 +901,12 @@ export func page(ctx as web.Context, defaultLimit as int, maxLimit as int) {
 }
 
 func isDigits(s as string) {
-    if (len($s) == 0) {
+    # Cap the length so a value accepted here always fits in int64: a 19-digit
+    # all-digit string can exceed it, and page() would then call convert.toInt on
+    # it and throw kind "runtime" - turning an oversized `limit` / `offset` query
+    # into a 500 instead of clamping. An over-long value is treated as absent (the
+    # default limit / a zero offset), which page() then clamps as usual.
+    if (len($s) == 0 or len($s) > 18) {
         return false;
     }
     def b as bytes init convert.bytesFromString($s, "utf-8");

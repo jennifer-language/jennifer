@@ -783,3 +783,76 @@ func testAddPagesBatch() {
     def b as Document init addPage(addPage(document(), page(612, 792)), page(612, 792));
     testing.assertEqual(len($a.pages), len($b.pages));
 }
+
+# ROBUSTNESS: a malformed image (a truncated JPEG, an oversized-dimension PNG)
+# fails with the module's own kind "pdf", not the raw kind "runtime" of a
+# bytes-index / integer-overflow fault deep in parseJpeg / parsePng, so a caller
+# dispatching on e.kind catches it.
+func loadTruncatedJpeg() {
+    def jp as bytes;
+    def jbytes as list of int init [
+        0xFF,
+        0xD8,
+        0xFF,
+        0xE0,
+        0x00,
+        0x08,
+        0x41,
+        0x41,
+        0x41,
+        0x41,
+        0xFF,
+        0xC0,
+        0x00
+    ];
+    for (def x in $jbytes) {
+        $jp[] = $x;
+    }
+    return loadImage("img", $jp);
+}
+func loadOversizedPng() {
+    def pn as bytes;
+    def pbytes as list of int init [
+        0x89,
+        0x50,
+        0x4E,
+        0x47,
+        0x0D,
+        0x0A,
+        0x1A,
+        0x0A,
+        0x00,
+        0x00,
+        0x00,
+        0x0D,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0x08,
+        0x06,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00
+    ];
+    for (def x in $pbytes) {
+        $pn[] = $x;
+    }
+    return loadImage("img", $pn);
+}
+func testMalformedImageKindPdf() {
+    testing.assertThrows("loadTruncatedJpeg", "pdf");
+    testing.assertThrows("loadOversizedPng", "pdf");
+}

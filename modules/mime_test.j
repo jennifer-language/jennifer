@@ -482,3 +482,12 @@ func testHeaderInjectionStripped() {
     def a as Part init attachment("a\r\nX-Inj: 1.txt", "text/plain", "x");
     testing.assertTrue(not strings.contains(encode($a), "\r\nX-Inj:"));
 }
+
+# ROBUSTNESS: parse() tolerates a malformed base64 body (falling back to the raw
+# bytes) instead of throwing kind runtime and aborting the whole message - matching
+# how a bad charset / encoded-word / unknown transfer encoding already degrades.
+func testBadBase64BodyTolerated() {
+    def p as Part init parse("Content-Type: text/plain\r\n" +
+        "Content-Transfer-Encoding: base64\r\n\r\n!!!bad!!!");
+    testing.assertEqual(body($p), "!!!bad!!!");
+}

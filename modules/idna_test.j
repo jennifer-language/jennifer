@@ -85,3 +85,14 @@ func testDecodeLabelRejectsMalformed() {
     testing.assertThrows("decodeInvalidDigit", "idna");
     testing.assertThrows("decodeTruncated", "idna");
 }
+
+# ROBUSTNESS: a punycode label whose decode accumulators would overflow int64
+# fails with the module's own kind "idna" (an RFC 3492 section 6.4 overflow
+# check), not the raw kind "runtime" of an integer-overflow fault - a hostname
+# from a peer or certificate could otherwise trigger the mislabelled error.
+func decodeOverflowLabel() {
+    return toUnicode("xn--99999999999999999999999999999");
+}
+func testPunycodeOverflowKindIdna() {
+    testing.assertThrows("decodeOverflowLabel", "idna");
+}

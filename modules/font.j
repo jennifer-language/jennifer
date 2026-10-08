@@ -173,6 +173,29 @@ export def struct Font {
  * @throws {Error} on a malformed font or an unrecognised container
  */
 export func parse(b as bytes) {
+    # parse walks attacker-shaped bytes: a bogus table count or offset can index
+    # past the buffer deep in a reader (cmap, name, metrics, loca / glyf) and
+    # surface as kind "runtime" (a bytes-index fault or an invalid-UTF-8 decode).
+    # Wrap the whole parse so a malformed font fails with the module's own kind
+    # "font" (the documented contract); a kind "font" error raised below is already
+    # correct and passes through unchanged.
+    try {
+        return parseFont($b);
+    } catch (e) {
+        if ($e.kind == "font") {
+            throw $e;
+        }
+        throw Error{
+            kind: "font",
+            message: "font.parse: malformed font: " + $e.message,
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+}
+
+func parseFont(b as bytes) {
     if (len($b) < 12) {
         throw Error{
             kind: "font",

@@ -153,11 +153,24 @@ func emptyBytes() {
 # decodeBytes reverses the transfer encoding to the raw content bytes. Unlike
 # decodeBody it never forces UTF-8, so a binary attachment survives intact.
 func decodeBytes(raw as string, enc as string) {
+    # parse() never fails on bad input: a bad charset, encoded-word, or unknown
+    # transfer encoding all degrade gracefully, so a malformed base64 /
+    # quoted-printable body must too - fall back to the raw bytes rather than
+    # throwing kind "runtime" and aborting the whole message. `raw` is a Jennifer
+    # string (valid UTF-8), so the fallback bytes are always well-formed.
     if ($enc == "base64") {
-        return encoding.fromText(stripWS($raw), "base64");
+        try {
+            return encoding.fromText(stripWS($raw), "base64");
+        } catch (e) {
+            return convert.bytesFromString($raw, "utf-8");
+        }
     }
     if ($enc == "quoted-printable") {
-        return encoding.fromText($raw, "quoted-printable");
+        try {
+            return encoding.fromText($raw, "quoted-printable");
+        } catch (e) {
+            return convert.bytesFromString($raw, "utf-8");
+        }
     }
     return convert.bytesFromString($raw, "utf-8");
 }

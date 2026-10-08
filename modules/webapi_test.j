@@ -297,4 +297,9 @@ func testIsDigits() {
     testing.assertFalse(isDigits(""));
     testing.assertFalse(isDigits("12a"));
     testing.assertFalse(isDigits("-1"));
+    # ROBUSTNESS: an 18-digit value fits in int64 and is accepted; a 19+-digit
+    # value is rejected (treated as absent) so page() never calls convert.toInt on
+    # a string that would overflow and turn an oversized limit/offset into a 500.
+    testing.assertTrue(isDigits("999999999999999999")); # 18 digits, fits int64
+    testing.assertFalse(isDigits("99999999999999999999")); # 20 digits, would overflow
 }

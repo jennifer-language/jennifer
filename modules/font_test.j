@@ -296,3 +296,32 @@ func outlineCffBomb() {
     def f as Font init parse(encoding.fromText(FIXTURE_CFFBOMB, "base64"));
     glyphPath($f, 66); # the operand-bomb glyph
 }
+
+# ROBUSTNESS: a corrupt font (here a valid sfnt version but a bogus table count
+# that makes the directory loop index past the end) fails with the module's own
+# kind "font", not the raw kind "runtime" of a bytes-index / invalid-UTF-8 fault
+# deep in a reader, so a caller dispatching on e.kind catches it.
+func parseCorruptFont() {
+    def b as bytes;
+    def bytes0 as list of int init [
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0xFF,
+        0xFF,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00
+    ];
+    for (def x in $bytes0) {
+        $b[] = $x;
+    }
+    return parse($b);
+}
+func testCorruptFontKindFont() {
+    testing.assertThrows("parseCorruptFont", "font");
+}

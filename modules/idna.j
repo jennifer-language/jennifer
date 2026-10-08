@@ -29,6 +29,10 @@ def const SKEW as int init 38;
 def const DAMP as int init 700;
 def const INITIAL_BIAS as int init 72;
 def const INITIAL_N as int init 128;
+# Largest int64, for the RFC 3492 section 6.4 overflow guards in the decoder: the
+# accumulators are checked against this *before* each multiply, since the multiply
+# itself would otherwise be a positioned int-overflow runtime error.
+def const MAXINT as int init 9223372036854775807;
 
 # --- small helpers (private) ---------------------------------------
 
@@ -234,6 +238,18 @@ func decodeStep(cs as list of string, ic as int, i as int, bias as int) {
             };
         }
         $cur = $cur + 1;
+        # RFC 3492 section 6.4 overflow check: reject before `acc + digit * w` can
+        # overflow int64 (which would surface as kind "runtime"). acc, digit and w
+        # are all non-negative here.
+        if ($w > 0 and $digit > (MAXINT - $acc) // $w) {
+            throw Error{
+                kind: "idna",
+                message: "idna: punycode value overflow",
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
         $acc = $acc + $digit * $w;
         def t as int init threshold($k, $bias);
         if ($digit < $t) {
@@ -242,7 +258,17 @@ func decodeStep(cs as list of string, ic as int, i as int, bias as int) {
             $res[] = $cur;
             return $res;
         }
-        $w = $w * (BASE - $t);
+        def factor as int init BASE - $t;
+        if ($factor > 0 and $w > MAXINT // $factor) {
+            throw Error{
+                kind: "idna",
+                message: "idna: punycode value overflow",
+                file: "",
+                line: 0,
+                col: 0
+            };
+        }
+        $w = $w * $factor;
         $k = $k + BASE;
     }
     return [];
