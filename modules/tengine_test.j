@@ -405,3 +405,27 @@ func testCommentWithBracesInBody() {
         render(oneSet('a{{/* note }} here */}}b'), "main", json.decode("null")),
         "ab");
 }
+
+# SECURITY: the MAX_NESTING cap bounds recursion depth, not total work, so a chain
+# where each template includes the previous one twice ("billion laughs") renders
+# 2^depth leaf copies at a shallow depth. A render-wide output budget trips before
+# the exponential runs away, throwing kind tengine instead of pinning CPU/memory.
+# (A 100 KB leaf makes the 10 MiB budget trip after ~100 expansions, so the test
+# is fast and deterministic.)
+func runawayExpansion() {
+    def set as Set init newSet();
+    $set = add($set, "t0", strings.repeat("A", 100000));
+    def k as int init 1;
+    while ($k <= 12) {
+        def prev as string init "t" + convert.toString($k - 1);
+        $set = add(
+            $set,
+            "t" + convert.toString($k),
+            '{{template "' + $prev + '"}}{{template "' + $prev + '"}}');
+        $k = $k + 1;
+    }
+    return render($set, "t12", json.decode('{}'));
+}
+func testExpansionBudgetTrips() {
+    testing.assertThrows("runawayExpansion", "tengine");
+}

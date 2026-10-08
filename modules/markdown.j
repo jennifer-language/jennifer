@@ -2261,6 +2261,14 @@ func safeHref(url as string) {
 # `style`, which pass html.attr's name-shape check yet would let untrusted
 # Markdown forge a live event handler (`![x](u){onerror="..."}`) or inject CSS.
 func mdAttrSafe(name as string) {
+    # The name must be a valid HTML attribute name (ASCII letter start, then
+    # letters / digits / hyphen) - the exact shape html.attr enforces. An
+    # untrusted `{...}` key like `data-x"y` or `data-é` passed the data- / aria-
+    # prefix check but then made html.attr throw, aborting toHtml; it is dropped
+    # here instead. Checked on the original name the renderer would emit.
+    if (not regex.matches("^[A-Za-z][A-Za-z0-9-]*$", $name)) {
+        return false;
+    }
     def n as string init strings.lower($name);
     if (strings.startsWith($n, "data-") or strings.startsWith($n, "aria-")) {
         return true;

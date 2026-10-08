@@ -40,6 +40,7 @@ use lists;
 use maps;
 use math;
 use convert;
+use kv;
 
 /**
  * A value-semantic set of named template sources (kept as two parallel lists).
@@ -104,6 +105,39 @@ def struct Verb {
 # interpreter's stack dies - a fatal crash, not a catchable error. 256 levels
 # is far beyond any legitimate page.
 def const MAX_NESTING as int init 256;
+
+# MAX_OUTPUT_BYTES bounds the TOTAL output a single render may produce, across
+# every template / block expansion. MAX_NESTING bounds recursion depth, not work:
+# a chain where each template includes the previous one twice renders 2^depth
+# leaf copies at a shallow depth (a "billion laughs"), so the depth cap never
+# fires. Counting produced output into a shared counter and throwing the moment
+# it crosses this budget caps the work at O(budget) regardless of the nesting
+# arithmetic. Generous (10 MiB) so no legitimate page is affected.
+def const MAX_OUTPUT_BYTES as int init 10485760;
+
+# countOut adds a produced output fragment to the render-wide shared counter and
+# throws when the running total crosses MAX_OUTPUT_BYTES. The counter lives in a
+# kv.Store whose handle is threaded through exec (a value-semantic copy of the
+# handle still shares one backing map), so the total aggregates across every
+# expansion - a per-call integer would reset on each sibling branch.
+func countOut(budget as kv.Store, frag as string) {
+    if (len($frag) == 0) {
+        return;
+    }
+    def total as int init kv.incr($budget, "n", len($frag));
+    if ($total > MAX_OUTPUT_BYTES) {
+        throw Error{
+            kind: "tengine",
+            message: "tengine: rendered output exceeds " +
+                convert.toString(MAX_OUTPUT_BYTES) +
+                " bytes (runaway template expansion?)",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    return;
+}
 
 # --- set construction (exported) --------------------------------------------
 
@@ -225,7 +259,11 @@ export func render(set as Set, entry as string, data as json.Value) {
             col: 0
         };
     }
-    return exec($set, setGet($set, $entry), $data, $data, emptyVars(), 0);
+    # A fresh render-wide output counter, shared (by handle) through every
+    # expansion so MAX_OUTPUT_BYTES bounds the total work, not just depth.
+    def budget as kv.Store init kv.open();
+    kv.set($budget, "n", "0", 0);
+    return exec($set, setGet($set, $entry), $data, $data, emptyVars(), 0, $budget);
 }
 
 # exec renders a template source against the current node (`.`), the root (`$`),
@@ -238,7 +276,8 @@ func exec(
     node as json.Value,
     root as json.Value,
     vars as map of string to json.Value,
-    depth as int) {
+    depth as int,
+    budget as kv.Store) {
     if ($depth > MAX_NESTING) {
         throw Error{
             kind: "tengine",
@@ -259,10 +298,14 @@ func exec(
     while (true) {
         def i as int init tNextOpen($cs, $pos);
         if ($i < 0) {
-            $parts[] = tSlice($cs, $pos, $n);
+            def tail as string init tSlice($cs, $pos, $n);
+            countOut($budget, $tail);
+            $parts[] = $tail;
             break;
         }
-        $parts[] = tSlice($cs, $pos, $i);
+        def lead as string init tSlice($cs, $pos, $i);
+        countOut($budget, $lead);
+        $parts[] = $lead;
         def actionStart as int init $i + 2;
         def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
@@ -279,7 +322,7 @@ func exec(
         def kind as string init actionKind($action);
         if ($kind == "if" or $kind == "range" or $kind == "with" or $kind == "block") {
             def bp as BlockParts init takeBlock(tSlice($cs, $tailStart, $n));
-            $parts[] = execControl($set, $kind, $action, $bp, $node, $root, $env, $depth);
+            $parts[] = execControl($set, $kind, $action, $bp, $node, $root, $env, $depth, $budget);
             $cs = strings.chars($bp.remainder);
             $n = len($cs);
             $pos = 0;
@@ -311,12 +354,15 @@ func exec(
                 $argNode,
                 $argNode,
                 emptyVars(),
-                $depth + 1);
+                $depth + 1,
+                $budget);
             $pos = $tailStart;
         } elseif ($kind == "comment" or $kind == "end" or $kind == "else") {
             $pos = $tailStart;
         } else {
-            $parts[] = evalOutput($action, $node, $root, $env);
+            def outFrag as string init evalOutput($action, $node, $root, $env);
+            countOut($budget, $outFrag);
+            $parts[] = $outFrag;
             $pos = $tailStart;
         }
     }
@@ -347,24 +393,25 @@ func execControl(
     node as json.Value,
     root as json.Value,
     vars as map of string to json.Value,
-    depth as int) {
+    depth as int,
+    budget as kv.Store) {
     if ($kind == "if") {
         if (isTruthy(evalExprString(pipelineOf($action), $node, $root, $vars))) {
-            return exec($set, $bp.thenPart, $node, $root, $vars, $depth + 1);
+            return exec($set, $bp.thenPart, $node, $root, $vars, $depth + 1, $budget);
         }
-        return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1);
+        return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1, $budget);
     }
     if ($kind == "with") {
         def val as json.Value init evalExprString(pipelineOf($action), $node, $root, $vars);
         if (isTruthy($val)) {
-            return exec($set, $bp.thenPart, $val, $root, $vars, $depth + 1);
+            return exec($set, $bp.thenPart, $val, $root, $vars, $depth + 1, $budget);
         }
-        return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1);
+        return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1, $budget);
     }
     if ($kind == "range") {
         def rv as RangeVars init parseRange(pipelineOf($action));
         def val as json.Value init evalExprString($rv.source, $node, $root, $vars);
-        return execRange($set, $val, $bp, $node, $root, $vars, $rv, $depth);
+        return execRange($set, $val, $bp, $node, $root, $vars, $rv, $depth, $budget);
     }
     # block: render the set's named override if present, else the inline default
     def na as NameArg init parseNameArg($action);
@@ -373,9 +420,16 @@ func execControl(
         $argNode = resolveTerm($na.arg, $node, $root, $vars);
     }
     if (setHas($set, $na.name)) {
-        return exec($set, setGet($set, $na.name), $argNode, $argNode, emptyVars(), $depth + 1);
+        return exec(
+            $set,
+            setGet($set, $na.name),
+            $argNode,
+            $argNode,
+            emptyVars(),
+            $depth + 1,
+            $budget);
     }
-    return exec($set, $bp.thenPart, $argNode, $argNode, emptyVars(), $depth + 1);
+    return exec($set, $bp.thenPart, $argNode, $argNode, emptyVars(), $depth + 1, $budget);
 }
 
 # execRange renders a range body once per element (list) or value (map, insertion
@@ -389,7 +443,8 @@ func execRange(
     root as json.Value,
     vars as map of string to json.Value,
     rv as RangeVars,
-    depth as int) {
+    depth as int,
+    budget as kv.Store) {
     def t as string init json.typeOf($val);
     # Collect per-iteration fragments and join once: an accumulating `+` over a
     # large range is O(N^2) in the rendered output size.
@@ -397,13 +452,13 @@ func execRange(
     if ($t == "list") {
         def n as int init json.length($val);
         if ($n == 0) {
-            return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1);
+            return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1, $budget);
         }
         def i as int init 0;
         while ($i < $n) {
             def elem as json.Value init json.get($val, "/" + convert.toString($i));
             def env as map of string to json.Value init bindLoop($vars, $rv, numVal($i), $elem);
-            $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1);
+            $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1, $budget);
             $i = $i + 1;
         }
         return strings.join($parts, "");
@@ -411,16 +466,16 @@ func execRange(
     if ($t == "map") {
         def keys as list of string init json.keys($val);
         if (len($keys) == 0) {
-            return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1);
+            return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1, $budget);
         }
         for (def k in $keys) {
             def elem as json.Value init json.get($val, "/" + $k);
             def env as map of string to json.Value init bindLoop($vars, $rv, strVal($k), $elem);
-            $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1);
+            $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1, $budget);
         }
         return strings.join($parts, "");
     }
-    return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1);
+    return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1, $budget);
 }
 
 # bindLoop returns a copy of the environment with the range's index / element

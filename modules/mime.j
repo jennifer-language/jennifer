@@ -296,9 +296,11 @@ func parseMultipart(body as string, boundary as string, depth as int) {
         }
     }
     # A truncated message may end mid-part with no closing delimiter; keep the
-    # last collected part rather than silently dropping it.
+    # last collected part rather than silently dropping it. Carry the current
+    # depth (parseAt, not parse) so the MAX_MIME_DEPTH cap still bounds a
+    # message that nests multipart parts without ever closing them.
     if ($collecting and len($cur) > 0) {
-        $parts[] = parse(strings.join($cur, "\n"));
+        $parts[] = parseAt(strings.join($cur, "\n"), $depth);
     }
     return $parts;
 }

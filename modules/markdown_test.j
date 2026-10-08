@@ -1602,6 +1602,11 @@ func testAttributeListDropsUnsafe() {
     # data-* / aria-* are allowed through.
     testing.assertContains(toHtml('# T {data-x="1" aria-label="l"}' + "\n"), 'data-x="1"');
     testing.assertContains(toHtml('# T {data-x="1" aria-label="l"}' + "\n"), 'aria-label="l"');
+    # A data-/aria- name whose tail is not a valid HTML attribute name must be
+    # dropped, not passed to html.attr (which would throw and abort toHtml on
+    # input the module documents as safe by default).
+    testing.assertEqual(toHtml('[t](u){data-x"y=1}'), '<p><a href="u">t</a></p>');
+    testing.assertEqual(toHtml('![a](u){data-é=1}'), '<p><img src="u" alt="a"></p>');
 }
 
 # highlight (==), subscript (~x~), superscript (^x^). ~~ stays strikethrough.

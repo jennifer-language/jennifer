@@ -156,7 +156,14 @@ An unknown pipe throws a catchable `Error` (kind `"tengine"`).
 Nesting (control blocks, `template` / `block` includes, `range` bodies) is
 capped at 256 levels; past the cap the engine throws a catchable `Error`
 (kind `"tengine"`) instead of recursing without bound, so a template that
-includes itself - directly or through a partner - fails cleanly even when
+includes itself - directly or through a partner - fails cleanly.
+
+The nesting cap bounds recursion *depth*, not total *work*: a chain where each
+template includes the previous one twice renders `2^depth` copies at a shallow
+depth (a "billion laughs"). A separate render-wide **output budget** (10 MiB of
+produced output per `render`) therefore bounds the total work and trips - again a
+catchable kind `"tengine"` `Error` - the moment a render's cumulative output
+crosses it. Both guards together are what let the engine fail cleanly even when
 templates come from untrusted authors.
 
 ### `printf`

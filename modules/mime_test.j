@@ -430,6 +430,31 @@ func testFilenameExtendedLatin1() {
     testing.assertEqual(filename($p), "café.txt");
 }
 
+# mimeDepth walks the first-child chain to measure a parsed tree's nesting.
+func mimeDepth(p as Part) {
+    def d as int init 0;
+    def cur as Part init $p;
+    while (len($cur.parts) > 0) {
+        $d = $d + 1;
+        $cur = $cur.parts[0];
+    }
+    return $d;
+}
+
+# SECURITY: a message that nests multipart parts without ever closing them must
+# not bypass MAX_MIME_DEPTH. The truncated-last-part path once called the public
+# parse() (restarting depth at 0), so the cap never fired and the parse recursed
+# one level per nesting until the recursion-memory limit; it now carries $depth.
+func testUnterminatedMultipartDepthCapped() {
+    def chunks as list of string init [];
+    for (def i as int init 0; $i < 150; $i = $i + 1) {
+        $chunks[] = "Content-Type: multipart/mixed; boundary=b" +
+            convert.toString($i) + "\r\n\r\n--b" + convert.toString($i);
+    }
+    def p as Part init parse(strings.join($chunks, "\r\n"));
+    testing.assertEqual(mimeDepth($p), MAX_MIME_DEPTH); # capped at 100, not the input's 150
+}
+
 # SECURITY: the header / address / boundary / filename builders strip CR/LF so a
 # crafted field cannot inject or fold an extra header line (RFC 5322 header
 # injection) into the message handed to smtp.send. Each sink is exercised.
