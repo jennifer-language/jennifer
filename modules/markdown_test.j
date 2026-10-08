@@ -1585,6 +1585,25 @@ func testAttributeLists() {
     testing.assertEqual(toHtml('## no {plain here}' + "\n"), '<h2>no {plain here}</h2>');
 }
 
+# SECURITY: a `{...}` attribute list is filtered through an allowlist, so
+# untrusted Markdown cannot smuggle an event handler or inline style into the
+# safe-by-default output. Unsafe names are dropped; safe ones (and the data-* /
+# aria-* families) pass through.
+func testAttributeListDropsUnsafe() {
+    # on* event handlers and style are dropped on every renderer that reads attrs.
+    testing.assertEqual(toHtml('# T {onclick="x()"}' + "\n"), "<h1>T</h1>");
+    testing.assertEqual(toHtml('# T {style="color:red"}' + "\n"), "<h1>T</h1>");
+    testing.assertEqual(
+        toHtml('![a](i.png){onerror="steal()"}'),
+        '<p><img src="i.png" alt="a"></p>');
+    testing.assertEqual(toHtml('[t](x){onmouseover="x()"}'), '<p><a href="x">t</a></p>');
+    # An unsafe key mixed with a safe one keeps only the safe one.
+    testing.assertEqual(toHtml('# T {onclick="x()" title="ok"}' + "\n"), '<h1 title="ok">T</h1>');
+    # data-* / aria-* are allowed through.
+    testing.assertContains(toHtml('# T {data-x="1" aria-label="l"}' + "\n"), 'data-x="1"');
+    testing.assertContains(toHtml('# T {data-x="1" aria-label="l"}' + "\n"), 'aria-label="l"');
+}
+
 # highlight (==), subscript (~x~), superscript (^x^). ~~ stays strikethrough.
 func testHighlightSubSup() {
     testing.assertEqual(toHtml("==important=="), "<p><mark>important</mark></p>");

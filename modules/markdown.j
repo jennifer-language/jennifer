@@ -2810,16 +2810,16 @@ func listNodeToAnsi(n as Node, depth as int) {
                 $marker = $marker + "[ ] ";
             }
         }
-        def inlineStr as string init "";
+        def inlineParts as list of string init [];
         def nested as string init "";
         for (def c in $item.children) {
             if ($c.kind == "list") {
                 $nested = "\n" + listNodeToAnsi($c, $depth + 1);
             } else {
-                $inlineStr = $inlineStr + inlineNodeToAnsi($c);
+                $inlineParts[] = inlineNodeToAnsi($c);
             }
         }
-        $out[] = $pad + $marker + $inlineStr + $nested;
+        $out[] = $pad + $marker + strings.join($inlineParts, "") + $nested;
         $idx = $idx + 1;
     }
     return strings.join($out, "");
@@ -3412,15 +3412,13 @@ func renderHeading(state as Layout, node as Node) {
     # colour is reset to black so the text and later content stay black).
     def bg as Fill init headingBg($state.opts, $lvl);
     if ($bg.on) {
-        $state.page = pdf.color($state.page, $bg.r, $bg.g, $bg.b);
-        $state.page = pdf.rect(
+        $state.page = fillRect(
             $state.page,
             $state.x - 3,
             $state.y - $blockH + 2,
             $state.width + 6,
             $blockH + 2,
-            true);
-        $state.page = pdf.color($state.page, 0, 0, 0);
+            $bg);
     }
     return placePlainLines($state, $lines, $state.opts.headingFont, $size, 0);
 }
@@ -3494,26 +3492,22 @@ func renderCode(state as Layout, node as Node) {
         $state = ensureSpace($state, $blockH);
         def top as int init $state.y + 4;
         if ($fill.on) {
-            $state.page = pdf.color($state.page, $fill.r, $fill.g, $fill.b);
-            $state.page = pdf.rect(
+            $state.page = fillRect(
                 $state.page,
                 $state.x - 3,
                 $top - $blockH,
                 $state.width + 6,
                 $blockH,
-                true);
-            $state.page = pdf.color($state.page, 0, 0, 0);
+                $fill);
         }
         if ($border.on) {
-            $state.page = pdf.color($state.page, $border.r, $border.g, $border.b);
-            $state.page = pdf.rect(
+            $state.page = strokeRect(
                 $state.page,
                 $state.x - 3,
                 $top - $blockH,
                 $state.width + 6,
                 $blockH,
-                false);
-            $state.page = pdf.color($state.page, 0, 0, 0);
+                $border);
         }
     }
     return placePlainLines($state, $lines, $state.opts.monoFont, $state.opts.bodySize, 6);
@@ -3776,9 +3770,7 @@ func renderTable(state as Layout, node as Node) {
         # text and grid on top; colour reset to black).
         if ($r == 0 and $state.opts.tableHeaderFill.on) {
             def hf as Fill init $state.opts.tableHeaderFill;
-            $state.page = pdf.color($state.page, $hf.r, $hf.g, $hf.b);
-            $state.page = pdf.rect($state.page, $state.x, $rowBot, $state.width, $rowH, true);
-            $state.page = pdf.color($state.page, 0, 0, 0);
+            $state.page = fillRect($state.page, $state.x, $rowBot, $state.width, $rowH, $hf);
         }
         # Cell text, aligned per the column's markdown alignment.
         def c as int init 0;
@@ -3880,20 +3872,16 @@ func renderQuote(state as Layout, node as Node, depth as int) {
             def top as int init $state.y + 2;
             def blockH as int init ($state.y - $probe.y) + 4;
             if ($fill.on) {
-                $state.page = pdf.color($state.page, $fill.r, $fill.g, $fill.b);
-                $state.page = pdf.rect(
+                $state.page = fillRect(
                     $state.page,
                     $savedX,
                     $top - $blockH,
                     $savedW,
                     $blockH,
-                    true);
-                $state.page = pdf.color($state.page, 0, 0, 0);
+                    $fill);
             }
             if ($rule.on) {
-                $state.page = pdf.color($state.page, $rule.r, $rule.g, $rule.b);
-                $state.page = pdf.rect($state.page, $savedX, $top - $blockH, 3, $blockH, true);
-                $state.page = pdf.color($state.page, 0, 0, 0);
+                $state.page = fillRect($state.page, $savedX, $top - $blockH, 3, $blockH, $rule);
             }
         }
     }
@@ -3909,13 +3897,34 @@ func renderQuote(state as Layout, node as Node, depth as int) {
 
 # renderBlock dispatches one block node and leaves a gap after it.
 # renderRule draws a thematic break as a thin grey rule across the content column.
+# fillRect paints a filled rectangle in (r, g, b) on a page and resets the colour
+# to black, so text and later content stay black. strokeRect is the same for an
+# outlined rectangle. Both operate on the page (not the whole layout, which would
+# copy the finished-pages list), and fold the repeated colour / rect / reset
+# triplet that every shaded box in the renderer used.
+func fillRect(pg as pdf.Page, x as int, y as int, w as int, h as int, c as Fill) {
+    def out as pdf.Page init pdf.color($pg, $c.r, $c.g, $c.b);
+    $out = pdf.rect($out, $x, $y, $w, $h, true);
+    return pdf.color($out, 0, 0, 0);
+}
+
+func strokeRect(pg as pdf.Page, x as int, y as int, w as int, h as int, c as Fill) {
+    def out as pdf.Page init pdf.color($pg, $c.r, $c.g, $c.b);
+    $out = pdf.rect($out, $x, $y, $w, $h, false);
+    return pdf.color($out, 0, 0, 0);
+}
+
 func renderRule(state as Layout) {
     def h as int init lineH($state.opts.bodySize);
     $state = ensureSpace($state, $h);
     def midY as int init $state.y - $h // 2;
-    $state.page = pdf.color($state.page, 128, 128, 128);
-    $state.page = pdf.rect($state.page, $state.x, $midY, $state.width, 1, true);
-    $state.page = pdf.color($state.page, 0, 0, 0);
+    $state.page = fillRect(
+        $state.page,
+        $state.x,
+        $midY,
+        $state.width,
+        1,
+        Fill{on: true, r: 128, g: 128, b: 128});
     $state.y = $state.y - $h;
     return $state;
 }
