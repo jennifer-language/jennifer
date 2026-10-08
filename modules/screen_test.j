@@ -68,6 +68,23 @@ func testTextWritesRunes() {
     testing.assertEqual(get($buf, 2, 0), "i");
 }
 
+# SECURITY: a control rune (ESC / C0 / DEL) written via text() is stored as a
+# space, so untrusted text cannot smuggle a terminal escape (window title, OSC 52
+# clipboard) through render. Printable bytes of the payload survive as harmless
+# literal cells once their ESC prefix is gone.
+func testControlRunesNeutralized() {
+    def s as string init "a" + charOf(27) + "]" + charOf(7) + "b";
+    def buf as Buffer init text(newScreen(1, 5), 0, 0, $s);
+    testing.assertEqual(get($buf, 0, 0), "a");
+    testing.assertEqual(get($buf, 1, 0), " "); # ESC -> space
+    testing.assertEqual(get($buf, 2, 0), "]"); # printable, kept
+    testing.assertEqual(get($buf, 3, 0), " "); # BEL -> space
+    testing.assertEqual(get($buf, 4, 0), "b");
+    # No raw ESC-] OSC introducer reaches the rendered output from the content
+    # (render's own cursor moves are CSI = ESC-[, never ESC-]).
+    testing.assertTrue(not strings.contains(render($buf), charOf(27) + "]"));
+}
+
 func testTextClipsAtRowEnd() {
     # "hello" from col 3 of a 5-wide row keeps only "he".
     def buf as Buffer init text(newScreen(1, 5), 3, 0, "hello");

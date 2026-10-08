@@ -98,6 +98,21 @@ func testSyslogLine() {
     testing.assertTrue(strings.startsWith(syslogLine($lg, "warn", "x", none(), fixed()), "<12>1 "));
 }
 
+# SECURITY: the syslog sink escapes CR/LF in the message, the field keys, and the
+# app name, so a crafted log value cannot inject a second forged RFC 5424 record
+# (receivers split a UDP payload on LF). The text / logfmt renderers already
+# escaped; this datagram path did not.
+func testSyslogLineInjectionEscaped() {
+    def lg as Logger init toSyslog("info", "localhost:514", "app\r\nX");
+    def fs as map of string to string init {"k\r\ninj": "v"};
+    def line as string init syslogLine($lg, "error", "hi\r\n<11>1 FORGED", $fs, fixed());
+    testing.assertTrue(not strings.contains($line, "\n")); # one datagram line only
+    testing.assertTrue(not strings.contains($line, "\r"));
+    testing.assertContains($line, "hi\\r\\n<11>1 FORGED"); # message CR/LF escaped
+    testing.assertContains($line, "k\\r\\ninj=v"); # field key CR/LF escaped
+    testing.assertContains($line, "app\\r\\nX"); # app CR/LF escaped
+}
+
 # mergeFields overlays extra over base; a per-call key wins on collision.
 func testMergeFields() {
     def m as map of string to string init mergeFields({"user": "ada"}, {"user": "bob", "x": "1"});

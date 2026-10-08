@@ -289,17 +289,21 @@ func syslogLine(
     fields as map of string to string,
     t as time.Time) {
     def pri as int init 8 + syslogSeverity($level);
-    def host as string init os.getEnv("HOSTNAME");
+    # Every untrusted string entering the datagram has CR / LF escaped so none can
+    # inject a second, forged RFC 5424 record (receivers split a UDP payload on
+    # LF). Field values already go through quoteIfNeeded; the message, the field
+    # keys, and the host / app header fields took the raw path before.
+    def host as string init escapeNewlines(os.getEnv("HOSTNAME"));
     if ($host == "") {
         $host = "-";
     }
-    def app as string init $logger.app;
+    def app as string init escapeNewlines($logger.app);
     if ($app == "") {
         $app = "-";
     }
-    def parts as list of string init [$message];
+    def parts as list of string init [escapeNewlines($message)];
     for (def k in $fields) {
-        $parts[] = $k + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = escapeNewlines($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     def msg as string init strings.join($parts, " ");
     return "<" + convert.toString($pri) + ">1 " + time.iso($t) + " " + $host + " " + $app +

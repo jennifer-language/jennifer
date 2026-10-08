@@ -138,3 +138,33 @@ func testEcSrpWiring() {
     def resp as bytes init crypto.mtweiClientKey($kp.private, $sk.public, $kp.public, $val);
     testing.assertEqual(len($resp), 32);
 }
+
+# SECURITY: a datagram shorter than a MACtelnet header from any LAN peer must be
+# dropped inside recvPacket (not returned, not thrown), so a single runt cannot
+# abort the session with an out-of-bounds error in parseHeader. The next
+# full-length datagram is still delivered, and a runt with nothing behind it
+# times out to empty rather than throwing.
+func testRecvPacketDropsRunt() {
+    def recvSock as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def addr as string init net.address($recvSock);
+    def sender as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def sess as Session init Session{
+        sock: $recvSock,
+        state: kv.open(),
+        srcmac: emptyBytes(),
+        dstmac: emptyBytes(),
+        seskey: 0
+    };
+    def runt as bytes init convert.bytesFromString("hello", "utf-8");
+    def full as bytes;
+    for (def i as int init 0; $i < HEADER_LEN; $i = $i + 1) {
+        $full[] = 0;
+    }
+    net.sendTo($sender, $addr, $runt);
+    net.sendTo($sender, $addr, $full);
+    testing.assertEqual(len(recvPacket($sess, 2000)), HEADER_LEN); # runt skipped, full returned
+    net.sendTo($sender, $addr, $runt);
+    testing.assertEqual(len(recvPacket($sess, 300)), 0); # lone runt -> timeout, no throw
+    net.close($recvSock);
+    net.close($sender);
+}

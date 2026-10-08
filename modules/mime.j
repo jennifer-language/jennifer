@@ -91,6 +91,26 @@ func stripWS(s as string) {
     return strings.replace($out, " ", "");
 }
 
+# stripNL removes CR and LF from a header-bound field so a crafted name or value
+# cannot inject or fold an extra header line (RFC 5322 header injection). Applied
+# on the build / encode side only (header names and values at serialize time,
+# addresses, the disposition filename) - never on the tolerant parse path, which
+# must keep accepting whatever it reads.
+func stripNL(s as string) {
+    def out as string init strings.replace($s, "\r", "");
+    return strings.replace($out, "\n", "");
+}
+
+# stripBoundary keeps a multipart boundary injection-safe: CR/LF would inject a
+# header or body line, and a double-quote would close the quoted boundary
+# parameter. The boundary is emitted both in the Content-Type header and in the
+# structural `--boundary` delimiter lines, so it is sanitised once at build time.
+func stripBoundary(s as string) {
+    def out as string init strings.replace($s, "\r", "");
+    $out = strings.replace($out, "\n", "");
+    return strings.replace($out, "\"", "");
+}
+
 # wrapLines folds a long unbroken string (base64) into 76-column CRLF lines.
 # The input is ASCII base64, so slicing by rune index equals slicing by column;
 # collecting the 76-char lines and joining once keeps a large attachment linear
@@ -642,14 +662,15 @@ export func attachmentBytes(filename as string, contentType as string, data as b
  * @return {Part} the multipart container part
  */
 export func multipart(subtype as string, boundary as string, parts as list of Part) {
+    def b as string init stripBoundary($boundary);
     def hs as list of Header init [];
-    $hs[] = mkHeader("Content-Type", "multipart/" + $subtype + "; boundary=\"" + $boundary + "\"");
+    $hs[] = mkHeader("Content-Type", "multipart/" + $subtype + "; boundary=\"" + $b + "\"");
     return Part{
         headers: $hs,
         body: "",
         encoding: "",
         parts: $parts,
-        boundary: $boundary,
+        boundary: $b,
         data: emptyBytes()
     };
 }
@@ -691,7 +712,9 @@ export func encode(part as Part) {
     # headers stays linear instead of re-copying the growing header block per line.
     def parts as list of string init [];
     for (def h in $part.headers) {
-        $parts[] = $h.name + ": " + encodeHeaderValue($h.name, $h.value) + "\r\n";
+        # CR/LF stripped from both name and value at the serialize choke point, so
+        # no header field can inject or fold an extra line into the message.
+        $parts[] = stripNL($h.name) + ": " + stripNL(encodeHeaderValue($h.name, $h.value)) + "\r\n";
     }
     $parts[] = "\r\n";
     def out as string init strings.join($parts, "");
@@ -709,13 +732,6 @@ export func encode(part as Part) {
 
 # --- parsing (exported) --------------------------------------------
 
-/**
- * Read a MIME message string into a Part tree: headers are unfolded, a multipart
- * body is split on its boundary (recursively), and a leaf body is
- * transfer-decoded.
- * @param text {string} the MIME message text
- * @return {Part} the parsed part tree
- */
 # Maximum multipart nesting the parser descends into. A message nested deeper is
 # kept as a single leaf part instead of being recursed. This bounds the work an
 # attacker-shaped, deeply nested message can force: each level rescans the whole
@@ -723,6 +739,13 @@ export func encode(part as Part) {
 # nests only a handful of levels, so this ceiling is never reached in practice.
 def const MAX_MIME_DEPTH as int init 100;
 
+/**
+ * Read a MIME message string into a Part tree: headers are unfolded, a multipart
+ * body is split on its boundary (recursively), and a leaf body is
+ * transfer-decoded.
+ * @param text {string} the MIME message text
+ * @return {Part} the parsed part tree
+ */
 export func parse(text as string) {
     return parseAt($text, 0);
 }
@@ -1041,11 +1064,12 @@ func pctEncode(s as string) {
 # cannot break out), or an RFC 2231 extended `key*=UTF-8''<pct>` for a name that
 # carries non-ASCII characters.
 func dispositionFilename(key as string, name as string) {
-    if (isAsciiText($name)) {
-        def safe as string init strings.replace(strings.replace($name, "\\", "\\\\"), "\"", "\\\"");
+    def nm as string init stripNL($name);
+    if (isAsciiText($nm)) {
+        def safe as string init strings.replace(strings.replace($nm, "\\", "\\\\"), "\"", "\\\"");
         return $key + "=\"" + $safe + "\"";
     }
-    return $key + "*=UTF-8''" + pctEncode($name);
+    return $key + "*=UTF-8''" + pctEncode($nm);
 }
 
 /**
@@ -1187,15 +1211,19 @@ func needsQuoting(s as string) {
  * @return {string} the formatted mailbox
  */
 export func address(name as string, email as string) {
-    if (len($name) == 0) {
-        return $email;
+    # CR/LF stripped from both fields so a crafted display name or address cannot
+    # inject a header line when the mailbox is used as a To / From / Cc value.
+    def nm as string init stripNL($name);
+    def em as string init stripNL($email);
+    if (len($nm) == 0) {
+        return $em;
     }
-    if (not isAsciiText($name)) {
-        return encodeWord($name) + " <" + $email + ">";
+    if (not isAsciiText($nm)) {
+        return encodeWord($nm) + " <" + $em + ">";
     }
-    def display as string init $name;
-    if (needsQuoting($name)) {
-        $display = "\"" + strings.replace($name, "\"", "\\\"") + "\"";
+    def display as string init $nm;
+    if (needsQuoting($nm)) {
+        $display = "\"" + strings.replace($nm, "\"", "\\\"") + "\"";
     }
-    return $display + " <" + $email + ">";
+    return $display + " <" + $em + ">";
 }

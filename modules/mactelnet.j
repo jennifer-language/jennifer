@@ -346,11 +346,21 @@ func bindDevice(sock as net.UDPSocket, iface as string) {
 func recvPacket(s as Session, timeoutMs as int) {
     defer net.setReadDeadline($s.sock, 0);
     net.setReadDeadline($s.sock, $timeoutMs);
-    try {
-        def dg as net.Datagram init net.recvFrom($s.sock, MAX_DATAGRAM);
-        return $dg.data;
-    } catch (e) {
-        return emptyBytes();
+    # The socket is wildcard-bound and broadcast, so any LAN peer can deliver a
+    # datagram. A runt (shorter than a MACtelnet header) would make parseHeader
+    # index past the end and abort the whole session; drop it and keep waiting
+    # within the one read deadline for a real one (or a timeout). Returning an
+    # empty bytes only on timeout keeps the callers' `while len(pkt) > 0` drain
+    # loops intact (a dropped runt must not look like "nothing more to read").
+    while (true) {
+        try {
+            def dg as net.Datagram init net.recvFrom($s.sock, MAX_DATAGRAM);
+            if (len($dg.data) >= HEADER_LEN) {
+                return $dg.data;
+            }
+        } catch (e) {
+            return emptyBytes();
+        }
     }
 }
 

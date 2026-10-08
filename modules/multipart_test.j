@@ -147,3 +147,15 @@ func testGenerateBoundaryShape() {
     testing.assertTrue(strings.startsWith($b, "----JenniferFormBoundary"));
     testing.assertEqual(len($b), 24 + 24);
 }
+
+# SECURITY: a part Content-Type with CR/LF is stripped so it cannot inject an
+# extra header line or a premature body separator. name / filename were already
+# stripped by escapeParam; the content type was written raw before.
+func testContentTypeInjectionStripped() {
+    def parts as list of Part init [
+        file("f", "a.txt", "text/plain\r\nX-Inj2: 1", convert.bytesFromString("x", "utf-8"))
+    ];
+    def body as string init asString(buildWith($parts, "B").body);
+    testing.assertTrue(not strings.contains($body, "\r\nX-Inj2:"));
+    testing.assertContains($body, "Content-Type: text/plainX-Inj2: 1\r\n");
+}

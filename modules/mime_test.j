@@ -429,3 +429,31 @@ func testFilenameExtendedLatin1() {
         "Content-Disposition: attachment; filename*=iso-8859-1'en'caf%E9.txt\r\n\r\n");
     testing.assertEqual(filename($p), "café.txt");
 }
+
+# SECURITY: the header / address / boundary / filename builders strip CR/LF so a
+# crafted field cannot inject or fold an extra header line (RFC 5322 header
+# injection) into the message handed to smtp.send. Each sink is exercised.
+func testHeaderInjectionStripped() {
+    # withHeader value: CR/LF collapses, no second header line appears.
+    def p as Part init text("text/plain", "hi");
+    $p = withHeader($p, "Subject", "a\r\nBcc: evil@x");
+    def out as string init encode($p);
+    testing.assertContains($out, "Subject: aBcc: evil@x");
+    testing.assertTrue(not strings.contains($out, "\r\nBcc:"));
+
+    # address: both the display-name side and the address side.
+    testing.assertEqual(address("Bob\r\nBcc: x", "b@x"), "\"BobBcc: x\" <b@x>");
+    testing.assertTrue(not strings.contains(address("Bob", "b@x\r\nBcc: x"), "\r\n"));
+
+    # multipart boundary: CR/LF and the quote that would close the param are gone,
+    # in both the Content-Type parameter and the structural delimiter lines.
+    def c as Part init multipart("mixed", "b\r\nX: y\"z", [$p]);
+    def cout as string init encode($c);
+    testing.assertTrue(not strings.contains($cout, "\r\nX: y"));
+    testing.assertContains($cout, "boundary=\"bX: yz\"");
+    testing.assertContains($cout, "--bX: yz");
+
+    # attachment filename.
+    def a as Part init attachment("a\r\nX-Inj: 1.txt", "text/plain", "x");
+    testing.assertTrue(not strings.contains(encode($a), "\r\nX-Inj:"));
+}

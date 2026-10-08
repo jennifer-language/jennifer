@@ -126,6 +126,14 @@ func escapeParam(s as string) {
     return strings.replace($clean, "\"", "\\\"");
 }
 
+# stripLines removes CR / LF from an unquoted header value (the part
+# Content-Type) so it cannot inject an extra header line or a premature body
+# separator. Unlike escapeParam it does not backslash-escape quotes, since a
+# Content-Type is written unquoted.
+func stripLines(s as string) {
+    return strings.replace(strings.replace($s, "\r", ""), "\n", "");
+}
+
 /**
  * Build a form body with an explicit boundary (deterministic).
  * @param parts {list of Part} the parts
@@ -142,7 +150,7 @@ export func buildWith(parts as list of Part, boundary as string) {
         }
         $head = $head + "\r\n";
         if (len($p.contentType) > 0) {
-            $head = $head + "Content-Type: " + $p.contentType + "\r\n";
+            $head = $head + "Content-Type: " + stripLines($p.contentType) + "\r\n";
         }
         $head = $head + "\r\n";
         # Append header bytes then data bytes into `body` in place: a by-value

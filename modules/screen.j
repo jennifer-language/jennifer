@@ -290,6 +290,20 @@ export func textColor(buf as Buffer, x as int, y as int, s as string, color as s
     return writeRunes($buf, $x, $y, strings.chars($s), FG[$color]);
 }
 
+# controlToSpace maps a C0 control (codepoint < 32) or DEL (127) rune to a space,
+# so untrusted text written into a cell cannot smuggle a terminal escape (a CSI /
+# OSC sequence - window title, cursor move, OSC 52 clipboard write) through
+# render. A control codepoint is always a single byte, so a multi-byte rune is
+# left untouched; the module's own SGR codes are added after this, so styling is
+# unaffected.
+func controlToSpace(r as string) {
+    def b as bytes init convert.bytesFromString($r, "utf-8");
+    if (len($b) == 1 and ($b[0] < 32 or $b[0] == 127)) {
+        return " ";
+    }
+    return $r;
+}
+
 # writeRunes places each rune of `runes` into consecutive cells from (x, y),
 # wrapping each in an SGR sequence when `code` is non-empty. Clips at the row
 # edge. One local copy, mutated in place - O(cells + len(runes)), not O(len^2).
@@ -301,7 +315,7 @@ func writeRunes(buf as Buffer, x as int, y as int, runes as list of string, code
     def col as int init $x;
     for (def i as int init 0; $i < len($runes); $i = $i + 1) {
         if ($col >= 0 and $col < $out.cols) {
-            def cell as string init $runes[$i];
+            def cell as string init controlToSpace($runes[$i]);
             if (len($code) > 0) {
                 $cell = CSI + $code + "m" + $cell + CSI + "0m";
             }
