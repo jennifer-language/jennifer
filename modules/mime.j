@@ -255,7 +255,7 @@ func parseHeaders(text as string) {
 # parseMultipart splits a multipart body on its boundary and parses each
 # body-part; the preamble before the first boundary and epilogue after the
 # close delimiter are dropped.
-func parseMultipart(body as string, boundary as string) {
+func parseMultipart(body as string, boundary as string, depth as int) {
     def delim as string init "--" + $boundary;
     def close as string init $delim + "--";
     def parts as list of Part init [];
@@ -265,7 +265,7 @@ func parseMultipart(body as string, boundary as string) {
         def t as string init stripCR($line);
         if ($t == $delim or $t == $close) {
             if ($collecting) {
-                $parts[] = parse(strings.join($cur, "\n"));
+                $parts[] = parseAt(strings.join($cur, "\n"), $depth);
             }
             $cur = [];
             $collecting = not ($t == $close);
@@ -716,7 +716,18 @@ export func encode(part as Part) {
  * @param text {string} the MIME message text
  * @return {Part} the parsed part tree
  */
+# Maximum multipart nesting the parser descends into. A message nested deeper is
+# kept as a single leaf part instead of being recursed. This bounds the work an
+# attacker-shaped, deeply nested message can force: each level rescans the whole
+# remaining body, so unbounded depth is quadratic in the nesting count. Real mail
+# nests only a handful of levels, so this ceiling is never reached in practice.
+def const MAX_MIME_DEPTH as int init 100;
+
 export func parse(text as string) {
+    return parseAt($text, 0);
+}
+
+func parseAt(text as string, depth as int) {
     def norm as string init strings.replace($text, "\r\n", "\n");
     def idx as int init strings.indexOf($norm, "\n\n");
     def headerText as string init $norm;
@@ -727,8 +738,8 @@ export func parse(text as string) {
     }
     def hs as list of Header init autoDecodeHeaders(parseHeaders($headerText));
     def boundary as string init extractBoundary(findHeader($hs, "Content-Type"));
-    if (len($boundary) > 0) {
-        def kids as list of Part init parseMultipart($bodyText, $boundary);
+    if (len($boundary) > 0 and $depth < MAX_MIME_DEPTH) {
+        def kids as list of Part init parseMultipart($bodyText, $boundary, $depth + 1);
         return Part{
             headers: $hs,
             body: "",

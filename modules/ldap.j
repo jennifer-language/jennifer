@@ -1863,7 +1863,7 @@ func attrRequested(name as string, reqAttrs as list of string) {
         if ($rl == "*" and not $isPw) {
             return true;
         }
-        if ($rl == $lname) {
+        if ($rl == $lname and not $isPw) {
             return true;
         }
     }

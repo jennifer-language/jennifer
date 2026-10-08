@@ -2254,9 +2254,42 @@ func safeHref(url as string) {
 # imageNode builds an `<img>` void element. The src runs through the same
 # scheme allowlist as a link href (so `![x](javascript:...)` is neutralized),
 # and the alt text is an escaped attribute.
+# mdAttrSafe gates which custom `{key=value}` attributes from a `{...}` list reach
+# the HTML output. toHtml is safe by default, so only a fixed allowlist of
+# presentational / semantic names (plus the data-* and aria-* families) is
+# emitted. Everything else is dropped - crucially the `on*` event handlers and
+# `style`, which pass html.attr's name-shape check yet would let untrusted
+# Markdown forge a live event handler (`![x](u){onerror="..."}`) or inject CSS.
+func mdAttrSafe(name as string) {
+    def n as string init strings.lower($name);
+    if (strings.startsWith($n, "data-") or strings.startsWith($n, "aria-")) {
+        return true;
+    }
+    def allow as list of string init [
+        "id",
+        "class",
+        "title",
+        "width",
+        "height",
+        "align",
+        "dir",
+        "lang",
+        "role",
+        "target",
+        "rel",
+        "colspan",
+        "rowspan",
+        "scope",
+        "headers"
+    ];
+    return lists.contains($allow, $n);
+}
+
 # mdAttrsToHtml renders a node's attribute-list attrs (id / class / custom key=val
 # from a `{...}`) as html attributes, id then class then the rest by key. Used by
-# the heading / link / image renderers; other renderers ignore these attrs.
+# the heading / link / image renderers; other renderers ignore these attrs. Custom
+# keys are filtered through mdAttrSafe so a `{...}` list cannot introduce an unsafe
+# attribute into the safe-by-default output.
 func mdAttrsToHtml(node as Node) {
     def out as list of html.Attr init [];
     if (maps.has($node.attrs, "id")) {
@@ -2266,7 +2299,7 @@ func mdAttrsToHtml(node as Node) {
         $out[] = html.attr("class", $node.attrs["class"]);
     }
     for (def k in maps.keys($node.attrs)) {
-        if (not ($k == "id") and not ($k == "class")) {
+        if (not ($k == "id") and not ($k == "class") and mdAttrSafe($k)) {
             $out[] = html.attr($k, $node.attrs[$k]);
         }
     }
