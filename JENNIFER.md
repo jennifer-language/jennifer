@@ -737,8 +737,11 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `hkdf` / `pbkdf2`, AES-256-GCM `encrypt` / `decrypt`, Ed25519 `signKeypair` /
   `sign` / `verify`, and PEM-key RSA / ECDSA `rsaSign` / `rsaVerify` / `ecdsaSign` /
   `ecdsaVerify` plus key generation / CSR / JWK `rsaGenerateKey` / `ecGenerateKey` /
-  `jwkPublic` / `jwkToPem` / `csr` (for JWT RS\* / ES\* and ACME). TinyGo-clean
-  except the RSA / ECDSA surface, which is **default binary only**.
+  `jwkPublic` / `jwkToPem` / `csr` (for JWT RS\* / ES\* and ACME), and the
+  post-quantum KEM ML-KEM-768 `mlkemKeypair` / `mlkemEncapsulate` /
+  `mlkemDecapsulate` (feed the shared secret through `hkdf` + `encrypt`; pair with
+  X25519 for a hybrid in production). TinyGo-clean except the RSA / ECDSA and
+  ML-KEM surfaces, which are **default binary only**.
 - **`compress`** - byte-stream compression: `pack` / `unpack` for `"gzip"` /
   `"zlib"` / `"deflate"` (`bytes` in/out, optional `"fast"` / `"default"` /
   `"best"` level), plus streaming via a `compress.Stream` handle. Both binaries.

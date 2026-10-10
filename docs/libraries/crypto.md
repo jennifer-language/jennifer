@@ -268,6 +268,46 @@ directly.
 The password itself never crosses the wire; only the derived proof does, and a
 wrong password yields a proof the router will not match.
 
+## Post-quantum key encapsulation (ML-KEM)
+
+`crypto.mlkem*` is **ML-KEM-768** (NIST FIPS 203, formerly Kyber) - a
+quantum-resistant **key encapsulation mechanism**. A KEM is not an encryptor: it
+lets two parties agree on a fresh random 32-byte shared secret, which you then
+run through `crypto.hkdf` and `crypto.encrypt` (AES-256-GCM). Over the Go
+standard library's `crypto/mlkem`, so dependency-free; **default-binary only** -
+`jennifer-tiny` returns a friendly error (the FIPS-140 / SHA-3 machinery is off
+the TinyGo build), the same split as the RSA / ECDSA surface.
+
+| Call | Returns | Notes |
+| --- | --- | --- |
+| `crypto.mlkemKeypair()` | `crypto.Keypair` | A fresh ML-KEM-768 keypair: 1184-byte `public` (the encapsulation key, publish it) and 64-byte `private` (the seed, keep it). |
+| `crypto.mlkemEncapsulate(public)` | `crypto.Encapsulation` | Wrap a fresh shared secret under `public`: returns `ciphertext` (1088 bytes, send it to the key holder) and `sharedSecret` (32 bytes, keep it). |
+| `crypto.mlkemDecapsulate(private, ciphertext)` | `bytes` | Recover the 32-byte shared secret from `ciphertext` with `private`. A ciphertext made for another key yields a different (useless) secret by design (implicit rejection), not an error; a malformed key / ciphertext length is a catchable error. |
+
+```jennifer
+use crypto;
+use convert;
+
+# Bob publishes a public key; Alice encapsulates a secret under it.
+def kp as crypto.Keypair init crypto.mlkemKeypair();
+def enc as crypto.Encapsulation init crypto.mlkemEncapsulate($kp.public);
+
+# Bob decapsulates the ciphertext and gets the same secret.
+def bob as bytes init crypto.mlkemDecapsulate($kp.private, $enc.ciphertext);
+# crypto.hmacEqual($enc.sharedSecret, $bob) is true.
+
+# The shared secret is key-establishment material, not a key: derive one.
+def key as bytes init crypto.hkdf($bob, $salt, $info, 32, "sha256");
+def box as bytes init crypto.encrypt($key, $plaintext);        # AES-256-GCM
+```
+
+**Not a complete migration on its own.** Deployed post-quantum key agreement is
+**hybrid** - ML-KEM combined with a classical exchange (X25519), so a break in
+either scheme alone is survivable (this is what TLS 1.3's `X25519MLKEM768` does).
+Use `mlkem*` as the post-quantum half; pair its secret with a classical
+shared secret (concatenate and feed both through `crypto.hkdf`) rather than
+shipping ML-KEM-only.
+
 ## Errors
 
 Every function validates argument kinds and counts and raises a

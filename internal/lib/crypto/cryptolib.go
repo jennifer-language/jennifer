@@ -98,6 +98,18 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "jwkPublic", jwkPublicFn)
 	in.RegisterNamespaced(LibraryName, "jwkToPem", jwkToPemFn)
 	in.RegisterNamespaced(LibraryName, "csr", csrFn)
+
+	// Post-quantum key encapsulation (ML-KEM-768 / FIPS 203). A KEM, not an
+	// encryptor: the 32-byte shared secret feeds crypto.hkdf then crypto.encrypt.
+	// Same build-tag split (default-binary only; stubbed on jennifer-tiny, since
+	// crypto/mlkem is off the TinyGo build). mlkemKeypair reuses crypto.Keypair.
+	in.RegisterNamespacedStruct(LibraryName, "Encapsulation", []parser.StructField{
+		{Name: "ciphertext", Type: parser.PrimitiveType(parser.TypeBytes)},
+		{Name: "sharedSecret", Type: parser.PrimitiveType(parser.TypeBytes)},
+	})
+	in.RegisterNamespaced(LibraryName, "mlkemKeypair", mlkemKeypairFn)
+	in.RegisterNamespaced(LibraryName, "mlkemEncapsulate", mlkemEncapsulateFn)
+	in.RegisterNamespaced(LibraryName, "mlkemDecapsulate", mlkemDecapsulateFn)
 }
 
 // ----- authenticated symmetric encryption (AES-256-GCM) --------------------
