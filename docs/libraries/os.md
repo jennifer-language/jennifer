@@ -32,7 +32,7 @@ function - see
 | `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
 | `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
 | `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr. An optional `stdin` (`string` or `bytes`) is fed to the child then closed. See "External programs" below. |
-| `os.spawn(argv)`   | `os.Process` | **Non-blocking.** Start `argv`, return a handle.                                    |
+| `os.spawn(argv[, options])` | `os.Process` | **Non-blocking.** Start `argv`, return a handle. `options` is a `map of string to string` with optional `"stdout"` / `"stderr"` keys. See "Spawned child stdio" below. |
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent.       |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
 | `os.kill(p)`       | null         | Send SIGTERM to `$p`.                                                               |
@@ -185,8 +185,12 @@ def struct os.Result {                  # not actually written by users -
     stderr   as string
 };
 
-def struct os.Process { pid as int };   # opaque handle for a spawned child
-                                        # (a monotonic internal id, not the OS pid).
+def struct os.Process {                 # a spawned child
+    handle as int,                      #   the registry handle (pass it to
+    pid    as int                       #   os.wait / poll / kill / release)
+};                                      #   `pid` is the real OS pid (ps, /proc,
+                                        #   logging); `handle` is a monotonic
+                                        #   internal id, distinct from the pid.
 ```
 
 `os.run(argv)` is the synchronous form. `argv` is a `list of string`
@@ -248,6 +252,33 @@ the OS reports for the terminated child.
 and `os.spawn`: a child that writes more has the excess dropped and a
 `\n[output truncated at 16 MiB]` marker appended, so a runaway child
 can't grow the interpreter heap without bound.
+
+**Spawned child stdio.** By default `os.spawn` **captures** both streams (so
+`os.wait` returns them, like `os.run`). A child you never `os.wait` - the
+spawn-and-poll pattern - then produces no visible output, and a child that fails
+at startup leaves its diagnostics only in the capture buffer. The optional
+`options` map redirects each stream independently; each value is one of:
+
+| `"stdout"` / `"stderr"` value | Effect |
+| ----------------------------- | ------ |
+| `"capture"` (default)         | Buffered and returned on `os.wait`'s `os.Result`. |
+| `"inherit"`                   | Connected to the parent's own stdout / stderr, so the child's output appears **live** (on the terminal, or wherever the parent's stream is redirected). `os.wait`'s field for that stream is then empty. |
+| `"discard"`                   | Dropped. |
+| any other string              | A **file path**; the stream is written to that file (created, truncated). |
+
+```jennifer
+# See a child's diagnostics as it runs (e.g. a browser that may fail at startup):
+def p as os.Process init os.spawn(["chromium", "--headless", $url], {"stderr": "inherit"});
+
+# Or send them to a log file without building a shell line:
+def q as os.Process init os.spawn(["worker", "--job", $id], {"stderr": "/var/log/worker.err"});
+```
+
+**The handle vs the pid.** `os.wait` / `os.poll` / `os.kill` / `os.release` take
+the whole `os.Process` and use its `handle` (a monotonic registry id). `$p.pid`
+is the **real OS pid** - use it for logs, `ps`, `/proc`, or an out-of-band signal.
+The two differ on purpose: the OS recycles a pid once a child is reaped, so the
+registry keys on the stable handle, never the pid.
 
 Because a handle (and its captured output) stays live for idempotent
 `os.wait`, a long-running program that spawns many children should

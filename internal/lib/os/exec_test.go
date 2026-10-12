@@ -4,6 +4,8 @@
 package oslib
 
 import (
+	"fmt"
+	stdos "os"
 	"runtime"
 	"strings"
 	"testing"
@@ -250,7 +252,7 @@ func TestSpawnHandlesAreDistinctAndOwnTheirProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn1 err: %v", err)
 	}
-	id1, _ := extractPid("t", p1)
+	id1, _ := extractHandle("t", p1)
 	// Let the first child fully terminate so the OS is free to recycle its pid.
 	r1, err := waitFn(interpreter.BuiltinCtx{}, []interpreter.Value{p1})
 	if err != nil {
@@ -260,7 +262,7 @@ func TestSpawnHandlesAreDistinctAndOwnTheirProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn2 err: %v", err)
 	}
-	id2, _ := extractPid("t", p2)
+	id2, _ := extractHandle("t", p2)
 	if id1 == id2 {
 		t.Fatalf("handles collided: id1=%d id2=%d", id1, id2)
 	}
@@ -407,7 +409,7 @@ func TestKillTerminatesProcess(t *testing.T) {
 
 func TestWaitOnUnknownHandleErrors(t *testing.T) {
 	// Construct a synthetic Process with an unknown pid.
-	p := makeProcess(9999999)
+	p := makeProcess(9999999, 9999999)
 	_, err := waitFn(interpreter.BuiltinCtx{}, []interpreter.Value{p})
 	if err == nil || !strings.Contains(err.Error(), "unknown process handle") {
 		t.Errorf("got %v", err)
@@ -448,5 +450,112 @@ func TestRunReturnsPromptlyWhenChildBackgrounds(t *testing.T) {
 	}
 	if !strings.Contains(out, "hi") {
 		t.Errorf("stdout = %q, want to contain %q", out, "hi")
+	}
+}
+
+// optsMap builds a `map of string to string` Value for os.spawn options.
+func optsMap(kv ...string) interpreter.Value {
+	var entries []interpreter.MapEntry
+	for i := 0; i+1 < len(kv); i += 2 {
+		entries = append(entries, interpreter.MapEntry{
+			Key:   interpreter.StringVal(kv[i]),
+			Value: interpreter.StringVal(kv[i+1]),
+		})
+	}
+	return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+}
+
+func fieldInt(v interpreter.Value, name string) (int64, bool) {
+	for _, f := range v.Fields {
+		if f.Name == name {
+			return f.Value.Int, f.Value.Kind == interpreter.KindInt
+		}
+	}
+	return 0, false
+}
+
+func resultField(v interpreter.Value, name string) string {
+	for _, f := range v.Fields {
+		if f.Name == name {
+			return f.Value.Str
+		}
+	}
+	return ""
+}
+
+// os.Process carries a small monotonic handle AND the real OS pid; the two are
+// distinct and the pid names a live process.
+func TestSpawnExposesRealPidAndHandle(t *testing.T) {
+	skipIfNotLinux(t)
+	p, err := spawnFn(interpreter.BuiltinCtx{}, []interpreter.Value{stringList("sleep", "2")})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	handle, ok := fieldInt(p, "handle")
+	if !ok || handle <= 0 {
+		t.Fatalf("handle field missing/invalid: %d (ok=%v)", handle, ok)
+	}
+	pid, ok := fieldInt(p, "pid")
+	if !ok || pid <= 1 {
+		t.Fatalf("pid field missing/invalid: %d (ok=%v)", pid, ok)
+	}
+	if pid == handle {
+		t.Errorf("pid (%d) must be the real OS pid, not the handle (%d)", pid, handle)
+	}
+	if _, serr := stdos.Stat(fmt.Sprintf("/proc/%d", pid)); serr != nil {
+		t.Errorf("reported pid %d has no /proc entry: %v", pid, serr)
+	}
+	_, _ = killFn(interpreter.BuiltinCtx{}, []interpreter.Value{p})
+	_, _ = waitFn(interpreter.BuiltinCtx{}, []interpreter.Value{p})
+}
+
+// The stdout / stderr options route each stream: capture (default, returned by
+// os.wait), discard (dropped), and a file path (written to the file).
+func TestSpawnStreamModes(t *testing.T) {
+	skipIfNotLinux(t)
+	bctx := interpreter.BuiltinCtx{}
+	prog := func() interpreter.Value { return stringList("sh", "-c", "echo OUT; echo ERR >&2") }
+
+	// capture (default): os.wait returns both streams.
+	p, _ := spawnFn(bctx, []interpreter.Value{prog()})
+	r, err := waitFn(bctx, []interpreter.Value{p})
+	if err != nil {
+		t.Fatalf("wait(capture): %v", err)
+	}
+	if !strings.Contains(resultField(r, "stdout"), "OUT") || !strings.Contains(resultField(r, "stderr"), "ERR") {
+		t.Errorf("capture lost output: out=%q err=%q", resultField(r, "stdout"), resultField(r, "stderr"))
+	}
+
+	// discard: os.wait returns empty for the discarded streams.
+	p, _ = spawnFn(bctx, []interpreter.Value{prog(), optsMap("stdout", "discard", "stderr", "discard")})
+	r, _ = waitFn(bctx, []interpreter.Value{p})
+	if resultField(r, "stdout") != "" || resultField(r, "stderr") != "" {
+		t.Errorf("discard should drop both: out=%q err=%q", resultField(r, "stdout"), resultField(r, "stderr"))
+	}
+
+	// file: the stream is written to the file; os.wait's field is empty.
+	logPath := t.TempDir() + "/err.log"
+	p, _ = spawnFn(bctx, []interpreter.Value{prog(), optsMap("stderr", logPath)})
+	r, _ = waitFn(bctx, []interpreter.Value{p})
+	if resultField(r, "stderr") != "" {
+		t.Errorf("file-redirected stderr should be empty in the Result, got %q", resultField(r, "stderr"))
+	}
+	body, rerr := stdos.ReadFile(logPath)
+	if rerr != nil || !strings.Contains(string(body), "ERR") {
+		t.Errorf("redirect file: err=%v contents=%q", rerr, string(body))
+	}
+}
+
+// Bad options surface a catchable error rather than a crash.
+func TestSpawnBadOptions(t *testing.T) {
+	skipIfNotLinux(t)
+	bctx := interpreter.BuiltinCtx{}
+	// options that are not a map
+	if _, err := spawnFn(bctx, []interpreter.Value{stringList("true"), interpreter.IntVal(1)}); err == nil {
+		t.Error("non-map options should error")
+	}
+	// a redirect path that cannot be created
+	if _, err := spawnFn(bctx, []interpreter.Value{stringList("true"), optsMap("stdout", "/no/such/dir/xyz.log")}); err == nil {
+		t.Error("an unwritable redirect path should error")
 	}
 }

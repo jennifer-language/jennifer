@@ -84,6 +84,7 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "stderr", Type: str},
 	})
 	in.RegisterNamespacedStruct(LibraryName, "Process", []parser.StructField{
+		{Name: "handle", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "pid", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
 }

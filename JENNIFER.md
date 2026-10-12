@@ -592,10 +592,17 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   To build a buffer, use `net.readAll`/`readN` for a stream or `binary.join` for a
   `list of bytes` - never `binary.concat` (or `$out[]` per byte) in a loop (O(n^2)).
 - **`maps`** - `keys values has delete merge`. `has` before a missing-key read.
-- **`os`** - `getEnv`, `hasFlag`/`flag`, `isTerminal`, `run`/`spawn`,
-  `cwd`/`homeDir`/`tempDir`; `catchSignal(name)`/`gotSignal(name)` to trap and poll
-  a Unix signal (`"int"`/`"term"`/`"hup"`/`"usr2"`; cooperative, opt-in, for
-  graceful shutdown; `"usr1"` reserved for `kill -USR1` interpreter diagnostics).
+- **`os`** - `getEnv`, `hasFlag`/`flag`, `isTerminal`, `cwd`/`homeDir`/`tempDir`;
+  external processes: `run(argv[, stdin])` -> `os.Result{exitCode, stdout, stderr}`
+  (blocking, captures both streams) and `spawn(argv[, options])` ->
+  `os.Process{handle, pid}` (non-blocking) with `wait`/`poll`/`kill`/`release` (which
+  take the `os.Process`). `os.Process.pid` is the real OS pid (for logs / `ps` /
+  signals); `handle` is the registry id the quartet uses. `spawn`'s `options` is a
+  `map of string to string` with `"stdout"`/`"stderr"` each `"capture"` (default,
+  returned by `wait`), `"inherit"` (live to the parent's stream), `"discard"`, or a
+  file path. `catchSignal(name)`/`gotSignal(name)` trap and poll a Unix signal
+  (`"int"`/`"term"`/`"hup"`/`"usr2"`; cooperative, opt-in, for graceful shutdown;
+  `"usr1"` reserved for `kill -USR1` interpreter diagnostics).
   Constants `PLATFORM ARCH NCPU EOL DIRSEP PATHSEP ARGS`.
 - **`path`** - OS-aware filesystem path manipulation (the string layer paired
   with `fs`; no I/O): `path.base(p)`, `dir(p)`, `ext(p)`, `stem(p)`,

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	stdos "os"
 	"os/exec"
 	"runtime"
@@ -80,9 +81,16 @@ func (c *capBuffer) String() string {
 }
 
 type processState struct {
-	cmd      *exec.Cmd
-	stdout   *capBuffer
-	stderr   *capBuffer
+	cmd *exec.Cmd
+	// stdout / stderr hold the capture buffer for a stream only when that stream
+	// is captured (the default); they are nil for an inherited / discarded /
+	// file-redirected stream, in which case os.wait's corresponding field is "".
+	stdout *capBuffer
+	stderr *capBuffer
+	// outFile / errFile are the open files for a `path`-redirected stream; the
+	// reaper closes them when the child exits.
+	outFile  *stdos.File
+	errFile  *stdos.File
 	done     chan struct{} // closed when cmd.Wait() returns
 	exitCode int64
 	waitErr  error
@@ -143,29 +151,36 @@ func makeResult(exitCode int64, stdout, stderr string) interpreter.Value {
 	})
 }
 
-// makeProcess constructs an `os.Process{pid}` Value.
-func makeProcess(pid int64) interpreter.Value {
+// makeProcess constructs an `os.Process{handle, pid}` Value. `handle` is the
+// internal registry id (a monotonic, never-reused key for os.wait / poll / kill /
+// release); `pid` is the real OS process id (for logging, `ps`, `/proc`, or an
+// out-of-band signal). They are distinct on purpose: the OS recycles a pid once
+// the child is reaped, so the registry must key on the stable handle, not the pid.
+func makeProcess(handle, pid int64) interpreter.Value {
 	return interpreter.NamespacedStructVal("os", "Process", []interpreter.StructField{
+		{Name: "handle", Value: interpreter.IntVal(handle)},
 		{Name: "pid", Value: interpreter.IntVal(pid)},
 	})
 }
 
-// extractPid pulls the pid field out of an `os.Process` value. A
-// non-Process value is a typed runtime error; missing field is an
-// internal error (the struct was built outside this library).
-func extractPid(fnName string, v interpreter.Value) (int64, error) {
+// extractHandle pulls the registry handle out of an `os.Process` value, which
+// os.wait / poll / kill / release use to find the child. A non-Process value is a
+// typed runtime error; a missing field is an internal error (the struct was built
+// outside this library). The OS pid field is informational only and is not used
+// here (the handle, not the recyclable pid, identifies the child).
+func extractHandle(fnName string, v interpreter.Value) (int64, error) {
 	if v.Kind != interpreter.KindStruct || v.StructNS != "os" || v.StructName != "Process" {
 		return 0, fmt.Errorf("%s: argument must be an os.Process, got %s", fnName, v.Kind)
 	}
 	for _, f := range v.Fields {
-		if f.Name == "pid" {
+		if f.Name == "handle" {
 			if f.Value.Kind != interpreter.KindInt {
-				return 0, fmt.Errorf("%s: os.Process.pid is not int (got %s)", fnName, f.Value.Kind)
+				return 0, fmt.Errorf("%s: os.Process.handle is not int (got %s)", fnName, f.Value.Kind)
 			}
 			return f.Value.Int, nil
 		}
 	}
-	return 0, fmt.Errorf("%s: os.Process has no pid field", fnName)
+	return 0, fmt.Errorf("%s: os.Process has no handle field", fnName)
 }
 
 // stdinBytes extracts the optional `stdin` argument to os.run: a string or
@@ -234,31 +249,90 @@ func runFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	return makeResult(int64(cmd.ProcessState.ExitCode()), outBuf.String(), errBuf.String()), nil
 }
 
-// spawnFn implements `os.spawn(argv) -> os.Process`. Non-blocking:
-// starts the child and returns immediately with a handle. A
-// background goroutine calls cmd.Wait() and records the result;
-// `os.wait` / `os.poll` consult the recorded state.
+// spawnStreamMode returns the requested mode for a stream key ("stdout" /
+// "stderr") from the optional options map, or "" (the default, capture) when the
+// map is absent or has no string value for that key.
+func spawnStreamMode(opts interpreter.Value, key string) string {
+	if opts.Kind != interpreter.KindMap {
+		return ""
+	}
+	for _, e := range opts.Map {
+		if e.Key.Kind == interpreter.KindString && e.Key.Str == key && e.Value.Kind == interpreter.KindString {
+			return e.Value.Str
+		}
+	}
+	return ""
+}
+
+// resolveSpawnStream wires one child stream per its mode: "" / "capture" -> an
+// in-memory capture buffer (returned later by os.wait), "inherit" -> the parent's
+// own stream (live on the terminal / the parent's redirect), "discard" ->
+// dropped, anything else -> a file path the stream is written to (created,
+// truncated). Returns the writer to hand exec.Cmd plus the capture buffer or the
+// open file to record on the state (at most one of the two is non-nil).
+func resolveSpawnStream(fn, which, mode string, inherit *stdos.File) (io.Writer, *capBuffer, *stdos.File, error) {
+	switch mode {
+	case "", "capture":
+		b := &capBuffer{}
+		return b, b, nil, nil
+	case "inherit":
+		return inherit, nil, nil, nil
+	case "discard":
+		return io.Discard, nil, nil, nil
+	default:
+		f, err := stdos.OpenFile(mode, stdos.O_WRONLY|stdos.O_CREATE|stdos.O_TRUNC, 0644)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("%s: cannot open %s redirect file %q: %v", fn, which, mode, err)
+		}
+		return f, nil, f, nil
+	}
+}
+
+// spawnFn implements `os.spawn(argv[, options]) -> os.Process`. Non-blocking:
+// starts the child and returns immediately with a handle. A background goroutine
+// calls cmd.Wait() and records the result; `os.wait` / `os.poll` consult it.
+// `options` is a `map of string to string` with optional "stdout" / "stderr"
+// keys, each "capture" (default; returned by os.wait), "inherit" (the parent's
+// stream, so a child's diagnostics appear live), "discard", or a file path.
 func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if !execSupported() {
 		return interpreter.Null(), execUnsupportedErr("os.spawn")
 	}
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("os.spawn expects 1 argument (argv list), got %d", len(args))
+	if len(args) < 1 || len(args) > 2 {
+		return interpreter.Null(), fmt.Errorf("os.spawn expects 1 or 2 arguments (argv list[, options map]), got %d", len(args))
 	}
 	argv, err := argvFromList("os.spawn", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	var opts interpreter.Value
+	if len(args) == 2 {
+		if args[1].Kind != interpreter.KindMap {
+			return interpreter.Null(), fmt.Errorf("os.spawn: options must be a map of string to string, got %s", args[1].Kind)
+		}
+		opts = args[1]
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.WaitDelay = procWaitDelay
-	state := &processState{
-		cmd:    cmd,
-		stdout: &capBuffer{},
-		stderr: &capBuffer{},
-		done:   make(chan struct{}),
+	state := &processState{cmd: cmd, done: make(chan struct{})}
+
+	// Resolve each stream's destination (default: capture). On a file-open error
+	// close any file already opened for the other stream, so no fd leaks.
+	outW, outBuf, outFile, err := resolveSpawnStream("os.spawn", "stdout", spawnStreamMode(opts, "stdout"), stdos.Stdout)
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	cmd.Stdout = state.stdout
-	cmd.Stderr = state.stderr
+	errW, errBuf, errFile, err := resolveSpawnStream("os.spawn", "stderr", spawnStreamMode(opts, "stderr"), stdos.Stderr)
+	if err != nil {
+		if outFile != nil {
+			_ = outFile.Close()
+		}
+		return interpreter.Null(), err
+	}
+	cmd.Stdout, cmd.Stderr = outW, errW
+	state.stdout, state.stderr = outBuf, errBuf
+	state.outFile, state.errFile = outFile, errFile
+
 	// Bound the live-process registry before starting the child, so a script that
 	// leaks os.Process handles (spawns without os.wait / os.release) fails with a
 	// catchable error instead of forking without limit. Checked before Start so no
@@ -267,11 +341,16 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	tooMany := len(handles) >= maxProcHandles
 	handlesMu.Unlock()
 	if tooMany {
+		closeSpawnFiles(outFile, errFile)
 		return interpreter.Null(), fmt.Errorf("os.spawn: too many live child processes (limit %d); each os.spawn needs a matching os.wait or os.release", maxProcHandles)
 	}
 	if err := cmd.Start(); err != nil {
+		closeSpawnFiles(outFile, errFile)
 		return interpreter.Null(), fmt.Errorf("os.spawn: %v", err)
 	}
+	// The real OS pid, captured now (cmd.Process is set once Start succeeds). It is
+	// informational only; os.wait / poll / kill / release use the registry handle.
+	pid := int64(cmd.Process.Pid)
 	handlesMu.Lock()
 	nextID++
 	id := nextID
@@ -290,17 +369,37 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 			}
 		}
 		state.waitErr = err
-		// Drain the buffers into strings and drop them (idempotent os.wait
-		// returns these). Ordered before close(done) under the lock, so a
-		// waiter that unblocks on <-done sees the drained strings.
-		state.outStr = state.stdout.String()
-		state.errStr = state.stderr.String()
-		state.stdout = nil
-		state.stderr = nil
+		// Drain any capture buffers into strings and drop them (idempotent os.wait
+		// returns these); close any redirect files. A nil buffer means that stream
+		// was inherited / discarded / file-redirected, so its os.wait field is "".
+		// Ordered before close(done) under the lock, so a waiter that unblocks on
+		// <-done sees the drained strings.
+		if state.stdout != nil {
+			state.outStr = state.stdout.String()
+			state.stdout = nil
+		}
+		if state.stderr != nil {
+			state.errStr = state.stderr.String()
+			state.stderr = nil
+		}
+		closeSpawnFiles(state.outFile, state.errFile)
+		state.outFile = nil
+		state.errFile = nil
 		close(state.done)
 		handlesMu.Unlock()
 	}()
-	return makeProcess(id), nil
+	return makeProcess(id, pid), nil
+}
+
+// closeSpawnFiles closes any non-nil redirect files (ignoring errors - the child
+// is done or never started, and a close error on a log file is not worth failing
+// the call over).
+func closeSpawnFiles(files ...*stdos.File) {
+	for _, f := range files {
+		if f != nil {
+			_ = f.Close()
+		}
+	}
 }
 
 // waitFn implements `os.wait(p) -> os.Result`. Blocks until the
@@ -311,15 +410,15 @@ func waitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.wait expects 1 argument (process handle), got %d", len(args))
 	}
-	pid, err := extractPid("os.wait", args[0])
+	handle, err := extractHandle("os.wait", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	handlesMu.Lock()
-	state, ok := handles[pid]
+	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("os.wait: unknown process handle (pid %d)", pid)
+		return interpreter.Null(), fmt.Errorf("os.wait: unknown process handle (%d)", handle)
 	}
 	<-state.done
 	// A non-ExitError from cmd.Wait (a stdout/stderr pipe-copy failure, say)
@@ -349,19 +448,19 @@ func releaseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.release expects 1 argument (process handle), got %d", len(args))
 	}
-	pid, err := extractPid("os.release", args[0])
+	handle, err := extractHandle("os.release", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	handlesMu.Lock()
 	defer handlesMu.Unlock()
-	state, ok := handles[pid]
+	state, ok := handles[handle]
 	if !ok {
 		return interpreter.BoolVal(false), nil
 	}
 	select {
 	case <-state.done:
-		delete(handles, pid)
+		delete(handles, handle)
 		return interpreter.BoolVal(true), nil
 	default:
 		return interpreter.Null(), fmt.Errorf("os.release: process is still running (wait or kill it first)")
@@ -375,15 +474,15 @@ func pollFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.poll expects 1 argument (process handle), got %d", len(args))
 	}
-	pid, err := extractPid("os.poll", args[0])
+	handle, err := extractHandle("os.poll", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	handlesMu.Lock()
-	state, ok := handles[pid]
+	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("os.poll: unknown process handle (pid %d)", pid)
+		return interpreter.Null(), fmt.Errorf("os.poll: unknown process handle (%d)", handle)
 	}
 	select {
 	case <-state.done:
@@ -402,15 +501,15 @@ func killFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.kill expects 1 argument (process handle), got %d", len(args))
 	}
-	pid, err := extractPid("os.kill", args[0])
+	handle, err := extractHandle("os.kill", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	handlesMu.Lock()
-	state, ok := handles[pid]
+	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("os.kill: unknown process handle (pid %d)", pid)
+		return interpreter.Null(), fmt.Errorf("os.kill: unknown process handle (%d)", handle)
 	}
 	if state.cmd.Process == nil {
 		return interpreter.Null(), fmt.Errorf("os.kill: process has no live OS handle")
