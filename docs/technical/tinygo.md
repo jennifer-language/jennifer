@@ -26,6 +26,15 @@ immediately. A few constraints shape the implementation:
   (`task.waitAny` / `waitAnyTimeout`, `channel.select`) use a
   register-then-poll wait set instead (see the interpreter page).
   A new reflect use needs justification and a TinyGo run.
+- **Crypto randomness needs `/dev/urandom`.** TinyGo's `crypto/rand`
+  on Linux reads `/dev/urandom` (the standard Go build uses the
+  `getrandom` system call, which needs no device node). On a minimal
+  container or embedded image without it, `crypto.randBytes` /
+  `randInt` / `encrypt` / `mtweiKeygen` and `uuid.v4` / `v7` raise a
+  catchable `secure random source unavailable` error - never weak
+  bytes. Provide the device (or bind-mount the host's) where
+  `jennifer-tiny` needs randomness; `hash` and `math.rand` are
+  unaffected.
 - **Floating-point results can differ in the last ulp.** TinyGo
   lowers `math.Log` / `Exp` / `Sqrt` / `Trunc` to LLVM intrinsics
   backed by its bundled C libm, and its LLVM codegen does not always

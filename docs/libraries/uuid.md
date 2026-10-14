@@ -15,6 +15,12 @@ Self-contained and TinyGo-clean.
 | `uuid.version(s)`     | `int`    | The version digit (4, 7, ...; `0` for `uuid.NIL`); errors on malformed input. |
 | `uuid.NIL`            | `string` | The all-zero UUID `"00000000-0000-0000-0000-000000000000"`.           |
 
+`v4` and `v7` draw from the `crypto` library's secure random source. If the
+operating system's source cannot be read they raise a catchable `secure random
+source unavailable` error instead of returning a predictable UUID - see
+[crypto errors](crypto.md#errors) (relevant to `jennifer-tiny` on an image
+without `/dev/urandom`).
+
 ```jennifer
 use io;
 use uuid;

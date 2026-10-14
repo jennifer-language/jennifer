@@ -314,6 +314,13 @@ Every function validates argument kinds and counts and raises a
 positioned runtime error on misuse (wrong type, negative `randBytes`
 length, `lo > hi`, non-positive `iterations` / `keyLen` / `length`, a key
 that is not 32 bytes for `encrypt` / `decrypt`, a wrong-length Ed25519 key or
-signature). The secure random source is assumed always available on the
-supported platform; an impossible failure aborts rather than returning weak
-bytes.
+signature).
+
+The functions that draw randomness (`randBytes`, `randInt`, `encrypt`'s nonce,
+`mtweiKeygen`; and `uuid.v4` / `v7`, which share the source) raise a catchable
+`secure random source unavailable` error if the operating system's random
+source cannot be read. There is no weak fallback: the call fails rather than
+return predictable bytes. The standard `jennifer` reads the `getrandom` system
+call and does not hit this in practice; `jennifer-tiny` reads `/dev/urandom`,
+which a minimal container or embedded image may lack (see
+[TinyGo notes](../technical/tinygo.md)).
