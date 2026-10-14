@@ -191,8 +191,9 @@ small `init()` that overwrites `Version` with the output of
 [../libraries/meta.md](../libraries/meta.md) for the format).
 
 This codegen path replaces the more conventional `go build -ldflags
-"-X .Version=..."` because TinyGo 0.41 silently ignores the `-X`
-directive. Codegen works identically on both toolchains. The generated
+"-X .Version=..."` because TinyGo before 0.43.0 silently ignores the
+`-X` directive (0.43.0 honours it, but 0.41.1 is still a supported,
+CI-tested toolchain). Codegen works identically on every toolchain. The generated
 file is `.gitignore`d so the repository never carries a stale copy.
 
 Two consumers read `version.Version`:

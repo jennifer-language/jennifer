@@ -108,6 +108,22 @@ jobs:
           # arch QEMU user-mode emulation handles it.
           ./jennifer run examples/hello.j
           ./jennifer-tiny run examples/hello.j
+          # Deep recursion must end in the catchable depth-limit error, not a
+          # segfault: this checks that the -stack-size above still leaves room
+          # for internal/limits.MaxCallDepth on this arch (frame sizes differ
+          # per arch, so it runs on every row).
+          for bin in ./jennifer ./jennifer-tiny; do
+            "$bin" run examples/recursion_limit.j | diff -u examples/expected/recursion_limit.txt -
+          done
+
+      - name: Golden examples under the release jennifer-tiny (amd64 only)
+        # The release build uses its own tinygo command rather than the
+        # Makefile, so check the binary actually being shipped against every
+        # golden (test.yml covers the Makefile build). amd64 only: the goldens
+        # are verified there; a foreign-arch libm may differ in a printed
+        # float's last bit, which should not block a release.
+        if: matrix.arch == 'amd64'
+        run: JENNIFER_TINY_BIN="$PWD/jennifer-tiny" go test ./cmd/jennifer -run TestExamplesTinyBinary -count=1 -v
 
       - name: Test report and coverage (amd64 only)
         # Run the full Go suite once, on the native amd64 row, to produce the

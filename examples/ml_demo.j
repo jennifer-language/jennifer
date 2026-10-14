@@ -23,9 +23,13 @@ def reg as ml.Model init ml.linearRegression($X, $y);
 io.printf("linreg predict [5,5] = %f|prec=1\n", ml.predict($reg, [[5.0, 5.0]])[0]);
 io.printf("linreg r2 on train  = %f|prec=3\n", ml.r2($y, ml.predict($reg, $X)));
 # Introspection: read the learned coefficients / intercept (y = 2*x1 + 3*x2 + 1).
+# A least-squares fit lands within a few ulps of the exact values, and which
+# ulps depends on the CPU (arm64 fuses multiply-adds), so print them rounded.
+def coef as list of float init ml.coefficients($reg);
 io.printf(
-    "linreg coefficients  = %v intercept = %f|prec=0\n",
-    ml.coefficients($reg),
+    "linreg coefficients  = [%s, %s] intercept = %f|prec=0\n",
+    io.sprintf("%f|prec=10|trim=true", $coef[0]),
+    io.sprintf("%f|prec=10|trim=true", $coef[1]),
     ml.intercept($reg));
 
 # --- Ridge regularization shrinks the fit (higher alpha, smaller coefficients). ---

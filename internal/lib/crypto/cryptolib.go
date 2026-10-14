@@ -13,9 +13,11 @@
 // library adds no dependency and stays TinyGo-clean.
 //
 // The random source is a package-level buffer refilled from `crypto/rand` so
-// the common per-byte draw (uuid's `randByte`) does not pay a syscall each
-// time; `crypto/rand.Read` never returns an error on the supported platform,
-// and an impossible failure panics rather than silently yielding weak bytes.
+// the common small draw (a UUID, a nonce) does not pay a syscall each time. A
+// failed read is a catchable Jennifer error, never weak bytes: the standard
+// build reads the getrandom syscall and does not fail in practice, but
+// jennifer-tiny's TinyGo `crypto/rand` reads /dev/urandom, which a minimal
+// container or embedded image may not have.
 package cryptolib
 
 import (
@@ -149,7 +151,9 @@ func encryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	// appends ciphertext+tag in place (nonce||ct||tag) with no second
 	// allocation-and-copy of the message.
 	nonce := make([]byte, gcm.NonceSize(), gcm.NonceSize()+len(args[1].Bytes)+gcm.Overhead())
-	RandFill(nonce)
+	if err := RandFill(nonce); err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.encrypt: %v", err)
+	}
 	box := gcm.Seal(nonce, nonce, args[1].Bytes, nil)
 	return interpreter.BytesVal(box), nil
 }
@@ -253,63 +257,74 @@ var (
 	randMu  sync.Mutex
 	randBuf [512]byte
 	randPos = len(randBuf) // past the end: force a refill on the first draw
+	// randRead is the OS source; a variable so a test can make it fail.
+	randRead = crand.Read
 )
 
-// RandByte returns one cryptographically secure random byte. It is the source
-// `uuidlib.randByte` draws on, so v4 / v7 UUIDs are unguessable. Buffered so a
+// RandByte returns one cryptographically secure random byte. Buffered so a
 // per-byte caller does not hit `crypto/rand` on every call.
-func RandByte() byte {
+func RandByte() (byte, error) {
 	randMu.Lock()
 	defer randMu.Unlock()
 	if randPos >= len(randBuf) {
-		fill(randBuf[:])
+		if err := fill(randBuf[:]); err != nil {
+			return 0, err
+		}
 		randPos = 0
 	}
 	b := randBuf[randPos]
 	randPos++
-	return b
+	return b, nil
 }
 
 // RandFill fills b with cryptographically secure random bytes from the shared
 // buffer, taking the lock once for the whole slice. uuid fills all 16 (or 10)
 // of a UUID's random bytes in one call, so it pays one lock acquisition instead
-// of one per byte. Refills the buffer mid-copy as needed.
-func RandFill(b []byte) {
+// of one per byte. Refills the buffer mid-copy as needed. On error b holds no
+// usable randomness and must be discarded.
+func RandFill(b []byte) error {
 	// A draw bigger than half the buffer would cycle it under the shared lock;
 	// crypto/rand.Read is itself thread-safe, so serve large draws directly and
 	// keep the lock for the small-draw fast path (nonces, UUIDs).
 	if len(b) > len(randBuf)/2 {
-		fill(b)
-		return
+		return fill(b)
 	}
 	randMu.Lock()
 	defer randMu.Unlock()
 	for filled := 0; filled < len(b); {
 		if randPos >= len(randBuf) {
-			fill(randBuf[:])
+			if err := fill(randBuf[:]); err != nil {
+				return err
+			}
 			randPos = 0
 		}
 		n := copy(b[filled:], randBuf[randPos:])
 		randPos += n
 		filled += n
 	}
+	return nil
 }
 
-// fill reads len(b) crypto-grade random bytes into b. crypto/rand.Read fills
-// completely and does not return an error on the supported platform; a failure
-// is unrecoverable (no weak fallback), so it panics.
-func fill(b []byte) {
-	if _, err := crand.Read(b); err != nil {
-		panic("crypto: secure random source unavailable: " + err.Error())
+// fill reads len(b) crypto-grade random bytes into b. There is no weak
+// fallback: if the OS source is unavailable the caller gets an error (raised as
+// a catchable Jennifer error), never predictable bytes. A failed refill of the
+// shared buffer leaves randPos past the end, so the next draw retries the
+// refill instead of serving the unfilled bytes.
+func fill(b []byte) error {
+	if _, err := randRead(b); err != nil {
+		return fmt.Errorf("secure random source unavailable: %v", err)
 	}
+	return nil
 }
 
 // randUint64 draws a uniform 64-bit value directly from crypto/rand (not the
 // per-byte buffer): callers here need 8 bytes at a time, not one.
-func randUint64() uint64 {
+func randUint64() (uint64, error) {
 	var b [8]byte
-	fill(b[:])
-	return binary.BigEndian.Uint64(b[:])
+	if err := fill(b[:]); err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(b[:]), nil
 }
 
 // maxRandBytes bounds a single crypto.randBytes request. Keys, tokens, nonces,
@@ -336,7 +351,9 @@ func randBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		return interpreter.Null(), fmt.Errorf("crypto.randBytes: n (%d) exceeds the %d-byte limit", n, maxRandBytes)
 	}
 	out := make([]byte, n)
-	fill(out)
+	if err := fill(out); err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.randBytes: %v", err)
+	}
 	return interpreter.BytesVal(out), nil
 }
 
@@ -355,26 +372,34 @@ func randIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if lo > hi {
 		return interpreter.Null(), fmt.Errorf("crypto.randInt: lo (%d) must be <= hi (%d)", lo, hi)
 	}
-	return interpreter.IntVal(randInRange(lo, hi)), nil
+	v, err := randInRange(lo, hi)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.randInt: %v", err)
+	}
+	return interpreter.IntVal(v), nil
 }
 
 // randInRange returns a uniform int64 in [lo, hi]. Width is computed in uint64
 // so the full int64 span (MinInt64..MaxInt64) does not overflow; the top
 // partial block is rejected so every value is equally likely.
-func randInRange(lo, hi int64) int64 {
+func randInRange(lo, hi int64) (int64, error) {
 	width := uint64(hi) - uint64(lo) // exact for hi >= lo, even across the sign boundary
 	if width == ^uint64(0) {
 		// The interval is the entire int64 range: every 64-bit draw is valid.
-		return int64(uint64(lo) + randUint64())
+		r, err := randUint64()
+		return int64(uint64(lo) + r), err
 	}
 	n := width + 1
 	mod := ((^uint64(0) % n) + 1) % n // 2^64 mod n, computed without overflowing
 	for {
-		r := randUint64()
+		r, err := randUint64()
+		if err != nil {
+			return 0, err
+		}
 		if mod != 0 && r >= -mod { // r in the top [2^64-mod, 2^64) block: biased, reject
 			continue
 		}
-		return int64(uint64(lo) + r%n)
+		return int64(uint64(lo) + r%n), nil
 	}
 }
 

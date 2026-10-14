@@ -4,7 +4,10 @@
 package cryptolib
 
 import (
+	"bytes"
 	"encoding/hex"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -240,9 +243,9 @@ func TestPbkdf2KnownAnswer(t *testing.T) {
 	}
 }
 
-// RandByte is the source uuid draws on, and a spawned task can generate UUIDs
-// concurrently with the main goroutine, so the shared refill buffer must be
-// race-free. Run under -race.
+// RandByte shares the refill buffer with RandFill (the source uuid draws on),
+// and a spawned task can generate UUIDs concurrently with the main goroutine,
+// so the shared buffer must be race-free. Run under -race.
 func TestRandByteConcurrent(t *testing.T) {
 	const goroutines, draws = 16, 2000
 	done := make(chan struct{}, goroutines)
@@ -250,7 +253,12 @@ func TestRandByteConcurrent(t *testing.T) {
 		go func() {
 			var acc byte
 			for i := 0; i < draws; i++ {
-				acc ^= RandByte()
+				b, err := RandByte()
+				if err != nil {
+					t.Error(err)
+					break
+				}
+				acc ^= b
 			}
 			_ = acc
 			done <- struct{}{}
@@ -481,5 +489,46 @@ func TestConcurrentEncryptDistinctNonces(t *testing.T) {
 	}
 	if len(seen) != n {
 		t.Errorf("got %d distinct nonces, want %d", len(seen), n)
+	}
+}
+
+// An unavailable OS random source (jennifer-tiny without /dev/urandom) must be a
+// catchable error from every random-drawing builtin - never a process abort and
+// never predictable bytes - and the shared buffer must recover once the source
+// comes back rather than serving the bytes a failed refill left behind.
+func TestRandomSourceUnavailableIsCatchable(t *testing.T) {
+	orig := randRead
+	defer func() { randRead = orig }()
+	randRead = func([]byte) (int, error) { return 0, errors.New("open /dev/urandom: no such file or directory") }
+	randMu.Lock()
+	randPos = len(randBuf) // force the next small draw to refill
+	randMu.Unlock()
+
+	for _, c := range []struct {
+		name string
+		fn   interpreter.Builtin
+		args []interpreter.Value
+	}{
+		{"randBytes", randBytesFn, []interpreter.Value{interpreter.IntVal(16)}},
+		{"randInt", randIntFn, []interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(6)}},
+		{"encrypt", encryptFn, []interpreter.Value{interpreter.BytesVal(make([]byte, 32)), interpreter.BytesVal([]byte("x"))}},
+		{"mtweiKeygen", mtweiKeygenFn, nil},
+	} {
+		_, err := c.fn(interpreter.BuiltinCtx{}, c.args)
+		if err == nil || !strings.Contains(err.Error(), "secure random source unavailable") {
+			t.Errorf("crypto.%s: got error %v, want a secure-random-source error", c.name, err)
+		}
+	}
+	if err := RandFill(make([]byte, 16)); err == nil {
+		t.Error("RandFill: want an error while the source is down")
+	}
+
+	randRead = orig
+	b := make([]byte, 16)
+	if err := RandFill(b); err != nil {
+		t.Fatalf("RandFill after the source recovered: %v", err)
+	}
+	if bytes.Equal(b, make([]byte, 16)) {
+		t.Error("RandFill after recovery returned all-zero bytes (served the failed refill)")
 	}
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestGenerateV4(t *testing.T) {
-	s := genV4()
+	s := mustGen(t, genV4)
 	b, ok := parse(s)
 	if !ok {
 		t.Fatalf("v4 %q did not parse", s)
@@ -29,7 +29,7 @@ func TestGenerateV4(t *testing.T) {
 }
 
 func TestGenerateV7(t *testing.T) {
-	s := genV7()
+	s := mustGen(t, genV7)
 	b, ok := parse(s)
 	if !ok {
 		t.Fatalf("v7 %q did not parse", s)
@@ -48,9 +48,9 @@ func TestV7SortsByCreationTime(t *testing.T) {
 	base := stdtime.UnixMilli(1_700_000_000_000)
 
 	nowFunc = func() stdtime.Time { return base }
-	early := genV7()
+	early := mustGen(t, genV7)
 	nowFunc = func() stdtime.Time { return base.Add(stdtime.Hour) }
-	late := genV7()
+	late := mustGen(t, genV7)
 
 	if !(early < late) {
 		t.Errorf("v7 not time-ordered: early=%s late=%s", early, late)
@@ -58,7 +58,7 @@ func TestV7SortsByCreationTime(t *testing.T) {
 }
 
 func TestParseRoundTrip(t *testing.T) {
-	s := genV4()
+	s := mustGen(t, genV4)
 	b, ok := parse(s)
 	if !ok {
 		t.Fatalf("parse(%q) failed", s)
@@ -118,4 +118,14 @@ func TestGeneratorFns(t *testing.T) {
 	if _, err := v7Fn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1)}); err == nil {
 		t.Error("expected an arity error when v7 is given an argument")
 	}
+}
+
+// mustGen runs a UUID generator and fails the test if the random source does.
+func mustGen(t *testing.T, gen func() (string, error)) string {
+	t.Helper()
+	s, err := gen()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	return s
 }

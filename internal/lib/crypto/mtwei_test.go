@@ -23,8 +23,8 @@ func TestMtweiRoundTrip(t *testing.T) {
 	validator := mtweiID(user, pass, salt)
 
 	// Client keypair is plain; the server's is entangled with the validator.
-	clientPriv, clientPub := mtweiKeygen(nil)
-	serverPriv, serverPub := mtweiKeygen(validator)
+	clientPriv, clientPub := mustKeygen(t, nil)
+	serverPriv, serverPub := mustKeygen(t, validator)
 
 	clientKey, err := mtweiClientKey(clientPriv, serverPub, clientPub, validator)
 	if err != nil {
@@ -49,8 +49,8 @@ func TestMtweiWrongPasswordDiffers(t *testing.T) {
 	serverValidator := mtweiID("admin", "correct", salt)
 	clientValidator := mtweiID("admin", "wrong", salt)
 
-	clientPriv, clientPub := mtweiKeygen(nil)
-	serverPriv, serverPub := mtweiKeygen(serverValidator)
+	clientPriv, clientPub := mustKeygen(t, nil)
+	serverPriv, serverPub := mustKeygen(t, serverValidator)
 
 	clientKey, err := mtweiClientKey(clientPriv, serverPub, clientPub, clientValidator)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestMtweiClientKeyRejectsDegeneratePoint(t *testing.T) {
 	neg.y.Mod(neg.y, c.p)
 	serverKey := encodePoint(c, neg)
 
-	clientPriv, clientPub := mtweiKeygen(nil)
+	clientPriv, clientPub := mustKeygen(t, nil)
 	_, err := mtweiClientKey(clientPriv, serverKey, clientPub, validator)
 	if err == nil {
 		t.Fatal("crafted degenerate serverKey must be rejected, not crash")
@@ -155,4 +155,14 @@ func TestMtweiClientKeyRejectsDegeneratePoint(t *testing.T) {
 	if !strings.Contains(err.Error(), "degenerate") {
 		t.Fatalf("want a degenerate-point error, got: %v", err)
 	}
+}
+
+// mustKeygen runs mtweiKeygen and fails the test if the random source does.
+func mustKeygen(t *testing.T, validator []byte) ([]byte, []byte) {
+	t.Helper()
+	priv, pub, err := mtweiKeygen(validator)
+	if err != nil {
+		t.Fatalf("mtweiKeygen: %v", err)
+	}
+	return priv, pub
 }

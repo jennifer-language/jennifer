@@ -45,8 +45,9 @@ immediately. A few constraints shape the implementation:
 - **Goroutines are allowed** (used for `spawn`),
   but need `-stack-size=4mb` under TinyGo - see
   [the goroutine-stack note below](#tinygo-goroutine-stack).
-- **No `-ldflags "-X package.var=value"`.** TinyGo 0.41 silently
-  ignores the `-X` directive. Use the codegen path
+- **No `-ldflags "-X package.var=value"`.** TinyGo before 0.43.0
+  silently ignores the `-X` directive, and 0.41.1 is still a
+  supported (CI-tested) toolchain. Use the codegen path
   (`scripts/gen-version.sh` -> `internal/version/version_gen.go`)
   for build-time string injection. See
   [CLI > Version injection](cli.md#version-injection).
@@ -149,7 +150,7 @@ support on both binaries** - `io`, `convert`, `math`, `strings`, `lists`,
 `maps`, `meta`, `time`, `hash`, `crc`, `crypto`, `compress`, `archive`,
 `encoding`, `json`, `toml`, `xml`, `yaml`, `intl`, `task`, `fs`, `regex`,
 `testing`, and `uuid`. `yaml` is the one carrying a third-party dependency
-(`gopkg.in/yaml.v3`), verified to build *and* run under TinyGo 0.41; every
+(`gopkg.in/yaml.v3`), verified to build *and* run under TinyGo 0.41.1 and 0.43.0; every
 other library is Go standard library or hand-rolled.
 
 **Development subcommands are default-binary only.** `jennifer-tiny`

@@ -21,8 +21,9 @@
 # The language still stays TinyGo-clean (both binaries built in CI); the
 # name flip only reflects which one distributors ship as default.
 #
-# We use codegen rather than `-ldflags -X` because TinyGo 0.41 silently
-# ignores -X. Codegen works identically on both toolchains.
+# We use codegen rather than `-ldflags -X` because TinyGo before 0.43.0
+# silently ignores -X, and 0.41.1 is still a supported (CI-tested) toolchain.
+# Codegen works identically on every toolchain.
 
 .PHONY: build build-tinygo build-go test clean version gen-version docker
 
@@ -60,8 +61,9 @@ build-go: gen-version
 # nested in one more call frame, e.g. inside benchFib / an io.printf arg).
 # 4MB clears the whole example suite (serial + parallel fib) with wide
 # headroom and sets the ceiling the catchable call-depth cap sits below
-# (internal/limits.MaxCallDepth = 48 on tinygo; a heavy recursive body
-# segfaults near depth 75 on this stack). Bump both together if a future
+# (internal/limits.MaxCallDepth = 120 on tinygo, counting calls, blocks and
+# expression descents; a heavy recursive body segfaults near call depth 75 on
+# this stack, i.e. past the cap). Bump both together if a future
 # workload needs deeper recursion.
 #
 # The build goes through scripts/build-tinygo.sh, which SKIPS gracefully (exit 0)

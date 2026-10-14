@@ -246,10 +246,12 @@ func (c *mtweiCurve) tangle(target *ecPoint, validator []byte, negate int) *big.
 // mtweiKeygen generates a client (validator == nil) or validator-entangled
 // (server) keypair. Returns the 32-byte private scalar (big-endian, as consumed
 // by BN_bin2bn) and the 33-byte compressed public key.
-func mtweiKeygen(validator []byte) (priv []byte, pub []byte) {
+func mtweiKeygen(validator []byte) (priv []byte, pub []byte, err error) {
 	c := mtweiInit()
 	var pk [32]byte
-	RandFill(pk[:])
+	if err := RandFill(pk[:]); err != nil {
+		return nil, nil, err
+	}
 	// The reference clamps these fixed byte positions of the big-endian scalar.
 	pk[0] &= 248
 	pk[31] &= 127
@@ -268,7 +270,7 @@ func mtweiKeygen(validator []byte) (priv []byte, pub []byte) {
 	if point.y.Bit(0) == 1 {
 		out[32] = 1
 	}
-	return pk[:], out
+	return pk[:], out, nil
 }
 
 // mtweiID derives the 32-byte SRP validator from the credentials and salt:
@@ -387,7 +389,10 @@ func mtweiKeygenFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if len(args) != 0 {
 		return interpreter.Null(), fmt.Errorf("crypto.mtweiKeygen expects no arguments, got %d", len(args))
 	}
-	priv, pub := mtweiKeygen(nil)
+	priv, pub, err := mtweiKeygen(nil)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("crypto.mtweiKeygen: %v", err)
+	}
 	return interpreter.NamespacedStructVal(LibraryName, "Keypair", []interpreter.StructField{
 		{Name: "public", Value: interpreter.BytesVal(pub)},
 		{Name: "private", Value: interpreter.BytesVal(priv)},

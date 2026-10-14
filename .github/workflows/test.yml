@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 #
 # PR gate: runs the full Go test suite and a TinyGo build on every
-# push to main and every pull request. Linux amd64 only - the same
+# push to main and every pull request, once per supported toolchain pair
+# (see the matrix below). Linux amd64 only - the same
 # pure-Go interpreter cross-compiles cleanly to arm64 and the other
 # supported platforms, so per-arch test runs would not catch
 # additional bugs at this stage. Cross-arch builds live in
@@ -21,8 +22,23 @@ permissions:
 
 jobs:
   test:
-    name: go test + tinygo build
+    name: go ${{ matrix.go }} + tinygo ${{ matrix.tinygo }}
     runs-on: ubuntu-latest
+    strategy:
+      # One toolchain failing must not cancel the other: a divergence that
+      # only one pair shows is exactly what the matrix is here to surface.
+      fail-fast: false
+      matrix:
+        include:
+          # The go.mod minimum, with the TinyGo release the release
+          # pipeline builds jennifer-tiny with.
+          - go: '1.26'
+            tinygo: '0.41.1'
+          # The current Go (what rolling distros such as Arch ship). Go 1.27
+          # needs TinyGo >= 0.43.0: older releases reject it or fail the
+          # -scheduler=tasks link (tinygo#5652).
+          - go: '1.27'
+            tinygo: '0.43.0'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -35,13 +51,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go }}
           cache: true
 
       - name: Set up TinyGo
         uses: acifani/setup-tinygo@v3
         with:
-          tinygo-version: '0.41.1'
+          tinygo-version: ${{ matrix.tinygo }}
 
       - name: Show toolchain versions
         run: |
@@ -87,7 +103,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-reports
+          name: test-reports-go${{ matrix.go }}
           path: |
             report.xml
             coverage.html

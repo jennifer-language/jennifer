@@ -44,21 +44,30 @@ func Install(in *interpreter.Interpreter) {
 
 // randFill fills b with crypto-grade random bytes in one shared-lock
 // acquisition (rather than one per byte), so v4 / v7 UUIDs are unguessable and
-// usable as security tokens without needless lock contention.
-func randFill(b []byte) { cryptolib.RandFill(b) }
+// usable as security tokens without needless lock contention. An unavailable
+// random source is an error, never a predictable UUID.
+func randFill(b []byte) error { return cryptolib.RandFill(b) }
 
 func v4Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if err := noArgs("v4", args); err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(genV4()), nil
+	s, err := genV4()
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("uuid.v4: %v", err)
+	}
+	return interpreter.StringVal(s), nil
 }
 
 func v7Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if err := noArgs("v7", args); err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(genV7()), nil
+	s, err := genV7()
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("uuid.v7: %v", err)
+	}
+	return interpreter.StringVal(s), nil
 }
 
 // noArgs rejects any argument to a nullary generator.
@@ -70,17 +79,19 @@ func noArgs(fn string, args []interpreter.Value) error {
 }
 
 // genV4 builds a random (version 4) UUID string.
-func genV4() string {
+func genV4() (string, error) {
 	var b [16]byte
-	randFill(b[:])
+	if err := randFill(b[:]); err != nil {
+		return "", err
+	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
-	return format(b)
+	return format(b), nil
 }
 
 // genV7 builds a time-ordered (version 7) UUID string: 48-bit big-endian
 // millisecond timestamp in the leading six bytes, random elsewhere.
-func genV7() string {
+func genV7() (string, error) {
 	ms := nowFunc().UnixMilli()
 	var b [16]byte
 	b[0] = byte(ms >> 40)
@@ -89,10 +100,12 @@ func genV7() string {
 	b[3] = byte(ms >> 16)
 	b[4] = byte(ms >> 8)
 	b[5] = byte(ms)
-	randFill(b[6:16])
+	if err := randFill(b[6:16]); err != nil {
+		return "", err
+	}
 	b[6] = (b[6] & 0x0f) | 0x70 // version 7
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
-	return format(b)
+	return format(b), nil
 }
 
 func parseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

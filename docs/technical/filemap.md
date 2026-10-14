@@ -145,7 +145,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | File | Description |
 | ---- | ----------- |
 | `internal/limits/nesting_std.go` | `MaxNestingDepth = 1000` + `MaxCallDepth = 10000` (`!tinygo`): the recursive-descent nesting cap (language parser + json / toml / xml decoders) and the `evalCall` method-call-depth cap on the default binary. |
-| `internal/limits/nesting_tiny.go` | `MaxNestingDepth = 64` + `MaxCallDepth = 48` (`tinygo`): the same caps lowered to stay below `jennifer-tiny`'s fixed 4 MB stack. See `docs/technical/tinygo.md`. |
+| `internal/limits/nesting_tiny.go` | `MaxNestingDepth = 64` + `MaxCallDepth = 120` (`tinygo`): the same caps lowered to stay below `jennifer-tiny`'s fixed 4 MB stack. See `docs/technical/tinygo.md`. |
 
 ## Version & build
 

@@ -1,0 +1,3 @@
+caught a limit error
+mentions the call stack: true
+still running after the catch
