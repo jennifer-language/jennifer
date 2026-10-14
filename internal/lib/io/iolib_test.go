@@ -435,3 +435,93 @@ func TestAlignCenterAndAggregate(t *testing.T) {
 		})
 	}
 }
+
+// %a element presentation modifiers apply to every scalar inside the aggregate
+// by kind, at any depth, and leave other kinds (and the defaults) untouched.
+func TestPrintfAggregateElementModifiers(t *testing.T) {
+	in := interpreter.New()
+	Install(in)
+	list := func(vs ...interpreter.Value) interpreter.Value {
+		return interpreter.Value{Kind: interpreter.KindList, List: vs}
+	}
+	f, i, s, b := interpreter.FloatVal, interpreter.IntVal, interpreter.StringVal, interpreter.BoolVal
+	matrix := list(list(f(0.6000000000000001), f(-0.7000000000000001)), list(f(-0.2), f(0.4)))
+	strMap := interpreter.Value{Kind: interpreter.KindMap, Map: []interpreter.MapEntry{
+		{Key: s("a"), Value: s("x\ty")},
+		{Key: s("b"), Value: s("z")},
+	}}
+	cases := []struct {
+		name string
+		args []interpreter.Value
+		want string
+	}{
+		{"floats rounded at depth", vals("%a|prec=10|trim=true", matrix), "[[0.6, -0.7], [-0.2, 0.4]]"},
+		{"fixed precision", vals("%a|prec=2", list(f(1), f(2.345))), "[1.00, 2.35]"},
+		{"scientific", vals("%a|sci=true|prec=1", list(f(1234.5))), "[1.2e+03]"},
+		{"int base", vals("%a|base=16", list(i(255), i(16), i(-1))), "[ff, 10, -1]"},
+		{"sign on ints and floats", vals("%a|sign=always", list(i(1), i(-2), f(0.5))), "[+1, -2, +0.5]"},
+		{"strings quoted, keys too", vals("%a|mode=quote", strMap), `{"a": "x\ty", "b": "z"}`},
+		{"bool case", vals("%a|case=upper", list(b(true), b(false))), "[TRUE, FALSE]"},
+		{"float modifier leaves other kinds alone", vals("%a|prec=1", list(i(3), s("s"), b(true), interpreter.Null(), f(2))), "[3, s, true, null, 2.0]"},
+		{"defaults unchanged", vals("%a", list(f(1), s("s"), b(true))), "[1.0, s, true]"},
+		{"combines with aggregate modifiers", vals(`%a|prec=1|sep=" "|open="("|close=")"`, list(f(1.25), f(2))), "(1.2 2.0)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if _, err := callPrintf(in, &buf, c.args); err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if buf.String() != c.want {
+				t.Errorf("got %q, want %q", buf.String(), c.want)
+			}
+		})
+	}
+	for _, c := range []struct{ format, want string }{
+		{"%a|group=3", "group= is not valid on `%a`"},
+		{"%a|pad=4", `layout modifier "pad" is not valid on`},
+		{"%a|align=left", `layout modifier "align" is not valid on`},
+		{"%a|max=3", `layout modifier "max" is not valid on`},
+		{"%a|fill=0", `layout modifier "fill" is not valid on`},
+		{"%a|prec=x", "not an integer"},
+	} {
+		_, err := callPrintf(in, &bytes.Buffer{}, vals(c.format, list(i(1))))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got error %v, want one containing %q", c.format, err, c.want)
+		}
+	}
+}
+
+// A bare modifier value is a word (letters, digits, `_`, optionally a leading
+// `-` before a digit) or one separator character, so punctuation written right
+// after a modifier is ordinary text rather than part of the value.
+func TestPrintfModifierValueEndsAtPunctuation(t *testing.T) {
+	in := interpreter.New()
+	Install(in)
+	i, f := interpreter.IntVal, interpreter.FloatVal
+	cases := []struct {
+		name string
+		args []interpreter.Value
+		want string
+	}{
+		{"comma after a word value", vals("0x%d|base=16, %d", i(255), i(7)), "0xff, 7"},
+		{"comma after a bool value", vals("%f|prec=1|trim=true, x", f(2.5)), "2.5, x"},
+		{"period after a number", vals("%f|prec=2.", f(3.14159)), "3.14."},
+		{"colon after a number", vals("%d|pad=3: x", i(7)), "  7: x"},
+		{"one-char sep comma", vals("%d|group=3|sep=,", i(1234567)), "1,234,567"},
+		{"one-char sep then a comma", vals("%d|group=3|sep=,, ok", i(1234)), "1,234, ok"},
+		{"one-char sep dash", vals("%d|group=3|sep=-", i(1234567)), "1-234-567"},
+		{"one-char sep period", vals("%d|group=3|sep=.", i(1234567)), "1.234.567"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if _, err := callPrintf(in, &buf, c.args); err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if buf.String() != c.want {
+				t.Errorf("got %q, want %q", buf.String(), c.want)
+			}
+		})
+	}
+}

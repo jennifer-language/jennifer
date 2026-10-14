@@ -86,6 +86,12 @@ Each verb (except `%v`) accepts an optional pipe-separated modifier list:
 Modifiers are **order-independent flags** - `%d|pad=5|fill=0|align=right`
 and `%d|align=right|fill=0|pad=5` produce the same output. The list runs
 left-to-right until it hits a byte that isn't part of a key or value.
+A bare value is either a word - letters, digits, and `_`, with an optional
+leading `-` before a digit - or exactly **one** separator character (`,`
+`.` `-` `:`, the `%d|sep=` set). So punctuation written right after a
+modifier is ordinary text: `"0x%d|base=16, %d"` prints `0xff, 7`, and
+`"%f|prec=2."` ends a sentence with the number. A value that needs any
+other character is written double-quoted (`%a|sep=" | "`).
 To put a literal `|` immediately after a verb, double it: `||` writes
 one `|` and ends the modifier list (same shape as `%%`). Unknown keys,
 bad values, missing companions (e.g. `group=` without `sep=`), and the
@@ -201,6 +207,26 @@ runtime error.
 | `depth` | non-negative integer | unlimited              | max recursion depth; deeper levels collapse to `[...]` / `{...}` (`depth=0` collapses at the top) |
 | `null`  | `skip`               | -                      | omit null list elements and null map values                                                       |
 
+**Element modifiers.** `%a` also accepts the presentation modifiers of the
+typed verbs. Each applies to every scalar of its kind inside the aggregate,
+at any depth, with the same values and meaning as on that verb:
+
+| Key    | Applies to       | Same as on |
+| ------ | ---------------- | ---------- |
+| `prec` | float elements   | `%f`       |
+| `trim` | float elements   | `%f`       |
+| `sci`  | float elements   | `%f`       |
+| `base` | int elements     | `%d`       |
+| `sign` | int and float elements | `%d` / `%f` |
+| `mode` | string elements, map keys included | `%s` |
+| `case` | bool elements    | `%t`       |
+
+Elements of any other kind (structs, enums, opaque values, `null`) render as
+`%v` would. `sep` keeps its `%a` meaning (the element separator), so digit
+grouping (`group`) is not available inside `%a`; neither are the layout
+modifiers `pad`, `align`, `max`, and `fill`, which shape a whole field rather
+than each element.
+
 Modifier values can be **double-quoted** to include spaces, brackets,
 or other characters reserved by the modifier-list grammar. The escape
 set is the standard `\n \r \t \\ \"`:
@@ -218,11 +244,16 @@ io.printf("%a|depth=1\n", $grid);    # [[...], [...]]
 def m as map of string to int init {"a": 1, "b": 2};
 io.printf("%a\n", $m);                       # {a: 1, b: 2}
 io.printf("%a|kv=\"=\"|sep=\" \"\n", $m);    # {a=1 b=2}
+
+def inverse as list of list of float init [[0.6000000000000001, -0.7], [-0.2, 0.4]];
+io.printf("%a|prec=10|trim=true\n", $inverse); # [[0.6, -0.7], [-0.2, 0.4]]
+io.printf("%a|base=16\n", [255, 4096]);       # [ff, 1000]
+io.printf("%a|mode=quote\n", {"k": "v"});     # {"k": "v"}
 ```
 
-Per-element rendering uses the same display form as `%v`, so primitive
-values inside an aggregate look the way they would in a print
-statement. `null=skip` is only valid on `%a` - it omits null elements
+Without an element modifier, per-element rendering uses the same display
+form as `%v`, so primitive values inside an aggregate look the way they
+would in a print statement. `null=skip` is only valid on `%a` - it omits null elements
 entirely; the other `null=` modes (`empty`, `null`, `literal`) are
 rejected for `%a` because they don't have a sensible per-element
 meaning.

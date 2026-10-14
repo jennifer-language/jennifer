@@ -1868,26 +1868,20 @@ machinery.
 
 **Planned.** `io.printf` / `sprintf` / `eprintf` parse their format string at
 runtime, so a malformed verb or modifier in a string literal fails on the line that
-runs rather than when the file is checked. The sharpest edge is the modifier
-grammar: a value runs to the next whitespace, so a trailing comma or period is
-swallowed into it - `io.printf("flags 0x%d|base=16, %d\n", $f, $n)` fails at runtime
-with `base="16,": expected 2, 8, 10, or 16` inside what reads as a constant format
-string, a mistake hard to spot in review.
+runs rather than when the file is checked: an unknown verb (`%x`), a modifier the
+verb does not take (`%d|prec=2`), a bad value (`%d|base=3`), a duplicate key, or a
+verb count that does not match the argument count all surface only when that line
+executes - possibly on a rarely-taken error path.
 
 When the format argument is a string literal the whole spec is statically known, so
 the same `io`/`format.go` parser that runs at call time can run at check time. Two
 shippable shapes: a `jennifer lint` rule that re-parses each literal format and
-reports a bad verb or modifier at its source position (additive, false-positive-free
-- a non-literal format is simply not checked); or, stronger, a parse-time error for
-a statically-known format whose spec cannot parse (the "undefined results error"
-stance applied to a format string). The lint form is the lower-risk first step and
-turns a whole class of runtime surprise into a pre-commit finding.
-
-Widening the modifier terminator set (end a value at any character outside
-`[A-Za-z0-9_-]`) would remove the footgun directly, but it collides with the
-unquoted single-character separator values the grammar supports (`sep=,`,
-`group=.`), so the static check is the safer fix and the runtime grammar stays as
-is.
+reports a bad verb, modifier, or argument count at its source position (additive,
+false-positive-free - a non-literal format is simply not checked); or, stronger, a
+parse-time error for a statically-known format whose spec cannot parse (the
+"undefined results error" stance applied to a format string). The lint form is the
+lower-risk first step and turns a whole class of runtime surprise into a pre-commit
+finding.
 
 **Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
 `jennifer lint` framework.

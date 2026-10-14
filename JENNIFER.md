@@ -511,7 +511,12 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 
 - **`io`** - `printf` / `sprintf` with verbs `%d %f %s %t %v %a` and
   `%verb[|key=value]` modifiers (`pad`, `align`, `base`, `prec`, `sign`,
-  `group`, `case`, ...); `readLine`, `eof`, `readBytes`.
+  `group`, `case`, ...); `%a` (list / map) also takes the element modifiers
+  `prec trim sci base sign mode case`, applied to every scalar inside
+  (`%a|prec=2` rounds each float). A bare modifier value ends at the first
+  character that is not a letter, digit, or `_`, so `"%d|base=16, %d"` prints
+  the comma (quote a value that needs other characters: `%a|sep=" | "`);
+  `readLine`, `eof`, `readBytes`.
 - **`convert`** - `toInt toFloat toString toBool`, `typeOf`, `objectType`,
   `fromCodepoint` / `toCodepoint`, `bytesFromString` / `stringFromBytes` (utf-8).
   `toInt(s, radix)` parses a string's bare digits in base 2/8/10/16 (strip any

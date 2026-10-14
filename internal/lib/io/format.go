@@ -72,6 +72,10 @@ type FormatSpec struct {
 	HasDepth    bool
 	Depth       int
 	NullSkipA   bool // null=skip set on %a
+	// AggElem is set when %a carries an element presentation modifier
+	// (prec / trim / sci / base / sign / mode / case); without one, elements
+	// render exactly as %v would.
+	AggElem bool
 
 	seen map[string]bool
 }
@@ -185,9 +189,13 @@ func readKey(src string, pos int) (string, int, error) {
 	return src[start:pos], pos, nil
 }
 
-// readValue reads a modifier value: either a bare token (letters,
-// digits, underscore, or single-char punctuation from the `sep=` set)
-// or a Jennifer-style double-quoted string. The quoted form is what
+// readValue reads a modifier value: a bare token or a Jennifer-style
+// double-quoted string. A bare token is either a run of letters, digits
+// and `_` (`16`, `true`, `quote`, or `-1` with a leading minus) or exactly
+// one separator character from the `%d|sep=` set (`,` `.` `-` `:`). Keeping punctuation to a single
+// character is what lets ordinary text follow a modifier: in
+// `"%d|base=16, %d"` the value ends at `16` and the `,` prints, while
+// `sep=,` still reads its one-character value. The quoted form is what
 // makes `%a|sep=", "` and `%a|open="<"` work - values containing
 // spaces, brackets, or other reserved characters can be expressed
 // without limiting the modifier-list grammar.
@@ -196,7 +204,15 @@ func readValue(src string, pos int) (string, int, error) {
 		return readQuotedValue(src, pos)
 	}
 	start := pos
-	for pos < len(src) && isValueByte(src[pos]) {
+	// A `-` directly before a digit starts a (negative) number rather than
+	// standing alone as a separator, so `depth=-1` reaches the range check
+	// ("depth must be >= 0") instead of failing as a bare `-`.
+	if pos+1 < len(src) && src[pos] == '-' && src[pos+1] >= '0' && src[pos+1] <= '9' {
+		pos++
+	} else if pos < len(src) && isSepValueByte(src[pos]) {
+		return src[start : pos+1], pos + 1, nil
+	}
+	for pos < len(src) && isWordValueByte(src[pos]) {
 		pos++
 	}
 	if pos == start {
@@ -240,7 +256,8 @@ func readQuotedValue(src string, pos int) (string, int, error) {
 	return "", pos, fmt.Errorf("unterminated quoted modifier value")
 }
 
-func isValueByte(c byte) bool {
+// isWordValueByte reports whether c can continue a bare word value.
+func isWordValueByte(c byte) bool {
 	switch {
 	case c >= 'a' && c <= 'z':
 		return true
@@ -248,10 +265,14 @@ func isValueByte(c byte) bool {
 		return true
 	case c >= '0' && c <= '9':
 		return true
-	case c == '_' || c == ',' || c == '.' || c == '-' || c == ':':
-		return true
 	}
-	return false
+	return c == '_'
+}
+
+// isSepValueByte reports whether c is a one-character separator value
+// (`%d|sep=` takes one of `_,.-:`; `_` is also a word byte).
+func isSepValueByte(c byte) bool {
+	return c == ',' || c == '.' || c == '-' || c == ':'
 }
 
 // readNullValue reads a `null=` value, which is either a bare identifier
@@ -370,9 +391,32 @@ func setNull(spec *FormatSpec, value string) error {
 
 // setAggMod handles modifiers for the `%a` aggregate verb.
 // The modifiers shape the *render*, not the values: separators,
-// brackets, recursion depth, and the per-element null-handling.
+// brackets, recursion depth, the per-element null-handling, and the
+// element presentation modifiers borrowed from the typed verbs, which
+// apply to every scalar inside the aggregate by its kind (`prec` / `trim`
+// / `sci` to floats, `base` to ints, `sign` to both, `mode` to strings -
+// map keys included - and `case` to bools).
 func setAggMod(spec *FormatSpec, key, value string) error {
 	switch key {
+	case "prec", "trim", "sci":
+		spec.AggElem = true
+		return setFloatMod(spec, key, value)
+	case "base":
+		spec.AggElem = true
+		return setIntMod(spec, key, value)
+	case "sign":
+		spec.AggElem = true
+		return setSign(spec, value)
+	case "mode":
+		spec.AggElem = true
+		return setStringMod(spec, key, value)
+	case "case":
+		spec.AggElem = true
+		return setBoolMod(spec, key, value)
+	case "group":
+		return fmt.Errorf("group= is not valid on `%%a` (its sep= is the element separator); format grouped numbers with `%%d`")
+	case "pad", "align", "max", "fill":
+		return fmt.Errorf("layout modifier %q is not valid on `%%a`; it applies to a whole field, not to each element", key)
 	case "sep":
 		spec.HasAggSep = true
 		spec.AggSep = value
@@ -691,11 +735,25 @@ func renderAggregate(spec FormatSpec, v interpreter.Value, level int) string {
 }
 
 // aggElement renders one element/value/key inside an aggregate. Nested
-// collections recurse through renderAggregate; primitives use Display
-// (the same shape `%v` produces).
+// collections recurse through renderAggregate; scalars use Display (the
+// same shape `%v` produces) unless an element presentation modifier is
+// set, in which case each scalar goes through its typed verb's renderer.
+// Other kinds (structs, enums, opaque objects, null) always use Display.
 func aggElement(spec FormatSpec, v interpreter.Value, level int) string {
 	if v.Kind == interpreter.KindList || v.Kind == interpreter.KindMap {
 		return renderAggregate(spec, v, level)
+	}
+	if spec.AggElem {
+		switch v.Kind {
+		case interpreter.KindFloat:
+			return renderFloat(spec, v.Float)
+		case interpreter.KindInt:
+			return renderInt(spec, v.Int)
+		case interpreter.KindString:
+			return renderString(spec, v.Str)
+		case interpreter.KindBool:
+			return renderBool(spec, v.Bool)
+		}
 	}
 	return v.Display()
 }

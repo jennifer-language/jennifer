@@ -380,6 +380,10 @@ io.printf("depth=1        %a|depth=1\n", $matrix);
 def scoreMap as map of string to int init {"a": 1, "b": 2};
 io.printf("map            %a\n", $scoreMap);
 io.printf("map kv style   %a|kv=\"=\"|sep=\" \"\n", $scoreMap);
+# Element modifiers from the typed verbs apply to every scalar inside.
+io.printf("rounded        %a|prec=2\n", [3.14159, 2.71828]);
+io.printf("hex            %a|base=16\n", [255, 4096]);
+io.printf("quoted         %a|mode=quote\n", {"key": "value"});
 
 # --- non-decimal literals + digit separators ---
 io.printf("=== literals ===\n");

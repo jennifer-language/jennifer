@@ -7,12 +7,6 @@
 use io;
 use linalg;
 
-# rounded renders a float to 10 decimals with trailing zeros trimmed, hiding
-# last-bit rounding noise (0.6000000000000001 prints as 0.6).
-func rounded(x as float) {
-    return io.sprintf("%f|prec=10|trim=true", $x);
-}
-
 # --- vectors ---
 def u as list of float init [1.0, 2.0, 2.0];
 def v as list of float init [3.0, 0.0, 4.0];
@@ -41,14 +35,9 @@ io.printf("a * [1, 1]     = %v\n", linalg.matmul($a, [1.0, 1.0]));
 io.printf("frobenius(a)   = %v\n", linalg.norm($a));
 io.printf("zeros(2, 3)    = %v\n", linalg.zeros(2, 3));
 # The inverse's entries are not exact in binary floating point, and their last
-# bit depends on the CPU (arm64 fuses multiply-adds), so print them rounded.
-def inv as list of list of float init linalg.inverse($a);
-io.printf(
-    "inverse(a)     = [[%s, %s], [%s, %s]]\n",
-    rounded($inv[0][0]),
-    rounded($inv[0][1]),
-    rounded($inv[1][0]),
-    rounded($inv[1][1]));
+# bit depends on the CPU (arm64 fuses multiply-adds), so print them rounded:
+# %a's prec / trim apply to every float inside the matrix.
+io.printf("inverse(a)     = %a|prec=10|trim=true\n", linalg.inverse($a));
 
 # Solve the linear system  x + y = 3,  x - y = 1  ->  x = 2, y = 1.
 def coeffs as list of list of float init [[1.0, 1.0], [1.0, -1.0]];

@@ -166,6 +166,9 @@ nested         [[1, 2], [3, 4]]
 depth=1        [[...], [...]]
 map            {a: 1, b: 2}
 map kv style   {a=1 b=2}
+rounded        [3.14, 2.72]
+hex            [ff, 1000]
+quoted         {"key": "value"}
 === literals ===
 0xff           = 255
 0xDEAD_BEEF    = 3735928559
