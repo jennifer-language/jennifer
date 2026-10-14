@@ -1194,13 +1194,28 @@ the standard `RegisterNamespaced` path:
 | `task.poll`        | `BoolVal(state.IsDone())` via the non-blocking select on `state.Done`                         |
 | `task.discard`     | `MarkObserved`; return `Null()` immediately (does not block)                                  |
 | `task.waitAll`     | iterate list, wait each, mark all observed; return list-of-results or first error in order    |
-| `task.waitAny`     | `[]reflect.SelectCase` over the list, `reflect.Select`, return chosen index                   |
+| `task.waitAny`     | register a waker with every task, poll `IsDone` in list order, sleep on the waker; return the lowest done index |
 
-`reflect.Select` is the one place the runtime drops into reflect;
-acceptable because the list length is dynamic and `select { ... }`
-on a variable arm count has no other Go-level construction. The
-TinyGo target supports it for chan-receive cases; verified by the
-package tests passing under both compilers.
+`task.waitAny` / `waitAnyTimeout` and `channel.select` wait on a
+dynamic number of Go channels, which a static `select { ... }` cannot
+express. They do not use `reflect.Select` (TinyGo ships it as a stub
+that panics) or a helper goroutine per case (each costs a full
+`-stack-size` stack under `jennifer-tiny`, and a helper's channel
+receive would consume a value the select might not return). Instead
+`internal/interpreter/waitset.go` gives `TaskState` and `ChannelState`
+a wait set: a waiter registers one buffered wake-up channel with every
+source, polls each source without blocking, and only then sleeps on
+the wake-up channel. A task finishing, a channel send, and a channel
+close poke the registered waiters. Registering **before** polling rules
+out a lost wake-up. One window remains for channels: a sender that
+has poked but not yet parked on an unbuffered (or full) channel is not
+receivable, so `ChannelState.Send` keeps a pending-send count and
+`channel.select` briefly yields and re-polls while it is non-zero
+instead of sleeping. `channel.select` rotates the channel it polls
+first so a busy channel cannot starve the rest; `task.waitAny` returns
+the lowest done index. Pinned by `TestSelectFanInStress` /
+`TestSelectWakesOnLaterSend` (channel) and
+`TestWaitAnyWakesOnLaterCompletion` (task), run under `-race`.
 
 `MarkObserved` is a thin wrapper around setting the flag under
 the registry mutex (no atomics - the field is read only by the

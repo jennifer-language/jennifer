@@ -18,7 +18,9 @@ package channellib
 
 import (
 	"fmt"
-	"reflect"
+	"runtime"
+	"sync/atomic"
+	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
@@ -116,7 +118,7 @@ func sendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (retVal interpre
 			retVal, retErr = interpreter.Null(), fmt.Errorf("channel.send: send on a closed channel")
 		}
 	}()
-	state.Ch <- args[1].Copy()
+	state.Send(args[1].Copy())
 	return interpreter.Null(), nil
 }
 
@@ -182,23 +184,77 @@ func selectFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if len(states) == 0 {
 		return interpreter.Null(), fmt.Errorf("channel.select: the list is empty (no channels to select on)")
 	}
-	// reflect.Select over the receive cases. A closed channel is always ready
-	// (yielding recvOK=false); drop it and re-select, so the call blocks on the
-	// still-open channels and only ends when they are all closed and drained.
-	live := states
-	for len(live) > 0 {
-		cases := make([]reflect.SelectCase, len(live))
-		for i, s := range live {
-			cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.Ch)}
-		}
-		chosen, recv, ok := reflect.Select(cases)
-		if ok {
-			return recv.Interface().(interpreter.Value), nil
-		}
-		// The chosen channel is closed and drained; remove it and keep waiting.
-		live = append(live[:chosen], live[chosen+1:]...)
+	if v, ok := selectRecv(states); ok {
+		return v, nil
 	}
 	return interpreter.Null(), fmt.Errorf("channel.select: all channels are closed")
+}
+
+// selectStart rotates the channel a select polls first, so a channel that always
+// has a value ready cannot starve the ones after it in the list.
+var selectStart atomic.Uint32
+
+// selectRecv receives the next value from whichever channel in states is ready
+// first, or reports ok=false once every channel is closed and drained (a closed
+// channel is dropped from the wait set; the call keeps blocking on the open
+// ones). There is no reflect.Select under TinyGo, so it registers one waker with
+// every channel BEFORE polling them without blocking - a send or close the poll
+// missed then pokes the waker (see interpreter/waitset.go). A sender that has
+// poked but not yet parked on an unbuffered channel is not receivable yet;
+// HasPendingSend covers that brief window with a short retry instead of a sleep
+// on the waker.
+func selectRecv(states []*interpreter.ChannelState) (interpreter.Value, bool) {
+	waker := interpreter.NewWaker()
+	for _, s := range states {
+		s.Subscribe(waker)
+	}
+	defer func() {
+		for _, s := range states {
+			s.Unsubscribe(waker)
+		}
+	}()
+	live := append([]*interpreter.ChannelState(nil), states...)
+	spins := 0
+	for len(live) > 0 {
+		start := int(selectStart.Add(1) % uint32(len(live)))
+		pending := false
+		for k := 0; k < len(live); k++ {
+			i := (start + k) % len(live)
+			v, ok, ready := live[i].TryRecv()
+			if !ready {
+				pending = pending || live[i].HasPendingSend()
+				continue
+			}
+			if ok {
+				return v, true
+			}
+			// Closed and drained: drop it and rescan the rest.
+			live = append(live[:i], live[i+1:]...)
+			k = -1
+			if len(live) == 0 {
+				break
+			}
+			start = 0
+		}
+		if len(live) == 0 {
+			break
+		}
+		if pending {
+			// A sender is between its poke and parking on the channel: yield so it
+			// can park, then poll again. Back off to a short sleep if it takes
+			// longer than a few yields (it is on another thread).
+			spins++
+			if spins < 16 {
+				runtime.Gosched()
+			} else {
+				time.Sleep(50 * time.Microsecond)
+			}
+			continue
+		}
+		spins = 0
+		<-waker
+	}
+	return interpreter.Value{}, false
 }
 
 // lenFn: channel.len(ch) -> int. The number of values currently buffered (Go

@@ -19,10 +19,23 @@ default binary is standard-Go. The `jennifer-tiny` build sits in
 CI so any change that breaks TinyGo compatibility surfaces
 immediately. A few constraints shape the implementation:
 
-- **No `reflect`-heavy code.** Tagged-union `Value` instead of
-  interfaces with type assertions in hot paths. `task.waitAny`
-  uses `reflect.Select` (verified under TinyGo); other new
-  reflect uses need justification.
+- **No `reflect`.** Tagged-union `Value` instead of interfaces
+  with type assertions in hot paths; the runtime imports no
+  `reflect` at all. In particular TinyGo's `reflect.Select` is an
+  unimplemented stub that panics, so the multi-way waits
+  (`task.waitAny` / `waitAnyTimeout`, `channel.select`) use a
+  register-then-poll wait set instead (see the interpreter page).
+  A new reflect use needs justification and a TinyGo run.
+- **Floating-point results can differ in the last ulp.** TinyGo
+  lowers `math.Log` / `Exp` / `Sqrt` / `Trunc` to LLVM intrinsics
+  backed by its bundled C libm, and its LLVM codegen does not always
+  match the standard Go compiler bit for bit, so most transcendental
+  functions (`log`, `exp`, trig, `erf`, `lgamma`, `pow`, ...) can
+  disagree with `jennifer` in the final bit. Neither binary is wrong;
+  sometimes the TinyGo value is the correctly rounded one (`log(81, 3)`
+  is `4.0` there and `4.000000000000001` on `jennifer`). Golden
+  examples therefore print such results at a fixed precision
+  (`%f|prec=N`) rather than the shortest round-trip `%v` form.
 - **No `text/template`.** Not needed yet; would drag in fragile
   runtime paths under TinyGo.
 - **No `encoding/json` for in-binary serialization.** The

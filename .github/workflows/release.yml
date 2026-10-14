@@ -89,17 +89,18 @@ jobs:
           # `-scheduler=tasks` pins the cooperative single-thread
           # scheduler (the threads-capable default segfaults on recursive
           # `spawn` bodies, since -stack-size doesn't govern OS-thread
-          # stacks); `-stack-size=2mb` covers the deep Go-stack frames
+          # stacks); `-stack-size=4mb` covers the deep Go-stack frames
           # Jennifer's tree-walking evaluator wraps each call in (TinyGo's
-          # ~8KB default overflows, and 1MB sat right at the edge - the
-          # serial recursive fib in examples/benchmark.j overflowed nested
-          # one call frame deep). `-no-debug` strips DWARF for a smaller
+          # ~8KB default overflows) and is the ceiling the catchable
+          # call-depth cap (internal/limits.MaxCallDepth) is sized below -
+          # a smaller stack segfaults on deep recursion before the cap can
+          # raise its catchable error. `-no-debug` strips DWARF for a smaller
           # release binary. Keep this in sync with the Makefile. See
           # docs/technical/tinygo.md.
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          tinygo build -scheduler=tasks -stack-size=2mb -no-debug -o jennifer-tiny ./cmd/jennifer
+          tinygo build -scheduler=tasks -stack-size=4mb -no-debug -o jennifer-tiny ./cmd/jennifer
 
       - name: Smoke-test the binaries
         run: |

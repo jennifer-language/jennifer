@@ -311,3 +311,46 @@ func TestBareTaskInExpressionPositionRejected(t *testing.T) {
 		t.Errorf("error doesn't guide the user: %v", runErr)
 	}
 }
+
+// TestWaitAnyWakesOnLaterCompletion: waitAny blocks while every task is still
+// running and is woken when one finishes, returning that task's index.
+func TestWaitAnyWakesOnLaterCompletion(t *testing.T) {
+	out, runErr, _ := runProg(t, `
+		use io;
+		use task;
+		def slow as task of int init spawn {
+			def n as int init 0;
+			for (def i in 0..200000) { $n = $n + 1; }
+			return $n;
+		};
+		def ts as list of task of int init [$slow];
+		def idx as int init task.waitAny($ts);
+		io.printf("idx=%d val=%d", $idx, task.wait($ts[$idx]));
+	`)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != "idx=0 val=200000" {
+		t.Errorf("got %q, want %q", out, "idx=0 val=200000")
+	}
+}
+
+// TestWaitAnyPrefersLowestDoneIndex: when several tasks are already done,
+// waitAny returns the lowest index.
+func TestWaitAnyPrefersLowestDoneIndex(t *testing.T) {
+	out, runErr, _ := runProg(t, `
+		use io;
+		use task;
+		def a as task of int init spawn { return 1; };
+		def b as task of int init spawn { return 2; };
+		task.wait($a);
+		task.wait($b);
+		io.printf("%d", task.waitAny([$b, $a]));
+	`)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != "0" {
+		t.Errorf("got %q, want %q", out, "0")
+	}
+}

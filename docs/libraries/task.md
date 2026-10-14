@@ -132,7 +132,8 @@ your own try/catch.
 ### `task.waitAny($ts)`
 
 "First to finish wins" pattern. Returns the *index* of the first
-completed task; you follow up with `task.wait($ts[$idx])` to read
+completed task (when several are already done, the lowest index);
+you follow up with `task.wait($ts[$idx])` to read
 the result (and mark that one observed). The losing tasks keep
 running; observe them or `task.discard` them so the loud-fail
 doesn't catch them.

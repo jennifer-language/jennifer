@@ -58,7 +58,7 @@ RUN set -eux; \
     CGO_ENABLED=0 GOARCH="$TARGETARCH" \
         go build -trimpath -ldflags="-s -w" -o /out/jennifer ./cmd/jennifer; \
     GOARCH="$TARGETARCH" \
-        tinygo build -scheduler=tasks -stack-size=2mb -no-debug -o /out/jennifer-tiny ./cmd/jennifer; \
+        tinygo build -scheduler=tasks -stack-size=4mb -no-debug -o /out/jennifer-tiny ./cmd/jennifer; \
     for m in modules/*.j; do \
         case "$m" in *_test.j) continue ;; esac; \
         cp "$m" /out/share/jennifer/modules/; \

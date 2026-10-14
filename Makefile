@@ -66,8 +66,8 @@ build-go: gen-version
 #
 # The build goes through scripts/build-tinygo.sh, which SKIPS gracefully (exit 0)
 # when the toolchain cannot build jennifer-tiny at all - so `make build` still
-# succeeds on a host where only the standard binary is buildable (e.g. Go 1.27,
-# which no current TinyGo release links: tinygo#5652). It gates the skip on a
+# succeeds on a host where only the standard binary is buildable (e.g. Go 1.27
+# with a TinyGo older than 0.43.0, which cannot link it: tinygo#5652). It gates the skip on a
 # probe build, so a real TinyGo-cleanliness regression in Jennifer still fails.
 # The scheduler/stack flags stay here as the single source; the script forwards
 # them to both the probe and the real build.

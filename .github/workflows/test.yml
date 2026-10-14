@@ -104,6 +104,15 @@ jobs:
       - name: Smoke-test the TinyGo binary (constrained)
         run: ./jennifer-tiny run examples/hello.j
 
+      - name: Golden examples under the TinyGo binary
+        # Runs every examples/*.j golden through ./jennifer-tiny (TestExamples
+        # covers the standard build in-process). This is what catches a
+        # TinyGo-only divergence - an unimplemented runtime feature, or a libm
+        # last-ulp difference printed by a golden. The test fails if the binary
+        # is missing, so a toolchain that `make build` had to skip cannot pass
+        # silently.
+        run: JENNIFER_TINY_BIN="$PWD/jennifer-tiny" go test ./cmd/jennifer -run TestExamplesTinyBinary -count=1 -v
+
       - name: Check .j formatting (jennifer fmt)
         # The `.j` counterpart to the gofmt gate above: `jennifer fmt -l` lists any
         # file whose formatting differs from canonical, and a non-empty list fails

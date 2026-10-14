@@ -19,7 +19,6 @@ package tasklib
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -214,14 +213,37 @@ func waitAnyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if len(states) == 0 {
 		return interpreter.Null(), fmt.Errorf("task.waitAny: list is empty (no tasks to wait on)")
 	}
-	// reflect.Select over each task's Done channel. The chosen index
-	// is the position in the input list.
-	cases := make([]reflect.SelectCase, len(states))
-	for i, s := range states {
-		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.Done)}
-	}
-	chosen, _, _ := reflect.Select(cases)
+	chosen, _ := firstDone(states, nil)
 	return interpreter.IntVal(int64(chosen)), nil
+}
+
+// firstDone blocks until any task in states has finished and returns its index
+// in the list (the lowest such index when several are done), or ok=false when
+// timeout fires first (a nil timeout never fires). It registers one waker with
+// every task BEFORE polling, so a task that finishes after the poll still wakes
+// it (see interpreter/waitset.go - TinyGo has no reflect.Select).
+func firstDone(states []*interpreter.TaskState, timeout <-chan time.Time) (int, bool) {
+	waker := interpreter.NewWaker()
+	for _, s := range states {
+		s.Subscribe(waker)
+	}
+	defer func() {
+		for _, s := range states {
+			s.Unsubscribe(waker)
+		}
+	}()
+	for {
+		for i, s := range states {
+			if s.IsDone() {
+				return i, true
+			}
+		}
+		select {
+		case <-waker:
+		case <-timeout:
+			return -1, false
+		}
+	}
 }
 
 // cancelFn requests cooperative cancellation of a task: it sets the shared
@@ -310,17 +332,10 @@ func waitAnyTimeoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	// reflect.Select over each task's Done channel plus one timeout case. The
-	// timeout occupies the last index; any lower index is a completed task.
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	cases := make([]reflect.SelectCase, len(states)+1)
-	for i, s := range states {
-		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.Done)}
-	}
-	cases[len(states)] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(timer.C)}
-	chosen, _, _ := reflect.Select(cases)
-	if chosen == len(states) {
+	chosen, ok := firstDone(states, timer.C)
+	if !ok {
 		return interpreter.Null(), fmt.Errorf("task.waitAnyTimeout: timed out after %d ms", args[1].Int)
 	}
 	return interpreter.IntVal(int64(chosen)), nil

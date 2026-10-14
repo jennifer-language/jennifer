@@ -171,6 +171,9 @@ type TaskState struct {
 	// task shared into two spawns that bind it concurrently would otherwise race
 	// on a plain field.
 	ElemTyp atomic.Pointer[parser.Type]
+	// waiters are the task.waitAny / waitAnyTimeout callers to wake when the
+	// task finishes (see waitset.go).
+	waiters waitSet
 }
 
 // ChannelState is the payload of a Value of kind KindChannel: a CSP channel
@@ -191,6 +194,10 @@ type ChannelState struct {
 	// atomic pointer: a generic channel (e.g. one held in a list) bound by two
 	// spawns concurrently would otherwise race on a plain field.
 	ElemTyp atomic.Pointer[parser.Type]
+	// waiters are the channel.select callers to wake on a send or close, and
+	// pending counts Sends in flight (see waitset.go).
+	waiters waitSet
+	pending atomic.Int32
 }
 
 // IsClosed reports whether the channel has been closed.
@@ -204,6 +211,7 @@ func (c *ChannelState) CloseOnce() bool {
 		return false
 	}
 	close(c.Ch)
+	c.waiters.notify()
 	return true
 }
 

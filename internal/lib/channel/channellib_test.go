@@ -6,6 +6,7 @@ package channellib
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
@@ -267,4 +268,76 @@ func TestSendElementTypeCheck(t *testing.T) {
 	ch.Chan.ElemTyp.Store(&intT)
 	wantErr(t, in, "send", "must be int", ch, interpreter.StringVal("nope"))
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(1)) // right type is accepted
+}
+
+// TestSelectFanInStress drives select as a fan-in over several channels fed by
+// concurrent senders, unbuffered and buffered, until every channel is closed.
+// Every sent value must arrive exactly once: a lost wake-up would hang the test,
+// and a select that consumed a value it did not return would lose it.
+func TestSelectFanInStress(t *testing.T) {
+	for _, capacity := range []int64{0, 1, 8} {
+		in := newLib(t)
+		const senders, perSender = 6, 300
+		chans := make([]interpreter.Value, senders)
+		for i := range chans {
+			chans[i] = makeChan(t, in, capacity)
+		}
+		sendFn := in.LookupNamespacedBuiltin("channel", "send")
+		closeFn := in.LookupNamespacedBuiltin("channel", "close")
+		for s := 0; s < senders; s++ {
+			go func(s int) {
+				for k := 0; k < perSender; k++ {
+					if _, err := sendFn(interpreter.BuiltinCtx{}, []interpreter.Value{chans[s], interpreter.IntVal(int64(s*perSender + k))}); err != nil {
+						panic(err)
+					}
+				}
+				if _, err := closeFn(interpreter.BuiltinCtx{}, []interpreter.Value{chans[s]}); err != nil {
+					panic(err)
+				}
+			}(s)
+		}
+		list := interpreter.Value{Kind: interpreter.KindList, List: chans}
+		seen := make(map[int64]bool)
+		for {
+			v, err := invoke(t, in, "select", list)
+			if err != nil {
+				if !strings.Contains(err.Error(), "all channels are closed") {
+					t.Fatalf("capacity %d: select: %v", capacity, err)
+				}
+				break
+			}
+			if seen[v.Int] {
+				t.Fatalf("capacity %d: value %d received twice", capacity, v.Int)
+			}
+			seen[v.Int] = true
+		}
+		if len(seen) != senders*perSender {
+			t.Errorf("capacity %d: received %d values, want %d", capacity, len(seen), senders*perSender)
+		}
+	}
+}
+
+// TestSelectWakesOnLaterSend: a select blocked on empty channels is woken by a
+// send that happens after it started waiting.
+func TestSelectWakesOnLaterSend(t *testing.T) {
+	in := newLib(t)
+	a, b := makeChan(t, in, 0), makeChan(t, in, 0)
+	got := make(chan interpreter.Value, 1)
+	go func() {
+		v, err := invoke(t, in, "select", interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{a, b}})
+		if err != nil {
+			panic(err)
+		}
+		got <- v
+	}()
+	time.Sleep(20 * time.Millisecond)
+	mustInvoke(t, in, "send", b, interpreter.IntVal(7))
+	select {
+	case v := <-got:
+		if v.Int != 7 {
+			t.Errorf("select returned %d, want 7", v.Int)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("select was not woken by a later send")
+	}
 }

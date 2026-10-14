@@ -4,12 +4,12 @@
 #
 # Build jennifer-tiny (the TinyGo binary), or skip gracefully when the available
 # TinyGo/Go toolchain cannot build it - so a plain `make build` still succeeds on
-# a host where only the standard `jennifer` is buildable. On Arch's Go 1.27 no
-# TinyGo release yet produces a working jennifer-tiny: an older TinyGo rejects
-# Go 1.27 at its version check ("requires go version 1.19 through 1.26, got
-# go1.27"), and TinyGo 0.42 accepts Go 1.27 but fails to link with
-# `duplicate symbol: tinygo_task_exit` (tinygo#5652; fixed on dev via #5656,
-# awaiting a release after 0.42.0 - retest when 0.43.0 ships).
+# a host where only the standard `jennifer` is buildable. The known incapable
+# setups pair Go 1.27 with an older TinyGo: TinyGo <= 0.41 rejects Go 1.27 at
+# its version check ("requires go version 1.19 through 1.26, got go1.27"), and
+# TinyGo 0.42 accepts Go 1.27 but fails to link with `duplicate symbol:
+# tinygo_task_exit` (tinygo#5652, fixed in TinyGo 0.43.0). Go 1.27 therefore
+# needs TinyGo >= 0.43.0; Go <= 1.26 builds with TinyGo 0.41.1 and later.
 #
 # The skip is gated on a PROBE build of a trivial goroutine program with the same
 # flags, NOT on swallowing the real build's errors. Both failure modes above
@@ -63,8 +63,7 @@ if ! probe_err="$(tinygo build "$@" -o "$PROBE_DIR/probe" "$PROBE_DIR/main.go" 2
     {
         echo "build-tinygo: this TinyGo/Go toolchain cannot build $OUT; skipping it."
         echo "  $(tinygo version 2>/dev/null || echo 'tinygo version unknown')"
-        echo "  No TinyGo release yet builds a working jennifer-tiny on Go 1.27 (tinygo#5652,"
-        echo "  fixed on dev via #5656, awaiting a release after 0.42.0);"
+        echo "  Go 1.27 needs TinyGo >= 0.43.0 (older releases reject it or hit tinygo#5652);"
         echo "  the standard 'jennifer' binary is unaffected. Probe error:"
         printf '%s\n' "$probe_err" | sed 's/^/    /'
     } >&2

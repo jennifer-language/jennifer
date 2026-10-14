@@ -4,7 +4,10 @@
 # The math library's function surface: trigonometry, exponentials and
 # logarithms, combinatorics, and the special functions a probability layer is
 # built on. Every result is deterministic - no randomness here - so the output
-# is a stable golden.
+# is a stable golden. Results that are not exactly representable print at a
+# fixed precision: their last bit can differ between math libraries (the
+# standard and the TinyGo build disagree in the final ulp for several
+# functions), and the shortest round-trip form would expose that.
 
 use io;
 use math;
@@ -18,7 +21,7 @@ io.printf("atan2(1, 1) = %v\n", math.atan2(1, 1) * 4); # = PI
 io.printf("exp(0)      = %v\n", math.exp(0));
 io.printf("ln(E)       = %v\n", math.ln(math.E));
 io.printf("log2(1024)  = %v\n", math.log2(1024));
-io.printf("log(81, 3)  = %v\n", math.log(81, 3));
+io.printf("log(81, 3)  = %f|prec=12\n", math.log(81, 3));
 
 # Roots, magnitude, sign, and toward-zero truncation.
 io.printf("cbrt(27)    = %v\n", math.cbrt(27));
@@ -38,7 +41,7 @@ io.printf("lcm(4, 6)     = %v\n", math.lcm(4, 6));
 io.printf("gamma(5)             = %v\n", math.gamma(5)); # = 4!
 io.printf("beta(2, 3)           = %v\n", math.beta(2, 3)); # = 1/12
 io.printf("regGammaP(1, 1)      = %v\n", math.regGammaP(1, 1)); # 1 - 1/e
-io.printf("regBetaI(0.5, 2, 2)  = %v\n", math.regBetaI(0.5, 2, 2));
+io.printf("regBetaI(0.5, 2, 2)  = %f|prec=12\n", math.regBetaI(0.5, 2, 2));
 
 # The TAU constant, and strictness: a domain slip is a catchable error.
 io.printf("TAU = %v\n", math.TAU);

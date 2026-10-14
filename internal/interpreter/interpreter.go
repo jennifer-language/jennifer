@@ -4868,12 +4868,12 @@ func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, 
 }
 
 // runSpawn is the goroutine body for a spawned block. It executes the
-// body, classifies the result into Result / Err, and closes Done so
-// every observer (task.wait future-phase, the registry scan, the
-// display form) sees the same final state. Writes to state happen
+// body, classifies the result into Result / Err, and closes Done (waking any
+// multi-way waiter) so every observer (task.wait future-phase, the registry
+// scan, the display form) sees the same final state. Writes to state happen
 // before the close; readers must observe close before reading.
 func (i *Interpreter) runSpawn(state *TaskState, ex *parser.SpawnExpr, spawnEnv *Environment) {
-	defer close(state.Done)
+	defer state.finish()
 
 	res, err := i.execBlock(&parser.Block{Stmts: ex.Body}, spawnEnv)
 	if err != nil {
