@@ -420,7 +420,14 @@ func isSpace(ch as string) {
 
 # matchLit reports whether the literal `lit` occurs at index i of cs.
 func matchLit(cs as list of string, i as int, lit as string) {
-    def ls as list of string init strings.chars($lit);
+    return matchChars($cs, $i, strings.chars($lit));
+}
+
+# matchChars reports whether the already-split literal `ls` occurs at index i of
+# cs. A scan (findLit) splits the literal once and calls this per position, so the
+# per-position `strings.chars` list allocation that a per-call split would cost -
+# one per scanned character of a comment / raw-text body - is gone.
+func matchChars(cs as list of string, i as int, ls as list of string) {
     def m as int init len($ls);
     if ($i + $m > len($cs)) {
         return false;
@@ -436,12 +443,13 @@ func matchLit(cs as list of string, i as int, lit as string) {
 }
 
 # findLit returns the index of the next occurrence of `lit` at or after `from`,
-# or len(cs) if there is none.
+# or len(cs) if there is none. The literal is split once, not at every position.
 func findLit(cs as list of string, from as int, lit as string) {
+    def ls as list of string init strings.chars($lit);
     def i as int init $from;
     def n as int init len($cs);
     while ($i < $n) {
-        if (matchLit($cs, $i, $lit)) {
+        if (matchChars($cs, $i, $ls)) {
             return $i;
         }
         $i = $i + 1;
@@ -456,14 +464,20 @@ func findLit(cs as list of string, from as int, lit as string) {
 # document). `lit` is the lowercase terminator; each `cs` char is lowercased to
 # compare.
 func matchLitCI(cs as list of string, i as int, lit as string) {
-    def ls as list of string init strings.chars($lit);
+    return matchCharsCI($cs, $i, strings.chars(strings.lower($lit)));
+}
+
+# matchCharsCI is matchChars with an ASCII-case-insensitive compare. `ls` is the
+# already-lowercased, already-split literal (lowercased once by the caller, not
+# per position), so only the document char is lowered per comparison.
+func matchCharsCI(cs as list of string, i as int, ls as list of string) {
     def m as int init len($ls);
     if ($i + $m > len($cs)) {
         return false;
     }
     def k as int init 0;
     while ($k < $m) {
-        if (strings.lower($cs[$i + $k]) != strings.lower($ls[$k])) {
+        if (strings.lower($cs[$i + $k]) != $ls[$k]) {
             return false;
         }
         $k = $k + 1;
@@ -472,10 +486,11 @@ func matchLitCI(cs as list of string, i as int, lit as string) {
 }
 
 func findLitCI(cs as list of string, from as int, lit as string) {
+    def ls as list of string init strings.chars(strings.lower($lit));
     def i as int init $from;
     def n as int init len($cs);
     while ($i < $n) {
-        if (matchLitCI($cs, $i, $lit)) {
+        if (matchCharsCI($cs, $i, $ls)) {
             return $i;
         }
         $i = $i + 1;

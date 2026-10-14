@@ -237,7 +237,7 @@ func testParseDoctype() {
     testing.assertEqual(get($doc, "html/body").children[0].text, "hi");
 }
 
-# PERFORMANCE/DOS: many sibling nodes under one parent must not make parse()
+# many sibling nodes under one parent must not make parse()
 # O(N^2) - html.parse is a tolerant reader for untrusted documents. The flat
 # sibling buffer makes each append O(1), so this large document (tens of seconds
 # under the old per-append subtree copy) parses promptly and correctly. Reaching
@@ -258,7 +258,7 @@ func testMismatchedNestingFold() {
     testing.assertEqual(parse("<b><i>x</b>y").children[1].text, "y");
 }
 
-# CORRECTNESS: a raw-text element (script / style) closes on its end tag
+# a raw-text element (script / style) closes on its end tag
 # regardless of case, so </SCRIPT> ends a <script> (the start tag is normalised to
 # lowercase) and the rest of the document is parsed rather than swallowed into the
 # raw body.
@@ -267,4 +267,21 @@ func testRawTextCaseInsensitiveClose() {
     testing.assertEqual(len($t.children), 2);
     testing.assertEqual(render($t.children[0]), "<script>var a=1;</script>");
     testing.assertEqual(render($t.children[1]), "<p>after</p>");
+}
+
+# scanning a long raw-text body (script / style) or a long
+# comment splits the terminator literal once per scan, not once per scanned
+# character (the per-character list allocation is gone). Trees stay identical: a
+# long script body is preserved verbatim and closed by a case-insensitive end tag,
+# and the element after it survives; a long comment is skipped.
+func testRawTextAndCommentLongBodyScan() {
+    def body as string init strings.repeat("a < b & c; ", 500);
+    def doc as Node init parse("<SCRIPT>" + $body + "</SCRIPT><p>after</p>");
+    testing.assertEqual(len($doc.children), 2);
+    testing.assertEqual($doc.children[0].tag, "script");
+    testing.assertTrue(strings.contains(render($doc.children[0]), "a < b & c;"));
+    testing.assertEqual(render($doc.children[1]), "<p>after</p>");
+    def doc2 as Node init parse("<!--" + strings.repeat("x", 4000) + "--><p>z</p>");
+    testing.assertEqual(len($doc2.children), 1);
+    testing.assertEqual(render($doc2.children[0]), "<p>z</p>");
 }

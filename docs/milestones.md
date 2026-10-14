@@ -1651,7 +1651,7 @@ which is unfollowable for the struct field where most real data lives.
 - **Surface.** Additive and non-breaking (it only accepts input that errors today).
   Removes the "Chained forms (`$xs[0][]`) are not supported" limitation.
 - **Touches.** Parser append-target grammar, the resolver, the interpreter append
-  path, the grammar EBNF in `docs/technical/`, and the CLAUDE.md / JENNIFER.md notes
+  path, the grammar EBNF in `docs/technical/`, and the JENNIFER.md notes
   that currently document the limitation and the workaround.
 
 **Requires:** M13.1 (structs), the existing indexed / field-assignment lvalue
