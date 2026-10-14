@@ -26,7 +26,7 @@ style, **L3nn** API lifecycle.
 | `L105` | constant-condition          | warning  | `if (true)`, `while (true)` with no escape, `if ($x == $x)`, ...   |
 | `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
 | `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined method (the call analogue of L002; namespaced / `$f()` calls excluded) |
-| `L108` | undefined-constant          | warning  | an unqualified, constant-spelled name read where no such constant is defined anywhere (the constant analogue of L107; `ns.CONST` excluded) |
+| `L108` | undefined-name              | warning  | an unqualified bare name read where nothing by that name is defined anywhere: a constant (`MISSING_CONSTANT`), or a function used as a value (`Table{ greet: greetingOf }`); a bare variable / parameter name gets a "did you mean `$x`?" hint. The bare-name analogue of L107; `ns.NAME` and `match` arm heads / pattern binders excluded |
 | `L109` | call-arity                  | warning  | a bare call to a same-file method with the wrong argument count (exact: no default / variadic params); func-value and namespaced calls excluded |
 | `L112` | undeclared-namespace        | warning  | a `ns.name` reference whose namespace has no `use` / `import` (the inverse of L106; local enum / struct type prefixes excluded) |
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |

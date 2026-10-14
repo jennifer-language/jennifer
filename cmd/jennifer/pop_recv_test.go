@@ -44,6 +44,15 @@ func fakePOP3(ln net.Listener) {
 			// A multi-byte UTF-8 body. Reading it as per-chunk strings (or
 			// counting runes) corrupts the accented characters.
 			fmt.Fprintf(conn, "+OK 30 octets\r\nSubject: Trois\r\n\r\ncafé résumé\r\n.\r\n")
+		case up == "RETR 4":
+			// A body far larger than the client's 512-byte read, so the
+			// multiline reader must append across several reads (and rewind its
+			// terminator scan over each read boundary).
+			fmt.Fprintf(conn, "+OK big\r\nSubject: Big\r\n\r\nfirst line\r\n")
+			for i := 0; i < 100; i++ {
+				fmt.Fprintf(conn, "filler line %03d of the large message body\r\n", i)
+			}
+			fmt.Fprintf(conn, "last line\r\n.\r\n")
 		case up == "QUIT":
 			fmt.Fprintf(conn, "+OK bye\r\n")
 			return
@@ -84,6 +93,10 @@ def msgB as string init pop.retrieve($s, 2);
 testing.assertContains($msgB, ".dotted");
 def msgC as string init pop.retrieve($s, 3);
 testing.assertContains($msgC, "café résumé");
+def msgD as string init pop.retrieve($s, 4);
+testing.assertContains($msgD, "first line");
+testing.assertContains($msgD, "filler line 099");
+testing.assertContains($msgD, "last line");
 def szs as list of int init pop.sizes($s);
 testing.assertEqual(len($szs), 2);
 testing.assertEqual($szs[0], 20);

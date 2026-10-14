@@ -745,43 +745,69 @@ func checkUndefinedCall(c *checkCtx) {
 	check.program(c.prog)
 }
 
-// checkUndefinedConstant (L108) flags an unqualified reference to a
-// constant-spelled name that is defined nowhere - the constant analogue of L107
-// and of L002's undefined variable. A `$var` typo is a parse error and a
-// `method()` typo is L107, but a bare constant read (`MISSING_CONSTANT`) is
-// resolved only at runtime, so a `def const` deleted while a reader survives
-// escapes a clean fmt + lint + ast and fails on the first line that reaches it.
+// checkUndefinedConstant (L108) flags an unqualified bare name that is defined
+// nowhere - the bare-name analogue of L107 and of L002's undefined variable. A
+// `$var` typo is a parse error and a `method()` typo is L107, but a bare read is
+// resolved only at runtime, so it escapes a clean fmt + lint + ast and fails on
+// the first line that reaches it. Two spellings reach this node:
 //
-// Only a *constant-spelled* bare name is checked (parser.IsValidConstName): a
-// lowercase bare name is a method-value reference or an enum variant, not a
-// constant. The defined set is every constant declared ANYWHERE in the program
-// (top level or local) plus every method name - a superset of what is actually in
-// scope at the reference, so the check only ever MISSES an out-of-scope reference,
-// never falsely flags one. That keeps it sound (no false positives) while still
-// catching the real failure: a name that exists nowhere. A constant-spelled
-// method (a func-value target named like a constant) stays allowed. Namespaced
-// constants (`ns.CONST`) are a different node and are not touched; includes and the
-// `MODULE_test.j` overlay are already spliced, so cross-file constants resolve.
-// Match-arm heads are skipped, as in L107, so a `when SOME_VARIANT` enum pattern is
-// never misread as an undefined constant.
+//   - a constant-spelled name (`MISSING_CONSTANT`): a `def const` deleted while a
+//     reader survives;
+//   - any other bare name, which is a func value (`Table{ greet: greetingOf }`,
+//     the provider pattern a module uses to hand out functions): a method that
+//     was renamed or never written. If the name is a variable or parameter
+//     instead, the finding says so - the reference is missing its `$`.
+//
+// The defined set is every constant declared ANYWHERE in the program (top level
+// or local) plus every method name - a superset of what is actually in scope at
+// the reference, so the check only ever MISSES an out-of-scope reference, never
+// falsely flags one. That keeps it sound (no false positives) while still
+// catching the real failure: a name that exists nowhere. Namespaced references
+// (`ns.CONST`, `ns.fn`) are a different node and are not touched; includes and
+// the `MODULE_test.j` overlay are already spliced, so cross-file names resolve.
+// Match-arm heads are skipped, as in L107: a bare `when Variant` enum pattern
+// over a subject the resolver could not type is a variant name, not a reference.
 func checkUndefinedConstant(c *checkCtx) {
 	defined := map[string]bool{}
+	variables := map[string]bool{}
 	collectDefs := walker{stmt: func(s parser.Stmt) {
-		if d, ok := s.(*parser.DefineStmt); ok && d.IsConst {
-			defined[d.VarName] = true
+		switch d := s.(type) {
+		case *parser.DefineStmt:
+			if d.IsConst {
+				defined[d.VarName] = true
+			} else {
+				variables[d.VarName] = true
+			}
+		case *parser.ForEachStmt:
+			variables[d.VarName] = true
+		case *parser.TryStmt:
+			variables[d.CatchName] = true
 		}
 	}}
 	collectDefs.program(c.prog)
 	for _, m := range c.prog.Methods {
-		defined[m.Name] = true // a constant-spelled bare name may be a func-value ref to a method
+		defined[m.Name] = true // a bare name may be a func-value ref to a method
+		for _, p := range m.Params {
+			variables[p.Name] = true
+		}
 	}
 
+	// Lint sees the unresolved AST, so an enum pattern arm `when Circle(c)` is
+	// still a CallExpr whose bare-name argument is the payload binder `c`: skip
+	// the binder as well as the arm head, or every pattern arm would be flagged.
 	skip := map[parser.Expr]bool{}
 	collectArms := walker{stmt: func(s parser.Stmt) {
 		if m, ok := s.(*parser.MatchStmt); ok {
 			for i := range m.Arms {
 				for _, v := range m.Arms[i].Values {
 					skip[v] = true
+					if call, ok := v.(*parser.CallExpr); ok {
+						for _, a := range call.Args {
+							if _, bare := a.(*parser.ConstRefExpr); bare {
+								skip[a] = true
+							}
+						}
+					}
 				}
 			}
 		}
@@ -790,10 +816,19 @@ func checkUndefinedConstant(c *checkCtx) {
 
 	check := walker{expr: func(e parser.Expr) {
 		ref, ok := e.(*parser.ConstRefExpr)
-		if !ok || skip[e] || defined[ref.Name] || !parser.IsValidConstName(ref.Name) {
+		if !ok || skip[e] || defined[ref.Name] {
 			return
 		}
-		c.report("L108", ref, fmt.Sprintf("reference to undefined constant `%s`", ref.Name))
+		switch {
+		case variables[ref.Name]:
+			// Checked first: a short variable name like `M` is also
+			// constant-spelled, and the missing `$` is the likelier slip.
+			c.report("L108", ref, fmt.Sprintf("bare `%s` names no function or constant; variables are read with `$` - did you mean `$%s`?", ref.Name, ref.Name))
+		case parser.IsValidConstName(ref.Name):
+			c.report("L108", ref, fmt.Sprintf("reference to undefined constant `%s`", ref.Name))
+		default:
+			c.report("L108", ref, fmt.Sprintf("reference to undefined name `%s` (no function or constant by that name)", ref.Name))
+		}
 	}}
 	check.program(c.prog)
 }

@@ -1370,7 +1370,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `RS256/384/512`, ECDSA `ES256/384/512`, `EdDSA`. `verify` pins the **expected**
   algorithm (rejects algorithm-confusion), enforces `exp` / `nbf`, compares in
   constant time; `decode` / `header` read without verifying (never authorize on
-  them). `verifyWith(..., jwt.Policy{iss, aud})` enforces issuer / audience;
+  them). `verifyWith(..., jwt.Policy{iss, aud, requireExp})` enforces issuer / audience and,
+  with `requireExp: true`, refuses a token that has no `exp`;
   `verifyLeeway(..., leeway)` widens `exp` / `nbf` for skew; `verifyWithKeys(token,
   keysByKid, alg)` / `verifyJwks(token, jwksJson, alg)` select the key by header
   `kid` (JWKS via `crypto.jwkToPem`, RS\* / ES\* only). Over `crypto` + `hash` +

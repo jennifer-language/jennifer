@@ -529,12 +529,45 @@ func b() { def h as func init greet; return $h(); }`
 			t.Fatalf("local const / func-value ref flagged as undefined constant: %d", got)
 		}
 	})
-	t.Run("a lowercase bare name is not treated as a constant", func(t *testing.T) {
-		// A bare lowercase name is a method-value reference, not a constant, so it
-		// is never an undefined *constant* (a mistyped one is out of L108's scope).
-		src := `func f() { def g as func init notdefined; return $g(); }`
+	t.Run("an undefined function used as a value is flagged", func(t *testing.T) {
+		// The provider pattern: a struct of func values naming a method that was
+		// never written runs until the line executes; lint must catch it.
+		src := `def struct Table { greet as func };
+func build() { return Table{ greet: greetingOf }; }
+func f() { def g as func init notdefined; return $g(); }`
+		diags := lintSrc(t, src, only("L108"), cfg)
+		if got := countID(diags, "L108"); got != 2 {
+			t.Fatalf("L108 count = %d, want 2 (greetingOf, notdefined): %v", got, diags)
+		}
+		for i, name := range []string{"greetingOf", "notdefined"} {
+			if !strings.Contains(diags[i].Message, "undefined name `"+name+"`") {
+				t.Errorf("finding %d should name %s as undefined, got %q", i, name, diags[i].Message)
+			}
+		}
+	})
+	t.Run("a bare variable or parameter gets the missing-sigil hint", func(t *testing.T) {
+		src := `func f(count as int) { def total as int init 1; return count + total; }`
+		diags := lintSrc(t, src, only("L108"), cfg)
+		if got := countID(diags, "L108"); got != 2 {
+			t.Fatalf("L108 count = %d, want 2: %v", got, diags)
+		}
+		for i, name := range []string{"count", "total"} {
+			if !strings.Contains(diags[i].Message, "did you mean `$"+name+"`") {
+				t.Errorf("finding %d should hint `$%s`, got %q", i, name, diags[i].Message)
+			}
+		}
+	})
+	t.Run("enum pattern binders and variant heads are not references", func(t *testing.T) {
+		src := `def enum Shape { Empty, Circle { r as float } };
+func area(s as Shape) {
+    match ($s) {
+        when Circle(c) { return $c.r; }
+        when Empty { return 0.0; }
+    }
+    return 0.0;
+}`
 		if got := countID(lintSrc(t, src, only("L108"), cfg), "L108"); got != 0 {
-			t.Fatalf("lowercase bare name flagged as undefined constant: %d", got)
+			t.Fatalf("enum pattern binder / variant flagged as undefined: %d", got)
 		}
 	})
 }

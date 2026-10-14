@@ -452,6 +452,18 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 	defer stopDiag()
 	runErr := in.Run(prog)
 
+	// Report a fatal error *before* the exit-time task scan below: the scan
+	// blocks on every still-running spawn, so a program that dies while a
+	// worker loops forever (a server's accept loop) would otherwise hang with
+	// the one message that explains it never printed. An `exit` is not an
+	// error and prints nothing.
+	if runErr != nil {
+		if _, ok := runErr.(*interpreter.ExitSignal); !ok {
+			fmt.Fprintf(os.Stderr, "%s: %s\n", label, runErr.Error())
+			printErrorContext(src, absPath, runErr)
+		}
+	}
+
 	// The exit-time loud-fail. Even when Run returned cleanly,
 	// any spawned task that ended with an error and was never
 	// task.wait'd / task.discard'd has its error printed to stderr
@@ -482,9 +494,7 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 		if ex, ok := runErr.(*interpreter.ExitSignal); ok {
 			return ex.Code
 		}
-		fmt.Fprintf(os.Stderr, "%s: %s\n", label, runErr.Error())
-		printErrorContext(src, absPath, runErr)
-		return 1
+		return 1 // already reported above, before the task scan
 	}
 	if unwaitedExit != nil {
 		return unwaitedExit.Code
