@@ -465,7 +465,10 @@ func parseRaw(raw as bytes) {
     def status as int init convert.toInt($codeStr);
     def headers as map of string to string init parseHeaders($lines);
     def bodyBytes as bytes init sliceBytes($raw, $hend + 4, len($raw));
-    if (isChunked($headers)) {
+    # An empty body is a bodiless response (HEAD / 204 / 304): a HEAD answer
+    # may still advertise Transfer-Encoding: chunked for the GET it describes,
+    # while a real chunked body always holds at least its terminating 0 chunk.
+    if (len($bodyBytes) > 0 and isChunked($headers)) {
         $bodyBytes = dechunk($bodyBytes);
     } elseif (maps.has($headers, "content-length")) {
         def cl as int init convert.toInt($headers["content-length"]);
@@ -590,7 +593,7 @@ func sendCore(
     # ignores our Connection: close and holds the socket open (Cisco appliances,
     # some proxies) still terminates here as soon as the framing says the body is
     # complete, instead of blocking until the idle timeout.
-    return readOneRaw($conn, $timeoutMs, $maxBytes);
+    return readOneRaw($conn, $timeoutMs, $maxBytes, $method);
 }
 
 # sendCoreRaw is sendCore for a **bytes** request body: it writes the ASCII head
@@ -621,7 +624,7 @@ func sendCoreRaw(
     # ignores our Connection: close and holds the socket open (Cisco appliances,
     # some proxies) still terminates here as soon as the framing says the body is
     # complete, instead of blocking until the idle timeout.
-    return readOneRaw($conn, $timeoutMs, $maxBytes);
+    return readOneRaw($conn, $timeoutMs, $maxBytes, $method);
 }
 
 /**
@@ -1309,20 +1312,56 @@ func chunkedComplete(buf as bytes, bodyStart as int) {
     }
 }
 
+# statusOf reads the status code from a response head's status line
+# ("HTTP/1.1 304 Not Modified"), or 0 when it cannot be read (parseRaw then
+# reports the malformed line).
+func statusOf(head as string) {
+    def parts as list of string init strings.split($head, " ");
+    if (len($parts) < 2) {
+        return 0;
+    }
+    def code as string init strings.split($parts[1], "\r\n")[0];
+    if (not isAllDigits($code)) {
+        return 0;
+    }
+    return convert.toInt($code);
+}
+
+# hasNoBody reports whether a response carries no body whatever its headers say
+# (RFC 9110 6.4.1 / 9.3.2): the answer to a HEAD request, and every 1xx / 204 /
+# 304. Its Content-Length (or Transfer-Encoding) describes the body a GET would
+# have returned, so reading that many bytes would block on bytes that never come.
+func hasNoBody(method as string, status as int) {
+    return strings.upper($method) == "HEAD" or ($status >= 100 and $status < 200) or
+        $status == 204 or $status == 304;
+}
+
 # readOneRaw reads exactly one response off a (possibly reused) connection and
 # returns its raw bytes (status line + headers + body as framed), suitable for
 # parseRaw. Frames by Content-Length or chunked encoding; a response with
-# neither is read to EOF (and the caller must not reuse the socket).
-func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
+# neither is read to EOF (and the caller must not reuse the socket). `method` is
+# the request's: the answer to HEAD - like a 204 / 304 - has no body, so only its
+# head is read. An interim 1xx response (100 Continue, 103 Early Hints) is
+# skipped and the final response read in its place; 101 Switching Protocols is
+# final, returned as-is.
+func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as string) {
     def limit as int init $maxBytes;
     if ($limit == 0) {
         $limit = MAX_BODY_BYTES;
     }
     def buf as bytes;
     def hend as int init -1;
+    def status as int init 0;
     while (true) {
         $hend = headerEnd($buf);
         if ($hend >= 0) {
+            $status = statusOf(bytesToStr($buf, 0, $hend));
+            if ($status >= 100 and $status < 200 and $status != 101) {
+                # Interim response: drop its head (keeping any bytes of the
+                # final response already read) and look for the next head.
+                $buf = sliceBytes($buf, $hend + 4, len($buf));
+                continue;
+            }
             break;
         }
         def chunk as bytes init readSock($conn, $timeoutMs);
@@ -1338,10 +1377,13 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int) {
         $buf = binary.concat($buf, $chunk);
         capGuard(len($buf), $limit);
     }
+    def bodyStart as int init $hend + 4;
+    if (hasNoBody($method, $status)) {
+        return sliceBytes($buf, 0, $bodyStart);
+    }
     def headers as map of string to string init parseHeaders(strings.split(
         bytesToStr($buf, 0, $hend),
         "\r\n"));
-    def bodyStart as int init $hend + 4;
     if (isChunked($headers)) {
         # Collect the wire chunks in a list and join once (binary.join, O(n)): a
         # per-read re-copy of the accumulating body is O(N^2) over a large
@@ -1548,7 +1590,7 @@ export func exchange(
         net.setWriteDeadline($s.conn, $timeoutMs);
     }
     net.writeBytes($s.conn, convert.bytesFromString($wire, "utf-8"));
-    def raw as bytes init readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes);
+    def raw as bytes init readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
     def r as BytesResponse init parseRaw($raw);
     for (def sc in setCookiesFromRaw($raw)) {
         $s.jar = jarAdd($s.jar, $sc);

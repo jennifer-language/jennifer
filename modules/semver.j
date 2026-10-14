@@ -70,6 +70,33 @@ func invalid(s as string) {
     throw Error{kind: "value", message: "invalid semver: " + $s, file: "", line: 0, col: 0};
 }
 
+# MAX_PART is the largest major / minor / patch number a Version can hold: one
+# below the int maximum. SemVer itself sets no limit, but the parts are ints;
+# stopping one short means every valid version sits strictly below the range
+# code's infinity sentinel (RANGE_INF, the int maximum), and the `n + 1` that
+# builds a caret / tilde upper bound can never overflow - bumping the largest
+# part lands exactly on infinity, which is the right "no upper bound".
+def const MAX_PART as int init 9223372036854775806;
+def const MAX_PART_TEXT as string init "9223372036854775806";
+
+# partFits reports whether a core part's digits (no leading zeros, as the
+# grammar guarantees) are at most MAX_PART, compared as text so a number too
+# large for an int never reaches convert.toInt.
+func partFits(digits as string) {
+    if (len($digits) != len(MAX_PART_TEXT)) {
+        return len($digits) < len(MAX_PART_TEXT);
+    }
+    return $digits <= MAX_PART_TEXT;
+}
+
+# coreTooLarge reports whether a grammar match has a major / minor / patch number
+# above MAX_PART. parse and isValid both apply it after the SemVer grammar, so
+# the two can never disagree.
+func coreTooLarge(m as regex.Match) {
+    return not (partFits($m.groupsNamed["major"]) and partFits($m.groupsNamed["minor"]) and
+        partFits($m.groupsNamed["patch"]));
+}
+
 # --- parse / validate / format (exported) --------------------------
 
 /**
@@ -82,6 +109,16 @@ export func parse(s as string) {
     def m as regex.Match init regex.find(SEMVER, $s);
     if ($m.start < 0) {
         invalid($s);
+    }
+    if (coreTooLarge($m)) {
+        throw Error{
+            kind: "value",
+            message: "invalid semver: " + $s + " (a major / minor / patch number exceeds " +
+                MAX_PART_TEXT + ")",
+            file: "",
+            line: 0,
+            col: 0
+        };
     }
     # Every named group is present in groupsNamed even when it did not
     # participate (an absent prerelease / build reads as "").
@@ -97,10 +134,11 @@ export func parse(s as string) {
 /**
  * Report whether a string is a valid SemVer 2.0.0 version.
  * @param s {string} the candidate version text
- * @return {bool} true when s parses as a valid version
+ * @return {bool} true exactly when `parse(s)` succeeds
  */
 export func isValid(s as string) {
-    return regex.matches(SEMVER, $s);
+    def m as regex.Match init regex.find(SEMVER, $s);
+    return $m.start >= 0 and not coreTooLarge($m);
 }
 
 /**
@@ -144,14 +182,14 @@ func compareIdent(a as string, b as string) {
     def an as bool init isNum($a);
     def bn as bool init isNum($b);
     if ($an and $bn) {
-        def d as int init convert.toInt($a) - convert.toInt($b);
-        if (not ($d == 0)) {
-            if ($d < 0) {
-                return -1;
-            }
-            return 1;
+        # Numeric ids have no leading zeros (the grammar forbids them), so the
+        # shorter one is smaller and equal lengths order as text. Comparing the
+        # digits directly keeps identifiers of any size exact - SemVer sets no
+        # limit on them, and they never pass through an int.
+        if (len($a) != len($b)) {
+            return sign(len($a) - len($b));
         }
-        return 0;
+        return compareStr($a, $b);
     }
     if ($an and not $bn) {
         return -1;
@@ -328,13 +366,28 @@ export func diff(a as Version, b as Version) {
     return "";
 }
 
+# bumped returns part + 1, or throws when the part is already MAX_PART (the
+# result would not be a valid version).
+func bumped(part as int, which as string) {
+    if ($part >= MAX_PART) {
+        throw Error{
+            kind: "value",
+            message: "semver: cannot increment " + $which + " past " + MAX_PART_TEXT,
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+    return $part + 1;
+}
+
 /**
  * Bump the major version, resetting minor / patch and clearing the tags.
  * @param v {Version} the starting version
  * @return {Version} a new version with major + 1 and minor = patch = 0
  */
 export func incMajor(v as Version) {
-    return Version{major: $v.major + 1, minor: 0, patch: 0, prerelease: "", build: ""};
+    return Version{major: bumped($v.major, "major"), minor: 0, patch: 0, prerelease: "", build: ""};
 }
 /**
  * Bump the minor version, resetting patch and clearing the tags.
@@ -342,7 +395,13 @@ export func incMajor(v as Version) {
  * @return {Version} a new version with minor + 1 and patch = 0
  */
 export func incMinor(v as Version) {
-    return Version{major: $v.major, minor: $v.minor + 1, patch: 0, prerelease: "", build: ""};
+    return Version{
+        major: $v.major,
+        minor: bumped($v.minor, "minor"),
+        patch: 0,
+        prerelease: "",
+        build: ""
+    };
 }
 /**
  * Bump the patch version, clearing the tags.
@@ -350,7 +409,7 @@ export func incMinor(v as Version) {
  * @return {Version} a new version with patch + 1
  */
 export func incPatch(v as Version) {
-    def next as int init $v.patch + 1;
+    def next as int init bumped($v.patch, "patch");
     return Version{major: $v.major, minor: $v.minor, patch: $next, prerelease: "", build: ""};
 }
 
@@ -966,7 +1025,9 @@ export func clean(s as string) {
 # which the clause admits prereleases (npm's rule - a prerelease is in range only
 # when a comparator pins one at its tuple). Full-version bounds + pins make the
 # algebra prerelease-precise, not just release-space.
-def const RANGE_INF as int init 1000000000000;
+# RANGE_INF is the infinity sentinel for unbounded interval ends: the int
+# maximum, strictly above every valid version's parts (see MAX_PART).
+def const RANGE_INF as int init 9223372036854775807;
 
 def struct Interval {
     lo as Version,

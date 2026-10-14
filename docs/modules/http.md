@@ -155,6 +155,16 @@ one that closes. Both framings are handled:
 - **Transfer-Encoding: chunked** - the chunks are decoded and concatenated.
 - **Neither** - the body runs to connection close (the last-resort framing).
 
+Some responses have **no body** whatever their headers say (RFC 9110): the answer
+to a `HEAD` request, and every `1xx` / `204` / `304`. Their `Content-Length` (or
+`Transfer-Encoding`) describes the body a `GET` would return, so the client reads
+only the head - it never waits for those bytes, and the `maxBytes` cap is not
+checked against them. `http.head(url, {})` therefore asks "does it exist, how big
+is it" without downloading anything (read the size with
+`http.header($r, "content-length")`). An interim `1xx` such as `100 Continue` or
+`103 Early Hints` is skipped and the final response returned; `101 Switching
+Protocols` is final.
+
 `request` and the verb shortcuts return the body as **text** (UTF-8): a JSON /
 HTML / XML body round-trips exactly, but a binary body (an image, a gzip stream)
 is not valid UTF-8 and raises an error. For binary content use the **byte verbs**

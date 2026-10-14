@@ -86,7 +86,17 @@ semver.isValid("1.2");          # false - too few
 semver.isValid("01.0.0");       # false - leading zero in a numeric part
 semver.isValid("1.0.0-01");     # false - leading zero in a numeric prerelease id
 semver.isValid("1.0.0-");       # false - empty prerelease
+semver.isValid("99999999999999999999.0.0"); # false - core number too large (see below)
 ```
+
+`isValid(s)` is true exactly when `parse(s)` succeeds, so it is a safe gate in
+front of `parse`, `compare`, and the range functions. SemVer sets no size limit,
+but a `Version`'s major / minor / patch are ints, so each is capped at
+`9223372036854775806` (one below the int maximum, which the range functions use
+as "no upper bound"); a larger core number is invalid. Numeric **prerelease**
+identifiers (`1.0.0-99999999999999999999`) have no limit: they are compared
+digit by digit, never converted. `incMajor` / `incMinor` / `incPatch` throw a
+`value` error rather than step past the cap.
 
 A looser N-segment form (`1.2.3.4`) has no defined ordering (`1.2.3` vs
 `1.2.3.0`?), which would quietly break sorting, so it is invalid rather

@@ -425,3 +425,47 @@ func testSimplifyRangePreservesPrereleases() {
     testing.assertFalse($out == "*"); # "*" would match nothing here
     testing.assertTrue(satisfies("1.2.3-rc.1", $out)); # the produced range keeps it
 }
+
+# isValid is true exactly when parse succeeds: a core part above MAX_PART fails
+# both, rather than validating and then breaking a later parse / sort.
+func testIsValidAgreesWithParseOnHugeParts() {
+    testing.assertTrue(isValid("9223372036854775806.0.0"));
+    testing.assertEqual(parse("9223372036854775806.0.0").major, MAX_PART);
+    testing.assertFalse(isValid("9223372036854775807.0.0"));
+    testing.assertFalse(isValid("99999999999999999999.0.0"));
+    testing.assertFalse(isValid("1.99999999999999999999.0"));
+    testing.assertFalse(isValid("1.0.99999999999999999999"));
+    testing.assertThrows("parseHuge", "value");
+}
+func parseHuge() {
+    return parse("99999999999999999999.0.0");
+}
+
+# Numeric prerelease identifiers have no size limit and compare numerically
+# without passing through an int.
+func testHugePrereleaseNumbersCompare() {
+    testing.assertTrue(isValid("1.0.0-99999999999999999999"));
+    testing.assertEqual(cmp("1.0.0-99999999999999999999", "1.0.0-99999999999999999998"), 1);
+    testing.assertEqual(cmp("1.0.0-9", "1.0.0-10"), -1);
+    testing.assertEqual(cmp("1.0.0-99999999999999999999", "1.0.0-99999999999999999999"), 0);
+    testing.assertEqual(cmp("1.0.0-99999999999999999999", "1.0.0-alpha"), -1);
+}
+
+# Caret / tilde bounds at the largest valid part reach the infinity sentinel
+# instead of overflowing, and versions above the old 1e12 sentinel still order.
+func testRangesAtTheLargestPart() {
+    testing.assertTrue(satisfies("9223372036854775806.0.0", "^9223372036854775806.0.0"));
+    testing.assertTrue(satisfies("1.9223372036854775806.5", "~1.9223372036854775806.0"));
+    testing.assertTrue(satisfies("0.0.9223372036854775806", "^0.0.9223372036854775806"));
+    testing.assertFalse(satisfies("2000000000001.0.0", "^2000000000000.0.0"));
+    testing.assertTrue(satisfies("2000000000000.5.0", "^2000000000000.0.0"));
+    testing.assertTrue(satisfies("5000000000000.0.0", ">=1.0.0"));
+}
+
+func testIncrementPastTheLargestPartThrows() {
+    testing.assertThrows("incMajorAtMax", "value");
+    testing.assertEqual(toString(incPatch(parse("1.2.3"))), "1.2.4");
+}
+func incMajorAtMax() {
+    return incMajor(parse("9223372036854775806.0.0"));
+}

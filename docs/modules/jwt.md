@@ -77,10 +77,16 @@ one:
   signature, algorithm, and time claims; it does not check `iss` or `aud`,
   because the expected values are the application's, not the library's. Use
   `jwt.verifyWith($token, $key, $alg, jwt.Policy{iss: "https://issuer.example",
-  aud: "my-api"})` to additionally require them. An empty `iss` (or `aud`) skips
-  that check; a non-empty one must match. `aud` may be a JSON string or an array
-  of strings (RFC 7519), and the check passes when the expected audience is
-  present.
+  aud: "my-api", requireExp: true})` to additionally require them. An empty `iss`
+  (or `aud`) skips that check; a non-empty one must match. `aud` may be a JSON
+  string or an array of strings (RFC 7519), and the check passes when the
+  expected audience is present.
+
+- **A missing `exp` is accepted unless the policy requires it.** RFC 7519 makes
+  `exp` optional, so `jwt.verify` accepts a token that never expires. A service
+  issuing short-lived tokens should set `requireExp: true` on its `jwt.Policy`:
+  `verifyWith` then refuses a token without `exp` (a `value` error), so one
+  minted by a bug or a leaked key cannot stay valid forever.
 
 `jwt.decode` and `jwt.header` do **not** verify anything - use them only to read
 a token you have not trusted yet (for example, to read `kid` before fetching the

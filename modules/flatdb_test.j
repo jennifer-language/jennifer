@@ -225,3 +225,78 @@ func testLockUnlockRoundTrip() {
     unlock($lk);
     testing.assertFalse(fs.exists($path + ".lock")); # released
 }
+
+# lockScratch returns a fresh store path whose lock files start absent.
+func lockScratch() {
+    return os.tempDir() + "/flatdb_break_" + uuid.v4() + ".json";
+}
+
+# holderAged builds a holder id stamped `age` seconds in the past.
+func holderAged(age as int) {
+    return uuid.v4() + " " + convert.toString(time.unix(time.now()) - $age);
+}
+
+func testStaleLockIsBroken() {
+    def path as string init lockScratch();
+    fs.writeNew($path + ".lock", holderAged(LOCK_STALE_SECONDS + 60));
+    breakIfStale($path + ".lock");
+    testing.assertFalse(fs.exists($path + ".lock"));
+    testing.assertFalse(fs.exists($path + ".lock.break")); # the break lock is released
+    unlock(lock($path)); # and the store can be locked again
+}
+
+func testFreshLockIsNotBroken() {
+    def path as string init lockScratch();
+    def holder as string init holderAged(0);
+    fs.writeNew($path + ".lock", $holder);
+    breakIfStale($path + ".lock");
+    testing.assertEqual(fs.readString($path + ".lock"), $holder);
+    fs.remove($path + ".lock");
+}
+
+# The race from the report, made deterministic: waiter A judged holder H0 stale,
+# but before A breaks, waiter B broke H0 and took the lock as H1. A must not
+# remove H1.
+func testBreakRefusesAHolderThatReplacedTheJudgedOne() {
+    def path as string init lockScratch();
+    def stale as string init holderAged(LOCK_STALE_SECONDS + 60);
+    def live as string init holderAged(0);
+    fs.writeNew($path + ".lock", $live);
+    testing.assertFalse(breakHolder($path + ".lock", $stale));
+    testing.assertEqual(fs.readString($path + ".lock"), $live);
+    fs.remove($path + ".lock");
+}
+
+# While another breaker holds `.break`, a second breaker leaves the lock alone.
+func testActiveBreakerExcludesOthers() {
+    def path as string init lockScratch();
+    def stale as string init holderAged(LOCK_STALE_SECONDS + 60);
+    fs.writeNew($path + ".lock", $stale);
+    fs.writeNew($path + ".lock.break", holderAged(0));
+    testing.assertFalse(breakHolder($path + ".lock", $stale));
+    testing.assertEqual(fs.readString($path + ".lock"), $stale);
+    fs.remove($path + ".lock");
+    fs.remove($path + ".lock.break");
+}
+
+# A `.break` abandoned by a crashed breaker is cleared, so breaking resumes.
+func testAbandonedBreakIsCleared() {
+    def path as string init lockScratch();
+    def stale as string init holderAged(LOCK_STALE_SECONDS + 60);
+    fs.writeNew($path + ".lock", $stale);
+    fs.writeNew($path + ".lock.break", holderAged(BREAK_STALE_SECONDS + 60));
+    testing.assertFalse(breakHolder($path + ".lock", $stale)); # clears the old .break
+    testing.assertFalse(fs.exists($path + ".lock.break"));
+    testing.assertTrue(breakHolder($path + ".lock", $stale)); # then breaks the lock
+    testing.assertFalse(fs.exists($path + ".lock"));
+}
+
+# removeIfHolder never deletes a different holder: it puts the file back.
+func testRemoveIfHolderRestoresAMismatch() {
+    def path as string init lockScratch();
+    fs.writeNew($path, "B");
+    testing.assertFalse(removeIfHolder($path, "A"));
+    testing.assertEqual(fs.readString($path), "B");
+    testing.assertTrue(removeIfHolder($path, "B"));
+    testing.assertFalse(fs.exists($path));
+}

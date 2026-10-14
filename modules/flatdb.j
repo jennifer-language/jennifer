@@ -41,6 +41,9 @@ use convert;
 def const LOCK_WAIT_MS as int init 5000;
 def const LOCK_RETRY_MS as int init 25;
 def const LOCK_STALE_SECONDS as int init 120;
+# BREAK_STALE_SECONDS ages out a `.break` file left by a breaker that crashed
+# mid-break. A break takes milliseconds, so anything this old is abandoned.
+def const BREAK_STALE_SECONDS as int init 30;
 
 /**
  * A held advisory lock, returned by `lock` and passed to `unlock`. Carries the
@@ -343,11 +346,61 @@ func peekHolder(lockPath as string) {
     }
 }
 
+# isStale reports whether a holder id ("<uuid> <seconds>") is older than maxAge
+# seconds. An unparseable holder is never stale (it is not ours to judge).
+func isStale(holder as string, maxAge as int) {
+    def stamp as int init holderStamp($holder);
+    return $stamp != 0 and time.unix(time.now()) - $stamp > $maxAge;
+}
+
+# removeIfHolder removes the file at path only if it still holds `expected`. The
+# file is first renamed to a unique scratch name (so two removers can never both
+# act on one file), then the moved content is checked: if a different holder had
+# replaced it in the meantime, it is put back with an exclusive create rather
+# than deleted. Returns whether the expected holder was removed.
+func removeIfHolder(path as string, expected as string) {
+    def scratch as string init $path + ".stale." + uuid.v4();
+    try {
+        fs.rename($path, $scratch);
+    } catch (err) { # lint-disable: L103
+        return false; # already gone, or another remover won the rename
+    }
+    def moved as string init "";
+    try {
+        $moved = fs.readString($scratch);
+    } catch (err) { # lint-disable: L103
+        $moved = "";
+    }
+    if ($moved != $expected) {
+        try {
+            fs.writeNew($path, $moved);
+        } catch (err) { # lint-disable: L103
+            # the path was taken again meanwhile; the moved holder cannot be restored
+        }
+        fs.remove($scratch);
+        return false;
+    }
+    fs.remove($scratch);
+    return true;
+}
+
+# releaseBreak removes this breaker's `.break` file, and only if it still holds
+# this breaker's id (a leaked-break cleanup may have replaced it).
+func releaseBreak(breakPath as string, me as string) {
+    try {
+        if (fs.readString($breakPath) == $me) {
+            fs.remove($breakPath);
+        }
+    } catch (err) { # lint-disable: L103
+        # already gone
+    }
+    return null;
+}
+
 # breakIfStale removes a lock whose holder timestamp is older than
 # LOCK_STALE_SECONDS, so a lock leaked by a crashed writer does not wedge the store
-# forever. The break is atomic against other breakers: it renames the stale lock to
-# a unique scratch name, and only the rename winner removes it - so two waiters can
-# never both "break and re-take" the same lock.
+# forever. The unlocked staleness read here is only a cheap pre-check; the break
+# itself happens in breakHolder, under the exclusive `.break` file.
 func breakIfStale(lockPath as string) {
     def holder as string init "";
     try {
@@ -355,21 +408,49 @@ func breakIfStale(lockPath as string) {
     } catch (err) { # lint-disable: L103
         return null;
     }
-    def stamp as int init holderStamp($holder);
-    if ($stamp == 0) {
-        return null;
-    }
-    if (time.unix(time.now()) - $stamp <= LOCK_STALE_SECONDS) {
-        return null;
-    }
-    def scratch as string init $lockPath + ".stale." + uuid.v4();
-    try {
-        fs.rename($lockPath, $scratch);
-        fs.remove($scratch);
-    } catch (err) { # lint-disable: L103
-        # lost the break race, or the lock changed under us - just retry
+    if (isStale($holder, LOCK_STALE_SECONDS)) {
+        breakHolder($lockPath, $holder);
     }
     return null;
+}
+
+# breakHolder removes the lock at lockPath if - and only if - it is still held by
+# `judged`, the holder a waiter found stale. Waiters that judged the same stale
+# holder must not each remove "whatever is at lockPath now": the first one's
+# removal lets a writer take a fresh lock, which a second breaker would then
+# delete, leaving two writers. So breakers serialize on an exclusive `.break`
+# file (fs.writeNew) and, holding it, re-read the lock and remove it only while it
+# still holds the judged holder. A waiter that finds `.break` taken leaves the
+# break to its holder (clearing a `.break` abandoned by a crashed breaker) and
+# simply polls again. Returns whether the judged holder was removed.
+func breakHolder(lockPath as string, judged as string) {
+    def breakPath as string init $lockPath + ".break";
+    def me as string init uuid.v4() + " " + convert.toString(time.unix(time.now()));
+    try {
+        fs.writeNew($breakPath, $me);
+    } catch (err) { # lint-disable: L103
+        def other as string init "";
+        try {
+            $other = fs.readString($breakPath);
+        } catch (err2) { # lint-disable: L103
+            return false;
+        }
+        if (isStale($other, BREAK_STALE_SECONDS)) {
+            removeIfHolder($breakPath, $other);
+        }
+        return false;
+    }
+    defer releaseBreak($breakPath, $me);
+    def current as string init "";
+    try {
+        $current = fs.readString($lockPath);
+    } catch (err) { # lint-disable: L103
+        return false; # already released or broken
+    }
+    if ($current != $judged) {
+        return false; # replaced since it was judged: the new holder is not stale
+    }
+    return removeIfHolder($lockPath, $judged);
 }
 
 /**

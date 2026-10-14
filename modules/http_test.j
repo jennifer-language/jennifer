@@ -378,3 +378,33 @@ func testResponseClosesConn() {
     # no framing header at all -> body ran to EOF -> connection is closed
     testing.assertEqual(responseClosesConn({}), true);
 }
+
+# statusOf reads the code off a response head, with or without a reason phrase,
+# and yields 0 for a line it cannot read (parseRaw then reports it).
+func testStatusOf() {
+    testing.assertEqual(statusOf("HTTP/1.1 304 Not Modified\r\nContent-Length: 3"), 304);
+    testing.assertEqual(statusOf("HTTP/1.1 200\r\nContent-Length: 3"), 200);
+    testing.assertEqual(statusOf("HTTP/1.1 100 Continue"), 100);
+    testing.assertEqual(statusOf("garbage"), 0);
+    testing.assertEqual(statusOf("HTTP/1.1 abc OK"), 0);
+}
+
+# hasNoBody: the HEAD answer and every 1xx / 204 / 304 carry no body.
+func testHasNoBody() {
+    testing.assertTrue(hasNoBody("HEAD", 200));
+    testing.assertTrue(hasNoBody("head", 200));
+    testing.assertTrue(hasNoBody("GET", 204));
+    testing.assertTrue(hasNoBody("GET", 304));
+    testing.assertTrue(hasNoBody("GET", 101));
+    testing.assertFalse(hasNoBody("GET", 200));
+    testing.assertFalse(hasNoBody("POST", 404));
+}
+
+# parseRaw does not dechunk an empty body: a HEAD answer may advertise chunked.
+func testParseRawBodilessChunkedHead() {
+    def r as BytesResponse init parseRaw(convert.bytesFromString(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+        "utf-8"));
+    testing.assertEqual($r.status, 200);
+    testing.assertEqual(len($r.body), 0);
+}

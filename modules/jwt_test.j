@@ -221,13 +221,17 @@ func testVerifyWithMatchingIssAndAud() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "good-iss", aud: "good-aud"});
+        Policy{iss: "good-iss", aud: "good-aud", requireExp: false});
     testing.assertEqual(json.asString($back, "/sub"), "ada");
 }
 
 func testVerifyWithEmptyPolicyActsLikeVerify() {
     def tok as string init sign(claimsWithIss(), secret(), "HS256");
-    def back as json.Value init verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: ""});
+    def back as json.Value init verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "", aud: "", requireExp: false});
     testing.assertEqual(json.asString($back, "/iss"), "good-iss");
 }
 
@@ -237,7 +241,7 @@ func testVerifyWithAudienceArrayMatch() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "", aud: "good-aud"});
+        Policy{iss: "", aud: "good-aud", requireExp: false});
     testing.assertEqual(json.asString($back, "/sub"), "ada");
 }
 
@@ -246,7 +250,7 @@ func testVerifyWithWrongIssuerRejected() {
 }
 func verifyBadIss() {
     def tok as string init sign(claimsWithIss(), secret(), "HS256");
-    verifyWith($tok, secret(), "HS256", Policy{iss: "wrong-iss", aud: ""});
+    verifyWith($tok, secret(), "HS256", Policy{iss: "wrong-iss", aud: "", requireExp: false});
 }
 
 func testVerifyWithWrongAudienceRejected() {
@@ -254,7 +258,7 @@ func testVerifyWithWrongAudienceRejected() {
 }
 func verifyBadAud() {
     def tok as string init sign(claimsWithIss(), secret(), "HS256");
-    verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "wrong-aud"});
+    verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "wrong-aud", requireExp: false});
 }
 
 # ---- verifyLeeway: clock-skew tolerance ----
@@ -436,4 +440,33 @@ func testVerifyWithKeysStillAcceptsPem() {
     def tok as string init signWithKid(sampleClaims(), $priv, "RS256", "rk");
     def back as json.Value init verifyWithKeys($tok, $ring, "RS256");
     testing.assertEqual(json.asString($back, "/sub"), "ada");
+}
+
+# requireExp refuses a token with no exp (RFC 7519 makes it optional, so plain
+# verify accepts one); a token that does carry exp still verifies normally.
+func testVerifyWithRequireExpRejectsTokenWithoutExp() {
+    testing.assertThrows("verifyNoExpRequired", "value");
+}
+func verifyNoExpRequired() {
+    def tok as string init sign(json.set(json.map(), "/sub", "1"), secret(), "HS256");
+    return verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "", requireExp: true});
+}
+func testVerifyWithRequireExpAcceptsTokenWithExp() {
+    def claims as json.Value init json.set(json.map(), "/exp", time.unix(time.now()) + 600);
+    def tok as string init sign($claims, secret(), "HS256");
+    def back as json.Value init verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "", aud: "", requireExp: true});
+    testing.assertTrue(json.has($back, "/exp"));
+}
+func testVerifyWithoutRequireExpStillAcceptsNoExp() {
+    def tok as string init sign(json.set(json.map(), "/sub", "1"), secret(), "HS256");
+    def back as json.Value init verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "", aud: "", requireExp: false});
+    testing.assertFalse(json.has($back, "/exp"));
 }

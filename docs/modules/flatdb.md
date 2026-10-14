@@ -171,7 +171,10 @@ flatdb.update("state.json", addVisit);   # locked read -> edit -> save -> releas
 The lock coordinates across **separate processes** (a CLI and a server, two CLI
 runs) as well as `spawn`ed tasks - a symlink-free lock file created with
 `fs.writeNew`, whose holder id and timestamp let a lock leaked by a crashed writer
-be broken after a stale window. `flatdb.lock` / `flatdb.unlock` are the raw
+be broken after a stale window (120 s). Waiters that find the same stale lock
+break it one at a time, under an exclusive `.lock.break` file, and remove the lock
+only while it still holds the holder they judged stale - so a lock a faster waiter
+has already re-taken is never removed. `flatdb.lock` / `flatdb.unlock` are the raw
 primitives for a multi-step transaction, but prefer `update`, which releases on
 every exit path.
 

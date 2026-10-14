@@ -333,7 +333,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
             $j = $j + 1;
         }
         capResponse(len($body));
-        $scanFrom = prev - 4;
+        $scanFrom = $prev - 4;
         if ($scanFrom < 0) {
             $scanFrom = 0;
         }

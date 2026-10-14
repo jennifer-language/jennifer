@@ -53,10 +53,14 @@ def const SUPPORTED as list of string init [
 
 # Policy carries the application-level claim checks jwt.verifyWith enforces on
 # top of the cryptographic verification: the expected issuer (`iss`) and
-# audience (`aud`). An empty string means "do not check this claim".
+# audience (`aud`) - an empty string means "do not check this claim" - and
+# whether an expiry is mandatory. `exp` is optional in RFC 7519, so plain verify
+# accepts a token without one; `requireExp: true` refuses such a token, so a
+# token minted by a bug or a leaked key cannot stay valid forever.
 export def struct Policy {
     iss as string,
-    aud as string
+    aud as string,
+    requireExp as bool
 };
 
 # ---- base64url (unpadded, as JWT requires) ----
@@ -325,19 +329,31 @@ func audienceMatches(claims as json.Value, want as string) {
 /**
  * Verify a JWT like `verify`, then additionally enforce the application-level
  * claim policy: when `policy.iss` is non-empty the token's `iss` must equal it,
- * and when `policy.aud` is non-empty the token's `aud` (a string or an array of
- * strings) must include it. `exp` / `nbf` and the signature are checked exactly
- * as in `verify`; issuer and audience are application policy the library cannot
- * assume, hence the explicit opt-in.
+ * when `policy.aud` is non-empty the token's `aud` (a string or an array of
+ * strings) must include it, and when `policy.requireExp` is true the token must
+ * carry an `exp` claim. `exp` / `nbf` values and the signature are checked
+ * exactly as in `verify`; issuer, audience, and a mandatory expiry are
+ * application policy the library cannot assume, hence the explicit opt-in.
  * @param token {string} the compact JWT
  * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
  * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
- * @param policy {Policy} the expected issuer / audience (empty string skips a check)
+ * @param policy {Policy} the expected issuer / audience (empty string skips a check),
+ *   and whether an `exp` claim is required
  * @return {json.Value} the verified claims
- * @throws {Error} on any `verify` failure, or a mismatched issuer / audience
+ * @throws {Error} on any `verify` failure, a mismatched issuer / audience, or a
+ *   missing `exp` the policy requires
  */
 export func verifyWith(token as string, key as bytes, alg as string, policy as Policy) {
     def claims as json.Value init verify($token, $key, $alg);
+    if ($policy.requireExp and not json.has($claims, "/exp")) {
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyWith: the token has no expiry (exp), which the policy requires",
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
     if ($policy.iss != "") {
         if (not json.has($claims, "/iss") or json.asString($claims, "/iss") != $policy.iss) {
             throw Error{
