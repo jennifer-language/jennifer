@@ -428,11 +428,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 22 {
-		t.Fatalf("expected 22 known IDs (4 source + 18 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 23 {
+		t.Fatalf("expected 23 known IDs (4 source + 19 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 22 {
-		t.Fatalf("catalog should list all 22 IDs")
+	if len(lint.Catalog()) != 23 {
+		t.Fatalf("catalog should list all 23 IDs")
 	}
 }
 
@@ -671,5 +671,114 @@ func TestAccumulatorParam(t *testing.T) {
 				t.Errorf("L205 count = %d, want %d", got, c.want)
 			}
 		})
+	}
+}
+
+func TestStructLitFields(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("an unknown and a missing field are flagged; a correct literal is not", func(t *testing.T) {
+		src := `def struct P { x as int, z as int };
+func ok() { return P{ x: 1, z: 2 }; }
+func extra(flag as bool) {
+    if ($flag) {
+        return P{ x: 1, z: 2, y: 3 };
+    }
+    return P{ x: 0 };
+}`
+		diags := lintSrc(t, src, only("L113"), cfg)
+		if got := countID(diags, "L113"); got != 2 {
+			t.Fatalf("L113 count = %d, want 2 (y unknown + z missing): %v", got, diags)
+		}
+	})
+	t.Run("enum variant payloads and variant names are checked", func(t *testing.T) {
+		src := `def enum Shape { Empty, Circle { r as int } };
+func ok() { return Shape.Circle{ r: 1 }; }
+func bad() { return Shape.Circle{ radius: 1 }; }
+func none() { return Shape.Square{ r: 1 }; }
+func bare() { return Shape.Empty; }`
+		if got := countID(lintSrc(t, src, only("L113"), cfg), "L113"); got != 3 {
+			t.Fatalf("L113 count = %d, want 3 (radius unknown, r missing, no Square)", got)
+		}
+	})
+	t.Run("library and module struct literals are left to the load-time check", func(t *testing.T) {
+		src := `use os;
+import "./m.j" as m;
+func f() { return os.Result{ exitCode: 1 }; }
+func g() { return m.Point{ q: 1 }; }`
+		if got := countID(lintSrc(t, src, only("L113"), cfg), "L113"); got != 0 {
+			t.Fatalf("a non-local literal was flagged: %d", got)
+		}
+	})
+}
+
+// A line directive also covers every line of a multi-line token that has no
+// room for one: a string or block comment ending on the directive's line, and a
+// docblock right below a directive standing alone. A line comment may end in a
+// directive; an embedded marker that does not parse is ordinary prose.
+func TestSuppressionReachesMultiLineTokens(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cfg.MaxLineLength = 40
+	long := strings.Repeat("x", 50)
+	cases := []struct {
+		name, src string
+		want      int
+	}{
+		{"multi-line string, directive where it ends",
+			"def t as string init '\n" + long + "\n'; # lint-disable: L203\n", 0},
+		{"multi-line string without a directive",
+			"def t as string init '\n" + long + "\n';\n", 1},
+		{"docblock below a lone directive",
+			"# lint-disable: L203\n/**\n * " + long + "\n */\ndef const A as int init 1;\n", 0},
+		{"docblock after the closing line of a block comment",
+			"/**\n * " + long + "\n */ # lint-disable: L203\ndef const A as int init 1;\n", 0},
+		{"a trailing directive does not reach the next docblock",
+			"def const A as int init 1; # lint-disable: L203\n/**\n * " + long + "\n */\ndef const B as int init 1;\n", 1},
+		{"directive at the end of a long line comment",
+			"# " + long + " # lint-disable: L203\ndef const A as int init 1;\n", 0},
+		{"an embedded file directive is not honoured",
+			"def const A as int init 1; # note # lint-disable-file: L203\ndef const B as string init \"" + long + "\";\n", 2},
+		{"prose mentioning a directive stays a comment",
+			"# write # lint-disable: L203 at the end " + long + "\ndef const A as int init 1;\n", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrc(t, c.src, only("L203"), cfg)
+			if got := countID(diags, "L203"); got != c.want {
+				t.Errorf("L203 count = %d, want %d: %v", got, c.want, diags)
+			}
+			if countID(diags, "L004") != 0 {
+				t.Errorf("unexpected L004: %v", diags)
+			}
+		})
+	}
+}
+
+// L203 does not flag a comment line that cannot be wrapped: a Markdown table
+// row, or a line whose overflow is one URL or code span. Code, and comment
+// prose that could wrap, are still flagged.
+func TestLineTooLongExemptions(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cfg.MaxLineLength = 30
+	exempt := []string{
+		"/**\n * | a | b | c | d | e | f | g | h | i |\n */\ndef const A as int init 1;\n",
+		"# see https://example.com/a/long/path/here\ndef const A as int init 1;\n",
+		"# run `jennifer lint --checks=L203`\ndef const A as int init 1;\n",
+	}
+	for i, src := range exempt {
+		if d := lintSrc(t, src, only("L203"), cfg); countID(d, "L203") != 0 {
+			t.Errorf("exempt case %d flagged: %v", i, d)
+		}
+	}
+	flagged := []string{
+		"# a long comment that could simply be wrapped\ndef const A as int init 1;\n",
+		// a short URL or code span that would fit on a line of its own
+		"# prose running past the limit https://e.x/y\ndef const A as int init 1;\n",
+		"# prose running past the limit, then `a b`\ndef const A as int init 1;\n",
+		"def u as string init \"https://example.com/a/long/path\";\n",
+	}
+	for i, src := range flagged {
+		if d := lintSrc(t, src, only("L203"), cfg); countID(d, "L203") != 1 {
+			t.Errorf("flagged case %d: %v", i, d)
+		}
 	}
 }

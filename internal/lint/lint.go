@@ -106,6 +106,7 @@ func init() {
 		{id: "L108", desc: "undefined-name: an unqualified bare name (a constant, or a function used as a value) that is not defined", severity: SeverityWarning, selectable: true, run: checkUndefinedConstant},
 		{id: "L109", desc: "call-arity: a bare call to a same-file method with the wrong argument count", severity: SeverityWarning, selectable: true, run: checkCallArity},
 		{id: "L112", desc: "undeclared-namespace: a `ns.name` reference whose namespace has no `use` / `import`", severity: SeverityWarning, selectable: true, run: checkUndeclaredNamespace},
+		{id: "L113", desc: "struct-literal-fields: a same-file struct / enum-variant literal with an unknown or missing field", severity: SeverityWarning, selectable: true, run: checkStructLitFields},
 		// L2nn - complexity & style.
 		{id: "L201", desc: "method-too-long: method body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},

@@ -646,11 +646,72 @@ func checkLineTooLong(c *checkCtx) {
 	for i, line := range strings.Split(c.source, "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		n := utf8.RuneCountInString(line)
-		if n > c.cfg.MaxLineLength {
+		if n > c.cfg.MaxLineLength && !unbreakableCommentLine(line, c.cfg.MaxLineLength) {
 			c.reportAt("L203", c.sourceFile, i+1, c.cfg.MaxLineLength+1,
 				fmt.Sprintf("line is %d columns, over the limit of %d", n, c.cfg.MaxLineLength))
 		}
 	}
+}
+
+// unbreakableCommentLine reports whether a long line is a comment line that
+// cannot be wrapped, which L203 does not flag: a Markdown table row (a row is
+// one line by definition), or a line whose overflow is one unbreakable piece -
+// a URL or a `code span` reaching past the limit to the end of the line - that
+// would still overflow on a continuation line of its own. A piece that would
+// fit there is the author's to wrap, so it stays flagged. The comment is
+// recognised by its leading marker (`#`, or `*` / `/*` of a block comment), the
+// same text-level view the check itself takes.
+func unbreakableCommentLine(line string, limit int) bool {
+	runes := []rune(line)
+	i := 0
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	rest := string(runes[i:])
+	switch {
+	case strings.HasPrefix(rest, "/**"):
+		i += 3
+	case strings.HasPrefix(rest, "/*"), strings.HasPrefix(rest, "*/"):
+		i += 2
+	case strings.HasPrefix(rest, "#"), strings.HasPrefix(rest, "*"):
+		i++
+	default:
+		return false
+	}
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	prefix := i // the indent + marker a continuation line would repeat
+	body := strings.TrimSpace(string(runes[i:]))
+	if len(body) > 1 && strings.HasPrefix(body, "|") && strings.HasSuffix(body, "|") {
+		return true
+	}
+	// The piece reaching past the limit to the end of the line: a code span
+	// (its text may hold spaces) or a single word.
+	start := -1
+	if strings.HasSuffix(body, "`") {
+		trimmed := runes[:len(runes)-1]
+		for j := len(trimmed) - 1; j >= prefix; j-- {
+			if trimmed[j] == '`' {
+				start = j
+				break
+			}
+		}
+	}
+	if start < 0 {
+		start = limit
+		for start > prefix && runes[start-1] != ' ' && runes[start-1] != '\t' {
+			start--
+		}
+		word := string(runes[start:])
+		if strings.ContainsAny(word, " \t") || !strings.Contains(word, "://") {
+			return false
+		}
+	}
+	if start >= limit {
+		return false // the piece starts past the limit: break before it
+	}
+	return prefix+len(runes)-start > limit
 }
 
 // checkInterpSlotComplexity (L204) flags a `{expr}` string-interpolation slot
@@ -1088,4 +1149,87 @@ func loopCanEscape(b *parser.Block) bool {
 	}
 	walk(b.Stmts, false)
 	return escaped
+}
+
+// checkStructLitFields (L113) flags a literal of a same-file struct or enum
+// variant that names a field the type does not declare, or leaves a declared
+// field out. A literal must name every field exactly once, so either mistake
+// is certain from the source; `jennifer run` refuses the program at load for
+// the same reason, and this reports it without running anything. Literals of
+// library and module types are left to the load-time check, which can see their
+// declarations.
+func checkStructLitFields(c *checkCtx) {
+	structs := map[string]*parser.StructDef{}
+	for _, sd := range c.prog.Structs {
+		structs[sd.Name] = sd
+	}
+	enums := map[string]*parser.EnumDef{}
+	for _, ed := range c.prog.Enums {
+		enums[ed.Name] = ed
+	}
+	// A two-segment literal whose first segment is an import prefix is a module
+	// or library struct, not an enum variant, so it is skipped. A vendored import
+	// whose prefix lint cannot determine makes every two-segment literal unsure.
+	prefixes := map[string]bool{}
+	unsure := false
+	for _, im := range c.prog.Imports {
+		prefixes[im.Name] = true
+		if im.AsName != "" {
+			prefixes[im.AsName] = true
+		}
+	}
+	for _, mi := range c.prog.ModuleImports {
+		if p, ok := moduleImportPrefix(mi); ok {
+			prefixes[p] = true
+		} else {
+			unsure = true
+		}
+	}
+	w := walker{expr: func(e parser.Expr) {
+		lit, ok := e.(*parser.StructLit)
+		if !ok || lit.Enum != "" {
+			return
+		}
+		if lit.NS == "" {
+			if sd := structs[lit.Name]; sd != nil {
+				c.reportLitFields(lit, sd.Fields, fmt.Sprintf("struct `%s`", lit.Name))
+			}
+			return
+		}
+		ed := enums[lit.NS]
+		if ed == nil || prefixes[lit.NS] || unsure {
+			return
+		}
+		for _, v := range ed.Variants {
+			if v.Name == lit.Name {
+				if !lit.Bare && len(v.Fields) > 0 {
+					c.reportLitFields(lit, v.Fields, fmt.Sprintf("variant `%s.%s`", ed.Name, v.Name))
+				}
+				return
+			}
+		}
+		c.report("L113", lit, fmt.Sprintf("enum `%s` has no variant `%s`", ed.Name, lit.Name))
+	}}
+	w.program(c.prog)
+}
+
+// reportLitFields reports each unknown field (at the field) and each missing
+// declared field (at the literal) of lit against declared.
+func (c *checkCtx) reportLitFields(lit *parser.StructLit, declared []parser.StructField, what string) {
+	known := make(map[string]bool, len(declared))
+	for _, f := range declared {
+		known[f.Name] = true
+	}
+	provided := make(map[string]bool, len(lit.Fields))
+	for _, f := range lit.Fields {
+		provided[f.Name] = true
+		if !known[f.Name] {
+			c.reportAt("L113", f.File, f.Line, f.Col, fmt.Sprintf("%s has no field `%s`", what, f.Name))
+		}
+	}
+	for _, f := range declared {
+		if !provided[f.Name] {
+			c.report("L113", lit, fmt.Sprintf("%s literal is missing field `%s` (a literal must name every field)", what, f.Name))
+		}
+	}
 }

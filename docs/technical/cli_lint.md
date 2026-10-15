@@ -29,9 +29,10 @@ style, **L3nn** API lifecycle.
 | `L108` | undefined-name              | warning  | an unqualified bare name read where nothing by that name is defined anywhere: a constant (`MISSING_CONSTANT`), or a function used as a value (`Table{ greet: greetingOf }`); a bare variable / parameter name gets a "did you mean `$x`?" hint. The bare-name analogue of L107; `ns.NAME` and `match` arm heads / pattern binders excluded |
 | `L109` | call-arity                  | warning  | a bare call to a same-file method with the wrong argument count (exact: no default / variadic params); func-value and namespaced calls excluded |
 | `L112` | undeclared-namespace        | warning  | a `ns.name` reference whose namespace has no `use` / `import` (the inverse of L106; local enum / struct type prefixes excluded) |
+| `L113` | struct-literal-fields       | warning  | a same-file struct / enum-variant literal naming a field the type lacks, leaving one out, or naming an unknown variant (library / module types are checked at load by `run`) |
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
-| `L203` | line-too-long               | info     | a source line over the column limit (default 100)                  |
+| `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
 | `L204` | interpolation-slot-too-complex | info  | a call or other non-trivial expression inside a `{expr}` string slot |
 | `L205` | accumulator-parameter       | info     | a method that takes, mutates, and returns a `list` / `map` parameter (an O(n^2) copy-in / copy-out accumulator) |
 | `L301` | deprecation                 | warning  | reserved family, empty until an API is deprecated                  |
@@ -50,7 +51,7 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L201/L202/L105 - L106 also
+checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L201/L202/L105 - L106 also
 walks declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
@@ -98,7 +99,19 @@ blanket disable-all - a directive names IDs, on the line the finding
 anchors to (the `func` line for `L201`, the block-introducer line for
 `L202`). Because the parser strips comments, `applySuppressions` reads
 directives off the raw `lexer.TokenizeWithFile` stream and correlates
-them to findings by `file`/`line`. A malformed or unknown-ID directive is
+them to findings by `file`/`line`. A directive must be its own `#` comment
+token, so a line inside a multi-line token cannot carry one; a line directive
+therefore also covers every line of a multi-line string or block comment
+that **ends** on its line (`'; # lint-disable: L203`), and a directive
+standing alone on its line covers the whole block comment (a `/** */`
+docblock) that **starts** on the next line. Text inside a docblock is never a
+directive (it is documentation, rendered by the docs tooling), so it is not
+reported as `L004` either. A line comment may **end** in a directive
+(`# long note # lint-disable: L203`, since a comment has no room for a second
+comment token); that embedded form counts only when it parses as a line directive, so prose
+that mentions a directive stays an ordinary comment rather than an `L004`, and
+an embedded `lint-disable-file` is not honoured (a file-wide directive belongs
+at the file head). A malformed or unknown-ID directive is
 **continue-and-report**: it becomes an `L004` finding, suppresses nothing
 (so the finding it meant to silence still surfaces), and the run keeps
 going. A doubled marker (`## lint-disable: ...`) is an ordinary comment,

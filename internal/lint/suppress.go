@@ -19,6 +19,19 @@ import (
 //
 // There is no blanket "disable all": a directive names IDs, so a review can
 // grep for what was silenced. Unknown or missing IDs are errors.
+//
+// A line directive covers its own line, and also every line of a token that
+// spans several lines and has nowhere to carry a directive of its own:
+//
+//   - a multi-line string literal or block comment that ends on the
+//     directive's line (`'; # lint-disable: L203` after a multi-line string);
+//   - a block comment (a `/** */` docblock) that starts on the line right
+//     after a directive standing alone on its line.
+//
+// A line comment may also end in a directive (`# long text # lint-disable:
+// L203`), since a comment has no room for a second comment token; that
+// embedded form is only a directive when it parses as one, so ordinary prose
+// that mentions `# lint-disable` stays an ordinary comment.
 
 const (
 	dirNone = iota
@@ -52,13 +65,22 @@ func applySuppressions(diags []Diagnostic, tokens []lexer.Token) []Diagnostic {
 	fileSup := map[string]map[string]bool{}
 	var bad []Diagnostic
 
+	spans := multiLineSpans(tokens)
+	lastEnd := map[string]int{} // per file: the end line of the previous non-trivia token
 	for _, t := range tokens {
 		if t.Type != lexer.TOKEN_COMMENT_LINE {
+			if t.Type != lexer.TOKEN_BLANK_LINE {
+				lastEnd[t.File] = tokenEndLine(t)
+			}
 			continue
 		}
+		alone := lastEnd[t.File] < t.Line
 		ids, kind, err := parseDirective(t.Lexeme)
 		if kind == dirNone {
-			continue
+			ids, kind = embeddedDirective(t.Lexeme)
+			if kind == dirNone {
+				continue
+			}
 		}
 		if err != nil {
 			bad = append(bad, Diagnostic{
@@ -74,13 +96,15 @@ func applySuppressions(diags []Diagnostic, tokens []lexer.Token) []Diagnostic {
 				byLine = map[int]map[string]bool{}
 				lineSup[t.File] = byLine
 			}
-			set := byLine[t.Line]
-			if set == nil {
-				set = map[string]bool{}
-				byLine[t.Line] = set
-			}
-			for _, id := range ids {
-				set[id] = true
+			for _, line := range coveredLines(spans[t.File], t.Line, alone) {
+				set := byLine[line]
+				if set == nil {
+					set = map[string]bool{}
+					byLine[line] = set
+				}
+				for _, id := range ids {
+					set[id] = true
+				}
 			}
 		case dirFile:
 			set := fileSup[t.File]
@@ -110,6 +134,69 @@ func applySuppressions(diags []Diagnostic, tokens []lexer.Token) []Diagnostic {
 		out = append(out, d)
 	}
 	return append(out, bad...)
+}
+
+// span is the line range of one token that covers several source lines.
+type span struct {
+	start, end int
+	block      bool // a block comment (docblock), not a string literal
+}
+
+// tokenEndLine is the last source line a token occupies: a string literal's
+// raw spelling or a block comment's text may carry newlines.
+func tokenEndLine(t lexer.Token) int {
+	text := t.Raw
+	if text == "" && t.Type == lexer.TOKEN_COMMENT_BLOCK {
+		text = t.Lexeme
+	}
+	return t.Line + strings.Count(text, "\n")
+}
+
+// multiLineSpans collects, per file, the tokens that span several lines.
+func multiLineSpans(tokens []lexer.Token) map[string][]span {
+	out := map[string][]span{}
+	for _, t := range tokens {
+		if end := tokenEndLine(t); end > t.Line {
+			out[t.File] = append(out[t.File], span{start: t.Line, end: end, block: t.Type == lexer.TOKEN_COMMENT_BLOCK})
+		}
+	}
+	return out
+}
+
+// coveredLines lists the lines a line directive on `line` applies to: its own,
+// every line of a multi-line token ending there, and - for a directive alone on
+// its line - every line of a block comment starting on the next line.
+func coveredLines(spans []span, line int, alone bool) []int {
+	lines := []int{line}
+	for _, sp := range spans {
+		if sp.end == line || (alone && sp.block && sp.start == line+1) {
+			for l := sp.start; l <= sp.end; l++ {
+				if l != line {
+					lines = append(lines, l)
+				}
+			}
+		}
+	}
+	return lines
+}
+
+// embeddedDirective finds a directive at the end of a line comment's text
+// (`# long note # lint-disable: L203`). It returns dirNone unless the text
+// after the last ` # ` marker parses as a valid line directive - an embedded
+// marker that does not is prose, so it is never reported as L004, and an
+// embedded `lint-disable-file` is not honoured.
+func embeddedDirective(lexeme string) ([]string, int) {
+	i := strings.LastIndex(lexeme, " # lint-disable")
+	if i <= 0 {
+		return nil, dirNone
+	}
+	ids, kind, err := parseDirective(lexeme[i+1:])
+	if err != nil || kind != dirLine {
+		// Only the line form: a file-wide directive belongs at the file head,
+		// not at the end of some comment where a reader would not look for it.
+		return nil, dirNone
+	}
+	return ids, kind
 }
 
 // parseDirective inspects a line comment's text. It returns the named IDs and

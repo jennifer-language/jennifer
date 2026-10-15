@@ -47,12 +47,18 @@ complexity and style, **L3nn** API lifecycle:
 | `L105` | a condition that is always true or always false (`if ($x == $x)`, ...) |
 | `L106` | a `use` / `import` whose namespace is never used                       |
 | `L107` | an unqualified call to a name that is not a defined method (a typo'd method) |
+| `L108` | a bare name read where nothing by that name is defined (a typo'd constant or function value) |
+| `L109` | a call to a same-file method with the wrong number of arguments        |
+| `L112` | a `ns.name` reference whose namespace has no `use` / `import`          |
+| `L113` | a same-file struct / enum-variant literal with an unknown or missing field |
 | `L201` | a method with too many statements (default over 60)                    |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
+| `L204` | a call (or other non-trivial expression) inside a `{expr}` string slot |
 | `L205` | a method that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator - keep it in the caller) |
 | `L301` | use of a deprecated API (reserved, empty until an API is deprecated)   |
 | `L302` | use of a removed API (e.g. an old `use core;`)                         |
+| `L303` | a malformed / duplicate / unknown `# pragma-jennifer-*` header line    |
 
 The **L0nn source errors are always on** - you can't disable "the file
 doesn't parse". They report in whatever `--format` you ask for, so a
@@ -79,6 +85,16 @@ for `L202`:
 ```jennifer
 try { risky(); } catch (e) { }   # lint-disable: L103
 ```
+
+A directive is its own `#` comment, so a few lines have nowhere to put one:
+the lines of a multi-line string, and the lines of a `/** ... */` doc
+comment (text inside a doc comment is documentation, never a directive).
+For those, a directive covers the whole token: put it after the line where a
+multi-line string ends (`'; # lint-disable: L203`), or on its own line right
+above a doc comment. A long `#` comment can end in its own directive
+(`# long note ... # lint-disable: L203`). `L203` also leaves alone a comment
+line that cannot be wrapped: a Markdown table row, or one whose overflow is a
+single URL or `code span` too long to fit on a line of its own.
 
 A `# lint-disable-file: L201, L202` at the top of a file silences those
 IDs file-wide, and a `.jennifer-lint` file at your project root sets
