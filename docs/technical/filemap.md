@@ -64,7 +64,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 
 | File | Description |
 | ---- | ----------- |
-| `value.go` | Runtime `Value` tagged union (incl. struct + namespaced-struct + `KindObject` tags). |
+| `value.go` | Runtime `Value` tagged union (incl. struct + namespaced-struct + `KindObject` tags; an object's payload is an `ObjectBox`: a wrapped `Value` tree or a library-native `NativeObject`). |
 | `environment.go` | Scoped symbol table (name map + slot slice). |
 | `interpreter.go` | Tree-walking evaluator; namespaced-struct + object registration and resolution. |
 | `interpreter_test.go` | End-to-end interpreter tests. |
@@ -100,7 +100,8 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `compress/compresslib.go` | `compress`: `pack` / `unpack` (gzip / zlib / deflate) + streaming (`compress.Stream`); optional level. |
 | `archive/archivelib.go` | `archive`: tar / zip / tar.gz `pack` / `unpack` over `bytes` (`archive.Entry`); no `fs` dependency. |
 | `encoding/encodinglib.go`, `encoding/codecs.go`, `encoding/codecs_gen.go`, `encoding/gen_codecs.go` | `encoding`: introspection + `toText` / `fromText` + `encode` / `decode`; hand-written `ascii` / `ebcdic` + generated ISO-8859-N / Windows-125N tables (`codecs_gen.go` is generated, do not edit; `gen_codecs.go` is the `go:build ignore` codegen). |
-| `json/jsonlib.go`, `json/jsondecode.go` | `json`: RFC 8259 `encode` / `encodePretty` + `Value` emitter; recursive-descent decoder -> opaque `json.Value` (`KindObject`), positioned errors. |
+| `doctree/node.go`, `doctree/edit.go`, `doctree/build.go`, `doctree/lib.go` | The compact document tree shared by `json` / `toml` / `yaml`: a 40-byte `Node` per value (map members in document order, a sorted key index above 8 members), about 8x smaller than the same document as `Value`s; JSON Pointer addressing and the copy-the-spine write verbs (`edit.go`); a `Builder` that grows containers in place for TOML's reopened tables, then seals them (`build.go`); and `Lib`, which registers the opaque `NAME.Value` type (a `NativeObject` payload) and the shared accessor + write builtins, with per-library options for `isNull` and date-times (`lib.go`). |
+| `json/jsonlib.go`, `json/jsondecode.go`, `json/jsonnode.go` | `json`: RFC 8259 `encode` / `encodePretty` + `Value` emitter; recursive-descent decoder into a `doctree` tree (unescaped strings sliced from the input), positioned errors. |
 | `task/tasklib.go` | `task`: `wait` / `poll` / `discard` / `waitAll` / `waitAny` over `task of T` handles. |
 | `fs/fslib.go`, `fs/handles.go` | `fs`: one-shot read / write / append + metadata + dir ops; buffered `fs.File` handles. |
 | `net/netlib.go`, `net/netlib_std.go`, `net/netlib_tinygo.go` | `net`: shared install / dispatch; `!tinygo` full TCP / TLS / UDP / DNS; `tinygo` friendly-error stubs. |
@@ -113,9 +114,9 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `intl/intllib.go` | `intl`: locale catalogs - `load(lang, catalog)`, `setLocale` / `locale`, `tr(key[, params])` with `%name%` interpolation. |
 | `term/termlib.go`, `term/termlib_std.go`, `term/termlib_tinygo.go` | `term`: raw mode (`makeRaw` / `restore` -> `term.State`), `size`, raw byte reads; `!tinygo` real termios (+ `RestoreAll` for the CLI signal path), `tinygo` stubs. |
 | `httpd/httpdlib.go`, `httpd/httpdlib_std.go`, `httpd/httpdlib_tinygo.go` | `httpd`: HTTP/1.1 server engine over `net/http` (TLS, graceful shutdown) - pull loop `listen` / `accept` / `respond` + request accessors; `tinygo` stubs. |
-| `xml/xmllib.go`, `xml/xmldecode.go`, `xml/xmlaccess.go` | `xml`: `decode` / `encode` / `encodePretty` over an opaque `xml.Value` element tree (ordered attributes, children, mixed text). |
-| `yaml/yamllib.go`, `yaml/yamldecode.go`, `yaml/yamlencode.go`, `yaml/yamlaccess.go`, `yaml/yamlwrite.go` | `yaml`: YAML 1.2 `decode` / `decodeAll` / `encode` / `encodePretty` over an opaque `yaml.Value` (on `gopkg.in/yaml.v3`); same read / walk / write surface as `json`. |
-| `toml/tomllib.go`, `toml/tomldecode.go`, `toml/tomlaccess.go`, `toml/tomlwrite.go` | `toml`: TOML 1.0 `encode` / `encodePretty` / `decode`, same `Value` walk / write surface as `json`, plus `asDatetime`. |
+| `xml/xmllib.go`, `xml/xmldecode.go`, `xml/xmlaccess.go`, `xml/xmlnode.go` | `xml`: `decode` / `encode` / `encodePretty` over an opaque `xml.Value` element tree (ordered attributes, children, mixed text); `xmlnode.go` is the compact native tree (a `NativeObject` payload, names and plain text sliced from the input). |
+| `yaml/yamllib.go`, `yaml/yamldecode.go`, `yaml/yamlencode.go` | `yaml`: YAML 1.2 `decode` / `decodeAll` / `encode` / `encodePretty` over an opaque `yaml.Value` (on `gopkg.in/yaml.v3`, converted into a `doctree` tree with bytes and timestamp nodes); the read / walk / write surface is `doctree`'s. |
+| `toml/tomllib.go`, `toml/tomldecode.go` | `toml`: TOML 1.0 `encode` / `encodePretty` / `decode` into a `doctree` tree (tables grown with a `doctree.Builder`, date-times as datetime nodes tagged with their form); the read / walk / write surface, plus `asDatetime`, is `doctree`'s. |
 | `devio/devio.go` | Shared plumbing for the handle-based libraries (`serial` / `spi` / `i2c` / `gpio`, also `sql`): integer-handle structs + typed positional-argument extraction. Not a Jennifer library itself (no namespace, no Install). |
 | `serial/seriallib.go`, `serial/seriallib_linux.go`, `serial/seriallib_other.go` | `serial`: termios serial-port I/O - `open` / `openWith` -> `serial.Port`, `read` / `write` / `flush` / `close`. Linux-only; stubs elsewhere. |
 | `spi/spilib.go`, `spi/spilib_linux.go`, `spi/spilib_other.go` | `spi`: SPI devices - `open` -> `spi.Device`, `configure(mode, speedHz)`, full-duplex `transfer`, `close`. Linux-only; stubs elsewhere. |
@@ -135,7 +136,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `internal/lint/scope.go` | Scope-aware traversal for binding-visibility checks (L101 unused-local, L104 throw-non-error). |
 | `internal/lint/walk.go` | Flat AST walker for node-shape checks (L102 / L103 / L105 / L201 / L202). |
 | `internal/lint/config.go` | `--checks` / `.jennifer-lint` selection parsing (selectable IDs only). |
-| `internal/lint/suppress.go` | `# lint-disable` directive parsing + application; a malformed / unknown-ID directive becomes an L004 finding. |
+| `internal/lint/suppress.go` | `# lint-disable` directive parsing + application (a line directive also covers a multi-line string / block comment ending on its line, or a docblock right below a lone directive; a line comment may end in one); a malformed / unknown-ID directive becomes an L004 finding. |
 | `internal/profile/profile.go` | `profile` collector: per-position hit counts + wall-clock (+ optional alloc counting). |
 | `internal/profile/render.go` | Table + Chrome-trace renderers. |
 | `internal/profile/pprof.go` | Gzipped-pprof output (hand-encoded, zero-dependency). |

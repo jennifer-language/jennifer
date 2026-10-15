@@ -191,7 +191,9 @@ function value), `channel of T` (a CSP channel between goroutines).
   type).
 - **map** literals: `{"a": 1, "b": 2}`, `{}`. Insertion-ordered.
 - **struct** literals: `Point{x: 1, y: 2}` after
-  `def struct Point { x as int, y as int };`. Every field must be named.
+  `def struct Point { x as int, y as int };`. Every field must be named; an
+  unknown or missing field is an error when the program loads, not when the
+  literal runs.
 - **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
   level. A value is one variant: construct with `Shape.Circle{r: 2.0}` or the
   payload-less `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value
@@ -617,7 +619,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`json`** - `encode`/`encodePretty`/`decode`. `decode` returns an opaque
   `json.Value` walked by JSON Pointer accessors (`get`/`asInt`/`asString`/
   `typeOf`/`has`/`keys`/`length`/...) and edited by non-mutating writers
-  (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`).
+  (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`). A repeated key in
+  one object is a decode error (as in `yaml` / `toml`).
 - **`asn1`** - ASN.1 BER decode / DER encode (the byte layer under LDAP / SNMP /
   PKI), designed like `json`. `decode(bytes)` returns an opaque `asn1.Value`
   walked by `(node, pointer)` accessors where the pointer's tokens are child
@@ -658,8 +661,11 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   callbacks): `httpd.listen(addr)` (or `listenTLS(addr, cert, key)`, TLS + HTTP/2)
   -> `Server`, then loop. `httpd.listenWith(addr, opts)` /
   `listenTLSWith(addr, cert, key, opts)` take an `httpd.Options{maxBodyBytes as
-  int, maxInFlight as int}` for per-server limits (a `0` field selects its
-  default: a 10 MiB request-body cap / 256 concurrent in-flight requests); the
+  int, maxInFlight as int, respondTimeoutMs as int}` for per-server limits (a `0`
+  field selects its default: a 10 MiB request-body cap / 256 concurrent in-flight
+  requests / a 60 s respond timeout, after which the engine answers `503` itself;
+  `httpd.isOpen($req)` / `httpd.timedOut($req)` tell a slow handler its reply can
+  no longer be sent); the
   guard rejects a pair whose `maxInFlight x maxBodyBytes` worst-case buffered
   memory exceeds a process-wide budget (default 4 GiB, set with
   `httpd.setMaxBufferBudget(bytes)` to match the host's RAM, or opt into
@@ -759,7 +765,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `"best"` level), plus streaming via a `compress.Stream` handle. Both binaries.
 - **`archive`** - tar / zip containers over `bytes` (no `fs`): `pack` / `unpack`
   for `"tar"` / `"zip"` / `"tar.gz"`; a bundle is a `list of archive.Entry{name,
-  data, mode, mtime}`. Both binaries.
+  data, mode, mtime}`. `unpack` refuses an absolute name or any `..` segment, and
+  refuses an archive holding a symlink / device / FIFO unless
+  `unpackWith(b, fmt, archive.UnpackOptions{..., skipSpecial: true})` (a tar hard
+  link comes back with its target's content). Both binaries.
 - **`encoding`** - introspection (`isAscii` / `lenBytes` / `lenRunes`),
   binary-to-text `toText` / `fromText` (`hex` / `base32` / `base64` / `base64-url`
   / `ascii85` / `z85` / `quoted-printable`, plus `uri-percent` (RFC 3986) and
@@ -786,9 +795,13 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   then `set(store, k, v, ttl)` / `add` / `get` / `has` / `delete` / `touch` /
   `incr(store, k, delta)` (memcache-shape: new value, `-1` when absent, does not
   create; `delta` is signed so a negative value decrements - no separate `decr` -
-  and it does not floor at 0) / `close`. A `kv.Store` is an integer handle into a per-interpreter
-  registry, so it shares its backing map across value-copies and `spawn`ed tasks
-  (per-store mutex; `incr` atomic) - the shared mutable state a pure `.j` module
+  and it does not floor at 0) / `close`. `setValue(store, k, value, ttl)` /
+  `getValue(store, k)` store an opaque library value (a parsed `json.Value`, ...)
+  shared rather than copied - the way concurrent `web` handlers share one parsed
+  document a writer replaces (in-memory stores only; `getValue` throws when
+  absent). A `kv.Store` is an integer handle into a run-scoped
+  registry, so it shares its backing map across value-copies, `spawn`ed tasks and
+  `import`ed modules (per-store mutex; `incr` atomic) - the shared mutable state a pure `.j` module
   cannot hold. Backs `kvstore`'s in-process option. TinyGo-clean (both binaries).
 
 For the exact signature of any function, see the hosted library reference -
@@ -1028,7 +1041,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   top-level `def` at overlapping times. `web.Context` helpers: `param` / `query` /
   `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /
   `remoteAddr`, and `text` / `html` / `sendJson` / `redirect` / `respond` /
-  `setHeader` / `serveFile` / `serveDir` / `sendGzip`. Plus cookies (`web.cookie`
+  `setHeader` / `serveFile` / `serveDir` / `sendGzip`, and `web.isOpen($ctx)`
+  (false once the request is answered, e.g. by the engine's `503` after its
+  respond timeout, so a slow handler can stop early). Plus cookies (`web.cookie`
   / `setCookie` + `CookieOptions`), sessions (`web.sessionId` mints a UUID id
   cookie, `web.renewSession` rotates it after login; the app owns the store), CORS
   (`web.cors` + `CorsOptions`), caching (`web.etag`; `serveFile` sets `ETag` /
@@ -1374,7 +1389,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   with `requireExp: true`, refuses a token that has no `exp`;
   `verifyLeeway(..., leeway)` widens `exp` / `nbf` for skew; `verifyWithKeys(token,
   keysByKid, alg)` / `verifyJwks(token, jwksJson, alg)` select the key by header
-  `kid` (JWKS via `crypto.jwkToPem`, RS\* / ES\* only). Over `crypto` + `hash` +
+  `kid` (JWKS via `crypto.jwkToPem`, RS\* / ES\* only), and
+  `verifyWithKeysWith` / `verifyJwksWith` add a trailing `jwt.Policy` (use these for
+  OIDC / CI tokens: without them `iss` / `aud` are unchecked and a token with no
+  `exp` is accepted). Over `crypto` + `hash` +
   `encoding` + `json` + `time`. HS\* / EdDSA both binaries; RS\* / ES\* need the
   default binary. JWT auth is this module as a `web.before` middleware.
 - **`jsonl`** - JSON Lines (JSONL / NDJSON): newline-delimited JSON, one

@@ -15,7 +15,7 @@ flat lookup view, not authoritative.
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [`archive`](archive.md)`.pack(entries, format)`      | Bundle a `list of archive.Entry` into `bytes`; `format` `"tar"`/`"zip"`/`"tar.gz"`.                                              |
 | [`archive`](archive.md)`.unpack(b, format)`          | Read a bundle back into a `list of archive.Entry` (256 MiB / 65536-entry caps; over a cap raises `Error{kind:"limit"}`).            |
-| [`archive`](archive.md)`.unpackWith(b, format, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries}`; `0`=default, `<0`=unlimited).         |
+| [`archive`](archive.md)`.unpackWith(b, format, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries, skipSpecial}`; `0`=default, `<0`=unlimited). |
 | [`asn1`](asn1.md)`.decode(b)` / `.encode(v)`         | Parse BER `bytes` into an opaque `asn1.Value` / serialise one back to DER `bytes`.                                                 |
 | [`asn1`](asn1.md)`.typeOf/tagClass/tagNumber/isConstructed(v[, ptr])` | Element type name / class / numeric tag / constructed-ness; pointer tokens are child indices (`"/0/2"`).       |
 | [`asn1`](asn1.md)`.get(v[, ptr])` / `.has(v, ptr)` / `.length(v[, ptr])` | Sub-element as `asn1.Value` / whether a pointer resolves / child count of a constructed node.               |
@@ -127,7 +127,7 @@ flat lookup view, not authoritative.
 | [`hash`](hash.md)`.stream(algo)`                      | Allocate a `hash.Stream` for `algo`; feed chunks via `hash.update` then close with `hash.finalize`.                                 |
 | [`hash`](hash.md)`.update($s, $bytes)`                | Feed one chunk into a `hash.Stream` (mutates by side effect).                                                                       |
 | [`httpd`](httpd.md)`.listen(addr)` / `.listenTLS(addr, cert, key)` | Start an HTTP / HTTPS server -> `httpd.Server` (`":0"` = ephemeral port). Default binary only. |
-| [`httpd`](httpd.md)`.listenWith(addr, opts)` / `.listenTLSWith(addr, cert, key, opts)` | Same, with per-server limits via `httpd.Options{maxBodyBytes, maxInFlight}` (a `0` field = its default: 10 MiB / 256). Guarded: `maxInFlight x maxBodyBytes` must stay under the memory budget. |
+| [`httpd`](httpd.md)`.listenWith(addr, opts)` / `.listenTLSWith(addr, cert, key, opts)` | Same, with per-server limits via `httpd.Options{maxBodyBytes, maxInFlight, respondTimeoutMs}` (a `0` field = its default: 10 MiB / 256 / 60 s). Guarded: `maxInFlight x maxBodyBytes` must stay under the memory budget. |
 | [`httpd`](httpd.md)`.setMaxBufferBudget(bytes)` | Move the process-wide memory-guard ceiling (default 4 GiB) `listenWith` enforces - raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
 | [`httpd`](httpd.md)`.setMaxBufferBudgetFromRAM(fraction)` | Opt-in, cgroup-aware: set the budget to `fraction` of the detected machine limit (min of host RAM and cgroup limit) -> the bytes set; errors if undeterminable. |
 | [`httpd`](httpd.md)`.address($srv)` / `.shutdown($srv)`  | Bound address of a server / graceful drain (unblocks parked `accept`).                                                            |
@@ -135,6 +135,7 @@ flat lookup view, not authoritative.
 | [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `body` -> `bytes`). |
 | [`httpd`](httpd.md)`.requestValue($req, key)` / `.setRequestValue($req, key, value)` | Read / write a request-scoped note (`""` if unset); scratch space to memoize a value computed once per request, never sent to the client. |
 | [`httpd`](httpd.md)`.setHeader($req, name, value)` / `.respond($req, status, body)` | Set a response header / send the response once (`body` is string or bytes). |
+| [`httpd`](httpd.md)`.isOpen($req)` / `.timedOut($req)` | `bool`: the request still awaits its answer / the engine answered `503` itself after the respond timeout. |
 | [`httpd`](httpd.md)`.etag($req, tag)`                 | Set the `ETag` and honour a conditional GET -> `bool` (`true` = a `304` was sent, stop; handles `If-None-Match` list / `*` / `W/`).  |
 | [`httpd`](httpd.md)`.serveFile($req, path)` / `.serveDir($req, root)` | Answer with a file / the file under `root` for the request path (`..` cannot escape `root`).                    |
 | [`httpd`](httpd.md)`.serveFileEtag($req, path)` / `.serveDirEtag($req, root)` | Same, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
@@ -180,6 +181,7 @@ flat lookup view, not authoritative.
 | [`kv`](kv.md)`.delete(store, key)`                    | Remove the key; whether it existed (`bool`).                                                                                        |
 | [`kv`](kv.md)`.touch(store, key, ttl)`                | Re-arm the expiry; whether it existed (`bool`).                                                                                     |
 | [`kv`](kv.md)`.incr(store, key, delta)`               | Add signed `delta` to the numeric value; new value, or `-1` when absent (not created).                                             |
+| [`kv`](kv.md)`.setValue(store, key, value, ttl)` / `.getValue(store, key)` | Store / read an opaque library value (`json.Value`, ...), shared not copied; in-memory stores only; `getValue` errors when absent. |
 | [`kv`](kv.md)`.close(store)`                          | Drop the store and free its handle.                                                                                                 |
 | [`linalg`](linalg.md)`.dot(a, b)` / `.distance(a, b)` | Dot product / Euclidean distance of vectors (`list of float`) -> `float`. Length-checked.                                          |
 | [`linalg`](linalg.md)`.cross(a, b)` / `.normalize(v)` | 3-D cross product of length-3 vectors / the unit vector `v / norm(v)` (zero vector errors) -> `list of float`.                      |
