@@ -4,6 +4,10 @@
 package archivelib
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -204,6 +208,7 @@ func TestUnpackWithCaps(t *testing.T) {
 			{Name: "maxTotalBytes", Value: interpreter.IntVal(total)},
 			{Name: "maxEntryBytes", Value: interpreter.IntVal(entryBytes)},
 			{Name: "maxEntries", Value: interpreter.IntVal(entries)},
+			{Name: "skipSpecial", Value: interpreter.BoolVal(false)},
 		})
 	}
 	es := []entry{
@@ -248,7 +253,8 @@ func TestCheckEntryNameDriveLetter(t *testing.T) {
 			t.Errorf("checkEntryName(%q) = %v, want nil (legal Unix name)", n, err)
 		}
 	}
-	bad := []string{"C:/x.txt", "c:\\x", "D:", "/abs/path", "../up", "x/../../y"}
+	bad := []string{"C:/x.txt", "c:\\x", "D:", "/abs/path", "../up", "x/../../y",
+		"a/b/c/d/src/../../../../PWNED.txt", "a/../b", "a\\..\\b", "x/.."}
 	for _, n := range bad {
 		if err := checkEntryName(n); err == nil {
 			t.Errorf("checkEntryName(%q) = nil, want rejection", n)
@@ -273,5 +279,167 @@ func TestUnpackTarMasksSpecialBits(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].mode != 0o755 {
 		t.Fatalf("tar entry mode = 0o%o, want 0o755 (special bits stripped)", entries[0].mode)
+	}
+}
+
+// A name whose cleaned form stays inside but which carries `..` segments is
+// refused on unpack (and never written by pack): unpack returns names verbatim,
+// so a caller that re-roots a sub-path of the name must not be handed `..`.
+func TestDotDotSegmentsRefused(t *testing.T) {
+	name := "a/b/c/d/src/../../../../PWNED.txt"
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: 1, Typeflag: tar.TypeReg})
+	_, _ = tw.Write([]byte("x"))
+	_ = tw.Close()
+	if _, err := unpackTar(buf.Bytes(), defaultUnpackCaps()); err == nil || !strings.Contains(err.Error(), "`..` path segment") {
+		t.Errorf("unpackTar(%q) = %v, want a `..` segment error", name, err)
+	}
+	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal([]entry{{name: name, data: []byte("x")}}), str("tar")}); err == nil {
+		t.Errorf("pack(%q) succeeded, want a refusal", name)
+	}
+}
+
+// tarWith builds a tar from raw headers (with their data, if any).
+func tarWith(t *testing.T, members []struct {
+	hdr  tar.Header
+	data string
+}) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, m := range members {
+		h := m.hdr
+		h.Size = int64(len(m.data))
+		if err := tw.WriteHeader(&h); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(m.data)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+type member = struct {
+	hdr  tar.Header
+	data string
+}
+
+// A hard link resolves to the content of the member it names, rather than the
+// file vanishing from the unpacked list.
+func TestTarHardlinkResolves(t *testing.T) {
+	b := tarWith(t, []member{
+		{tar.Header{Name: "./src/hard.j", Mode: 0o644, Typeflag: tar.TypeReg}, "payload"},
+		{tar.Header{Name: "src/real.j", Mode: 0o600, Typeflag: tar.TypeLink, Linkname: "src/hard.j"}, ""},
+	})
+	es, err := unpackTar(b, defaultUnpackCaps())
+	if err != nil {
+		t.Fatalf("unpackTar: %v", err)
+	}
+	if len(es) != 2 || es[1].name != "src/real.j" || string(es[1].data) != "payload" || es[1].mode != 0o600 {
+		t.Fatalf("entries = %+v, want src/real.j carrying the linked content", es)
+	}
+	// A link to a member that is not in the archive (or not yet) is an error.
+	dangling := tarWith(t, []member{{tar.Header{Name: "a", Typeflag: tar.TypeLink, Linkname: "missing"}, ""}})
+	if _, err := unpackTar(dangling, defaultUnpackCaps()); err == nil {
+		t.Error("a hard link to a missing member should error")
+	}
+	// Links count against the total budget like copies, so a link bomb is bounded.
+	bomb := []member{{tar.Header{Name: "big", Mode: 0o644, Typeflag: tar.TypeReg}, strings.Repeat("x", 600)}}
+	for i := 0; i < 3; i++ {
+		bomb = append(bomb, member{tar.Header{Name: "l" + string(rune('a'+i)), Typeflag: tar.TypeLink, Linkname: "big"}, ""})
+	}
+	caps := defaultUnpackCaps()
+	caps.total = 1500
+	if _, err := unpackTar(tarWith(t, bomb), caps); err == nil {
+		t.Error("hard links past the total budget should trip the cap")
+	}
+	// Each linked entry owns its bytes.
+	es[1].data[0] = 'X'
+	if string(es[0].data) != "payload" {
+		t.Error("a hard-linked entry shares its target's bytes")
+	}
+	// A link to a member skipped as special is skipped with it.
+	viaSymlink := tarWith(t, []member{
+		{tar.Header{Name: "sym", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}, ""},
+		{tar.Header{Name: "hard", Typeflag: tar.TypeLink, Linkname: "sym"}, ""},
+		{tar.Header{Name: "real", Mode: 0o644, Typeflag: tar.TypeReg}, "x"},
+	})
+	skipCaps := defaultUnpackCaps()
+	skipCaps.skipSpecial = true
+	if es, err := unpackTar(viaSymlink, skipCaps); err != nil || len(es) != 1 || es[0].name != "real" {
+		t.Errorf("link to a skipped symlink: %+v, %v; want only real", es, err)
+	}
+}
+
+// pack refuses a mode with bits above the permission bits: Go's zip writer
+// turns the symlink bit into a real symbolic link member.
+func TestPackRefusesFileTypeModeBits(t *testing.T) {
+	for _, format := range []string{"zip", "tar"} {
+		in := entriesVal([]entry{{name: "link", data: []byte("/etc/passwd"), mode: 1<<27 | 0o777}})
+		if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{in, str(format)}); err == nil || !strings.Contains(err.Error(), "permission bits only") {
+			t.Errorf("%s: err = %v, want a mode refusal", format, err)
+		}
+	}
+	if got := roundtrip(t, "zip", []entry{{name: "s", data: []byte("x"), mode: 0o4755}}); len(got) != 1 {
+		t.Errorf("a setuid permission mode should still pack: %+v", got)
+	}
+}
+
+// Symlinks, devices and FIFOs refuse the archive by default (an Entry cannot
+// represent them, and dropping them silently hides that they were there), and
+// are skipped when the caller opts in.
+func TestSpecialEntries(t *testing.T) {
+	for _, flag := range []byte{tar.TypeSymlink, tar.TypeChar, tar.TypeBlock, tar.TypeFifo} {
+		b := tarWith(t, []member{
+			{tar.Header{Name: "src/link.j", Typeflag: flag, Linkname: "/etc/passwd"}, ""},
+			{tar.Header{Name: "src/real.j", Mode: 0o644, Typeflag: tar.TypeReg}, "x"},
+		})
+		if _, err := unpackTar(b, defaultUnpackCaps()); err == nil || !strings.Contains(err.Error(), "skipSpecial") {
+			t.Errorf("tar type %q: err = %v, want a refusal naming skipSpecial", flag, err)
+		}
+		caps := defaultUnpackCaps()
+		caps.skipSpecial = true
+		es, err := unpackTar(b, caps)
+		if err != nil || len(es) != 1 || es[0].name != "src/real.j" {
+			t.Errorf("tar type %q with skipSpecial: %+v, %v; want only src/real.j", flag, es, err)
+		}
+	}
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	h := &zip.FileHeader{Name: "src/link.j"}
+	h.SetMode(fs.ModeSymlink | 0o777)
+	w, _ := zw.CreateHeader(h)
+	_, _ = w.Write([]byte("/etc/passwd"))
+	h2 := &zip.FileHeader{Name: "src/real.j"}
+	h2.SetMode(0o644)
+	w, _ = zw.CreateHeader(h2)
+	_, _ = w.Write([]byte("x"))
+	_ = zw.Close()
+	if _, err := unpackZip(buf.Bytes(), defaultUnpackCaps()); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("zip symlink: err = %v, want a refusal (not a regular file holding the target)", err)
+	}
+	caps := defaultUnpackCaps()
+	caps.skipSpecial = true
+	es, err := unpackZip(buf.Bytes(), caps)
+	if err != nil || len(es) != 1 || es[0].name != "src/real.j" {
+		t.Errorf("zip symlink with skipSpecial: %+v, %v; want only src/real.j", es, err)
+	}
+
+	// The option reaches unpackWith through archive.UnpackOptions.
+	opts := interpreter.NamespacedStructVal("archive", "UnpackOptions", []interpreter.StructField{
+		{Name: "maxTotalBytes", Value: interpreter.IntVal(0)},
+		{Name: "maxEntryBytes", Value: interpreter.IntVal(0)},
+		{Name: "maxEntries", Value: interpreter.IntVal(0)},
+		{Name: "skipSpecial", Value: interpreter.BoolVal(true)},
+	})
+	got, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(buf.Bytes()), str("zip"), opts})
+	if err != nil || len(got.List) != 1 {
+		t.Errorf("unpackWith skipSpecial: %v entries, %v", len(got.List), err)
 	}
 }

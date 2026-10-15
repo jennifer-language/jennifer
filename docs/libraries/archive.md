@@ -24,10 +24,26 @@ call (summed across every entry) is capped at 256 MiB and the member
 count at 65536; past either cap it raises a catchable `Error{kind:
 "limit"}` (resource exhaustion, distinct from a `"runtime"` bug)
 instead of expanding a small "zip bomb" into gigabytes of memory. It
-also rejects any member whose name is an absolute path or escapes with
-`..` (a "zip-slip" name), so a naive extraction loop
+also rejects any member whose name is an absolute path or contains a `..`
+segment (a "zip-slip" name), so a naive extraction loop
 (`fs.writeBytes($dir + "/" + $e.name, $e.data)`) can't be tricked into
-writing outside the target directory.
+writing outside the target directory. A `..` segment is refused even when the
+path would stay inside after cleaning (`a/../b`): `unpack` returns each name
+exactly as stored, so a caller that keeps only part of it (stripping a wrapper
+directory, or taking what follows `src/`) is never handed a `..`. `pack` refuses
+the same names, so it never writes an archive `unpack` would reject.
+
+### Links and special members
+
+Directories are implied by member paths and skipped. A tar **hard link** comes
+back as a regular `Entry` carrying the content of the member it names (which
+must appear earlier in the archive); its bytes count against the size caps like
+a copy. A **symbolic link**, device, FIFO or socket has no content an `Entry`
+can carry, so `unpack` **refuses** an archive holding one with a catchable
+error naming the member, rather than dropping it unnoticed. To unpack such an
+archive anyway, pass `skipSpecial: true` to `unpackWith`, which leaves those
+members out (and a hard link to one of them too). Tar and zip behave the same (a zip symlink is not returned as a
+file holding its target path).
 
 ### `archive.UnpackOptions`
 
@@ -38,15 +54,17 @@ for an input whose trusted size differs from the defaults:
 def opts as archive.UnpackOptions init archive.UnpackOptions{
     maxTotalBytes: 50 * 1024 * 1024,   # 50 MiB total across all entries
     maxEntryBytes: 10 * 1024 * 1024,   # 10 MiB per entry
-    maxEntries: 1000
+    maxEntries: 1000,
+    skipSpecial: false                 # true: leave symlinks / devices out
 };
 def entries as list of archive.Entry init archive.unpackWith($kmz, "zip", $opts);
 ```
 
-Each field: **`0` takes the default** (so a bare `UnpackOptions{}` behaves
-exactly like `unpack`), **a positive value** sets that cap, and **a
-negative value disables it** (unlimited - for a fully trusted archive).
-Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
+Each cap field: **`0` takes the default** (so all three at `0`, with
+`skipSpecial: false`, behaves exactly like `unpack`), **a positive value** sets
+that cap, and **a negative value disables it** (unlimited - for a fully trusted
+archive). Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
+Like any struct literal, `UnpackOptions{...}` must name every field.
 
 ## `archive.Entry`
 
@@ -57,11 +75,13 @@ A struct `{ name as string, data as bytes, mode as int, mtime as int }`:
 - **`mode`** - unix permission bits (e.g. `0o644`); `0` means the default `0o644`.
   On `unpack`, the special bits (setuid / setgid / sticky) and tar file-type bits
   are masked off to the permission bits, so an untrusted archive never yields a
-  setuid `mode` an extraction loop would apply.
+  setuid `mode` an extraction loop would apply. `pack` refuses a `mode` outside
+  `0` to `0o7777`: a higher bit is a file type (a zip member with the symlink
+  bit is written as a symbolic link).
 - **`mtime`** - modification time, unix seconds.
 
-Only regular files map to an `Entry`; directory members are skipped on
-`unpack`.
+Only regular files (and tar hard links, resolved to their content) map to an
+`Entry`; see [Links and special members](#links-and-special-members).
 
 ## Example
 

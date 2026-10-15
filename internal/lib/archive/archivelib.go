@@ -40,10 +40,13 @@ var (
 
 // unpackCaps bounds one unpack call: total decompressed bytes, per-entry bytes,
 // and entry count. A zero field in any dimension means "no limit" for it.
+// skipSpecial drops a symlink / device / FIFO member instead of refusing the
+// archive (the default refuses, so a dropped member is never silent).
 type unpackCaps struct {
-	total      int64
-	entryBytes int64
-	entries    int
+	total       int64
+	entryBytes  int64
+	entries     int
+	skipSpecial bool
 }
 
 // defaultUnpackCaps reads the package defaults (which tests may lower). The
@@ -130,6 +133,7 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "maxTotalBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "maxEntryBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "maxEntries", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "skipSpecial", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 	in.RegisterNamespaced(LibraryName, "pack", packFn)
 	in.RegisterNamespaced(LibraryName, "unpack", unpackFn)
@@ -194,6 +198,16 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		e, err := extractEntry(i, ev)
 		if err != nil {
 			return interpreter.Null(), err
+		}
+		// Refuse to write a member unpack would refuse to read, so pack never
+		// produces an archive that is unsafe (or impossible) to extract.
+		if err := checkEntryName(e.name); err != nil {
+			return interpreter.Null(), fmt.Errorf("archive.pack: %v", err)
+		}
+		// Permission bits only: a higher bit is a file type to Go's archive
+		// writers (a zip member with the symlink bit is written as a symlink).
+		if e.mode < 0 || e.mode > 0o7777 {
+			return interpreter.Null(), fmt.Errorf("archive.pack: entry %q has mode %#o; a mode holds permission bits only (0 to 0o7777)", e.name, e.mode)
 		}
 		entries = append(entries, e)
 	}
@@ -309,6 +323,8 @@ func capsFromOptions(v interpreter.Value) (unpackCaps, error) {
 			caps.entryBytes = capFromOpt(f.Value.Int, def.entryBytes)
 		case "maxEntries":
 			caps.entries = int(capFromOpt(f.Value.Int, int64(def.entries)))
+		case "skipSpecial":
+			caps.skipSpecial = f.Value.Bool
 		}
 	}
 	return caps, nil
@@ -359,12 +375,6 @@ func packTar(entries []entry) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// checkEntryName rejects a member whose name would escape an extraction
-// directory: an absolute path or a `..` traversal. Archive paths are
-// slash-separated by spec; backslashes are normalized so a Windows-style
-// `..\..\x` is caught too. The library never touches the filesystem, but the
-// obvious extraction loop (fs.write(dir + "/" + name)) with such a name is the
-// zip-slip hole, so it's closed at the decode source.
 // hasDriveLetter reports whether s (already slash-normalized) begins with a
 // Windows drive reference - an ASCII letter, a `:`, then a separator or the end
 // of the string (`C:`, `C:/foo`). A bare `:` at index 1 is not enough: ordinary
@@ -380,6 +390,16 @@ func hasDriveLetter(s string) bool {
 	return len(s) == 2 || s[2] == '/'
 }
 
+// checkEntryName rejects a member whose name could escape an extraction
+// directory: an absolute path, or any `..` segment. Archive paths are
+// slash-separated by spec; backslashes are normalized so a Windows-style
+// `..\\x` is caught too. A `..` segment is refused even when the cleaned path
+// stays inside (`a/../b`), because unpack returns the name verbatim: a caller
+// that re-roots a sub-path of it (strip a wrapper directory, keep what follows
+// `src/`) would otherwise turn `a/b/src/../../../x` into a write outside its
+// target. The library never touches the filesystem, but the obvious extraction
+// loop (fs.write(dir + "/" + name)) is the zip-slip hole, so it is closed at the
+// decode source.
 func checkEntryName(name string) error {
 	if name == "" {
 		return fmt.Errorf("archive entry has an empty name")
@@ -388,16 +408,50 @@ func checkEntryName(name string) error {
 	if strings.HasPrefix(norm, "/") || hasDriveLetter(norm) {
 		return fmt.Errorf("archive entry %q has an absolute path", name)
 	}
-	clean := path.Clean(norm)
-	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return fmt.Errorf("archive entry %q escapes the target directory", name)
+	for _, seg := range strings.Split(norm, "/") {
+		if seg == ".." {
+			return fmt.Errorf("archive entry %q has a `..` path segment", name)
+		}
 	}
 	return nil
+}
+
+// specialError reports a member that is not a regular file or a directory - a
+// symlink, device, FIFO or socket. It has no content an Entry could carry, and
+// dropping it silently would hide that the archive held it, so unpack refuses
+// unless the caller opted into skipping via UnpackOptions.skipSpecial.
+func specialError(name, what string) error {
+	return fmt.Errorf("archive entry %q is a %s, which an archive.Entry cannot represent; "+
+		"pass archive.UnpackOptions{skipSpecial: true, ...} to archive.unpackWith to skip such entries", name, what)
+}
+
+// tarSpecialKind names a tar member type that maps to no Entry, or "" for one
+// that does (a regular file) or is skipped quietly (a directory).
+func tarSpecialKind(flag byte) string {
+	switch flag {
+	case tar.TypeReg, tar.TypeDir, tar.TypeLink:
+		return ""
+	case tar.TypeSymlink:
+		return "symbolic link"
+	case tar.TypeChar:
+		return "character device"
+	case tar.TypeBlock:
+		return "block device"
+	case tar.TypeFifo:
+		return "FIFO"
+	default:
+		return fmt.Sprintf("member of unsupported tar type %q", flag)
+	}
 }
 
 func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
 	tr := tar.NewReader(bytes.NewReader(b))
 	var entries []entry
+	// byName maps a regular member's name to its index in entries, so a hardlink
+	// (which names an earlier member instead of carrying data) resolves to that
+	// member's content rather than vanishing.
+	byName := map[string]int{}
+	skipped := map[string]bool{} // members dropped by skipSpecial
 	budget := caps.total
 	for {
 		hdr, err := tr.Next()
@@ -407,19 +461,51 @@ func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue // only regular files map to an Entry
+		if hdr.Typeflag == tar.TypeDir {
+			continue // directories are implied by the member paths
 		}
 		if err := checkEntryName(hdr.Name); err != nil {
 			return nil, err
 		}
+		if kind := tarSpecialKind(hdr.Typeflag); kind != "" {
+			if caps.skipSpecial {
+				skipped[memberKey(hdr.Name)] = true
+				continue
+			}
+			return nil, specialError(hdr.Name, kind)
+		}
+		// A hard link to a member skipped as special is skipped with it.
+		if hdr.Typeflag == tar.TypeLink && skipped[memberKey(hdr.Linkname)] {
+			skipped[memberKey(hdr.Name)] = true
+			continue
+		}
 		if caps.entries > 0 && len(entries) >= caps.entries {
 			return nil, &capError{fmt.Sprintf("archive holds more than %d entries", caps.entries)}
 		}
-		data, err := readCapped(tr, &budget, caps)
-		if err != nil {
+		var data []byte
+		if hdr.Typeflag == tar.TypeLink {
+			idx, ok := byName[memberKey(hdr.Linkname)]
+			if !ok {
+				return nil, fmt.Errorf("archive entry %q is a hard link to %q, which is not an earlier regular file in the archive", hdr.Name, hdr.Linkname)
+			}
+			// Charge the linked content against the budget like a real copy: every
+			// Entry owns its bytes (the copy below), so N links to one big member
+			// cost N times its size (a link bomb otherwise skirts the total cap).
+			src := entries[idx].data
+			if caps.entryBytes > 0 && int64(len(src)) > caps.entryBytes {
+				return nil, &capError{fmt.Sprintf("an archive entry exceeds the %d-byte per-entry limit", caps.entryBytes)}
+			}
+			if budget > 0 {
+				if int64(len(src)) > budget {
+					return nil, &capError{fmt.Sprintf("total decompressed size exceeds the %d-byte limit", caps.total)}
+				}
+				budget -= int64(len(src))
+			}
+			data = append([]byte(nil), src...)
+		} else if data, err = readCapped(tr, &budget, caps); err != nil {
 			return nil, err
 		}
+		byName[memberKey(hdr.Name)] = len(entries)
 		// Mask to permission bits (0o777) like the zip path (f.Mode().Perm()): a
 		// tar header carries setuid / setgid / sticky and file-type bits verbatim,
 		// and Entry.mode is documented as plain permission bits. Dropping the
@@ -497,6 +583,12 @@ func unpackZip(b []byte, caps unpackCaps) ([]entry, error) {
 		if err := checkEntryName(f.Name); err != nil {
 			return nil, err
 		}
+		if kind := zipSpecialKind(f.Mode()); kind != "" {
+			if caps.skipSpecial {
+				continue
+			}
+			return nil, specialError(f.Name, kind)
+		}
 		rc, err := f.Open()
 		if err != nil {
 			return nil, err
@@ -514,6 +606,28 @@ func unpackZip(b []byte, caps unpackCaps) ([]entry, error) {
 		})
 	}
 	return entries, nil
+}
+
+// zipSpecialKind names a zip member mode that maps to no Entry, or "" for a
+// regular file. A zip symlink stores its target as the member's content, so
+// without this check it would come back as a regular file holding the target
+// path, unlike the same archive in tar form.
+func zipSpecialKind(m fs.FileMode) string {
+	switch {
+	case m&fs.ModeSymlink != 0:
+		return "symbolic link"
+	case m&fs.ModeNamedPipe != 0:
+		return "FIFO"
+	case m&fs.ModeSocket != 0:
+		return "socket"
+	case m&fs.ModeCharDevice != 0:
+		return "character device"
+	case m&fs.ModeDevice != 0:
+		return "block device"
+	case m&fs.ModeIrregular != 0:
+		return "member of unknown type"
+	}
+	return ""
 }
 
 // gzipBytes / gunzipBytes wrap compress/gzip for the tar.gz combo.
@@ -545,4 +659,10 @@ func gunzipBytes(b []byte, caps unpackCaps) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// memberKey is the lookup form of a tar member name for hardlink resolution:
+// slash-normalized and cleaned, so `./a/b` and `a/b` name the same member.
+func memberKey(name string) string {
+	return path.Clean(strings.ReplaceAll(name, "\\", "/"))
 }
