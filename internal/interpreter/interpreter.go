@@ -4352,18 +4352,15 @@ func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment,
 	return int(lo), int(hi), nil
 }
 
-// evalExprDeep evaluates an operand one level deeper, counting the descent into
-// the shared call-depth counter. Expression nesting deepens only through the
-// operand evaluations in evalBinary / evalUnary / evalLogical, so charging those
+// Operand evaluation in evalBinary / evalLogical / evalUnary counts the descent
+// into the shared call-depth counter (`*env.depth++` around each operand).
+// Expression nesting deepens only through those operands, so charging them
 // keeps the guard aware of a recursive call wrapped in many operators (e.g.
-// `return (1+(1+(... f(n-1) ...)))`), which would otherwise overflow the Go stack
-// at a recursion depth far below the call cap. Increment-only, like execBlock.
-func (i *Interpreter) evalExprDeep(e parser.Expr, env *Environment) (Value, error) {
-	*env.depth++
-	v, err := i.evalExpr(e, env)
-	*env.depth--
-	return v, err
-}
+// `return (1+(1+(... f(n-1) ...)))`), which would otherwise overflow the Go
+// stack at a recursion depth far below the call cap. Increment-only, like
+// execBlock. The bump is written inline at each operand, not through a helper:
+// a helper is not inlined, and a call plus a copy of the large Value result on
+// every operand cost tight numeric loops about a fifth of their speed.
 
 func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value, error) {
 	// constant-fold shortcut. Set by the resolver when both
@@ -4378,11 +4375,15 @@ func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value,
 	if b.Op.IsLogical() {
 		return i.evalLogical(b, env)
 	}
-	lv, err := i.evalExprDeep(b.Left, env)
+	*env.depth++
+	lv, err := i.evalExpr(b.Left, env)
+	*env.depth--
 	if err != nil {
 		return Value{}, err
 	}
-	rv, err := i.evalExprDeep(b.Right, env)
+	*env.depth++
+	rv, err := i.evalExpr(b.Right, env)
+	*env.depth--
 	if err != nil {
 		return Value{}, err
 	}
@@ -4462,7 +4463,9 @@ func (i *Interpreter) evalBitOp(op parser.BinaryOp, lv, rv Value, file string, l
 // evalLogical implements short-circuit `and`/`or`. Both operands must be bool;
 // the right operand is only evaluated when the left doesn't already decide.
 func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value, error) {
-	lv, err := i.evalExprDeep(b.Left, env)
+	*env.depth++
+	lv, err := i.evalExpr(b.Left, env)
+	*env.depth--
 	if err != nil {
 		return Value{}, err
 	}
@@ -4480,7 +4483,9 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 	if b.Op == parser.OpOr && lv.Bool {
 		return BoolVal(true), nil
 	}
-	rv, err := i.evalExprDeep(b.Right, env)
+	*env.depth++
+	rv, err := i.evalExpr(b.Right, env)
+	*env.depth--
 	if err != nil {
 		return Value{}, err
 	}
@@ -4501,7 +4506,9 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 	if u.Folded != nil {
 		return i.evalExpr(u.Folded, env)
 	}
-	v, err := i.evalExprDeep(u.Operand, env)
+	*env.depth++
+	v, err := i.evalExpr(u.Operand, env)
+	*env.depth--
 	if err != nil {
 		return Value{}, err
 	}

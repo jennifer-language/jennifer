@@ -203,7 +203,9 @@ nested expression operands do too - so `internal/limits.MaxCallDepth` counts all
 three: a per-call-chain `*int` (fresh at each goroutine root) bumped on every
 method entry (`evalCall` and the cross-boundary dispatch `meta.call` /
 `meta.callMain`), block entry (`execBlock`), and expression-operand descent
-(`evalExprDeep`, from `evalBinary` / `evalUnary` / `evalLogical`). The cap thus
+(an inline bump around each operand in `evalBinary` / `evalUnary` /
+`evalLogical` - inline, since a non-inlined helper there cost tight numeric
+loops about a fifth of their speed). The cap thus
 bounds real Go-stack depth however a frame mixes recursion with nesting; a
 call-only count let ~10 nested blocks, or a call wrapped in many parens, overflow
 below it. The **check** runs only at the call sites - block and expression nesting
