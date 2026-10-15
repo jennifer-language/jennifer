@@ -386,6 +386,41 @@ func TestFmtColumnReflow(t *testing.T) {
 			`def s as string init "` + strings.Repeat("x", 40) + `" + "` + strings.Repeat("y", 40) + `" + "` + strings.Repeat("z", 40) + `";`,
 			"def s as string init \"" + strings.Repeat("x", 40) + "\" +\n    \"" + strings.Repeat("y", 40) + "\" + \"" + strings.Repeat("z", 40) + "\";\n",
 		},
+		{
+			// The operand after a trailing comment is still a continuation line.
+			"trailing comment after + keeps the continuation indent",
+			"def s as string init \"aa\" + # note\n\"bb\" +\n\"cc\";\n",
+			"def s as string init \"aa\" + # note\n    \"bb\" +\n    \"cc\";\n",
+		},
+		{
+			"trailing comments after and / or in a condition",
+			"if ($a and # one\n$b or # two\n$c) {\nreturn;\n}\n",
+			"if ($a and # one\n    $b or # two\n    $c) {\n    return;\n}\n",
+		},
+		{
+			// A value wrapped after `init` stays wrapped when joining would
+			// overflow; one that fits is joined.
+			"break after init kept when the joined line overflows",
+			"def const C as string init\n\"" + strings.Repeat("x", 80) + "\";\n",
+			"def const C as string init\n    \"" + strings.Repeat("x", 80) + "\";\n",
+		},
+		{
+			"break after init joined when it fits",
+			"def const C as string init\n\"short\";\n",
+			"def const C as string init \"short\";\n",
+		},
+		{
+			// A call's lone argument the author moved to its own line stays there
+			// when hugging it back would overflow; a short one is hugged.
+			"lone call argument kept on its own line when it would overflow",
+			"def d as string init parse(\n'" + strings.Repeat("y", 80) + "');\n",
+			"def d as string init parse(\n    '" + strings.Repeat("y", 80) + "');\n",
+		},
+		{
+			"lone call argument hugged when it fits",
+			"def d as string init parse(\n'short');\n",
+			"def d as string init parse('short');\n",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1110,5 +1145,16 @@ func TestFmtCheckMode(t *testing.T) {
 	// -w and --check together is a usage error.
 	if code := runFmt([]string{"-w", "--check", clean}); code != 2 {
 		t.Errorf("-w --check together: exit %d, want 2", code)
+	}
+}
+
+// A line comment written after a block comment's closing `*/` stays on that
+// line: a `# lint-disable` there covers the whole block comment, and moving it
+// to a line of its own would detach it.
+func TestFmtKeepsCommentAfterBlockClose(t *testing.T) {
+	src := "/**\n * doc\n */ # lint-disable: L203\ndef const A as int init 1;\nfunc f() {\n    /* x */ # note\n    return 1;\n}\n"
+	got := fmtSource(t, src)
+	if got != src {
+		t.Errorf("got %q\nwant %q", got, src)
 	}
 }

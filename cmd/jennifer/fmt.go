@@ -308,13 +308,16 @@ func formatTokens(tokens []lexer.Token) string {
 // tokens. The driver loop calls `emit(curr, next)` for every non-EOF
 // token, then `finish()` once for the trailing newline.
 type fmtState struct {
-	out         strings.Builder
-	indent      int // current block depth in indent units
-	col         int // current output column (rune count since last '\n')
-	prev        lexer.Token
-	beforePrev  lexer.Token // the real token two back (trivia skipped); a `.` here marks f.prev as a namespaced member name
-	hasPrev     bool        // false before the first token
-	atLineStart bool        // true right after newline+indent has been written
+	out strings.Builder
+	// trailAfterBlock is set when a leading block comment was just written and
+	// the line comment that follows it on its closing line stays on that line.
+	trailAfterBlock bool
+	indent          int // current block depth in indent units
+	col             int // current output column (rune count since last '\n')
+	prev            lexer.Token
+	beforePrev      lexer.Token // the real token two back (trivia skipped); a `.` here marks f.prev as a namespaced member name
+	hasPrev         bool        // false before the first token
+	atLineStart     bool        // true right after newline+indent has been written
 	// Token kinds that "begin an operand context" - i.e. when the next
 	// token is `-`, that `-` is binary, not unary. Maintained on every
 	// emit() so unary-vs-binary disambiguation stays a state lookup.
@@ -503,7 +506,7 @@ func (f *fmtState) emit(t, next lexer.Token) {
 			// overflow (so the trailing ` {` cannot leave it over the limit); a
 			// call's lone argument stays inline.
 			funcSig := f.prev.Type == lexer.TOKEN_IDENT && f.beforePrev.Type == lexer.TOKEN_FUNC
-			wraps = f.decideCallWrap(f.tokenIdx, funcSig)
+			wraps = f.decideCallWrap(f.tokenIdx, funcSig || f.sourceBrokeAfter(f.tokenIdx))
 		}
 		f.pushWrap(wraps)
 		if f.hasPrev && f.prev.Type == lexer.TOKEN_FOR {
@@ -595,10 +598,23 @@ func (f *fmtState) nextLineIndent(next lexer.Token) int {
 	if (next.Type == lexer.TOKEN_RBRACE || next.Type == lexer.TOKEN_RBRACKET) && f.curWraps() {
 		ind--
 	}
+	// Trivia right after a binary joiner sits inside a continued expression
+	// (`"a" + # note`): the operand that follows is a continuation line, so it
+	// hangs one level in, as continuationLine would have put it.
+	if f.continuesExpression() {
+		ind++
+	}
 	if ind < 0 {
 		ind = 0
 	}
 	return ind
+}
+
+// continuesExpression reports whether the last real token is a binary joiner
+// whose right operand is still to come, i.e. a line break here continues an
+// expression rather than ending a statement.
+func (f *fmtState) continuesExpression() bool {
+	return f.hasPrev && isBinaryJoiner(f.prev.Type) && !f.prevIsUnaryMinus && !f.insideForHeader()
 }
 
 // emitTrivia handles comments and blank lines. It writes only output -
@@ -621,9 +637,12 @@ func (f *fmtState) emitTrivia(t, next lexer.Token) {
 		// token is a trailing comment; one on its own line is a leading
 		// comment. Trailing: ` # ...`. Leading: indent + ` # ...`.
 		// Either way, the line ends after the comment.
-		if f.hasPrev && f.prev.Line == t.Line {
+		switch {
+		case f.trailAfterBlock:
+			f.trailAfterBlock = false // the separating space is already written
+		case f.hasPrev && f.prev.Line == t.Line:
 			f.writeByte(' ')
-		} else if !f.atLineStart {
+		case !f.atLineStart:
 			f.newline()
 		}
 		// A `# pragma-jennifer-*:` directive is canonicalized to its single-spaced
@@ -660,6 +679,15 @@ func (f *fmtState) emitTrivia(t, next lexer.Token) {
 				f.newline()
 			}
 			f.writeString(t.Lexeme)
+			// A line comment the source put after the closing `*/` stays there:
+			// a `# lint-disable` in that spot covers the whole block comment,
+			// and moving it to its own line would detach it.
+			if next.Type == lexer.TOKEN_COMMENT_LINE && next.Line == t.Line+strings.Count(t.Lexeme, "\n") {
+				f.writeByte(' ')
+				f.trailAfterBlock = true
+				f.atLineStart = false
+				return
+			}
 			// End the comment line and indent for the next token (a following
 			// `}` lands one level out).
 			f.writeByte('\n')
@@ -737,13 +765,27 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	if t.Type == lexer.TOKEN_LBRACE && f.currentBraceKind() == braceStructLit {
 		return
 	}
+	// A value the source wrapped onto the line after `init` stays there when
+	// joining it would run past the column limit (the joined line would be
+	// one lint's L203 flags, and the author's break is the better shape). The
+	// trailing `;` (or the hanging joiner of a longer expression) counts too.
+	if f.prev.Type == lexer.TOKEN_INIT && t.Line > f.prev.Line {
+		opW, followW := f.nextOperandWidth(f.tokenIdx)
+		if followW == 0 {
+			followW = 1
+		}
+		if f.col+1+opW+followW > maxLineLength {
+			f.continuationLine()
+			return
+		}
+	}
 	// Column-based reflow at binary joiners. When a line has already
 	// grown past maxLineLength, or when the source itself put a break
 	// at this point, wrap AFTER the joiner so the operator hangs at
 	// end-of-line (matches the string-concat idiom in the wild). One
 	// extra indent level per hanging continuation line, matching what
 	// the style guide recommends.
-	if isBinaryJoiner(f.prev.Type) && !f.prevIsUnaryMinus && !f.insideForHeader() {
+	if f.continuesExpression() {
 		// Break when the source broke here, when the line is already over the
 		// limit, or when appending the next operand would push it over - the
 		// last case fills the line before wrapping and is what stops a long
@@ -1465,6 +1507,25 @@ func (f *fmtState) decideWrap(open int, applyCount bool) bool {
 	w := inlineContainerWidth(f.tokens, open, end)
 	trail := trailingWidth(f.tokens, end)
 	return f.effectiveStartCol()+w+trail > maxLineLength
+}
+
+// sourceBrokeAfter reports whether the source put a line break right after the
+// token at tokens[i] (before the next non-trivia token), i.e. the author wrapped
+// there. A call whose lone argument the author moved to its own line keeps that
+// shape when the joined form would overflow, instead of being hugged back past
+// the column limit.
+func (f *fmtState) sourceBrokeAfter(i int) bool {
+	for j := i + 1; j < len(f.tokens); j++ {
+		switch f.tokens[j].Type {
+		case lexer.TOKEN_COMMENT_LINE, lexer.TOKEN_COMMENT_BLOCK, lexer.TOKEN_BLANK_LINE:
+			continue
+		case lexer.TOKEN_SPAWN, lexer.TOKEN_LBRACE:
+			// A lone spawn / block / map argument expands on its own.
+			return false
+		}
+		return f.tokens[j].Line > f.tokens[i].Line
+	}
+	return false
 }
 
 // decideCallWrap reports whether a parenthesised list opening at tokens[open]

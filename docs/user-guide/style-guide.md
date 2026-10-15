@@ -157,12 +157,16 @@ nothing here will surprise you.
 
   Source-level line breaks at these joiners are also preserved even when the
   line would fit under 100 - so the shape above survives a `fmt` round-trip
-  byte-for-byte. What `fmt` will **not** guess at: a long argument list or a
-  deeply nested call has no safe break point, so it stays on one line, and a
-  single token longer than the limit (a long string literal, a URL) stays
-  over it - break those by hand. Because `fmt` never *introduces* an
-  over-long line, its output does not add [`lint`](tooling.md) `L203`
-  (`line-too-long`) findings that the source did not already have.
+  byte-for-byte, and so is a break after an operand that ends in a trailing
+  comment (the next operand keeps its continuation indent). A value moved to
+  the line after `init`, or a call's lone argument moved to the line after its
+  `(`, also keeps that break when joining it would pass 100 columns. What
+  `fmt` will **not** guess at: a long argument list or a deeply nested call
+  has no safe break point, so it stays on one line, and a single token longer
+  than the limit (a long string literal, a URL) stays over it - break those
+  by hand. Because `fmt` never *introduces* an over-long line, its output does
+  not add [`lint`](tooling.md) `L203` (`line-too-long`) findings that the
+  source did not already have.
 
 ## Statements
 
