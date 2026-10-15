@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -84,12 +85,19 @@ var writeTimeout = 5 * time.Minute
 // Slowloris). A var so tests can lower it (read at server construction).
 var idleTimeout = 2 * time.Minute
 
-// respondTimeout bounds how long a handler goroutine parks waiting for the
-// program to answer an accepted request. If the program never responds (e.g.
-// it threw between accept and respond), the handler answers 500 and unparks so
-// the goroutine and client connection don't leak until server shutdown. It is
-// a generous safety net, not a per-request SLA. A var so tests can lower it.
+// respondTimeout is the default for how long a handler goroutine parks waiting
+// for the program to answer an accepted request (httpd.Options.respondTimeoutMs
+// overrides it per server). If the program does not respond in time - it threw
+// between accept and respond, or the handler is slow - the engine answers 503
+// and unparks, so the goroutine and client connection don't leak until server
+// shutdown. It also bounds how long an admitted request waits to be accepted. A
+// var so tests can lower it.
 var respondTimeout = 60 * time.Second
+
+// maxTimedOutIDs bounds the record of request ids the engine answered on its
+// own after the respond timeout (timedOut). It only serves a clearer error to a
+// handler that replies late, so old entries are simply forgotten.
+const maxTimedOutIDs = 4096
 
 // -------- Registries --------
 
@@ -111,6 +119,9 @@ type serverState struct {
 	// reads maxBody per request; inFlight equals cap(sem).
 	maxBody  int64
 	inFlight int
+	// respondTimeout is this server's wait for the program to accept and then
+	// answer a request (the package default, or httpd.Options.respondTimeoutMs).
+	respondTimeout time.Duration
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -178,6 +189,7 @@ type reqState struct {
 
 	mu           sync.Mutex
 	responded    bool
+	timedOut     bool // the engine answered 503 itself after the respond timeout
 	status       int
 	respBody     []byte
 	respHeaders  []respHeader
@@ -195,6 +207,11 @@ var (
 	reqsMu    sync.Mutex
 	reqStates = map[int64]*reqState{}
 	nextReqID int64
+	// timedOut remembers (boundedly, oldest first out) the ids the engine
+	// answered after the respond timeout, so a late reply gets an error that
+	// says so rather than a generic "not open". Guarded by reqsMu.
+	timedOut      = map[int64]bool{}
+	timedOutOrder []int64
 )
 
 // ResetForTest wipes both registries between test runs.
@@ -216,6 +233,8 @@ func ResetForTest() {
 	reqsMu.Lock()
 	reqStates = map[int64]*reqState{}
 	nextReqID = 0
+	timedOut = map[int64]bool{}
+	timedOutOrder = nil
 	reqsMu.Unlock()
 
 	etagCacheMu.Lock()
@@ -270,9 +289,91 @@ func resolveReq(fnName string, id int64) (*reqState, error) {
 	defer reqsMu.Unlock()
 	rs, ok := reqStates[id]
 	if !ok {
+		if timedOut[id] {
+			return nil, fmt.Errorf("%s: %s", fnName, lateReplyMsg)
+		}
 		return nil, fmt.Errorf("%s: httpd.Request id %d is not open (already responded, or never accepted)", fnName, id)
 	}
 	return rs, nil
+}
+
+// lateReplyMsg is the error a handler gets for writing to a request the engine
+// already answered because the respond timeout passed. web recognises it (via
+// httpd.isOpen) and drops the late reply instead of logging a handler error.
+const lateReplyMsg = "request was already answered with 503 by the server, because the handler did not respond within the respond timeout (httpd.Options.respondTimeoutMs)"
+
+// markTimedOut records that the engine answered id itself after the respond
+// timeout. Bounded: past maxTimedOutIDs the oldest id is forgotten.
+func markTimedOut(id int64) {
+	reqsMu.Lock()
+	defer reqsMu.Unlock()
+	timedOut[id] = true
+	timedOutOrder = append(timedOutOrder, id)
+	if len(timedOutOrder) > maxTimedOutIDs {
+		delete(timedOut, timedOutOrder[0])
+		timedOutOrder = timedOutOrder[1:]
+	}
+}
+
+// answeredErr is the error for a write to a request that is already answered:
+// by the program itself, or by the engine after the respond timeout.
+// The caller holds rs.mu.
+func answeredErr(fnName string, rs *reqState) error {
+	msg := "request already answered"
+	if rs.timedOut {
+		msg = lateReplyMsg
+	}
+	if fnName == "" {
+		return fmt.Errorf("%s", msg)
+	}
+	return fmt.Errorf("%s: %s", fnName, msg)
+}
+
+// timedOutFn implements httpd.timedOut(req) -> bool: whether the engine itself
+// answered the request with 503 because the program did not respond within the
+// respond timeout. A handler (or web's dispatcher) uses it to tell "my reply came
+// too late" from a real failure.
+func timedOutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.timedOut expects 1 argument (request), got %d", len(args))
+	}
+	id, err := extractID("httpd.timedOut", "Request", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	reqsMu.Lock()
+	rs, ok := reqStates[id]
+	marked := timedOut[id]
+	reqsMu.Unlock()
+	if ok {
+		rs.mu.Lock()
+		marked = marked || rs.timedOut
+		rs.mu.Unlock()
+	}
+	return interpreter.BoolVal(marked), nil
+}
+
+// isOpenFn implements httpd.isOpen(req) -> bool: whether the request is still
+// waiting for its answer. false once the program has responded, the engine has
+// answered it after the respond timeout, or the server shut down - so a slow
+// handler can check before doing work whose reply could no longer be sent.
+func isOpenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.isOpen expects 1 argument (request), got %d", len(args))
+	}
+	id, err := extractID("httpd.isOpen", "Request", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	reqsMu.Lock()
+	rs, ok := reqStates[id]
+	reqsMu.Unlock()
+	if !ok {
+		return interpreter.BoolVal(false), nil
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return interpreter.BoolVal(!rs.responded), nil
 }
 
 // -------- handler --------
@@ -331,7 +432,7 @@ func makeHandler(st *serverState) http.Handler {
 		// One timer per wait, stopped as soon as its select returns, rather than
 		// time.After (which leaves a 60 s timer in the runtime timer heap per
 		// request even when another arm wins - GC pressure at high rps).
-		admitTimer := time.NewTimer(respondTimeout)
+		admitTimer := time.NewTimer(st.respondTimeout)
 		defer admitTimer.Stop()
 		select {
 		case st.reqs <- rs:
@@ -348,7 +449,7 @@ func makeHandler(st *serverState) http.Handler {
 		}
 		admitTimer.Stop()
 
-		respondTimer := time.NewTimer(respondTimeout)
+		respondTimer := time.NewTimer(st.respondTimeout)
 		defer respondTimer.Stop()
 		select {
 		case <-rs.done:
@@ -356,17 +457,22 @@ func makeHandler(st *serverState) http.Handler {
 			http.Error(w, "server shutting down", http.StatusServiceUnavailable)
 			return
 		case <-respondTimer.C:
-			// The program accepted this request but never answered it (e.g. it
-			// threw between accept and respond). Claim the response so a late
-			// respond can't double-write, then answer 500 and unpark -
-			// otherwise this handler goroutine and the client connection leak
-			// until server shutdown.
+			// The program accepted this request but has not answered it - the
+			// handler is slow, or it threw between accept and respond. Claim the
+			// response so a late respond can't double-write, then answer 503 and
+			// unpark - otherwise this handler goroutine and the client connection
+			// leak until server shutdown. 503, not 500: the engine cannot tell a
+			// slow handler from a failed one, and under overload (the common
+			// cause) "unavailable, retry" is the truthful answer; a handler that
+			// failed is answered 500 by the program itself (web does).
 			rs.mu.Lock()
 			claimed := !rs.responded
 			rs.responded = true
+			rs.timedOut = claimed
 			rs.mu.Unlock()
 			if claimed {
-				http.Error(w, "handler did not respond in time", http.StatusInternalServerError)
+				markTimedOut(rs.id)
+				http.Error(w, "handler did not respond in time", http.StatusServiceUnavailable)
 				return
 			}
 			// The program responded within the timeout race window; fall
@@ -419,6 +525,22 @@ func makeHandler(st *serverState) http.Handler {
 }
 
 // -------- lifecycle --------
+
+// resolveRespondTimeout turns httpd.Options.respondTimeoutMs into this server's
+// respond timeout: 0 selects the default, a positive value is milliseconds, and
+// a negative value is an error (an unbounded wait would leak a goroutine and a
+// connection per request the program never answers).
+func resolveRespondTimeout(ms int64) (time.Duration, error) {
+	switch {
+	case ms < 0:
+		return 0, fmt.Errorf("respondTimeoutMs must be >= 0 (0 selects the %d s default), got %d", int64(respondTimeout/time.Second), ms)
+	case ms == 0:
+		return respondTimeout, nil
+	case ms > int64(math.MaxInt64/time.Millisecond):
+		return 0, fmt.Errorf("respondTimeoutMs %d is too large", ms)
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
 
 // resolveServerLimits turns a caller's requested (maxBody, inFlight) - where 0
 // means "use the built-in default" - into the concrete per-server limits, and is
@@ -547,7 +669,7 @@ func doListen(fnName, addr string) (net.Listener, error) {
 }
 
 // openServer opens a plaintext server on addr with the given resolved limits.
-func openServer(fnName, addr string, maxBody int64, inFlight int) (Value, error) {
+func openServer(fnName, addr string, maxBody int64, inFlight int, respond time.Duration) (Value, error) {
 	if serverCount() >= maxServers {
 		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
 	}
@@ -555,7 +677,7 @@ func openServer(fnName, addr string, maxBody int64, inFlight int) (Value, error)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	st := newServer(ln, maxBody, inFlight)
+	st := newServer(ln, maxBody, inFlight, respond)
 	go func() { _ = st.srv.Serve(ln) }()
 	return makeServer(registerServer(st)), nil
 }
@@ -568,7 +690,7 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return openServer("httpd.listen", addr, defaultMaxBodyBytes, defaultMaxInFlight)
+	return openServer("httpd.listen", addr, defaultMaxBodyBytes, defaultMaxInFlight, respondTimeout)
 }
 
 // listenWithFn is httpd.listen with an explicit httpd.Options{maxBodyBytes,
@@ -581,15 +703,19 @@ func listenWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	reqBody, reqInFlight, err := takeOptionsArg("httpd.listenWith", args[1])
+	o, err := takeOptionsArg("httpd.listenWith", args[1])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	maxBody, inFlight, err := resolveServerLimits(reqBody, reqInFlight)
+	maxBody, inFlight, err := resolveServerLimits(o.maxBody, o.inFlight)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listenWith: %v", err)
 	}
-	return openServer("httpd.listenWith", addr, maxBody, inFlight)
+	respond, err := resolveRespondTimeout(o.respondMs)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("httpd.listenWith: %v", err)
+	}
+	return openServer("httpd.listenWith", addr, maxBody, inFlight, respond)
 }
 
 // isStaleUnixSocket reports whether path is a leftover unix socket with no live
@@ -611,7 +737,7 @@ func isStaleUnixSocket(path string) bool {
 
 // openServerTLS opens a TLS server on addr with the given cert/key and resolved
 // limits.
-func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, maxBody int64, inFlight int) (Value, error) {
+func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, maxBody int64, inFlight int, respond time.Duration) (Value, error) {
 	if serverCount() >= maxServers {
 		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
 	}
@@ -623,7 +749,7 @@ func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, maxBody int64, i
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
 	}
-	st := newServer(ln, maxBody, inFlight)
+	st := newServer(ln, maxBody, inFlight, respond)
 	// Floor at TLS 1.2: 1.0/1.1 are deprecated (RFC 8996) and fail compliance
 	// scans.
 	st.srv.TLSConfig = &tls.Config{
@@ -650,7 +776,7 @@ func listenTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return openServerTLS("httpd.listenTLS", addr, certPEM, keyPEM, defaultMaxBodyBytes, defaultMaxInFlight)
+	return openServerTLS("httpd.listenTLS", addr, certPEM, keyPEM, defaultMaxBodyBytes, defaultMaxInFlight, respondTimeout)
 }
 
 // listenTLSWithFn is httpd.listenTLS with a trailing httpd.Options for the
@@ -671,28 +797,33 @@ func listenTLSWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	reqBody, reqInFlight, err := takeOptionsArg("httpd.listenTLSWith", args[3])
+	o, err := takeOptionsArg("httpd.listenTLSWith", args[3])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	maxBody, inFlight, err := resolveServerLimits(reqBody, reqInFlight)
+	maxBody, inFlight, err := resolveServerLimits(o.maxBody, o.inFlight)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: %v", err)
 	}
-	return openServerTLS("httpd.listenTLSWith", addr, certPEM, keyPEM, maxBody, inFlight)
+	respond, err := resolveRespondTimeout(o.respondMs)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: %v", err)
+	}
+	return openServerTLS("httpd.listenTLSWith", addr, certPEM, keyPEM, maxBody, inFlight, respond)
 }
 
 // newServer builds the serverState + http.Server for an already-open listener,
 // with the resolved per-server limits.
-func newServer(ln net.Listener, maxBody int64, inFlight int) *serverState {
+func newServer(ln net.Listener, maxBody int64, inFlight int, respond time.Duration) *serverState {
 	st := &serverState{
-		ln:       ln,
-		addr:     ln.Addr().String(),
-		reqs:     make(chan *reqState),
-		closing:  make(chan struct{}),
-		sem:      make(chan struct{}, inFlight),
-		maxBody:  maxBody,
-		inFlight: inFlight,
+		ln:             ln,
+		addr:           ln.Addr().String(),
+		reqs:           make(chan *reqState),
+		closing:        make(chan struct{}),
+		sem:            make(chan struct{}, inFlight),
+		maxBody:        maxBody,
+		inFlight:       inFlight,
+		respondTimeout: respond,
 	}
 	st.srv = &http.Server{
 		Handler:           makeHandler(st),
@@ -873,7 +1004,7 @@ func setHeaderFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if rs.responded {
-		return interpreter.Null(), fmt.Errorf("httpd.setHeader: request already answered")
+		return interpreter.Null(), answeredErr("httpd.setHeader", rs)
 	}
 	rs.respHeaders = append(rs.respHeaders, respHeader{key: name, value: value})
 	return interpreter.Null(), nil
@@ -958,8 +1089,9 @@ func respondFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	rs.mu.Lock()
 	if rs.responded {
+		err := answeredErr("httpd.respond", rs)
 		rs.mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("httpd.respond: request already answered")
+		return interpreter.Null(), err
 	}
 	rs.responded = true
 	rs.status = int(status)
@@ -1021,8 +1153,9 @@ func etagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	inm := rs.r.Header.Get("If-None-Match")
 	rs.mu.Lock()
 	if rs.responded {
+		err := answeredErr("httpd.etag", rs)
 		rs.mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("httpd.etag: request already answered")
+		return interpreter.Null(), err
 	}
 	// Set the validator now, so it is present on whichever response follows.
 	rs.respHeaders = append(rs.respHeaders, respHeader{key: "ETag", value: quoted})
@@ -1207,8 +1340,9 @@ func contentEtag(p string) string {
 func answerWithStatus(rs *reqState, status int, body string) (Value, error) {
 	rs.mu.Lock()
 	if rs.responded {
+		err := answeredErr("", rs)
 		rs.mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("request already answered")
+		return interpreter.Null(), err
 	}
 	rs.responded = true
 	rs.status = status
@@ -1230,8 +1364,9 @@ func answerWithFile(rs *reqState, p string) (Value, error) {
 func answerWithFileEtag(rs *reqState, p, etag string) (Value, error) {
 	rs.mu.Lock()
 	if rs.responded {
+		err := answeredErr("", rs)
 		rs.mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("request already answered")
+		return interpreter.Null(), err
 	}
 	rs.responded = true
 	rs.useServeFile = true

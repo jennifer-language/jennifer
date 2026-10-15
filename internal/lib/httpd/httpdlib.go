@@ -50,11 +50,11 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
 	// Options carries the per-server limits for httpd.listenWith /
-	// httpd.listenTLSWith. A 0 field selects that limit's built-in default, so a
-	// caller can set just one (e.g. httpd.Options{maxBodyBytes: 100 * 1024 * 1024}).
+	// httpd.listenTLSWith. A 0 field selects that limit's built-in default.
 	in.RegisterNamespacedStruct(LibraryName, "Options", []parser.StructField{
 		{Name: "maxBodyBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "maxInFlight", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "respondTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
 
 	// Lifecycle.
@@ -77,6 +77,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "header", headerFn)
 	in.RegisterNamespaced(LibraryName, "body", bodyFn)
 	in.RegisterNamespaced(LibraryName, "remoteAddr", remoteAddrFn)
+	in.RegisterNamespaced(LibraryName, "isOpen", isOpenFn)
+	in.RegisterNamespaced(LibraryName, "timedOut", timedOutFn)
 
 	// Request-scoped scratch (compute-once-per-request notes).
 	in.RegisterNamespaced(LibraryName, "requestValue", requestValueFn)
@@ -147,30 +149,37 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 	return args[idx].Bytes, nil
 }
 
-// takeOptionsArg reads the (maxBodyBytes, maxInFlight) pair out of a
-// httpd.Options struct value. Both are returned as int64 exactly as written (0 =
-// "use default", the guard in resolveServerLimits validates the range); a
-// missing field defaults to 0, so the zero value httpd.Options is all-defaults.
-func takeOptionsArg(fnName string, v Value) (int64, int64, error) {
+// serverOpts is an httpd.Options as written: each field exactly as the caller
+// set it (0 = "use the default"); resolveServerLimits / resolveRespondTimeout
+// validate the ranges.
+type serverOpts struct {
+	maxBody, inFlight, respondMs int64
+}
+
+// takeOptionsArg reads an httpd.Options struct value into serverOpts.
+func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
+	var o serverOpts
 	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Options" {
-		return 0, 0, fmt.Errorf("%s: options must be a httpd.Options, got %s", fnName, v.Kind)
+		return o, fmt.Errorf("%s: options must be a httpd.Options, got %s", fnName, v.Kind)
 	}
-	var maxBody, inFlight int64
 	for _, f := range v.Fields {
+		var dst *int64
 		switch f.Name {
 		case "maxBodyBytes":
-			if f.Value.Kind != interpreter.KindInt {
-				return 0, 0, fmt.Errorf("%s: httpd.Options.maxBodyBytes must be int, got %s", fnName, f.Value.Kind)
-			}
-			maxBody = f.Value.Int
+			dst = &o.maxBody
 		case "maxInFlight":
-			if f.Value.Kind != interpreter.KindInt {
-				return 0, 0, fmt.Errorf("%s: httpd.Options.maxInFlight must be int, got %s", fnName, f.Value.Kind)
-			}
-			inFlight = f.Value.Int
+			dst = &o.inFlight
+		case "respondTimeoutMs":
+			dst = &o.respondMs
+		default:
+			continue
 		}
+		if f.Value.Kind != interpreter.KindInt {
+			return o, fmt.Errorf("%s: httpd.Options.%s must be int, got %s", fnName, f.Name, f.Value.Kind)
+		}
+		*dst = f.Value.Int
 	}
-	return maxBody, inFlight, nil
+	return o, nil
 }
 
 // takeBodyArg accepts a response body as either a string or bytes.

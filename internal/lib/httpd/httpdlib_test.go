@@ -455,9 +455,15 @@ func TestOversizeBodyRejectedNotTruncated(t *testing.T) {
 
 // optionsVal builds a httpd.Options struct value for the listenWith tests.
 func optionsVal(maxBody, inFlight int64) Value {
+	return optionsValRespond(maxBody, inFlight, 0)
+}
+
+// optionsValRespond is optionsVal with an explicit respondTimeoutMs.
+func optionsValRespond(maxBody, inFlight, respondMs int64) Value {
 	return interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
 		{Name: "maxBodyBytes", Value: interpreter.IntVal(maxBody)},
 		{Name: "maxInFlight", Value: interpreter.IntVal(inFlight)},
+		{Name: "respondTimeoutMs", Value: interpreter.IntVal(respondMs)},
 	})
 }
 
@@ -729,8 +735,8 @@ func TestSetMaxBufferBudgetFromRAM(t *testing.T) {
 }
 
 // A request that is accepted but never answered (the program threw between
-// accept and respond) must not park the handler goroutine and client forever:
-// the engine answers 500 after respondTimeout and unparks.
+// accept and respond, or is slow) must not park the handler goroutine and
+// client forever: the engine answers 503 after respondTimeout and unparks.
 func TestUnansweredRequestTimesOut(t *testing.T) {
 	ResetForTest()
 	old := respondTimeout
@@ -751,8 +757,8 @@ func TestUnansweredRequestTimesOut(t *testing.T) {
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("unanswered request status = %d, want 500", resp.StatusCode)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("unanswered request status = %d, want 503", resp.StatusCode)
 	}
 }
 
@@ -1114,5 +1120,68 @@ func TestServeDirEtag(t *testing.T) {
 	}
 	if et := resp.Header.Get("ETag"); et != sha256Tag(content) {
 		t.Errorf("ETag = %q, want %q", et, sha256Tag(content))
+	}
+}
+
+// httpd.Options.respondTimeoutMs sets the deadline per server; a handler that
+// replies after it gets an error naming the timeout (not a generic "not open"),
+// and httpd.isOpen tells it the request is no longer waiting.
+func TestRespondTimeoutOption(t *testing.T) {
+	ResetForTest()
+	srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsValRespond(0, 0, 150)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	addrV, _ := addressFn(noCtx, []Value{srv})
+
+	type late struct {
+		openBefore, openAfter         bool
+		timedOutBefore, timedOutAfter bool
+		err                           error
+	}
+	got := make(chan late, 1)
+	go func() {
+		req, err := acceptFn(noCtx, []Value{srv})
+		if err != nil {
+			got <- late{err: err}
+			return
+		}
+		before, _ := isOpenFn(noCtx, []Value{req})
+		tBefore, _ := timedOutFn(noCtx, []Value{req})
+		time.Sleep(400 * time.Millisecond) // past the 150 ms deadline
+		after, _ := isOpenFn(noCtx, []Value{req})
+		tAfter, _ := timedOutFn(noCtx, []Value{req})
+		_, rerr := respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("late")})
+		got <- late{before.Bool, after.Bool, tBefore.Bool, tAfter.Bool, rerr}
+	}()
+
+	start := time.Now()
+	resp, err := http.Get("http://" + addrV.Str + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("answered after %v; the per-server 150 ms deadline was not used", took)
+	}
+	l := <-got
+	if !l.openBefore || l.openAfter {
+		t.Errorf("isOpen before/after the deadline = %t/%t, want true/false", l.openBefore, l.openAfter)
+	}
+	if l.timedOutBefore || !l.timedOutAfter {
+		t.Errorf("timedOut before/after the deadline = %t/%t, want false/true", l.timedOutBefore, l.timedOutAfter)
+	}
+	if l.err == nil || !strings.Contains(l.err.Error(), "respond timeout") {
+		t.Errorf("late respond error = %v, want one naming the respond timeout", l.err)
+	}
+
+	// A negative value is rejected (an unbounded wait would leak per request).
+	if _, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsValRespond(0, 0, -1)}); err == nil {
+		t.Error("respondTimeoutMs < 0 should be rejected")
 	}
 }

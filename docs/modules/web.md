@@ -43,6 +43,35 @@ memory in any language. Keep per-request mutable state where it belongs:
 Reads of shared config set once at startup (a routing table, a settings map) are
 fine; it is concurrent *writes* to one global that you must avoid.
 
+### Sharing a large parsed document
+
+A document every request reads - a `flatdb` store, a parsed JSON / YAML / TOML
+file - belongs in a top-level `def`, loaded **once** at startup. Handlers read it
+concurrently, and reading it costs no copy: a `json.Value` (and every opaque
+library value) is immutable, so binding it, passing it to a handler, or
+capturing it in a `spawn` shares the one parsed tree. Parsing it again in each
+handler instead multiplies its in-memory size (from about its file size for
+text-heavy documents up to roughly 15 times it for one made of many small
+values) by the number of requests in flight.
+
+```jennifer
+import "flatdb.j" as flatdb;
+import "web.j" as web;
+
+def store as flatdb.DB init flatdb.open("registry.json");   # parsed once
+
+func listDecks(ctx as web.Context) {
+    web.sendJson($ctx, 200, flatdb.get($store, "/decks"));   # shared, not copied
+}
+```
+
+When the document **changes while the server runs**, a top-level `def` cannot be
+reassigned safely from concurrent handlers. Publish each new version through a
+`kv` store instead: `kv.setValue($cache, "registry", $db.data, 0)` replaces the
+shared value atomically, and `kv.getValue($cache, "registry")` hands each request
+the current one, again without copying the tree. See
+[`kv` values](../libraries/kv.md#values-shared-parsed-data).
+
 ### Shutdown and handler lifecycle
 
 Two consequences of per-request workers are worth knowing:
@@ -404,7 +433,9 @@ func report(ctx as web.Context) {
 | `web.serveOn($app, srv)` | Serve on an already-listening `httpd.Server` you hold - so you can shut it down (or serve from a `spawn`). |
 
 `web.run` is the common path. Use `web.serveOn` when you want the server handle,
-e.g. to shut down from another task:
+e.g. to shut down from another task, or to open the server with
+`httpd.listenWith` and its `httpd.Options` (body cap, in-flight limit, respond
+timeout):
 
 ```jennifer
 def srv as httpd.Server init httpd.listen(":8080");
@@ -413,6 +444,33 @@ def worker as task of null init spawn { web.serveOn($app, $srv); };
 httpd.shutdown($srv);
 task.wait($worker);
 ```
+
+### Slow handlers and the respond timeout
+
+The `httpd` engine answers a request **`503`** itself when the handler has not
+answered within the server's respond timeout (60 s by default; see
+[the respond timeout](../libraries/httpd.md#the-respond-timeout)). A handler that
+legitimately runs longer needs a server opened with a larger
+`respondTimeoutMs`, served with `web.serveOn`:
+
+```jennifer
+def srv as httpd.Server init httpd.listenWith(":8080",
+    httpd.Options{ maxBodyBytes: 0, maxInFlight: 0, respondTimeoutMs: 5 * 60 * 1000 });
+web.serveOn($app, $srv);
+```
+
+A handler that overruns anyway can no longer answer. `web.isOpen($ctx)` returns
+`false` once the request has been answered, so a long handler can check it
+before doing work whose reply has nowhere to go. If the handler still tries to
+reply, `web` notes it in one stderr line (`the client already got 503, so its
+reply was dropped`) instead of reporting a handler error, and does not call the
+`onError` hook: nothing failed, the reply was simply too late. Any other error
+the handler throws after the timeout is still a handler failure, reported on
+stderr and to `onError` as usual.
+
+| Call | |
+| ---- | - |
+| `web.isOpen($ctx)` | `bool`: `true` while a reply can still be sent; `false` once answered (by the handler, or by the server after the respond timeout). |
 
 ## Running with `jennifer serve`
 

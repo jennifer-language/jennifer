@@ -55,6 +55,10 @@ func bodyFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)   { return unava
 func remoteAddrFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.remoteAddr")
 }
+func timedOutFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.timedOut")
+}
+func isOpenFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("httpd.isOpen") }
 func requestValueFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.requestValue")
 }

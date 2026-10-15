@@ -532,6 +532,19 @@ export func setHeader(ctx as Context, name as string, value as string) {
 }
 
 /**
+ * Whether the request is still waiting for its answer. False once it has been
+ * answered - by the handler, or by the server itself after the respond timeout
+ * (`httpd.Options.respondTimeoutMs`, 60 s by default), when the client already got
+ * a 503. A slow handler can check it before work whose reply could no longer be
+ * sent.
+ * @param ctx {Context} the request context
+ * @return {bool} true while a reply can still be sent
+ */
+export func isOpen(ctx as Context) {
+    return httpd.isOpen($ctx.req);
+}
+
+/**
  * Answer the request with a status code and body.
  * @param ctx {Context} the request context
  * @param status {int} the HTTP status code
@@ -931,12 +944,26 @@ func ensureAnswered(req as httpd.Request, status as int, body as string) {
 # must never propagate to serveOn, which would read it as a shutdown signal and
 # stop the whole server (a one-request DoS).
 func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request) {
+    # Read now: once the server answers a slow request itself, it is closed and
+    # these accessors would throw.
+    def where as string init httpd.method($req) + " " + httpd.path($req);
     try {
         def cont as bool init runMiddleware($app, $ctx);
         if ($cont) {
             $handler($ctx);
         }
     } catch (err) {
+        if (httpd.timedOut($req) and isLateReply(convert.toString($err))) {
+            # Not a handler failure: it finished after the server had already
+            # answered 503 for it (the respond timeout), so its reply had nowhere
+            # to go. Note that once, without the error dump or the onError hook.
+            # Any other error is a real failure (one that happened to come after
+            # the timeout) and is reported below as usual.
+            io.eprintf(
+                "web: %s: the handler finished after the respond timeout; the client already got 503, so its reply was dropped\n",
+                $where);
+            return;
+        }
         # Middleware or handler failed - the safety net below turns it into a 500.
         # Always write the failure to stderr, *then* (if set) also invoke the
         # onError hook. The hook is additive, never a replacement: registering it
@@ -957,6 +984,13 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         }
     }
     ensureAnswered($req, 500, "500 internal server error\n");
+}
+
+# isLateReply reports whether a caught error (as text: a handler may throw any
+# value) is the engine refusing a reply to a request it already answered with
+# 503 after the respond timeout.
+func isLateReply(text as string) {
+    return strings.contains($text, "already answered with 503");
 }
 
 # --- authentication ---------------------------------------------------------

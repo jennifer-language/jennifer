@@ -69,6 +69,8 @@ for (def i in lists.range(0, 4)) {
 | `httpd.header(req, name)` | `string` | Request header (`""` if absent; case-insensitive name). |
 | `httpd.body(req)` | `bytes` | The request body (buffered; a body over the 10 MiB cap is answered 413 by the engine). |
 | `httpd.remoteAddr(req)` | `string` | Client `host:port`. |
+| `httpd.isOpen(req)` | `bool` | Whether the request still awaits its answer: `false` once it is answered, by the program or by the engine after the [respond timeout](#the-respond-timeout). A slow handler checks it before work whose reply could no longer be sent. |
+| `httpd.timedOut(req)` | `bool` | Whether the engine answered the request itself with `503` because the respond timeout passed. Tells "my reply came too late" from a real failure. |
 | `httpd.requestValue(req, key)` | `string` | Read a request-scoped note (`""` if unset). Per-request scratch space, not a header and never sent to the client. |
 | `httpd.setRequestValue(req, key, value)` | `null` | Store a request-scoped note - a place to memoize a value computed at most once per request (see below). |
 | `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). |
@@ -82,7 +84,8 @@ for (def i in lists.range(0, 4)) {
 
 Each request must be answered **exactly once** - a second `respond` /
 `serveFile` / `serveDir` on the same request, or a `setHeader` after the
-answer, is an error.
+answer, is an error. A write to a request the engine already answered after the
+respond timeout fails with an error that says so.
 
 ## Handles
 
@@ -314,8 +317,10 @@ open a server with an explicit `httpd.Options`:
 | ----- | ------- |
 | `maxBodyBytes as int` | Per-request body cap in bytes. `0` selects the 10 MiB default. |
 | `maxInFlight as int` | Concurrent in-flight requests. `0` selects the default 256. |
+| `respondTimeoutMs as int` | How long an admitted request may wait to be accepted, and then to be answered, before the engine answers `503` itself (see [The respond timeout](#the-respond-timeout)). `0` selects the default 60 s; negative is an error. |
 
-A `0` field takes that limit's default, so you can set just one:
+A `0` field takes that limit's default, so you can tune one and leave the others
+(every field is still named, as in any struct literal):
 
 ```jennifer
 use httpd;
@@ -323,7 +328,7 @@ use httpd;
 # A dedicated upload endpoint on a low-concurrency server: 100 MiB bodies, but
 # only 40 at once (100 MiB x 40 = 4 GiB worst case).
 def srv as httpd.Server init httpd.listenWith(":8080",
-    httpd.Options{ maxBodyBytes: 100 * 1024 * 1024, maxInFlight: 40 });
+    httpd.Options{ maxBodyBytes: 100 * 1024 * 1024, maxInFlight: 40, respondTimeoutMs: 0 });
 ```
 
 **The memory guard.** `listenWith` validates the pair at listen time and refuses
@@ -349,7 +354,7 @@ policy (floored at one default body, 10 MiB, so it can never reject everything):
 use httpd;
 httpd.setMaxBufferBudget(6 * 1024 * 1024 * 1024); # this 8 GiB VPS can spend 6 GiB
 def srv as httpd.Server init httpd.listenWith(":8080",
-    httpd.Options{ maxBodyBytes: 500 * 1024 * 1024, maxInFlight: 12 });
+    httpd.Options{ maxBodyBytes: 500 * 1024 * 1024, maxInFlight: 12, respondTimeoutMs: 0 });
 ```
 
 The budget is **process-wide**, not per-server: several servers in one process
@@ -389,9 +394,42 @@ the defaults):
 
 ```jennifer
 def srv as httpd.Server init httpd.listenWith(":8080",
-    httpd.Options{ maxBodyBytes: 50 * 1024 * 1024, maxInFlight: 64 });
+    httpd.Options{ maxBodyBytes: 50 * 1024 * 1024, maxInFlight: 64, respondTimeoutMs: 0 });
 web.serveOn(app, srv);
 ```
+
+## The respond timeout
+
+The engine never waits forever for the program. Once a request is admitted (it
+holds one of the `maxInFlight` slots and its body is buffered), it must be
+pulled off the queue by `httpd.accept` and then answered, each within the
+server's **respond timeout** - 60 s by default, `httpd.Options.respondTimeoutMs`
+per server. Past it the engine answers **`503 Service Unavailable`** itself and
+frees the slot, so a request whose handler threw before answering, or one stuck
+behind a slow handler, cannot hold a goroutine and a connection until shutdown.
+`503`, not `500`: the engine cannot tell a slow handler from a failed one, and
+under overload (the usual cause) "unavailable, retry" is the truthful answer. A
+handler that fails is answered `500` by the program (the `web` module does
+this).
+
+Waiting for an admission slot is not part of it: a connection that finds every
+slot busy waits for one without a deadline, so `maxInFlight` and the respond
+timeout work together - the slots bound memory, the timeout bounds how long one
+admitted request can keep a slot. Set the timeout above your slowest legitimate
+handler:
+
+```jennifer
+use httpd;
+
+# Report generation can take a few minutes; give each request five.
+def srv as httpd.Server init httpd.listenWith(":8080",
+    httpd.Options{ maxBodyBytes: 0, maxInFlight: 32, respondTimeoutMs: 5 * 60 * 1000 });
+```
+
+A handler that finishes after the deadline cannot answer any more: its
+`respond` / `setHeader` fails with an error naming the respond timeout, and
+`httpd.isOpen($req)` is already `false` (`httpd.timedOut($req)` is `true`), so a
+long handler can check before it starts work whose reply has nowhere to go.
 
 ## Scope and limits
 
@@ -408,9 +446,10 @@ web.serveOn(app, srv);
   concurrency slot count is per-server settable too.
 - **Must respond.** Every accepted request must be answered with
   `httpd.respond` (or `serveFile` / `serveDir`). A request left unanswered -
-  e.g. the program threw between `accept` and `respond` - is answered **500**
-  by the engine after a 60-second safety timeout, so the handler goroutine and
-  client connection don't leak.
+  the program threw between `accept` and `respond`, or the handler is slow - is
+  answered **503** by the engine after the [respond timeout](#the-respond-timeout)
+  (60 s by default, per-server settable), so the handler goroutine and client
+  connection don't leak.
 - **Routing, path parameters, middleware, cookies, and sessions** are not in
   the engine - they belong to the [`web`](../modules/web.md) framework module
   built on top of it, which does name-based handler dispatch itself (the engine
