@@ -72,7 +72,8 @@ io.printf("%s\n", yaml.asString($doc, "/server/host"));     # localhost
 
 Scalars are typed by YAML's implicit resolution: `42` is an `int` (decimal,
 `0x` hex, and `0o` octal all resolve), `3.14` a `float` (`.inf` / `.nan`
-included), `true` / `false` a `bool`, `~` / `null` a `null`, a timestamp a
+included, though `yaml.asFloat` refuses those: Jennifer has no non-finite
+float), `true` / `false` a `bool`, `~` / `null` a `null`, a timestamp a
 `datetime`, and everything else a `string`. A quoted scalar keeps its string
 type (`"42"` stays a string), and `yaml.encode` round-trips it faithfully -
 a string that reads like another type is re-quoted on output. An integer too
@@ -85,10 +86,16 @@ complex key) and a **duplicate mapping key** are both rejected.
 decode errors: a raw-text pre-scan rejects structural nesting deeper than 128
 levels **before** the parse runs (the underlying parser is recursive, and a
 deeply-nested document would otherwise overflow the interpreter's stack - fatal
-on the fixed-stack `jennifer-tiny`); an input-byte cap rejects an oversized
-document before the backing parser materialises its whole node tree; and a node
-budget (shared with the other decoders) stops an alias bomb (anchors that each
-reference the previous one twice) from exhausting memory.
+on the fixed-stack `jennifer-tiny`); an input-byte cap (4 MiB on `jennifer`,
+512 KiB on `jennifer-tiny`) rejects an oversized document before the backing
+parser materialises its whole node tree; and a node budget (shared with the
+other decoders) stops an alias bomb (anchors that each reference the previous
+one twice) from exhausting memory.
+
+The decoded tree is the same compact, immutable one `json` and `toml` use, so
+binding, passing or `yaml.get`-ing a `yaml.Value` shares the tree instead of
+copying it. While decoding, the backing parser's own node tree also takes
+memory, briefly, for the whole document.
 
 ### Anchors, aliases, and merge keys
 

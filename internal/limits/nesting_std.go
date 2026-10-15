@@ -58,14 +58,14 @@ const MaxCopyChainBytes = 1 << 30
 
 // MaxDecodedNodes caps how many value nodes one decode of untrusted text may
 // materialise, shared by the hand-rolled json / xml / toml decoders and the
-// yaml converter. A node is an interpreter.Value (~272 bytes) plus container
-// slice-growth transients, so it costs closer to ~1 KB at the decode peak; a
-// few-MB document would otherwise amplify into gigabytes and an uncatchable OOM
-// (only nesting depth was bounded before). At 1<<19 (~524k nodes) the decode
-// peaks at a few hundred MB - far past any real document yet well below the OOM
-// cliff - and exceeding it is a catchable "too many nodes" error. (asn1 keeps
-// its own lower 200k cap.)
-const MaxDecodedNodes = 1 << 19
+// yaml converter, so a few-MB document of tiny values is a catchable "too many
+// nodes" error rather than unbounded memory. The decoders build compact native
+// trees (internal/lib/doctree, the xml element tree), about 80 to 200 bytes per
+// node at the decode peak, so 1<<21 (~2.1M nodes, a 20-35 MB document) peaks
+// at a few hundred MB - far past any real document yet well below the OOM
+// cliff. yaml also sizes its raw-input cap from it. (asn1 keeps its own lower
+// 200k cap.)
+const MaxDecodedNodes = 1 << 21
 
 // MaxRangeElements caps how many elements a range expression will materialise
 // into a `list of int` in one evaluation - the value forms `0..n` and

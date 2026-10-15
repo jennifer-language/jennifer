@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
 
-// TOML 1.0.0 decoder. `toml.decode(text)` parses a TOML document into the same
-// generic Value tree json.decode produces - tables become KindMap (in document
-// order), arrays become KindList, and scalars map to the matching Jennifer
-// kind - then wraps it in an opaque toml.Value (a KindObject). The one type
-// TOML has that JSON lacks, the four date-time forms, is carried as an internal
-// `toml.Datetime` struct node (text + form); `toml.asDatetime` turns it into a
-// `time.Time`, and the encoder emits it bare. This file is the parser only; the
-// accessors, write surface, and encoder live alongside it.
+// TOML 1.0.0 decoder. `toml.decode(text)` parses a TOML document into the
+// shared compact document tree json.decode also produces (internal/lib/
+// doctree) - tables become maps (in document order), arrays become lists, and
+// scalars map to the matching kind - then wraps it in an opaque toml.Value (a
+// KindObject). The one type TOML has that JSON lacks, the four date-time forms,
+// is a datetime node (text + form tag); `toml.asDatetime` turns it into a
+// `time.Time`, and the encoder emits it bare. Tables are grown in place through
+// a doctree.Builder (a [header] can reopen a table after its siblings) and the
+// tree is sealed at the end. This file is the parser only; the encoder lives
+// alongside it, the accessors and write surface in doctree.
 package tomllib
 
 import (
@@ -16,59 +18,38 @@ import (
 	"strconv"
 	"strings"
 
-	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
-	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
-// datetime form tags stored on a toml.Datetime node's `form` field.
+// datetime form tags stored on a datetime node.
 const (
-	formOffsetDatetime = "offset-datetime"
-	formLocalDatetime  = "local-datetime"
-	formLocalDate      = "local-date"
-	formLocalTime      = "local-time"
+	formOffsetDatetime uint8 = iota
+	formLocalDatetime
+	formLocalDate
+	formLocalTime
 )
 
-// datetimeVal builds the internal toml.Datetime node. It is never registered as
-// a namespaced struct (it only ever lives inside the opaque toml.Value tree), so
-// no `.j` code can name or construct it; the accessor and encoder recognise it
-// by (StructNS, StructName).
-func datetimeVal(text, form string) interpreter.Value {
-	return interpreter.NamespacedStructVal("toml", "Datetime", []interpreter.StructField{
-		{Name: "text", Value: interpreter.StringVal(text)},
-		{Name: "form", Value: interpreter.StringVal(form)},
-	})
-}
-
-// isDatetimeNode reports whether v is a toml.Datetime tree node, returning its
-// text and form.
-func isDatetimeNode(v interpreter.Value) (text, form string, ok bool) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != "toml" || v.StructName != "Datetime" {
-		return "", "", false
+// formName spells a datetime form for an error message.
+func formName(form uint8) string {
+	switch form {
+	case formOffsetDatetime:
+		return "offset-datetime"
+	case formLocalDatetime:
+		return "local-datetime"
+	case formLocalDate:
+		return "local-date"
+	case formLocalTime:
+		return "local-time"
 	}
-	for _, f := range v.Fields {
-		switch f.Name {
-		case "text":
-			text = f.Value.Str
-		case "form":
-			form = f.Value.Str
-		}
-	}
-	return text, form, true
+	return "datetime"
 }
 
-// listVal / mapVal mirror the json tree constructors so the accessors and write
-// surface (near-identical to json's) build nodes the same way.
-func listVal(elems []interpreter.Value) interpreter.Value {
-	return interpreter.ListVal(parser.PrimitiveType(parser.TypeNull), elems)
-}
+// node is a toml.Value tree node.
+type node = doctree.Node
 
-func mapVal(entries []interpreter.MapEntry) interpreter.Value {
-	return interpreter.MapVal(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeNull), entries)
-}
-
-// decodeToml parses a full TOML document into the root table (a KindMap).
-func decodeToml(src string) (interpreter.Value, error) {
+// decodeToml parses a full TOML document into the root table (a map).
+func decodeToml(src string) (node, error) {
 	d := &decoder{
 		src:      src,
 		defined:  map[string]bool{},
@@ -90,9 +71,8 @@ func decodeToml(src string) (interpreter.Value, error) {
 const maxNestingDepth = limits.MaxNestingDepth
 
 // maxDecodedNodes bounds how many value nodes one decode may materialise, so a
-// flat document (e.g. a huge array) cannot amplify a few MB into gigabytes of
-// Value; only nesting depth was bounded before. A package var so tests can lower
-// it.
+// flat document (e.g. a huge array) is a catchable error rather than unbounded
+// memory. A package var so tests can lower it.
 var maxDecodedNodes = limits.MaxDecodedNodes
 
 type decoder struct {
@@ -117,6 +97,8 @@ type decoder struct {
 	// redefinition state is scoped per element.
 	arrayIdx map[string]int
 	curPath  []string // dotted path of the current [header] context (for key paths)
+
+	b doctree.Builder // grows tables in place; sealed when the parse ends
 }
 
 // stateKey encodes a dotted path for the redefinition-state maps. Each
@@ -219,9 +201,9 @@ func (d *decoder) skipBlank() {
 	}
 }
 
-func (d *decoder) run() (interpreter.Value, error) {
-	root := mapVal(nil)
-	current := &root
+func (d *decoder) run() (node, error) {
+	root := d.b.NewMap()
+	current := root
 	for {
 		d.skipBlank()
 		if d.pos >= len(d.src) {
@@ -230,16 +212,16 @@ func (d *decoder) run() (interpreter.Value, error) {
 		if d.peek() == '[' {
 			var err error
 			if d.at(1) == '[' {
-				current, err = d.parseArrayTableHeader(&root)
+				current, err = d.parseArrayTableHeader(root)
 			} else {
-				current, err = d.parseTableHeader(&root)
+				current, err = d.parseTableHeader(root)
 			}
 			if err != nil {
-				return interpreter.Value{}, err
+				return node{}, err
 			}
 		} else {
 			if err := d.parseKeyValue(current); err != nil {
-				return interpreter.Value{}, err
+				return node{}, err
 			}
 		}
 		// End of statement: inline whitespace then comment / newline / EOF.
@@ -253,24 +235,31 @@ func (d *decoder) run() (interpreter.Value, error) {
 		case '\n', '\r':
 			d.consumeNewline()
 		default:
-			return interpreter.Value{}, d.errf("unexpected %q after value", string(d.peek()))
+			return node{}, d.errf("unexpected %q after value", string(d.peek()))
 		}
+	}
+	root = d.b.Seal(root)
+	// Headers, dotted keys and inline values each cap their own nesting, but
+	// together they can stack deeper; bound the whole document like the other
+	// decoders do. The root table is implicit, so it does not count as a level.
+	if root.ExceedsDepth(maxNestingDepth + 1) {
+		return node{}, fmt.Errorf("toml: document nests deeper than %d levels", maxNestingDepth)
 	}
 	return root, nil
 }
 
 // ----- table headers -------------------------------------------------------
 
-func (d *decoder) parseTableHeader(root *interpreter.Value) (*interpreter.Value, error) {
+func (d *decoder) parseTableHeader(root node) (node, error) {
 	d.advance() // '['
 	d.skipInlineWS()
 	segs, err := d.parseKey()
 	if err != nil {
-		return nil, err
+		return node{}, err
 	}
 	d.skipInlineWS()
 	if d.peek() != ']' {
-		return nil, d.errf("expected ']' to close table header")
+		return node{}, d.errf("expected ']' to close table header")
 	}
 	d.advance()
 	key := d.stateKey(segs)
@@ -278,44 +267,44 @@ func (d *decoder) parseTableHeader(root *interpreter.Value) (*interpreter.Value,
 	// A second [header] for the same path, or a [header] on an existing
 	// array-of-tables, is a TOML MUST-error.
 	if d.defined[key] {
-		return nil, d.errf("table %q is defined more than once", dotted)
+		return node{}, d.errf("table %q is defined more than once", dotted)
 	}
 	if d.arrays[key] {
-		return nil, d.errf("%q is an array of tables, not a table", dotted)
+		return node{}, d.errf("%q is an array of tables, not a table", dotted)
 	}
 	// A header may not extend a closed inline table, neither directly nor
 	// through one ([a.b] with a = {x = 1}).
 	for i := range segs {
 		if d.inline[d.stateKey(segs[:i+1])] {
-			return nil, d.errf("cannot extend inline table %q with a header", strings.Join(segs[:i+1], "."))
+			return node{}, d.errf("cannot extend inline table %q with a header", strings.Join(segs[:i+1], "."))
 		}
 	}
 	cur := root
-	for _, seg := range segs {
-		cur, err = d.descendTable(cur, seg)
+	for i, seg := range segs {
+		cur, err = d.descendTable(cur, seg, d.stateKey(segs[:i+1]))
 		if err != nil {
-			return nil, err
+			return node{}, err
 		}
 	}
-	if cur.Kind != interpreter.KindMap {
-		return nil, d.errf("table header %q targets a non-table", dotted)
+	if cur.Kind() != doctree.KindMap {
+		return node{}, d.errf("table header %q targets a non-table", dotted)
 	}
 	d.defined[key] = true
 	d.curPath = segs
 	return cur, nil
 }
 
-func (d *decoder) parseArrayTableHeader(root *interpreter.Value) (*interpreter.Value, error) {
+func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 	d.advance() // '['
 	d.advance() // '['
 	d.skipInlineWS()
 	segs, err := d.parseKey()
 	if err != nil {
-		return nil, err
+		return node{}, err
 	}
 	d.skipInlineWS()
 	if d.peek() != ']' || d.at(1) != ']' {
-		return nil, d.errf("expected ']]' to close array-of-tables header")
+		return node{}, d.errf("expected ']]' to close array-of-tables header")
 	}
 	d.advance()
 	d.advance()
@@ -324,72 +313,76 @@ func (d *decoder) parseArrayTableHeader(root *interpreter.Value) (*interpreter.V
 	// A [[header]] whose path names a plain table ([header]) or a closed inline
 	// table (directly or through one) is a MUST-error.
 	if d.defined[key] {
-		return nil, d.errf("%q is a table, not an array of tables", dotted)
+		return node{}, d.errf("%q is a table, not an array of tables", dotted)
 	}
 	for i := range segs {
 		if d.inline[d.stateKey(segs[:i+1])] {
-			return nil, d.errf("cannot extend inline table %q as an array of tables", strings.Join(segs[:i+1], "."))
+			return node{}, d.errf("cannot extend inline table %q as an array of tables", strings.Join(segs[:i+1], "."))
 		}
 	}
 	cur := root
 	for i := 0; i < len(segs)-1; i++ {
-		cur, err = d.descendTable(cur, segs[i])
+		cur, err = d.descendTable(cur, segs[i], d.stateKey(segs[:i+1]))
 		if err != nil {
-			return nil, err
+			return node{}, err
 		}
 	}
 	last := segs[len(segs)-1]
-	lastKey := interpreter.StringVal(last)
 	// Find or create the array under `last`, then append a fresh table element.
-	if pos := cur.LookupKey(lastKey); pos >= 0 {
-		v := &cur.Map[pos].Value
+	elem := d.b.NewMap()
+	if pos := d.b.Lookup(cur, last); pos >= 0 {
+		v := cur.Elem(pos)
 		// The key must be an array *of tables* created by an earlier
-		// [[header]] - not a static array (`a = []`) sharing the KindList.
-		if v.Kind != interpreter.KindList || !d.arrays[key] {
-			return nil, d.errf("key %q is not an array of tables", last)
+		// [[header]] - not a static array (`a = []`) that is also a list.
+		if v.Kind() != doctree.KindList || !d.arrays[key] {
+			return node{}, d.errf("key %q is not an array of tables", last)
 		}
-		v.List = append(v.List, mapVal(nil))
+		d.b.Push(v, elem)
 		d.arrayIdx[key]++
 		d.curPath = segs
-		return &v.List[len(v.List)-1], nil
+		return elem, nil
 	}
-	cur.UpsertKey(lastKey, listVal([]interpreter.Value{mapVal(nil)}))
+	arr := d.b.NewList()
+	d.b.Push(arr, elem)
+	d.b.Add(cur, last, arr)
 	d.arrays[key] = true
 	d.arrayIdx[key] = 0
 	d.curPath = segs
-	v := &cur.Map[len(cur.Map)-1].Value
-	return &v.List[0], nil
+	return elem, nil
 }
 
 // descendTable returns a pointer to the child table named key under cur,
 // creating an empty table if absent. An array-of-tables child descends into its
-// last element (so `[a.b]` after `[[a]]` targets the newest `a`). Lookups and
-// inserts go through the Value hash index (LookupKey/UpsertKey) so building a
-// wide table stays O(N), not O(N^2).
-func (d *decoder) descendTable(cur *interpreter.Value, key string) (*interpreter.Value, error) {
-	k := interpreter.StringVal(key)
-	pos := cur.LookupKey(k)
+// last element (so `[a.b]` after `[[a]]` targets the newest `a`). Lookups go
+// through the Builder's index so building a wide table stays O(N), not O(N^2).
+//
+// stateKey is the dotted path's redefinition-state key: a list is descended
+// only when it is an array of tables made by [[header]]s - a static array
+// (`a = [{x = 1}]`) is closed, so `[a.y]` may not extend it (TOML 1.0).
+func (d *decoder) descendTable(cur node, key, stateKey string) (node, error) {
+	pos := d.b.Lookup(cur, key)
 	if pos < 0 {
-		cur.UpsertKey(k, mapVal(nil))
-		return &cur.Map[len(cur.Map)-1].Value, nil
+		t := d.b.NewMap()
+		d.b.Add(cur, key, t)
+		return t, nil
 	}
-	v := &cur.Map[pos].Value
-	switch v.Kind {
-	case interpreter.KindMap:
+	v := cur.Elem(pos)
+	switch v.Kind() {
+	case doctree.KindMap:
 		return v, nil
-	case interpreter.KindList:
-		if len(v.List) == 0 || v.List[len(v.List)-1].Kind != interpreter.KindMap {
-			return nil, d.errf("key %q is not a table", key)
+	case doctree.KindList:
+		if !d.arrays[stateKey] || v.Len() == 0 || v.Elem(v.Len()-1).Kind() != doctree.KindMap {
+			return node{}, d.errf("key %q is not a table", key)
 		}
-		return &v.List[len(v.List)-1], nil
+		return v.Elem(v.Len() - 1), nil
 	default:
-		return nil, d.errf("key %q is not a table", key)
+		return node{}, d.errf("key %q is not a table", key)
 	}
 }
 
 // ----- key/value pairs -----------------------------------------------------
 
-func (d *decoder) parseKeyValue(current *interpreter.Value) error {
+func (d *decoder) parseKeyValue(current node) error {
 	segs, err := d.parseKey()
 	if err != nil {
 		return err
@@ -412,20 +405,19 @@ func (d *decoder) parseKeyValue(current *interpreter.Value) error {
 		if d.inline[d.stateKey(full[:len(d.curPath)+i+1])] {
 			return d.errf("cannot extend inline table %q", strings.Join(full[:len(d.curPath)+i+1], "."))
 		}
-		cur, err = d.descendTable(cur, segs[i])
+		cur, err = d.descendTable(cur, segs[i], d.stateKey(full[:len(d.curPath)+i+1]))
 		if err != nil {
 			return err
 		}
 	}
 	last := segs[len(segs)-1]
-	lastKey := interpreter.StringVal(last)
-	if cur.LookupKey(lastKey) >= 0 {
+	if d.b.Lookup(cur, last) >= 0 {
 		return d.errf("duplicate key %q", last)
 	}
-	cur.UpsertKey(lastKey, val)
+	d.b.Add(cur, last, val)
 	// A value that is itself an inline table is closed: no later dotted key or
 	// header may extend it.
-	if val.Kind == interpreter.KindMap {
+	if val.Kind() == doctree.KindMap {
 		d.inline[d.stateKey(full)] = true
 	}
 	return nil
@@ -477,29 +469,29 @@ func isBareKeyChar(c byte) bool {
 
 // ----- values --------------------------------------------------------------
 
-func (d *decoder) parseValue() (interpreter.Value, error) {
+func (d *decoder) parseValue() (node, error) {
 	d.nodes++
 	if d.nodes > maxDecodedNodes {
-		return interpreter.Value{}, d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+		return node{}, d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
 	}
 	switch c := d.peek(); {
 	case c == '"':
 		if d.at(1) == '"' && d.at(2) == '"' {
 			s, err := d.parseMultilineBasicString()
-			return interpreter.StringVal(s), err
+			return doctree.String(s), err
 		}
 		s, err := d.parseBasicString()
-		return interpreter.StringVal(s), err
+		return doctree.String(s), err
 	case c == '\'':
 		if d.at(1) == '\'' && d.at(2) == '\'' {
 			s, err := d.parseMultilineLiteralString()
-			return interpreter.StringVal(s), err
+			return doctree.String(s), err
 		}
 		s, err := d.parseLiteralString()
-		return interpreter.StringVal(s), err
+		return doctree.String(s), err
 	case c == '[':
 		if d.depth >= maxNestingDepth {
-			return interpreter.Value{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
+			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
 		}
 		d.depth++
 		v, err := d.parseArray()
@@ -507,7 +499,7 @@ func (d *decoder) parseValue() (interpreter.Value, error) {
 		return v, err
 	case c == '{':
 		if d.depth >= maxNestingDepth {
-			return interpreter.Value{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
+			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
 		}
 		d.depth++
 		v, err := d.parseInlineTable()
@@ -518,20 +510,20 @@ func (d *decoder) parseValue() (interpreter.Value, error) {
 	case c == '+' || c == '-' || c >= '0' && c <= '9' || c == 'i' || c == 'n':
 		return d.parseNumberOrDate()
 	default:
-		return interpreter.Value{}, d.errf("unexpected value starting with %q", string(c))
+		return node{}, d.errf("unexpected value starting with %q", string(c))
 	}
 }
 
-func (d *decoder) parseBool() (interpreter.Value, error) {
+func (d *decoder) parseBool() (node, error) {
 	if strings.HasPrefix(d.src[d.pos:], "true") {
 		d.pos += 4
-		return interpreter.BoolVal(true), nil
+		return doctree.Bool(true), nil
 	}
 	if strings.HasPrefix(d.src[d.pos:], "false") {
 		d.pos += 5
-		return interpreter.BoolVal(false), nil
+		return doctree.Bool(false), nil
 	}
-	return interpreter.Value{}, d.errf("invalid boolean")
+	return node{}, d.errf("invalid boolean")
 }
 
 // ----- strings -------------------------------------------------------------
@@ -760,21 +752,21 @@ func (d *decoder) parseUnicodeEscape(n int) (string, error) {
 
 // ----- arrays and inline tables --------------------------------------------
 
-func (d *decoder) parseArray() (interpreter.Value, error) {
+func (d *decoder) parseArray() (node, error) {
 	d.advance() // '['
-	elems := []interpreter.Value{}
+	elems := []node{}
 	for {
 		d.skipArrayGaps()
 		if d.peek() == ']' {
 			d.advance()
-			return listVal(elems), nil
+			return doctree.List(elems), nil
 		}
 		if d.pos >= len(d.src) {
-			return interpreter.Value{}, d.errf("unterminated array")
+			return node{}, d.errf("unterminated array")
 		}
 		v, err := d.parseValue()
 		if err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 		elems = append(elems, v)
 		d.skipArrayGaps()
@@ -784,9 +776,9 @@ func (d *decoder) parseArray() (interpreter.Value, error) {
 		}
 		if d.peek() == ']' {
 			d.advance()
-			return listVal(elems), nil
+			return doctree.List(elems), nil
 		}
-		return interpreter.Value{}, d.errf("expected ',' or ']' in array")
+		return node{}, d.errf("expected ',' or ']' in array")
 	}
 }
 
@@ -809,9 +801,9 @@ func (d *decoder) skipArrayGaps() {
 	}
 }
 
-func (d *decoder) parseInlineTable() (interpreter.Value, error) {
+func (d *decoder) parseInlineTable() (node, error) {
 	d.advance() // '{'
-	tbl := mapVal(nil)
+	tbl := d.b.NewMap()
 	d.skipInlineWS()
 	if d.peek() == '}' {
 		d.advance()
@@ -821,20 +813,20 @@ func (d *decoder) parseInlineTable() (interpreter.Value, error) {
 		d.skipInlineWS()
 		segs, err := d.parseKey()
 		if err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 		d.skipInlineWS()
 		if d.peek() != '=' {
-			return interpreter.Value{}, d.errf("expected '=' in inline table")
+			return node{}, d.errf("expected '=' in inline table")
 		}
 		d.advance()
 		d.skipInlineWS()
 		val, err := d.parseValue()
 		if err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
-		if err := inlineAssign(&tbl, segs, val, d); err != nil {
-			return interpreter.Value{}, err
+		if err := inlineAssign(tbl, segs, val, d); err != nil {
+			return node{}, err
 		}
 		d.skipInlineWS()
 		switch d.peek() {
@@ -844,31 +836,29 @@ func (d *decoder) parseInlineTable() (interpreter.Value, error) {
 			d.advance()
 			return tbl, nil
 		default:
-			return interpreter.Value{}, d.errf("expected ',' or '}' in inline table")
+			return node{}, d.errf("expected ',' or '}' in inline table")
 		}
 	}
 }
 
 // inlineAssign sets a (possibly dotted) key inside an inline table, creating
-// intermediate tables as needed. Duplicate detection and inserts go through
-// the Value hash index so a wide inline table builds in O(N).
-func inlineAssign(tbl *interpreter.Value, segs []string, val interpreter.Value, d *decoder) error {
-	k := interpreter.StringVal(segs[0])
+// intermediate tables as needed. Duplicate detection goes through the
+// Builder's index so a wide inline table builds in O(N).
+func inlineAssign(tbl node, segs []string, val node, d *decoder) error {
 	if len(segs) == 1 {
-		if tbl.LookupKey(k) >= 0 {
+		if d.b.Lookup(tbl, segs[0]) >= 0 {
 			return d.errf("duplicate key %q", segs[0])
 		}
-		tbl.UpsertKey(k, val)
+		d.b.Add(tbl, segs[0], val)
 		return nil
 	}
 	// Dotted: descend/create a sub-table.
-	pos := tbl.LookupKey(k)
+	pos := d.b.Lookup(tbl, segs[0])
 	if pos < 0 {
-		tbl.UpsertKey(k, mapVal(nil))
-		pos = len(tbl.Map) - 1
+		pos = d.b.Add(tbl, segs[0], d.b.NewMap())
 	}
-	sub := &tbl.Map[pos].Value
-	if sub.Kind != interpreter.KindMap {
+	sub := tbl.Elem(pos)
+	if sub.Kind() != doctree.KindMap {
 		return d.errf("key %q is not a table", segs[0])
 	}
 	return inlineAssign(sub, segs[1:], val, d)
@@ -879,7 +869,7 @@ func inlineAssign(tbl *interpreter.Value, segs []string, val interpreter.Value, 
 // parseNumberOrDate classifies the token ahead as a date-time or a number. A
 // date-time is recognised by its shape: four digits then '-' (a date), or two
 // digits then ':' (a local time).
-func (d *decoder) parseNumberOrDate() (interpreter.Value, error) {
+func (d *decoder) parseNumberOrDate() (node, error) {
 	if d.looksLikeDate() || d.looksLikeTime() {
 		return d.parseDatetime()
 	}
@@ -898,29 +888,29 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // parseDatetime consumes one of the four RFC 3339 / TOML date-time forms and
 // returns a toml.Datetime node tagged with the form.
-func (d *decoder) parseDatetime() (interpreter.Value, error) {
+func (d *decoder) parseDatetime() (node, error) {
 	start := d.pos
 	if d.looksLikeTime() {
 		if err := d.scanTime(); err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 		text := d.src[start:d.pos]
 		if err := d.validateDatetime(text, formLocalTime); err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
-		return datetimeVal(text, formLocalTime), nil
+		return doctree.Datetime(text, formLocalTime), nil
 	}
 	// Date: YYYY-MM-DD, validating each position rather than blindly advancing
 	// (which could swallow a newline or non-digit into the token).
 	for _, want := range []byte{'D', 'D', 'D', 'D', '-', 'D', 'D', '-', 'D', 'D'} {
 		if want == 'D' {
 			if err := d.consumeDigit("date"); err != nil {
-				return interpreter.Value{}, err
+				return node{}, err
 			}
 			continue
 		}
 		if err := d.consumeExact(want, "date"); err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 	}
 	// A local date unless a time follows (separated by 'T', 't', or a space).
@@ -936,12 +926,12 @@ func (d *decoder) parseDatetime() (interpreter.Value, error) {
 	if !hasTime {
 		text := d.src[start:d.pos]
 		if err := d.validateDatetime(text, formLocalDate); err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
-		return datetimeVal(text, formLocalDate), nil
+		return doctree.Datetime(text, formLocalDate), nil
 	}
 	if err := d.scanTime(); err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	// Optional offset: Z, z, or +HH:MM / -HH:MM
 	off := d.peek()
@@ -955,12 +945,12 @@ func (d *decoder) parseDatetime() (interpreter.Value, error) {
 		for _, want := range []byte{'D', 'D', ':', 'D', 'D'} {
 			if want == 'D' {
 				if err := d.consumeDigit("date-time offset"); err != nil {
-					return interpreter.Value{}, err
+					return node{}, err
 				}
 				continue
 			}
 			if err := d.consumeExact(want, "date-time offset"); err != nil {
-				return interpreter.Value{}, err
+				return node{}, err
 			}
 		}
 		return d.datetimeChecked(d.src[start:d.pos], formOffsetDatetime)
@@ -970,20 +960,20 @@ func (d *decoder) parseDatetime() (interpreter.Value, error) {
 
 // datetimeChecked normalizes the raw token, verifies it parses under its form,
 // and returns the node (or a positioned error for an out-of-range field).
-func (d *decoder) datetimeChecked(raw, form string) (interpreter.Value, error) {
+func (d *decoder) datetimeChecked(raw string, form uint8) (node, error) {
 	norm := normalizeDatetime(raw)
 	if err := d.validateDatetime(norm, form); err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
-	return datetimeVal(norm, form), nil
+	return doctree.Datetime(norm, form), nil
 }
 
 // validateDatetime re-parses a scanned token with Go's time package so
 // out-of-range fields (month 13, day 99, hour 25) are rejected instead of
 // stored as garbage that toml.encode would re-emit.
-func (d *decoder) validateDatetime(text, form string) error {
+func (d *decoder) validateDatetime(text string, form uint8) error {
 	if _, err := parseDatetimeText(text, form); err != nil {
-		return d.errf("invalid %s %q", form, text)
+		return d.errf("invalid %s %q", formName(form), text)
 	}
 	return nil
 }
@@ -1048,14 +1038,14 @@ func normalizeDatetime(s string) string {
 }
 
 // parseNumber consumes an integer or float token (no whitespace inside).
-func (d *decoder) parseNumber() (interpreter.Value, error) {
+func (d *decoder) parseNumber() (node, error) {
 	start := d.pos
 	for d.pos < len(d.src) && isNumberChar(d.src[d.pos]) {
 		d.pos++
 	}
 	tok := d.src[start:d.pos]
 	if tok == "" {
-		return interpreter.Value{}, d.errf("expected a number")
+		return node{}, d.errf("expected a number")
 	}
 	return classifyNumber(tok, d)
 }
@@ -1065,19 +1055,19 @@ func isNumberChar(c byte) bool {
 		c == '.' || c == '+' || c == '-' || c == '_'
 }
 
-func classifyNumber(tok string, d *decoder) (interpreter.Value, error) {
+func classifyNumber(tok string, d *decoder) (node, error) {
 	switch tok {
 	case "inf", "+inf":
-		return interpreter.FloatVal(inf(false)), nil
+		return doctree.Float(inf(false)), nil
 	case "-inf":
-		return interpreter.FloatVal(inf(true)), nil
+		return doctree.Float(inf(true)), nil
 	case "nan", "+nan", "-nan":
-		return interpreter.FloatVal(nan()), nil
+		return doctree.Float(nan()), nil
 	}
 	// Underscores must sit between digits (strconv silently strips them, so
 	// without this `1__0`, `_1`, `1_` would slip through).
 	if !validateUnderscores(tok) {
-		return interpreter.Value{}, d.errf("invalid number %q: misplaced underscore", tok)
+		return node{}, d.errf("invalid number %q: misplaced underscore", tok)
 	}
 	// Prefixed integers: hex / octal / binary. No sign, no underscores adjacent
 	// to the prefix (we strip all underscores after the check above).
@@ -1099,15 +1089,15 @@ func classifyNumber(tok string, d *decoder) (interpreter.Value, error) {
 	// bare-dot floats (`.5`, `5.`, `3.e2`), and empty exponents, all of which
 	// TOML rejects - validate the grammar explicitly first.
 	if !validateDecimalGrammar(body) {
-		return interpreter.Value{}, d.errf("invalid number %q", tok)
+		return node{}, d.errf("invalid number %q", tok)
 	}
 	// Float if it carries a '.', or an exponent, or is inf/nan (handled above).
 	if strings.ContainsAny(body, ".eE") && !isDecimalInteger(body) {
 		f, err := strconv.ParseFloat(body, 64)
 		if err != nil {
-			return interpreter.Value{}, d.errf("invalid float %q", tok)
+			return node{}, d.errf("invalid float %q", tok)
 		}
-		return interpreter.FloatVal(f), nil
+		return doctree.Float(f), nil
 	}
 	n, err := strconv.ParseInt(body, 10, 64)
 	if err != nil {
@@ -1115,11 +1105,11 @@ func classifyNumber(tok string, d *decoder) (interpreter.Value, error) {
 		// decode error, not a silent lossy-float downgrade. (`json` keeps its
 		// deliberate integral-past-int64 -> float fallback; TOML does not.)
 		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
-			return interpreter.Value{}, d.errf("integer %q is out of range for a 64-bit signed TOML integer", tok)
+			return node{}, d.errf("integer %q is out of range for a 64-bit signed TOML integer", tok)
 		}
-		return interpreter.Value{}, d.errf("invalid integer %q", tok)
+		return node{}, d.errf("invalid integer %q", tok)
 	}
-	return interpreter.IntVal(n), nil
+	return doctree.Int(n), nil
 }
 
 // validateUnderscores rejects TOML underscore misuse: a `_` must sit between
@@ -1219,9 +1209,9 @@ func isDecimalInteger(body string) bool {
 	return true
 }
 
-func intOrErr(n int64, err error, tok string, d *decoder) (interpreter.Value, error) {
+func intOrErr(n int64, err error, tok string, d *decoder) (node, error) {
 	if err != nil {
-		return interpreter.Value{}, d.errf("invalid integer %q", tok)
+		return node{}, d.errf("invalid integer %q", tok)
 	}
-	return interpreter.IntVal(n), nil
+	return doctree.Int(n), nil
 }

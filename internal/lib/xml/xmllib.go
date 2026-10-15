@@ -3,7 +3,7 @@
 
 // Package xmllib is the `xml` library: hand-rolled XML encode / decode over an
 // opaque `xml.Value`, designed like `json` and `toml`. `decode` parses a
-// document into a KindObject wrapping the node tree (xmlaccess.go); the
+// document into a KindObject holding the compact node tree (xmlnode.go); the
 // accessors walk it by an XPath-style path; the small build surface
 // (`element` / `setAttr` / `setText` / `append`) constructs a tree to encode.
 // No `encoding/xml` (reflect-bound), so both binaries build it.
@@ -18,15 +18,12 @@ import (
 
 // Install registers the xml surface.
 func Install(in *interpreter.Interpreter) {
-	// An xml.Value displays as its (compact) XML, so `$v` at the REPL and `%v`
-	// show the document rather than an opaque `<xml.Value>`.
-	in.RegisterNamespacedObject(LibraryName, "Value", func(inner interpreter.Value) string {
-		var sb strings.Builder
-		if err := encodeNode(&sb, inner, false, 0); err != nil {
-			return "<xml.Value>"
-		}
-		return sb.String()
-	})
+	// An xml.Value displays as its (compact) XML (xmlValue.DisplayNative), so
+	// `$v` at the REPL and `%v` show the document rather than an opaque
+	// `<xml.Value>`. An uninitialised `def v as xml.Value;` holds an empty
+	// text node.
+	in.RegisterNamespacedObject(LibraryName, "Value", nil)
+	in.SetNativeObjectZero(LibraryName, "Value", &xmlValue{root: textNode("")})
 
 	in.RegisterNamespaced(LibraryName, "decode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
@@ -77,12 +74,12 @@ func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) 
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("%s expects 1 argument (xml.Value), got %d", verb, len(args))
 	}
-	node, err := takeNode(verb, args[0])
+	n, err := takeNode(verb, args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	var sb strings.Builder
-	if err := encodeNode(&sb, node, pretty, 0); err != nil {
+	if err := encodeNode(&sb, n, pretty, 0); err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", verb, err)
 	}
 	return interpreter.StringVal(sb.String()), nil
@@ -91,7 +88,7 @@ func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) 
 // encodeNode writes n's XML image. Pretty-printing indents element-only
 // content; an element containing any text child is emitted inline so its
 // character data stays byte-exact.
-func encodeNode(sb *strings.Builder, n interpreter.Value, pretty bool, depth int) error {
+func encodeNode(sb *strings.Builder, n node, pretty bool, depth int) error {
 	// Guard the recursion: a tree built deep via xml.append in a loop (or a
 	// value printed with %v) would otherwise overflow the Go stack, an
 	// uncatchable crash. Matches the decode-side maxDepth; deeper than that
@@ -99,52 +96,46 @@ func encodeNode(sb *strings.Builder, n interpreter.Value, pretty bool, depth int
 	if depth >= maxDepth {
 		return fmt.Errorf("element nesting exceeds %d levels", maxDepth)
 	}
-	switch nodeKind(n) {
-	case "text":
-		t, _ := mapField(n, "text")
-		escapeText(sb, t.Str)
+	e := n.el
+	if e == nil {
+		escapeText(sb, n.text)
 		return nil
-	case "element":
-		name := nodeName(n)
-		sb.WriteByte('<')
-		sb.WriteString(name)
-		for _, e := range nodeAttrs(n).Map {
-			sb.WriteByte(' ')
-			sb.WriteString(e.Key.Str)
-			sb.WriteString(`="`)
-			escapeAttr(sb, e.Value.Str)
-			sb.WriteByte('"')
-		}
-		kids := nodeChildren(n)
-		if len(kids) == 0 {
-			sb.WriteString("/>")
-			return nil
-		}
-		sb.WriteByte('>')
-		block := pretty && !hasTextChild(kids)
-		for _, c := range kids {
-			if block {
-				newlineIndent(sb, depth+1)
-			}
-			if err := encodeNode(sb, c, pretty, depth+1); err != nil {
-				return err
-			}
-		}
-		if block {
-			newlineIndent(sb, depth)
-		}
-		sb.WriteString("</")
-		sb.WriteString(name)
-		sb.WriteByte('>')
-		return nil
-	default:
-		return fmt.Errorf("cannot encode a node of kind %q", nodeKind(n))
 	}
+	sb.WriteByte('<')
+	sb.WriteString(e.name)
+	for _, a := range e.attrs {
+		sb.WriteByte(' ')
+		sb.WriteString(a.name)
+		sb.WriteString(`="`)
+		escapeAttr(sb, a.value)
+		sb.WriteByte('"')
+	}
+	if len(e.children) == 0 {
+		sb.WriteString("/>")
+		return nil
+	}
+	sb.WriteByte('>')
+	block := pretty && !hasTextChild(e.children)
+	for _, c := range e.children {
+		if block {
+			newlineIndent(sb, depth+1)
+		}
+		if err := encodeNode(sb, c, pretty, depth+1); err != nil {
+			return err
+		}
+	}
+	if block {
+		newlineIndent(sb, depth)
+	}
+	sb.WriteString("</")
+	sb.WriteString(e.name)
+	sb.WriteByte('>')
+	return nil
 }
 
-func hasTextChild(kids []interpreter.Value) bool {
+func hasTextChild(kids []node) bool {
 	for _, c := range kids {
-		if nodeKind(c) == "text" {
+		if c.el == nil {
 			return true
 		}
 	}
@@ -232,25 +223,17 @@ func elementFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	return wrap(elementNode(args[0].Str, nil, nil)), nil
 }
 
-// cloneAttrs copies an attrs map's entries so a build op does not mutate the
-// shared source tree.
-func cloneAttrs(m interpreter.Value) []interpreter.MapEntry {
-	out := make([]interpreter.MapEntry, len(m.Map))
-	copy(out, m.Map)
-	return out
-}
-
 // setAttrFn: xml.setAttr(node, name, value) -> the element with the attribute
 // added or updated.
 func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("xml.setAttr expects 3 arguments (xml.Value, name, value), got %d", len(args))
 	}
-	node, err := takeNode("xml.setAttr", args[0])
+	n, err := takeNode("xml.setAttr", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := requireElement("xml.setAttr", node); err != nil {
+	if err := requireElement("xml.setAttr", n); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[1].Kind != interpreter.KindString || args[2].Kind != interpreter.KindString {
@@ -259,19 +242,21 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if !validName(args[1].Str) {
 		return interpreter.Null(), fmt.Errorf("xml.setAttr: %q is not a valid attribute name", args[1].Str)
 	}
-	attrs := cloneAttrs(nodeAttrs(node))
+	// Copy the attribute list so the shared source element is never mutated.
+	attrs := make([]attr, len(n.el.attrs), len(n.el.attrs)+1)
+	copy(attrs, n.el.attrs)
 	replaced := false
 	for i := range attrs {
-		if attrs[i].Key.Str == args[1].Str {
-			attrs[i] = interpreter.MapEntry{Key: sv(args[1].Str), Value: sv(args[2].Str)}
+		if attrs[i].name == args[1].Str {
+			attrs[i].value = args[2].Str
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		attrs = append(attrs, interpreter.MapEntry{Key: sv(args[1].Str), Value: sv(args[2].Str)})
+		attrs = append(attrs, attr{name: args[1].Str, value: args[2].Str})
 	}
-	return wrap(elementNode(nodeName(node), attrs, nodeChildren(node))), nil
+	return wrap(elementNode(n.el.name, attrs, n.el.children)), nil
 }
 
 // setTextFn: xml.setText(node, s) -> the element with its children replaced by
@@ -280,18 +265,17 @@ func setTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("xml.setText expects 2 arguments (xml.Value, text), got %d", len(args))
 	}
-	node, err := takeNode("xml.setText", args[0])
+	n, err := takeNode("xml.setText", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if err := requireElement("xml.setText", node); err != nil {
+	if err := requireElement("xml.setText", n); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("xml.setText: text must be string, got %s", args[1].Kind)
 	}
-	children := []interpreter.Value{textNode(args[1].Str)}
-	return wrap(elementNode(nodeName(node), cloneAttrs(nodeAttrs(node)), children)), nil
+	return wrap(elementNode(n.el.name, n.el.attrs, []node{textNode(args[1].Str)})), nil
 }
 
 // appendFn: xml.append(parent, child) -> the parent element with child (an
@@ -311,9 +295,14 @@ func appendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	kids := nodeChildren(parent)
-	next := make([]interpreter.Value, 0, len(kids)+1)
+	// Bound the depth of a tree built by appending (decode bounds its own):
+	// equality and encoding recurse once per level.
+	if child.height()+1 > maxDepth {
+		return interpreter.Null(), fmt.Errorf("xml.append: the result would nest deeper than %d levels", maxDepth)
+	}
+	kids := parent.el.children
+	next := make([]node, 0, len(kids)+1)
 	next = append(next, kids...)
 	next = append(next, child)
-	return wrap(elementNode(nodeName(parent), cloneAttrs(nodeAttrs(parent)), next)), nil
+	return wrap(elementNode(parent.el.name, parent.el.attrs, next)), nil
 }

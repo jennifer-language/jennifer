@@ -4,9 +4,9 @@
 // Package jsonlib is the `json` library: RFC 8259 encode / decode. Hand-rolled
 // (no `encoding/json`, no `reflect`) to stay TinyGo-clean, the same reason the
 // AST-JSON emitter is hand-rolled. `decode` returns an opaque `json.Value` (a
-// KindObject wrapping the decoded tree: objects become `map of string to V`,
-// numbers become int when integral else float); the accessors in
-// jsonaccess.go walk it, and there is no map-to-struct coercion - a typed
+// KindObject holding the shared compact node tree, internal/lib/doctree:
+// objects become maps in document order, numbers int when integral else
+// float); the shared accessors walk it, and there is no map-to-struct coercion - a typed
 // target is rebuilt explicitly from the decoded value (see the library doc,
 // and docs/technical/rejected.md). `encode` accepts ordinary typed values and
 // json.Values alike (a decode/encode round-trip).
@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
@@ -30,15 +31,9 @@ const LibraryName = "json"
 // `json.Value` (a KindObject) that callers walk with the accessors below;
 // `encode` accepts ordinary typed values and json.Values alike.
 func Install(in *interpreter.Interpreter) {
-	// A json.Value displays as its compact JSON, so `$v` at the REPL and
-	// `%v` show the document rather than an opaque `<json.Value>`.
-	in.RegisterNamespacedObject(LibraryName, "Value", func(inner interpreter.Value) string {
-		var sb strings.Builder
-		if err := encodeValue(&sb, inner, false, 0); err != nil {
-			return "<json.Value>"
-		}
-		return sb.String()
-	})
+	// The json.Value type (an uninitialised one holds JSON null), its
+	// accessors and its write surface (internal/lib/doctree).
+	lib.Install(in)
 
 	in.RegisterNamespaced(LibraryName, "encode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		return encodeFn(args, false)
@@ -51,30 +46,8 @@ func Install(in *interpreter.Interpreter) {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		return interpreter.ObjectVal(LibraryName, "Value", tree), nil
+		return wrap(tree), nil
 	})
-
-	// json.Value accessors (jsonaccess.go).
-	in.RegisterNamespaced(LibraryName, "typeOf", typeOfFn)
-	in.RegisterNamespaced(LibraryName, "get", getFn)
-	in.RegisterNamespaced(LibraryName, "has", hasFn)
-	in.RegisterNamespaced(LibraryName, "keys", keysFn)
-	in.RegisterNamespaced(LibraryName, "length", lengthFn)
-	in.RegisterNamespaced(LibraryName, "asInt", asIntFn)
-	in.RegisterNamespaced(LibraryName, "asFloat", asFloatFn)
-	in.RegisterNamespaced(LibraryName, "asString", asStringFn)
-	in.RegisterNamespaced(LibraryName, "asBool", asBoolFn)
-	in.RegisterNamespaced(LibraryName, "isNull", isNullFn)
-
-	// json.Value write surface (jsonwrite.go) - all non-mutating, returning
-	// a fresh handle; the idiom is `$v = json.set($v, ...)`.
-	in.RegisterNamespaced(LibraryName, "list", listFn)
-	in.RegisterNamespaced(LibraryName, "map", mapFn)
-	in.RegisterNamespaced(LibraryName, "set", setFn)
-	in.RegisterNamespaced(LibraryName, "insert", insertFn)
-	in.RegisterNamespaced(LibraryName, "append", appendFn)
-	in.RegisterNamespaced(LibraryName, "remove", removeFn)
-	in.RegisterNamespaced(LibraryName, "move", moveFn)
 }
 
 func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) {
@@ -113,16 +86,7 @@ func encodeValue(sb *strings.Builder, v interpreter.Value, pretty bool, depth in
 	case interpreter.KindInt:
 		sb.WriteString(strconv.FormatInt(v.Int, 10))
 	case interpreter.KindFloat:
-		if math.IsNaN(v.Float) || math.IsInf(v.Float, 0) {
-			return fmt.Errorf("cannot encode non-finite float")
-		}
-		s := strconv.FormatFloat(v.Float, 'g', -1, 64)
-		// Keep the float kind round-trippable: a bare "1" would decode back as
-		// int, so give a float without a fractional/exponent part one.
-		if !strings.ContainsAny(s, ".eE") {
-			s += ".0"
-		}
-		sb.WriteString(s)
+		return writeFloat(sb, v.Float)
 	case interpreter.KindString:
 		encodeString(sb, v.Str)
 	case interpreter.KindBytes:
@@ -170,9 +134,9 @@ func encodeValue(sb *strings.Builder, v interpreter.Value, pretty bool, depth in
 			})
 		})
 	case interpreter.KindObject:
-		// a json.Value round-trips: unwrap it and encode its inner tree.
-		if inner, ok := v.AsObject(LibraryName, "Value"); ok {
-			return encodeValue(sb, inner, pretty, depth)
+		// a json.Value round-trips: encode its node tree.
+		if n, ok := asNode(v); ok {
+			return encodeNode(sb, n, pretty, depth)
 		}
 		return fmt.Errorf("cannot encode an opaque %s.%s value", v.StructNS, v.StructName)
 	case interpreter.KindTask:
@@ -180,6 +144,58 @@ func encodeValue(sb *strings.Builder, v interpreter.Value, pretty bool, depth in
 	default:
 		return fmt.Errorf("cannot encode value of kind %s", v.Kind)
 	}
+	return nil
+}
+
+// encodeNode writes a json.Value node's JSON image to sb, with the same depth
+// guard and number / string forms as encodeValue.
+func encodeNode(sb *strings.Builder, n node, pretty bool, depth int) error {
+	if depth > limits.MaxNestingDepth {
+		return fmt.Errorf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
+	}
+	switch n.Kind() {
+	case doctree.KindNull:
+		sb.WriteString("null")
+	case doctree.KindBool:
+		if n.BoolVal() {
+			sb.WriteString("true")
+		} else {
+			sb.WriteString("false")
+		}
+	case doctree.KindInt:
+		sb.WriteString(strconv.FormatInt(n.IntVal(), 10))
+	case doctree.KindFloat:
+		return writeFloat(sb, n.FloatVal())
+	case doctree.KindString:
+		encodeString(sb, n.Str())
+	case doctree.KindList:
+		return encodeSeq(sb, n.Len(), pretty, depth, '[', ']', func(i int) error {
+			return encodeNode(sb, n.Elem(i), pretty, depth+1)
+		})
+	case doctree.KindMap:
+		return encodeSeq(sb, n.Len(), pretty, depth, '{', '}', func(i int) error {
+			encodeString(sb, n.Key(i))
+			sb.WriteString(colon(pretty))
+			return encodeNode(sb, n.Elem(i), pretty, depth+1)
+		})
+	default:
+		return fmt.Errorf("cannot encode a %s node", n.TypeName())
+	}
+	return nil
+}
+
+// writeFloat writes a finite float so that it decodes back as a float.
+func writeFloat(sb *strings.Builder, f float64) error {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return fmt.Errorf("cannot encode non-finite float")
+	}
+	s := strconv.FormatFloat(f, 'g', -1, 64)
+	// Keep the float kind round-trippable: a bare "1" would decode back as
+	// int, so give a float without a fractional/exponent part one.
+	if !strings.ContainsAny(s, ".eE") {
+		s += ".0"
+	}
+	sb.WriteString(s)
 	return nil
 }
 

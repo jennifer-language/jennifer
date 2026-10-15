@@ -263,7 +263,7 @@ type Value struct {
 	KeyTyp     *parser.Type      // KindMap:  key type
 	ValTyp     *parser.Type      // KindMap:  value type
 	Task       *TaskState        // KindTask: shared handle - copying a task copies the pointer
-	Obj        *Value            // KindObject: wrapped opaque payload (e.g. json.Value's decoded tree); StructNS/StructName carry the owning type
+	Obj        *ObjectBox        // KindObject: the opaque payload (a wrapped Value tree, or a library-native structure); StructNS/StructName carry the owning type
 	Fn         *parser.MethodDef // KindFunc: the referenced top-level method (immutable); a copy shares this pointer, nil is the uninitialized zero
 	FnHome     *Interpreter      // KindFunc: the interpreter that defined Fn (its home context). A func value called from another interpreter dispatches back here so Fn's body resolves its own namespace imports; nil = legacy / caller-context (same interpreter). Immutable, shared on copy.
 	Chan       *ChannelState     // KindChannel: shared channel handle - copying a channel copies the pointer (values sent through it are copied)
@@ -538,25 +538,69 @@ func EnumVal(ns, modPath, enum, variant string, fields []StructField) Value {
 	return Value{Kind: KindEnum, StructNS: ns, ModPath: modPath, StructName: enum, Variant: variant, Fields: fields}
 }
 
+// ObjectBox is the payload of a KindObject value. It holds either a wrapped
+// Value tree (ObjectVal - the asn1 library) or a library-native Go structure
+// (NativeObjectVal - json / toml / yaml over their shared compact document
+// tree, and xml's element tree, each many times smaller than the same document
+// as Values). Either way the
+// payload is immutable: library write surfaces return fresh handles, so copies
+// of the Value share the box.
+type ObjectBox struct {
+	inner  Value
+	native NativeObject
+}
+
+// NativeObject is a library-owned payload for an opaque object. It must be
+// immutable (it is shared by every copy of the handle, across goroutines) and
+// supplies the two operations the language performs on an opaque value
+// without going through the library: equality (`==`) and display (`%v`, the
+// REPL echo, convert.toString).
+type NativeObject interface {
+	// EqualNative reports whether other (a payload of the same object type)
+	// holds an equal document.
+	EqualNative(other NativeObject) bool
+	// DisplayNative renders the payload for Display().
+	DisplayNative() string
+}
+
 // ObjectVal wraps an inner value tree as an opaque, library-owned
-// KindObject (e.g. json.Value). ns/name identify the owning type; the
-// language rejects operators / [index] / .field on it, so only that
-// library's accessors reach into the wrapped tree.
+// KindObject. ns/name identify the owning type; the language rejects
+// operators / [index] / .field on it, so only that library's accessors reach
+// into the wrapped tree.
 func ObjectVal(ns, name string, inner Value) Value {
-	return Value{Kind: KindObject, StructNS: ns, StructName: name, Obj: &inner}
+	return Value{Kind: KindObject, StructNS: ns, StructName: name, Obj: &ObjectBox{inner: inner}}
+}
+
+// NativeObjectVal wraps a library-native payload as an opaque KindObject.
+func NativeObjectVal(ns, name string, native NativeObject) Value {
+	return Value{Kind: KindObject, StructNS: ns, StructName: name, Obj: &ObjectBox{native: native}}
 }
 
 // AsObject unwraps a KindObject of the given ns/name, returning its inner
-// tree. Reports false for any other value, so a builtin can reject a
-// wrong-typed argument cleanly.
+// tree. Reports false for any other value - including an object of that type
+// whose payload is native (read that with AsNativeObject) - so a builtin can
+// reject a wrong-typed argument cleanly.
 func (v Value) AsObject(ns, name string) (Value, bool) {
 	if v.Kind == KindObject && v.StructNS == ns && v.StructName == name {
-		if v.Obj != nil {
-			return *v.Obj, true
+		if v.Obj == nil {
+			return Null(), true
 		}
-		return Null(), true
+		if v.Obj.native != nil {
+			return Value{}, false
+		}
+		return v.Obj.inner, true
 	}
 	return Value{}, false
+}
+
+// AsNativeObject returns the native payload of a KindObject of the given
+// ns/name, or false for any other value (including an uninitialised zero
+// handle, which has no payload).
+func (v Value) AsNativeObject(ns, name string) (NativeObject, bool) {
+	if v.Kind == KindObject && v.StructNS == ns && v.StructName == name && v.Obj != nil && v.Obj.native != nil {
+		return v.Obj.native, true
+	}
+	return nil, false
 }
 
 // ObjectDisplayer renders an opaque object's inner tree for Display() (the
@@ -881,10 +925,14 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 		// library's accessors, but a library may register a displayer so
 		// `$v` at the REPL and `%v` show its content instead of the bare
 		// type name.
+		if v.Obj != nil && v.Obj.native != nil {
+			b.WriteString(v.Obj.native.DisplayNative())
+			return
+		}
 		if d := objectDisplayer(v.StructNS, v.StructName); d != nil {
 			inner := Null()
 			if v.Obj != nil {
-				inner = *v.Obj
+				inner = v.Obj.inner
 			}
 			b.WriteString(d(inner))
 			return
@@ -1136,7 +1184,13 @@ func (v Value) Equal(o Value) bool {
 			if v.Obj == nil || o.Obj == nil {
 				return v.Obj == o.Obj
 			}
-			return v.Obj.Equal(*o.Obj)
+			if v.Obj == o.Obj {
+				return true
+			}
+			if v.Obj.native != nil || o.Obj.native != nil {
+				return v.Obj.native != nil && o.Obj.native != nil && v.Obj.native.EqualNative(o.Obj.native)
+			}
+			return v.Obj.inner.Equal(o.Obj.inner)
 		case KindList:
 			if len(v.List) != len(o.List) {
 				return false

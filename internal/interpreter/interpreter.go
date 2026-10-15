@@ -408,6 +408,27 @@ func (i *Interpreter) RegisterNamespacedObject(lib, name string, display ObjectD
 	registerObjectDisplayer(lib, name, display)
 }
 
+// SetNativeObjectZero records the payload an uninitialised `def x as ns.name;`
+// of a native object type holds (json / toml / yaml register a null node, xml
+// an empty text node), so the zero value is an ordinary payload of that type
+// rather than a special case the library has to recognise.
+func (i *Interpreter) SetNativeObjectZero(lib, name string, zero NativeObject) {
+	objectZeros.Store(lib+"."+name, zero)
+}
+
+// objectZeros is keyed by "ns.name"; package-level for the same reason as
+// objectDisplayers (a library registers the same immutable zero per
+// interpreter).
+var objectZeros sync.Map
+
+// zeroObject is the zero value of an opaque object type.
+func zeroObject(ns, name string) Value {
+	if z, ok := objectZeros.Load(ns + "." + name); ok {
+		return NativeObjectVal(ns, name, z.(NativeObject))
+	}
+	return ObjectVal(ns, name, Null())
+}
+
 // isObjectType reports whether (ns, name) names a registered opaque object
 // type rather than an ordinary namespaced struct.
 func (i *Interpreter) isObjectType(ns, name string) bool {
@@ -1938,8 +1959,9 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 			val = zero
 		} else if st.VarType.Kind == parser.TypeStruct && i.isObjectType(st.VarType.StructNS, st.VarType.StructName) {
 			// an opaque object type (json.Value) zeroes to an empty payload:
-			// a wrapped null node, not a struct.
-			val = ObjectVal(st.VarType.StructNS, st.VarType.StructName, Null())
+			// the library's registered native zero, else a wrapped null node -
+			// not a struct.
+			val = zeroObject(st.VarType.StructNS, st.VarType.StructName)
 		} else if st.VarType.Kind == parser.TypeStruct {
 			zero, err := i.zeroStructFor(st.VarType.StructNS, st.VarType.StructName, st.VarType.ModPath, st)
 			if err != nil {
@@ -2536,6 +2558,12 @@ func (p posNode) astNode()         {}
 // surprises later). `ns` is empty for user-defined
 // structs and set for library-provided namespaced ones.
 func (i *Interpreter) zeroStructFor(ns, name, modPath string, st parser.Node) (Value, error) {
+	// An opaque library type (json.Value, ...) zeroes to its registered empty
+	// payload wherever it appears - a struct field or enum payload included -
+	// never to a struct of its (non-existent) fields.
+	if ns != "" && i.isObjectType(ns, name) {
+		return zeroObject(ns, name), nil
+	}
 	// A module struct: build it inside the module's own interpreter so nested
 	// module-struct fields resolve there, then retag the module's own structs
 	// from their internal bare identity to the stem the importer sees - the

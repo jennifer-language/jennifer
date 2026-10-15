@@ -12,14 +12,23 @@ both binaries.
 | `json.encodePretty(v)`   | `string`     | Same, 2-space indented; empty lists / maps stay `[]`/`{}`.     |
 | `json.decode(s)`         | `json.Value` | Parse JSON text into an opaque handle (see below).             |
 
-`json.decode` rejects container nesting past a fixed depth with a normal
+`json.decode` rejects an object that repeats a key (`{"a": 1, "a": 2}`) with a
+catchable decode error positioned at the second copy, at any depth, the same as
+`yaml.decode` and `toml.decode`. RFC 8259 leaves duplicates to the
+implementation and I-JSON (RFC 7493) forbids them; silently keeping one copy
+would let two parsers read the same document differently. The same key in two
+different objects is fine.
+
+`json.decode` also rejects container nesting past a fixed depth with a normal
 (catchable) decode error, so hostile deeply-nested input can't exhaust the
 interpreter's stack. The limit is shared by every parser in the toolchain and
 is set per binary: 1000 levels on the default `jennifer` (Go's growable stack),
 64 on `jennifer-tiny` (its fixed 4 MB stack). Both are far past any real
 document. `decode` also caps the total number of value nodes it will
-materialise, so a flat few-MB document (a huge array) raises a catchable error
-instead of amplifying into gigabytes of memory.
+materialise - about two million on `jennifer` (a 20-35 MB document of small
+values), a quarter million on `jennifer-tiny` - so a hostile document of
+millions of tiny values raises a catchable error instead of growing without
+bound.
 
 Accessors over a decoded `json.Value`. Every one takes an optional
 trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
@@ -98,7 +107,18 @@ into typed code by accident. `==` / `!=` are the exception - they compare two
 handles by value (same type and equal content), so decoded documents can be
 de-duplicated or matched. You reach inside
 with the accessors, addressing nodes by **JSON Pointer** - the same paths
-the (planned) write surface uses, so reads and writes are mirror images.
+the write surface uses, so reads and writes are mirror images.
+
+The parsed tree is compact and immutable. It is stored in a form built for
+JSON rather than as ordinary Jennifer values, so a document takes from about
+its text size (string-heavy data) to roughly 15 times it (many small values) in
+memory. Because nothing edits it in place, binding a `json.Value`, passing it to
+a function, capturing it in a `spawn`, or taking a sub-tree with `json.get`
+shares the tree instead of copying it, and each write copies only the path it
+changes. Strings in the tree share the decoded text, so a sub-tree from
+`json.get` keeps the whole document's text in memory; the values the `as*`
+accessors and `keys` return are copies, so to keep a few fields of a large
+document past its lifetime, read them out rather than holding a sub-tree.
 
 ```jennifer
 use io;

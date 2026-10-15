@@ -4,8 +4,10 @@
 package xmllib
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
@@ -171,7 +173,7 @@ func TestBuildSurface(t *testing.T) {
 	e, _ = setAttrFn(noCtx, []interpreter.Value{e, interpreter.StringVal("type"), interpreter.StringVal("warn")}) // update
 	e, _ = setTextFn(noCtx, []interpreter.Value{e, interpreter.StringVal("hi <there> & you")})
 	var sb strings.Builder
-	inner, _ := e.AsObject(LibraryName, "Value")
+	inner, _ := asNode(e)
 	encodeNode(&sb, inner, false, 0)
 	if got := sb.String(); got != `<note type="warn">hi &lt;there&gt; &amp; you</note>` {
 		t.Errorf("built = %q", got)
@@ -179,7 +181,7 @@ func TestBuildSurface(t *testing.T) {
 	// append into a fresh parent; the child tree is not mutated.
 	parent, _ := elementFn(noCtx, []interpreter.Value{interpreter.StringVal("outer")})
 	parent, _ = appendFn(noCtx, []interpreter.Value{parent, e})
-	pinner, _ := parent.AsObject(LibraryName, "Value")
+	pinner, _ := asNode(parent)
 	var sb2 strings.Builder
 	encodeNode(&sb2, pinner, false, 0)
 	if !strings.HasPrefix(sb2.String(), "<outer><note") {
@@ -242,12 +244,12 @@ func TestDecodeDepthCap(t *testing.T) {
 
 // Encoding a tree built deeper than the cap must error, not overflow the stack.
 func TestEncodeDepthCap(t *testing.T) {
-	node := elementNode("a", nil, nil)
+	deep := elementNode("a", nil, nil)
 	for i := 0; i < maxDepth+50; i++ {
-		node = elementNode("a", nil, []interpreter.Value{node})
+		deep = elementNode("a", nil, []node{deep})
 	}
 	var sb strings.Builder
-	if err := encodeNode(&sb, node, false, 0); err == nil {
+	if err := encodeNode(&sb, deep, false, 0); err == nil {
 		t.Error("encoding an over-deep tree should error")
 	}
 }
@@ -308,5 +310,103 @@ func TestDecodeNodeBudget(t *testing.T) {
 	}
 	if _, err := decodeXML("<a><b/></a>"); err != nil {
 		t.Errorf("within-budget document should decode, got %v", err)
+	}
+}
+
+// Text and attribute values with nothing to decode are taken as-is (the
+// substring fast path); ones with references or whitespace still decode.
+func TestDecodeFastAndSlowPaths(t *testing.T) {
+	str := strGetter(t)
+	rv := mustDecode(t, "<r a=\"plain\" b=\"x &amp; y\" c=\"p\tq\">one<i/>two &lt;3</r>")
+	for name, want := range map[string]string{"a": "plain", "b": "x & y", "c": "p q"} {
+		if got := str(attrFn(noCtx, []interpreter.Value{rv, interpreter.StringVal(name)})); got != want {
+			t.Errorf("attr %s = %q, want %q", name, got, want)
+		}
+	}
+	if got := str(textFn(noCtx, []interpreter.Value{rv})); got != "onetwo <3" {
+		t.Errorf("text = %q", got)
+	}
+	if got := str(encodeFn([]interpreter.Value{rv}, false)); got != `<r a="plain" b="x &amp; y" c="p q">one<i/>two &lt;3</r>` {
+		t.Errorf("re-encode = %q", got)
+	}
+}
+
+// Equality compares content: attribute order does not matter, child order
+// does, and a decoded document equals the same document built by hand.
+func TestValueEquality(t *testing.T) {
+	a := mustDecode(t, `<p x="1" y="2"><q>t</q></p>`)
+	b := mustDecode(t, `<p y="2" x="1"><q>t</q></p>`)
+	if !a.Equal(b) {
+		t.Error("attribute order should not affect equality")
+	}
+	if a.Equal(mustDecode(t, `<p x="1" y="2"><q>u</q></p>`)) {
+		t.Error("different text should not be equal")
+	}
+	if mustDecode(t, `<p><a/><b/></p>`).Equal(mustDecode(t, `<p><b/><a/></p>`)) {
+		t.Error("child order should matter")
+	}
+	built, _ := elementFn(noCtx, []interpreter.Value{interpreter.StringVal("q")})
+	built, _ = setTextFn(noCtx, []interpreter.Value{built, interpreter.StringVal("t")})
+	if !built.Equal(mustGet(t, a, "q")) {
+		t.Error("built element should equal the decoded one")
+	}
+}
+
+// The build surface never mutates the element it was given, even when the
+// result is appended to or re-attributed.
+func TestBuildSurfaceSharesSafely(t *testing.T) {
+	str := strGetter(t)
+	base := mustDecode(t, `<e k="v"><c/></e>`)
+	_, _ = setAttrFn(noCtx, []interpreter.Value{base, interpreter.StringVal("k"), interpreter.StringVal("w")})
+	extra, _ := elementFn(noCtx, []interpreter.Value{interpreter.StringVal("d")})
+	_, _ = appendFn(noCtx, []interpreter.Value{base, extra})
+	_, _ = setTextFn(noCtx, []interpreter.Value{base, interpreter.StringVal("x")})
+	if got := str(encodeFn([]interpreter.Value{base}, false)); got != `<e k="v"><c/></e>` {
+		t.Errorf("source element changed: %q", got)
+	}
+}
+
+// An element with a huge attribute list decodes and compares in linear time,
+// and a duplicate is still found past the small-list scan.
+func TestManyAttributes(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("<r")
+	for i := 0; i < 80000; i++ {
+		fmt.Fprintf(&sb, ` a%d=""`, i)
+	}
+	sb.WriteString("/>")
+	start := time.Now()
+	a := mustDecode(t, sb.String())
+	b := mustDecode(t, sb.String())
+	if !a.Equal(b) {
+		t.Error("identical documents should be equal")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("decode + compare of 80k attributes took %v", d)
+	}
+	if _, err := decodeXML(`<r a0="" a1="" a2="" a3="" a4="" a5="" a6="" a7="" a8="" a9="" a3=""/>`); err == nil || !strings.Contains(err.Error(), "duplicate attribute") {
+		t.Errorf("duplicate past the scan threshold: %v", err)
+	}
+}
+
+// xml.append refuses to build a tree deeper than the nesting cap, so equality
+// and encoding (one Go frame per level) stay bounded.
+func TestAppendDepthCap(t *testing.T) {
+	v, _ := elementFn(noCtx, []interpreter.Value{interpreter.StringVal("a")})
+	var err error
+	for i := 0; i < maxDepth+5 && err == nil; i++ {
+		p, _ := elementFn(noCtx, []interpreter.Value{interpreter.StringVal("a")})
+		var next interpreter.Value
+		next, err = appendFn(noCtx, []interpreter.Value{p, v})
+		if err == nil {
+			v = next
+		}
+	}
+	if err == nil || !strings.Contains(err.Error(), "nest deeper") {
+		t.Errorf("deep append: %v", err)
+	}
+	n, _ := asNode(v)
+	if n.height() != maxDepth {
+		t.Errorf("deepest tree built has height %d, want %d", n.height(), maxDepth)
 	}
 }

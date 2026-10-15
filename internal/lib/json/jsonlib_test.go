@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
@@ -23,13 +24,34 @@ func enc(t *testing.T, v interpreter.Value) string {
 	return out.Str
 }
 
+// dec decodes s and materialises the node tree as interpreter Values, so the
+// structural assertions below read like the language-level shapes.
 func dec(t *testing.T, s string) interpreter.Value {
 	t.Helper()
 	out, err := decodeFn([]interpreter.Value{interpreter.StringVal(s)})
 	if err != nil {
 		t.Fatalf("decode(%q): %v", s, err)
 	}
-	return out
+	return toValue(out)
+}
+
+// toValue renders a node as the equivalent interpreter Value tree (tests only).
+func toValue(n node) interpreter.Value {
+	switch n.Kind() {
+	case doctree.KindList:
+		out := make([]interpreter.Value, n.Len())
+		for i, e := range n.Elems() {
+			out[i] = toValue(e)
+		}
+		return interpreter.Value{Kind: interpreter.KindList, List: out}
+	case doctree.KindMap:
+		entries := make([]interpreter.MapEntry, n.Len())
+		for i, e := range n.Elems() {
+			entries[i] = interpreter.MapEntry{Key: interpreter.StringVal(n.Key(i)), Value: toValue(e)}
+		}
+		return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+	}
+	return n.ScalarValue()
 }
 
 func TestEncodeScalars(t *testing.T) {
@@ -159,10 +181,19 @@ func TestDecodeCompound(t *testing.T) {
 	if o.Map[0].Key.Str != "a" || o.Map[0].Value.Int != 1 {
 		t.Errorf("object[a] wrong: %v", o.Map[0])
 	}
-	// last-wins on duplicate keys
-	d := dec(t, `{"k": 1, "k": 2}`)
-	if len(d.Map) != 1 || d.Map[0].Value.Int != 2 {
-		t.Errorf("dup keys -> %v, want single k=2", d)
+	// A duplicate key is an error (as in yaml / toml), positioned at the second
+	// copy, at any depth; equal keys in different objects are fine.
+	for _, s := range []string{`{"k": 1, "k": 2}`, `{"a": {"k": 1, "k": 1}}`, `[{"x": 1, "y": 2, "x": 3}]`, `{"\u006b": 1, "k": 2}`} {
+		_, err := decodeFn([]interpreter.Value{interpreter.StringVal(s)})
+		if err == nil || !strings.Contains(err.Error(), "duplicate key") {
+			t.Errorf("decode(%s) = %v, want a duplicate-key error", s, err)
+		}
+	}
+	if _, err := decodeFn([]interpreter.Value{interpreter.StringVal(`{"k": 1, "x": 2, "k": 3}`)}); err == nil || !strings.Contains(err.Error(), "line 1, column 18") {
+		t.Errorf("duplicate-key error should point at the second key (1:18), got %v", err)
+	}
+	if o := dec(t, `{"k": {"k": 1}, "j": {"k": 2}}`); len(o.Map) != 2 {
+		t.Errorf("same key in different objects must decode: %v", o)
 	}
 }
 
@@ -259,10 +290,17 @@ func TestEncodeDepthGuard(t *testing.T) {
 		t.Error("expected a depth-limit error for an over-deep value")
 	}
 	// The write-API construction guard rejects the same shape at build time.
-	if exceedsDepth(nest(limits.MaxNestingDepth), limits.MaxNestingDepth) {
+	nodeOf := func(v interpreter.Value) node {
+		n, err := lib.ToNode(v, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if nodeOf(nest(limits.MaxNestingDepth)).ExceedsDepth(limits.MaxNestingDepth) {
 		t.Error("a tree at the limit must not be flagged as exceeding it")
 	}
-	if !exceedsDepth(nest(limits.MaxNestingDepth+1), limits.MaxNestingDepth) {
+	if !nodeOf(nest(limits.MaxNestingDepth + 1)).ExceedsDepth(limits.MaxNestingDepth) {
 		t.Error("a tree past the limit must be flagged")
 	}
 }
@@ -274,18 +312,15 @@ func TestEncodeDepthGuard(t *testing.T) {
 func TestMoveDepthGuard(t *testing.T) {
 	// A chain of n single-key maps ("k") ending in an empty map (so a child can
 	// still be added at the bottom).
-	chain := func(n int) interpreter.Value {
-		v := mapVal(nil)
+	chain := func(n int) node {
+		v := doctree.Map(nil, nil)
 		for i := 0; i < n; i++ {
-			v = mapVal([]interpreter.MapEntry{{Key: interpreter.StringVal("k"), Value: v}})
+			v = doctree.Map([]string{"k"}, []node{v})
 		}
 		return v
 	}
 	half := maxNestingDepth/2 + 50 // each branch ~ half the limit; combined exceeds it
-	doc := wrap(mapVal([]interpreter.MapEntry{
-		{Key: interpreter.StringVal("a"), Value: chain(half)},
-		{Key: interpreter.StringVal("b"), Value: chain(half)},
-	}))
+	doc := wrap(doctree.Map([]string{"a", "b"}, []node{chain(half), chain(half)}))
 	// The document itself is within the limit (encodes fine).
 	if _, err := encodeFn([]interpreter.Value{doc}, false); err != nil {
 		t.Fatalf("setup doc should encode, got %v", err)
@@ -341,7 +376,7 @@ func TestDecodedObjectIndexedLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := interpreter.ObjectVal("json", "Value", tree)
+	doc := wrap(tree)
 	ctx := interpreter.BuiltinCtx{}
 	for i := 0; i < n; i++ {
 		v, err := asIntFn(ctx, []interpreter.Value{doc, interpreter.StringVal("/k" + strconv.Itoa(i))})

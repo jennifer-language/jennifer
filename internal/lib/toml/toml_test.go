@@ -8,20 +8,51 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
-// get walks a decoded tree by JSON Pointer, failing the test on any error.
-func get(t *testing.T, tree interpreter.Value, ptr string) interpreter.Value {
+// getNode walks a decoded tree by JSON Pointer, failing the test on any error.
+func getNode(t *testing.T, tree node, ptr string) node {
 	t.Helper()
-	tokens, err := parsePointer("get", ptr)
-	if err != nil {
-		t.Fatalf("bad pointer %q: %v", ptr, err)
-	}
-	v, err := walkPointer("get", tree, tokens)
+	n, err := doctree.Resolve("get", tree, ptr)
 	if err != nil {
 		t.Fatalf("walk %q: %v", ptr, err)
 	}
-	return v
+	return n
+}
+
+// get is getNode rendered as an interpreter Value (scalars as themselves,
+// containers as a list / map), so assertions read like language-level shapes.
+func get(t *testing.T, tree node, ptr string) interpreter.Value {
+	t.Helper()
+	return toValue(getNode(t, tree, ptr))
+}
+
+func toValue(n node) interpreter.Value {
+	switch n.Kind() {
+	case doctree.KindList:
+		out := make([]interpreter.Value, n.Len())
+		for i, e := range n.Elems() {
+			out[i] = toValue(e)
+		}
+		return listVal(out)
+	case doctree.KindMap:
+		entries := make([]interpreter.MapEntry, n.Len())
+		for i, e := range n.Elems() {
+			entries[i] = interpreter.MapEntry{Key: interpreter.StringVal(n.Key(i)), Value: toValue(e)}
+		}
+		return mapVal(entries)
+	}
+	return n.ScalarValue()
+}
+
+func listVal(elems []interpreter.Value) interpreter.Value {
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeNull), elems)
+}
+
+func mapVal(entries []interpreter.MapEntry) interpreter.Value {
+	return interpreter.MapVal(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeNull), entries)
 }
 
 func TestDecodeScalars(t *testing.T) {
@@ -178,7 +209,8 @@ spaced = 1979-05-27 07:32:00Z
 		t.Fatalf("decode: %v", err)
 	}
 	cases := []struct {
-		ptr, wantForm string
+		ptr      string
+		wantForm uint8
 	}{
 		{"/odt", formOffsetDatetime},
 		{"/odt2", formOffsetDatetime},
@@ -188,28 +220,23 @@ spaced = 1979-05-27 07:32:00Z
 		{"/spaced", formOffsetDatetime},
 	}
 	for _, c := range cases {
-		v := get(t, tree, c.ptr)
-		_, form, ok := isDatetimeNode(v)
-		if !ok {
-			t.Errorf("%s: not a datetime node (%+v)", c.ptr, v)
+		v := getNode(t, tree, c.ptr)
+		if v.Kind() != doctree.KindDatetime {
+			t.Errorf("%s: not a datetime node (%s)", c.ptr, v.TypeName())
 			continue
 		}
+		form := v.Form()
 		if form != c.wantForm {
-			t.Errorf("%s: form = %q, want %q", c.ptr, form, c.wantForm)
+			t.Errorf("%s: form = %s, want %s", c.ptr, formName(form), formName(c.wantForm))
 		}
-		if _, err := parseDatetimeText(mustText(v), form); err != nil {
+		if _, err := parseDatetimeText(v.Str(), form); err != nil {
 			t.Errorf("%s: parseDatetimeText: %v", c.ptr, err)
 		}
 	}
 	// The space separator is normalised to 'T'.
-	if txt := mustText(get(t, tree, "/spaced")); txt != "1979-05-27T07:32:00Z" {
+	if txt := getNode(t, tree, "/spaced").Str(); txt != "1979-05-27T07:32:00Z" {
 		t.Errorf("spaced normalised = %q", txt)
 	}
-}
-
-func mustText(v interpreter.Value) string {
-	text, _, _ := isDatetimeNode(v)
-	return text
 }
 
 func TestEncodeRoundTrip(t *testing.T) {
@@ -230,7 +257,7 @@ name = "banana"
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	out, err := encodeToml(tree, false)
+	out, err := encodeToml(lib.Wrap(tree), false)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
@@ -246,7 +273,7 @@ name = "banana"
 	if v := get(t, tree2, "/fruit/1/name"); v.Str != "banana" {
 		t.Errorf("round-trip fruit[1] = %q", v.Str)
 	}
-	if txt := mustText(get(t, tree2, "/created")); txt != "1979-05-27T07:32:00Z" {
+	if txt := getNode(t, tree2, "/created").Str(); txt != "1979-05-27T07:32:00Z" {
 		t.Errorf("round-trip created = %q", txt)
 	}
 }
@@ -328,6 +355,14 @@ func TestDecodeDepthCap(t *testing.T) {
 	deepKey := "x = {" + strings.Repeat("a.", maxNestingDepth+1) + "b = 1}"
 	if _, err := decodeToml(deepKey); err == nil || !strings.Contains(err.Error(), "nesting") {
 		t.Errorf("deep dotted key: expected nesting-depth error, got %v", err)
+	}
+	// Headers, dotted keys and inline nesting each stay under their own cap but
+	// stack past it together; the document as a whole is bounded too.
+	half := maxNestingDepth/2 + 10
+	stacked := "[" + strings.TrimSuffix(strings.Repeat("h.", half), ".") + "]\nx = " +
+		strings.Repeat("[", half) + strings.Repeat("]", half)
+	if _, err := decodeToml(stacked); err == nil || !strings.Contains(err.Error(), "nests deeper") {
+		t.Errorf("stacked nesting: expected a document-depth error, got %v", err)
 	}
 	// A document exactly at the cap still decodes.
 	okArr := "x = " + strings.Repeat("[", maxNestingDepth) + strings.Repeat("]", maxNestingDepth)
@@ -474,5 +509,34 @@ func TestDecodeNodeBudget(t *testing.T) {
 	}
 	if _, err := decodeToml("a = [1, 2, 3]"); err != nil {
 		t.Errorf("within-budget document should decode, got %v", err)
+	}
+}
+
+// A plain time.Time encodes as an offset date-time (as a stored one does), not
+// as a table of its nanos / offset fields.
+func TestEncodePlainTimeAsDatetime(t *testing.T) {
+	tm := interpreter.NamespacedStructVal("time", "Time", []interpreter.StructField{
+		{Name: "nanos", Value: interpreter.IntVal(0)},
+		{Name: "offset", Value: interpreter.IntVal(-28800)},
+	})
+	out, err := encodeToml(mapVal([]interpreter.MapEntry{{Key: interpreter.StringVal("t"), Value: tm}}), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "t = 1969-12-31T16:00:00-08:00\n" {
+		t.Errorf("encode = %q", out)
+	}
+}
+
+// A header may extend an array of tables made by [[...]], but not a static
+// array of inline tables (TOML 1.0: a static array is closed).
+func TestHeaderCannotExtendStaticArray(t *testing.T) {
+	for _, src := range []string{"a = [{x = 1}]\n[a.y]\nz = 1\n", "a = [{x = 1}]\na.y = 1\n"} {
+		if _, err := decodeToml(src); err == nil {
+			t.Errorf("%q should not decode", src)
+		}
+	}
+	if _, err := decodeToml("[[a]]\nx = 1\n[a.y]\nz = 1\n"); err != nil {
+		t.Errorf("extending an array of tables: %v", err)
 	}
 }

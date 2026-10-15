@@ -5,9 +5,9 @@
 // delegated to gopkg.in/yaml.v3 (anchors / aliases, flow and block styles,
 // implicit typing, and multi-document streams are impractical to hand-roll and
 // have no Go stdlib equivalent - the one place a config parser earns a
-// dependency), then the resulting yaml.Node tree is walked into the same
-// interpreter Value tree the json / toml libraries use, so the read / write
-// accessor surface is shared in shape. Mapping order is preserved (Jennifer's
+// dependency), then the resulting yaml.Node tree is walked into the shared
+// compact document tree the json / toml libraries use (internal/lib/doctree),
+// so the read / write surface is literally shared. Mapping order is preserved (Jennifer's
 // map is insertion-ordered); scalar keys are taken in their source text form.
 package yamllib
 
@@ -20,9 +20,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
-	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // maxNestingDepth caps container recursion so a deeply-nested (or alias-nested)
@@ -38,14 +37,15 @@ const maxNestingDepth = 1000
 var maxNodes = limits.MaxDecodedNodes
 
 // maxDecodeBytes caps the raw input one decode accepts, checked before yaml.v3
-// runs. The converter's maxNodes budget bounds the Value tree, but yaml.v3 builds
+// runs. The converter's maxNodes budget bounds the tree, but yaml.v3 builds
 // its own yaml.Node tree for the whole document first, so without a byte cap a
 // large flat document reaches multi-GB RSS (and a possible OOM kill) before the
-// node budget is ever consulted. Sized so the densest input (~2 bytes per node)
-// cannot build far past maxNodes yaml.Node before the converter stops it; a larger
-// document is a catchable error. Config YAML is KB-MB, so this never rejects a
-// real one.
-var maxDecodeBytes = 4 << 20
+// node budget is ever consulted. Sized at two bytes per node so the densest
+// input (~2 bytes per node) cannot build far past maxNodes yaml.Nodes before the
+// converter stops it: 4 MiB on the default binary, 512 KiB on jennifer-tiny; a
+// larger document is a catchable error. Config YAML is KB-MB, so this never
+// rejects a real one.
+var maxDecodeBytes = 2 * limits.MaxDecodedNodes
 
 // maxParseDepth caps structural nesting *before* the input reaches yaml.v3.
 // yaml.v3 is a recursive-descent parser that recurses once per nesting level as
@@ -65,65 +65,31 @@ type converter struct {
 	nodes int
 }
 
-// datetimeVal builds the internal yaml.Datetime node holding a timestamp's
-// verbatim text. It is never registered as a namespaced struct (it only ever
-// lives inside the opaque yaml.Value tree), so no `.j` code can name or
-// construct it; the accessor and encoder recognise it by (StructNS, StructName).
-func datetimeVal(text string) interpreter.Value {
-	return interpreter.NamespacedStructVal("yaml", "Datetime", []interpreter.StructField{
-		{Name: "text", Value: interpreter.StringVal(text)},
-	})
-}
-
-// isDatetimeNode reports whether v is a yaml.Datetime tree node, returning its
-// verbatim text.
-func isDatetimeNode(v interpreter.Value) (text string, ok bool) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != "yaml" || v.StructName != "Datetime" {
-		return "", false
-	}
-	for _, f := range v.Fields {
-		if f.Name == "text" {
-			text = f.Value.Str
-		}
-	}
-	return text, true
-}
-
-// listVal / mapVal mirror the json / toml tree constructors so the accessors and
-// write surface build nodes the same way.
-func listVal(elems []interpreter.Value) interpreter.Value {
-	return interpreter.ListVal(parser.PrimitiveType(parser.TypeNull), elems)
-}
-
-func mapVal(entries []interpreter.MapEntry) interpreter.Value {
-	return interpreter.MapVal(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeNull), entries)
-}
-
 // decodeYaml parses a single-document YAML string into its root value. A stream
 // with more than one document is an error pointing at decodeAll; an empty stream
 // yields a null value.
-func decodeYaml(src string) (interpreter.Value, error) {
+func decodeYaml(src string) (node, error) {
 	docs, err := decodeStream(src)
 	if err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	if len(docs) == 0 {
-		return interpreter.Null(), nil
+		return doctree.Null(), nil
 	}
 	if len(docs) > 1 {
-		return interpreter.Value{}, fmt.Errorf("yaml.decode: input has %d documents; use yaml.decodeAll for a multi-document stream", len(docs))
+		return node{}, fmt.Errorf("yaml.decode: input has %d documents; use yaml.decodeAll for a multi-document stream", len(docs))
 	}
 	return docs[0], nil
 }
 
 // decodeAllYaml parses every document of a YAML stream into a slice of root
 // values (each later wrapped as a yaml.Value).
-func decodeAllYaml(src string) ([]interpreter.Value, error) {
+func decodeAllYaml(src string) ([]node, error) {
 	return decodeStream(src)
 }
 
 // decodeStream runs the yaml.v3 streaming decoder and converts each document.
-func decodeStream(src string) ([]interpreter.Value, error) {
+func decodeStream(src string) ([]node, error) {
 	if len(src) > maxDecodeBytes {
 		return nil, fmt.Errorf("yaml.decode: input is %d bytes, over the %d-byte limit (input rejected as a decode bomb)", len(src), maxDecodeBytes)
 	}
@@ -131,7 +97,11 @@ func decodeStream(src string) ([]interpreter.Value, error) {
 		return nil, err
 	}
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(src)))
-	var out []interpreter.Value
+	var out []node
+	// One converter for the whole stream: its node budget bounds the decode,
+	// not each document (a many-document file of alias bombs would otherwise
+	// multiply the cap).
+	c := &converter{}
 	for {
 		var doc yaml.Node
 		err := dec.Decode(&doc)
@@ -141,7 +111,6 @@ func decodeStream(src string) ([]interpreter.Value, error) {
 		if err != nil {
 			return nil, fmt.Errorf("yaml.decode: %v", err)
 		}
-		c := &converter{}
 		v, cerr := c.node(&doc, 0)
 		if cerr != nil {
 			return nil, cerr
@@ -400,24 +369,24 @@ func isIntegerText(s string) bool {
 	return true
 }
 
-// node converts one yaml.Node into an interpreter Value.
-func (c *converter) node(n *yaml.Node, depth int) (interpreter.Value, error) {
+// node converts one yaml.Node into a tree node.
+func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 	if depth > maxNestingDepth {
-		return interpreter.Value{}, fmt.Errorf("yaml.decode: nesting too deep (limit %d)", maxNestingDepth)
+		return node{}, fmt.Errorf("yaml.decode: nesting too deep (limit %d)", maxNestingDepth)
 	}
 	c.nodes++
 	if c.nodes > maxNodes {
-		return interpreter.Value{}, fmt.Errorf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", maxNodes)
+		return node{}, fmt.Errorf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", maxNodes)
 	}
 	switch n.Kind {
 	case yaml.DocumentNode:
 		if len(n.Content) == 0 {
-			return interpreter.Null(), nil
+			return doctree.Null(), nil
 		}
 		return c.node(n.Content[0], depth+1)
 	case yaml.AliasNode:
 		if n.Alias == nil {
-			return interpreter.Value{}, fmt.Errorf("yaml.decode: alias %q has no anchor", n.Value)
+			return node{}, fmt.Errorf("yaml.decode: alias %q has no anchor", n.Value)
 		}
 		return c.node(n.Alias, depth+1)
 	case yaml.MappingNode:
@@ -428,14 +397,15 @@ func (c *converter) node(n *yaml.Node, depth int) (interpreter.Value, error) {
 		return c.scalar(n)
 	case 0:
 		// A zero Node comes from an empty document.
-		return interpreter.Null(), nil
+		return doctree.Null(), nil
 	default:
-		return interpreter.Value{}, fmt.Errorf("yaml.decode: unsupported node kind %d", n.Kind)
+		return node{}, fmt.Errorf("yaml.decode: unsupported node kind %d", n.Kind)
 	}
 }
 
-func (c *converter) mapping(n *yaml.Node, depth int) (interpreter.Value, error) {
-	entries := make([]interpreter.MapEntry, 0, len(n.Content)/2)
+func (c *converter) mapping(n *yaml.Node, depth int) (node, error) {
+	keys := make([]string, 0, len(n.Content)/2)
+	elems := make([]node, 0, len(n.Content)/2)
 	seen := map[string]bool{}
 	var merges []*yaml.Node // deferred `<<` merge-source value nodes, in order
 	for i := 0; i+1 < len(n.Content); i += 2 {
@@ -450,56 +420,59 @@ func (c *converter) mapping(n *yaml.Node, depth int) (interpreter.Value, error) 
 			keyNode = keyNode.Alias
 		}
 		if keyNode.Kind != yaml.ScalarNode {
-			return interpreter.Value{}, fmt.Errorf("yaml.decode: mapping key must be scalar, got node kind %d", keyNode.Kind)
+			return node{}, fmt.Errorf("yaml.decode: mapping key must be scalar, got node kind %d", keyNode.Kind)
 		}
 		// Duplicate keys would produce a map with a repeated key, breaking the
 		// unique-key invariant; reject them (as json / toml / xml decode do).
 		if seen[keyNode.Value] {
-			return interpreter.Value{}, fmt.Errorf("yaml.decode: duplicate mapping key %q", keyNode.Value)
+			return node{}, fmt.Errorf("yaml.decode: duplicate mapping key %q", keyNode.Value)
 		}
 		val, err := c.node(n.Content[i+1], depth+1)
 		if err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 		seen[keyNode.Value] = true
-		entries = append(entries, interpreter.MapEntry{Key: interpreter.StringVal(keyNode.Value), Value: val})
+		keys = append(keys, keyNode.Value)
+		elems = append(elems, val)
 	}
 	// Apply merges: an explicit key always wins over a merged one, and an
 	// earlier merge source wins over a later one.
 	for _, m := range merges {
 		sources, err := c.mergeSources(m, depth)
 		if err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 		for _, srcMap := range sources {
-			for _, e := range srcMap.Map {
-				if seen[e.Key.Str] {
+			for i, e := range srcMap.Elems() {
+				k := srcMap.Key(i)
+				if seen[k] {
 					continue
 				}
-				seen[e.Key.Str] = true
-				entries = append(entries, e)
+				seen[k] = true
+				keys = append(keys, k)
+				elems = append(elems, e)
 			}
 		}
 	}
-	return mapVal(entries), nil
+	return doctree.Map(keys, elems), nil
 }
 
 // mergeSources resolves a `<<` merge value into the mappings it contributes: a
 // single mapping (an alias or an inline map), or a sequence of them.
-func (c *converter) mergeSources(n *yaml.Node, depth int) ([]interpreter.Value, error) {
+func (c *converter) mergeSources(n *yaml.Node, depth int) ([]node, error) {
 	nn := n
 	if nn.Kind == yaml.AliasNode && nn.Alias != nil {
 		nn = nn.Alias
 	}
 	if nn.Kind == yaml.SequenceNode {
-		out := make([]interpreter.Value, 0, len(nn.Content))
+		out := make([]node, 0, len(nn.Content))
 		for _, e := range nn.Content {
 			v, err := c.node(e, depth+1)
 			if err != nil {
 				return nil, err
 			}
-			if v.Kind != interpreter.KindMap {
-				return nil, fmt.Errorf("yaml.decode: merge (<<) source must be a mapping, got a %s", yamlNodeType(v))
+			if v.Kind() != doctree.KindMap {
+				return nil, fmt.Errorf("yaml.decode: merge (<<) source must be a mapping, got a %s", v.TypeName())
 			}
 			out = append(out, v)
 		}
@@ -509,61 +482,61 @@ func (c *converter) mergeSources(n *yaml.Node, depth int) ([]interpreter.Value, 
 	if err != nil {
 		return nil, err
 	}
-	if v.Kind != interpreter.KindMap {
-		return nil, fmt.Errorf("yaml.decode: merge (<<) source must be a mapping, got a %s", yamlNodeType(v))
+	if v.Kind() != doctree.KindMap {
+		return nil, fmt.Errorf("yaml.decode: merge (<<) source must be a mapping, got a %s", v.TypeName())
 	}
-	return []interpreter.Value{v}, nil
+	return []node{v}, nil
 }
 
-func (c *converter) sequence(n *yaml.Node, depth int) (interpreter.Value, error) {
-	elems := make([]interpreter.Value, 0, len(n.Content))
+func (c *converter) sequence(n *yaml.Node, depth int) (node, error) {
+	elems := make([]node, 0, len(n.Content))
 	for _, child := range n.Content {
 		v, err := c.node(child, depth+1)
 		if err != nil {
-			return interpreter.Value{}, err
+			return node{}, err
 		}
 		elems = append(elems, v)
 	}
-	return listVal(elems), nil
+	return doctree.List(elems), nil
 }
 
-// scalar resolves a scalar node to a typed Value using the tag yaml.v3 resolved
+// scalar resolves a scalar node to a typed tree node using the tag yaml.v3 resolved
 // (implicit typing). Unknown / custom tags fall back to the verbatim string.
-func (c *converter) scalar(n *yaml.Node) (interpreter.Value, error) {
+func (c *converter) scalar(n *yaml.Node) (node, error) {
 	switch n.ShortTag() {
 	case "!!null":
-		return interpreter.Null(), nil
+		return doctree.Null(), nil
 	case "!!bool":
 		var b bool
 		if err := n.Decode(&b); err != nil {
-			return interpreter.StringVal(n.Value), nil
+			return doctree.String(n.Value), nil
 		}
-		return interpreter.BoolVal(b), nil
+		return doctree.Bool(b), nil
 	case "!!int":
 		var i int64
 		if err := n.Decode(&i); err == nil {
-			return interpreter.IntVal(i), nil
+			return doctree.Int(i), nil
 		}
 		// Too big for int64: keep the verbatim digits as a string rather than a
 		// float. A float64 cannot hold a 20+-digit integer exactly, so a float
 		// fallback would silently corrupt an id / counter; the string keeps every
 		// digit and the caller can convert deliberately if it wants a number.
-		return interpreter.StringVal(n.Value), nil
+		return doctree.String(n.Value), nil
 	case "!!float":
 		// yaml.v3 re-tags an integer too large for int64 as !!float. Such a value
 		// is all digits (no '.' / exponent); keep its exact text as a string
 		// rather than a lossy float64 - a 20+-digit id or counter must not
 		// silently change value. Genuine floats (with '.' / 'e') decode normally.
 		if isIntegerText(n.Value) {
-			return interpreter.StringVal(n.Value), nil
+			return doctree.String(n.Value), nil
 		}
 		var f float64
 		if err := n.Decode(&f); err != nil {
-			return interpreter.StringVal(n.Value), nil
+			return doctree.String(n.Value), nil
 		}
-		return interpreter.FloatVal(f), nil
+		return doctree.Float(f), nil
 	case "!!timestamp":
-		return datetimeVal(n.Value), nil
+		return doctree.Datetime(n.Value, 0), nil
 	case "!!binary":
 		// A single !!binary node cannot be decoded through Node.Decode, so
 		// base64-decode the payload directly (whitespace in a block scalar is
@@ -576,10 +549,10 @@ func (c *converter) scalar(n *yaml.Node) (interpreter.Value, error) {
 		}, n.Value)
 		data, err := base64.StdEncoding.DecodeString(payload)
 		if err != nil {
-			return interpreter.StringVal(n.Value), nil
+			return doctree.String(n.Value), nil
 		}
-		return interpreter.BytesVal(data), nil
+		return doctree.Bytes(data), nil
 	default:
-		return interpreter.StringVal(n.Value), nil
+		return doctree.String(n.Value), nil
 	}
 }

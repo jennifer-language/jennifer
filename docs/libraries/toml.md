@@ -49,9 +49,14 @@ fixed depth with a normal (catchable) decode error, so hostile deeply-nested
 input can't exhaust the interpreter's stack. The limit is shared by every parser
 in the toolchain and is set per binary: 1000 levels on the default `jennifer`
 (Go's growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). `decode`
-also caps the total number of value nodes it will materialise, so a flat few-MB
-document (a huge array) raises a catchable error instead of amplifying into
-gigabytes of memory.
+also caps the total number of value nodes it will materialise - about two
+million on `jennifer`, a quarter million on `jennifer-tiny` - so a hostile flat
+document (a huge array) raises a catchable error instead of growing without
+bound.
+
+The decoded tree is the same compact, immutable one `json` uses: a document
+takes from about its text size to roughly 15 times it in memory, and binding,
+passing or `toml.get`-ing a `toml.Value` shares the tree instead of copying it.
 
 ## Decoding
 
@@ -78,7 +83,9 @@ io.printf("%s\n", toml.asString($doc, "/fruit/1/name"));   # banana
 
 The full TOML 1.0 value grammar decodes: basic / literal / multiline
 strings, integers (decimal, `0x` hex, `0o` octal, `0b` binary, `_` digit
-separators), floats (including `inf` / `nan`), booleans, `[table]`,
+separators), floats (including `inf` / `nan`, which `typeOf` reports as
+`float` and `encode` keeps, but `toml.asFloat` refuses: Jennifer has no
+non-finite float), booleans, `[table]`,
 `[[array of tables]]`, dotted keys (`a.b.c = 1`), and inline tables
 (`{ x = 1, y = 2 }`). Tables become maps in document order; arrays become
 lists.

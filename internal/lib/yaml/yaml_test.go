@@ -8,7 +8,12 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// wrap makes a yaml.Value handle over a decoded tree.
+func wrap(n node) interpreter.Value { return lib.Wrap(n) }
 
 var noCtx = interpreter.BuiltinCtx{}
 
@@ -147,8 +152,8 @@ func TestMultiDocument(t *testing.T) {
 	}
 	// empty stream decodes to null.
 	v, err := decodeYaml("")
-	if err != nil || v.Kind != interpreter.KindNull {
-		t.Errorf("empty decode = (%v, %v), want (null, nil)", v.Kind, err)
+	if err != nil || v.Kind() != doctree.KindNull {
+		t.Errorf("empty decode = (%v, %v), want (null, nil)", v.TypeName(), err)
 	}
 }
 
@@ -284,12 +289,12 @@ func TestBytesBinary(t *testing.T) {
 		t.Errorf("!!binary type = %q, want bytes", got)
 	}
 	bnode := get(t, rv, "/data")
-	inner, _ := bnode.AsObject(LibraryName, "Value")
-	if inner.Kind != interpreter.KindBytes || string(inner.Bytes) != "hi" {
-		t.Fatalf("decoded !!binary = %s %q", inner.Kind, inner.Bytes)
+	inner, _ := lib.AsNode(bnode)
+	if inner.Kind() != doctree.KindBytes || inner.Str() != "hi" {
+		t.Fatalf("decoded !!binary = %s %q", inner.TypeName(), inner.Str())
 	}
 	// A raw bytes value encodes to a !!binary scalar and round-trips.
-	m := mapVal([]interpreter.MapEntry{{Key: interpreter.StringVal("blob"), Value: interpreter.BytesVal([]byte("hi"))}})
+	m := interpreter.MapVal(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeNull), []interpreter.MapEntry{{Key: interpreter.StringVal("blob"), Value: interpreter.BytesVal([]byte("hi"))}})
 	text, err := encodeYaml(m, false)
 	if err != nil {
 		t.Fatal(err)
@@ -302,9 +307,9 @@ func TestBytesBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	rb := get(t, wrap(back), "/blob")
-	ib, _ := rb.AsObject(LibraryName, "Value")
-	if ib.Kind != interpreter.KindBytes || string(ib.Bytes) != "hi" {
-		t.Errorf("round-trip bytes = %s %q", ib.Kind, ib.Bytes)
+	ib, _ := lib.AsNode(rb)
+	if ib.Kind() != doctree.KindBytes || ib.Str() != "hi" {
+		t.Errorf("round-trip bytes = %s %q", ib.TypeName(), ib.Str())
 	}
 }
 
@@ -530,5 +535,20 @@ func TestDecodeByteCap(t *testing.T) {
 	}
 	if _, err := decodeYaml("a: 1"); err != nil {
 		t.Errorf("small input should decode, got %v", err)
+	}
+}
+
+// The node budget covers the whole stream: documents that each fit under it
+// still fail together once their sum passes it.
+func TestNodeBudgetSpansDocuments(t *testing.T) {
+	saved := maxNodes
+	maxNodes = 50
+	defer func() { maxNodes = saved }()
+	doc := "[" + strings.TrimSuffix(strings.Repeat("1, ", 30), ", ") + "]\n"
+	if _, err := decodeAllYaml(doc); err != nil {
+		t.Fatalf("one document under the budget: %v", err)
+	}
+	if _, err := decodeAllYaml(doc + "---\n" + doc); err == nil || !strings.Contains(err.Error(), "too many nodes") {
+		t.Errorf("two documents over the budget together: %v", err)
 	}
 }

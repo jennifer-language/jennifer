@@ -12,26 +12,26 @@ import (
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
-	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
-func decodeFn(args []interpreter.Value) (interpreter.Value, error) {
+func decodeFn(args []interpreter.Value) (node, error) {
 	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("json.decode expects 1 argument (string), got %d", len(args))
+		return node{}, fmt.Errorf("json.decode expects 1 argument (string), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("json.decode: argument must be string, got %s", args[0].Kind)
+		return node{}, fmt.Errorf("json.decode: argument must be string, got %s", args[0].Kind)
 	}
 	d := &decoder{s: args[0].Str}
 	d.skipWS()
 	v, err := d.parseValue()
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("json.decode: %v", err)
+		return node{}, fmt.Errorf("json.decode: %v", err)
 	}
 	d.skipWS()
 	if d.pos < len(d.s) {
-		return interpreter.Null(), fmt.Errorf("json.decode: %v", d.errf("unexpected trailing content"))
+		return node{}, fmt.Errorf("json.decode: %v", d.errf("unexpected trailing content"))
 	}
 	return v, nil
 }
@@ -45,13 +45,22 @@ func decodeFn(args []interpreter.Value) (interpreter.Value, error) {
 const maxNestingDepth = limits.MaxNestingDepth
 
 // maxDecodedNodes bounds how many value nodes one decode may materialise, so a
-// few-MB document cannot amplify into gigabytes of Value (depth alone was
-// bounded). A package var so tests can lower it.
+// document of millions of tiny values is a catchable error rather than
+// unbounded memory. A package var so tests can lower it.
 var maxDecodedNodes = limits.MaxDecodedNodes
 
 // decoder is a recursive-descent JSON reader over a byte-indexed string.
+//
+// Containers are collected on two shared stacks (elems / keys) rather than a
+// growing slice each: a container pushes its members above whatever its
+// ancestors have pushed, and on close copies exactly its own run into a
+// right-sized slice and pops it. A document's containers therefore carry no
+// append slack, and the decode allocates one slice per container instead of
+// one per growth step.
 type decoder struct {
 	s     string
+	elems []node
+	keys  []string
 	pos   int
 	depth int // current container nesting, gated in parseValue
 	nodes int // value nodes materialised so far, gated in parseValue
@@ -95,18 +104,18 @@ func (d *decoder) skipWS() {
 	}
 }
 
-func (d *decoder) parseValue() (interpreter.Value, error) {
+func (d *decoder) parseValue() (node, error) {
 	if d.pos >= len(d.s) {
-		return interpreter.Null(), d.errf("unexpected end of input")
+		return node{}, d.errf("unexpected end of input")
 	}
 	d.nodes++
 	if d.nodes > maxDecodedNodes {
-		return interpreter.Null(), d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+		return node{}, d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
 	}
 	switch c := d.s[d.pos]; {
 	case c == '{':
 		if d.depth >= maxNestingDepth {
-			return interpreter.Null(), d.errf("nesting exceeds %d levels", maxNestingDepth)
+			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
 		}
 		d.depth++
 		v, err := d.parseObject()
@@ -114,7 +123,7 @@ func (d *decoder) parseValue() (interpreter.Value, error) {
 		return v, err
 	case c == '[':
 		if d.depth >= maxNestingDepth {
-			return interpreter.Null(), d.errf("nesting exceeds %d levels", maxNestingDepth)
+			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
 		}
 		d.depth++
 		v, err := d.parseArray()
@@ -123,9 +132,9 @@ func (d *decoder) parseValue() (interpreter.Value, error) {
 	case c == '"':
 		s, err := d.parseString()
 		if err != nil {
-			return interpreter.Null(), err
+			return node{}, err
 		}
-		return interpreter.StringVal(s), nil
+		return doctree.String(s), nil
 	case c == 't' || c == 'f':
 		return d.parseKeyword()
 	case c == 'n':
@@ -133,51 +142,83 @@ func (d *decoder) parseValue() (interpreter.Value, error) {
 	case c == '-' || (c >= '0' && c <= '9'):
 		return d.parseNumber()
 	default:
-		return interpreter.Null(), d.errf("unexpected character %q", string(c))
+		return node{}, d.errf("unexpected character %q", string(c))
 	}
 }
 
-// parseObject decodes a JSON object into a generic `map of string to V`.
-// Duplicate keys are last-wins so the map stays well-formed.
-func (d *decoder) parseObject() (interpreter.Value, error) {
+// smallObject is the member count up to which duplicate keys are found by
+// scanning the key stack rather than through a set.
+const smallObject = 8
+
+// parseObject decodes a JSON object into a map node, members in document
+// order. A duplicate key is an error, as in `yaml` and `toml`: RFC 8259 leaves
+// the behaviour open, and I-JSON (RFC 7493) forbids duplicates. Picking one
+// copy silently would let two parsers of the same document disagree on its
+// value (a parser-differential: a JWT with two `exp` claims, say).
+func (d *decoder) parseObject() (node, error) {
 	d.pos++ // '{'
-	var entries []interpreter.MapEntry
-	// idx keys each seen key to its position so duplicate handling stays O(1)
-	// per key: a linear scan per key made a large object O(N^2).
-	idx := map[string]int{}
+	kbase, ebase := len(d.keys), len(d.elems)
+	// seen detects duplicates in a large object in O(1) per key; a small one is
+	// scanned directly on the key stack, which needs no allocation.
+	var seen map[string]bool
 	d.skipWS()
 	if d.pos < len(d.s) && d.s[d.pos] == '}' {
 		d.pos++
-		return mapVal(entries), nil
+		return doctree.Map(nil, nil), nil
 	}
 	for {
 		d.skipWS()
 		if d.pos >= len(d.s) || d.s[d.pos] != '"' {
-			return interpreter.Null(), d.errf("expected string key in object")
+			return node{}, d.errf("expected string key in object")
 		}
+		keyStart := d.pos
 		key, err := d.parseString()
 		if err != nil {
-			return interpreter.Null(), err
+			return node{}, err
+		}
+		n := len(d.keys) - kbase
+		dup := false
+		switch {
+		case seen != nil:
+			dup = seen[key]
+			seen[key] = true
+		case n < smallObject:
+			for _, k := range d.keys[kbase:] {
+				if k == key {
+					dup = true
+					break
+				}
+			}
+		default:
+			seen = make(map[string]bool, 2*n)
+			for _, k := range d.keys[kbase:] {
+				seen[k] = true
+			}
+			dup = seen[key]
+			seen[key] = true
+		}
+		if dup {
+			d.pos = keyStart
+			return node{}, d.errf("duplicate key %q in object", key)
 		}
 		d.skipWS()
 		if d.pos >= len(d.s) || d.s[d.pos] != ':' {
-			return interpreter.Null(), d.errf("expected ':' after object key")
+			return node{}, d.errf("expected ':' after object key")
 		}
 		d.pos++
 		d.skipWS()
+		// Push the key before parsing the value: a nested container pushes and
+		// pops its own run above it, so this object's keys and values stay
+		// aligned at [kbase, len) / [ebase, len).
+		d.keys = append(d.keys, key)
 		val, err := d.parseValue()
 		if err != nil {
-			return interpreter.Null(), err
+			return node{}, err
 		}
-		if pos, seen := idx[key]; seen {
-			entries[pos].Value = val // last-wins
-		} else {
-			idx[key] = len(entries)
-			entries = append(entries, interpreter.MapEntry{Key: interpreter.StringVal(key), Value: val})
-		}
+		d.elems = append(d.elems, val)
 		d.skipWS()
 		if d.pos >= len(d.s) {
-			return interpreter.Null(), d.errf("unterminated object")
+			return node{}, d.errf("unterminated object")
 		}
 		if d.s[d.pos] == ',' {
 			d.pos++
@@ -185,30 +226,34 @@ func (d *decoder) parseObject() (interpreter.Value, error) {
 		}
 		if d.s[d.pos] == '}' {
 			d.pos++
-			return mapVal(entries), nil
+			keys := append([]string(nil), d.keys[kbase:]...)
+			elems := append([]node(nil), d.elems[ebase:]...)
+			d.keys = d.keys[:kbase]
+			d.elems = d.elems[:ebase]
+			return doctree.Map(keys, elems), nil
 		}
-		return interpreter.Null(), d.errf("expected ',' or '}' in object")
+		return node{}, d.errf("expected ',' or '}' in object")
 	}
 }
 
-func (d *decoder) parseArray() (interpreter.Value, error) {
+func (d *decoder) parseArray() (node, error) {
 	d.pos++ // '['
-	elems := []interpreter.Value{}
+	base := len(d.elems)
 	d.skipWS()
 	if d.pos < len(d.s) && d.s[d.pos] == ']' {
 		d.pos++
-		return listVal(elems), nil
+		return doctree.List([]node{}), nil
 	}
 	for {
 		d.skipWS()
 		v, err := d.parseValue()
 		if err != nil {
-			return interpreter.Null(), err
+			return node{}, err
 		}
-		elems = append(elems, v)
+		d.elems = append(d.elems, v)
 		d.skipWS()
 		if d.pos >= len(d.s) {
-			return interpreter.Null(), d.errf("unterminated array")
+			return node{}, d.errf("unterminated array")
 		}
 		if d.s[d.pos] == ',' {
 			d.pos++
@@ -216,14 +261,32 @@ func (d *decoder) parseArray() (interpreter.Value, error) {
 		}
 		if d.s[d.pos] == ']' {
 			d.pos++
-			return listVal(elems), nil
+			elems := append([]node(nil), d.elems[base:]...)
+			d.elems = d.elems[:base]
+			return doctree.List(elems), nil
 		}
-		return interpreter.Null(), d.errf("expected ',' or ']' in array")
+		return node{}, d.errf("expected ',' or ']' in array")
 	}
 }
 
 func (d *decoder) parseString() (string, error) {
 	d.pos++ // opening quote
+	// Fast path: a string with no escape is returned as a slice of the input,
+	// with no copy or allocation - most keys and values in real documents. The
+	// decoded tree then shares the input text, which stays alive while any of
+	// those strings does; the tree is held in place of the text, so that is the
+	// cheaper side of the trade.
+	start := d.pos
+	for i := d.pos; i < len(d.s); i++ {
+		c := d.s[i]
+		if c == '"' {
+			d.pos = i + 1
+			return d.s[start:i], nil
+		}
+		if c == '\\' || c < 0x20 {
+			break
+		}
+	}
 	var sb strings.Builder
 	for d.pos < len(d.s) {
 		c := d.s[d.pos]
@@ -322,19 +385,19 @@ func (d *decoder) readHex4() (uint32, error) {
 }
 
 // parseKeyword handles the three bare literals true / false / null.
-func (d *decoder) parseKeyword() (interpreter.Value, error) {
+func (d *decoder) parseKeyword() (node, error) {
 	switch {
 	case strings.HasPrefix(d.s[d.pos:], "true"):
 		d.pos += 4
-		return interpreter.BoolVal(true), nil
+		return doctree.Bool(true), nil
 	case strings.HasPrefix(d.s[d.pos:], "false"):
 		d.pos += 5
-		return interpreter.BoolVal(false), nil
+		return doctree.Bool(false), nil
 	case strings.HasPrefix(d.s[d.pos:], "null"):
 		d.pos += 4
-		return interpreter.Null(), nil
+		return doctree.Null(), nil
 	}
-	return interpreter.Null(), d.errf("invalid literal")
+	return node{}, d.errf("invalid literal")
 }
 
 // parseNumber scans a JSON number and returns int when it has no fractional
@@ -344,14 +407,14 @@ func (d *decoder) parseKeyword() (interpreter.Value, error) {
 // digit (`1.` is invalid), and an exponent needs at least one digit (`1e`).
 // strconv accepts all of those, so a permissive scan-then-parse would leak
 // them through.
-func (d *decoder) parseNumber() (interpreter.Value, error) {
+func (d *decoder) parseNumber() (node, error) {
 	start := d.pos
 	if d.pos < len(d.s) && d.s[d.pos] == '-' {
 		d.pos++
 	}
 	// integer part: a lone 0, or a nonzero digit followed by more digits.
 	if d.pos >= len(d.s) || !isDigit(d.s[d.pos]) {
-		return interpreter.Null(), d.errf("invalid number: expected a digit")
+		return node{}, d.errf("invalid number: expected a digit")
 	}
 	if d.s[d.pos] == '0' {
 		d.pos++ // a leading 0 stands alone; 01 / 00 are rejected below
@@ -365,7 +428,7 @@ func (d *decoder) parseNumber() (interpreter.Value, error) {
 		isFloat = true
 		d.pos++
 		if d.pos >= len(d.s) || !isDigit(d.s[d.pos]) {
-			return interpreter.Null(), d.errf("invalid number: a fraction needs at least one digit")
+			return node{}, d.errf("invalid number: a fraction needs at least one digit")
 		}
 		for d.pos < len(d.s) && isDigit(d.s[d.pos]) {
 			d.pos++
@@ -378,7 +441,7 @@ func (d *decoder) parseNumber() (interpreter.Value, error) {
 			d.pos++
 		}
 		if d.pos >= len(d.s) || !isDigit(d.s[d.pos]) {
-			return interpreter.Null(), d.errf("invalid number: an exponent needs at least one digit")
+			return node{}, d.errf("invalid number: an exponent needs at least one digit")
 		}
 		for d.pos < len(d.s) && isDigit(d.s[d.pos]) {
 			d.pos++
@@ -388,44 +451,26 @@ func (d *decoder) parseNumber() (interpreter.Value, error) {
 	// above, so it surfaces as trailing content at the call site; catch the
 	// clearer message here instead.
 	if d.pos < len(d.s) && isDigit(d.s[d.pos]) {
-		return interpreter.Null(), d.errf("invalid number: leading zeros are not allowed")
+		return node{}, d.errf("invalid number: leading zeros are not allowed")
 	}
 	tok := d.s[start:d.pos]
 	// `-0` (with no fraction/exponent) would parse to int 0 and lose its sign;
 	// decode it as negative-zero float to preserve the sign, matching Go's
 	// encoding/json.
 	if !isFloat && tok == "-0" {
-		return interpreter.FloatVal(math.Copysign(0, -1)), nil
+		return doctree.Float(math.Copysign(0, -1)), nil
 	}
 	if !isFloat {
 		if n, err := strconv.ParseInt(tok, 10, 64); err == nil {
-			return interpreter.IntVal(n), nil
+			return doctree.Int(n), nil
 		}
 		// too big for int64: fall through to float
 	}
 	f, err := strconv.ParseFloat(tok, 64)
 	if err != nil {
-		return interpreter.Null(), d.errf("invalid number %q", tok)
+		return node{}, d.errf("invalid number %q", tok)
 	}
-	return interpreter.FloatVal(f), nil
+	return doctree.Float(f), nil
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
-
-// listVal / mapVal build generic decoded collections. Element / value types
-// are left unset so the value is assignable to any declared list / map type
-// through Value.MatchesDeclared's lenient path (the same leniency an empty
-// literal gets); keys are always strings.
-func listVal(elems []interpreter.Value) interpreter.Value {
-	return interpreter.Value{Kind: interpreter.KindList, List: elems}
-}
-
-func mapVal(entries []interpreter.MapEntry) interpreter.Value {
-	st := parser.PrimitiveType(parser.TypeString)
-	m := interpreter.Value{Kind: interpreter.KindMap, Map: entries, KeyTyp: &st}
-	// Build the key index once at decode time so walking keys + json.get per key
-	// is O(n), not O(n^2): the handle shares this tree by pointer across accessor
-	// calls, so the index persists.
-	m.BuildMapIndex()
-	return m
-}

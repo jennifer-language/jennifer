@@ -21,7 +21,7 @@ func TestDecodeUnicodeEscapes(t *testing.T) {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		return interpreter.ObjectVal(LibraryName, "Value", raw), nil // wrap as json.Value
+		return wrap(raw), nil // wrap as json.Value
 	}
 	asStr := func(node interpreter.Value, ptr string) string {
 		t.Helper()

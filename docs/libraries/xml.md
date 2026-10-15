@@ -125,17 +125,26 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
       return strings.substring($name, $i + 1, len($name));
   }
   ```
-- **Element nesting is capped** on both decode and encode: a deeper document
-  (or a tree built that deep with `xml.append`) raises a catchable error rather
+- **Element nesting is capped** on decode, encode and `xml.append`: a deeper
+  document (or an `append` that would build one) raises a catchable error rather
   than overflowing the stack. The limit is shared by every parser in the
   toolchain and is set per binary: 1000 levels on the default `jennifer` (Go's
   growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). No entity is expanded
   beyond the five predefined names and numeric references, so there is no
   entity-expansion ("billion laughs") blow-up, and nothing is fetched
   externally - an unknown or external entity is simply an error.
-- **Node count is capped** on decode: a document with a huge number of elements,
-  attributes, or text nodes raises a catchable error rather than amplifying a
-  few MB of markup into gigabytes of memory.
+- **Node count is capped** on decode: a document with more than about two
+  million elements, attributes and text runs (a quarter million on
+  `jennifer-tiny`) raises a catchable error rather than growing without bound.
+- **Memory**: a decoded `xml.Value` is a compact element tree (name, ordered
+  attributes, ordered children); names, and text and attribute values with no
+  entity to decode, share the input string. A document takes from about its
+  text size (text-heavy markup) up to roughly 15 times it (many small
+  elements) in memory. Copies of a handle,
+  and the sub-trees `get` / `findAll` / `children` hand out, share the tree
+  instead of copying it. A sub-tree handle therefore keeps the whole document's
+text in memory, while `tag` / `text` / `attr` / `attrs` return copies: to keep
+a few values of a large document, read them out rather than holding a node.
 
 ## See also
 

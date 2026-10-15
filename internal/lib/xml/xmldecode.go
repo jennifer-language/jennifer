@@ -3,8 +3,8 @@
 
 // The hand-rolled XML parser (no `encoding/xml`, no `reflect`, so TinyGo-clean
 // - the same reason `json` and `toml` are hand-rolled). It reads a
-// well-formed XML document char by char into the node tree defined in
-// xmlaccess.go: elements with ordered attributes and ordered children, text
+// well-formed XML document char by char into the compact node tree defined in
+// xmlnode.go: elements with ordered attributes and ordered children, text
 // (character data), and CDATA (as text). Comments, processing instructions, an
 // XML declaration, and a DOCTYPE are parsed and skipped. The five predefined
 // entities and numeric character references are decoded; an unknown entity is
@@ -18,7 +18,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
@@ -31,14 +30,17 @@ type decoder struct {
 	lineOff int
 	line    int
 	col     int
-	nodes   int // map entries / text nodes materialised so far, gated by addNodes
+	nodes   int // elements / attributes / text nodes built so far, gated by addNodes
+	// Shared scratch stacks: an element's children and attributes are pushed
+	// here while it is open and copied out at exactly their final size when it
+	// closes, so no per-element slice is left with append's spare capacity.
+	kids  []node
+	attrs []attr
 }
 
-// maxDecodedNodes bounds how many value nodes one decode may materialise. An
-// element is a 4-entry map (~several KB), so depth alone did not stop a few-MB
-// document from amplifying into gigabytes of Value. Counted in units comparable
-// to the other decoders (map entries), so the shared cap bounds memory similarly.
-// A package var so tests can lower it.
+// maxDecodedNodes bounds how many nodes (elements, attributes, text runs) one
+// decode may build, so a document of millions of tiny elements is a catchable
+// error rather than unbounded memory. A package var so tests can lower it.
 var maxDecodedNodes = limits.MaxDecodedNodes
 
 // addNodes charges n materialised nodes and errors once the running total passes
@@ -114,23 +116,23 @@ func (d *decoder) skipSpace() {
 
 // decodeXML parses a full document: an optional prolog, exactly one root
 // element, and optional trailing misc.
-func decodeXML(src string) (interpreter.Value, error) {
+func decodeXML(src string) (node, error) {
 	d := &decoder{s: src}
 	if err := d.skipMisc(true); err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	if d.eof() || d.peek() != '<' {
-		return interpreter.Value{}, d.errf("expected a root element")
+		return node{}, d.errf("expected a root element")
 	}
 	root, err := d.parseElement(0)
 	if err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	if err := d.skipMisc(false); err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	if !d.eof() {
-		return interpreter.Value{}, d.errf("unexpected content after the root element")
+		return node{}, d.errf("unexpected content after the root element")
 	}
 	return root, nil
 }
@@ -207,29 +209,28 @@ func (d *decoder) skipDoctype() error {
 // parseElement parses a start tag, its content, and its end tag (or a
 // self-closing tag). d.pos is at the opening '<'. depth is the current nesting
 // level, capped to keep the recursion from overflowing the Go stack.
-func (d *decoder) parseElement(depth int) (interpreter.Value, error) {
+func (d *decoder) parseElement(depth int) (node, error) {
 	if depth >= maxDepth {
-		return interpreter.Value{}, d.errf("element nesting exceeds %d levels", maxDepth)
+		return node{}, d.errf("element nesting exceeds %d levels", maxDepth)
 	}
-	// An element node is a 4-entry map (kind / name / attrs / children).
-	if err := d.addNodes(4); err != nil {
-		return interpreter.Value{}, err
+	if err := d.addNodes(1); err != nil {
+		return node{}, err
 	}
 	d.pos++ // '<'
 	name, err := d.parseName()
 	if err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	attrs, selfClose, err := d.parseAttributes()
 	if err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	if selfClose {
 		return elementNode(name, attrs, nil), nil
 	}
 	children, err := d.parseContent(name, depth)
 	if err != nil {
-		return interpreter.Value{}, err
+		return node{}, err
 	}
 	return elementNode(name, attrs, children), nil
 }
@@ -258,9 +259,14 @@ func (d *decoder) parseName() (string, error) {
 }
 
 // parseAttributes reads zero or more `name="value"` pairs, returning whether
-// the tag was self-closing (`/>`).
-func (d *decoder) parseAttributes() (attrs []interpreter.MapEntry, selfClose bool, err error) {
-	seen := map[string]bool{}
+// the tag was self-closing (`/>`). The pairs are collected on the shared
+// d.attrs stack and copied out at their final size.
+func (d *decoder) parseAttributes() (attrs []attr, selfClose bool, err error) {
+	base := len(d.attrs)
+	// seen finds duplicates in O(1) once an element has many attributes; a
+	// few are scanned directly on the stack, which needs no allocation.
+	var seen map[string]bool
+	defer func() { d.attrs = d.attrs[:base] }()
 	for {
 		d.skipSpace()
 		if d.eof() {
@@ -269,11 +275,11 @@ func (d *decoder) parseAttributes() (attrs []interpreter.MapEntry, selfClose boo
 		switch d.peek() {
 		case '>':
 			d.pos++
-			return attrs, false, nil
+			return d.takeAttrs(base), false, nil
 		case '/':
 			if d.pos+1 < len(d.s) && d.s[d.pos+1] == '>' {
 				d.pos += 2
-				return attrs, true, nil
+				return d.takeAttrs(base), true, nil
 			}
 			return nil, false, d.errf("expected '>' after '/'")
 		}
@@ -291,15 +297,49 @@ func (d *decoder) parseAttributes() (attrs []interpreter.MapEntry, selfClose boo
 		if e != nil {
 			return nil, false, e
 		}
-		if seen[aname] {
+		if d.hasAttr(base, aname, &seen) {
 			return nil, false, d.errf("duplicate attribute %q", aname)
 		}
-		seen[aname] = true
 		if err := d.addNodes(1); err != nil {
 			return nil, false, err
 		}
-		attrs = append(attrs, interpreter.MapEntry{Key: sv(aname), Value: sv(aval)})
+		d.attrs = append(d.attrs, attr{name: aname, value: aval})
 	}
+}
+
+// hasAttr reports whether the open element (attributes from base on) already
+// has an attribute called name, and records name. Up to manyAttrs attributes
+// it scans the stack; past that it builds *seen and looks up there, so an
+// element with a huge attribute list stays linear.
+func (d *decoder) hasAttr(base int, name string, seen *map[string]bool) bool {
+	open := d.attrs[base:]
+	if *seen == nil && len(open) < manyAttrs {
+		for _, a := range open {
+			if a.name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if *seen == nil {
+		*seen = make(map[string]bool, 2*len(open))
+		for _, a := range open {
+			(*seen)[a.name] = true
+		}
+	}
+	if (*seen)[name] {
+		return true
+	}
+	(*seen)[name] = true
+	return false
+}
+
+// takeAttrs copies the open element's attributes off the shared stack.
+func (d *decoder) takeAttrs(base int) []attr {
+	if len(d.attrs) == base {
+		return nil
+	}
+	return append([]attr(nil), d.attrs[base:]...)
 }
 
 // parseAttValue reads a quoted, entity-decoded attribute value.
@@ -309,6 +349,19 @@ func (d *decoder) parseAttValue() (string, error) {
 	}
 	q := d.peek()
 	d.pos++
+	// Fast path: a value with no reference and no whitespace to normalize is a
+	// plain substring of the input.
+	for i := d.pos; i < len(d.s); i++ {
+		c := d.s[i]
+		if c == q {
+			v := d.s[d.pos:i]
+			d.pos = i + 1
+			return v, nil
+		}
+		if c == '&' || c == '<' || c == '\t' || c == '\n' || c == '\r' {
+			break
+		}
+	}
 	var b strings.Builder
 	for {
 		if d.eof() {
@@ -349,8 +402,11 @@ func (d *decoder) parseAttValue() (string, error) {
 
 // parseContent reads an element's children up to and including its `</name>`.
 // depth is the nesting level of the owning element, passed to child elements.
-func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, error) {
-	var children []interpreter.Value
+// The children are collected on the shared d.kids stack (a child element's own
+// children sit above them while it is parsed) and copied out at their final size.
+func (d *decoder) parseContent(name string, depth int) ([]node, error) {
+	base := len(d.kids)
+	defer func() { d.kids = d.kids[:base] }()
 	for {
 		if d.eof() {
 			return nil, d.errf("element <%s> is not closed", name)
@@ -360,10 +416,10 @@ func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, err
 			if err != nil {
 				return nil, err
 			}
-			if err := d.addNodes(2); err != nil {
+			if err := d.addNodes(1); err != nil {
 				return nil, err
 			}
-			children = append(children, textNode(txt))
+			d.kids = append(d.kids, textNode(txt))
 			continue
 		}
 		switch {
@@ -371,7 +427,10 @@ func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, err
 			if err := d.parseCloseTag(name); err != nil {
 				return nil, err
 			}
-			return children, nil
+			if len(d.kids) == base {
+				return nil, nil
+			}
+			return append([]node(nil), d.kids[base:]...), nil
 		case d.startsWith("<!--"):
 			if err := d.skipComment(); err != nil {
 				return nil, err
@@ -381,10 +440,10 @@ func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, err
 			if err != nil {
 				return nil, err
 			}
-			if err := d.addNodes(2); err != nil {
+			if err := d.addNodes(1); err != nil {
 				return nil, err
 			}
-			children = append(children, textNode(txt))
+			d.kids = append(d.kids, textNode(txt))
 		case d.startsWith("<?"):
 			if err := d.skipPI(); err != nil {
 				return nil, err
@@ -396,7 +455,7 @@ func (d *decoder) parseContent(name string, depth int) ([]interpreter.Value, err
 			if err != nil {
 				return nil, err
 			}
-			children = append(children, child)
+			d.kids = append(d.kids, child)
 		}
 	}
 }
@@ -431,6 +490,16 @@ func (d *decoder) parseCDATA() (string, error) {
 
 // parseText reads character data up to the next '<', decoding entities.
 func (d *decoder) parseText() (string, error) {
+	// Fast path: a run with no reference is a plain substring of the input.
+	start := d.pos
+	end := strings.IndexByte(d.s[start:], '<')
+	if end < 0 {
+		end = len(d.s) - start
+	}
+	if strings.IndexByte(d.s[start:start+end], '&') < 0 {
+		d.pos = start + end
+		return d.s[start:d.pos], nil
+	}
 	var b strings.Builder
 	for !d.eof() {
 		c := d.peek()

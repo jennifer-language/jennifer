@@ -3,14 +3,14 @@
 
 // Package tomllib implements the `toml` system library: RFC-conformant TOML
 // 1.0.0 decode / encode onto the same opaque, library-owned Value that `json`
-// uses. `toml.decode(text)` returns a `toml.Value` (a KindObject wrapping the
-// decoded table tree); the read accessors (`typeOf` / `get` / `has` / `keys` /
-// `length` / `as*`, addressed by JSON Pointer) and the non-mutating write
-// surface (`map` / `list` / `set` / `insert` / `append` / `remove` / `move`)
-// are deliberately the same shape as `json`'s, so the two libraries read the
-// same. The one thing TOML has that JSON does not - the four date-time forms -
-// is carried as an internal node and surfaced through `toml.asDatetime`, which
-// returns a `time.Time`.
+// uses. `toml.decode(text)` returns a `toml.Value` (a KindObject holding the
+// shared compact document tree, internal/lib/doctree); the read accessors
+// (`typeOf` / `get` / `has` / `keys` / `length` / `as*`, addressed by JSON
+// Pointer) and the non-mutating write surface (`map` / `list` / `set` /
+// `insert` / `append` / `remove` / `move`) are doctree's, the same as `json`'s
+// and `yaml`'s, so the libraries read the same. The one thing TOML has that
+// JSON does not - the four date-time forms - is a datetime node, surfaced
+// through `toml.asDatetime`, which returns a `time.Time`.
 package tomllib
 
 import (
@@ -19,12 +19,41 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 )
 
 // LibraryName is the namespace prefix (`toml.decode`, `toml.get`, ...).
 const LibraryName = "toml"
+
+// lib is the toml library's handle on the shared surface: TOML has no null,
+// and a stored time.Time becomes an offset date-time.
+var lib = &doctree.Lib{Name: LibraryName, Display: display, TimeNode: timeNode, AsTime: asTime}
+
+// display renders a toml.Value inline (`{ a = 1 }`), for `%v` and the REPL.
+func display(n node) (string, error) {
+	var sb strings.Builder
+	if err := encodeInline(&sb, n); err != nil {
+		return "", err
+	}
+	return sb.String(), nil
+}
+
+// timeNode stores a time.Time as an offset date-time.
+func timeNode(v interpreter.Value) (node, bool) {
+	text, ok := doctree.TimeRFC3339(v)
+	if !ok {
+		return node{}, false
+	}
+	return doctree.Datetime(text, formOffsetDatetime), true
+}
+
+// asTime reads any of the four date-time forms as a Go time.
+func asTime(n node) (stdtime.Time, error) {
+	return parseDatetimeText(n.Str(), n.Form())
+}
 
 func inf(neg bool) float64 {
 	if neg {
@@ -37,13 +66,9 @@ func nan() float64 { return math.NaN() }
 
 // Install registers the toml library on in.
 func Install(in *interpreter.Interpreter) {
-	in.RegisterNamespacedObject(LibraryName, "Value", func(inner interpreter.Value) string {
-		var sb strings.Builder
-		if err := encodeInline(&sb, inner); err != nil {
-			return "<toml.Value>"
-		}
-		return sb.String()
-	})
+	// The toml.Value type, its accessors (with isDatetime / asDatetime) and
+	// its write surface (internal/lib/doctree).
+	lib.Install(in)
 
 	in.RegisterNamespaced(LibraryName, "decode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
@@ -56,7 +81,7 @@ func Install(in *interpreter.Interpreter) {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		return interpreter.ObjectVal(LibraryName, "Value", tree), nil
+		return lib.Wrap(tree), nil
 	})
 
 	in.RegisterNamespaced(LibraryName, "encode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -65,28 +90,31 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "encodePretty", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		return encodeFn(args, true)
 	})
+}
 
-	// Read accessors (JSON Pointer shape, mirroring json).
-	in.RegisterNamespaced(LibraryName, "typeOf", typeOfFn)
-	in.RegisterNamespaced(LibraryName, "get", getFn)
-	in.RegisterNamespaced(LibraryName, "has", hasFn)
-	in.RegisterNamespaced(LibraryName, "keys", keysFn)
-	in.RegisterNamespaced(LibraryName, "length", lengthFn)
-	in.RegisterNamespaced(LibraryName, "asInt", asIntFn)
-	in.RegisterNamespaced(LibraryName, "asFloat", asFloatFn)
-	in.RegisterNamespaced(LibraryName, "asString", asStringFn)
-	in.RegisterNamespaced(LibraryName, "asBool", asBoolFn)
-	in.RegisterNamespaced(LibraryName, "asDatetime", asDatetimeFn)
-	in.RegisterNamespaced(LibraryName, "isDatetime", isDatetimeFn)
-
-	// Write surface (non-mutating; fresh handle each call, mirroring json).
-	in.RegisterNamespaced(LibraryName, "list", listFn)
-	in.RegisterNamespaced(LibraryName, "map", mapFn)
-	in.RegisterNamespaced(LibraryName, "set", setFn)
-	in.RegisterNamespaced(LibraryName, "insert", insertFn)
-	in.RegisterNamespaced(LibraryName, "append", appendFn)
-	in.RegisterNamespaced(LibraryName, "remove", removeFn)
-	in.RegisterNamespaced(LibraryName, "move", moveFn)
+// parseDatetimeText parses stored RFC 3339 text into a Go time.Time, choosing
+// the layout by the recorded form. Zone-less forms parse as UTC: a local date
+// is taken at midnight, a local time on the Unix epoch date.
+func parseDatetimeText(text string, form uint8) (stdtime.Time, error) {
+	switch form {
+	case formOffsetDatetime:
+		return stdtime.Parse(stdtime.RFC3339Nano, text)
+	case formLocalDatetime:
+		return stdtime.Parse("2006-01-02T15:04:05.999999999", text)
+	case formLocalDate:
+		return stdtime.Parse("2006-01-02", text)
+	case formLocalTime:
+		t, err := stdtime.Parse("15:04:05.999999999", text)
+		if err != nil {
+			return stdtime.Time{}, err
+		}
+		// A time-only layout parses onto year 0, whose UnixNano overflows int64
+		// (~-6.2e19). Anchor to the Unix epoch date so the clock is preserved
+		// and the stored nanos are representable.
+		return stdtime.Date(1970, 1, 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), stdtime.UTC), nil
+	default:
+		return stdtime.Time{}, fmt.Errorf("unknown datetime form %d", form)
+	}
 }
 
 // ----- encode --------------------------------------------------------------
@@ -106,15 +134,17 @@ func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) 
 	return interpreter.StringVal(s), nil
 }
 
-// encodeToml renders a document. The root must be a table (a map / struct, or a
-// toml.Value wrapping one); TOML has no top-level array or scalar form.
+// encodeToml renders a document: a toml.Value, or any value that converts to
+// one (a map / struct; `bytes` as a base64 string, a time.Time as an offset
+// date-time). The root must be a table; TOML has no top-level array or scalar
+// form.
 func encodeToml(v interpreter.Value, pretty bool) (string, error) {
-	if inner, ok := v.AsObject(LibraryName, "Value"); ok {
-		v = inner
-	}
-	root, err := asTable(v)
+	root, err := lib.ToNode(v, false)
 	if err != nil {
-		return "", fmt.Errorf("a TOML document root must be a table, got %s", tomlNodeType(v))
+		return "", err
+	}
+	if root.Kind() != doctree.KindMap {
+		return "", fmt.Errorf("a TOML document root must be a table, got %s", root.TypeName())
 	}
 	var sb strings.Builder
 	if err := emitTable(&sb, root, nil, pretty); err != nil {
@@ -123,48 +153,14 @@ func encodeToml(v interpreter.Value, pretty bool) (string, error) {
 	return sb.String(), nil
 }
 
-// tableEntry is a normalised (key, value) pair - a struct field or a map entry
-// with a string key - so the encoder handles both container kinds uniformly.
-type tableEntry struct {
-	key string
-	val interpreter.Value
-}
-
-// asTable normalises a map or struct to an ordered list of string-keyed
-// entries, or reports that v is not a table.
-func asTable(v interpreter.Value) ([]tableEntry, error) {
-	switch v.Kind {
-	case interpreter.KindMap:
-		out := make([]tableEntry, len(v.Map))
-		for i, e := range v.Map {
-			if e.Key.Kind != interpreter.KindString {
-				return nil, fmt.Errorf("table key must be string, got %s", e.Key.Kind)
-			}
-			out[i] = tableEntry{key: e.Key.Str, val: e.Value}
-		}
-		return out, nil
-	case interpreter.KindStruct:
-		if _, _, ok := isDatetimeNode(v); ok {
-			return nil, fmt.Errorf("a datetime is not a table")
-		}
-		out := make([]tableEntry, len(v.Fields))
-		for i, f := range v.Fields {
-			out[i] = tableEntry{key: f.Name, val: f.Value}
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("not a table")
-	}
-}
-
-// isArrayOfTables reports whether v is a non-empty list whose every element is a
-// table (so it renders as [[header]] sections rather than an inline array).
-func isArrayOfTables(v interpreter.Value) bool {
-	if v.Kind != interpreter.KindList || len(v.List) == 0 {
+// isArrayOfTables reports whether n is a non-empty list whose every element is
+// a table (so it renders as [[header]] sections rather than an inline array).
+func isArrayOfTables(n node) bool {
+	if n.Kind() != doctree.KindList || n.Len() == 0 {
 		return false
 	}
-	for _, e := range v.List {
-		if _, err := asTable(e); err != nil {
+	for _, e := range n.Elems() {
+		if e.Kind() != doctree.KindMap {
 			return false
 		}
 	}
@@ -174,63 +170,46 @@ func isArrayOfTables(v interpreter.Value) bool {
 // emitTable writes a table's contents: leaf keys first (so they attach to this
 // table, not a following header), then sub-tables as [header] sections, then
 // arrays of tables as [[header]] sections.
-func emitTable(sb *strings.Builder, entries []tableEntry, path []string, pretty bool) error {
-	// Unwrap any wrapped toml.Value once up front so every pass (leaf,
-	// sub-table, array-of-tables) classifies the inner value rather than the
-	// opaque handle. Without this, a wrapped array-of-tables slipped past the
-	// pass-1/pass-3 predicates and was silently dropped from the output.
-	norm := make([]tableEntry, len(entries))
-	for i, e := range entries {
-		if inner, ok := e.val.AsObject(LibraryName, "Value"); ok {
-			e.val = inner
+func emitTable(sb *strings.Builder, t node, path []string, pretty bool) error {
+	for i, v := range t.Elems() {
+		if v.Kind() == doctree.KindMap || isArrayOfTables(v) {
+			continue // passes 2 and 3
 		}
-		norm[i] = e
-	}
-	entries = norm
-	for _, e := range entries {
-		if _, err := asTable(e.val); err == nil {
-			continue // a sub-table: pass 2
-		}
-		if isArrayOfTables(e.val) {
-			continue // pass 3
-		}
-		sb.WriteString(renderKey(e.key))
+		sb.WriteString(renderKey(t.Key(i)))
 		sb.WriteString(" = ")
-		if err := encodeInline(sb, e.val); err != nil {
+		if err := encodeInline(sb, v); err != nil {
 			return err
 		}
 		sb.WriteByte('\n')
 	}
-	for _, e := range entries {
-		sub, err := asTable(e.val)
-		if err != nil {
+	for i, v := range t.Elems() {
+		if v.Kind() != doctree.KindMap {
 			continue
 		}
-		childPath := append(append([]string{}, path...), e.key)
+		childPath := append(append([]string{}, path...), t.Key(i))
 		if pretty && sb.Len() > 0 {
 			sb.WriteByte('\n')
 		}
 		sb.WriteByte('[')
 		sb.WriteString(renderPath(childPath))
 		sb.WriteString("]\n")
-		if err := emitTable(sb, sub, childPath, pretty); err != nil {
+		if err := emitTable(sb, v, childPath, pretty); err != nil {
 			return err
 		}
 	}
-	for _, e := range entries {
-		if !isArrayOfTables(e.val) {
+	for i, v := range t.Elems() {
+		if !isArrayOfTables(v) {
 			continue
 		}
-		childPath := append(append([]string{}, path...), e.key)
-		for _, elem := range e.val.List {
-			sub, _ := asTable(elem)
+		childPath := append(append([]string{}, path...), t.Key(i))
+		for _, elem := range v.Elems() {
 			if pretty && sb.Len() > 0 {
 				sb.WriteByte('\n')
 			}
 			sb.WriteString("[[")
 			sb.WriteString(renderPath(childPath))
 			sb.WriteString("]]\n")
-			if err := emitTable(sb, sub, childPath, pretty); err != nil {
+			if err := emitTable(sb, elem, childPath, pretty); err != nil {
 				return err
 			}
 		}
@@ -238,40 +217,49 @@ func emitTable(sb *strings.Builder, entries []tableEntry, path []string, pretty 
 	return nil
 }
 
-// encodeInline renders a value in inline form: a scalar literal, a datetime
+// encodeInline renders a node in inline form: a scalar literal, a datetime
 // bare, an inline array, or an inline table.
-func encodeInline(sb *strings.Builder, v interpreter.Value) error {
-	if inner, ok := v.AsObject(LibraryName, "Value"); ok {
-		v = inner
-	}
-	switch v.Kind {
-	case interpreter.KindNull:
+func encodeInline(sb *strings.Builder, n node) error {
+	switch n.Kind() {
+	case doctree.KindNull:
 		return fmt.Errorf("TOML has no null type")
-	case interpreter.KindBool:
-		if v.Bool {
+	case doctree.KindBool:
+		if n.BoolVal() {
 			sb.WriteString("true")
 		} else {
 			sb.WriteString("false")
 		}
-	case interpreter.KindInt:
-		sb.WriteString(strconv.FormatInt(v.Int, 10))
-	case interpreter.KindFloat:
-		sb.WriteString(formatTomlFloat(v.Float))
-	case interpreter.KindString:
-		encodeBasicString(sb, v.Str)
-	case interpreter.KindBytes:
-		encodeBasicString(sb, base64.StdEncoding.EncodeToString(v.Bytes))
-	case interpreter.KindStruct:
-		if text, _, ok := isDatetimeNode(v); ok {
-			sb.WriteString(text)
-			return nil
+	case doctree.KindInt:
+		sb.WriteString(strconv.FormatInt(n.IntVal(), 10))
+	case doctree.KindFloat:
+		sb.WriteString(formatTomlFloat(n.FloatVal()))
+	case doctree.KindString:
+		encodeBasicString(sb, n.Str())
+	case doctree.KindBytes:
+		encodeBasicString(sb, base64.StdEncoding.EncodeToString([]byte(n.Str())))
+	case doctree.KindDatetime:
+		sb.WriteString(n.Str())
+	case doctree.KindMap:
+		sb.WriteByte('{')
+		for i, v := range n.Elems() {
+			if i > 0 {
+				sb.WriteString(", ")
+			} else {
+				sb.WriteByte(' ')
+			}
+			sb.WriteString(renderKey(n.Key(i)))
+			sb.WriteString(" = ")
+			if err := encodeInline(sb, v); err != nil {
+				return err
+			}
 		}
-		return encodeInlineTable(sb, v)
-	case interpreter.KindMap:
-		return encodeInlineTable(sb, v)
-	case interpreter.KindList:
+		if n.Len() > 0 {
+			sb.WriteByte(' ')
+		}
+		sb.WriteByte('}')
+	case doctree.KindList:
 		sb.WriteByte('[')
-		for i, e := range v.List {
+		for i, e := range n.Elems() {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
@@ -280,36 +268,7 @@ func encodeInline(sb *strings.Builder, v interpreter.Value) error {
 			}
 		}
 		sb.WriteByte(']')
-	case interpreter.KindTask:
-		return fmt.Errorf("cannot encode a task value")
-	default:
-		return fmt.Errorf("cannot encode value of kind %s", v.Kind)
 	}
-	return nil
-}
-
-func encodeInlineTable(sb *strings.Builder, v interpreter.Value) error {
-	entries, err := asTable(v)
-	if err != nil {
-		return err
-	}
-	sb.WriteByte('{')
-	for i, e := range entries {
-		if i > 0 {
-			sb.WriteString(", ")
-		} else {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString(renderKey(e.key))
-		sb.WriteString(" = ")
-		if err := encodeInline(sb, e.val); err != nil {
-			return err
-		}
-	}
-	if len(entries) > 0 {
-		sb.WriteByte(' ')
-	}
-	sb.WriteByte('}')
 	return nil
 }
 
