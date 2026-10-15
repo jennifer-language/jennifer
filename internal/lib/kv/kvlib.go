@@ -14,7 +14,10 @@
 //
 // The verb set deliberately mirrors `memcache` (set / add / get / delete / touch
 // / incr) so the `session` / `ratelimit` backend selector can dispatch to any of
-// the three uniformly.
+// the three uniformly. Beside strings, an in-memory store holds opaque library
+// values (setValue / getValue): a parsed json.Value and its kin are immutable, so
+// the store keeps the one tree and every reader shares it - the way concurrent
+// handlers share a parsed document that a writer replaces atomically.
 package kv
 
 import (
@@ -37,8 +40,11 @@ import (
 const LibraryName = "kv"
 
 // entry is one stored value with an optional absolute expiry (zero = no expiry).
+// obj is non-nil for an opaque library value stored by setValue (then value is
+// unused); such an entry is read with getValue, never with get / incr.
 type entry struct {
 	value   string
+	obj     *interpreter.Value
 	expires time.Time
 }
 
@@ -245,6 +251,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "delete", bind((*registry).deleteFn))
 	in.RegisterNamespaced(LibraryName, "touch", bind((*registry).touchFn))
 	in.RegisterNamespaced(LibraryName, "incr", bind((*registry).incrFn))
+	in.RegisterNamespaced(LibraryName, "setValue", bind((*registry).setValueFn))
+	in.RegisterNamespaced(LibraryName, "getValue", bind((*registry).getValueFn))
 	in.RegisterNamespaced(LibraryName, "close", bind((*registry).closeFn))
 }
 
@@ -457,9 +465,85 @@ func (r *registry) getFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e, ok := live(s, key, time.Now()); ok {
+		if e.obj != nil {
+			return interpreter.Null(), fmt.Errorf("kv.get: %q holds a %s value, not a string; read it with kv.getValue", key, objectType(*e.obj))
+		}
 		return interpreter.StringVal(e.value), nil
 	}
 	return interpreter.StringVal(""), nil
+}
+
+// objectType names an opaque value's type for messages ("json.Value").
+func objectType(v interpreter.Value) string {
+	return v.StructNS + "." + v.StructName
+}
+
+// setValueFn implements `kv.setValue(store, key, value, ttl)`: store an opaque
+// library value (a json.Value, toml.Value, yaml.Value, xml.Value, ...) with a
+// ttl-second expiry (0 = never), replacing whatever the key held. Such values are
+// immutable, so the store keeps the value itself - no copy is made here or by
+// getValue, and a large parsed document is shared by every reader. Opaque values
+// only: a list / map / struct would need a deep copy at both ends (and a module
+// struct a cross-boundary identity), which is exactly the cost this avoids; text
+// goes through kv.set. In-memory stores only: an openFile store persists strings,
+// and an opaque value has no faithful text form in general.
+func (r *registry) setValueFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 4 {
+		return interpreter.Null(), fmt.Errorf("kv.setValue expects 4 arguments (store, key, value, ttl), got %d", len(args))
+	}
+	s, err := r.resolve("kv.setValue", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	key, err := stringArg("kv.setValue", "key", args[1])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[2].Kind != interpreter.KindObject {
+		return interpreter.Null(), fmt.Errorf("kv.setValue: value must be an opaque library value (json.Value, toml.Value, yaml.Value, xml.Value, ...), got %s; store text with kv.set", args[2].Kind)
+	}
+	ttl, err := intArg("kv.setValue", "ttl", args[3])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if s.path != "" {
+		return interpreter.Null(), fmt.Errorf("kv.setValue: values live in memory only, and this store is file-backed (kv.openFile); use a kv.open store")
+	}
+	v := args[2]
+	now := time.Now()
+	s.mu.Lock()
+	s.data[key] = entry{obj: &v, expires: expiryFor(ttl, now)}
+	s.maybeSweepLocked(now)
+	s.mu.Unlock()
+	return interpreter.Null(), nil
+}
+
+// getValueFn implements `kv.getValue(store, key) -> value`: the opaque value
+// stored by setValue, shared rather than copied. An absent or expired key is an
+// error (there is no empty value of an unknown type to return); check kv.has
+// first when absence is expected.
+func (r *registry) getValueFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("kv.getValue expects 2 arguments (store, key), got %d", len(args))
+	}
+	s, err := r.resolve("kv.getValue", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	key, err := stringArg("kv.getValue", "key", args[1])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	s.mu.Lock()
+	e, ok := live(s, key, time.Now())
+	s.mu.Unlock()
+	switch {
+	case !ok:
+		return interpreter.Null(), fmt.Errorf("kv.getValue: no value at %q (absent or expired); check with kv.has", key)
+	case e.obj == nil:
+		return interpreter.Null(), fmt.Errorf("kv.getValue: %q holds a string; read it with kv.get", key)
+	}
+	return *e.obj, nil
 }
 
 // hasFn implements `kv.has(store, key) -> bool`: whether the key is present and
@@ -570,6 +654,9 @@ func (r *registry) incrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	e, ok := live(s, key, now)
 	if !ok {
 		return interpreter.IntVal(-1), nil
+	}
+	if e.obj != nil {
+		return interpreter.Null(), fmt.Errorf("kv.incr: value at %q is a %s, not a number", key, objectType(*e.obj))
 	}
 	cur, perr := strconv.ParseInt(e.value, 10, 64)
 	if perr != nil {

@@ -316,3 +316,65 @@ func TestOpenFilePreservesPermissions(t *testing.T) {
 		t.Errorf("new store perms = %o, want 644", fi2.Mode().Perm())
 	}
 }
+
+// setValue / getValue hold an opaque library value: the stored value is the one
+// passed in (its tree shared, never copied), the verbs keep strings and values
+// apart, and a file-backed store refuses values.
+func TestSetGetValue(t *testing.T) {
+	r := &registry{stores: map[int64]*store{}}
+	st := mustOpen(t, r)
+	inner := interpreter.StringVal("payload")
+	doc := interpreter.ObjectVal("json", "Value", inner)
+
+	call(t, r.setValueFn, st, str("doc"), doc, iv(0))
+	got := call(t, r.getValueFn, st, str("doc"))
+	if got.Kind != interpreter.KindObject || got.StructNS != "json" || got.StructName != "Value" {
+		t.Fatalf("getValue = %v, want the json.Value", got)
+	}
+	if got.Obj != doc.Obj {
+		t.Error("getValue copied the tree; it must share the stored one")
+	}
+	if !call(t, r.hasFn, st, str("doc")).Bool {
+		t.Error("has(doc) = false for a value entry")
+	}
+
+	expectErr := func(name string, fn func(interpreter.BuiltinCtx, []interpreter.Value) (interpreter.Value, error), args ...interpreter.Value) {
+		t.Helper()
+		if _, err := fn(ctx, args); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	expectErr("get on a value", r.getFn, st, str("doc"))
+	expectErr("incr on a value", r.incrFn, st, str("doc"), iv(1))
+	call(t, r.setFn, st, str("s"), str("text"), iv(0))
+	expectErr("getValue on a string", r.getValueFn, st, str("s"))
+	expectErr("getValue on an absent key", r.getValueFn, st, str("nope"))
+	expectErr("setValue of a non-opaque value", r.setValueFn, st, str("x"), str("text"), iv(0))
+
+	// A value replaced by setValue is seen by later readers; delete removes it.
+	doc2 := interpreter.ObjectVal("json", "Value", interpreter.IntVal(2))
+	call(t, r.setValueFn, st, str("doc"), doc2, iv(0))
+	if call(t, r.getValueFn, st, str("doc")).Obj != doc2.Obj {
+		t.Error("getValue after a replace did not return the new value")
+	}
+	if !call(t, r.deleteFn, st, str("doc")).Bool || call(t, r.hasFn, st, str("doc")).Bool {
+		t.Error("delete of a value entry failed")
+	}
+
+	// Expiry applies to values too.
+	call(t, r.setValueFn, st, str("short"), doc, iv(1))
+	s, _ := r.resolve("test", st)
+	s.mu.Lock()
+	e := s.data["short"]
+	e.expires = time.Now().Add(-time.Second)
+	s.data["short"] = e
+	s.mu.Unlock()
+	expectErr("getValue on an expired key", r.getValueFn, st, str("short"))
+
+	// A file-backed store persists text only.
+	fileSt, err := r.openFileFn(ctx, []interpreter.Value{str(filepath.Join(t.TempDir(), "kv.db"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectErr("setValue on an openFile store", r.setValueFn, fileSt, str("doc"), doc, iv(0))
+}

@@ -35,6 +35,8 @@ io.printf("%s\n", kv.get($store, "greeting"));
 | `kv.delete(store, key)` | `bool` | remove the key; whether it existed |
 | `kv.touch(store, key, ttl)` | `bool` | re-arm the key's expiry; whether it existed |
 | `kv.incr(store, key, delta)` | `int` | add `delta` (signed - **negative decrements**, no separate `decr`) to the numeric value; the new value, or `-1` when the key is absent (it is **not** created) |
+| `kv.setValue(store, key, value, ttl)` | | store an **opaque library value** (`json.Value`, `toml.Value`, `yaml.Value`, `xml.Value`, ...) - shared, not copied; in-memory stores only (see [Values](#values-shared-parsed-data)) |
+| `kv.getValue(store, key)` | the stored value | the value `setValue` stored, shared with every other reader; an error when absent / expired (check `kv.has` first) |
 | `kv.close(store)` | | drop the store and free its handle |
 
 ## Semantics
@@ -61,7 +63,8 @@ io.printf("%s\n", kv.get($store, "greeting"));
 - **Handles are shared, values are copies.** The `kv.Store` handle shares one
   backing map (that is the point - it survives value-copies, `spawn`, and being
   passed into or out of an `import`ed module); the string values it stores are
-  ordinary copies. The sharing is run-scoped: the registry is created fresh each
+  ordinary copies, and an opaque value stored with `setValue` is immutable, so
+  sharing it is indistinguishable from copying it. The sharing is run-scoped: the registry is created fresh each
   run and never leaks into the next.
 - **Single process.** State lives in this process only. `open` is in-memory
   (gone when the program exits); `openFile` persists to disk and survives across
@@ -74,6 +77,46 @@ io.printf("%s\n", kv.get($store, "greeting"));
   cross-process lock. For state shared across processes (multiple workers, a web
   fleet), use `memcache` / `redis` - the [`kvstore`](../modules/kvstore.md)
   selector switches backends behind one API.
+
+## Values: shared parsed data
+
+`kv.set` / `kv.get` move strings. `kv.setValue` / `kv.getValue` move an **opaque
+library value** - a parsed `json.Value` and its kin (`toml.Value`, `yaml.Value`,
+`xml.Value`, `asn1.Value`). Those values are immutable (every edit returns a new
+handle), so the store keeps the one parsed tree and every `getValue` hands out
+that same tree: **nothing is copied**, however large the document and however
+many tasks read it at once. That makes a `kv` store the place to publish a
+parsed document that concurrent workers - `web` handlers, `spawn`ed tasks - read
+and an occasional writer replaces:
+
+```jennifer
+use fs;
+use json;
+use kv;
+
+def cache as kv.Store init kv.open();
+kv.setValue($cache, "registry", json.decode(fs.readString("registry.json")), 0);
+
+# Any worker, any time - no parse, no copy:
+def doc as json.Value init kv.getValue($cache, "registry");
+
+# A writer publishes a new version; readers already holding the old one keep it,
+# the next getValue sees the new one.
+kv.setValue($cache, "registry", json.set($doc, "/updated", json.decode("true")), 0);
+```
+
+- **Only opaque values.** A list, map or struct would have to be deep-copied on
+  the way in and out to keep value semantics, which is the cost this avoids;
+  `setValue` refuses one (store text with `kv.set`, or wrap the data in a
+  `json.Value`).
+- **Strings and values stay apart.** `kv.get` on a value entry, `kv.getValue` on
+  a string entry, and `kv.incr` on a value entry are errors. `has`, `delete` and
+  `touch` work on both, and either setter replaces whatever the key held.
+- **In-memory stores only.** A `kv.openFile` store persists text, so `setValue`
+  on one is an error.
+- **Absent is an error.** `getValue` has no empty value of an unknown type to
+  return, so an absent or expired key throws a catchable error; check `kv.has`
+  when absence is expected. TTLs apply as for strings.
 
 ## See also
 
