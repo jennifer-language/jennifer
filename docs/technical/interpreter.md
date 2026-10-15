@@ -577,7 +577,13 @@ string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
    per-access lookup (an unexported / missing name stays unstamped, so its
    runtime error is unchanged). This pass runs after BOTH import
    mechanisms (the tables didn't exist during Resolve) and is skipped by
-   the REPL, which builds its namespaces incrementally. Finally executes
+   the REPL, which builds its namespaces incrementally. The same walk
+   collects every `StructLit`, and `checkStructLits`
+   (`structlit_check.go`) then checks each literal's field set against its
+   resolved struct / enum-variant declaration (same-file, library, or
+   module), so an unknown or missing field fails the load with the message
+   `evalStructLit` / `evalEnumLit` would raise, before any statement runs.
+   A literal whose type does not resolve is left to the runtime path. Finally executes
    `prog.TopLevel` statements in source order in the global scope.
 5. Method calls execute the body in a fresh call frame whose parent is
    `effectiveGlobal(env)` (an O(1) `env.root` field read; in

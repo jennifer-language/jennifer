@@ -471,3 +471,27 @@ func TestModuleEnumNotExported(t *testing.T) {
 		t.Fatalf("want not-exported error, got %v", err)
 	}
 }
+
+// A literal of an imported module's struct or enum has its field set checked at
+// load, against the module's declaration, like a same-file literal - and a bad
+// literal inside the module itself fails the import.
+func TestModuleStructLiteralFieldsCheckedAtLoad(t *testing.T) {
+	mod := `export def struct Point { x as int, y as int };
+export def enum Shape { Empty, Circle { r as int } };`
+	for _, c := range []struct{ name, main, want string }{
+		{"struct", `use io; import "./m.j"; func f() { return m.Point{ x: 1 }; } io.printf("ran");`, `missing field "y" in struct "Point" literal`},
+		{"enum", `use io; import "./m.j"; func f() { return m.Shape.Circle{ radius: 1 }; } io.printf("ran");`, `unknown field "radius" in variant Shape.Circle`},
+	} {
+		out, err := runModuleMain(t, map[string]string{"m.j": mod, "main.j": c.main})
+		if err == nil || !strings.Contains(err.Error(), c.want) || out != "" {
+			t.Errorf("%s: out %q, err %v; want %q before any output", c.name, out, err, c.want)
+		}
+	}
+	out, err := runModuleMain(t, map[string]string{
+		"m.j":    mod + ` export func make() { return Point{ x: 1, z: 2 }; }`,
+		"main.j": `use io; import "./m.j"; io.printf("ran");`,
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown field "z"`) || out != "" {
+		t.Errorf("bad literal inside the module: out %q, err %v", out, err)
+	}
+}

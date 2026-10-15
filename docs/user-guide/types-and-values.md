@@ -581,8 +581,12 @@ $p.x = 30;
 
 The struct literal `Point{ x: 3, y: 4 }` requires **every** field; a
 missing field is a positioned error, and so is an unknown one (`z: 5`
-on a `Point`). Field order in the literal is free - the runtime stores
-each field at its declaration position regardless.
+on a `Point`). Both are caught when the program **loads**, before its first
+statement runs, even for a literal in a branch that never executes; the same
+holds for an enum variant's payload fields and for library and module struct
+types. (`jennifer lint` reports it too, as `L113`, for types declared in the same
+file.) Field order in the literal is free - the runtime stores each field at its
+declaration position regardless.
 
 `def p as Point;` (no `init`) gives every field its declared zero,
 recursing through nested struct fields. So `def L as Line;` produces

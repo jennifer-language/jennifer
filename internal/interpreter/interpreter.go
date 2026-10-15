@@ -196,6 +196,11 @@ type Interpreter struct {
 	// mutable global set grows across inputs.
 	entryGlobalsImmutable bool
 
+	// structLits collects every struct / enum literal resolveQualifiedRefs walks
+	// past, so Run can check their field sets once the module and namespace
+	// tables exist (checkStructLits). Cleared after the check.
+	structLits []*parser.StructLit
+
 	// host is the entry-program interpreter for a module sub-interpreter, or
 	// nil on the entry program itself. meta.callMain / meta.definedMain resolve
 	// against it, so a module (e.g. `jsonrpc`, dispatching a wire method name)
@@ -1294,6 +1299,12 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// their loaded const values), since both dictate which prefixes are valid and
 	// module-const stamping needs the imported module's constants to exist.
 	i.resolveQualifiedRefs(prog)
+	// Every literal names its struct / variant statically, and must name every
+	// field exactly, so a wrong field set is a load-time error rather than one
+	// that waits for the branch holding the literal to run.
+	if err := i.checkStructLits(); err != nil {
+		return err
+	}
 	// Per-function escape analysis for read-only-parameter borrow: mark each
 	// method that (transitively over its named calls) mutates no global, so its
 	// never-written params may be borrowed. Runs after loadModuleImports +
@@ -5788,6 +5799,7 @@ func (i *Interpreter) walkExprForQualifiedRefs(e parser.Expr) {
 			i.walkExprForQualifiedRefs(ex.Values[k])
 		}
 	case *parser.StructLit:
+		i.structLits = append(i.structLits, ex)
 		for _, f := range ex.Fields {
 			i.walkExprForQualifiedRefs(f.Expr)
 		}

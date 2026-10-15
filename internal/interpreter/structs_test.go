@@ -220,3 +220,64 @@ def struct Point { a as int };
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A literal's field set is checked when the program loads, not when the literal
+// runs: a wrong field in a branch that never executes (or has not yet) still
+// fails before the first statement, so it cannot ship unnoticed.
+func TestStructLiteralFieldsCheckedAtLoad(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"unknown field in an untaken branch", `
+use io;
+def struct P { x as int };
+func make(flag as bool) {
+    if ($flag) {
+        return P{ x: 1, y: 2 };
+    }
+    return P{ x: 0 };
+}
+io.printf("ran\n");
+make(false);
+`, `unknown field "y" in struct "P"`},
+		{"missing field in an uncalled method", `
+use io;
+def struct P { x as int, z as int };
+func make() { return P{ x: 1 }; }
+io.printf("ran\n");
+`, `missing field "z" in struct "P" literal`},
+		{"enum variant payload", `
+use io;
+def enum Shape { Empty, Circle { r as float } };
+func make() { return Shape.Circle{ radius: 1.0 }; }
+io.printf("ran\n");
+`, `unknown field "radius" in variant Shape.Circle`},
+		{"unknown enum variant", `
+use io;
+def enum Shape { Empty, Circle { r as float } };
+func make() { return Shape.Square{ r: 1.0 }; }
+io.printf("ran\n");
+`, `enum Shape has no variant "Square"`},
+		{"library struct", `
+use io;
+use os;
+func res() { return os.Result{ exitCode: 1 }; }
+io.printf("ran\n");
+`, `missing field "stdout"`},
+		{"inside a spawn body", `
+use io;
+def struct P { x as int };
+func later() {
+    def t as task of P init spawn { return P{ x: 1, q: 2 }; };
+}
+io.printf("ran\n");
+`, `unknown field "q"`},
+	}
+	for _, c := range cases {
+		out, err := run(t, c.src)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+		if strings.Contains(out, "ran") {
+			t.Errorf("%s: the program ran before the literal was rejected", c.name)
+		}
+	}
+}
