@@ -67,8 +67,19 @@ func runTest(args []string) int {
 
 	tests := discoverTests(in, opts.filter)
 	if len(tests) == 0 {
-		fmt.Fprintln(os.Stderr, "jennifer test: no test methods found (default convention: names starting with `test`)")
-		return testExitPass
+		// An empty suite is a runner-level failure by default: a gate that runs
+		// overlays and checks the exit status must not pass one with nothing in
+		// it. --allow-empty opts back into success for a deliberately empty file.
+		what := "no test methods found (default convention: names starting with `test`)"
+		if opts.filter != nil {
+			what = fmt.Sprintf("no test methods match --filter=%s", opts.filter)
+		}
+		if opts.allowEmpty {
+			fmt.Fprintf(os.Stderr, "jennifer test: %s\n", what)
+			return testExitPass
+		}
+		fmt.Fprintf(os.Stderr, "jennifer test: %s; pass --allow-empty to accept an empty suite\n", what)
+		return testExitFailure
 	}
 
 	hasSetUp := hasMethod(in, "setUp")
@@ -343,6 +354,7 @@ type testOptions struct {
 	format         string
 	filter         *regexp.Regexp
 	isolated       bool
+	allowEmpty     bool
 	single         string
 	showHelp       bool
 	coverage       bool
@@ -373,6 +385,8 @@ func parseTestArgs(args []string) (testOptions, bool) {
 			opts.filter = re
 		case a == "--isolated":
 			opts.isolated = true
+		case a == "--allow-empty":
+			opts.allowEmpty = true
 		case strings.HasPrefix(a, "--testing-single="):
 			opts.single = strings.TrimPrefix(a, "--testing-single=")
 		case a == "-" || !strings.HasPrefix(a, "-"):
@@ -405,15 +419,16 @@ func parseTestArgs(args []string) (testOptions, bool) {
 }
 
 func testUsage(w *os.File) {
-	fmt.Fprintln(w, "usage: jennifer test [--filter=REGEX] [--format=text|tap|junit] [--isolated] [--coverage[=text|json]] <file.j>")
+	fmt.Fprintln(w, "usage: jennifer test [--filter=REGEX] [--format=text|tap|junit] [--isolated] [--allow-empty] [--coverage[=text|json]] <file.j>")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Discover and run the test methods in a Jennifer source file.")
 	fmt.Fprintln(w, "  default            run methods whose name starts with `test`")
 	fmt.Fprintln(w, "  --filter=REGEX     run methods matching the regex instead")
 	fmt.Fprintln(w, "  --format=FMT       text (default), tap, or junit report")
 	fmt.Fprintln(w, "  --isolated         run each test in a fresh interpreter subprocess")
+	fmt.Fprintln(w, "  --allow-empty      exit 0 when no test method is found (default: exit 2)")
 	fmt.Fprintln(w, "  --coverage[=FMT]   also report statement coverage: text (default) or json")
 	fmt.Fprintln(w, "                     (json owns stdout; the test report moves to stderr)")
 	fmt.Fprintln(w, "  setUp / tearDown methods, if present, run around each test")
-	fmt.Fprintln(w, "Exit: 0 all pass, 1 failures, 2 runner error.")
+	fmt.Fprintln(w, "Exit: 0 all pass, 1 failures, 2 runner error or no tests found.")
 }

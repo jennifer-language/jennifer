@@ -63,6 +63,7 @@ PASS testGreeting (0 ms)
 | `--format=tap`    | TAP version 14 - CI-friendly, with a YAML diagnostic block per failure.                       |
 | `--format=junit`  | JUnit XML - for CI dashboards that consume it.                                                |
 | `--isolated`      | Run each test in a fresh interpreter subprocess: clean state per test, coarser reporting (a pass/fail line, no in-process kind / position). |
+| `--allow-empty`   | Exit `0` when no test method is found (none by the `test*` convention, or none matching `--filter`). Without it an empty suite exits `2`. |
 | `--coverage[=FMT]`| Also report statement coverage: which executable positions in the tested file(s) ran. `text` (default) prints a per-file and total percentage plus the never-executed positions; `json` emits a machine-readable form. Runs in-process (so it overrides `--isolated`). |
 
 ## Coverage
@@ -115,10 +116,12 @@ ok 3 - testGreeting
 | ---- | --------------------------------------------- |
 | `0`  | All tests passed.                             |
 | `1`  | At least one test failed.                     |
-| `2`  | Runner error (parse / lex / IO) - no tests ran. |
+| `2`  | Runner error (parse / lex / IO), or no test methods found - no tests ran. |
 
 The `0` / `1` / `2` split matches `jennifer lint`, so a CI step can treat
-"failures" and "the tool broke" differently.
+"failures" and "the tool broke" differently. An empty suite counts as a runner
+error, so a gate that only checks the exit status cannot pass an overlay with
+nothing in it; `--allow-empty` accepts one that is empty on purpose.
 
 ## Assertions
 

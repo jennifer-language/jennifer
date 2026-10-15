@@ -290,8 +290,9 @@ the orchestration layer on top. It discovers `test*` methods (or
 `--filter=REGEX`), runs `setUp` / `tearDown` around each, renders
 `--format=text|tap|junit`, and with `--isolated` runs each test in a
 fresh interpreter subprocess so one test's crash, `exit`, or leaked
-global state can't affect the others. Its flags and exit codes are
-documented in
+global state can't affect the others. A file with no test methods exits `2`
+(a runner error) unless `--allow-empty` is passed, so a gate cannot pass an
+empty suite by accident. Its flags and exit codes are documented in
 [technical/cli_test.md > Test runner](../technical/cli_test.md#test-runner-cmdjennifertestgo-internallibtesting).
 `testing.runWith` (and `Interpreter.CallByNameWith` beneath it) supplies
 the arg-taking dispatch that parameterised drivers use.
