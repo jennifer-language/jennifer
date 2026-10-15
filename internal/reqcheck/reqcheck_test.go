@@ -178,3 +178,40 @@ func TestHeaderScanTolerance(t *testing.T) {
 		}
 	})
 }
+
+// A leading UTF-8 BOM (which BOM-writing editors add and the lexer strips) must
+// not end the header: the pragmas after it are still enforced.
+func TestHeaderAfterBOM(t *testing.T) {
+	src := "\uFEFF# pragma-jennifer-capability: nosuchcap\nuse io;\n"
+	if err := CheckRequirements(src, "bom.j"); err == nil {
+		t.Error("a BOM-prefixed header must still be checked")
+	}
+	dirs, mErr := Parse("\uFEFF#!/usr/bin/env -S jennifer run\n# pragma-jennifer-version: >=0.1.0\n")
+	if mErr != nil || len(dirs) != 1 || dirs[0].Line != 2 {
+		t.Errorf("Parse after BOM = %+v, %v; want the version directive on line 2", dirs, mErr)
+	}
+}
+
+// Block comments nest in the header scan exactly as in the lexer: a pragma line
+// inside a still-open nested comment is commentary, and the header resumes once
+// every level has closed.
+func TestHeaderNestedBlockComments(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want int // directives found
+	}{
+		{"inside a nested comment", "/* a /* b */\n# pragma-jennifer-version: >=0.1.0\n*/\nuse io;\n", 0},
+		{"inside a plain comment", "/*\n# pragma-jennifer-version: >=0.1.0\n*/\nuse io;\n", 0},
+		{"after a nested comment closes", "/* a /* b */ c */\n# pragma-jennifer-version: >=0.1.0\nuse io;\n", 1},
+		{"after a multi-line nest", "/* a\n/* b\n*/\n*/\n# pragma-jennifer-version: >=0.1.0\nuse io;\n", 1},
+		{"after a comment on the same line", "/* note */ # pragma-jennifer-version: >=0.1.0\nuse io;\n", 1},
+		{"code after a comment ends the header", "/* note */ use io;\n# pragma-jennifer-version: >=0.1.0\n", 0},
+	}
+	for _, c := range cases {
+		dirs, mErr := Parse(c.src)
+		if mErr != nil || len(dirs) != c.want {
+			t.Errorf("%s: got %d directives (%v), want %d", c.name, len(dirs), mErr, c.want)
+		}
+	}
+}

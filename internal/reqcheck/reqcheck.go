@@ -129,14 +129,19 @@ func (e *MalformedError) Error() string { return e.Detail }
 // that opens the marker but does not parse stops the scan with a *MalformedError.
 // Parse does no validation against the running build - it is the shared front end
 // for both the read-time check and lint.
+//
+// The scan agrees with the lexer on what is a comment: a leading UTF-8 BOM is
+// skipped (the lexer strips it, so a BOM must not end the header and switch the
+// guard off), and block comments nest, so a `# pragma-jennifer-*` line inside a
+// still-open `/* /* */` is commentary, not a directive.
 func Parse(rawSource string) ([]Directive, *MalformedError) {
 	var out []Directive
-	inBlock := false
+	depth := 0 // block-comment nesting carried across lines
+	rest := strings.TrimPrefix(rawSource, "\uFEFF")
 	// Iterate line by line rather than strings.Split(rawSource, "\n"): Parse returns
 	// at the first line of code, so a full split would eagerly allocate a header for
 	// every line of a possibly-huge file (up to O(size)) only to discard the bulk.
 	// IndexByte advances one line at a time and stops the moment the header ends.
-	rest := rawSource
 	for lineNo := 1; len(rest) > 0; lineNo++ {
 		raw := rest
 		if idx := strings.IndexByte(rest, '\n'); idx >= 0 {
@@ -145,19 +150,24 @@ func Parse(rawSource string) ([]Directive, *MalformedError) {
 			rest = ""
 		}
 		line := strings.TrimSpace(raw)
-		if inBlock {
-			if strings.Contains(line, "*/") {
-				inBlock = false
+		// Consume any block comments on this line: one still open from earlier
+		// lines, then any that open (and maybe close) here.
+		for {
+			if depth > 0 {
+				depth, line = skipBlockComment(line, depth)
+				if depth > 0 {
+					break // the comment runs on past this line
+				}
+				line = strings.TrimSpace(line)
 			}
-			continue
+			if !strings.HasPrefix(line, "/*") {
+				break
+			}
+			depth, line = skipBlockComment(line[2:], 1)
+			line = strings.TrimSpace(line)
 		}
 		switch {
-		case line == "":
-			continue
-		case strings.HasPrefix(line, "/*"):
-			if !strings.Contains(line[2:], "*/") {
-				inBlock = true
-			}
+		case depth > 0, line == "":
 			continue
 		case !strings.HasPrefix(line, "#"):
 			return out, nil // first code line: header block is over
@@ -185,6 +195,28 @@ func Parse(rawSource string) ([]Directive, *MalformedError) {
 		out = append(out, Directive{Key: key, Val: val, Line: lineNo})
 	}
 	return out, nil
+}
+
+// skipBlockComment scans s from inside a block comment nested depth deep, the
+// way the lexer does (`/*` deepens, `*/` closes one level). It returns the depth
+// at the end of s, and - once the comment has closed - the text after it.
+func skipBlockComment(s string, depth int) (int, string) {
+	for i := 0; i+1 < len(s); {
+		switch {
+		case s[i] == '/' && s[i+1] == '*':
+			depth++
+			i += 2
+		case s[i] == '*' && s[i+1] == '/':
+			depth--
+			i += 2
+			if depth == 0 {
+				return 0, s[i:]
+			}
+		default:
+			i++
+		}
+	}
+	return depth, ""
 }
 
 // CheckRequirements scans the leading header of rawSource for `# pragma-jennifer-*`

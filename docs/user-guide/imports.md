@@ -313,7 +313,10 @@ block:
   / `meta.CAPABILITIES`.
 
 The header is a comment (a module top level is declarations-only, and the check runs
-before parsing), tolerant of the shebang, the SPDX block, and the docblock. It
+before parsing), tolerant of the shebang, the SPDX block, and the docblock. The
+header scan reads comments exactly as the lexer does: a leading UTF-8 byte-order
+mark is skipped (so a BOM-writing editor cannot switch the check off), and block
+comments nest, so a directive inside a still-open `/* /* */` is commentary. It
 applies uniformly to a program, a module, and each `include`d file: **every file
 self-checks its own header** against the running interpreter, so `include` needs no
 merging - the effective floor is the highest and the effective capability set the
