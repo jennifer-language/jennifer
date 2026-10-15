@@ -353,3 +353,33 @@ func TestSortLargeInts(t *testing.T) {
 		t.Errorf("large ints sorted wrong: %d, %d", out.List[0].Int, out.List[1].Int)
 	}
 }
+
+// Every comparison path of the sort: int / int, float / float, string, bool,
+// and a mixed int / float pair compared exactly at the 2^53 boundary (an int
+// one above 2^53 sorts after the float 2^53, which a float64 view would tie).
+func TestSortComparisonPaths(t *testing.T) {
+	sorted := func(vs ...interpreter.Value) []interpreter.Value {
+		t.Helper()
+		out, err := sortFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.Value{Kind: interpreter.KindList, List: vs}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.List
+	}
+	if got := sorted(interpreter.IntVal(3), interpreter.IntVal(-1), interpreter.IntVal(2)); got[0].Int != -1 || got[2].Int != 3 {
+		t.Errorf("ints: %v", got)
+	}
+	if got := sorted(interpreter.FloatVal(2.5), interpreter.FloatVal(-0.5), interpreter.FloatVal(1)); got[0].Float != -0.5 || got[2].Float != 2.5 {
+		t.Errorf("floats: %v", got)
+	}
+	if got := sorted(interpreter.StringVal("b"), interpreter.StringVal("a")); got[0].Str != "a" {
+		t.Errorf("strings: %v", got)
+	}
+	if got := sorted(interpreter.BoolVal(true), interpreter.BoolVal(false)); got[0].Bool {
+		t.Errorf("bools: %v", got)
+	}
+	got := sorted(interpreter.IntVal(9007199254740993), interpreter.FloatVal(9007199254740992), interpreter.IntVal(1))
+	if got[0].Int != 1 || got[1].Kind != interpreter.KindFloat || got[2].Int != 9007199254740993 {
+		t.Errorf("mixed int / float at 2^53: %v", got)
+	}
+}
