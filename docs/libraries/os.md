@@ -31,7 +31,7 @@ function - see
 | `os.setEnv(name, value)` | null   | Sets an environment variable for this process (and any child it later spawns). An invalid name (empty, or containing `=` / NUL) is a positioned error. |
 | `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
 | `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
-| `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr. An optional `stdin` (`string` or `bytes`) is fed to the child then closed. See "External programs" below. |
+| `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr. An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |
 | `os.spawn(argv[, options])` | `os.Process` | **Non-blocking.** Start `argv`, return a handle. `options` is a `map of string to string` with optional `"stdout"` / `"stderr"` keys. See "Spawned child stdio" below. |
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent.       |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
@@ -304,7 +304,19 @@ the unsafe form.
 the child) populates `$r.exitCode` with the value; the caller
 branches on it. Only *boundary* failures - program not found, not
 executable, permission denied, fork/exec failure - are positioned
-runtime errors at the call site.
+runtime errors at the call site (`Error{kind: "runtime"}`, catchable). So a
+"is this tool installed?" probe wraps the call:
+
+```jennifer
+use os;
+func hasGit() {
+    try {
+        return os.run(["git", "--version"]).exitCode == 0;
+    } catch (e) {
+        return false; # not on PATH, or not executable
+    }
+}
+```
 
 **Stream buffering.** Both stdout and stderr are buffered in memory.
 A child that produces gigabytes of output will exhaust the
