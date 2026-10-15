@@ -344,21 +344,29 @@ func audienceMatches(claims as json.Value, want as string) {
  *   missing `exp` the policy requires
  */
 export func verifyWith(token as string, key as bytes, alg as string, policy as Policy) {
-    def claims as json.Value init verify($token, $key, $alg);
+    return applyPolicy("jwt.verifyWith", verify($token, $key, $alg), $policy);
+}
+
+# applyPolicy enforces a Policy on already-verified claims - a required `exp`,
+# the expected issuer, the expected audience - for every `...With` verifier, so
+# the key-set forms check exactly what verifyWith checks. fnName prefixes the
+# errors.
+func applyPolicy(fnName as string, claims as json.Value, policy as Policy) {
     if ($policy.requireExp and not json.has($claims, "/exp")) {
         throw Error{
             kind: "value",
-            message: "jwt.verifyWith: the token has no expiry (exp), which the policy requires",
+            message: $fnName + ": the token has no expiry (exp), which the policy requires",
             file: "",
             line: 0,
             col: 0
         };
     }
     if ($policy.iss != "") {
-        if (not json.has($claims, "/iss") or json.asString($claims, "/iss") != $policy.iss) {
+        if (not json.has($claims, "/iss") or json.typeOf($claims, "/iss") != "string" or
+            json.asString($claims, "/iss") != $policy.iss) {
             throw Error{
                 kind: "value",
-                message: "jwt.verifyWith: issuer (iss) does not match the expected " + $policy.iss,
+                message: $fnName + ": issuer (iss) does not match the expected " + $policy.iss,
                 file: "",
                 line: 0,
                 col: 0
@@ -369,8 +377,7 @@ export func verifyWith(token as string, key as bytes, alg as string, policy as P
         if (not audienceMatches($claims, $policy.aud)) {
             throw Error{
                 kind: "value",
-                message: "jwt.verifyWith: audience (aud) does not include the expected " +
-                    $policy.aud,
+                message: $fnName + ": audience (aud) does not include the expected " + $policy.aud,
                 file: "",
                 line: 0,
                 col: 0
@@ -450,6 +457,29 @@ func keyMaterialFor(alg as string, value as string) {
 }
 
 /**
+ * `verifyWithKeys` plus the claim policy `verifyWith` enforces: the key is chosen
+ * by the header's `kid` from `keysByKid`, the signature and `exp` / `nbf` are
+ * checked, then the `Policy` - a required `exp`, the expected issuer, the
+ * expected audience. Use this whenever the token comes from an issuer that serves
+ * more than one audience, or may omit `exp`.
+ * @param token {string} the compact JWT
+ * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / ES\*)
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
+ * @param policy {Policy} the expected issuer / audience (empty string skips a check),
+ *   and whether an `exp` claim is required
+ * @return {json.Value} the verified claims
+ * @throws {Error} on anything `verifyWithKeys` rejects, a mismatched issuer /
+ *   audience, or a missing `exp` the policy requires
+ */
+export func verifyWithKeysWith(
+    token as string,
+    keysByKid as map of string to string,
+    alg as string,
+    policy as Policy) {
+    return applyPolicy("jwt.verifyWithKeysWith", verifyWithKeys($token, $keysByKid, $alg), $policy);
+}
+
+/**
  * Verify a JWT against a **JWKS** (a JSON Web Key Set), selecting the key by the
  * header's `kid`. Reads `kid` from the (unverified) header, finds the matching
  * JWK in the set's `keys` array, converts it to a PEM public key with
@@ -518,6 +548,25 @@ export func verifyJwks(token as string, jwksJson as string, alg as string) {
         line: 0,
         col: 0
     };
+}
+
+/**
+ * `verifyJwks` plus the claim policy `verifyWith` enforces. This is the form to
+ * use for an OIDC issuer's tokens (CI identity tokens, login ID tokens): the key
+ * comes from the issuer's JWKS by `kid`, then the `Policy` checks the issuer, the
+ * audience - without which a token minted for another service would be accepted
+ * by yours - and, with `requireExp`, that the token expires at all.
+ * @param token {string} the compact JWT
+ * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
+ * @param alg {string} the algorithm the caller requires (e.g. "RS256", "ES256")
+ * @param policy {Policy} the expected issuer / audience (empty string skips a check),
+ *   and whether an `exp` claim is required
+ * @return {json.Value} the verified claims
+ * @throws {Error} on anything `verifyJwks` rejects, a mismatched issuer /
+ *   audience, or a missing `exp` the policy requires
+ */
+export func verifyJwksWith(token as string, jwksJson as string, alg as string, policy as Policy) {
+    return applyPolicy("jwt.verifyJwksWith", verifyJwks($token, $jwksJson, $alg), $policy);
 }
 
 /**

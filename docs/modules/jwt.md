@@ -36,9 +36,11 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
 | `jwt.sign(claims, key, alg)`  | `string`     | Sign `claims` (a `json.Value`) into a compact JWT.                     |
 | `jwt.verify(token, key, alg)` | `json.Value` | Verify the signature, the header algorithm, and `exp` / `nbf`; return the claims. Throws on any failure. |
 | `jwt.verifyLeeway(token, key, alg, leeway)` | `json.Value` | Like `verify`, but widen the `exp` / `nbf` checks by `leeway` seconds each way for clock skew. `verify` is `verifyLeeway(..., 0)`. |
-| `jwt.verifyWith(token, key, alg, policy)` | `json.Value` | Like `verify`, then additionally enforce the `jwt.Policy` claim checks (issuer / audience). Throws on any failure. |
+| `jwt.verifyWith(token, key, alg, policy)` | `json.Value` | Like `verify`, then additionally enforce the `jwt.Policy` claim checks (issuer / audience / required `exp`). Throws on any failure. |
 | `jwt.verifyWithKeys(token, keysByKid, alg)` | `json.Value` | Select the verification key by the header's `kid` from a `map of string to string` (secret or PEM text), then `verify`. |
 | `jwt.verifyJwks(token, jwksJson, alg)` | `json.Value` | Verify against a **JWKS** (`{"keys":[...]}`): select the JWK by the header's `kid`, convert it to a key with `crypto.jwkToPem`, then `verify`. Asymmetric algs (RS\* / ES\*) only; needs the default binary. |
+| `jwt.verifyWithKeysWith(token, keysByKid, alg, policy)` | `json.Value` | `verifyWithKeys`, then the same `jwt.Policy` checks as `verifyWith`. |
+| `jwt.verifyJwksWith(token, jwksJson, alg, policy)` | `json.Value` | `verifyJwks`, then the same `jwt.Policy` checks as `verifyWith` - the form to use for an OIDC issuer's tokens. |
 | `jwt.decode(token)`           | `json.Value` | The payload claims **without verifying** - for inspection only.        |
 | `jwt.header(token)`           | `json.Value` | The token header (its `alg` / `kid`), also without verifying.          |
 
@@ -153,15 +155,22 @@ def jwks as string init http.get("https://issuer.example.com/.well-known/jwks.js
 def claims as json.Value init jwt.verifyJwks($token, $jwks, "RS256");
 ```
 
-**JWKS.** A raw JWKS endpoint publishes keys as JSON Web Keys
-(`{"kty","kid","n","e"}` for RSA, `{"kty","kid","crv","x","y"}` for EC), not
-PEM. `jwt` does not consume a JWKS directly: turning a JWK's modulus/exponent
-(or EC point) into a verification key requires ASN.1 DER encoding that the
-`crypto` surface does not expose, and hand-rolled DER in `.j` would be fragile
-and a poor fit for security-sensitive code. Resolve the JWKS to a `kid -> PEM`
-(or `kid -> secret`) map out of band - for example with your identity provider's
-tooling or `openssl` - and pass that map to `verifyWithKeys`. A `crypto.jwkToPem`
-helper that would let `jwt` ingest a JWKS in-process is a noted follow-up.
+**Check the issuer and audience on key-set tokens.** `verifyWithKeys` and
+`verifyJwks` verify the signature and the `exp` / `nbf` times, and nothing
+more: they accept a token with no `exp` (it never expires), and a token minted
+for any audience. A JWKS is what an OIDC issuer publishes - CI identity tokens,
+login ID tokens - and that issuer serves many relying parties, so without an
+audience check a token minted for another service replays against yours. Use the
+`...With` forms, which apply the same `jwt.Policy` as `verifyWith`:
+
+```jennifer
+def policy as jwt.Policy init jwt.Policy{
+    iss: "https://token.actions.githubusercontent.com",
+    aud: "https://registry.example.com",
+    requireExp: true
+};
+def claims as json.Value init jwt.verifyJwksWith($token, $jwks, "RS256", $policy);
+```
 
 ## JWT as web auth (`jwt_auth`)
 

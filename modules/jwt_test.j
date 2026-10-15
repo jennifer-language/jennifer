@@ -470,3 +470,86 @@ func testVerifyWithoutRequireExpStillAcceptsNoExp() {
         Policy{iss: "", aud: "", requireExp: false});
     testing.assertFalse(json.has($back, "/exp"));
 }
+
+# ---- verifyWithKeysWith / verifyJwksWith: key sets with a claim policy ----
+
+func strictPolicy() {
+    return Policy{iss: "good-iss", aud: "good-aud", requireExp: true};
+}
+# claimsFor builds claims with the given aud and, when withExp, an hour of life.
+func claimsFor(aud as string, withExp as bool) {
+    def c as json.Value init json.set(json.set(json.map(), "/sub", "ci"), "/iss", "good-iss");
+    $c = json.set($c, "/aud", $aud);
+    if ($withExp) {
+        $c = json.set($c, "/exp", time.unix(time.now()) + 3600);
+    }
+    return $c;
+}
+
+func testVerifyWithKeysWithAcceptsMatchingToken() {
+    def tok as string init signWithKid(claimsFor("good-aud", true), secret(), "HS256", "k2");
+    def back as json.Value init verifyWithKeysWith($tok, keyRing(), "HS256", strictPolicy());
+    testing.assertEqual(json.asString($back, "/sub"), "ci");
+}
+func testVerifyWithKeysWithRejectsMissingExp() {
+    testing.assertThrows("keysNoExp", "value");
+}
+func keysNoExp() {
+    def tok as string init signWithKid(claimsFor("good-aud", false), secret(), "HS256", "k2");
+    verifyWithKeysWith($tok, keyRing(), "HS256", strictPolicy());
+}
+func testVerifyWithKeysWithRejectsForeignAudience() {
+    testing.assertThrows("keysForeignAud", "value");
+}
+func keysForeignAud() {
+    def tok as string init signWithKid(claimsFor("other-service", true), secret(), "HS256", "k2");
+    verifyWithKeysWith($tok, keyRing(), "HS256", strictPolicy());
+}
+# A failure is reported under the verifier's own name.
+func testVerifyWithKeysWithNamesItself() {
+    def msg as string init "";
+    try {
+        keysNoExp();
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertTrue(strings.startsWith($msg, "jwt.verifyWithKeysWith:"));
+}
+
+func testVerifyJwksWithAcceptsMatchingToken() {
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    def tok as string init signWithKid(claimsFor("good-aud", true), $priv, "ES256", "ec1");
+    def back as json.Value init verifyJwksWith(
+        $tok,
+        jwksFor($priv, "ec1"),
+        "ES256",
+        strictPolicy());
+    testing.assertEqual(json.asString($back, "/iss"), "good-iss");
+}
+func testVerifyJwksWithRejectsMissingExp() {
+    testing.assertThrows("jwksNoExp", "value");
+}
+func jwksNoExp() {
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    def tok as string init signWithKid(claimsFor("good-aud", false), $priv, "ES256", "ec1");
+    verifyJwksWith($tok, jwksFor($priv, "ec1"), "ES256", strictPolicy());
+}
+func testVerifyJwksWithRejectsForeignAudience() {
+    testing.assertThrows("jwksForeignAud", "value");
+}
+func jwksForeignAud() {
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    def tok as string init signWithKid(claimsFor("other-service", true), $priv, "ES256", "ec1");
+    verifyJwksWith($tok, jwksFor($priv, "ec1"), "ES256", strictPolicy());
+}
+# A non-string iss is a policy mismatch, not a json accessor error.
+func testPolicyNonStringIssuerRejectedCleanly() {
+    def msg as string init "";
+    try {
+        def c as json.Value init json.set(claimsFor("good-aud", true), "/iss", 7);
+        verifyWith(sign($c, secret(), "HS256"), secret(), "HS256", strictPolicy());
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertTrue(strings.contains($msg, "issuer (iss) does not match"));
+}
