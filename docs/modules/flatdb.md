@@ -174,7 +174,13 @@ runs) as well as `spawn`ed tasks - a symlink-free lock file created with
 be broken after a stale window (120 s). Waiters that find the same stale lock
 break it one at a time, under an exclusive `.lock.break` file, and remove the lock
 only while it still holds the holder they judged stale - so a lock a faster waiter
-has already re-taken is never removed. `flatdb.lock` / `flatdb.unlock` are the raw
+has already re-taken is never removed. A waiter gives up after 5 s with a
+`flatdb` error naming the current holder. A lock file that cannot be created at
+all - a missing directory, a read-only mount, a data directory owned by another
+user - has no holder to wait for, so `lock` / `update` fail **at once** with the
+create's own error (`cannot create the lock file ...: permission denied`) instead
+of reporting contention after the wait (a dangling symbolic link left at the
+lock path is named as such). `flatdb.lock` / `flatdb.unlock` are the raw
 primitives for a multi-step transaction, but prefer `update`, which releases on
 every exit path.
 
@@ -182,6 +188,46 @@ A note on `save` returning a `DB`: `save` returns the document rebound to the
 just-written file, so if you save the **same handle** more than once, thread the
 return - `$db = flatdb.save($db);` - or the next `save` sees the file it wrote as
 a conflict.
+
+## Many readers: load once, share the parsed tree
+
+An opened store is a parsed `json.Value` tree, which takes from about the
+file's size (text-heavy data) up to roughly 15 times it (many small values) in
+memory.
+So a server should **not** open the store in every request handler: N requests
+in flight would hold N parsed copies. Open it **once** and share it:
+
+- **Read-only for the server's lifetime** - a top-level `def` is enough.
+  `def store as flatdb.DB init flatdb.open("registry.json");` and handlers read
+  `$store`. Passing the `DB` around, or capturing it in a `spawn`, copies only
+  the small struct around the tree; the tree itself is immutable and shared.
+- **Updated while serving** - publish each version through a `kv` store, which
+  holds an opaque value without copying it, and rebuild the `DB` around it where
+  you need one:
+
+```jennifer
+use kv;
+import "flatdb.j" as flatdb;
+
+def cache as kv.Store init kv.open();
+def first as flatdb.DB init flatdb.open("registry.json");
+kv.setValue($cache, "registry", $first.data, 0);
+
+# Readers (any handler / task): the current tree, no parse, no copy.
+func current() {
+    return flatdb.DB{ path: "registry.json", data: kv.getValue($cache, "registry"), version: "" };
+}
+
+# The writer: update, save, and publish the new tree.
+func publish(db as flatdb.DB) {
+    def saved as flatdb.DB init flatdb.save($db);
+    kv.setValue($cache, "registry", $saved.data, 0);
+}
+```
+
+A reader `DB` built this way is for reading: its empty `version` makes a `save`
+of it fail the conflict check, so writes go through a `DB` from `flatdb.open`
+(or `flatdb.update`). See [`kv` values](../libraries/kv.md#values-shared-parsed-data).
 
 ## Atomic save, in detail
 

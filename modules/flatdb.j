@@ -453,6 +453,61 @@ func breakHolder(lockPath as string, judged as string) {
     return removeIfHolder($lockPath, $judged);
 }
 
+# lockFileExists reports whether a lock file is visibly present. A path that
+# cannot even be checked (a directory the process may not search) counts as
+# absent: there is no holder to wait for there either.
+func lockFileExists(lockPath as string) {
+    try {
+        return fs.exists($lockPath);
+    } catch (err) {
+        return false;
+    }
+}
+
+# isSymlink reports whether path is a symbolic link (dangling or not).
+func isSymlink(path as string) {
+    try {
+        fs.readlink($path);
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+# createWithoutHolder handles an exclusive create that failed. If a lock file is
+# present, someone holds the lock: return false and let the caller wait. If none
+# is, the create failed for another reason (a missing directory, a read-only
+# mount, a directory owned by another user), and waiting cannot help - so retry
+# once at once (a holder may have released between the create and the check),
+# and if that fails with still no holder, throw the create's own error, which
+# names the real cause, instead of reporting contention after the full wait.
+func createWithoutHolder(lockPath as string, holder as string) {
+    if (lockFileExists($lockPath)) {
+        return false;
+    }
+    try {
+        fs.writeNew($lockPath, $holder);
+        return true;
+    } catch (again) {
+        if (lockFileExists($lockPath)) {
+            return false; # taken by another writer in between: ordinary contention
+        }
+        # A dangling symlink is not a holder: fs.exists follows it (false) while
+        # the exclusive create refuses the name. Say so rather than "file exists".
+        def why as string init $again.message;
+        if (isSymlink($lockPath)) {
+            $why = "the path is a dangling symbolic link (a lock file is never a symlink); remove it";
+        }
+        throw Error{
+            kind: "flatdb",
+            message: "flatdb.lock: cannot create the lock file " + $lockPath + ": " + $why,
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+}
+
 /**
  * Take the advisory write lock for the store backed by `dbPath`, blocking (with a
  * short poll) until it is free or `LOCK_WAIT_MS` elapses. Built on `fs.writeNew`
@@ -462,7 +517,9 @@ func breakHolder(lockPath as string, judged as string) {
  * brackets the whole read-modify-write and releases on every path.
  * @param dbPath {string} the store's backing file path
  * @return {Lock} the held lock (pass to unlock)
- * @throws {Error} kind "flatdb" if the lock cannot be taken within LOCK_WAIT_MS
+ * @throws {Error} kind "flatdb" if the lock cannot be taken within LOCK_WAIT_MS, or
+ *   at once if the lock file cannot be created at all (no holder exists: a
+ *   missing directory, a read-only mount, no write permission)
  */
 export func lock(dbPath as string) {
     def lockPath as string init $dbPath + ".lock";
@@ -473,8 +530,11 @@ export func lock(dbPath as string) {
         try {
             fs.writeNew($lockPath, $holder);
             $took = true;
-        } catch (err) { # lint-disable: L103
-            breakIfStale($lockPath);
+        } catch (err) {
+            $took = createWithoutHolder($lockPath, $holder);
+            if (not $took) {
+                breakIfStale($lockPath);
+            }
         }
         if ($took) {
             return Lock{path: $lockPath, holder: $holder};

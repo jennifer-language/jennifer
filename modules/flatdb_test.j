@@ -226,6 +226,40 @@ func testLockUnlockRoundTrip() {
     testing.assertFalse(fs.exists($path + ".lock")); # released
 }
 
+# A lock file that cannot be created at all (here: its directory does not exist,
+# or a path component is a file) has no holder to wait for, so lock fails at
+# once with the create's own error rather than after LOCK_WAIT_MS as contention.
+func testUncreatableLockFailsFast() {
+    def plainFile as string init os.tempDir() + "/flatdb_notadir_" + uuid.v4();
+    fs.writeString($plainFile, "x");
+    for (def path in ["/no/such/flatdb/dir/db.json", $plainFile + "/db.json"]) {
+        def t0 as time.Time init time.now();
+        def msg as string init "";
+        try {
+            lock($path);
+        } catch (e) {
+            $msg = $e.message;
+        }
+        testing.assertTrue(strings.contains($msg, "cannot create the lock file"));
+        testing.assertFalse(strings.contains($msg, "holder: unknown"));
+        testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < LOCK_WAIT_MS);
+    }
+    fs.remove($plainFile);
+}
+
+func testDanglingSymlinkLockPathIsNamed() {
+    def path as string init lockScratch();
+    fs.symlink("/no/such/flatdb/target", $path + ".lock");
+    def msg as string init "";
+    try {
+        lock($path);
+    } catch (e) {
+        $msg = $e.message;
+    }
+    fs.remove($path + ".lock");
+    testing.assertTrue(strings.contains($msg, "dangling symbolic link"));
+}
+
 # lockScratch returns a fresh store path whose lock files start absent.
 func lockScratch() {
     return os.tempDir() + "/flatdb_break_" + uuid.v4() + ".json";
