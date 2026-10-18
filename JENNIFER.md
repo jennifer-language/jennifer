@@ -768,7 +768,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   data, mode, mtime}`. `unpack` refuses an absolute name or any `..` segment, and
   refuses an archive holding a symlink / device / FIFO unless
   `unpackWith(b, fmt, archive.UnpackOptions{..., skipSpecial: true})` (a tar hard
-  link comes back with its target's content). Both binaries.
+  link comes back with its target's content; a pax global header, as `git archive`
+  writes, is consumed). Both binaries.
 - **`encoding`** - introspection (`isAscii` / `lenBytes` / `lenRunes`),
   binary-to-text `toText` / `fromText` (`hex` / `base32` / `base64` / `base64-url`
   / `ascii85` / `z85` / `quoted-printable`, plus `uri-percent` (RFC 3986) and

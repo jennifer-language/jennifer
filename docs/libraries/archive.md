@@ -35,7 +35,11 @@ the same names, so it never writes an archive `unpack` would reject.
 
 ### Links and special members
 
-Directories are implied by member paths and skipped. A tar **hard link** comes
+Directories are implied by member paths and skipped. Archive-wide metadata is
+consumed too, never returned as a member: a pax **global header** (the one
+`git archive` and forge-generated source tarballs write first, to record the
+commit id) and a GNU volume label. A tar contiguous file and a GNU
+sparse file come back as ordinary entries. A tar **hard link** comes
 back as a regular `Entry` carrying the content of the member it names (which
 must appear earlier in the archive); its bytes count against the size caps like
 a copy. A **symbolic link**, device, FIFO or socket has no content an `Entry`

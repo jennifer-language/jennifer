@@ -8,6 +8,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -441,5 +444,78 @@ func TestSpecialEntries(t *testing.T) {
 	got, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(buf.Bytes()), str("zip"), opts})
 	if err != nil || len(got.List) != 1 {
 		t.Errorf("unpackWith skipSpecial: %v entries, %v", len(got.List), err)
+	}
+}
+
+// Archive-wide metadata is consumed, never a member: a pax global header (what
+// `git archive` writes first, holding the commit id; its POSIX default name is
+// an absolute path) and a GNU volume label. A GNU dumpdir is a directory. None
+// is an Entry, and none needs skipSpecial, which keeps its meaning: a symlink
+// beside them is still refused.
+func TestTarMetadataHeadersConsumed(t *testing.T) {
+	for _, name := range []string{"pax_global_header", "/tmp/GlobalHead.1.1"} {
+		b := tarWith(t, []member{
+			{tar.Header{Name: name, Typeflag: tar.TypeXGlobalHeader,
+				PAXRecords: map[string]string{"comment": "6f1c0a2e"}}, ""},
+			{tar.Header{Name: "vol", Typeflag: tarTypeGNUVolume, Format: tar.FormatGNU}, ""},
+			{tar.Header{Name: "src/", Typeflag: tarTypeGNUDumpDir, Format: tar.FormatGNU}, "Ya.txt\x00"},
+			{tar.Header{Name: "src/a.txt", Mode: 0o644, Typeflag: tar.TypeReg}, "hi"},
+		})
+		es, err := unpackTar(b, defaultUnpackCaps())
+		if err != nil || len(es) != 1 || es[0].name != "src/a.txt" || string(es[0].data) != "hi" {
+			t.Errorf("global header %q: %+v, %v; want only src/a.txt", name, es, err)
+		}
+	}
+	b := tarWith(t, []member{
+		{tar.Header{Name: "pax_global_header", Typeflag: tar.TypeXGlobalHeader,
+			PAXRecords: map[string]string{"comment": "6f1c0a2e"}}, ""},
+		{tar.Header{Name: "src/link.j", Typeflag: tar.TypeSymlink, Linkname: "a.txt"}, ""},
+	})
+	if _, err := unpackTar(b, defaultUnpackCaps()); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("symlink after a global header: err = %v, want a refusal", err)
+	}
+}
+
+// A POSIX contiguous file is a regular file.
+func TestTarContiguousFileIsRegular(t *testing.T) {
+	b := tarWith(t, []member{
+		{tar.Header{Name: "data.bin", Mode: 0o644, Typeflag: tar.TypeCont}, "abc"},
+	})
+	es, err := unpackTar(b, defaultUnpackCaps())
+	if err != nil || len(es) != 1 || string(es[0].data) != "abc" {
+		t.Errorf("contiguous file: %+v, %v", es, err)
+	}
+}
+
+// A real `git archive` tarball unpacks under the default options.
+func TestGitArchiveTarball(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) []byte {
+		t.Helper()
+		cmd := exec.Command(gitBin, append([]string{"-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("init", "-q")
+	run("add", "a.txt")
+	run("commit", "-qm", "x")
+	tarball := run("archive", "HEAD")
+	if !bytes.Contains(tarball, []byte("pax_global_header")) {
+		t.Fatal("git archive wrote no pax global header; the test proves nothing")
+	}
+	es, err := unpackTar(tarball, defaultUnpackCaps())
+	if err != nil || len(es) != 1 || es[0].name != "a.txt" || string(es[0].data) != "hi" {
+		t.Errorf("git archive: %+v, %v; want a.txt", es, err)
 	}
 }

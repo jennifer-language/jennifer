@@ -425,11 +425,31 @@ func specialError(name, what string) error {
 		"pass archive.UnpackOptions{skipSpecial: true, ...} to archive.unpackWith to skip such entries", name, what)
 }
 
+// GNU tar header types archive/tar has no constant for.
+const (
+	tarTypeGNUDumpDir = 'D' // a directory, carrying a listing of its names
+	tarTypeGNUVolume  = 'V' // the archive's volume label
+)
+
+// tarSkipped reports a header unpack consumes without yielding an Entry: a
+// directory (implied by the member paths), or archive-wide metadata that is no
+// member at all - a pax global header (`git archive` writes one first, holding
+// the commit id) or a GNU volume label. It is checked before the member name,
+// since a global header's POSIX default name is an absolute path.
+func tarSkipped(flag byte) bool {
+	switch flag {
+	case tar.TypeDir, tarTypeGNUDumpDir, tar.TypeXGlobalHeader, tarTypeGNUVolume:
+		return true
+	}
+	return false
+}
+
 // tarSpecialKind names a tar member type that maps to no Entry, or "" for one
-// that does (a regular file) or is skipped quietly (a directory).
+// that does: a regular file (including the POSIX contiguous-file type and an
+// old-style GNU sparse file, whose content archive/tar expands) or a hard link.
 func tarSpecialKind(flag byte) string {
 	switch flag {
-	case tar.TypeReg, tar.TypeDir, tar.TypeLink:
+	case tar.TypeReg, tar.TypeLink, tar.TypeCont, tar.TypeGNUSparse:
 		return ""
 	case tar.TypeSymlink:
 		return "symbolic link"
@@ -461,8 +481,8 @@ func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Typeflag == tar.TypeDir {
-			continue // directories are implied by the member paths
+		if tarSkipped(hdr.Typeflag) {
+			continue
 		}
 		if err := checkEntryName(hdr.Name); err != nil {
 			return nil, err
