@@ -4,12 +4,15 @@ Single-binary throughput for the two builds - `jennifer` (standard Go, the
 default) and `jennifer-tiny` (TinyGo, the constrained variant) - measured with
 `examples/benchmark.j`.
 
-Reference numbers are from `examples/benchmark.j` (version
-`0.23.0-dev+16.f857e8a`) on an **AMD Ryzen 5 7600X3D** (6 cores, 12 threads;
-bare metal, desktop idle) - the machine the suite prints in its own header, from
-`os.NCPU` plus a `/proc/cpuinfo` read done in Jennifer. The numbers are
-machine-specific; the **ratios and the shape** of the comparison are the stable
-part, not the absolute milliseconds.
+Reference numbers are from `examples/benchmark.j` on an **AMD Ryzen 5
+7600X3D** (6 cores, 12 threads; bare metal, desktop idle) - the machine the
+suite prints in its own header, from `os.NCPU` plus a `/proc/cpuinfo` read done
+in Jennifer. The numbers are machine-specific; the **ratios and the shape** of
+the comparison are the stable part, not the absolute milliseconds. The suite v1
+run of the default binary is from version `0.24.0-dev+127.bb94b10`; the
+`jennifer-tiny` run, suite v2, and the memory / wall-clock table are from
+`0.23.0-dev+16.f857e8a` and are due a refresh, so the cross-build comparisons
+below set numbers from those two versions side by side.
 
 The suite is **versioned** (`--suite v1` / `v2` / `all`) so its reference series
 stays comparable over time. **v1** is the interpreter-throughput workload;
@@ -37,7 +40,7 @@ binding, and a byte scan can drop into a single Go call.
 ```
 === Jennifer benchmark suite ===
 build:    go
-version:  0.23.0-dev+16.f857e8a
+version:  0.24.0-dev+127.bb94b10
 cpu:      AMD Ryzen 5 7600X3D 6-Core Processor (12 cores)
 platform: linux/amd64
 host:     bare metal (no VM / container hints)
@@ -45,27 +48,28 @@ host:     bare metal (no VM / container hints)
 ----------------------------------------------------------------------
 Workload                               base        iters      time_ms
 ----------------------------------------------------------------------
-fib(N) recursive                         23            1           57
-primes up to LIMIT                   100000            1        18342
-newton sqrt batch                     10000        10000          309
-monte carlo pi                       500000       500000          821
-list sort/reverse/slice               10000          500         1075
+fib(N) recursive                         23            1           59
+primes up to LIMIT                   100000            1        18520
+newton sqrt batch                     10000        10000          331
+monte carlo pi                       500000       500000          831
+list sort/reverse/slice               10000          500         1230
 struct list build+read                10000        10000           30
-string join                           10000        10000           11
-map insert+read                       10000        10000           37
-byte scan naive (per-byte)           500000           10         6442
+string join                           10000        10000            9
+map insert+read                       10000        10000           41
+byte scan naive (per-byte)           500000           10         6451
 byte scan binary.indexOf (Go)        500000           10            0
 ----------------------------------------------------------------------
-total                                                           27124
+total                                                           27502
 
+----------------------------------------------------------------------
 Parallel comparison (workers = 4, scheduler = go)
 ----------------------------------------------------------------------
 Workload                          serial_ms       par_ms      speedup
 ----------------------------------------------------------------------
-primes up to LIMIT                    18342         6543         2.80
-newton sqrt batch                       309           74         4.18
-monte carlo pi                          821          232         3.54
-fib(N) x workers                        228           63         3.62
+primes up to LIMIT                    18520         7470         2.48
+newton sqrt batch                       331          114         2.90
+monte carlo pi                          831          296         2.81
+fib(N) x workers                        236           82         2.88
 ----------------------------------------------------------------------
 ```
 
@@ -118,29 +122,30 @@ slightly below on rows where spawn setup has no parallel payoff to offset it.
 ## v1 per-workload comparison (serial section)
 
 Ratios are `tiny_ms / go_ms`; > 1.0 means `jennifer-tiny` is slower, < 1.0
-(shown in *italics*) means it is faster.
+(shown in *italics*) means it is faster. The go column is from
+`0.24.0-dev+127`, the tiny column from `0.23.0-dev+16`.
 
 | Workload                       | tiny (ms) | go (ms) | Ratio  | Where the time goes                                                            |
 | ------------------------------ | --------- | ------- | ------ | ------------------------------------------------------------------------------ |
-| `fib(N) recursive`             |        53 |      57 | *0.9x* | Call-heavy dispatch; TinyGo's tighter loop edges it. Both effectively free (sub-60 ms) thanks to the per-frame allocation elimination. |
-| `primes up to LIMIT`           |     15451 |   18342 | *0.8x* | The long numeric dispatch loop, the single biggest row. TinyGo leads it by ~2.9 s this run. |
-| `newton sqrt batch`            |       270 |     309 | *0.9x* | Float arithmetic + dispatch; TinyGo ahead.                                     |
-| `monte carlo pi`               |       818 |     821 | 1.0x   | Float arithmetic + RNG calls; a dead heat.                                     |
-| `list sort/reverse/slice`      |      1620 |    1075 | 1.5x   | Allocation-heavy. Go's concurrent GC absorbs the sort/reverse/slice churn better than TinyGo's simpler collector - the one clear Go win in the serial section. |
+| `fib(N) recursive`             |        53 |      59 | *0.9x* | Call-heavy dispatch; TinyGo's tighter loop edges it. Both effectively free (sub-60 ms) thanks to the per-frame allocation elimination. |
+| `primes up to LIMIT`           |     15451 |   18520 | *0.8x* | The long numeric dispatch loop, the single biggest row. TinyGo leads it by ~3.1 s. |
+| `newton sqrt batch`            |       270 |     331 | *0.8x* | Float arithmetic + dispatch; TinyGo ahead.                                     |
+| `monte carlo pi`               |       818 |     831 | 1.0x   | Float arithmetic + RNG calls; a dead heat.                                     |
+| `list sort/reverse/slice`      |      1620 |    1230 | 1.3x   | Allocation-heavy. Go's concurrent GC absorbs the sort/reverse/slice churn better than TinyGo's simpler collector - the one clear Go win in the serial section. |
 | `struct list build+read`       |        33 |      30 | 1.1x   | Append hot loop is O(1); both effectively free (sub-40 ms).                    |
-| `string join`                  |        18 |      11 | 1.6x   | Build-up-a-string pattern is O(1); both free (sub-20 ms).                      |
-| `map insert+read`              |        45 |      37 | 1.2x   | The advisory map hash index keeps keyed insert+read O(1); both sub-50 ms.      |
-| `byte scan naive (per-byte)`   |      4286 |    6442 | *0.7x* | A per-byte tree-walker scan of ~500 KB x 10 - the cost the `binary` library exists to remove. TinyGo's tighter dispatch wins it by ~2.2 s. |
+| `string join`                  |        18 |       9 | 2.0x   | Build-up-a-string pattern is O(1); both free (sub-20 ms).                      |
+| `map insert+read`              |        45 |      41 | 1.1x   | The advisory map hash index keeps keyed insert+read O(1); both sub-50 ms.      |
+| `byte scan naive (per-byte)`   |      4286 |    6451 | *0.7x* | A per-byte tree-walker scan of ~500 KB x 10 - the cost the `binary` library exists to remove. TinyGo's tighter dispatch wins it by ~2.2 s. |
 | `byte scan binary.indexOf (Go)`|         2 |       0 | -      | The same scan through one `binary.indexOf` call (Go `bytes.Index`, SIMD). Both effectively **0 ms** - see below. |
-| **total**                      |     22596 |   27124 | *0.8x* | TinyGo posts the lower serial total (~17%), carried mainly by `primes` and the naive byte-scan row. |
+| **total**                      |     22596 |   27502 | *0.8x* | TinyGo posts the lower serial total (~18%), carried mainly by `primes` and the naive byte-scan row. |
 
-TinyGo takes the serial section clearly this run (22.6 s vs 27.1 s, ~17% lower),
-where its tighter dispatch loop leads the long numeric workloads - `primes`
-(-2.9 s), the naive `byte scan` (-2.2 s), plus `newton` and `fib`. Go's win is
-the allocation-heavy `list` row (+545 ms) and the tiny structural rows
-(`struct` / `string` / `map`, all sub-50 ms). **Strip the two byte-scan rows and
-the classic-workload totals are 18308 ms (TinyGo) vs 20682 ms (Go)** - TinyGo
-still ahead, so this run's serial lead is not just the byte scan. (The absolute
+TinyGo takes the serial section clearly (22.6 s vs 27.5 s, ~18% lower), where
+its tighter dispatch loop leads the long numeric workloads - `primes` (-3.1 s),
+the naive `byte scan` (-2.2 s), plus `newton` and `fib`. Go's win is the
+allocation-heavy `list` row (+390 ms) and the tiny structural rows (`struct` /
+`string` / `map`, all sub-50 ms). **Strip the two byte-scan rows and the
+classic-workload totals are 18308 ms (TinyGo) vs 21051 ms (Go)** - TinyGo still
+ahead, so its serial lead is not just the byte scan. (The absolute
 milliseconds shift run to run; the durable signal is that the two builds trade
 wins by workload shape - TinyGo the tight compute loops, Go the allocation churn
 and the parallel section below.)
@@ -151,7 +156,7 @@ The two `byte scan` rows are the `binary` library's throughput demonstration:
 the same search for a 6-byte needle at the **end** of a ~500 KB buffer, 10 times
 (so every scan traverses the whole buffer).
 
-- **Naive, per byte** (a `.j` loop comparing bytes one at a time): 6442 ms (Go) /
+- **Naive, per byte** (a `.j` loop comparing bytes one at a time): 6451 ms (Go) /
   4286 ms (TinyGo). This is the per-byte tree-walker cost byte-oriented code used
   to pay.
 - **`binary.indexOf`** (one call into Go's assembly/SIMD `bytes.Index`): **0 ms**
@@ -171,23 +176,24 @@ design.
 
 | Workload             | Go serial (ms) | Go par (ms) | Go speedup | TinyGo serial (ms) | TinyGo par (ms) | TinyGo speedup |
 | -------------------- | -------------- | ----------- | ---------- | ------------------ | --------------- | -------------- |
-| `primes up to LIMIT` |          18342 |        6543 |   **2.80** |              15451 |           15261 |      1.01      |
-| `newton sqrt batch`  |            309 |          74 |   **4.18** |                270 |             283 |      0.95      |
-| `monte carlo pi`     |            821 |         232 |   **3.54** |                818 |             845 |      0.97      |
-| `fib(N) x workers`   |            228 |          63 |   **3.62** |                212 |             229 |      0.93      |
+| `primes up to LIMIT` |          18520 |        7470 |   **2.48** |              15451 |           15261 |      1.01      |
+| `newton sqrt batch`  |            331 |         114 |   **2.90** |                270 |             283 |      0.95      |
+| `monte carlo pi`     |            831 |         296 |   **2.81** |                818 |             845 |      0.97      |
+| `fib(N) x workers`   |            236 |          82 |   **2.88** |                212 |             229 |      0.93      |
 
-Go reaches real multi-core speedup (2.8x-4.2x on four workers). `jennifer-tiny`
+Go reaches real multi-core speedup (2.5x-2.9x on four workers). `jennifer-tiny`
 pins the cooperative scheduler, so `spawn` there is concurrency without
 multi-core throughput: its column sits at ~1.0, a touch under on rows where the
 spawn setup has no parallel payoff to hide behind. Use the default binary when
 parallel throughput matters.
 
 **The parallel section reverses the end-to-end picture.** TinyGo has the lower
-*serial* total (22.6 s vs 27.1 s), but Go crunches the parallel section in
-**~6.9 s** (6543 + 74 + 232 + 63) where TinyGo takes **~16.6 s** (no
-parallelism). On the wall clock the full `--suite all` run finishes in
-**34.35 s on Go vs 39.43 s on TinyGo** (see below): a lower single-thread total
-does not mean a faster end-to-end run once any `spawn` parallelism is in play.
+*serial* total (22.6 s vs 27.5 s), but Go crunches the parallel section in
+**~8.0 s** (7470 + 114 + 296 + 82) where TinyGo takes **~16.6 s** (no
+parallelism). On the wall clock the full `--suite all` run of `0.23.0-dev+16`
+finished in **34.35 s on Go vs 39.43 s on TinyGo** (see below): a lower
+single-thread total does not mean a faster end-to-end run once any `spawn`
+parallelism is in play.
 
 ## Suite v2 - numeric libraries (`stats` / `linalg` / `math` / `ml`)
 
@@ -237,7 +243,8 @@ overhead is in the per-call loop around them, not the math.
 
 ## Memory, page faults, and wall clock
 
-GNU `/bin/time` on the full `--suite all` run (v1 + v2) on the reference machine:
+GNU `/bin/time` on the full `--suite all` run (v1 + v2) on the reference machine,
+version `0.23.0-dev+16.f857e8a`:
 
 | Metric                | `jennifer` (Go)  | `jennifer-tiny` (TinyGo) |
 | --------------------- | ---------------- | ------------------------ |
@@ -271,7 +278,7 @@ GNU `/bin/time` on the full `--suite all` run (v1 + v2) on the reference machine
   scan; Go leads the allocation-heavy `list` row and the small structural rows.
   Which build posts the lower serial *total* shifts run to run.
 - **End-to-end wall clock / any `spawn` parallelism:** the default **`jennifer`**,
-  every time - it is the only build with real multi-core throughput (2.8x-4.2x
+  every time - it is the only build with real multi-core throughput (2.5x-2.9x
   here) and finishes the whole suite faster despite a higher serial total.
 - **Footprint:** `jennifer` for a small, on-demand memory profile (~44 MB peak);
   `jennifer-tiny` trades ~3x the RSS for its smaller *binary* and embeddability,

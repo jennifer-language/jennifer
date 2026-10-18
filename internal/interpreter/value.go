@@ -64,7 +64,7 @@ func DisplayFloat(f float64) string {
 }
 
 // ValueKind tags a runtime value's type.
-type ValueKind int
+type ValueKind uint8
 
 const (
 	KindNull ValueKind = iota
@@ -245,12 +245,29 @@ func (s *TaskState) IsDone() bool {
 // Value, not *Value). That matches the value-semantics decision:
 // `$ys = $xs;` and parameter binding both copy the whole structure;
 // aliasing is impossible.
+//
+// Every evaluation step copies Values by value, so the struct's size is on the
+// hot path: Kind, Bool and strRunes share the first word (keep them together
+// when adding a field).
 type Value struct {
-	Kind       ValueKind
+	Kind ValueKind
+	Bool bool
+
+	// strRunes is an unexported acceleration cache for KindString: the number
+	// of runes (code points) in Str. A string is immutable, so the count is
+	// computed once in StringVal and is valid for the value and every copy of
+	// it (a plain field travels with the by-value struct copy). It turns
+	// `len($s)` and each `$s[a..b]` slice from O(len) into O(1), so a loop that
+	// walks a string by index is O(n) instead of O(n^2). The value 0 means
+	// "empty string or not computed" (also a string past 2^31 runes);
+	// runeLen() falls back to a direct count in that case, which is correct
+	// and cheap (0 for the empty string). A string Value built without
+	// StringVal simply misses the cache and counts on use.
+	strRunes int32
+
 	Int        int64
 	Float      float64
 	Str        string
-	Bool       bool
 	List       []Value           // KindList: element data
 	Map        []MapEntry        // KindMap:  insertion-ordered entries
 	Bytes      []byte            // KindBytes: byte data
@@ -279,17 +296,6 @@ type Value struct {
 	// or a map holding a non-hashable key all fail the check and scan. Built
 	// by DeepCopy / evalMapLit / lazily in writeIndexedSlot; never relied on.
 	mapIdx map[string]int
-
-	// strRunes is an unexported acceleration cache for KindString: the number
-	// of runes (code points) in Str. A string is immutable, so the count is
-	// computed once in StringVal and is valid for the value and every copy of
-	// it (a plain field travels with the by-value struct copy). It turns
-	// `len($s)` and each `$s[a..b]` slice from O(len) into O(1), so a loop that
-	// walks a string by index is O(n) instead of O(n^2). The value 0 means
-	// "empty string or not computed"; runeLen() falls back to a direct count in
-	// that case, which is correct and cheap (0 for the empty string). A string
-	// Value built without StringVal simply misses the cache and counts on use.
-	strRunes int
 }
 
 // CompareNumeric orders two numeric Values (int or float), returning -1, 0, or
@@ -487,7 +493,11 @@ func Null() Value              { return Value{Kind: KindNull} }
 func IntVal(n int64) Value     { return Value{Kind: KindInt, Int: n} }
 func FloatVal(f float64) Value { return Value{Kind: KindFloat, Float: f} }
 func StringVal(s string) Value {
-	return Value{Kind: KindString, Str: s, strRunes: utf8.RuneCountInString(s)}
+	n := utf8.RuneCountInString(s)
+	if n > math.MaxInt32 {
+		n = 0 // beyond the cache's range: runeLen counts on use
+	}
+	return Value{Kind: KindString, Str: s, strRunes: int32(n)}
 }
 
 // runeLen returns the rune (code-point) count of a KindString value, using the
@@ -497,7 +507,7 @@ func StringVal(s string) Value {
 // back to a direct count (O(len), but correct).
 func (v Value) runeLen() int {
 	if v.strRunes != 0 {
-		return v.strRunes
+		return int(v.strRunes)
 	}
 	return utf8.RuneCountInString(v.Str)
 }

@@ -17,7 +17,7 @@ const maxFoldStringBytes = 64 << 10
 // foldFloat builds a folded FloatLit, but leaves the node UNFOLDED (returns nil)
 // when the result is non-finite (+/-Inf or NaN), so the runtime raises the strict
 // "float overflow" error at the original position - the exact discipline the int
-// overflow folds use, and mirroring evalArithmetic.finiteFloatResult. A folded
+// overflow folds use, and mirroring evalArithmetic's non-finite check. A folded
 // and an unfolded overflow must behave identically.
 func foldFloat(p pos, v float64) Expr {
 	if math.IsInf(v, 0) || math.IsNaN(v) {

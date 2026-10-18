@@ -1014,8 +1014,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 	callFrame := borrowBlockEnv(parent, len(m.Params))
 	dc := callerDepth
 	if dc == nil {
-		entryDepth := 0
-		dc = &entryDepth
+		dc = newDepthCounter()
 	}
 	callFrame.depth = dc
 	borrowCtx := i.methodBorrowCtx(m)
@@ -3456,6 +3455,27 @@ func (i *Interpreter) evalBool(e parser.Expr, env *Environment, ctx string) (boo
 	return v.Bool, nil
 }
 
+// evalInterpString evaluates a cooked-string interpolation: the literal chunks
+// concatenated with each slot value stringified via Display (the same form
+// convert.toString produces), so no `use convert` is needed and any value kind
+// interpolates. Kept out of evalExpr so its builder does not enlarge the frame
+// of every expression evaluation.
+func (i *Interpreter) evalInterpString(ex *parser.InterpStringExpr, env *Environment) (Value, error) {
+	var b strings.Builder
+	for _, part := range ex.Parts {
+		if part.Expr == nil {
+			b.WriteString(part.Lit)
+			continue
+		}
+		v, err := i.evalExpr(part.Expr, env)
+		if err != nil {
+			return Value{}, err
+		}
+		b.WriteString(v.Display())
+	}
+	return StringVal(b.String()), nil
+}
+
 func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 	switch ex := e.(type) {
 	case *parser.PreEval:
@@ -3469,22 +3489,7 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 	case *parser.StringLit:
 		return StringVal(ex.Value), nil
 	case *parser.InterpStringExpr:
-		// Cooked-string interpolation: concatenate literal chunks with each slot
-		// value stringified via Display (the same form convert.toString produces),
-		// so no `use convert` is needed and any value kind interpolates.
-		var b strings.Builder
-		for _, part := range ex.Parts {
-			if part.Expr == nil {
-				b.WriteString(part.Lit)
-				continue
-			}
-			v, err := i.evalExpr(part.Expr, env)
-			if err != nil {
-				return Value{}, err
-			}
-			b.WriteString(v.Display())
-		}
-		return StringVal(b.String()), nil
+		return i.evalInterpString(ex, env)
 	case *parser.BoolLit:
 		return BoolVal(ex.Value), nil
 	case *parser.NullLit:
@@ -4719,44 +4724,49 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, file stri
 	if !aok || !bok {
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("operator %s requires numeric operands, got %s and %s", op, lv.Kind, rv.Kind), File: file, Line: line, Col: col}
 	}
+	var r float64
 	switch op {
 	case parser.OpAdd:
-		return finiteFloatResult(a+b, a, b, op, file, line, col)
+		r = a + b
 	case parser.OpSub:
-		return finiteFloatResult(a-b, a, b, op, file, line, col)
+		r = a - b
 	case parser.OpMul:
-		return finiteFloatResult(a*b, a, b, op, file, line, col)
+		r = a * b
 	case parser.OpDiv:
 		if b == 0 {
 			return Value{}, &runtimeError{Msg: "division by zero", File: file, Line: line, Col: col}
 		}
-		return finiteFloatResult(a/b, a, b, op, file, line, col)
+		r = a / b
 	case parser.OpFloorDiv:
 		if b == 0 {
 			return Value{}, &runtimeError{Msg: "division by zero", File: file, Line: line, Col: col}
 		}
-		return finiteFloatResult(floorDiv(a, b), a, b, op, file, line, col)
+		r = floorDiv(a, b)
 	case parser.OpMod:
 		return Value{}, &runtimeError{Msg: "operator % requires int operands, got float", File: file, Line: line, Col: col}
+	default:
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown binary operator %s", op), File: file, Line: line, Col: col}
 	}
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown binary operator %s", op), File: file, Line: line, Col: col}
+	// r - r is NaN exactly when r is +/-Inf or NaN.
+	if r-r != 0 {
+		return Value{}, floatOverflowError(a, b, op, file, line, col)
+	}
+	return FloatVal(r), nil
 }
 
-// finiteFloatResult wraps a computed float result and enforces the language's
-// strict "undefined results error" stance for the operator layer: an IEEE
-// overflow to +/-Inf or a NaN is a positioned, catchable error rather than a
-// value that silently enters program state (the same discipline int overflow,
-// the `1e400` literal, and the math / convert boundaries already apply). The
-// constant folder mirrors this (fold.go), so a folded and an unfolded overflow
-// behave identically.
-func finiteFloatResult(v, a, b float64, op parser.BinaryOp, file string, line, col int) (Value, error) {
-	if math.IsInf(v, 0) || math.IsNaN(v) {
-		return Value{}, &runtimeError{
-			Msg:  fmt.Sprintf("float overflow: %v %s %v produced a non-finite result", a, op, b),
-			File: file, Line: line, Col: col,
-		}
+// floatOverflowError enforces the language's strict "undefined results error"
+// stance for the operator layer: an IEEE overflow to +/-Inf or a NaN is a
+// positioned, catchable error rather than a value that silently enters program
+// state (the same discipline int overflow, the `1e400` literal, and the math /
+// convert boundaries already apply). The constant folder mirrors this
+// (fold.go), so a folded and an unfolded overflow behave identically. The
+// check stays in evalArithmetic with one shared result path; only this cold
+// error build is out of line, so the float fast path keeps a small frame.
+func floatOverflowError(a, b float64, op parser.BinaryOp, file string, line, col int) error {
+	return &runtimeError{
+		Msg:  fmt.Sprintf("float overflow: %v %s %v produced a non-finite result", a, op, b),
+		File: file, Line: line, Col: col,
 	}
-	return FloatVal(v), nil
 }
 
 // int64 bounds as untyped constants, so the integer overflow helpers use no

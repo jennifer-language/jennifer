@@ -224,6 +224,28 @@ func rootFor(parent, self *Environment) *Environment {
 	return parent
 }
 
+// counterLine is the span a goroutine's counters are padded to: two cache
+// lines, since some CPUs prefetch lines in adjacent pairs.
+const counterLine = 128
+
+// depthCell and chainCell hold one goroutine's counter alone on its cache lines.
+// The depth counter is bumped on every operand evaluated, so two goroutines'
+// counters allocated side by side (8 bytes each, the same size class) would
+// share a line, and parallel spawn workers would contend for it on every
+// expression (false sharing).
+type depthCell struct {
+	n int
+	_ [counterLine - 8]byte
+}
+
+type chainCell struct {
+	n int64
+	_ [counterLine - 8]byte
+}
+
+// newDepthCounter mints a fresh call-depth counter on its own cache lines.
+func newDepthCounter() *int { return &new(depthCell).n }
+
 // inheritDepth returns the call-depth counter a new frame should carry: the
 // parent's (so a call chain shares one counter) or, at a goroutine root
 // (parent == nil), a fresh one. A cross-interpreter dispatch overrides the
@@ -232,8 +254,7 @@ func inheritDepth(parent *Environment) *int {
 	if parent != nil && parent.depth != nil {
 		return parent.depth
 	}
-	d := 0
-	return &d
+	return newDepthCounter()
 }
 
 // inheritChainBytes returns the recursion-memory counter a new frame carries:
@@ -243,8 +264,7 @@ func inheritChainBytes(parent *Environment) *int64 {
 	if parent != nil && parent.chainBytes != nil {
 		return parent.chainBytes
 	}
-	b := int64(0)
-	return &b
+	return &new(chainCell).n
 }
 
 func NewEnvironment(parent *Environment) *Environment {
