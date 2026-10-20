@@ -683,7 +683,7 @@ func TestFmtLiteralWrapping(t *testing.T) {
 	}
 }
 
-// TestFmtNeverAuthorsLongLine is the fmt / lint contract (M23.9): for source
+// TestFmtNeverAuthorsLongLine is the fmt / lint contract: for source
 // whose over-length is entirely due to wrappable constructs - a long literal or
 // a binary-operator chain - fmt's output has no line past the 100-column limit,
 // so fmt never hands `lint` an L203 (line-too-long) the source did not already
@@ -747,6 +747,20 @@ func TestFmtForHeaderWrap(t *testing.T) {
 	short := fmtSource(t, `func f() { for (def i as int init 0; $i < 10; $i = $i + 1) { } }`)
 	if strings.Count(short, "for (") != 1 || !strings.Contains(short, "$i < 10; $i = $i + 1) {") {
 		t.Errorf("short for-header should stay inline; got:\n%s", short)
+	}
+	// An empty step clause keeps the `)` on the `;`, short or wrapped.
+	for _, src := range []string{
+		`func f() { for (; $x < 3;) { } }`,
+		`func f() { for (def i as int init 0; $i < 3;) { } }`,
+		`func f() { for (; $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x] and $x < 100000;) { } }`,
+	} {
+		out := fmtSource(t, src)
+		if !strings.Contains(out, ";) {") {
+			t.Errorf("empty step clause: want `;) {`; got:\n%s", out)
+		}
+		if again := fmtSource(t, out); again != out {
+			t.Errorf("not idempotent:\n--- once ---\n%s--- twice ---\n%s", out, again)
+		}
 	}
 }
 
@@ -849,7 +863,7 @@ func TestFmtRejectsDirectory(t *testing.T) {
 	}
 }
 
-// TestFmtPreservesLiteralLexemes covers M23.10 fidelity: fmt re-emits a numeric
+// TestFmtPreservesLiteralLexemes covers lexeme fidelity: fmt re-emits a numeric
 // or string literal's exact source spelling (digit separators, base prefix,
 // quote style, escapes, embedded newlines) rather than the processed value.
 func TestFmtPreservesLiteralLexemes(t *testing.T) {
@@ -872,7 +886,7 @@ func TestFmtPreservesLiteralLexemes(t *testing.T) {
 	}
 }
 
-// TestFmtWrapsLongCall covers M23.10 call-argument wrapping: a long call with two
+// TestFmtWrapsLongCall covers call-argument wrapping: a long call with two
 // or more arguments wraps one per line with `)` hugging the last argument; a
 // short call, a single-argument call, and an empty call stay inline.
 func TestFmtWrapsLongCall(t *testing.T) {

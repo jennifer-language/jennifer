@@ -807,6 +807,12 @@ func (f *fmtState) writeSeparator(t lexer.Token) {
 	// `for (...; ...; ...)` stay inline, and an inline `when` / `else` arm
 	// keeps its single statement's `;` on the same line as the closing `}`.
 	if f.prev.Type == lexer.TOKEN_SEMI {
+		// `;` directly before `)` is a for-header with an empty step clause
+		// (`for (; cond;)`). The header's frame is already popped by the time the
+		// `)` is written, so catch it here: the `)` hugs the `;`.
+		if t.Type == lexer.TOKEN_RPAREN {
+			return
+		}
 		if f.insideForHeader() {
 			// A header too wide for one line breaks after each `;` so its three
 			// clauses stack (one per line) instead of an operator split inside one.
