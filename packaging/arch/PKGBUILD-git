@@ -27,7 +27,7 @@ pkgdesc='Jennifer programming language interpreter (built from source)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/jennifer-language/jennifer'
 license=('LGPL3')
-provides=('jennifer')
+provides=("jennifer=${pkgver}")
 conflicts=('jennifer' 'jennifer-bin')
 # `tinygo` is a makedepend so `make build` can produce `jennifer-tiny` whenever
 # the toolchain supports it (see the header); an incapable TinyGo only skips the

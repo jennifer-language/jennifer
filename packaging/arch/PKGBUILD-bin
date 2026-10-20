@@ -16,7 +16,7 @@ pkgdesc='Jennifer programming language interpreter (prebuilt binary)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/jennifer-language/jennifer'
 license=('LGPL3')
-provides=('jennifer')
+provides=("jennifer=${pkgver}")
 conflicts=('jennifer' 'jennifer-git')
 optdepends=(
     'shared-mime-info: registers the .j file extension with file managers'
