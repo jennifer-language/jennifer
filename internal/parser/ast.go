@@ -338,6 +338,13 @@ type MethodDef struct {
 	// is valid only under the interpreter's one-Run-per-resolved-Program
 	// assumption; see computeEntryGlobalSafe for the concurrency note.
 	GlobalSafe bool
+	// ReturnsOwned is set by Resolve (markOwnership) when every value the method
+	// returns is solely owned by the method frame - a fresh literal or scalar, a
+	// local or a copied parameter, or the result of another owning method - so
+	// nothing else references it once the frame exits. A caller then stores the
+	// call result without the defensive copy a value that might alias a live
+	// binding needs.
+	ReturnsOwned bool
 }
 
 func (*MethodDef) stmtNode() {}
@@ -862,6 +869,14 @@ type CallExpr struct {
 	// lookup, so the hot recursion path (fib, walk) skips a hash
 	// lookup per call.
 	Method *MethodDef
+	// MoveArg is 1 + the index of an argument the call may take by move, 0 for
+	// none: set by Resolve (markOwnership) on `$v = f(..., $v, ...)` where `$v`
+	// is an owned method local named once in the call, outside any `try` in the
+	// method. The old value is dead on every path out of the statement - replaced
+	// on success, its frame unwound on an error - so the parameter binds it
+	// without the value-semantics copy, and a callee that mutates and returns its
+	// parameter does so in place.
+	MoveArg int
 }
 
 func (*CallExpr) exprNode() {}
@@ -937,6 +952,9 @@ type QualifiedCallExpr struct {
 	// lookup when this is nil (REPL turns, hand-built ASTs,
 	// resolver-less paths).
 	Fn any
+	// MoveArg is CallExpr.MoveArg for a module method call; ignored for a
+	// builtin, which never copies its arguments.
+	MoveArg int
 }
 
 func (*QualifiedCallExpr) exprNode() {}

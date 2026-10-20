@@ -56,8 +56,11 @@ def const FG as map of string to string init {
  * A rectangular grid of character cells, drawn into then painted to the
  * terminal. `cells` is row-major (`y * cols + x`); each cell is a one-column
  * string, optionally wrapped in an SGR colour sequence. Value-semantic like any
- * struct: the drawing functions return a fresh `Buffer`, copying the whole grid
- * once per call (so batch a frame's writes with `setMany` / `textMany`).
+ * struct: a drawing function returns the updated `Buffer`. Written as
+ * `$buf = screen.set($buf, ...);` in a method, a call updates the grid in place;
+ * anywhere else (top-level code, a global, inside a `try`, or keeping the old
+ * buffer too) it copies the whole grid, so batch such writes with `setMany` /
+ * `textMany`.
  *
  * A cell is assumed to be one terminal column wide. A wide glyph (CJK, most
  * emoji) takes two columns on screen and an East-Asian-ambiguous one (such as
@@ -265,30 +268,27 @@ export func newScreen(rows as int, cols as int) {
  * @return {Buffer} the updated buffer
  */
 export func set(buf as Buffer, x as int, y as int, cell as string) {
-    def out as Buffer init $buf;
-    if ($x >= 0 and $x < $out.cols and $y >= 0 and $y < $out.rows) {
-        $out.cells[$y * $out.cols + $x] = $cell;
+    if ($x >= 0 and $x < $buf.cols and $y >= 0 and $y < $buf.rows) {
+        $buf.cells[$y * $buf.cols + $x] = $cell;
     }
-    return $out;
+    return $buf;
 }
 
 /**
  * A copy of `buf` with every plot applied in order, as a run of `set` calls
- * would, but for the cost of one buffer copy instead of one per cell. Each
- * drawing call copies the whole buffer, so draw a frame with one `setMany` /
- * `textMany` rather than one `set` per glyph. Out-of-range plots are clipped.
+ * would. Where a drawing call copies the grid (see `Buffer`), this costs one copy
+ * for the whole batch instead of one per cell. Out-of-range plots are clipped.
  * @param buf {Buffer} the source buffer
  * @param plots {list of Plot} the cells to write
  * @return {Buffer} the updated buffer
  */
 export func setMany(buf as Buffer, plots as list of Plot) {
-    def out as Buffer init $buf;
     for (def p in $plots) {
-        if ($p.x >= 0 and $p.x < $out.cols and $p.y >= 0 and $p.y < $out.rows) {
-            $out.cells[$p.y * $out.cols + $p.x] = $p.cell;
+        if ($p.x >= 0 and $p.x < $buf.cols and $p.y >= 0 and $p.y < $buf.rows) {
+            $buf.cells[$p.y * $buf.cols + $p.x] = $p.cell;
         }
     }
-    return $out;
+    return $buf;
 }
 
 /**
@@ -315,7 +315,8 @@ export func get(buf as Buffer, x as int, y as int) {
  * @return {Buffer} the updated buffer
  */
 export func text(buf as Buffer, x as int, y as int, s as string) {
-    return textMany($buf, [Span{x: $x, y: $y, text: $s, color: ""}]);
+    $buf = textMany($buf, [Span{x: $x, y: $y, text: $s, color: ""}]);
+    return $buf;
 }
 
 /**
@@ -339,7 +340,8 @@ export func textColor(buf as Buffer, x as int, y as int, s as string, color as s
             col: 0
         };
     }
-    return textMany($buf, [Span{x: $x, y: $y, text: $s, color: $color}]);
+    $buf = textMany($buf, [Span{x: $x, y: $y, text: $s, color: $color}]);
+    return $buf;
 }
 
 # controlToSpace maps a C0 control (codepoint < 32) or DEL (127) rune to a space,
@@ -358,8 +360,8 @@ func controlToSpace(r as string) {
 
 /**
  * A copy of `buf` with every span written in order, as a run of `text` /
- * `textColor` calls would, but for the cost of one buffer copy instead of one
- * per call. Each span writes one rune per cell from its `(x, y)`, clipped at the
+ * `textColor` calls would. Where a drawing call copies the grid (see `Buffer`),
+ * this costs one copy for the whole batch instead of one per call. Each span writes one rune per cell from its `(x, y)`, clipped at the
  * row's right edge, in its colour (none when `color` is empty). A control
  * character is written as a space, so untrusted text cannot smuggle a terminal
  * escape through `render`.
@@ -369,24 +371,23 @@ func controlToSpace(r as string) {
  * @throws {Error} when a span names an unknown colour
  */
 export func textMany(buf as Buffer, spans as list of Span) {
-    def out as Buffer init $buf;
     for (def sp in $spans) {
         def code as string init spanCode($sp.color);
-        if ($sp.y < 0 or $sp.y >= $out.rows) {
+        if ($sp.y < 0 or $sp.y >= $buf.rows) {
             continue;
         }
         def col as int init $sp.x;
         for (def r in strings.chars($sp.text)) {
-            if ($col >= $out.cols) {
+            if ($col >= $buf.cols) {
                 break;
             }
             if ($col >= 0) {
-                $out.cells[$sp.y * $out.cols + $col] = styledCell(controlToSpace($r), $code);
+                $buf.cells[$sp.y * $buf.cols + $col] = styledCell(controlToSpace($r), $code);
             }
             $col = $col + 1;
         }
     }
-    return $out;
+    return $buf;
 }
 
 # spanCode is the SGR colour code for a span's colour name, "" for none.
@@ -421,15 +422,14 @@ func styledCell(cell as string, code as string) {
  * @return {Buffer} the updated buffer
  */
 export func fill(buf as Buffer, x as int, y as int, w as int, h as int, ch as string) {
-    def out as Buffer init $buf;
     for (def row as int init $y; $row < $y + $h; $row = $row + 1) {
         for (def col as int init $x; $col < $x + $w; $col = $col + 1) {
-            if ($col >= 0 and $col < $out.cols and $row >= 0 and $row < $out.rows) {
-                $out.cells[$row * $out.cols + $col] = $ch;
+            if ($col >= 0 and $col < $buf.cols and $row >= 0 and $row < $buf.rows) {
+                $buf.cells[$row * $buf.cols + $col] = $ch;
             }
         }
     }
-    return $out;
+    return $buf;
 }
 
 /**
@@ -442,7 +442,8 @@ export func fill(buf as Buffer, x as int, y as int, w as int, h as int, ch as st
  * @return {Buffer} the updated buffer
  */
 export func hline(buf as Buffer, x as int, y as int, n as int, ch as string) {
-    return fill($buf, $x, $y, $n, 1, $ch);
+    $buf = fill($buf, $x, $y, $n, 1, $ch);
+    return $buf;
 }
 
 /**
@@ -455,7 +456,8 @@ export func hline(buf as Buffer, x as int, y as int, n as int, ch as string) {
  * @return {Buffer} the updated buffer
  */
 export func vline(buf as Buffer, x as int, y as int, n as int, ch as string) {
-    return fill($buf, $x, $y, 1, $n, $ch);
+    $buf = fill($buf, $x, $y, 1, $n, $ch);
+    return $buf;
 }
 
 /**
@@ -469,21 +471,20 @@ export func vline(buf as Buffer, x as int, y as int, n as int, ch as string) {
  * @return {Buffer} the updated buffer
  */
 export func box(buf as Buffer, x as int, y as int, w as int, h as int) {
-    def out as Buffer init $buf;
     if ($w < 2 or $h < 2) {
-        return $out;
+        return $buf;
     }
     def right as int init $x + $w - 1;
     def bottom as int init $y + $h - 1;
-    $out = hline($out, $x + 1, $y, $w - 2, "─");
-    $out = hline($out, $x + 1, $bottom, $w - 2, "─");
-    $out = vline($out, $x, $y + 1, $h - 2, "│");
-    $out = vline($out, $right, $y + 1, $h - 2, "│");
-    $out = set($out, $x, $y, "┌");
-    $out = set($out, $right, $y, "┐");
-    $out = set($out, $x, $bottom, "└");
-    $out = set($out, $right, $bottom, "┘");
-    return $out;
+    $buf = hline($buf, $x + 1, $y, $w - 2, "─");
+    $buf = hline($buf, $x + 1, $bottom, $w - 2, "─");
+    $buf = vline($buf, $x, $y + 1, $h - 2, "│");
+    $buf = vline($buf, $right, $y + 1, $h - 2, "│");
+    $buf = set($buf, $x, $y, "┌");
+    $buf = set($buf, $right, $y, "┐");
+    $buf = set($buf, $x, $bottom, "└");
+    $buf = set($buf, $right, $bottom, "┘");
+    return $buf;
 }
 
 /**

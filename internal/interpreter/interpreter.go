@@ -80,7 +80,7 @@ func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
 	if c.interp == nil {
 		return Value{}, fmt.Errorf("no interpreter bound to this call context")
 	}
-	return c.interp.callMethodWithDepthRoot(fn.Fn, c.Depth, c.root, args...)
+	return c.interp.callMethodWithDepthRoot(fn.Fn, c.Depth, c.root, 0, args...)
 }
 
 // CallByName invokes a top-level method of this call's interpreter by name,
@@ -963,7 +963,7 @@ func (i *Interpreter) CallByNameWithRoot(name string, callerDepth *int, callerRo
 	if !ok {
 		return Value{}, fmt.Errorf("method %q is not defined", name)
 	}
-	return i.callMethodWithDepthRoot(m, callerDepth, callerRoot, args...)
+	return i.callMethodWithDepthRoot(m, callerDepth, callerRoot, 0, args...)
 }
 
 // CallMethodWith dispatches an already-resolved *MethodDef with the given args,
@@ -985,7 +985,14 @@ func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value,
 // (the CLI invoking the entry program, a `testing` harness) where there is no
 // caller chain to continue and each entry should stand alone.
 func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int, args ...Value) (Value, error) {
-	return i.callMethodWithDepthRoot(m, callerDepth, nil, args...)
+	return i.callMethodWithDepthRoot(m, callerDepth, nil, 0, args...)
+}
+
+// callMethodMoving is callMethodWithDepth for a call whose argument moveArg - 1
+// (0: none) the caller hands over by move (parser.CallExpr.MoveArg): that
+// parameter binds it without the value-semantics copy.
+func (i *Interpreter) callMethodMoving(m *parser.MethodDef, callerDepth *int, moveArg int, args ...Value) (Value, error) {
+	return i.callMethodWithDepthRoot(m, callerDepth, nil, moveArg, args...)
 }
 
 // callMethodWithDepthRoot is callMethodWithDepth with an explicit caller global
@@ -996,7 +1003,9 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int,
 // i.global (which another goroutine's spawn body would otherwise race). nil
 // parents at i.global, the right frame for a cross-interpreter dispatch (a module
 // call, meta.callMain), which must use the callee interpreter's own global.
-func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *int, callerRoot *Environment, args ...Value) (Value, error) {
+// moveArg is 1 + the index of an argument taken by move (see callMethodMoving),
+// 0 for none.
+func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *int, callerRoot *Environment, moveArg int, args ...Value) (Value, error) {
 	if len(args) != len(m.Params) {
 		// A *runtimeError (not a plain fmt.Errorf) so this is catchable by a
 		// surrounding try/catch, exactly like the same-interpreter callUserMethod
@@ -1036,9 +1045,14 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 				File: p.File, Line: p.Line, Col: p.Col,
 			}
 		}
-		bound := i.bindArg(args[idx], p, borrowCtx)
-		if !(p.Borrow && borrowCtx) {
-			i.accountCopy(callFrame, bound)
+		var bound Value
+		if moveArg == idx+1 {
+			bound = stampDeclaredType(args[idx], p.Type) // taken by move: no copy
+		} else {
+			bound = i.bindArg(args[idx], p, borrowCtx)
+			if !(p.Borrow && borrowCtx) {
+				i.accountCopy(callFrame, bound)
+			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
 			releaseBlockEnv(callFrame)
@@ -1869,6 +1883,21 @@ func rhsFreshLiteral(e parser.Expr) bool {
 	return false
 }
 
+// ownedCallResult reports whether e is a call to a method whose results are
+// solely owned (parser.MethodDef.ReturnsOwned): the value it returns is
+// referenced by nothing else once the callee frame exits, so a bind site stores
+// it without the defensive copy, exactly like a fresh literal.
+func ownedCallResult(e parser.Expr) bool {
+	switch c := e.(type) {
+	case *parser.CallExpr:
+		return c.Method != nil && c.Method.ReturnsOwned
+	case *parser.QualifiedCallExpr:
+		mt, ok := c.Fn.(moduleMethodTarget)
+		return ok && mt.method.ReturnsOwned
+	}
+	return false
+}
+
 // literalElementValue returns the value to store for a list element / map value
 // / struct or enum field whose source expression is src and whose evaluated
 // value is v. A copy keeps value semantics, but is skipped in two cases where
@@ -1927,8 +1956,9 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		// or untyped) container so subsequent `$x[i] = ...` writes can
 		// enforce the declared inner type. A fresh literal RHS is already
 		// private (its evaluator copied every element), so skip the
-		// redundant whole-value copy - only the stamp is needed.
-		if rhsFreshLiteral(st.InitExpr) {
+		// redundant whole-value copy - only the stamp is needed, as for a call
+		// result its method solely owns (ownedCallResult).
+		if rhsFreshLiteral(st.InitExpr) || ownedCallResult(st.InitExpr) {
 			val = stampDeclaredType(v, st.VarType)
 			i.accountCopy(env, val)
 		} else if st.Borrow && env.borrowDefs {
@@ -2203,8 +2233,9 @@ func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error 
 	}
 	// A fresh literal RHS is already private (its evaluator copied every
 	// element), so skip the redundant whole-value copy - only the stamp
-	// is needed. Any other RHS may alias a live binding and is eager-copied.
-	if rhsFreshLiteral(st.Value) {
+	// is needed; so is a call result its method solely owns. Any other RHS
+	// may alias a live binding and is eager-copied.
+	if rhsFreshLiteral(st.Value) || ownedCallResult(st.Value) {
 		val = stampDeclaredType(val, b.DeclType)
 	} else {
 		val = stampDeclaredType(i.eagerCopy(val, st), b.DeclType)
@@ -5478,12 +5509,19 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 					File: file, Line: line, Col: col,
 				}
 			}
-			bound := i.bindArg(v, p, borrowCtx)
-			if !(p.Borrow && borrowCtx) {
-				i.accountCopy(callFrame, bound)
-				if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-					pf, pl, pcol := posFor(a)
-					i.prof.RecordEagerCopy(pf, pl, pcol)
+			var bound Value
+			if c.MoveArg == idx+1 {
+				// The caller's binding is dead after this call (parser.CallExpr.MoveArg),
+				// so the parameter takes the value by move: no copy.
+				bound = stampDeclaredType(v, p.Type)
+			} else {
+				bound = i.bindArg(v, p, borrowCtx)
+				if !(p.Borrow && borrowCtx) {
+					i.accountCopy(callFrame, bound)
+					if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+						pf, pl, pcol := posFor(a)
+						i.prof.RecordEagerCopy(pf, pl, pcol)
+					}
 				}
 			}
 			if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {

@@ -58,6 +58,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `parser.go` | Recursive-descent parser; namespaced struct literals. |
 | `resolver.go` | Parse-time scope / slot resolution; undefined-variable + shadowing errors. |
 | `fold.go` | Parse-time constant folding of literal-only subtrees. |
+| `ownership.go` | Ownership analysis run from `Resolve`: which methods return solely owned values (`ReturnsOwned`) and which `$v = f($v, ...)` calls move their argument (`MoveArg`). |
 | `parser_test.go` / `fold_test.go` | Parser and constant-folding tests (incl. "runtime error stays runtime"). |
 
 ## Interpreter (`internal/interpreter/`)
@@ -68,6 +69,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `environment.go` | Scoped symbol table (name map + slot slice). |
 | `interpreter.go` | Tree-walking evaluator; namespaced-struct + object registration and resolution. |
 | `interpreter_test.go` | End-to-end interpreter tests. |
+| `ownership_test.go` | Value semantics on every path of the owned-result and moved-argument copy elisions, across a module boundary too. |
 | `interactive_test.go` | REPL `EvalInteractive` tests. |
 | `namespace_test.go` | Namespaced builtins + constants tests. |
 | `namespaced_struct_test.go` | Namespaced struct tests (synthetic `widgets` lib). |

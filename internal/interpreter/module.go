@@ -159,6 +159,9 @@ func subtreeNeedsRetag(v Value, fromNS, fromMod string, isOwn func(string) bool)
 		if typeNeedsRetag(v.ElemTyp, fromNS, fromMod, isOwn) {
 			return true
 		}
+		if primitiveType(v.ElemTyp) {
+			return false // typed elements of a primitive kind hold no struct
+		}
 		for _, e := range v.List {
 			if subtreeNeedsRetag(e, fromNS, fromMod, isOwn) {
 				return true
@@ -168,11 +171,30 @@ func subtreeNeedsRetag(v Value, fromNS, fromMod string, isOwn func(string) bool)
 		if typeNeedsRetag(v.KeyTyp, fromNS, fromMod, isOwn) || typeNeedsRetag(v.ValTyp, fromNS, fromMod, isOwn) {
 			return true
 		}
+		if primitiveType(v.KeyTyp) && primitiveType(v.ValTyp) {
+			return false
+		}
 		for _, e := range v.Map {
 			if subtreeNeedsRetag(e.Key, fromNS, fromMod, isOwn) || subtreeNeedsRetag(e.Value, fromNS, fromMod, isOwn) {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// primitiveType reports whether t is a declared scalar or bytes type. A list / map
+// stamped with one can hold only values of that kind (every element write is
+// checked against it), so no struct can sit among its elements and the retag
+// precheck need not walk them - which would make every module call carrying a
+// large typed list O(n).
+func primitiveType(t *parser.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind {
+	case parser.TypeInt, parser.TypeFloat, parser.TypeString, parser.TypeBool, parser.TypeBytes, parser.TypeNull:
+		return true
 	}
 	return false
 }
@@ -366,12 +388,18 @@ func findImpostorStruct(v Value, m *loadedModule) (Value, bool) {
 			}
 		}
 	case KindList:
+		if primitiveType(v.ElemTyp) {
+			return Value{}, false // typed elements of a primitive kind hold no struct
+		}
 		for _, e := range v.List {
 			if imp, found := findImpostorStruct(e, m); found {
 				return imp, true
 			}
 		}
 	case KindMap:
+		if primitiveType(v.KeyTyp) && primitiveType(v.ValTyp) {
+			return Value{}, false
+		}
 		for _, e := range v.Map {
 			if imp, found := findImpostorStruct(e.Key, m); found {
 				return imp, true
@@ -457,7 +485,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 	var err error
 	if i.prof != nil && i.profStmts && i.profModules {
 		start := time.Now()
-		v, err = m.interp.callMethodWithDepth(md, env.depth, args...)
+		v, err = m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
 		dur := time.Since(start)
 		root := env.root
 		if root == nil {
@@ -465,7 +493,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 		}
 		root.profChild.Add(int64(dur))
 	} else {
-		v, err = m.interp.callMethodWithDepth(md, env.depth, args...)
+		v, err = m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
 	}
 	if err != nil {
 		switch err.(type) {

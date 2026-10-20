@@ -52,12 +52,17 @@ Colour names for `textColor`: `black`, `red`, `green`, `yellow`, `blue`,
 `magenta`, `cyan`, `white`, `gray` / `grey`. Each coloured cell carries its own
 SGR reset, so it still occupies exactly one column and the diff stays correct.
 
-**Draw a frame with one batch call, not one call per glyph.** Every drawing
-call copies the whole buffer (value semantics), so a single-cell `set` on a
-110x244 terminal costs about as much as the copy of its 26,840 cells, and a frame
-of a few hundred `set` / `text` calls costs seconds. Collect the frame's cells in
-a `list of screen.Plot` (or its text runs in a `list of screen.Span`) and apply
-them with one `setMany` / `textMany`: one copy per frame, however many cells.
+**Draw in a method, as `$buf = screen.set($buf, ...);`.** Each drawing call
+returns the updated buffer (value semantics). In that shape inside a method -
+the variable both passed and assigned, a local or parameter, not inside a `try` -
+the old buffer is dead after the call, so the interpreter hands it over without a
+copy and the call updates the grid in place, whatever its size. Anywhere else -
+top-level code (its variables are globals), inside a `try`, or keeping the old
+buffer as well (`def next as screen.Buffer init screen.set($buf, ...)`) - the call
+copies the whole grid: a single-cell `set` on a 110x244 terminal then costs about
+as much as copying its 26,840 cells. There, collect the frame's cells in a
+`list of screen.Plot` (or its text runs in a `list of screen.Span`) and apply them
+with one `setMany` / `textMany`: one copy per frame, however many cells.
 
 A cell is one terminal column. A wide glyph (CJK, most emoji) takes two columns
 on screen, and an East-Asian-ambiguous one (such as `♥`) takes two on some

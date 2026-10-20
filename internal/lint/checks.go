@@ -448,9 +448,12 @@ func (c *checkCtx) maybeReportNest(anchor parser.Node, depth int) {
 
 // checkAccumulatorParam (L205) flags a method that takes a `list` / `map`
 // parameter, mutates it (append, index-write, field-write, or reassign), and
-// returns it. Value semantics make that a copy-in / copy-out accumulator: each
-// call copies the argument in and the result back out, so calling it in a loop
-// over N elements is O(N^2). It is the shape L202 steers people toward when they
+// returns it. Value semantics make that a copy-in / copy-out accumulator: a call
+// copies the argument in, so calling it in a loop over N elements is O(N^2) -
+// except for a call written `$v = f($v, ...)` on a method local outside a `try`,
+// where the argument moves in and the result comes back without a copy
+// (parser/ownership.go). The finding says so; the definition cannot tell how it
+// is called. It is the shape L202 steers people toward when they
 // "flatten with a helper" an inner block that appends to an accumulator - the
 // callee cannot mutate the caller's value, so the accumulator has to be passed
 // and returned. The non-quadratic fix keeps the accumulator in the caller and
@@ -480,8 +483,8 @@ func checkAccumulatorParam(c *checkCtx) {
 				continue
 			}
 			c.report("L205", m, fmt.Sprintf(
-				"method `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator that is O(n^2) when called in a loop; keep the accumulator in the caller and mutate it in place",
-				m.Name, p.Type.Kind, p.Name))
+				"method `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator, O(n^2) in a loop unless every call is `$v = %s($v, ...)` on a local inside a method (outside a `try`), which updates in place; otherwise keep the accumulator in the caller",
+				m.Name, p.Type.Kind, p.Name, m.Name))
 		}
 	}
 }

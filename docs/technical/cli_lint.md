@@ -37,7 +37,7 @@ style, **L3nn** API lifecycle.
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
 | `L204` | interpolation-slot-too-complex | info  | a call or other non-trivial expression inside a `{expr}` string slot |
-| `L205` | accumulator-parameter       | info     | a method that takes, mutates, and returns a `list` / `map` parameter (an O(n^2) copy-in / copy-out accumulator) |
+| `L205` | accumulator-parameter       | info     | a method that takes, mutates, and returns a `list` / `map` parameter (an O(n^2) copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` on a method local outside a `try`) |
 | `L301` | deprecation                 | warning  | reserved family, empty until an API is deprecated                  |
 | `L302` | removed-api                 | warning  | use of a removed API (e.g. `use core;`)                            |
 | `L303` | invalid-requirement-header  | warning  | a malformed / duplicate / unknown `# pragma-jennifer-*` directive    |

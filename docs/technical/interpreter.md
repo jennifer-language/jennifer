@@ -88,6 +88,47 @@ eager deep copies at every store site, not on copy-on-write:
   left-leaning construction (`$acc = Node{ parts: [$acc, ...] }`, a
   parser AST or expression tree) from quadratic into linear.
 
+**Ownership: owned call results and moved arguments.** Two more elisions,
+computed by `markOwnership` (`internal/parser/ownership.go`) at the end of
+`Resolve`, make a mutate-and-return helper - `$grid = put($grid, x, v);`,
+the shape every value-semantic "update" API takes - O(1) per call instead of
+O(size of the value). Both rest on the same invariant as above: a method's
+locals solely own their values, except a borrowed parameter / `def` (an
+alias), a for-each iterator, a catch name, a match binder (left out to stay
+conservative, as are constants). `ownedLocals` computes that set per method,
+by name (no shadowing makes a name unambiguous within a method; a name bound
+more than one way in sibling blocks is not owned).
+
+- **`MethodDef.ReturnsOwned`** - every `return` of the method yields a value
+  nothing else references once the frame exits: a scalar, a fresh literal, an
+  owned local or a field / element of one, or the result of another
+  `ReturnsOwned` method. A greatest fixpoint over the program's methods (start
+  all true, clear on a non-owned return, repeat) handles recursion soundly: any
+  value actually returned comes from a finite chain ending in a return owned on
+  its own terms. `execDefine` / `execAssign` then store such a call's result
+  without the eager copy (`ownedCallResult`), like a fresh literal. A module
+  method's flag is read through the stamped `moduleMethodTarget`.
+- **`CallExpr.MoveArg` / `QualifiedCallExpr.MoveArg`** - in
+  `$v = f(..., $v, ...)`, where `$v` is an owned local named exactly once in
+  the right-hand side (as a direct argument), the old value is dead on every
+  path out of the statement: overwritten when the call returns, unreachable
+  when it throws because the error unwinds the frame. The parameter binds it
+  without the copy (`evalCall`, and `callMethodMoving` for a module call), so a
+  callee that mutates its parameter does so in place. The one path that could
+  still observe `$v` after a throw is a `try` in the **same method**, so a call
+  inside a `try` body is never marked; a global (reachable from the callee and
+  from a catch anywhere up the stack) is never in the owned set, which also
+  rules out all top-level code. Callers other than this exact shape pay one
+  copy, at the bind.
+
+Crossing a module boundary, `findImpostorStruct` and the retag precheck
+(`subtreeNeedsRetag`) skip the elements of a list / map whose element types are
+primitive (`primitiveType`) - a typed list can hold no struct - so a module call
+carrying a large `list of string` stays O(1) as well. Pinned by
+`internal/parser/ownership_test.go` (which calls are marked, which methods own
+their results) and `internal/interpreter/ownership_test.go` (value semantics on
+every elided and every non-elided path, across a module boundary too).
+
 **Read-only-parameter borrow.** The one carve-out to "parameter
 binding always copies": when a method never writes a parameter, its
 argument is bound by **alias** rather than deep-copied, since a

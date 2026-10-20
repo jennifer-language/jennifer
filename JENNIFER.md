@@ -434,21 +434,27 @@ the whole list, so the same loop is O(N^2). Use `$xs[]` to build a list element
 by element (a raster, a buffer, a big result set); use `lists.push` only when you
 want a fresh list and keep the original.
 
-**Never thread a growing accumulator through a function call.** A `list` / `bytes`
-argument is deep-copied on every call (value semantics), so passing a growing
-accumulator into a helper each iteration is O(N^2). The tell is that it scales
-*backwards* - smaller batches run slower, because each call re-copies a larger
-accumulator. Keep the accumulator in the caller and append the small per-batch
-result with `$xs[]`; return the piece, don't pass the whole down:
+**Thread a growing accumulator through a call only as `$acc = f($acc, ...)` in
+a method.** A `list` / `bytes` / struct argument is deep-copied on a call (value
+semantics), so passing a growing accumulator into a helper each iteration is
+O(N^2) - the tell is that it scales *backwards*: smaller batches run slower,
+because each call re-copies a larger accumulator. The one exception: inside a
+method, `$acc = addTo($acc, v);` on a local or parameter, outside a `try`, moves
+the old value in (it is dead after the call) and takes the mutated parameter back
+without a copy - O(1) per call. Top-level code (its variables are globals), a
+global, a `try`, or another target copies. Simplest is still to keep the
+accumulator in the caller and append with `$xs[]`:
 
 ```jennifer
-# quadratic: each call copies the whole growing accumulator
+# O(1) per call when called as `$acc = addTo($acc, v);` inside a method;
+# O(N) per call (so O(N^2) in a loop) from top-level code or inside a `try`
 func addTo(acc as list of int, v as int) {
-    def out as list of int init $acc;   # copies every element
-    $out[] = $v;
-    return $out;
+    $acc[] = $v;
+    return $acc;
 }
-# linear: helper returns just the piece; the caller owns the accumulator
+# still quadratic anywhere: a local copy of the parameter copies every element
+#     def out as list of int init $acc;
+# always linear: the helper returns just the piece; the caller owns the accumulator
 for (def v in $items) { $results[] = compute($v); }
 ```
 
@@ -1214,10 +1220,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (`screen.newScreen(rows, cols)`) drawn with `screen.text` / `textColor` / `box` /
   `fill` / `hline` / `vline` / `set`, ANSI control builders (`screen.clear` /
   `moveTo(x, y)` / `hideCursor` / `enterAlt` / ...), and a flicker-free
-  `screen.render(buf)` / `diff(old, new)` paint loop. Every drawing call copies the
-  whole buffer, so draw a frame with one batch call - `screen.setMany(buf, list of
-  screen.Plot{x, y, cell})` / `textMany(buf, list of screen.Span{x, y, text,
-  color})` - not one `set` per glyph; keep cell text single-width (no CJK / emoji).
+  `screen.render(buf)` / `diff(old, new)` paint loop. Draw inside a method as
+  `$buf = screen.set($buf, ...);` (updates in place); elsewhere (top level, in a
+  `try`) each call copies the whole buffer, so batch a frame with
+  `screen.setMany(buf, list of screen.Plot{x, y, cell})` / `textMany(buf, list of
+  screen.Span{x, y, text, color})`; keep cell text single-width (no CJK / emoji).
   Interactive layer (needs `term`, default binary):
   `screen.decodeKey(seq) -> screen.Key{name, char}` (arrows, nav, F1-F12, ctrl /
   alt; a lone Escape is `"escape"`) plus `nextKey` / `begin` / `end` / `size`

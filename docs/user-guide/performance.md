@@ -10,6 +10,15 @@ it can prove doing so is invisible, and it does this for you automatically:
   writes is bound by alias, so passing a large `list` or `map` into a helper that
   only reads it does not deep-copy it. You get this with no annotation and no
   special syntax - just write the read-only helper.
+- **A mutate-and-return helper updates in place.** Inside a method,
+  `$grid = put($grid, x, y, v);` hands `$grid` to `put` without a copy (the old
+  value is dead once the call returns), and the value `put` mutates and returns
+  comes back without one either - so the call costs the same for a ten-cell grid
+  as for a million-cell one. The variable has to be both passed and assigned, and
+  be a local or parameter of the method, outside any `try` there (a `catch` could
+  still read the old value). Top-level code (its variables are globals), a global
+  inside a method, or a different target (`def next as Grid init put($grid, ...)`)
+  copies the value once per call.
 - **Call frames are pooled and slot-bound.** A deeply recursive program allocates
   a near-constant handful of objects rather than one allocation per call, so
   recursion and tight call loops do not generate garbage-collector pressure on

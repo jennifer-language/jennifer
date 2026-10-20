@@ -217,6 +217,7 @@ func (r *resolver) resolveProgram(p *Program) error {
 			return err
 		}
 	}
+	markOwnership(p)
 
 	return nil
 }
