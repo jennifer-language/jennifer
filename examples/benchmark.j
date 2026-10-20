@@ -13,10 +13,12 @@
  * VERSIONING DISCIPLINE. The suite is versioned so reference numbers stay
  * comparable over time and across machines. `--suite v1` (the default) runs
  * the original interpreter-throughput workload; `--suite v2` runs the
- * numeric-library workload (stats / linalg / math / ml); `--suite all` runs
- * both. A suite's workloads and tunables are FROZEN once it has published
- * reference numbers - never change a v1 (or v2) workload's operations or
- * sizing, or its historical series breaks. New workloads go in a NEW suite
+ * numeric-library workload (stats / linalg / math / ml); `--suite v3` runs the
+ * value-semantics workload (copy-on-write, owned updates, borrowed reads,
+ * spawn snapshots); `--suite all` runs all three. A suite's workloads and
+ * tunables are FROZEN once it has published reference numbers - never change
+ * a v1, v2 (or v3) workload's operations or sizing, or its historical series
+ * breaks. New workloads go in a NEW suite
  * version (v3, v4, ...), never into a frozen one. The harness / output around
  * the workloads may evolve, but the timed code inside each `benchX` must not.
  * @module benchmark
@@ -72,6 +74,23 @@ def const ML_ROWS as int init 500; # ml training rows
 def const ML_FEATS as int init 5; # ml feature columns
 def const ML_REPS as int init 200; # fit+predict repetitions
 def const KMEANS_REPS as int init 40; # ml.kMeans repetitions
+
+# --- Suite v3 tunables (value semantics) ---------------------------
+# FROZEN together with the v3 workloads once v3 has reference numbers.
+# Each v3 workload isolates one path of the value model: an owned update
+# that may run in place, a copy that must happen, a borrowed read, a nested
+# field write, and a spawn snapshot. VS_CELLS is a mid-sized buffer (a
+# 100x100 grid, between an 80x24 and a 244x110 terminal) so a full copy is
+# expensive enough to dominate a row whenever the interpreter makes one.
+def const VS_CELLS as int init 10000; # cells in the Grid every row uses
+def const VS_OWNED_CALLS as int init 20000; # $g = gridSet($g, ...) calls
+def const VS_COPY_CALLS as int init 2000; # copy-then-write helper calls
+def const VS_SNAPSHOT_REPS as int init 2000; # snapshot + write (forced detach)
+def const VS_READ_CALLS as int init 20000; # read-only Grid parameter calls
+def const VS_APPEND_CALLS as int init 10000; # $xs = appendTo($xs, v) calls
+def const VS_UNITS as int init 1000; # structs in the nested-write list
+def const VS_NESTED_PASSES as int init 50; # passes over every unit
+def const VS_SPAWNS as int init 200; # tasks spawned over a captured Grid
 
 # --- Helpers -------------------------------------------------------
 
@@ -891,20 +910,313 @@ func runV2() {
     }
 }
 
+# --- Suite v3 workloads (value semantics) -------------------------
+# FROZEN with the v3 tunables once v3 has reference numbers. v1 and v2 are
+# dominated by dispatch and Go-side compute, so they cannot show what the
+# value model costs. These rows can: each one repeats a pattern real programs
+# lean on (a draw call that returns the updated buffer, a game-state record
+# rebuilt every tick) at a size where an unnecessary deep copy is the whole
+# cost. Every row also checks its result, so a build that got faster by
+# breaking copy semantics fails loudly instead of posting a better number.
+# The workloads use only long-standing language features (no Error literal
+# without a location, no struct literal with omitted fields), so an older
+# interpreter can run this file and extend the series backwards.
+
+# Grid is the large value every v3 row moves around: a struct whose list
+# field is the expensive part to copy.
+def struct Grid {
+    width as int,
+    cells as list of int
+};
+
+# Pos and Unit are a small record nested inside a list, for the
+# nested-field-write row.
+def struct Pos {
+    x as int,
+    y as int
+};
+def struct Unit {
+    id as int,
+    pos as Pos,
+    hp as int
+};
+
+func newGrid(n as int) {
+    def cells as list of int init [];
+    def i as int init 0;
+    while ($i < $n) {
+        $cells[] = 0;
+        $i = $i + 1;
+    }
+    return Grid{width: 100, cells: $cells};
+}
+
+# vsCheck stops the run when a v3 row computed the wrong answer, so the row's
+# timing is never published for a build whose value semantics are broken.
+func vsCheck(row as string, got as int, want as int) {
+    if ($got != $want) {
+        throw Error{
+            kind: "benchmark",
+            message: io.sprintf("v3 %s: checksum %d, want %d", $row, $got, $want),
+            file: "",
+            line: 0,
+            col: 0
+        };
+    }
+}
+
+func gridSum(g as Grid) {
+    def sum as int init 0;
+    for (def c in $g.cells) {
+        $sum = $sum + $c;
+    }
+    return $sum;
+}
+
+# gridSet is the owned-update shape: take the value, write it, return it.
+# Called as `$g = gridSet($g, ...)` the argument is dead after the call, so an
+# interpreter may hand it over and write in place instead of copying.
+func gridSet(g as Grid, i as int, v as int) {
+    $g.cells[$i] = $v;
+    return $g;
+}
+
+# gridSetCopy is the older defensive idiom: copy into a local, write the copy,
+# return it. Its cost is whatever the interpreter makes of that local copy.
+func gridSetCopy(g as Grid, i as int, v as int) {
+    def out as Grid init $g;
+    $out.cells[$i] = $v;
+    return $out;
+}
+
+# gridCell only reads its Grid parameter, so the argument can be borrowed.
+func gridCell(g as Grid, i as int) {
+    return $g.cells[$i];
+}
+
+# appendTo is the accumulator helper lint L205 warns about: a list passed in,
+# appended to, and returned.
+func appendTo(xs as list of int, v as int) { # lint-disable: L205
+    $xs[] = $v;
+    return $xs;
+}
+
+func benchOwnedUpdate() {
+    def g as Grid init newGrid(VS_CELLS);
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < VS_OWNED_CALLS) {
+        $g = gridSet($g, $k % VS_CELLS, 1);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("owned update", gridSum($g), VS_CELLS);
+    return time.milliseconds($gap);
+}
+
+func benchCopyUpdate() {
+    def g as Grid init newGrid(VS_CELLS);
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < VS_COPY_CALLS) {
+        $g = gridSetCopy($g, $k, 1);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("copy-then-write update", gridSum($g), VS_COPY_CALLS);
+    return time.milliseconds($gap);
+}
+
+# benchSnapshot keeps the old value alive across a write, so a copy is
+# required every iteration: this row is the price of one full detach, the
+# baseline the owned-update row is measured against.
+func benchSnapshot() {
+    def g as Grid init newGrid(VS_CELLS);
+    def kept as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < VS_SNAPSHOT_REPS) {
+        def snap as Grid init $g;
+        $g.cells[$k % VS_CELLS] = $g.cells[$k % VS_CELLS] + 1;
+        $kept = $kept + $snap.cells[$k % VS_CELLS];
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    # Each snapshot must still hold the value from before its write.
+    vsCheck("snapshot + write", $kept, 0);
+    vsCheck("snapshot + write", gridSum($g), VS_SNAPSHOT_REPS);
+    return time.milliseconds($gap);
+}
+
+func benchBorrowedRead() {
+    def g as Grid init newGrid(VS_CELLS);
+    $g.cells[7] = 3;
+    def sum as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < VS_READ_CALLS) {
+        $sum = $sum + gridCell($g, 7);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("borrowed read", $sum, VS_READ_CALLS * 3);
+    return time.milliseconds($gap);
+}
+
+func benchListAppendHelper() {
+    def xs as list of int init [];
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < VS_APPEND_CALLS) {
+        $xs = appendTo($xs, $k);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("list append helper", len($xs), VS_APPEND_CALLS);
+    return time.milliseconds($gap);
+}
+
+func benchNestedWrite() {
+    def units as list of Unit init [];
+    def i as int init 0;
+    while ($i < VS_UNITS) {
+        $units[] = Unit{id: $i, pos: Pos{x: 0, y: $i}, hp: 100};
+        $i = $i + 1;
+    }
+    def start as time.Time init time.now();
+    def pass as int init 0;
+    while ($pass < VS_NESTED_PASSES) {
+        def j as int init 0;
+        while ($j < VS_UNITS) {
+            $units[$j].pos.x = $units[$j].pos.x + 1;
+            $units[$j].hp = $units[$j].hp - 1;
+            $j = $j + 1;
+        }
+        $pass = $pass + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    def xs as int init 0;
+    for (def u in $units) {
+        $xs = $xs + $u.pos.x + $u.hp;
+    }
+    vsCheck("nested field write", $xs, VS_UNITS * 100);
+    return time.milliseconds($gap);
+}
+
+# benchSpawnCapture spawns tasks that each read one cell of a Grid in the
+# enclosing scope. `spawn` snapshots the scope it captures, so this row is the
+# cost of handing a large value to a task. Each task is waited on before the
+# next is spawned: with hundreds alive at once, jennifer-tiny's cooperative
+# scheduler (a full reserved stack per task) dominates the row and it stops
+# measuring the snapshot.
+func benchSpawnCapture() {
+    def g as Grid init newGrid(VS_CELLS);
+    $g.cells[42] = 2;
+    def sum as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < VS_SPAWNS) {
+        def t as task of int init spawn {
+            return $g.cells[42];
+        };
+        $sum = $sum + task.wait($t);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("spawn capture", $sum, VS_SPAWNS * 2);
+    return time.milliseconds($gap);
+}
+
+# runV3 runs the value-semantics suite, emitting the same report shape as v1.
+func runV3() {
+    def benches as list of Bench init [];
+    $benches[] = Bench{
+        name: "owned update g = f(g)",
+        base: VS_CELLS,
+        iters: VS_OWNED_CALLS,
+        timeMs: benchOwnedUpdate()
+    };
+    $benches[] = Bench{
+        name: "copy-then-write update",
+        base: VS_CELLS,
+        iters: VS_COPY_CALLS,
+        timeMs: benchCopyUpdate()
+    };
+    $benches[] = Bench{
+        name: "snapshot + write (detach)",
+        base: VS_CELLS,
+        iters: VS_SNAPSHOT_REPS,
+        timeMs: benchSnapshot()
+    };
+    $benches[] = Bench{
+        name: "borrowed read param",
+        base: VS_CELLS,
+        iters: VS_READ_CALLS,
+        timeMs: benchBorrowedRead()
+    };
+    $benches[] = Bench{
+        name: "list append helper",
+        base: VS_APPEND_CALLS,
+        iters: VS_APPEND_CALLS,
+        timeMs: benchListAppendHelper()
+    };
+    $benches[] = Bench{
+        name: "nested field write",
+        base: VS_UNITS,
+        iters: VS_NESTED_PASSES,
+        timeMs: benchNestedWrite()
+    };
+    $benches[] = Bench{
+        name: "spawn capture",
+        base: VS_CELLS,
+        iters: VS_SPAWNS,
+        timeMs: benchSpawnCapture()
+    };
+
+    def sumMs as int init 0;
+    for (def w in $benches) {
+        $sumMs = $sumMs + $w.timeMs;
+    }
+    def noPar as list of Par init [];
+    def rep as Report init Report{
+        schema: "jennifer-benchmark/3",
+        build: meta.BUILD,
+        version: meta.VERSION,
+        cpu: cpuModel(),
+        ncpu: os.NCPU,
+        platform: os.PLATFORM,
+        arch: os.ARCH,
+        virt: detectVirt(),
+        workers: PARALLEL_WORKERS,
+        totalMs: $sumMs,
+        workloads: $benches,
+        parallel: $noPar
+    };
+    if (os.flag("--format") == "json") {
+        emitJson($rep);
+    } else {
+        emitText($rep);
+    }
+}
+
 # --- Suite dispatch ------------------------------------------------
-# --suite v1 (default) / v2 / all. A suite's workloads are frozen; new
-# numeric coverage goes in a new suite version, never into an old one.
+# --suite v1 (default) / v2 / v3 / all. A suite's workloads are frozen; new
+# coverage goes in a new suite version, never into an old one.
 def suite as string init os.flag("--suite");
 if ($suite == "") {
     $suite = "v1";
 }
-if ($suite != "v1" and $suite != "v2" and $suite != "all") {
-    io.printf("unknown --suite %s (use v1, v2, or all)\n", $suite);
+if ($suite != "v1" and $suite != "v2" and $suite != "v3" and $suite != "all") {
+    io.printf("unknown --suite %s (use v1, v2, v3, or all)\n", $suite);
     exit 1;
 }
 
 if ($suite == "v2") {
     runV2();
+    exit 0;
+}
+if ($suite == "v3") {
+    runV3();
     exit 0;
 }
 
@@ -1041,7 +1353,9 @@ if (os.flag("--format") == "json") {
     emitText($report);
 }
 
-# --suite all runs the v2 numeric suite after the v1 suite above.
+# --suite all runs the v2 numeric and v3 value-semantics suites after the v1
+# suite above.
 if ($suite == "all") {
     runV2();
+    runV3();
 }
