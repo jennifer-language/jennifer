@@ -224,6 +224,11 @@ func TestMetrics(t *testing.T) {
 	fails(t, accuracyFn, yt, vec(1, 0)) // length mismatch
 	fails(t, r2Fn, vec(2, 2, 2), vec(1, 2, 3))
 	fails(t, rocAucFn, vec(1, 1, 1), vec(0.1, 0.2, 0.3)) // no negatives
+	// Arity is exact: a stray argument is an error, not silently ignored.
+	fails(t, accuracyFn, yt)
+	fails(t, accuracyFn, yt, yp, iv(1))
+	fails(t, rmseFn, yt, yp, iv(1))
+	fails(t, precisionFn, yt, yp, iv(1), iv(0))
 }
 
 // TestIntrospectionAndExtras covers the introspection accessors, the regression

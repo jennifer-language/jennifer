@@ -11,10 +11,14 @@ import (
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
-// twoVectors reads two equal-length numeric-list arguments (yTrue, yPred).
-func twoVectors(name string, args []interpreter.Value) ([]float64, []float64, error) {
-	if len(args) < 2 {
-		return nil, nil, fmt.Errorf("ml.%s expects at least 2 list arguments", name)
+// twoVectors reads two equal-length numeric-list arguments (yTrue, yPred) from a
+// call taking 2 to max arguments; the caller reads any optional ones past them.
+func twoVectors(name string, args []interpreter.Value, max int) ([]float64, []float64, error) {
+	if len(args) < 2 || len(args) > max {
+		if max == 2 {
+			return nil, nil, fmt.Errorf("ml.%s expects 2 arguments (yTrue, yPred), got %d", name, len(args))
+		}
+		return nil, nil, fmt.Errorf("ml.%s expects 2 or 3 arguments (yTrue, yPred [, positive]), got %d", name, len(args))
 	}
 	a, err := vector(name, args, 0)
 	if err != nil {
@@ -43,7 +47,7 @@ func floatResult(name string, r float64) (interpreter.Value, error) {
 // --- classification metrics ---
 
 func accuracyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("accuracy", args)
+	yt, yp, err := twoVectors("accuracy", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -87,7 +91,7 @@ func posLabelArg(args []interpreter.Value) (float64, error) {
 }
 
 func precisionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("precision", args)
+	yt, yp, err := twoVectors("precision", args, 3)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -103,7 +107,7 @@ func precisionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 }
 
 func recallFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("recall", args)
+	yt, yp, err := twoVectors("recall", args, 3)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -119,7 +123,7 @@ func recallFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 }
 
 func f1Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("f1", args)
+	yt, yp, err := twoVectors("f1", args, 3)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -135,7 +139,7 @@ func f1Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value
 }
 
 func confusionMatrixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("confusionMatrix", args)
+	yt, yp, err := twoVectors("confusionMatrix", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -170,7 +174,7 @@ func confusionMatrixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inte
 // rocAucFn computes the binary ROC-AUC from true 0/1 labels and predicted
 // scores via the rank (Mann-Whitney U) statistic, with tie-aware average ranks.
 func rocAucFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, scores, err := twoVectors("rocAuc", args)
+	yt, scores, err := twoVectors("rocAuc", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -219,7 +223,7 @@ func rocAucFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 // --- regression metrics ---
 
 func rmseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("rmse", args)
+	yt, yp, err := twoVectors("rmse", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -232,7 +236,7 @@ func rmseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 }
 
 func mseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("mse", args)
+	yt, yp, err := twoVectors("mse", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -248,7 +252,7 @@ func mseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 // probabilities, with the probabilities clipped away from 0 and 1 so the log
 // stays finite.
 func logLossFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, p, err := twoVectors("logLoss", args)
+	yt, p, err := twoVectors("logLoss", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -274,7 +278,7 @@ func logLossFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 }
 
 func maeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("mae", args)
+	yt, yp, err := twoVectors("mae", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -286,7 +290,7 @@ func maeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 }
 
 func r2Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	yt, yp, err := twoVectors("r2", args)
+	yt, yp, err := twoVectors("r2", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
