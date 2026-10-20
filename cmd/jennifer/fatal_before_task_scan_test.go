@@ -4,7 +4,7 @@
 package main
 
 import (
-	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,31 +40,20 @@ def x as int init 1 // 0;
 	os.Stderr = w
 	defer func() { os.Stderr = oldErr }()
 
+	// Drain stderr concurrently so a full pipe can never block runFile.
+	output := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		output <- string(b)
+	}()
+
 	done := make(chan int, 1)
 	go func() { done <- runFile(path, nil, "") }()
 
-	lines := make(chan string, 16)
-	go func() {
-		sc := bufio.NewScanner(r)
-		for sc.Scan() {
-			lines <- sc.Text()
-		}
-		close(lines)
-	}()
-
-	deadline := time.After(1 * time.Second)
-	for seen := false; !seen; {
-		select {
-		case line := <-lines:
-			if strings.Contains(line, "division by zero") {
-				seen = true
-			}
-		case code := <-done:
-			t.Fatalf("runFile returned (code %d) before the fatal error reached stderr", code)
-		case <-deadline:
-			t.Fatal("the fatal error was not printed while the spawned task was still running")
-		}
-	}
+	// Returning well inside the task's 10 s sleep is the "does not wait" half;
+	// the error then being on stderr is the "reports it" half. Ordering the two
+	// against each other would race: runFile may return before the reader has
+	// seen the line it already wrote.
 	select {
 	case code := <-done:
 		if code != 1 {
@@ -74,6 +63,9 @@ def x as int init 1 // 0;
 		t.Fatal("runFile waited for the still-running task after a fatal error")
 	}
 	w.Close()
+	if got := <-output; !strings.Contains(got, "division by zero") {
+		t.Errorf("stderr lacks the fatal error:\n%s", got)
+	}
 }
 
 // `exit` ends the program without waiting for a task still running - here one
