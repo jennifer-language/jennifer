@@ -579,7 +579,8 @@ required (every statement ends in one).
 
 ```jennifer
 # Construct - every field must be named at the literal (the built-in `Error`
-# is the one exception: its file / line / col may be left out, see control flow).
+# may leave out file / line / col, see control flow; a library struct may leave
+# out any field, see below).
 def p as Point init Point{ x: 3, y: 4 };
 
 # Read.
@@ -597,6 +598,15 @@ holds for an enum variant's payload fields and for library and module struct
 types. (`jennifer lint` reports it too, as `L113`, for types declared in the same
 file.) Field order in the literal is free - the runtime stores each field at its
 declaration position regardless.
+
+A literal of a **library** struct (`net.Datagram{ data: $b, peer: $addr }`,
+`archive.UnpackOptions{ maxEntries: 100 }`) is the exception: it may leave out
+any field, and each left-out field takes its zero value - the value a
+`def d as net.Datagram;` gives it. The library owns the type and may add a field
+in any release; requiring every field would turn each such addition into a
+breaking change for every program that builds the type by hand. An unknown field
+is still an error at load. Your own structs and an imported module's keep the
+every-field rule, since you control both the type and its literals.
 
 `def p as Point;` (no `init`) gives every field its declared zero,
 recursing through nested struct fields. So `def L as Line;` produces

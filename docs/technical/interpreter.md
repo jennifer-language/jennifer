@@ -631,6 +631,9 @@ string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
    resolved struct / enum-variant declaration (same-file, library, or
    module), so an unknown or missing field fails the load with the message
    `evalStructLit` / `evalEnumLit` would raise, before any statement runs.
+   A library struct literal may leave fields out (each takes its zero value,
+   built by `zeroPayload` as for a zero declaration), so only an unknown
+   field fails one; `Error` may leave out its location fields.
    A literal whose type does not resolve is left to the runtime path. Finally executes
    `prog.TopLevel` statements in source order in the global scope.
 5. Method calls execute the body in a fresh call frame whose parent is

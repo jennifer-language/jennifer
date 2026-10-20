@@ -198,9 +198,12 @@ function value), `channel of T` (a CSP channel between goroutines).
   type).
 - **map** literals: `{"a": 1, "b": 2}`, `{}`. Insertion-ordered.
 - **struct** literals: `Point{x: 1, y: 2}` after
-  `def struct Point { x as int, y as int };`. Every field must be named (the one
-  exception: an `Error` literal may omit `file` / `line` / `col`); an unknown or
-  missing field is an error when the program loads, not when the literal runs.
+  `def struct Point { x as int, y as int };`. Every field must be named, with two
+  exceptions: an `Error` literal may omit `file` / `line` / `col`, and a literal
+  of a **library** struct (`net.Datagram{peer: $p}`, `os.Result{...}`) may omit
+  any field, which then takes its zero value - so a field a library adds later
+  does not break it. An unknown or missing field is an error when the program
+  loads, not when the literal runs.
 - **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
   level. A value is one variant: construct with `Shape.Circle{r: 2.0}` or the
   payload-less `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value

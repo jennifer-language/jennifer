@@ -259,9 +259,9 @@ io.printf("ran\n");
 		{"library struct", `
 use io;
 use os;
-func res() { return os.Result{ exitCode: 1 }; }
+func res() { return os.Result{ exitCod: 1 }; }
 io.printf("ran\n");
-`, `missing field "stdout"`},
+`, `unknown field "exitCod"`},
 		{"inside a spawn body", `
 use io;
 def struct P { x as int };

@@ -68,7 +68,8 @@ Each cap field: **`0` takes the default** (so all three at `0`, with
 `skipSpecial: false`, behaves exactly like `unpack`), **a positive value** sets
 that cap, and **a negative value disables it** (unlimited - for a fully trusted
 archive). Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
-Like any struct literal, `UnpackOptions{...}` must name every field.
+Like any library struct literal, `UnpackOptions{...}` may leave fields out; a
+left-out field takes its zero value (so `0`, the default cap).
 
 ## `archive.Entry`
 

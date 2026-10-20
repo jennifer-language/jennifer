@@ -211,13 +211,24 @@ def named as widgets.Point init $bare;
 	}
 }
 
-func TestNamespacedStructMissingFieldAtLiteral(t *testing.T) {
-	_, err := runWidget(t, `
+// A library struct literal may leave fields out: each takes its zero value,
+// exactly as a zero-declared value of the type has, so a field the library adds
+// later does not break existing literals. (A user or module struct literal must
+// still name every field.)
+func TestNamespacedStructOmittedFieldIsZero(t *testing.T) {
+	out, err := runWidget(t, `
+use io;
 use widgets;
 def p as widgets.Point init widgets.Point{ x: 1 };
+def z as widgets.Point;
+def e as widgets.Point init widgets.Point{};
+io.printf("%d %d %t", $p.x, $p.y, $z == $e);
 `)
-	if err == nil || !strings.Contains(err.Error(), `missing field "y"`) {
-		t.Fatalf("got %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "1 0 true" {
+		t.Errorf("got %q, want %q", out, "1 0 true")
 	}
 }
 

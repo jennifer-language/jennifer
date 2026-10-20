@@ -481,3 +481,33 @@ It lives instead in **`internal/libsig`**: one file per library, a text block of
 
 The cost is one more file to touch when a builtin is added or its arity changes;
 the coverage test names the missing line.
+
+## A library struct literal may leave fields out
+
+A struct literal names every field: there are no field defaults, so a reader
+sees the whole value and a forgotten field is a load-time error, not a silent
+zero. That rule assumes the author controls both the type and its literals. For
+a **library** struct (`net.Datagram`, `os.Result`, `archive.UnpackOptions`) the
+author does not: the library adds fields as it grows, and each addition broke
+every literal of the type in user code. Adding `truncated` to `net.Datagram`
+did exactly that to a downstream test that built a fake datagram, at load, for a
+change that was no break at all for code reading the struct.
+
+So a library struct literal may leave any field out, and the field takes its
+zero value - the value `def d as net.Datagram;` gives it, built by the same
+zero-value walk. Reasons this does not give up what the rule protects:
+
+- **It adds no new behaviour.** Zero-declaring the type and assigning fields
+  was always legal and yields the same value; the literal is now just the
+  shorter spelling of it.
+- **The typo check stays.** An unknown field is still an error at load, so
+  `os.Result{exitCod: 1}` is caught exactly as before.
+- **User and module structs keep the full rule.** There the author owns both
+  sides, and "forgot a field" is the bug worth catching. A module is code the
+  importer vendors or pins and can update its literals with; a library ships
+  inside the interpreter and changes under the program on upgrade.
+
+The precedent is `Error`, whose literal could already leave out its location
+fields. The alternatives were weaker: a documentation note that library structs
+may grow (true, but still breaks the code), and a lint nudging authors towards
+zero-declare plus assignment (a workaround the language should not need).

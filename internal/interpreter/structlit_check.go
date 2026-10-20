@@ -33,6 +33,7 @@ func (i *Interpreter) checkStructLit(ex *parser.StructLit) error {
 		return i.checkEnumLit(ex)
 	}
 	var def *parser.StructDef
+	library := false // a library struct: any field may be left out, taking its zero
 	if mod, ok := i.moduleAliases[ex.NS]; ok {
 		d, exists := mod.interp.structs[ex.Name]
 		if !exists || !mod.exports[ex.Name] {
@@ -45,6 +46,7 @@ func (i *Interpreter) checkStructLit(ex *parser.StructLit) error {
 			return nil
 		}
 		def = i.NSStructs[nsKey{NS: canonical, Name: ex.Name}]
+		library = true
 	} else {
 		def = i.structs[ex.Name]
 	}
@@ -54,7 +56,7 @@ func (i *Interpreter) checkStructLit(ex *parser.StructLit) error {
 	return litFieldsError(ex, def.Fields,
 		func(name string) string { return fmt.Sprintf("unknown field %q in struct %q", name, ex.Name) },
 		func(name string) string {
-			if _, optional := errorLocationZero(ex, name); optional {
+			if _, optional := errorLocationZero(ex, name); optional || library {
 				return ""
 			}
 			return fmt.Sprintf("missing field %q in struct %q literal", name, ex.Name)

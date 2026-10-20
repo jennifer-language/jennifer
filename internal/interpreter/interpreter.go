@@ -3862,6 +3862,18 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 				out = append(out, StructField{Name: decl.Name, Value: zero})
 				continue
 			}
+			if resolvedNS != "" && resolvedModPath == "" {
+				// A library struct literal may leave a field out: it takes the
+				// field's zero value, as `def x as lib.T;` gives every field. The
+				// library owns the type and may add fields in any release, which
+				// would otherwise break every literal of it in user code.
+				zero, err := i.zeroPayload([]parser.StructField{decl}, ex)
+				if err != nil {
+					return Value{}, err
+				}
+				out = append(out, zero[0])
+				continue
+			}
 			file, line, col := posFor(ex)
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("missing field %q in struct %q literal", decl.Name, ex.Name), File: file, Line: line, Col: col}
 		}
