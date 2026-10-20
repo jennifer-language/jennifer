@@ -41,3 +41,6 @@ func sizeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 func readByteFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("term.readByte")
 }
+func readByteTimeoutFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("term.readByteTimeout")
+}

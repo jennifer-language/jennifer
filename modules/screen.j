@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Terminal user interfaces: an explicit `screen`, not a GUI framework. Two
@@ -56,7 +56,13 @@ def const FG as map of string to string init {
  * A rectangular grid of character cells, drawn into then painted to the
  * terminal. `cells` is row-major (`y * cols + x`); each cell is a one-column
  * string, optionally wrapped in an SGR colour sequence. Value-semantic like any
- * struct: the drawing functions return a fresh `Buffer`.
+ * struct: the drawing functions return a fresh `Buffer`, copying the whole grid
+ * once per call (so batch a frame's writes with `setMany` / `textMany`).
+ *
+ * A cell is assumed to be one terminal column wide. A wide glyph (CJK, most
+ * emoji) takes two columns on screen and an East-Asian-ambiguous one (such as
+ * `♥`) takes two on some CJK-locale terminals, shifting the rest of its row out
+ * of step with the buffer; keep cell text to single-width characters.
  * @field rows {int} the number of rows (height)
  * @field cols {int} the number of columns (width)
  * @field cells {list of string} row-major cell contents, length `rows * cols`
@@ -80,6 +86,33 @@ export def struct Buffer {
 export def struct Key {
     name as string,
     char as string
+};
+
+/**
+ * One cell write for `setMany`: the glyph `cell` at `(x, y)`.
+ * @field x {int} the column (0-based)
+ * @field y {int} the row (0-based)
+ * @field cell {string} the cell contents (one visible column)
+ */
+export def struct Plot {
+    x as int,
+    y as int,
+    cell as string
+};
+
+/**
+ * One text run for `textMany`: `text` written from `(x, y)`, in the named
+ * foreground `color`, or uncoloured when `color` is empty.
+ * @field x {int} the starting column (0-based)
+ * @field y {int} the row (0-based)
+ * @field text {string} the text to write
+ * @field color {string} a colour name (as for `textColor`), or `""` for none
+ */
+export def struct Span {
+    x as int,
+    y as int,
+    text as string,
+    color as string
 };
 
 # charOf builds a one-character string from a byte value (ASCII / Latin-1).
@@ -240,6 +273,25 @@ export func set(buf as Buffer, x as int, y as int, cell as string) {
 }
 
 /**
+ * A copy of `buf` with every plot applied in order, as a run of `set` calls
+ * would, but for the cost of one buffer copy instead of one per cell. Each
+ * drawing call copies the whole buffer, so draw a frame with one `setMany` /
+ * `textMany` rather than one `set` per glyph. Out-of-range plots are clipped.
+ * @param buf {Buffer} the source buffer
+ * @param plots {list of Plot} the cells to write
+ * @return {Buffer} the updated buffer
+ */
+export func setMany(buf as Buffer, plots as list of Plot) {
+    def out as Buffer init $buf;
+    for (def p in $plots) {
+        if ($p.x >= 0 and $p.x < $out.cols and $p.y >= 0 and $p.y < $out.rows) {
+            $out.cells[$p.y * $out.cols + $p.x] = $p.cell;
+        }
+    }
+    return $out;
+}
+
+/**
  * The contents of the cell at `(x, y)`, or an empty string if out of range.
  * @param buf {Buffer} the buffer
  * @param x {int} the column (0-based)
@@ -263,7 +315,7 @@ export func get(buf as Buffer, x as int, y as int) {
  * @return {Buffer} the updated buffer
  */
 export func text(buf as Buffer, x as int, y as int, s as string) {
-    return writeRunes($buf, $x, $y, strings.chars($s), "");
+    return textMany($buf, [Span{x: $x, y: $y, text: $s, color: ""}]);
 }
 
 /**
@@ -287,7 +339,7 @@ export func textColor(buf as Buffer, x as int, y as int, s as string, color as s
             col: 0
         };
     }
-    return writeRunes($buf, $x, $y, strings.chars($s), FG[$color]);
+    return textMany($buf, [Span{x: $x, y: $y, text: $s, color: $color}]);
 }
 
 # controlToSpace maps a C0 control (codepoint < 32) or DEL (127) rune to a space,
@@ -304,26 +356,57 @@ func controlToSpace(r as string) {
     return $r;
 }
 
-# writeRunes places each rune of `runes` into consecutive cells from (x, y),
-# wrapping each in an SGR sequence when `code` is non-empty. Clips at the row
-# edge. One local copy, mutated in place - O(cells + len(runes)), not O(len^2).
-func writeRunes(buf as Buffer, x as int, y as int, runes as list of string, code as string) {
+/**
+ * A copy of `buf` with every span written in order, as a run of `text` /
+ * `textColor` calls would, but for the cost of one buffer copy instead of one
+ * per call. Each span writes one rune per cell from its `(x, y)`, clipped at the
+ * row's right edge, in its colour (none when `color` is empty). A control
+ * character is written as a space, so untrusted text cannot smuggle a terminal
+ * escape through `render`.
+ * @param buf {Buffer} the source buffer
+ * @param spans {list of Span} the text runs to write
+ * @return {Buffer} the updated buffer
+ * @throws {Error} when a span names an unknown colour
+ */
+export func textMany(buf as Buffer, spans as list of Span) {
     def out as Buffer init $buf;
-    if ($y < 0 or $y >= $out.rows) {
-        return $out;
-    }
-    def col as int init $x;
-    for (def i as int init 0; $i < len($runes); $i = $i + 1) {
-        if ($col >= 0 and $col < $out.cols) {
-            def cell as string init controlToSpace($runes[$i]);
-            if (len($code) > 0) {
-                $cell = CSI + $code + "m" + $cell + CSI + "0m";
-            }
-            $out.cells[$y * $out.cols + $col] = $cell;
+    for (def sp in $spans) {
+        def code as string init spanCode($sp.color);
+        if ($sp.y < 0 or $sp.y >= $out.rows) {
+            continue;
         }
-        $col = $col + 1;
+        def col as int init $sp.x;
+        for (def r in strings.chars($sp.text)) {
+            if ($col >= $out.cols) {
+                break;
+            }
+            if ($col >= 0) {
+                $out.cells[$sp.y * $out.cols + $col] = styledCell(controlToSpace($r), $code);
+            }
+            $col = $col + 1;
+        }
     }
     return $out;
+}
+
+# spanCode is the SGR colour code for a span's colour name, "" for none.
+func spanCode(color as string) {
+    if (len($color) == 0) {
+        return "";
+    }
+    if (not maps.has(FG, $color)) {
+        throw Error{kind: "value", message: "screen.textMany: unknown colour: " + $color};
+    }
+    return FG[$color];
+}
+
+# styledCell wraps one cell's glyph in an SGR colour sequence, or returns it as is
+# when code is empty.
+func styledCell(cell as string, code as string) {
+    if (len($code) == 0) {
+        return $cell;
+    }
+    return CSI + $code + "m" + $cell + CSI + "0m";
 }
 
 /**
@@ -434,38 +517,48 @@ export func render(buf as Buffer) {
 /**
  * The minimal escape string that turns the terminal showing `old` into `new` -
  * only the changed cells are repositioned and rewritten, in row runs. When the
- * two buffers differ in size it falls back to a full `render(new)`. This is the
- * flicker-free update path: keep the previous buffer, `diff` against the next.
+ * two buffers differ in size (a resized terminal) it falls back to clearing the
+ * screen and a full `render(new)`, so no cell of the old frame is left behind
+ * outside the new one. This is the flicker-free update path: keep the previous
+ * buffer, `diff` against the next.
  * @param old {Buffer} the buffer currently on screen
  * @param new {Buffer} the buffer to display
  * @return {string} the minimal-update escape string
  */
 export func diff(old as Buffer, new as Buffer) {
     if ($old.rows != $new.rows or $old.cols != $new.cols) {
-        return render($new);
+        return clear() + render($new);
     }
     def parts as list of string init [];
     def cols as int init $new.cols;
     for (def y as int init 0; $y < $new.rows; $y = $y + 1) {
+        def row as int init $y * $cols;
         def x as int init 0;
-        for (; $x < $cols;
-        ) {
-            def idx as int init $y * $cols + $x;
-            if ($old.cells[$idx] == $new.cells[$idx]) {
+        for (; $x < $cols;) {
+            if ($old.cells[$row + $x] == $new.cells[$row + $x]) {
                 $x = $x + 1;
-            } else {
-                # Start of a changed run: emit one move, then every changed
-                # cell until the buffers agree again.
-                $parts[] = moveTo($x, $y);
-                for (;
-                    $x < $cols and $old.cells[$y * $cols + $x] != $new.cells[$y * $cols + $x];
-                    $x = $x + 1) {
-                    $parts[] = $new.cells[$y * $cols + $x];
-                }
+                continue;
             }
+            # Start of a changed run: emit one move, then every changed cell
+            # until the buffers agree again.
+            def end as int init runEnd($old, $new, $row, $x, $cols);
+            $parts[] = moveTo($x, $y);
+            $parts[] = strings.join($new.cells[$row + $x..$row + $end], "");
+            $x = $end;
         }
     }
     return strings.join($parts, "");
+}
+
+# runEnd returns the column where the run of changed cells starting at x in the
+# row beginning at cell index row ends: the first column from x whose cell is the
+# same in both buffers, or cols.
+func runEnd(old as Buffer, new as Buffer, row as int, x as int, cols as int) {
+    def end as int init $x;
+    while ($end < $cols and $old.cells[$row + $end] != $new.cells[$row + $end]) {
+        $end = $end + 1;
+    }
+    return $end;
 }
 
 # ---- Stage 2: key decoding (pure) + the event loop (over `term`) ----
@@ -615,16 +708,12 @@ export func decodeKey(seq as list of int) {
  * decoding, and returns the `Key`. At end of input the name is `"eof"`.
  * Requires raw mode (see `begin`) and the `term` library (default binary).
  *
- * Caveat: a lone Escape is not just delayed, it is **merged** with the next key
- * and both are consumed together, because `term.readByte` has no timeout to tell a
- * bare Escape from the start of an escape sequence. After Escape, the key the user
- * presses next is read into the sequence: `ESC` then `q` decodes as `alt-q` (the q
- * is gone), and `ESC` then an arrow steers off the merged bytes. An ESC-merged
- * *control* key is at least recovered - `ESC` then `Ctrl-C` yields `ctrl-c`, `ESC`
- * then `Escape` yields `escape` - so a quit always works; but an application
- * **cannot rely on Escape, or on Alt-combinations, immediately after an Escape**.
- * Advertise a named key (`q`, Ctrl-C) rather than Escape to leave a loop. A timed
- * read that delivers a lone Escape cleanly is planned (milestones M28.2).
+ * A lone Escape is told apart from the start of an escape sequence by timing:
+ * after `ESC`, the next byte is awaited for `ESCAPE_WAIT_MS` (50 ms). A
+ * terminal sends a sequence's bytes together, so nothing arriving in that window
+ * is a bare Escape, returned as `"escape"` without consuming the key pressed
+ * after it. A key pressed within the window still merges with the Escape (`ESC`
+ * then `q` decodes as `alt-q`, the way terminals encode Alt).
  * @return {Key} the next key event
  */
 export func nextKey() {
@@ -635,24 +724,18 @@ export func nextKey() {
     def seq as list of int init [];
     $seq[] = $b;
     if ($b == 27) {
-        def c as int init term.readByte();
+        def c as int init term.readByteTimeout(ESCAPE_WAIT_MS);
+        if ($c == -2) {
+            return Key{name: "escape", char: ""};
+        }
         if ($c == -1) {
             return decodeKey($seq);
         }
         $seq[] = $c;
         if ($c == 91 or $c == 79) {
-            # Read the rest of the CSI / SS3 sequence up to its final byte
-            # (a letter, or `~` for the numeric-parameter forms).
-            repeat {
-                def d as int init term.readByte();
-                if ($d == -1) {
-                    break;
-                }
+            for (def d in readSequenceTail()) {
                 $seq[] = $d;
-                if (($d >= 65 and $d <= 90) or ($d >= 97 and $d <= 122) or $d == 126) {
-                    break;
-                }
-            } until (false);
+            }
         }
     } elseif ($b >= 192) {
         # A UTF-8 lead byte: read the continuation bytes so a multi-byte character
@@ -675,6 +758,24 @@ export func nextKey() {
         }
     }
     return decodeKey($seq);
+}
+
+# readSequenceTail reads the rest of a CSI / SS3 sequence after its `ESC [` or
+# `ESC O` opener: bytes up to and including the final byte (a letter, or `~` for
+# the numeric-parameter forms), or up to end of input.
+func readSequenceTail() {
+    def tail as list of int init [];
+    repeat {
+        def d as int init term.readByte();
+        if ($d == -1) {
+            return $tail;
+        }
+        $tail[] = $d;
+        if (($d >= 65 and $d <= 90) or ($d >= 97 and $d <= 122) or $d == 126) {
+            return $tail;
+        }
+    } until (false);
+    return $tail;
 }
 
 /**
@@ -717,6 +818,12 @@ export def struct Input {
 # polls. When it is full the reader blocks on send (backpressure), so keys are
 # delayed, never dropped; 64 is far more than one render tick accumulates.
 def const INPUT_BUFFER as int init 64;
+
+# ESCAPE_WAIT_MS is how long nextKey waits for the byte after an `ESC` before
+# deciding it was a lone Escape key. A terminal writes an escape sequence in one
+# burst, so even over SSH its bytes arrive well within it, while a human cannot
+# press a second key that fast on purpose.
+def const ESCAPE_WAIT_MS as int init 50;
 
 /**
  * Start a background keyboard reader for a free-running loop (a game, a live

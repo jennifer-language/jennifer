@@ -234,3 +234,58 @@ func TestReadByteRetriesEmptyRead(t *testing.T) {
 		t.Errorf("readByte at EOF = %d, want -1", v.Int)
 	}
 }
+
+// readTimeout calls term.readByteTimeout(ms) and returns the int result.
+func readTimeout(t *testing.T, ctx interpreter.BuiltinCtx, ms int64) int64 {
+	t.Helper()
+	v, err := readByteTimeoutFn(ctx, []Value{interpreter.IntVal(ms)})
+	if err != nil {
+		t.Fatalf("readByteTimeout(%d): %v", ms, err)
+	}
+	return v.Int
+}
+
+// A timed read returns the byte when one arrives in time, -2 when none does, and
+// a read that timed out stays in flight: the byte it eventually yields is the
+// next one any term read returns, so nothing is lost or reordered.
+func TestReadByteTimeout(t *testing.T) {
+	ResetForTest()
+	r, w := io.Pipe()
+	defer w.Close()
+	ctx := interpreter.BuiltinCtx{In: r}
+	if got := readTimeout(t, ctx, 0); got != -2 {
+		t.Errorf("poll with nothing to read = %d, want -2", got)
+	}
+	go func() { _, _ = w.Write([]byte{27}) }()
+	if got := readTimeout(t, ctx, 2000); got != 27 {
+		t.Errorf("byte in time = %d, want 27", got)
+	}
+	if got := readTimeout(t, ctx, 20); got != -2 {
+		t.Errorf("nothing in time = %d, want -2", got)
+	}
+	// The timed-out read is still pending: the next write lands in it, and a
+	// blocking readByte collects it.
+	go func() { _, _ = w.Write([]byte("xy")) }()
+	if v, err := readByteFn(ctx, nil); err != nil || v.Int != 'x' {
+		t.Errorf("readByte after a timeout = %v, %v; want 'x'", v, err)
+	}
+	if got := readTimeout(t, ctx, 2000); got != 'y' {
+		t.Errorf("next byte = %d, want 'y'", got)
+	}
+	w.Close()
+	if got := readTimeout(t, ctx, 2000); got != -1 {
+		t.Errorf("at end of input = %d, want -1", got)
+	}
+}
+
+func TestReadByteTimeoutArgs(t *testing.T) {
+	ctx := interpreter.BuiltinCtx{In: strings.NewReader("")}
+	for _, args := range [][]Value{nil, {interpreter.IntVal(-1)}, {interpreter.StringVal("5")}} {
+		if _, err := readByteTimeoutFn(ctx, args); err == nil {
+			t.Errorf("readByteTimeout(%v) should error", args)
+		}
+	}
+	if _, err := readByteTimeoutFn(interpreter.BuiltinCtx{InREPL: true}, []Value{interpreter.IntVal(1)}); err == nil {
+		t.Error("readByteTimeout in the REPL should error")
+	}
+}

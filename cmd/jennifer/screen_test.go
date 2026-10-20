@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestScreenModule drives the screen module through the real import path: build
@@ -51,5 +52,47 @@ testing.assertEqual(screen.decodeKey([]).name, "eof");`, screenMod)
 
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("screen program failed with code %d", code)
+	}
+}
+
+// TestScreenNextKeyLoneEscape drives screen.nextKey over a real stdin pipe: a
+// lone Escape (nothing follows within the wait) arrives as "escape" without
+// swallowing the key pressed after it, and a complete sequence still decodes
+// whole.
+func TestScreenNextKeyLoneEscape(t *testing.T) {
+	screenMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "screen.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+import %q as screen;
+
+testing.assertEqual(screen.nextKey().name, "escape");
+def k as screen.Key init screen.nextKey();
+testing.assertEqual($k.name, "char");
+testing.assertEqual($k.char, "x");
+testing.assertEqual(screen.nextKey().name, "up");
+testing.assertEqual(screen.nextKey().name, "eof");
+`, screenMod)
+	progPath := filepath.Join(dir, "keys.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin; r.Close() }()
+	go func() {
+		defer w.Close()
+		_, _ = w.Write([]byte{27})
+		time.Sleep(300 * time.Millisecond) // well past the Escape wait
+		_, _ = w.Write([]byte("x\x1b[A"))
+	}()
+	if code := runFile(progPath, nil, ""); code != 0 {
+		t.Fatalf("key program exited %d", code)
 	}
 }

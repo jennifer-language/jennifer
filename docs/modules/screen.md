@@ -40,6 +40,8 @@ colour). It is value-semantic like any struct, so every drawing call returns a
 | `screen.get(buf, x, y)`                | `string`         | The cell contents, or `""` out of range.                                  |
 | `screen.text(buf, x, y, s)`            | `screen.Buffer`  | Write `s` one rune per cell from `(x, y)`, clipped at the row's edge.     |
 | `screen.textColor(buf, x, y, s, color)`| `screen.Buffer`  | Same, in a named foreground colour. Unknown colour errors.                |
+| `screen.setMany(buf, plots)`           | `screen.Buffer`  | Apply a `list of screen.Plot{x, y, cell}` in order, for one buffer copy.  |
+| `screen.textMany(buf, spans)`          | `screen.Buffer`  | Write a `list of screen.Span{x, y, text, color}` (`color` `""` = none), for one buffer copy. Unknown colour errors. |
 | `screen.fill(buf, x, y, w, h, ch)`     | `screen.Buffer`  | Fill a `w`-by-`h` rectangle with the glyph `ch`.                          |
 | `screen.hline(buf, x, y, n, ch)`       | `screen.Buffer`  | A horizontal run of `n` cells of `ch`.                                    |
 | `screen.vline(buf, x, y, n, ch)`       | `screen.Buffer`  | A vertical run of `n` cells of `ch`.                                      |
@@ -50,15 +52,24 @@ Colour names for `textColor`: `black`, `red`, `green`, `yellow`, `blue`,
 `magenta`, `cyan`, `white`, `gray` / `grey`. Each coloured cell carries its own
 SGR reset, so it still occupies exactly one column and the diff stays correct.
 
-For efficiency, prefer `text` / `box` / `fill` (each copies the buffer once) over
-a per-cell `set` in a loop (each copies the whole buffer, so a loop is O(n^2)).
+**Draw a frame with one batch call, not one call per glyph.** Every drawing
+call copies the whole buffer (value semantics), so a single-cell `set` on a
+110x244 terminal costs about as much as the copy of its 26,840 cells, and a frame
+of a few hundred `set` / `text` calls costs seconds. Collect the frame's cells in
+a `list of screen.Plot` (or its text runs in a `list of screen.Span`) and apply
+them with one `setMany` / `textMany`: one copy per frame, however many cells.
+
+A cell is one terminal column. A wide glyph (CJK, most emoji) takes two columns
+on screen, and an East-Asian-ambiguous one (such as `♥`) takes two on some
+CJK-locale terminals, shifting the rest of its row out of step with the buffer
+and `diff`; keep cell text to single-width characters.
 
 ## Painting: `render` and `diff`
 
 | Call                    | Returns  | Notes                                                                                       |
 | ----------------------- | -------- | ------------------------------------------------------------------------------------------- |
 | `screen.render(buf)`    | `string` | The escape string that paints the whole buffer. Print it with `io.printf`.                  |
-| `screen.diff(old, new)` | `string` | The **minimal** escape string that turns `old` into `new` - only changed cells, in row runs. Falls back to a full `render(new)` when the sizes differ. |
+| `screen.diff(old, new)` | `string` | The **minimal** escape string that turns `old` into `new` - only changed cells, in row runs. When the sizes differ (a resized terminal) it clears the screen and does a full `render(new)`, so nothing of the old frame is left outside the new one. |
 
 The update loop keeps the previously-shown buffer and diffs the next one against
 it, so only the cells that changed are repositioned and rewritten - no flicker,
@@ -131,9 +142,11 @@ repeat {
 } until (false);
 ```
 
-A lone **Escape** press is only reported once the next byte arrives:
-`term.readByte` has no timeout to tell a bare `ESC` from the start of an escape
-sequence. Prefer a named key (or `Ctrl-C`) to quit a loop. A multi-byte UTF-8
+A lone **Escape** press arrives as `"escape"`: after an `ESC` byte, `nextKey`
+waits up to 50 ms (`term.readByteTimeout`) for the rest of an escape sequence,
+which a terminal sends in one burst, and reports a bare Escape when nothing
+follows. A key pressed within that window still merges with it (`ESC` then `q`
+is `alt-q`, the way terminals encode Alt). A multi-byte UTF-8
 character (an accented letter, a symbol, an emoji) is read whole and decodes to a
 single `"char"` key with the full rune in `char`; malformed or truncated bytes
 decode to `"unknown"` (never a throw).
@@ -163,8 +176,9 @@ The background reader blocks in `term.readByte` and **cannot be interrupted
 mid-read** (neither `task.cancel` nor closing the channel reaches a syscall read),
 so it runs until end of input or program exit, when the OS reaps it; `startInput`
 discards the task so the program exits cleanly instead of hanging on it. One
-reader owns stdin - do not also call `nextKey` while it runs. Stopping and
-resuming raw input mid-program needs a lower-level timed read (a horizon item).
+reader owns stdin - do not also call `nextKey` while it runs. A loop that must
+stop reading mid-program (to return to line input) can skip `startInput` and
+poll with `term.readByteTimeout(0)` itself.
 
 ## Layering and platforms
 

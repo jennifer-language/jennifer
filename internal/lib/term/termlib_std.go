@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"golang.org/x/term"
 
@@ -67,6 +68,9 @@ func ResetForTest() {
 	states = map[int]*rawEntry{}
 	nextID = 0
 	statesMu.Unlock()
+	pumpsMu.Lock()
+	pumps = map[io.Reader]*pump{}
+	pumpsMu.Unlock()
 }
 
 // streamFile maps a stream name to its *os.File. Raw mode / size are properties
@@ -167,10 +171,99 @@ func sizeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if gerr != nil {
 		return interpreter.Null(), fmt.Errorf("term.size: %s is not a terminal: %v", args[0].Str, gerr)
 	}
+	// A pty whose window size was never set (a `script` / CI / test-harness
+	// pty) reports 0 x 0 without an error. That is no more an answer than the
+	// pipe case above, so it fails the same way rather than handing back a
+	// zero-sized screen.
+	if rows <= 0 || cols <= 0 {
+		return interpreter.Null(), fmt.Errorf("term.size: %s is a terminal with no window size set (%d x %d)", args[0].Str, rows, cols)
+	}
 	return interpreter.NamespacedStructVal(LibraryName, "Size", []interpreter.StructField{
 		{Name: "rows", Value: interpreter.IntVal(int64(rows))},
 		{Name: "cols", Value: interpreter.IntVal(int64(cols))},
 	}), nil
+}
+
+// readResult is one completed 1-byte read: the byte (0-255), -1 at end of
+// input, or an error.
+type readResult struct {
+	b   int
+	err error
+}
+
+// pump serializes the term reads of one input reader. At most one 1-byte read
+// is in flight: a timed read that expires leaves it pending, and the next read
+// (timed or not) collects its byte, so nothing is lost or reordered. This is
+// what lets readByteTimeout bound a read over any io.Reader (the injected input
+// tests feed, not just a terminal fd) without poll(2) or termios changes.
+type pump struct {
+	in      io.Reader
+	mu      sync.Mutex
+	pending chan readResult // the in-flight read, nil when none
+}
+
+var (
+	pumpsMu sync.Mutex
+	pumps   = map[io.Reader]*pump{}
+)
+
+// pumpFor returns the pump for an input reader, creating it on first use.
+func pumpFor(in io.Reader) *pump {
+	pumpsMu.Lock()
+	defer pumpsMu.Unlock()
+	p := pumps[in]
+	if p == nil {
+		p = &pump{in: in}
+		pumps[in] = p
+	}
+	return p
+}
+
+// readOne performs one blocking 1-byte read.
+func readOne(in io.Reader) readResult {
+	var buf [1]byte
+	// io.ReadFull retries a (0, nil) read - which io.Reader permits and which
+	// does NOT mean end of input - and reports io.EOF only at a genuine end. For
+	// a 1-byte buffer it still returns the instant one byte is available
+	// (raw-mode immediacy is kept).
+	n, err := io.ReadFull(in, buf[:])
+	switch {
+	case n == 1:
+		return readResult{b: int(buf[0])}
+	case err == io.EOF:
+		return readResult{b: -1}
+	default:
+		return readResult{err: err}
+	}
+}
+
+// read returns the next byte. wait < 0 blocks; otherwise it gives up after wait
+// (0 polls) and reports timedOut, leaving the read in flight for the next call.
+func (p *pump) read(wait time.Duration) (r readResult, timedOut bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pending == nil {
+		if wait < 0 {
+			return readOne(p.in), false // nothing in flight: read inline
+		}
+		ch := make(chan readResult, 1)
+		p.pending = ch
+		go func() { ch <- readOne(p.in) }()
+	}
+	if wait < 0 {
+		r = <-p.pending
+		p.pending = nil
+		return r, false
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case r = <-p.pending:
+		p.pending = nil
+		return r, false
+	case <-timer.C:
+		return readResult{}, true
+	}
 }
 
 // readByteFn implements term.readByte() -> int: the next raw byte from stdin
@@ -186,20 +279,44 @@ func readByteFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if ctx.In == nil {
 		return interpreter.IntVal(-1), nil
 	}
-	var buf [1]byte
-	// io.ReadFull retries a (0, nil) read - which io.Reader permits and which
-	// does NOT mean end-of-input - instead of the bare Read that mistook it for
-	// EOF; it reports io.EOF only at a genuine end. For a 1-byte buffer it still
-	// returns the instant one byte is available (raw-mode immediacy is kept).
-	n, err := io.ReadFull(ctx.In, buf[:])
-	if n == 1 {
-		return interpreter.IntVal(int64(buf[0])), nil
+	r, _ := pumpFor(ctx.In).read(-1)
+	if r.err != nil {
+		return interpreter.Null(), fmt.Errorf("term.readByte: %v", r.err)
 	}
-	if err == io.EOF {
+	return interpreter.IntVal(int64(r.b)), nil
+}
+
+// readByteTimeoutFn implements term.readByteTimeout(ms) -> int: like readByte,
+// but gives up after ms milliseconds and returns -2 (distinct from -1, end of
+// input); ms == 0 polls. A read that times out stays in flight, so the byte it
+// eventually yields is the next one any term read returns.
+func readByteTimeoutFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if ctx.InREPL {
+		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: not available inside the REPL")
+	}
+	if len(args) != 1 || args[0].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("term.readByteTimeout expects 1 int argument (ms)")
+	}
+	ms := args[0].Int
+	if ms < 0 || ms > maxTimeoutMs {
+		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: ms must be in [0, %d], got %d", maxTimeoutMs, ms)
+	}
+	if ctx.In == nil {
 		return interpreter.IntVal(-1), nil
 	}
-	return interpreter.Null(), fmt.Errorf("term.readByte: %v", err)
+	r, timedOut := pumpFor(ctx.In).read(time.Duration(ms) * time.Millisecond)
+	if timedOut {
+		return interpreter.IntVal(-2), nil
+	}
+	if r.err != nil {
+		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: %v", r.err)
+	}
+	return interpreter.IntVal(int64(r.b)), nil
 }
+
+// maxTimeoutMs bounds readByteTimeout's wait (24 hours), far above any key
+// timeout, so the duration arithmetic cannot overflow.
+const maxTimeoutMs = 24 * 60 * 60 * 1000
 
 // stateID extracts the registry id from a term.State handle.
 func stateID(fnName string, v Value) (int, error) {

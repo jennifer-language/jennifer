@@ -21,8 +21,9 @@ error (a minimal / embedded target may have no controlling terminal).
 | ---- | ------- | ----- |
 | `term.makeRaw(stream)` | `term.State` | Put the terminal into raw mode; `stream` must be `"stdin"` (raw mode governs input). Returns a handle for `restore`. |
 | `term.restore(state)` | `null` | Undo `makeRaw`, restoring the terminal. The handle is single-use. |
-| `term.size(stream)` | `term.Size` | The terminal's `{rows, cols}` (query `"stdout"`). Catchable error off a terminal; `0`/`0` for a terminal with no window size set (see [Terminal size](#terminal-size)). |
+| `term.size(stream)` | `term.Size` | The terminal's `{rows, cols}` (query `"stdout"`). Catchable error when there is no size to report: not a terminal, or a terminal with no window size set (see [Terminal size](#terminal-size)). |
 | `term.readByte()` | `int` | The next raw byte from stdin (`0`-`255`), or `-1` at end of input. |
+| `term.readByteTimeout(ms)` | `int` | Like `readByte`, but `-2` when no byte arrives within `ms` milliseconds; `ms` `0` polls. |
 
 `stream` is `"stdin"` / `"stdout"` / `"stderr"` (the same names as
 `os.isTerminal`). A stream that is not a terminal - a pipe or a redirect - is a
@@ -84,8 +85,27 @@ arrives as a multi-byte escape sequence (`ESC [ A` for Up, ...). Decoding those
 into key events is the job of a TUI layer on top - `term` deliberately stops at
 the raw byte.
 
-`term.readByte` is refused inside the REPL, which owns the terminal for its own
-line editor.
+`term.readByteTimeout(ms)` is the bounded form: the byte, `-1` at end of input,
+or `-2` when `ms` milliseconds pass with no byte (`0` polls without waiting). Its
+use is telling a lone `Escape` key from the start of an escape sequence - a
+terminal writes a sequence's bytes in one burst, so after an `ESC` a short wait
+(the `screen` module uses 50 ms) that times out means a bare Escape - and polling
+input from a loop that must not block. A read that times out stays pending: the
+byte it eventually gets is the next one any `term` read returns, so mixing timed
+and blocking reads never loses or reorders input.
+
+```jennifer
+def b as int init term.readByte();
+if ($b == 27) {
+    def next as int init term.readByteTimeout(50);
+    if ($next == -2) {
+        # a lone Escape key
+    }
+}
+```
+
+`term.readByte` and `term.readByteTimeout` are refused inside the REPL, which owns
+the terminal for its own line editor.
 
 ## Terminal size
 
@@ -100,24 +120,23 @@ io.printf("%d rows x %d cols\n", $dim.rows, $dim.cols);
 The size is a snapshot; a terminal can be resized after the call, so re-query it
 when you need the current value.
 
-Two outcomes a caller that draws must handle. `term.size` **errors** (catchable)
-when `stream` is not a terminal - a pipe, a redirect, or `jennifer test`'s stdout -
-so wrap it in a `try` if the program can run non-interactively. Separately, a real
-terminal with **no window size set** - a pty opened without one, as under
-`script(1)` or some CI runners - reports `0` for both `rows` and `cols` rather than
-erroring, so treat `0` as "unknown" and fall back (e.g. 80x24):
+`term.size` **errors** (catchable) whenever there is no size to report: when
+`stream` is not a terminal - a pipe, a redirect, or `jennifer test`'s stdout - and
+when it is a terminal with **no window size set** - a pty opened without one, as
+under `script(1)` or some CI runners, which the OS reports as `0` x `0`. So a
+successful call always returns positive dimensions, and one `try` covers both
+cases; fall back (for example to the `LINES` / `COLUMNS` environment, then
+80x24) when it throws:
 
 ```jennifer
 def rows as int init 24;
 def cols as int init 80;
 try {
     def dim as term.Size init term.size("stdout");
-    if ($dim.rows > 0 and $dim.cols > 0) {
-        $rows = $dim.rows;
-        $cols = $dim.cols;
-    }
+    $rows = $dim.rows;
+    $cols = $dim.cols;
 } catch (e) {
-    # not a terminal - keep the 80x24 fallback
+    # no terminal size - keep the 80x24 fallback
 }
 ```
 

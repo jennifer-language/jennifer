@@ -6,7 +6,7 @@
 #     jennifer test modules/screen_test.j
 #
 # The overlay splices screen.j in front of this file, so the tests reach its
-# private helpers (charOf, csiParam, tildeKey, finalKey, writeRunes) by bare
+# private helpers (charOf, csiParam, tildeKey, finalKey, styledCell) by bare
 # identifier as well as its exported surface. Only the pure output-only layer
 # and the pure decodeKey are tested here; the term-backed event loop (nextKey /
 # begin / end / size) needs a real TTY and is exercised by the demo.
@@ -207,10 +207,42 @@ func testDiffTwoSeparateRuns() {
     testing.assertEqual(diff($before, $after), moveTo(0, 0) + "A" + moveTo(4, 0) + "B");
 }
 
-func testDiffFallsBackToFullRenderOnSizeChange() {
+# A size change clears first, so a shrunk frame leaves nothing of the old one
+# outside it.
+func testDiffClearsAndRendersOnSizeChange() {
     def small as Buffer init newScreen(1, 2);
     def big as Buffer init newScreen(2, 2);
-    testing.assertEqual(diff($small, $big), render($big));
+    testing.assertEqual(diff($small, $big), clear() + render($big));
+    testing.assertEqual(diff($big, $small), clear() + render($small));
+}
+
+# setMany / textMany apply a batch for one buffer copy, with the same result as
+# the per-call functions they batch.
+func testSetManyMatchesSet() {
+    def b as Buffer init newScreen(2, 3);
+    def one as Buffer init set(set(set($b, 0, 0, "a"), 2, 1, "b"), 9, 9, "z");
+    def many as Buffer init setMany(
+        $b,
+        [Plot{x: 0, y: 0, cell: "a"}, Plot{x: 2, y: 1, cell: "b"}, Plot{x: 9, y: 9, cell: "z"}]);
+    testing.assertEqual($many, $one);
+}
+
+func testTextManyMatchesText() {
+    def b as Buffer init newScreen(2, 4);
+    def one as Buffer init textColor(text($b, 1, 0, "hey!"), 0, 1, "ok", "red");
+    def many as Buffer init textMany(
+        $b,
+        [Span{x: 1, y: 0, text: "hey!", color: ""}, Span{x: 0, y: 1, text: "ok", color: "red"}]);
+    testing.assertEqual($many, $one);
+    testing.assertEqual(get($many, 3, 0), "y"); # clipped at the row edge
+}
+
+func testTextManyRejectsUnknownColour() {
+    testing.assertThrows("textManyBadColour", "value");
+}
+
+func textManyBadColour() {
+    textMany(newScreen(1, 1), [Span{x: 0, y: 0, text: "x", color: "mauve"}]);
 }
 
 # ---- decodeKey (pure) ----
