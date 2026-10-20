@@ -203,6 +203,7 @@ flat lookup view, not authoritative.
 | [`lists`](lists.md)`.head(xs, n)`                     | New list of the first `n` elements.                                                                                                 |
 | [`lists`](lists.md)`.last(xs)`                        | Element at the last index. Empty input errors.                                                                                      |
 | [`lists`](lists.md)`.map(xs, fn)`                     | New list of `fn(x)` for each element (`fn` a `func`); result type checked at the binding.                                            |
+| [`lists`](lists.md)`.mismatch(a, b [, from])`         | First index at/after `from` (default `0`) where the two lists differ (value, or only one has an element); `-1` if none. One native scan for "what changed". |
 | [`lists`](lists.md)`.pop(xs)`                         | New list without the last element. Empty input errors.                                                                              |
 | [`lists`](lists.md)`.push(xs, item)`                  | New list with `item` appended.                                                                                                      |
 | [`lists`](lists.md)`.range(start, end[, step])`       | Half-open list of consecutive ints; `end` excluded; `step` must match direction.                                                    |
@@ -426,8 +427,8 @@ flat lookup view, not authoritative.
 | [`task`](task.md)`.wait($t)`                          | Block until `$t` finishes; return its value or re-raise its error.                                                                  |
 | [`task`](task.md)`.waitAll($ts)`                      | Block for all tasks in `$ts`; results in list order; re-raises the first error if any.                                              |
 | [`task`](task.md)`.waitAny($ts)`                      | Block until any task in `$ts` is done; return its index.                                                                            |
-| [`task`](task.md)`.waitAnyTimeout($ts, ms)`           | Like `waitAny`, but throws a catchable "timed out" error if none finishes within `ms`.                                              |
-| [`task`](task.md)`.waitTimeout($t, ms)`               | Like `wait`, but throws a catchable "timed out" error if `$t` doesn't finish within `ms`.                                           |
+| [`task`](task.md)`.waitAnyTimeout($ts, ms)`           | Like `waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes within `ms`.                                       |
+| [`task`](task.md)`.waitTimeout($t, ms)`               | Like `wait`, but throws a catchable `Error{kind: "timeout"}` if `$t` doesn't finish within `ms`.                                    |
 | [`time`](time.md)`.add($t, $d)`                       | `time.Time` shifted by duration `$d`.                                                                                               |
 | [`time`](time.md)`.after($a, $b)`                     | True if `$a` is strictly later than `$b`.                                                                                           |
 | [`time`](time.md)`.before($a, $b)`                    | True if `$a` is strictly earlier than `$b`.                                                                                         |

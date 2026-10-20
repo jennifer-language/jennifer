@@ -41,6 +41,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "sort", sortFn)
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
 	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
+	in.RegisterNamespaced(LibraryName, "mismatch", mismatchFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "shuffle", shuffleFn)
@@ -539,6 +540,47 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		if v.Equal(args[1]) {
 			return interpreter.IntVal(int64(i)), nil
 		}
+	}
+	return interpreter.IntVal(-1), nil
+}
+
+// mismatchFn returns the first index at or after `from` (default 0) where the
+// two lists differ - their elements there are not == (the same deep equality as
+// contains / indexOf), or only one list has an element there - or -1 when they
+// agree from `from` to the end. It is the whole-list comparison done in one Go
+// loop, so a caller looking for what changed between two large lists (a frame
+// buffer, a snapshot) skips the equal stretches without a per-element .j loop.
+func mismatchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 && len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("lists.mismatch expects 2 or 3 arguments (a, b [, from]), got %d", len(args))
+	}
+	if err := requireList("mismatch", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireList("mismatch", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	a, b := args[0].List, args[1].List
+	longest := max(len(a), len(b))
+	from := 0
+	if len(args) == 3 {
+		n, err := requireInt("mismatch", args[2], "from")
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if n < 0 || n > longest {
+			return interpreter.Null(), fmt.Errorf("lists.mismatch: from %d out of range [0, %d]", n, longest)
+		}
+		from = n
+	}
+	shortest := min(len(a), len(b))
+	for i := from; i < shortest; i++ {
+		if !a[i].Equal(b[i]) {
+			return interpreter.IntVal(int64(i)), nil
+		}
+	}
+	if len(a) != len(b) && from < longest {
+		return interpreter.IntVal(int64(max(from, shortest))), nil
 	}
 	return interpreter.IntVal(-1), nil
 }

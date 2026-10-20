@@ -489,7 +489,7 @@ Catch it inside the body for a clean partial result; `task.cancel` plus
 every undiscarded task; one that ends by `exit` or an uncaught error does not.
 `task.cancelled()` is a non-raising poll.
 `task.waitTimeout($t, ms)` / `task.waitAnyTimeout($ts, ms)` are bounded waits that
-throw a catchable "timed out" error.
+throw a catchable `Error{kind: "timeout"}`.
 
 **Channels.** `channel of T` streams values between goroutines (the counterpart to
 `task`'s single result). `channel.make(capacity)` (0 = unbuffered), `send`
@@ -620,8 +620,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   Rune-indexed. `fold` folds Latin diacritics / ligatures for a sort or search
   key (`Straße` -> `Strasse`) and **preserves case** - it is not a compare; for
   case-insensitive matching use `lower` (`lower(fold(a)) == lower(fold(b))`).
-- **`lists`** - `push pop first last head tail reverse sort contains indexOf concat
-  slice shuffle range`, plus higher-order `map filter reduce find any all sortBy`
+- **`lists`** - `push pop first last head tail reverse sort contains indexOf mismatch
+  concat slice shuffle range` (`mismatch(a, b[, from])` is the first index where two
+  lists differ, `-1` if none - one native scan), plus higher-order `map filter reduce find any all sortBy`
   (each takes a `func` value). Non-mutating (they return new lists).
 - **`binary`** - bulk operations on `bytes` (the byte-data counterpart to
   `strings`/`lists`): `make concat join slice indexOf contains split startsWith endsWith`

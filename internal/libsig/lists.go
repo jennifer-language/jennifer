@@ -15,6 +15,7 @@ reverse(list of any) list of any
 sort(list of any) list of any
 contains(list of any, any) bool
 indexOf(list of any, any) int
+mismatch(list of any, list of any, int?) int
 concat(list of any, list of any) list of any
 slice(list of any, int, int?) list of any
 shuffle(list of any) list of any

@@ -26,6 +26,8 @@
  */
 use convert;
 use strings;
+use lists;
+use regex;
 use maps;
 use io;
 use term;
@@ -250,11 +252,8 @@ export func newScreen(rows as int, cols as int) {
             col: 0
         };
     }
-    def cells as list of string init [];
-    def total as int init $rows * $cols;
-    for (def i as int init 0; $i < $total; $i = $i + 1) {
-        $cells[] = " ";
-    }
+    # One native repeat + split instead of rows*cols appends from .j.
+    def cells as list of string init strings.chars(strings.repeat(" ", $rows * $cols));
     return Buffer{rows: $rows, cols: $cols, cells: $cells};
 }
 
@@ -344,25 +343,25 @@ export func textColor(buf as Buffer, x as int, y as int, s as string, color as s
     return $buf;
 }
 
-# controlToSpace maps a C0 control (codepoint < 32) or DEL (127) rune to a space,
-# so untrusted text written into a cell cannot smuggle a terminal escape (a CSI /
+# CONTROL_CHARS matches a C0 control (codepoint < 32) or DEL (127).
+def const CONTROL_CHARS as string init '[\x00-\x1f\x7f]';
+
+# controlsToSpaces replaces every C0 control or DEL in s with a space, so
+# untrusted text written into a cell cannot smuggle a terminal escape (a CSI /
 # OSC sequence - window title, cursor move, OSC 52 clipboard write) through
-# render. A control codepoint is always a single byte, so a multi-byte rune is
-# left untouched; the module's own SGR codes are added after this, so styling is
+# render. One regex pass per span, not a check per glyph; multi-byte runes are
+# untouched, and the module's own SGR codes are added after this, so styling is
 # unaffected.
-func controlToSpace(r as string) {
-    def b as bytes init convert.bytesFromString($r, "utf-8");
-    if (len($b) == 1 and ($b[0] < 32 or $b[0] == 127)) {
-        return " ";
-    }
-    return $r;
+func controlsToSpaces(s as string) {
+    return regex.replace(CONTROL_CHARS, $s, " ");
 }
 
 /**
  * A copy of `buf` with every span written in order, as a run of `text` /
  * `textColor` calls would. Where a drawing call copies the grid (see `Buffer`),
- * this costs one copy for the whole batch instead of one per call. Each span writes one rune per cell from its `(x, y)`, clipped at the
- * row's right edge, in its colour (none when `color` is empty). A control
+ * this costs one copy for the whole batch instead of one per call. Each span
+ * writes one rune per cell from its `(x, y)`, clipped at the row's right edge,
+ * in its colour (none when `color` is empty). A control
  * character is written as a space, so untrusted text cannot smuggle a terminal
  * escape through `render`.
  * @param buf {Buffer} the source buffer
@@ -377,12 +376,12 @@ export func textMany(buf as Buffer, spans as list of Span) {
             continue;
         }
         def col as int init $sp.x;
-        for (def r in strings.chars($sp.text)) {
+        for (def r in strings.chars(controlsToSpaces($sp.text))) {
             if ($col >= $buf.cols) {
                 break;
             }
             if ($col >= 0) {
-                $buf.cells[$sp.y * $buf.cols + $col] = styledCell(controlToSpace($r), $code);
+                $buf.cells[$sp.y * $buf.cols + $col] = styledCell($r, $code);
             }
             $col = $col + 1;
         }
@@ -532,21 +531,19 @@ export func diff(old as Buffer, new as Buffer) {
     }
     def parts as list of string init [];
     def cols as int init $new.cols;
-    for (def y as int init 0; $y < $new.rows; $y = $y + 1) {
+    # lists.mismatch skips every unchanged cell in one native call, so an
+    # unchanged stretch - most of a typical frame - costs nothing per cell.
+    def i as int init lists.mismatch($old.cells, $new.cells);
+    while ($i >= 0) {
+        # Start of a changed run: emit one move, then every changed cell
+        # until the buffers agree again or the row ends.
+        def y as int init $i // $cols;
         def row as int init $y * $cols;
-        def x as int init 0;
-        for (; $x < $cols;) {
-            if ($old.cells[$row + $x] == $new.cells[$row + $x]) {
-                $x = $x + 1;
-                continue;
-            }
-            # Start of a changed run: emit one move, then every changed cell
-            # until the buffers agree again.
-            def end as int init runEnd($old, $new, $row, $x, $cols);
-            $parts[] = moveTo($x, $y);
-            $parts[] = strings.join($new.cells[$row + $x..$row + $end], "");
-            $x = $end;
-        }
+        def x as int init $i - $row;
+        def end as int init runEnd($old, $new, $row, $x, $cols);
+        $parts[] = moveTo($x, $y);
+        $parts[] = strings.join($new.cells[$row + $x..$row + $end], "");
+        $i = lists.mismatch($old.cells, $new.cells, $row + $end);
     }
     return strings.join($parts, "");
 }

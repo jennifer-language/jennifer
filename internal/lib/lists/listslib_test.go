@@ -383,3 +383,50 @@ func TestSortComparisonPaths(t *testing.T) {
 		t.Errorf("mixed int / float at 2^53: %v", got)
 	}
 }
+
+// TestMismatch pins lists.mismatch: the first index at or after `from` where the
+// lists differ in value or in length, -1 when they agree to the end, and a
+// positioned boundary error for a bad `from`.
+func TestMismatch(t *testing.T) {
+	ctx := interpreter.BuiltinCtx{}
+	cases := []struct {
+		a, b interpreter.Value
+		from int64 // -1: omitted
+		want int64
+	}{
+		{intList(1, 2, 3), intList(1, 2, 3), -1, -1},
+		{intList(1, 2, 3), intList(1, 9, 3), -1, 1},
+		{intList(1, 2, 3), intList(1, 9, 3), 2, -1},
+		{intList(1, 2, 3), intList(9, 2, 9), 1, 2},
+		{intList(1, 2), intList(1, 2, 3), -1, 2},
+		{intList(1, 2, 3, 4), intList(1, 2), 3, 3},
+		{intList(1, 2), intList(1, 2, 3), 3, -1},
+		{intList(), intList(), -1, -1},
+		{intList(), intList(), 0, -1},
+		{intList(), intList(7), -1, 0},
+	}
+	for _, c := range cases {
+		args := []interpreter.Value{c.a, c.b}
+		if c.from >= 0 {
+			args = append(args, interpreter.IntVal(c.from))
+		}
+		got, err := mismatchFn(ctx, args)
+		if err != nil {
+			t.Fatalf("mismatch(%v, %v, %d): %v", c.a.List, c.b.List, c.from, err)
+		}
+		if got.Int != c.want {
+			t.Errorf("mismatch(%v, %v, %d) = %d, want %d", c.a.List, c.b.List, c.from, got.Int, c.want)
+		}
+	}
+	for _, bad := range [][]interpreter.Value{
+		{intList(1)},
+		{intList(1), interpreter.IntVal(1)},
+		{intList(1), intList(1), interpreter.IntVal(-1)},
+		{intList(1), intList(1), interpreter.IntVal(2)},
+		{intList(1), intList(1), interpreter.StringVal("0")},
+	} {
+		if _, err := mismatchFn(ctx, bad); err == nil || !strings.Contains(err.Error(), "lists.mismatch") {
+			t.Errorf("mismatch(%v): err = %v, want a lists.mismatch error", bad, err)
+		}
+	}
+}

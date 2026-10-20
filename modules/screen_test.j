@@ -83,6 +83,11 @@ func testControlRunesNeutralized() {
     # No raw ESC-] OSC introducer reaches the rendered output from the content
     # (render's own cursor moves are CSI = ESC-[, never ESC-]).
     testing.assertTrue(not strings.contains(render($buf), charOf(27) + "]"));
+    # The edges of the range: NUL and US (31) and DEL (127) go, space (32) and
+    # `~` (126) stay, and a multi-byte rune is untouched.
+    def edges as string init charOf(0) + charOf(31) + " ~" + charOf(127) + "é♥";
+    def wide as Buffer init text(newScreen(1, 7), 0, 0, $edges);
+    testing.assertEqual($wide.cells, [" ", " ", " ", "~", " ", "é", "♥"]);
 }
 
 func testTextClipsAtRowEnd() {
@@ -205,6 +210,20 @@ func testDiffTwoSeparateRuns() {
     def after as Buffer init set(set($before, 0, 0, "A"), 4, 0, "B");
     # Two non-adjacent changes -> two moves.
     testing.assertEqual(diff($before, $after), moveTo(0, 0) + "A" + moveTo(4, 0) + "B");
+}
+
+# A run never wraps: a change that ends one row and one that starts the next
+# are two moves, and a run touching the last cell of the buffer ends cleanly.
+func testDiffRunsStopAtRowEnd() {
+    def before as Buffer init newScreen(3, 3);
+    def after as Buffer init set(set(set($before, 2, 0, "A"), 0, 1, "B"), 2, 2, "C");
+    testing.assertEqual(
+        diff($before, $after),
+        moveTo(2, 0) + "A" + moveTo(0, 1) + "B" + moveTo(2, 2) + "C");
+    def full as Buffer init fill($before, 0, 0, 3, 3, "x");
+    testing.assertEqual(
+        diff($before, $full),
+        moveTo(0, 0) + "xxx" + moveTo(0, 1) + "xxx" + moveTo(0, 2) + "xxx");
 }
 
 # A size change clears first, so a shrunk frame leaves nothing of the old one

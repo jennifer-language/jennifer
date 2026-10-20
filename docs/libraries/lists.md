@@ -41,6 +41,7 @@ original.
 | `lists.sort(xs)`                | list         | New list sorted ascending. See "Sort" below.                       |
 | `lists.contains(xs, item)`      | bool         | True iff `item` appears in `xs` under structural equality.         |
 | `lists.indexOf(xs, item)`       | int          | Index of the first element equal to `item` (same structural equality as `contains`); `-1` if absent. |
+| `lists.mismatch(a, b)` / `lists.mismatch(a, b, from)` | int | First index at or after `from` (default `0`) where `a` and `b` differ - elements not `==`, or only one list has an element there; `-1` if they agree to the end. `from` must be in `[0, max(len(a), len(b))]`. |
 | `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s.                                  |
 | `lists.slice(xs, start)`        | list         | Elements from `start` to end (exclusive `end` = `len(xs)`).        |
 | `lists.slice(xs, start, end)`   | list         | Elements `[start, end)`. Out-of-range bounds error.                |
