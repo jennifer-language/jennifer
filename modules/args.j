@@ -42,11 +42,13 @@ use maps;
  * @field short {string} the single-character short flag ("" for none)
  * @field kind {string} "flag" or "positional"
  * @field typ {string} the value type: "string" / "int" / "float" / "bool"
- * @field action {string} "store" (default), "count" (repeat -> int), or "append" (repeat -> list)
+ * @field action {string} "store" (default), "count" (repeat -> int), or "append"
+ *   (repeat -> list)
  * @field fallback {string} the default value in string form (when `hasDefault`)
  * @field hasDefault {bool} whether `fallback` applies when the arg is absent
  * @field required {bool} whether the arg must be supplied
- * @field nargs {string} positional arity: "" (one), "?" (0-1), "*" (0+), "+" (1+), or an integer count
+ * @field nargs {string} positional arity: "" (one), "?" (0-1), "*" (0+), "+" (1+),
+ *   or an integer count
  * @field choices {list of string} the allowed values ([] = any)
  * @field help {string} the per-argument help text
  */
@@ -748,10 +750,9 @@ func handleShort(p as Parser, toks as list of string, i as int, r as Result) {
             def val as string init "";
             if ($j + 1 < len($cluster)) {
                 $val = strings.substring($cluster, $j + 1, len($cluster));
+            } elseif ($i + 1 >= len($toks)) {
+                fail("flag -" + $ch + " needs a value");
             } else {
-                if ($i + 1 >= len($toks)) {
-                    fail("flag -" + $ch + " needs a value");
-                }
                 $val = $toks[$i + 1];
                 $extra = true;
             }
@@ -803,17 +804,7 @@ func run(p as Parser, toks as list of string, r as Result) {
         } else {
             # a positional token, or a subcommand word
             if (len($p.commands) > 0) {
-                def ci as int init findCommand($p, $t);
-                if ($ci < 0) {
-                    fail("unknown command '" + $t + "'");
-                }
-                def subToks as list of string init [];
-                if ($i + 1 < len($toks)) {
-                    $subToks = $toks[$i + 1..];
-                }
-                def subR as Result init run($p.commands[$ci].parser, $subToks, $nr);
-                $subR.command = $t;
-                return $subR;
+                return runCommand($p, $toks, $i, $nr);
             }
             $posQueue[] = $t;
             $i = $i + 1;
@@ -823,58 +814,69 @@ func run(p as Parser, toks as list of string, r as Result) {
     return finalize($p, $posQueue, $nr);
 }
 
+# runCommand hands the rest of the tokens after the subcommand word toks[i] to
+# that subcommand's parser and records which command ran.
+func runCommand(p as Parser, toks as list of string, i as int, r as Result) {
+    def word as string init $toks[$i];
+    def ci as int init findCommand($p, $word);
+    if ($ci < 0) {
+        fail("unknown command '" + $word + "'");
+    }
+    def subR as Result init run($p.commands[$ci].parser, $toks[$i + 1..], $r);
+    $subR.command = $word;
+    return $subR;
+}
+
 # finalize assigns collected positionals per their nargs, then applies defaults
 # and enforces required flags.
 func finalize(p as Parser, posQueue as list of string, r as Result) {
     def nr as Result init $r;
     def qi as int init 0;
 
-    def k as int init 0;
-    while ($k < len($p.args)) {
-        def a as Arg init $p.args[$k];
-        if ($a.kind == "positional") {
-            def remaining as int init len($posQueue) - $qi;
-            if ($a.nargs == "*" or $a.nargs == "+") {
-                if ($a.nargs == "+" and $remaining < 1) {
-                    fail("positional " + $a.name + " needs at least one value");
-                }
-                def col as list of string init [];
-                while ($qi < len($posQueue)) {
-                    $col[] = validateValue($a, $posQueue[$qi]);
-                    $qi = $qi + 1;
-                }
-                $nr.lists[$a.name] = $col;
-                $nr.present[$a.name] = $remaining > 0;
-            } elseif ($a.nargs == "?") {
-                if ($remaining >= 1) {
-                    $nr = setValue($nr, $a.name, validateValue($a, $posQueue[$qi]));
-                    $qi = $qi + 1;
-                } elseif ($a.hasDefault) {
-                    $nr.values[$a.name] = $a.fallback;
-                }
-            } elseif (isIntStr($a.nargs)) {
-                def n as int init convert.toInt($a.nargs);
-                if ($remaining < $n) {
-                    fail("positional " + $a.name + " needs " + convert.toString($n) + " values");
-                }
-                def coln as list of string init [];
-                def c as int init 0;
-                while ($c < $n) {
-                    $coln[] = validateValue($a, $posQueue[$qi]);
-                    $qi = $qi + 1;
-                    $c = $c + 1;
-                }
-                $nr.lists[$a.name] = $coln;
-                $nr.present[$a.name] = true;
-            } else {
-                if ($remaining < 1) {
-                    fail("missing positional argument: " + $a.name);
-                }
-                $nr = setValue($nr, $a.name, validateValue($a, $posQueue[$qi]));
+    for (def a in $p.args) {
+        if ($a.kind != "positional") {
+            continue;
+        }
+        def remaining as int init len($posQueue) - $qi;
+        if ($a.nargs == "*" or $a.nargs == "+") {
+            if ($a.nargs == "+" and $remaining < 1) {
+                fail("positional " + $a.name + " needs at least one value");
+            }
+            def col as list of string init [];
+            while ($qi < len($posQueue)) {
+                $col[] = validateValue($a, $posQueue[$qi]);
                 $qi = $qi + 1;
             }
+            $nr.lists[$a.name] = $col;
+            $nr.present[$a.name] = $remaining > 0;
+        } elseif ($a.nargs == "?") {
+            if ($remaining >= 1) {
+                $nr = setValue($nr, $a.name, validateValue($a, $posQueue[$qi]));
+                $qi = $qi + 1;
+            } elseif ($a.hasDefault) {
+                $nr.values[$a.name] = $a.fallback;
+            }
+        } elseif (isIntStr($a.nargs)) {
+            def n as int init convert.toInt($a.nargs);
+            if ($remaining < $n) {
+                fail("positional " + $a.name + " needs " + convert.toString($n) + " values");
+            }
+            def coln as list of string init [];
+            def c as int init 0;
+            while ($c < $n) {
+                $coln[] = validateValue($a, $posQueue[$qi]);
+                $qi = $qi + 1;
+                $c = $c + 1;
+            }
+            $nr.lists[$a.name] = $coln;
+            $nr.present[$a.name] = true;
+        } else {
+            if ($remaining < 1) {
+                fail("missing positional argument: " + $a.name);
+            }
+            $nr = setValue($nr, $a.name, validateValue($a, $posQueue[$qi]));
+            $qi = $qi + 1;
         }
-        $k = $k + 1;
     }
 
     if ($qi < len($posQueue)) {
@@ -882,28 +884,23 @@ func finalize(p as Parser, posQueue as list of string, r as Result) {
     }
 
     # flags: apply defaults / enforce required for those not supplied
-    def k2 as int init 0;
-    while ($k2 < len($p.args)) {
-        def a as Arg init $p.args[$k2];
-        if ($a.kind == "flag") {
-            def seen as bool init maps.has($nr.present, $a.name) and $nr.present[$a.name];
-            if (not $seen) {
-                if ($a.action == "count") {
-                    if (not maps.has($nr.counts, $a.name)) {
-                        $nr.counts[$a.name] = 0;
-                    }
-                } elseif ($a.action == "append") {
-                    if (not maps.has($nr.lists, $a.name)) {
-                        $nr.lists[$a.name] = [];
-                    }
-                } elseif ($a.required) {
-                    fail("missing required flag: --" + $a.name);
-                } elseif ($a.hasDefault) {
-                    $nr.values[$a.name] = $a.fallback;
-                }
-            }
+    for (def a in $p.args) {
+        if ($a.kind != "flag" or (maps.has($nr.present, $a.name) and $nr.present[$a.name])) {
+            continue;
         }
-        $k2 = $k2 + 1;
+        if ($a.action == "count") {
+            if (not maps.has($nr.counts, $a.name)) {
+                $nr.counts[$a.name] = 0;
+            }
+        } elseif ($a.action == "append") {
+            if (not maps.has($nr.lists, $a.name)) {
+                $nr.lists[$a.name] = [];
+            }
+        } elseif ($a.required) {
+            fail("missing required flag: --" + $a.name);
+        } elseif ($a.hasDefault) {
+            $nr.values[$a.name] = $a.fallback;
+        }
     }
     return $nr;
 }
@@ -1022,7 +1019,8 @@ export func dispatch(r as Result, handlers as map of string to func) {
         return;
     }
     if ($r.command == "") {
-        fail("dispatch: no subcommand was selected (check r.command, or the parser declares no commands)");
+        fail("dispatch: no subcommand was selected " +
+            "(check r.command, or the parser declares no commands)");
     }
     if (not maps.has($handlers, $r.command)) {
         fail("dispatch: no handler for subcommand \"" + $r.command + "\"");
