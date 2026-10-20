@@ -1598,38 +1598,17 @@ allowlist than `import`.
 
 ### M28.2 - non-blocking / timed terminal read
 
-**Planned.** A bounded terminal-read primitive that fixes two coupled defects: a
-free-running TUI loop stalls in the blocking `term.readByte`, and `screen.nextKey`
-cannot deliver a lone `Escape` (it reads a second byte unconditionally to tell a
-bare `Escape` from a CSI / SS3 opener, and that read blocks until the *next*
-keypress - which is then swallowed into the sequence, so `Escape` then `x` arrives
-as one `alt-x`). The `"escape"` name the `screen.Key` docblock advertises is
-therefore reachable only through `decodeKey` directly, never from `nextKey`.
-
-- **Primitive.** `term.readByteTimeout(ms) -> int`: the byte `0..255`, `-1` at EOF,
-  `-2` on timeout (a distinct sentinel, not conflated with EOF). `ms == 0` polls
-  (return immediately). The blocking `term.readByte` stays as the simple path.
-- **Implementation.** It cannot use the `ctx.In` `io.Reader` abstraction (what the
-  injected-input tests feed; it has no deadline), so it reaches the raw fd and
-  either `poll(2)`s it with a timeout or sets termios `VMIN` / `VTIME`. That
-  conflicts with `term.makeRaw`'s blocking `VMIN=1`, so entry into raw mode and the
-  timed read must be reconciled (the timed call sets `VMIN=0` / `VTIME` for its
-  duration, or `poll`s without touching termios). Unix-only, `x/sys/unix`-backed,
-  build-tag split like the rest of `term` (real on `linux && !tinygo`, friendly
-  stub elsewhere).
-- **`screen` fix.** `nextKey` reads the escape-disambiguation byte with a short
-  timeout (25-50 ms) and returns `Key{name: "escape"}` when it expires, so a lone
-  `Escape` is delivered and the following keypress is no longer consumed. This makes
-  the documented `"escape"` name reachable from `nextKey` and removes the docblock
-  caveat.
-- **Bonus.** The primitive also lets an app stop raw input and return to line mode
-  mid-program (the `screen` background-reader task blocks in the syscall and cannot
-  be interrupted by `task.cancel` or a channel close today), and lets a caller bound
-  a single read without a dedicated reader goroutine.
-
-**Requires:** M20.5 (`term` library), M21's `screen` module. Graduated from
-`DRAFT#29` (retired). Open: whether to also expose `term.pollByte()` as sugar for
-`readByteTimeout(0)`.
+**Done.** `term.readByteTimeout(ms) -> int` returns the byte, `-1` at EOF, or `-2`
+when `ms` pass (`0` polls); the blocking `term.readByte` stays the simple path.
+Rather than `poll(2)` or termios `VMIN` / `VTIME`, a per-reader pump bounds the
+wait over any `io.Reader` (so injected-input tests exercise it): a timed-out read
+stays pending and its byte is the next one any read returns, so nothing is lost
+and raw mode is untouched. `screen.nextKey` reads the escape-disambiguation byte
+with a 50 ms timeout, so a lone `Escape` arrives as `"escape"` and no longer
+swallows the next keypress. Stub under `jennifer-tiny`, refused in the REPL like
+`readByte`. Not delivered: a pending pump read still holds stdin, so handing the
+terminal back to line-mode `io.readLine` mid-program is unchanged; no
+`term.pollByte` sugar.
 
 ### M28.3 - append sugar for any place expression
 
@@ -1822,45 +1801,32 @@ tracking.
 
 ### M28.9 - static call-site checking in `jennifer lint`
 
-**Planned.** `jennifer lint` resolves a call's name (`L107`) but not its arity or
-argument types, so compile-legal code that cannot run - a `bytes` passed to a
-`string` parameter, a call left one argument short after a signature changed -
-clears a CI lint gate and surfaces only as a runtime error. The runtime diagnostic
-is already precise (`argument 3 to "token" must be string, got bytes`); this
-surfaces the decidable subset at lint time, emitting **only where the type is
-statically known** so the checks stay false-positive-free (the property that earns
-a place in a CI gate). New IDs in the `L1nn` correctness band: `L109` (arity),
-`L110` (argument type), `L111` (initializer type). Same-file `L109` has shipped;
-the remainder:
+**Done.** `jennifer lint` surfaces the decidable subset of the runtime's call and
+binding type errors, emitting **only where a type is certain** so the checks stay
+false-positive-free enough for a CI gate (the shipped modules, overlays and
+examples lint clean under them).
 
-- **Same-file argument / initializer types (`L110` / `L111`).** Compare an
-  argument's, or a `def ... init` expression's, static type to the declared
-  parameter / binding type, but only when that type is knowable without inference:
-  a literal, or a variable / parameter / constant / struct-field reference the lint
-  scope pass (`scope.go`) already resolves. Catches arity-drift and same-file type
-  mismatches with zero false positives; additive over the existing AST and scope
-  machinery.
-- **Cross-module tier.** Extend the same three checks across an `import` boundary,
-  so `callee.wantsString(42)` is caught the way a same-file call is. Lint sees the
-  import declarations today but never loads the target file; parsing the imported
-  module's AST to read callee parameter types (reusing the interpreter's module
-  resolver) closes that gap, making lint a trustworthy gate for a module-heavy repo
-  whose checked logic sits behind module boundaries.
-- **Library-builtin signatures.** The tier that catches a library return type
-  flowing into a typed slot (`web.body(ctx)`, a `bytes`, passed to a `string`
-  parameter). Builtins carry no static signature (each validates its own arguments
-  at runtime), so this adds a static signature table (arity + argument kinds +
-  return kind), attached at registration or as a declarative side table, across the
-  ~40 libraries - TinyGo-clean and without bloating `RegisterNamespaced`.
-  Independently valuable for editor tooling and doc / cheatsheet generation. How to
-  attach signatures without that bloat earns a `design-decisions.md` record.
+- **`L109` arity** for same-file methods, an imported module's exported methods,
+  and library builtins (optional / variadic counts from the signature table).
+- **`L110` argument type** and **`L111` binding type** (`def ... init`, `$x = ...`,
+  struct field writes and literal fields, element writes, `$xs[] = ...`), over a
+  small static typer (`internal/lint/types.go`): literals, declared bindings
+  (for-each iterators included), field / index / slice reads, operators, struct
+  and enum literals, library calls, library constants and struct fields. Types
+  compare as `MatchesDeclared` does; a literal collection is checked element by
+  element; a library parameter's element type only against literal elements
+  (builtins check elements one by one).
+- **Cross-module.** Lint resolves `import`s as `run` does and reads the
+  module's exported surface, translating its types into the importing file's
+  terms.
+- **Library signatures.** A declarative side table, `internal/libsig` (one
+  `name(T1, T2?, T3...) R` line per builtin), never stricter than the builtin and
+  held in lock-step with `InstallAll` by a coverage test; the placement is
+  recorded in [design-decisions.md](technical/design-decisions.md).
 
-A user method declares no return type by design, so `f(g())` with `g` a user method
-stays undecidable in one pass and is deliberately skipped (inferring a return type,
-or an optional annotation, is a separate decision).
-
-**Requires:** none hard; builds on the shipped `L107` / `L109` lint and scope
-machinery.
+A user method declares no return type by design, so `f(g())` with `g` a user
+method stays unknown and is skipped (inferring a return type, or an optional
+annotation, is a separate decision).
 
 ---
 

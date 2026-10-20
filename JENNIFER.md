@@ -35,14 +35,21 @@ the exact signature of any function there. Source and issues:
 > to that marker: **equal -> this copy is current, do nothing**; **different, or
 > no marker yet (a pristine copy just dropped into the project) -> run the sync
 > below**. That is one command and a string compare, so it is cheap enough to do
-> at the start of any `.j` work; you only fetch over the network when the marker
-> actually disagrees.
+> at the start of any `.j` work; you only sync when the marker actually
+> disagrees.
 >
 > **Sync:**
 >
 > 1. Read the installed version: `jennifer version` (e.g. `0.24.0`, or
 >    `0.24.0-dev+N.<sha>`).
-> 2. Fetch the JENNIFER.md that matches it from the source repo:
+> 2. **Prefer the copy installed with the interpreter.** The Linux packages
+>    (Arch, Debian, the Docker image) put one at
+>    `/usr/share/doc/jennifer/JENNIFER.md`, Homebrew under
+>    `$(brew --prefix)/share/doc/jennifer/`, the Windows installer beside
+>    `jennifer.exe`. It was built from the same commit as the installed
+>    `jennifer`, so it matches exactly - even a dev build, where `main` may already
+>    be ahead - and needs no network. Use it when it exists; otherwise fetch the
+>    JENNIFER.md that matches the version from the source repo:
 >    - a **development build** - any version containing `-dev` (e.g.
 >      `0.24.0-dev+N.<sha>`) or the bare string `dev` - is ahead of the last
 >      release, so **always** fetch the `main` branch, regardless of the `X.Y.Z`
@@ -50,24 +57,24 @@ the exact signature of any function there. Source and issues:
 >      `https://raw.githubusercontent.com/jennifer-language/jennifer/main/JENNIFER.md`;
 >    - a **clean release** `X.Y.Z` (no `-dev` suffix) fetches its own tag:
 >      `https://raw.githubusercontent.com/jennifer-language/jennifer/X.Y.Z/JENNIFER.md`.
-> 3. If the fetched file differs from this local copy, **replace this local copy
->    with it**.
+> 3. If the installed or fetched file differs from this local copy, **replace
+>    this local copy with it**.
 > 4. **Stamp the marker.** Whether or not step 3 replaced anything, set the last
 >    line of the local copy to the full `jennifer version` string you read in
 >    step 1, so the next self-check is a cheap compare:
 >    `<!-- jennifer-md-synced-for: 0.24.0-dev+N.<sha> -->`. Record the whole
 >    string verbatim - for a dev build it carries the commit (`+N.<sha>`), so the
 >    marker changes the moment the installed interpreter is rebuilt and your check
->    catches it. (A dev build always re-fetches `main` per step 2, since `main`
->    advances even when the local commit has not; the marker still tells you the
->    interpreter itself moved.)
+>    catches it. (Without an installed copy, a dev build re-fetches `main` per
+>    step 2, since `main` advances even when the local commit has not; the marker
+>    still tells you the interpreter itself moved.)
 >
 > Match the **installed interpreter**, not the newest release: if the local
 > `jennifer` is `0.24.0` while `0.25.0` is out, fetch the `0.24.0` JENNIFER.md -
 > this file must describe the features the interpreter you actually run has, no
-> more and no less. (No web access? Then note in your reply that you could not
-> verify JENNIFER.md against the installed `jennifer version`, so some guidance
-> here may not match it.)
+> more and no less. (No installed copy and no web access? Then note in your reply
+> that you could not verify JENNIFER.md against the installed `jennifer version`,
+> so some guidance here may not match it.)
 
 ---
 
@@ -191,9 +198,9 @@ function value), `channel of T` (a CSP channel between goroutines).
   type).
 - **map** literals: `{"a": 1, "b": 2}`, `{}`. Insertion-ordered.
 - **struct** literals: `Point{x: 1, y: 2}` after
-  `def struct Point { x as int, y as int };`. Every field must be named; an
-  unknown or missing field is an error when the program loads, not when the
-  literal runs.
+  `def struct Point { x as int, y as int };`. Every field must be named (the one
+  exception: an `Error` literal may omit `file` / `line` / `col`); an unknown or
+  missing field is an error when the program loads, not when the literal runs.
 - **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
   level. A value is one variant: construct with `Shape.Circle{r: 2.0}` or the
   payload-less `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value
@@ -234,6 +241,13 @@ $x = 7;                       # assignment uses the $ sigil
 
 - The name at the `def` site is bare (`def x`), never `def $x`.
 - `const` is deep: a const list/map/struct rejects mutation at any depth.
+- Top-level code runs in source order: define a constant **above** the code that
+  first reads it. A top-level read before its `def const` is a load-time error; a
+  method may read a constant defined lower down, but not when it is called
+  before that definition has run.
+- A method body may not `def` a name that a top-level `def` already uses (no
+  shadowing, globals included): a helper's loop variable cannot reuse the name
+  of a top-level loop variable.
 
 ## Operators
 
@@ -312,15 +326,18 @@ is **no fall-through**, and `match` is **not** a `break` target - `break` /
 ```jennifer
 use io;
 try {
-    throw Error{kind: "bad", message: "nope", file: "", line: 0, col: 0};
+    throw Error{kind: "bad", message: "nope"};
 } catch (e) {
-    io.printf("%s\n", $e.message);
+    io.printf("%s at line %d\n", $e.message, $e.line);
 }
 ```
 
 `throw EXPR;` raises any value; convention is the auto-provided `Error` struct
-`{kind, message, file, line, col}`. `catch` also catches the runtime errors
-builtins raise (out-of-range, missing key, etc.), wrapped into `Error`.
+`{kind, message, file, line, col}`. An `Error` literal may omit `file` / `line` /
+`col` (only `kind` and `message` are required), and `throw` stamps a missing
+location with the throw site. `catch` also catches the runtime errors builtins
+raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
+"runtime"` - or `"limit"` (a resource cap) or `"timeout"` (a `net` deadline).
 `exit`/`return`/`break`/`continue` are control flow, not catchable.
 
 ### Cleanup with `defer`
@@ -453,9 +470,12 @@ its enclosing scope at launch, so there are no shared-memory data races.
 
 **Cancellation + timeouts.** `task.cancel($t)` requests cooperative cancellation:
 the body observes it at its next loop checkpoint, where the runtime raises a
-catchable "task cancelled" (so a runaway `spawn` can be stopped - this retires the
-exit-time hang). Catch it inside the body for a clean partial result; `task.cancel
-+ task.discard` is stop-and-forget. `task.cancelled()` is a non-raising poll.
+catchable "task cancelled" (so a runaway `spawn` can be stopped). A task blocked
+in a system call (`net.accept`, a socket read, `term.readByte`) only sees it when
+the call returns: close its socket from another task, or `task.discard` it.
+Catch it inside the body for a clean partial result; `task.cancel
++ task.discard` is stop-and-forget. A program that runs to its end waits for
+every undiscarded task; one that ends by `exit` or an uncaught error does not. `task.cancelled()` is a non-raising poll.
 `task.waitTimeout($t, ms)` / `task.waitAnyTimeout($ts, ms)` are bounded waits that
 throw a catchable "timed out" error.
 
@@ -485,7 +505,8 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 - `import "PATH.j" [as NAME];` - **module** import (a real boundary, not a
   splice). Path forms: `./x.j` / `../x.j` local, `/x.j` absolute, bare `x.j`
   from the module search path. Loads once (run-once, cached), depth-first
-  post-order; cycles error. Reach the module's surface as `NAME.fn(args)`,
+  post-order; cycles error. Re-importing the same module under the same alias
+  is a no-op. Reach the module's surface as `NAME.fn(args)`,
   `NAME.CONST`, and `NAME.Struct` / `NAME.Struct{...}` (`NAME` is the `as`
   alias, else the file stem). A **module top level is declarations-only**:
   `def const`, `def struct`, `func`, `use`, `import` - no mutable `def`, no
@@ -511,14 +532,16 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 
 Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 
-- **`io`** - `printf` / `sprintf` with verbs `%d %f %s %t %v %a` and
+- **`io`** - `printf` (stdout) / `eprintf` (stderr - diagnostics and logs that
+  must not mix into stdout) / `sprintf` (to a string), all with verbs
+  `%d %f %s %t %v %a` and
   `%verb[|key=value]` modifiers (`pad`, `align`, `base`, `prec`, `sign`,
   `group`, `case`, ...); `%a` (list / map) also takes the element modifiers
   `prec trim sci base sign mode case`, applied to every scalar inside
   (`%a|prec=2` rounds each float). A bare modifier value ends at the first
   character that is not a letter, digit, or `_`, so `"%d|base=16, %d"` prints
   the comma (quote a value that needs other characters: `%a|sep=" | "`);
-  `readLine`, `eof`, `readBytes`.
+  stdin input `readLine` / `readLines` / `eof`, binary `readBytes` / `readChars`.
 - **`convert`** - `toInt toFloat toString toBool`, `typeOf`, `objectType`,
   `fromCodepoint` / `toCodepoint`, `bytesFromString` / `stringFromBytes` (utf-8).
   `toInt(s, radix)` parses a string's bare digits in base 2/8/10/16 (strip any
@@ -685,8 +708,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   (`jennifer-tiny` stubs it).
 - **`term`** - terminal control for interactive TUIs: `term.makeRaw(stream)` ->
   `term.State` and `term.restore(state)` (raw mode: unbuffered, no-echo input),
-  `term.size(stream)` -> `term.Size{rows, cols}`, `term.readByte()` -> int (one
-  raw byte from stdin, `-1` at EOF; bytes, not decoded keys). Over
+  `term.size(stream)` -> `term.Size{rows, cols}` (throws when there is no size: not
+  a terminal, or no window size set), `term.readByte()` -> int (one raw byte from
+  stdin, `-1` at EOF; bytes, not decoded keys), `term.readByteTimeout(ms)` (the
+  same, or `-2` when `ms` pass first; `0` polls). Over
   `golang.org/x/term`; default binary only (`jennifer-tiny` stubs it). Refused in
   the REPL. Output-only TUIs need only `ansi` + `os.isTerminal`.
 - **`serial`** - serial ports: `serial.open(path, baud)` -> `serial.Port`, `read`
@@ -727,15 +752,19 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   handles (`open` / `readLine` / ... / `sync` / `close`); and a polling `watch` ->
   `fs.Watcher` (`next` / `hasEvent` / `close`). Path- vs handle-form verbs dispatch
   on the first arg.
-- **`net`** - sockets. TCP `connect` / `listen` / `accept` / `readBytes` /
-  `writeBytes`, bulk `readAll` / `readN`; per-direction timeouts
-  `setReadDeadline` / `setWriteDeadline` (`$conn`/`$udp`, ms out; `0` clears) -
-  a read deadline is the poll-with-timeout primitive (a read past it throws a
-  catchable `read timed out`) and never blocks a later write, so a keepalive /
+- **`net`** - sockets. TCP `connect` / `listen` / `accept` / `readBytes` (empty
+  `bytes` once the peer closed) / `writeBytes`, bulk `readAll` / `readN`;
+  per-direction timeouts `setReadDeadline` / `setWriteDeadline` (`$conn`/`$udp`,
+  ms out; `0` clears) - a read deadline is the poll-with-timeout primitive (a read
+  past it throws `Error{kind: "timeout"}`, as does every net timeout - test `kind`,
+  not the message; any other socket failure is `"runtime"`) and never blocks a
+  later write, so a keepalive /
   reply after a read timeout still goes out; there is no combined call, arm both
   to bound an exchange; TLS `connectTLS` / `startTLS` (opt-out
   verify via `net.TLSOptions{skipVerify, caCert}`); UDP `listenUDP` / `sendTo` /
-  `recvFrom` / `setBroadcast` / `bindToDevice` (pin a UDP socket to one interface
+  `recvFrom` (-> `net.Datagram{data, peer, truncated}`: a datagram longer than the
+  requested size is cut to it with `truncated` set) / `setBroadcast` /
+  `bindToDevice` (pin a UDP socket to one interface
   via `SO_BINDTODEVICE` - Linux-only, needs root; the multi-homed-host fix a
   wildcard bind can't give); DNS `lookup` / `reverseLookup`; polymorphic `close` / `address`.
   `connect` takes an optional trailing `timeoutMs`. **Default `jennifer` binary
@@ -1182,10 +1211,14 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (`screen.newScreen(rows, cols)`) drawn with `screen.text` / `textColor` / `box` /
   `fill` / `hline` / `vline` / `set`, ANSI control builders (`screen.clear` /
   `moveTo(x, y)` / `hideCursor` / `enterAlt` / ...), and a flicker-free
-  `screen.render(buf)` / `diff(old, new)` paint loop. Interactive layer (needs
+  `screen.render(buf)` / `diff(old, new)` paint loop. Every drawing call copies the
+  whole buffer, so draw a frame with one batch call - `screen.setMany(buf, list of
+  screen.Plot{x, y, cell})` / `textMany(buf, list of screen.Span{x, y, text,
+  color})` - not one `set` per glyph; keep cell text single-width (no CJK / emoji).
+  Interactive layer (needs
   `term`, default binary): `screen.decodeKey(seq) -> screen.Key{name, char}`
-  (arrows, nav, F1-F12, ctrl / alt) + `nextKey` / `begin` / `end` / `size` over raw
-  mode. For a free-running loop (a game, a live dashboard) that cannot block on a
+  (arrows, nav, F1-F12, ctrl / alt; a lone Escape is `"escape"`) + `nextKey` /
+  `begin` / `end` / `size` over raw mode. For a free-running loop (a game, a live dashboard) that cannot block on a
   keypress, `screen.startInput() -> Input` runs a background reader into a buffered
   channel, polled with `hasKey` / `pollKey` (non-blocking) or `waitKey`.
   Coordinates 0-based (origin top-left); drawing past an edge is clipped.
