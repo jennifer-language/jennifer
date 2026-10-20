@@ -178,7 +178,7 @@ func testPngSignature() {
     testing.assertTrue(len($img) > 50);
 }
 
-# --- M23.6: UPC-A / UPC-E / Code93 / GS1-128 ---
+# --- UPC-A / UPC-E / Code93 / GS1-128 ---
 
 # barBits renders a Linear symbol's bar runs back to a "1"=bar module string.
 func barBits(sym as Symbol) {
@@ -271,7 +271,7 @@ func testGs1VariableInsertsSeparator() {
     testing.assertEqual($seps, 2); # leading FNC1 + one separator
 }
 
-# --- M23.6: QR versions 11-40 + numeric / alphanumeric modes ---
+# --- QR versions 11-40 + numeric / alphanumeric modes ---
 
 # The QR spec's worked example: "01234567" in version 1-M numeric mode produces
 # these 16 data codewords.
@@ -342,7 +342,7 @@ func testQrHighVersionSelection() {
     testing.assertEqual(len(alignPositions(40)), 7); # v40 alignment centres
 }
 
-# --- M23.6: DataMatrix ECC200 ---
+# --- DataMatrix ECC200 ---
 
 func testDmEncodeAscii() {
     # digit pairs -> value+130; a lone char / letter -> value+1

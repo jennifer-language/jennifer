@@ -89,7 +89,7 @@ func testObjectKeysDecodesEntities() {
     testing.assertEqual($keys[1], "a<b>c.txt");
 }
 
-# --- M23.6: presign, byte bodies, metadata, multipart ---
+# --- presign, byte bodies, metadata, multipart ---
 
 # A configured client for the deterministic signing tests.
 func sampleClient() {

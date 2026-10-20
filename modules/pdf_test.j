@@ -158,7 +158,7 @@ func testPdfDate() {
         "D:20260102030405+01'00'");
 }
 
-# --- embedded fonts (M23.6) -------------------------------------------------
+# --- embedded fonts -------------------------------------------------
 
 func testScaleMetric() {
     testing.assertEqual(scaleMetric(1000, 1000), 1000); # 1:1 at 1000 upem
@@ -276,7 +276,7 @@ func testLoadFontRejectsCff() {
     testing.assertTrue($threw);
 }
 
-# --- images (M23.6) ---------------------------------------------------------
+# --- images ---------------------------------------------------------
 
 func testBeHelpers() {
     def b as bytes;
@@ -395,7 +395,7 @@ func testImageObjects() {
     testing.assertTrue(strings.contains($txt, "/XObject << /Rgb"));
 }
 
-# --- text layout (M23.6) ----------------------------------------------------
+# --- text layout ----------------------------------------------------
 
 func testMeasureEm() {
     testing.assertEqual(measureEm("Helvetica", "AV"), 1334); # 667 + 667

@@ -10,7 +10,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
-// computeEntryGlobalSafe (the M25.2 per-function escape analysis) marks a method
+// computeEntryGlobalSafe (the per-function escape analysis) marks a method
 // GlobalSafe when it, and everything it transitively calls by name, mutates no
 // global. A false positive would let borrow alias a parameter whose backing the
 // callee can mutate, so the write-scan, the fixpoint, and the dynamic-dispatch

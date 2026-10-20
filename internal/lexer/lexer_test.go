@@ -788,7 +788,7 @@ func TestTokenizeErrdeferKeyword(t *testing.T) {
 	}
 }
 
-// TestTokenizeMatchKeywords covers the `match` / `when` keywords (M22.4). `else`
+// TestTokenizeMatchKeywords covers the `match` / `when` keywords. `else`
 // is shared with `if`; it already has coverage above.
 func TestTokenizeMatchKeywords(t *testing.T) {
 	toks, err := Tokenize("match when else")

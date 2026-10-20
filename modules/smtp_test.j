@@ -104,7 +104,7 @@ func testCleanEnvelopeAccepted() {
     testing.assertEqual(asciiEnvelope("alice@example.com"), "alice@example.com");
 }
 
-# ---- M21.9 hardening: STARTTLS advertise, envelope validation, cleartext auth ----
+# ---- hardening: STARTTLS advertise, envelope validation, cleartext auth ----
 
 func testEhloAdvertisesStartTls() {
     def caps as string init "250-mail.example.com\n250-STARTTLS\n250 AUTH PLAIN LOGIN";

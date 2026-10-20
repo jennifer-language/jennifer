@@ -14,7 +14,7 @@ import (
 )
 
 // runAllLibs parses + runs a script with the whole standard library installed
-// (needed by the M25.2 tests that exercise meta.call / lists.map callback paths).
+// (needed by the tests that exercise meta.call / lists.map callback paths).
 func runAllLibs(t *testing.T, src string) (string, error) {
 	t.Helper()
 	prog, err := parser.Parse(src)
@@ -57,7 +57,7 @@ func TestBorrowGateEntryProgramKeepsCopySemantics(t *testing.T) {
 	}
 }
 
-// M25.2: in a script that HAS a mutable global, a function that transitively
+// In a script that HAS a mutable global, a function that transitively
 // mutates that global (directly, via a callee, or via a reflective builtin) is
 // not GlobalSafe and keeps copy semantics. Each returns 1 (copy) not 99 (a
 // borrowed read of the mutated backing).
@@ -99,7 +99,7 @@ func TestBorrowM252UnsafeFunctionsKeepCopy(t *testing.T) {
 	}
 }
 
-// M25.2: in a script that HAS a mutable global, a GlobalSafe function (mutates no
+// In a script that HAS a mutable global, a GlobalSafe function (mutates no
 // global transitively) borrows its never-written params. Value semantics must
 // hold: copying the borrowed param to a local and mutating the local leaves the
 // borrowed original intact.

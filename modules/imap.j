@@ -1249,7 +1249,7 @@ export func fetchAll(opts as Options, folder as string) {
 # A cooperative read loop rather than callbacks: enter IDLE, then block in
 # receiveNotification (or poll with a timeout) for the server's untagged pushes,
 # and break out with done. The app wraps the loop in its own `spawn` when it
-# wants push handling to run alongside other work. This is the M23.1
+# wants push handling to run alongside other work. This is the
 # streaming / server-push shape shared with the other read loops.
 
 /**

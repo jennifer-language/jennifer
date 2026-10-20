@@ -182,7 +182,7 @@ func testParseFoldedLine() {
     testing.assertEqual($cal.events[0].description, "first part and second part");
 }
 
-# --- M23.6: all-day / TZID / recurrence / VALARM / attendees / VTODO ---
+# --- all-day / TZID / recurrence / VALARM / attendees / VTODO ---
 
 func testAllDayRoundTrip() {
     def ev as Event init withAllDay(

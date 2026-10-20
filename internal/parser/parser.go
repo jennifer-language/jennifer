@@ -1698,7 +1698,7 @@ func (p *parser) deepenExpr() error {
 	return nil
 }
 
-// parseRange parses a half-open range `lo..hi` (M21.11). It sits at the top of
+// parseRange parses a half-open range `lo..hi`. It sits at the top of
 // the precedence ladder (looser than every operator), so the endpoints are full
 // parseOr expressions and `a+1..b*2` parses as `(a+1)..(b*2)`. `..` is
 // non-associative (`a..b..c` is rejected). Absent `..` it is transparent. The
@@ -1727,7 +1727,7 @@ func (p *parser) parseRange() (Expr, error) {
 
 // parseBracketSuffix parses one `[...]` suffix after `target`: a plain index
 // `[expr]`, or a half-open slice `[lo..hi]` / `[lo..]` / `[..hi]` / `[..]`
-// (M21.11). The caller has confirmed `[` is current and (where relevant)
+// The caller has confirmed `[` is current and (where relevant)
 // rejected the append `[]` form. Endpoints parse at parseOr precedence (below
 // `..`), so any int index expression is still accepted (incl. a bool-key
 // comparison) and the `..` is detected here; a slice yields a read-only

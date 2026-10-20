@@ -185,7 +185,7 @@ sql.exec($conn, "DROP TABLE IF EXISTS el_authors");`, ormMod, driver, dsn, diale
 	}
 }
 
-// TestOrmWritePath drives the M23.15.4 write verbs (insertMany, insertReturning,
+// TestOrmWritePath drives the write verbs (insertMany, insertReturning,
 // upsert, updateWhere, deleteWhere, save) against a real database. Same DB gate.
 func TestOrmWritePath(t *testing.T) {
 	driver := os.Getenv("ORM_TEST_DRIVER")

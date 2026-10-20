@@ -296,7 +296,7 @@ func testFilenameNameFallback() {
     testing.assertEqual(convert.stringFromBytes(data($p), "utf-8"), "hi");
 }
 
-# --- M23.6: charset on decode ------------------------------------------------
+# --- charset on decode ------------------------------------------------
 
 # A text body declaring a non-UTF-8 charset is decoded from that charset, not
 # force-read as UTF-8 (which would have mangled the high bytes).
@@ -324,7 +324,7 @@ func testDecodeUnknownCharsetFallsBack() {
     testing.assertEqual(body($p), "hello");
 }
 
-# --- M23.6: RFC 2231 filenames (private helpers) -----------------------------
+# --- RFC 2231 filenames (private helpers) -----------------------------
 
 func testSplitParams() {
     def ps as list of Header init splitParams("attachment; filename=\"a.txt\"; size=10");
@@ -360,7 +360,7 @@ func testStripExtPrefix() {
     testing.assertEqual($bare[1], "plain.txt");
 }
 
-# --- M23.6: RFC 2231 filenames (decode) --------------------------------------
+# --- RFC 2231 filenames (decode) --------------------------------------
 
 func testFilenameExtended() {
     def p as Part init parse("Content-Type: image/png\r\n" +
@@ -388,7 +388,7 @@ func testFilenamePrefersDisposition() {
     testing.assertEqual(filename($p), "disp.png");
 }
 
-# --- M23.6: RFC 2231 filenames (encode + round-trip) -------------------------
+# --- RFC 2231 filenames (encode + round-trip) -------------------------
 
 func testEncodeAsciiFilenameStaysQuoted() {
     def a as Part init attachment("plain.txt", "text/plain", "hi");

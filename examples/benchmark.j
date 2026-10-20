@@ -628,7 +628,7 @@ func emitJson(r as Report) {
 # byteScanNaive scans a large buffer for a 6-byte needle one byte at a time in
 # Jennifer - the per-byte tree-walker cost that byte-oriented modules (MIME
 # boundary finding, protocol framing) used to pay. byteScanFast does the same
-# search with binary.indexOf (M21.10), which runs the scan once in Go. The two rows
+# search with binary.indexOf, which runs the scan once in Go. The two rows
 # side by side are the throughput delta the bulk-byte primitives buy; run on the
 # reference machine to record it (numbers are machine-specific, not committed).
 # Needle "NEEDLE" placed at the end so every scan traverses the whole buffer.

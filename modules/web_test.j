@@ -294,7 +294,7 @@ func testSecureCookiesOptOut() {
     testing.assertTrue(secureCookies());
 }
 
-# --- M22.13 additions -------------------------------------------------------
+# --- additions -------------------------------------------------------------
 
 func hErr(err as Error) {
     return;

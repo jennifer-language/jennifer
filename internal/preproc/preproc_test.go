@@ -402,7 +402,7 @@ func TestIncludeAtTopLevel(t *testing.T) {
 	}
 }
 
-// TestIncludeExpansionCapRejectsExponential pins the M22.16 guard: a chain where
+// TestIncludeExpansionCapRejectsExponential pins the include-expansion guard: a chain where
 // each file includes the previous one twice expands exponentially, and must fail
 // with a positioned "too large" error rather than exhausting memory. The token
 // cache makes reaching the bound fast (in-memory), not N re-reads.

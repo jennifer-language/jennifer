@@ -68,7 +68,7 @@ func sigV4Expected(r *http.Request, region, secret string) string {
 }
 
 // TestS3Requests drives the s3 module's get / put / delete / listObjects plus the
-// M23.6 additions (putBytes / getBytes / putWith metadata / head / copy /
+// The byte, metadata and copy verbs (putBytes / getBytes / putWith metadata / head / copy /
 // multipart) against an S3-shaped server that re-derives and checks the SigV4
 // signature over the wire (a 403 on mismatch), also confirming
 // x-amz-content-sha256 equals the body's hash. A signing or transport bug throws

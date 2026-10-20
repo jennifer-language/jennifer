@@ -18,7 +18,7 @@ import (
 // benchRun parses once, then re-runs the program on a fresh interpreter each
 // iteration. b.ReportAllocs() surfaces allocations/op, which - unlike wall
 // clock - is machine-independent, so it is the fair proxy for the GC pressure
-// M21.12 targets. The workloads are call-heavy (recursive method frames) and
+// the frame-allocation work targets. The workloads are call-heavy (recursive method frames) and
 // block-heavy (per-iteration block frames), the two shapes that borrow and
 // release Environment frames in the hot path.
 func benchRun(b *testing.B, src string) {

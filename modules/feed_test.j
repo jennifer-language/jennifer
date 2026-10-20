@@ -212,7 +212,7 @@ func testEmptyFeedRoundTrips() {
     testing.assertEqual(len(parse(build($f, "atom")).entries), 0);
 }
 
-# ---- M23.6: enclosure, author, categories ----
+# ---- enclosure, author, categories ----
 
 # A podcast-style feed with author, categories and a media enclosure.
 func podcast() {

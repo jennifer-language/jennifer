@@ -223,7 +223,7 @@ func fakeRedisPubSub(ln net.Listener) {
 	}
 }
 
-// A .j program drives the redis module's M23.1 verbs against the scripted mock:
+// A .j program drives the redis module's verbs against the scripted mock:
 // it subscribes and reads a pushed message (asserting receiveMessage drains the
 // SUBSCRIBE confirmation and returns the channel / payload), pipelines two
 // commands (asserting both replies come back in order), and scans (asserting the

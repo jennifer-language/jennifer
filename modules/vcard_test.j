@@ -131,7 +131,7 @@ func testParseReadsTypeParameters() {
     testing.assertEqual($cards[0].phones[0].type, "cell");
 }
 
-# --- M23.6: full N, TYPE round-trip, common fields ---
+# --- full N, TYPE round-trip, common fields ---
 
 func testFullNameRoundTrip() {
     def c as Card init withFullName(
