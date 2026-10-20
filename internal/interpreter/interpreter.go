@@ -815,6 +815,14 @@ func RaiseError(kind, message, file string, line, col int) error {
 	}
 }
 
+// KindedError returns a catchable runtime error of the given kind (`$e.kind` in
+// a catch) for a builtin to return. Unlike RaiseError it takes no position: the
+// call site fills it in, as for any error a builtin returns, so a helper with no
+// BuiltinCtx at hand (a handle lookup) can still classify its error.
+func KindedError(kind, message string) error {
+	return &runtimeError{Kind: kind, Msg: message}
+}
+
 // runtimeErrorToValue converts a *runtimeError into the conventional
 // `Error` struct Value so it can be bound to a catch variable. Kind
 // falls back to `"runtime"` when the originating site didn't set one.

@@ -171,7 +171,7 @@ can be cancelled, and it stops. Cancellation reaches a body only at a loop
 checkpoint: a task blocked in a system call - `net.accept`, a socket read,
 `term.readByte` - does not see the flag until that call returns. Unblock it by
 closing its socket from another task (the blocked call raises a catchable
-error), or `task.discard` it. A program that ends by `exit` or an uncaught error
+`Error{kind: "closed"}`), or `task.discard` it. A program that ends by `exit` or an uncaught error
 does not wait for still-running tasks at all; one that runs to its end waits for
 every task nobody discarded.
 

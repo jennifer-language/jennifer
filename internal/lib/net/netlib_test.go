@@ -1076,7 +1076,7 @@ func TestRecvFromTruncated(t *testing.T) {
 
 // TestTimeoutKind - a read past its deadline is a catchable Error{kind:
 // "timeout"} with one message shape for TCP and UDP, while a closed socket is
-// an ordinary runtime error, so a poll loop can tell the two apart.
+// Error{kind: "closed"}, so a poll loop can tell the two apart.
 func TestTimeoutKind(t *testing.T) {
 	l, err := stdnet.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1108,8 +1108,40 @@ func TestTimeoutKind(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
 	}
-	want := "timeout net.readBytes: read timed out;timeout net.recvFrom: read timed out;runtime"
+	want := "timeout net.readBytes: read timed out;timeout net.recvFrom: read timed out;closed"
 	if out != want {
 		t.Errorf("got  %q\nwant %q", out, want)
+	}
+}
+
+// TestCloseStopsBlockedCall - closing a listener from another task is how a
+// program stops a task parked in net.accept (cancellation cannot reach a
+// system call): the blocked accept fails with Error{kind: "closed"}, the same
+// kind a call on an already-closed handle raises, so the task can end cleanly.
+// Whichever runs first - the accept parks and is then closed under, or the
+// close lands before the accept starts - the task sees the same kind.
+func TestCloseStopsBlockedCall(t *testing.T) {
+	out, runErr := runProg(t, `
+		use net;
+		use io;
+		use task;
+		def l as net.Listener init net.listen("127.0.0.1:0");
+		def acceptor as task of string init spawn {
+			try {
+				net.accept($l);
+			} catch (e) {
+				return $e.kind;
+			}
+			return "accepted";
+		};
+		net.close($l);
+		io.printf("%s;", task.wait($acceptor));
+		try { net.close($l); } catch (e) { io.printf("%s", $e.kind); }
+	`)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if want := "closed;closed"; out != want {
+		t.Errorf("got %q, want %q", out, want)
 	}
 }

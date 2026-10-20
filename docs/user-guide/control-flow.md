@@ -456,8 +456,10 @@ won't be able to read `.kind` / `.message` off it. Use
   struct with `kind = "runtime"` (more specific tags will land per
   site over time) and the original file / line / col preserved.
 - **Timeouts** from the `net` library - a read or write past its deadline, a
-  `connect` past its `timeoutMs` - carry `kind = "timeout"`, so a poll loop can
-  tell "nothing arrived yet" from a closed or broken socket (`"runtime"`).
+  `connect` past its `timeoutMs` - carry `kind = "timeout"`, and a call on a
+  closed socket (one closed before the call, or under a call blocked on it)
+  carries `kind = "closed"`, so a poll loop can tell "nothing arrived yet" and
+  "we closed it" from a broken socket (`"runtime"`).
 - **Resource-exhaustion errors** carry `kind = "limit"` instead of
   `"runtime"`, so a caller can tell "the input was too big / too deep"
   from "something inside me is broken" and a library can re-raise it in

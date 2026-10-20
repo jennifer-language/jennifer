@@ -143,7 +143,7 @@ func resolveConn(fnName string, id int64) (*connState, error) {
 	defer connsMu.Unlock()
 	s, ok := conns[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: net.Conn id %d is not open (already closed, or never opened)", fnName, id)
+		return nil, notOpen(fmt.Sprintf("%s: net.Conn id %d is not open (already closed, or never opened)", fnName, id))
 	}
 	return s, nil
 }
@@ -153,7 +153,7 @@ func resolveListener(fnName string, id int64) (*listenerState, error) {
 	defer listenersMu.Unlock()
 	s, ok := listeners[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: net.Listener id %d is not open (already closed, or never opened)", fnName, id)
+		return nil, notOpen(fmt.Sprintf("%s: net.Listener id %d is not open (already closed, or never opened)", fnName, id))
 	}
 	return s, nil
 }
@@ -163,7 +163,7 @@ func resolveUDP(fnName string, id int64) (*udpState, error) {
 	defer udpsMu.Unlock()
 	s, ok := udps[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: net.UDPSocket id %d is not open (already closed, or never opened)", fnName, id)
+		return nil, notOpen(fmt.Sprintf("%s: net.UDPSocket id %d is not open (already closed, or never opened)", fnName, id))
 	}
 	return s, nil
 }
@@ -174,16 +174,30 @@ func resolveUDP(fnName string, id int64) (*udpState, error) {
 // an IPv4 datagram tops out lower, an IPv6 jumbogram needs a special path).
 const maxDatagram = 65535 - 8
 
+// notOpen is the error for a handle that is closed (or was never opened):
+// Error{kind: "closed"}, the kind a call blocked on a socket that gets closed
+// raises too (failure), so a loop handles both the same way.
+func notOpen(message string) error {
+	return interpreter.KindedError("closed", message)
+}
+
 // failure turns a socket error into the error a Jennifer program sees. A
 // deadline or dial timeout (a net.Error whose Timeout() is true) becomes a
 // catchable Error{kind: "timeout"} reading "<prefix>: <op> timed out", the same
 // shape for every call, TCP and UDP alike, so a poll loop can tell "nothing
-// arrived yet" from a closed or broken socket by kind rather than by message.
-// Anything else stays a runtime error carrying the OS text.
+// arrived yet" from a closed or broken socket by kind rather than by message. A
+// socket closed under a blocked call - `net.close` from another task, the way
+// to stop a task parked in `accept` or a read - becomes Error{kind: "closed"}
+// reading "<prefix>: <op> on a closed socket", the kind a call on an
+// already-closed handle raises too (notOpen). Anything else stays a runtime
+// error carrying the OS text.
 func failure(ctx interpreter.BuiltinCtx, prefix, op string, err error) error {
 	var ne stdnet.Error
 	if errors.As(err, &ne) && ne.Timeout() {
 		return interpreter.RaiseError("timeout", fmt.Sprintf("%s: %s timed out", prefix, op), ctx.File, ctx.Line, ctx.Col)
+	}
+	if errors.Is(err, stdnet.ErrClosed) {
+		return interpreter.RaiseError("closed", fmt.Sprintf("%s: %s on a closed socket", prefix, op), ctx.File, ctx.Line, ctx.Col)
 	}
 	return fmt.Errorf("%s: %v", prefix, err)
 }
@@ -667,7 +681,7 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return makeListener(id), nil
 }
 
-func acceptFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func acceptFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("net.accept expects 1 argument (net.Listener), got %d", len(args))
 	}
@@ -681,7 +695,7 @@ func acceptFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	c, aErr := s.l.Accept()
 	if aErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.accept: %v", aErr)
+		return interpreter.Null(), failure(ctx, "net.accept", "accept", aErr)
 	}
 	connsMu.Lock()
 	if len(conns) >= maxNetHandles {
@@ -981,7 +995,7 @@ func closeConn(id int64) error {
 	s, ok := conns[id]
 	if !ok {
 		connsMu.Unlock()
-		return fmt.Errorf("net.close: net.Conn id %d is not open (already closed?)", id)
+		return notOpen(fmt.Sprintf("net.close: net.Conn id %d is not open (already closed?)", id))
 	}
 	delete(conns, id)
 	connsMu.Unlock()
@@ -998,7 +1012,7 @@ func closeListener(id int64) error {
 	s, ok := listeners[id]
 	if !ok {
 		listenersMu.Unlock()
-		return fmt.Errorf("net.close: net.Listener id %d is not open (already closed?)", id)
+		return notOpen(fmt.Sprintf("net.close: net.Listener id %d is not open (already closed?)", id))
 	}
 	delete(listeners, id)
 	listenersMu.Unlock()
@@ -1197,7 +1211,7 @@ func closeUDP(id int64) error {
 	s, ok := udps[id]
 	if !ok {
 		udpsMu.Unlock()
-		return fmt.Errorf("net.close: net.UDPSocket id %d is not open (already closed?)", id)
+		return notOpen(fmt.Sprintf("net.close: net.UDPSocket id %d is not open (already closed?)", id))
 	}
 	delete(udps, id)
 	udpsMu.Unlock()

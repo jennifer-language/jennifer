@@ -50,7 +50,8 @@ cancelled" - so a runaway `spawn` can be stopped, and a body that catches it
 inside a `try` / `catch` exits cleanly with a partial result. A task blocked in
 a system call - `net.accept`, a socket read, `term.readByte` - is not at a
 checkpoint and does not see the flag; close its socket from another task (the
-blocked call then raises a catchable error) or `task.discard` it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
+blocked call then raises a catchable `Error{kind: "closed"}`) or `task.discard`
+it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
 a catchable "timed out" error. Full detail in the
 [`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
 

@@ -153,10 +153,37 @@ The deadline is absolute and is **not** rearmed automatically: reset it
 `connect` / `connectTLS` past its `timeoutMs`, and a `startTLS` handshake past its
 timeout all raise `Error{kind: "timeout"}` with one message shape,
 `<call>: <operation> timed out` (`net.recvFrom: read timed out`,
-`net.connect: 10.0.0.1:80: connect timed out`), on TCP and UDP alike. Every other
-socket failure - a closed or reset connection, a refused connect - is
-`kind: "runtime"` carrying the OS text, so a poll loop can tell "nothing arrived
-yet" from "the socket is gone" by `kind` alone.
+`net.connect: 10.0.0.1:80: connect timed out`), on TCP and UDP alike.
+
+**A closed socket has `kind: "closed"`.** A call on a handle that was closed
+(`net.Conn id 2 is not open ...`) and a call blocked on one that another task
+closes (`net.accept: accept on a closed socket`) raise `Error{kind: "closed"}`.
+Closing is how a program stops a task parked in `net.accept` or a read, which
+`task.cancel` cannot reach inside the system call: close the listener or
+connection from another task, and the parked call throws, so the task ends.
+
+```jennifer
+def acceptor as task of null init spawn {
+    try {
+        while (true) {
+            serve(net.accept($listener));
+        }
+    } catch (err) {
+        if ($err.kind != "closed") {
+            throw $err;
+        }
+    }
+    return;
+};
+# ... later, to shut down:
+net.close($listener);
+task.wait($acceptor);
+```
+
+Every other socket failure - a reset connection, a refused connect - is
+`kind: "runtime"` carrying the OS text, so a loop can tell "nothing arrived yet"
+(`timeout`), "we closed it" (`closed`) and "the network failed" (`runtime`) by
+`kind` alone.
 
 ### Read errors are catchable - including inside `spawn`
 

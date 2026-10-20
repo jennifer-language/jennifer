@@ -340,7 +340,8 @@ try {
 `col` (only `kind` and `message` are required), and `throw` stamps a missing
 location with the throw site. `catch` also catches the runtime errors builtins
 raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
-"runtime"` - or `"limit"` (a resource cap) or `"timeout"` (a `net` deadline).
+"runtime"` - or `"limit"` (a resource cap), `"timeout"` (a `net` deadline) or
+`"closed"` (a `net` socket closed before or under the call).
 `exit`/`return`/`break`/`continue` are control flow, not catchable.
 
 ### Cleanup with `defer`
@@ -481,7 +482,8 @@ its enclosing scope at launch, so there are no shared-memory data races.
 the body observes it at its next loop checkpoint, where the runtime raises a
 catchable "task cancelled" (so a runaway `spawn` can be stopped). A task blocked
 in a system call (`net.accept`, a socket read, `term.readByte`) only sees it when
-the call returns: close its socket from another task, or `task.discard` it.
+the call returns: close its socket from another task (the call then throws
+`Error{kind: "closed"}`), or `task.discard` it.
 Catch it inside the body for a clean partial result; `task.cancel` plus
 `task.discard` is stop-and-forget. A program that runs to its end waits for
 every undiscarded task; one that ends by `exit` or an uncaught error does not.
@@ -769,7 +771,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   per-direction timeouts `setReadDeadline` / `setWriteDeadline` (`$conn`/`$udp`,
   ms out; `0` clears) - a read deadline is the poll-with-timeout primitive (a read
   past it throws `Error{kind: "timeout"}`, as does every net timeout - test `kind`,
-  not the message; any other socket failure is `"runtime"`) and never blocks a
+  not the message; a closed socket is `"closed"`, any other socket failure
+  `"runtime"`) and never blocks a
   later write, so a keepalive /
   reply after a read timeout still goes out; there is no combined call, arm both
   to bound an exchange; TLS `connectTLS` / `startTLS` (opt-out
