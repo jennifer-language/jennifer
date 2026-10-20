@@ -13,8 +13,6 @@
 #
 #   go build -o jennifer ./cmd/jennifer
 #   ./jennifer run --sysmoddir=modules <grimoire>/bin/grimoire build --pdf
-#
-# Stable 0.24.0 will not run it.
 
 [book]
 title = "Jennifer Programming Language"
