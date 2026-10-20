@@ -4,6 +4,7 @@
 package lint_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -428,11 +429,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 23 {
-		t.Fatalf("expected 23 known IDs (4 source + 19 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 26 {
+		t.Fatalf("expected 26 known IDs (4 source + 22 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 23 {
-		t.Fatalf("catalog should list all 23 IDs")
+	if len(lint.Catalog()) != 26 {
+		t.Fatalf("catalog should list all 26 IDs")
 	}
 }
 
@@ -780,5 +781,226 @@ func TestLineTooLongExemptions(t *testing.T) {
 		if d := lintSrc(t, src, only("L203"), cfg); countID(d, "L203") != 1 {
 			t.Errorf("flagged case %d: %v", i, d)
 		}
+	}
+}
+
+// Calls and literals into an imported module are checked against the module's
+// exported surface (Config.Modules): arity (L109), struct fields and enum
+// variants (L113). A private or unknown member is L114.
+func TestModuleSurfaceChecks(t *testing.T) {
+	mod, err := parser.Parse(`export func two(a as int, b as int) { return $a + $b; }
+func hidden(a as int) { return $a; }
+export def struct P { x as int };
+export def enum Shape { Dot, Circle { r as int } };`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := lint.DefaultConfig()
+	cfg.Modules = map[string]*parser.Program{"m": mod}
+	src := `import "./m.j" as m;
+def a as int init m.two(1);
+def b as int init m.two(1, 2);
+def c as int init m.hidden(1, 2, 3);
+def p as m.P init m.P{x: 1, y: 2};
+def q as m.P init m.P{};
+def s as m.Shape init m.Shape.Circle{r: 1, q: 2};
+def u as m.Shape init m.Shape.Square{w: 1};
+def v as m.Shape init m.Shape.Dot;`
+	diags := lintSrc(t, src, only("L109", "L113"), cfg)
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%s", d.Line, d.ID))
+	}
+	want := []string{"2:L109", "5:L113", "6:L113", "7:L113", "8:L113"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("findings %v, want %v\n%v", got, want, diags)
+	}
+	// Without the module's program nothing is checked.
+	if n := len(lintSrc(t, src, only("L109", "L113"), lint.DefaultConfig())); n != 0 {
+		t.Errorf("unloaded module: %d findings, want 0", n)
+	}
+}
+
+// A library builtin's arity comes from its signature table (internal/libsig),
+// optional and variadic parameters included, under the alias it is used by.
+func TestCallArityLibrary(t *testing.T) {
+	src := `use strings as s;
+use io;
+func f() {
+    io.printf("%d %d\n", 1, 2);
+    io.printf("x\n");
+    def a as int init s.indexOf("ab", "b");
+    def b as int init s.indexOf("ab", "b", 1);
+    def c as int init s.indexOf("ab");
+    def d as string init s.upper("a", "b");
+    return $a + $b + $c + len($d);
+}`
+	diags := lintSrc(t, src, only("L109"), lint.DefaultConfig())
+	var lines []int
+	for _, d := range diags {
+		lines = append(lines, d.Line)
+	}
+	if len(lines) != 2 || lines[0] != 8 || lines[1] != 9 {
+		t.Fatalf("L109 lines = %v, want [8 9]: %v", lines, diags)
+	}
+}
+
+// L110 compares an argument's static type to the parameter type of a same-file
+// method or a library builtin, and only where the argument's type is certain.
+func TestArgTypes(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("certain mismatches are flagged", func(t *testing.T) {
+		src := `use strings;
+use binary;
+func take(s as string, xs as list of int) { return $s; }
+func f(b as bytes, n as int) {
+    take($b, [1]);
+    take("x", [1, "two"]);
+    take("x" + "y", 0..3);
+    def u as string init strings.upper($n);
+    def k as bool init binary.contains("s", $b);
+    return $u + convert($k);
+}
+func convert(k as bool) { return "x"; }`
+		diags := lintSrc(t, src, only("L110"), cfg)
+		var lines []int
+		for _, d := range diags {
+			lines = append(lines, d.Line)
+		}
+		if fmt.Sprint(lines) != "[5 6 8 9]" {
+			t.Fatalf("L110 lines = %v, want [5 6 8 9]: %v", lines, diags)
+		}
+	})
+	t.Run("unknown or possibly-fitting arguments are not flagged", func(t *testing.T) {
+		// A user method's result, a func-value call, a union-returning builtin,
+		// an `any` parameter, and a stamped list of another element type handed
+		// to a builtin (which checks elements one by one, so an empty one passes)
+		// all stay silent.
+		src := `use strings;
+use math;
+use io;
+func take(s as string) { return $s; }
+func g() { return "x"; }
+func f(h as func, ints as list of int) {
+    take(g());
+    take($h());
+    io.printf("%v\n", math.abs(1));
+    io.printf("%v %v\n", 1, [1]);
+    def j as string init strings.join($ints, ",");
+    for (def x in $ints) { io.printf("%d\n", $x); }
+    return $j;
+}`
+		if diags := lintSrc(t, src, only("L110"), cfg); len(diags) != 0 {
+			t.Fatalf("unexpected L110: %v", diags)
+		}
+	})
+}
+
+// L111 compares a stored value's static type to the declared type of its slot.
+func TestBindingTypes(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	t.Run("certain mismatches are flagged", func(t *testing.T) {
+		src := `use strings;
+def struct P { x as int, tags as list of string };
+def enum Sh { Empty, Circle { r as float } };
+def const LIMIT as string init 3;
+func f(p as P, names as list of string) {
+    def a as float init 1 + 2;
+    def b as list of int init [1, 2.5];
+    def c as Sh init Sh.Circle{r: 1};
+    def d as int init strings.split("a b", " ");
+    $p.x = "one";
+    $names[0] = 1;
+    $names[] = true;
+    def e as Error init Error{kind: 7, message: "m"};
+    def q as P init P{x: 1, tags: [1]};
+    for (def n in $names) { def k as int init $n; }
+    $a = "x";
+    return $a;
+}`
+		diags := lintSrc(t, src, only("L111"), cfg)
+		var lines []int
+		for _, d := range diags {
+			lines = append(lines, d.Line)
+		}
+		if fmt.Sprint(lines) != "[4 6 7 8 9 10 11 12 13 14 15 16]" {
+			t.Fatalf("L111 lines = %v, want [4 6 7 8 9 10 11 12 13 14 15 16]: %v", lines, diags)
+		}
+	})
+	t.Run("matching or unknown values are not flagged", func(t *testing.T) {
+		src := `def struct P { x as int };
+def enum Sh { Empty, Circle { r as float } };
+func g() { return 1; }
+func f(h as func) {
+    def a as int init g();
+    def b as float init 1.0 // 2;
+    def c as list of int init [];
+    def d as map of string to int init {};
+    def e as Sh init Sh.Empty;
+    def k as func init g;
+    def t as task of int init spawn { return 1; };
+    def p as P init P{x: $h()};
+    def r as list of int init 0..3;
+    def s as Error init Error{kind: "k", message: "m"};
+    return $a;
+}`
+		if diags := lintSrc(t, src, only("L111"), cfg); len(diags) != 0 {
+			t.Fatalf("unexpected L111: %v", diags)
+		}
+	})
+}
+
+// L114 flags a `ns.name` its namespace does not have: a library builtin missing
+// from the signature table, a constant or type missing from the registered
+// tables, and a module member that is unknown or not exported. Each surface is
+// checked only when it is available.
+func TestUnknownMember(t *testing.T) {
+	mod, err := parser.Parse(`export def const K as int init 1;
+def const HIDDEN as int init 2;
+export def struct P { x as int };
+export func two() { return 2; }
+func hidden() { return 3; }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := lint.DefaultConfig()
+	cfg.Modules = map[string]*parser.Program{"m": mod}
+	cfg.LibConsts = map[string]parser.Type{"math.PI": {Kind: parser.TypeFloat}}
+	cfg.LibStructs = map[string]*parser.StructDef{"time.Time": {Name: "Time"}}
+	src := `use strings as s;
+use math;
+use time;
+import "./m.j" as m;
+func f(a as time.Tme, b as list of m.Q) {
+    def x as string init s.uper("a");
+    def y as float init math.PII + math.PI;
+    def z as time.Time init time.Tme{};
+    def w as int init m.two() + m.hidden() + m.K + m.HIDDEN + m.NOPE;
+    def p as m.P init m.P{x: 1};
+    return s.upper($x);
+}`
+	diags := lintSrc(t, src, only("L114"), cfg)
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%d", d.Line, d.Col))
+	}
+	want := "5:8 5:23 6:26 7:25 8:29 9:33 9:52 9:63"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("L114 at %v, want %s\n%v", got, want, diags)
+	}
+	for _, frag := range []string{"did you mean `s.upper`?", "did you mean `math.PI`?", "did you mean `time.Time`?", "`m.hidden` is not exported", "`m.HIDDEN` is not exported", "constant `m.NOPE` does not exist"} {
+		found := false
+		for _, d := range diags {
+			found = found || strings.Contains(d.Message, frag)
+		}
+		if !found {
+			t.Errorf("no finding mentions %q: %v", frag, diags)
+		}
+	}
+	// Without the module program and the library tables, only the signature
+	// table's builtins are checked.
+	diags = lintSrc(t, src, only("L114"), lint.DefaultConfig())
+	if len(diags) != 1 || diags[0].Line != 6 {
+		t.Errorf("surfaces unavailable: %v, want only the s.uper call", diags)
 	}
 }

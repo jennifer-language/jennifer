@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/capabilities"
+	"jennifer-lang.dev/jennifer/internal/libsig"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/reqcheck"
 	"jennifer-lang.dev/jennifer/internal/version"
@@ -960,43 +961,54 @@ func checkUndeclaredNamespace(c *checkCtx) {
 	w.program(c.prog)
 }
 
-// checkCallArity (L109) flags a bare call to a same-file user method with the
-// wrong number of arguments - the arity drift (a parameter added, one of several
-// call sites missed) that today fails only when that call executes. Arity is fully
-// decidable from the AST (Jennifer has no default or variadic parameters: an
-// argument count must equal the parameter count exactly), so this is
-// false-positive-free. This is Tier 1 of the broader static call-site checking
-// (horizon DRAFT#27); argument *types*, cross-module calls, and library-builtin
-// signatures are the remaining tiers.
+// checkCallArity (L109) flags a call with the wrong number of arguments: a bare
+// call to a same-file user method, a call into an imported module's exported
+// method, or a library builtin call. Arity is fully decidable from the AST
+// (a user method has no default or variadic parameters, so the count must equal
+// the parameter count exactly; a builtin's accepted counts come from its
+// signature table, internal/libsig), so this is false-positive-free - the arity
+// drift (a parameter added, one of several call sites missed) that otherwise
+// fails only when that call executes.
 //
-// Only a bare call resolving to a known same-file method is checked: a call to a
-// func-valued binding (a `def ... as func`) has no statically known arity and is
-// not in the method set; a namespaced call (`ns.fn(...)`) is a different node; and
-// an undefined bare call is L107's job. Match-arm heads are skipped, as in L107, so
-// a `when Variant(bind)` enum pattern (which parses as a call) is never measured.
+// A call to a func-valued binding (a `def ... as func`) has no statically known
+// arity and is not in the method set; an undefined bare call is L107's job; a
+// builtin with no signature entry is left alone. Match-arm heads are skipped, as
+// in L107, so a `when Variant(bind)` enum pattern (which parses as a call) is
+// never measured.
 func checkCallArity(c *checkCtx) {
-	methods := map[string]*parser.MethodDef{}
-	for _, m := range c.prog.Methods {
-		methods[m.Name] = m
-	}
-	skip := map[parser.Expr]bool{}
-	collectArms := walker{stmt: func(s parser.Stmt) {
-		if m, ok := s.(*parser.MatchStmt); ok {
-			for i := range m.Arms {
-				for _, v := range m.Arms[i].Values {
-					skip[v] = true
+	t := newTyper(c)
+	skip := matchArmHeads(c.prog)
+	check := walker{expr: func(e parser.Expr) {
+		if qc, ok := e.(*parser.QualifiedCallExpr); ok {
+			if mod := c.cfg.Modules[qc.Prefix]; mod != nil {
+				// A call into an imported module: check it against the module's
+				// exported method. An unexported or unknown name is L114.
+				if m := exportedMethod(mod, qc.Callee); m != nil && len(qc.Args) != len(m.Params) {
+					c.report("L109", qc, fmt.Sprintf("method `%s.%s` takes %d argument(s), got %d", qc.Prefix, qc.Callee, len(m.Params), len(qc.Args)))
+				}
+				return
+			}
+			if lib, ok := t.libCall(qc.Prefix); ok {
+				sigs := libsig.Lookup(lib, qc.Callee)
+				if len(sigs) > 0 && len(matchingSigs(sigs, len(qc.Args))) == 0 {
+					counts := make([]string, 0, len(sigs))
+					seen := map[string]bool{}
+					for _, s := range sigs {
+						if a := s.ArityText(); !seen[a] {
+							seen[a] = true
+							counts = append(counts, a)
+						}
+					}
+					c.report("L109", qc, fmt.Sprintf("`%s.%s` takes %s argument(s), got %d", qc.Prefix, qc.Callee, strings.Join(counts, " or "), len(qc.Args)))
 				}
 			}
+			return
 		}
-	}}
-	collectArms.program(c.prog)
-
-	check := walker{expr: func(e parser.Expr) {
 		call, ok := e.(*parser.CallExpr)
 		if !ok || skip[e] {
 			return
 		}
-		m, ok := methods[call.Callee]
+		m, ok := t.methods[call.Callee]
 		if !ok {
 			return // undefined (L107) or a func-value binding - not an arity question
 		}
@@ -1005,6 +1017,37 @@ func checkCallArity(c *checkCtx) {
 		}
 	}}
 	check.program(c.prog)
+}
+
+// exportedMethod returns the exported top-level method name of a module
+// program, or nil.
+func exportedMethod(mod *parser.Program, name string) *parser.MethodDef {
+	for _, m := range mod.Methods {
+		if m.Name == name && m.Exported {
+			return m
+		}
+	}
+	return nil
+}
+
+// exportedStruct returns the exported struct name of a module program, or nil.
+func exportedStruct(mod *parser.Program, name string) *parser.StructDef {
+	for _, sd := range mod.Structs {
+		if sd.Name == name && sd.Exported {
+			return sd
+		}
+	}
+	return nil
+}
+
+// exportedEnum returns the exported enum name of a module program, or nil.
+func exportedEnum(mod *parser.Program, name string) *parser.EnumDef {
+	for _, ed := range mod.Enums {
+		if ed.Name == name && ed.Exported {
+			return ed
+		}
+	}
+	return nil
 }
 
 // checkConstantCondition (L105) flags conditions a reader can see are
@@ -1155,8 +1198,10 @@ func loopCanEscape(b *parser.Block) bool {
 // variant that names a field the type does not declare, or leaves a declared
 // field out. A literal must name every field exactly once, so either mistake
 // is certain from the source; `jennifer run` refuses the program at load for
-// the same reason, and this reports it without running anything. Literals of
-// library and module types are left to the load-time check, which can see their
+// the same reason, and this reports it without running anything. Literals of an
+// imported module's exported struct (`m.Point{...}`) or enum variant
+// (`m.Shape.Circle{...}`) are checked against the module (Config.Modules);
+// library types are left to the load-time check, which can see their
 // declarations.
 func checkStructLitFields(c *checkCtx) {
 	structs := map[string]*parser.StructDef{}
@@ -1187,7 +1232,14 @@ func checkStructLitFields(c *checkCtx) {
 	}
 	w := walker{expr: func(e parser.Expr) {
 		lit, ok := e.(*parser.StructLit)
-		if !ok || lit.Enum != "" {
+		if !ok {
+			return
+		}
+		if mod := c.cfg.Modules[lit.NS]; mod != nil {
+			c.checkModuleLit(lit, mod)
+			return
+		}
+		if lit.Enum != "" {
 			return
 		}
 		if lit.NS == "" {
@@ -1211,6 +1263,31 @@ func checkStructLitFields(c *checkCtx) {
 		c.report("L113", lit, fmt.Sprintf("enum `%s` has no variant `%s`", ed.Name, lit.Name))
 	}}
 	w.program(c.prog)
+}
+
+// checkModuleLit checks a literal of an imported module's type: `m.Struct{...}`
+// against the exported struct, `m.Enum.Variant{...}` against the exported
+// enum's variant. A name the module does not export is L114.
+func (c *checkCtx) checkModuleLit(lit *parser.StructLit, mod *parser.Program) {
+	if lit.Enum == "" {
+		if sd := exportedStruct(mod, lit.Name); sd != nil {
+			c.reportLitFields(lit, sd.Fields, fmt.Sprintf("struct `%s.%s`", lit.NS, lit.Name))
+		}
+		return
+	}
+	ed := exportedEnum(mod, lit.Enum)
+	if ed == nil {
+		return
+	}
+	for _, v := range ed.Variants {
+		if v.Name == lit.Name {
+			if !lit.Bare && len(v.Fields) > 0 {
+				c.reportLitFields(lit, v.Fields, fmt.Sprintf("variant `%s.%s.%s`", lit.NS, ed.Name, v.Name))
+			}
+			return
+		}
+	}
+	c.report("L113", lit, fmt.Sprintf("enum `%s.%s` has no variant `%s`", lit.NS, ed.Name, lit.Name))
 }
 
 // reportLitFields reports each unknown field (at the field) and each missing

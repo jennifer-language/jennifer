@@ -44,6 +44,14 @@ type scoped struct {
 	// onPop fires as a frame leaves scope, after its subtree is walked, so a
 	// check can inspect never-used bindings (L101).
 	onPop func(f *sframe)
+	// onStmt / onExpr fire on every statement / expression before it is walked,
+	// with a resolver for the current scope (L110 / L111). onStmt sees a `def`
+	// before its name is declared.
+	onStmt func(st parser.Stmt, resolve func(string) *binding)
+	onExpr func(e parser.Expr, resolve func(string) *binding)
+	// iterType, when set, gives a for-each iterator the element type of its
+	// collection, so a typed check can see through the loop variable.
+	iterType func(coll parser.Expr, resolve func(string) *binding) parser.Type
 }
 
 func (s *scoped) push(isGlobal bool) *sframe {
@@ -150,6 +158,9 @@ func (s *scoped) stmts(ss []parser.Stmt) {
 }
 
 func (s *scoped) doStmt(st parser.Stmt) {
+	if s.onStmt != nil && st != nil {
+		s.onStmt(st, s.resolve)
+	}
 	switch n := st.(type) {
 	case *parser.DefineStmt:
 		// Walk the initializer BEFORE declaring, so `def x init $x` can't
@@ -217,7 +228,11 @@ func (s *scoped) doStmt(st parser.Stmt) {
 		// Iterator and body share one frame; the iterator is non-reportable.
 		s.push(false)
 		s.doExpr(n.Coll)
-		s.declare(&binding{name: n.VarName})
+		it := &binding{name: n.VarName}
+		if s.iterType != nil {
+			it.typ = s.iterType(n.Coll, s.resolve)
+		}
+		s.declare(it)
 		if n.Body != nil {
 			s.stmts(n.Body.Stmts)
 		}
@@ -261,6 +276,9 @@ func (s *scoped) doStmt(st parser.Stmt) {
 func (s *scoped) doExpr(e parser.Expr) {
 	if e == nil {
 		return
+	}
+	if s.onExpr != nil {
+		s.onExpr(e, s.resolve)
 	}
 	switch n := e.(type) {
 	case *parser.VarExpr:

@@ -17,6 +17,22 @@ type Config struct {
 	MethodMaxStmts int // L201 threshold
 	MaxNesting     int // L202 threshold
 	MaxLineLength  int // L203 threshold
+	// Modules holds the parsed programs of the file's `import`ed modules, keyed
+	// by the prefix each is bound to (its `as` alias or file stem). The CLI
+	// resolves and parses them the way `run` would; L109, L110, L111, L113 and
+	// L114 check calls, literals and types into a module against its exported
+	// surface. An
+	// import that is missing here (unresolvable, or failing to parse) is simply
+	// not checked.
+	Modules map[string]*parser.Program
+	// LibStructs and LibConsts describe the standard library's registered
+	// struct / opaque types (keyed "lib.Name") and constants (keyed "lib.NAME",
+	// valued by their type). The CLI fills them from an interpreter with every
+	// library installed, so L110 / L111 can type a library struct's field or a
+	// library constant and L114 can tell a misspelt one. Left nil, those reads are
+	// simply unknown.
+	LibStructs map[string]*parser.StructDef
+	LibConsts  map[string]parser.Type
 }
 
 // DefaultConfig returns the v1 thresholds documented for the checks.

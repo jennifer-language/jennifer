@@ -133,7 +133,11 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `internal/lint/lint.go` | `lint` checks: `Diagnostic` + grouped-ID registry (L0nn source / L1nn correctness / L2nn style / L3nn lifecycle) + `KnownIDs` / selectable / `Catalog`. |
 | `internal/lint/run.go` | Check driver + threshold `Config` + source-error diagnostic builder. |
 | `internal/lint/checks.go` | The individual check implementations. |
-| `internal/lint/scope.go` | Scope-aware traversal for binding-visibility checks (L101 unused-local, L104 throw-non-error). |
+| `internal/lint/scope.go` | Scope-aware traversal for binding-visibility checks (L101 unused-local, L104 throw-non-error, and the typed hooks L110 / L111 use). |
+| `internal/lint/types.go` | The static typer behind L110 / L111: the type an expression certainly has, struct identity normalised to the linted file's terms, and the runtime-faithful mismatch test. |
+| `internal/lint/typecheck.go` | L110 argument-type and L111 binding-type checks over the typer. |
+| `internal/lint/members.go` | L114 unknown-member: a `ns.name` checked against its library's signature table and registered constants / types, or its module's exported surface, with a "did you mean" hint. |
+| `internal/libsig/` | Static signature table of every library builtin (arity, argument types, return type), one file per library; read by `lint` (L109 / L110 / L111). `internal/stdlib/libsig_test.go` keeps it in lock-step with `InstallAll`. |
 | `internal/lint/walk.go` | Flat AST walker for node-shape checks (L102 / L103 / L105 / L201 / L202). |
 | `internal/lint/config.go` | `--checks` / `.jennifer-lint` selection parsing (selectable IDs only). |
 | `internal/lint/suppress.go` | `# lint-disable` directive parsing + application (a line directive also covers a multi-line string / block comment ending on its line, or a docblock right below a lone directive; a line comment may end in one); a malformed / unknown-ID directive becomes an L004 finding. |

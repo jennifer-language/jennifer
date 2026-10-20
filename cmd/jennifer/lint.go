@@ -11,11 +11,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	"jennifer-lang.dev/jennifer/internal/lint"
+	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/preproc"
+	"jennifer-lang.dev/jennifer/internal/stdlib"
 )
 
 // Exit codes, mirroring gofmt -l / shellcheck: 0 clean, 1 findings at or
@@ -30,8 +34,8 @@ const (
 )
 
 // runLint implements `jennifer lint [--checks=IDS] [--format=FMT] <file.j>`.
-// It reports patterns that are compile-legal but suspect; see
-// docs/milestones.md M16.6 and internal/lint for the check catalog.
+// It reports patterns that are compile-legal but suspect; see internal/lint
+// and docs/technical/cli_lint.md for the check catalog.
 func runLint(args []string) int {
 	opts, ok := parseLintArgs(args)
 	if !ok {
@@ -162,7 +166,10 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		return nil, src, absPath, true
 	}
 
-	diags = lint.Check(prog, suppressTokens, src, absPath, enabled, lint.DefaultConfig())
+	cfg := lint.DefaultConfig()
+	cfg.Modules = lintModules(prog, baseDir, opts)
+	cfg.LibStructs, cfg.LibConsts = lintLibSurface()
+	diags = lint.Check(prog, suppressTokens, src, absPath, enabled, cfg)
 	if len(baseFiles) > 0 {
 		// Drop findings that landed in the spliced base module (or its includes);
 		// they belong to `lint MODULE.j`, not to linting the overlay.
@@ -175,6 +182,97 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		diags = kept
 	}
 	return diags, src, absPath, false
+}
+
+var (
+	libSurfaceOnce    sync.Once
+	libSurfaceStructs map[string]*parser.StructDef
+	libSurfaceConsts  map[string]parser.Type
+)
+
+// lintLibSurface returns the standard library's registered struct types and
+// constant types (keyed "lib.Name"), read once from an interpreter with every
+// library installed, so lint types a library struct's fields and a library
+// constant exactly as registered.
+func lintLibSurface() (map[string]*parser.StructDef, map[string]parser.Type) {
+	libSurfaceOnce.Do(func() {
+		in := interpreter.New()
+		stdlib.InstallAll(in)
+		libSurfaceStructs = map[string]*parser.StructDef{}
+		for k, def := range in.NSStructs {
+			libSurfaceStructs[k.NS+"."+k.Name] = def
+		}
+		libSurfaceConsts = map[string]parser.Type{}
+		for k, v := range in.NSConstants {
+			if t, ok := constType(v); ok {
+				libSurfaceConsts[k.NS+"."+k.Name] = t
+			}
+		}
+	})
+	return libSurfaceStructs, libSurfaceConsts
+}
+
+// constType returns the static type of a library constant's value: a scalar's
+// kind, a struct's identity, a collection with its recorded element type (open
+// when none is recorded). ok=false for any other kind.
+func constType(v interpreter.Value) (parser.Type, bool) {
+	switch v.Kind {
+	case interpreter.KindInt:
+		return parser.Type{Kind: parser.TypeInt}, true
+	case interpreter.KindFloat:
+		return parser.Type{Kind: parser.TypeFloat}, true
+	case interpreter.KindString:
+		return parser.Type{Kind: parser.TypeString}, true
+	case interpreter.KindBool:
+		return parser.Type{Kind: parser.TypeBool}, true
+	case interpreter.KindBytes:
+		return parser.Type{Kind: parser.TypeBytes}, true
+	case interpreter.KindStruct, interpreter.KindObject:
+		if v.StructNS == "" || v.ModPath != "" {
+			return parser.Type{}, false
+		}
+		return parser.Type{Kind: parser.TypeStruct, StructNS: v.StructNS, StructName: v.StructName}, true
+	case interpreter.KindList:
+		return parser.Type{Kind: parser.TypeList, Element: v.ElemTyp}, true
+	case interpreter.KindMap:
+		if v.KeyTyp == nil || v.ValTyp == nil {
+			return parser.Type{Kind: parser.TypeMap}, true
+		}
+		return parser.Type{Kind: parser.TypeMap, KeyType: v.KeyTyp, ValType: v.ValTyp}, true
+	}
+	return parser.Type{}, false
+}
+
+// lintModules resolves and parses each `import`ed module the way `run` would
+// (relative to the program's directory, then the system module dir and any -I
+// dirs, `@` decks under the vendor root), keyed by the prefix the import binds,
+// so L109 / L110 / L111 / L113 / L114 can check calls and literals into it. An import that does not
+// resolve or parse is left out: `run` reports that, and lint stays quiet about
+// what it cannot see.
+func lintModules(prog *parser.Program, baseDir string, opts lintOptions) map[string]*parser.Program {
+	if len(prog.ModuleImports) == 0 {
+		return nil
+	}
+	sm := module.ResolveSysmoddir(opts.sysmoddir, os.Getenv)
+	search := append([]string{sm.Dir}, opts.includes...)
+	vendorRoot := module.FindVendorRoot(opts.vendor, baseDir)
+	mods := map[string]*parser.Program{}
+	for _, mi := range prog.ModuleImports {
+		path, err := module.Resolve(mi.Path, baseDir, search, vendorRoot)
+		if err != nil {
+			continue
+		}
+		mp, err := loadModuleProgram(path)
+		if err != nil {
+			continue
+		}
+		alias := mi.AsName
+		if alias == "" {
+			alias = strings.TrimSuffix(filepath.Base(mi.Path), ".j")
+		}
+		mods[alias] = mp
+	}
+	return mods
 }
 
 // sourceErrorDiag turns a positioned lex / preprocess / parse error into an
@@ -210,15 +308,60 @@ type lintOptions struct {
 	hasChecks bool
 	format    string
 	showHelp  bool
+	// Module resolution for `import`s, as `run` takes it: the system module dir
+	// (--sysmoddir), extra search dirs (-I), and the vendor root (--vendor).
+	sysmoddir string
+	includes  []string
+	vendor    string
 }
 
 // parseLintArgs parses the lint subcommand's flags. Supported:
-// --checks=IDS, --format=human|json|github, -h/--help, and exactly one
-// positional file path. Errors print to stderr and return ok=false.
+// --checks=IDS, --format=human|json|github, the module-resolution flags
+// --sysmoddir / -I / --vendor (as `run`), -h/--help, and one or more positional
+// file paths. Errors print to stderr and return ok=false.
 func parseLintArgs(args []string) (lintOptions, bool) {
 	opts := lintOptions{format: "human"}
 	var positionals []string
-	for _, a := range args {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		// A flag taking a directory, either `--flag=DIR` or `--flag DIR`.
+		dirArg := func(flag string) (string, bool) {
+			if strings.HasPrefix(a, flag+"=") {
+				return strings.TrimPrefix(a, flag+"="), true
+			}
+			if a == flag {
+				if i+1 >= len(args) {
+					fmt.Fprintf(os.Stderr, "jennifer lint: %s needs a directory argument\n", flag)
+					return "", false
+				}
+				i++
+				return args[i], true
+			}
+			return "", false
+		}
+		switch {
+		case a == "--sysmoddir" || strings.HasPrefix(a, "--sysmoddir="):
+			dir, ok := dirArg("--sysmoddir")
+			if !ok {
+				return opts, false
+			}
+			opts.sysmoddir = dir
+			continue
+		case a == "--vendor" || strings.HasPrefix(a, "--vendor="):
+			dir, ok := dirArg("--vendor")
+			if !ok {
+				return opts, false
+			}
+			opts.vendor = dir
+			continue
+		case a == "-I" || strings.HasPrefix(a, "-I="):
+			dir, ok := dirArg("-I")
+			if !ok {
+				return opts, false
+			}
+			opts.includes = append(opts.includes, dir)
+			continue
+		}
 		switch {
 		case a == "-h" || a == "--help":
 			opts.showHelp = true
@@ -360,7 +503,7 @@ func ghProp(s string) string {
 
 // lintUsage prints the subcommand's help.
 func lintUsage(w *os.File) {
-	fmt.Fprintln(w, "usage: jennifer lint [--checks=IDS] [--format=human|json|github] <file.j>...")
+	fmt.Fprintln(w, "usage: jennifer lint [--checks=IDS] [--format=human|json|github] [--sysmoddir DIR] [-I DIR]... [--vendor DIR] <file.j>...")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Report compile-legal but suspect patterns. Checks:")
 	for _, c := range lint.Catalog() {
@@ -370,4 +513,6 @@ func lintUsage(w *os.File) {
 	fmt.Fprintln(w, "--checks: comma-separated IDs to run, or !ID to exclude (one direction).")
 	fmt.Fprintln(w, "A .jennifer-lint file at the tree root sets per-project defaults.")
 	fmt.Fprintln(w, "Suppress inline with `# lint-disable: ID` or `# lint-disable-file: ID`.")
+	fmt.Fprintln(w, "--sysmoddir / -I / --vendor resolve `import`s as `run` does, so calls and")
+	fmt.Fprintln(w, "literals into a module are checked against its exported surface.")
 }

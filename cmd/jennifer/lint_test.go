@@ -4,8 +4,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -119,5 +121,76 @@ func TestLintSplicesModuleOverlay(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected L101 for the unused local when linting the base module directly, got %v", baseDiags)
+	}
+}
+
+// lint resolves a file's `import`s the way `run` does, so a call or literal into
+// a module is checked against the module's exported surface: a local `./` import
+// here, and a bare name through an -I search dir.
+func TestLintChecksImportedModuleSurface(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for p, content := range map[string]string{
+		filepath.Join(dir, "m.j"):   "export func two(a as int, b as int) { return $a + $b; }\nexport def struct P { x as int };\n",
+		filepath.Join(lib, "lb.j"):  "export func one(a as int) { return $a; }\n",
+		filepath.Join(dir, "use.j"): "import \"./m.j\" as m;\nimport \"lb.j\";\ndef a as int init m.two(1);\ndef p as m.P init m.P{x: 1, y: 2};\ndef b as int init lb.one(1, 2);\n",
+	} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts, ok := parseLintArgs([]string{"-I", lib, "--checks=L109,L113", filepath.Join(dir, "use.j")})
+	if !ok || len(opts.includes) != 1 {
+		t.Fatalf("parseLintArgs: ok=%t includes=%v", ok, opts.includes)
+	}
+	diags, _, _, failed := lintComputeDiags(opts.paths[0], opts)
+	if failed {
+		t.Fatal("lint invocation failed")
+	}
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%s", d.Line, d.ID))
+	}
+	if want := "3:L109 4:L113 5:L109"; strings.Join(got, " ") != want {
+		t.Errorf("findings %v, want %s", got, want)
+	}
+}
+
+// Argument and binding types are checked across an import (L110 / L111), and a
+// library constant or library struct field is typed from the registered library
+// surface (lintLibSurface).
+func TestLintChecksTypesAcrossBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	for p, content := range map[string]string{
+		filepath.Join(dir, "m.j"): "export def struct P { x as int };\nexport func two(a as int, p as P) { return $a; }\n",
+		filepath.Join(dir, "use.j"): "import \"./m.j\" as m;\nuse time;\n" +
+			"def a as int init m.two(\"x\", m.P{x: 1});\n" +
+			"def b as int init m.two(1, 2);\n" +
+			"def z as string init time.UTC;\n" +
+			"def u as time.Zone init time.UTC;\n" +
+			"def n as string init $u.offset;\n" +
+			"def p as m.P init m.P{x: \"one\"};\n",
+	} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts, ok := parseLintArgs([]string{"--checks=L110,L111", filepath.Join(dir, "use.j")})
+	if !ok {
+		t.Fatal("parseLintArgs failed")
+	}
+	diags, _, _, failed := lintComputeDiags(opts.paths[0], opts)
+	if failed {
+		t.Fatal("lint invocation failed")
+	}
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%s", d.Line, d.ID))
+	}
+	if want := "3:L110 4:L110 5:L111 7:L111 8:L111"; strings.Join(got, " ") != want {
+		t.Errorf("findings %v, want %s", got, want)
 	}
 }

@@ -154,14 +154,14 @@ jobs:
         run: |
           # Top-level examples are curated golden tests, kept within the line
           # limit, so every check runs.
-          ./jennifer lint --format=github examples/*.j
+          ./jennifer lint --format=github --sysmoddir modules examples/*.j
           # The module demos under examples/modules/ also illustrate real usage:
           # their docblocks fully describe the module, and they embed realistic
           # data (JSON payloads, HTML/template strings, URLs) that reads worse if
           # broken, so they legitimately run long. Exclude only the cosmetic
           # line-length check (L203) for them - every correctness / lifecycle /
           # other-style check still runs and still gates.
-          ./jennifer lint --format=github --checks='!L203' examples/modules/*.j
+          ./jennifer lint --format=github --sysmoddir modules --checks='!L203' examples/modules/*.j
 
       - name: Lint the shipped modules
         # Lint modules/ too. Two scope decisions:
@@ -186,7 +186,7 @@ jobs:
             targets+=("$m")
           done
           echo "linting ${#targets[@]} module file(s); *.inc.j include-partials are covered via their parents"
-          ./jennifer lint --format=github --checks='!L202,!L203' "${targets[@]}"
+          ./jennifer lint --format=github --sysmoddir modules --checks='!L202,!L203' "${targets[@]}"
 
       - name: Check doc comments (docblock)
         # Gate on the docblock parser: a doc comment that drifts from its code

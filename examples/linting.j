@@ -59,6 +59,14 @@ func undefinedCall() {
     return noSuchMethod(1); # lint-disable: L107
 }
 
+# L114 unknown-member - a `ns.name` its namespace does not have: a misspelt
+# library function, constant or type, or a name an imported module does not
+# export. The runtime reports one only when that line runs.
+func unknownMember() {
+    io.prinf("hi\n"); # lint-disable: L114
+    return;
+}
+
 # L201 method-too-long - a body over the 60-statement limit. The finding
 # anchors at the method, so the directive lives on the `func` line.
 func longMethod() { # lint-disable: L201

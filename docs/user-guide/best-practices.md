@@ -48,9 +48,12 @@ complexity and style, **L3nn** API lifecycle:
 | `L106` | a `use` / `import` whose namespace is never used                       |
 | `L107` | an unqualified call to a name that is not a defined method (a typo'd method) |
 | `L108` | a bare name read where nothing by that name is defined (a typo'd constant or function value) |
-| `L109` | a call to a same-file method with the wrong number of arguments        |
+| `L109` | a call to a same-file method, an imported module's function, or a library builtin, with the wrong number of arguments |
+| `L110` | a call argument of the wrong type (`strings.upper(5)`, a `bytes` passed to a `string` parameter) |
+| `L111` | a value of the wrong type stored in a typed variable, field, or element (`def n as int init "5";`) |
 | `L112` | a `ns.name` reference whose namespace has no `use` / `import`          |
-| `L113` | a same-file struct / enum-variant literal with an unknown or missing field |
+| `L113` | a struct / enum-variant literal (same-file or an imported module's) with an unknown or missing field |
+| `L114` | a `ns.name` its namespace does not have: a misspelt library function, constant or type (`time.millis(10)`, `math.PII`), or a module member that is not exported |
 | `L201` | a method with too many statements (default over 60)                    |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
@@ -69,7 +72,16 @@ Everything else (`L1nn`/`L2nn`/`L3nn`) is selectable:
 jennifer lint myprogram.j                 # human-readable, with source carets
 jennifer lint --format=json app.j         # JSON array of findings, for editors/CI
 jennifer lint --checks=!L201,!L202 app.j  # run everything except the two style checks
+jennifer lint -I lib app.j                # resolve bare imports from lib/ too, as `run -I lib`
 ```
+
+`lint` loads the modules a file `import`s - resolved the way `run` resolves them,
+taking the same `--sysmoddir`, `-I` and `--vendor` flags - so a call into a
+module with the wrong argument count (`L109`) or argument type (`L110`), a
+literal of a module struct with a wrong field (`L113`), or a name the module does
+not export (`L114`), is caught before the code runs. The type checks speak only when a type is certain - a literal, a variable,
+parameter or field with a declared type, a library call - and stay quiet about a
+user method's result, since methods declare no return type.
 
 The exit code follows `gofmt -l` / `shellcheck`: `0` clean, `1` when
 there are findings (a source error counts), `2` only when the *invocation*

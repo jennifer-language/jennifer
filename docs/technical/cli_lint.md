@@ -27,9 +27,12 @@ style, **L3nn** API lifecycle.
 | `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
 | `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined method (the call analogue of L002; namespaced / `$f()` calls excluded) |
 | `L108` | undefined-name              | warning  | an unqualified bare name read where nothing by that name is defined anywhere: a constant (`MISSING_CONSTANT`), or a function used as a value (`Table{ greet: greetingOf }`); a bare variable / parameter name gets a "did you mean `$x`?" hint. The bare-name analogue of L107; `ns.NAME` and `match` arm heads / pattern binders excluded |
-| `L109` | call-arity                  | warning  | a bare call to a same-file method with the wrong argument count (exact: no default / variadic params); func-value and namespaced calls excluded |
+| `L109` | call-arity                  | warning  | a call with the wrong argument count to a same-file method (exact: no default / variadic params), an imported module's exported function (`alias.fn(...)`), or a library builtin (optional / variadic counts from its `libsig` signature); func-value calls excluded |
+| `L110` | argument-type               | warning  | a call argument whose static type certainly differs from the parameter's - a same-file method's, an imported module's exported function's, or a library builtin's signature; arguments of unknown type (a user method's result, a func-value call) are skipped |
+| `L111` | binding-type                | warning  | a value whose static type certainly differs from the declared type of where it is stored: a `def ... init`, a `$x = ...`, a struct field write or literal field, a list / map element write, a `$xs[] = ...` append |
 | `L112` | undeclared-namespace        | warning  | a `ns.name` reference whose namespace has no `use` / `import` (the inverse of L106; local enum / struct type prefixes excluded) |
-| `L113` | struct-literal-fields       | warning  | a same-file struct / enum-variant literal naming a field the type lacks, leaving one out, or naming an unknown variant (library / module types are checked at load by `run`) |
+| `L113` | struct-literal-fields       | warning  | a struct / enum-variant literal - of a same-file type, or an imported module's exported one (`alias.T{...}`, `alias.E.V{...}`) - naming a field the type lacks, leaving one out, or naming an unknown variant (library types are checked at load by `run`) |
+| `L114` | unknown-member              | warning  | a `ns.name` naming a function, constant, or type that its library does not register (`time.millis(10)`, `math.PII`, `def t as time.Tme`) or its imported module does not export (unknown, or private to it), with a "did you mean" hint for a near miss; a surface that is not available is skipped |
 | `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
@@ -51,11 +54,11 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L201/L202/L105 - L106 also
-walks declared types, which the node walker does not visit, to catch a
+checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L114/L201/L202/L105 - L106 and
+L114 also walk declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
-for the checks that need binding visibility (L101/L104). Both descend
+for the checks that need binding visibility (L101/L104/L110/L111). Both descend
 into `SpawnExpr.Body`, which the resolver deliberately skips: a read
 inside a spawn still marks an outer local used, but a *declaration*
 inside a spawn is left unreported (the resolver's spawn carve-out, which
@@ -123,6 +126,66 @@ wins locally: `--checks` gates which checks *run*, then
 `--checks=L203` with a `# lint-disable: L203` on one line runs L203
 everywhere but silences that one line - suppression can only ever remove
 findings, never add them, so there is no conflict to resolve.
+
+**Imported modules.** `lint` resolves each `import` exactly as `run` does -
+relative to the linted file's directory, then the system module dir and any
+`-I DIR`, `@` decks under the vendor root - taking the same `--sysmoddir DIR`,
+`-I DIR` (repeatable) and `--vendor DIR` flags. Each resolved module is parsed
+(`loadModuleProgram`, with its own requirement header checked) and handed to the
+checks in `Config.Modules`, keyed by the prefix the import binds, so `L109`,
+`L110`, `L111`, `L113` and `L114` check a call, literal or type into it against
+its **exported** surface (a module's own struct type reads as `alias.T` from the
+importing file, a library type it names through its own `use` as the canonical
+`lib.T`). A
+module that does not resolve or parse is left out silently - `run` reports that -
+so the checks stay false-positive-free; an unexported or unknown member of a
+loaded module is `L114`. CI passes
+`--sysmoddir modules` so the bare imports of the shipped examples resolve.
+
+**Static types (L110 / L111).** `types.go` is a deliberately small static
+typer: it names the type an expression *certainly* has - a literal, a reference
+to a binding with a declared type (parameter, `def`, constant, a for-each
+iterator over a typed list / map), a field / index / slice of one, an operator
+over typed operands (`int + int` is int, a float operand makes float, `/` is
+float, a comparison is bool), a struct or enum literal, a range (`list of int`),
+or a library call whose signature names a single return type - and answers
+"unknown" for everything else, above all a user method's result (methods declare
+no return type) and a func-value call. An unknown type never produces a finding.
+Types compare as the runtime's `MatchesDeclared` does (strict kinds: an `int` is
+not a `float`; struct identity by name; a stamped collection's element type must
+match), so a finding is a call or store the runtime would reject; a list / map
+literal is checked element by element, the way the runtime validates a generic
+collection. Library builtins are the one exception to element checking: a
+builtin validates a collection's elements one by one, so an empty `list of int`
+passes a builtin that wants strings, and a library parameter's element type is
+compared only against literal elements. Struct identity is normalised to the
+linted file's terms (no prefix for a same-file type, the canonical library name
+for a library type whatever alias it is `use`d under, the import prefix for a
+module type); a name the typer cannot place makes the type unknown. The CLI
+supplies the library's registered struct shapes and constant types
+(`Config.LibStructs` / `LibConsts`, read once from an interpreter with every
+library installed), so a library struct's fields (`$size.rows`) and constants
+(`math.PI`) are typed too.
+
+**Library signatures (`internal/libsig`).** Builtins validate their own
+arguments at runtime and carry no static signature, so the arity, argument
+types and return type of every builtin live in a declarative side table: one
+file per library, each a text block of `name(T1, T2?, T3...) R` lines in
+Jennifer's type syntax (`any` for any value, `A|B` for a union, `?` optional,
+`...` variadic; a builtin that dispatches on its first argument gets one line
+per shape). Registration stays a name and a function, and the table compiles to
+strings the tiny binary never links (only `lint` reads it). A signature is never
+stricter than its builtin: lint reports only when no line accepts a call, so an
+uncertain parameter is `any` and a return whose kind varies is `any` or a union
+(which lint treats as unknown); a list return names its element type only when
+the builtin stamps one. `TestLibsigCoversInstalledBuiltins`
+(`internal/stdlib`) keeps the table in lock-step with `InstallAll`: every line
+parses, every registered builtin has a line, every line names a registered
+builtin, and every library type it mentions is registered. **A new builtin needs
+its `libsig` line.** Because the table is complete, `L114` reads it as
+the list of a library's functions: a call to a name with no line is unknown.
+A library's constants and types come from the interpreter's registered tables
+(`Config.LibConsts` / `LibStructs`, filled by the CLI).
 
 **Configuration.** `--checks=IDS` (per run) or a `.jennifer-lint` file at
 the tree root (per project) select checks with one `IDS` / `!IDS`

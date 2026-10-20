@@ -448,3 +448,36 @@ one import and one namespace give a caller every rendering path
 judged worth the import tax; a program that needs `markdown` without PDF and cares
 about the few-ms / few-MB cost can take the single `.j` file and strip the `pdf`
 import. See the M24.21 milestone.
+
+## Library signatures are a side table, not part of registration
+
+M28.9 needed a static signature (arity, argument types, return type) for every
+library builtin so `jennifer lint` can check a library call the way it checks a
+user method call. The obvious home is the registration call itself
+(`RegisterNamespaced(lib, name, fn, sig)`), which keeps a signature beside its
+implementation and can never name a builtin that does not exist.
+
+It lives instead in **`internal/libsig`**: one file per library, a text block of
+`name(T1, T2?, T3...) R` lines in Jennifer's own type syntax. The reasons:
+
+- **The binaries do not pay for it.** Only `lint` reads signatures, and `lint`
+  is not in `jennifer-tiny`. A signature argument on `RegisterNamespaced` would
+  be parsed or stored by every `Install` in every interpreter (every module
+  sub-interpreter included) of every run, for a tool most runs never invoke.
+- **Registration stays a name and a function.** Some 600 call sites keep one
+  shape, and a builtin's own runtime checks remain the authority on what it
+  accepts. The table states what lint may assume, a deliberately looser claim:
+  a signature is never stricter than its builtin (`any` where a shape is
+  uncertain), because an over-narrow line would turn a working call into a false
+  finding.
+- **Drift is a test failure, not a silent gap.**
+  `TestLibsigCoversInstalledBuiltins` compares the table with what `InstallAll`
+  registers - every builtin has a line, every line a builtin, every line parses,
+  every library type it names is registered - which gives the side table the
+  "cannot name a missing builtin" property the registration form would have had.
+- **It reads as documentation.** A block of one-line signatures per library is
+  the shape editor tooling and generated reference pages want, without
+  reflecting over Go code.
+
+The cost is one more file to touch when a builtin is added or its arity changes;
+the coverage test names the missing line.
