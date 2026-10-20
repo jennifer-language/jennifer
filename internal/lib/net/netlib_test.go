@@ -1049,3 +1049,67 @@ func TestReadAllIdleTimeoutRecoverable(t *testing.T) {
 		t.Fatalf("got %q, want true/Q", out)
 	}
 }
+
+// TestRecvFromTruncated - a datagram longer than recvFrom's n comes back cut to
+// n bytes with truncated set; one that fits has truncated false.
+func TestRecvFromTruncated(t *testing.T) {
+	out, err := runProg(t, `
+		use net;
+		use convert;
+		use io;
+		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		net.sendTo($a, net.address($b), convert.bytesFromString("0123456789abcdef", "utf-8"));
+		def d as net.Datagram init net.recvFrom($b, 5);
+		io.printf("%s %t;", convert.stringFromBytes($d.data, "utf-8"), $d.truncated);
+		net.sendTo($a, net.address($b), convert.bytesFromString("hi", "utf-8"));
+		$d = net.recvFrom($b, 5);
+		io.printf("%s %t", convert.stringFromBytes($d.data, "utf-8"), $d.truncated);
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "01234 true;hi false" {
+		t.Errorf("got %q", out)
+	}
+}
+
+// TestTimeoutKind - a read past its deadline is a catchable Error{kind:
+// "timeout"} with one message shape for TCP and UDP, while a closed socket is
+// an ordinary runtime error, so a poll loop can tell the two apart.
+func TestTimeoutKind(t *testing.T) {
+	l, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		c, aErr := l.Accept()
+		if aErr != nil {
+			return
+		}
+		<-done
+		_ = c.Close()
+	}()
+	out, runErr := runProg(t, fmt.Sprintf(`
+		use net;
+		use io;
+		def c as net.Conn init net.connect(%q);
+		net.setReadDeadline($c, 30);
+		try { net.readBytes($c, 1); } catch (e) { io.printf("%%s %%s;", $e.kind, $e.message); }
+		def u as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+		net.setReadDeadline($u, 30);
+		try { net.recvFrom($u, 16); } catch (e) { io.printf("%%s %%s;", $e.kind, $e.message); }
+		net.close($u);
+		try { net.recvFrom($u, 16); } catch (e) { io.printf("%%s", $e.kind); }
+	`, l.Addr().String()))
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	want := "timeout net.readBytes: read timed out;timeout net.recvFrom: read timed out;runtime"
+	if out != want {
+		t.Errorf("got  %q\nwant %q", out, want)
+	}
+}

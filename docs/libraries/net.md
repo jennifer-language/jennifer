@@ -29,11 +29,11 @@ arrived.
 | `net.connect(address[, timeoutMs])` | `net.Conn`   | TCP client. `address` is `"host:port"` (Go's convention). An optional `timeoutMs` bounds connection establishment (a slow / unreachable peer otherwise blocks the dial forever); `0` / omitted means no connect timeout. |
 | `net.listen(address)`            | `net.Listener`  | Bind and listen. `":0"` selects an ephemeral port.                                        |
 | `net.accept($listener)`          | `net.Conn`      | Blocking accept. Non-blocking use pairs with `spawn`.                                     |
-| `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Sticky-EOF on close. |
+| `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Once the peer has closed it returns **empty** `bytes` (length 0), and keeps doing so (sticky EOF) - how a reader tells "peer closed" from "nothing yet". |
 | `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap; a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
 | `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable "closed mid-frame" error, never a truncated return. `idleTimeoutMs` as in `readAll`. |
 | `net.writeBytes($conn, b)`       | `null`          | Blocking write of every byte.                                                             |
-| `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a distinguishable `read timed out` error; the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
+| `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a catchable `Error{kind: "timeout"}` (`... read timed out`); the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.setWriteDeadline($conn, ms)` | `null`         | Arm a **write** deadline `ms` out; `0` clears it. Bounds a slow / stalled send; reads are untouched. Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.eof($conn)`                 | `bool`          | Looks ahead: true iff the next read would return partial or fail.                        |
 | `net.address($conn)`             | `string`        | Peer's `"host:port"` (for logs). Polymorphic - see [Address helpers](#address-helpers).  |
@@ -97,9 +97,9 @@ the same connection.
 ### Deadlines: single-threaded poll with timeout
 
 `net.setReadDeadline($conn, ms)` arms a read deadline `ms` milliseconds in the
-future; a read that reaches it before data arrives fails with a distinguishable
-`net.readBytes: read timed out` error you can `catch`, rather than blocking
-forever or crashing. `net.setReadDeadline($conn, 0)` clears it again. This turns
+future; a read that reaches it before data arrives fails with a catchable
+`Error{kind: "timeout"}` (message `net.readBytes: read timed out`), rather than
+blocking forever or crashing. `net.setReadDeadline($conn, 0)` clears it again. This turns
 a blocking read into a poll-with-timeout, so a protocol client can wait for a
 packet and, on a timeout, do idle work - all on one flow, without dedicating a
 `spawn`ed reader. The same call accepts a `net.UDPSocket`, so a datagram
@@ -133,7 +133,7 @@ while ($running) {
         net.setReadDeadline($c, 0);  # clear while we read the rest of the packet
         # ... read and dispatch the rest of the message ...
     } catch (err) {
-        if (strings.contains($err.message, "timed out")) {
+        if ($err.kind == "timeout") {
             net.writeBytes($c, $keepalive);   # works: the read deadline never touched the write side
         } else {
             $running = false;                 # a real failure (closed conn, etc.)
@@ -147,7 +147,16 @@ Clear a deadline on every exit path from the read that armed it with
 the same connection.
 
 The deadline is absolute and is **not** rearmed automatically: reset it
-(or clear it with `0`) before the next read. It applies to writes too.
+(or clear it with `0`) before the next read.
+
+**Every timeout has `kind: "timeout"`.** A read or write past its deadline, a
+`connect` / `connectTLS` past its `timeoutMs`, and a `startTLS` handshake past its
+timeout all raise `Error{kind: "timeout"}` with one message shape,
+`<call>: <operation> timed out` (`net.recvFrom: read timed out`,
+`net.connect: 10.0.0.1:80: connect timed out`), on TCP and UDP alike. Every other
+socket failure - a closed or reset connection, a refused connect - is
+`kind: "runtime"` carrying the OS text, so a poll loop can tell "nothing arrived
+yet" from "the socket is gone" by `kind` alone.
 
 ### Read errors are catchable - including inside `spawn`
 
@@ -266,7 +275,7 @@ to establish; the socket is a bound port.
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
 | `net.listenUDP(address)`         | `net.UDPSocket` | Bind a UDP port. Usable as both client and server (send from wherever you bound).         |
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
-| `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes.                                                  |
+| `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes. A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
 | `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. This is the interface selection a wildcard bind (`0.0.0.0:0`) otherwise leaves to the kernel routing table - the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux-only and needs `CAP_NET_RAW`** (typically root); it errors with `EPERM` when unprivileged. |
 
@@ -283,7 +292,8 @@ def struct net.UDPSocket { id as int };
 
 def struct net.Datagram {
     data as bytes,
-    peer as string      # "host:port" of the sender
+    peer as string,     # "host:port" of the sender
+    truncated as bool   # the datagram was longer than recvFrom's n; data holds its first n bytes
 };
 ```
 

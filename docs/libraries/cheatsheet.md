@@ -255,14 +255,14 @@ flat lookup view, not authoritative.
 | [`net`](net.md)`.listenUDP(address)`                  | Bind a UDP socket. Returns a `net.UDPSocket`; usable as both client and server.                                                     |
 | [`net`](net.md)`.lookup(host)`                        | DNS: resolve `host` to a `list of string` IPs.                                                                                      |
 | [`net`](net.md)`.readAll($conn [, maxBytes [, idleTimeoutMs]])` | Read to EOF, returning the whole stream as one `bytes` in a single Go loop (whole-body / object download). `maxBytes>0` caps (catchable), `idleTimeoutMs>0` re-arms a per-chunk read deadline. |
-| [`net`](net.md)`.readBytes($conn, n)`                 | Read up to `n` bytes; blocks for at least one byte. Sticky-EOF on close.                                                            |
+| [`net`](net.md)`.readBytes($conn, n)`                 | Read up to `n` bytes; blocks for at least one byte. Empty `bytes` once the peer closed (sticky EOF).                                |
 | [`net`](net.md)`.readN($conn, n [, idleTimeoutMs])`   | Read **exactly** `n` bytes for a length-prefixed frame; a close before `n` bytes is a catchable error, not a truncated return.      |
-| [`net`](net.md)`.recvFrom($sock, n)`                  | Block for one UDP datagram, up to `n` bytes. Returns `net.Datagram{data, peer}`.                                                    |
+| [`net`](net.md)`.recvFrom($sock, n)`                  | Block for one UDP datagram, up to `n` bytes. Returns `net.Datagram{data, peer, truncated}` (`truncated`: it was longer than `n`). |
 | [`net`](net.md)`.reverseLookup(ip)`                   | Reverse DNS: IP address to a `list of string` of hostnames.                                                                         |
 | [`net`](net.md)`.sendTo($sock, peer, bytes)`          | Send one UDP datagram to `peer` (`"host:port"`).                                                                                    |
 | [`net`](net.md)`.setBroadcast($sock, on)`             | Enable/disable `SO_BROADCAST` so a `sendTo` may target a broadcast address. Off by default; Linux/Unix only.                         |
 | [`net`](net.md)`.bindToDevice($sock, iface)`          | Pin a UDP socket's egress/ingress to one interface via `SO_BINDTODEVICE` (`""` clears). The multi-homed-host fix a wildcard bind can't give. Linux-only, needs `CAP_NET_RAW` (root).             |
-| [`net`](net.md)`.setReadDeadline($conn, ms)`          | Arm a read deadline `ms` ms out (`0` clears). The poll-with-timeout primitive; a timeout leaves writes usable.                       |
+| [`net`](net.md)`.setReadDeadline($conn, ms)`          | Arm a read deadline `ms` ms out (`0` clears). The poll-with-timeout primitive: a read past it throws `kind: "timeout"`; writes stay usable. |
 | [`net`](net.md)`.setWriteDeadline($conn, ms)`         | Arm a write deadline `ms` ms out (`0` clears). Bounds a slow send; reads untouched.                                                  |
 | [`net`](net.md)`.writeBytes($conn, bytes)`            | Blocking write of every byte to a `net.Conn`.                                                                                       |
 | [`regex`](regex.md)`.escape(s)`                       | Escape RE2 metacharacters so `s` matches literally when used as a pattern.                                                          |
@@ -387,8 +387,9 @@ flat lookup view, not authoritative.
 | [`stats`](stats.md)`.histogram(data, binEdges)` | Bin counts (Excel `FREQUENCY`); `k+1` ascending edges -> `k` counts (`list of int`). |
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
-| [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Non-terminal errors** (catchable); `0`/`0` when the terminal has no window size set - fall back.  |
+| [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Errors** (catchable) off a terminal or when no window size is set - fall back. |
 | [`term`](term.md)`.readByte()`                        | Next raw byte from stdin (`0`-`255`), or `-1` at end of input. Bytes, not decoded keys. Refused in the REPL.                        |
+| [`term`](term.md)`.readByteTimeout(ms)`               | As `readByte`, or `-2` when no byte arrives within `ms` (`0` polls). Tells a lone Escape from an escape sequence. Refused in the REPL. |
 | [`testing`](testing.md)`.assertContains(hay, needle)` | Throw `Error{kind:"assertion"}` unless hay contains needle: substring / list element / map key.                                     |
 | [`testing`](testing.md)`.assertEqual(actual, expected)` | Throw unless deeply equal (lists / maps / structs compare by value).                                                              |
 | [`testing`](testing.md)`.assertFalse(cond)`           | Throw unless `cond` (a bool) is false.                                                                                              |

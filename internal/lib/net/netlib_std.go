@@ -170,7 +170,25 @@ func resolveUDP(fnName string, id int64) (*udpState, error) {
 
 // -------- TCP --------
 
-func connectFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// maxDatagram is the largest UDP payload (65,535 minus the 8-byte UDP header;
+// an IPv4 datagram tops out lower, an IPv6 jumbogram needs a special path).
+const maxDatagram = 65535 - 8
+
+// failure turns a socket error into the error a Jennifer program sees. A
+// deadline or dial timeout (a net.Error whose Timeout() is true) becomes a
+// catchable Error{kind: "timeout"} reading "<prefix>: <op> timed out", the same
+// shape for every call, TCP and UDP alike, so a poll loop can tell "nothing
+// arrived yet" from a closed or broken socket by kind rather than by message.
+// Anything else stays a runtime error carrying the OS text.
+func failure(ctx interpreter.BuiltinCtx, prefix, op string, err error) error {
+	var ne stdnet.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return interpreter.RaiseError("timeout", fmt.Sprintf("%s: %s timed out", prefix, op), ctx.File, ctx.Line, ctx.Col)
+	}
+	return fmt.Errorf("%s: %v", prefix, err)
+}
+
+func connectFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 2 {
 		return interpreter.Null(), fmt.Errorf("net.connect expects 1 or 2 arguments (address[, timeoutMs]), got %d", len(args))
 	}
@@ -190,7 +208,7 @@ func connectFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		c, dialErr = stdnet.Dial("tcp", addr)
 	}
 	if dialErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.connect: %s: %v", addr, dialErr)
+		return interpreter.Null(), failure(ctx, "net.connect: "+addr, "connect", dialErr)
 	}
 	host, _, _ := stdnet.SplitHostPort(addr) // recorded so a later startTLS can reuse it
 	connsMu.Lock()
@@ -319,7 +337,7 @@ func (b *bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 // net.Conn`: dial `address` (host:port, same as net.connect) and complete
 // a TLS handshake, verifying the server certificate against the address's
 // host.
-func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func connectTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.connectTLS expects 1 to 3 arguments (address[, net.TLSOptions][, timeoutMs]), got %d", len(args))
 	}
@@ -355,7 +373,7 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		c, dialErr = tls.Dial("tcp", addr, cfg)
 	}
 	if dialErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.connectTLS: %s: %v", addr, dialErr)
+		return interpreter.Null(), failure(ctx, "net.connectTLS: "+addr, "connect", dialErr)
 	}
 	connsMu.Lock()
 	if len(conns) >= maxNetHandles {
@@ -383,7 +401,7 @@ func connectTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // sentinel for the rare trusted-peer case. idleTimeoutMs > 0 re-arms a read
 // deadline before each chunk (the same idle-timeout a `.j` loop gets from
 // net.setReadDeadline); a timeout is a distinct catchable error.
-func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.readAll expects 1 to 3 arguments (net.Conn[, maxBytes[, idleTimeoutMs]]), got %d", len(args))
 	}
@@ -461,11 +479,7 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 				s.mu.Unlock()
 				return interpreter.BytesVal(out), nil
 			}
-			var ne stdnet.Error
-			if errors.As(rerr, &ne) && ne.Timeout() {
-				return interpreter.Null(), fmt.Errorf("net.readAll: read timed out")
-			}
-			return interpreter.Null(), fmt.Errorf("net.readAll: %v", rerr)
+			return interpreter.Null(), failure(ctx, "net.readAll", "read", rerr)
 		}
 	}
 }
@@ -476,7 +490,7 @@ func readAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // interpreted accumulation. A peer that closes after fewer than n bytes is a
 // catchable "closed mid-frame" error, never a truncated return. idleTimeoutMs
 // works as in readAll.
-func readNFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.readN expects 2 or 3 arguments (net.Conn, n[, idleTimeoutMs]), got %d", len(args))
 	}
@@ -546,11 +560,7 @@ func readNFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 				s.mu.Unlock()
 				return interpreter.Null(), fmt.Errorf("net.readN: connection closed after %d of %d bytes", got, n)
 			}
-			var ne stdnet.Error
-			if errors.As(rerr, &ne) && ne.Timeout() {
-				return interpreter.Null(), fmt.Errorf("net.readN: read timed out")
-			}
-			return interpreter.Null(), fmt.Errorf("net.readN: %v", rerr)
+			return interpreter.Null(), failure(ctx, "net.readN", "read", rerr)
 		}
 	}
 	return interpreter.BytesVal(buf), nil
@@ -560,7 +570,7 @@ func readNFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // net.Conn`: upgrade an open plaintext connection to TLS in place (for
 // STARTTLS). The server certificate is verified against the hostname the
 // connection was opened with (net.connect); returns the same handle.
-func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func startTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.startTLS expects 1 to 3 arguments (net.Conn[, net.TLSOptions][, timeoutMs]), got %d", len(args))
 	}
@@ -622,7 +632,7 @@ func startTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		_ = c.SetWriteDeadline(time.Time{})
 	}
 	if hErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.startTLS: %v", hErr)
+		return interpreter.Null(), failure(ctx, "net.startTLS", "handshake", hErr)
 	}
 	s.mu.Lock()
 	s.c = tlsConn
@@ -693,7 +703,7 @@ func acceptFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // whatever the buffered reader has, capped at n. Callers who need
 // exactly N bytes call it in a loop until they've assembled the
 // payload.
-func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func readBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("net.readBytes expects 2 arguments (net.Conn, n), got %d", len(args))
 	}
@@ -729,16 +739,12 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 			s.mu.Unlock()
 			return interpreter.BytesVal(buf[:read]), nil
 		}
-		// A deadline set by net.setReadDeadline surfaces as a timeout error.
-		// Report it with a distinct, catchable message (not a crash) so a
-		// poll-with-timeout loop can tell "no data yet, send a keepalive"
-		// apart from a real connection failure. The deadline is not cleared;
-		// the caller re-arms it (or clears it with ms 0) before the next read.
-		var ne stdnet.Error
-		if errors.As(rerr, &ne) && ne.Timeout() {
-			return interpreter.Null(), fmt.Errorf("net.readBytes: read timed out")
-		}
-		return interpreter.Null(), fmt.Errorf("net.readBytes: %v", rerr)
+		// A deadline set by net.setReadDeadline surfaces as a catchable
+		// Error{kind: "timeout"}, so a poll-with-timeout loop can tell "no data
+		// yet, send a keepalive" apart from a real connection failure. The
+		// deadline is not cleared; the caller re-arms it (or clears it with ms
+		// 0) before the next read.
+		return interpreter.Null(), failure(ctx, "net.readBytes", "read", rerr)
 	}
 	return interpreter.BytesVal(buf[:read]), nil
 }
@@ -840,7 +846,7 @@ func setWriteDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return applyDeadline("net.setWriteDeadline", args, dlWrite)
 }
 
-func writeBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func writeBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("net.writeBytes expects 2 arguments (net.Conn, bytes), got %d", len(args))
 	}
@@ -860,7 +866,7 @@ func writeBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	c := s.c
 	s.mu.Unlock()
 	if _, werr := c.Write(data); werr != nil {
-		return interpreter.Null(), fmt.Errorf("net.writeBytes: %v", werr)
+		return interpreter.Null(), failure(ctx, "net.writeBytes", "write", werr)
 	}
 	return interpreter.Null(), nil
 }
@@ -1031,7 +1037,7 @@ func listenUDPFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return makeUDPSocket(id), nil
 }
 
-func sendToFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func sendToFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("net.sendTo expects 3 arguments (net.UDPSocket, peer, bytes), got %d", len(args))
 	}
@@ -1056,12 +1062,12 @@ func sendToFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.sendTo: %s: %v", peer, resolveErr)
 	}
 	if _, werr := s.c.WriteTo(data, peerAddr); werr != nil {
-		return interpreter.Null(), fmt.Errorf("net.sendTo: %v", werr)
+		return interpreter.Null(), failure(ctx, "net.sendTo", "write", werr)
 	}
 	return interpreter.Null(), nil
 }
 
-func recvFromFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func recvFromFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("net.recvFrom expects 2 arguments (net.UDPSocket, n), got %d", len(args))
 	}
@@ -1080,12 +1086,21 @@ func recvFromFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	buf := make([]byte, n)
+	// Read into a buffer of the largest possible datagram, whatever n is: a
+	// datagram longer than the buffer is cut short by the kernel and the rest
+	// discarded without a word, so a buffer of only n bytes could not tell a
+	// truncated datagram from a short one. The result carries the first n bytes
+	// and `truncated` reports whether any were dropped.
+	buf := make([]byte, maxDatagram)
 	read, peer, rerr := s.c.ReadFrom(buf)
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("net.recvFrom: %v", rerr)
+		return interpreter.Null(), failure(ctx, "net.recvFrom", "read", rerr)
 	}
-	return makeDatagram(buf[:read], peer.String()), nil
+	truncated := int64(read) > n
+	if truncated {
+		read = int(n)
+	}
+	return makeDatagram(buf[:read], peer.String(), truncated), nil
 }
 
 // setBroadcastFn toggles the SO_BROADCAST socket option on a UDP socket, so a

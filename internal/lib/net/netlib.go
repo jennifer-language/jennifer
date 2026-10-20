@@ -53,6 +53,9 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedStruct(LibraryName, "Datagram", []parser.StructField{
 		{Name: "data", Type: parser.PrimitiveType(parser.TypeBytes)},
 		{Name: "peer", Type: parser.PrimitiveType(parser.TypeString)},
+		// truncated: the datagram was longer than recvFrom's n, so data holds
+		// only its first n bytes (the rest is gone - a datagram is read whole).
+		{Name: "truncated", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 	// TLS handshake options; the zero value verifies against the system
 	// roots. `skipVerify: true` accepts any certificate (insecure); a
@@ -116,10 +119,11 @@ func makeUDPSocket(id int64) Value {
 	})
 }
 
-func makeDatagram(data []byte, peer string) Value {
+func makeDatagram(data []byte, peer string, truncated bool) Value {
 	return interpreter.NamespacedStructVal(LibraryName, "Datagram", []interpreter.StructField{
 		{Name: "data", Value: interpreter.BytesVal(data)},
 		{Name: "peer", Value: interpreter.StringVal(peer)},
+		{Name: "truncated", Value: interpreter.BoolVal(truncated)},
 	})
 }
 
