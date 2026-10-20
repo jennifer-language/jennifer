@@ -283,7 +283,7 @@ func cancelledFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 // makeWaitTimeout is task.wait bounded by a millisecond deadline: it returns the
 // task's result if it completes within the timeout (re-raising a body error, and
 // marking observed, exactly like task.wait), and otherwise throws a catchable
-// "timed out" error. On timeout the task stays live and unobserved - the caller
+// Error{kind: "timeout"}. On timeout the task stays live and unobserved - the caller
 // can retry, cancel + discard, or wait again.
 func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
 	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -308,14 +308,14 @@ func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
 			}
 			return state.Result, nil
 		case <-timer.C:
-			return interpreter.Null(), fmt.Errorf("task.waitTimeout: timed out after %d ms", args[1].Int)
+			return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitTimeout: timed out after %d ms", args[1].Int))
 		}
 	}
 }
 
 // waitAnyTimeoutFn is task.waitAny bounded by a millisecond deadline: it returns
 // the zero-based index of the first task to complete within the timeout, or
-// throws a catchable "timed out" error. Like task.waitAny it does not mark any
+// throws a catchable Error{kind: "timeout"}. Like task.waitAny it does not mark any
 // task observed (the caller observes the returned index).
 func waitAnyTimeoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
@@ -336,7 +336,7 @@ func waitAnyTimeoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	defer timer.Stop()
 	chosen, ok := firstDone(states, timer.C)
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("task.waitAnyTimeout: timed out after %d ms", args[1].Int)
+		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAnyTimeout: timed out after %d ms", args[1].Int))
 	}
 	return interpreter.IntVal(int64(chosen)), nil
 }

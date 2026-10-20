@@ -148,7 +148,8 @@ io.printf("%d\n", task.waitTimeout($t, 5000));
 }
 
 // TestTaskWaitTimeoutTimesOut: a spinning task does not finish within the
-// timeout, so waitTimeout throws a catchable error.
+// timeout, so waitTimeout and waitAnyTimeout throw a catchable
+// Error{kind: "timeout"} - the kind net uses for its deadlines too.
 func TestTaskWaitTimeoutTimesOut(t *testing.T) {
 	out, err, _ := runTask(t, `
 use io;
@@ -157,7 +158,12 @@ def t as task of int init spawn { while (true) { } return 0; };
 try {
     task.waitTimeout($t, 30);
 } catch (e) {
-    io.printf("timedout\n");
+    io.printf("%s: %s\n", $e.kind, $e.message);
+}
+try {
+    task.waitAnyTimeout([$t], 30);
+} catch (e) {
+    io.printf("%s: %s\n", $e.kind, $e.message);
 }
 task.cancel($t);
 task.discard($t);
@@ -165,8 +171,9 @@ task.discard($t);
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out != "timedout\n" {
-		t.Errorf("out = %q, want timedout", out)
+	want := "timeout: task.waitTimeout: timed out after 30 ms\ntimeout: task.waitAnyTimeout: timed out after 30 ms\n"
+	if out != want {
+		t.Errorf("out = %q, want %q", out, want)
 	}
 }
 

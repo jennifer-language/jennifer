@@ -15,10 +15,12 @@ def n as int init task.wait($t);
 io.printf("answer: %d\n", $n);
 ```
 
-That's the whole story. No channels, no shared memory, no locks,
-no cancellation tokens, no goroutine-leak gotchas. The four pieces
-- the `spawn` keyword, the `task of T` type, the `task` library,
-and the exit-time loud-fail contract - are what concurrency ships.
+That's the core. The pieces are the `spawn` keyword, the `task of T`
+type, the `task` library (waiting, cooperative cancellation, bounded
+waits), [`channel of T`](../libraries/channel.md) for streaming values
+between tasks, and the exit-time loud-fail contract. There is no
+shared mutable memory and no lock: a task works on its own copy of
+the data, and values travel between tasks only by being copied.
 
 ## The model
 
@@ -52,7 +54,7 @@ a system call - `net.accept`, a socket read, `term.readByte` - is not at a
 checkpoint and does not see the flag; close its socket from another task (the
 blocked call then raises a catchable `Error{kind: "closed"}`) or `task.discard`
 it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
-a catchable "timed out" error. Full detail in the
+a catchable `Error{kind: "timeout"}`. Full detail in the
 [`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
 
 **Channels stream values.** Where a `task` observes one result, a
@@ -94,9 +96,10 @@ mutable state to race on.
 
 The cost is the obvious one: deep-copying a large structure into a
 spawn frame is O(N). For a 10 000-element list that's measurable.
-The benefit is that you never need a lock, a mutex, an atomic, or
-a channel to coordinate; concurrent code reads like sequential
-code with `spawn` markers.
+The benefit is that you never need a lock, a mutex, or an atomic
+to protect data; concurrent code reads like sequential code with
+`spawn` markers, and a channel is there for passing values, not for
+guarding them.
 
 ## Patterns
 
@@ -126,6 +129,20 @@ io.printf("%a\n", $results);
 `task.waitAll` returns results in the same order as the input
 tasks, not the order in which they completed. That's the property
 most parallel-compute code wants.
+
+### Many live tasks on `jennifer-tiny`
+
+Under `jennifer-tiny` every task runs on one OS thread (concurrency, no
+multi-core speedup) and holds a fixed 4 MB stack while it is alive. Starting
+tasks that are all alive at once also gets slower the more there are: under
+TinyGo's default collector a few dozen start in well under a second, 100 take
+about 2 s and 400 about 35 s, with roughly 4 MB of memory each. The standard
+`jennifer` binary starts the same 400 in milliseconds.
+
+So on `jennifer-tiny`, keep the number of live tasks small: wait for each task
+(or each small batch) before spawning the next, or start a few worker tasks
+that take their jobs from a [channel](../libraries/channel.md) instead of
+spawning one task per job up front.
 
 ### Fire and forget
 
@@ -225,46 +242,36 @@ Doing nothing is not a fourth option.
 > program, so a server's accept loop blocked in `net.accept` cannot
 > keep it alive.
 
-## What's deliberately not in v1
+## What Jennifer leaves out
 
-The current surface stops short of several features common to other
-languages' concurrency stories. Each was considered and deferred,
-not rejected:
+A few features common in other languages' concurrency stories are
+not part of Jennifer:
 
-- **Channels.** Inter-task communication beyond "wait for a
-  return value" is not in v1. The chosen surface (`task of T` +
-  `wait/waitAll/waitAny`) handles the most common cases without
-  the bookkeeping channels require. A channel primitive would
-  arrive in a later milestone.
-- **Cancellation tokens.** No way to signal a running task to
-  stop. The spawn body runs to completion or to an unhandled
-  error. Cancellation is an open design question (cooperative
-  flag? hard abort? structured-concurrency tree?) and stays
-  deferred.
-- **Timeouts.** No built-in `task.waitWithTimeout`. Build one with
-  a sentinel spawn that returns after `time.sleep` and a
-  `task.waitAny` over the pair. A higher-level helper may ship
-  later.
+- **Hard abort.** `task.cancel` is cooperative: it takes effect at
+  the body's next loop checkpoint, never in the middle of a
+  statement. A task blocked in a system call is stopped by closing
+  what it waits on (its socket, its channel) instead.
 - **Structured concurrency.** No automatic scope-bounded
   termination of unwaited tasks. The loud-fail contract is
   Jennifer's lighter-weight answer: not as strong a guarantee as
   Trio / async-await scopes, but enough to keep spawned errors
   visible.
-- **Parallel `for` / `map`.** No `for parallel (...)` syntax. If
-  you need it, write the explicit `spawn` / `waitAll` pair; that's
-  what a parallel-map combinator would compile to anyway.
-- **Atomics, mutexes, shared mutable state.** Value-semantics
-  capture removes the need.
-
-The single most likely follow-on in this area is a `time`-aware
-helper for timeouts; channels are second; structured-concurrency
-scopes a distant third (and might never land, since the loud-fail
-contract already addresses the main pain point).
+- **Parallel `for` / `map`.** No `for parallel (...)` syntax. Write
+  the explicit `spawn` / `waitAll` pair, or a worker pool over a
+  channel; that's what a parallel-map combinator would compile to
+  anyway.
+- **Atomics, mutexes, shared mutable variables.** Value-semantics
+  capture removes the need. State that several tasks must see lives
+  behind a library handle instead - a channel, or a
+  [`kv`](../libraries/kv.md) store (whose `incr` is atomic).
 
 ## See also
 
-- [`task` library reference](../libraries/task.md) - the five
-  builtins, error propagation, worked examples.
+- [`task` library reference](../libraries/task.md) - every
+  builtin, error propagation, cancellation, timeouts, worked
+  examples.
+- [`channel` library reference](../libraries/channel.md) - sending,
+  receiving, closing, and `select` over several channels.
 - [Control flow](control-flow.md) - `try`/`catch` works the same
   way around `task.wait` as around any other runtime error.
 - [Methods](methods.md) - calling methods from inside a spawn body
@@ -272,4 +279,4 @@ contract already addresses the main pain point).
   any other call frame does.
 - [`docs/milestones.md`](../milestones.md) - the concurrency entry has
   the design rationale (data-race-freedom by construction, the
-  loud-fail decision, what's deferred to later).
+  loud-fail decision).

@@ -30,14 +30,14 @@ io.printf("%d\n", $n);                      # 2
 | `task.waitAny($ts)`             | `int`           | Block until any task in `$ts` is done; return its index. Caller follows up with `task.wait`.   |
 | `task.cancel($t)`               | `null`          | Request cooperative cancellation of `$t` (see "Cancellation"). Does not block.                  |
 | `task.cancelled()`              | `bool`          | Non-raising poll: true if the **current** spawn body has been cancelled (always false on main). |
-| `task.waitTimeout($t, ms)`      | `T`             | Like `task.wait`, but throws a catchable "timed out" error if `$t` doesn't finish in `ms` (`ms` up to ~9.2e12; a larger value is a catchable error, not a silent instant timeout). |
-| `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable "timed out" error if none finishes in `ms`.         |
+| `task.waitTimeout($t, ms)`      | `T`             | Like `task.wait`, but throws a catchable `Error{kind: "timeout"}` if `$t` doesn't finish in `ms` (`ms` up to ~9.2e12; a larger value is a catchable error, not a silent instant timeout). |
+| `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes in `ms`. |
 
 `task.wait` is the workhorse - everything else is a convenience or
 a non-blocking variant. The full surface is intentionally small;
 patterns more complex than "wait for the result", "wait for them
 all", "wait for whichever is first" compose by hand on top of
-these five.
+these calls.
 
 ## Error propagation
 
@@ -218,15 +218,20 @@ Notes:
 
 `task.waitTimeout($t, ms)` is `task.wait` bounded by a millisecond deadline: it
 returns the result (re-raising a body error, exactly like `wait`) if `$t`
-completes within `ms`, and otherwise throws a **catchable** "timed out" error.
+completes within `ms`, and otherwise throws a **catchable**
+`Error{kind: "timeout"}` (message `task.waitTimeout: timed out after N ms`) - the
+same kind `net` uses for its deadlines.
 `task.waitAnyTimeout($ts, ms)` is the multi-task form, returning the first
 finisher's index or throwing on timeout. On a timeout the task(s) stay live and
-unobserved, so follow up with a retry, or `task.cancel` + `task.discard`.
+unobserved, so follow up with a retry, or `task.cancel` + `task.discard`. A body
+error re-raised by `waitTimeout` keeps its own kind, so check `kind` to tell the
+two apart:
 
 ```jennifer
 try {
     def v as int init task.waitTimeout($t, 500);   # up to 500 ms
 } catch (e) {
+    if ($e.kind != "timeout") { throw $e; }   # the body failed
     task.cancel($t);
     task.discard($t);
 }
@@ -253,11 +258,10 @@ site.
 
 - [../user-guide/concurrency.md](../user-guide/concurrency.md) -
   worked-example tour: when to spawn, what value-semantics capture
-  buys you, the loud-fail contract, what's deliberately deferred
-  to later milestones.
-- [../technical/interpreter.md > Concurrency](../technical/interpreter.md#concurrency-m160) -
+  buys you, the loud-fail contract, what Jennifer leaves out.
+- [../technical/interpreter.md > Concurrency](../technical/interpreter.md#concurrency) -
   internals: goroutine mapping, frame snapshot, error routing,
   registry, exit-time scan.
-- [../milestones.md](../milestones.md) - ships `spawn` +
+- [../milestones.md](../milestones.md) - the design history of `spawn` +
   `task of T` + the `task` library; later milestones use
   them to build `fs`, `net`, `httpd`.

@@ -453,19 +453,21 @@ won't be able to read `.kind` / `.message` off it. Use
   keys, type mismatches, division by zero, undefined names,
   bytes-element range violations, and the rest of the positioned
   runtime errors. The runtime wraps them into the canonical `Error`
-  struct with `kind = "runtime"` (more specific tags will land per
-  site over time) and the original file / line / col preserved.
-- **Timeouts** from the `net` library - a read or write past its deadline, a
-  `connect` past its `timeoutMs` - carry `kind = "timeout"`, and a call on a
-  closed socket (one closed before the call, or under a call blocked on it)
-  carries `kind = "closed"`, so a poll loop can tell "nothing arrived yet" and
-  "we closed it" from a broken socket (`"runtime"`).
+  struct with `kind = "runtime"` (the sites below use a more specific
+  kind) and the original file / line / col preserved.
+- **Timeouts** - a `net` read or write past its deadline, a `connect` past its
+  `timeoutMs`, a `task.waitTimeout` / `waitAnyTimeout` that runs out - carry
+  `kind = "timeout"`. In `net`, a call on a closed socket (one closed before
+  the call, or under a call blocked on it) carries `kind = "closed"`, so a poll
+  loop can tell "nothing arrived yet" and "we closed it" from a broken socket
+  (`"runtime"`).
 - **Resource-exhaustion errors** carry `kind = "limit"` instead of
   `"runtime"`, so a caller can tell "the input was too big / too deep"
   from "something inside me is broken" and a library can re-raise it in
-  its own vocabulary. Today this covers the call-depth cap ("call stack
-  too deep") and `archive.unpack` / `unpackWith` exceeding their size /
-  entry caps; more cap sites move to `"limit"` over time.
+  its own vocabulary. It covers the call-depth cap ("call stack too
+  deep"), the recursion memory guard (below), and `archive.unpack` /
+  `unpackWith` exceeding their size / entry caps; other resource caps still
+  raise `"runtime"`.
 
   The call-depth cap counts method calls, block nesting, and expression
   nesting together, so recursion through several nested `if` blocks or a
