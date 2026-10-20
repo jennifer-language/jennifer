@@ -473,9 +473,10 @@ the body observes it at its next loop checkpoint, where the runtime raises a
 catchable "task cancelled" (so a runaway `spawn` can be stopped). A task blocked
 in a system call (`net.accept`, a socket read, `term.readByte`) only sees it when
 the call returns: close its socket from another task, or `task.discard` it.
-Catch it inside the body for a clean partial result; `task.cancel
-+ task.discard` is stop-and-forget. A program that runs to its end waits for
-every undiscarded task; one that ends by `exit` or an uncaught error does not. `task.cancelled()` is a non-raising poll.
+Catch it inside the body for a clean partial result; `task.cancel` plus
+`task.discard` is stop-and-forget. A program that runs to its end waits for
+every undiscarded task; one that ends by `exit` or an uncaught error does not.
+`task.cancelled()` is a non-raising poll.
 `task.waitTimeout($t, ms)` / `task.waitAnyTimeout($ts, ms)` are bounded waits that
 throw a catchable "timed out" error.
 
@@ -501,7 +502,9 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 - `use NAME [as ALIAS];` - system library. Nothing auto-loads; every program
   states its imports. Aliasing is a rename (the canonical prefix stops working).
 - `include "path.j";` - textual file splice (path is a string literal ending in
-  `.j`, resolved relative to the including file).
+  `.j`, resolved relative to the including file). A file only ever `include`d is
+  named `NAME.inc.j`; `jennifer lint` then skips the names it takes from its
+  includer (lint the including file).
 - `import "PATH.j" [as NAME];` - **module** import (a real boundary, not a
   splice). Path forms: `./x.j` / `../x.j` local, `/x.j` absolute, bare `x.j`
   from the module search path. Loads once (run-once, cached), depth-first
@@ -1215,11 +1218,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   whole buffer, so draw a frame with one batch call - `screen.setMany(buf, list of
   screen.Plot{x, y, cell})` / `textMany(buf, list of screen.Span{x, y, text,
   color})` - not one `set` per glyph; keep cell text single-width (no CJK / emoji).
-  Interactive layer (needs
-  `term`, default binary): `screen.decodeKey(seq) -> screen.Key{name, char}`
-  (arrows, nav, F1-F12, ctrl / alt; a lone Escape is `"escape"`) + `nextKey` /
-  `begin` / `end` / `size` over raw mode. For a free-running loop (a game, a live dashboard) that cannot block on a
-  keypress, `screen.startInput() -> Input` runs a background reader into a buffered
+  Interactive layer (needs `term`, default binary):
+  `screen.decodeKey(seq) -> screen.Key{name, char}` (arrows, nav, F1-F12, ctrl /
+  alt; a lone Escape is `"escape"`) plus `nextKey` / `begin` / `end` / `size`
+  over raw mode. For a free-running loop (a game, a live dashboard) that cannot
+  block on a keypress, `screen.startInput() -> Input` runs a background reader into a buffered
   channel, polled with `hasKey` / `pollKey` (non-blocking) or `waitKey`.
   Coordinates 0-based (origin top-left); drawing past an edge is clipped.
 - **`semver`** - strict SemVer 2.0.0 over a `Version` struct,
