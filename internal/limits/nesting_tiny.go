@@ -12,6 +12,11 @@ package limits
 // and 128 (segfaults); the 4 MB stack roughly doubles that floor, so 64 sits far
 // below it with ample margin for shape variance, and is still an order of
 // magnitude past the point where nesting is a code smell.
+//
+// Both caps here are the only guard against a stack overflow: TinyGo does not
+// reliably trap one, and past the floor a run may panic or go on with corrupted
+// values (wrong results, bogus type errors). Never lower -stack-size without
+// re-measuring the floors and these caps with it.
 const MaxNestingDepth = 64
 
 // MaxCallDepth caps interpreter recursion for jennifer-tiny, whose fixed 4 MB

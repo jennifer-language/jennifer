@@ -64,7 +64,11 @@ build-go: gen-version
 # (internal/limits.MaxCallDepth = 120 on tinygo, counting calls, blocks and
 # expression descents; a heavy recursive body segfaults near call depth 75 on
 # this stack, i.e. past the cap). Bump both together if a future
-# workload needs deeper recursion.
+# workload needs deeper recursion. Never shrink it without re-measuring and
+# lowering the caps: TinyGo does not reliably trap an overflow, so past the
+# floor a run can continue on corrupted values instead of crashing (at 1mb a
+# map-building recursion did from 10 levels on). Smaller stacks would also make
+# many live tasks cheaper to start (docs/technical/tinygo.md), but not safely.
 #
 # The build goes through scripts/build-tinygo.sh, which SKIPS gracefully (exit 0)
 # when the toolchain cannot build jennifer-tiny at all - so `make build` still
