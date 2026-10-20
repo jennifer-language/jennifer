@@ -2147,3 +2147,17 @@ func TestIndexBoundsUseInt64Compare(t *testing.T) {
 		}
 	}
 }
+
+// A method reached during top-level init that reads a constant defined further
+// down reports the ordering problem, not a misleading "use $B" hint; the same
+// method called after the definition runs reads it fine.
+func TestConstReadBeforeDefinitionRuns(t *testing.T) {
+	_, err := run(t, "func f() { return B; }\ndef const A as int init f();\ndef const B as int init 2;")
+	if err == nil || !strings.Contains(err.Error(), "constant B is read before its definition has run") {
+		t.Errorf("got %v", err)
+	}
+	out, err := run(t, "use io;\nfunc f() { return B; }\ndef const B as int init 2;\nio.printf(\"%d\", f());")
+	if err != nil || out != "2" {
+		t.Errorf("read after the definition: %q, %v", out, err)
+	}
+}

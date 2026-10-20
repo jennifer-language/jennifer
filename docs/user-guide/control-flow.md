@@ -414,16 +414,17 @@ def struct Error {
 ```
 
 User code throws an `Error{...}` to signal expected failure modes;
-catch sites dispatch on `$err.kind`:
+catch sites dispatch on `$err.kind`. An `Error` literal may leave out its
+location (`file`, `line`, `col`) - the one struct whose literal need not name
+every field - and `throw` fills a missing location in with the throw site's, so a
+caught error says where it was raised. `kind` and `message` stay required. A
+location given explicitly, and a caught error rethrown with `throw $err;`, keep
+their own.
 
 ```jennifer
 func parseConfig(src as string) {
     if (not strings.contains($src, "=")) {
-        throw Error{
-            kind: "parse_error",
-            message: "missing `=`",
-            file: "", line: 0, col: 0
-        };
+        throw Error{kind: "parse_error", message: "missing `=`"};
     }
     # ... happy path ...
 }
@@ -454,6 +455,9 @@ won't be able to read `.kind` / `.message` off it. Use
   runtime errors. The runtime wraps them into the canonical `Error`
   struct with `kind = "runtime"` (more specific tags will land per
   site over time) and the original file / line / col preserved.
+- **Timeouts** from the `net` library - a read or write past its deadline, a
+  `connect` past its `timeoutMs` - carry `kind = "timeout"`, so a poll loop can
+  tell "nothing arrived yet" from a closed or broken socket (`"runtime"`).
 - **Resource-exhaustion errors** carry `kind = "limit"` instead of
   `"runtime"`, so a caller can tell "the input was too big / too deep"
   from "something inside me is broken" and a library can re-raise it in

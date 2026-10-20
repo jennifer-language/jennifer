@@ -191,7 +191,11 @@ Guarantees:
 
 - **Run-once.** A module's top level runs exactly once per program,
   cached by its resolved absolute path. Importing it again returns the
-  same initialised module without re-running it.
+  same initialised module without re-running it. Importing the same module
+  again **under the same alias** is a silent no-op, like a duplicate `use` (so
+  two spliced parts - an `include`d file, or a module and its `_test.j`
+  overlay - can each import what they need); binding an alias that is already
+  bound to a *different* module is an error.
 - **Post-order init.** Imports initialise depth-first: a module is fully
   initialised before any module that imports it. If `main` imports `db`
   and `db` imports `config`, the order is `config`, then `db`, then
@@ -247,7 +251,10 @@ io.printf("%d\n", config.MAXCONN);      # reads an exported constant
 
 Testing: a co-located `MODULE_test.j` is a white-box overlay - `jennifer
 test MODULE_test.j` splices `MODULE.j` in first, so its `test*` methods
-reach the module's private names by bare identifier. For black-box tests,
+reach the module's private names by bare identifier. The module must still
+declare every `use` / `import` it needs itself - the test file's own do not count
+for it, and `jennifer test` refuses to run a module that leans on them. For
+black-box tests,
 `import` the module and exercise its exported surface. See the runnable
 [`examples/modules/`](https://github.com/jennifer-language/jennifer/tree/main/examples/modules)
 chain.

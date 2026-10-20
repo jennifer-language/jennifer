@@ -53,7 +53,12 @@ func (i *Interpreter) checkStructLit(ex *parser.StructLit) error {
 	}
 	return litFieldsError(ex, def.Fields,
 		func(name string) string { return fmt.Sprintf("unknown field %q in struct %q", name, ex.Name) },
-		func(name string) string { return fmt.Sprintf("missing field %q in struct %q literal", name, ex.Name) })
+		func(name string) string {
+			if _, optional := errorLocationZero(ex, name); optional {
+				return ""
+			}
+			return fmt.Sprintf("missing field %q in struct %q literal", name, ex.Name)
+		})
 }
 
 func (i *Interpreter) checkEnumLit(ex *parser.StructLit) error {
@@ -98,7 +103,8 @@ func (i *Interpreter) checkEnumLit(ex *parser.StructLit) error {
 }
 
 // litFieldsError compares a literal's named fields with the declared ones: an
-// unknown field is reported at that field, a missing one at the literal.
+// unknown field is reported at that field, a missing one at the literal (unless
+// missing returns "", marking a field the literal may leave out).
 // Unknown fields are reported first, as the evaluators do.
 func litFieldsError(ex *parser.StructLit, declared []parser.StructField, unknown, missing func(string) string) error {
 	known := make(map[string]bool, len(declared))
@@ -114,8 +120,12 @@ func litFieldsError(ex *parser.StructLit, declared []parser.StructField, unknown
 	}
 	for _, f := range declared {
 		if !provided[f.Name] {
+			msg := missing(f.Name)
+			if msg == "" {
+				continue // a field the literal may leave out
+			}
 			file, line, col := posFor(ex)
-			return &runtimeError{Msg: missing(f.Name), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: msg, File: file, Line: line, Col: col}
 		}
 	}
 	return nil

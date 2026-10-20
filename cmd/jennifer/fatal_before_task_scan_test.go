@@ -13,18 +13,17 @@ import (
 )
 
 // A program that dies with an uncaught error while a spawned task is still
-// running must report that error immediately, not after the exit-time task scan
-// (which blocks on every in-flight task). Otherwise a script whose worker loops
-// forever - a server's accept loop - hangs with the explanation never printed.
-// The task here sleeps for a second, so the test can observe the error on
-// stderr while runFile is still blocked on it, then let it finish cleanly.
+// running reports the error at once and exits without waiting for the task: an
+// early end abandons tasks still in flight, so a script whose worker loops
+// forever - a server's accept loop - neither hangs nor hides the explanation.
+// The task here sleeps far longer than the test waits.
 func TestFatalErrorPrintsBeforeTaskScan(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fatal.j")
 	src := `use time;
 use task;
 def worker as task of null init spawn {
-    time.sleep(time.fromMilliseconds(1500));
+    time.sleep(time.fromMilliseconds(10000));
     return;
 };
 def x as int init 1 // 0;
@@ -67,13 +66,42 @@ def x as int init 1 // 0;
 		}
 	}
 	select {
-	case <-done:
-		t.Fatal("runFile returned before the spawned task finished; the test no longer exercises the scan")
-	default:
-	}
-
-	if code := <-done; code != 1 {
-		t.Errorf("exit code %d, want 1", code)
+	case code := <-done:
+		if code != 1 {
+			t.Errorf("exit code %d, want 1", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("runFile waited for the still-running task after a fatal error")
 	}
 	w.Close()
+}
+
+// `exit` ends the program without waiting for a task still running - here one
+// blocked in net.accept, which no cancellation reaches - and keeps its code.
+func TestExitDoesNotWaitForRunningTask(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "exit.j")
+	src := `use net;
+def l as net.Listener init net.listen("127.0.0.1:0");
+def t as task of null init spawn {
+    while (true) {
+        net.accept($l);
+    }
+    return;
+};
+exit 3;
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() { done <- runFile(path, nil, "") }()
+	select {
+	case code := <-done:
+		if code != 3 {
+			t.Errorf("exit code %d, want 3", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("exit waited for a task blocked in net.accept")
+	}
 }

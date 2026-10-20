@@ -269,11 +269,10 @@ func (i *Interpreter) SetVendorRoot(dir string) {
 // its body runs, so a module is fully initialised before the code that
 // imports it (depth-first post-order). Errors here are load-time errors:
 // they fail the program before the importer's body and are not catchable
-// (an `import` is a declaration, not an expression).
-// The `repl` flag tolerates re-importing the same module under the same alias
-// across inputs (the REPL re-runs bindModuleAlias on every submission, and a
-// module is cached / run-once), so a user can re-run an `import` snippet.
-func (i *Interpreter) loadModuleImports(prog *parser.Program, repl bool) error {
+// (an `import` is a declaration, not an expression). Re-importing the same
+// module under the same alias is a no-op (see bindModuleAlias), so the REPL can
+// re-run an `import` snippet.
+func (i *Interpreter) loadModuleImports(prog *parser.Program) error {
 	if len(prog.ModuleImports) == 0 {
 		return nil
 	}
@@ -293,7 +292,7 @@ func (i *Interpreter) loadModuleImports(prog *parser.Program, repl bool) error {
 		if alias == "" {
 			alias = moduleStem(mi.Path)
 		}
-		if err := i.bindModuleAlias(alias, m, mi, repl); err != nil {
+		if err := i.bindModuleAlias(alias, m, mi); err != nil {
 			return err
 		}
 	}
@@ -309,7 +308,7 @@ func moduleStem(importPath string) string {
 // bindModuleAlias makes `alias.member` at this importer resolve into the
 // loaded module. The alias must not collide with an active library prefix
 // (`use io;` reserves `io`) or a module alias already bound in this program.
-func (i *Interpreter) bindModuleAlias(alias string, m *loadedModule, at parser.Node, repl bool) error {
+func (i *Interpreter) bindModuleAlias(alias string, m *loadedModule, at parser.Node) error {
 	if _, taken := i.nsPrefixes[alias]; taken {
 		file, line, col := posFor(at)
 		return &runtimeError{Msg: fmt.Sprintf("module alias %q collides with an imported library namespace; import the module `as` a different name", alias), File: file, Line: line, Col: col}
@@ -318,11 +317,12 @@ func (i *Interpreter) bindModuleAlias(alias string, m *loadedModule, at parser.N
 		i.moduleAliases = map[string]*loadedModule{}
 	}
 	if existing, dup := i.moduleAliases[alias]; dup {
-		// REPL: re-importing the *same* module under the same alias across
-		// submissions is a harmless no-op (a module is run-once / cached), so a
-		// re-run snippet works. Binding the alias to a *different* module is
-		// still a real collision.
-		if repl && existing == m {
+		// Re-importing the *same* module under the same alias is a harmless
+		// no-op (a module is run-once / cached), like a duplicate `use`: a re-run
+		// REPL snippet works, and so do two spliced parts that each import what
+		// they need (an `include`d file, or a module and its `_test.j` overlay).
+		// Binding the alias to a *different* module is still a real collision.
+		if existing == m {
 			return nil
 		}
 		file, line, col := posFor(at)

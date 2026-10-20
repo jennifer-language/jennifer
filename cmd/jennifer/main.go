@@ -464,14 +464,19 @@ func runFileHook(path string, searchDirs []string, vendorFlag string, afterParse
 		}
 	}
 
-	// The exit-time loud-fail. Even when Run returned cleanly,
-	// any spawned task that ended with an error and was never
-	// task.wait'd / task.discard'd has its error printed to stderr
-	// and bumps the exit code. Tasks that are still in flight at exit
-	// have not been observed either, so the scan blocks on each
-	// until it finishes (the goroutine has nowhere to go if we don't
-	// drain it; the alternative is silently dropping its outcome).
-	unwaited := in.UnwaitedTaskErrors()
+	// The exit-time loud-fail: a spawned task that ended with an error and was
+	// never task.wait'd / task.discard'd has its error printed to stderr and
+	// bumps the exit code. A program that ran to its end waits for tasks still in
+	// flight (they have not been observed either; dropping their outcome would be
+	// silent). One that ended by `exit` or an uncaught error reports only the
+	// tasks already finished: `exit` ends the whole program, so a task blocked
+	// where no cancellation reaches (net.accept, term.readByte) cannot hold it.
+	var unwaited []error
+	if runErr != nil {
+		unwaited = in.FinishedTaskErrors()
+	} else {
+		unwaited = in.UnwaitedTaskErrors()
+	}
 	var unwaitedExit *interpreter.ExitSignal
 	for _, e := range unwaited {
 		if ex, ok := e.(*interpreter.ExitSignal); ok {

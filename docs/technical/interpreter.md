@@ -553,7 +553,14 @@ string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
    check runs. Resolve is idempotent: re-running on an already-resolved
    program produces the same annotations. Any undefined-variable or
    shadowing error surfaces here as a positioned parse-time
-   diagnostic, not a runtime error.
+   diagnostic, not a runtime error. So does a top-level read of a `def
+   const` defined further down (`laterConsts`): top-level statements run
+   in source order, so that read could never succeed. Method bodies are
+   resolved after the top level, against the complete globals frame, so a
+   method may name a constant defined lower down; if such a method runs
+   before the definition has (during top-level setup), the read finds the
+   still-empty global slot and `evalExpr`'s `ConstRefExpr` arm reports that
+   ordering problem rather than a misleading "use `$NAME`" hint.
 2. Records `Imports` into `i.imported`, activating library namespaces.
    Module aliases are not loaded yet - that happens in step 4 - which
    is why the qualified-ref pre-resolution is deferred until after it.
@@ -675,7 +682,9 @@ free-standing statements.
 `loadModuleImports` binds each import's alias (the `as NAME` clause, or the
 file stem via `moduleStem`) into the importer's `moduleAliases`
 (`map[string]*loadedModule`), collision-checked against library prefixes
-(`nsPrefixes`) and other module aliases. Consumer-side resolution rides the
+(`nsPrefixes`) and other module aliases; re-binding an alias to the module it
+already names is a no-op (as a duplicate `use` is), only a different module is a
+collision. Consumer-side resolution rides the
 existing qualified-reference eval layer, since the parser resolver and
 `resolveQualifiedRefs` already defer unknown prefixes to runtime:
 
@@ -972,9 +981,14 @@ error, binds the thrown value to `$NAME` in a fresh per-handler
 scope. Two sentinel paths can produce the catchable error:
 
 - **`*ErrorSignal`** - raised by `throw EXPR;` (`execThrow`). Carries
-  the thrown `Value` plus the throw's source position. Uncaught
-  signals reach the CLI through the same `positioned` interface as
-  `*runtimeError`.
+  the thrown `Value` plus the throw's source position. A thrown `Error`
+  with no location (`file` "", `line` / `col` 0) has the throw site
+  stamped into it (`stampThrowSite`), which is what lets an `Error`
+  literal omit those three fields (`errorLocationZero`, honoured by both
+  `evalStructLit` and the load-time `checkStructLits`); an `Error` that
+  already carries a location - a caught runtime error rethrown - keeps
+  it. Uncaught signals reach the CLI through the same `positioned`
+  interface as `*runtimeError`.
 - **`*runtimeError`** - raised by any builtin or language operation
   (out-of-bounds index, missing map key, type mismatch, etc.). When
   one reaches an enclosing `try`, `execTry` wraps it via
@@ -1156,7 +1170,7 @@ rethrow), `task.discard`, and `task.waitAll` (drains every
 survivor before re-raising).
 
 `Interpreter.UnwaitedTaskErrors()` runs at the end of CLI
-execution:
+execution when the program ran to its end:
 
 ```go
 func (i *Interpreter) UnwaitedTaskErrors() []error {
@@ -1181,8 +1195,15 @@ unobserved goroutine never finishes (a `spawn { while (true) {} }`
 without `task.discard`). The user-guide flags this as a footgun
 of its own; the runtime trade-off favours soundness.
 
+A program that ended **early** - `Run` returned an `*ExitSignal` (an
+`exit`) or an uncaught error - uses `FinishedTaskErrors()` instead: the
+same scan without the wait, reporting only unobserved tasks that are
+already done. `exit` ends the whole program, so a task blocked where no
+cancellation reaches (`net.accept`, a socket read, `term.readByte`) must
+not keep it alive; the process exit abandons it.
+
 `cmd/jennifer/main.go` consumes the slice: after `Run(prog)`
-returns, it walks `UnwaitedTaskErrors()`, prints each one to
+returns, it walks the scan's result, prints each one to
 stderr in `spawn error (unwaited): MSG` form, and bumps the
 process exit code if any were present. `ExitSignal` from a body
 is special-cased in the loud-fail surface (treat as a normal

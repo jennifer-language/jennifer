@@ -173,6 +173,14 @@ def first as int init $xs[0];                # element read
 The same goes for `def const NAME` - the `init` expression is evaluated
 once at declaration time and the result is frozen.
 
+**Top-level code runs in source order, so a constant exists from its `def
+const` on.** Reading one in top-level code above its definition is an error when
+the program loads (`constant B is used before its definition on line 9`). A
+method body may name a constant defined further down - methods usually run after
+the whole top level - but a method *called* during top-level setup, before that
+`def const` has run, raises a runtime error saying so. Define constants above the
+code that first uses them.
+
 **At the def site, names are bare identifiers (no `$`).** The `$` sigil is
 reserved for use-site references that read or assign a variable. So:
 
@@ -194,9 +202,10 @@ MAX = 200;               # ERROR: cannot assign to constant
 ```
 
 **Constant names must be UPPERCASE.** The full rule is
-`[A-Z]+(_[A-Z]+)*`: one or more uppercase chunks joined by single
-underscores. `MAX`, `MAX_RETRIES`, `HTTP_OK`, and `A_B_C` are all
-legal; `max`, `Max`, `_MAX`, `MAX_`, and `MAX__INT` are not. The
+`[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*`: one or more uppercase chunks joined by
+single underscores, each starting with a letter and digits allowed after it.
+`MAX`, `MAX_RETRIES`, `HTTP_OK`, `A_B_C`, `SHA256`, and `HTTP2` are all legal;
+`max`, `Max`, `_MAX`, `MAX_`, `MAX__INT`, and `AES_256` are not. The
 uppercase-only rule is what tells the parser at use sites that a bare
 identifier is a constant reference, not a variable that forgot its
 `$`. Constants also **require an `init` expression** - there is no
@@ -569,7 +578,8 @@ required (every statement ends in one).
 ### Constructing, reading, writing
 
 ```jennifer
-# Construct - every field must be named at the literal.
+# Construct - every field must be named at the literal (the built-in `Error`
+# is the one exception: its file / line / col may be left out, see control flow).
 def p as Point init Point{ x: 3, y: 4 };
 
 # Read.

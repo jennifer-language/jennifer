@@ -62,6 +62,13 @@ type resolver struct {
 	// register itself on PendingEnumMatches for the interpreter to validate
 	// after modules load.
 	prog *Program
+	// laterConsts holds the top-level `def const`s not yet reached while the
+	// top-level statements are resolved (nil once they are done), so a top-level
+	// read of one is reported as a use before its definition: top-level code
+	// runs in source order, so such a read can never succeed. A method body may
+	// read a constant defined further down - it usually runs after the whole top
+	// level - so methods are resolved with laterConsts nil.
+	laterConsts map[string]*DefineStmt
 }
 
 // namedTypeOf returns a pointer to t when t names a struct / enum type, else
@@ -171,11 +178,21 @@ func (r *resolver) resolveProgram(p *Program) error {
 	// Top-level statements share the globals frame.
 	globals := &scopeFrame{slots: map[string]slotInfo{}, isRoot: true}
 	r.push(globals)
+	r.laterConsts = map[string]*DefineStmt{}
+	for _, s := range p.TopLevel {
+		if d, ok := s.(*DefineStmt); ok && d.IsConst {
+			r.laterConsts[d.VarName] = d
+		}
+	}
 	for _, s := range p.TopLevel {
 		if err := r.resolveStmt(s); err != nil {
 			return err
 		}
+		if d, ok := s.(*DefineStmt); ok && d.IsConst {
+			delete(r.laterConsts, d.VarName)
+		}
 	}
+	r.laterConsts = nil
 	p.NumGlobals = globals.count
 	r.pop()
 
@@ -1636,6 +1653,19 @@ func (r *resolver) resolveExpr(e Expr) error {
 			ex.Depth = depth
 			ex.Slot = slot
 			return nil
+		}
+		if d, later := r.laterConsts[ex.Name]; later && !r.isMethod(ex.Name) {
+			file, line, col := posFor(ex)
+			dFile, dLine, _ := posFor(d)
+			where := fmt.Sprintf("line %d", dLine)
+			if dFile != file {
+				where = fmt.Sprintf("%s:%d", dFile, dLine)
+			}
+			return &ParseError{
+				Msg: fmt.Sprintf("constant %s is used before its definition on %s; top-level code runs in source order, so move the `def const` above its first use",
+					ex.Name, where),
+				File: file, Line: line, Col: col,
+			}
 		}
 		// Not a slot binding. Might be a method name (bare method
 		// reference is a runtime error today; leave it for the

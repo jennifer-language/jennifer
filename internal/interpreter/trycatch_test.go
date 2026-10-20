@@ -304,3 +304,32 @@ io.printf("source=%s\n", $err.kind);
 		t.Errorf("got %q", out)
 	}
 }
+
+// An Error literal may leave out its location (file / line / col), and a thrown
+// Error with no location takes the throw site's, so a caught error says where it
+// was raised. An explicit location and a rethrown runtime error keep theirs;
+// kind and message stay required.
+func TestThrowStampsMissingLocation(t *testing.T) {
+	out, err := run(t, `use io;
+func f() {
+    throw Error{kind: "value", message: "short"};
+}
+try { f(); } catch (e) { io.printf("%s:%d:%d;", $e.kind, $e.line, $e.col); }
+try {
+    throw Error{kind: "value", message: "m", file: "x.j", line: 7, col: 3};
+} catch (e) { io.printf("%s:%d:%d;", $e.file, $e.line, $e.col); }
+try {
+    try { def z as int init 1 // 0; } catch (e) { throw $e; }
+} catch (e) { io.printf("%d;", $e.line); }
+def plain as Error init Error{kind: "k", message: "m"};
+io.printf("%d", $plain.line);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "value:3:5;x.j:7:3;10;0"; out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+	if _, err := run(t, `def p as Error init Error{kind: "k"};`); err == nil || !strings.Contains(err.Error(), `missing field "message"`) {
+		t.Errorf("message must stay required: %v", err)
+	}
+}

@@ -495,3 +495,39 @@ export def enum Shape { Empty, Circle { r as int } };`
 		t.Errorf("bad literal inside the module: out %q, err %v", out, err)
 	}
 }
+
+// Re-importing the same module under the same alias is a no-op, like a
+// duplicate `use` (two spliced parts can each import what they need); binding
+// the alias to a different module is still a collision.
+func TestModuleSameAliasReimport(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"m.j":    `export def const V as int init 7;`,
+		"main.j": `use io; import "./m.j" as m; import "./m.j" as m; io.printf("%d", m.V);`,
+	})
+	if err != nil || out != "7" {
+		t.Errorf("same-module re-import: out %q, err %v", out, err)
+	}
+	_, err = runModuleMain(t, map[string]string{
+		"m.j":    `export def const V as int init 7;`,
+		"n.j":    `export def const V as int init 8;`,
+		"main.j": `import "./m.j" as m; import "./n.j" as m;`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Errorf("alias bound to a different module: err = %v, want a collision", err)
+	}
+}
+
+// A module's short `Error{kind, message}` throw is stamped with the module's
+// own throw site and reaches the importer's catch as the reserved Error.
+func TestModuleShortErrorThrow(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"m.j":    "export func boom() {\n    throw Error{kind: \"value\", message: \"bad\"};\n}",
+		"main.j": `use io; import "./m.j" as m; try { m.boom(); } catch (e) { io.printf("%s %s %d %s", $e.kind, $e.message, $e.line, $e.file); }`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.HasPrefix(out, "value bad 2 ") || !strings.HasSuffix(out, "m.j") {
+		t.Errorf("got %q, want the module's throw site", out)
+	}
+}

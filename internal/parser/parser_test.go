@@ -771,6 +771,38 @@ func TestResolveRejectsDuplicateDeclarations(t *testing.T) {
 	}
 }
 
+// TestResolveRejectsTopLevelForwardConst pins that top-level code reading a
+// `def const` defined further down is a load-time error naming the definition:
+// top-level statements run in source order, so the read can never succeed. A
+// method body reading the same constant stays legal (it usually runs later).
+func TestResolveRejectsTopLevelForwardConst(t *testing.T) {
+	for _, src := range []string{
+		"def x as int init B;\ndef const B as int init 2;",
+		"if (true) { def y as int init B + 1; }\ndef const B as int init 2;",
+	} {
+		prog, err := Parse(src)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := Resolve(prog); err == nil || !strings.Contains(err.Error(), "constant B is used before its definition on line 2") {
+			t.Errorf("%q: got %v", src, err)
+		}
+	}
+	for _, src := range []string{
+		"func f() { return B; }\ndef const B as int init 2;",
+		"def const B as int init 2;\ndef x as int init B;",
+		"func B() { return 1; }\ndef f as func init B;",
+	} {
+		prog, err := Parse(src)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := Resolve(prog); err != nil {
+			t.Errorf("%q: unexpected error %v", src, err)
+		}
+	}
+}
+
 // TestNestedInterpolationBudget pins a `{...}` slot's text is re-lexed per
 // nesting level, so deeply nested interpolation re-lexes depth*payload bytes.
 // A cumulative byte budget (threaded across the sub-parsers) must stop that with

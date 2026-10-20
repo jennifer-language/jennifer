@@ -845,29 +845,30 @@ func posFor(n parser.Node) (file string, line, col int) {
 	return n.Filename(), line, col
 }
 
-// Run executes the program. It records imports, hoists method definitions so
-// they can be called in any order, then runs the program's top-level
-// statements in source order in a global environment. Methods see this
-// global env as their outer scope (so top-level vars are visible inside
-// methods, subject to the no-shadowing rule).
-// UnwaitedTaskErrors implements the exit-time loud-fail.
-// Walks the per-run task registry, waits for each unobserved task to
-// finish, and returns the errors held by tasks that ended in failure
-// without ever being task.wait'd or task.discard'd. Tasks marked
-// observed (Phase 3: task.wait on success or rethrow, or
-// task.discard) are skipped without waiting - "discard" is the
-// fire-and-forget escape hatch the spec promises.
-//
-// Phase 2 doesn't ship task.wait / discard yet, so every spawn is
-// considered unobserved at exit. The CLI prints each returned error
-// to stderr and bumps the exit code to 1; if any returned error is
-// an *ExitSignal (exit invoked inside the spawn body), the CLI uses
-// that ExitSignal's code instead. Unbounded tasks (e.g. a spawn with
-// a `while (true)` loop) will hang the program at exit since the
-// scan waits for each unobserved task to finish; users opt out by
-// calling task.discard once Phase 3 ships, or by ensuring the body
-// terminates.
+// UnwaitedTaskErrors is the exit-time loud-fail scan for a program that ran to
+// its end: it waits for every spawned task nobody observed (never task.wait'd
+// or task.discard'd) to finish, and returns the errors those that failed hold.
+// The CLI prints each to stderr and exits non-zero; an *ExitSignal among them
+// (`exit` called inside a spawn body) supplies the exit code instead. Observed
+// tasks are skipped without waiting - task.discard is the fire-and-forget
+// escape hatch. Because it waits, a task that never finishes (an endless loop,
+// or one blocked in a syscall such as net.accept) holds the program at its end
+// until it is discarded or its socket is closed.
 func (i *Interpreter) UnwaitedTaskErrors() []error {
+	return i.unwaitedTaskErrors(true)
+}
+
+// FinishedTaskErrors is the scan for a program that ended early - by `exit` or
+// an uncaught error: it reports the errors of unobserved tasks that have
+// already finished and does not wait for those still running, which the
+// process exit then abandons. `exit` ends the whole program, so a spawn that
+// cannot finish (blocked in a syscall no cancellation reaches) must not keep it
+// alive.
+func (i *Interpreter) FinishedTaskErrors() []error {
+	return i.unwaitedTaskErrors(false)
+}
+
+func (i *Interpreter) unwaitedTaskErrors(wait bool) []error {
 	i.tasksMu.Lock()
 	snapshot := append([]*TaskState(nil), i.tasks...)
 	i.tasksMu.Unlock()
@@ -877,11 +878,17 @@ func (i *Interpreter) UnwaitedTaskErrors() []error {
 		if t == nil || t.Observed.Load() {
 			continue
 		}
-		// Block until the task finishes. Tasks that were already done
-		// before the scan reached them receive on a closed channel
-		// immediately, so this is no slower than an IsDone check in
-		// the common case.
-		<-t.Done
+		if wait {
+			// A task already done receives on its closed channel at once, so this
+			// is no slower than a done check in the common case.
+			<-t.Done
+		} else {
+			select {
+			case <-t.Done:
+			default:
+				continue // still running: abandoned by the process exit
+			}
+		}
 		if t.Err != nil {
 			errs = append(errs, t.Err)
 		}
@@ -1309,7 +1316,7 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// Module imports load (and their modules initialise) before this
 	// program's body runs - depth-first post-order, so an imported module
 	// is fully initialised before the code that imports it.
-	if err := i.loadModuleImports(prog, false); err != nil {
+	if err := i.loadModuleImports(prog); err != nil {
 		return err
 	}
 	// Pre-resolve every QualifiedCallExpr / QualifiedConstRefExpr against the
@@ -1646,7 +1653,7 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 	// a re-submitted `import` no-op instead of erroring on the bound alias.
 	// Modules stay disabled (a positioned error) if the REPL never called
 	// EnableModules.
-	if err := i.loadModuleImports(prog, true); err != nil {
+	if err := i.loadModuleImports(prog); err != nil {
 		return Null(), err
 	}
 	// A top-level `defer` in the REPL runs at the end of the input that
@@ -3242,7 +3249,55 @@ func (i *Interpreter) execThrow(st *parser.ThrowStmt, env *Environment) error {
 		return err
 	}
 	file, line, col := posFor(st)
-	return &ErrorSignal{Value: v.Copy(), File: file, Line: line, Col: col}
+	return &ErrorSignal{Value: stampThrowSite(v.Copy(), file, line, col), File: file, Line: line, Col: col}
+}
+
+// errorLocationZero reports whether field is one of the location fields
+// (file / line / col) an `Error{...}` literal may leave out, and its zero. Only
+// the reserved `Error` struct has them: a thrown Error with no location takes
+// the throw site's (stampThrowSite), so `throw Error{kind: k, message: m};`
+// needs no placeholder location.
+func errorLocationZero(ex *parser.StructLit, field string) (Value, bool) {
+	if ex.NS != "" || ex.Name != canonicalErrorStructName {
+		return Value{}, false
+	}
+	switch field {
+	case "file":
+		return StringVal(""), true
+	case "line", "col":
+		return IntVal(0), true
+	}
+	return Value{}, false
+}
+
+// stampThrowSite fills the location of a thrown `Error` that has none (file
+// "", line 0, col 0) with the throw site, so a caught error says where it was
+// raised. An Error that already carries a location - a caught runtime error
+// rethrown, or one built with an explicit position - is left as is; so is any
+// other thrown value.
+func stampThrowSite(v Value, file string, line, col int) Value {
+	if v.Kind != KindStruct || v.StructNS != "" || v.StructName != canonicalErrorStructName {
+		return v
+	}
+	var fileIdx, lineIdx, colIdx = -1, -1, -1
+	for k, f := range v.Fields {
+		switch f.Name {
+		case "file":
+			fileIdx = k
+		case "line":
+			lineIdx = k
+		case "col":
+			colIdx = k
+		}
+	}
+	if fileIdx < 0 || lineIdx < 0 || colIdx < 0 ||
+		v.Fields[fileIdx].Value.Str != "" || v.Fields[lineIdx].Value.Int != 0 || v.Fields[colIdx].Value.Int != 0 {
+		return v
+	}
+	v.Fields[fileIdx].Value = StringVal(file)
+	v.Fields[lineIdx].Value = IntVal(int64(line))
+	v.Fields[colIdx].Value = IntVal(int64(col))
+	return v
 }
 
 // deferredCall is a `defer`red call: the original call expression plus its
@@ -3527,6 +3582,16 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 			b, err = env.GetBinding(ex.Name)
 		}
 		if err == nil {
+			if b.Name == "" && ex.Slot >= 0 {
+				// The resolver bound this name to a global slot whose `def const`
+				// has not run yet: a method reached during top-level init reads a
+				// constant defined further down.
+				file, line, col := posFor(ex)
+				return Value{}, &runtimeError{
+					Msg:  fmt.Sprintf("constant %s is read before its definition has run; top-level constants are defined in source order, so define it above the code that first reaches this read", ex.Name),
+					File: file, Line: line, Col: col,
+				}
+			}
 			if !b.IsConst {
 				file, line, col := posFor(ex)
 				return Value{}, &runtimeError{
@@ -3762,6 +3827,10 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	for _, decl := range def.Fields {
 		lit, ok := provided[decl.Name]
 		if !ok {
+			if zero, optional := errorLocationZero(ex, decl.Name); optional {
+				out = append(out, StructField{Name: decl.Name, Value: zero})
+				continue
+			}
 			file, line, col := posFor(ex)
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("missing field %q in struct %q literal", decl.Name, ex.Name), File: file, Line: line, Col: col}
 		}

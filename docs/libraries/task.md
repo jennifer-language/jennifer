@@ -166,8 +166,14 @@ The tree-walker cannot preempt a goroutine, so a body makes progress toward a
 checkpoint by looping; a tight non-loop computation is instead bounded by the
 call-depth guard.
 
-This directly retires the exit-time hang: a non-terminating `spawn` that would
-otherwise block the program at exit can be cancelled and it stops.
+So a non-terminating `spawn` that would otherwise keep a program from ending
+can be cancelled, and it stops. Cancellation reaches a body only at a loop
+checkpoint: a task blocked in a system call - `net.accept`, a socket read,
+`term.readByte` - does not see the flag until that call returns. Unblock it by
+closing its socket from another task (the blocked call raises a catchable
+error), or `task.discard` it. A program that ends by `exit` or an uncaught error
+does not wait for still-running tasks at all; one that runs to its end waits for
+every task nobody discarded.
 
 ```jennifer
 def t as task of int init spawn {

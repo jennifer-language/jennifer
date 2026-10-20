@@ -46,9 +46,11 @@ full surface and worked examples per builtin.
 
 **Cancellation is cooperative.** `task.cancel($t)` sets a flag the spawned body
 observes at its next loop checkpoint, where the runtime raises a catchable "task
-cancelled" - so a runaway `spawn` can be stopped (retiring the exit-time hang
-below), and a body that catches it inside a `try` / `catch` exits cleanly with a
-partial result. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
+cancelled" - so a runaway `spawn` can be stopped, and a body that catches it
+inside a `try` / `catch` exits cleanly with a partial result. A task blocked in
+a system call - `net.accept`, a socket read, `term.readByte` - is not at a
+checkpoint and does not see the flag; close its socket from another task (the
+blocked call then raises a catchable error) or `task.discard` it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
 a catchable "timed out" error. Full detail in the
 [`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
 
@@ -170,7 +172,9 @@ io.printf("winner=%d val=%d\n", $winner, $value);
 If a spawn body raises a runtime error and the program never
 observes the resulting task (never `task.wait`s it, never
 `task.waitAll`s it, never `task.discard`s it), Jennifer prints the
-error to stderr at program exit and exits non-zero.
+error to stderr at program exit and exits non-zero. An explicit
+`exit N;` keeps its code `N`: the error is still printed, but the code
+you chose wins.
 
 This is deliberate. The default of every other concurrency model
 is some flavour of "errors in spawned work get silently dropped
@@ -207,12 +211,18 @@ Three ways to make a spawn quiet:
 
 Doing nothing is not a fourth option.
 
-> **Beware infinite spawns.** The loud-fail scan blocks on every
-> unobserved task to determine whether it produced an error.
-> `spawn { while (true) { ... } }` without `task.discard` will
-> hang the program at exit, since the goroutine never finishes.
-> Long-running or potentially-non-terminating spawns should be
-> paired with an explicit `task.discard` at the top of the scope.
+> **Beware infinite spawns.** When a program runs to its end, the
+> loud-fail scan waits for every unobserved task to finish, to learn
+> whether it failed. `spawn { while (true) { ... } }` without
+> `task.discard` therefore keeps the program from ending, since the
+> goroutine never finishes. Pair a long-running or
+> potentially-non-terminating spawn with an explicit `task.discard`.
+>
+> A program that ends **early** - by `exit`, or by an uncaught error -
+> does not wait: it reports the unobserved tasks that have already
+> failed and abandons the ones still running. `exit` ends the whole
+> program, so a server's accept loop blocked in `net.accept` cannot
+> keep it alive.
 
 ## What's deliberately not in v1
 
