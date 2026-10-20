@@ -166,6 +166,11 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		return nil, src, absPath, true
 	}
 
+	if isIncludeFragment(absPath) {
+		enabled = withoutFragmentChecks(enabled)
+		fmt.Fprintf(os.Stderr, "jennifer lint: note: %s is an include fragment; names it takes from the file that includes it are not checked (L107 / L108 / L112) - lint that file\n", path)
+	}
+
 	cfg := lint.DefaultConfig()
 	cfg.Modules = lintModules(prog, baseDir, opts)
 	cfg.LibStructs, cfg.LibConsts = lintLibSurface()
@@ -182,6 +187,30 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 		diags = kept
 	}
 	return diags, src, absPath, false
+}
+
+// isIncludeFragment reports whether path names an include fragment: a part of a
+// multi-file module (`NAME.inc.j`) that is only `include`d, never run or
+// imported on its own, so it may call methods and read constants and
+// namespaces that the including file defines.
+func isIncludeFragment(path string) bool {
+	return strings.HasSuffix(filepath.Base(path), ".inc.j")
+}
+
+// withoutFragmentChecks returns the selection minus the checks that resolve
+// names a fragment takes from its including file (an undefined call, an
+// undefined bare name, an undeclared namespace). Linted alone those would flag
+// every borrowed name; linting the including file covers them, since the
+// fragment is spliced into it.
+func withoutFragmentChecks(enabled map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(enabled))
+	for id, on := range enabled {
+		out[id] = on
+	}
+	for _, id := range []string{"L107", "L108", "L112"} {
+		delete(out, id)
+	}
+	return out
 }
 
 var (

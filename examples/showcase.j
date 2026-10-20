@@ -20,7 +20,7 @@ use strings;
 use lists;
 use maps;
 use os;
-include "showcase/helpers.j";
+include "showcase/helpers.inc.j";
 
 # --- Constants: simple, underscored, library-provided ---
 def const MAX as int init 5;

@@ -187,6 +187,15 @@ the list of a library's functions: a call to a name with no line is unknown.
 A library's constants and types come from the interpreter's registered tables
 (`Config.LibConsts` / `LibStructs`, filled by the CLI).
 
+**Include fragments.** A file named `NAME.inc.j` is an include fragment: a part
+that is only ever `include`d, free to call methods and read constants and
+namespaces its includer defines. Linted on its own (`jennifer lint modules/*.j`
+picks the fragments up), the undefined-name checks would flag every such borrowed
+name, so the CLI drops `L107`, `L108` and `L112` for a fragment and prints one
+stderr note pointing at the including file; every other check still runs. Linting
+the including file covers the fragment fully, since its tokens are spliced in and
+findings anchor to the fragment's own lines.
+
 **Configuration.** `--checks=IDS` (per run) or a `.jennifer-lint` file at
 the tree root (per project) select checks with one `IDS` / `!IDS`
 direction - all includes ("run only these") or all excludes ("run

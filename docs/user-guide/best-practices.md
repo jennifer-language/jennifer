@@ -117,6 +117,10 @@ doubled marker (`## lint-disable: ...`) is just a comment, not a
 directive - handy for writing *about* a directive. `examples/linting.j`
 demonstrates every check and its suppression.
 
+An include fragment (`NAME.inc.j`, a file that is only ever `include`d) linted on
+its own is not flagged for the methods, constants and namespaces it takes from
+the including file; lint that file to check them.
+
 ## Document your public surface with doc comments
 
 A `/** ... */` doc comment on every exported construct - each `func`, `def struct`,

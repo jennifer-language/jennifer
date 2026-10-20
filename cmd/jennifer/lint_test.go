@@ -194,3 +194,44 @@ func TestLintChecksTypesAcrossBoundaries(t *testing.T) {
 		t.Errorf("findings %v, want %s", got, want)
 	}
 }
+
+// An include fragment (`NAME.inc.j`) linted on its own does not flag the names
+// it takes from the file that includes it, but every other check still runs on
+// it; linting the including file checks those names, the fragment spliced in.
+func TestLintIncludeFragment(t *testing.T) {
+	dir := t.TempDir()
+	frag := filepath.Join(dir, "part.inc.j")
+	parent := filepath.Join(dir, "whole.j")
+	for p, content := range map[string]string{
+		frag: "func shout(s as string) {\n    def n as int init \"x\";\n" +
+			"    return strings.upper($s) + helper() + convert.toString(LIMIT + $n) + nope();\n}\n",
+		parent: "use strings;\nuse convert;\ndef const LIMIT as int init 3;\n" +
+			"func helper() { return \"!\"; }\ninclude \"./part.inc.j\";\nshout(\"hi\");\n",
+	} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findings := func(path string) string {
+		t.Helper()
+		opts, ok := parseLintArgs([]string{"--checks=L107,L108,L111,L112", path})
+		if !ok {
+			t.Fatal("parseLintArgs failed")
+		}
+		diags, _, _, failed := lintComputeDiags(opts.paths[0], opts)
+		if failed {
+			t.Fatal("lint invocation failed")
+		}
+		var got []string
+		for _, d := range diags {
+			got = append(got, fmt.Sprintf("%s:%d:%s", filepath.Base(d.File), d.Line, d.ID))
+		}
+		return strings.Join(got, " ")
+	}
+	if got, want := findings(frag), "part.inc.j:2:L111"; got != want {
+		t.Errorf("fragment alone: %s, want %s", got, want)
+	}
+	if got, want := findings(parent), "part.inc.j:2:L111 part.inc.j:3:L107"; got != want {
+		t.Errorf("including file: %s, want %s", got, want)
+	}
+}

@@ -158,6 +158,13 @@ io.printf($helperValue);
 Circular includes (file A includes file B, B includes A) are detected
 and rejected with an error.
 
+A file that exists only to be `include`d - a part of a larger program or
+module, calling methods and reading constants its includer defines - is named
+`NAME.inc.j` by convention (the shipped `barcode_ecc.inc.j`, `pdf_afm.inc.j`).
+`jennifer lint` recognises the suffix: linted on its own, such a fragment is not
+flagged for names it takes from the including file, which linting that file
+checks instead.
+
 ## Module imports
 
 `import "PATH.j" [as NAME];` loads another `.j` file as a **module** - a
