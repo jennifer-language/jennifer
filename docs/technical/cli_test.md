@@ -150,6 +150,16 @@ references - `myTest` is a name, not a value), and the interpreter's
 The subcommand parses, preprocesses, and runs the file (methods hoist, top level
 executes for setup), then:
 
+- **Module overlay** - for `MODULE_test.j` with a sibling `MODULE.j`, the
+  module's tokens are spliced in front of the test file and the pair runs as one
+  program in module context, so tests reach private names by bare identifier.
+  Because the splice also puts the test file's `use` / `import`s in scope for the
+  module's code, the module is first checked **on its own** for a namespace it
+  references but never declares (lint's `L112`, `moduleDeclaresItsNamespaces`):
+  a module that forgot a `use` / `import` would otherwise pass its suite and fail
+  the first time it is really imported. A finding fails the run (exit 2) before
+  any test executes. Both files may import the same module under the same alias
+  (a no-op re-import).
 - **Discovery** - `Interpreter.MethodNames()` filtered to `test*`, overridable
   with `--filter`.
 - **Per test** - `setUp` if present, run the test through `CallByName` (timing +

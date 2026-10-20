@@ -18,6 +18,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	testinglib "jennifer-lang.dev/jennifer/internal/lib/testing"
+	"jennifer-lang.dev/jennifer/internal/lint"
 	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/preproc"
@@ -164,6 +165,9 @@ func loadForTestProg(path string, cov *profile.Collector) (*interpreter.Interpre
 		if !ok {
 			return nil, nil, testExitFailure
 		}
+		if !moduleDeclaresItsNamespaces(base, baseToks) {
+			return nil, nil, testExitFailure
+		}
 		tokens = spliceTokens(baseToks, tokens)
 		moduleContext = true
 	}
@@ -210,6 +214,28 @@ func overlayBaseFor(absPath string) string {
 		return base
 	}
 	return ""
+}
+
+// moduleDeclaresItsNamespaces checks a module under test on its own for a
+// namespace it references but never declares (lint's L112), reporting each to
+// stderr. The overlay splice puts the test file's `use` / `import`s in scope
+// for the module's code, so a module that forgot one would pass its suite and
+// then fail the first time it is really imported; checking the module alone
+// first fails the run instead. A module that does not parse is left to the
+// normal path, which reports the parse error.
+func moduleDeclaresItsNamespaces(path string, toks []lexer.Token) bool {
+	prog, err := parser.ParseTokens(toks)
+	if err != nil {
+		return true
+	}
+	src, _ := os.ReadFile(path)
+	diags := lint.Check(prog, toks, string(src), path, map[string]bool{"L112": true}, lint.DefaultConfig())
+	for _, d := range diags {
+		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s; the module under test must declare it itself (the test file's `use` / `import` does not reach a real import of the module) [%s]\n",
+			d.File, d.Line, d.Col, d.Message, d.ID)
+		printErrorContext(string(src), path, &lint.PositionError{File: d.File, Line: d.Line, Col: d.Col})
+	}
+	return len(diags) == 0
 }
 
 // tokenizeForSplice reads, lexes, and preprocesses a file for splicing into

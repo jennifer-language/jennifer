@@ -142,3 +142,31 @@ func testOk() { testing.assertEqual(1, 1); }`), 0o644); err != nil {
 		t.Errorf("test method not discovered in plain test file")
 	}
 }
+
+// The overlay's own `use` / `import`s would satisfy a namespace the module
+// forgot to declare, so the suite would pass while a real import of the module
+// fails. The runner checks the module alone first and refuses to run it.
+func TestModuleTestOverlayRejectsUndeclaredNamespace(t *testing.T) {
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"n.j":      "export func shout(s as string) { return strings.upper($s) + helper.tag(); }\n",
+		"helper.j": "export func tag() { return \"!\"; }\n",
+		"n_test.j": "use strings;\nuse testing;\nimport \"./helper.j\" as helper;\n" +
+			"func testShout() { testing.assertEqual(shout(\"hi\"), \"HI!\"); }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, code := loadForTest(filepath.Join(dir, "n_test.j")); code != testExitFailure {
+		t.Errorf("a module missing its own `use` / `import` loaded with code %d, want %d", code, testExitFailure)
+	}
+	// Declaring them in the module makes it load.
+	if err := os.WriteFile(filepath.Join(dir, "n.j"), []byte("use strings;\nimport \"./helper.j\" as helper;\n"+
+		"export func shout(s as string) { return strings.upper($s) + helper.tag(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(filepath.Join(dir, "n_test.j")); code != testExitPass {
+		t.Errorf("a module declaring its namespaces loaded with code %d", code)
+	}
+}
