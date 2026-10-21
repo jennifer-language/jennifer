@@ -63,7 +63,7 @@ attribute).
 | `html.renderAll(nodes)`             | `string` | Serialize a `list of Node` fragment in order.                     |
 | `html.renderXhtml(node)`            | `string` | Like `render`, but well-formed XHTML: void elements self-close (`<hr />`) and boolean attributes expand (`disabled="disabled"`) - an XHTML / EPUB content document. |
 | `html.renderAllXhtml(nodes)`        | `string` | `renderAll` in XHTML mode (see `renderXhtml`).                     |
-| `html.escape(s)`                    | `string` | HTML-escape a bare string for text context (the helper `render` uses). |
+| `html.escape(s)`                    | `string` | HTML-escape a bare string: `&` `<` `>` `"` `'`. Safe in text and inside a quoted attribute value; not a URL check (use `safeUrl`). |
 | `html.safeUrl(url)`                 | `string` | The URL if its scheme is `http` / `https` / `mailto`, else `"#"` (anti-XSS `href`/`src` gate). |
 
 ## Escaping
@@ -74,6 +74,10 @@ Escaping is automatic and context-aware; a value is escaped exactly once:
   is not double-escaped).
 - **Attribute values** additionally escape `"`, since they render inside
   double quotes.
+- **`html.escape`** (for strings you splice into markup by hand) escapes
+  both quotes as well, so its result is safe in text and in a single- or
+  double-quoted attribute value. `render` does not use it: text nodes keep
+  their quotes readable.
 - **`raw` nodes** are emitted verbatim - the escape hatch for markup you
   have already produced (an SVG blob, a rendered sub-tree). Only pass
   trusted content.
@@ -85,8 +89,12 @@ io.printf("%s\n", html.render(html.element("span", $a, [])));
 # <span title="a &quot;b&quot; &lt;c&gt;"></span>
 ```
 
-`html.escape(s)` exposes the text-context escaper, for an escaped string
-without building a node.
+`html.escape(s)` escapes a string without building a node. It also escapes
+both quotes, so it is safe wherever a hand-built template puts the result:
+
+```jennifer
+def page as string init '<input value="' + html.escape($query) + '">';
+```
 
 ## Boolean attributes
 

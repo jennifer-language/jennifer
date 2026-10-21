@@ -146,23 +146,32 @@ export func boolAttr(name as string) {
 # --- escaping (private + one public helper) ------------------------
 
 /**
- * Return s with the text-context HTML metacharacters replaced by entities (`&`
- * first, so an escaped entity is not re-escaped). Public because escaping a bare
- * string for HTML text is useful without building a node.
+ * Return s with every HTML metacharacter replaced by an entity: `&` (first, so an
+ * escaped entity is not re-escaped), `<`, `>`, `"` and `'`. The result is safe in
+ * text content and inside a single- or double-quoted attribute value, so a
+ * hand-built `'<input value="' + html.escape($q) + '">'` cannot break out of the
+ * quotes. It does not make a URL safe: gate an `href` / `src` with `safeUrl`.
  * @param s {string} the string to escape
  * @return {string} the escaped string
  */
 export func escape(s as string) {
-    def out as string init strings.replace($s, "&", "&amp;");
-    $out = strings.replace($out, "<", "&lt;");
-    $out = strings.replace($out, ">", "&gt;");
-    return $out;
+    def out as string init escapeText($s);
+    $out = strings.replace($out, '"', "&quot;");
+    return strings.replace($out, "'", "&#39;");
 }
 
-# escapeAttr additionally escapes the double quote, since attribute values are
-# rendered inside double quotes.
+# escapeText escapes the text-context metacharacters only (`&` first, `<`, `>`);
+# render uses it for text nodes, where quotes are inert and stay readable.
+func escapeText(s as string) {
+    def out as string init strings.replace($s, "&", "&amp;");
+    $out = strings.replace($out, "<", "&lt;");
+    return strings.replace($out, ">", "&gt;");
+}
+
+# escapeAttr additionally escapes the double quote, since render writes every
+# attribute value inside double quotes.
 func escapeAttr(s as string) {
-    def out as string init escape($s);
+    def out as string init escapeText($s);
     return strings.replace($out, '"', "&quot;");
 }
 
@@ -275,7 +284,7 @@ func renderAttrs(attrs as list of Attr, xhtml as bool) {
 # (attribute quoting, `&` `<` `>` `"` escaping) is already XML-clean in both modes.
 func renderNode(node as Node, xhtml as bool) {
     match ($node.kind) {
-        when Text { return escape($node.text); }
+        when Text { return escapeText($node.text); }
         when Raw { return $node.text; }
         when Element {
             def open as string init "<" + $node.tag + renderAttrs($node.attrs, $xhtml);

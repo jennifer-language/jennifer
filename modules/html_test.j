@@ -16,6 +16,23 @@ func testEscapeText() {
     testing.assertEqual(escape("plain"), "plain");
 }
 
+# SECURITY: the public escaper is safe inside a quoted attribute value, so a
+# hand-built attribute cannot be broken out of (a reflected-XSS vector).
+func testEscapeQuotes() {
+    testing.assertEqual(escape("a\"b'c"), "a&quot;b&#39;c");
+    def q as string init "\" autofocus onfocus=alert(1) x=\"";
+    testing.assertEqual(
+        '<input value="' + escape($q) + '">',
+        '<input value="&quot; autofocus onfocus=alert(1) x=&quot;">');
+    testing.assertEqual(unescape(escape("<a href='x'>\"&\"</a>")), "<a href='x'>\"&\"</a>");
+}
+
+# Text nodes keep quotes readable: only & < > are escaped in text context.
+func testTextNodeKeepsQuotes() {
+    testing.assertEqual(render(text("say \"hi\" 'x'")), "say \"hi\" 'x'");
+    testing.assertEqual(escapeText("a\"<"), "a\"&lt;");
+}
+
 func testTextNodeEscapes() {
     testing.assertEqual(render(text("x & <y>")), "x &amp; &lt;y&gt;");
 }

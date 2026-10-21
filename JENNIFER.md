@@ -959,8 +959,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `html.element(tag, attrs, children)` / `text(s)` / `raw(s)` / `attr(n, v)`,
   `render` / `renderAll` (HTML5) or `renderXhtml` / `renderAllXhtml` (well-formed
   XHTML: void elements self-close, boolean attributes expand - for EPUB / XML),
-  `escape`, `safeUrl(url)` (an `http` / `https` / `mailto`
-  allowlist, else `"#"`), `boolAttr(name)`. `element` / `attr` reject a tag /
+  `escape(s)` (`&` `<` `>` `"` `'`: safe in text and in a quoted attribute
+  value), `safeUrl(url)` (an `http` / `https` / `mailto`
+  allowlist, else `"#"`; gate every data-driven `href` / `src` with it), `boolAttr(name)`. `element` / `attr` reject a tag /
   attribute name outside `[A-Za-z][A-Za-z0-9-]*`. Also a **tolerant `parse(src)`**
   that reads HTML back into the same `Node` tree (void / self-closing /
   mismatched-nesting / comment / DOCTYPE tolerant, budget-capped), walked by

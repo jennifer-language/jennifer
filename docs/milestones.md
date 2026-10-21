@@ -1849,6 +1849,16 @@ timeout, now a per-server `httpd.Options.bodyTimeoutMs` (default 60 s).
 Timeout` (it was `400`); a request beyond the buffer budget gets `503` instead of
 waiting for a slot.
 
+### M28.12 - `html.escape` escapes quotes
+
+**Done.** The public `html.escape` replaced only `&` `<` `>`, so its obvious use -
+a value spliced into `value="..."` by hand - was an attribute injection (a
+reflected XSS in a downstream app's search page). It now also escapes `"` and `'`
+(`&quot;` / `&#39;`), making it safe in text and in a quoted attribute value.
+`render` keeps a private text-only escaper, so rendered text nodes keep their
+quotes and output is unchanged. **Breaking:** `html.escape` output for a string
+with quotes changes (the same text once unescaped).
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported
