@@ -56,6 +56,7 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "maxInFlight", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "respondTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "bodyTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "dirListing", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 
 	// Lifecycle.
@@ -155,6 +156,7 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 // validate the ranges.
 type serverOpts struct {
 	maxBody, inFlight, respondMs, bodyMs int64
+	dirListing                           bool
 }
 
 // takeOptionsArg reads an httpd.Options struct value into serverOpts.
@@ -164,6 +166,13 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 		return o, fmt.Errorf("%s: options must be a httpd.Options, got %s", fnName, v.Kind)
 	}
 	for _, f := range v.Fields {
+		if f.Name == "dirListing" {
+			if f.Value.Kind != interpreter.KindBool {
+				return o, fmt.Errorf("%s: httpd.Options.dirListing must be bool, got %s", fnName, f.Value.Kind)
+			}
+			o.dirListing = f.Value.Bool
+			continue
+		}
 		var dst *int64
 		switch f.Name {
 		case "maxBodyBytes":

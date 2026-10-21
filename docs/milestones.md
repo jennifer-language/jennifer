@@ -1870,6 +1870,29 @@ amortised O(1) (20,000 in 27 ms). `list(xs)` / `map(m)` also take an optional
 Jennifer list / map and convert it in one step, the linear way to build a map.
 Additive.
 
+### M28.14 - `httpd` hardening pass
+
+**Done.** An audit of the engine, each finding confirmed against a running server
+and pinned by a regression test:
+
+- A request without a body no longer reserves body buffer, so it is served while
+  uploads hold the whole budget (a health check got `503` before); a body with a
+  declared `Content-Length` is buffered at exactly that size.
+- `serveDir` / `serveDirEtag` answer `404` for dotfiles (`.env`, `.git/`), except
+  `.well-known/`, and for a directory without an `index.html`, which Go's file
+  server would list; `httpd.Options.dirListing` opts back into listings.
+- The engine answers `400` to a decoded path with a `.` or `..` segment
+  (`/a%2F..%2Fb`), which a route parameter could otherwise carry into a file path.
+- `setHeader` rejects an invalid name or a value with a control character, and
+  `etag` a tag with a quote, space or control character, instead of `net/http`
+  silently dropping or rewriting them.
+- `respond` takes a final status (`200`-`999`); a 1xx produced a broken response.
+- `listenTLS` / `listenTLSWith` accept the `unix:` prefix like `listen`.
+- `shutdown` closes connections still busy after its 5 s grace period.
+
+**Breaking:** requests with dot segments, dotfiles and unindexed directories under
+`serveDir`, invalid headers / tags and 1xx statuses that used to pass now fail.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

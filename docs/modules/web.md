@@ -132,7 +132,7 @@ touches `httpd` directly:
 | `web.sendGzip($ctx, status, body)` | `null` | Respond, gzip-compressed when the client accepts it. |
 | `web.redirect($ctx, status, location)` | `null` | Redirect (301/302/303/307/308) with a `Location` header. |
 | `web.serveFile($ctx, path)` | `null` | Respond with a file from disk. |
-| `web.serveDir($ctx, root)` | `null` | Serve static files from a directory root. |
+| `web.serveDir($ctx, root)` | `null` | Serve static files from a directory root (`httpd.serveDir`: dotfiles and unindexed directories are `404`). |
 
 ## Cookies
 

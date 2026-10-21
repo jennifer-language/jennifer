@@ -56,14 +56,14 @@ for (def i in lists.range(0, 4)) {
 | ---- | ------- | ----- |
 | `httpd.listen(addr)` | `httpd.Server` | Start listening. `"127.0.0.1:8080"` (TCP), `":0"` (ephemeral TCP port), or `"unix:/run/app.sock"` (a Unix domain socket). |
 | `httpd.listenWith(addr, opts)` | `httpd.Server` | Like `listen`, with per-server limits from an `httpd.Options` (see [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits)). |
-| `httpd.listenTLS(addr, cert, key)` | `httpd.Server` | HTTPS; `cert` / `key` are PEM `bytes`. HTTP/2 negotiated automatically. |
+| `httpd.listenTLS(addr, cert, key)` | `httpd.Server` | HTTPS; `cert` / `key` are PEM `bytes`. HTTP/2 negotiated automatically. Takes the same addresses as `listen`, `unix:` included. |
 | `httpd.listenTLSWith(addr, cert, key, opts)` | `httpd.Server` | Like `listenTLS`, with an `httpd.Options` trailing the cert/key. |
 | `httpd.setMaxBufferBudget(bytes)` | `null` | Move the process-wide memory-guard ceiling (default 4 GiB) that `listenWith` enforces; raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
 | `httpd.setMaxBufferBudgetFromRAM(fraction)` | `int` | Opt-in, cgroup-aware: set the budget to `fraction` (`0 < f <= 1`) of the detected machine limit (min of host RAM and any cgroup limit); returns the bytes it set. Errors on a host where the limit can't be determined. |
 | `httpd.address(srv)` | `string` | The actual bound address (resolve `":0"` to the chosen port). |
 | `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Errors once the server is shut down. |
 | `httpd.method(req)` | `string` | `"GET"`, `"POST"`, ... |
-| `httpd.path(req)` | `string` | URL path, e.g. `/users/42`. |
+| `httpd.path(req)` | `string` | URL path, decoded, e.g. `/users/42`. Never has a `.` or `..` segment: the engine answers such a request `400` itself. |
 | `httpd.query(req, name)` | `string` | Query parameter (`""` if absent). |
 | `httpd.header(req, name)` | `string` | Request header (`""` if absent; case-insensitive name). |
 | `httpd.body(req)` | `bytes` | The request body (buffered; a body over the 10 MiB cap is answered 413 by the engine). |
@@ -72,14 +72,14 @@ for (def i in lists.range(0, 4)) {
 | `httpd.timedOut(req)` | `bool` | Whether the engine answered the request itself with `503` because the respond timeout passed. Tells "my reply came too late" from a real failure. |
 | `httpd.requestValue(req, key)` | `string` | Read a request-scoped note (`""` if unset). Per-request scratch space, not a header and never sent to the client. |
 | `httpd.setRequestValue(req, key, value)` | `null` | Store a request-scoped note - a place to memoize a value computed at most once per request (see below). |
-| `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). |
-| `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag`, else returns `false` (send the full body). |
-| `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. |
+| `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). An invalid name (not an RFC 9110 token) or a value with a control character (CR, LF, NUL, ...) is an error, never silently dropped or rewritten. |
+| `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag`, else returns `false` (send the full body). A `tag` with a quote, space or control character is an error. |
+| `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. `status` is a final status, `200` to `999` (a 1xx is an error). |
 | `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). |
-| `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (`..` cannot escape `root`). |
+| `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (`..` cannot escape `root`). Dotfiles and directories without an `index.html` are `404` (see [Static files](#static-files)). |
 | `httpd.serveFileEtag(req, path)` | `null` | Like `serveFile`, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
 | `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
-| `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, finish in-flight requests. |
+| `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, give in-flight requests 5 s to finish, then close what is left. |
 
 Each request must be answered **exactly once** - a second `respond` /
 `serveFile` / `serveDir` on the same request, or a `setHeader` after the
@@ -144,6 +144,16 @@ while (true) {
 a request path containing a backslash (`400`), and re-verifies the joined path is
 still under `root` before serving it (`404` otherwise); `serveFile` answers with
 one specific file regardless of the request path.
+
+`serveDir` also keeps what is not content out of reach:
+
+- **Dotfiles are `404`.** Any path segment starting with `.` (`.env`, `.git/`,
+  `.htpasswd`) is treated as configuration, not content. The one exception is
+  `.well-known/` (RFC 8615), where ACME challenges and other discovery files
+  live.
+- **Directories are not listed.** A directory is served through its
+  `index.html`; one without is `404`. A server that wants Go's file listing
+  opts in with `httpd.Options{dirListing: true}` (dotfiles stay hidden).
 
 **Symlinks are followed.** Both verbs open the resolved path directly (Go's
 `http.ServeFile` behaviour), so a symbolic link *inside* `root` that points
@@ -237,8 +247,9 @@ handlers call.)
 ## Graceful shutdown
 
 `httpd.shutdown` closes the listener, wakes any workers blocked in
-`httpd.accept` (they get an error so their loops can exit), and lets in-flight
-requests finish before returning. A typical server installs a signal handler
+`httpd.accept` (they get an error so their loops can exit), and gives in-flight
+requests 5 s to finish before returning. Connections still busy after that (a
+long download) are closed, so a shut-down server has stopped serving. A typical server installs a signal handler
 (via `os`) that calls `shutdown`, or shuts down after a sentinel request.
 
 ## Behind a reverse proxy (nginx)
@@ -314,6 +325,7 @@ open a server with an explicit `httpd.Options`:
 | `maxInFlight as int` | Concurrent in-flight requests. `0` selects the default 256. |
 | `respondTimeoutMs as int` | How long an admitted request may wait to be accepted, and then to be answered, before the engine answers `503` itself (see [The respond timeout](#the-respond-timeout)). `0` selects the default 60 s; negative is an error. |
 | `bodyTimeoutMs as int` | How long a client may take to send its whole request body; past it the engine answers `408`. Any single read also gives up after 10 s of silence. `0` selects the default 60 s; negative is an error. A server taking only small bodies can set a few seconds. |
+| `dirListing as bool` | Let `serveDir` / `serveDirEtag` answer a directory without an `index.html` with a file listing. `false` (the default): `404`. |
 
 A `0` field takes that limit's default, so you can tune one and leave the others
 (as a library struct, `httpd.Options{...}` may also leave a field out; it takes
@@ -444,10 +456,17 @@ long handler can check before it starts work whose reply has nowhere to go.
   256 (by default) in-flight slots; further requests wait for a slot. Reading
   the body outside the slots means clients that trickle an upload tie up only
   their own connections: they can never hold every slot and stall the server.
+- **Request paths.** A decoded path with a `.` or `..` segment (`/a/../b`,
+  `/a%2F..%2Fb`) is answered **400** before the program sees it, so a route
+  parameter or a path built from `httpd.path` cannot climb out of a directory.
+  Browsers resolve dot segments before sending, so only crafted requests hit it.
 - **Body memory.** Body buffers are bounded by the bytes they actually hold:
   at most `maxInFlight x maxBody` across the server, reserved as each buffer
   grows (from 512 bytes, doubling), so a slow upload holds about what it has
-  sent. A body that would pass the bound is answered **503** with `Retry-After`.
+  sent; a body with a declared `Content-Length` is buffered at exactly that size.
+  A request without a body reserves nothing, so it is served even while uploads
+  hold the whole budget. A body that would pass the bound is answered **503**
+  with `Retry-After`.
   A body that is not complete within the body timeout (60 s, `bodyTimeoutMs`), or
   sends nothing for 10 s, is answered **408**.
 - **Must respond.** Every accepted request must be answered with

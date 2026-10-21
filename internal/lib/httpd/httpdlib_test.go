@@ -9,12 +9,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1305,5 +1313,317 @@ func TestRespondTimeoutOption(t *testing.T) {
 	// A negative value is rejected (an unbounded wait would leak per request).
 	if _, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsValRespond(0, 0, -1)}); err == nil {
 		t.Error("respondTimeoutMs < 0 should be rejected")
+	}
+}
+
+// rawRequest sends one raw HTTP/1.1 request line and returns the status code.
+func rawRequest(t *testing.T, addr, requestLine string) int {
+	t.Helper()
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	fmt.Fprintf(c, "%s\r\nHost: x\r\nConnection: close\r\n\r\n", requestLine)
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("%s: read response: %v", requestLine, err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// serveLoop answers every accepted request with handler until the server stops.
+func serveLoop(srv Value, handler func(req Value)) {
+	go func() {
+		for {
+			req, err := acceptFn(noCtx, []Value{srv})
+			if err != nil {
+				return
+			}
+			handler(req)
+		}
+	}()
+}
+
+// A request without a body reserves no body buffer, so it is served even while
+// uploads hold the whole budget (a health check must not get "server busy").
+func TestBodilessRequestServedWhenBudgetFull(t *testing.T) {
+	ResetForTest()
+	srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsVal(1000, 1)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	addrV, _ := addressFn(noCtx, []Value{srv})
+	st, _ := resolveServer("test", srv.Fields[0].Value.Int)
+	c := trickle(t, addrV.Str, 900)
+	defer c.Close()
+	for i := 0; st.buffered.Load() == 0; i++ {
+		if i > 200 {
+			t.Fatal("trickling upload never reserved a buffer")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	serveOnce(srv, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
+	})
+	if got := rawRequest(t, addrV.Str, "GET /health HTTP/1.1"); got != http.StatusOK {
+		t.Errorf("GET while the budget is in use = %d, want 200", got)
+	}
+}
+
+// A body with a declared Content-Length is buffered at that size (plus the one
+// byte that detects an overlong body), not rounded up to the next doubling.
+func TestKnownLengthBodyNotOverAllocated(t *testing.T) {
+	st := &serverState{bufBudget: 1 << 20, serverLimits: serverLimits{maxBody: 1 << 20, bodyTimeout: time.Second}}
+	rc := http.NewResponseController(httptest.NewRecorder())
+	body, held, err := st.readBody(rc, strings.NewReader(strings.Repeat("x", 600)), 600)
+	if err != nil || len(body) != 600 {
+		t.Fatalf("readBody = %d bytes, %v", len(body), err)
+	}
+	if held != 601 || st.buffered.Load() != 601 {
+		t.Errorf("held %d (budget used %d), want 601", held, st.buffered.Load())
+	}
+}
+
+// SECURITY: serveDir never lists a directory unless the server opted in, and
+// never serves a dotfile; `.well-known/` stays reachable.
+func TestServeDirNoListingNoDotfiles(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".env", "SECRET=1")
+	write(".git/config", "[core]")
+	write("sub/.htpasswd", "u:p")
+	write("sub/a.txt", "a")
+	write("site/index.html", "<h1>hi</h1>")
+	write(".well-known/acme-challenge/tok", "proof")
+	serve := func(opts Value) string {
+		srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), opts})
+		if err != nil {
+			t.Fatalf("listenWith: %v", err)
+		}
+		t.Cleanup(func() { shutdownFn(noCtx, []Value{srv}) })
+		serveLoop(srv, func(req Value) { _, _ = serveDirFn(noCtx, []Value{req, interpreter.StringVal(dir)}) })
+		addrV, _ := addressFn(noCtx, []Value{srv})
+		return addrV.Str
+	}
+	addr := serve(optionsVal(0, 0))
+	for path, want := range map[string]int{
+		"/":                               http.StatusNotFound,
+		"/sub/":                           http.StatusNotFound,
+		"/sub/a.txt":                      http.StatusOK,
+		"/site/":                          http.StatusOK,
+		"/.env":                           http.StatusNotFound,
+		"/.git/config":                    http.StatusNotFound,
+		"/sub/.htpasswd":                  http.StatusNotFound,
+		"/.well-known/acme-challenge/tok": http.StatusOK,
+	} {
+		if got := rawRequest(t, addr, "GET "+path+" HTTP/1.1"); got != want {
+			t.Errorf("GET %s = %d, want %d", path, got, want)
+		}
+	}
+	listing := interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
+		{Name: "dirListing", Value: interpreter.BoolVal(true)},
+	})
+	addr = serve(listing)
+	if got := rawRequest(t, addr, "GET /sub/ HTTP/1.1"); got != http.StatusOK {
+		t.Errorf("GET /sub/ with dirListing = %d, want 200", got)
+	}
+	if got := rawRequest(t, addr, "GET /.git/config HTTP/1.1"); got != http.StatusNotFound {
+		t.Errorf("GET /.git/config with dirListing = %d, want 404", got)
+	}
+}
+
+// SECURITY: a decoded path with a `.` or `..` segment is refused before the
+// program sees it, so neither httpd.path nor a route parameter can carry one.
+func TestDotSegmentsRejected(t *testing.T) {
+	ResetForTest()
+	srv, addr := startServer(t)
+	defer shutdownFn(noCtx, []Value{srv})
+	seen := make(chan string, 8)
+	serveLoop(srv, func(req Value) {
+		p, _ := pathFn(noCtx, []Value{req})
+		seen <- p.Str
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
+	})
+	for _, line := range []string{
+		"GET /a/../admin HTTP/1.1",
+		"GET /static/..%2F..%2Fetc%2Fpasswd HTTP/1.1",
+		"GET /./x HTTP/1.1",
+		"GET /a/%2E%2E/b HTTP/1.1",
+	} {
+		if got := rawRequest(t, addr, line); got != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", line, got)
+		}
+	}
+	if got := rawRequest(t, addr, "GET /a/..b/.c/x.y HTTP/1.1"); got != http.StatusOK {
+		t.Errorf("dots inside names = %d, want 200", got)
+	}
+	if p := <-seen; p != "/a/..b/.c/x.y" {
+		t.Errorf("program saw %q, want only the clean path", p)
+	}
+}
+
+// setHeader rejects what net/http would silently drop or rewrite.
+func TestSetHeaderRejectsInvalid(t *testing.T) {
+	ResetForTest()
+	rs := &reqState{done: make(chan struct{}), status: 200, r: &http.Request{URL: &url.URL{Path: "/"}}}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	req := makeRequest(id)
+	set := func(name, value string) error {
+		_, err := setHeaderFn(noCtx, []Value{req, interpreter.StringVal(name), interpreter.StringVal(value)})
+		return err
+	}
+	for _, name := range []string{"", "X A", "X-A: 1\r\nX-B", "Xé", "X(A)"} {
+		if set(name, "v") == nil {
+			t.Errorf("setHeader name %q accepted", name)
+		}
+	}
+	for _, value := range []string{"v\r\nX-Injected: 1", "a\nb", "a\x00b", "a\x7fb"} {
+		if set("X-A", value) == nil {
+			t.Errorf("setHeader value %q accepted", value)
+		}
+	}
+	if err := set("Set-Cookie", "a=b; Path=/\tx"); err != nil {
+		t.Errorf("valid header rejected: %v", err)
+	}
+	if len(rs.respHeaders) != 1 {
+		t.Errorf("headers stored = %d, want only the valid one", len(rs.respHeaders))
+	}
+}
+
+// httpd.etag rejects a tag that cannot sit inside the entity-tag quotes.
+func TestEtagRejectsInvalidTag(t *testing.T) {
+	ResetForTest()
+	rs := &reqState{done: make(chan struct{}), status: 200, r: &http.Request{URL: &url.URL{Path: "/"}, Header: http.Header{}}}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	req := makeRequest(id)
+	for _, tag := range []string{`a"b`, "a b", "a\r\nb", "a\x7f"} {
+		if _, err := etagFn(noCtx, []Value{req, interpreter.StringVal(tag)}); err == nil {
+			t.Errorf("etag %q accepted", tag)
+		}
+	}
+	if _, err := etagFn(noCtx, []Value{req, interpreter.StringVal("v1-abc/def")}); err != nil {
+		t.Errorf("valid tag rejected: %v", err)
+	}
+}
+
+// httpd.respond takes a final status only: a 1xx is informational.
+func TestRespondRejectsInformationalStatus(t *testing.T) {
+	ResetForTest()
+	rs := &reqState{done: make(chan struct{}), status: 200, r: &http.Request{URL: &url.URL{Path: "/"}}}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	req := makeRequest(id)
+	for _, status := range []int64{100, 101, 103, 199, 1000} {
+		if _, err := respondFn(noCtx, []Value{req, interpreter.IntVal(status), interpreter.StringVal("")}); err == nil {
+			t.Errorf("respond %d accepted", status)
+		}
+	}
+	if _, err := respondFn(noCtx, []Value{req, interpreter.IntVal(204), interpreter.StringVal("")}); err != nil {
+		t.Errorf("respond 204: %v", err)
+	}
+}
+
+// selfSignedPEM returns a throwaway certificate and key for 127.0.0.1.
+func selfSignedPEM(t *testing.T) ([]byte, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kder, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder})
+}
+
+// listenTLS honours the unix: prefix like listen does.
+func TestListenTLSUnixSocket(t *testing.T) {
+	ResetForTest()
+	certPEM, keyPEM := selfSignedPEM(t)
+	sock := filepath.Join(t.TempDir(), "tls.sock")
+	srv, err := listenTLSFn(noCtx, []Value{interpreter.StringVal("unix:" + sock), interpreter.BytesVal(certPEM), interpreter.BytesVal(keyPEM)})
+	if err != nil {
+		t.Fatalf("listenTLS unix: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	serveOnce(srv, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("tls")})
+	})
+	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+		},
+	}}
+	resp, err := client.Get("https://unix/")
+	if err != nil {
+		t.Fatalf("GET over unix TLS: %v", err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(b) != "tls" {
+		t.Errorf("body = %q", b)
+	}
+}
+
+// httpd.shutdown closes connections still busy after the grace period, so a
+// shut-down server stops serving a long download.
+func TestShutdownClosesBusyConnections(t *testing.T) {
+	ResetForTest()
+	old := shutdownGrace
+	shutdownGrace = 100 * time.Millisecond
+	defer func() { shutdownGrace = old }()
+	srv, addr := startServer(t)
+	const size = 64 << 20
+	serveOnce(srv, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.BytesVal(make([]byte, size))})
+	})
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+	one := make([]byte, 1)
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := c.Read(one); err != nil {
+		t.Fatalf("first byte: %v", err)
+	}
+	start := time.Now()
+	shutdownFn(noCtx, []Value{srv})
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("shutdown took %v", d)
+	}
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	n, _ := io.Copy(io.Discard, c)
+	if n >= size {
+		t.Errorf("received the whole %d-byte download after shutdown", n)
 	}
 }

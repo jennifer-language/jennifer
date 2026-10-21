@@ -103,6 +103,10 @@ var idleTimeout = 2 * time.Minute
 // var so tests can lower it.
 var respondTimeout = 60 * time.Second
 
+// shutdownGrace is how long httpd.shutdown waits for in-flight requests to
+// finish before it closes their connections. A var so tests can lower it.
+var shutdownGrace = 5 * time.Second
+
 // maxTimedOutIDs bounds the record of request ids the engine answered on its
 // own after the respond timeout (timedOut). It only serves a clearer error to a
 // handler that replies late, so old entries are simply forgotten.
@@ -143,6 +147,9 @@ type serverLimits struct {
 	respondTimeout time.Duration
 	// bodyTimeout bounds the whole body read (httpd.Options.bodyTimeoutMs).
 	bodyTimeout time.Duration
+	// dirListing lets serveDir answer a directory without an index.html with
+	// a file listing (httpd.Options.dirListing); off, it is a 404.
+	dirListing bool
 }
 
 // defaultLimits are httpd.listen's limits (read at call time, so tests that
@@ -171,7 +178,7 @@ func resolveLimits(o serverOpts) (serverLimits, error) {
 	if err != nil {
 		return serverLimits{}, err
 	}
-	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body}, nil
+	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, dirListing: o.dirListing}, nil
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -435,10 +442,16 @@ var errBodyBudget = errors.New("body buffer budget exhausted")
 // readBody reads a request body of up to maxBody+1 bytes (one past the cap, so
 // an over-limit body is detectable). The buffer starts at minBodyChunk and
 // doubles, each growth reserved from the server's budget first; held is the
-// reservation the caller returns when the request ends. Each read waits at most
-// bodyIdleTimeout, and the whole read at most the server's bodyTimeout.
-func (st *serverState) readBody(rc *http.ResponseController, r io.Reader) (buf []byte, held int64, err error) {
+// reservation the caller returns when the request ends. A declared
+// Content-Length (contentLength >= 0) caps the buffer at that size plus the one
+// byte that detects a longer body, so a known-size body is not over-allocated.
+// Each read waits at most bodyIdleTimeout, and the whole read at most the
+// server's bodyTimeout.
+func (st *serverState) readBody(rc *http.ResponseController, r io.Reader, contentLength int64) (buf []byte, held int64, err error) {
 	limit := st.maxBody + 1
+	if contentLength >= 0 && contentLength+1 < limit {
+		limit = contentLength + 1
+	}
 	deadline := time.Now().Add(st.bodyTimeout)
 	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
 	for int64(len(buf)) < limit {
@@ -475,6 +488,16 @@ func (st *serverState) readBody(rc *http.ResponseController, r io.Reader) (buf [
 	return buf, held, nil
 }
 
+// hasDotSegment reports whether a URL path has a `.` or `..` segment.
+func hasDotSegment(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // reserve takes n bytes of the body-buffer budget, or reports false when that
 // would pass it.
 func (st *serverState) reserve(n int64) bool {
@@ -495,11 +518,28 @@ func (st *serverState) reserve(n int64) bool {
 // the response from this goroutine.
 func makeHandler(st *serverState) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A `.` or `..` segment in the decoded path (`/a/../b`, `/a%2F..%2Fb`)
+		// never comes from a browser, which resolves them before sending. Handed
+		// on, it would let a route parameter or a path built from httpd.path
+		// climb out of the directory a handler means to read from, so it is
+		// refused before the program sees it.
+		if hasDotSegment(r.URL.Path) {
+			w.Header().Set("Connection", "close")
+			http.Error(w, "bad request: path contains a . or .. segment", http.StatusBadRequest)
+			return
+		}
 		// Read the body first, outside the admission slots: a client trickling
 		// its upload then holds only its own connection and the little it has
-		// sent, never a slot the rest of the server needs.
+		// sent, never a slot the rest of the server needs. A request without a
+		// body reserves nothing, so it is still served when uploads have used
+		// up the body budget.
 		rc := http.NewResponseController(w)
-		body, held, rerr := st.readBody(rc, r.Body)
+		var body []byte
+		var held int64
+		var rerr error
+		if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+			body, held, rerr = st.readBody(rc, r.Body, r.ContentLength)
+		}
 		defer st.buffered.Add(-held)
 		if rerr != nil {
 			// Connection: close makes the server skip its keepalive body drain,
@@ -854,9 +894,9 @@ func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, lim serverLimits
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: bad certificate / key pair: %v", fnName, err)
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := doListen(fnName, addr)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+		return interpreter.Null(), err
 	}
 	st := newServer(ln, lim)
 	// Floor at TLS 1.2: 1.0/1.1 are deprecated (RFC 8996) and fail compliance
@@ -966,9 +1006,13 @@ func shutdownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	// Unblock parked handlers and accept() callers, then drain gracefully.
 	st.closeOnce.Do(func() { close(st.closing) })
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	_ = st.srv.Shutdown(ctx)
+	if err := st.srv.Shutdown(ctx); err != nil {
+		// The grace period ran out with connections still busy (a long download
+		// under its write timeout): close them, so a shut-down server is down.
+		_ = st.srv.Close()
+	}
 	serversMu.Lock()
 	delete(servers, id)
 	serversMu.Unlock()
@@ -1105,6 +1149,15 @@ func setHeaderFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// net/http drops a header with an invalid name and turns CR / LF in a value
+	// into spaces, both silently; a lost or rewritten Set-Cookie should be an
+	// error the handler sees instead.
+	if !validHeaderName(name) {
+		return interpreter.Null(), fmt.Errorf("httpd.setHeader: invalid header name %q (letters, digits and !#$%%&'*+-.^_`|~ only)", name)
+	}
+	if !validHeaderValue(value) {
+		return interpreter.Null(), fmt.Errorf("httpd.setHeader: header %s value contains a control character (CR, LF, NUL, ...)", name)
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if rs.responded {
@@ -1112,6 +1165,34 @@ func setHeaderFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	rs.respHeaders = append(rs.respHeaders, respHeader{key: name, value: value})
 	return interpreter.Null(), nil
+}
+
+// validHeaderName reports whether s is an RFC 9110 token (a field name).
+func validHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			continue
+		}
+		if !strings.ContainsRune("!#$%&'*+-.^_`|~", rune(c)) {
+			return false
+		}
+	}
+	return true
+}
+
+// validHeaderValue reports whether s is a valid field value: no control
+// character except horizontal tab.
+func validHeaderValue(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 && c != '\t' || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // setRequestValueFn stores a request-scoped note. It is per-request scratch
@@ -1181,11 +1262,12 @@ func respondFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	// net/http's WriteHeader panics for a status outside [100, 999]; reject it
-	// at the boundary so a bad status is a catchable error, not an aborted
-	// connection with a logged panic.
-	if status < 100 || status > 999 {
-		return interpreter.Null(), fmt.Errorf("httpd.respond: status %d out of range [100, 999]", status)
+	// A final response needs a final status. net/http's WriteHeader panics
+	// outside [100, 999], and a 1xx is informational: 101 would claim a
+	// protocol switch that never happens, and any other 1xx is followed by an
+	// implicit 200. Reject them at the boundary as a catchable error.
+	if status < 200 || status > 999 {
+		return interpreter.Null(), fmt.Errorf("httpd.respond: status %d out of range [200, 999] (a 1xx is not a final response)", status)
 	}
 	body, err := takeBodyArg("httpd.respond", args[2])
 	if err != nil {
@@ -1231,6 +1313,17 @@ func etagMatches(inm, quoted, tag string) bool {
 	return false
 }
 
+// validEtag reports whether tag can sit inside an entity-tag's quotes (RFC 9110
+// etagc: any byte from 0x21 up except `"` and DEL).
+func validEtag(tag string) bool {
+	for i := 0; i < len(tag); i++ {
+		if c := tag[i]; c <= 0x20 || c == '"' || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // etagFn sets an ETag validator and honours a conditional GET at the engine
 // level, so a bare-httpd app gets the same conditional-request handling the
 // `web` module exposes without re-parsing If-None-Match itself. It sets the
@@ -1252,6 +1345,9 @@ func etagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	tag, err := takeStringArg("httpd.etag", args, 1, "tag")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if !validEtag(tag) {
+		return interpreter.Null(), fmt.Errorf("httpd.etag: invalid tag %q (no quote, space or control character)", tag)
 	}
 	quoted := "\"" + tag + "\""
 	inm := rs.r.Header.Get("If-None-Match")
@@ -1341,6 +1437,25 @@ func resolveDirPath(rs *reqState, root string) (string, bool, Value, error) {
 	if rel, rerr := filepath.Rel(root, full); rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		v, err := answerWithStatus(rs, http.StatusNotFound, "not found")
 		return "", false, v, err
+	}
+	// Dotfiles (`.env`, `.git/`, `.htpasswd`) are configuration and secrets, not
+	// content: a path with a segment starting with `.` is not found. The one
+	// exception is `.well-known/` (RFC 8615), which ACME challenges and other
+	// discovery files live under.
+	for _, seg := range strings.Split(clean, "/") {
+		if strings.HasPrefix(seg, ".") && seg != ".well-known" {
+			v, err := answerWithStatus(rs, http.StatusNotFound, "not found")
+			return "", false, v, err
+		}
+	}
+	// A directory is served through its index.html. Without one, http.ServeFile
+	// would list the directory's contents; that is 404 unless the server opted
+	// in with httpd.Options.dirListing.
+	if fi, serr := os.Stat(full); serr == nil && fi.IsDir() && (rs.srv == nil || !rs.srv.dirListing) {
+		if _, ierr := os.Stat(filepath.Join(full, "index.html")); ierr != nil {
+			v, err := answerWithStatus(rs, http.StatusNotFound, "not found")
+			return "", false, v, err
+		}
 	}
 	return full, true, interpreter.Null(), nil
 }

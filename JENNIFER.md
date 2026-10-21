@@ -694,8 +694,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   callbacks): `httpd.listen(addr)` (or `listenTLS(addr, cert, key)`, TLS + HTTP/2)
   -> `Server`, then loop. `httpd.listenWith(addr, opts)` /
   `listenTLSWith(addr, cert, key, opts)` take an `httpd.Options{maxBodyBytes as
-  int, maxInFlight as int, respondTimeoutMs as int, bodyTimeoutMs as int}` for
-  per-server limits (a `0` field selects its default: a 10 MiB request-body cap /
+  int, maxInFlight as int, respondTimeoutMs as int, bodyTimeoutMs as int,
+  dirListing as bool}` for per-server limits (a `0` field selects its default: a 10 MiB request-body cap /
   256 concurrent in-flight requests / a 60 s respond timeout, after which the
   engine answers `503` itself / a 60 s body timeout, `408`; the body is read
   before a request takes an in-flight slot, so slow uploads cannot stall the server;
@@ -715,7 +715,12 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `ETag` and honours a conditional GET (returns `bool`; `true` = a `304` was
   sent, so stop), parsing `If-None-Match` (list / `*` / weak `W/`).
   `serveFileEtag` / `serveDirEtag` are `serveFile` / `serveDir` plus a cached
-  content-hash `ETag` (stable across replicas, unlike an mtime).
+  content-hash `ETag` (stable across replicas, unlike an mtime). `serveDir`
+  answers `404` for dotfiles (except `.well-known/`) and for a directory without
+  an `index.html` (listing is opt-in, `dirListing: true`). The engine answers
+  `400` to a path with a `.` / `..` segment, so `httpd.path` never has one;
+  `setHeader` / `etag` reject an invalid name, value or tag, and `respond` takes a
+  status from `200` to `999`.
   `spawn` several accept loops for a worker pool. Default binary only
   (`jennifer-tiny` stubs it).
 - **`term`** - terminal control for interactive TUIs: `term.makeRaw(stream)` ->

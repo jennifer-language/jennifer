@@ -608,7 +608,8 @@ export func serveFile(ctx as Context, path as string) {
 }
 
 /**
- * Serve static files from a directory root (path-safe; 404 for a missing file).
+ * Serve static files from a directory root (path-safe; 404 for a missing file, a
+ * dotfile other than `.well-known/`, or a directory without an index.html).
  * @param ctx {Context} the request context
  * @param root {string} the directory to serve from
  */
