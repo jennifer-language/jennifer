@@ -159,9 +159,9 @@ export def struct EnumDoc {
     internal as bool
 };
 /**
- * The documentation of one method.
- * @field name {string} the method name
- * @field exported {bool} whether the method is exported
+ * The documentation of one function.
+ * @field name {string} the function name
+ * @field exported {bool} whether the function is exported
  * @field summary {string} the summary (its first paragraph)
  * @field description {string} the description (the paragraphs after the summary)
  * @field params {list of ParamDoc} the documented parameters
@@ -171,7 +171,7 @@ export def struct EnumDoc {
  * @field since {string} the documented since-version
  * @field deprecated {string} the deprecation note, or "" if not deprecated
  * @field see {list of string} the cross-references
- * @field internal {bool} whether the method is marked internal
+ * @field internal {bool} whether the function is marked internal
  */
 export def struct FuncDoc {
     name as string,
@@ -190,7 +190,7 @@ export def struct FuncDoc {
 /**
  * The full documentation extracted from one source file.
  * @field module {ModuleDoc} the module preamble documentation
- * @field funcs {list of FuncDoc} the documented methods
+ * @field funcs {list of FuncDoc} the documented functions
  * @field structs {list of StructDoc} the documented structs
  * @field enums {list of EnumDoc} the documented enums (sum types)
  * @field consts {list of ConstDoc} the documented constants

@@ -5,13 +5,13 @@
 /**
  * A generic OAuth2 client: the get-a-token half of OAuth2 (the use-a-token half
  * is `sasl` XOAUTH2). Acquires and refreshes access tokens against any OAuth2
- * token endpoint, over `http` + `json`. Ships the flows that need no extra
- * dependencies: Client Credentials (a service authenticating as itself),
+ * token endpoint, over `http` + `json`. Ships three flows:
+ * Client Credentials (a service authenticating as itself),
  * Refresh Token (trade a refresh token for a fresh access token), and the
  * Device Authorization Grant (the CLI-friendly flow: show the user a URL +
  * code, poll the token endpoint until they approve). Authorization Code + PKCE
- * and the service-account JWT assertion need a local redirect server and
- * crypto-grade signing, so they land later. Provider presets for Google and
+ * and the service-account JWT assertion are not provided (build the assertion
+ * with `jwt.sign`). Provider presets for Google and
  * Microsoft 365 fill in the endpoints. Because it builds on `http` (which uses
  * `net`), this module needs the default `jennifer` binary. A token-endpoint
  * error surfaces as a catchable `Error` (kind "oauth").

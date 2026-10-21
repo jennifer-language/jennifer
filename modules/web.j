@@ -567,7 +567,7 @@ export func text(ctx as Context, status as int, body as string) {
 
 /**
  * Answer with an application/json body encoded from a json.Value. (Named
- * sendJson, not json, because a method may not shadow the `json` namespace this
+ * sendJson, not json, because a function may not shadow the `json` namespace this
  * module imports.)
  * @param ctx {Context} the request context
  * @param status {int} the HTTP status code

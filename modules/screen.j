@@ -59,7 +59,7 @@ def const FG as map of string to string init {
  * terminal. `cells` is row-major (`y * cols + x`); each cell is a one-column
  * string, optionally wrapped in an SGR colour sequence. Value-semantic like any
  * struct: a drawing function returns the updated `Buffer`. Written as
- * `$buf = screen.set($buf, ...);` in a method, a call updates the grid in place;
+ * `$buf = screen.set($buf, ...);` in a function, a call updates the grid in place;
  * anywhere else (top-level code, a global, inside a `try`, or keeping the old
  * buffer too) it copies the whole grid, so batch such writes with `setMany` /
  * `textMany`.

@@ -121,7 +121,7 @@ export def enum RelationKind {
 /**
  * A declared association from a schema to another table. Metadata only - built
  * by `orm.belongsTo` / `hasOne` / `hasMany` / `manyToMany`, read by
- * `orm.joinRelation` (and, later, eager loading). For a `BelongsTo`, `foreignKey`
+ * `orm.joinRelation` and eager loading (`orm.with` / `orm.load`). For a `BelongsTo`, `foreignKey`
  * is on **this** table and `localKey` is the target's key; for `HasOne` /
  * `HasMany`, `foreignKey` is on the **target** table and `localKey` is this
  * table's key. `ManyToMany` links through `through` (a join table) via its two

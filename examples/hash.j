@@ -4,8 +4,8 @@
 /**
  * Exercises the `hash` + `crc` libraries.
  * Both libraries use the codec-table shape: a single function per category
- * with the algorithm as a string argument. This example carries a tiny
- * `bytesToHex` helper so the digests are printable for a golden comparison.
+ * with the algorithm as a string argument. Digests are hex-encoded with
+ * `encoding.toText` so they are printable for a golden comparison.
  * @module hash
  */
 

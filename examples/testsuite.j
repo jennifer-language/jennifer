@@ -4,12 +4,12 @@
 /**
  * A `jennifer test` target showing the assertion
  * vocabulary. Unlike testing.j (which self-drives testing.run and
- * renders reports), this file only defines test methods and lets the
+ * renders reports), this file only defines test functions and lets the
  * runner orchestrate them. Run it with:
  *   jennifer test examples/testsuite.j
  *   jennifer test --format=tap examples/testsuite.j
  *   jennifer test --isolated examples/testsuite.j
- * The runner discovers every zero-arg method named test*, calls setUp
+ * The runner discovers every zero-arg function named test*, calls setUp
  * before each and tearDown after (both optional), and reports pass/fail.
  * @module testsuite
  */

@@ -3,7 +3,7 @@
 
 /**
  * Recursion + parameters + multi-arg printf.
- * Demonstrates method parameters, return values, recursion, and format-string
+ * Demonstrates function parameters, return values, recursion, and format-string
  * printf.
  * @module factorial
  */

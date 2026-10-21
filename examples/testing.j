@@ -3,7 +3,7 @@
 
 /**
  * Exercises the `testing` library. Defines a
- * handful of test methods hitting every failure mode
+ * handful of test functions hitting every failure mode
  * (pass, user throw, runtime error, exit inside a test) and
  * renders the accumulated results in each of the three shipping
  * formats: human text, TAP, and JUnit XML.

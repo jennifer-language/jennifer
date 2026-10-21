@@ -5,10 +5,9 @@
  * A workload for the allocation profiler, run with jennifer profile --allocs.
  * It exercises the value-semantics copy paths that --allocs tracks: eager
  * copies (a def / assignment / parameter binding that deep-copies a compound
- * value) and spawn-frame deep copies. It also aliases-then-mutates the way that
- * would force a copy-on-write detachment under a lazier strategy, but the
- * interpreter copies eagerly at every store and keeps the append/index hot loop
- * unshared, so COW detachments stay at or near zero. Drop --allocs for the
+ * value) and spawn-frame deep copies. It also aliases-then-mutates; the
+ * interpreter copies eagerly at every store and keeps the append/index hot
+ * loop unshared, so that costs no extra copy. Drop --allocs for the
  * statement/time profile instead.
  * @module profile
  */

@@ -5,7 +5,7 @@
 /**
  * JSON-RPC 2.0 (https://www.jsonrpc.org/specification) over HTTP: a **client**
  * that calls remote methods, and a transport-agnostic **server** `handle` that
- * dispatches an incoming request to the entry program's methods **by name**, via
+ * dispatches an incoming request to the entry program's functions **by name**, via
  * `meta.callMain` - the method name arrives on the wire, so it is resolved as a
  * runtime string, not a `func` value. Built on `json` for the wire format and
  * `http` for the client transport, so it needs the default `jennifer` binary.
@@ -18,7 +18,7 @@
  *
  * **Server security.** `handle` dispatches each request's `method` to a
  * *top-level* `func` of that name in the entry program, so **every** top-level
- * method taking one `json.Value` parameter is remotely reachable - there is no
+ * function taking one `json.Value` parameter is remotely reachable - there is no
  * separate route registry. Name RPC handlers deliberately (a shared prefix, a
  * dedicated dispatch file) and do not co-locate a `handle`-served program with
  * privileged one-argument helpers. Authentication is the transport's job: gate
@@ -222,16 +222,16 @@ func parseResult(body as string, status as int, expectId as int) {
 /**
  * Dispatch a JSON-RPC request body and return the reply body (transport-
  * agnostic: wire it to `httpd` / `net` however you serve). Each request's
- * `method` names a top-level method `func NAME(params as json.Value)` in the
+ * `method` names a top-level function `func NAME(params as json.Value)` in the
  * program that imported this module; it is called with the request's params and
  * must return a `json.Value` **or a scalar** (int / float / string / bool /
- * null) as its result. A missing method is a -32601 reply, a thrown error a
+ * null) as its result. A missing function is a -32601 reply, a thrown error a
  * generic -32603 reply. A single request yields a single reply; a notification
  * (no `id`) yields no reply (`""`); a batch (a JSON array) yields an array reply
  * with the notification entries omitted (`""` when the batch is all
  * notifications).
  *
- * **Security.** Every top-level one-`json.Value`-argument method is reachable by
+ * **Security.** Every top-level one-`json.Value`-argument function is reachable by
  * name (there is no route allow-list); the module-level doc explains how to
  * scope handlers and where authentication belongs. A thrown handler error's
  * message is *not* echoed to the client (only the generic -32603 text is), so

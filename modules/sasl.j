@@ -10,8 +10,8 @@
  *
  * - **Simple encoders** (`plain`, `loginUser` / `loginPass`, `bearer`) - one
  *   base64 token per step. `bearer` builds the SASL XOAUTH2 response from an
- *   OAuth2 bearer token (named `bearer`, not `xoauth2`, because a Jennifer
- *   method name is letters-only; "XOAUTH2" is the string the client sends).
+ *   OAuth2 bearer token (named for the token it carries; "XOAUTH2" is the
+ *   mechanism string the client sends).
  * - **Challenge-response** (`cram`, and the `SCRAM` family) - keyed by the
  *   `hash` / `crypto` libraries. `cram` (CRAM-MD5, RFC 2195) answers a server
  *   challenge in one step. SCRAM is a multi-step exchange over a `Scram` handle:
@@ -127,9 +127,8 @@ export func negotiate(advertised as list of string) {
 /**
  * Build the CRAM-MD5 response (RFC 2195): base64 of "user <hex>", where <hex>
  * is the lowercase HMAC-MD5 of the server's (base64-encoded) challenge keyed by
- * the password. A one-step challenge-response mechanism. Named `cram` (not
- * `cramMd5`) because a Jennifer method name is letters-only; the wire mechanism
- * is "CRAM-MD5".
+ * the password. A one-step challenge-response mechanism. Named `cram`; the wire
+ * mechanism is "CRAM-MD5".
  * @param user {string} the login username
  * @param pass {string} the login password
  * @param challenge {string} the server's base64-encoded challenge

@@ -560,8 +560,9 @@ export func encodeAll(cards as list of Card) {
 
 /**
  * Parse vCard text into a list of `Card`s (one entry per `VCARD`). Unfolds
- * folded lines, ignores property parameters (the `;KEY=VALUE` after a name),
- * reads the structured `N` / `ADR` values, and unescapes text values.
+ * folded lines, reads the `TYPE` parameter on `EMAIL` / `TEL` / `ADR` into
+ * `Typed.type` (other `;KEY=VALUE` parameters are ignored), reads the
+ * structured `N` / `ADR` values, and unescapes text values.
  * @param text {string} the vCard text
  * @return {list of Card} the parsed cards (empty when the text has none)
  */
