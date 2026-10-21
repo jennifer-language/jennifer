@@ -19,8 +19,8 @@ Terminals in CAPITALS are token classes from the lexer (see
 punctuation that match the corresponding token's lexeme.
 
 ```ebnf
-program     = { useStmt | moduleImport | exported | methodDef | structDef | enumDef | statement } EOF ;
-exported    = "export" ( methodDef | structDef | enumDef | constDefine ) ;
+program     = { useStmt | moduleImport | exported | functionDef | structDef | enumDef | statement } EOF ;
+exported    = "export" ( functionDef | structDef | enumDef | constDefine ) ;
                                        (* `export` publishes a name from a
                                           module; it may only precede a
                                           `func`, `def struct`, `def enum`, or
@@ -29,18 +29,28 @@ exported    = "export" ( methodDef | structDef | enumDef | constDefine ) ;
                                           `export` at all (module vs script)
                                           is decided at load time, not by the
                                           grammar. *)
-useStmt     = "use" IDENT [ "as" IDENT ] ";" ;      (* library import; the
+useStmt     = "use" ( IDENT | "task" ) [ "as" IDENT ] ";" ;
+                                                    (* library import; the
                                                        optional "as ALIAS"
                                                        renames the namespace
-                                                       at the use site *)
+                                                       at the use site. `task`
+                                                       is a type keyword, so
+                                                       `use task;` is accepted
+                                                       as its own case *)
 moduleImport = "import" STRING [ "as" IDENT ] ";" ;  (* module import; the
                                                        STRING path must end
-                                                       in ".j". Top-level
+                                                       in ".j", except a
+                                                       vendored deck reference
+                                                       starting with "@"
+                                                       (`"@scope/package/"`),
+                                                       which expands to the
+                                                       package entry file at
+                                                       resolve time. Top-level
                                                        only - a module is a
                                                        declaration, so an
                                                        import inside a block
                                                        is a parse error *)
-methodDef   = "func" IDENT "(" [ paramList ] ")" block ;
+functionDef = "func" IDENT "(" [ paramList ] ")" block ;
 paramList   = param { "," param } ;
 param       = IDENT "as" type ;
 block       = "{" { statement } "}" ;
@@ -87,10 +97,10 @@ statement   = defineStmt
 
 tryStmt     = "try" block "catch" "(" IDENT ")" block ;
                                        (* IDENT is the catch
-                                          binding, follows the
-                                          iteration-variable name rule
-                                          (letters only). No `finally`
-                                          in v1. *)
+                                          binding, follows the variable
+                                          name rule (letters and digits,
+                                          no `_`). There is no `finally`
+                                          (rejected - use `defer`). *)
 throwStmt   = "throw" expr ";" ;
                                        (* expr may produce any
                                           value; convention is an
@@ -127,13 +137,14 @@ constDefine = "def" "const" IDENT "as" type "init" expr ";" ; (* the const
 defineStmt  = "def" [ "const" ] IDENT "as" type [ "init" expr ] ";" ;
                                        (* constants require "init" and an
                                           uppercase name matching
-                                          [A-Z]+(_[A-Z]+)* (uppercase
-                                          chunks joined by single `_`;
-                                          no leading, trailing or
-                                          consecutive `_`); variables may
-                                          omit "init" and get zero-value,
-                                          and use the letters-only IDENT
-                                          form *)
+                                          [A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*
+                                          (uppercase chunks joined by single
+                                          `_`, each chunk letter-initial; no
+                                          leading, trailing or consecutive
+                                          `_`); variables may omit "init" and
+                                          get zero-value, and use the
+                                          letters-and-digits IDENT form
+                                          (no `_`) *)
 
 assignStmt  = VARREF "=" expr ";" ;
 
@@ -150,15 +161,15 @@ fieldAssign = VARREF lvalueTail { lvalueTail } "." wordName "=" expr ";" ;
 
 lvalueTail  = "[" expr "]" | "." wordName ;
 
-appendStmt  = VARREF "[" "]" "=" expr ";" ;
+appendStmt  = VARREF { lvalueTail } "[" "]" "=" expr ";" ;
                                        (* append sugar: write-only
                                           target meaning "the position
                                           just past the end of the
                                           list"; read use `e[]` is a
-                                          parse error. Only one bare
-                                          VARREF root - chained forms
-                                          like `$xs[0][]` are not supported
-                                          (yet). *)
+                                          parse error. Closes any
+                                          lvalue chain: `$xs[] = v`,
+                                          `$s.items[] = v`,
+                                          `$grid[i][] = v`. *)
 
 ifStmt      = "if" "(" expr ")" block
               { "elseif" "(" expr ")" block }
@@ -194,8 +205,9 @@ patternArm  = IDENT [ "(" IDENT ")" ] ; (* an enum-variant pattern: a variant
                                           into a fresh name *)
                                        (* Two arm forms, disambiguated at resolve
                                           time by the subject's type. When the
-                                          subject is a variable / parameter of a
-                                          known enum type, every arm is a
+                                          subject is a variable / parameter /
+                                          constant / struct field of a known
+                                          enum type, every arm is a
                                           patternArm (variant + optional binder),
                                           checked for exhaustiveness (cover every
                                           variant or add `else`). Otherwise arms
@@ -228,10 +240,8 @@ taskType    = "task" "of" type ;       (* `task of T` - handle to
                                           shape as `list of T`; recurses
                                           the same way (`task of list of
                                           int` is legal). *)
-                                       (* recursive; nesting like
-                                          `list of list of int` and
-                                          `map of string to list of int`
-                                          falls out naturally *)
+                                       (* recursive: `list of list of int`,
+                                          `map of string to list of int` *)
 structType  = IDENT [ "." IDENT ] ;    (* User-defined struct OR enum type
                                           (bare IDENT), or a library-/module-
                                           provided namespaced type
@@ -325,7 +335,9 @@ lenExpr     = "len" "(" expr ")" ;     (* polymorphic
                                           not a library function; the
                                           `core` library that once
                                           hosted it no longer exists. *)
-structLit   = IDENT [ "." wordName [ "." wordName ] ] "{" [ structLitField { "," structLitField } [ "," ] ] "}" ;
+structLit   = IDENT [ "." wordName ] structBody
+            | IDENT "." wordName "." wordName [ structBody ] ;
+structBody  = "{" [ structLitField { "," structLitField } [ "," ] ] "}" ;
                                        (* struct OR enum literal (same node).
                                           Bare IDENT names a user struct;
                                           `IDENT.IDENT` is a namespaced struct
@@ -337,13 +349,23 @@ structLit   = IDENT [ "." wordName [ "." wordName ] ] "{" [ structLitField { ","
                                           eval from the tables, not from
                                           capitalisation. A payload-less enum
                                           variant (`Shape.Empty`) has no `{...}`
-                                          and reaches eval as a constRef the
-                                          interpreter resolves against the enum.
+                                          and reaches eval as a qualifiedConstRef
+                                          the interpreter resolves against the
+                                          enum; the cross-module payload-less
+                                          `mod.Shape.Empty` is the braceless
+                                          three-segment structLit. The third
+                                          segment is taken only when neither the
+                                          IDENT nor the middle name is an
+                                          UPPER_CASE constant name (`mod.CONST.f`
+                                          stays a field access).
                                           The `{` after IDENT in expression
                                           position is the tie-breaker against
-                                          `constRef`. `P{}` parses; "every field
-                                          present exactly once" is a post-parse
-                                          check. *)
+                                          `constRef`. `P{}` parses; a field
+                                          named twice is a parse error, and
+                                          "every field present" is checked at
+                                          load time - except that a library
+                                          struct may omit any field and an
+                                          `Error` its `file` / `line` / `col`. *)
 structLitField = wordName ":" expr ;
 call        = IDENT "(" [ expr { "," expr } ] ")" ;
 qualifiedCall      = IDENT "." wordName "(" [ expr { "," expr } ] ")" ;

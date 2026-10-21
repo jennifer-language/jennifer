@@ -9,9 +9,9 @@ Enable with `use encoding;`. Three groups of functions:
 3. **Character codecs** (`encode` / `decode`) - a Jennifer `string` to and
    from a single-byte legacy encoding (ISO-8859-*, Windows-*, EBCDIC).
 
-The cross-kind UTF-8 codec ships with [`convert`](convert.md)
-(`convert.bytesFromString` / `convert.stringFromBytes`); this library is
-where the rest of the codec proliferation lives.
+The UTF-8 codec ships with [`convert`](convert.md)
+(`convert.bytesFromString` / `convert.stringFromBytes`); every other codec
+lives here.
 
 ```jennifer
 use io;
@@ -34,8 +34,8 @@ io.printf("%x\n", encoding.encode("café", "iso-8859-1"));  # 63 61 66 e9
 
 ## Binary-to-text: `toText` / `fromText`
 
-One verb pair, the encoding named by a string. Reversible representation -
-these grow or reshape the bytes, they don't reduce information (that's
+One verb pair, the encoding named by a string. Reversible representation:
+these grow or reshape the bytes without reducing information (for that, see
 [`compress`](compress.md)).
 
 | Call                        | Returns  | Notes                                    |
@@ -74,16 +74,12 @@ encodes as `%2B`). Decode reverses each; a malformed `%` escape (`%`, `%2`,
 query strings (its `encode` / `decode` are `uri-percent`, `encodeForm` /
 `decodeForm` and `buildQuery` / `parseQuery` are `uri-form`).
 
-Format names are **exact** (case-sensitive, no `-` / `_` normalisation) -
-they're the library's own fixed set, not external standards with variant
-spellings. `"base64"` works; `"BASE64"` errors with the supported set
-listed.
+Format names are **exact** (case-sensitive, no `-` / `_` normalisation):
+`"base64"` works; `"BASE64"` errors with the supported set listed.
 
-> **Why a format string instead of `encoding.hex()` / `encoding.base64()`?**
-> Jennifer's letters-only identifier rule rejects digits in method names, so
-> `encoding.base64` won't parse; and the codec-table shape already matches
-> the rest of this library plus [`convert`](convert.md), [`hash`](hash.md),
-> and [`crc`](crc.md).
+A format string, rather than `encoding.hex()` / `encoding.base64()`, keeps
+the codec-table shape shared with the rest of this library and with
+[`convert`](convert.md), [`hash`](hash.md), and [`crc`](crc.md).
 
 ## Character codecs: `encode` / `decode`
 
@@ -146,11 +142,10 @@ error on decode; runes with no byte are a positioned error on encode.
 
 ### Codec names are exact
 
-Codec names are **exact-match** - the one canonical spelling only, no
-case-folding, separator-stripping, or IANA aliases. `"iso-8859-1"` works;
-`"latin-1"`, `"ISO-8859-1"`, `"iso88591"`, and `"cp1252"` all error with the
-known set listed. This is deliberate strictness (stance #2, explicit over
-implicit): a codec is named one way, and no lenient spelling hides a typo.
+Codec names are **exact-match**: one canonical spelling, no case-folding,
+separator-stripping, or IANA aliases. `"iso-8859-1"` works; `"latin-1"`,
+`"ISO-8859-1"`, `"iso88591"`, and `"cp1252"` all error with the known set
+listed (stance #2, explicit over implicit: no lenient spelling hides a typo).
 Map an external name (an HTTP `charset=ISO-8859-1`, say) to the canonical
 form yourself before calling.
 
@@ -159,9 +154,7 @@ form yourself before calling.
 Only `ascii` (7-bit, with its own out-of-range errors) and `ebcdic`
 (IBM-1047, not in the standard Unicode mapping path) are hand-written.
 Every ISO-8859 and Windows single-byte codec - including `iso-8859-1` and
-`windows-1252` - is **generated from the Unicode Consortium mapping files**,
-so every table comes from one authoritative source rather than being
-hand-transcribed:
+`windows-1252` - is **generated from the Unicode Consortium mapping files**:
 
 ```sh
 go generate ./internal/lib/encoding/   # writes codecs_gen.go
@@ -170,8 +163,7 @@ go generate ./internal/lib/encoding/   # writes codecs_gen.go
 ### Converting a text file
 
 Jennifer strings are UTF-8 internally, so converting a legacy-encoded file
-to UTF-8 is just decode-then-write - there's no separate "encode to UTF-8"
-step:
+to UTF-8 is decode-then-write, with no separate "encode to UTF-8" step:
 
 ```jennifer
 use fs;
@@ -191,8 +183,9 @@ codec)`, which errors if a character has no byte in the target codec.
 whole input and builds the whole output in memory, so both are held at once.
 There is no fixed cap - a Jennifer `string` / `bytes` is a Go `string` /
 `[]byte`, bounded only by available memory. For a file too large to hold
-twice over, note that the single-byte codecs decode each byte independently,
-so decoding can be split at any byte boundary: read the file in fixed-size
+twice over: the single-byte codecs decode each byte independently, so
+decoding can be split at any byte boundary. Read the file in fixed-size
+
 byte chunks, `decode` each, and append to the output. (Encoding the other
 way must instead split on rune boundaries, since a UTF-8 character can span
 several bytes.)

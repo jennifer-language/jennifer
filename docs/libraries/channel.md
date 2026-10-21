@@ -2,9 +2,8 @@
 
 The `channel` library provides CSP-style channels: typed conduits that carry
 values between a `spawn`ed body and the rest of the program (or between several
-spawns). Channels are the coordination primitive that pairs with
-[`spawn` / `task`](task.md) - where `task` observes a single result, a channel
-streams many values and lets producers and consumers rendez-vous.
+spawns). Where [`task`](task.md) observes a single result, a channel streams
+many values and lets producers and consumers rendez-vous.
 
 ```jennifer
 use channel;
@@ -36,10 +35,9 @@ task.wait($producer);
 A channel is a **shared handle**: copies - including the deep copy a `spawn` makes
 of its captured scope - refer to the one underlying conduit, which is what lets a
 spawn body and its parent talk. But the **values sent through it are copied** at
-the send site, so channels carry copies and Jennifer's no-shared-mutable-state
-guarantee still holds. That is precisely why channels, not mutexes or atomics, are
-the right primitive: a shared lock would expose shared mutable state and stays
-rejected. A channel shares the *conduit*, never the *data*.
+the send site, so Jennifer's no-shared-mutable-state guarantee still holds. A
+mutex or atomic would expose shared mutable state, so locks stay rejected: a
+channel shares the *conduit*, never the *data*.
 
 `channel` is a **contextual keyword**: `channel of T` is a type, but `channel`
 stays an ordinary identifier everywhere else (a field or parameter named
@@ -125,8 +123,9 @@ primitive; per-channel dispatch is a possible later addition.
 Channel operations block like Go's: an unbuffered `send` waits for a receiver, a
 `recv` waits for a value. A channel with no counterpart (an unbuffered `send`
 nothing will receive, a `recv` on a channel nothing will send to or close)
-**hangs** the program - the same sharp edge as a non-terminating `spawn`. Note
-this does *not* trigger Go's "all goroutines asleep" deadlock abort: the
+**hangs** the program - the same sharp edge as a non-terminating `spawn`. It
+does *not* trigger Go's "all goroutines asleep" deadlock abort: the
+
 interpreter keeps a signal-handler goroutine alive (for `SIGUSR1` diagnostics), so
 the runtime never sees every goroutine blocked, and the program waits until it is
 killed rather than aborting. A spawn body blocked in `channel.send` / `recv` is

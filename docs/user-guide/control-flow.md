@@ -52,8 +52,7 @@ bitwise `^`, bitwise `&`, shifts `<< >>`, additive (`+`, `-`),
 multiplicative (`*`, `/`, `//`, `%`), unary `-` / `~`. Use parentheses
 to override: `(1 + 2) * 3`. The bit-op rungs sit between
 comparison and additive following Python's precedence, so
-`$x & 0xff == 0` parses as `($x & 0xff) == 0` (the intuitive
-interpretation), not the C/Go shape `$x & (0xff == 0)`. Examples that
+`$x & 0xff == 0` parses as `($x & 0xff) == 0`, not the C/Go shape `$x & (0xff == 0)`. Examples that
 follow the rules:
 
 ```jennifer
@@ -74,10 +73,7 @@ def result as bool init $gate and expensive();   # expensive() not called
 ```
 
 Mixed `int`/`float` arithmetic promotes the int to float and the result is a
-float (`3 + 0.5` -> `3.5`). **`/` always returns `float`**, even with two
-int operands (`5 / 2` is `2.5`, not `2`). Use `//` when you want an
-integer quotient: `5 // 2` is `2`. This is Python-3 division, not C/Java
-division.
+float (`3 + 0.5` -> `3.5`).
 
 ### Bitwise operators
 
@@ -86,7 +82,7 @@ positioned error. The shifts are arithmetic (sign-extending `>>`); a
 negative shift count is rejected, and a count >= 64 saturates to 0 or
 -1 the way hardware does. Non-decimal literals (`0xff`, `0o755`,
 `0b1010_0110`) and the `_` digit separator (`1_000_000`,
-`0xDEAD_BEEF`) make bit-twiddling code much easier to read.
+`0xDEAD_BEEF`) keep bit-twiddling code readable.
 
 ```jennifer
 def mask as int init 0xff;
@@ -136,9 +132,8 @@ is no implicit truthiness. Use a comparison (`$x == 0`) to get a bool.
 For-each (`for (def x in $coll)`) doesn't take a condition - it walks
 the whole collection (or the whole range).
 
-**A condition short-circuits.** `and` / `or` only evaluate their right operand
-when the result is not already decided, so a call on the right side may never
-run:
+**A condition short-circuits** (see `and` / `or` above), so a call on the right
+side may never run:
 
 ```jennifer
 use io;
@@ -184,7 +179,7 @@ io.printf("%d\n", $i);   # ok - prints 10
 ```
 
 The loop-local form is the [recommended style](style-guide.md#loops);
-reach for the outer-scope form only when you actually need to inspect
+reach for the outer-scope form only when you need to inspect
 the iterator after the loop ends. For-each (`for (def x in $coll)`)
 is always loop-local - the iteration variable lives in a fresh scope
 each pass through the loop and is gone once the loop exits.
@@ -206,11 +201,10 @@ repeat {
 The body runs unconditionally on entry, then `until (cond)` is checked
 **after** each iteration. The loop stops when `cond` evaluates true.
 
-This is the post-test counterpart to `while`. The keyword pair
-`repeat`/`until` was chosen over `do { } while ...` so the condition
-inversion ("loop until done") reads as English and matches the rest of
-Jennifer's word-operator style (`and`, `or`, `not`). Like every other
-condition slot, `cond` must be `bool`.
+This is the post-test counterpart to `while`. `repeat`/`until` was chosen over
+`do { } while ...` so the condition reads as English ("loop until done"),
+matching the word operators `and`, `or`, `not`. Like every other condition
+slot, `cond` must be `bool`.
 
 ## `match` (multi-way value dispatch)
 
@@ -248,8 +242,8 @@ match ($cmd) {
 - **No fall-through.** Each arm is an independent block; there is no `break` to
   end an arm and nothing falls into the next. Because of that, **`match` is not a
   `break` target**: a `break` or `continue` inside an arm acts on the enclosing
-  **loop**, never the match - which sidesteps C's "break breaks the switch" and
-  "forgot the break" traps at once.
+  **loop**, never the match, which avoids C's "break breaks the switch" and
+  "forgot the break" traps.
 
   ```jennifer
   for (def n in [1, 2, 3, 4]) {
@@ -305,14 +299,14 @@ normally when `until` becomes true.
 Misuse:
 
 - `break` and `continue` **only exist inside a loop**. Using one at
-  the top level or as a stray statement in a method body that has no
+  the top level or as a stray statement in a function body that has no
   enclosing loop is a positioned runtime error.
-- They do **not** cross the method-call boundary. A `break` inside a
-  method body looks for a loop in **that method**, not in the caller.
-  If the called method has no loop, the `break` errors.
+- They do **not** cross the function-call boundary. A `break` inside a
+  function body looks for a loop in **that function**, not in the caller.
+  If the called function has no loop, the `break` errors.
 - They only catch the **innermost** loop. To exit several levels at
   once, use a flag variable that the outer loop checks, or refactor
-  the inner work into a method that `return`s when done.
+  the inner work into a function that `return`s when done.
 
 ### Matching an enum (variant patterns)
 
@@ -350,7 +344,7 @@ first.
 ## `exit`
 
 `exit;` terminates the whole program immediately - it skips the rest
-of the current method, every caller frame, and every remaining
+of the current function, every caller frame, and every remaining
 top-level statement. The bare form yields exit code 0:
 
 ```jennifer
@@ -371,11 +365,11 @@ exit 2;                 # process ends with code 2
 On Unix a process exit status is only 8 bits, so the code a shell or
 parent process observes is `EXPR & 0xff`: `exit 256` is seen as `0` and
 `exit 300` as `44`. Stick to the `0..255` range for an exit code a
-caller can actually read back.
+caller can read back.
 
 `exit` is **distinct from `return`**. `return` ends the current
-method's body and yields a value to the caller; `exit` ends the
-program. Use `return` when a method has done its job; use `exit` when
+function's body and yields a value to the caller; `exit` ends the
+program. Use `return` when a function has done its job; use `exit` when
 the whole run is over.
 
 ## `try`, `catch`, `throw`
@@ -469,7 +463,7 @@ won't be able to read `.kind` / `.message` off it. Use
   `unpackWith` exceeding their size / entry caps; other resource caps still
   raise `"runtime"`.
 
-  The call-depth cap counts method calls, block nesting, and expression
+  The call-depth cap counts function calls, block nesting, and expression
   nesting together, so recursion through several nested `if` blocks or a
   recursive call wrapped in many parentheses raises a catchable `"limit"`
   error rather than crashing. A companion **recursion memory guard** covers
@@ -477,7 +471,7 @@ won't be able to read `.kind` / `.message` off it. Use
   value - a parameter or local holding a big `list` / `map` / `string` per
   level - would otherwise exhaust memory (an uncatchable crash) long before the
   depth cap fires, so the live per-frame copies are bounded too, raising the
-  same catchable `"limit"` error. The accounting is deliberately crude: it
+  same catchable `"limit"` error. The accounting is crude: it
   counts the value copies made into recursive frames, not every allocation, so
   a single huge value or a non-recursive loop that grows one is still bounded
   only by the host's own memory. The fix for a tripped recursion is the one the
@@ -508,8 +502,8 @@ need without `finally`'s footguns.
 
 `defer CALL(args);` schedules a single call to run when the **enclosing block**
 exits - on **every** exit path: normal fall-through, `return`, `break`,
-`continue`, a `throw` that unwinds through it, and `exit`. It is the clean way to
-pair "acquire a resource" with "release it", right next to each other:
+`continue`, a `throw` that unwinds through it, and `exit`. It keeps "acquire a
+resource" and "release it" next to each other:
 
 ```jennifer
 use fs;
@@ -526,7 +520,7 @@ func dumpFirst(path as string) {
 
 Rules:
 
-- **The deferred thing must be a call** - a method call (`defer cleanup();`) or a
+- **The deferred thing must be a call** - a function call (`defer cleanup();`) or a
   namespaced / module call (`defer fs.close($f);`). A non-call
   (`defer 1 + 2;`) is a parse error. Because it is a single call, not a block,
   there is no way to smuggle a `return` or `throw` into the cleanup.
@@ -554,8 +548,8 @@ Rules:
   ```
 
   A top-level `defer` runs at program end.
-- **Does not cross the method or `spawn` boundary** (like `break` / `return`): a
-  method's defers run when that method returns, not in its caller.
+- **Does not cross the function or `spawn` boundary** (like `break` / `return`): a
+  function's defers run when that function returns, not in its caller.
 - A deferred call that **throws** propagates and is catchable; if the block was
   already unwinding an error, the deferred error supersedes it. An `exit` is
   never superseded - defers still run, but the exit code stands.

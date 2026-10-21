@@ -93,7 +93,7 @@ def msg as mime.Part init mime.multipart("alternative", "b0", $parts);
 io.printf("%s", mime.encode($msg));
 ```
 
-The boundary is **yours to pass** (not auto-generated), so output is
+The caller passes the boundary (it is not generated), so output is
 deterministic and testable; pick a string that cannot appear in the content.
 
 ## Parsing
@@ -115,8 +115,7 @@ for (def part in mime.parts($back)) {
 
 A received message is usually a `multipart/mixed` (bodies + attachments) whose
 first child may itself be a `multipart/alternative` (the `text/plain` and
-`text/html` views). Rather than walk that tree by hand, use the accessors: they
-flatten it for you.
+`text/html` views). The accessors flatten that tree:
 
 ```jennifer
 def msg as mime.Part init mime.parse(raw);   # or imap.fetchMessage(session, n)
@@ -140,13 +139,15 @@ binary); `body` is the text convenience.
 ## Non-ASCII headers (RFC 2047 encoded-words)
 
 Header values must be ASCII on the wire, so a non-ASCII `Subject` or display
-name is carried as an RFC 2047 **encoded-word** (`=?UTF-8?B?...?=`). This is
-applied **automatically** and symmetrically:
+name is carried as an RFC 2047 **encoded-word** (`=?UTF-8?B?...?=`). `encode`
+and `parse` handle this automatically:
 
 - `encode` encodes a non-ASCII `Subject` / `Comments` value, and the
   display-name half of an address header (`From` / `To` / `Cc` / `Bcc` /
-  `Reply-To` / `Sender`), leaving the `<addr>` untouched. Long values fold
-  into several encoded-words split on rune boundaries.
+  `Reply-To` / `Sender`), leaving the `<addr>` untouched. A comma-separated
+  address list is split on its top-level commas (a comma inside a quoted
+  `"Last, First"` name is not a separator) and each mailbox's name is
+  encoded on its own. Long values fold into several encoded-words split on rune boundaries.
 - `parse` decodes those same headers back to plain text - so a fetched
   `Subject: =?UTF-8?B?QmVyaWNodCBhdXMgTcO8bmNoZW4=?=` reads back as
   `Bericht aus München`. A word that fails to decode is left verbatim, so a
@@ -160,14 +161,14 @@ io.printf("%s", mime.encode($m));   # Subject: =?UTF-8?B?R3LDvMOfZSBhdXMgTcO8bmN
 ```
 
 The primitives `mime.encodeWord` / `mime.decodeWord` are exposed for the cases
-the auto-hooks don't cover (a custom header, a multi-address line). Both B
+the auto-hooks don't cover (a custom header). Both B
 (base64) and Q (quoted-printable) encoded-words decode; encoding always emits
 B. `us-ascii` / `iso-8859-*` / `windows-*` charsets decode through
 [`encoding`](../libraries/encoding.md); UTF-8 is the default.
 
 ## Out of scope
 
-Deliberately a foundation, not a full mail stack:
+A message-structure foundation, not a full mail stack:
 
 - **Legacy multibyte charsets.** A text part is decoded to `body` using its
   Content-Type `charset` for UTF-8 and every single-byte codepage the
@@ -175,8 +176,6 @@ Deliberately a foundation, not a full mail stack:
   `iso-8859-*` / `windows-*`). A multibyte legacy charset (`shift_jis`,
   `gb2312`, `big5`, ...) has no `encoding` codec, so it falls back to a UTF-8
   read of `body`; the exact bytes always stay reachable via `data`.
-- **Multi-address name encoding.** A comma-separated address list is left raw
-  on `encode`; encode each mailbox's name with `mime.address` when building it.
 - **Networking.** This module only shapes messages; sending / fetching them is
   the `mail` SMTP / POP3 / IMAP clients (built on `mime`).
 

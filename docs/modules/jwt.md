@@ -13,8 +13,8 @@ Ten algorithms across four families:
 | ECDSA  | `ES256` / `ES384` / `ES512` | a PEM EC key (SEC1 / PKCS#8 / PKIX)           |
 | EdDSA  | `EdDSA`                   | a raw Ed25519 key from `crypto.signKeypair`     |
 
-The key is **always `bytes`** - a secret, a PEM blob read from disk, or a raw
-Ed25519 key - and which one is decided by the algorithm family.
+The key is always `bytes`: a secret, a PEM blob read from disk, or a raw
+Ed25519 key, depending on the algorithm family.
 
 ```jennifer
 use convert;
@@ -46,9 +46,7 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
 
 ## Verifying safely
 
-`jwt.verify` takes the algorithm you **expect** as its third argument, and this
-is deliberate - it is the difference between a safe verifier and a vulnerable
-one:
+`jwt.verify` takes the algorithm you expect as its third argument:
 
 - **Algorithm confusion is rejected.** A token whose header `alg` does not equal
   the `alg` you pass is refused. This closes the classic attack where an
@@ -63,9 +61,9 @@ one:
 - **Clock skew is a `leeway`.** Issuer and verifier clocks rarely agree to the
   second, so `jwt.verifyLeeway($token, $key, $alg, $leeway)` widens each time
   check by `leeway` seconds: a token is accepted while `now < exp + leeway` and
-  `now >= nbf - leeway`. `jwt.verify` is exactly `verifyLeeway(..., 0)`, so the
-  strict, zero-tolerance behaviour stays the default; opt into a small leeway
-  (30-60s is typical) only where clock drift is real. `leeway` must be
+  `now >= nbf - leeway`. `jwt.verify` is `verifyLeeway(..., 0)`, so zero
+  tolerance is the default; use a small leeway (30-60s is typical) only where
+  clock drift is real. `leeway` must be
   non-negative.
 - **HMAC comparison is constant-time** (`crypto.hmacEqual`), so a wrong MAC
   leaks nothing through timing.
@@ -90,14 +88,14 @@ one:
   `verifyWith` then refuses a token without `exp` (a `value` error), so one
   minted by a bug or a leaked key cannot stay valid forever.
 
-`jwt.decode` and `jwt.header` do **not** verify anything - use them only to read
+`jwt.decode` and `jwt.header` do not verify anything. Use them only to read
 a token you have not trusted yet (for example, to read `kid` before fetching the
 matching key). Never authorize on their output.
 
 ## Building claims
 
-Claims are a `json.Value`, so build them however you build JSON - decode a
-literal, or assemble one with the `json` write surface:
+Claims are a `json.Value`: decode a literal, or assemble one with the `json`
+write surface:
 
 ```jennifer
 use json;
@@ -119,7 +117,7 @@ def token as string init jwt.sign($claims, $secret, "HS256");
   PKIX / `-----BEGIN PUBLIC KEY-----`).
 - **EdDSA**: the `public` / `private` `bytes` from `crypto.signKeypair()`.
 
-`jwt` does not generate RSA or EC keys - bring your own (from your identity
+`jwt` does not generate RSA or EC keys; bring your own (from your identity
 provider, or `openssl`). It generates Ed25519 keys through `crypto.signKeypair`.
 
 ## Selecting a key by `kid`
@@ -129,7 +127,7 @@ which key signed it. `jwt.verifyWithKeys` reads that `kid`, looks it up in a
 caller-supplied `map of string to string`, and verifies with the matching value
 - an HMAC secret for HS\*, or PEM key text for RS\* / ES\* (each is decoded to
 `bytes` for you). A token with no `kid`, or a `kid` absent from the map, is an
-error - never a silent skip.
+error.
 
 ```jennifer
 def keys as map of string to string init {
@@ -140,14 +138,13 @@ def claims as json.Value init jwt.verifyWithKeys($token, $keys, "RS256");
 ```
 
 `alg` is still required and enforced against the header: selecting the key by
-`kid` does **not** select the algorithm, so the algorithm-confusion protection
+`kid` does not select the algorithm, so the algorithm-confusion protection
 above stays in force. Pin `alg` to what the issuer uses.
 
-For a raw **JWKS** endpoint (`{"keys":[{"kty":..,"kid":..,"n":..,"e":..}, ...]}`),
-`jwt.verifyJwks` does the resolution for you: it finds the JWK whose `kid` matches
-the header, converts it to a PEM public key with
-[`crypto.jwkToPem`](../libraries/crypto.md), and verifies - no manual JWK-to-key
-step. It is for asymmetric algorithms (RS\* / ES\*) only, since a JWKS carries
+For a raw JWKS endpoint (`{"keys":[{"kty":..,"kid":..,"n":..,"e":..}, ...]}`),
+`jwt.verifyJwks` finds the JWK whose `kid` matches the header, converts it to a
+PEM public key with [`crypto.jwkToPem`](../libraries/crypto.md), and verifies.
+It is for asymmetric algorithms (RS\* / ES\*) only, since a JWKS carries
 public keys; for HMAC use `verifyWithKeys` with the shared secret.
 
 ```jennifer
@@ -174,7 +171,7 @@ def claims as json.Value init jwt.verifyJwksWith($token, $jwks, "RS256", $policy
 
 ## JWT as web auth (`jwt_auth`)
 
-There is no separate `jwt_auth` module - JWT authentication is this module used
+There is no separate `jwt_auth` module; JWT authentication is this module used
 as a [`web`](web.md) `before` middleware. Register a guard that pulls the bearer
 token from the `Authorization` header, verifies it, and rejects on failure:
 
@@ -200,6 +197,6 @@ func requireJwt(ctx as web.Context) {
 ## Platforms
 
 HS\* (over `hash.hmac`) and `EdDSA` (over `crypto.sign` / `verify`) run on
-**both binaries**. RS\* / ES\* need the `crypto` library's RSA / ECDSA surface,
+both binaries. RS\* / ES\* need the `crypto` library's RSA / ECDSA surface,
 which is on the default `jennifer` binary; on `jennifer-tiny` they raise a
 friendly "not available" error (the same split as `net`).

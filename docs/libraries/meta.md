@@ -1,16 +1,14 @@
 # `meta` - interpreter identity and reflection
 
-Enable with `use meta;`. Holds facts about the running Jennifer
-interpreter itself - the build version, which Go toolchain compiled
-it, and similar information that programs typically log for bug
-reports, embed in error messages, or branch on for build-specific
-behaviour - plus a small **reflection** surface for invoking a
-top-level method by a runtime string name (`meta.call` / `meta.defined`
-and their entry-program siblings `meta.callMain` / `meta.definedMain`).
+Enable with `use meta;`. Facts about the running interpreter (build
+version, which Go toolchain compiled it, build capabilities) for bug
+reports, error messages, or build-specific branching, plus a small
+**reflection** surface for invoking a top-level function by a runtime string
+name (`meta.call` / `meta.defined` and the entry-program forms
+`meta.callMain` / `meta.definedMain`).
 
-This is distinct from `os` (which is about the *host environment* -
-operating system, CPU architecture, environment variables) and from
-the rest of the standard library (which is about user data).
+The *host environment* (OS, CPU architecture, environment variables) is
+in `os`.
 
 ```jennifer
 use io;
@@ -60,17 +58,14 @@ The build pipeline derives `meta.VERSION` from
 | No tags exist yet                          | `"0.0.0-dev+<N>.<shortsha>"` |
 | Built without git (or outside a repo)      | `"dev"`                      |
 
-The `dev+` prefix is intentional: any non-tagged build is a development
-build, and the `N.shortsha` suffix lets you trace which commit produced it.
+Any non-tagged build is a `dev` build; the `N.shortsha` suffix identifies
+the commit that produced it.
 
 ### `BUILD` values
 
-`meta.BUILD` distinguishes which Go variant compiled the
-interpreter binary. Useful because TinyGo has subtly different runtime
-behaviour from standard Go (different GC, different scheduler tuning,
-different stdlib subset) - a program that needs build-specific behaviour
-or just wants to log "which interpreter is this for the bug report" can
-branch on this value.
+`meta.BUILD` names the Go variant that compiled the interpreter. TinyGo
+differs from standard Go at runtime (GC, scheduler, stdlib subset), so a
+program can branch on it or log it in a bug report.
 
 | Value      | Meaning                                                            |
 | ---------- | ------------------------------------------------------------------ |
@@ -80,24 +75,21 @@ branch on this value.
 `make build` produces both binaries: the default `jennifer` (standard
 Go, `meta.BUILD == "go"`) and `jennifer-tiny` (TinyGo, `meta.BUILD ==
 "tinygo"`). `make build-go` and `make build-tinygo` produce only one
-each. `go run` against the source also reports `"go"`. If a future
-alternative compiler shows up, its identifier passes through directly
-rather than being normalised - so the constant always reports honestly
-what built the binary.
+each. `go run` against the source also reports `"go"`. A future
+alternative compiler's identifier would pass through unnormalised.
 
-## Reflection - calling a method by name
+## Reflection - calling a function by name
 
-A `func` value binds to a specific method at parse time, and a bare call
-`greet(...)` is resolved at compile time, so neither dispatches on a name
-computed at runtime. `meta.call` closes that gap - it invokes a top-level user
-method by a runtime string, the general form of what `testing.run` does
-for tests.
+A `func` value and a bare call `greet(...)` are both bound at parse time,
+so neither dispatches on a name computed at runtime. `meta.call` invokes a
+top-level user function by a runtime string, the general form of what
+`testing.run` does for tests.
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `meta.call(name, args...)` | the method's return value | Invoke the method `name` with the given arguments (arity + declared types checked, as at a normal call site). |
-| `meta.defined(name)` | bool | Whether a method `name` exists - validate a name before calling it. |
-| `meta.callMain(name, args...)` | the method's return value | Like `call`, but resolves against the **entry program's** methods. |
+| `meta.call(name, args...)` | the function's return value | Invoke the function `name` with the given arguments (arity + declared types checked, as at a normal call site). |
+| `meta.defined(name)` | bool | Whether a function `name` exists - validate a name before calling it. |
+| `meta.callMain(name, args...)` | the function's return value | Like `call`, but resolves against the **entry program's** functions. |
 | `meta.definedMain(name)` | bool | Like `defined`, against the entry program. |
 
 ```jennifer
@@ -117,15 +109,14 @@ thrown `Error`, `exit` - propagates to the caller, catchable with
 
 ### Security: never dispatch on untrusted input
 
-`meta.call` / `meta.callMain` invoke **any** top-level method by name, with no
-built-in restriction. Passing a name that comes from request data, a URL, a
-message body, or any other untrusted source is a remote-code-execution hole - it
-reaches `deleteAllUsers`, `runMigration`, or any internal helper you never meant
-to expose. `meta.defined` answers "does it exist", which is **not** an
-authorization check.
+`meta.call` / `meta.callMain` invoke **any** top-level function by name, with no
+built-in restriction. Passing a name from request data, a URL, a message body,
+or any other untrusted source is a remote-code-execution hole: it reaches
+`deleteAllUsers`, `runMigration`, or any internal helper. `meta.defined` answers
+"does it exist", which is **not** an authorization check.
 
-Always match untrusted input against a **program-defined allowlist** first, and
-call only a name that is on it:
+Match untrusted input against a **program-defined allowlist** first, and call
+only a name on it:
 
 ```jennifer
 use meta;
@@ -142,19 +133,13 @@ func handleAction(name as string, arg as string) {
 }
 ```
 
-A dispatcher that maps a runtime name to a method must be careful: never let
-untrusted input (a request path, a wire field) name an arbitrary method. Gate on
-a name you control - a registered allow-list, or at least a `meta.defined` check
-that the target exists - and never dispatch a name you did not intend. Follow
-that discipline whenever you build dispatch on `meta.call`.
-
 ### `callMain` / `definedMain` - reaching the entry program
 
 Modules run on isolated sub-interpreters, so a `meta.call` *inside a
-module* reaches that module's own methods, not the program that imported
-it. The `*Main` variants cross that boundary: they resolve against the
-**entry program's** top-level methods. This is what lets a module dispatch to
-methods the application defined - the [`jsonrpc`](../modules/jsonrpc.md) module
+module* reaches that module's own functions, not the program that imported
+it. The `*Main` variants resolve against the **entry program's** top-level
+functions instead, so a module can dispatch to functions the application defined:
+the [`jsonrpc`](../modules/jsonrpc.md) module
 resolves each request's wire method name against the entry program with
 `meta.callMain` (a cross-boundary `func` value, as in `web`, uses the same host
 reference to run in its home context). Called from the entry program
@@ -165,28 +150,23 @@ boundary automatically, so a module can pass one of its own struct values
 
 ## Build flow
 
-`meta.VERSION` is set at build time by a small codegen step.
-
-
-The Makefile runs `scripts/gen-version.sh` before `tinygo build` /
+`meta.VERSION` is set at build time by a small codegen step. The Makefile runs `scripts/gen-version.sh` before `tinygo build` /
 `go build`, writing a generated `internal/version/version_gen.go` whose
 `init()` assigns `version.Version` to the string from
 `scripts/version.sh`. The `meta` library then mirrors that into the
 interpreter as the `meta.VERSION` constant.
 
-You don't need to run the codegen step manually if you build via `make
-build` (TinyGo) or `make build-go` (Go). A bare `go test ./...` skips
-codegen and uses the default `"dev"` baked into `version.go`.
+`make build`, `make build-go` and `make build-tinygo` run the codegen step
+for you. A bare `go test ./...` skips it and uses the default `"dev"` baked
+into `version.go`.
 
-Codegen rather than `go build -ldflags -X` is used because TinyGo 0.41
+Codegen is used instead of `go build -ldflags -X` because TinyGo 0.41
 silently ignores `-X`. The generated file is `.gitignore`d.
 
 ## Roadmap
 
-`meta` is a new library and intentionally small. Future candidates if
-they earn their slot: build time, git SHA (separated from the version
-string), REPL-vs-script mode, runtime GC stats, scheduler diagnostics.
-The library exists in part to give those a natural home when they
-land.
+`meta` is intentionally small. Candidates if they earn their slot: build
+time, git SHA (separate from the version string), REPL-vs-script mode,
+runtime GC stats, scheduler diagnostics.
 
 See also: [os.md](os.md), [index.md](index.md).

@@ -24,12 +24,15 @@ nothing).
 ```peg
 # --- program structure -------------------------------------------------------
 
-Program      <- (UseStmt / ModuleImport / Exported / MethodDef / StructDef
+Program      <- (UseStmt / ModuleImport / Exported / FunctionDef / StructDef
                / EnumDef / Statement)* EOF
-Exported     <- "export" (MethodDef / StructDef / EnumDef / ConstDefine)
-UseStmt      <- "use" IDENT ("as" IDENT)? ";"
+Exported     <- "export" (FunctionDef / StructDef / EnumDef / ConstDefine)
+UseStmt      <- "use" (IDENT / "task") ("as" IDENT)? ";"
+                 # `task` is a type keyword, accepted here as a one-off
 ModuleImport <- "import" STRING ("as" IDENT)? ";"
-MethodDef    <- "func" IDENT "(" ParamList? ")" Block
+                 # STRING ends in ".j", or starts with "@" (a vendored deck
+                 # reference, `"@scope/package/"`) - checked by the parser
+FunctionDef  <- "func" IDENT "(" ParamList? ")" Block
 ParamList    <- Param ("," Param)*
 Param        <- IDENT "as" Type
 Block        <- "{" Statement* "}"
@@ -86,7 +89,8 @@ MatchStmt    <- "match" "(" Expr ")" "{"
                  # the block, not `Name{...}`); the flag is re-enabled inside
                  # any "(" / "[" / call / list / map, mirroring Go's exprLev.
                  # `else` must be last (enforced by the parser, not the grammar).
-                 # When the subject has a known enum type, the resolver
+                 # When the subject (a variable / parameter / constant / struct
+                 # field) has a known enum type, the resolver
                  # reinterprets each arm's single `Expr` as a variant pattern -
                  # `Name` (payload-less) or `Name(bind)` (payload binder) - and
                  # checks exhaustiveness. This is a resolve-time rewrite, not a
@@ -107,15 +111,15 @@ DeferCall    <- "(" DeferCall ")" / QualifiedCall / PlainCall
                  # (`f()[0]`, `f().g`) is not a call node and fails.
 
 # The four VARREF-rooted statements. AssignStmt first mirrors the parser's
-# `$x =` peek; AppendStmt's "[" "]" prefix cannot be an IndexAssign (an index
-# expression never starts at "]"), but trying it first keeps the intent
-# obvious. In `(LvalueStep !"=")*` the not-predicate stops the greedy star
+# `$x =` peek; AppendStmt's closing "[" "]" cannot be an IndexAssign step (an
+# index expression never starts at "]"), and a step `[expr]` never matches
+# "[" "]", so the star stops exactly before the empty brackets. In `(LvalueStep !"=")*` the not-predicate stops the greedy star
 # one step early, leaving the FINAL `[index]` / `.field` - the one directly
 # before "=" - for the explicit tail. Without the predicate a greedy star
 # would swallow the last step and the alternative could never match.
 
 AssignStmt   <- VARREF "=" Expr ";"
-AppendStmt   <- VARREF "[" "]" "=" Expr ";"
+AppendStmt   <- VARREF LvalueStep* "[" "]" "=" Expr ";"
 IndexAssign  <- VARREF (LvalueStep !"=")* "[" Expr "]" "=" Expr ";"
 FieldAssign  <- VARREF (LvalueStep !"=")* "." WordName "=" Expr ";"
 LvalueStep   <- "[" Expr "]" / "." WordName
@@ -185,10 +189,12 @@ SliceTail    <- OrExpr ".." OrExpr? / ".." OrExpr?
 # ordered choice over alternatives that share prefixes. IdentExpr and
 # TaskExpr expand below.
 
-Atom         <- INT / FLOAT / STRING / "true" / "false" / "null"
+Atom         <- INT / FLOAT / STRING / STRING_INTERP / "true" / "false" / "null"
               / LenExpr / SpawnExpr / TaskExpr
               / VARREF / IdentExpr
               / "(" Expr ")" / ListLit / MapLit
+                 # STRING_INTERP is a cooked string with `{expr}` slots; the
+                 # parser sub-parses each slot as one Expr (InterpStringExpr).
                  # a type keyword (int / float / string / bool / bytes) is NOT
                  # an atom: expression position rejects it with a positioned
                  # error pointing at convert.toInt / convert.toFloat / ...
@@ -206,7 +212,15 @@ SpawnExpr    <- "spawn" Block
 
 IdentExpr    <- IDENT IdentSuffix?
 IdentSuffix  <- QualifiedSuffix / StructBody / CallArgs
-QualifiedSuffix <- "." WordName (CallArgs / StructBody)?
+QualifiedSuffix <- "." WordName "." WordName StructBody?
+                 / "." WordName (CallArgs / StructBody)?
+                 # The first alternative is a cross-module enum variant
+                 # (`mod.Shape.Circle{...}`, payload-less `mod.Shape.Empty`).
+                 # It is guarded by a semantic predicate PEG cannot spell: it
+                 # applies only when neither the IDENT nor the middle name is an
+                 # UPPER_CASE constant name, so `mod.CONST.field` and
+                 # `CONST.sub.field` fall through to the second alternative plus
+                 # the Postfix field-access chain.
 
 # WordName: any identifier-shaped token - a plain IDENT or a keyword spelled
 # like one (every Jennifer keyword is). Name positions (after a ".", field
@@ -232,7 +246,8 @@ StructBody    <- "{" (StructLitField ("," StructLitField)* ","?)? "}"
 StructLitField <- WordName ":" Expr
                  # `P{}` parses; "every field present exactly once" is a
                  # post-parse check (duplicates at parse time, missing fields
-                 # at evaluation)
+                 # at load time; a library struct may omit any field, an
+                 # `Error` its file / line / col)
 
 ListLit      <- "[" (Expr ("," Expr)* ","?)? "]"
 MapLit       <- "{" (MapEntry ("," MapEntry)* ","?)? "}"
@@ -244,8 +259,8 @@ MapEntry     <- Expr ":" Expr
 
 ## Reading the load-bearing orderings
 
-Three places where PEG's first-match-wins is doing real work, and what the
-parser does at the same juncture:
+Three places where PEG's first-match-wins matters, and what the parser does
+at the same juncture:
 
 - **`Statement`: `ExprStmt` last.** The parser peeks: `$x` followed by `=`
   is an assignment, `$xs[...]...` ending in `= expr ;` an index/field
@@ -254,12 +269,11 @@ parser does at the same juncture:
   `ExprStmt` earlier would shadow every assignment form.
 - **`IdentSuffix` / `QualifiedSuffix`: call before constant.** The parser
   decides `call` vs `constRef` (and `qualifiedCall` vs `qualifiedConstRef`)
-  by peeking for `(`. In PEG the bare-name alternative simply comes last: if
+  by peeking for `(`. In PEG the bare-name alternative comes last: if
   `CallArgs` matches, it was a call; only when nothing longer matches does
   the name stand alone.
 - **`IndexAssign` / `FieldAssign`: `(LvalueStep !"=")*`.** PEG repetition is
   greedy and never gives back, so `LvalueStep* "[" Expr "]"` could not work -
   the star would consume the final step. The `!"="` predicate stops the star
-  exactly one step before the `=`, which is precisely the parser's approach
-  of scanning the l-value chain while watching for the assignment that
+  one step before the `=`, matching the parser's approach of scanning the l-value chain while watching for the assignment that
   terminates it.

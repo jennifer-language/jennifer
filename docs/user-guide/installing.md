@@ -8,12 +8,12 @@ case:
 
 | Binary          | Build                  | Pick when                                                                                                                                          |
 | --------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jennifer`      | standard Go (default)  | **What most users want.** Full host-feature surface; competitive on compute-heavy work (the two builds are now within ~1.5x either way per workload on the serial benchmark, and the Go binary wins the end-to-end wall clock once `spawn` parallelism is involved; see [technical/benchmark.md](../technical/benchmark.md)) and the reliable choice for multi-core parallel `spawn`. Required for `os.run` / `os.spawn` / `os.wait` / `os.poll` / `os.kill` and the whole `net` library. |
+| `jennifer`      | standard Go (default)  | **What most users want.** Full host-feature surface; competitive on compute-heavy work (the two builds are within ~1.5x either way per workload on the serial benchmark, and the Go binary wins the end-to-end wall clock once `spawn` parallelism is involved; see [technical/benchmark.md](../technical/benchmark.md)) and the reliable choice for multi-core parallel `spawn`. Required for `os.run` / `os.spawn` / `os.wait` / `os.poll` / `os.kill` and the whole `net` library. |
 | `jennifer-tiny` | TinyGo                 | Constrained variant. Smaller binary, embeddable in minimal-footprint deployments (embedded systems, minimal containers, small-footprint scripting hosts). Missing `os/exec` (TinyGo runtime gap) and the network stack (no netdev driver). Also run-only: the `tokens` / `ast` / `fmt` / `lint` / `profile` / `test` development subcommands live only in the default binary. Calls into any of these surfaces return a friendly error pointing back at `jennifer`. |
 
 Both binaries install side by side and never overlap. The packaged
-distributions below install both; for tarball or from-source builds
-you get both binaries in one go too. (The best-effort **macOS /
+distributions below install both, as do the tarball and a from-source
+build. (The best-effort **macOS /
 Windows** builds ship the standard `jennifer` only - see
 [macOS / Windows](#macos--windows-unsupported) below.)
 
@@ -125,7 +125,7 @@ distroless build (~15-25MB, no `/bin/sh`, so `os.run` of external programs is
 unavailable - use it for pure-interpreter or web-serving workloads). `:latest`
 and the version tags track releases; a **`:dev`** (also **`:main`**) slim image
 is rebuilt from the latest commit on `main` on every push - a moving tag for
-trying the bleeding edge, always overwriting the previous one. Build
+trying unreleased changes. Build
 details and local-build recipes are in
 [`packaging/docker/README.md`](https://github.com/jennifer-language/jennifer/blob/main/packaging/docker/README.md).
 
@@ -167,8 +167,8 @@ docker compose up        # start (add -d to run detached)
 
 #### Podman
 
-Podman is a daemonless, rootless-capable drop-in: the same image and flags work,
-just swap `docker` for `podman`.
+Podman is a daemonless, rootless-capable drop-in: the same image and flags work
+with `docker` swapped for `podman`.
 
 ```sh
 # Run a script (add :Z to the bind mount on SELinux hosts so the container can read it).
@@ -196,7 +196,7 @@ bind host ports below 1024 without extra configuration - map to a high port
 `...-UNSUPPORTED`. Read the caveats before relying on them:
 
 - **Best-effort, may be absent.** They come from a pipeline step that is
-  allowed to fail; if a build breaks, that release simply won't have them,
+  allowed to fail; if a build breaks, that release won't have them,
   and it does not hold up the Linux release.
 - **Standard `jennifer` only.** No `jennifer-tiny` - TinyGo's macOS /
   Windows host support is too limited to ship. This is the full-featured
@@ -217,7 +217,7 @@ bind host ports below 1024 without extra configuration - map to a high port
 
 #### macOS: Homebrew (recommended)
 
-The lowest-friction way onto macOS is the Homebrew tap, which builds `jennifer`
+The easiest macOS install is the Homebrew tap, which builds `jennifer`
 **from source** - so it runs on both Intel and Apple Silicon with **no Gatekeeper
 prompt** (Homebrew does not quarantine what it builds), puts `jennifer` on your
 `PATH`, and bundles the system modules so a bare `import "name.j";` resolves with
@@ -260,9 +260,8 @@ you are on 32-bit Windows - the installer is 64-bit only); set
 
 Windows 8.1 and earlier are not possible: this project's Go toolchain
 (Go 1.21+) produces binaries that require **Windows 10 or newer** (or
-Windows Server 2016+). Go discontinued support for older releases in Go
-1.21, so Windows 7, 8, and 8.1 - as well as Vista and XP - are all
-excluded, not just XP. The 32-bit build targets 32-bit Windows 10 / 11.
+Windows Server 2016+). Go dropped older releases in Go 1.21, so Windows
+7, 8, 8.1, Vista, and XP are excluded. The 32-bit build targets 32-bit Windows 10 / 11.
 
 ### Build from source
 
@@ -344,16 +343,15 @@ A few notes:
   `printf`) are suppressed.
 - String results are printed with surrounding double quotes so
   they're distinguishable from numbers (`"hello"`, not `hello`).
-- Variables, constants, methods, and library imports persist for
-  the whole session. Methods can be redefined freely as you
+- Variables, constants, functions, and library imports persist for
+  the whole session. Functions can be redefined freely as you
   iterate.
 - File splices (`include "lib.j";`) work in the REPL and resolve
   relative to the directory you launched `jennifer repl` from.
 - `:quit`, `:exit`, or Ctrl-D end the session; `:help` shows a
   reminder.
 
-The prompt supports the standard line-editing keys you'd expect
-from a modern shell:
+The prompt supports the standard shell line-editing keys:
 
 | Key                    | Action                   |
 | ---------------------- | ------------------------ |
@@ -374,8 +372,8 @@ reads lines normally, so non-interactive uses keep working.
 
 ## Inspection and formatting
 
-Three commands help you see what Jennifer is doing under the hood
-and keep your source in canonical shape:
+Three commands show what the lexer and parser make of your source
+and keep it in canonical shape:
 
 ```sh
 # Print the lexer's token stream, one per line

@@ -2,9 +2,9 @@
 
 `cmd/jennifer/dump.go` and `cmd/jennifer/astjson.go` implement two
 read-only inspection subcommands over the front of the pipeline: `tokens`
-stops after the lexer, `ast` after the parser. They make the two
-intermediate representations the interpreter builds visible, which is as
-much a teaching aid as a debugging one. Both live only in the default
+stops after the lexer, `ast` after the parser. They expose the
+interpreter's two intermediate representations, for debugging and teaching.
+Both live only in the default
 `jennifer` binary (the run-only `jennifer-tiny` build stubs them).
 
 The examples below use this three-line program, `snippet.j`:
@@ -47,11 +47,14 @@ $ jennifer tokens snippet.j
 4:1   EOF
 ```
 
-A few things the stream makes concrete: every token records its source
+In the stream: every token records its source
 `LINE:COL`; the type keyword `int` scans to its own `INT_TYPE`, distinct
 from the `INT` literal `41`; the `$x` use-site is a single `VARREF "x"`
 with the sigil already consumed; and the stream always terminates in
-`EOF`.
+`EOF`. Comments and blank-line runs are not dropped: the lexer emits them as
+trivia tokens (`COMMENT_LINE`, `COMMENT_BLOCK`, `BLANK_LINE`, and
+`COMMENT_SHEBANG` for a line-1 `#!`) so `jennifer fmt` can round-trip them, and
+`tokens` prints them too (the parser skips them).
 
 ## `ast` - the parsed tree as JSON
 
@@ -72,6 +75,8 @@ $ jennifer ast snippet.j
     { "type": "ImportStmt", "line": 1, "col": 1, "name": "io" }
   ],
   "moduleImports": [],
+  "structs": [],
+  "enums": [],
   "methods": [],
   "topLevel": [
     {
@@ -115,9 +120,9 @@ over a `VarExpr` and an `IntLit`, and `io.printf(...)` as a single
 ## Implementation
 
 The JSON emitter is hand-rolled in `astjson.go`'s `emitNode` (a switch
-over every concrete AST type). We avoid `encoding/json` because its
+over every concrete AST type). It avoids `encoding/json` because its
 reflect-based marshaling is fragile under TinyGo and at odds with the
-tagged-union `Value` discipline used elsewhere; a switch over ~20 node
+tagged-union `Value` discipline used elsewhere; a switch over ~40 node
 kinds is small enough to keep readable. Each field-emitter
 (`emitStringField`, `emitBoolField`, `emitNodeListField`, etc.) writes
 `"key": value,` and the closing `endObj` trims the trailing comma so

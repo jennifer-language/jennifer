@@ -51,9 +51,9 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.startsWith(b, prefix)`   | bool           | True iff `b` begins with `prefix`.                                                 |
 | `binary.endsWith(b, suffix)`     | bool           | True iff `b` ends with `suffix`.                                                   |
 
-`binary.split` is the natural way to cut a container at a delimiter in one
-pass - for example splitting a MIME multipart body on its boundary, or a
-length-unprefixed record stream on its separator:
+`binary.split` cuts a container at a delimiter in one pass, e.g. a MIME
+multipart body on its boundary, or a length-unprefixed record stream on its
+separator:
 
 ```jennifer
 def parts as list of bytes init binary.split($body, $boundary);
@@ -73,14 +73,13 @@ All are positioned, catchable runtime errors.
 
 ## Why this library exists: throughput
 
-The reason to reach for `binary` over a hand-written loop is speed. A `.j`
-program that concatenates, slices, searches, or splits a byte buffer *one byte
-at a time* pays the tree-walking interpreter's per-operation cost on every byte
-(an index read, a comparison, an append, a loop step). For kilobyte-sized data
-that is invisible; for a megabyte-scale buffer it dominates. Each `binary`
-function pushes the inner loop into Go and runs it once at native speed
-(`binary.indexOf` / `binary.split` are Go's `bytes.Index` / `bytes.Split`), so
-scanning a large buffer for a delimiter is one call, not a per-byte scan.
+A `.j` loop that concatenates, slices, searches, or splits a byte buffer *one
+byte at a time* pays the tree-walking interpreter's per-operation cost on every
+byte (an index read, a comparison, an append, a loop step). For kilobyte-sized
+data that is invisible; for a megabyte-scale buffer it dominates. Each `binary`
+function runs the inner loop once in Go (`binary.indexOf` / `binary.split` are
+Go's `bytes.Index` / `bytes.Split`), so scanning a large buffer for a delimiter
+is one call.
 
 ```jennifer
 # Slow: a per-byte scan pays the interpreter's cost on every byte.
@@ -107,11 +106,10 @@ length-prefixed frame - both grow a single Go slice rather than concatenating in
 a `.j` loop. Reserve `binary.concat` for joining a small, fixed number of
 pieces.
 
-When you already hold the pieces - you built them in a loop rather than read
-them off a stream - collect them in a `list of bytes` and make one
-`binary.join` call. That is `O(n)` (a single allocation sized to the total),
-where the concat-in-a-loop it replaces is `O(n^2)`. It is the exact byte-data
-analogue of building a string with list-append plus `strings.join`:
+When you already hold the pieces (built in a loop rather than read off a
+stream), collect them in a `list of bytes` and make one `binary.join` call:
+`O(n)` (a single allocation sized to the total) instead of `O(n^2)`. It is the
+byte-data analogue of list-append plus `strings.join`:
 
 ```jennifer
 # Slow: each concat re-copies the whole accumulator - O(n^2).
@@ -130,9 +128,9 @@ def out as bytes init binary.join($parts);
 
 ## TinyGo
 
-`binary` is pure byte manipulation with no host dependencies, so it runs in
-full on both binaries - the default `jennifer` and the constrained
+`binary` has no host dependencies, so it runs in full on both `jennifer` and
 `jennifer-tiny`.
+
 
 See also: [`strings`](strings.md), [`net`](net.md) (`readAll` / `readN`),
 [index.md](index.md).

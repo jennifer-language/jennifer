@@ -1,8 +1,8 @@
 # `markdown` - render a Markdown subset to HTML and ANSI
 
 Import with `import "markdown.j" as markdown;`. Renders a small CommonMark
-subset to **HTML** (through the [`html`](html.md) module, so
-escaping is handled for you) and to **styled terminal text** (through the
+subset to HTML (through the [`html`](html.md) module, which handles
+escaping) and to styled terminal text (through the
 [`ansi`](ansi.md) module). Pure Jennifer: line-oriented block parsing with a
 small inline scanner. Runs on either binary.
 
@@ -38,7 +38,7 @@ Rendering (Markdown in, HTML / terminal text / PDF out):
 `toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, and `toPdf` over
 `renderPdf(parse(md), pdfDefaults())`, so build and parse share one document model.
 
-Reading (surface the parse tree, walked like [`xml`](xml.md) / [`html`](html.md)):
+Reading (surface the parse tree, walked like [`xml`](../libraries/xml.md) / [`html`](html.md)):
 
 | Call                          | Returns        | Notes                                                       |
 | ----------------------------- | -------------- | ----------------------------------------------------------- |
@@ -67,7 +67,7 @@ Authoring (build Markdown text - the inverse):
 
 ## Supported Markdown
 
-A deliberately small [CommonMark](https://commonmark.org) subset:
+A small [CommonMark](https://commonmark.org) subset:
 
 | Block                | Syntax                          | HTML                        |
 | -------------------- | ------------------------------- | --------------------------- |
@@ -103,10 +103,10 @@ A deliberately small [CommonMark](https://commonmark.org) subset:
 after a link or image, sets that node's attributes - a stable heading anchor
 (`## Title {#my-anchor}` -> `<h2 id="my-anchor">`), extra classes, a
 `target="_blank"` link, an image `width`. HTML/XHTML emit them; ANSI/PDF ignore
-them. Read any of them with `attr(node, name)`. Note: in a `.j` **string literal**
-a cooked `"...{...}"` treats `{...}` as interpolation, so write Markdown that
-contains attribute lists (or any literal brace) with a **raw** `'...'` string, or
-read it from a file.
+them. Read any of them with `attr(node, name)`. In a `.j` string literal a
+cooked `"...{...}"` treats `{...}` as interpolation, so write Markdown that
+contains attribute lists (or any literal brace) as a raw `'...'` string, or read
+it from a file.
 
 **Inline spans nest.** A link inside `**...**`, a `` `code` `` span or
 `*emphasis*` inside a link label, and so on all parse to a nested tree, so
@@ -114,8 +114,7 @@ read it from a file.
 dropping the link. A link label may contain a `]` inside a code span or a
 balanced nested `[...]` pair (`[the `$xs[]` sugar](x)` parses correctly).
 
-A **destination may contain parentheses** when they balance, which is what makes
-a DOI a link: `[NW](https://doi.org/10.1016/0022-2836(70)90057-4)` keeps the
+A destination may contain parentheses when they balance, so a DOI is a link: `[NW](https://doi.org/10.1016/0022-2836(70)90057-4)` keeps the
 whole URL rather than ending at the first `)`. One that does not balance ends
 the destination, and a `\(` or `\)` is data - escaped in the source, plain in
 the `href`.
@@ -150,10 +149,9 @@ content, so `text(node)` is the body alone. Everything else the quotation holds 
 paragraphs, lists, code, a nested admonition - is its children.
 
 A sixth word, or a marker that is not the whole of what precedes the title, is a
-quotation: `> [!NOTES]` and `> [!NOTE]: as it happens` both parse as `quote` -
-which is also what a renderer that has never heard of the syntax makes of all of
-them, and the reason for this syntax rather than `:::note`. It is already
-Markdown, so nothing breaks anywhere else.
+quotation: `> [!NOTES]` and `> [!NOTE]: as it happens` both parse as `quote`.
+A renderer unaware of the syntax also reads every admonition as a quote, which is
+why this syntax was chosen over `:::note`: it degrades to plain Markdown.
 
 The title is plain text, not inline Markdown, and only the parser can see it: by
 the time the block exists the line break after the marker has been folded into a
@@ -161,23 +159,21 @@ space, and `> [!NOTE] Mind the gap` is then indistinguishable from a marker with
 a body on the next line.
 
 `toHtml` writes the conventional class names, so a stylesheet written for another
-generator's callouts already matches - this module ships none. `toAnsi` prints
+generator's callouts already matches (this module ships none). `toAnsi` prints
 the label in bold above the quotation. In a PDF the label is a bold paragraph at
-the head of the panel, which is what a callout looks like in print, and
-`PdfOptions.admonitionLabels` is how a book in another language says so:
+the head of the panel; `PdfOptions.admonitionLabels` localizes the labels:
 
 ```jennifer
 $o.admonitionLabels = {"note": "Hinweis", "warning": "Warnung"};
 ```
 
-A kind the table does not name is called by its own name; a title, being the
-author's words rather than the renderer's, outranks both.
+A kind missing from the map uses its own name; a custom title overrides both.
 
 ## HTML output and safety
 
 `toHtml` builds an [`html`](html.md) node tree and renders it, so
-all text and every link target are correctly escaped - `&`, `<`, `>` in text
-and code, and `&`/`"` in an `href` - and you cannot produce malformed markup:
+all text and every link target are escaped (`&`, `<`, `>` in text and code,
+`&`/`"` in an `href`) and the markup is always well-formed:
 
 ```jennifer
 markdown.toHtml("[t](http://x/?a=1&b=2) and <b> & `x<y`");
@@ -185,14 +181,13 @@ markdown.toHtml("[t](http://x/?a=1&b=2) and <b> & `x<y`");
 ```
 
 **Safe by default for untrusted Markdown.** A raw HTML block in the source (a line
-opening with `<tag>`) is **escaped**, so rendering a README, a comment, or any
+opening with `<tag>`) is escaped, so rendering a README, a comment, or any
 publisher-supplied Markdown cannot inject a `<script>` or an event-handler
-attribute (`<img onerror=...>`) - it renders as visible text instead. This closes
-the stored-XSS vector that verbatim HTML passthrough would open on the rendering
-origin. Inline raw HTML was already escaped, and everything the renderer builds
-(text, link URLs, image attributes) is escaped too.
+attribute (`<img onerror=...>`, a stored-XSS vector); it renders as visible text.
+Inline raw HTML and everything the renderer builds (text, link URLs, image
+attributes) are escaped too.
 
-For **trusted** Markdown where raw HTML is intended (your own docs using
+For trusted Markdown where raw HTML is intended (your own docs using
 `<details>`, `<div align>`, badges), opt back in to verbatim passthrough:
 
 ```jennifer
@@ -211,15 +206,15 @@ source. A code block's content is escaped but never treated as Markdown.
 `toAnsi` renders for a terminal: headings and `**bold**` in bold, `*italic*`
 in italic, inline code in cyan, links underlined with their URL in
 parentheses, list items with `- ` / `N. ` markers, and fenced code indented
-and dimmed. Styling comes from the `ansi` module, which **suppresses itself
-when stdout is not a terminal** (or `NO_COLOR` is set) and is forced on by
+and dimmed. Styling comes from the `ansi` module, which suppresses itself
+when stdout is not a terminal (or `NO_COLOR` is set) and is forced on by
 `FORCE_COLOR` - so piping the output gives clean plain text, and
 `ansi.strip(markdown.toAnsi(md))` gives it unconditionally.
 
 ## Reading the document tree
 
 `markdown.parse(md)` returns the document as a tree of `Node`s, walked with the
-same accessor vocabulary as [`xml`](xml.md) / [`html`](html.md) - so a document
+same accessor vocabulary as [`xml`](../libraries/xml.md) / [`html`](html.md) - so a document
 can be inspected or transformed (pull the headings for a table of contents,
 rewrite links, lint) and then rendered, rather than going straight to a string. A
 node's `typeOf` is a block kind (`"document"`, `"heading"`, `"paragraph"`,
@@ -309,9 +304,8 @@ row, a delimiter row (`| --- | :--: |`), and its data rows; cell content is
 inline-parsed (emphasis / code / links work in cells), and a table interrupts
 an open paragraph.
 
-`tablePretty` reformats the **source** of every table in a document so its
-columns line up - the handcraft-then-prettify workflow, in one call - and
-leaves every non-table line exactly as written:
+`tablePretty` reformats the source of every table in a document so its
+columns line up, and leaves every non-table line exactly as written:
 
 ```jennifer
 def messy as string init "| Name | Score |\n|:-|-:|\n| Ada | 95 |";
@@ -345,8 +339,8 @@ general-purpose CommonMark conformance.
 
 > `toPdf` folds PDF rendering into `markdown` as a third output beside
 > `toHtml` / `toAnsi`, so it imports [`pdf`](pdf.md) (which pulls in `font`). That
-> makes every `markdown` import a bit heavier even for a `toHtml`-only program - a
-> deliberate trade for one unified rendering surface; see
+> makes every `markdown` import a bit heavier even for a `toHtml`-only program, a
+> trade for one unified rendering surface; see
 > [design-decisions.md](../technical/design-decisions.md). Text outside the WinAnsi
 > range the standard-14 fonts encode is replaced per the `unencodable` option
 > (below) rather than aborting the render. `PdfOptions` comes from `markdown.pdfDefaults()`
@@ -420,9 +414,8 @@ general-purpose CommonMark conformance.
 > same fallback `toAnsi` uses), so nothing is lost when no picture is supplied. To
 > draw the actual picture, load its bytes with [`pdf.loadImage`](pdf.md) and put it
 > in `PdfOptions.images`, a `map of string to pdf.Image` keyed by the image URL
-> **exactly as it appears in the Markdown source**. `markdown` never touches the
-> filesystem - the caller owns loading the bytes (and so resolving relative paths),
-> which is what keeps a rendering module free of I/O and path opinions.
+> exactly as it appears in the Markdown source. `markdown` never touches the
+> filesystem: the caller loads the bytes (and so resolves relative paths).
 >
 > ```jennifer
 > import "markdown.j" as markdown;
@@ -433,7 +426,7 @@ general-purpose CommonMark conformance.
 > def out as bytes init markdown.toPdfWith("# Report\n\n![a diagram](figure.png)\n", $o);
 > ```
 >
-> Only a **paragraph that is a single image** (a picture on its own line) is drawn;
+> Only a paragraph that is a single image (a picture on its own line) is drawn;
 > an image inline in a sentence keeps its `[alt]` run, and an image in a list item,
 > quote, or table cell keeps the fallback too. A drawn picture is scaled to keep its
 > aspect ratio, never wider than the text column and never taller than one page;

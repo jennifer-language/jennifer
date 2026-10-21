@@ -2,14 +2,14 @@
 
 Import with `import "plot.j" as plot;`. Turns numbers into a self-contained
 `<svg>` chart string you can write to a `.svg` file or drop into HTML. A unified
-`chart` renders one or more **series** (line, points, both, or filled area,
-solid or dashed, with **error bars** and pickable **marker shapes**) on shared
-axes with a positioned **legend**; `line` / `scatter` / `bar` / `bars` /
-`histogram` are focused wrappers, and `bars` **groups or stacks** multiple
-series (values may be negative - bars **diverge** from a zero baseline). Charts
-support **log scales**, a **date axis**, **fonts**, configurable **margins**,
-**reference lines**, **data labels** on bars, and native `<title>` **hover
-tooltips**. `save` writes the SVG to a file. Pure Jennifer over `math` and
+`chart` renders one or more series (line, points, both, or filled area,
+solid or dashed, with error bars and selectable marker shapes) on shared
+axes with a positioned legend; `line` / `scatter` / `bar` / `bars` /
+`histogram` are focused wrappers, and `bars` groups or stacks multiple
+series (negative values diverge from a zero baseline). Charts
+support log scales, a date axis, fonts, configurable margins,
+reference lines, data labels on bars, and native `<title>` hover
+tooltips. `save` writes the SVG to a file. Pure Jennifer over `math` and
 `time` / `fs` / `strings` / `lists` / `convert`; both binaries; the visual
 companion to the `stats` / `ml` numeric stack.
 

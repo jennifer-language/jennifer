@@ -1,13 +1,10 @@
 # Cheatsheet - all builtins at a glance
 
-Alphabetical index of every standard-library function and constant. Use
-it when you know the *name* and want to know *which library* and *how to
-call it*; use each library's own page when you want to read about a
-topic. Each row's library prefix links to the per-library doc.
+Alphabetical index of every standard-library function and constant: use
+it when you know the *name* and want the *library* and *call shape*. Each
+row's library prefix links to the per-library doc, which is authoritative;
+this is a flat lookup view, updated together with it.
 
-The table covers what ships with the interpreter. New
-entries land here at the same time as the per-library doc - it's a
-flat lookup view, not authoritative.
 
 ## Functions
 
@@ -395,14 +392,14 @@ flat lookup view, not authoritative.
 | [`testing`](testing.md)`.assertEqual(actual, expected)` | Throw unless deeply equal (lists / maps / structs compare by value).                                                              |
 | [`testing`](testing.md)`.assertFalse(cond)`           | Throw unless `cond` (a bool) is false.                                                                                              |
 | [`testing`](testing.md)`.assertNotEqual(actual, expected)` | Throw unless not deeply equal.                                                                                                 |
-| [`testing`](testing.md)`.assertThrows(name, kind)`    | Throw unless the named zero-arg method throws an `Error` of that `kind`.                                                            |
-| [`testing`](testing.md)`.assertThrowsWith(name, args, kind)` | As `assertThrows`, binding the list `args` to the method's parameters (no per-case wrapper method).                          |
+| [`testing`](testing.md)`.assertThrows(name, kind)`    | Throw unless the named zero-arg function throws an `Error` of that `kind`.                                                            |
+| [`testing`](testing.md)`.assertThrowsWith(name, args, kind)` | As `assertThrows`, binding the list `args` to the function's parameters (no per-case wrapper function).                          |
 | [`testing`](testing.md)`.assertTrue(cond)`            | Throw unless `cond` (a bool) is true.                                                                                              |
 | [`testing`](testing.md)`.report(results, format)`     | Render results to `"text"`, `"tap"`, or `"junit"` (returns string).                                                                 |
 | [`testing`](testing.md)`.reset()`                     | Clear the process-wide result accumulator.                                                                                          |
 | [`testing`](testing.md)`.results()`                   | Snapshot of the accumulator as `list of testing.Result`.                                                                            |
-| [`testing`](testing.md)`.run(name)`                   | Invoke a zero-arg user method by name; catch every failure mode into a `testing.Result`.                                            |
-| [`testing`](testing.md)`.runWith(name, args)`         | Like `run`, binding the `args` list to the method's parameters (arity + type checked).                                             |
+| [`testing`](testing.md)`.run(name)`                   | Invoke a zero-arg user function by name; catch every failure mode into a `testing.Result`.                                            |
+| [`testing`](testing.md)`.runWith(name, args)`         | Like `run`, binding the `args` list to the function's parameters (arity + type checked).                                             |
 | [`strings`](strings.md)`.contains(s, sub)`            | True if `s` contains the substring `sub`.                                                                                           |
 | [`strings`](strings.md)`.endsWith(s, suffix)`         | True if `s` ends with `suffix`.                                                                                                     |
 | [`strings`](strings.md)`.fold(s)`                     | Remove common Latin diacritics for a sort / search key (`Österreich` -> `Osterreich`); case preserved. Not full Unicode collation. |
@@ -518,9 +515,9 @@ flat lookup view, not authoritative.
 | [`meta`](meta.md)`.SYSMODDIR`              | `string`       | Resolved system module directory (`--sysmoddir` > `JENNIFER_SYSMODDIR` > compile default).       |
 | [`meta`](meta.md)`.CAPABILITIES`           | `list of string` | Host capabilities this build has, sorted: `["exec", "net", "sql"]` (standard) / `[]` (tiny).            |
 | [`meta`](meta.md)`.hasCapability(name)`    | `bool`         | Whether the build includes capability `name` (`"net"` / `"exec"`); the `# pragma-jennifer-capability:` set. |
-| [`meta`](meta.md)`.call(name, args...)`    | value          | Invoke a top-level method by runtime name (arity + types checked); errors / `exit` propagate.     |
-| [`meta`](meta.md)`.defined(name)`          | `bool`         | Whether a top-level method `name` exists.                                                         |
-| [`meta`](meta.md)`.callMain(name, args...)` / `.definedMain(name)` | value / `bool` | Like `call` / `defined` but against the **entry program's** methods (a module reaching its host's handlers). |
+| [`meta`](meta.md)`.call(name, args...)`    | value          | Invoke a top-level function by runtime name (arity + types checked); errors / `exit` propagate.     |
+| [`meta`](meta.md)`.defined(name)`          | `bool`         | Whether a top-level function `name` exists.                                                         |
+| [`meta`](meta.md)`.callMain(name, args...)` / `.definedMain(name)` | value / `bool` | Like `call` / `defined` but against the **entry program's** functions (a module reaching its host's handlers). |
 | [`os`](os.md)`.ARCH`                       | `string`       | CPU architecture: `"amd64"`, `"arm64"`, `"wasm"`, ...                                            |
 | [`os`](os.md)`.ARGS`                       | list of string | Argv. Index 0 is the script path, the rest are user args.                                        |
 | [`os`](os.md)`.DIRSEP`                     | `string`       | Path-component separator: `"/"` Unix, `"\\"` Windows.                                            |
@@ -534,12 +531,12 @@ flat lookup view, not authoritative.
 
 ## Type-conversion calls
 
-`int`, `float`, `string`, `bool` are also type keywords (used in `def x
-as int`). The parser allows them in expression position **only** when
-immediately followed by `(`, so `def x as int init convert.toInt("42");` works
-but `def x as int init int;` errors. See
-[convert.md](convert.md#notes-on-the-type-name-syntax) for the parser
-detail.
+`int`, `float`, `string`, `bool`, `bytes` are type keywords (used in `def x
+as int`) and never appear in expression position, not even followed by `(`:
+`int("42")` is a parse error pointing at `convert.toInt("42")`. Use
+`convert.toInt` / `toFloat` / `toString` / `toBool` (and
+`convert.bytesFromString` for `bytes`). See
+[convert.md](convert.md#notes-on-the-verb-naming) for the naming detail.
 
 ## See also
 

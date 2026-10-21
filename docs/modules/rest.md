@@ -65,7 +65,7 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 
 - **Base-URL joining** puts exactly one slash between `baseUrl` and `path`, so
   `"https://api"` + `"/users"` and `"https://api/"` + `"users"` both give
-  `https://api/users` - no double slashes.
+  `https://api/users`.
 - **Query strings** are built from a `map of string to string` and
   percent-encoded (`{"q": "a b"}` -> `?q=a%20b`).
 - **Auth** is a header: set `Client.headers["Authorization"]` to `rest.bearer(token)`
@@ -132,9 +132,9 @@ when it is absent, null, or empty. Both throw `kind "rest"` on a non-2xx page.
 
 ## Errors
 
-A non-2xx **status is a value, not a crash**: a 404 or 500 comes back as a
-normal `Response` with that `status` for you to branch on. `getJson` (and the
-pagination walkers) will, however, `throw` `kind "rest"` on a non-2xx or a body
+A non-2xx status is a value, not an error: a 404 or 500 comes back as a
+normal `Response` with that `status` for you to branch on. `getJson` and the
+pagination walkers do `throw` `kind "rest"` on a non-2xx or a body
 that is not valid JSON (e.g. an HTML error page) - guard with `get` + a status
 check when a server may return non-JSON errors.
 

@@ -97,7 +97,7 @@ elements is rejected).
 
 ## Scope
 
-BER decode / DER encode over the tree above is the whole of v1 - the enabler for
+BER decode / DER encode over the tree above is the whole library - the enabler for
 the [`ldap`](../modules/) and SNMP clients. It does not interpret schema
 (no ASN.1-module compiler), and `asn1.asInt` is `int64`-bounded (read a larger
 `INTEGER`, such as an SNMP `Counter64` near `2^64`, with `asBytes`).

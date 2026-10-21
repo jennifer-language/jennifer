@@ -65,8 +65,7 @@ A client is stateful: `connect`, subscribe / publish / receive, `disconnect`.
 `Options.security` is a [`transport.Security`](transport.md): `.None` (plaintext,
 port 1883) or `.Tls` (implicit TLS, `mqtts`, port 8883); `.Starttls` is rejected
 (MQTT has no in-band upgrade). Needs `import "transport.j" as transport;`.
-`username` / `password` `""` omit the CONNECT
-credentials. A non-empty `clientId` identifies the session to the broker.
+`username` / `password` `""` omit the CONNECT credentials. A non-empty `clientId` identifies the session to the broker.
 
 ## QoS 1: the PUBACK handshake
 
@@ -173,8 +172,7 @@ broker refuses the connection (a non-zero CONNACK code) or does not answer with
 a CONNACK; `subscribe` / `subscribeQos1` throw when the SUBACK reports failure
 (`0x80`); `publishQos1` throws when no PUBACK arrives within the retry budget. A
 connection that closes mid-packet throws `mqtt: connection closed mid-packet`. A
-`poll` whose deadline elapses is **not** an error - it simply returns an empty
-list.
+`poll` whose deadline elapses is not an error; it returns an empty list.
 
 ## Testing
 
@@ -210,8 +208,7 @@ or unreachable broker fails the dial instead of blocking it forever, and the
 CONNECT and SUBSCRIBE handshakes carry a 30 s timeout, so a broker that accepts
 the connection but never acknowledges fails instead of hanging. `publishQos1`
 waits a bounded window for each PUBACK and retries a fixed number of times
-before throwing. `poll(client,
-ms)` already bounds how long it waits for a message; `receive` blocks until one
+before throwing. `poll(client, ms)` bounds how long it waits for a message; `receive` blocks until one
 arrives. A single control packet is capped at **64 MiB**: the remaining-length
 varint is attacker-declarable, so a broker declaring an enormous packet fails
 with a catchable error rather than an unbounded allocation.

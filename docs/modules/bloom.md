@@ -3,9 +3,9 @@
 Import with `import "bloom.j" as bloom;`. A compact, probabilistic set: `add`
 records a string and `mightContain` tests membership with **no false negatives**
 (a member always reports present) but possible **false positives** (a non-member
-may report present, with a probability that grows as the filter fills). Trades a
-little accuracy for a lot of space - ideal for "have I seen this before?" checks
-over large sets. Pure `.j` over `hash` + `strings` + `binary`; runs on both binaries.
+may report present, with a probability that grows as the filter fills). It trades
+a little accuracy for a lot of space, for "have I seen this before?" checks over
+large sets. Pure `.j` over `hash` + `strings` + `binary`; runs on both binaries.
 
 ```jennifer
 import "bloom.j" as bloom;
@@ -52,17 +52,16 @@ thumb for `n` expected items at a target false-positive probability `p`:
 
 So for 10000 items at 1%: `size ~= 96000`, `hashes = 7`.
 
-**`bloom.optimal(n, fpr)` does this arithmetic for you** - it computes
+`bloom.optimal(n, fpr)` does this arithmetic: it computes
 `m = ceil(-(n * ln fpr) / (ln 2)^2)` and `k = round((m / n) * ln 2)` (clamped to
-`k >= 1`) and returns an empty filter of that shape. So `bloom.optimal(1000,
-0.01)` yields a `size = 9586`, `hashes = 7` filter with no manual sizing.
+`k >= 1`) and returns an empty filter of that shape. `bloom.optimal(1000, 0.01)`
+yields a `size = 9586`, `hashes = 7` filter.
 
 ## Serialization and union
 
 `bloom.serialize` encodes a filter to a self-describing `bytes` blob (a 4-byte
 big-endian `size`, a 4-byte big-endian `hashes`, then the raw bit array), and
-`bloom.deserialize` reverses it exactly - `serialize` then `deserialize`
-round-trips to a byte-identical filter with membership preserved, so a filter can
+`bloom.deserialize` reverses it to a byte-identical filter, so a filter can
 be written to disk (`fs`) or sent over the wire and rebuilt later.
 
 `bloom.union` (alias `bloom.merge`) bitwise-ORs two filters of the **same `size`
@@ -81,10 +80,10 @@ def restored as bloom.Filter init bloom.deserialize($blob);   # identical filter
 
 ## Scope
 
-- **Add and test only** - a standard Bloom filter cannot remove an item or count
-  occurrences (removal needs a counting Bloom filter; membership only, here).
+- **Add and test only.** A standard Bloom filter cannot remove an item or count
+  occurrences (removal needs a counting Bloom filter).
 - **Value-semantic `add`.** Each `add` copies the bit array and returns a fresh
-  filter, so chain adds (`$f = bloom.add($f, x)`); it does not mutate in place.
+  filter, so chain adds (`$f = bloom.add($f, x)`).
   For many inserts this copies the array each time - fine for typical set sizes,
   not for millions of adds into a huge filter in a tight loop.
 - **Strings only.** Hash other values through `convert.toString` or a `json` /

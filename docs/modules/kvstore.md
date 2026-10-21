@@ -1,12 +1,12 @@
 # `kvstore` - selectable key/value backend
 
-Import with `import "kvstore.j" as kvstore;`. A **backend selector** for a
+Import with `import "kvstore.j" as kvstore;`. A backend selector for a
 key/value store with per-key TTL: one `Store` value is a `memcache` connection, a
 `redis` connection, or the in-process [`kv`](../libraries/kv.md) library, and a
 uniform `set` / `get` / `delete` / `touch` / `incrWindow` surface dispatches to
 whichever you chose. It is the shared backend layer under
 [`session`](session.md) and [`ratelimit`](ratelimit.md), so each works over any
-backend without duplicating the plumbing.
+backend.
 
 ```jennifer
 import "kvstore.j" as kvstore;
@@ -23,8 +23,8 @@ io.printf("%s\n", kvstore.get($store, "greeting"));
 
 ## `Store` is an enum, not a tagged struct
 
-`Store` is a sum type - each variant carries only its own backend handle, and
-every op is a `match` the compiler checks for **exhaustiveness**:
+`Store` is a sum type: each variant carries only its own backend handle, and
+every op is a `match` the compiler checks for exhaustiveness:
 
 ```jennifer
 export def enum Store {
@@ -33,6 +33,7 @@ export def enum Store {
     Local { local as kv.Store }
 };
 ```
+
 ## Surface
 
 | Call | Backend | |
@@ -50,17 +51,16 @@ export def enum Store {
 ## Choosing a backend
 
 - **Distributed** (`memcache` / `redis`) - state lives on the server, shared
-  across every process and machine that connects. The right choice for a web
-  fleet, a worker pool, or anything where more than one process must agree.
+  across every process and machine that connects. Use it for a web fleet, a
+  worker pool, or anything where more than one process must agree.
 - **Local in-memory** (`inProcessStore`) - no server, fastest, but gone when the
   program exits and invisible to other processes. Good for a single-process
   cache or a test. Expired entries are swept periodically, so a rate limiter over
-  it stays bounded; but there is no cap on *unexpired* data, so an **adversarial,
-  unbounded working set** (millions of live sessions from an attacker) belongs on
+  it stays bounded; but there is no cap on unexpired data, so an adversarial,
+  unbounded working set (millions of live sessions from an attacker) belongs on
   a distributed backend with a server-side eviction policy, not here.
 - **Local persisted** (`fileStore`) - no server, and it survives across
-  `jennifer run` invocations (handy for development and CLI tools that keep
-  state). Single-process: safe for `spawn` within one process, but concurrent
+  `jennifer run` invocations (for development and CLI tools that keep state). Single-process: safe for `spawn` within one process, but concurrent
   *separate* processes on one file can lose writes - use a distributed backend
   for cross-process coordination.
 

@@ -1,17 +1,16 @@
 # `label` - industrial label printing
 
 Import with `import "label.j" as label;`. Describe and print labels for
-industrial label printers. **One** module, one way to describe a label, with the
-printer language as a **selectable backend** (a `Device` dialect) rather than a
-module per printer. A deliberate **three-stage pipeline** keeps the stages
-independent:
+industrial label printers. One module covers every printer: the printer
+language is a selectable backend (a `Device` dialect). A three-stage pipeline
+keeps the stages independent:
 
 1. **build** a device-independent `Label` in millimetres,
 2. **render** it to a chosen dialect string, and
 3. **emit** that string anywhere.
 
-Build and render are pure text and run on **both** binaries; only `send` (the
-`:9100` convenience) uses `net`, so it needs the default **`jennifer`** binary.
+Build and render are pure text and run on both binaries; only `send` (the
+`:9100` convenience) uses `net`, so it needs the default `jennifer` binary.
 
 ```jennifer
 import "label.j" as label;
@@ -30,8 +29,8 @@ Runnable: [`examples/modules/label_demo.j`](https://github.com/jennifer-language
 ## Stage 1 - build (device-independent, millimetres)
 
 Every builder is value-semantic and returns a new `Label`, so a label is
-assembled by reassignment. Coordinates and sizes are **millimetres** - never
-device dots.
+assembled by reassignment. Coordinates and sizes are millimetres, not device
+dots.
 
 | Call / type                                       | Notes                                             |
 | ------------------------------------------------- | ------------------------------------------------- |
@@ -48,8 +47,7 @@ device dots.
 `TextOptions` is zero-value-friendly (`def t as label.TextOptions;`): an
 unrotated, non-bold field sized by `height` mm. Set `points` for a point-sized
 font (it wins over `height`), `rotation` to turn it (degrees counter-clockwise),
-and `bold` for a bold face. Rotation and point size are portable; both dialects
-honour them (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter
+and `bold` for a bold face. Both dialects honour rotation and point size (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter
 and a dots conversion).
 
 Barcode `type` is a **linear** symbology - `"code128"`, `"ean13"`, `"ean8"`,
@@ -161,8 +159,8 @@ module ships one convenience for the common case:
 | --------------------------------- | --------------------------------------------------------- |
 | `label.send(host, port, rendered)` | Open a TCP connection and write the stream (raw `:9100`). |
 
-Keeping emit separate from render is what makes the same label printable,
-saveable, and testable without a printer attached.
+Because emit is separate from render, a label can be printed, saved, or tested
+without a printer attached.
 
 ## Testing
 

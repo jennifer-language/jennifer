@@ -9,23 +9,30 @@ A hand-written, single-pass scanner.
 | Markers                  | `EOF`, `ILLEGAL`                                                                                                                                            |
 | Literal values           | `INT`, `FLOAT`, `STRING`, `STRING_INTERP`, `TRUE`, `FALSE`, `NULL`                                                                                           |
 | Identifiers              | `IDENT`, `VARREF`                                                                                                                                           |
-| Declaration keywords     | `DEFINE` (`def`), `FUNC`, `AS`, `INIT`, `CONST`, `RETURN`                                                                                                   |
-| Import keywords          | `USE`, `IMPORT`                                                                                                                                             |
-| Control-flow keywords    | `IF`, `ELSEIF`, `ELSE`, `WHILE`, `FOR`                                                                                                                      |
-| Type keywords            | `INT_TYPE`, `FLOAT_TYPE`, `STRING_TYPE`, `BOOL_TYPE`, `LIST`, `MAP`                                                                                         |
+| Declaration keywords     | `DEFINE` (`def`), `FUNC`, `AS`, `INIT`, `CONST`, `RETURN`, `STRUCT`, `ENUM`, `EXPORT`                                                                       |
+| Import keywords          | `USE`, `IMPORT`, `INCLUDE`                                                                                                                                  |
+| Control-flow keywords    | `IF`, `ELSEIF`, `ELSE`, `WHILE`, `FOR`, `REPEAT`, `UNTIL`, `MATCH`, `WHEN`, `BREAK`, `CONTINUE`, `EXIT`, `TRY`, `CATCH`, `THROW`, `DEFER`, `ERRDEFER`       |
+| Type keywords            | `INT_TYPE`, `FLOAT_TYPE`, `STRING_TYPE`, `BOOL_TYPE`, `BYTES_TYPE`, `LIST`, `MAP`, `TASK`                                                                   |
 | Type structure keywords  | `OF`, `TO`                                                                                                                                                  |
 | Iteration keyword        | `IN`                                                                                                                                                        |
+| Expression keywords      | `LEN` (`len(...)`), `SPAWN` (`spawn { ... }`)                                                                                                               |
 | Keyword operators        | `AND`, `OR`, `NOT`                                                                                                                                          |
 | Arithmetic operators     | `PLUS` (`+`), `MINUS` (`-`), `STAR` (`*`), `SLASH` (`/`), `DIV` (`//`), `PERCENT` (`%`)                                                                     |
 | Comparison operators     | `LT` (`<`), `GT` (`>`), `LE` (`<=`), `GE` (`>=`), `EQ` (`==`), `NEQ` (`!=`)                                                                                 |
+| Bitwise operators        | `BIT_AND` (`&`), `BIT_OR` (`\|`), `BIT_XOR` (`^`), `BIT_NOT` (`~`), `SHL` (`<<`), `SHR` (`>>`)                                                               |
 | Assignment               | `ASSIGN` (`=`)                                                                                                                                              |
 | Grouping and punctuation | `LBRACE` (`{`), `RBRACE` (`}`), `LPAREN` (`(`), `RPAREN` (`)`), `LBRACKET` (`[`), `RBRACKET` (`]`), `SEMI` (`;`), `COMMA` (`,`), `COLON` (`:`), `DOT` (`.`), `DOTDOT` (`..`) |
+| Trivia                   | `COMMENT_LINE`, `COMMENT_BLOCK`, `COMMENT_SHEBANG`, `BLANK_LINE` (see [Comments](#comments))                                                                 |
 
 `def` introduces a variable or constant binding (TOKEN_DEFINE); `func`
-introduces a method (TOKEN_FUNC). `import` (TOKEN_IMPORT) is for **file
-imports** (`import "path.j";`); `use` (TOKEN_USE) is for **library imports**
-(`use io;`). `DOT` (`.`) no longer appears in import syntax (paths are
-strings now) and is reserved for future expression use.
+introduces a function (TOKEN_FUNC). `include` (TOKEN_INCLUDE) is the **textual
+file splice** (`include "path.j";`), `import` (TOKEN_IMPORT) the **module
+import** (`import "path.j" as m;`), and `use` (TOKEN_USE) the **library
+import** (`use io;`). `DOT` (`.`) does not appear in import syntax (paths are
+strings); in expressions it is the namespace / module qualifier (`io.printf`,
+`m.CONST`), field access (`$p.x`), and enum construction (`Shape.Circle{...}`).
+`channel` is **not** a keyword: it lexes as `IDENT` and the parser
+treats it as a type only in `channel of T`.
 Comparison tokens `LE`, `GE`, `EQ`, `NEQ` are two-character (`<=`, `>=`, `==`,
 `!=`) and are recognized by a one-character lookahead from `<`, `>`, `=`, `!`.
 `!` exists **only** as the lead of `!=` (logical negation is the word `not`); a
@@ -70,7 +77,7 @@ semantically identical program.
 
 The only place whitespace is *retained* is inside string literals -
 `readString` reads byte-by-byte until the closing quote, so a literal
-space, tab, or even a raw `\n` between the quotes becomes part of
+space, tab, or raw newline between the quotes becomes part of
 the string value (in both the cooked `"..."` and the raw `'...'` form).
 In a raw single-quoted literal a backslash is just a byte, so `'\n'` is the
 two-character string `\n`, and a multi-line block needs no escapes at all; `fmt`
@@ -94,8 +101,10 @@ imported file - see [Interpreter > Errors and positions](interpreter.md#errors-a
 
 ## Keywords
 
-The lexer's keyword map covers: `def func as init const import use return if
-elseif else while for true false null and or not int float string bool`.
+The lexer's keyword map covers: `def func as init const include import use
+export return if elseif else while for repeat until match when break continue
+exit try catch throw defer errdefer true false null and or not int float string
+bool bytes list map of to in struct enum len task spawn`.
 Anything else lexed as a word stays a `TOKEN_IDENT`. `define` is **not** a
 keyword and lexes as a plain identifier. `div` was removed when `//` took
 over floor division.
@@ -143,15 +152,14 @@ The parser's `strconv.ParseFloat` governs the magnitude boundaries. An
 **overflowing** exponent (`1e400`) is a positioned parse error, never an
 `Infinity` (the strict stance rejects non-finite results). An
 **underflowing** one (`1e-400`, below the smallest denormal ~`5e-324`)
-rounds to `0.0` with no error - `0.0` is a finite, correctly-rounded
-value, unlike the non-finite `Infinity` overflow would give, so it is the
-same value every IEEE-754 language yields there. The asymmetry is
-deliberate: the strict check bans the non-finite, not a finite zero.
+rounds to `0.0` with no error: a finite, correctly-rounded value, the same
+every IEEE-754 language yields. The strict check bans the non-finite, not a
+finite zero.
 
 ## Identifier rule
 
 Every identifier is **letter-initial** (a token that starts with a digit is
-always a number, which keeps lexing unambiguous). Variable, method, parameter
+always a number, which keeps lexing unambiguous). Variable, function, parameter
 and library names are `[A-Za-z][A-Za-z0-9]{0,63}` - a letter, then letters and
 digits, no underscores. Constants use a looser form: uppercase chunks separated
 by single `_` characters, with in-chunk digits - `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*`.
@@ -163,7 +171,7 @@ underscore-then-digit forms are all rejected (`SHA256` / `SCRAM_SHA256` are lega
 The lexer reflects this by accepting digits and `_` as continuation characters
 for bare IDENT tokens (so `sha256` and `MAX_RETRIES` are each a single token) but
 rejecting any identifier that *ends* with `_`. The full per-kind rule is then
-enforced by the parser at each def / use site - variables, methods, parameters,
+enforced by the parser at each def / use site - variables, functions, parameters,
 library names and call callees may not contain `_`; constants may, with the
 leading-`_` case already excluded by `isIdentStart`. `$var` references go through
 a separate lexer path (`readVarRef`) whose `isIdentPart` allows the leading

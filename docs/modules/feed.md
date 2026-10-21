@@ -1,11 +1,9 @@
 # `feed` - RSS 2.0 and Atom 1.0 syndication
 
-Import with `import "feed.j" as feed;`. Build and parse web syndication feeds -
-**both RSS 2.0 and Atom 1.0 through one module** (design stance 1: not separate
-`rss` / `atom` modules). The format is chosen when you `build` and detected from
-the root element when you `parse`, so the same value-semantic `Feed` shape
-serves a feed reader, podcast client, news aggregator, or changelog-to-feed
-generator.
+Import with `import "feed.j" as feed;`. Build and parse web syndication feeds,
+RSS 2.0 and Atom 1.0 through one module (design stance 1: no separate `rss` /
+`atom` modules). The format is chosen when you `build` and detected from the
+root element when you `parse`; both use the same value-semantic `Feed` shape.
 
 Parsing rides the [`xml`](../libraries/xml.md) library (entities, CDATA, Atom's
 namespaces); building emits escaped XML through it. Dates go through
@@ -70,10 +68,10 @@ RSS uses RFC 822 dates (`pubDate` / `lastBuildDate`); Atom uses RFC 3339
 (`published` / `updated`). All text is XML-escaped, so `&`, `<`, and `>` in
 titles or summaries round-trip.
 
-Each builder returns a fresh copy of its input (value semantics), so `add`
-copies the whole feed on every call. To attach many entries, collect them in a
-list and call `addAll` once, rather than calling `add` in a loop: `add` in a
-loop is O(entries²), while `addAll` appends them all under a single copy.
+Each builder returns a fresh copy of its input, so `add` copies the whole feed
+on every call. To attach many entries, collect them in a list and call `addAll`
+once: `add` in a loop is O(entries²), while `addAll` appends them all under a
+single copy.
 
 ```jennifer
 def entries as list of feed.Entry init [];
@@ -119,8 +117,7 @@ omits `<channel>` is still read. A document whose root is neither `<rss>` nor
 
 ## Safety for untrusted feeds
 
-Feeds come from URLs you do not control, so the untrusted-input paths are
-hardened:
+Feeds come from URLs you do not control; the untrusted-input paths are hardened:
 
 - **Deeply-nested XML** is capped by the `xml` library's shared nesting limit
   (a catchable error, not a stack overflow) - see

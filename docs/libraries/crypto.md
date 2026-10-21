@@ -1,9 +1,9 @@
 # `crypto` - security primitives
 
-Enable with `use crypto;`. The home for the security-sensitive
-primitives that need a cryptographically secure random source or a
-timing-safe operation: crypto-grade randomness, constant-time
-comparison, and the two standard key-derivation functions.
+Enable with `use crypto;`. Security-sensitive primitives that need a
+cryptographically secure random source or a timing-safe operation:
+crypto-grade randomness, constant-time comparison, key derivation,
+authenticated encryption, and signatures.
 
 Digests (MD5 / SHA-*) and the keyed-hash MAC (`hash.hmac`) live in
 [`hash`](hash.md); non-cryptographic checksums live in [`crc`](crc.md).
@@ -13,9 +13,9 @@ or a timing side channel is a vulnerability.
 Everything here is Go standard library only (`crypto/rand`,
 `crypto/subtle`, `crypto/hkdf`, `crypto/pbkdf2`, `crypto/aes`,
 `crypto/cipher`, `crypto/ed25519`), so the library adds no dependency and
-works on **both binaries** (`jennifer` and `jennifer-tiny`). The one exception
-is the RSA / ECDSA signature surface below (`crypto/rsa`, `crypto/ecdsa`,
-`crypto/x509`), which is default-`jennifer` only - everything else runs on both.
+works on **both binaries** (`jennifer` and `jennifer-tiny`). The exceptions are
+default-`jennifer` only: the RSA / ECDSA, key-generation / CSR / JWK surface
+(`crypto/rsa`, `crypto/ecdsa`, `crypto/x509`) and ML-KEM (`crypto/mlkem`).
 
 ```jennifer
 use io;
@@ -51,9 +51,8 @@ def dieRoll as int init crypto.randInt(1, 6);        # secure, unbiased
 def key as bytes init crypto.randBytes(16);          # a 128-bit key
 ```
 
-Since this library landed, [`uuid`](uuid.md) draws its v4 / v7
-randomness here, so `uuid.v4()` is unguessable and safe to
-hand a client as a session id or bearer token.
+[`uuid`](uuid.md) draws its v4 / v7 randomness here, so `uuid.v4()` is
+unguessable and safe to hand a client as a session id or bearer token.
 
 ## Constant-time comparison
 
@@ -121,7 +120,7 @@ io.printf("derived key: %s\n", encoding.toText($derived, "hex"));
 
 Storing passwords for later verification wants a memory-hard function
 (Argon2id, bcrypt, scrypt), which needs a dependency outside the
-standard library. That is deliberately out of scope for `crypto`; use
+standard library. That is out of scope for `crypto`; use
 PBKDF2 only where an interoperable KDF is required (e.g. SCRAM), not as
 a general password store.
 
@@ -176,13 +175,11 @@ def ok as bool init crypto.verify($kp.public, $msg, $sig);   # true
 ```
 
 Publish the `public` key; keep the `private` key secret. `verify` returning
-`false` means the message, key, or signature does not match - it never throws for
-a genuine mismatch, only for a wrong-length key or signature.
+`false` means the message, key, or signature does not match; it throws only for
+a wrong-length key or signature.
 
-The random source draws from the same crypto-grade generator as `randBytes`.
-All Go stdlib (`crypto/aes`, `crypto/cipher`, `crypto/ed25519`), so both binaries
-carry it. Out of scope by design: password *hashing* (see above) and raw block
-modes.
+Keys and nonces come from the same crypto-grade generator as `randBytes`.
+Out of scope: password *hashing* (see above) and raw block modes.
 
 ## Asymmetric signatures (RSA / ECDSA)
 
@@ -224,8 +221,8 @@ SANs, expiry) - key parsing is all that is exposed.
 
 ## Key generation, CSR, and JWK
 
-The rest of the asymmetric surface - what an [ACME](../modules/acme.md) client
-needs to mint keys and request certificates. Same default-binary-only split.
+The rest of the asymmetric surface, used by an [ACME](../modules/acme.md) client
+to mint keys and request certificates. Same default-binary-only split.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
@@ -255,7 +252,8 @@ def csr as bytes init crypto.csr($key, ["example.com", "www.example.com"]);
 (EC-SRP) exchange RouterOS 6.43+ and all of v7 use for MAC-Telnet / Winbox login
 (the modern replacement for the old MD5 salt). It is a dependency-free port
 (`math/big` + `crypto/sha256`) of the reference algorithm over Curve25519 in
-short-Weierstrass form - no OpenSSL, and it stays TinyGo-clean. The
+short-Weierstrass form, TinyGo-clean. The
+
 [`mactelnet`](../modules/mactelnet.md) module drives these; you rarely call them
 directly.
 

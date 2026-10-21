@@ -182,10 +182,9 @@ log output.
   `edited_message`, `channel_post`, and inline queries set `hasMessage` false -
   reach the raw JSON via a direct `http` call. A `callback_query` (a button
   press) is parsed by `parseCallbackQuery`.
-- **UTF-8 upload bodies.** `sendPhotoFile` / `sendDocumentFile` send the
-  multipart body through the text `http` client, so a file whose bytes are not
-  valid UTF-8 is rejected on send; the pure `buildUpload` builder is byte-exact
-  regardless. A byte-safe multipart send path is a follow-on.
+- **Byte-exact uploads.** `sendPhotoFile` / `sendDocumentFile` send the
+  multipart body as raw bytes (`http.requestRawBody`), so a binary file reaches
+  the wire intact.
 - **No message editing or deletion** in this version.
 
 ## See also

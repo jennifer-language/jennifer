@@ -19,19 +19,15 @@ Nothing here is a commitment. An idea graduates into
 
 ## Drafts
 
-Shaped directions, **grouped by theme** and ordered roughly **easiest to
-implement first** - language tweaks and additive libraries near the top, the big
-runtime and ecosystem restructures near the bottom. Each has a design; it just
-has no schedule.
+Ordered roughly easiest first: language tweaks and additive libraries near the
+top, the big runtime and ecosystem restructures near the bottom.
 
 Each carries a stable **`DRAFT#`** handle so it can be referenced and later
-graduated into a numbered milestone (graduating a `DRAFT#` gives it an `M`-number
-in `milestones.md`). Handles are **assigned once and retired on graduation** -
-never reused, and **never renumbered when the list is reordered** - so a reference
-stays valid for the life
-of the idea (which is why the numbers below run out of sequence). `DRAFT#` is
-deliberately *not* a milestone number; an idea only gets an `M`-number when it
-graduates into [milestones.md](milestones.md).
+graduated into a numbered milestone. Handles are **assigned once and retired on
+graduation** - never reused, and **never renumbered when the list is reordered** -
+so a reference stays valid for the life of the idea (which is why the numbers
+below run out of sequence). `DRAFT#` is not a milestone number; an idea gets an
+`M`-number only when it graduates into [milestones.md](milestones.md).
 
 Each draft also states its **Requires** - the `DRAFT#` handles and/or milestones
 (`M`-numbers) that must land first, or *none* - so its blockers are explicit
@@ -45,7 +41,7 @@ before it is scheduled.
 passed / returned / stored / called, powering the higher-order `lists` layer. What
 is missing - the "Tier 2" `M24.2` deferred - is the **anonymous function literal**
 (an inline lambda) and **capture** of enclosing bindings. Today a one-off transform
-must be hoisted to a named top-level method
+must be hoisted to a named top-level function
 (`func dbl(n as int) { return $n * 2; }` just to write `lists.map($xs, dbl)`), and
 a middleware or handler cannot close over state, which is why the module ecosystem
 routes so much through **by-name dispatch** (`web` handlers, `args.dispatch`,
@@ -78,7 +74,7 @@ creation, so a later mutation of the outer variable is invisible inside the clos
 - the identical mental model `spawn` already teaches, deliberately consistent
 rather than the JS / Python live-binding behavior.
 
-**What it buys, beyond inline lambdas.** Real currying actually captures
+**What it buys, beyond inline lambdas.** Real currying captures
 (`makeAdder(1)(2)` today is call-through-expression syntax, not capture - this is
 what would make it capture). And it lets the module ecosystem replace by-name
 dispatch with closures that close over their state - a `webapi` guard could capture
@@ -88,7 +84,7 @@ separate follow-on, not part of this draft.
 
 Syntax and semantics to settle at graduation: the literal spelling
 (`func(params) { body }`, mirroring a named `func` declaration without the name),
-whether parameter types are required (yes, for consistency with methods), no
+whether parameter types are required (yes, for consistency with functions), no
 declared return type (consistent), and how `defer` / `spawn` inside a closure body
 behave.
 
@@ -113,11 +109,11 @@ Why it might pay: a worker pool with a tunable ceiling is more natural in Go tha
 expressed as `.j` `spawn`s; back-pressure / queue-depth limits live where the
 sockets already are (`httpd` already bounds `maxInFlight`); and the hot accept
 loop stops paying tree-walker overhead per request. Why it is only a refinement,
-not a fix: a handler is still a `.j` method invoked on the shared host
+not a fix: a handler is still a `.j` function invoked on the shared host
 interpreter, so making that invocation race-safe is the actual prerequisite and
 does the real work - this only relocates the loop. Keep `web` a `.j` module
 either way: dogfooding is a first-class goal, and with no closures a handler is
-always a by-name entry method, so a Go rewrite of the router would buy little and
+always a by-name entry function, so a Go rewrite of the router would buy little and
 lose test surface.
 
 ### Embedding, WASM, and sandboxing
@@ -128,9 +124,9 @@ Extract the interpreter core out from under `internal/` and expose a
 documented Go-side surface so external programs can embed Jennifer. Today
 `internal/interpreter`, `internal/parser`, `internal/lexer`, and
 `internal/lib/*` are unreachable from any module that isn't
-`jennifer-lang.dev/jennifer` - Go's `internal/` visibility rule is not a
-convention, it's a compile-time barrier. No submodule / require / replace
-workaround exists; embedding is impossible without a restructure.
+`jennifer-lang.dev/jennifer` - Go's `internal/` visibility rule is a
+compile-time barrier, and no submodule / require / replace workaround exists;
+embedding is impossible without a restructure.
 
 It comes ahead of the WASM runtime (`DRAFT#2`) because a Go-side embedding
 API is a strictly smaller change (repository restructure, no new external
@@ -261,9 +257,9 @@ re-walking the tree. This is the big structural lever, and the big effort.
   current evaluator, and to strict behaviour parity: the `spawn` snapshot,
   `defer` order, positioned errors, and the call-depth guard must all survive the
   rewrite, with the existing test suite as the conformance oracle.
-- **Sequenced after the cheap win.** what remains for a VM
+- **Sequenced after the cheap win.** Once hot paths have moved into Go primitives, what remains for a VM
   is the residual CPU-bound `.j` (recursion, business-logic loops) no Go
-  primitive covers. Pursued only when benchmark shows that residual is
+  primitive covers. Pursued only when a benchmark shows that residual is
   a real workload's bottleneck - not on spec.
 - **Composes with arena.** The per-frame arena allocator is
   an independent memory-side optimization that pairs naturally here, since a
@@ -357,9 +353,8 @@ A grab-bag, loosely grouped and recorded when it comes up.
   pure-text `.j` the rest of the module is, so it is a separate piece of work
   rather than another encoder branch. Until then, `label.image` (by reference)
   covers the stored-logo case.
-- **SQLite (`sql` engine backend).** SQLite stays parked here, and it is 
-  worth being precise about *why*, because the reason is not what it first looks like.
-  SQLite is **also** just a pure-Go `database/sql` driver - `modernc.org/sqlite`,
+- **SQLite (`sql` engine backend).** SQLite stays parked here, and the reason
+  is not integration effort. SQLite is also a pure-Go `database/sql` driver - `modernc.org/sqlite`,
   registered with the same one-line `import _` as `go-sql-driver/mysql` or
   `pgx`, cross-compiling cleanly like any pure-Go package (the cgo
   `mattn/go-sqlite3`, which *does* break static / cross-compile / TinyGo and
@@ -385,9 +380,8 @@ A grab-bag, loosely grouped and recorded when it comes up.
   TinyGo, and no TinyGo-compatible SQLite exists. Unlike a wire-protocol
   database - which could in principle be reimplemented as pure `.j` over a
   net-enabled tiny rebuild - SQLite has no wire protocol and so can *never*
-  reach the embeddable binary. That is the irony: a local,
-  file-based store is exactly what a minimal embedded target would most want,
-  and it is the one database that binary can't have with current tooling.
+  reach the embeddable binary - although a local, file-based store is what a
+  minimal embedded target would most want.
 - **FCGI.** `use FCGI as web;` library when `net` and `httpd` mature. Lets
   Jennifer host CGI / FastCGI workloads end-to-end.
 - **i18n (CLDR formatting).** Locale-aware case folding, collation, number /
@@ -445,7 +439,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   TLS / `crypto` / `sql` / `regex` / ...) never appears. The mappings are natural
   - value semantics to struct copies, `spawn` to a goroutine over a snapshot,
   `defer` to `defer`, `throw` to error returns. The catch is the language's
-  dynamism (untyped method returns, `meta.call` by name, opaque `json.Value`): a
+  dynamism (untyped function returns, `meta.call` by name, opaque `json.Value`): a
   naive transpile keeps boxed tagged-union values, so it beats the tree-walker
   but is not C-speed without type-specialisation work. Relates to `DRAFT#17` (the
   in-process bytecode VM is the cheaper dispatch win) and `DRAFT#2` (WASM, the
@@ -457,7 +451,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   NUMA awareness, `GOMAXPROCS`-equivalent runtime tuning. Runtime-config
   surface for the spawn scheduler, not new language features. Ships when a
   real use case forces it (the default - "let Go's scheduler decide" -
-  handles every workload we've imagined so far).
+  handles every workload considered so far).
 - **Profiler: heap-per-position metric.** Out of scope for now: `--allocs`
   already proxies value-copy churn, and true per-position RSS needs
   `runtime.ReadMemStats` sampling, which is coarse under TinyGo.

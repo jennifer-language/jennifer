@@ -1,9 +1,9 @@
 # `jsonrpc` - JSON-RPC 2.0 client and server
 
 Import with `import "jsonrpc.j" as jsonrpc;`. A [JSON-RPC
-2.0](https://www.jsonrpc.org/specification) **client** that calls remote methods
-over HTTP, and a transport-agnostic **server** `handle` that dispatches an
-incoming request to your program's methods by name. Built on
+2.0](https://www.jsonrpc.org/specification) client that calls remote methods
+over HTTP, and a transport-agnostic server `handle` that dispatches an
+incoming request to your program's functions by name. Built on
 [`json`](../libraries/json.md) for the wire format and
 [`http`](http.md) for the client transport, so it needs the default `jennifer`
 binary.
@@ -11,8 +11,8 @@ binary.
 `params` and a call's result are [`json.Value`](../libraries/json.md)s: you build
 params with the `json` write API and read the result with the `json` accessors.
 Every client-side failure - a JSON-RPC error reply, a transport error (connection
-refused / timeout / malformed HTTP), or a malformed reply - surfaces as a single
-catchable `Error{kind: "jsonrpc"}`, so one `catch` covers them all.
+refused / timeout / malformed HTTP), or a malformed reply - surfaces as one
+catchable `Error{kind: "jsonrpc"}`.
 
 ```jennifer
 import "jsonrpc.j" as jsonrpc;
@@ -59,18 +59,17 @@ io.printf("%d C\n", json.asInt($w, "/tempC"));
 
 ## Server
 
-`jsonrpc.handle(requestBody)` turns a raw request into a reply body - it does the
-whole JSON-RPC protocol (single request, notification, batch, and every reserved
+`jsonrpc.handle(requestBody)` turns a raw request into a reply body. It handles
+the whole JSON-RPC protocol (single request, notification, batch, and every reserved
 error code) and leaves the transport to you: read the body off
 [`httpd`](../libraries/httpd.md) or [`net`](../libraries/net.md), pass it to
 `handle`, write the returned string back.
 
-Each request's `method` names a **top-level method** `func NAME(params as
-json.Value)` in the program that imported the module (dispatched by name via
-`meta.callMain` - the method name arrives on the wire, so it is resolved as a
-runtime string, not a `func` value). The handler
-is called with the request's params and returns a `json.Value` **or a scalar**
-(int / float / string / bool / null) as its result.
+Each request's `method` names a top-level function `func NAME(params as
+json.Value)` in the program that imported the module, dispatched by name via
+`meta.callMain` (the name arrives on the wire as a runtime string, not a `func`
+value). The handler is called with the request's params and returns a
+`json.Value` or a scalar (int / float / string / bool / null) as its result.
 
 | Call | Returns | |
 | ---- | ------- | - |
@@ -89,10 +88,10 @@ if (len($reply) > 0) {
 }
 ```
 
-A missing method is a `-32601` (method not found) reply; a handler that **throws**
-becomes a generic `-32603` (internal error) reply - the thrown message stays
-server-side and is **not** put on the wire, so you can raise detailed errors
-without leaking internals. An unparseable body is `-32700` (parse error). A
+A missing method is a `-32601` (method not found) reply; a handler that throws
+becomes a generic `-32603` (internal error) reply. The thrown message stays
+server-side and is not put on the wire, so detailed errors do not leak
+internals. An unparseable body is `-32700` (parse error). A
 handler must take exactly one `json.Value` parameter.
 
 > **Security - the whole top-level namespace is exposed.** `handle` resolves a
@@ -100,8 +99,8 @@ handler must take exactly one `json.Value` parameter.
 > `meta.callMain`); any one that takes a single `json.Value` argument is remotely
 > callable. There is no route allow-list like [`web`](web.md)'s. So:
 >
-> - Name RPC handlers deliberately - a shared prefix, or a dedicated dispatch
->   file - and do not co-locate a `handle`-served program with privileged
+> - Name RPC handlers distinctly (a shared prefix, or a dedicated dispatch
+>   file) and do not co-locate a `handle`-served program with privileged
 >   one-argument helpers.
 > - Authenticate at the transport: check a header / token **before** calling
 >   `handle`; the module does no authentication of its own.
@@ -125,8 +124,8 @@ block.
 ## Scope
 
 - **HTTP transport.** The client speaks JSON-RPC over HTTP POST (the common
-  case); `handle` is transport-agnostic, so a raw-TCP / newline-framed server is
-  a matter of wiring it to `net`.
+  case); `handle` is transport-agnostic, so a raw-TCP / newline-framed server
+  only needs wiring to `net`.
 - **Client is single-call.** `call` / `notify` send one request; the server
   `handle` accepts a batch (a JSON array) on the receiving side. A client-side
   batch builder is a possible later add.

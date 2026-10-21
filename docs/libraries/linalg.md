@@ -2,10 +2,10 @@
 
 The `linalg` library does linear algebra over Jennifer's own value types - the
 companion to [`stats`](stats.md). **Vectors** are a `list of float` and
-**matrices** a `list of list of float`, so the data is idiomatic,
-value-semantic, and interchangeable with the rest of the language (no opaque
-handle to construct or unwrap). It is pure-value and dependency-free (Go stdlib
-only, algorithms implemented directly - no `gonum`), so both binaries build it.
+**matrices** a `list of list of float`: value-semantic and interchangeable with
+the rest of the language, with no opaque handle to construct or unwrap. It is
+dependency-free (Go stdlib only, algorithms implemented directly - no `gonum`),
+so both binaries build it.
 
 ```jennifer
 use linalg;
@@ -66,11 +66,11 @@ non-empty; anything else is a positioned error.
 ## Matrices are a plain nested list
 
 There is no dedicated matrix type: a matrix is exactly a `list of list of float`,
-built and read with the language's own list syntax and value semantics. That
-keeps the data first-class (pass it to `stats`, iterate it, slice it) at the cost
-of the per-element boxing a Go-backed dense matrix would avoid - a fine trade at
-the sizes a scripting language handles. A Go-backed opaque matrix handle is the
-noted future escape hatch if big-matrix throughput ever demands it.
+built and read with the language's own list syntax and value semantics. You can
+pass it to `stats`, iterate it, and slice it, at the cost of the per-element
+boxing a Go-backed dense matrix would avoid - acceptable at the sizes a scripting
+language handles. A Go-backed opaque matrix handle is the noted escape hatch if
+big-matrix throughput ever demands it.
 
 ## Strictness
 
@@ -92,9 +92,9 @@ dimension problem and a numerically undefined result are both catchable errors.
   the point where materialising it would exhaust memory): a constructor called
   with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`) and an
   operation handed an oversized input both raise a positioned, catchable error
-  rather than a fatal out-of-memory crash. This ceiling also keeps the `O(n^3)`
-  routines (`matmul` / `inverse` / `solve`) bounded to a small, finite amount of
-  work.
+  rather than a fatal out-of-memory crash. The ceiling also bounds the work of
+  the `O(n^3)` routines (`matmul` / `inverse` / `solve`).
+
 
 ```jennifer
 use linalg;
@@ -108,5 +108,5 @@ try {
 ## See also
 
 [`stats`](stats.md) for descriptive statistics over a `list`; `linalg` is its
-linear-algebra companion. Further ML primitives atop the two are on the
-[horizon](../horizon.md).
+linear-algebra companion. [`ml`](ml.md) builds classical machine learning
+(fit / predict models) on top of the two.

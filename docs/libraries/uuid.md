@@ -37,8 +37,8 @@ if (uuid.isValid($id)) {
 
 - **`uuid.v4()`** - fully random. Use for opaque identifiers with no ordering.
 - **`uuid.v7()`** - a 48-bit millisecond timestamp in the leading bytes, random
-  after. Two v7s created later sort lexically after earlier ones, so they
-  make good database keys (index locality) while staying globally unique.
+  after. A later v7 sorts lexically after an earlier one, so they make good
+  database keys (index locality) while staying globally unique.
 
 ```jennifer
 def a as string init uuid.v7();
@@ -50,11 +50,9 @@ def b as string init uuid.v7();
 ## Randomness
 
 v4/v7 randomness comes from the [`crypto`](crypto.md) library's
-crypto-grade source, so a generated UUID is **unguessable** - safe to
-use directly as a security token, session key, or bearer id. It is not
-seedable (crypto randomness has no reproducible sequence); for a fast,
-seedable, deliberately reproducible identifier stream, draw from
-[`math`](math.md) instead.
+crypto-grade source, so a generated UUID is **unguessable** and safe as
+a security token, session key, or bearer id. It is not seedable; for a
+fast, seedable, reproducible identifier stream, use [`math`](math.md).
 
 ## See also
 

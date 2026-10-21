@@ -147,10 +147,10 @@ module does not implement - use simple bind over TLS. Change a password with
 
 The server answers **simple bind** and **search** for an in-memory directory. It
 is read-only over the LDAP protocol (it rejects add / modify / delete on the
-wire), but the directory itself is **fully mutable from your own code** - so a
-web interface or a database sync can update the directory a running server is
-serving, and the change is visible immediately (the directory is a shared
-`kv`-backed store). There is no schema enforcement and no ACLs.
+wire), but your own code can mutate the directory: it is a shared `kv`-backed
+store, so a web interface or a database sync can update it while the server runs
+and the change is visible immediately. There is no schema enforcement and no
+ACLs.
 
 ### Building a directory
 
@@ -203,9 +203,9 @@ def all as list of ldap.Entry init ldap.listEntries($dir);
 def ok as bool init ldap.hasEntry($dir, "uid=bob,ou=people,dc=example,dc=org");
 ```
 
-These edits are visible to a running server immediately, so the directory can be
-built from a database at startup and kept in sync by your own admin tooling while
-the server serves auth requests from it. (Serialize your writes: a mutation is a
+The directory can be built from a database at startup and kept in sync by your
+own admin tooling while the server serves auth requests from it. (Serialize your
+writes: a mutation is a
 read-modify-write on the shared store, so a single admin path avoids a lost
 update.)
 
@@ -287,5 +287,5 @@ easy to repoint at a `kvstore` or a PBKDF2-hash file instead of LDAP.
 
 Client and server failures throw an `Error` with kind `"ldap"` (a malformed
 message, a transport failure, a refused StartTLS, a failed SASL verification).
-LDAP-level result codes on a bind are returned in the `Result`, not thrown, so a
-bad password is a value to inspect rather than an exception.
+LDAP-level result codes on a bind (such as a bad password) are returned in the
+`Result`, not thrown.

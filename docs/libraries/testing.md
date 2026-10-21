@@ -1,7 +1,7 @@
 # `testing` - assertions and test-runner primitives
 
 Enable with `use testing;`. An assertion vocabulary plus the
-system-side runner surface: name-based method invocation, a
+system-side runner surface: name-based function invocation, a
 per-process result accumulator, and a format dispatcher for
 human / TAP / JUnit output. The `jennifer test` subcommand
 (discovery, `setUp` / `tearDown`, `--format`, `--isolated`)
@@ -20,14 +20,10 @@ testing.run("addPasses");
 io.printf("%s", testing.report(testing.results(), "text"));
 ```
 
-Under `jennifer test`, the `testing.run` / `report` boilerplate is
-handled for you; a test file just defines `test*` methods with
-assertions in the body.
-
 ## Quick start
 
 The everyday path is the `jennifer test` subcommand: write `func test*`
-methods with assertions, and the runner discovers and runs them - no
+functions with assertions, and the runner discovers and runs them - no
 `testing.run` / `report` boilerplate.
 
 ```jennifer
@@ -46,47 +42,41 @@ PASS testMath (0 ms)
 1 passed, 0 failed, 1 total
 ```
 
-`setUp` / `tearDown` methods (run before / after each test) and the flags
+`setUp` / `tearDown` functions (run before / after each test) and the flags
 (`--filter`, `--format=text|tap|junit`, `--isolated`) are documented in
 [technical/cli_test.md](../technical/cli_test.md). The rest of this page
-documents the `testing` **primitives** the runner is built from - reach for
-them directly only when building your own harness.
+covers the `testing` **primitives** the runner is built from, for building
+your own harness.
 
 ## Why this is a system library
 
-A pure `.j` test runner would have to take *the test body* as
-a value. Jennifer has no function references / first-class
-methods - you can't say `testing.run(myTest)` because
-`myTest` is a name, not a value. The interpreter already does
-name-based method lookup at every call site; `testing.run`
-exposes that as a builtin so a Jennifer-coded module can
-dispatch user methods by name without inventing its own
-indirection.
+`testing.run` dispatches a test by its function **name** (a
+string), exposing the interpreter's name-based function lookup so a
+`.j` harness can run discovered tests without its own indirection.
 
-`testing.run` is also the one place in the language where
-`exit` is intercepted. Language-level `try`/`catch`
-deliberately does **not** catch `exit` (see
+It is also the one place in the language where `exit` is
+intercepted. `try`/`catch` does **not** catch `exit` (see
 [control-flow.md](../user-guide/control-flow.md#try-catch-throw));
-the testing runner catches it at the Go level so a runaway
-`exit` in a test body stays scoped to the runner. This
-carve-out is why the primitive can't live in `.j`.
+the runner catches it at the Go level so an `exit` in a test body
+stays scoped to the runner. That is why the primitive can't live
+in `.j`.
 
 ## Surface
 
 | Call                                        | Returns                  | Notes                                                                             |
 | ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| `testing.run(name)`                         | `testing.Result`         | Look up a zero-arg method by name, call it, catch every failure mode, append.     |
-| `testing.runWith(name, args)`               | `testing.Result`         | Like `run`, but binds the `args` list to the method's parameters (arity + declared-type checked). For framework dispatchers, not the zero-arg tests the runner discovers. |
+| `testing.run(name)`                         | `testing.Result`         | Look up a zero-arg function by name, call it, catch every failure mode, append.     |
+| `testing.runWith(name, args)`               | `testing.Result`         | Like `run`, but binds the `args` list to the function's parameters (arity + declared-type checked). For framework dispatchers, not the zero-arg tests the runner discovers. |
 | `testing.results()`                         | `list of testing.Result` | Snapshot of the accumulator. Value semantics - safe to modify.                    |
 | `testing.reset()`                           | `null`                   | Clear the accumulator between independent runs.                                   |
 | `testing.report(results, format)`           | `string`                 | Render `results` to `"text"`, `"tap"`, or `"junit"`.                              |
 
 ## Assertions
 
-Six builtins for test bodies. Each reduces to a `Value.Equal` / Kind
-comparison in Go - native speed, no per-call interpreter overhead - and,
-on failure, throws `Error{kind: "assertion"}` positioned at the
-assertion call, which `testing.run` catches and records.
+Builtins for test bodies. Each is a `Value.Equal` / Kind comparison
+in Go (native speed) and, on failure, throws `Error{kind: "assertion"}`
+positioned at the assertion call, which `testing.run` catches and
+records.
 
 | Call                                       | Fails (throws) when                                                                     |
 | ------------------------------------------ | --------------------------------------------------------------------------------------- |
@@ -95,8 +85,8 @@ assertion call, which `testing.run` catches and records.
 | `testing.assertTrue(cond)`                 | `cond` is `false` (`cond` must be `bool`).                                               |
 | `testing.assertFalse(cond)`                | `cond` is `true` (`cond` must be `bool`).                                                |
 | `testing.assertContains(haystack, needle)` | `needle` is absent: substring for a string, element for a list, key for a map (by haystack kind). |
-| `testing.assertThrows(name, kind)`         | the named zero-arg method doesn't throw, or throws an `Error` whose `kind` differs.      |
-| `testing.assertThrowsWith(name, args, kind)` | as `assertThrows`, but binds the list `args` to the method's parameters - no per-case zero-arg wrapper method needed. |
+| `testing.assertThrows(name, kind)`         | the named zero-arg function doesn't throw, or throws an `Error` whose `kind` differs.      |
+| `testing.assertThrowsWith(name, args, kind)` | as `assertThrows`, but binds the list `args` to the function's parameters - no per-case zero-arg wrapper function needed. |
 
 ```jennifer
 use testing;
@@ -112,13 +102,13 @@ func testAdd() {
 ```
 
 `assertThrowsWith` is the argument-passing form: where `assertThrows` needs a
-zero-arg wrapper method per failing input, `assertThrowsWith("parse", [input],
+zero-arg wrapper function per failing input, `assertThrowsWith("parse", [input],
 kind)` calls `parse(input)` directly, so one helper covers every case.
 
 ### Table-driven tests
 
 There is no `testing.subtest` primitive; drive a set of cases with a plain loop
-inside one test method - the idiomatic Jennifer shape:
+inside one test function:
 
 ```jennifer
 use testing;
@@ -136,7 +126,7 @@ func testDoubles() {
 }
 ```
 
-An assertion `throw`s, so the **first** failing case stops that test method
+An assertion `throw`s, so the **first** failing case stops that test function
 (later iterations don't run) and the reported position points at the
 `assertEqual` line. Put a distinguishing value in the case (or a per-case
 `assertContains` message) when you need to tell which row failed.
@@ -158,7 +148,7 @@ def struct testing.Result {
 
 `errorKind` mirrors the strings surfaced by
 [`try`/`catch`](../user-guide/control-flow.md#try-catch-throw)
-plus a new `"exit"` value for the exit-intercept case:
+plus `"exit"` for the exit-intercept case:
 
 | Value       | Meaning                                                                         |
 | ----------- | ------------------------------------------------------------------------------- |
@@ -167,7 +157,7 @@ plus a new `"exit"` value for the exit-intercept case:
 | `"error"`   | A `throw` whose thrown value wasn't an `Error` struct.                          |
 | `"assertion"` etc. | A `throw Error{kind: "assertion", ...}` - `errorKind` mirrors the struct's `kind` field. |
 | `"exit"`    | The test body called `exit`. `errorMessage` is `"exit code N"`.                 |
-| `"unknown"` | Anything else (method not found, wrong parameter count, ...).                   |
+| `"unknown"` | Anything else (function not found, wrong parameter count, ...).                   |
 
 ## How `testing.run` handles each failure mode
 
@@ -204,10 +194,9 @@ can inspect it immediately.
 
 ## Reports
 
-`testing.report(results, format)` takes any list of
-`testing.Result` and returns a rendered string. Three formats
-ship in v1; format strings are case-sensitive to match the
-codec-table shape used by `hash.compute`, `encoding.toText`,
+`testing.report(results, format)` renders any list of
+`testing.Result` to a string. Format strings are case-sensitive,
+like the codec names of `hash.compute`, `encoding.toText`,
 `fs.open`.
 
 ### `"text"` - human-readable
@@ -257,8 +246,6 @@ Works with the `prove` command and most CI harnesses.
 </testsuite>
 ```
 
-The ubiquitous CI input format.
-
 Unknown format strings error at the boundary:
 `testing.report: unknown format "html"; known: "text", "tap",
 "junit"`.
@@ -269,28 +256,29 @@ Unknown format strings error at the boundary:
   `testing.run expects 1 argument (name), got 0`.
 - **Wrong argument type.** Boundary error:
   `testing.run: name must be string, got int`.
-- **Method with parameters.** `testing.run` in v1 only invokes
-  zero-argument methods. Calling it with a method that takes
+- **Function with parameters.** `testing.run` only invokes
+  zero-argument functions. Calling it with a function that takes
   parameters records a failing Result with `errorKind="unknown"`
-  and the reason in `errorMessage`.
+  and the reason in `errorMessage`; use `testing.runWith(name, args)`
+  to pass arguments.
 - **Unknown format.** `testing.report: unknown format "html";
   known: "text", "tap", "junit"`.
 
 ## Concurrency
 
 The accumulator is guarded by a mutex, so `spawn { testing.run(...) }`
-from multiple tasks doesn't race. Ordering is by completion time,
-not spawn time. A test runner that wants stable ordering should
-run tests sequentially or sort the results before rendering.
+from multiple tasks doesn't race. Results are ordered by completion
+time, not spawn time; for stable ordering run tests sequentially or
+sort the results before rendering.
 
 ## Running with `jennifer test`
 
-These builtins are the substrate; the `jennifer test` subcommand is
-the orchestration layer on top. It discovers `test*` methods (or
+The `jennifer test` subcommand orchestrates these builtins. It
+discovers `test*` functions (or
 `--filter=REGEX`), runs `setUp` / `tearDown` around each, renders
 `--format=text|tap|junit`, and with `--isolated` runs each test in a
 fresh interpreter subprocess so one test's crash, `exit`, or leaked
-global state can't affect the others. A file with no test methods exits `2`
+global state can't affect the others. A file with no test functions exits `2`
 (a runner error) unless `--allow-empty` is passed, so a gate cannot pass an
 empty suite by accident. Its flags and exit codes are documented in
 [technical/cli_test.md > Test runner](../technical/cli_test.md#test-runner-cmdjennifertestgo-internallibtesting).

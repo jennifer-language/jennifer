@@ -2,23 +2,22 @@
 
 Enable with `use yaml;`. [YAML 1.2](https://yaml.org) decode / encode onto
 the same opaque, library-owned value that [`json`](json.md) and
-[`toml`](toml.md) use - the **same read / walk / write surface, name for
-name**, so a program that reads, walks, and builds JSON or TOML does the same
-with YAML. Like TOML, YAML has a timestamp scalar JSON lacks, surfaced through
+[`toml`](toml.md) use, with the **same read / walk / write surface, name for
+name**. YAML's timestamp scalar, which JSON lacks, is surfaced through
 `yaml.asDatetime` (backed by [`time`](time.md)).
 
 `yaml.decode(text)` returns an opaque `yaml.Value` (a `KindObject`, the sibling
 of `json.Value` / `toml.Value`); `[index]` and `.field` reject it (and `==` /
-`!=` compare two handles by value), so the accessors below are the way inside.
+`!=` compare two handles by value), so use the accessors below.
 `convert.typeOf` reports
 `"object"`; `convert.objectType` reports `"yaml.Value"`.
 
-Unlike `json` / `toml` / `xml`, which are hand-rolled, `yaml` is backed by a Go
+Unlike the hand-rolled `json` / `toml` / `xml`, `yaml` is backed by a Go
 dependency ([`gopkg.in/yaml.v3`](https://pkg.go.dev/gopkg.in/yaml.v3)): full
-YAML - anchors and aliases, flow and block styles, implicit typing, and
-multi-document streams - is impractical to hand-roll and has no Go standard
+YAML (anchors and aliases, flow and block styles, implicit typing,
+multi-document streams) is impractical to hand-roll and has no Go standard
 library. The dependency is verified TinyGo-clean, so `yaml` builds on **both
-binaries** (`jennifer` and `jennifer-tiny`).
+binaries**.
 
 ## Surface
 
@@ -49,9 +48,8 @@ binaries** (`jennifer` and `jennifer-tiny`).
 | `yaml.move(v, from, to)` | `yaml.Value` | Relocate a subtree. |
 
 The `[, ptr]` argument is a **JSON Pointer** (see below); omit it (or pass
-`""`) to address the node itself. Every write verb is **non-mutating** - it
-returns a fresh handle, so the idiom is `$v = yaml.set($v, ...)`, the same
-shape lists and maps use.
+`""`) to address the node itself. Every write verb is **non-mutating** and
+returns a fresh handle: `$v = yaml.set($v, ...)`, as with lists and maps.
 
 ## Decoding
 
@@ -75,18 +73,17 @@ Scalars are typed by YAML's implicit resolution: `42` is an `int` (decimal,
 included, though `yaml.asFloat` refuses those: Jennifer has no non-finite
 float), `true` / `false` a `bool`, `~` / `null` a `null`, a timestamp a
 `datetime`, and everything else a `string`. A quoted scalar keeps its string
-type (`"42"` stays a string), and `yaml.encode` round-trips it faithfully -
-a string that reads like another type is re-quoted on output. An integer too
-large for a 64-bit `int` is kept as its exact-digit `string` rather than a
-lossy `float`. Mappings become maps in document order; sequences become lists;
+type (`"42"` stays a string), and `yaml.encode` re-quotes a string that reads
+like another type. An integer too large for a 64-bit `int` is kept as its
+exact-digit `string`, not a lossy `float`. Mappings become maps in document order; sequences become lists;
 a `!!binary` scalar decodes to `bytes`. A non-scalar mapping key (a `? [a, b]`
 complex key) and a **duplicate mapping key** are both rejected.
 
 `yaml.decode` guards against resource-exhaustion input with normal (catchable)
 decode errors: a raw-text pre-scan rejects structural nesting deeper than 128
-levels **before** the parse runs (the underlying parser is recursive, and a
-deeply-nested document would otherwise overflow the interpreter's stack - fatal
-on the fixed-stack `jennifer-tiny`); an input-byte cap (4 MiB on `jennifer`,
+levels **before** the parse runs (the underlying parser is recursive, so a
+deeply nested document would otherwise overflow the stack, fatally on the
+fixed-stack `jennifer-tiny`); an input-byte cap (4 MiB on `jennifer`,
 512 KiB on `jennifer-tiny`) rejects an oversized document before the backing
 parser materialises its whole node tree; and a node budget (shared with the
 other decoders) stops an alias bomb (anchors that each reference the previous
@@ -100,8 +97,7 @@ memory, briefly, for the whole document.
 ### Anchors, aliases, and merge keys
 
 An anchor (`&name`) and its aliases (`*name`) are resolved **by value** during
-decode - each alias expands to an independent copy, so the resulting tree has
-no shared state. A `<<` merge key pulls another mapping's entries in; an
+decode: each alias expands to an independent copy. A `<<` merge key pulls another mapping's entries in; an
 explicit key always wins over a merged one, and an earlier merge source wins
 over a later one:
 
@@ -130,9 +126,8 @@ for (def d in $docs) { io.printf("%v\n", yaml.keys($d)); }
 
 ### JSON Pointer (RFC 6901)
 
-YAML has no document-pointer syntax of its own, so addressing reuses `json`'s
-**JSON Pointer** - identical `/`-separated syntax, so a program that walks JSON
-walks YAML unchanged:
+YAML has no pointer syntax of its own, so addressing reuses `json`'s **JSON
+Pointer**; code that walks JSON walks YAML unchanged:
 
 ```jennifer
 yaml.get($doc, "/server/ports/0")   # first port
@@ -145,8 +140,8 @@ List tokens are `0` or `[1-9][0-9]*`.
 
 ### Timestamps
 
-A YAML timestamp scalar is the one place YAML is richer than JSON.
-`yaml.typeOf` reports `datetime`; `yaml.asDatetime` returns a `time.Time`:
+`yaml.typeOf` reports `datetime` for a timestamp scalar; `yaml.asDatetime`
+returns a `time.Time`:
 
 ```jennifer
 use time;
@@ -159,7 +154,7 @@ io.printf("%s\n", time.iso($t));    # 2001-12-15T02:59:43Z
 
 `yaml.encode` renders **flow style** (compact, `{a: 1, b: [x, y]}`);
 `yaml.encodePretty` renders **block style** (the readable, indented form).
-Flow / block is YAML's own analogue of `json`'s compact / pretty pair. A native
+(YAML's analogue of `json`'s compact / pretty pair.) A native
 `map` / `list` / struct / scalar encodes directly, so a `yaml.Value` handle is
 not required; a `bytes` value encodes as a `!!binary` scalar and a `time.Time`
 as a timestamp.

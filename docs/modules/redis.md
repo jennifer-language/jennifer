@@ -4,8 +4,7 @@ Import with `import "redis.j" as redis;`. A **Redis** client speaking
 **RESP2** (the REdis Serialization Protocol) over the `net` system library.
 Commands go out as RESP arrays of bulk strings; replies (`+OK`, `-ERR`,
 `:int`, `$bulk`, `*array`) parse back into a `Reply`. Typed per-command
-helpers (`get` / `set` / `incr` / `keys` / ...) keep the common path fully
-typed; `command` is the generic escape hatch for everything else. Because it
+helpers (`get` / `set` / `incr` / `keys` / ...) cover the common path; `command` is the generic escape hatch for everything else. Because it
 uses `net`, this module needs the default **`jennifer`** binary.
 
 > **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
@@ -228,7 +227,7 @@ keys, and an empty page with a non-zero cursor is normal).
 
 `get` / `set` speak **text**: RESP bulk lengths are byte counts, but the string
 verbs decode a value as UTF-8, which is exact for keys, JSON payloads, and
-counters, and **throws** on a non-UTF-8 value (strict, by design). For an
+counters, and **throws** on a non-UTF-8 value. For an
 arbitrary **binary** value - a serialized blob, a compressed payload, an image -
 use `setBytes(session, key, value)` (a `bytes` value sent byte-for-byte) and
 `getBytes(session, key)` (`bytes`, never decoded):
@@ -259,9 +258,8 @@ in CI without a Redis install.
 ## Out of scope
 
 - **A working subset**, not the full command set: strings, counters, keys,
-  pub/sub, pipelining, transactions, and SCAN, plus the generic `command` for
-  the rest. Lists / hashes / sets are reachable through `command`; typed
-  helpers for them can follow.
+  hashes, lists, sets, pub/sub, pipelining, transactions, and SCAN, plus the
+  generic `command` for the rest (sorted sets, streams, ...).
 - **RESP2 only, no RESP3.** Pub/sub pushes are read from the same connection
   as replies (the RESP2 model), not over a RESP3 out-of-band push channel.
 - **No connection pool.** One `Session` is one connection; a subscribed

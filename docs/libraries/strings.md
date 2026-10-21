@@ -1,36 +1,31 @@
 # `strings` - text utilities
 
-Enable with `use strings;`. Namespaced under `strings.`; every function is
-called as `strings.NAME(...)`. Fourteen functions for the common things you
-do with strings: case conversion, search, trim, replace, repeat,
-substring extraction, and split / join.
+Enable with `use strings;`; every function is called as
+`strings.NAME(...)`. Case conversion, search, trim, replace, repeat,
+substring extraction, split / join, and accent folding.
 
-> **Breaking change.** `strings` moved from flat to namespaced.
-> Callers used to write `upper(s)`, `contains(s, sub)`, etc.; the namespaced form
-> is `strings.upper(s)`, `strings.contains(s, sub)`. Same library, just
-> the call-site prefix is mandatory now. The rationale matches the
-> lists/maps move: collision-prone verbs (`contains`, `split`,
-> `replace`, ...) belong in their domain library to keep the bare-name
-> pool clean.
+> **Breaking change.** `strings` moved from flat to namespaced: `upper(s)`,
+> `contains(s, sub)` are now `strings.upper(s)`, `strings.contains(s, sub)`.
+> Collision-prone verbs (`contains`, `split`, `replace`, ...) belong in their
+> domain library, as with `lists` / `maps`.
 
-> **`len(s)` is a language built-in** - no `use` statement needed. The
-> same `len` covers strings, lists, maps, and bytes with one polymorphic
-> dispatch.
+> **`len(s)` is a language built-in** (no `use` needed), covering strings,
+> lists, maps, and bytes.
 
 **String positions are 0-relative.** The first character is at index `0`,
 not `1`. So `strings.indexOf("hello", "h")` returns `0`,
 `strings.substring("hello", 0, 1)` returns `"h"`, and `len("hello")` is the
-same as the index just past the last character (`5`). This matches Python,
-JavaScript, Go, Rust, Java, C, C++, C#, Swift, Ruby. Lua/MATLAB/Pascal are
-1-relative; Jennifer is not.
+same as the index just past the last character (`5`), as in Python,
+JavaScript, Go, Rust, Java, C and most other languages (unlike Lua, MATLAB,
+Pascal).
 
 **All indices and lengths are rune-based** (Unicode code points), not
 bytes. `len("héllo")` is `5`, not `6`. `strings.indexOf` and
 `strings.substring` agree.
 
-The combination of "0-relative" plus "exclusive end" plus "rune-based"
-means `strings.substring(s, strings.indexOf(s, x), len(s))` always does
-what you'd guess - the same units come out of every function.
+Because every function uses the same units (0-relative, exclusive end,
+runes), `strings.substring(s, strings.indexOf(s, x), len(s))` does what
+you'd expect.
 
 ```jennifer
 use io;
@@ -86,7 +81,7 @@ indices. So given `s = "héllo"`:
 - `strings.substring(s, 2)` = `"llo"` (2-arg form, end defaults to `len(s)`)
 
 The 2-arg `strings.substring(s, start)` is the same as
-`strings.substring(s, start, len(s))` - a common case worth shortening.
+`strings.substring(s, start, len(s))`.
 
 ## Errors
 
@@ -105,27 +100,23 @@ whitespace (Go's `unicode.IsSpace`): ASCII spaces, tabs, newlines, plus
 characters like non-breaking space (`U+00A0`) and Unicode line
 separators.
 
-If you need to trim specific characters instead of whitespace, that's
-not in v1 - propose `strings.trimChars(s, chars)` as a follow-up if it
-comes up.
+Trimming specific characters instead of whitespace is not supported
+(a possible future `strings.trimChars(s, chars)`).
 
 ## Performance
 
-Most `strings` calls are cheap, and for short, human-sized text - a
-title, a filename, a line of input - you never need to think about
-speed. Two everyday patterns can get slow when strings grow to
-thousands of characters and you touch them in a loop. Both come down to
-how much work gets *repeated*; the O(1) / O(n) / O(n²) shorthand below is
-explained in [Big O notation](https://en.wikipedia.org/wiki/Big_O_notation).
-The gist: **O(n)** means the work grows in step with the input, and
-**O(n²)** means it grows with the *square* of the input - ten times the
-text, a hundred times the work.
+For short text (a title, a filename, a line of input) speed does not
+matter. Two patterns get slow when strings grow to thousands of
+characters and you touch them in a loop, because work gets *repeated*
+([Big O notation](https://en.wikipedia.org/wiki/Big_O_notation): **O(n)**
+grows with the input, **O(n²)** with its square - ten times the text, a
+hundred times the work).
 
 ### Build strings with `join`, not `+` in a loop
 
 Every `+` on strings makes a new string and copies both sides into it.
-Once is fine. In a loop, each step re-copies everything built so far, so
-the total work is O(n²):
+In a loop, each step re-copies everything built so far, so the total
+work is O(n²):
 
 ```jennifer
 # Slow: O(n^2). Each step recopies the whole result so far.
@@ -135,9 +126,8 @@ for (def piece in $pieces) {
 }
 ```
 
-Instead, collect the pieces in a list and join them in one pass.
-`strings.join` visits each piece exactly once, so the whole thing is
-O(n):
+Instead, collect the pieces in a list and join them once; `strings.join`
+visits each piece once, so the whole thing is O(n):
 
 ```jennifer
 # Fast: O(n). Collect the parts, then join once.
@@ -148,32 +138,30 @@ for (def piece in $pieces) {
 def out as string init strings.join($parts, "");
 ```
 
-Same idea whenever you assemble something big from many small pieces -
-an HTML page, a CSV file, a log line built from several fields: gather
-the parts, then `strings.join` at the end.
+The same applies to assembling an HTML page, a CSV file, or a log line
+from many pieces.
 
 ### Avoid re-copying a big value
 
-Two things in Jennifer quietly make a *whole copy* of a value, which
-costs O(n) in the size of that value:
+Two things cost O(n) in the size of a value:
 
-- **Passing a list or string to a function.** Jennifer uses value
-  semantics: a function gets its own copy of each argument, so it can
-  never change the caller's data by surprise. Convenient - but calling
-  `helper($bigList)` inside a loop copies the entire list *every time*,
-  turning an O(n) loop into O(n²).
+- **Passing a list to a function that writes its parameter.** Under value
+  semantics a function gets its own copy of an argument it modifies, so
+  calling such a `helper($bigList)` inside a loop copies the entire list
+  *every time*, turning an O(n) loop into O(n²). A parameter the function
+  only reads is passed without a copy (see
+  [Performance](../user-guide/performance.md)).
 - **`strings.substring` counts from the start.** Because indices are
   rune-based (see [Indexing rules](#indexing-rules)), `substring` walks
   the string from the beginning to reach `start`. One call is fine;
   slicing thousands of small pieces out of one long string adds up to
   O(n²).
 
-The workaround for both is the same idea: don't hand the whole big value
-over and over. Convert the string to a rune list *once* with
-`strings.chars`, then read single positions with `$cs[i]` (that is O(1)
-each), and when you need a slice back as a string use `lists.slice` plus
-`strings.join` - which copies only the slice, not the whole string
-(needs `use lists;`):
+The fix for both: don't hand over the whole big value repeatedly. Convert
+the string to a rune list *once* with `strings.chars`, read single
+positions with `$cs[i]` (O(1)), and when you need a slice back as a string
+use `lists.slice` plus `strings.join`, which copies only the slice (needs
+`use lists;`):
 
 ```jennifer
 # Slow: substring re-scans from the start on every call.
@@ -185,8 +173,8 @@ def cs as list of string init strings.chars($big);              # once
 def piece as string init strings.join(lists.slice($cs, $start, $end), "");
 ```
 
-Keeping the big value in one place and passing only small things into
-helpers - an index, a short piece - follows the same rule.
+Likewise, keep the big value in one place and pass helpers only small
+things (an index, a short piece).
 
 ## Accent-folding for sorting and search
 
@@ -210,9 +198,9 @@ common Latin Extended-A) and a few expansions (`ß` / `ẞ` -> `ss` / `SS`,
 `Æ` -> `AE`); runes outside that table pass through unchanged. A stray combining
 accent (an NFD-decomposed diaeresis, acute, etc. in the U+0300-U+036F range) is
 dropped, so the decomposed spelling of a word folds to the same key as its
-precomposed form. It is **not** full Unicode collation - no per-locale ordering
+precomposed form. It is **not** full Unicode collation: no per-locale ordering
 (German phonebook `ö` = `oe`, Swedish `ö` after `z`), no non-Latin scripts. For
-those, sort by a fold key that suits your locale, or wait for a dedicated
-collation library (see the horizon notes).
+those, sort by a key that suits your locale; a dedicated collation library is a
+horizon idea.
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).

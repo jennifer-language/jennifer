@@ -1,8 +1,7 @@
 # `maps` - map manipulation
 
-Enable with `use maps;`. Namespaced under `maps.`; every function is
-called as `maps.NAME(...)`. Each function **returns a new map (or
-list)** - the input is never mutated:
+Enable with `use maps;`; every function is called as `maps.NAME(...)`.
+Each function **returns a new map (or list)** and never mutates the input:
 
 ```jennifer
 use io;
@@ -27,8 +26,8 @@ def with_dave as map of string to int init maps.merge($scores, {"dave": 75});
 
 ### `maps.has`
 
-Reports whether the map contains the given key. Pair it with the
-indexed-read to avoid the missing-key runtime error:
+Reports whether the map contains the key. Check before an indexed read
+to avoid the missing-key runtime error:
 
 ```jennifer
 def m as map of string to int init {"a": 1};
@@ -37,21 +36,15 @@ if (maps.has($m, "a")) {
 }
 ```
 
-This lived in core as bare `has(...)`; it moved here because
-map-only membership is domain-specific and didn't fit core's
-"universally needed structural primitives" charter (`len`, by
-contrast, is genuinely polymorphic across string / list / map and
-stays). The lists side of "does this contain that?" is
-[`lists.contains`](lists.md), which checks values rather than keys -
-the differing names keep the role distinction visible at every call
-site.
+The list counterpart is [`lists.contains`](lists.md), which checks
+values rather than keys; the different names keep that distinction
+visible at the call site.
 
 ### `maps.delete` is strict
 
 Deleting a key that isn't in the map raises a positioned runtime
-error - matching the read-side rule that `$m[missing]` is an error
-rather than a silent default. Callers who want a "delete if present"
-shape can guard with `maps.has`:
+error, matching the read-side rule that `$m[missing]` is an error.
+For "delete if present", guard with `maps.has`:
 
 ```jennifer
 if (maps.has($m, "stale")) {
@@ -59,8 +52,7 @@ if (maps.has($m, "stale")) {
 }
 ```
 
-This is "strict at boundaries" applied to writes: silent no-ops on
-missing keys would let typos drift through unnoticed.
+A silent no-op would let a misspelt key go unnoticed.
 
 ### `maps.merge` ordering
 
@@ -68,14 +60,12 @@ missing keys would let typos drift through unnoticed.
 `b`'s values overwriting where keys collide. New keys from `b` are
 appended in `b`'s insertion order. So merging
 `{"x": 1, "y": 2}` with `{"y": 99, "z": 3}` yields
-`{"x": 1, "y": 99, "z": 3}` - same shape Python's `{**a, **b}`
-produces.
+`{"x": 1, "y": 99, "z": 3}`, as Python's `{**a, **b}` does.
 
 ### Value semantics
 
-The library never modifies its inputs. `maps.delete` and `maps.merge`
-both copy, so the source maps stay intact for further use; the new
-map is independent of either.
+The library never modifies its inputs: `maps.delete` and `maps.merge`
+return a new, independent map and leave the sources intact.
 
 See also: [lists.md](lists.md), [index.md](index.md). `len(m)` is a
 language built-in (no import needed).

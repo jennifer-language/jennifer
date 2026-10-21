@@ -1,29 +1,23 @@
 # Best practices
 
-Stylistic guidance for writing Jennifer that reads well, ages well, and
-fits the way the language is shaped. Each entry is a heuristic, not a
-hard rule - the language won't stop you, but the rule of thumb is
-there because the alternative tends to bite later.
+Stylistic guidance for writing Jennifer that reads well and ages well.
+Each entry is a heuristic, not a hard rule: the language won't stop you,
+but the alternative tends to bite later.
 
 ## Follow the style guide
 
-The single biggest readability win is uniform source style across a
-codebase. When every file uses the same spacing, brace placement, and
-naming, the eye learns the shape of well-formed Jennifer and starts
-spotting bugs from rhythm alone - a one-off indent or a stray space
-becomes a signal. The reverse is also true: every codebase that
-tolerates "personal style" eventually pays for it in review friction,
-merge conflicts over whitespace, and reader-time spent on the wrong
-question ("is this code unusual because it does something unusual, or
-just because the author indents differently?"). Pick the agreed style
-once, then stop thinking about it.
+Uniform source style across a codebase is the biggest readability win.
+When every file uses the same spacing, brace placement, and naming, a
+one-off indent or a stray space stands out as a signal. Tolerating
+"personal style" costs review friction, merge conflicts over whitespace,
+and reader time spent asking whether code is unusual or only formatted
+unusually.
 
 Jennifer ships its style as both a written spec and an enforcement
 tool: read [Style guide](style-guide.md) for the canonical rules
 (spacing, braces, naming, literal layout), then run `jennifer fmt` to
-make any file conform. Running `fmt` on save - or at minimum before
-every commit - is the cheapest habit you can adopt; it removes style
-from the list of things you and your reviewers have to think about.
+make any file conform. Run `fmt` on save, or at least before every
+commit, so style drops out of review.
 
 ## Lint for suspect patterns with `jennifer lint`
 
@@ -46,19 +40,19 @@ complexity and style, **L3nn** API lifecycle:
 | `L104` | a `throw` of something that isn't an `Error` struct                    |
 | `L105` | a condition that is always true or always false (`if ($x == $x)`, ...) |
 | `L106` | a `use` / `import` whose namespace is never used                       |
-| `L107` | an unqualified call to a name that is not a defined method (a typo'd method) |
+| `L107` | an unqualified call to a name that is not a defined function (a typo'd function) |
 | `L108` | a bare name read where nothing by that name is defined (a typo'd constant or function value) |
-| `L109` | a call to a same-file method, an imported module's function, or a library builtin, with the wrong number of arguments |
+| `L109` | a call to a same-file function, an imported module's function, or a library builtin, with the wrong number of arguments |
 | `L110` | a call argument of the wrong type (`strings.upper(5)`, a `bytes` passed to a `string` parameter) |
 | `L111` | a value of the wrong type stored in a typed variable, field, or element (`def n as int init "5";`) |
 | `L112` | a `ns.name` reference whose namespace has no `use` / `import`          |
 | `L113` | a struct / enum-variant literal (same-file or an imported module's) with an unknown or missing field |
 | `L114` | a `ns.name` its namespace does not have: a misspelt library function, constant or type (`time.millis(10)`, `math.PII`), or a module member that is not exported |
-| `L201` | a method with too many statements (default over 60)                    |
+| `L201` | a function with too many statements (default over 60)                  |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
 | `L204` | a call (or other non-trivial expression) inside a `{expr}` string slot |
-| `L205` | a method that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` inside a method) |
+| `L205` | a function that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` inside a function) |
 | `L301` | use of a deprecated API (reserved, empty until an API is deprecated)   |
 | `L302` | use of a removed API (e.g. an old `use core;`)                         |
 | `L303` | a malformed / duplicate / unknown `# pragma-jennifer-*` header line    |
@@ -81,7 +75,7 @@ module with the wrong argument count (`L109`) or argument type (`L110`), a
 literal of a module struct with a wrong field (`L113`), or a name the module does
 not export (`L114`), is caught before the code runs. The type checks speak only when a type is certain - a literal, a variable,
 parameter or field with a declared type, a library call - and stay quiet about a
-user method's result, since methods declare no return type.
+user function's result, since functions declare no return type.
 
 The exit code follows `gofmt -l` / `shellcheck`: `0` clean, `1` when
 there are findings (a source error counts), `2` only when the *invocation*
@@ -113,20 +107,19 @@ IDs file-wide, and a `.jennifer-lint` file at your project root sets
 defaults for every run (same `IDS` / `!IDS` format, one direction).
 There is no blanket "disable everything" - a directive always names the
 IDs it turns off, so a reviewer can see exactly what was waved through. A
-doubled marker (`## lint-disable: ...`) is just a comment, not a
+doubled marker (`## lint-disable: ...`) is a plain comment, not a
 directive - handy for writing *about* a directive. `examples/linting.j`
 demonstrates every check and its suppression.
 
 An include fragment (`NAME.inc.j`, a file that is only ever `include`d) linted on
-its own is not flagged for the methods, constants and namespaces it takes from
+its own is not flagged for the functions, constants and namespaces it takes from
 the including file; lint that file to check them.
 
 ## Document your public surface with doc comments
 
 A `/** ... */` doc comment on every exported construct - each `func`, `def struct`,
 `def enum`, `def const`, plus the file's `@module` preamble - is what turns a module
-from "source someone can read" into "an API someone can use". These comments are not
-just prose: the [`docblock`](../modules/docblock.md) module parses them into
+into a usable API. The [`docblock`](../modules/docblock.md) module parses them into
 structured data, so they are the single source your API reference is generated from,
 and `docblock` reports **drift** - a `@param` naming no real parameter, a parameter
 with no `@param`, a `@field` on the wrong construct - which is checked in CI, so the
@@ -166,8 +159,7 @@ diagnostic it reports.
 
 ## Why 4+ levels of nesting is a code smell
 
-The flexibility that lets `list of list of int` hold any shape gets
-unreadable fast as you nest deeper. Here's a four-level type holding
+Nested collection types get unreadable fast. Here is a four-level type holding
 "per game, per player, per character, per inventory slot, the item
 name":
 
@@ -187,8 +179,9 @@ Three problems:
    or "the inventory slot"? You can't tell without going back to read
    the declaration and counting brackets.
 2. **Bug-prone access.** `$saves[0][1][0][0]` is four indices that all
-   look the same. Off-by-one or off-by-level errors are silent until
-   the program either panics or, worse, modifies the wrong slot.
+   look the same. Off-by-one or off-by-level errors surface as an
+   out-of-bounds runtime error at best, or silently read or modify the
+   wrong slot.
 3. **Inflexible.** Adding a fifth dimension (per save slot, per
    timestamp, ...) means rewriting every access site in the program.
 
@@ -196,7 +189,7 @@ The standard fix is a struct or named record (see
 [Structs](types-and-values.md#structs)). Other options that work
 without introducing a new type:
 
-- **Wrap access in methods**: `getItem(save, player, character, slot)`
+- **Wrap access in functions**: `getItem(save, player, character, slot)`
   reads better than four bare brackets and gives you one place to fix
   a bug. Internally the function still walks the nested lists, but
   call sites are self-documenting.

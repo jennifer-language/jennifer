@@ -38,7 +38,7 @@ increment.
   straddle a window boundary: up to `2 * limit` requests across the seam (all of
   one window's budget at its end, then all of the next window's at its start).
 - **Sliding window** - blends the current window's count with the previous
-  window's, weighted by how far into the current window you are. At the very
+  window's, weighted by how far into the current window you are. At the
   start of a new window the previous window still carries full weight, so a fresh
   burst is blocked; its influence decays linearly to zero by the window's end.
   This smooths the fixed-window boundary burst.

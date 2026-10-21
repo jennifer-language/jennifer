@@ -1,12 +1,12 @@
 # `mactelnet` - MikroTik MAC-Telnet (Layer-2) console
 
-Import with `import "mactelnet.j" as mactelnet;`. Open a **Layer-2 console** to a
-MikroTik RouterOS device **by MAC address**, with no IP configured on either side
-- the same reach Winbox's "Neighbors" console gives you. This is how you set the
+Import with `import "mactelnet.j" as mactelnet;`. Open a Layer-2 console to a
+MikroTik RouterOS device by MAC address, with no IP configured on either side
+(the same reach as Winbox's "Neighbors" console). This is how you set the
 first IP address on a fresh or just-reset router, before switching to the
 IP-based [`mikrotik`](mikrotik.md) API.
 
-The transport is **UDP broadcast on port 20561** with the source and destination
+The transport is UDP broadcast on port 20561 with the source and destination
 MAC carried inside the packet payload, so a datagram reaches a router that has no
 address yet. Built on [`net`](../libraries/net.md) (broadcast UDP, Linux-only),
 [`crypto`](../libraries/crypto.md) (EC-SRP), and `hash` (MD5). Needs the default
@@ -39,22 +39,22 @@ reach its API over the network. MAC-Telnet is the bootstrap door:
 3. `mactelnet.close(...)`, then continue over IP with the
    [`mikrotik`](mikrotik.md) API (`mikrotik.optionsTLS` on any untrusted link).
 
-It drives the router's **text CLI** (send a command line ending in `\r\n`, read
-the echoed output), not the binary API - so you compose the same commands you
-would type at the console.
+It drives the router's text CLI, not the binary API: send a command line ending
+in `\r\n` (the same commands you would type at the console) and read the echoed
+output.
 
 ## Authentication (auto-detected)
 
 The router announces its auth generation by the length of the salt it sends, and
-`connect` picks the algorithm to match - no flag needed:
+`connect` picks the matching algorithm:
 
 | Salt | Algorithm | RouterOS |
 | --- | --- | --- |
 | 16 bytes | **MD5** (`0x00` + `MD5(0x00 + password + salt)`) | before 6.43 |
 | 49 bytes | **EC-SRP** over Curve25519 (`crypto.mtwei*`) | 6.43+ and all v7 |
 
-Modern devices - including anything factory-fresh - use EC-SRP, an Elliptic-Curve
-Secure Remote Password exchange. Jennifer implements it dependency-free in the
+Modern devices, including anything factory-fresh, use EC-SRP (Elliptic-Curve
+Secure Remote Password). Jennifer implements it dependency-free in the
 [`crypto`](../libraries/crypto.md) library (`crypto.mtweiKeygen` /
 `crypto.mtweiId` / `crypto.mtweiClientKey`), so no external crypto is pulled in and
 the password never crosses the wire.
@@ -89,12 +89,10 @@ holding the mutable send/receive counters and pending output), `srcmac` /
   MAC stamps the packet, and the broadcast socket is best-effort bound to the
   interface (`SO_BINDTODEVICE`, via `net.bindToDevice`) so egress and ingress use
   it rather than whichever link the kernel routing table picks for
-  `255.255.255.255`. That bind needs `CAP_NET_RAW` (root); when unprivileged it
-  is skipped, leaving the historical wildcard behavior. On a host with a single
-  active NIC that is fine (one link either way), but on a laptop with more than
-  one interface up (wired + wifi + a USB adapter) an unprivileged run can send
-  out the wrong NIC and silently time out - **run it with `sudo` / as root** so
-  the interface bind takes effect.
+  `255.255.255.255`. That bind needs `CAP_NET_RAW` (root); unprivileged, it is
+  skipped and the socket stays wildcard-bound. With one active NIC that is fine,
+  but with several up (wired + wifi + a USB adapter) an unprivileged run can send
+  out the wrong NIC and silently time out - run it with `sudo` / as root.
 - **`mac-server` must allow the interface.** RouterOS enables MAC-Telnet on all
   interfaces by default; a hardened or narrowly-configured device may have
   disabled it (`/tool mac-server`), in which case `connect` times out. A

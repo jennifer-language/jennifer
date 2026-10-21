@@ -47,28 +47,25 @@ All three of these print the host OS and are accepted by the parser:
 use io;
 use os;
 
-io.printf(os.JENNIFER_OS);            # canonical - tight everywhere
-io.printf( os.JENNIFER_OS );          # ugly - spaces inside the call parens
-printf   (   os     . JENNIFER_OS  );   # uglier - spaces around `.` too
+io.printf(os.PLATFORM);               # canonical - tight everywhere
+io.printf( os.PLATFORM );             # ugly - spaces inside the call parens
+io   .   printf   (   os . PLATFORM  );  # uglier - spaces around `.` too
 ```
 
-The third form parses fine because the `.` between `os` and
-`JENNIFER_OS` is just another token boundary - the lexer doesn't
-care that there are spaces around it. **`jennifer fmt` rewrites all
-three into the canonical form**, so you'll only ever see the first
-one after a format pass. The
-[style guide](style-guide.md#namespaced-calls) makes "no space
-around `.`" explicit, but it's a style rule, not a syntax rule.
+The third form parses fine because each `.` is an ordinary token
+boundary. **`jennifer fmt` rewrites all
+three into the canonical form.** The
+[style guide](style-guide.md#namespaced-calls)'s "no space around `.`" is a
+style rule, not a syntax rule.
 
-A few practical consequences worth knowing up front:
+Practical consequences:
 
 - `jennifer fmt` is the enforcement layer for style. The
   [style guide](style-guide.md) describes the canonical shape (one
   space around binary operators, no space inside `(` / `[` / `{`,
   1TBS braces, tight `.` in qualified calls, ...) and `fmt` re-emits
-  any well-formed source in exactly that shape. You're never
-  *required* to write canonical form; you just won't see anything
-  else after `fmt`.
+  any well-formed source in exactly that shape. You are never
+  *required* to write canonical form.
 - The first line may be a `#!` shebang because `#` starts a line
   comment; everything from `#` to the next `\n` is whitespace as far
   as the parser is concerned.
@@ -77,9 +74,6 @@ A few practical consequences worth knowing up front:
   actual newline between the quotes is a literal newline in the
   value (though the conventional spelling is the `\n` escape -
   multi-line literals work but aren't the canonical form).
-
-Indentation and blank lines never change the meaning of a program;
-they only change how it reads.
 
 ## Comments
 
@@ -90,7 +84,8 @@ they only change how it reads.
    can span multiple lines */
 ```
 
-Block comments don't nest. Because `#` starts a line comment, the first
+Block comments nest, so `/* ... */` can wrap code that already contains
+one. Because `#` starts a line comment, the first
 line of a script may be a Unix shebang and the interpreter will skip it:
 
 ```jennifer
@@ -134,13 +129,15 @@ end of the digit run (`0x_ff`, `1__000`, `100_` are all lex errors).
 
 ## Identifiers
 
-- Variable, method, parameter and library names are letters only: `[A-Za-z]`,
-  up to 64 characters. No digits or underscores.
+- Variable, function, parameter and library names start with a letter, then
+  letters and digits: `[A-Za-z][A-Za-z0-9]*`, up to 64 characters. No
+  underscores. `sha256`, `x2` and `toUtf8` are legal.
 - **Constants** are uppercase chunks joined by single `_` separators:
-  `[A-Z]+(_[A-Z]+)*`, up to 64 characters. Every `_` must be immediately
-  followed by another uppercase letter. `MAX`, `MAX_RETRIES`, `HTTP_OK`,
-  and `A_B_C` are all legal; `_MAX`, `MAX_`, and `MAX__INT` are not.
+  `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*`, up to 64 characters. Each chunk starts
+  with an uppercase letter and may contain digits. `MAX`, `MAX_RETRIES`,
+  `HTTP2`, `SHA256` and `SCRAM_SHA256` are legal; `_MAX`, `MAX_`, `MAX__INT`
+  and `AES_256` are not.
 - **Variable references** use a leading `$`: define `name`, refer to it as
   `$name`.
 - **Constant references** are bare (no `$`).
-- **Method calls** are bare and followed by `(...)`.
+- **Function calls** are bare and followed by `(...)`.

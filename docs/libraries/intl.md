@@ -3,16 +3,14 @@
 Enable with `use intl;`. Message catalogs and locale-aware translation: load a
 `map of string to string` per language, pick a locale, and translate keys with
 named-placeholder interpolation and an automatic fallback chain. The name is
-`intl` (letters only, matching JavaScript's `Intl`) because a Jennifer library
-namespace cannot contain a digit - so no `i18n`.
+`intl` (letters only, matching JavaScript's `Intl`), not `i18n`.
 
-`intl` is a **system library**, not a `.j` module, for two independent reasons:
-it holds **global mutable state** (the loaded catalogs plus the current locale),
-which a declarations-only module cannot; and it keeps each catalog in a Go
-`map[string]string` for **O(1)** lookup, where a Jennifer `map` (a linear-scan
-`[]MapEntry`) would be O(n) on every translation. The `map of string to string`
-you pass to `intl.load` is the one-time ingest; the per-lookup scan is what the
-library avoids.
+`intl` is a **system library**, not a `.j` module, because it holds **global
+mutable state** (the loaded catalogs plus the current locale), which a
+declarations-only module cannot. That state is per interpreter: each
+interpreter (the entry program and each imported module) gets its own catalogs
+and locale. The `map of string to string` you pass to `intl.load` is a one-time
+ingest, copied into the library's own store.
 
 ## Surface
 
@@ -47,7 +45,7 @@ catalog.
 
 ### From `.yml` files on disk
 
-In practice each language lives in its own file. Keep them as flat
+Typically each language lives in its own file. Keep them as flat
 `key: value` YAML and read each with [`fs`](fs.md) + [`yaml`](yaml.md), bridging
 the decoded `yaml.Value` to the `map of string to string` `intl.load` wants -
 `yaml.keys` walks the top-level keys, `yaml.asString` pulls each value:
@@ -142,7 +140,7 @@ intl.tr("greeting", {"name": "Welt"})   # "Hallo, Welt!"
 The marker is `%name%`, not `{name}`, so a template reads the same whether it
 lives in a cooked `"..."` or a raw `'...'` string: the language reserves `{}` for
 [string interpolation](../user-guide/syntax.md) and `\` for escapes, while `intl`
-owns `%`. The two never collide.
+owns `%`.
 
 ### Output cap (untrusted catalogs)
 
@@ -151,20 +149,21 @@ that repeats a placeholder many times (`"%x%%x%%x%..."`), so a small template pl
 a modest param blows up into a huge string. To keep that from driving the process
 toward OOM, one interpolated translation is **capped at 1 MiB of output**, checked
 incrementally so `intl.tr` **errors before** the oversized string is ever built
-(the error is catchable with `try` / `catch`). A genuine translation is a UI
-message far below the cap; a document that large is a templating layer's job, not
-a catalog entry. Substitution is also single-pass - a param whose value itself
+(the error is catchable with `try` / `catch`). A real translation is a UI message
+far below the cap; a document that large belongs in a templating layer.
+Substitution is also single-pass - a param whose value itself
 contains `%other%` is inserted verbatim, never re-expanded - so there is no
 recursive-expansion blow-up either.
 
 ## Why `intl.tr`, not a global `_()`
 
-There is no gettext-style ambient `_("key")`. `_` is not a valid Jennifer method
+There is no gettext-style ambient `_("key")`. `_` is not a valid Jennifer function
 name (identifiers are letters-only; `_` is reserved for constant-name
 separators), and a bare `tr()` builtin does not clear the bar for a language
 built-in (translation is not useful to nearly every program, the way `len` is).
-An ambient global is also exactly what the **explicit** and **namespaced, no
+An ambient global is also what the **explicit** and **namespaced, no
 globals** stances rule out - so translation is a namespaced call,
+
 `intl.tr("key")` (or `use intl as t; t.tr("key")`). Translation is *content
 substitution from stateful external data*, distinct from `printf`'s job of
 *presenting the value in hand*, which is why it is not a `printf` extension.

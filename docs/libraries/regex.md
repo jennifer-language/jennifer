@@ -1,8 +1,8 @@
 # `regex` - regular expressions
 
 Enable with `use regex;`. Six verbs over `string`, one match
-struct. Uses RE2 syntax (Go's `regexp` package) - a documented
-subset of PCRE: no backreferences, no lookahead/lookbehind.
+struct. RE2 syntax (Go's `regexp` package), a subset of PCRE
+without backreferences or lookahead/lookbehind.
 
 ```jennifer
 use io;
@@ -54,10 +54,9 @@ if ($m.start == -1) {
 
 ## Worked examples
 
-**Write patterns as raw single-quoted literals** (`'\d+'`, not `"\\d+"`). A
-single-quoted string is raw - backslashes are literal - so a pattern reads exactly
-as its RE2 form, with no double-escaping. The cooked double-quoted form works too
-(every `\` doubled), but the raw form is the idiom throughout these examples.
+**Write patterns as raw single-quoted literals** (`'\d+'`, not `"\\d+"`). In a
+raw string backslashes are literal, so the pattern reads exactly as its RE2 form.
+The cooked double-quoted form also works with every `\` doubled.
 
 ### Match a whole string
 
@@ -131,9 +130,9 @@ def parts as list of string init regex.split('\s+', "one   two  three");
 
 ### Escape a literal
 
-`regex.escape` returns a pattern string that matches its
-input verbatim. Use it to build patterns from user input or
-literal strings that would otherwise contain metacharacters:
+`regex.escape` returns a pattern that matches its input
+verbatim, for building patterns from user input or literals
+containing metacharacters:
 
 ```jennifer
 def userInput as string init "1+2=(3)";
@@ -145,10 +144,8 @@ if (regex.matches($pat, $someHaystack)) { ... }
 ## Syntax
 
 Jennifer uses **RE2 syntax** exactly as Go's `regexp` package
-does. The full reference is at
-<https://github.com/google/re2/wiki/Syntax>.
-
-A quick cheat sheet of the most-used pieces:
+does; full reference: <https://github.com/google/re2/wiki/Syntax>.
+The most-used pieces:
 
 | Pattern         | Meaning                                                       |
 | --------------- | ------------------------------------------------------------- |
@@ -176,9 +173,8 @@ A quick cheat sheet of the most-used pieces:
   `(?<!...)`.
 - Possessive quantifiers: `a++`.
 
-RE2 avoids these by design so its worst-case runtime stays
-linear in the input; every RE2 pattern runs in bounded time,
-which is what makes the language usable for untrusted input.
+RE2 omits these so matching stays linear in the input, which
+makes it safe for untrusted input.
 
 ## Errors
 
@@ -195,23 +191,19 @@ Every error is catchable with `try` / `catch`.
 
 ## Pattern caching
 
-The library keeps an LRU cache of compiled patterns (128
-entries). Hot loops that reuse a pattern string pay the RE2
-compile cost once. Distinct patterns beyond 128 evict the
-oldest silently; correctness is unaffected.
+The library keeps a 128-entry LRU cache of compiled patterns,
+so a hot loop reusing a pattern string compiles it once. Beyond
+128 distinct patterns the oldest is evicted silently.
 
 A pattern that compiles to an excessively large program (a short pattern can
 expand to millions of instructions through nested bounded repeats) is a
-catchable error rather than a multi-hundred-MB compiled regexp, so the cache
-stays bounded in memory even under attacker-supplied patterns.
+catchable error, so the cache stays bounded in memory even under
+attacker-supplied patterns.
 
-You don't need to think about this. A future `regex.compile`
-verb would expose explicit control if a benchmark ever showed
-the implicit cache wasn't enough.
+A future `regex.compile` verb would expose explicit control if a
+benchmark showed the implicit cache was not enough.
 
-## What's not in v1
-
-Recorded so the design decisions stay visible.
+## What's left out
 
 - **`regex.compile` + `regex.Pattern` handle.** The implicit
   LRU cache handles the common case.
@@ -222,8 +214,7 @@ Recorded so the design decisions stay visible.
   pattern (`(?i)`).
 - **`regex.count`.** Write `len(regex.findAll(pat, s))`.
 - **Backreferences, lookahead, lookbehind.** RE2 doesn't
-  support them; that's the price of guaranteed linear-time
-  matching.
+  support them (the cost of linear-time matching).
 
 ## See also
 

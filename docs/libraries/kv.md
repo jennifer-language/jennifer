@@ -7,11 +7,10 @@ is a handle (`kv.Store`) into a run-scoped registry, so a `kv.Store` value
 **shares its backing map across copies, across `spawn`ed tasks, and across a
 module boundary** - the shared mutable state a pure `.j` module cannot hold
 itself. A store opened in your program is usable from a module you `import` (pass
-the handle in), and one a module hands back is usable in your program: the
-registry is shared by every interpreter in a run and minted fresh each run. This
-is what backs the
-in-process option of the [`kvstore`](../modules/kvstore.md) backend selector (and
-so [`session`](../modules/session.md) / [`ratelimit`](../modules/ratelimit.md)).
+the handle in), and vice versa: the registry is shared by every interpreter in a
+run and minted fresh each run. It backs the in-process option of the
+[`kvstore`](../modules/kvstore.md) backend selector (and so
+[`session`](../modules/session.md) / [`ratelimit`](../modules/ratelimit.md)).
 Pure Go stdlib, so it is on **both** binaries.
 
 ```jennifer
@@ -49,30 +48,30 @@ io.printf("%s\n", kv.get($store, "greeting"));
   working set. A TTL so large it would overflow an internal duration is treated
   as no expiry (like `0`), never as an immediate expiry.
 - **No hard size cap on live data.** There is no ceiling on *unexpired* entries -
-  storing unbounded live data OOMs the process, exactly as an unbounded `list`
-  would. That is the program's own responsibility. For an **adversarial or
+  storing unbounded live data OOMs the process, as an unbounded `list` would.
+  That is the program's own responsibility. For an **adversarial or
   unbounded working set**, use `memcache` / `redis` (a server-side `maxmemory`
   eviction policy) via the [`kvstore`](../modules/kvstore.md) selector; `close`
   frees the whole store.
 - **`incr` mirrors `memcache`.** It does not create the key (returns `-1` when
   absent) and errors on a non-numeric value, so it composes into the same
   increment-then-add window pattern the distributed backends use. `delta` is
-  **signed** - `kv.incr($s, $k, -1)` decrements, so there is no separate `decr`
-  (one verb, both directions). Unlike memcached's `DECR` it does **not** floor at
+  **signed** - `kv.incr($s, $k, -1)` decrements, so there is no separate `decr`.
+  Unlike memcached's `DECR` it does **not** floor at
   0; clamp yourself if you need a non-negative counter.
 - **Handles are shared, values are copies.** The `kv.Store` handle shares one
-  backing map (that is the point - it survives value-copies, `spawn`, and being
-  passed into or out of an `import`ed module); the string values it stores are
-  ordinary copies, and an opaque value stored with `setValue` is immutable, so
-  sharing it is indistinguishable from copying it. The sharing is run-scoped: the registry is created fresh each
-  run and never leaks into the next.
+  backing map (across value-copies, `spawn`, and an `import`ed module boundary);
+  the string values it stores are ordinary copies, and an opaque value stored
+  with `setValue` is immutable, so sharing it is indistinguishable from copying
+  it. The registry is created fresh each run and never leaks into the next.
 - **Single process.** State lives in this process only. `open` is in-memory
   (gone when the program exits); `openFile` persists to disk and survives across
   runs (a rewrite-the-whole-file flush after every mutation - simple and correct,
   not fast). Both are safe for `spawn`ed tasks within one process (a per-store
   mutex; `incr` is atomic). Concurrent *separate* processes on one file get
   **last-write-wins** - a lost write, never a crash or a torn file (the flush
-  renames a uniquely-named temp over the target). Note `add`'s test-and-set checks
+  renames a uniquely-named temp over the target). `add`'s test-and-set checks
+
   the in-memory snapshot loaded at open, so `openFile` + `add` is **not** a
   cross-process lock. For state shared across processes (multiple workers, a web
   fleet), use `memcache` / `redis` - the [`kvstore`](../modules/kvstore.md)

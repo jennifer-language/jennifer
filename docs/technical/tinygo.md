@@ -3,8 +3,7 @@
 Jennifer ships as two binaries built from the same source:
 
 - `jennifer` - default, built with the standard Go toolchain.
-  Full host-feature surface: file I/O, `os/exec`, network stack,
-  everything.
+  Full host-feature surface: file I/O, `os/exec`, network stack.
 - `jennifer-tiny` - constrained variant, built with TinyGo. Smaller
   binary, embeddable; the stock build ships without `os/exec` or a
   network stack (a build choice, not a hard TinyGo limit - see
@@ -15,9 +14,8 @@ build-tinygo` for just one; both regenerate the version file
 before compiling.
 
 **The language is written to stay TinyGo-clean** even though the
-default binary is standard-Go. The `jennifer-tiny` build sits in
-CI so any change that breaks TinyGo compatibility surfaces
-immediately. A few constraints shape the implementation:
+default binary is standard-Go. CI builds `jennifer-tiny`, so a change
+that breaks TinyGo compatibility fails there. Constraints:
 
 - **No `reflect`.** Tagged-union `Value` instead of interfaces
   with type assertions in hot paths; the runtime imports no
@@ -77,11 +75,10 @@ make build
 
 ## TinyGo restrictions
 
-A few standard-library features depend on TinyGo runtime support
-that isn't there today. Calls into them from `jennifer-tiny` error
-with a friendly Jennifer-level message pointing the user at the
-default `jennifer` binary. The default binary always supports the
-full surface.
+Some standard-library features depend on TinyGo runtime support
+that isn't there today. Calls into them from `jennifer-tiny` raise
+a Jennifer-level error pointing at the default `jennifer` binary,
+which supports the full surface.
 
 | Library | Affected names                                        | What happens on `jennifer-tiny`                                                                       |
 | ------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -115,7 +112,7 @@ implementation compiles in. With a network stack present, `net` and
 `memcache`, `session`, `ratelimit`, ...) run on `jennifer-tiny` too. So
 read "needs the default `jennifer` binary" as "needs a build that
 includes a network stack" - the stock `jennifer` has one, the stock
-`jennifer-tiny` does not. (UDP is the one genuinely thinner spot:
+`jennifer-tiny` does not. (UDP is the one thinner spot:
 `net.ListenPacket` is not part of TinyGo's surface today, so a rebuild
 covers TCP / DNS more readily than UDP.)
 
@@ -123,9 +120,8 @@ covers TCP / DNS more readily than UDP.)
 
 The `os` restriction is narrower than it looks: it is only the **`os/exec`
 subprocess surface** - `os.run` / `os.spawn` / `os.wait` / `os.poll` /
-`os.kill` / `os.release`. Everything else in `os` (env, args, flags, the `PLATFORM` /
-`ARCH` / `EOL` / `DIRSEP` / `PATHSEP` / `ARGS` values) works fully on both
-binaries.
+`os.kill` / `os.release`. Everything else in `os` works on both binaries
+(see below).
 
 Do **not** read the `net` note above as applying here. `net` needs a
 pluggable *driver* you can supply; `os/exec` needs a whole **host operating
@@ -138,22 +134,17 @@ filesystem. There is no component to link in. Two cases:
   `jennifer-tiny` could gain `os.run` / `os.spawn`; that is upstream work,
   not a rebuild switch on our side.
 - **Embedded / bare-metal / WASM / WASI targets** (what `jennifer-tiny`
-  exists for): there is **no process model at all** - nothing to fork, no
-  other programs, no `exec` syscall. So the subprocess surface is
-  *fundamentally inapplicable*, a hard platform limit rather than a missing
-  piece. It stays unavailable there, permanently.
+  exists for): there is **no process model** - nothing to fork, no other
+  programs, no `exec` syscall. The subprocess surface is a hard platform
+  limit there and stays unavailable permanently.
 
-This also fits the deployment target: minimal containers and embedded
-scripting hosts generally should *not* shell out to external processes (no
-shell, no other executables), so the restriction aligns with where
-`jennifer-tiny` runs rather than fighting it. In short: `net` = a driver you
-can supply and rebuild around; `os/exec` = a host capability that is a TinyGo
-gap on host targets and simply absent on embedded / WASM.
+This fits the deployment target: minimal containers and embedded scripting
+hosts generally should *not* shell out to external processes (no shell, no
+other executables).
 
 The constants and the env / argv / flag helpers in `os`
 (`os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`,
-`os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) all work fully
-on both binaries. `os.isTerminal` works on both too, but `jennifer-tiny` has no
+`os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) work on both binaries. `os.isTerminal` works on both too, but `jennifer-tiny` has no
 `golang.org/x/term`, so it falls back to the character-device mode bit
 (`isterminal_tinygo.go`): right for a pty, a pipe, and a file redirect, wrong
 only for a non-terminal character device such as `/dev/null`. Every shipped
@@ -205,10 +196,10 @@ error on both binaries. `yaml` keeps its own pre-parse guard (it is
 backed by a Go dependency, not a hand-rolled descent).
 
 The same 4 MB ceiling limits how deep the tree-walker can recurse at runtime.
-Method calls are not the only thing that stacks Go frames - nested blocks and
+Function calls are not the only thing that stacks Go frames - nested blocks and
 nested expression operands do too - so `internal/limits.MaxCallDepth` counts all
 three: a per-call-chain `*int` (fresh at each goroutine root) bumped on every
-method entry (`evalCall` and the cross-boundary dispatch `meta.call` /
+function entry (`evalCall` and the cross-boundary dispatch `meta.call` /
 `meta.callMain`), block entry (`execBlock`), and expression-operand descent
 (an inline bump around each operand in `evalBinary` / `evalUnary` /
 `evalLogical` - inline, since a non-inlined helper there cost tight numeric
@@ -239,16 +230,15 @@ is a positioned parse error.
 
 **TinyGo scheduler**. `jennifer-tiny` pins the cooperative
 single-thread scheduler (`-scheduler=tasks` in the Makefile).
-`spawn` works fully (semantics, loud-fail, registry), but every
+`spawn` works (semantics, loud-fail, registry), but every
 goroutine shares one OS thread, so it gives concurrency without
 multi-core parallelism: **parallel speedups stay close to 1.0**,
 and `-stack-size=4mb` reliably covers recursive `spawn` bodies.
-The pin is deliberate - the threads-capable default briefly showed
-real multi-core speedups (161% CPU) but segfaulted on recursive
-`spawn` bodies, because `-stack-size` doesn't govern OS-thread
-stacks. Real multi-core on `jennifer-tiny` is separate future
-work, not a default flip; the default `jennifer` binary already
-reaches multi-core speedup via Go's scheduler.
+The threads-capable default briefly showed multi-core speedups
+(161% CPU) but segfaulted on recursive `spawn` bodies, because
+`-stack-size` doesn't govern OS-thread stacks. Multi-core on
+`jennifer-tiny` is separate future work, not a default flip; the
+default `jennifer` binary already gets it from Go's scheduler.
 
 **Many live tasks are slow to start.** With 4 MB stacks under TinyGo's default
 collector (`gc.boehm`), starting N goroutines that are all alive at once costs
@@ -279,14 +269,13 @@ over-deep program and silent corruption. Never lower `-stack-size` without
 re-measuring the deepest recursion and nesting that still survive, and lowering
 both caps to match.
 
-Future library work will grow the restrictions table if further
-TinyGo runtime gaps surface. Each new gap lands with the same
-friendly-message pattern.
+A new TinyGo runtime gap gets a row in the restrictions table and
+the same friendly-error stub.
 
 ## Binary size
 
-The constrained build is the smaller one, which is the point of
-`jennifer-tiny` targeting minimal-footprint deployments. Sizes from
+`jennifer-tiny` is the smaller build (it targets minimal-footprint
+deployments). Sizes from
 `make build` on linux/amd64 (Go 1.26.5, TinyGo 0.41.1, unstripped).
 The absolute numbers move with toolchain version and platform; the
 ratio is the stable part.
@@ -309,8 +298,7 @@ build), so the ratio drifts with each library the tiny build stubs.
 These are unstripped `make build` (dev) sizes. Release builds strip:
 the Go binary adds `-trimpath -ldflags "-s -w"` (down to ~16.0 MB, a
 ~31% cut) and the TinyGo binary adds `-no-debug` (down to ~4.5 MB, a
-~57% cut). Shipped artifacts are therefore well under the dev numbers
-above; dev builds keep symbols for debugging.
+~57% cut); dev builds keep symbols for debugging.
 
 ## Benchmarks
 

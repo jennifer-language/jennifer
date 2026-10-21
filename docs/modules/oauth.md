@@ -92,13 +92,15 @@ catchable `Error` (kind `"oauth"`) with the code and description. A non-terminal
 device-poll status (`authorization_pending`, `slow_down`) is handled internally
 by `deviceWait`, not surfaced.
 
-## Out of scope (later, dependency-gated)
+## Out of scope
 
-- **Authorization Code + PKCE** - needs a local redirect server (`httpd`) to
-  catch the callback and a crypto-grade random source for the PKCE verifier;
-  lands with those.
-- **Service-account JWT assertion** (Google) - an RSA-signed client assertion,
-  so it waits on the `crypto` library.
+- **Authorization Code + PKCE** - not provided. The pieces exist (an
+  [`httpd`](../libraries/httpd.md) redirect listener to catch the callback,
+  `crypto.randBytes` for the PKCE verifier, `hash.compute` for the S256
+  challenge), but the flow is not wired into this module.
+- **Service-account JWT assertion** (Google) - not provided as a helper. Build
+  the RSA-signed client assertion with [`jwt.sign`](jwt.md) (`RS256`) and post
+  it to the token endpoint yourself.
 
 ## See also
 

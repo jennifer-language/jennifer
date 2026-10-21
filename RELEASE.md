@@ -39,7 +39,7 @@ It is independent of `release.yml` and needs no secrets beyond the built-in
 
 ### Before tagging
 
-1. **Check the milestone is actually shippable.**
+1. **Check the milestone is shippable.**
    - `go test ./...` is green locally.
    - `make build` produces both binaries cleanly.
    - `examples/benchmark.j` runs to completion under both binaries
@@ -81,8 +81,7 @@ plus QEMU smoke tests).
 3. **Publish the AUR packages** with the publish scripts. The canonical
    copies live in this repo at `packaging/arch/publish-bin.sh` and
    `packaging/arch/publish-git.sh`; each is copied into its AUR clone as
-   `publish.sh` and run there. This is the one step that genuinely can't
-   run from GitHub Actions: the AUR publishes via SSH-key-authenticated
+   `publish.sh` and run there. This step can't run from GitHub Actions: the AUR publishes via SSH-key-authenticated
    `git push` to `aur.archlinux.org`, and storing that key in CI secrets
    adds blast-radius for limited benefit at our scale.
 
@@ -121,17 +120,16 @@ plus QEMU smoke tests).
    `/releases/latest/` alias can't be used: every `0.x` tag is a
    pre-release and that alias excludes pre-releases), downloads its
    `PKGBUILD-bin`, syncs `jennifer.install`, regenerates `.SRCINFO`,
-   then commits and pushes to `master`. It is a clean no-op if the
-   release is unchanged. Re-run it after every release, because `-bin`
-   pins `pkgver` / `sha256sums` to the tarball. To smoke-test the
-   actual install first, run `makepkg -si` in the clone (the script
+   then commits and pushes to `master`; a no-op if the release is
+   unchanged. Re-run it after every release, because `-bin` pins
+   `pkgver` / `sha256sums` to the tarball. To smoke-test the install
+   first, run `makepkg -si` in the clone (the script
    itself does not build).
 
    `jennifer-git` does **not** need a per-release update: its
    `pkgver()` derives from `git describe`, so AUR users get the new
    version automatically on their next rebuild. Its `publish.sh` is
-   optional storefront polish, run only to refresh the version shown on
-   the AUR page:
+   optional, run only to refresh the version shown on the AUR page:
 
    ```sh
    ../jennifer-git/publish.sh
@@ -163,15 +161,13 @@ plus QEMU smoke tests).
 
 ### Post-release
 
-- Move the milestone log entry from "in progress" to "done" + the
-  compaction pass we use for every shipped milestone (see prior
-  M15.x entries for the shape).
+- Move the milestone log entry from "in progress" to "done" and compact it
+  like the earlier shipped entries in `docs/milestones.md`.
 - Open the next release-cycle tracking issue if relevant.
 
 ## Smoke test commands
 
-Quick checks the artifacts work as advertised, run on a clean
-machine after the release is live:
+Run on a clean machine after the release is live:
 
 ```sh
 # Debian / Ubuntu

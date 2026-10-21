@@ -6,8 +6,8 @@ intended capability.
 
 ## The trust boundary: the script is trusted
 
-A Jennifer program has **full access to the host**, by design, exactly like a
-Python, Ruby, or Node program:
+A Jennifer program has **full access to the host**, like a Python, Ruby, or Node
+program:
 
 - `fs` reads, writes, and deletes any path the process can reach.
 - `net` / `sql` / `http` dial any address or database.
@@ -31,8 +31,8 @@ the answer.
 
 ## What *is* a security bug
 
-A real vulnerability is one that exists **even under the trusted-script model** -
-where untrusted *data*, not untrusted *code*, causes harm. The clear cases:
+A real vulnerability exists **even under the trusted-script model**: untrusted
+*data*, not untrusted *code*, causes harm. The clear cases:
 
 - **Protocol injection.** A module that puts a caller-supplied value onto a
   protocol wire without sanitizing it. A program using the module *correctly* -
@@ -44,10 +44,11 @@ where untrusted *data*, not untrusted *code*, causes harm. The clear cases:
   received message size.
 - **Uncatchable crashes / DoS from untrusted input.** Parsing an attacker-shaped
   document must fail with a *catchable* error, not a fatal crash. The
-  `json` / `toml` / `xml` decoders and the language parser share a nesting cap;
-  the `http` client caps response-body size; deep Jennifer recursion is
+  `json` / `toml` / `xml` / `asn1` decoders and the language parser share a
+  nesting cap; the `http` client caps response-body size; deep Jennifer recursion is
   bounded by a call-depth cap (`limits.MaxCallDepth`) that raises a catchable
-  "call stack too deep" error instead of overflowing the Go stack; and the lexer
+  "call stack too deep" error instead of overflowing the Go stack (and the heap
+  its per-frame value copies hold by `limits.MaxCopyChainBytes`); and the lexer
   caps the token stream a single source file may produce (`limits.MaxTokens`), so
   a dense "token bomb" (a few MB of tiny tokens that amplifies ~100x into Token
   structs) is a catchable lex error rather than an out-of-memory kill.

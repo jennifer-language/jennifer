@@ -33,7 +33,7 @@ serial.close($port);
 - `parity` - `"none"`, `"even"`, or `"odd"`.
 - `stopBits` - 1 or 2.
 
-Blocking on purpose - run a read loop in a `spawn` for concurrency (same stance as
+Blocking; run a read loop in a `spawn` for concurrency (as with
 [`fs`](fs.md) / [`net`](net.md)). The handle is the integer-registry pattern:
 copies share the underlying port, so close it exactly once.
 

@@ -1,10 +1,10 @@
 # `jsonl` - JSON Lines (JSONL / NDJSON)
 
-Import with `import "jsonl.j" as jsonl;`. Read and write **newline-delimited
-JSON**: one independent JSON value per line. A thin framing layer over
+Import with `import "jsonl.j" as jsonl;`. Read and write newline-delimited
+JSON: one independent JSON value per line. A thin framing layer over
 [`json`](../libraries/json.md) - each record is a `json.Value`, so `encode` /
 `decode` compose `json.encode` / `json.decode` with a `\n` split / join, and the
-file helpers add `fs`. Pure Jennifer; runs on **both** binaries.
+file helpers add `fs`. Pure Jennifer; runs on both binaries.
 
 ```jennifer
 import "jsonl.j" as jsonl;
@@ -39,8 +39,8 @@ list encodes to `""`; `decode("")` is the empty list.
 | `jsonl.writeFile(path, records)` | `null` | encode and write (replacing existing content) |
 | `jsonl.appendFile(path, records)` | `null` | encode and append (file created if missing) |
 
-`appendFile` is the common JSONL pattern - adding rows to a growing log or event
-stream without rewriting the file.
+`appendFile` adds rows to a growing log or event stream without rewriting the
+file.
 
 ## Streaming large files
 
@@ -56,10 +56,10 @@ copies, so successive `readRecord` calls advance the same stream.
 | `jsonl.closeReader(reader)` | `null` | close the reader |
 
 `readRecord` returns a `Record` `{value, done}`: `done` is the reliable
-end-of-stream signal. Loop until `done` rather than guarding with `hasMore` -
+end-of-stream signal. Loop until `done` rather than guarding with `hasMore`:
 `hasMore` is a coarse `not eof` check that still reports `true` when only
-trailing blank lines remain (which carry no record), so a `hasMore`-guarded
-loop would over-run the last record.
+trailing blank lines remain, so a `hasMore`-guarded loop would over-run the
+last record.
 
 ```jennifer
 def r as jsonl.Reader init jsonl.openReader("events.jsonl");
@@ -109,15 +109,14 @@ jsonl.closeReader($r);
 
 `readValue` returns a JSON `null` once the stream is exhausted. JSONL written by
 `writeValue` has exactly one value per line and no trailing blanks, so `not
-fs.eof(...)` is a reliable loop guard; when you need to tell end-of-stream from a
-genuine `null` record, use `readRecord` and its explicit `done` flag instead.
+fs.eof(...)` is a reliable loop guard; to tell end-of-stream from a `null`
+record, use `readRecord` and its explicit `done` flag instead.
 
 ## Scope
 
-- **Records are `json.Value`.** JSONL is a framing convention, not a new
-  encoder - the actual JSON work stays in the `json` library, and rebuilding a
-  typed target from a decoded record is the same explicit step it is there (no
-  map-to-struct coercion).
+- **Records are `json.Value`.** The JSON work stays in the `json` library, and
+  rebuilding a typed target from a decoded record is the same explicit step it
+  is there (no map-to-struct coercion).
 - **`\n`-separated.** Records are separated by line feed; a trailing `\r` is
   tolerated on read. `encode` writes `\n` and terminates the last line too.
 

@@ -84,9 +84,7 @@ validates the body, and rate-limits - answering the request and returning false
 on any failure, or true to run the handler. A request matching no API route
 passes through untouched.
 
-The authenticator and limiter are entry-program `func` values, called through
-their home interpreter (so the authenticator can construct and return a
-`webapi.Identity`). Their signatures:
+The authenticator and limiter signatures:
 
 ```jennifer
 func verifyToken(token as string) -> webapi.Identity        # ok:false = reject

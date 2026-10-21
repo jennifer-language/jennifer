@@ -5,18 +5,14 @@ Jennifer is an interpreted programming language with a rich type system
 topic-based standard library, and a large ecosystem of Jennifer-coded
 modules.
 
-This guide covers everything you can do in
-Jennifer. Run `jennifer version` to see which build you're on; the
+This guide covers the whole language. Run `jennifer version` to see which build you're on; the
 language history lives in [docs/milestones.md](../milestones.md).
 
 ## Design stances
 
-A handful of decisions shape every feature in Jennifer. Read them
-before the topical chapters - they explain why the language looks the
-way it does and rule out the "but why don't you just..." reflex.
-
-See [docs/design-stances.md](../design-stances.md) for the full
-seven-stance table.
+Seven decisions shape every feature in Jennifer and explain why the
+language looks the way it does. Read the
+[seven-stance table](../design-stances.md) before the topical chapters.
 
 ## Contents
 
@@ -30,7 +26,7 @@ seven-stance table.
 - [Types and values](types-and-values.md) - the primitive types,
   variables and constants, scoping rules, and the compound types
   `list` and `map`.
-- [Methods](methods.md) - declaring methods, parameters, return values,
+- [Functions](functions.md) - declaring functions, parameters, return values,
   recursion, hoisting, the no-shadowing rule for builtins.
 - [Control flow](control-flow.md) - operators, precedence, `if` / `while`
   / `for` / for-each.
@@ -42,8 +38,8 @@ seven-stance table.
   `jennifer fmt` produces; the spacing/indentation rules, the names
   convention, the `[]` and `{}` literal layout.
 - [Best practices](best-practices.md) - stylistic guidance and
-  code-smell heuristics for writing Jennifer that ages well. Not
-  enforced by the language; click through if you want the "why".
+  code-smell heuristics, with the reasoning behind each. Not enforced
+  by the language.
 - [Performance](performance.md) - the few patterns that turn a
   quadratic hot path into a linear one (append-and-join over `+` in a
   loop, hoisting per-element calls out of hot loops), and what the
@@ -60,7 +56,7 @@ seven-stance table.
   contributors.
 - [docs/glossary.md](../glossary.md) - canonical project terminology.
   When two words could plausibly name the same concept (function vs
-  method, library vs module, list vs array), this page picks the one
+  function, library vs module, list vs array), this page picks the one
   the project uses everywhere.
 - [docs/milestones.md](../milestones.md) - what's shipped, what's
   planned.

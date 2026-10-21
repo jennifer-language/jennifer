@@ -1,8 +1,7 @@
 # `args` - command-line argument parser
 
 Import with `import "args.j" as args;`. A declarative CLI parser at the common
-surface of Python's `argparse`, plus the features an argparse user misses
-immediately - typed flags (long + short), defaults, `required`, `choices`,
+surface of Python's `argparse`: typed flags (long + short), defaults, `required`, `choices`,
 `count` / `append` actions, positionals with `nargs`, subcommands, and
 `--version`. It is the structured layer over `os.ARGS` (`os.hasFlag` / `os.flag`
 are primitive lookups). Pure Jennifer over `strings` + `convert` + `lists` +
@@ -62,8 +61,8 @@ argument vector and returns a `Result`.
 | `args.command(p, name, help, sub)`        | add a subcommand with its own `Parser`                           |
 | `args.version(p, ver)`                    | enable `--version`, printing `ver`                               |
 
-`required` and `choices` are **post-modifiers** on the last-added argument, so
-they read fluently right after the builder:
+`required` and `choices` are post-modifiers on the last-added argument, applied
+right after the builder:
 
 ```jennifer
 $p = args.choices(args.required(args.flag($p, "mode", "m", "", "build mode")), ["debug", "release"]);
@@ -138,8 +137,8 @@ def r as args.Result init args.parse($git, os.ARGS);      # e.g. git -q add http
 
 ## Scope (and what's out)
 
-This is **argparse Level B** - the ~95%. Out of scope (argparse Level C,
-diminishing returns for a `.j` module): argument groups, mutually-exclusive sets,
+This covers argparse "Level B" (roughly 95% of use). Out of scope (Level C):
+argument groups, mutually-exclusive sets,
 parent parsers, prefix-abbreviation matching (`--verb` for `--verbose`), and
 `@argfile`.
 

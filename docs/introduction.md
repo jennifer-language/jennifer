@@ -12,8 +12,7 @@ Jennifer is an interpreted programming language written in (Tiny)Go.
 It is **batteries-included**:
 **[41 built-in libraries](libraries/index.md) and
 [74 distributable modules](modules/index.md) - over 1,800 functions,
-constants, and types** cover what real programs actually need. Talk to a
-real database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
+constants, and types**. Query a database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
 PostgreSQL, parameterized and injection-safe) or map rows to structs with the
 [ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
 [YAML](libraries/yaml.md), [TOML](libraries/toml.md), and [XML](libraries/xml.md);
@@ -23,39 +22,37 @@ both ways: an [HTTP/S client](modules/http.md) and ergonomic
 and [web framework](modules/web.md) to serve. Email is a complete stack -
 [SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) / [IMAP](modules/imap.md)
 to receive; caches and stores come through [Redis](modules/redis.md) and
-[memcached](modules/memcache.md) clients. Security is implemented, not stubbed:
+[memcached](modules/memcache.md) clients. Cryptography covers
 [AES-256-GCM, Ed25519, HKDF / PBKDF2](libraries/crypto.md), and [JWT](modules/jwt.md).
 Wire your program into AI agents with the
 [Model Context Protocol](modules/mcp.md): expose your own functions as tools /
 resources / prompts to a host (Claude, an IDE, ...), or call another MCP server
-as a client - validated end to end against the official MCP SDK. And
-lightweight [concurrency](user-guide/concurrency.md) is built into the language
-via `spawn` and the [task](libraries/task.md) library. More niche needs are covered
-too - [Gotify](modules/gotify.md) push, strict [SemVer](modules/semver.md),
+as a client - validated end to end against the official MCP SDK. Lightweight
+[concurrency](user-guide/concurrency.md) is built into the language via `spawn`
+and the [task](libraries/task.md) library. Niche needs are covered too -
+[Gotify](modules/gotify.md) push, strict [SemVer](modules/semver.md),
 [S3](modules/s3.md) object storage, [vCard](modules/vcard.md) /
 [iCalendar](modules/ical.md), [MQTT](modules/mqtt.md) and [AMQP](modules/amqp.md)
 messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
 two-factor codes.
 The interpreter and its built-in libraries ship as **one self-contained static
 binary** - about 23 MB with everything, ~10 MB for the embeddable build - with
-nothing else to install to run everything built in: no separate runtime, and no
-dependency tree to resolve first. The modules ride along as plain `.j` source
+no separate runtime and no dependency tree to install. The modules ride along as plain `.j` source
 files (installed beside the binary and resolved through the module path),
 readable and hackable with no compile step. Reaching past the built-ins is
 opt-in: third-party **decks** (Jennifer's packages) are vendored into your
 project's own tree - no global install, no daemon - with the `jvc` package
 manager to resolve and pin them.
 
-It also works well for **teaching and learning**: an interactive
+It also suits **teaching and learning**: an interactive
 [REPL](technical/cli_repl.md), an [easy-to-read grammar](technical/grammar.md),
 and [token and AST dumps](technical/cli_inspect.md) show what an interpreter does
 at each stage, plus a built-in [linter](technical/cli_lint.md) and
 [profiler](technical/cli_profile.md) and full
 [test support](technical/cli_test.md). Its
-[strict, explicit design](design-stances.md) - conditions must be `bool`,
-conversions are spelled out, names never shadow, and errors are positioned -
-so a mistake shows up as a clear message rather than silent misbehavior, and a
-learner can see exactly what went wrong.
+[strict, explicit design](design-stances.md) (conditions must be `bool`,
+conversions are spelled out, names never shadow, errors are positioned) turns a
+mistake into a clear message instead of silent misbehavior.
 
 Source files use the `.j` extension. Whitespace is not significant
 anywhere; statements end with `;`.
@@ -75,7 +72,7 @@ io.printf("ran for %d ms\n", time.milliseconds($gap));
 Jennifer ships as two binaries built from the same source:
 
 - **`jennifer`** - standard Go build, full host-feature surface.
-  This is the default binary you install and reach for.
+  This is the default binary.
 - **`jennifer-tiny`** - TinyGo build, smaller and embeddable.
   Missing `os/exec` and the network stack (TinyGo runtime gaps);
   calls into those surfaces return a friendly runtime error
@@ -101,7 +98,7 @@ from the start. See [Editor & AI support](user-guide/tooling.md).
 - **[Editor & AI support](user-guide/tooling.md)** - highlighting and
   the drop-in `JENNIFER.md` for AI-assisted coding.
 - **[Language reference](user-guide/index.md)** - syntax, types,
-  methods, control flow, imports, style.
+  functions, control flow, imports, style.
 - **[Libraries](libraries/index.md)** - per-library reference plus
   an alphabetical [cheatsheet](libraries/cheatsheet.md) of every
   builtin.
@@ -132,6 +129,5 @@ License: LGPL-3.0-only.
 
 > **[Download the whole manual as a single PDF](jennifer-manual.pdf).** It ships
 > with a clickable outline (the H1/H2/H3 headings) in your PDF reader's bookmark
-> panel, so you can jump straight to any section.
-> The entire documentation in one file, regenerated from these pages on every
-> build - handy for reading or searching offline.
+> panel. It is regenerated from these pages on every build, for reading or
+> searching offline.

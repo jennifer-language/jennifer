@@ -34,8 +34,7 @@ A `totp.Options` carries the parameters; a zero-value struct
 
 The `secret` is a **base32** string - the same value an authenticator app
 stores. Spaces are ignored, letters are upper-cased, and missing `=` padding is
-supplied, so an app's grouped, unpadded secret (`JBSW Y3DP EHPK 3PXP`) decodes
-fine.
+supplied, so an app's grouped, unpadded secret (`JBSW Y3DP EHPK 3PXP`) decodes.
 
 ## Functions
 
@@ -60,8 +59,7 @@ steps away is rejected.
 Use `verifyWindow` / `verifyWindowAt` to set the tolerance explicitly: `window`
 is the number of period-steps accepted on each side of now, so `window` 0 checks
 only the current step and `window` 2 tolerates up to a minute of drift (at the
-default 30-second period). Widen it only as far as the drift you actually need -
-every extra step is another valid code an attacker may guess.
+default 30-second period). Keep it narrow (see [Security notes](#security-notes)).
 
 ### Generating a secret
 
@@ -124,10 +122,9 @@ and `totp.verify` then agree on the code for each 30-second window.
 
 - The secret is the shared key: store it like a password, and transmit the
   provisioning URI over a secure channel only.
-- Generate a *new* secret with `totp.generateSecret()` (crypto-grade random,
-  RFC 6238-recommended 20 bytes, base32-encoded) rather than rolling your own -
-  never use `math.rand*`, which is not crypto-grade.
-- Keep the skew window as narrow as the real clock drift requires: each extra
+- Generate a *new* secret with `totp.generateSecret()` rather than rolling your
+  own - never use `math.rand*`, which is not crypto-grade.
+- Keep the skew window as narrow as the clock drift requires: each extra
   step (`verifyWindow`) is another simultaneously-valid code.
 - SHA-1 is the default because authenticator apps default to it; it is a safe
   choice for HMAC despite being broken for collision resistance.

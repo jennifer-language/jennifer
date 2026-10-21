@@ -2,13 +2,13 @@
 
 A relational-database client over Go's `database/sql`, shipping the two
 client-server engines: **MySQL/MariaDB/Galera** and **PostgreSQL** (both pure-Go
-drivers). SQLite (the one embedded engine) is deliberately not here. **Default
-`jennifer` binary only** - `jennifer-tiny` returns a friendly error (the drivers
-are not compiled there, and it has no network stack anyway).
+drivers). SQLite (embedded) is not included. **Default `jennifer` binary
+only**: `jennifer-tiny` returns a friendly error (the drivers are not compiled
+there, and it has no network stack).
 
-Values bind **only through placeholders**. String interpolation (the
-SQL-injection vector) is never how a value reaches a query. The placeholder
-spelling is the engine's own - `?` for MySQL/MariaDB/Galera, `$1`..`$n` for
+Values bind **only through placeholders**, never by string interpolation (the
+SQL-injection vector). The placeholder spelling is the engine's own: `?` for
+MySQL/MariaDB/Galera, `$1`..`$n` for
 Postgres; the SQL text goes to the driver verbatim, so write the dialect you
 are connecting to.
 
@@ -61,28 +61,27 @@ A struct is a positioned error - build the value first.
 Every `query` / `exec` (and the prepared-statement variants) runs under a
 **client-side deadline** (default **30 s**) that also bounds the pool-connection
 acquisition it may block on, so a leaked cursor pinning a pool connection cannot
-make a later call block forever. Because that same deadline governs the returned
-cursor's `sql.next` reads, a long streaming loop over a big table would otherwise
-fail mid-iteration - looking like a database error when it is really the client
-timeout. So it is **caller-settable**: `sql.setQueryTimeout(ms)` raises it (or
-`sql.setQueryTimeout(0)` disables it entirely) for a long batch read. The timeout
-is process-wide; set it once at startup. When it does fire during a read,
-`sql.next` names the source and the knob, not a phantom database failure.
+make a later call block forever. The same deadline governs the cursor's
+`sql.next` reads, so a long streaming loop over a big table can hit it
+mid-iteration. For a long batch read, raise it with `sql.setQueryTimeout(ms)` or
+disable it with `sql.setQueryTimeout(0)`. The timeout is process-wide; set it
+once at startup. When it fires during a read, `sql.next`'s error names the
+client timeout and this setting.
 
 | `sql.setQueryTimeout(ms)` | `null` | Set the client query/read deadline in milliseconds; `0` (or negative) disables it. Default 30 000. |
 
 Each handle registry (connections, cursors, statements,
-transactions) is bounded, so a handle leaked in a loop surfaces a catchable
-"too many open" error rather than growing without limit; always pair `open` /
+transactions) is bounded, so a handle leaked in a loop raises a catchable
+"too many open" error; always pair `open` /
 `query` / `prepare` / `begin` with their close verb (a `defer` is the idiom).
 
 A **single `list` argument is spread** into the parameter sequence:
 `sql.exec($conn, $sql, $params)` binds each element of `$params` in turn, so a
 query whose parameter count is only known at runtime (the pattern the
 [`orm`](../modules/orm.md) module builds on) works without a fixed call-site
-arity. The plain variadic form (`sql.exec($conn, $sql, a, b, c)`) is unchanged;
+arity. The plain variadic form (`sql.exec($conn, $sql, a, b, c)`) still works;
 a list mixed with other arguments, or a list element that is itself a list, is
-still a placeholder-binding error.
+a placeholder-binding error.
 
 ## Reading rows
 
@@ -95,7 +94,7 @@ a column of the current row by **name (string) or 0-based index (int)**.
 | `sql.columns(rows)` | `list of string` | Column names. |
 | `sql.asInt(rows, col)` / `.asFloat` / `.asString` / `.asBool` / `.asBytes` | typed | The current row's column, coerced. A `NULL` column is an error (check `sql.isNull` first); `asString` also stringifies a datetime (RFC 3339). |
 | `sql.isNull(rows, col)` | `bool` | Whether the column is SQL `NULL`. |
-| `sql.closeRows(rows)` | `null` | Close a cursor early (before exhaustion). A no-op on an already-released cursor, so `defer sql.closeRows($rows);` is always safe - whether or not the loop ran to the end. |
+| `sql.closeRows(rows)` | `null` | Close a cursor early (before exhaustion). A no-op on an already-released cursor, so `defer sql.closeRows($rows);` is always safe. |
 
 ## Transactions
 

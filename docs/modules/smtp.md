@@ -62,7 +62,7 @@ One call runs the whole delivery, throwing a catchable `Error` (kind
 1. Connect per `security` (`net.connect`, or `net.connectTLS` for `"tls"`),
    bounded by a connection-establishment timeout.
 2. Read the `220` greeting, send `EHLO`.
-3. For `"starttls"`: confirm the `EHLO` response actually advertised `STARTTLS`
+3. For `"starttls"`: confirm the `EHLO` response advertised `STARTTLS`
    (an anti-downgrade check - a MITM that strips the capability to keep the
    session in plaintext is refused), then `STARTTLS`, `net.startTLS`, and a
    second `EHLO`.
@@ -140,13 +140,14 @@ server); a live send against a real daemon is the demo's job.
 
 ## Out of scope
 
-- **Send only.** Receiving is POP3 / IMAP (later sub-milestones); this module
+- **Send only.** Receiving is [`pop`](pop.md) / [`imap`](imap.md); this module
   does not fetch mail.
 - **Auth mechanisms**: PLAIN, LOGIN, XOAUTH2, CRAM-MD5, and SCRAM-SHA-1 /
   SCRAM-SHA-256 (via [`sasl`](sasl.md)). `auth: "auto"` selects the strongest
   the server's `EHLO` advertises. Server-side SASLprep is not applied.
-- **No connection reuse / pipelining.** `send` opens, delivers, and closes one
-  connection per call.
+- **No ESMTP `PIPELINING`.** Commands go one at a time, each waiting for its
+  reply. `send` opens, delivers, and closes one connection per call; to reuse a
+  connection across messages, use `open` + `sendOn` + `close`.
 - **Non-ASCII local parts only.** An internationalized **domain** in the host
   or an envelope address (`user@münchen.de`) is IDNA-encoded to its `xn--`
   form automatically (via [`idna`](idna.md)). A non-ASCII **local part**

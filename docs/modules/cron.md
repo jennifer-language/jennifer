@@ -3,9 +3,9 @@
 Import with `import "cron.j" as cron;`. Parse and evaluate **cron expressions** -
 the five-field `minute hour day-of-month month day-of-week` spec. `parse` builds
 a `Schedule`, `matches` tests whether a `time.Time` fires it, and `next` finds
-the next fire at or after a time. A **pure calculator** over `time` - no clock,
-no sleeping - so it runs on **both** binaries; a real scheduler is your own
-`spawn` + `time.sleep` loop over `cron.next`.
+the next fire at or after a time. A pure calculator over `time` (no clock, no
+sleeping), so it runs on both binaries; a scheduler is your own `spawn` +
+`time.sleep` loop over `cron.next`.
 
 ```jennifer
 import "cron.j" as cron;

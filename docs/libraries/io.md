@@ -22,17 +22,16 @@ io.printf("%s = %d, ok=%t\n", "answer", 42, true);
 > a generated password, user input, file contents - use
 > `io.printf("%s", s)` (or `"%s\n"`). A stray `%` in the data would otherwise be
 > read as a verb: `%c` fails as an unknown verb, `%s` as a missing argument, so
-> `io.printf(password)` is a latent bug. This is deliberate - there is no
-> separate verbatim-print builtin (see
+> `io.printf(password)` is a latent bug. There is no separate verbatim-print
+> builtin (see
 > [technical/rejected.md](../technical/rejected.md)); `printf("%s", s)` is the
 > one canonical way to print a dynamic string.
 
 ## `eprintf`
 
-Exactly like `printf` - same argument forms and verbs - but writes to **standard
-error** instead of standard output. Use it for diagnostics, warnings, and logs
-that must not mix into a program's stdout data (so a pipeline consuming the stdout
-stays clean).
+Like `printf` - same argument forms and verbs - but writes to **standard
+error**. Use it for diagnostics, warnings, and logs that must not mix into a
+program's stdout data.
 
 ```jennifer
 io.eprintf("warning: retrying (%d/%d)\n", $attempt, $max);   # goes to stderr
@@ -92,8 +91,8 @@ leading `-` before a digit - or exactly **one** separator character (`,`
 modifier is ordinary text: `"0x%d|base=16, %d"` prints `0xff, 7`, and
 `"%f|prec=2."` ends a sentence with the number. A value that needs any
 other character is written double-quoted (`%a|sep=" | "`).
-To put a literal `|` immediately after a verb, double it: `||` writes
-one `|` and ends the modifier list (same shape as `%%`). Unknown keys,
+A literal `|` immediately after a verb is written `||` (see
+[escaping the meta-characters](#format-verbs) above). Unknown keys,
 bad values, missing companions (e.g. `group=` without `sep=`), and the
 same key set twice are all runtime errors.
 
@@ -188,9 +187,8 @@ io.printf("%f|sci=true|prec=2\n", 0.00123);     # 1.23e-03
 
 ### `%v` modifiers
 
-`%v` takes no modifiers - it is deliberately the "I don't care, just
-print it" verb. Use a typed verb plus modifiers when you want to shape
-the output.
+`%v` takes no modifiers - it is the "print it as is" verb. Use a typed
+verb plus modifiers to shape the output.
 
 ### `%a` modifiers
 
@@ -251,18 +249,15 @@ io.printf("%a|base=16\n", [255, 4096]);       # [ff, 1000]
 io.printf("%a|mode=quote\n", {"k": "v"});     # {"k": "v"}
 ```
 
-Without an element modifier, per-element rendering uses the same display
-form as `%v`, so primitive values inside an aggregate look the way they
-would in a print statement. `null=skip` is only valid on `%a` - it omits null elements
+Without an element modifier, each element renders in the same display form
+as `%v`. `null=skip` is only valid on `%a` - it omits null elements
 entirely; the other `null=` modes (`empty`, `null`, `literal`) are
-rejected for `%a` because they don't have a sensible per-element
-meaning.
+rejected for `%a` because they have no sensible per-element meaning.
 
 ## Input from stdin
 
-Three builtins for reading lines from standard input. They are
-**output-symmetric** with `printf` / `sprintf` and intentionally
-minimal - line at a time, with an explicit end-of-input predicate so
+Builtins for reading standard input. They are minimal - a line (or `n`
+bytes / runes) at a time, with an explicit end-of-input predicate so
 nothing happens implicitly.
 
 ### `io.readLine() -> string`
@@ -279,8 +274,7 @@ call that reaches it; the subsequent call errors.
 
 Same as `io.readLine()` but writes `prompt` to stdout (no newline added)
 before reading. The prompt is written **unconditionally**, even when
-stdin is piped - explicit beats silently skipping the prompt off a
-non-TTY.
+stdin is piped (it is not silently skipped off a non-TTY).
 
 ```jennifer
 def name as string init io.readLine("name: ");
@@ -345,8 +339,10 @@ count - one Unicode character can be 1-4 bytes wide.
 
 ```jennifer
 use io;
+use encoding;
 def first as string init io.readChars(3);  # exactly 3 runes
-io.printf("got %d runes (%d bytes)\n", len($first), 0);  # len = 3
+io.printf("got %d runes (%d bytes)\n", len($first), encoding.lenBytes($first));
+# input "h\u00e9llo" prints: got 3 runes (4 bytes)
 ```
 
 ### Canonical loop
@@ -359,12 +355,10 @@ while (not io.eof()) {
 }
 ```
 
-This is the only pattern the language asks you to learn. There is no
-`for line in stdin` shortcut, no `lines()` that slurps the whole
-stream, and `io.readLine()` does not return a sentinel value at EOF -
-they were considered and rejected because the existing trio is
-already complete and adding parallels would violate Jennifer's "one
-way per thing" stance.
+This is the streaming pattern. There is no `for line in stdin` shortcut,
+and `io.readLine()` does not return a sentinel value at EOF - both were
+rejected under Jennifer's "one way per thing" stance. (`io.readLines()`
+is the bounded-input slurp, above.)
 
 ### REPL limitation
 
@@ -382,8 +376,8 @@ run it with stdin piped or redirected: `jennifer run prog.j < input.txt`.
 ## Float display
 
 Floats always display with a decimal point so the value's type stays visible:
-`5.0` prints as `"5.0"`, not `"5"`. That matters most after the Python 3
-division change - `4 / 2` is the float `2.0`, and you can tell at a glance
-rather than wondering whether it's an `int`.
+`5.0` prints as `"5.0"`, not `"5"`. Since `/` is true division, `4 / 2` is the
+float `2.0`, distinguishable at a glance from an `int`.
+
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).

@@ -111,10 +111,9 @@ the brute-force space," not "is this a good password."
 
 ## Scope
 
-- **Crypto-grade randomness** (see the security note) - generation draws from
-  the `crypto` library, so a generated password is safe as a real credential.
+- **Crypto-grade randomness** from the `crypto` library (see the security note).
 - **Complexity is character-set entropy**, with no dictionary, keyboard-walk, or
-  repeated-character analysis. It will happily call a common word "reasonable".
+  repeated-character analysis, so a common word can score "reasonable".
 - **Rune-based length**: `len` counts runes, so multi-byte characters count as
   one, consistent with the rest of the language.
 

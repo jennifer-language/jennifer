@@ -83,15 +83,14 @@ HMAC-SHA256, hex; the timestamp travels separately in
 `X-Slack-Request-Timestamp` (parse it to an `int` and pass it in). Slack's own
 guidance is a 5-minute (`300`) tolerance.
 
-**Generic** (`timestampedSign` / `timestampedVerify`): the small composable core
-- sign `<timestamp> + "." + <body>` with any supported digest and encoding, so
+**Generic** (`timestampedSign` / `timestampedVerify`): the composable core;
+signs `<timestamp> + "." + <body>` with any supported digest and encoding, so
 a GitHub-style `sha1`/`sha256` scheme or a base64 scheme is one call. Hex is
 case-folded on the built-in schemes; base64 is compared exactly.
 
-Every verify does a **constant-time** compare (via `crypto.hmacEqual`), so no
-scheme leaks through timing how many leading bytes of the signature matched, and
-the freshness window is checked independently so a replayed-but-correctly-signed
-request is still rejected.
+Every verify compares in constant time (via `crypto.hmacEqual`) and checks the
+freshness window independently, so a replayed but correctly signed request is
+still rejected.
 
 ## Sending
 

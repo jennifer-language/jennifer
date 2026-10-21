@@ -2,14 +2,13 @@
 
 Enable with `use toml;`. RFC-conformant [TOML 1.0.0](https://toml.io)
 decode / encode onto the same opaque, library-owned value that
-[`json`](json.md) uses - the **same read / walk / write surface, name for
-name**, so a program that reads, walks, and builds JSON does the same with
-TOML. The one thing TOML has that JSON does not, its four date-time forms,
-is surfaced through `toml.asDatetime` (backed by [`time`](time.md)).
+[`json`](json.md) uses, with the **same read / walk / write surface, name for
+name**. TOML's four date-time forms, which JSON lacks, are surfaced through
+`toml.asDatetime` (backed by [`time`](time.md)).
 
 `toml.decode(text)` returns an opaque `toml.Value` (a `KindObject`, the
 sibling of `json.Value`); `[index]` and `.field` reject it (and `==` / `!=`
-compare two handles by value), so the accessors below are the way inside.
+compare two handles by value), so use the accessors below.
 `convert.typeOf` reports
 `"object"`; `convert.objectType` reports `"toml.Value"`.
 
@@ -40,9 +39,8 @@ compare two handles by value), so the accessors below are the way inside.
 | `toml.move(v, from, to)` | `toml.Value` | Relocate a subtree. |
 
 The `[, ptr]` argument is a **JSON Pointer** (see below); omit it (or pass
-`""`) to address the node itself. Every write verb is **non-mutating** -
-it returns a fresh handle, so the idiom is `$v = toml.set($v, ...)`, the
-same shape lists and maps use.
+`""`) to address the node itself. Every write verb is **non-mutating** and
+returns a fresh handle: `$v = toml.set($v, ...)`, as with lists and maps.
 
 `toml.decode` rejects container nesting (and dotted-key segment counts) past a
 fixed depth with a normal (catchable) decode error, so hostile deeply-nested
@@ -92,10 +90,9 @@ lists.
 
 ### JSON Pointer (RFC 6901)
 
-TOML has no document-pointer syntax of its own, and a dotted path would be
-ambiguous the moment a key itself contains a `.` (the quoted key
-`"a.b"`). So addressing reuses `json`'s **JSON Pointer** - identical
-`/`-separated syntax, so a program that walks JSON walks TOML unchanged:
+TOML has no pointer syntax of its own, and a dotted path would be ambiguous
+for a key containing `.` (the quoted key `"a.b"`). Addressing therefore reuses
+`json`'s **JSON Pointer**, so code that walks JSON walks TOML unchanged:
 
 ```jennifer
 toml.get($doc, "/server/ports/0")   # first port
@@ -108,7 +105,6 @@ first). List tokens are `0` or `[1-9][0-9]*`.
 
 ### Date-times
 
-The date-time forms are the one place TOML is richer than JSON.
 `toml.typeOf` reports `datetime`; `toml.asDatetime` returns a `time.Time`:
 
 ```jennifer
@@ -164,27 +160,21 @@ io.printf("%s", toml.encode($cfg));
 
 ## Why TOML and not INI
 
-Jennifer ships **one** structured config format, and it is TOML. INI - the
-`[section]` / `key=value` shape people reach for first - is deliberately
-**not** supported, for three concrete reasons:
+Jennifer ships one structured config format, TOML. INI (`[section]` /
+`key=value`) is **not** supported:
 
-- **No real standard.** "INI" is a family of mutually-incompatible dialects,
-  not a spec. Parsers disagree on comment characters (`;` vs `#`), quoting,
-  escapes, whether `[a.b]` nests, duplicate keys, and case sensitivity. There
-  is nothing to conform *to*, so "reads INI" would mean "reads our INI."
-- **Flat.** INI has one level of `[section]`. It has no arrays of tables, no
-  nested tables, no arrays at all in any agreed form - exactly the structure
-  a real configuration needs.
-- **Untyped.** Every INI value is a bare string. `port = 8080`, `debug =
-  true`, and `ratio = 0.5` are all just text; the program re-parses each by
-  hand and guesses the type. There is no `int` / `float` / `bool` / date-time
-  distinction.
+- **No standard.** "INI" is a family of incompatible dialects. Parsers
+  disagree on comment characters (`;` vs `#`), quoting, escapes, whether
+  `[a.b]` nests, duplicate keys, and case sensitivity, so "reads INI" would
+  mean "reads our INI".
+- **Flat.** One level of `[section]`; no nested tables, arrays of tables, or
+  arrays in any agreed form.
+- **Untyped.** Every value is a string (`port = 8080`, `debug = true`,
+  `ratio = 0.5` are all text), so the program re-parses and guesses types.
 
-TOML fixes all three - a real (versioned) standard, nested tables and arrays
-of tables, and typed scalars including native date-times - which is why it,
-not INI, is the format Jennifer decodes into typed values. INI stays out on
-purpose (documented here rather than silently missing); a tiny `.ini` cousin
-is a candidate only if concrete demand appears.
+TOML is a versioned standard with nested tables, arrays of tables, and typed
+scalars including date-times. A small `.ini` reader is a candidate only if
+concrete demand appears.
 
 ## See also
 

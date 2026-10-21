@@ -82,9 +82,8 @@ is exactly `ansi.color(s, "NAME")` (or `ansi.style` for a style name):
 3. else on when `os.isTerminal("stdout")` is true; off when it is false.
 4. If the host cannot tell whether stdout is a terminal, defaults **on**.
 
-`strip` ignores this gate - it removes escapes unconditionally, so it
-cleans up already-styled text (or a captured subprocess's output)
-regardless of the current terminal state.
+`strip` ignores this gate and removes escapes unconditionally, so it
+cleans up already-styled text (or a captured subprocess's output).
 
 ```jennifer
 def styled as string init ansi.bold(ansi.blue("styled"));

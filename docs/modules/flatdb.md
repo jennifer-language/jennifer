@@ -9,10 +9,10 @@ file); runs on either binary.
 
 ## What it is - and isn't
 
-`flatdb` is **not a database engine**. Honestly, it is *crash-atomic
-snapshotting of small data*:
+`flatdb` is **not a database engine**; it is *crash-atomic snapshotting of
+small data*:
 
-- **Atomicity** - whole-file, via a temp file + rename. A reader ever sees the
+- **Atomicity** - whole-file, via a temp file + rename. A reader sees either the
   whole old file or the whole new one, never a torn write.
 - **Consistency** - application-level (you decide what's valid).
 - **Isolation** - optimistic, with an opt-in lock. Each writer reads the whole
@@ -21,10 +21,10 @@ snapshotting of small data*:
   writers serialize with no loss. No multi-key transactions.
 - **Durability** - the rename is atomic, but flush-to-disk is OS-buffered.
 
-For a real database, reach for a client over `net` (e.g. [`redis`](redis.md)),
-not this. `flatdb` is the "embed a small store" need - config, a cache you can
-read, a benchmark history, a little app's saved state - where a single
-human-readable JSON file is exactly right.
+For a real database, use a client over `net` (e.g. [`redis`](redis.md)).
+`flatdb` is for embedding a small store - config, a readable cache, a benchmark
+history, a little app's saved state - where a single human-readable JSON file
+fits.
 
 ## Handle, not a connection
 
@@ -91,9 +91,8 @@ A runnable version is [`examples/modules/flatdb_demo.j`](../../examples/modules/
 ## Read-only from a URL or a string
 
 `flatdb.openString(text)` loads a store from an in-memory JSON string instead of
-a file. flatdb stays transport-agnostic - it never imports `http` / `net`, so it
-remains `fs`-only and builds on both binaries - and you bring the bytes. To read
-a database published at a URL:
+a file. flatdb never imports `http` / `net` (it stays `fs`-only and builds on
+both binaries), so you bring the bytes. To read a database published at a URL:
 
 ```jennifer
 use io;
@@ -120,28 +119,27 @@ flatdb.save($local);   # now writable - $local is bound to config.local.json
 
 `saveAs(db, path)` writes to `path` and returns a **fresh DB bound to that
 path**; the `db` you passed in is unchanged (value semantics, like `set` /
-`append` / `remove`). So after a `saveAs` you hold *both* - which one is "current"
-for the next `save` is simply the handle you keep: reassign
-(`$db = flatdb.saveAs($db, path);`) to make the new file current, or keep the old
-handle to keep writing the original file. There is no hidden "active file" state;
-a `DB` is a value.
+`append` / `remove`). After a `saveAs` you hold *both*; the next `save` writes
+whichever handle you keep: reassign (`$db = flatdb.saveAs($db, path);`) to make
+the new file current, or keep the old handle to keep writing the original file.
+There is no hidden "active file" state.
 
 Decoding untrusted input is safe against a nesting bomb: `json.decode` caps
 container depth (a deeply-nested payload is a **catchable** error, not a fatal
-stack overflow), and JSON has no entity/alias expansion to amplify size - so a
-malicious URL can't crash or blow up the process. Bound the *download* itself with
+stack overflow), and JSON has no entity/alias expansion to amplify size. Bound
+the *download* itself with
 `http`'s body cap (64 MiB by default; pass an explicit `maxBytes` to
 `http.requestWith` for more or less).
 
 ## Concurrent writers
 
-Crash-atomic is **not** the same as write-safe. Two writers that each `open`,
-edit different parts, and `save` would clobber one of the two changes (last
-rename wins). `flatdb` closes that two ways:
+Crash-atomic is not write-safe: two writers that each `open`, edit different
+parts, and `save` would clobber one change (last rename wins). `flatdb` handles
+this two ways:
 
 **`save` fails loudly on a conflict.** `open` records a token of the file's
 on-disk state; `save` re-checks it and throws a `flatdb` error if the file moved
-since - so a lost update can never be *silent*. Catch it and re-open, or retry:
+since, so a lost update is never *silent*. Catch it and re-open, or retry:
 
 ```jennifer
 try {
@@ -193,9 +191,9 @@ a conflict.
 
 An opened store is a parsed `json.Value` tree, which takes from about the
 file's size (text-heavy data) up to roughly 15 times it (many small values) in
-memory.
-So a server should **not** open the store in every request handler: N requests
-in flight would hold N parsed copies. Open it **once** and share it:
+memory. A server should therefore **not** open the store in every request
+handler (N requests in flight would hold N parsed copies). Open it **once** and
+share it:
 
 - **Read-only for the server's lifetime** - a top-level `def` is enough.
   `def store as flatdb.DB init flatdb.open("registry.json");` and handlers read

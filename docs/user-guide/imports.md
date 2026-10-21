@@ -31,7 +31,7 @@ over string / list / map / bytes; no import needed.
 | `convert` | `use convert;` | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts                                                                       | [libraries/convert.md](../libraries/convert.md) |
 | `math`    | `use math;`    | `math.abs`, `math.min`, `math.max`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.round`, `math.rand`, `math.randInt`, `math.randSeed`; constants `math.PI`, `math.E` | [libraries/math.md](../libraries/math.md)       |
 | `strings` | `use strings;` | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`            | [libraries/strings.md](../libraries/strings.md) |
-| `binary`  | `use binary;`  | `binary.concat`, `slice`, `find`, `split`, `startsWith`, `endsWith` - bulk operations on `bytes` (the byte-data counterpart to `strings`/`lists`)                                 | [libraries/binary.md](../libraries/binary.md)   |
+| `binary`  | `use binary;`  | `binary.make`, `concat`, `join`, `slice`, `indexOf`, `contains`, `split`, `startsWith`, `endsWith` - bulk operations on `bytes` (the byte-data counterpart to `strings`/`lists`)                                 | [libraries/binary.md](../libraries/binary.md)   |
 | `json`    | `use json;`    | RFC 8259 `json.encode`/`encodePretty`/`decode`; structs and `map of string to V` map to objects, `bytes` to base64, integral numbers decode to `int` else `float`; decode yields generic values (no map-to-struct coercion) | [libraries/json.md](../libraries/json.md)       |
 | `toml`    | `use toml;`    | RFC-conformant TOML 1.0 `toml.encode`/`encodePretty`/`decode`; same opaque `toml.Value` + read / walk / write surface as `json` (JSON Pointer), plus `toml.asDatetime` (backed by `time.Time`) for date-times; the config format Jennifer ships, not INI | [libraries/toml.md](../libraries/toml.md)       |
 | `lists`   | `use lists;`   | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `indexOf`, `mismatch`, `concat`, `slice`, `shuffle`, `range`, plus `map` `filter` `reduce` `find` `any` `all` `sortBy` - non-mutating helpers | [libraries/lists.md](../libraries/lists.md)     |
@@ -51,7 +51,7 @@ over string / list / map / bytes; no import needed.
 | `httpd`   | `use httpd;`   | HTTP/1.1 server engine over `net/http` (TLS, HTTP/2, graceful shutdown). Pull loop `httpd.listen`/`accept`/`respond`; request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`; `setHeader`, `serveFile`/`serveDir`, `shutdown`; structs `httpd.Server`, `httpd.Request`. Default `jennifer` only; `jennifer-tiny` returns friendly errors | [libraries/httpd.md](../libraries/httpd.md) |
 | `regex`   | `use regex;`   | regular expressions over `string` (RE2 syntax). `matches`/`find`/`findAll`/`replace`/`split`/`escape` + `regex.Match` with positional and named captures. Implicit LRU cache for compiled patterns; rune-index offsets in matches | [libraries/regex.md](../libraries/regex.md) |
 | `testing` | `use testing;` | test-runner primitives. `run`/`results`/`reset`/`report` + `testing.Result`. Catches runtime errors, throws, and `exit` inside test bodies. Three report formats: `"text"`, `"tap"`, `"junit"`. Foundation for the `.j`-side testing framework | [libraries/testing.md](../libraries/testing.md) |
-| `uuid`    | `use uuid;`    | RFC 9562 UUIDs. `uuid.v4()` / `uuid.v7()` + `parse`/`isValid`/`version` + constant `NIL`. The version is a method; RNG is the `crypto` library's crypto-grade source (unguessable, safe as a security token)                          | [libraries/uuid.md](../libraries/uuid.md)       |
+| `uuid`    | `use uuid;`    | RFC 9562 UUIDs. `uuid.v4()` / `uuid.v7()` + `parse`/`isValid`/`version` + constant `NIL`. The version is a function; RNG is the `crypto` library's crypto-grade source (unguessable, safe as a security token)                          | [libraries/uuid.md](../libraries/uuid.md)       |
 | `serial`  | `use serial;`  | serial-port I/O with termios config. `open(path, baud)` / `openWith(path, Options)` -> `serial.Port`, `read`/`write`/`flush`/`close`. Linux-only; `jennifer-tiny` and non-Linux return a friendly stub | [libraries/serial.md](../libraries/serial.md) |
 | `spi`     | `use spi;`     | SPI devices. `open(path)` -> `spi.Device`, `configure(dev, mode, speedHz)`, full-duplex `transfer(dev, bytes)`, `close`. Linux-only; stub elsewhere | [libraries/spi.md](../libraries/spi.md) |
 | `i2c`     | `use i2c;`     | the I2C bus. `open(path, addr)` -> `i2c.Bus`, `read`/`write`/`readReg`/`writeReg`/`close`. Linux-only; stub elsewhere | [libraries/i2c.md](../libraries/i2c.md) |
@@ -63,7 +63,7 @@ and the library-organization principles, or
 [libraries/cheatsheet.md](../libraries/cheatsheet.md) for an
 alphabetical lookup of every builtin function and constant.
 
-Quick orientation - if you're reading top to bottom and just want a flavor:
+A quick sample:
 
 ```jennifer
 use io;
@@ -105,9 +105,8 @@ io.printf("pi=%f\n", m.PI);               # aliased prefix
 - **Without aliasing, the prefix is reserved.** Bare `use os;`
   reserves `os` as a namespace prefix for the rest of the program;
   `func os() {}` then errors with `shadows imported namespace 'os'`.
-- **Repeating a `use` is a silent no-op in the REPL.** In a batch
-  program a duplicate `use` is accepted as a no-op too. Pick one
-  form per program.
+- **Repeating a `use` is a silent no-op**, in the REPL and in a
+  batch program. Pick one form per program.
 - **Module `import` works in the REPL.** `import "./mod.j";` at the
   prompt loads the module and binds its namespace (local `./` / `../`
   paths resolve against the current directory; a bare name walks the
@@ -159,7 +158,7 @@ Circular includes (file A includes file B, B includes A) are detected
 and rejected with an error.
 
 A file that exists only to be `include`d - a part of a larger program or
-module, calling methods and reading constants its includer defines - is named
+module, calling functions and reading constants its includer defines - is named
 `NAME.inc.j` by convention (the shipped `barcode_ecc.inc.j`, `pdf_afm.inc.j`).
 `jennifer lint` recognises the suffix: linted on its own, such a fragment is not
 flagged for names it takes from the including file, which linting that file
@@ -167,8 +166,8 @@ checks instead.
 
 ## Module imports
 
-`import "PATH.j" [as NAME];` loads another `.j` file as a **module** - a
-real boundary, not a textual splice. Where an `include` pastes tokens
+`import "PATH.j" [as NAME];` loads another `.j` file as a **module** with a
+real boundary. Where an `include` pastes tokens
 into the current scope, an `import` runs the referenced file as its own
 program: its top level executes once, in its own scope, before the
 importing file's body runs.
@@ -257,7 +256,7 @@ io.printf("%d\n", config.MAXCONN);      # reads an exported constant
 ```
 
 Testing: a co-located `MODULE_test.j` is a white-box overlay - `jennifer
-test MODULE_test.j` splices `MODULE.j` in first, so its `test*` methods
+test MODULE_test.j` splices `MODULE.j` in first, so its `test*` functions
 reach the module's private names by bare identifier. The module must still
 declare every `use` / `import` it needs itself - the test file's own do not count
 for it, and `jennifer test` refuses to run a module that leans on them. For
@@ -312,17 +311,17 @@ block:
 ```
 
 - **`version`** is a *minimum* floor (`>=major.minor.patch`; newer always
-  satisfies). The `>=` is **mandatory** - it is the only comparator. There is no
-  `>` (strictly-greater), `<`, `~`, or range grammar: a floor names the release that
-  introduced what you need, and any later version satisfies it. A bare
+  satisfies). The `>=` is **mandatory** and is the only comparator; there is no
+  `>` (strictly-greater), `<`, `~`, or range grammar, since a floor names the
+  release that introduced what you need. A bare
   `0.25.0` (no `>=`) is a malformed directive. Any development build of the
   interpreter bypasses the check (a `-dev` build is ahead of the last release);
   only a clean release tag is compared. A file states **one** version floor - a
   duplicate is an error.
 - **`capability`** names a host facility the build must provide: `net` (TCP / UDP /
-  TLS / DNS and the network-backed libraries) or `exec` (`os/exec` external
-  processes). Neither is present on `jennifer-tiny`. List several on one line
-  (`capability: net, exec`) or on separate lines; they accumulate. Query the same
+  TLS / DNS and the network-backed libraries), `exec` (`os/exec` external
+  processes) or `sql` (the `sql` database drivers). None is present on
+  `jennifer-tiny`. List several on one line (`capability: net, exec`) or on separate lines; they accumulate. Query the same
   set at runtime with [`meta.hasCapability`](../libraries/meta.md#capability-query)
   / `meta.CAPABILITIES`.
 

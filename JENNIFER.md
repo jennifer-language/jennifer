@@ -2,9 +2,9 @@
 
 Drop this file into a project where you write **Jennifer** (`.j` files) and
 point your AI coding assistant at it ("we code in Jennifer, see JENNIFER.md").
-It is a self-contained reference to the language so an assistant with no prior
-knowledge of Jennifer can write correct code. It describes the *language*, not
-the interpreter's internals.
+It is a self-contained language reference for an assistant with no prior
+knowledge of Jennifer. It describes the *language*, not the interpreter's
+internals.
 
 Jennifer is a batteries-included, interpreted language (tree-walking interpreter
 written in Go/TinyGo). Source files use the `.j` extension. Run a program with
@@ -12,8 +12,8 @@ written in Go/TinyGo). Source files use the `.j` extension. Run a program with
 
 **Full documentation** - guides, the complete library reference, and an
 alphabetical cheatsheet of every builtin - is hosted at
-<https://jennifer-lang.dev/>. If an assistant has web access, fetch
-the exact signature of any function there. Source and issues:
+<https://jennifer-lang.dev/>; with web access, fetch exact function
+signatures there. Source and issues:
 <https://github.com/jennifer-language/jennifer>.
 
 > This file mirrors the authoritative spec. If something here conflicts with the
@@ -21,22 +21,19 @@ the exact signature of any function there. Source and issues:
 > maintainer.
 
 > **Keep this file in sync with the installed interpreter - it is your job.**
-> This is a copy dropped into a project, so it silently goes stale as the local
-> `jennifer` is upgraded (or was already older than this copy). A JENNIFER.md
-> that does not match the installed release is the most common reason an
-> assistant writes `.j` code the interpreter then rejects. So **you, the
-> assistant, are responsible for keeping this file aligned with the installed
-> release** - do this before you rely on it (and again whenever code you wrote
-> fails with an "unknown"/"not defined"/pragma-version error).
+> This copy goes stale as the local `jennifer` is upgraded (or the installed
+> `jennifer` may already be older than it). A mismatched JENNIFER.md is the most common reason an
+> assistant writes `.j` code the interpreter rejects. **You, the assistant, keep
+> it aligned with the installed release** - before you rely on it, and again
+> whenever code you wrote fails with an "unknown"/"not defined"/pragma-version
+> error.
 >
-> **Cheap self-check first.** Once you have synced this file you leave a marker on
-> its last line recording the exact `jennifer version` string it was fetched for
-> (`<!-- jennifer-md-synced-for: ... -->`). Run `jennifer version` and compare it
-> to that marker: **equal -> this copy is current, do nothing**; **different, or
-> no marker yet (a pristine copy just dropped into the project) -> run the sync
-> below**. That is one command and a string compare, so it is cheap enough to do
-> at the start of any `.j` work; you only sync when the marker actually
-> disagrees.
+> **Cheap self-check first.** After a sync, the last line of this file is a marker
+> recording the exact `jennifer version` string it was synced for
+> (`<!-- jennifer-md-synced-for: ... -->`). Run `jennifer version` and compare:
+> **equal -> current, do nothing**; **different, or no marker yet (a pristine
+> copy) -> run the sync below**. One command and a string compare, so do it at the
+> start of any `.j` work.
 >
 > **Sync:**
 >
@@ -47,9 +44,9 @@ the exact signature of any function there. Source and issues:
 >    `/usr/share/doc/jennifer/JENNIFER.md`, Homebrew under
 >    `$(brew --prefix)/share/doc/jennifer/`, the Windows installer beside
 >    `jennifer.exe`. It was built from the same commit as the installed
->    `jennifer`, so it matches exactly - even a dev build, where `main` may already
->    be ahead - and needs no network. Use it when it exists; otherwise fetch the
->    JENNIFER.md that matches the version from the source repo:
+>    `jennifer`, so it matches exactly (even a dev build, where `main` may be
+>    ahead) and needs no network. Otherwise fetch the matching JENNIFER.md from
+>    the source repo:
 >    - a **development build** - any version containing `-dev` (e.g.
 >      `0.24.0-dev+N.<sha>`) or the bare string `dev` - is ahead of the last
 >      release, so **always** fetch the `main` branch, regardless of the `X.Y.Z`
@@ -70,27 +67,24 @@ the exact signature of any function there. Source and issues:
 >    still tells you the interpreter itself moved.)
 >
 > Match the **installed interpreter**, not the newest release: if the local
-> `jennifer` is `0.24.0` while `0.25.0` is out, fetch the `0.24.0` JENNIFER.md -
-> this file must describe the features the interpreter you actually run has, no
-> more and no less. (No installed copy and no web access? Then note in your reply
-> that you could not verify JENNIFER.md against the installed `jennifer version`,
-> so some guidance here may not match it.)
+> `jennifer` is `0.24.0` while `0.25.0` is out, fetch the `0.24.0` JENNIFER.md. (No installed copy and no web
+> access? Then note in your reply that you could not verify JENNIFER.md against
+> the installed `jennifer version`, so some guidance here may not match it.)
 
 ---
 
 ## The 10 rules that trip people up
 
-Read these first; they are where Jennifer differs from Python/JS/Go and where
-an assistant usually guesses wrong:
+Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
 
 1. **Variables are referenced with a `$` sigil: `$x`.** But the *declaration*
    uses a bare name: `def x as int init 5;` then use `$x`. Writing `def $x` is
    an error; using bare `x` in an expression is an error.
 2. **Constants are referenced bare (no `$`): `MAX`.** They are `UPPER_CASE`.
    Reading one *with* `$` (`$MAX`) is a parse error - the sigil is for
-   mutable variables only. A method may not share a name with a top-level
+   mutable variables only. A function may not share a name with a top-level
    variable or constant either (`def foo ...; func foo() {}` is rejected).
-3. **Method calls are bare and take `()`: `greet()`.** The parser tells a call
+3. **Function calls are bare and take `()`: `greet()`.** The parser tells a call
    from a constant by the `(`.
 4. **`/` is true division and always returns `float`** (like Python 3).
    `5 / 2 == 2.5`. Use `//` for integer/floor division: `5 // 2 == 2`. `%`
@@ -101,7 +95,7 @@ an assistant usually guesses wrong:
    `+Inf`/`NaN`); a mixed `int`/`float` comparison is exact (no lossy
    promotion).
 5. **Identifiers are letter-initial, then letters + digits, <= 64 chars.** No
-   underscores in variable/method/parameter/library names. `myVar`, `var2`,
+   underscores in variable/function/parameter/library names. `myVar`, `var2`,
    `sha256` are fine; `my_var` is not, and a name cannot start with a digit.
    (Constants are the *only* names that take `_`: `MAX_RETRIES`.)
 6. **Statements end with `;`.** Whitespace (including newlines) is
@@ -118,7 +112,7 @@ an assistant usually guesses wrong:
 
 ## Lexical basics
 
-- **Identifiers** (variables, methods, parameters, library names):
+- **Identifiers** (variables, functions, parameters, library names):
   `[A-Za-z][A-Za-z0-9]*`, <= 64 chars. Letter-initial (a digit-initial token is a
   number), then letters and digits; no underscores. Legal: `myVar`, `sha256`,
   `x2`, `toUtf8`.
@@ -127,16 +121,16 @@ an assistant usually guesses wrong:
   Legal: `MAX`, `MAX_RETRIES`, `HTTP_OK`, `SHA256`, `HTTP2`, `SCRAM_SHA256`.
   Illegal: `_MAX`, `MAX_`, `MAX__INT`, `maxInt`, `AES_256` (write `AES256`).
 - **`.j` import paths** are strings and may contain digits, `_`, `/`.
-- **Reserved words** (cannot be a variable, method, parameter, or library name):
+- **Reserved words** (cannot be a variable, function, parameter, or library name):
   `and` `as` `break` `catch` `const` `continue` `def` `defer` `else` `elseif`
   `enum` `errdefer` `exit` `export` `false` `for` `func` `if` `import` `in`
   `include` `init` `len` `list` `map` `match` `not` `null` `of` `or` `repeat`
   `return` `spawn` `struct` `task` `throw` `to` `true` `try` `until` `use` `when`
   `while`, plus the type keywords `int` `float` `string` `bool` `bytes` (legal only
-  after `as`). Note the ones that read like they might be contextual but are **not**:
+  after `as`). These look contextual but are **not**:
   `list` / `map` (unlike `channel`, they are hard keywords even outside `list of T`
   / `map of K to V`), and `to` / `of` / `in` (keywords everywhere, not just in a
-  type or `for`-each). `channel` is the one genuinely contextual word - a type only
+  type or `for`-each). `channel` is the one contextual word - a type only
   in `channel of T`, a valid identifier elsewhere. So `from`/`to` as a parameter
   pair fails on `to`; use `to2` / `hi` / `end` instead.
 - A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`. A
@@ -157,7 +151,7 @@ function value), `channel of T` (a CSP channel between goroutines).
   (`6.022e23`, `1.6e-19`, `1e10` - the exponent alone makes it a float); `_`
   separators in the mantissa only. Overflow (`1e400`) is an error, not `Infinity`;
   underflow (`1e-400`) rounds to `0.0` (a finite value; only the non-finite is banned).
-- **string** literals: two delimiters, one job each. `"..."` is **cooked** -
+- **string** literals: `"..."` is **cooked** -
   escape sequences `\n \r \t \\ \" \' \0 \{ \}`, plus Unicode `\uXXXX` (exactly 4
   hex, the BMP) and `\UXXXXXXXX` (exactly 8 hex, any plane, e.g. `\U0001F600`), are
   processed; a surrogate, an out-of-range code point, or the wrong digit count is
@@ -166,17 +160,16 @@ function value), `channel of T` (a CSP channel between goroutines).
   escape processing at all and no interpolation: every byte to the next `'` is
   literal (backslashes, braces, and newlines included), so `'\d+\.\d+'` is an
   8-char string, `'{"port": 8080}'` is literal JSON, and a multi-line block is
-  just a `'...'` that spans newlines. To put a `'` inside a string, use the cooked
+  a `'...'` that spans newlines. To put a `'` inside a string, use the cooked
   form: `"it's"`. There is no `r"..."` prefix.
   **Reach for raw `'...'` by default when the text carries backslashes or
   braces** - regex patterns (`'\d+\.\d+'`, `'\bword\b'`), Windows paths
   (`'C:\Users\me'`), JSON / template / brace-heavy literals (`'{"a": 1}'`,
-  `'${VAR}'`), and any escape-dense blob. Raw needs **zero** escaping and reads
-  exactly as written, so it is shorter and clearer than the cooked equivalent
-  (`"\\d+\\.\\d+"`, `"C:\\Users\\me"`, `"\{\"a\": 1\}"` - error-prone and hard to
-  read). Only pick cooked `"..."` when you actually need one of its three
-  features: an escape sequence (`\n`, `\t`, `\uXXXX`), a `'` inside the string,
-  or `{expr}` interpolation. Rule of thumb: **if you find yourself typing `\\`,
+  `'${VAR}'`), and any escape-dense blob: raw needs no escaping, unlike the
+  cooked equivalent (`"\\d+\\.\\d+"`, `"C:\\Users\\me"`, `"\{\"a\": 1\}"`).
+  Pick cooked `"..."` only when you need one of its three features: an escape
+  sequence (`\n`, `\t`, `\uXXXX`), a `'` inside the string, or `{expr}`
+  interpolation. Rule of thumb: **if you find yourself typing `\\`,
   `\{`, or `\}`, switch the whole literal to raw `'...'`.**
 - **string interpolation**: inside a cooked `"..."` string, each unescaped
   `{expr}` is a slot - one Jennifer **expression** evaluated in the current scope
@@ -189,8 +182,8 @@ function value), `channel of T` (a CSP channel between goroutines).
   interpolation" form). No `f"..."` prefix - the cooked / raw split is the opt-in.
   Style: keep slots to variables, field / index access, and arithmetic; a
   side-effecting or expensive **call** in a slot is flagged by `lint` (L204) -
-  compute it into a variable first. `undefined` variables in a slot are caught at
-  parse time, exactly like any other reference.
+  compute it into a variable first. An undefined variable in a slot is a
+  parse-time error, like any other reference.
 - **bool**: `true`, `false`. **null**: `null`.
 - **bytes** has no literal: build with `convert.bytesFromString(s, "utf-8")`
   or append into `def b as bytes;` with `$b[] = 65;`.
@@ -211,14 +204,14 @@ function value), `channel of T` (a CSP channel between goroutines).
   **first** variant, payload zeroed. Read the payload only through `match` (no
   `$enum.field`). Names may be any case (an all-`UPPERCASE` name is a constant,
   so don't name a type all-caps).
-- **func** (first-class function value): a bare method name in expression
+- **func** (first-class function value): a bare function name in expression
   position **is** the value; a name followed by `(` is a call.
-  `def f as func init greet;` binds the method `greet` into a value; call it
+  `def f as func init greet;` binds the function `greet` into a value; call it
   through a variable or any function-valued expression: `$f(args)`,
   `$fns[0](x)`, `makeAdder(1)(2)`. Pass and return them like any value
   (`func apply(fn as func, x as int) { return $fn($x); }`). Arity + argument
   types are checked at the call site (the `func` type has no signature).
-  Immutable (copies share the method; value semantics hold). Zero value
+  Immutable (copies share the function; value semantics hold). Zero value
   (`def f as func;`) is a **null** function - calling it errors. No `&NAME`
   sigil and no anonymous-function / closure literal (yet). Powers the
   higher-order `lists` layer (`map` / `filter` / `reduce` / `find` / `any` /
@@ -246,9 +239,9 @@ $x = 7;                       # assignment uses the $ sigil
 - `const` is deep: a const list/map/struct rejects mutation at any depth.
 - Top-level code runs in source order: define a constant **above** the code that
   first reads it. A top-level read before its `def const` is a load-time error; a
-  method may read a constant defined lower down, but not when it is called
+  function may read a constant defined lower down, but not when it is called
   before that definition has run.
-- A method body may not `def` a name that a top-level `def` already uses (no
+- A function body may not `def` a name that a top-level `def` already uses (no
   shadowing, globals included): a helper's loop variable cannot reuse the name
   of a top-level loop variable.
 
@@ -314,7 +307,7 @@ exit;       # terminate the whole program (exit 0); exit EXPR sets the code (Uni
 ```
 
 Conditions must be `bool` (there is no truthiness). `and` / `or` **short-circuit**
-(`true or f()` never calls `f`). `break`/`continue` do not cross a method-call or
+(`true or f()` never calls `f`). `break`/`continue` do not cross a function-call or
 `spawn` boundary.
 
 `match` compares the subject to each `when` value by strict `==`; the first
@@ -355,12 +348,12 @@ func write(path as string) {
 }
 ```
 
-`defer CALL(args);` schedules a **call** (method / namespaced / module call - a
+`defer CALL(args);` schedules a **call** (function / namespaced / module call - a
 non-call is a parse error) to run when the **enclosing block** exits, on every
 path (`return`/`break`/`continue`/`throw`/`exit`/fall-through), **LIFO**.
 Arguments are evaluated at the `defer` line; the call runs at block exit.
 Block-scoped (a `defer` in a loop body runs each iteration); does not cross a
-method or `spawn` boundary. A deferred throw propagates and supersedes a pending
+function or `spawn` boundary. A deferred throw propagates and supersedes a pending
 error (never an `exit`). There is no `finally`.
 
 `errdefer CALL(args);` is the error-path variant: same form, same LIFO stack,
@@ -378,7 +371,7 @@ func connect(addr as string) {
 }
 ```
 
-## Methods
+## Functions
 
 ```jennifer
 use io;
@@ -393,8 +386,8 @@ greet("ada");
 
 - Bare parameter names (`name as string`), referenced inside as `$name`.
 - No return type is declared; the caller's `def x as T init f();` checks it.
-- Methods are **top-level only** (not nested). Recursion works.
-- Method bodies see global variables/constants. A method may not shadow a
+- Functions are **top-level only** (not nested). Recursion works.
+- Function bodies see global variables/constants. A function may not shadow a
   global name, nor share a name with a builtin from an imported library.
 - A program has **no required entry point**: top-level statements run in order.
 
@@ -405,11 +398,10 @@ def xs as list of int init [1, 2, 3];
 $xs[0];            # read -> 1
 $xs[0] = 9;        # write
 $xs[] = 4;         # append (write-only; lists and bytes only)
-# The append form takes ONLY a bare variable - it does not nest through a chain.
-# `$box.items[] = v;` and `$grid[0][] = v;` are parse errors (unlike `$box.items[0] = v;`,
-# which works). For a list in a struct field, append into a local then assign the
-# field once; appending through a copy each time (`$box.items = lists.push($box.items, v)`)
-# is O(n^2). See the accumulator note under "Prefer $xs[]".
+$box.items[] = 5;  # append through a chain: a struct field ...
+$grid[0][] = 6;    # ... or a nested list - in place, like the bare form
+# Never `$box.items = lists.push($box.items, v)` in a loop: that copies the whole
+# list every pass (O(n^2)). See the accumulator note under "Prefer $xs[]".
 
 def m as map of string to int init {"a": 1};
 $m["a"];           # read (missing key is an error - test with maps.has)
@@ -432,25 +424,25 @@ default to the extremes (`$xs[a..]`, `$xs[..b]`, `$xs[..]`). Bounds are strict
 error (it is a copy, so a write through it would do nothing).
 
 **Prefer `$xs[]` over `lists.push` in loops.** The `$xs[] = item;` append sugar
-(lists and bytes) mutates in place via copy-on-write - amortized O(N) to append
+(lists and bytes) mutates in place - amortized O(N) to append
 N items. `$xs = lists.push($xs, item)` returns a *new* list each pass and copies
 the whole list, so the same loop is O(N^2). Use `$xs[]` to build a list element
 by element (a raster, a buffer, a big result set); use `lists.push` only when you
 want a fresh list and keep the original.
 
 **Thread a growing accumulator through a call only as `$acc = f($acc, ...)` in
-a method.** A `list` / `bytes` / struct argument is deep-copied on a call (value
+a function.** A `list` / `bytes` / struct argument is deep-copied on a call (value
 semantics), so passing a growing accumulator into a helper each iteration is
 O(N^2) - the tell is that it scales *backwards*: smaller batches run slower,
 because each call re-copies a larger accumulator. The one exception: inside a
-method, `$acc = addTo($acc, v);` on a local or parameter, outside a `try`, moves
+function, `$acc = addTo($acc, v);` on a local or parameter, outside a `try`, moves
 the old value in (it is dead after the call) and takes the mutated parameter back
 without a copy - O(1) per call. Top-level code (its variables are globals), a
-global, a `try`, or another target copies. Simplest is still to keep the
+global, a `try`, or another target copies. Simplest is to keep the
 accumulator in the caller and append with `$xs[]`:
 
 ```jennifer
-# O(1) per call when called as `$acc = addTo($acc, v);` inside a method;
+# O(1) per call when called as `$acc = addTo($acc, v);` inside a function;
 # O(N) per call (so O(N^2) in a loop) from top-level code or inside a `try`
 func addTo(acc as list of int, v as int) {
     $acc[] = $v;
@@ -716,7 +708,7 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   unset; never sent to the client) for memoizing a compute-once-per-request value.
   `httpd.etag($req, tag)` sets an
   `ETag` and honours a conditional GET (returns `bool`; `true` = a `304` was
-  sent, so stop) - parsing `If-None-Match` (list / `*` / weak `W/`) for you.
+  sent, so stop), parsing `If-None-Match` (list / `*` / weak `W/`).
   `serveFileEtag` / `serveDirEtag` are `serveFile` / `serveDir` plus a cached
   content-hash `ETag` (stable across replicas, unlike an mtime).
   `spawn` several accept loops for a worker pool. Default binary only
@@ -826,10 +818,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   a generated UUID is safe as a security token.
 - **`meta`** - interpreter self-identity: constants `VERSION` / `BUILD` /
   `SYSMODDIR` / `CAPABILITIES` + `hasCapability(name)`, and a small reflection
-  surface - `call(name, args...)` / `defined(name)` (a top-level method by string
+  surface - `call(name, args...)` / `defined(name)` (a top-level function by string
   name) and `callMain` / `definedMain` (resolve against the entry program, so a
   module can dispatch to handlers its host defined).
-- **`testing`** - test-runner primitives: `run(name)` (invoke a user method by
+- **`testing`** - test-runner primitives: `run(name)` (invoke a user function by
   name; the one place `exit` is caught), assertions `assertEqual` / ... /
   `assertThrows` / `assertThrowsWith(name, args, kind)` (throw `Error{kind:
   "assertion"}`), `results` / `reset`, and
@@ -1017,7 +1009,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Stateless, pin-keyed: `gpio.setup(pin, "in"/"out")` / `write(pin, 0/1)` /
   `read(pin)` / `release(pin)`. Root `/sys/class/gpio`, overridable via the
   `JENNIFER_GPIO_BASE` env var (`os.setEnv`, e.g. for a mock). Off a
-  GPIO-capable host, calls throw `Error{kind: "gpio"}` clearly. Both binaries.
+  GPIO-capable host, calls throw `Error{kind: "gpio"}`. Both binaries.
 - **`rest`** - an ergonomic REST layer over `http` + `json`. Build a
   value-semantic `rest.client(baseUrl)` (`Client{baseUrl, headers, options}`,
   `options` an `http.Options` policy), then `rest.get(c, path, query)` / `post(c,
@@ -1041,8 +1033,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
   on `encoding`'s `uri-percent` / `uri-form` codecs.
 - **`validate`** - declarative validation of a `map of string to string` (a form
-  body, query, config) against a rule set, returning a structured failure list
-  instead of ad-hoc `if` checks. Rules compose per field as value-semantic
+  body, query, config) against a rule set, returning a structured failure list. Rules compose per field as value-semantic
   descriptors: `validate.required` / `isInt` / `isFloat` / `isBool` / `min(n)` /
   `max(n)` / `minLen(n)` / `maxLen(n)` / `pattern(re)` / `email` / `url` /
   `datetime(format)` / `oneOf(list)` / `noneOf(list)` / `password(schema)` /
@@ -1059,8 +1050,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   layer auth / TLS with `bearer(c, token)` / `basic` / `header` / `withCA` /
   `insecure`, then `graphql.query(c, query, variables)` POSTs `{"query", "variables"}`
   and returns the decoded `json.Value` (result under `/data`; `variables` a
-  `json.Value`, empty `json.map()` for none). The rule it gets right: a GraphQL
-  execution error is an **HTTP 200 with a top-level `errors` array**, so `query`
+  `json.Value`, empty `json.map()` for none). A GraphQL execution error is an
+  **HTTP 200 with a top-level `errors` array**, so `query`
   raises `Error{kind: "graphql"}` (a non-2xx also raises). To read partial data,
   `graphql.tryQuery(...)` returns the raw envelope (raises only on non-2xx);
   inspect with `hasErrors` / `errorMessages`. `queryNamed` / `tryQueryNamed` add a
@@ -1227,7 +1218,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (`screen.newScreen(rows, cols)`) drawn with `screen.text` / `textColor` / `box` /
   `fill` / `hline` / `vline` / `set`, ANSI control builders (`screen.clear` /
   `moveTo(x, y)` / `hideCursor` / `enterAlt` / ...), and a flicker-free
-  `screen.render(buf)` / `diff(old, new)` paint loop. Draw inside a method as
+  `screen.render(buf)` / `diff(old, new)` paint loop. Draw inside a function as
   `$buf = screen.set($buf, ...);` (updates in place); elsewhere (top level, in a
   `try`) each call copies the whole buffer, so batch a frame with
   `screen.setMany(buf, list of screen.Plot{x, y, cell})` / `textMany(buf, list of
@@ -1592,7 +1583,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `header` / `divider` / `contextBlock` / `fieldsSection(m, fields)` /
   `actionsBlock(m, buttons)` (+ `button(text, url)`; each returns a fresh
   `Message`), and post with `sendMessage(webhookUrl, m)` (`render(m)` gives the
-  JSON). Text is JSON-escaped for you; both return the `http.Response`. Over `http`
+  JSON). Text is JSON-escaped; both return the `http.Response`. Over `http`
   + `json`. **Default `jennifer` binary only** (`net`).
 - **`discord`** - post to a Discord channel Webhook over `http` (sibling of
   `gotify` / `slack`). `discord.send(webhookUrl, content)` posts a plain message.
@@ -1601,7 +1592,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `embedField(m, name, value, inline)` / `embedFooter` / `embedAuthor`, override
   identity with `username(m, name)` / `avatar(m, url)` (each returns a fresh
   `Message`), and post with `sendMessage(webhookUrl, m)` (`render(m)` gives the
-  JSON). Text is JSON-escaped for you; both return the `http.Response`. Over `http`
+  JSON). Text is JSON-escaped; both return the `http.Response`. Over `http`
   + `json`. **Default `jennifer` binary only** (`net`).
 - **`telegram`** - a Telegram Bot API client over `http` + `json`.
   `telegram.bot(token)` (or `botWith(token, baseUrl)`) -> `Bot`. Send with
@@ -1754,8 +1745,8 @@ io.printf("%s\n", json.encode($users));   # [{"name":"ada","age":36},...]
 - Used `//` for a comment? -> that is floor division; use `#`.
 - Expected `5 / 2` to be `2`? -> it is `2.5`; use `//`.
 - Used `&&`/`||`/`!`? -> use `and`/`or`/`not`.
-- Used a digit or `_` in a variable name? -> not allowed (only constants take
-  `_`).
+- Started a variable name with a digit, or used `_` in it? -> not allowed
+  (interior digits are fine; only constants take `_`).
 - Used `x += 1` or `x++`? -> write `$x = $x + 1;`.
 - Called `int(x)` / `string(x)`? -> use `convert.toInt(x)` / `toString`.
 - Read a map key that might be absent? -> guard with `maps.has($m, key)`.

@@ -1,8 +1,7 @@
 # `os` - operating-system glue
 
 Enable with `use os;`. Every name lives behind the `os.` prefix
-(`os.PLATFORM`, `os.getEnv`). Nothing here is reachable as a bare
-identifier.
+(`os.PLATFORM`, `os.getEnv`).
 
 ```jennifer
 use io;
@@ -15,9 +14,8 @@ io.printf("home:         %s\n", os.getEnv("HOME"));
 io.printf("args:         %d arguments\n", len(os.ARGS));
 ```
 
-The library splits cleanly: **immutable per-run host facts are
-uppercase constants** (no arguments to take, no reason to be a
-function); **operations that take arguments are functions**.
+**Immutable per-run host facts are uppercase constants**;
+**operations that take arguments are functions**.
 
 Process exit is the language statement `exit EXPR;`, not an `os`
 function - see
@@ -47,10 +45,9 @@ function - see
 ### Signals
 
 `os.catchSignal(name)` opts into trapping a signal, and `os.gotSignal(name)` polls
-whether it has arrived (clearing the flag). The model is **cooperative, never
-preemptive**: a delivered signal only sets a flag; your program reacts at a point
-of its own choosing, so no Jennifer code runs in a signal context and the
-value-semantics guarantees hold. `name` is one of `"int"`, `"term"`, `"hup"`,
+whether it has arrived (clearing the flag). The model is **cooperative**: a
+delivered signal only sets a flag and the program reacts where it polls, so no
+Jennifer code runs in a signal context and value semantics hold. `name` is one of `"int"`, `"term"`, `"hup"`,
 `"usr2"` (letters-only, lowercased, no `SIG` prefix). The main use is a
 **graceful shutdown**:
 
@@ -69,15 +66,14 @@ shutdownCleanly();                       # close connections, remove temp files,
 **Trapping is opt-in per signal**, so defaults survive: until you call
 `os.catchSignal("int")`, Ctrl-C still terminates the program as usual (a script
 that never traps SIGINT is stopped by Ctrl-C; one that traps it must poll). A
-signal never caught is never pending, so a stray `os.gotSignal` is harmless. Note
-the trade-off: a program that catches a signal and then never polls will not see
-it (polling latency is real and explicit).
+signal never caught is never pending, so a stray `os.gotSignal` is harmless. A
+program that catches a signal and never polls will not see it.
 
 **`"usr1"` is reserved** for interpreter diagnostics and cannot be caught:
 `kill -USR1 <pid>` makes the interpreter print a one-shot snapshot to stderr and
-keep running - the answer to "my program is stuck in a loop, *where*?". Use
+keep running, showing where a stuck program is. Use
 `"usr2"` for a program-defined signal. The snapshot is a fixed, labeled block
-(delivered at the next loop / method-call boundary):
+(delivered at the next loop / function-call boundary):
 
 ```
 === jennifer diagnostics (SIGUSR1) ===
@@ -97,15 +93,15 @@ memory:     heap 12.4 MiB (sys 68.0 MiB), 14 GCs
 - **memory** - runtime heap in use, memory obtained from the OS, and GC count -
   the "is it growing while stuck?" read.
 
-A method-name **call stack** and loop depth are a planned addition (they need
+A function-name **call stack** and loop depth are a planned addition (they need
 call-frame tracking in the interpreter). The dump rides the Unix `SIGUSR1`
 wiring, so it is Unix-only - but it works on **both** binaries there, `jennifer`
 and `jennifer-tiny` (subject to the scheduler note below); `kill -USR1` never
 terminates either binary.
 
-Signals are **Unix-only**, and work on both binaries on a Unix host (`SIGUSR1` /
+Signals are **Unix-only** and work on both binaries on a Unix host (`SIGUSR1` /
 `SIGUSR2` / `SIGHUP` do not exist on Windows, where `os.catchSignal` is a
-positioned error rather than a crash). Aborting a script is unaffected: Ctrl-C on
+positioned error). Aborting a script is unaffected: Ctrl-C on
 Windows terminates through the OS, not through this library.
 
 **`jennifer-tiny` scheduler note.** The TinyGo binary runs a **cooperative**
@@ -120,9 +116,8 @@ preemptive scheduler and has no such latency.
 
 ### Terminal detection
 
-`os.isTerminal(stream)` answers "is this standard stream an interactive
-terminal?" - the usual gate for deciding whether to emit ANSI colour or a
-progress spinner. `stream` is `"stdout"`, `"stderr"`, or `"stdin"`; any
+`os.isTerminal(stream)` reports whether a standard stream is an interactive
+terminal, the usual gate for ANSI colour or a progress spinner. `stream` is `"stdout"`, `"stderr"`, or `"stdin"`; any
 other string, or a non-string, is an error.
 
 ```jennifer
@@ -132,19 +127,17 @@ def coloured as bool init os.isTerminal("stdout");   # false when piped or redir
 
 It reports `true` for a terminal and `false` for a pipe, a file redirect, or
 a redirect from a non-terminal character device such as `/dev/null` or
-`/dev/zero` - so it also works as an "am I interactive? (may I prompt?)" gate,
-not just a color gate. The default binary uses a real terminal probe
-(`golang.org/x/term`); a stream that can't be inspected reports `false` (the
-conservative answer: when in doubt, don't emit escapes or a prompt). On
+`/dev/zero`, so it also works as a "may I prompt?" gate. The default binary
+uses a real terminal probe (`golang.org/x/term`); a stream that can't be
+inspected reports `false`. On
 `jennifer-tiny`, which excludes `x/term`, detection falls back to the
 character-device mode bit - correct for a pty, but a `/dev/null` redirect reads
 `true` there; use `io.eof()` to gate a read on the tiny build.
 
 ### Flag inspection
 
-`os.hasFlag` and `os.flag` are convenience helpers for the most common
-"did the user pass `--verbose`?" and "what value follows `--port`?"
-patterns. They are **exact-match only**:
+`os.hasFlag` and `os.flag` cover "did the user pass `--verbose`?" and
+"what value follows `--port`?". They are **exact-match only**:
 
 - `os.hasFlag("--port")` is true if `"--port"` appears as a standalone
   element of `os.ARGS`. It is **false** if `"--port=8080"` appears
@@ -152,10 +145,9 @@ patterns. They are **exact-match only**:
 - `os.flag("--port")` returns the element immediately after `"--port"`
   if there is one, else `""`. The `--foo=bar` form is not parsed.
 
-This is deliberately minimal. Real CLI parsing (combined short flags
-like `-rf`, `--foo=bar`, repeated flags, subcommands) belongs to a
-future `cli` library; if you need any of it now, walk `os.ARGS`
-yourself.
+Real CLI parsing (combined short flags like `-rf`, `--foo=bar`,
+repeated flags, subcommands) belongs to a future `cli` library; for
+now, walk `os.ARGS` yourself.
 
 ```jennifer
 use io;
@@ -175,8 +167,7 @@ io.printf("listening on %s\n", $port);
 ### External programs
 
 `os.run` and the `os.spawn` / `os.wait` / `os.poll` / `os.kill` quartet
-let Jennifer programs execute other programs. Two struct types are
-introduced for this:
+execute other programs. The library registers two structs:
 
 ```jennifer
 def struct os.Result {                  # not actually written by users -
@@ -209,8 +200,7 @@ io.printf("exit: %d\n", $r.exitCode);
 
 **Feeding stdin.** An optional second argument - a `string` or `bytes` - is
 written to the child's standard input, which is then closed (the child sees
-EOF). This drives a filter (`sort`, `jq`, `gzip`) or any program that reads
-stdin, in one call:
+EOF). This drives a filter (`sort`, `jq`, `gzip`) in one call:
 
 ```jennifer
 def up as os.Result init os.run(["tr", "a-z", "A-Z"], "shout");
@@ -223,12 +213,12 @@ io.printf("%s", $sorted.stdout);             # apple / banana / cherry
 It is **deadlock-free**: the whole input is buffered up front and the output is
 drained as the child runs, so neither side blocks on a full pipe. The captured
 output is still capped at 16 MiB per stream (a large input can produce a larger
-output, which truncates with the usual marker). This is the "feed all input, read
-all output" one-shot form; a persistent, interleaved stdin/stdout session on a
-spawned process is a separate future capability.
+output, which truncates with the usual marker). This is a one-shot form; a
+persistent, interleaved stdin/stdout session on a spawned process is future
+work.
 
-`os.spawn(argv)` is the asynchronous form. It returns immediately
-with an `os.Process` handle. Drain the streams with `os.wait`
+`os.spawn(argv)` is the asynchronous form and returns an `os.Process`
+handle immediately. Drain the streams with `os.wait`
 (blocking) or check completion with `os.poll` (non-blocking):
 
 ```jennifer
@@ -243,8 +233,8 @@ io.printf("done: exit=%d\n", $r.exitCode);
 `os.wait` is **idempotent** - calling it again on the same handle
 returns the same `os.Result` immediately. If the child did not
 terminate cleanly (an I/O failure draining its streams, not a non-zero
-exit), `os.wait` raises a catchable error rather than reporting a false
-exit code 0. `os.kill($p)` sends SIGTERM (falling back to a hard kill on
+exit), `os.wait` raises a catchable error instead of reporting exit
+code 0. `os.kill($p)` sends SIGTERM (falling back to a hard kill on
 Windows, which has no SIGTERM); a subsequent `os.wait` returns whatever
 the OS reports for the terminated child.
 
@@ -254,9 +244,9 @@ and `os.spawn`: a child that writes more has the excess dropped and a
 can't grow the interpreter heap without bound.
 
 **Spawned child stdio.** By default `os.spawn` **captures** both streams (so
-`os.wait` returns them, like `os.run`). A child you never `os.wait` - the
-spawn-and-poll pattern - then produces no visible output, and a child that fails
-at startup leaves its diagnostics only in the capture buffer. The optional
+`os.wait` returns them, like `os.run`). A child you never `os.wait` then
+produces no visible output, and a child that fails at startup leaves its
+diagnostics only in the capture buffer. The optional
 `options` map redirects each stream independently; each value is one of:
 
 | `"stdout"` / `"stderr"` value | Effect |
@@ -276,9 +266,9 @@ def q as os.Process init os.spawn(["worker", "--job", $id], {"stderr": "/var/log
 
 **The handle vs the pid.** `os.wait` / `os.poll` / `os.kill` / `os.release` take
 the whole `os.Process` and use its `handle` (a monotonic registry id). `$p.pid`
-is the **real OS pid** - use it for logs, `ps`, `/proc`, or an out-of-band signal.
-The two differ on purpose: the OS recycles a pid once a child is reaped, so the
-registry keys on the stable handle, never the pid.
+is the **real OS pid**, for logs, `ps`, `/proc`, or an out-of-band signal. The
+OS recycles a pid once a child is reaped, so the registry keys on the stable
+handle instead.
 
 Because a handle (and its captured output) stays live for idempotent
 `os.wait`, a long-running program that spawns many children should
@@ -293,18 +283,16 @@ def r as os.Result init os.wait($p);
 os.release($p);   # free the handle in a per-job server loop
 ```
 
-**No shell parsing.** `argv` is always a list - Jennifer never
-concatenates a command string and hands it to a shell. If you
-genuinely want shell parsing, pass `["sh", "-c", $cmd]` explicitly so
-the shell hop is visible at the call site. This avoids the
-shell-injection footguns that plague languages where the easy form is
-the unsafe form.
+**No shell parsing.** `argv` is always a list; Jennifer never hands a
+command string to a shell. For shell parsing, pass `["sh", "-c", $cmd]`
+so the shell hop is visible at the call site. This avoids shell
+injection by default.
 
 **Non-zero exit codes are not errors.** A failed exit (`exit 1` from
 the child) populates `$r.exitCode` with the value; the caller
 branches on it. Only *boundary* failures - program not found, not
 executable, permission denied, fork/exec failure - are positioned
-runtime errors at the call site (`Error{kind: "runtime"}`, catchable). So a
+runtime errors at the call site (`Error{kind: "runtime"}`, catchable). An
 "is this tool installed?" probe wraps the call:
 
 ```jennifer
@@ -324,16 +312,12 @@ interpreter's memory; for streaming workloads, redirect to a file
 via `["sh", "-c", "cmd > /tmp/out"]` or wait for a future streaming
 variant.
 
-**TinyGo limitation.** The `jennifer-tiny` binary (TinyGo build)
-does not support `os.run`, `os.spawn`, `os.wait`, `os.poll`, or
-`os.kill` - TinyGo's runtime hasn't implemented the underlying
-`os/exec` syscalls. Calling these functions on `jennifer-tiny`
-returns a friendly runtime error pointing at the default `jennifer`
-binary. The default `jennifer` (`make build` produces both, or
-`make build-go` for just it) supports the full exec surface. This
-was the first user-visible gap in Jennifer's two-binary story;
-`net` hit the same boundary and adopted the same
-friendly-error pattern.
+**TinyGo limitation.** `jennifer-tiny` does not support `os.run`,
+`os.spawn`, `os.wait`, `os.poll`, or `os.kill`: TinyGo's runtime does not
+implement the underlying `os/exec` syscalls. On `jennifer-tiny` these
+return a friendly runtime error pointing at the default `jennifer`
+binary (`make build` produces both, `make build-go` only the default).
+`net` uses the same friendly-error pattern.
 
 ## Constants
 
@@ -343,7 +327,7 @@ friendly-error pattern.
 | ------------- | ------ | ----------------------------------------------------------------------------------------- |
 | `os.PLATFORM` | string | Operating-system name as reported by the runtime: `"linux"`, `"darwin"`, `"windows"`, ... |
 | `os.ARCH`     | string | CPU architecture: `"amd64"`, `"arm64"`, `"wasm"`, ...                                     |
-| `os.NCPU`     | int    | Number of logical CPUs usable by the running process (`runtime.NumCPU`). Portable stdlib, so it stays OS-independent - it reports usable parallelism, not a raw core count: on `jennifer-tiny` (cooperative single-thread scheduler) it is `1`. For richer host details (CPU model, RAM), read the OS's own files from Jennifer, e.g. `/proc/cpuinfo` via `fs` on Linux, so the interpreter stays portable. |
+| `os.NCPU`     | int    | Number of logical CPUs usable by the running process (`runtime.NumCPU`): usable parallelism, not a raw core count, so `1` on `jennifer-tiny` (cooperative single-thread scheduler). For CPU model, RAM etc., read the OS's own files (e.g. `/proc/cpuinfo` via `fs` on Linux). |
 | `os.EOL`      | string | Platform line ending. `"\n"` on Unix-likes, `"\r\n"` on Windows.                          |
 | `os.DIRSEP`   | string | Path-component separator: `"/"` on Unix-likes, `"\\"` on Windows.                         |
 | `os.PATHSEP`  | string | PATH-list separator (between entries in `$PATH`): `":"` on Unix-likes, `";"` on Windows.  |
@@ -354,8 +338,7 @@ friendly-error pattern.
 | --------- | -------------- | -------------------------------------------------------------------------------------------------- |
 | `os.ARGS` | list of string | Command-line arguments passed to the running program. Index 0 is the script path, the rest follow. |
 
-Interpreter-self-identity constants (`VERSION`, `BUILD`) live in
-[`meta`](meta.md) since they describe the interpreter binary itself
-rather than the host environment.
+Interpreter identity constants (`VERSION`, `BUILD`) live in
+[`meta`](meta.md).
 
 See also: [meta.md](meta.md), [../user-guide/index.md](../user-guide/index.md), [../user-guide/imports.md](../user-guide/imports.md), [../user-guide/style-guide.md](../user-guide/style-guide.md), [index.md](index.md).

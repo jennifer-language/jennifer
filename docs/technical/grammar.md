@@ -21,13 +21,11 @@ They describe the same language and must be kept in sync - when the syntax
 changes, update **both**, in the same commit that changes the parser. The
 parser (`internal/parser/parser.go`) is the source of truth.
 
-The semantic rules no grammar can express follow here.
-
 **Semantic notes that aren't expressed in the grammar:**
 
 - Two separate keywords: `def` introduces a binding (variable or constant);
-  `func` introduces a method. There's no longer any lookahead disambiguation
-  in this area - the parser dispatches purely on the keyword.
+  `func` introduces a function. The parser dispatches on the keyword alone,
+  with no lookahead.
 - The name in `defineStmt` is a bare `IDENT`. Writing `def $x as int`
   produces a parse error with a hint to drop the `$` (it's reserved for
   use-site references).
@@ -54,7 +52,7 @@ The semantic rules no grammar can express follow here.
   (`#!/usr/bin/env -S jennifer run`).
 - Floats always display with a `.` so the type stays visible: `5.0` prints as
   `"5.0"`, not `"5"`. See `interpreter.DisplayFloat`.
-- Methods may only be defined at the top level. Variable definitions, assignments,
+- Functions may only be defined at the top level. Variable definitions, assignments,
   control flow, and expression statements may appear at the top level or inside
   a block.
 - Each `block` (`{...}`) introduces a new lexical scope. A binding is visible
@@ -63,24 +61,24 @@ The semantic rules no grammar can express follow here.
 - `for` opens a private scope for its `init`, `cond`, `step`, and body so the
   init variable does not leak out of the loop.
 - There is **no required entry point**. Top-level statements execute in source
-  order. Methods are hoisted (collected before any top-level statement runs)
+  order. Functions are hoisted (collected before any top-level statement runs)
   so they can be called regardless of textual order.
-- Method bodies inherit the global scope as their outer scope, so top-level
-  variables are visible inside methods (subject to the no-shadowing rule).
-- Method parameters use bare `IDENT` (no `$`), same as variable definitions.
+- Function bodies inherit the global scope as their outer scope, so top-level
+  variables are visible inside functions (subject to the no-shadowing rule).
+- Function parameters use bare `IDENT` (no `$`), same as variable definitions.
   Writing `func f($x as int)` errors with "parameter name has no `$`".
 - Call sites type-check arguments against the declared parameter types at
   runtime; both arity and per-argument kind are checked.
-- Method return values are dynamically typed - methods don't declare a
+- Function return values are dynamically typed - functions don't declare a
   return type, and callers receive whatever value the body returns (or
   `null` for a bare `return;` or a body that falls off the end).
 - A bare `IDENT` in expression position is parsed as a `CallExpr` if
   immediately followed by `(`, otherwise as a `ConstRefExpr`. At runtime
   the latter resolves to a constant in scope, else to a **first-class
-  function value** if the name is a top-level method (the `func` type), else
+  function value** if the name is a top-level function (the `func` type), else
   a name that resolves to a variable produces a helpful error ("use
   `$name`"); anything else is an undefined-name error.
-- A postfix `(...)` on any value expression (not a bare method-name call,
+- A postfix `(...)` on any value expression (not a bare function-name call,
   which parseCallTail consumes) is a **`CallValueExpr`** - a call through a
   function value: `$f(x)`, `$fns[0](x)`, `makeAdder(1)(2)`. The callee must
   evaluate to a non-null `func`; arity and argument kinds are checked at the
@@ -92,16 +90,16 @@ The semantic rules no grammar can express follow here.
 - **Maps preserve insertion order**: iteration via `for (def k in $m)`
   visits keys in the order they were first inserted; updating an
   existing key does not move it; appending a new key extends. Reads of
-  missing keys are runtime errors - use `has($m, key)` to test.
+  missing keys are runtime errors - use `maps.has($m, key)` to test.
 - **Lists and maps are value-typed**: `$ys = $xs;` copies, function
   parameters bind by copy, and `const` is deep (constness extends to
   every nested element). Aliasing is impossible; mutations through
   `$xs[i] = ...` only affect that binding.
-- **Index assignment** (`$xs[i][j] = ...`) walks the chain on a copy of
-  the root binding's value, applies the write, and stores the result
-  back via `env.Assign`. The const-target check fires once against the
-  root binding; deep constness falls out of the value-semantics
-  invariant.
+- **Index assignment** (`$xs[i][j] = ...`) walks the l-value chain and
+  writes into the root binding's own backing **in place** - safe because
+  every store site takes a private copy, so no other live binding aliases
+  it. The const-target check fires once against the root binding; deep
+  constness falls out of the value-semantics invariant.
 - **Iteration** (`for (def x in $coll)`) opens a fresh scope per
   iteration. The loop variable is bound to each element (list) or key
   (map). The collection is evaluated once at loop entry; concurrent
@@ -115,11 +113,9 @@ The semantic rules no grammar can express follow here.
 
 ## Parser (`internal/parser`)
 
-Recursive descent with precedence climbing for binary operators. The
-grammar the parser implements is documented twice: as
-[EBNF](grammar_ebnf.md) (the shapes) and as [PEG](grammar_peg.md) (the
-decision order); the PEG is the closer mirror of the code, down to which
-`case` order and peeks are load-bearing.
+Recursive descent with precedence climbing for binary operators. Of the two
+grammar files, the [PEG](grammar_peg.md) mirrors the code more closely, down
+to which `case` order and peeks are load-bearing.
 
 The exported entry points (`Parse`, `ParseTokens`) return a raw
 `*Program` without running the scope-analysis pass. Callers
@@ -133,13 +129,14 @@ below.
 
 | Node                    | Kind | Fields                                                                                                     |
 | ----------------------- | ---- | ---------------------------------------------------------------------------------------------------------- |
-| `Program`               | root | `Imports []*ImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `Enums []*EnumDef`, `TopLevel []Stmt`, `NumGlobals int`                 |
+| `Program`               | root | `Imports []*ImportStmt`, `ModuleImports []*ModuleImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `Enums []*EnumDef`, `PendingEnumMatches []*MatchStmt`, `TopLevel []Stmt`, `NumGlobals int`                 |
 | `ImportStmt`            | stmt | `Name`, `AsName` (empty unless `use NAME as ALIAS;`)                                                       |
-| `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`                                                                    |
+| `ModuleImportStmt`      | stmt | `Path`, `AsName` (empty unless `import "path.j" as NAME;`; the prefix is then the file stem)               |
+| `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`, `Exported` (`export func`), plus the `GlobalSafe` / `ReturnsOwned` analysis flags |
 | `Param`                 | -    | `Name`, `Type`                                                                                             |
-| `StructDef`             | stmt | `Name`, `Fields []StructField` (top-level only, hoisted before execution)                           |
+| `StructDef`             | stmt | `Name`, `Fields []StructField`, `Exported` (top-level only, hoisted before execution)                |
 | `StructField`           | -    | `Name`, `Type` (each field of a struct definition)                                                         |
-| `EnumDef`               | stmt | `Name`, `Variants []EnumVariant` (top-level only, hoisted; a sum type)                              |
+| `EnumDef`               | stmt | `Name`, `Variants []EnumVariant`, `Exported` (top-level only, hoisted; a sum type)                   |
 | `EnumVariant`           | -    | `Name`, `Fields []StructField` (payload-less when empty)                                            |
 | `Block`                 | stmt | `Stmts []Stmt`, `NumSlots int` (hint used by `NewEnvironmentSized`)                                |
 | `DefineStmt`            | stmt | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit), `Slot int` (-1 = unresolved) |
@@ -148,8 +145,13 @@ below.
 | `FieldAssignStmt`       | stmt | `Target *FieldAccessExpr`, `Value Expr` - `$p.field = ...`                                         |
 | `TryStmt`               | stmt | `Body *Block`, `CatchName`, `CatchBody *Block`, `CatchSlot` (slot for `CatchName` in the handler frame) - `try { ... } catch (NAME) { ... }`                |
 | `ThrowStmt`             | stmt | `Value Expr` - `throw EXPR;`                                                                       |
-| `AppendStmt`            | stmt | `Target *VarExpr`, `Value Expr` - `$xs[] = item;`                                                     |
+| `AppendStmt`            | stmt | `Target Expr` (the bare `VarExpr` or an index / field chain rooted on one), `Value Expr` - `$xs[] = item;`, `$s.items[] = item;` |
 | `ReturnStmt`            | stmt | `Value Expr` (nil for bare `return;`)                                                                      |
+| `BreakStmt`             | stmt | - `break;`                                                                                                 |
+| `ContinueStmt`          | stmt | - `continue;`                                                                                              |
+| `ExitStmt`              | stmt | `Code Expr` (nil for bare `exit;`)                                                                         |
+| `RepeatStmt`            | stmt | `Body *Block`, `Cond Expr` - `repeat { ... } until (cond);`                                                |
+| `DeferStmt`             | stmt | `Call Expr` (a `CallExpr` / `QualifiedCallExpr`), `OnError` (true for `errdefer`)                          |
 | `IfStmt`                | stmt | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block`                            |
 | `MatchStmt`             | stmt | `Subject Expr`, `Arms []MatchArm`, `Else *Block` (nil if absent) - `match (EXPR) { when ... else ... }`     |
 | `MatchArm`              | node | `Values []Expr` (value arm, compared by `==`) OR `Variant`/`Bind`/`BindSlot` (enum-pattern arm, set by the resolver), `Body *Block`         |
@@ -160,13 +162,16 @@ below.
 | `IntLit`                | expr | `Value int64`                                                                                              |
 | `FloatLit`              | expr | `Value float64`                                                                                            |
 | `StringLit`             | expr | `Value string`                                                                                             |
+| `InterpStringExpr`      | expr | `Parts []InterpPart` (each a literal chunk `Lit` or a slot `Expr`) - `"total: {$n}"`                       |
 | `BoolLit`               | expr | `Value bool`                                                                                               |
 | `NullLit`               | expr | -                                                                                                          |
 | `VarExpr`               | expr | `Name` (no `$`), `Depth`, `Slot` (both -1 = unresolved, use name lookup) - mutable-variable reference |
 | `ConstRefExpr`          | expr | `Name`, `Depth`, `Slot` (-1 = unresolved) - bare-IDENT reference; interpreter expects it to resolve to a constant |
-| `CallExpr`              | expr | `Callee`, `Args []Expr`, `Method *MethodDef` (pre-resolved pointer for hoisted user methods; nil for builtins and resolver-less paths) |
+| `CallExpr`              | expr | `Callee`, `Args []Expr`, `Method *MethodDef` (pre-resolved pointer for hoisted user functions; nil for builtins and resolver-less paths), `MoveArg` (1 + index of an argument bound by move; 0 for none) |
 | `CallValueExpr`         | expr | `Callee Expr`, `Args []Expr` (a call through a function value: `$f(x)`; the callee evaluates to a `func` at run time)                |
 | `LenExpr`               | expr | `Operand Expr` - `len(EXPR)` language built-in                                                     |
+| `SpawnExpr`             | expr | `Body []Stmt`, `Captures *SpawnCaptures` (globals the body reads; set by the interpreter) - `spawn { ... }` |
+| `PreEval`               | expr | `Value any` - runtime-only: a `defer` argument already evaluated at the defer site                 |
 | `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr`, `Fn any` (pre-resolved `Builtin`; nil for resolver-less paths)     |
 | `QualifiedConstRefExpr` | expr | `Prefix`, `Name`, `Const any` (pre-resolved `Value`; nil for resolver-less paths)                    |
 | `BinaryExpr`            | expr | `Op BinaryOp`, `Left`, `Right`, `Folded Expr` (pre-computed fold result; nil for runtime-only exprs) |
@@ -198,8 +203,8 @@ parse-time diagnostics:
   parallel with the AST and reports any `VarExpr` / `AssignStmt`
   whose name isn't in scope.
 - **Shadowing** - a `def` (variable or constant) whose name is
-  already visible in an enclosing scope. Same rule the runtime's
-  name-based `Define` used to enforce; now caught earlier.
+  already visible in an enclosing scope (the rule the runtime's
+  name-based `Define` enforces, caught earlier).
 
 The resolver is idempotent: running twice on the same AST produces
 the same annotations. `Interpreter.Run` calls it before any structural
@@ -211,11 +216,11 @@ the `-1` sentinel and using name-based Environment methods.
 **Scope-frame model.** The resolver tracks scopes as a stack. Each
 frame carries a name -> slot map and a `count` allocator. A frame is
 `isRoot=true` at the boundaries where the runtime chain jumps
-directly to globals (the globals frame itself, and a method's
+directly to globals (the globals frame itself, and a function's
 callFrame). Reference lookup walks innermost-out, respects those
 root boundaries, and terminates at globals.
 
-Three scope-shape carve-outs where the resolver deliberately deviates
+Three scope-shape carve-outs where the resolver deviates
 from "one AST scope = one runtime frame" to stay aligned with the
 interpreter:
 
@@ -231,9 +236,9 @@ interpreter:
   `(Depth=-1, Slot=-1)` and the interpreter falls back to name-based
   lookup at runtime.
 
-**Method-call pre-resolution.** The resolver also pre-fills
+**Function-call pre-resolution.** The resolver also pre-fills
 `CallExpr.Method` whenever the callee names a hoisted top-level user
-method. The interpreter's `evalCall` consults the pointer first and
+function. The interpreter's `evalCall` consults the pointer first and
 skips the `i.methods` hash lookup on every recursive call. Builtins
 keep `Method = nil` because the namespaced / global registries need
 the runtime `use`-activation check.
@@ -243,8 +248,10 @@ the runtime `use`-activation check.
 happens on the interpreter side, not in the parser resolver, because
 the namespace / import tables don't exist until `processImports` has
 run. `Interpreter.resolveQualifiedRefs` is a second pass invoked from
-`Interpreter.Run` after `processImports` that walks the same AST and
-stamps the exact `Builtin` / `Value` a call would otherwise look up.
+`Interpreter.Run` after `processImports` and `loadModuleImports` that walks
+the same AST and stamps the exact `Builtin` / `Value` a call would otherwise
+look up - module-alias references included (`m.CONST` caches its value,
+`m.fn(...)` its resolved module function).
 
 **Constant folding.** `internal/parser/fold.go` runs from
 inside `Resolve` as a post-step on `BinaryExpr` / `UnaryExpr`. When

@@ -56,8 +56,7 @@ catchable `Error{kind: "transport"}` naming `what` when `n` is negative or over 
 cap. A wire client calls it on a peer-declared body / literal size before reading,
 and on an accumulating buffer's length inside a read loop, so a hostile or desynced
 server cannot drive the recover-less interpreter to an unbounded allocation. One
-shared constant and check, so the whole client suite caps identically instead of
-each module inventing its own.
+shared constant and check, so every client caps identically.
 
 ```jennifer
 def bodySize as int init decodeContentBodySize($frame);

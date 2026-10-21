@@ -19,8 +19,8 @@ Runnable: [`examples/modules/acme_demo.j`](https://github.com/jennifer-language/
 
 ## The flow
 
-Proving you control a domain is **your** job, so the steps are separate calls,
-not one `obtain()`. The order is: register an account, create an order, and for
+Proving you control a domain is your job, so the steps are separate calls
+rather than one `obtain()`: register an account, create an order, and for
 each domain fetch its authorization, pick a challenge, **publish the response**,
 `accept`, and poll until valid; then finalize with a CSR and download the cert.
 
@@ -77,8 +77,8 @@ then tell the CA it is ready with `accept`.
 | `acme.downloadCertificate(client, order)` | `string` | The issued PEM certificate chain. |
 | `acme.fetchOrder(client, orderUrl)` | `Order` | Re-fetch an order's state. |
 
-The structs (`Client`, `Order`, `Authorization`, `Challenge`) are value-semantic;
-`register` returns a client with the account `kid` filled in. `Client` holds the
+The structs (`Client`, `Order`, `Authorization`, `Challenge`) are value-semantic.
+`Client` holds the
 account key and the CA endpoints. Every signed request draws a fresh anti-replay
 nonce from the CA before it is sent.
 
@@ -112,7 +112,7 @@ Errors from the CA (an RFC 7807 problem document) surface as catchable
 
 ## Renewal
 
-Renewing is just running the flow again before expiry (Let's Encrypt certs last
+Renewing is running the flow again before expiry (Let's Encrypt certs last
 90 days; renew at ~60). Keep the account key; a new order re-validates the
 domains and issues a fresh certificate.
 

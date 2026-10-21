@@ -1,6 +1,6 @@
 # Test runner (`cmd/jennifer/test.go`, `internal/lib/testing`)
 
-`jennifer test <file.j>` discovers a file's `test*` methods, runs each with
+`jennifer test <file.j>` discovers a file's `test*` functions, runs each with
 optional `setUp` / `tearDown` hooks, and reports pass / fail. It is the
 `testing` library's assertion vocabulary and runner primitives wired into a
 subcommand - "primitives in Go, orchestration as subcommand", the same shape as
@@ -63,8 +63,9 @@ PASS testGreeting (0 ms)
 | `--format=tap`    | TAP version 14 - CI-friendly, with a YAML diagnostic block per failure.                       |
 | `--format=junit`  | JUnit XML - for CI dashboards that consume it.                                                |
 | `--isolated`      | Run each test in a fresh interpreter subprocess: clean state per test, coarser reporting (a pass/fail line, no in-process kind / position). |
-| `--allow-empty`   | Exit `0` when no test method is found (none by the `test*` convention, or none matching `--filter`). Without it an empty suite exits `2`. |
+| `--allow-empty`   | Exit `0` when no test function is found (none by the `test*` convention, or none matching `--filter`). Without it an empty suite exits `2`. |
 | `--coverage[=FMT]`| Also report statement coverage: which executable positions in the tested file(s) ran. `text` (default) prints a per-file and total percentage plus the never-executed positions; `json` emits a machine-readable form. Runs in-process (so it overrides `--isolated`). |
+| `--profile`       | Also write the statement profile - hits, self and cumulative wall-clock time per source position, the [`jennifer profile`](cli_profile.md) table - to **stderr**, so the test report (and a `--coverage=json` report) keep stdout. The way to profile a module through its `_test.j` overlay, which `jennifer profile` cannot run. Runs in-process (overrides `--isolated`). |
 
 ## Coverage
 
@@ -116,7 +117,7 @@ ok 3 - testGreeting
 | ---- | --------------------------------------------- |
 | `0`  | All tests passed.                             |
 | `1`  | At least one test failed.                     |
-| `2`  | Runner error (parse / lex / IO), or no test methods found - no tests ran. |
+| `2`  | Runner error (parse / lex / IO), or no test functions found - no tests ran. |
 
 The `0` / `1` / `2` split matches `jennifer lint`, so a CI step can treat
 "failures" and "the tool broke" differently. An empty suite counts as a runner
@@ -125,7 +126,7 @@ nothing in it; `--allow-empty` accepts one that is empty on purpose.
 
 ## Assertions
 
-Six builtins from the `testing` library (`internal/lib/testing/assertions.go`,
+Seven builtins from the `testing` library (`internal/lib/testing/assertions.go`,
 built into **both** binaries). On failure each throws the canonical
 `Error{kind: "assertion"}` positioned at the call site, which the runner catches
 and classifies exactly like a user `throw`:
@@ -136,18 +137,19 @@ and classifies exactly like a user `throw`:
 | `testing.assertNotEqual(a, b)`         | `a` differs from `b`.                                    |
 | `testing.assertTrue(cond)`             | `cond` (a `bool`) is `true`.                             |
 | `testing.assertFalse(cond)`            | `cond` is `false`.                                       |
-| `testing.assertContains(container, x)` | `x` occurs in the string / list `container`.             |
-| `testing.assertThrows(name, kind)`     | calling the zero-arg method `name` throws an `Error` of that `kind`. |
+| `testing.assertContains(container, x)` | `x` occurs in the string / list `container`, or is a key of the map `container`. |
+| `testing.assertThrows(name, kind)`     | calling the zero-arg function `name` throws an `Error` of that `kind`. |
+| `testing.assertThrowsWith(name, args, kind)` | calling function `name` with the `args` list bound to its parameters throws an `Error` of that `kind`. |
 
-`assertThrows` takes the method **name** as a string (Jennifer has no function
-references - `myTest` is a name, not a value), and the interpreter's
-`CallByName` invokes it. `testing.runWith(name, args)` /
-`CallByNameWith` bind arguments for framework dispatchers; the zero-arg
-`CallByName` is the entry point the runner itself uses.
+`assertThrows` takes the function **name** as a string (not a `func` value), and
+the interpreter's `CallByName` invokes it. `testing.assertThrowsWith(name, args,
+kind)` and `testing.runWith(name, args)` bind arguments through
+`CallByNameWith`; the zero-arg `CallByName` is the entry point the runner itself
+uses.
 
 ## Flow (implementation)
 
-The subcommand parses, preprocesses, and runs the file (methods hoist, top level
+The subcommand parses, preprocesses, and runs the file (functions hoist, top level
 executes for setup), then:
 
 - **Module overlay** - for `MODULE_test.j` with a sibling `MODULE.j`, the
@@ -157,7 +159,7 @@ executes for setup), then:
   module's code, the module is first checked **on its own** for a namespace it
   references but never declares (lint's `L112`, `moduleDeclaresItsNamespaces`):
   a module that forgot a `use` / `import` would otherwise pass its suite and fail
-  the first time it is really imported. A finding fails the run (exit 2) before
+  the first time it is imported. A finding fails the run (exit 2) before
   any test executes. Both files may import the same module under the same alias
   (a no-op re-import).
 - **Discovery** - `Interpreter.MethodNames()` filtered to `test*`, overridable
@@ -167,16 +169,15 @@ executes for setup), then:
 - **Report** - `--format=text|tap|junit` via `testinglib.RenderReport`; the
   exit-code split above.
 - **`--isolated`** - `os.Executable()` re-invokes the binary as
-  `jennifer test --testing-single METHOD FILE.j` (runs exactly one method,
+  `jennifer test --testing-single=METHOD FILE.j` (runs exactly one function,
   prints a one-line result); the parent records the child's exit code and line.
 
-**Enabling interpreter change.** A Go builtin can now raise a *catchable*
-Jennifer error. `evalCall` / `evalQualifiedCall` previously flattened any
-builtin error into a fresh `runtimeError` (losing a custom `kind`); now
-`builtinError` passes an `*ErrorSignal` / `*ExitSignal` through unwrapped - so
-`interpreter.RaiseError(kind, msg, ...)` throws a real Jennifer error - and
-`BuiltinCtx` carries the call-site `file/line/col` so it anchors at the call. No
-existing builtin returned a signal, so the change is additive.
+**Catchable builtin errors.** A Go builtin can raise a *catchable* Jennifer
+error with a custom `kind`: `builtinError` passes an `*ErrorSignal` /
+`*ExitSignal` through unwrapped (and keeps an already-positioned `runtimeError`
+with its `kind`) instead of flattening it into a fresh `runtimeError`, so
+`interpreter.RaiseError(kind, msg, ...)` throws a real Jennifer error, and
+`BuiltinCtx` carries the call-site `file/line/col` so it anchors at the call.
 
 **TinyGo.** The subcommand is build-tag split like the other dev tools:
 `test.go` (`!tinygo`) has it, `devtools_tinygo.go` stubs it. The assertion

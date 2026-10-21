@@ -13,7 +13,7 @@ def f as float init convert.toFloat(5);       # int -> 5.0
 def s as string init convert.toString(3.14);  # any -> "3.14"
 def b as bool init convert.toBool(0);         # 0 -> false
 
-io.printf("%s\n", convert.typeOf(5 / 2));      # "float" (after Python 3 / change)
+io.printf("%s\n", convert.typeOf(5 / 2));      # "float" (`/` is true division)
 io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 ```
 
@@ -45,8 +45,7 @@ binary-to-text codecs (hex, base64, quoted-printable) live in
 
 These convert between a single **code point** (a Unicode scalar value, an
 `int`) and the **one-rune string** that holds it - the primitive a Unicode
-algorithm needs (Punycode digits, a `\x01` control byte, an escape). Two
-details matter here:
+algorithm needs (Punycode digits, a `\x01` control byte, an escape).
 
 - **The whole range works, not just ASCII or the BMP.** `fromCodepoint`
   accepts any scalar value `0`..`0x10FFFF` (hex literals are fine:
@@ -84,24 +83,23 @@ details matter here:
 For "any nonzero counts as true" semantics, write the comparison explicitly:
 
 ```jennifer
-def b as bool init $count != 0;     // not convert.toBool($count)
+def b as bool init $count != 0;     # not convert.toBool($count)
 ```
 
-This matches the strict-conditions rule everywhere else in Jennifer - if you
-want to project an arbitrary value into a bool, state the criterion.
+This matches Jennifer's strict-conditions rule: to project an arbitrary value
+into a bool, state the criterion.
 
 ## Notes on the verb naming
 
 The convert library's four conversion callees are named `toInt`,
 `toFloat`, `toString`, `toBool` (not `int` / `float` / `string` /
-`bool`) so they don't collide with the type keywords - the parser
-keeps those reserved for declarations (`def x as int ...`). The
-`to`-prefixed verb also reads as English at the call site:
-`convert.toInt("42")` says "convert to int." `typeOf` is a normal
-identifier and is not a type keyword.
+`bool`) so they don't collide with the type keywords, which the parser
+reserves for declarations (`def x as int ...`). `typeOf` is a normal
+identifier, not a type keyword.
 
-Writing the bare form (`int("42")`, `string(42)`, ...) is
-a parse error directing you at the `convert.to*` form.
+The bare form (`int("42")`, `string(42)`, ...) is a parse error pointing
+at the `convert.to*` form.
+
 
 ## Objects: `typeOf` vs `objectType`
 

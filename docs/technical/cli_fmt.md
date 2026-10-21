@@ -46,8 +46,7 @@ The write is careful about what it touches:
 
 `fmt` formats exactly the files you name; it does **no** globbing or directory
 walking of its own (a directory argument is a usage error). Selecting files is
-the shell's job - that is the one obvious way to do it, and it composes with
-every other command. A filemask works flat, and recursively via `**`:
+the shell's job, which composes with every other command. A filemask works flat, and recursively via `**`:
 
 ```sh
 # bash / zsh
@@ -118,7 +117,8 @@ func add(a as int, b as int) {
 | `else` / `elseif` | cuddle the preceding brace on one line (`} else {`).                                                                     |
 | `for` header    | the two `;` stay on the header line (`for (init; cond; step)`), not split across lines.                                    |
 | Calls / params  | arguments and parameters get one space after each comma (`add(a as int, b as int)`, `f(a, b)`).                           |
-| Strings         | re-quoted with double quotes and standard escapes (`quoteJenniferString`, mirroring the lexer's `readString`).            |
+| Literals        | string and number literals keep their exact source spelling (the token's `Raw`): quote style, escapes, interpolation slots, digit separators, base prefixes. `quoteJenniferString` is only the fallback for a token with no `Raw`. |
+| Line length     | soft 100-column limit (`maxLineLength`): a long expression breaks after a binary joiner with a hanging indent; a struct / enum / map / list literal that would pass the limit (or has more than `maxInlineElements` members) wraps to one element per line; a too-long `for` header breaks one clause per line. |
 | Blank lines     | a run of blank lines collapses to a single one.                                                                           |
 
 ## What `fmt` deliberately preserves
@@ -154,7 +154,7 @@ newline-plus-indent) and then writes the token's canonical spelling
 | `indent`           | current block depth; bumps on `{`, drops on `}` (the closing brace dedents before it is written).        |
 | `prevIsOperand`    | answers "is the next `-` binary or unary?" - flipped by `isOperandToken` after every emit.               |
 | `prevIsUnaryMinus` | suppresses the right-side space after a `-` that was ruled unary, so `-$x` stays tight.                   |
-| `insideForHeader`  | a small backward scan that lets the two `;`s inside `for (...; ...; ...)` stay on the same line.          |
+| `wrapStack`        | one frame per open `(` / `[` / `{`: whether that container wraps, and (`forHeader`) whether it is a `for (...; ...; ...)` header, so `insideForHeader` is an O(1) read that keeps the two `;`s on the header line. |
 
 Comments and blank lines flow through the same machine: the lexer emits them as
 trivia tokens, and `emitTrivia` writes them in place without disturbing the

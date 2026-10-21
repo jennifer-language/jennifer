@@ -58,8 +58,8 @@ one). Inside a template three things address data:
   call). `{{ $.site.title }}` reaches the top-level data even from inside a loop.
 - **`$name`** - a variable (see [Variables](#variables)).
 
-A missing key renders as **empty**, not an error. Output is **not auto-escaped**
-(this mirrors `text/template`, not `html/template`): pipe untrusted values
+A missing key renders as **empty**, not an error. Output is not auto-escaped
+(see [Security](#security-output-is-not-auto-escaped)): pipe untrusted values
 through `html` in an HTML context.
 
 **Truthiness** (for `if` / `with` and the range `else`): a value is true when it
@@ -161,10 +161,10 @@ includes itself - directly or through a partner - fails cleanly.
 The nesting cap bounds recursion *depth*, not total *work*: a chain where each
 template includes the previous one twice renders `2^depth` copies at a shallow
 depth (a "billion laughs"). A separate render-wide **output budget** (10 MiB of
-produced output per `render`) therefore bounds the total work and trips - again a
+produced output per `render`) bounds the total work and trips - again a
 catchable kind `"tengine"` `Error` - the moment a render's cumulative output
-crosses it. Both guards together are what let the engine fail cleanly even when
-templates come from untrusted authors.
+crosses it. Together the two guards let the engine fail cleanly on templates
+from untrusted authors.
 
 ### `printf`
 

@@ -9,9 +9,9 @@ layer over [`jsonrpc`](jsonrpc.md) (which is over [`http`](http.md) +
 [`json`](../libraries/json.md)) and the server is a purpose-built router. Because
 it uses `jsonrpc` / `http`, this module needs the default `jennifer` binary.
 
-This module targets the **stateless** protocol only - no SSE, no sessions. The
-stdio server (the primary transport), the HTTP client, and the stdio subprocess
-client are all implemented (see [Scope](#scope)).
+This module targets the stateless protocol only (no SSE, no sessions). The
+stdio server, the HTTP client, and the stdio subprocess client are implemented
+(see [Scope](#scope)).
 
 ```jennifer
 import "mcp.j" as mcp;
@@ -52,7 +52,7 @@ def struct mcp.Server {
 | `mcp.addPrompt(server, name, description, arguments, handler)` | `Server` | register a prompt template; `arguments` is a `list of PromptArg` (declared to the host, may be `[]`) |
 | `mcp.promptArg(name, description, required)` | `PromptArg` | one prompt-argument declaration for `addPrompt` |
 
-Each item's `handler` is a **`func` value** - a top-level method in the program
+Each item's `handler` is a `func` value: a top-level function in the program
 that imported the module, passed by its bare name and called through its home
 interpreter, so it resolves its own imports and builds its `json.Value` result in
 the entry program's context (the same mechanism the [`web`](web.md) module uses):
@@ -64,9 +64,9 @@ the entry program's context (the same mechanism the [`web`](web.md) module uses)
   resource's text;
 - a **prompt** handler is `func NAME(arguments as json.Value)` and returns the
   prompt messages as a `json.Value` array. Each message is
-  `{role, content}` where **`content` is a content block**
-  `{"type": "text", "text": ...}` - not a bare string (MCP requires the block
-  form, and a host rejects a plain string).
+  `{role, content}` where `content` is a content block
+  `{"type": "text", "text": ...}`; MCP requires the block form, and a host
+  rejects a plain string.
 
 A prompt's `arguments` (built with `promptArg`) are surfaced by `prompts/list`,
 so a host can collect them before calling `prompts/get`. Pass `[]` for a prompt
@@ -91,7 +91,7 @@ def sch as json.Value init mcp.property(
 ## Serving
 
 `mcp.handle(server, requestBody)` turns one raw JSON-RPC request into a reply
-body - it routes the whole stateless MCP surface and leaves the transport to
+body: it routes the whole stateless MCP surface and leaves the transport to
 you. A notification (a request with no `id`, or any `notifications/` method)
 owes no reply and returns `""`.
 
@@ -100,7 +100,7 @@ owes no reply and returns `""`.
 | `mcp.handle(server, requestBody)` | `string` | the reply JSON, or `""` when none is owed |
 | `mcp.serveStdio(server)` | | run the stdio transport: read newline-delimited JSON-RPC from the program's own stdin, dispatch each through `handle`, write each non-empty reply to stdout, until EOF |
 
-`serveStdio` is the primary MCP transport - an LLM host launches the program and
+`serveStdio` is the primary MCP transport: an LLM host launches the program and
 speaks JSON-RPC over its stdin/stdout:
 
 ```jennifer
@@ -137,15 +137,15 @@ error); an unknown resource / prompt is `-32602` (invalid params).
 
 > **Security - dispatch is an allow-list.** Unlike [`jsonrpc`](jsonrpc.md)'s
 > `handle`, which dispatches a request's `method` to any top-level `func` of that
-> name, `mcp.handle` only ever invokes a handler **registered** in the server:
+> name, `mcp.handle` only invokes a handler registered in the server:
 >
 > - A `tools/call` looks the tool up by name in the registry; an unregistered
 >   name is a tool-result error (`isError: true`), never a dispatch to an
->   arbitrary top-level method. The same holds for resources (by `uri`) and
+>   arbitrary top-level function. The same holds for resources (by `uri`) and
 >   prompts (by `name`).
-> - A tool handler that **throws** yields a tool-result error with a generic
->   message; the thrown message stays server-side and is **not** put on the wire,
->   so you can raise detailed errors without leaking internals.
+> - A tool handler that throws yields a tool-result error with a generic
+>   message; the thrown message stays server-side and is not put on the wire,
+>   so detailed errors do not leak internals.
 > - Authenticate at the transport (check a header / token before calling
 >   `handle`); the module does no authentication of its own.
 
@@ -188,16 +188,15 @@ io.printf("isError=%t text=%s\n",
 - **Stateless protocol only.** No SSE, no session lifecycle. `handle` treats each
   request independently; `notifications/initialized` (and any other
   `notifications/` message) is accepted and answered with no reply.
-- **Transports.** The **stdio server** (`serveStdio`) and a **transport-agnostic
-  `handle`** (wire to `httpd` / `net`) are implemented on the server side; the
-  **HTTP client** (`connect` + the call verbs, over `jsonrpc`) and the **stdio
-  subprocess client** (`connectStdio`, over `os.run`) are implemented on the
-  client side.
+- **Transports.** Server side: the stdio server (`serveStdio`) and the
+  transport-agnostic `handle` (wire to `httpd` / `net`). Client side: the HTTP
+  client (`connect` + the call verbs, over `jsonrpc`) and the stdio subprocess
+  client (`connectStdio`, over `os.run`).
 - **The stdio client is one-shot.** Because `os.run` has no persistent child pipe,
   `connectStdio` relaunches the server per call: it writes the `initialize`
   handshake plus the one operation as newline-delimited JSON on the child's stdin,
   closes it, and reads the replies from stdout (correlating by `id`). A stateless
-  server therefore sees a complete short session each call; a persistent,
+  server sees a complete short session each call; a persistent,
   interleaved session (many calls over one launched process) would need the
   streaming-pipe primitive noted in `os` as a follow-on. `connectStdio` needs the
   default binary (`os.run`).

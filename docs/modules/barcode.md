@@ -60,8 +60,8 @@ def struct barcode.Options {
 
 `barcode.defaults()` gives scale 8, quiet 4, EC level M, black on white, and a
 human-readable text line under 1D SVGs (`opts.humanReadable = false` to omit it).
-Scale 8 (8 px per module) keeps a code comfortably scannable by a phone camera
-off a screen - a smaller render can defeat autofocus or pick up screen moire;
+Scale 8 (8 px per module) keeps a code scannable by a phone camera off a
+screen; a smaller render can defeat autofocus or pick up screen moire;
 lower `opts.scale` for a more compact image.
 
 | Call | Returns | |
@@ -77,8 +77,7 @@ codes; `opts.foreground` / `background` are the SVG / PNG colours.
 
 ## Verification
 
-Correctness is pinned two ways: the overlay
-(`modules/barcode_test.j`) checks the Reed-Solomon against the canonical QR
+The overlay (`modules/barcode_test.j`) checks the Reed-Solomon against the canonical QR
 vector, the format / version BCH against known values, mode codewords (including
 the QR spec's numeric worked example), the DataMatrix 10x10 matrix against
 `zint`, and 1D bar patterns against independent reference encoders; and the Go

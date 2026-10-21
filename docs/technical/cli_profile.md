@@ -42,21 +42,21 @@ A high `SELF` is a hot line; a high `CUM` with low `SELF` is a line that mostly
 waits on the work it dispatches.
 
 Below the table the statement profile also reports the **maximum call depth** -
-the deepest chain of nested method calls the run reached, overall and per deepest
+the deepest chain of nested function calls the run reached, overall and per deepest
 call site (top 10):
 
 ```text
-Max call depth (deepest chain of nested method calls): 12
+Max call depth (deepest chain of nested function calls): 12
   DEPTH  CALL SITE
      12  examples/profile.j:2:62
       1  examples/profile.j:3:19
 ```
 
 It shares the interpreter's call-depth counter with the catchable recursion guard
-(`limits.MaxCallDepth`, build-tag split - 10000 on the default binary, 24 on
+(`limits.MaxCallDepth`, build-tag split - 10000 on the default binary, 120 on
 `jennifer-tiny`), so a program that trips a stack-limit / deep-recursion error can
-be re-run under `profile` to see exactly which call site drove the depth. The
-section is silent for a program that made no method call.
+be re-run under `profile` to see which call site drove the depth. The
+section is silent for a program that made no function call.
 
 ## Modes and formats
 
@@ -66,7 +66,7 @@ section is silent for a program that made no method call.
 | `--allocs`        | Value-semantics profile instead: where compound values are copied (see below).             |
 | `--format=table`  | Human-readable text (default).                                                             |
 | `--format=pprof`  | Gzipped protobuf, hand-encoded to keep the zero-dependency stance; `go tool pprof` and speedscope.app read it. |
-| `--format=trace`  | Chrome-trace JSON of the method-call timeline (open in `chrome://tracing` / Perfetto).     |
+| `--format=trace`  | Chrome-trace JSON of the function-call timeline (open in `chrome://tracing` / Perfetto).     |
 | `--sysmoddir D`   | System module directory for bare imports (defaults to the built-in path).                  |
 | `-I DIR`          | Add `DIR` to the module search path (repeatable), same as `run`.                           |
 | `--vendor DIR`    | Vendor root for `@scope/package` deck imports.                                              |
@@ -115,7 +115,7 @@ Spawn-frame deep copies - a scope snapshot captured at spawn launch:
 
 | Copy path             | What it is                                                                                                       |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- |
-| **Eager copies**      | A `def` / assignment / parameter binding that deep-copies a compound value (`Value.Copy()`). Where the real allocation cost lives. A fresh list / map / struct literal RHS is already private, so binding it is **not** counted (no redundant copy). |
+| **Eager copies**      | A `def` / assignment / parameter binding that deep-copies a compound value (`Value.Copy()`). Where the real allocation cost lives. A fresh list / map / struct literal RHS is already private, so binding it is **not** counted (no redundant copy); neither is a borrowed read-only parameter / local or an owned call result, which skip the copy too. |
 | **Spawn-frame copies**| The scope snapshot taken when a `spawn` launches (`snapshotForSpawn`).                                            |
 
 `examples/profile.j` exercises both - read it to see where value semantics turn
@@ -151,7 +151,7 @@ profiling machinery compiles into either binary's run path. Hook points:
   (`env.root.profChild`), not the shared `Interpreter`, so parallel `spawn`
   bodies each accumulate into their own snapshot root instead of racing one
   field; the collector's maps are mutex-guarded for the same reason.
-- **`evalCall`** times each method-call body for the trace timeline.
+- **`evalCall`** times each function-call body for the trace timeline.
 - **`eagerCopy`** records an eager deep copy at each value-storage site
   (`def` / assignment / parameter binding) when the value is a compound.
 - **`evalSpawn`** times the `snapshotForSpawn` deep copy.

@@ -31,10 +31,8 @@ export func distance(ax as float, ay as float, bx as float, by as float) { ... }
 
 The body is a **summary** - the first paragraph, with wrapped lines joined, so it
 can span several source lines - then an optional **description** (the remaining
-paragraphs, separated from the summary by a blank line), then `@`-tags. Because the
-split is by paragraph and not by line, a summary that wraps across source lines stays
-one sentence rather than breaking at the line break; put a blank line where you want
-the summary to end and the description to begin.
+paragraphs, separated from the summary by a blank line), then `@`-tags. Put a blank
+line where the summary ends and the description begins.
 
 ### Types are written in Jennifer syntax, in braces
 
@@ -79,9 +77,9 @@ for (def f in $doc.funcs) {
 
 ### The result types
 
-The result is **typed data, not a tag bag** - Jennifer has no sum types, so
-heterogeneous collections are modelled as parallel typed lists plus fixed-field
-structs. All are exported:
+The result is typed data rather than a tag bag: each kind of entry has its own
+typed list (`funcs`, `structs`, `enums`, `consts`) of fixed-field structs. All
+are exported:
 
 - `FileDoc { module, funcs, structs, enums, consts, diagnostics }`
 - `ModuleDoc { summary, description, author, version, license, see }`
@@ -115,22 +113,22 @@ An absent value is its zero: a function with no `@return` has a `returns` whose
 ```
 
 Whole-body analysis (e.g. "a `@return` on a function that never returns a
-value") is **out of scope**: it needs the AST, and the module has only the
-text. What earns its keep is the signature cross-check above.
+value") is out of scope: it needs the AST, and the module has only the
+text.
 
 ## Scanner correctness
 
 Comment boundaries are found by a character-level `/* */` depth scan that
-**skips string literals** and `#` line comments and **nests `/* */`
-correctly** - not a fragile "delimiter alone on its line" rule. So a `/**`
+skips string literals and `#` line comments and nests `/* */`
+correctly, so a `/**`
 inside a string literal is not mistaken for a doc comment, and a nested
 `/* ... */` inside a doc body does not close it early.
 
 ## Checking a file or tree
 
 `scripts/docblock-check.sh` runs the parser over a `.j` file or a whole
-directory and reports each file's doc coverage plus any diagnostics, exiting
-non-zero when it finds a problem - a ready-made pre-commit / CI check:
+directory and reports each file's doc coverage plus any diagnostics, for use as
+a pre-commit / CI check:
 
 ```sh
 scripts/docblock-check.sh modules/          # every .j under modules/
@@ -142,8 +140,7 @@ scripts/docblock-check.sh myapp.j           # a single file
 
 It finds the interpreter via `JENNIFER=/path/to/jennifer`, else `./jennifer`
 at the repo root, else `jennifer` on `PATH`. It exits `0` when every file is
-clean and `1` when any file has diagnostics, so it drops straight into a
-pre-commit hook.
+clean and `1` when any file has diagnostics.
 
 ### Enforced in CI
 
@@ -155,11 +152,8 @@ scripts/docblock-check.sh examples/
 scripts/docblock-check.sh modules/
 ```
 
-A drift diagnostic fails the build, so a doc comment can never silently fall
-out of step with the code it documents - the same guarantee the linter and the
-module test overlays give. A missing doc comment is *not* an error (docblock
-reports drift, not absence); it flags a doc that is present but wrong, or one
-that documents nothing.
+A drift diagnostic fails the build. A missing doc comment is not an error:
+docblock flags a doc that is present but wrong, or one that documents nothing.
 
 ## See also
 

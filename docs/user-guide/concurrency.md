@@ -15,7 +15,7 @@ def n as int init task.wait($t);
 io.printf("answer: %d\n", $n);
 ```
 
-That's the core. The pieces are the `spawn` keyword, the `task of T`
+The pieces are the `spawn` keyword, the `task of T`
 type, the `task` library (waiting, cooperative cancellation, bounded
 waits), [`channel of T`](../libraries/channel.md) for streaming values
 between tasks, and the exit-time loud-fail contract. There is no
@@ -67,9 +67,8 @@ pools, and pipelines are the usual shapes.
 
 ## Why value-semantics capture matters
 
-The biggest single design choice is that **a `spawn`
-block captures its surrounding scope by deep copy, not by
-reference**. Variables visible at the `spawn` site are copied into
+**A `spawn` block captures its surrounding scope by deep copy, not
+by reference.** Variables visible at the `spawn` site are copied into
 the spawn frame at the moment of launch; mutations on either side
 afterwards are independent.
 
@@ -91,11 +90,10 @@ io.printf("%d\n", $total);
 This is the same value-semantics discipline Jennifer applies
 everywhere - lists, maps, structs, bytes all copy on assignment
 and on function-parameter binding. Concurrency reuses the rule, so
-**data races are impossible by construction**. There is no shared
-mutable state to race on.
+**data races are impossible by construction**.
 
-The cost is the obvious one: deep-copying a large structure into a
-spawn frame is O(N). For a 10 000-element list that's measurable.
+The cost: deep-copying a large structure into a spawn frame is
+O(N). For a 10 000-element list that's measurable.
 The benefit is that you never need a lock, a mutex, or an atomic
 to protect data; concurrent code reads like sequential code with
 `spawn` markers, and a channel is there for passing values, not for
@@ -127,8 +125,7 @@ io.printf("%a\n", $results);
 ```
 
 `task.waitAll` returns results in the same order as the input
-tasks, not the order in which they completed. That's the property
-most parallel-compute code wants.
+tasks, not the order in which they completed.
 
 ### Many live tasks on `jennifer-tiny`
 
@@ -146,7 +143,7 @@ spawning one task per job up front.
 
 ### Fire and forget
 
-For background work whose result you genuinely don't care about,
+For background work whose result you don't need,
 launch with `spawn` and mark the handle with `task.discard`:
 
 ```jennifer
@@ -194,13 +191,10 @@ error to stderr at program exit and exits non-zero. An explicit
 `exit N;` keeps its code `N`: the error is still printed, but the code
 you chose wins.
 
-This is deliberate. The default of every other concurrency model
-is some flavour of "errors in spawned work get silently dropped
-unless you go out of your way to handle them." That's a footgun
-- bugs hide inside unobserved tasks until something else breaks
-much later. Jennifer's contract is the inverse: an unobserved spawn
-error is **always** loud. The only way to silence it is to say so
-explicitly with `task.discard`.
+Many concurrency models silently drop errors in spawned work unless
+you handle them, so bugs hide inside unobserved tasks until something
+else breaks. In Jennifer an unobserved spawn error is **always** loud;
+the only way to silence it is an explicit `task.discard`.
 
 ```jennifer
 use task;
@@ -226,8 +220,6 @@ Three ways to make a spawn quiet:
 2. `task.waitAll($ts)` / `task.waitAny($ts)` - same idea, with
    `waitAll` observing every survivor on the way out.
 3. `task.discard($t)` - the explicit fire-and-forget marker.
-
-Doing nothing is not a fourth option.
 
 > **Beware infinite spawns.** When a program runs to its end, the
 > loud-fail scan waits for every unobserved task to finish, to learn
@@ -274,7 +266,7 @@ not part of Jennifer:
   receiving, closing, and `select` over several channels.
 - [Control flow](control-flow.md) - `try`/`catch` works the same
   way around `task.wait` as around any other runtime error.
-- [Methods](methods.md) - calling methods from inside a spawn body
+- [Functions](functions.md) - calling functions from inside a spawn body
   works normally; the body inherits the global env the same way
   any other call frame does.
 - [`docs/milestones.md`](../milestones.md) - the concurrency entry has

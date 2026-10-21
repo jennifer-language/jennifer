@@ -83,8 +83,9 @@ for (def p in $back) {
   `name` / `filename` are read from the quoted `Content-Disposition` params.
 - **No streaming.** The whole body is built / parsed in memory - fine for form
   posts, not for multi-gigabyte uploads.
-- **Names / filenames are emitted verbatim** inside quotes; avoid `"` and CRLF
-  in them (RFC 7578 percent-encoding is a follow-on).
+- **Names / filenames are escaped, not percent-encoded.** `build` strips CR / LF
+  and backslash-escapes `\` and `"` inside the quoted parameter (and `parse`
+  undoes `\"` / `\\`); RFC 7578 percent-encoding is a follow-on.
 
 ## See also
 

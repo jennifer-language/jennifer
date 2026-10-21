@@ -1,8 +1,8 @@
 # `influxdb` - InfluxDB time-series client
 
 Import with `import "influxdb.j" as influxdb;`. Write measurements as
-line-protocol points and query them back as parsed results, against **both** major
-API generations: **1.x** (`/write?db=...` + InfluxQL) and **2.x / 3.x**
+line-protocol points and query them back as parsed results, against both major
+API generations: 1.x (`/write?db=...` + InfluxQL) and 2.x / 3.x
 (`/api/v2/write?org=...&bucket=...` + Flux). Built on the [`http`](http.md)
 module, so it needs the default `jennifer` binary. A failed request throws
 `Error{kind: "influxdb"}` (a 2.x client's token is redacted from it).
@@ -55,8 +55,7 @@ def struct influxdb.Client {
 
 ## Writing points
 
-A `Point` is built with value-semantic builders - each returns a fresh `Point`,
-so they chain. Field types are carried as pre-rendered line-protocol fragments,
+A `Point` is built with value-semantic builders; each returns a fresh `Point`. Field types are carried as pre-rendered line-protocol fragments,
 so one point can mix float, integer, string, and boolean fields (Jennifer maps
 are homogeneous, so a single typed map could not).
 
@@ -75,12 +74,12 @@ are homogeneous, so a single typed map could not).
 
 Line-protocol escaping is automatic: measurement names escape space and comma;
 tag keys/values and field keys escape space, comma, and `=`; string field
-values are double-quoted with `"` and `\` escaped. A point with **no fields**
-is invalid line protocol, so `line` / `write` throw for one. The line protocol
-is **identical across API generations**, so `line` is version-agnostic.
+values are double-quoted with `"` and `\` escaped. A point with no fields is
+invalid line protocol, so `line` / `write` throw for one. The line protocol is
+identical across API generations, so `line` is version-agnostic.
 
-`write` dispatches on the client's `version`: a **1.x** client posts to
-`/write?db=...&precision=ns` with optional Basic auth; a **2.x** client posts to
+`write` dispatches on the client's `version`: a 1.x client posts to
+`/write?db=...&precision=ns` with optional Basic auth; a 2.x client posts to
 `/api/v2/write?org=...&bucket=...&precision=ns` with an `Authorization: Token
 <token>` header. Either throws on a non-2xx response, surfacing the server's
 `{"error": ...}` message when present (with the 2.x token redacted).
@@ -109,8 +108,8 @@ def struct influxdb.Result {
 
 `influxdb.query(client, influxql)` runs an InfluxQL statement against `/query`
 and parses the tabular JSON into `Series` (the same read-a-parsed-result shape
-as [`prometheus`](prometheus.md)'s retrieval half). Every **cell is
-stringified** - `time` comes back as its RFC 3339 string, numbers via their
+as [`prometheus`](prometheus.md)'s retrieval half). Every cell is
+stringified: `time` comes back as its RFC 3339 string, numbers via their
 shortest form, booleans as `"true"` / `"false"`, and JSON `null` as `""` - so a
 homogeneous `list of list of string` can hold a row of otherwise mixed-type
 columns. Convert a cell you know is numeric with `convert.toFloat`. A
@@ -129,7 +128,7 @@ for (def s in $r.series) {
 
 `influxdb.queryFlux(client2, flux)` runs a Flux script against a 2.x client's
 organization (`POST /api/v2/query?org=...` under `application/vnd.flux`).
-InfluxDB answers a Flux query with **annotated CSV** (RFC 4180 with
+InfluxDB answers a Flux query with annotated CSV (RFC 4180 with
 `#datatype` / `#group` / `#default` header rows), not JSON, so `queryFlux`
 returns the response body verbatim as a `string`; parse it with the
 [`csv`](csv.md) module. (The JSON-parsing `query` / `Series` / `Result` shape
@@ -145,13 +144,12 @@ def csv as string init influxdb.queryFlux($db2,
 
 - **Both API generations.** 1.x line protocol + InfluxQL (`client` /
   `clientWith`, `query`) and 2.x / 3.x org/bucket writes + Flux (`client2`,
-  `queryFlux`), sharing the identical line protocol and the same value-semantic
-  `Point` builders. `write` dispatches on the client's `version`.
+  `queryFlux`), sharing the line protocol and `Point` builders.
 - **Nanosecond write precision** (`precision=ns`); a point's timestamp is an
   integer nanosecond value (or a `time.Time` via `atTime`).
 - **1.x query cells are stringified.** The `Result` keeps rows homogeneous
-  (`list of list of string`) rather than exposing a typed cell union; you
-  convert numeric columns yourself.
+  (`list of list of string`) rather than exposing a typed cell union; convert
+  numeric columns yourself.
 - **Flux returns raw annotated CSV.** `queryFlux` returns the response body as a
   `string` for the `csv` module to parse, rather than a bespoke Flux-CSV
   decoder.

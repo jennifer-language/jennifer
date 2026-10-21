@@ -17,7 +17,7 @@ io.printf("%s", $content);
 
 ## One-shot operations
 
-Whole-file reads and writes. Cheap to write, cheap to read.
+Whole-file reads and writes.
 
 | Call                                  | Returns  | Notes                                                                       |
 | ------------------------------------- | -------- | --------------------------------------------------------------------------- |
@@ -71,9 +71,9 @@ def struct fs.Stat {
 };
 ```
 
-`mtimeNanos` is deliberately an `int`, not a `time.Time` - that
-keeps `fs` decoupled from the `time` library at the Go-package
-level. Composition is one line:
+`mtimeNanos` is an `int`, not a `time.Time`, which keeps `fs`
+decoupled from the `time` library at the Go-package level.
+Composition is one line:
 
 ```jennifer
 use fs;
@@ -84,8 +84,8 @@ def modified as time.Time init time.fromUnixNanos($stat.mtimeNanos);
 io.printf("modified: %s\n", time.iso($modified));
 ```
 
-`size` is `-1` for directories so callers don't accidentally
-interpret it as "empty directory."
+`size` is `-1` for directories so it can't be mistaken for
+"empty directory."
 
 ### Permissions
 
@@ -110,13 +110,11 @@ error is catchable like any other `fs` failure.
 
 ## Directory operations
 
-The library ships **two verbs each** for create and delete
-(`mkdir` / `mkdirAll`, `remove` / `removeAll`). The safe
-non-recursive form keeps the short name; the recursive form
-gets an explicit second name so a code review can grep for
-the risky sites. This is Jennifer's "no footguns" stance
-applied at the API level - a `bool` parameter or a mode
-string would obscure the recursive intent at the call site.
+Create and delete have **two verbs each** (`mkdir` / `mkdirAll`,
+`remove` / `removeAll`). The safe non-recursive form keeps the
+short name; the recursive form gets an explicit second name so a
+code review can grep for the risky sites (a `bool` parameter or
+mode string would hide the recursive intent at the call site).
 
 | Call                    | Returns           | Notes                                                          |
 | ----------------------- | ----------------- | -------------------------------------------------------------- |
@@ -141,11 +139,10 @@ fs.removeAll("build/output/cache");       # explicit intent
 ## Temporary files and directories
 
 `fs.makeTempFile` and `fs.makeTempDir` create a fresh, uniquely-named entry and
-return its **path**. Creation is atomic - the OS reserves the name, so two
-concurrent callers never collide - and restrictive (`0600` for a file, `0700`
-for a directory), so scratch data holding secrets is not world-readable. They
-return a path (not an open handle) so the result drops straight into the ordinary
-path-based verbs.
+return its **path** (not an open handle), for use with the ordinary path-based
+verbs. Creation is atomic - the OS reserves the name, so two concurrent callers
+never collide - and restrictive (`0600` for a file, `0700` for a directory), so
+scratch data holding secrets is not world-readable.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
@@ -237,17 +234,16 @@ fs.close($f);
 ```
 
 `fs.readLine` on a handle whose next read is EOF errors with
-`end of input`; the `fs.eof($f)` guard is what keeps the loop
-tight. `fs.eof` looks one byte ahead (through the buffered
-reader) so a file ending cleanly with `\n` still trips the
-guard after the last line comes out.
+`end of input`, hence the `fs.eof($f)` guard. `fs.eof` looks one
+byte ahead (through the buffered reader) so a file ending cleanly
+with `\n` still trips the guard after the last line comes out.
 
 **Durability: `sync` vs `close`.** `fs.close` guarantees the bytes reach the
 *operating system*, not the *disk* - the OS may still hold them in its cache
 after close returns. `fs.sync($f)` forces the file's written data all the way to
 the storage device (an `fsync`) and leaves the handle open. This is the "safe to
-remove the USB stick" step: sync explicitly and let a failure surface *before*
-you tell the user it is safe, rather than discovering the write never landed:
+remove the USB stick" step: sync explicitly so a failure surfaces *before* you
+tell the user it is safe:
 
 ```jennifer
 use fs;
@@ -261,7 +257,7 @@ fs.close($f);
 ```
 
 `fs.sync` requires a write- or append-mode handle (a read handle has nothing to
-flush). Note `fsync` covers the OS side; a removable device's own internal cache
+flush). `fsync` covers the OS side; a removable device's own internal cache
 is the job of the OS eject / unmount.
 
 ### Polymorphic verbs (path vs handle)
@@ -281,9 +277,8 @@ kind is a positioned boundary error.
 ### Handles share state between copies
 
 An `fs.File{id}` value is small; copies share the underlying
-Go `*os.File` state via the integer id. This mirrors the
-`task of T` carve-out to the "value semantics everywhere"
-rule:
+Go `*os.File` state via the integer id - a carve-out to value
+semantics, like `task of T`:
 
 ```jennifer
 def a as fs.File init fs.open("x.txt", "read");
@@ -291,10 +286,6 @@ def b as fs.File init $a;              # `b` and `a` reference the same file
 fs.close($a);                          # closes for both
 def s as string init fs.readLine($b);  # errors: id is not open
 ```
-
-Handles are the second "handles wrap shared state" carve-out
-in the language, sitting alongside `task of T`. Every other
-type keeps whole-value semantics.
 
 ## Watching for changes
 
@@ -334,8 +325,8 @@ def worker as task of null init spawn {
 
 **How it works, and the trade-offs.** The watch is **mtime polling** (a
 background goroutine re-scans the tree each interval and diffs a snapshot), not
-inotify - so it is pure-stdlib, dependency-free, and works on both binaries,
-matching `jennifer serve --watch`. Two consequences worth knowing:
+inotify - so it is dependency-free and works on both binaries, matching
+`jennifer serve --watch`. Two consequences:
 
 - **Bursts coalesce.** An editor's save (write / rename / chmod) within one poll
   interval collapses into one event per path - a save is one `"modified"`, not
@@ -352,8 +343,8 @@ variant could be added later behind a build tag if it is ever needed.
 
 ## Concurrency composition
 
-`fs` is blocking on purpose. Non-blocking use is a one-line
-composition with `spawn`:
+`fs` is blocking. Non-blocking use is a one-line composition
+with `spawn`:
 
 ```jennifer
 use fs;
@@ -383,7 +374,8 @@ for (def p in $paths) {
 def contents as list of string init task.waitAll($tasks);
 ```
 
-Under the default `jennifer` binary this actually parallelises across
+Under the default `jennifer` binary this parallelises across
+
 cores; under `jennifer-tiny` (TinyGo, cooperative single-threaded
 0.41) the composition is correct but sequential. See
 [../technical/tinygo.md](../technical/tinygo.md).
@@ -421,19 +413,19 @@ try {
 }
 ```
 
-## What's not in v1
+## What's left out
 
 Recorded so the design decisions stay visible; ships if a
 concrete workload forces it.
 
 - **Streaming line iterator** (`for (def line in fs.lines(path))`).
   Compose with `fs.open` + `while (not fs.eof)`.
-- **`fs.copy(src, dst)`** and **`fs.chmod(path, mode)`**.
-- **`fs.stat($f)` on an open handle**. Only path-based `fs.stat`
-  in v1.
-- **Watch / notify** (inotify / kqueue / FSEvents).
-- **Temp file / dir creation helpers** (`fs.tempFile`,
-  `fs.tempDir`). Use `os.getEnv("TMPDIR")` plus your own naming.
+- **`fs.copy(src, dst)`**. Read and write the bytes, then `fs.chmod`
+  if the mode matters.
+- **`fs.stat($f)` on an open handle**. Only the path-based `fs.stat`.
+- **Event-driven watch** (inotify / kqueue / FSEvents). `fs.watch`
+  polls modification times instead, which keeps it dependency-free
+  and TinyGo-clean.
 - **Follow symlinks in `fs.walk`**. Symlink-loop protection is
   the reason for the deferral; a `follow=true` flag or a
   distinct `fs.walkFollowing` verb ships once the story is clear.

@@ -20,9 +20,8 @@ def resp as json.Value init graphql.query($gql,
 io.printf("%s\n", json.asString($resp, "/data/user/name"));
 ```
 
-The query is an **opaque string** you supply - GraphQL syntax is the server's
-job, not this module's - and a mutation is just a query string, so there is no
-separate verb. `variables` is a `json.Value` object (use an empty `json.map()`
+The query is an **opaque string** you supply (the module does not parse
+GraphQL), and a mutation is a query string too, so there is no separate verb. `variables` is a `json.Value` object (use an empty `json.map()`
 when the operation takes none).
 
 Runnable: [`examples/modules/graphql_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/graphql_demo.j).
@@ -69,9 +68,6 @@ def login as string init json.asString($resp, "/data/viewer/login");
 The response is the whole GraphQL envelope, so read the payload under `/data`
 (and `/data/<field>/...`) with the [`json`](../libraries/json.md) accessors.
 
-`variables` is a `json.Value` object - pass an empty `json.map()` for an
-operation that takes none.
-
 ### Named operations
 
 When a document defines more than one named operation, pass the one to run as
@@ -86,20 +82,18 @@ A single-operation document needs no name - use plain `query` / `tryQuery`.
 
 ## Errors
 
-GraphQL has an unusual error convention that this client handles for you: an
-**execution error is an HTTP 200 with a top-level `errors` array**, not a non-2xx
-status. `query` inspects the payload rather than trusting the status line and
-raises a positioned `Error` (kind `"graphql"`) in two cases:
+In GraphQL an **execution error is an HTTP 200 with a top-level `errors`
+array**, not a non-2xx status. `query` inspects the payload as well as the status
+line and raises a positioned `Error` (kind `"graphql"`) in two cases:
 
 - **GraphQL errors** - the response carries a non-empty `errors` array. The
   error's `message` is `graphql: ` followed by every entry's `message`, joined
-  with `; `. (A response with partial `data` *and* `errors` still raises - the
-  errors are not silently dropped.)
+  with `; `. A response with partial `data` *and* `errors` still raises.
 - **HTTP failure** - a non-2xx status (a transport, auth, or server problem). The
   message carries the status code and the response body.
 
-A successful return therefore has no `errors`, so `/data` is present and
-complete. Catch with `try` / `catch`:
+A successful return has no `errors`, so `/data` is present and complete. Catch
+with `try` / `catch`:
 
 ```jennifer
 try {
@@ -133,13 +127,13 @@ if (graphql.hasErrors($resp)) {
 }
 ```
 
-Everything under `/errors` is reachable with the ordinary `json` accessors, since
-the envelope is a plain `json.Value`.
+The envelope is a plain `json.Value`, so everything under `/errors` is reachable
+with the `json` accessors.
 
 ## TLS to a self-signed host
 
-Because the client wraps `rest`, the TLS builders reach a homelab / private-CA
-endpoint (Hasura, a self-hosted API):
+The TLS builders (from `rest`) reach a homelab / private-CA endpoint (Hasura, a
+self-hosted API):
 
 ```jennifer
 def pem as bytes init fs.readBytes("ca.pem");

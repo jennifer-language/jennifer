@@ -1,16 +1,16 @@
 # `memcache` - a memcached client
 
-Import with `import "memcache.j" as memcache;`. A client for a **memcached**
-server, speaking its classic **text protocol** over the `net` system library.
+Import with `import "memcache.j" as memcache;`. A client for a memcached
+server, speaking its classic text protocol over the `net` system library.
 Store with an expiration (`set` / `add`), read (`get`), remove (`delete`),
 count atomically (`incr` / `decr`), and re-arm a key's expiry (`touch`).
-memcached is a **volatile cache** - keys expire on their `exptime` and the
-server evicts under memory pressure - so it suits sessions, rate limits, and
+memcached is a volatile cache (keys expire on their `exptime` and the
+server evicts under memory pressure), so it suits sessions, rate limits, and
 derived data, not a system of record. Because it uses `net`, this module needs
-the default **`jennifer`** binary.
+the default `jennifer` binary.
 
 > **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
-> **stock** tiny build, which ships without a network driver - not a TinyGo
+> stock tiny build, which ships without a network driver; it is not a TinyGo
 > limitation. A `jennifer-tiny` rebuilt with a network stack runs this module
 > too; see the
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
@@ -53,8 +53,8 @@ an `exptime` in **seconds** (`0` = never expire, until evicted).
 
 ## `add`, `incr`, and the primitives caches are built from
 
-`add` stores **only if the key does not already exist** and reports which
-happened - the atomic building block for a lock ("did I win the key?") or a
+`add` stores only if the key does not already exist and reports which
+happened: the atomic building block for a lock ("did I win the key?") or a
 create-if-new. `incr` / `decr` are atomic server-side counters; memcached will
 not create a missing counter, so `incr` on an absent key returns `-1` and the
 caller decides whether to `add` an initial value:
@@ -67,10 +67,9 @@ if ($n == -1) {                                  # first hit this window
 }
 ```
 
-That `incr`-then-`add` shape is exactly what the [`ratelimit`](ratelimit.md)
-module builds on, and `add` + a TTL is what the [`session`](session.md) module
-uses to mint a session; both are small modules designed to sit on top of this
-client.
+The [`ratelimit`](ratelimit.md) module builds on this `incr`-then-`add` shape,
+and the [`session`](session.md) module mints a session with `add` + a TTL; both
+sit on top of this client.
 
 ## Errors
 
@@ -80,14 +79,14 @@ answer `STORED`. A network failure surfaces as the underlying `net` error.
 
 ## Binary values and check-and-set
 
-`get` / `set` speak **text**: a value is decoded as UTF-8, which is exact for
-JSON, numbers, and identifiers, and **throws** on a non-UTF-8 value (strict). For
-an arbitrary **binary** value, use `setBytes` (a `bytes` value stored
+`get` / `set` speak text: a value is decoded as UTF-8, which is exact for
+JSON, numbers, and identifiers, and throws on a non-UTF-8 value. For
+an arbitrary binary value, use `setBytes` (a `bytes` value stored
 byte-for-byte) and `getBytes` (`bytes`, never decoded); `getBytes` returns empty
 `bytes` for a missing key.
 
 `gets` + `cas` are the optimistic-concurrency primitive: `gets` returns the value
-with a **CAS token**, and `cas` stores only if that token still matches (nobody
+with a CAS token, and `cas` stores only if that token still matches (nobody
 else changed the value meanwhile). The loop is `gets` -> compute -> `cas`, retry
 on `"exists"`:
 
@@ -100,7 +99,7 @@ def r as string init memcache.cas($mc, "counter", $next, 0, $it.cas);
 ```
 
 `getMulti(session, keys)` fetches several keys in one round-trip as a `map of
-string to string`, with missing keys simply absent (test with `maps.has`).
+string to string`, with missing keys absent (test with `maps.has`).
 
 ## Out of scope
 

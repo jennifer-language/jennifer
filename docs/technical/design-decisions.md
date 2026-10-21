@@ -5,7 +5,7 @@ they conflict with one of Jennifer's seven design stances. Each entry
 explains why the feature is *not* the kind of thing the stance was
 written to reject. The negative counterpart is
 [Rejected features](rejected.md): proposals that *were* turned down
-because they really did clash with a stance.
+because they did clash with a stance.
 
 When in doubt, the stances list in
 [../user-guide/index.md](../user-guide/index.md) is authoritative for
@@ -17,8 +17,7 @@ Stance #1 ("one way per thing") normally rejects sugar that creates a
 parallel API. `$xs[] = item;` and `$xs = lists.push($xs, item);` do
 compile to the same operation, so the form looks suspect under that
 rule. It ships anyway because the three properties below set it apart
-from the rejected `$i++` / `+=` family - the form is not a parallel
-API, it's the index-write syntax growing one more legal position.
+from the rejected `$i++` / `+=` family.
 
 1. **`$xs[]` re-uses an existing operator slot; it is not a new
    operator.** `$xs[i] = item;` already targets a list position via
@@ -37,8 +36,8 @@ API, it's the index-write syntax growing one more legal position.
    commit the new list back into the binding. So the bracket form
    isn't a "shortcut for `lists.push`" so much as the index-write
    syntax growing one more legal position. The two forms have
-   genuinely different shapes: one is a write statement that mutates
-   a binding, the other is an expression that returns a new list.
+   different shapes: one is a write statement that mutates a binding,
+   the other is an expression that returns a new list.
 3. **Write-only; no expression-context footgun.** `$xs[]` cannot
    appear on the right-hand side of any expression - reading "the
    element just past the end" has no meaning and is rejected at
@@ -211,7 +210,7 @@ standard library is pure-stdlib, the two carve-outs being `gopkg.in/yaml.v3`
 `sql` library breaks further: it takes two **real dependency trees** -
 `go-sql-driver/mysql` and `jackc/pgx` - which looks like a clear violation.
 
-It ships anyway, and the reasoning is deliberate, not slid in:
+It ships anyway, for these reasons:
 
 - **Both drivers are pure-Go.** No cgo, so static builds, cross-compilation, and
   the best-effort macOS / Windows artifacts stay clean. The one *embedded* engine
@@ -247,11 +246,10 @@ would re-derive slowly and get subtly wrong" justification, not mere convenience
 Turning the `web` framework from serial to concurrent request handling looked
 like a one-line change: wrap each request in a `spawn`. The naive version worked
 - a fast request issued mid-way through a slow handler dropped from ~1700 ms to
-~3 ms - but `go test -race` reported a data race on the call-depth counter. The
-fix that makes concurrent dispatch safe turns on understanding why.
+~3 ms - but `go test -race` reported a data race on the call-depth counter.
 
 The call-depth guard (the `RecursionError` analogue that raises a catchable
-error before the Go goroutine stack overflows fatally) counts nested method
+error before the Go goroutine stack overflows fatally) counts nested function
 calls. It originally lived as a plain `int` on the per-goroutine **root env**
 (`i.global` in serial code, a `spawn` snapshot's globals frame inside a spawn),
 which is correct for ordinary spawn bodies: each snapshot is a distinct root, so
@@ -277,7 +275,7 @@ The first cut of this minted a *fresh* counter at each cross-interpreter dispatc
 entry (`CallMethodWith`) - which is race-free, but wrong in a subtler way that an
 adversarial review caught: it **reset the depth at every boundary crossing**, so
 recursion that bounces through a dispatch builtin (`meta.call` self-recursion, a
-handler that re-dispatches itself via `meta.callMain`, a module method that calls
+handler that re-dispatches itself via `meta.callMain`, a module function that calls
 back into the host) never accumulated past a single crossing and grew the Go
 stack unbounded - converting a **catchable** "call stack too deep" error into a
 **fatal, unrecoverable** Go stack overflow (a whole-process crash, e.g. a web
@@ -299,13 +297,13 @@ boundary. The result is strictly better than the pre-change reach: recursion tha
 bounces purely through `meta.call` (never guarded before, because those builtins
 bypassed `evalCall`'s increment) is now catchable too.
 
-Two consequences worth stating. First, the audit that gated the change (run
+Two consequences. First, the audit that gated the change (run
 under `-race`): the *other* shared interpreter state a concurrently-dispatched
 handler can reach is safe - the map hash-index is built only on an indexed
 *write* (a read never mutates the shared value), the resolver's
 `CallExpr.Method` / `Fn` caches are stamped single-threaded before any spawn and
 only read afterwards, the profiler's collector is mutex-guarded (and off the
-serve path anyway), and `diagReq` is atomic. Second, the one genuinely-unsafe
+serve path anyway), and `diagReq` is atomic. Second, the one unsafe
 pattern is left to the user and documented, not papered over: a handler that
 **writes** a shared top-level variable of the entry program races another
 handler doing the same, because handler workers run against the same host
@@ -395,7 +393,7 @@ String interpolation (M24.19) makes an unescaped `{expr}` inside a cooked `"..."
 string an evaluation slot. That reserves `{}` for the language, and it *appears* to
 violate stance #1 (one obvious way) twice - once by adding a second way to build a
 string beside `+` concatenation, and once by colliding with the `{name}`
-placeholder markers `intl` and `validate` used. Both are reasoned, not overlooked.
+placeholder markers `intl` and `validate` used. Both are reasoned below.
 
 **Why interpolation despite `+` already existing.** Concatenation and
 interpolation are not the same job. `+` joins two *strings* and requires an
@@ -442,7 +440,7 @@ low-level PDF writer would embed a markup parser) and would tax every `pdf` user
 with `markdown` + `html` + `ansi`.
 
 `markdown` was chosen anyway because it is **already a multi-format renderer** -
-`toHtml` and `toAnsi` set the precedent, and `toPdf` is simply the third output, so
+`toHtml` and `toAnsi` set the precedent, and `toPdf` is the third output, so
 one import and one namespace give a caller every rendering path
 (`markdown.toHtml` / `toAnsi` / `toPdf`). The unified, discoverable surface was
 judged worth the import tax; a program that needs `markdown` without PDF and cares
@@ -453,7 +451,7 @@ import. See the M24.21 milestone.
 
 M28.9 needed a static signature (arity, argument types, return type) for every
 library builtin so `jennifer lint` can check a library call the way it checks a
-user method call. The obvious home is the registration call itself
+user function call. The obvious home is the registration call itself
 (`RegisterNamespaced(lib, name, fn, sig)`), which keeps a signature beside its
 implementation and can never name a builtin that does not exist.
 

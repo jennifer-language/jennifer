@@ -25,19 +25,19 @@ style, **L3nn** API lifecycle.
 | `L104` | throw-non-error             | warning  | a `throw` whose value isn't statically an `Error`                  |
 | `L105` | constant-condition          | warning  | `if (true)`, `while (true)` with no escape, `if ($x == $x)`, ...   |
 | `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
-| `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined method (the call analogue of L002; namespaced / `$f()` calls excluded) |
+| `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined function (the call analogue of L002; namespaced / `$f()` calls excluded) |
 | `L108` | undefined-name              | warning  | an unqualified bare name read where nothing by that name is defined anywhere: a constant (`MISSING_CONSTANT`), or a function used as a value (`Table{ greet: greetingOf }`); a bare variable / parameter name gets a "did you mean `$x`?" hint. The bare-name analogue of L107; `ns.NAME` and `match` arm heads / pattern binders excluded |
-| `L109` | call-arity                  | warning  | a call with the wrong argument count to a same-file method (exact: no default / variadic params), an imported module's exported function (`alias.fn(...)`), or a library builtin (optional / variadic counts from its `libsig` signature); func-value calls excluded |
-| `L110` | argument-type               | warning  | a call argument whose static type certainly differs from the parameter's - a same-file method's, an imported module's exported function's, or a library builtin's signature; arguments of unknown type (a user method's result, a func-value call) are skipped |
+| `L109` | call-arity                  | warning  | a call with the wrong argument count to a same-file function (exact: no default / variadic params), an imported module's exported function (`alias.fn(...)`), or a library builtin (optional / variadic counts from its `libsig` signature); func-value calls excluded |
+| `L110` | argument-type               | warning  | a call argument whose static type certainly differs from the parameter's - a same-file function's, an imported module's exported function's, or a library builtin's signature; arguments of unknown type (a user function's result, a func-value call) are skipped |
 | `L111` | binding-type                | warning  | a value whose static type certainly differs from the declared type of where it is stored: a `def ... init`, a `$x = ...`, a struct field write or literal field, a list / map element write, a `$xs[] = ...` append |
 | `L112` | undeclared-namespace        | warning  | a `ns.name` reference whose namespace has no `use` / `import` (the inverse of L106; local enum / struct type prefixes excluded) |
 | `L113` | struct-literal-fields       | warning  | a struct / enum-variant literal - of a same-file type, or an imported module's exported one (`alias.T{...}`, `alias.E.V{...}`) - naming a field the type lacks, leaving one out, or naming an unknown variant (library types are checked at load by `run`) |
 | `L114` | unknown-member              | warning  | a `ns.name` naming a function, constant, or type that its library does not register (`time.millis(10)`, `math.PII`, `def t as time.Tme`) or its imported module does not export (unknown, or private to it), with a "did you mean" hint for a near miss; a surface that is not available is skipped |
-| `L201` | method-too-long             | info     | method body over the statement threshold (default 60)              |
+| `L201` | function-too-long           | info     | function body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
 | `L204` | interpolation-slot-too-complex | info  | a call or other non-trivial expression inside a `{expr}` string slot |
-| `L205` | accumulator-parameter       | info     | a method that takes, mutates, and returns a `list` / `map` parameter (an O(n^2) copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` on a method local outside a `try`) |
+| `L205` | accumulator-parameter       | info     | a function that takes, mutates, and returns a `list` / `map` parameter (an O(n^2) copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` on a function local outside a `try`) |
 | `L301` | deprecation                 | warning  | reserved family, empty until an API is deprecated                  |
 | `L302` | removed-api                 | warning  | use of a removed API (e.g. `use core;`)                            |
 | `L303` | invalid-requirement-header  | warning  | a malformed / duplicate / unknown `# pragma-jennifer-*` directive    |
@@ -54,7 +54,7 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L114/L201/L202/L105 - L106 and
+checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L114/L201/L204/L105 - L106 and
 L114 also walk declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
@@ -62,9 +62,14 @@ for the checks that need binding visibility (L101/L104/L110/L111). Both descend
 into `SpawnExpr.Body`, which the resolver deliberately skips: a read
 inside a spawn still marks an outer local used, but a *declaration*
 inside a spawn is left unreported (the resolver's spawn carve-out, which
-the linter inherits). The linter runs on the parsed AST alone - it does
-not call `parser.Resolve`, so it can lint code that would fail
-resolution, and it tracks its own bindings and declared types.
+the linter inherits). The checks in `internal/lint` run on the parsed AST
+and track their own bindings and declared types; they do not read the
+resolver's `(Depth, Slot)` annotations. The CLI does run `parser.Resolve`
+first (`lintComputeDiags`), so an undefined name, a shadowing, or an enum
+`match` error that `run` would refuse surfaces as an `L002` source finding
+rather than a clean lint. L202 and L205 walk statements with their own
+small recursions (nesting depth, accumulator scan) instead of either
+traversal.
 
 **Format-honest errors.** A lex / preprocess / parse failure is not a
 stderr bail-out: `lintComputeDiags` turns it into an `L0nn` source
@@ -80,7 +85,7 @@ the same splice `jennifer test` applies (`overlayBaseFor` /
 `tokenizeForSplice` / `spliceTokens`) - so the scope analysis
 `lintComputeDiags` runs (`parser.Resolve`: undefined names, shadowing,
 enum-match binding and exhaustiveness) sees the module's private consts /
-structs / enums / methods. Without it the resolver reports false positives
+structs / enums / functions. Without it the resolver reports false positives
 the test run never hits: e.g. a `when Variant(bind)` arm over a
 module-private enum goes unrecognised, so the bound name reads as an
 undefined variable (`L002`). Findings that land in the spliced base module
@@ -149,7 +154,7 @@ iterator over a typed list / map), a field / index / slice of one, an operator
 over typed operands (`int + int` is int, a float operand makes float, `/` is
 float, a comparison is bool), a struct or enum literal, a range (`list of int`),
 or a library call whose signature names a single return type - and answers
-"unknown" for everything else, above all a user method's result (methods declare
+"unknown" for everything else, above all a user function's result (functions declare
 no return type) and a func-value call. An unknown type never produces a finding.
 Types compare as the runtime's `MatchesDeclared` does (strict kinds: an `int` is
 not a `float`; struct identity by name; a stamped collection's element type must
@@ -188,7 +193,7 @@ A library's constants and types come from the interpreter's registered tables
 (`Config.LibConsts` / `LibStructs`, filled by the CLI).
 
 **Include fragments.** A file named `NAME.inc.j` is an include fragment: a part
-that is only ever `include`d, free to call methods and read constants and
+that is only ever `include`d, free to call functions and read constants and
 namespaces its includer defines. Linted on its own (`jennifer lint modules/*.j`
 picks the fragments up), the undefined-name checks would flag every such borrowed
 name, so the CLI drops `L107`, `L108` and `L112` for a fragment and prints one

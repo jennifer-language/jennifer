@@ -1,15 +1,15 @@
 # `ml` - classical machine learning
 
-Enable with `use ml;`. Classical / predictive machine learning on tabular data -
-the scikit-learn-lite core companion to [`stats`](stats.md) and
+Enable with `use ml;`. Classical / predictive machine learning on tabular data,
+a scikit-learn-lite companion to [`stats`](stats.md) and
 [`linalg`](linalg.md). Models follow a **fit / predict** shape: a fit function
 (`ml.kMeans`, `ml.linearRegression`, ...) trains and returns an opaque `ml.Model`
 handle, and `ml.predict` / `ml.transform` apply it. Pure Go stdlib, TinyGo-clean,
 both binaries.
 
-It is **not** a deep-learning framework: tensors, autodiff, and training deep
-nets are native GPU / C++ territory a tree-walker cannot usefully replace, and
-"run a pre-trained model" is already [`http`](../modules/http.md) / `os.run`.
+It is **not** a deep-learning framework: tensors, autodiff and deep-net
+training belong to native GPU / C++ tools, and running a pre-trained model is
+already possible via [`http`](../modules/http.md) / `os.run`.
 
 ```jennifer
 use ml;
@@ -84,9 +84,8 @@ io.printf("y = %v . x + %v\n", ml.coefficients($m), ml.intercept($m));   # [2, 3
 
 The random models (`kMeans`, `randomForest`, `trainTestSplit`) draw from
 `math`'s shared random source, so `math.randSeed(n)` makes a run reproducible.
-This is deliberate - reproducibility, not secrecy, is what training needs; a seed
-is not a secret, so `ml` uses `math`'s seedable source, never `crypto`'s
-unseedable one (which would make a split or clustering impossible to reproduce).
+Training needs reproducibility, not secrecy, so `ml` never uses `crypto`'s
+unseedable source.
 
 A fitted model lives in a per-run registry behind its handle until the program
 ends. When you fit **many** models in a loop (e.g. a large cross-validation),
@@ -98,12 +97,11 @@ forest `nTrees` <= 1000, `kMeans` `maxIter` <= 10000, logistic `epochs` <= 1e6,
 (rows x columns) <= 2e7); a value above the ceiling is a catchable error, as is a
 `polynomialFeatures` product that overflows to a non-finite value.
 
-`ml.lasso`, unlike ordinary least squares, is fine with more features than rows
-(p > n) - that is its feature-selection use case, so it does **not** require
-`rows > features`. Feeding it a very wide `polynomialFeatures` design is allowed
+`ml.lasso`, unlike ordinary least squares, accepts more features than rows
+(p > n), its feature-selection use case. Feeding it a very wide `polynomialFeatures` design is allowed
 but does dense O(sweeps x features x rows) work; keep the expansion modest.
-`ml.logLoss` requires each probability in `[0, 1]` (an out-of-range value errors,
-rather than being silently clamped).
+`ml.logLoss` requires each probability in `[0, 1]`; an out-of-range value errors
+instead of being clamped.
 
 ```jennifer
 use ml;
@@ -166,8 +164,8 @@ a silent NaN: an empty / ragged matrix, mismatched `X` / `y` lengths, a singular
 regression design (collinear features), a diverged logistic fit, or magnitudes
 that overflow the computation all raise a positioned error.
 
-`ml` targets the modest tabular data a tree-walker handles - native loops over
-thousands of rows, not millions. Large-scale training stays a native-tool job.
+`ml` targets modest tabular data: thousands of rows, not millions. Large-scale
+training stays a native-tool job.
 Support-vector machines, gradient-boosted trees, density-based clustering
 (DBSCAN), and model serialization are out of scope for this tier.
 

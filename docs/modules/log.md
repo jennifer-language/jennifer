@@ -29,17 +29,17 @@ sink:
 | `log.toFile(level, format, path)` | append to a file (created if missing) |
 | `log.toSyslog(level, address, app)` | an RFC 5424 syslog server over UDP |
 
-`level` is the **minimum** level to emit - one of `"debug"` < `"info"` <
-`"warn"` < `"error"` - so a logger at `"info"` silently drops `debug` records.
+`level` is the minimum level to emit - one of `"debug"` < `"info"` <
+`"warn"` < `"error"` - so a logger at `"info"` drops `debug` records.
 `format` is `"text"`, `"logfmt"`, or `"json"` (the syslog sink uses RFC 5424
 framing and ignores it).
 
 ## Levels
 
-Each level has a method taking the logger, a message, and a
+Each level has a function taking the logger, a message, and a
 `map of string to string` of fields (`{}` for none):
 
-| Method | |
+| Function | |
 | ------ | - |
 | `log.debug(logger, message, fields)` | verbose / development detail |
 | `log.info(logger, message, fields)` | normal operation |
@@ -48,19 +48,18 @@ Each level has a method taking the logger, a message, and a
 | `log.fatal(logger, message, fields)` | an unrecoverable failure - **logs then exits** |
 | `log.at(logger, level, message, fields)` | emit at a level chosen at runtime |
 
-The level ordering is `"debug"` < `"info"` < `"warn"` < `"error"` < `"fatal"`.
-A record below the logger's level is dropped before rendering, so guarded
-`log.debug` calls in hot paths cost only the level comparison. `log.fatal` ranks
-above every other level, so it is **always** emitted regardless of the logger's
-minimum level, and then terminates the whole program with exit code `1` - the
-statement after a `log.fatal` call never runs.
+A record below the logger's level is dropped before rendering, so `log.debug`
+calls in hot paths cost only the level comparison. `log.fatal` ranks above
+`"error"`, so it is always emitted regardless of the logger's minimum level; it
+then terminates the program with exit code `1`, and the statement after it never
+runs.
 
 ## Context loggers
 
 `log.with(logger, fields)` returns a **new** logger that carries `fields` as
 persistent context: every record emitted through it includes those fields,
 merged with any per-call fields (a per-call key of the same name wins). The
-parent logger is unchanged (value semantics), and `with` **composes** - calling
+parent logger is unchanged (value semantics), and `with` composes: calling
 it again merges the new fields on top of the carried ones:
 
 ```jennifer
@@ -99,18 +98,17 @@ overrides the built-in key).
   (1) times 8 plus the level's severity (`error`=3, `warn`=4, `info`=6,
   `debug`=7), the host is `$HOSTNAME` (or `-`), and the fields ride in the
   message as logfmt pairs. Because it uses `net`, the syslog sink needs the
-  default **`jennifer`** binary - the module is therefore **partial** on
-  `jennifer-tiny` (console and file logging work; the syslog sink returns the
+  default `jennifer` binary, so the module is partial on `jennifer-tiny` (console and file logging work; the syslog sink returns the
   no-network error).
 
 ## Scope
 
 - **String fields.** `fields` is a `map of string to string` - convert numbers /
-  bools to strings at the call site (`convert.toString`). This keeps the record
-  model simple and the value quoting predictable.
+  bools to strings at the call site (`convert.toString`). This keeps value
+  quoting predictable.
 - **UDP syslog.** No TCP / TLS syslog transport, and no local `/dev/log` socket.
-- **No global default logger.** Loggers are values you pass explicitly - no
-  hidden singleton, no package-level state.
+- **No global default logger.** Loggers are values you pass explicitly; there is
+  no package-level state.
 
 ## See also
 

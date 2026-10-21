@@ -1,9 +1,8 @@
 # `lists` - list manipulation
 
-Enable with `use lists;`. Namespaced under `lists.`; every function is
-called as `lists.NAME(...)`. Each function **returns a new list** -
-nothing mutates the input. Commit the result with the usual
-assignment:
+Enable with `use lists;`; every function is called as `lists.NAME(...)`.
+Each function **returns a new list** and never mutates the input; commit
+the result with an assignment:
 
 ```jennifer
 use io;
@@ -16,16 +15,13 @@ $xs = lists.sort($xs);             # sort ascending
 io.printf("first=%d last=%d\n", lists.first($xs), lists.last($xs));
 ```
 
-For the common "append to a list as you build it" pattern, the
-language ships the `$xs[] = item;` sugar (see
-[user-guide/types-and-values.md](../user-guide/types-and-values.md#the-xs-append-sugar)). It's
-shorthand for `$xs = lists.push($xs, item);` **and, in a loop, much
-faster**: `$xs[]` mutates in place through the copy-on-write protocol
-(amortized O(N) for N appends), whereas `$xs = lists.push($xs, item)`
-returns a new list each pass and copies the whole thing - O(N^2)
-overall. Prefer `$xs[]` when building a list element by element; use
-`lists.push` when you specifically want a fresh list and keep the
-original.
+To build a list element by element, use the `$xs[] = item;` append sugar
+(see
+[user-guide/types-and-values.md](../user-guide/types-and-values.md#the-xs-append-sugar)).
+It means `$xs = lists.push($xs, item);` but mutates the binding in place
+(amortized O(N) for N appends), whereas `lists.push` copies the whole list
+each pass - O(N^2) in a loop. Use `lists.push` when you want a fresh list
+and keep the original.
 
 ## Functions
 
@@ -59,9 +55,9 @@ original.
 ### Higher-order functions
 
 `map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy` each take a
-first-class **`func`** value (see the language guide) and call it back per
-element. A bare method name in expression position is the function value, so you
-pass a method by name:
+**`func`** value (see the language guide) and call it once per element. A bare
+function name in expression position is the function value, so pass a function by
+name:
 
 ```jennifer
 use lists;
@@ -101,16 +97,14 @@ lists.all($xs, isEven);        # false
 - All elements `bool` - `false < true`.
 
 A list mixing strings with numbers, or containing `null`, `list`, or
-`map` elements, errors at runtime rather than silently producing
-nonsense. For a custom order, `lists.sortBy(xs, keyFn)` sorts by the key a
+`map` elements, is a runtime error. For a custom order, `lists.sortBy(xs, keyFn)` sorts by the key a
 `func` value extracts (see "Higher-order functions" above).
 
 ### `first`/`last` versus `head`/`tail`
 
 `first` and `last` return *elements* (the value at index 0 or
 `len-1`). `head` and `tail` return *sublists* of length `n`, modelled
-on the Unix `head` / `tail` commands. They are not aliases; pick the
-one that matches what you actually want:
+on the Unix `head` / `tail` commands; they are not aliases:
 
 ```jennifer
 def xs as list of int init [10, 20, 30, 40, 50];
@@ -130,19 +124,15 @@ lists.slice($xs, 0, len($xs) - 1);  # [10, 20, 30, 40]
 ### Argument order
 
 `lists.contains` puts the *haystack* first and the *needle* second
-(`lists.contains($xs, item)`). Mirrors `strings.contains($s, $sub)`.
-PHP's `in_array($needle, $haystack)` order is deliberately not
-adopted - it's famously confusing.
+(`lists.contains($xs, item)`), mirroring `strings.contains($s, $sub)`
+(not PHP's `in_array($needle, $haystack)` order).
 
 ### Shuffle
 
-`lists.shuffle(xs)` returns a uniformly-random permutation of `xs` -
-non-mutating, like every other helper in this library. The algorithm
-is Durstenfeld's variant of the Fisher-Yates shuffle (O(n), uniform
-across the n! permutations). The random source is the same one
-`math.rand` / `math.randInt` / `math.randSeed` use, so calling
-`math.randSeed(N)` before a shuffle makes the result deterministic
-across runs:
+`lists.shuffle(xs)` returns a uniformly random permutation of `xs`
+(Durstenfeld's Fisher-Yates, O(n)). It shares the random source of
+`math.rand` / `math.randInt` / `math.randSeed`, so `math.randSeed(N)`
+before a shuffle makes the result deterministic across runs:
 
 ```jennifer
 use lists;
@@ -155,21 +145,16 @@ def b as list of int init lists.shuffle([1, 2, 3, 4, 5]);
 # $a and $b are byte-identical permutations.
 ```
 
-Empty and single-element inputs are returned (still copied per the
-non-mutating convention). The function does NOT require `use math;`
-in the calling program - the shared source is a Go-side
-implementation detail.
+Empty and single-element inputs are returned as copies. The caller does
+not need `use math;` - the shared source is internal.
 
 ### Range
 
 `lists.range(start, end)` returns a **half-open** list of consecutive
 integers: `[start, start+1, ..., end-1]` for ascending, descending
-implied when `start > end`. **End is exclusive.** Same semantic as
-`lists.slice` and `strings.substring`, and the same shape every
-half-open range function in the wider ecosystem has (Python
-`range`, Go slice indexing, Rust `..`, etc.). The full design
-rationale (including why we deviated from Jennifer's
-English-reading default) is in
+implied when `start > end`. **End is exclusive**, as in `lists.slice`,
+`strings.substring`, Python `range`, Go slicing and Rust `..`. Rationale
+(including why this departs from Jennifer's English-reading default):
 [design-decisions.md > Half-open ranges](../technical/design-decisions.md#half-open-ranges).
 
 ```jennifer
@@ -180,8 +165,6 @@ lists.range(1, 5);          # [1, 2, 3, 4]       - 4 elements (5 excluded)
 lists.range(5, 5);          # []                 - coincident bounds: empty
 lists.range(3, 0);          # [3, 2, 1]          - descending implied
 ```
-
-Two properties fall out:
 
 - **Index alignment.** `lists.range(0, len($xs))` gives exactly the
   valid indices for a list of `len($xs)` elements, matching how
@@ -209,13 +192,12 @@ lists.range(10, 1, -3);     # [10, 7, 4]         - 1 excluded
 lists.range(10, 0, -3);     # [10, 7, 4, 1]      - -2 past 0, stop at 1
 ```
 
-There's no "did the step land?" question - the rule is uniformly
-"emit while inside the open end."
+The rule is always "emit while strictly before `end`", whether or not the
+step lands on it.
 
 ### Value semantics
 
-Every function copies its inputs; the original list is never modified.
-Callers always re-bind the result:
+Every function copies its inputs; re-bind the result:
 
 ```jennifer
 def xs as list of int init [1, 2, 3];
@@ -223,8 +205,7 @@ def ys as list of int init lists.push($xs, 4);
 # $xs is still [1, 2, 3]; $ys is [1, 2, 3, 4]
 ```
 
-This matches the rest of Jennifer's value-semantics design - the same
-rule that makes `$dst = $src;` a copy, not an alias.
+This is the same rule that makes `$dst = $src;` a copy.
 
 See also: [maps.md](maps.md), [index.md](index.md). `len(xs)` is a
 language built-in (no import needed).

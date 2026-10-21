@@ -1,13 +1,12 @@
 # `math` - numeric functions and constants
 
-Enable with `use math;`. The numeric toolbox: the everyday functions
-(arithmetic helpers, trigonometry, hyperbolics, exponentials and logarithms,
-combinatorics) plus the special functions a probability layer is built on
-(the error, gamma and beta functions and their regularized incomplete forms),
-and the constants `math.PI`, `math.E`, and `math.TAU`. The library is strict
-on undefined inputs - anything that would produce `NaN` or `Infinity` in IEEE
-arithmetic instead produces a positioned runtime error, so a domain slip
-(`math.ln(0)`, `math.asin(2)`) is a catchable error, never a silent NaN.
+Enable with `use math;`. Arithmetic helpers, trigonometry, hyperbolics,
+exponentials and logarithms, combinatorics, the special functions a
+probability layer is built on (error, gamma and beta functions and their
+regularized incomplete forms), and the constants `math.PI`, `math.E`, and
+`math.TAU`. Anything that would produce `NaN` or `Infinity` in IEEE
+arithmetic is a positioned, catchable runtime error instead, so a domain slip
+(`math.ln(0)`, `math.asin(2)`) never yields a silent NaN.
 
 ```jennifer
 use io;
@@ -92,15 +91,12 @@ Integer in, integer out; a result past `int64` is a catchable overflow error
 
 ## Special functions
 
-The functions a statistics / probability layer needs. All return a `float`.
-The error and gamma functions come from Go's standard library; the
-**regularized incomplete** gamma and beta - the engine every distribution CDF
-is built on - are computed by the standard series / continued-fraction
-algorithms, verified to machine precision on their convergent domain. Their
-results are pinned into `[0, 1]` (a CDF by definition), and an extreme argument
-that drives the series to a non-finite or non-converged result is a catchable
-error, not a silently-wrong value or a leaked `NaN` - the same strict contract
-the rest of the library keeps.
+All return a `float`. The error and gamma functions come from Go's standard
+library; the **regularized incomplete** gamma and beta (the engine behind every
+distribution CDF) use the standard series / continued-fraction algorithms,
+verified to machine precision on their convergent domain. Their results are
+clamped to `[0, 1]`, and an argument that drives the series to a non-finite or
+non-converged result is a catchable error, not a wrong value or a `NaN`.
 
 | Call                    | Returns | Notes                                        |
 | ----------------------- | ------- | -------------------------------------------- |
@@ -129,9 +125,9 @@ call makes both deterministic together. (`uuid` and `password` draw from
 the [`crypto`](crypto.md) library's crypto-grade source instead, so
 `randSeed` does not affect them.)
 
-The source is **not cryptographically secure** - it is Go's `math/rand`,
-seedable and predictable once observed. Don't derive secrets, tokens, keys,
-or anything security-sensitive from it.
+The source is **not cryptographically secure**: it is Go's `math/rand`,
+seedable and predictable once observed. Don't derive secrets, tokens or keys
+from it.
 
 ```jennifer
 use io;
@@ -144,12 +140,11 @@ io.printf("%d\n", math.randInt(1, 6));          # die roll, seeded
 
 ### For secure random numbers, use `crypto`
 
-When the value must be unpredictable - a password, a token, a nonce, a
-shuffle an adversary must not guess - use the [`crypto`](crypto.md)
-library's crypto-grade source instead of `math`. `crypto.randInt(lo, hi)`
-has the **same shape** as `math.randInt` (inclusive `[lo, hi]`), so it is a
-drop-in replacement; it is unseedable by design (there is no
-`crypto.randSeed`, since predictability is the thing you are avoiding):
+When the value must be unpredictable (a password, token, nonce, or a
+shuffle an adversary must not guess), use the [`crypto`](crypto.md)
+library's crypto-grade source. `crypto.randInt(lo, hi)` has the same shape
+as `math.randInt` (inclusive `[lo, hi]`) and is unseedable (there is no
+`crypto.randSeed`):
 
 ```jennifer
 use io;
@@ -159,9 +154,8 @@ io.printf("%d\n", crypto.randInt(1, 6));        # secure, unbiased die roll
 def token as bytes init crypto.randBytes(32);   # 256 bits of secure entropy
 ```
 
-If you specifically want `math`'s fast, `lists.shuffle`-sharing stream but
-seeded **unpredictably** (so each run differs and the seed can't be guessed),
-draw the seed from `crypto` once at startup:
+To keep `math`'s fast, `lists.shuffle`-sharing stream but with an
+unguessable seed, draw the seed from `crypto` once at startup:
 
 ```jennifer
 use math;
@@ -174,10 +168,10 @@ math.randSeed(crypto.randInt(0 - 9223372036854775807, 9223372036854775807));
 # fast and non-reproducible, but still NOT cryptographically secure output.
 ```
 
-Note the trade-off: seeding `math` from `crypto` only makes the *starting
-point* unpredictable. The stream itself is still `math/rand`, so once enough
-output is observed it remains predictable - for output that must stay secret,
-use `crypto.randInt` / `crypto.randBytes` directly.
+This only makes the *starting point* unpredictable. The stream is still
+`math/rand` and becomes predictable once enough output is observed; for
+output that must stay secret, use `crypto.randInt` / `crypto.randBytes`
+directly.
 
 ## Constants
 
@@ -187,22 +181,20 @@ use `crypto.randInt` / `crypto.randBytes` directly.
 | `math.E`   | float | 2.718281828459045... |
 | `math.TAU` | float | 6.283185307179586... (`2*PI`, the full-turn constant) |
 
-Constants are referenced through the `math.` namespace prefix like
-every other library name; the bare identifiers `PI` and `E`
+Constants are referenced through the `math.` prefix; bare `PI` and `E`
 are not in scope. With `use math as m;` the alias takes over
 (`m.PI`, `m.E`).
 
 ## Strictness
 
-The library refuses to produce floating-point edge values:
+The library refuses to produce NaN or Infinity:
 
 - `math.sqrt(-1)` - undefined for negative input.
 - `math.pow(0, -1)` - division-by-zero territory; result would be Infinity.
 - `math.pow(-1, 0.5)` - would be NaN.
 
-If a future use case needs the NaN/Infinity values, a `math.NAN` / `math.INF`
-constant (or dedicated check functions) can be added later. For now Jennifer
-treats them as errors at the boundary - consistent with how the language
-already refuses to silently coerce types.
+A `math.NAN` / `math.INF` constant (or check functions) could be added if a
+use case needs them; for now these are errors at the boundary, consistent
+with the language refusing to coerce types silently.
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).

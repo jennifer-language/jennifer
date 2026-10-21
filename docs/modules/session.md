@@ -6,8 +6,8 @@ held under a `sess:ID` key with a sliding TTL, so it expires on its own when
 idle. The store is a [`kvstore.Store`](kvstore.md) - back it with `memcache` or
 `redis` (distributed, shared across processes) or the in-process
 [`kv`](../libraries/kv.md) library (single process, no server), all behind one
-API. Session values are a `json.Value`, so a session holds **structured** data
-(nested objects, arrays, numbers), not just flat strings.
+API. A session can hold structured data (nested objects, arrays, numbers), not
+only flat strings.
 
 ```jennifer
 import "session.j" as session;

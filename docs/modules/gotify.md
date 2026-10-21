@@ -1,10 +1,10 @@
 # `gotify` - push notifications to a Gotify server
 
-Import with `import "gotify.j" as gotify;`. A tiny module on top of the
-[`http`](http.md) client that pushes a notification to a
-[Gotify](https://gotify.net) server. Hold a value-semantic `Config` (server URL
-+ application token) and call `push`. Because it builds on `http` (which uses
-`net`), this module needs the default **`jennifer`** binary.
+Import with `import "gotify.j" as gotify;`. Pushes a notification to a
+[Gotify](https://gotify.net) server over the [`http`](http.md) client. Hold a
+value-semantic `Config` (server URL + application token) and call `push`. It
+builds on `http` (which uses `net`), so it needs the default **`jennifer`**
+binary.
 
 > **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
 > **stock** tiny build, which ships without a network driver - not a TinyGo
@@ -47,9 +47,9 @@ not a crash.
 ## Message extras (markdown, click action)
 
 Gotify's [extras](https://gotify.net/docs/msgextras) let a message carry
-client hints. Because extras are a nested object, the extras-carrying variants
-POST a **JSON** body (`application/json`) instead of the form - the plain
-`push` stays form-encoded and unchanged. Two extras are supported:
+client hints. Extras are a nested object, so the extras-carrying variants POST
+a **JSON** body (`application/json`) instead of the form; the plain `push` stays
+form-encoded. Two extras are supported:
 
 - **markdown** - `pushMarkdown` (or `Extras{markdown: true}`) sets
   `extras["client::display"]["contentType"] = "text/markdown"`, so the body
@@ -87,12 +87,11 @@ The JSON body `pushExtras` builds for the combined case is:
 
 ## Stateless by design
 
-There is no `init()` that stashes the URL and token - a module has no mutable
-state. The caller holds the value-semantic `Config` and passes it to each
-`push`, the same shape as the `time` / `hash` structs. The URL and token are
-**yours to supply and never commit**: read them from the environment or a config
-file. The demo reads `GOTIFY_URL` / `GOTIFY_TOKEN` from the environment; the docs
-use placeholders.
+There is no `init()` that stashes the URL and token (a module has no mutable
+state). The caller holds the value-semantic `Config` and passes it to each
+`push`, the same shape as the `time` / `hash` structs. Never commit the URL and
+token: read them from the environment or a config file. The demo reads
+`GOTIFY_URL` / `GOTIFY_TOKEN` from the environment.
 
 ## See also
 

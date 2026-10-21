@@ -2,8 +2,8 @@
 
 Import with `import "font.j" as font;`. A **pure-Jennifer** TrueType / OpenType
 parser: read a `.ttf` / `.otf` from `bytes` and expose its metrics, character
-map, and glyph outlines - no Go, no dependency, just the `bytes` type and the
-bitwise operators for the big-endian tables, so it runs on **both binaries**.
+map, and glyph outlines. No Go and no dependency (the `bytes` type and the
+bitwise operators read the big-endian tables), so it runs on **both binaries**.
 
 Both outline backends ship: the **TrueType `glyf`** backend (simple + composite
 glyphs, quadratic curves) and the **CFF / PostScript** backend for OpenType
@@ -108,11 +108,10 @@ guard.
 
 ## Performance
 
-Parsing is cheap - even a multi-megabyte CJK CFF font opens in ~100 ms, because
-`parse` only reads the table directory and headers. Glyph access scales with the
-glyph, not the font: a single CharStrings / subr INDEX entry is read in O(1)
-(never walking the whole 65k-glyph INDEX), the format-12 cmap is binary-searched,
-and CFF subroutines are fetched on demand - so a CJK glyph outlines in a fraction
-of a second. There is no need to cache or serialise a parsed `Font`: it is just
-the raw file bytes plus a small table of offsets, so re-`open`ing the file is as
-fast as reloading any cache would be.
+A multi-megabyte CJK CFF font opens in ~100 ms, because `parse` only reads the
+table directory and headers. Glyph access scales with the glyph, not the font: a
+single CharStrings / subr INDEX entry is read in O(1) (never walking the whole
+65k-glyph INDEX), the format-12 cmap is binary-searched, and CFF subroutines are
+fetched on demand, so a CJK glyph outlines in a fraction of a second. There is
+no need to cache or serialise a parsed `Font`: it is the raw file bytes plus a
+small table of offsets, so re-`open`ing the file is as fast as reloading a cache.

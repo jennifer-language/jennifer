@@ -84,7 +84,7 @@ For a SET, build typed bindings:
 ## Agent (server)
 
 The module is also an **agent** (server): it answers GET / GETNEXT / SET for a
-MIB you supply. This is a hardware simulator for testing an SNMP tool, a
+MIB you supply: a hardware simulator for testing an SNMP tool, a
 self-contained example (no external device), or a way to expose your own app's
 metrics to an SNMP-native monitoring system.
 
@@ -141,8 +141,7 @@ authentication / privacy model a later tier would add. v1 / v2c has no privacy o
 integrity either: the community travels in plaintext, and a response is matched
 only by request-id (a random 31-bit value), not by source address - so a
 network-level observer can read the community and a well-placed attacker can spoof
-a reply. Treat the community as a filter, not a secret. GETBULK is not built (a
-`walk` uses GETNEXT). `number` is `int64`-bounded, so a `Counter64` (or other
+a reply. Treat the community as a filter, not a secret. `number` is `int64`-bounded, so a `Counter64` (or other
 unsigned type) whose value is `>= 2^63` is returned as a `0x`-prefixed **hex**
 `value` string with `number` `0`, rather than a wrong negative number. There is no
 MIB compiler: OIDs are dotted numeric strings, and values are returned by SNMP

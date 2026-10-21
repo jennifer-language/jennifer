@@ -1,13 +1,12 @@
 # `stats` - statistics: descriptive, distributions, and inference
 
-The `stats` library is the whole statistical toolkit: descriptive statistics
-over a `list of int` or `list of float`, the probability **distributions** those
-build on, and the classical **inference** layer (regression, confidence
-intervals, hypothesis tests). It is pure-value and dependency-free (Go stdlib
-only, the distribution CDFs reusing `math`'s special functions), so both binaries
-build it. There is deliberately no separate `prob` library - distributions live
-with the descriptive stats and inference they are used with, as in `scipy.stats`
-or R's base `dnorm` / `pnorm` / `qnorm`.
+Enable with `use stats;`. Descriptive statistics over a `list of int` or
+`list of float`, probability **distributions**, and classical **inference**
+(regression, confidence intervals, hypothesis tests). Pure-value and
+dependency-free (Go stdlib only; the distribution CDFs reuse `math`'s special
+functions), so both binaries build it. There is no separate `prob` library:
+distributions live with the stats that use them, as in `scipy.stats` or R's
+base `dnorm` / `pnorm` / `qnorm`.
 
 ```jennifer
 use stats;
@@ -80,12 +79,11 @@ sample       s² = Σ(x - x̄)² / (n - 1)     s = √s²
 ```
 
 where μ (population) / x̄ (sample) is the mean. The sample form `s` is what some
-sources call the **empirical** standard deviation; Jennifer names the two forms
-explicitly (`stddev` vs `sampleStddev`) rather than by that ambiguous label.
+sources call the **empirical** standard deviation; Jennifer avoids that
+ambiguous label.
 `covariance` follows the population convention (σ_xy, `÷ n`) to match `variance`;
 `sampleCovariance` is the sample form (s_xy, `÷ (n-1)`). The normalized
-`correlation` divides out the standard deviations, so its `n` factor cancels and
-the population/sample distinction does not matter there. The companion
+`correlation` divides out the standard deviations, so its `n` factor cancels. The companion
 [`linalg`](linalg.md) library does linear algebra over the same value types;
 further ML primitives atop the two are on the [horizon](../horizon.md).
 
@@ -128,8 +126,8 @@ strictly positive. `stats.weightedMean(xs, weights)` averages `xs` weighted by
 `stats.kurtosis(xs)` is the **excess** kurtosis (the standardized fourth moment
 minus 3), so a normal distribution is `0` and heavier-than-normal tails are
 positive. Both need at least two elements and a non-constant list.
-`stats.mad(xs)` (median absolute deviation) and `stats.modes(xs)` (every modal
-value, versus `mode`'s single one) round out the robust / multimodal summaries.
+`stats.mad(xs)` is the median absolute deviation; `stats.modes(xs)` returns
+every modal value, versus `mode`'s single one.
 
 ## `describe`
 
@@ -172,8 +170,7 @@ stats.binomialPmf(5, 10, 0.5);      # 0.2461
 
 ## Inference
 
-Regression, confidence intervals, and hypothesis tests. Results come back as
-small structs whose fields are:
+Results come back as small structs:
 
 ```jennifer
 def struct Regression { n as int, slope as float, intercept as float, r as float, r2 as float, stdErr as float, pValue as float };
@@ -205,22 +202,22 @@ A degenerate input (zero variance, a singular design, a non-positive expected
 count, a negative observed count, or magnitudes that overflow the computation) is
 a catchable error.
 
-A few boundary and numerical notes:
+Boundary and numerical notes:
 
 - **Proportion intervals at the extremes.** For `proportionCi` at `successes == 0`
   or `successes == n`, the `"wald"` and `"wilson"` formulas collapse to a
-  degenerate point interval (`[0, 0]` / `[1, 1]`) - the well-known boundary defect
-  of those methods. Use `"clopper-pearson"` (the exact interval) when a boundary
-  count matters; it yields a proper one-sided bound there.
+  degenerate point interval (`[0, 0]` / `[1, 1]`), a known defect of those
+  methods. Use `"clopper-pearson"` (exact) when a boundary count matters; it
+  yields a proper one-sided bound there.
 - **Regression conditioning.** `linearRegression` / `multipleRegression` solve the
   normal equations by Gaussian elimination (the same approach as `linalg.solve`).
-  That is fast and exact for well-conditioned data, but numerically weak for
-  near-collinear predictors or extreme scales; the coefficients can lose precision
+  That is fast and exact for well-conditioned data but numerically weak for
+  near-collinear predictors or extreme scales: coefficients can lose precision
   before the design is flagged singular. Center / scale the predictors when they
   span very different magnitudes.
 - **Cost.** `multipleRegression` is `O(n*k²)` to form the system and `O(k³)` to
-  solve it, for `k` predictors - fine for the modest tabular data a tree-walker
-  handles, not a many-thousand-column design.
+  solve it, for `k` predictors: fine for modest tabular data, not a
+  many-thousand-column design.
 
 ```jennifer
 use stats;
@@ -243,8 +240,7 @@ catchable error rather than a `NaN` or `Inf`: an empty list (for every reduction
 except `sum`), a percentile `p` outside `[0, 100]`, mismatched or too-short
 `correlation` inputs, a zero-variance `correlation`, and an int `sum` that
 overflows `int64` all raise a positioned error you can `try` / `catch`. The same
-applies when an input's *magnitudes* overflow the computation - a `list of float`
-with values near the float64 ceiling (`~1.8e308`) can push an intermediate sum or
-power to `+/-Inf` (and thence `NaN`); every real-valued reduction rejects a
-non-finite result instead of returning it, so a `NaN` never escapes into the type
-system.
+applies when an input's *magnitudes* overflow the computation: values near the
+float64 ceiling (`~1.8e308`) can push an intermediate sum or power to `+/-Inf`
+(and then `NaN`), and every real-valued reduction rejects such a non-finite
+result instead of returning it.

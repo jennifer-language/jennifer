@@ -2,13 +2,12 @@
 
 `use path;` enables `path.`-prefixed functions for taking paths apart and
 building them back up: base name, directory, extension, join, clean. Every
-function is a **pure string transform** - it never touches the disk (that is
-`fs`'s job) - so `path` is the string layer that pairs with `fs`'s I/O, the same
-way `strings` pairs with text.
+function is a **pure string transform** that never touches the disk; disk I/O
+is [`fs`](fs.md).
 
 Paths use the **host separator** (`/` on Linux, `\` on the best-effort Windows
 build), via Go's `path/filepath`. Build paths with `path.join` instead of
-hardcoding `"/"` and they stay portable across platforms; the separator itself is
+hardcoding `"/"` and they stay portable; the separator itself is
 [`os.DIRSEP`](os.md).
 
 ## Functions
@@ -30,7 +29,7 @@ hardcoding `"/"` and they stay portable across platforms; the separator itself i
 OS-aware, so on Linux `path.base("a\b")` is `"a\b"` unchanged (backslash is a
 legal Unix filename byte). To neutralize an attacker-controlled name - an email
 attachment's filename, an upload field - before writing it, strip **both**
-separators yourself and reject `.` / `..`, rather than reaching for `path.base`.
+separators yourself and reject `.` / `..`.
 
 ## Examples
 

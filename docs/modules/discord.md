@@ -64,8 +64,8 @@ def struct discord.Embed {
 
 `color` is the embed's left-bar colour as a **decimal** RGB integer (e.g.
 `3066993` for green, `0xFF0000` = `16711680` for red). At least one of `title` /
-`description` should be non-empty. All strings are JSON-escaped for you, so
-quotes and newlines are safe. `content` and `embeds` are each emitted only when
+`description` should be non-empty. All strings are JSON-escaped, so quotes and
+newlines are safe. `content` and `embeds` are each emitted only when
 present, so a plain `send`, an embeds-only message, and a content-plus-embeds
 message are all valid.
 

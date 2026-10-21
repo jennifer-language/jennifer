@@ -1,9 +1,8 @@
 # `ntp` - SNTP network-time client
 
 Import with `import "ntp.j" as ntp;`. Query a time server over UDP and get back
-its time plus the local clock **offset** and round-trip **delay**. This is the
-one-shot query half of NTP - a simple **SNTP** client (RFC 4330 / 5905): it
-speaks the standard NTP wire protocol (the 48-byte packet on port 123) but does
+its time plus the local clock **offset** and round-trip **delay**. A one-shot
+**SNTP** client (RFC 4330 / 5905): it speaks the standard NTP wire protocol (the 48-byte packet on port 123) but does
 not discipline the clock or run as a daemon. It reports the measurement; acting
 on it is the caller's job. Needs the default `jennifer` binary (`net`).
 
@@ -43,7 +42,7 @@ timestamps. A positive `offset` means the local clock is behind the server.
 full `host:port` address and an explicit receive timeout in milliseconds. A query
 that gets no reply within the timeout, or a short / malformed packet, throws
 `Error{kind: "ntp"}` - catch it with `try` / `catch`. The receive timeout is a
-real deadline on the UDP socket, so a lost reply fails fast instead of hanging.
+deadline on the UDP socket, so a lost reply fails fast instead of hanging.
 
 ## Scope
 

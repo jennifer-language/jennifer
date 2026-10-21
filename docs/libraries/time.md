@@ -1,17 +1,10 @@
 # `time` - instants, durations, and arithmetic
 
-Enable with `use time;`. Covers one type for absolute instants on the
-wall-clock timeline (`time.Time`) and one for signed spans
-(`time.Duration`), with constructors from Unix integers, calendar
-accessors, and arithmetic / comparison helpers.
-
-This page covers the `time` library surface. A benchmark
-example uses `time.now()` to measure elapsed time.
-IANA zone names and daylight-saving transitions are not part
-of the library yet - it ships fixed-offset zones only. IANA /
-DST support is planned as a Go-backed extension to this
-library (delegating to the host tz database), not a
-hand-maintained data map.
+Enable with `use time;`. One type for absolute instants (`time.Time`),
+one for signed spans (`time.Duration`), and fixed-offset zones
+(`time.Zone`), with constructors, calendar accessors, arithmetic /
+comparison, formatting and parsing. IANA zone names and DST are not
+supported yet (see [Zones](#zones)).
 
 ```jennifer
 use io;
@@ -25,11 +18,10 @@ io.printf("took %d ms\n", time.milliseconds($gap));
 
 ## Types
 
-The library registers two namespaced structs at install time. Field
-names exist because Jennifer structs have no privacy mechanism, but
-the conventional API is the function set below - prefer
-`time.unix($t)` over `$t.nanos / 1000000000`, since the field shape
-can change between milestones.
+The library registers these namespaced structs. Their fields are
+visible (Jennifer structs have no privacy), but use the functions
+below - `time.unix($t)` rather than `$t.nanos / 1000000000` - since
+the field shape can change between releases.
 
 ```jennifer
 def struct time.Time { nanos as int, offset as int };
@@ -46,8 +38,8 @@ def struct time.Zone { offset as int, name as string };
   later time from an earlier one produces a negative duration. A duration is an
   int64 nanosecond count, so a constructor given a count too large to represent
   (e.g. `time.fromSeconds` of ~9.2e9 or more), and a `time.sub` whose difference
-  overflows, raise a catchable error rather than wrapping - the same strictness
-  as the language's integer arithmetic.
+  overflows, raise a catchable error instead of wrapping, like the language's
+  integer arithmetic.
 - `time.Zone.offset` - seconds east of UTC (`3600` for CET,
   `-28800` for PST, `0` for UTC). Capped at +/- 26 hours to catch
   obvious mistakes.
@@ -80,15 +72,13 @@ milliseconds or nanoseconds when sub-second precision is needed.
 Two constants live alongside the constructors:
 
 - **`time.UTC`** (= `Zone{offset: 0, name: "UTC"}`) - the canonical
-  UTC zone. Coexists with the `time.utc()` function (which returns
-  the *current* instant in UTC) because constants and functions
-  live in separate namespace maps.
+  UTC zone. It coexists with the `time.utc()` function (the *current*
+  instant in UTC) because constants and functions live in separate
+  namespace maps.
 - **`time.PROGRAM_START`** (`time.Time`) - the moment the time
-  library was installed, which for the `jennifer` and
-  `jennifer-tiny` binaries is just before the user's source file is
-  read. Use it to anchor "total elapsed since program start"
-  timing without scattering a `def start = time.now();` line at
-  the top of every script. See
+  library was installed, just before the user's source file is read.
+  Use it to time the whole program without a `time.now()` snapshot at
+  the top. See
   [Measuring total runtime](#measuring-total-runtime) below.
 
 ## Accessors
@@ -141,16 +131,14 @@ at the requested unit.
 | `time.sleep($d)`           | `null`          | Block the running task for the requested duration. Negative or zero `$d` returns immediately. |
 
 Comparison is on the underlying UTC instant, so `13:00 CET` and
-`12:00 UTC` compare equal. The library has no operator overloading
-in v1: write `time.add($t, $d)`, not `$t + $d`.
+`12:00 UTC` compare equal. The library has no operator overloading:
+write `time.add($t, $d)`, not `$t + $d`.
 
 ## Measuring total runtime
 
 `time.PROGRAM_START` is captured before the interpreter reads the
-user source, so anchoring elapsed-time against it gives "total
-runtime since the program launched" with no per-script setup.
-Subtract the current instant from it and read the duration at
-whatever unit you want:
+user source, so subtracting it from the current instant gives the
+total runtime:
 
 ```jennifer
 use io;
@@ -172,14 +160,13 @@ def stepMs as int init time.milliseconds(time.sub(time.now(), $stepStart));
 io.printf("step took %d ms\n", $stepMs);
 ```
 
-`time.PROGRAM_START` is a constant - reading it multiple times
-always returns the same instant, so it's safe as a long-lived
-anchor without ever needing to "refresh" it.
+`time.PROGRAM_START` is a constant and always returns the same
+instant.
 
 ## Pausing execution
 
 `time.sleep($d)` blocks the running task for the requested
-duration. Pair it with the duration constructors:
+duration:
 
 ```jennifer
 use time;
@@ -187,8 +174,8 @@ time.sleep(time.fromMilliseconds(250));   # 250 ms pause
 time.sleep(time.fromSeconds(2));          # 2 second pause
 ```
 
-Negative or zero durations return immediately - safe to use with
-a computed "remaining budget" without checking the sign:
+Negative or zero durations return immediately, so a computed
+"remaining budget" needs no sign check:
 
 ```jennifer
 def deadline as time.Time init time.add(time.now(), time.fromSeconds(5));
@@ -197,18 +184,17 @@ def remaining as time.Duration init time.sub($deadline, time.now());
 time.sleep($remaining);   # no-op if work already took longer than 5s
 ```
 
-`time.sleep` returns `null`; the caller who wants the wake-up
-instant calls `time.now()` after it returns. With concurrency,
-sleep blocks one task instead of the whole interpreter.
+`time.sleep` returns `null`; call `time.now()` afterwards for the
+wake-up instant. Under `spawn`, sleep blocks one task, not the whole
+interpreter.
 
 ## Zones
 
-A `time.Zone` is a fixed offset plus a display name; the core
-library never resolves an IANA name like `"Europe/Vienna"` to an
-offset, because that resolution depends on date (DST) and on
-tzdata the interpreter doesn't ship. To shift a `time.Time` into a
-different wall-clock view, build a `Zone` with the offset you
-want, then call `time.inZone`:
+A `time.Zone` is a fixed offset plus a display name; the library
+does not resolve an IANA name like `"Europe/Vienna"`, since that
+depends on the date (DST) and on tzdata the interpreter doesn't
+ship. To view a `time.Time` in another wall-clock, build a `Zone`
+with the offset you want and call `time.inZone`:
 
 ```jennifer
 def t as time.Time init time.now();
@@ -225,17 +211,15 @@ def tv as time.Time init time.inZone($t, $vienna);
 | `time.local()`             | `time.Zone`   | Host's current zone. Reads `time.Now().Zone()` once.                     |
 | `time.UTC` (constant)      | `time.Zone`   | `Zone{offset: 0, name: "UTC"}`. Canonical UTC.                           |
 
-DST-aware and IANA-named zones (`"Europe/Vienna"`) are not
-resolved today. They are planned as a **Go-backed extension** to
-this library - delegating to the host tz database
-(`time.LoadLocation`) for historically correct DST - rather than
-a hand-maintained data map. Until then, build a fixed-offset
-`Zone` for the offset you need.
+DST-aware and IANA-named zones are planned as a **Go-backed
+extension** to this library, delegating to the host tz database
+(`time.LoadLocation`) for historically correct DST, not a
+hand-maintained data map. Until then, build a fixed-offset `Zone`.
 
 ## Formatting and parsing
 
 `time.format` and `time.parse` use a strftime-style layout. The
-codes below cover the v1 set; everything outside this list is a
+codes below are the whole set; everything outside this list is a
 positioned error.
 
 ```jennifer
@@ -262,21 +246,18 @@ def back as time.Time init time.parse($s, "%Y-%m-%dT%H:%M:%S%z");
 | `%A` | Long weekday (English)                   | `Saturday`       | full name, case-insensitive (informational) |
 | `%b` | Short month name (English)               | `Jun`            | 3 letters, case-insensitive (sets the month) |
 | `%B` | Long month name (English)                | `June`           | full name, case-insensitive (sets the month) |
-| `%j` | Day of year 001-366                      | `167`            | format-only in v1       |
-| `%u` | ISO weekday 1-7 (Mon=1, Sun=7)           | `6`              | format-only in v1       |
+| `%j` | Day of year 001-366                      | `167`            | format-only             |
+| `%u` | ISO weekday 1-7 (Mon=1, Sun=7)           | `6`              | format-only             |
 | `%%` | Literal `%`                              | `%`              | matches `%` in input    |
 
 Codes not listed (e.g. `%y`, `%e`) are reserved and error if used
-in a layout - the v1 set deliberately stays small and adds only
-when a use case appears.
+in a layout; codes are added only when a use case appears.
 
 **Weekday and month names are English only.** `%a` / `%A` / `%b` /
 `%B` render (and parse) the English names regardless of the process
-locale - `time` ships no locale data (CLDR), by design. To render a
-regional name, read the numeric field - `time.month($t)` (1..12) or
-`time.weekday($t)` (1..7, ISO), or the `%m` / `%u` format verbs - and
-index your own name table; a `.j` library can offer regional
-formatting on top of that without `time` carrying the data.
+locale; `time` ships no locale data (CLDR). For a regional name, read
+the numeric field (`time.month($t)` 1..12, `time.weekday($t)` 1..7 ISO,
+or the `%m` / `%u` verbs) and index your own name table.
 
 Missing parts default to year 1970, month 1, day 1, all the
 time-of-day at zero, offset 0 (UTC). Trailing input after the
@@ -284,7 +265,7 @@ layout consumed errors with a positioned message.
 
 ### `time.iso` / `time.fromIso`
 
-ISO 8601 / RFC 3339 round-trip without needing a layout. The
+ISO 8601 / RFC 3339 round-trip without a layout. The
 output uses `Z` for UTC and `+HH:MM` for any other offset;
 fractional seconds appear only when non-zero, with trailing zeros
 trimmed.

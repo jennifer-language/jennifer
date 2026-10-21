@@ -1,15 +1,15 @@
 # `xml` - XML encode / decode
 
 Enable with `use xml;`. Parses and serializes XML over an opaque
-`xml.Value`, designed exactly like [`json`](json.md) and
-[`toml`](toml.md): `decode` returns a handle you walk with accessors, and
-a small build surface constructs a tree to `encode`. Hand-rolled (no
-`encoding/xml`, which is reflect-bound), so it runs on **both binaries**.
+`xml.Value`, designed like [`json`](json.md) and [`toml`](toml.md):
+`decode` returns a handle you walk with accessors, and a small build
+surface constructs a tree to `encode`. Hand-rolled (no reflect-bound
+`encoding/xml`), so it runs on **both binaries**.
 
-Unlike JSON's map/list/scalar tree, XML is a tree of **elements** - each
-with a tag name, ordered **attributes**, and ordered **children** that mix
-elements and text. The accessors reflect that shape, and navigation uses a
-small **XPath-style path** dialect in place of JSON Pointer.
+XML is a tree of **elements**, each with a tag name, ordered
+**attributes**, and ordered **children** mixing elements and text.
+Navigation uses a small **XPath-style path** dialect instead of JSON
+Pointer.
 
 ```jennifer
 use io;
@@ -79,8 +79,8 @@ a well-formed path that matches nothing is an empty `findAll` (and a false
 
 ## Building
 
-The build surface is non-mutating - each call returns a fresh `xml.Value`,
-the same `$v = xml.set(...)` idiom as `json` / `toml`:
+The build surface is non-mutating: each call returns a fresh `xml.Value`
+(`$v = xml.setAttr($v, ...)`), as in `json` / `toml`:
 
 | Call                        | Returns     | Notes                                               |
 | --------------------------- | ----------- | --------------------------------------------------- |
@@ -108,9 +108,8 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
   those. The one root element is required (XML has exactly one).
 - **Namespaces are lexical**: prefixes are kept as written, not resolved to
   their `xmlns` URIs. Full namespace resolution and richer XPath (predicates,
-  `@attr` / `text()` path steps) are future extensions. The practical
-  consequence for real-world KML / GML / GPX, which use prefixes: a name must be
-  matched **verbatim, including the prefix**. `xml.get($root, "Document")`
+  `@attr` / `text()` path steps) are future extensions. For KML / GML / GPX,
+  which use prefixes, a name must be matched **verbatim, including the prefix**. `xml.get($root, "Document")`
   silently matches nothing on a `<kml:Document>` (use `"kml:Document"`), and
   `xml.attr($el, "lat")` *raises* on a `gpx:lat` attribute (use
   `xml.attr($el, "gpx:lat")`). To accept either form, match on the local name
@@ -126,16 +125,16 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
   }
   ```
 - **Element nesting is capped** on decode, encode and `xml.append`: a deeper
-  document (or an `append` that would build one) raises a catchable error rather
-  than overflowing the stack. The limit is shared by every parser in the
+  document (or an `append` that would build one) raises a catchable error instead
+  of overflowing the stack. The limit is shared by every parser in the
   toolchain and is set per binary: 1000 levels on the default `jennifer` (Go's
   growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). No entity is expanded
   beyond the five predefined names and numeric references, so there is no
   entity-expansion ("billion laughs") blow-up, and nothing is fetched
-  externally - an unknown or external entity is simply an error.
+  externally; an unknown or external entity is an error.
 - **Node count is capped** on decode: a document with more than about two
   million elements, attributes and text runs (a quarter million on
-  `jennifer-tiny`) raises a catchable error rather than growing without bound.
+  `jennifer-tiny`) raises a catchable error.
 - **Memory**: a decoded `xml.Value` is a compact element tree (name, ordered
   attributes, ordered children); names, and text and attribute values with no
   entity to decode, share the input string. A document takes from about its
@@ -143,8 +142,8 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
   elements) in memory. Copies of a handle,
   and the sub-trees `get` / `findAll` / `children` hand out, share the tree
   instead of copying it. A sub-tree handle therefore keeps the whole document's
-text in memory, while `tag` / `text` / `attr` / `attrs` return copies: to keep
-a few values of a large document, read them out rather than holding a node.
+  text in memory, while `tag` / `text` / `attr` / `attrs` return copies: to keep
+  a few values of a large document, read them out instead of holding a node.
 
 ## See also
 

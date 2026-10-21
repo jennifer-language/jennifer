@@ -27,14 +27,13 @@ io.printf("crc32 checksum is %d bytes\n", len($sum));
 | `"crc32"`   | 4 bytes      | IEEE 802.3 (Go `crc32.IEEE`).                 |
 | `"crc64"`   | 8 bytes      | Go `crc64.ECMA` (0xC96C5795D7870F42).         |
 
-Note: the "CRC-64/XZ" vector you may see elsewhere
-(`6c40df5f0b497347` for `"123456789"`) uses a different
-polynomial. We ship Go's stdlib choice (`995dc9bbdf1939fa` for
-the same input).
+The "CRC-64/XZ" vector seen elsewhere (`6c40df5f0b497347` for
+`"123456789"`) uses a different polynomial; `crc` ships Go's stdlib
+choice (`995dc9bbdf1939fa` for the same input).
 
-Output bytes are big-endian (network byte order). The convention
-matches the natural display of `Sum()` from Go's CRC types and
-removes any ambiguity at the call site.
+Output bytes are big-endian (network byte order), matching the display
+of `Sum()` from Go's CRC types.
+
 
 Passing an unknown algorithm is a positioned runtime error:
 `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"`.
@@ -79,5 +78,5 @@ All errors are positioned at the call site.
 
 ## See also
 
-- [hash.md](hash.md) - cryptographic-style digests (MD5, SHA-1, SHA-256).
-- [milestones.md](../milestones.md) - ships hash/crc.
+- [hash.md](hash.md) - cryptographic-style digests (MD5, SHA-1, SHA-2).
+- [encoding.md](encoding.md) - hex / base64 rendering of a checksum.

@@ -9,22 +9,20 @@ jennifer ast <file.j>      dump the preprocessed AST as JSON
 jennifer fmt [-w] <file.j>...  format source per style-guide.md (-w rewrites in place)
 jennifer lint <file.j>     report compile-legal but suspect patterns
 jennifer profile <file.j>  profile hit counts and wall-clock per source position
-jennifer test <file.j>     discover and run the file's test methods
+jennifer test <file.j>     discover and run the file's test functions
+jennifer serve <file.j>    run a program (--watch re-runs it on change)
 jennifer version [-v]      print the build version (-v adds module-path layers)
 jennifer help              show usage
 ```
 
 ## Subcommand reference
 
-The `jennifer` command-line tool bundles the Jennifer interpreter and its
-full development toolchain into a single binary. Beyond running `.j` programs,
-it provides an interactive REPL, a source-code formatter, a linter, a
-profiler, a test runner, and lexer-token and AST inspection - so a whole
-Jennifer workflow (write, run, format, lint, profile, test) needs no extra
-tools. Each subcommand is summarised below and documented in depth on its own
-page. The development subcommands (`tokens`, `ast`, `fmt`, `lint`, `profile`,
-`test`) and `serve` live in the default `jennifer` binary only; `run`,
-`repl`, and `version` work on both `jennifer` and `jennifer-tiny`.
+The `jennifer` binary bundles the interpreter with its development toolchain:
+REPL, formatter, linter, profiler, test runner, and token / AST inspection.
+Each subcommand has its own page. The development subcommands (`tokens`, `ast`,
+`fmt`, `lint`, `profile`, `test`) and `serve` live in the default `jennifer`
+binary only (the run-only `jennifer-tiny` build stubs them; `serve` runs a
+net-backed `web` app); `run`, `repl`, and `version` work in both binaries.
 
 | Subcommand         | What it does                                             | Details                                                   |
 | ------------------ | ------------------------------------------------------- | --------------------------------------------------------- |
@@ -35,7 +33,7 @@ page. The development subcommands (`tokens`, `ast`, `fmt`, `lint`, `profile`,
 | `fmt [-w] <file.j>...` | Format source per the style guide (stdout; `-w`/`--write` rewrites in place). | [Formatter](cli_fmt.md)                    |
 | `lint <file.j>`    | Report compile-legal but suspect patterns.              | [Linter](cli_lint.md)                                     |
 | `profile <file.j>` | Per-position hit counts and wall-clock timings.         | [Profiler](cli_profile.md)                                |
-| `test <file.j>`    | Discover and run the file's test methods.               | [Test runner](cli_test.md)                                |
+| `test <file.j>`    | Discover and run the file's test functions.               | [Test runner](cli_test.md)                                |
 | `serve <file.j>`  | Run a program; `--watch` re-runs it on change (a web-app reloader, or an autorun loop for any script). | [The `serve` command](#the-serve-command)                 |
 | `version [-v]`     | Print the build version (`-v` adds module-path layers). | [Version injection](#version-injection)                   |
 | `help`             | Show usage.                                             | -                                                         |
@@ -85,19 +83,14 @@ system module dir and the vendor root - each with the layers (compile default /
 - Reads the file, parses, runs
 - On error: prints the message and a source-context caret on stderr, exits `1`
 - Bad usage exits `2`
-- `jennifer help` includes a `Version:` line so the build is identifiable at a glance
-- `tokens`, `ast`, `fmt`, `lint`, `profile`, `test`, and `serve` are
-  present only in the default `jennifer` binary (the run-only `jennifer-tiny`
-  build stubs them); the first six are development subcommands with their own
-  pages below, and `serve` runs a net-backed `web` app so it, too, is
-  default-only.
+- `jennifer help` includes a `Version:` line identifying the build
 
 ## The `serve` command
 
 `jennifer serve <file.j>` runs a program the same way `run` does - there is
 no entry point, so the file's top-level executes in order and serving happens
 only because the program itself calls `web.run(...)`. On its own, `serve` adds
-just a banner (printed after a clean parse). Its reason to exist is `--watch`:
+only a banner (printed after a clean parse). Its reason to exist is `--watch`:
 
 ```sh
 jennifer serve app.j            # run the app
@@ -177,8 +170,8 @@ curl -s https://api.example.com/thing | json-pretty
 ```
 
 The same shape extends to any decode / re-encode pair: swap `json` for
-`xml` once that library lands ([M20.2](../milestones.md#m20---system-libraries-compacted)) and the
-file becomes a `pretty-xml`.
+[`xml`](../libraries/xml.md) (or `yaml` / `toml`) and the file becomes a
+`pretty-xml`.
 
 
 ## Version injection
@@ -206,4 +199,4 @@ Two consumers read `version.Version`:
 
 `go test ./...` skips codegen and uses the default `"dev"`. The meta-lib
 test only checks that the constant matches `version.Version`, not a
-specific value, so it stays robust across builds.
+specific value, so it passes on any build.

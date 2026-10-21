@@ -85,14 +85,12 @@ open.** RFC 4180 quoting does not stop CSV formula injection
 ([CWE-1236](https://cwe.mitre.org/data/definitions/1236.html)): a field
 whose first character is `=`, `+`, `-`, `@`, a tab (`0x09`), or a CR
 (`0x0D`) is interpreted by Excel and Google Sheets as a **formula** on
-import - so a value like `=SUM(...)`, or a payload like
-`=cmd|'/c calc'!A1`, executes in the victim's spreadsheet. A field is
-still just text in the CSV; the danger is the consuming spreadsheet.
+import, so a value like `=SUM(...)`, or a payload like
+`=cmd|'/c calc'!A1`, executes in the victim's spreadsheet.
 
-`formatSafe` / `formatSafeWith` are the export-to-spreadsheet path: they
-behave exactly like `format` / `formatWith` but, before quoting, prefix
-any such field with a single apostrophe (`'`), the standard neutraliser
-that every major spreadsheet treats as "this cell is literal text":
+`formatSafe` / `formatSafeWith` behave like `format` / `formatWith` but,
+before quoting, prefix any such field with a single apostrophe (`'`), which
+every major spreadsheet treats as "this cell is literal text":
 
 ```jennifer
 def rows as list of list of string init [];
@@ -178,7 +176,7 @@ quoted field is normalised to `\n` on the streaming path (the whole-file
 
 ## Header-keyed records
 
-Most CSV has a header row. `toRecords` pairs it with the data rows, giving
+`toRecords` pairs the header row with the data rows, giving
 one `map of string to string` per record keyed by column name; `fromRecords`
 rebuilds rows from records and an explicit header:
 
@@ -190,8 +188,6 @@ def recs as list of map of string to string init csv.toRecords($rows);
 def back as list of list of string init csv.fromRecords(["name", "age"], $recs);
 # back == [["name","age"], ["Ada","36"], ["Grace","45"]]
 ```
-
-Details worth knowing:
 
 - Every record carries **every** header key. A data row shorter than the
   header fills the missing fields with `""`; fields past the header width
@@ -206,11 +202,10 @@ Details worth knowing:
 
 ## Out of scope
 
-Type inference (numbers, booleans, dates) is not part of this module -
-every field is a `string`, and the caller converts what it needs with
-`convert.toInt` / `convert.toFloat`. For whole-file work, read with
-`fs.readString` (or slurp stdin) and hand the text to `parse`; for a file
-too large to hold in memory, use the streaming `reader` / `writer` above.
+No type inference (numbers, booleans, dates): every field is a `string`,
+and the caller converts with `convert.toInt` / `convert.toFloat`. For
+whole-file work, read with `fs.readString` (or slurp stdin) and hand the
+text to `parse`.
 
 ## See also
 

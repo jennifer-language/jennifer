@@ -2,8 +2,8 @@
 
 Import with `import "ical.j" as ical;`. Build a calendar of events and encode it
 to **iCalendar** text (a `VCALENDAR` of `VEVENT`s), and parse that text back into
-a `Calendar`. Pure Jennifer over `strings` / `lists` + `time` - no Go engine, so
-it runs on **both** binaries.
+a `Calendar`. Pure Jennifer over `strings` / `lists` + `time`; runs on both
+binaries.
 
 ```jennifer
 import "ical.j" as ical;
@@ -22,8 +22,8 @@ Runnable: [`examples/modules/ical_demo.j`](https://github.com/jennifer-language/
 
 ## Types
 
-Both structs have public fields (read them directly - `$cal.events`,
-`$ev.summary`); the builder functions are the conventional way to construct them.
+The structs have public fields (`$cal.events`, `$ev.summary`); construct them
+with the builder functions.
 
 ```jennifer
 def struct ical.Calendar { prodid as string, events as list of Event, todos as list of Todo };
@@ -65,8 +65,8 @@ def struct ical.Todo {
 | `ical.todo(uid, stamp, summary)` + `withDue` / `withStatus` / `describeTodo` | `Todo` | build a to-do |
 | `ical.add(cal, ev)` / `addTodo(cal, td)` | `Calendar` | a copy with the event / to-do appended |
 
-The builders are **value-semantic** - `describe` / `locate` / `add` return a
-fresh copy and never mutate their argument, so you thread them:
+The builders are value-semantic: `describe` / `locate` / `add` return a fresh
+copy and never mutate their argument, so thread the result:
 
 ```jennifer
 def ev as ical.Event init ical.event("id", $start, $end, "Meeting");
@@ -93,7 +93,7 @@ no `DTSTART`, and defaults a missing `DTEND` to the start.
 
 `DTSTAMP` / `DTSTART` / `DTEND` go through `time`. `encode` writes each as a UTC
 `DATE-TIME` (`20240615T130000Z`), normalising a non-UTC `time.Time` to UTC first,
-so the output is always a correct `Z` value. `parse` accepts the UTC `...Z` form,
+so the output is always a `Z` value. `parse` accepts the UTC `...Z` form,
 a floating `DATE-TIME` (no `Z`, read as UTC), and a bare `DATE` (`20240615`).
 
 ## Text escaping and folding
@@ -101,8 +101,7 @@ a floating `DATE-TIME` (no `Z`, read as UTC), and a bare `DATE` (`20240615`).
 Text values (`SUMMARY` / `DESCRIPTION` / `LOCATION` / `UID` / `PRODID`) use RFC
 5545 escaping: a backslash, `;`, `,`, and any newline become `\\`, `\;`, `\,`,
 and `\n`. Content lines longer than 75 characters are folded onto continuation
-lines (a CRLF followed by a space), and `parse` rejoins them - so a long
-description survives the round-trip intact.
+lines (a CRLF followed by a space), and `parse` rejoins them.
 
 ## Recurrence
 

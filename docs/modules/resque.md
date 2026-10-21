@@ -2,7 +2,7 @@
 
 Import with `import "resque.j" as resque;`. Schedule background jobs onto named
 queues now and process them from a worker later, over the [`redis`](redis.md)
-module. Deliberately **Resque wire-compatible**: queues are Redis lists at
+module. **Resque wire-compatible**: queues are Redis lists at
 `resque:queue:NAME`, the queue registry is a set at `resque:queues`, and a job
 is the JSON envelope `{"class":"WorkerName","args":[...]}`. Because that layout
 is the de-facto Resque standard, a job Jennifer enqueues can be processed by a
@@ -18,9 +18,10 @@ Ruby-resque / php-resque worker and vice versa. Built on `redis` (which uses
 ```jennifer
 import "resque.j" as resque;
 import "redis.j" as redis;
+import "transport.j" as transport;
 
 def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1",
-    port: 6379, security: "none", user: "", password: "", db: 0});
+    port: 6379, security: transport.Security.None, user: "", password: "", db: 0});
 
 # producer: schedule a job
 resque.enqueue($db, "email", "SendWelcome", ["user@example.com", "en"]);
@@ -42,7 +43,7 @@ own.
 | `resque.queueLength(session, queue)`         | Pending jobs on one queue.                                        |
 | `resque.queues(session)`                     | Registered queue names (`list of string`).                       |
 | `resque.size(session)`                       | Total pending jobs across every queue (one pipelined batch of LLENs). |
-| `resque.fail(session, job, message)`         | Record a failed job on the failed list.                          |
+| `resque.fail(session, job, message)`         | Record a failed job on the failed list as a standard Resque failure record (`failed_at`, `payload`, `exception`, `error`, `backtrace` (empty), `worker`, `queue`). |
 
 `args` is a `list of string` - it maps to Ruby-resque's *positional* arguments
 (`perform(a, b)`). A job enqueued elsewhere with a numeric or boolean arg still
@@ -51,19 +52,22 @@ reserves cleanly (each arg is read back as its string form).
 ## Producer and worker
 
 The **producer** is one call. The **worker** is your loop: `reserve`, then
-dispatch on the `class` string. A Jennifer module can't call a method by a name
+dispatch on the `class` string. A Jennifer module can't call a function by a name
 computed at runtime, so the module hands you the decoded `Job` and you branch -
-the same class-lookup a Ruby worker does under the hood:
+the same class lookup a Ruby worker does:
 
 ```jennifer
 use io;
 import "resque.j" as resque;
+import "redis.j" as redis;
+import "transport.j" as transport;
 
-def db as redis.Session init resque... ;   # a redis.Session
+def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1",
+    port: 6379, security: transport.Security.None, user: "", password: "", db: 0});
 while (true) {
     def job as resque.Job init resque.reserve($db, ["high", "email"]);
     if (len($job.class) == 0) {
-        # every queue drained; sleep and poll again (blocking BLPOP is a later add)
+        # every queue drained (`reserveBlocking` parks on BLPOP instead)
         break;
     }
     try {
@@ -104,10 +108,6 @@ positional array; this module emits the positional Ruby form.
 
 ## Out of scope
 
-Basics first - these are deferred to a later pass:
-
-- **Full Resque failure records.** `fail` writes a simplified entry, not the
-  complete `failed_at` / `exception` / `backtrace` / `worker` shape.
 - **Scheduled / delayed jobs and retries.**
 - **A configurable namespace** (fixed to `resque:`).
 

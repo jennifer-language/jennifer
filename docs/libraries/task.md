@@ -1,13 +1,10 @@
 # `task` - operations on spawned computations
 
-Enable with `use task;`. Five builtins for observing and joining
-`task of T` values produced by `spawn { ... }` blocks. The library
-ships alongside the `spawn` keyword and the `task of T`
-type kind; together they form Jennifer's concurrency surface.
+Enable with `use task;`. Builtins for observing, joining, cancelling
+and bounding `task of T` values produced by `spawn { ... }` blocks.
 
-For the broader story (when to use `spawn`, what value-semantics
-capture buys you, the exit-time loud-fail contract for unwaited
-errors), see
+For when to use `spawn`, value-semantics capture, and the exit-time
+loud-fail contract, see
 [../user-guide/concurrency.md](../user-guide/concurrency.md).
 
 ```jennifer
@@ -33,20 +30,15 @@ io.printf("%d\n", $n);                      # 2
 | `task.waitTimeout($t, ms)`      | `T`             | Like `task.wait`, but throws a catchable `Error{kind: "timeout"}` if `$t` doesn't finish in `ms` (`ms` up to ~9.2e12; a larger value is a catchable error, not a silent instant timeout). |
 | `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes in `ms`. |
 
-`task.wait` is the workhorse - everything else is a convenience or
-a non-blocking variant. The full surface is intentionally small;
-patterns more complex than "wait for the result", "wait for them
-all", "wait for whichever is first" compose by hand on top of
-these calls.
+`task.wait` is the core call; the rest are conveniences or
+non-blocking variants. More complex patterns compose from these.
 
 ## Error propagation
 
 A `task of T` carries either a value or an error after its body
-finishes. `task.wait` returns the value when there is one and
-re-raises the error otherwise - the rethrow surfaces as a
-positioned runtime error at the wait site, so an enclosing
-`try`/`catch` catches it the same way it catches any
-runtime error:
+finishes. `task.wait` returns the value or re-raises the error at the wait call,
+where an enclosing `try`/`catch` catches it like any runtime error. The
+error keeps the position where it happened in the spawn body:
 
 ```jennifer
 use task;
@@ -63,23 +55,19 @@ try {
 }
 ```
 
-A successful `task.wait` and a `task.wait` that re-raises *both*
-mark the task observed - the parent saw the outcome either way.
-`task.discard($t)` is the third way to mark a task observed; use
-it for fire-and-forget where you genuinely don't care about the
-result.
+A `task.wait` marks the task observed whether it returns or
+re-raises. `task.discard($t)` also marks a task observed; use it
+for fire-and-forget.
 
 ## Exit-time loud-fail
 
-The contract: a task that ends in an error and is never
-observed (never `task.wait`'d, never `task.discard`'d) has its
-error printed to stderr at program exit, and the process exits
-non-zero. No spawn error can silently disappear from the run.
+A task that ends in an error and is never observed (never
+`task.wait`'d, never `task.discard`'d) has its error printed to
+stderr at program exit, and the process exits non-zero, so no spawn
+error disappears silently.
 
-Default to `task.wait` when you need the result; default to
-`task.discard($t);` when you genuinely don't. Both make the
-intent visible at the call site. Doing neither is the "no
-footguns" wake-up call - the loud-fail will surface it.
+Use `task.wait` when you need the result and `task.discard($t);`
+when you don't; both make the intent visible at the call site.
 
 ```jennifer
 use task;
@@ -91,19 +79,16 @@ def alive as task of null init spawn {
 task.discard($alive);                       # explicit fire-and-forget
 ```
 
-Note: the loud-fail scan blocks on every unobserved task to wait
-for completion before deciding. A `spawn { while (true) { ... } }`
-without `task.discard` will hang the program at exit since the
-goroutine never finishes. Spawned bodies that may not terminate
-should be paired with an explicit `task.discard` at the top of
-the scope.
+When the program runs to its end, the loud-fail scan waits for
+every unobserved task to complete. A `spawn { while (true) { ... } }`
+without `task.discard` therefore hangs the program at exit; pair a
+body that may not terminate with an explicit `task.discard`.
 
 ## Working with collections of tasks
 
 ### `task.waitAll($ts)`
 
-Common pattern: spawn N units of work, wait for all results in
-order.
+Spawn N units of work, wait for all results in order.
 
 ```jennifer
 use task;
@@ -125,18 +110,17 @@ def squares as list of int init task.waitAll($tasks);
 
 If any task in the list ended in an error, `waitAll` drains every
 other task (so the loud-fail stays quiet) and then re-raises the
-first error in list order. The other errors are observed-but-not-
-surfaced - if you need them, wait on each task individually with
-your own try/catch.
+first error in list order. The other errors are observed but not
+surfaced; to get them, wait on each task individually with your
+own try/catch.
 
 ### `task.waitAny($ts)`
 
-"First to finish wins" pattern. Returns the *index* of the first
-completed task (when several are already done, the lowest index);
-you follow up with `task.wait($ts[$idx])` to read
-the result (and mark that one observed). The losing tasks keep
-running; observe them or `task.discard` them so the loud-fail
-doesn't catch them.
+First to finish wins. Returns the *index* of the first completed
+task (the lowest index when several are already done); follow up
+with `task.wait($ts[$idx])` to read the result and mark it observed.
+The losing tasks keep running; observe or `task.discard` them so the
+loud-fail doesn't report them.
 
 ```jennifer
 use task;
@@ -153,22 +137,19 @@ def value as int init task.wait($candidates[$winner]);
 task.discard($candidates[1 - $winner]);     # release the loser
 ```
 
-`task.waitAny([])` is a positioned runtime error - there's nothing
-to wait on.
+`task.waitAny([])` is a positioned runtime error.
 
 ## Cancellation
 
 `task.cancel($t)` requests **cooperative** cancellation: it sets a flag the
 spawned body observes at its next **loop checkpoint** (the start of any `while` /
 `for` / for-each / `repeat` iteration), where the runtime raises a **catchable
-"task cancelled"** error. That stops the loop - and the spawn - at a safe point.
-The tree-walker cannot preempt a goroutine, so a body makes progress toward a
-checkpoint by looping; a tight non-loop computation is instead bounded by the
-call-depth guard.
+"task cancelled"** error, stopping the loop and the spawn at a safe point.
+The tree-walker cannot preempt a goroutine; a non-loop computation is instead
+bounded by the call-depth guard.
 
-So a non-terminating `spawn` that would otherwise keep a program from ending
-can be cancelled, and it stops. Cancellation reaches a body only at a loop
-checkpoint: a task blocked in a system call - `net.accept`, a socket read,
+A non-terminating `spawn` can thus be cancelled. Cancellation reaches a body
+only at a loop checkpoint: a task blocked in a system call - `net.accept`, a socket read,
 `term.readByte` - does not see the flag until that call returns. Unblock it by
 closing its socket from another task (the blocked call raises a catchable
 `Error{kind: "closed"}`), or `task.discard` it. A program that ends by `exit` or an uncaught error
@@ -202,16 +183,16 @@ task.cancel($t);
 def partial as int init task.wait($t);   # a clean value, not an error
 ```
 
-`task.cancelled()` is a **non-raising** poll of the current body's cancel flag -
-useful at an arbitrary point (e.g. before starting an expensive step). It does
-**not** suppress the loop-checkpoint raise, so inside a loop the raise still fires;
-the `try` / `catch` idiom above is the way to exit a loop cleanly.
+`task.cancelled()` is a **non-raising** poll of the current body's cancel flag,
+for use at an arbitrary point (e.g. before an expensive step). It does **not**
+suppress the loop-checkpoint raise; use the `try` / `catch` idiom above to exit
+a loop cleanly.
 
 Notes:
 - `task.cancel` does **not** wait and does **not** mark the task observed. The
   idiom to stop-and-forget is `task.cancel($t); task.discard($t);`. If you instead
   `task.wait` a cancelled task whose body didn't catch the error, the "task
-  cancelled" error is re-raised at the wait site (catchable).
+  cancelled" error is re-raised by the wait (catchable).
 - Cancelling an already-finished task is a harmless no-op.
 
 ## Timeouts
@@ -250,9 +231,8 @@ The boundary checks are uniform across the library:
   `task.waitAny: list is empty (no tasks to wait on)`.
 
 All errors are positioned at the call site. Errors re-raised by
-`task.wait` carry the position from the spawn body, so debuggers
-and human readers see the actual fault location, not the wait
-site.
+`task.wait` carry the position from the spawn body, so the report
+shows the actual fault location.
 
 ## See also
 

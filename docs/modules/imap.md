@@ -4,17 +4,15 @@ Import with `import "imap.j" as imap;`. An **IMAP4rev1** receive client (RFC
 3501): tagged commands and untagged `*` responses over the `net` system
 library, with plaintext / implicit-TLS / STARTTLS transport and auth by `LOGIN`,
 XOAUTH2, CRAM-MD5, or SCRAM-SHA-1 / SCRAM-SHA-256.
-A practical subset - not the full protocol, but covering both **reading and
-basic folder management**: select a folder, search it with criteria, fetch
-whole messages or named headers, set/clear flags, copy or atomically **move**
-messages (RFC 6851), create a folder, and delete (mark `\Deleted` + expunge).
-It is not read-only. Retrieved messages come back as strings for the
-[`mime`](mime.md) module to parse. Because it uses `net`, this module needs the
-default **`jennifer`** binary.
+A practical subset covering reading and basic folder management: select a
+folder, search it with criteria, fetch whole messages or named headers,
+set/clear flags, copy or atomically move messages (RFC 6851), create a folder,
+and delete (mark `\Deleted` + expunge). Retrieved messages come back as strings
+for the [`mime`](mime.md) module to parse. Because it uses `net`, this module
+needs the default `jennifer` binary.
 
-> **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
-> **stock** tiny build, which ships without a network driver - not a TinyGo
-> limitation. A `jennifer-tiny` rebuilt with a network stack runs this module
+> **On `jennifer-tiny`:** the stock tiny build ships without a network driver;
+> this is a build choice, not a TinyGo limitation. A `jennifer-tiny` rebuilt with a network stack runs this module
 > too; see the
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
@@ -37,8 +35,8 @@ Runnable: [`examples/modules/imap_demo.j`](https://github.com/jennifer-language/
 A session is stateful: `connect`, `selectFolder`, `search` / `fetch` /
 `fetchHeaders`, optional `addFlags` / `expunge`, `logout`. `fetchAll` wraps the
 common "read every message in a folder" case. Messages are addressed by their
-stable **UID** throughout (see [UIDs](#uids-stable-identifiers) below) - `search`
-returns UIDs, and every message verb takes one.
+stable UID (see [UIDs](#uids-stable-identifiers)): `search` returns UIDs, and
+every message verb takes one.
 
 | Call / type                          | Notes                                                            |
 | ------------------------------------ | ---------------------------------------------------------------- |
@@ -100,7 +98,7 @@ over the wire in the clear.
 `folders(session, pattern)` runs `LIST` and returns the matching folders as
 `imap.Folder` values (`name`, `delimiter`, `flags`); `status(session, folder)`
 returns a folder's counts (`messages` / `unseen` / `recent` / `uidnext` /
-`uidvalidity`) **without** selecting it - ideal for a folder tree with unread
+`uidvalidity`) without selecting it, e.g. for a folder tree with unread
 badges. (IMAP calls these "mailboxes"; the module uses the everyday term
 *folder*.)
 
@@ -120,33 +118,31 @@ to scope to a subtree. `flags` carries IMAP attributes such as `\HasChildren`
 ## Searching
 
 `search(session, criteria)` returns the **UIDs** of the messages in the
-selected folder that match a `Criteria` (via `UID SEARCH`), so you fetch only the
-mail you want instead of pulling the whole folder. Build one from `imap.criteria()` (which
-matches everything) and set the fields you need - a zero-value `Criteria` is the
-old `SEARCH ALL`.
+selected folder that match a `Criteria` (via `UID SEARCH`). Build one from
+`imap.criteria()` (matches everything) and set the fields you need; a zero-value
+`Criteria` is `SEARCH ALL`.
 
-The fields split by **where they run**:
+The fields split by where they run:
 
 - **Server-side** - mapped straight to one IMAP `SEARCH` (a single round-trip, no
   message bodies downloaded), and all ANDed together:
   - `subject` / `from` / `to` / `text` - case-insensitive **substring** match
     (`text` covers headers + body).
   - `since` / `before` - an inclusive-since / exclusive-before range as standard
-    `time.Time` values (a zero-value time, the default, ignores the bound). Set
-    them straight from `time` - `$c.since = time.now()`, or a shifted time for
-    "the last week". IMAP `SEARCH` filters by calendar **day**, so a bound at
-    midnight is a pure server-side search; a bound that carries a **time-of-day**
-    is transparently refined to the exact instant on the client (against each
-    candidate's `INTERNALDATE`, the arrival clock `SEARCH` uses), so a sub-day
-    range like "since 14:30 today" just works - no extra call.
+    `time.Time` values (a zero-value time, the default, ignores the bound), e.g.
+    `$c.since = time.now()`. IMAP `SEARCH` filters by calendar day, so a bound at
+    midnight is a pure server-side search; a bound with a time-of-day is refined
+    to the exact instant on the client (against each candidate's `INTERNALDATE`,
+    the arrival clock `SEARCH` uses), so a sub-day range like "since 14:30 today"
+    works with no extra call.
   - `seen` / `unseen` / `flagged` / `answered` - flag state.
   - `largerThan` / `smallerThan` - size in bytes.
 - **Client-side** - applied only to the messages the server-side search returns,
   by fetching just their headers or structure (never full bodies):
-  - `subjectRegex` / `fromRegex` - an [RE2](regex.md) pattern matched against the
+  - `subjectRegex` / `fromRegex` - an [RE2](../libraries/regex.md) pattern matched against the
     decoded `Subject` / `From` header (what IMAP's substring search can't do).
   - `hasAttachments` - keep only messages whose `BODYSTRUCTURE` shows an
-    attachment. This is a **heuristic** (it looks for an `attachment`
+    attachment. This is a heuristic (it looks for an `attachment`
     content-disposition and downloads no body); an unusual message may fool it.
 
 ```jennifer
@@ -174,7 +170,7 @@ for (def uid in imap.search($s, $c)) {
 The server-side fields (`from`, `since`, `unseen`) become one `SEARCH`; only
 the handful of messages it returns are then fetched to apply the `subjectRegex`
 and `hasAttachments` filters, so an inbox of thousands costs one search plus a
-few header/structure fetches - not a full download.
+few header/structure fetches.
 
 Search strings are safe to build from data: substrings are sent as quoted,
 control-checked IMAP strings, dates come from `time.Time` values, and sizes are
@@ -187,33 +183,30 @@ Not yet covered: non-ASCII search strings over `SEARCH` (use `subjectRegex` /
 
 ## UIDs: stable identifiers
 
-Every message verb addresses by **UID**, never by a sequence number. A sequence
-number is only valid within the current selection - an `EXPUNGE` renumbers every
-message after the removed one, so a number captured earlier can silently point at
-the wrong message. A UID is stable: it keeps naming the same message across
-expunges and across sessions (paired with the folder's `UIDVALIDITY` from
-`status`). So there is one addressing scheme, and it is the correct one:
+Every message verb addresses by UID, never by a sequence number. A sequence
+number is only valid within the current selection: an `EXPUNGE` renumbers every
+message after the removed one, so a number captured earlier can point at the
+wrong message. A UID keeps naming the same message across expunges and across
+sessions (paired with the folder's `UIDVALIDITY` from `status`):
 
 ```jennifer
 def uids as list of int init imap.search($s, imap.criteria());  # stable UIDs
 def body as string init imap.fetch($s, $uids[0]);               # fetch by UID
 ```
 
-This is the correct basis for "process only what is new since last run": record
-the UIDs (and `UIDVALIDITY`) you have handled, then next session `search` and
-skip the ones you have already seen - immune to the renumbering a sequence-number
-loop would trip over. Sequence numbers appear only where the *server* emits them
-as data - the count from `selectFolder`, and the numbers in IDLE `EXISTS` /
-`EXPUNGE` pushes - never as an addressing input.
+For "process only what is new since last run", record the UIDs (and
+`UIDVALIDITY`) you have handled, then next session `search` and skip the ones
+already seen. Sequence numbers appear only where the server emits them as data
+(the count from `selectFolder`, the numbers in IDLE `EXISTS` / `EXPUNGE`
+pushes), never as an addressing input.
 
 ## Managing messages
 
-Reading is only half of it - the module also **modifies** the folder. Given a
-UID (from `search`):
+The module also modifies the folder. Given a UID (from `search`):
 
 **Flag a message** (mark read, tag, star). Flags are a space-separated string;
 system flags start with `\`, keywords don't. A server that disallows a keyword
-answers `OK` but silently drops it, so read it back with `flags` if it matters:
+answers `OK` but drops it, so read it back with `flags` if it matters:
 
 ```jennifer
 def uid as int init imap.search($s, imap.criteria())[0];
@@ -256,8 +249,6 @@ imap.appendWith($s, "Drafts", "\\Draft", $draft);  # marked \Draft
 
 ## Tagged responses and literals
 
-Two IMAP mechanics the client handles for you:
-
 - **Tags.** Each command carries a tag and completes with a tagged
   `OK` / `NO` / `BAD` line; a `NO` / `BAD` throws a catchable `Error` (kind
   `"imap"`). The client uses one fixed tag, which is safe here because it is
@@ -280,20 +271,19 @@ runs in CI without an external server.
 
 ## IDLE (server push)
 
-Instead of re-polling `STATUS` on a timer, `IDLE` (RFC 2177) lets the server
-**push** mailbox changes as they happen - new mail, an expunge, a recent-count
-change. The idiom is a cooperative read loop: **idle -> receive / poll -> done**.
-There are no callbacks; you read pushes with a blocking `receiveNotification` (or
-a timeout-bounded `pollNotification`) and, when you want to stop, break out with
-`done`. It is the same M23.1 streaming / server-push shape the other read loops
-share, so wrapping the loop in a `spawn` runs push handling beside the rest of
-your program.
+`IDLE` (RFC 2177) lets the server push mailbox changes (new mail, an expunge, a
+recent-count change) instead of you re-polling `STATUS` on a timer. The idiom is
+a cooperative read loop: idle -> receive / poll -> done. There are no callbacks;
+read pushes with a blocking `receiveNotification` (or a timeout-bounded
+`pollNotification`) and stop with `done`. This is the same streaming /
+server-push shape the other read loops share, so wrapping the loop in a `spawn`
+runs push handling beside the rest of your program.
 
 Each push arrives as an `imap.Notification`: `kind` is `"exists"` (the mailbox
 now holds this many messages - new mail), `"expunge"` (the message at this
 sequence number was removed), or `"recent"` (recent-count change); `number` is
-the count / sequence number it carried. A `kind` of `""` is the **idle-gap
-sentinel** - `pollNotification` timed out, or IDLE ended - so it never blocks a
+the count / sequence number it carried. A `kind` of `""` is the idle-gap
+sentinel (`pollNotification` timed out, or IDLE ended), so it never blocks a
 poll loop.
 
 ```jennifer
@@ -318,7 +308,7 @@ def uids as list of int init imap.search($s, imap.criteria());
 def latest as string init imap.fetch($s, $uids[len($uids) - 1]);
 ```
 
-`pollNotification($s, timeoutMs)` is the non-blocking variant - it returns the
+`pollNotification($s, timeoutMs)` is the non-blocking variant: it returns the
 next push if one arrives within `timeoutMs`, otherwise the empty sentinel, so a
 loop can do other work between checks:
 
@@ -334,21 +324,19 @@ while (running()) {
 imap.done($s);
 ```
 
-A server **drops an idle session after about 29 minutes** (RFC 2177 advises
+A server drops an idle session after about 29 minutes (RFC 2177 advises
 re-issuing well before that), so a long-lived client must periodically `done`
-and `idle` again - break IDLE, then re-enter it - rather than assume the same
-IDLE stays live forever. Always pair an `idle` with a `done` before running any
+and `idle` again. Always pair an `idle` with a `done` before running any
 other command: while idling, the connection is dedicated to the push stream.
 
 ## Out of scope
 
-A practical subset of IMAP4rev1, not the whole protocol. What it does **not**
-cover:
+Not covered:
 
 - **Commands.** No `RENAME` / `DELETE` of *folders* (only `CREATE` / `LIST` /
   `STATUS`). `IDLE` is supported (see [IDLE](#idle-server-push)) for the `EXISTS`
   / `EXPUNGE` / `RECENT` pushes (whose numbers are sequence numbers - the one
-  place they surface). Message operations address by **UID**; `SEARCH` sends
+  place they surface). Message operations address by UID; `SEARCH` sends
   ASCII-only criteria (no `CHARSET UTF-8`).
 - **Auth.** The supported mechanisms are in [Authentication](#authentication);
   *not* covered are GSSAPI / Kerberos, NTLM, client-certificate auth, and OAuth2
@@ -357,7 +345,7 @@ cover:
 - **Extensions.** Only the IMAP4rev1 core - no `SORT` / `THREAD`, `CONDSTORE` /
   `QRESYNC`, `COMPRESS`, `METADATA`, quota, or ACL support.
 
-(Message literals are read by byte count, so a raw 8-bit / multi-byte body **is**
+(Message literals are read by byte count, so a raw 8-bit / multi-byte body is
 returned byte-exact - see [Tagged responses and literals](#tagged-responses-and-literals).)
 
 ## Timeouts and limits
@@ -366,7 +354,7 @@ Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hun
 server fails with a catchable error instead of blocking the caller forever. The
 initial connect (and a STARTTLS handshake) is bounded by its own
 connection-establishment timeout, so a slow or unreachable server fails the dial.
-A single accumulated response is capped at **64 MiB**: a literal's `{N}` byte
+A single accumulated response is capped at 64 MiB: a literal's `{N}` byte
 count is attacker-declarable, and a server can also stream untagged lines that
 never reach the tagged completion, so either fails with a catchable error rather
 than an unbounded allocation.

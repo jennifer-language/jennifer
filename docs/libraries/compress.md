@@ -52,8 +52,9 @@ io.printf("%t\n", convert.stringFromBytes($back, "utf-8") == "hello hello hello 
 
 ## Streaming
 
-Feed input in chunks (so you never hold it all at once); the full
-compressed result comes back at `finalize`:
+Feed input in chunks without holding it all at once; the full compressed
+result comes back at `finalize`:
+
 
 ```jennifer
 def s as compress.Stream init compress.stream("gzip");

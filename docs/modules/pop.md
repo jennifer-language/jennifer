@@ -14,8 +14,7 @@ the default **`jennifer`** binary.
 > too; see the
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
-> The module is named `pop` (not `pop3`): a Jennifer namespace is
-> letters-only, so a digit in the name can't be a call prefix. It is POP
+> The module is named `pop` (not `pop3`). It is POP
 > version 3 - the only one in use - the same choice Ruby's `net/pop` makes.
 
 ```jennifer

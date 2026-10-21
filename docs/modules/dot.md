@@ -3,10 +3,9 @@
 Import with `import "dot.j" as dot;`. Builds a graph of nodes and edges with
 attributes and renders it to `.dot` text for an external Graphviz tool to lay
 out and draw. Pure Jennifer over `strings` and `lists`, so it runs on either
-binary. It emits the text description only - graph **layout** is Graphviz's job
-and is deliberately not reimplemented (drawing a graph is a large algorithm the
-`dot` tool exists to do). Every builder returns a fresh `Graph`, so value
-semantics hold: the graph you pass in is never mutated.
+binary. It emits the text description only; graph **layout** is left to
+Graphviz. Every builder returns a fresh `Graph`; the graph you pass in is never
+mutated.
 
 ```jennifer
 use io;
@@ -46,8 +45,7 @@ Runnable: [`examples/modules/dot_demo.j`](https://github.com/jennifer-language/j
 Attribute maps keep insertion order, so the rendered attribute list is stable.
 String values (labels, the graph name, attribute values) are DOT-escaped: a
 backslash and a double-quote are backslash-escaped, and a literal newline
-becomes the two-character `\n` DOT escape - so a label carrying quotes or
-newlines stays well-formed.
+becomes the two-character `\n` DOT escape.
 
 ## Types
 

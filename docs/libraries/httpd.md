@@ -2,8 +2,8 @@
 
 Enable with `use httpd;`. An HTTP/1.1 server engine wrapping Go's `net/http`,
 so keep-alive, chunked transfer, TLS (and HTTP/2 over TLS), request timeouts,
-and graceful shutdown come from the battle-tested Go stack rather than being
-re-implemented in the interpreter. It is the server counterpart to the `net`
+and graceful shutdown come from Go's stack, not the interpreter. It is the
+server counterpart to the `net`
 client primitives and the [`http`](../modules/http.md) client module.
 
 **Default binary only.** Like `net`, `httpd` needs a network stack, so it runs
@@ -29,9 +29,8 @@ while (true) {
 }
 ```
 
-The two concurrency worlds stay cleanly separate: **Go owns the I/O
-concurrency** (accepting, parsing, keep-alive), and your program stays a simple
-serial loop. When you *want* per-request parallelism, opt into it with your own
+**Go owns the I/O concurrency** (accepting, parsing, keep-alive); your program
+stays a serial loop. For per-request parallelism, opt in with your own
 `spawn` - several `spawn`ed workers can each call `httpd.accept` on the same
 server handle to form a worker pool, since the handle's state is shared:
 
@@ -207,8 +206,7 @@ The engine adds **no `Server:` header**. Go's `net/http` sends `Date` and the
 framing headers (`Content-Length` / `Transfer-Encoding`) but never advertises the
 server software, and `httpd` adds nothing on top - so a response carries no
 `Server: ...` fingerprint (no stack name, no version a scanner can match a CVE
-against). This is a deliberate default; you opt *in* to advertising a server, you
-do not opt out.
+against). Advertising a server is opt-in.
 
 To send a `Server` header (or any custom header), set it **before** `respond`, on
 that one request:
@@ -276,9 +274,6 @@ lingers from a prior crash, `httpd.listen` clears it only after confirming it
 is stale (nothing is listening) - it never deletes a socket a live server is
 still using.
 
-`httpd.listenTLS` floors the negotiated protocol at TLS 1.2 (TLS 1.0 / 1.1 are
-deprecated by RFC 8996).
-
 ```jennifer
 def srv as httpd.Server init httpd.listen("unix:/run/app/app.sock");
 ```
@@ -303,12 +298,11 @@ app processes on distinct ports or sockets behind one nginx `upstream {}` block.
 ## Tuning the body / concurrency limits
 
 `httpd.listen` / `listenTLS` open a server with two safety limits: a **10 MiB**
-request-body cap and a **256** in-flight-request ceiling. They exist to bound
-worst-case memory - the engine buffers each body fully into RAM before your
-program sees it, so the worst case is `maxInFlight x maxBodyBytes` (`256 x 10
-MiB = 2.56 GiB` at the defaults). Raising the body cap for everyone therefore
-also raises that ceiling; the two knobs let you spend a fixed memory budget the
-way your traffic needs it.
+request-body cap and a **256** in-flight-request ceiling. They bound worst-case
+memory - the engine buffers each body fully into RAM before your program sees
+it, so the worst case is `maxInFlight x maxBodyBytes` (`256 x 10 MiB = 2.56 GiB`
+at the defaults). Raising the body cap also raises that ceiling; the two knobs
+split a fixed memory budget the way your traffic needs it.
 
 `httpd.listenWith(addr, opts)` (and `httpd.listenTLSWith(addr, cert, key, opts)`)
 open a server with an explicit `httpd.Options`:
@@ -320,7 +314,8 @@ open a server with an explicit `httpd.Options`:
 | `respondTimeoutMs as int` | How long an admitted request may wait to be accepted, and then to be answered, before the engine answers `503` itself (see [The respond timeout](#the-respond-timeout)). `0` selects the default 60 s; negative is an error. |
 
 A `0` field takes that limit's default, so you can tune one and leave the others
-(every field is still named, as in any struct literal):
+(as a library struct, `httpd.Options{...}` may also leave a field out; it takes
+its zero value, `0`):
 
 ```jennifer
 use httpd;
@@ -371,7 +366,7 @@ def budget as int init httpd.setMaxBufferBudgetFromRAM(0.5); # half the box
 io.printf("upload budget: {$budget} bytes\n");
 ```
 
-It is **opt-in** and **cgroup-aware** by design. The detected limit is the
+It is **opt-in** and **cgroup-aware**. The detected limit is the
 minimum of the host's `MemTotal` and any cgroup memory limit found by walking
 this process's cgroup to the root - so inside a container it uses the
 **container's** limit, not the host's RAM (auto-sizing off host RAM in a
@@ -385,7 +380,7 @@ fraction - leave headroom for the interpreter heap, response buffers, the page
 cache, and anything else on the box.
 
 Because the body is fully buffered, none of this is a streaming-upload path:
-genuinely large uploads (video, backups, multi-GB files) want a reverse proxy or
+large uploads (video, backups, multi-GB files) want a reverse proxy or
 object storage in front, not a bigger buffer - see below.
 
 For the [`web`](../modules/web.md) framework, open the tuned server yourself and
@@ -434,7 +429,9 @@ long handler can check before it starts work whose reply has nowhere to go.
 ## Scope and limits
 
 - **HTTP/1.1** over plaintext; **HTTP/2** is negotiated automatically over TLS
-  by `net/http`.
+  by `net/http`. `httpd.listenTLS` floors the negotiated protocol at TLS 1.2
+  (TLS 1.0 / 1.1 are deprecated by RFC 8996).
+
 - The request body is buffered with a **10 MiB cap** by default; a body over the
   cap is rejected with **413 Request Entity Too Large** before it reaches the
   program (never silently truncated - a truncated body would defeat body-signature

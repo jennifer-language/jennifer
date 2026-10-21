@@ -149,8 +149,7 @@ more forge an extra metric than a single-metric send.
 
 ## Scope
 
-- **Fire-and-forget only.** UDP means a lost or unheard datagram is silent by
-  design - there is no delivery confirmation and no error when the agent is
+- **Fire-and-forget only.** A lost or unheard UDP datagram is silent - there is no delivery confirmation and no error when the agent is
   down. Use it for metrics, not for data you must not lose.
 - **One datagram per verb (except `Batch`).** The single-metric verbs each send
   their own datagram; use a `Batch` to coalesce several metrics into one packet.

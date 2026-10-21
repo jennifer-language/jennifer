@@ -1,11 +1,11 @@
 # `ipnet` - IP addresses and CIDR networks
 
-Import with `import "ipnet.j" as ipnet;`. Parse and reason about **IPv4 and
-IPv6** addresses and CIDR blocks: canonical formatting, membership tests, subnet
+Import with `import "ipnet.j" as ipnet;`. Parse and reason about IPv4 and
+IPv6 addresses and CIDR blocks: canonical formatting, membership tests, subnet
 math (netmask, broadcast, split, aggregate, host iteration), and address
 classification (private / loopback / global / ...). Addresses are held as raw
 `bytes` (4 for IPv4, 16 for IPv6); the math is bitwise. Pure Jennifer over
-`strings` + `convert`; runs on **both** binaries.
+`strings` + `convert`; runs on both binaries.
 
 ```jennifer
 import "ipnet.j" as ipnet;
@@ -19,8 +19,7 @@ Runnable: [`examples/modules/ipnet_demo.j`](https://github.com/jennifer-language
 
 ## Types
 
-Both structs have public fields (read them directly), and the builder functions
-are the conventional way to construct them.
+Both structs have public fields; construct them with the builder functions.
 
 ```jennifer
 def struct ipnet.Address { version as int, octets as bytes };   # version 4 or 6
@@ -96,11 +95,10 @@ for (def net in $allowed) {
   both usable) and a `/32` (single host). IPv6 has no broadcast, so the last
   address is usable; the first is the base + 1 (skipping the subnet-router
   anycast), except `/127` and `/128`.
-- **`hosts`** materializes the usable range - capped at **65536** addresses; a
-  larger block throws (walk it with `next` instead), so this cannot exhaust
-  memory.
+- **`hosts`** materializes the usable range, capped at 65536 addresses; a
+  larger block throws (walk it with `next` instead).
 - **`split`** divides a network into the equal subnets of a longer prefix (a
-  `/24` into four `/26`s), capped at **65536** subnets (`newPrefix` at most 16
+  `/24` into four `/26`s), capped at 65536 subnets (`newPrefix` at most 16
   bits longer).
 - **`aggregate`** drops contained blocks and folds adjacent sibling pairs into
   their shorter parent (`192.168.0.0/25` + `192.168.0.128/25` ->
@@ -128,7 +126,7 @@ def merged as list of ipnet.Network init ipnet.aggregate([
 | `ipnet.isMulticast(addr)` | `bool` | `224.0.0.0/4` or `ff00::/8` |
 | `ipnet.isUnspecified(addr)` | `bool` | `0.0.0.0` or `::` |
 
-`scope` is a **total, disjoint** classification: every address maps to exactly
+`scope` is a total, disjoint classification: every address maps to exactly
 one variant of the enum
 
 ```jennifer
@@ -151,7 +149,7 @@ match (ipnet.scope($client)) {
 ```
 
 The classification follows the well-known special-purpose registries and is
-**best-effort**: `isGlobal` means "not one of the categories above", not a
+best-effort: `isGlobal` means "not one of the categories above", not a
 routing-table check.
 
 ## Errors

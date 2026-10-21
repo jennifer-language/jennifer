@@ -80,7 +80,7 @@ func isHandle(v as string) { return validate.ok({"h": $v}, {"h": [validate.patte
 "username": [validate.required(), validate.custom(isHandle, "must be a valid handle")]
 ```
 
-The predicate is **exception-safe**: if it throws (say a naive `convert.toInt` on
+The predicate is **exception-safe**: if it throws (e.g. a naive `convert.toInt` on
 a non-numeric value), the field is treated as invalid rather than the exception
 escaping `check`.
 
@@ -156,12 +156,11 @@ def de as map of string to string init {
 def msgs as list of string init validate.messages(validate.localize($errs, $de));
 ```
 
-The markers are `%name%`-style (brace-free) on purpose: they never collide with
-the language's `{expr}` string interpolation, so a template reads the same in a
-cooked or raw string. Substitution is a single left-to-right pass (a substituted
-value is never re-scanned), and a literal `%` is written `%%` - valid in cooked or
-raw alike, since the string engine never touches `%` (it owns `\` and `{}`, the
-module owns `%`).
+The markers are `%name%`-style (brace-free) so they never collide with the
+language's `{expr}` string interpolation; a template reads the same in a cooked
+or raw string. Substitution is a single left-to-right pass (a substituted value
+is never re-scanned), and a literal `%` is written `%%` - valid in cooked or raw
+alike, since string escapes never touch `%`.
 
 For full internationalization, build the `templates` map from
 [`intl`](../libraries/intl.md) - one `intl.tr("validate.min")` per rule id, so the
@@ -183,8 +182,8 @@ own English reasons; a `"password"` template replaces the whole message.)
 Values are strings, so validation is over the string form (what forms / queries /
 config give you). A nested `json.Value` is not validated directly - pull the
 fields you need into a `map of string to string` first. There is no cross-field
-rule (e.g. "password == confirm") in v1; express that with a `custom` rule over
-the whole map, or a follow-up check.
+rule (e.g. "password == confirm"): a `custom` predicate sees only its own field's
+value, so compare the fields yourself after `validate.check`.
 
 ## See also
 

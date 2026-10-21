@@ -105,8 +105,8 @@ def out as bytes init pdf.render($doc);
 ```
 
 A slot becomes a clickable link when its `leftUri` / `centerUri` / `rightUri` is
-set - the running footer's backlink to a website, drawn on every page. (Under the
-hood that is a `pdf.link` annotation over the slot's measured rectangle; use
+set - e.g. a footer backlink to a website, drawn on every page. (It is a
+`pdf.link` annotation over the slot's measured rectangle; use
 `pdf.link` directly to make any drawn text a hyperlink.)
 
 `getTotalPages` / `getCurrentPageNr` report the page count while building (the
@@ -202,8 +202,10 @@ string in points, using the Adobe Core-14 AFM metrics for the standard-14 fonts;
 **Wrap.** `wrapText(font, size, str, maxWidth)` greedily word-wraps to a maximum
 line width (points) and returns the lines. Existing newlines in `str` are honoured
 as hard breaks (so a `\n\n` leaves a blank line), and runs of spaces collapse. A
-single word wider than `maxWidth` lands alone on its line (it overflows rather
-than being broken mid-word). `wrapTextUnicode` is the embedded-font form.
+token wider than `maxWidth` (no space to break on) is hard-folded via `foldLine`,
+so no line exceeds `maxWidth`. `wrapTextUnicode` is the embedded-font form; it
+does not hard-fold, so there an over-wide word lands alone on its line and
+overflows.
 
 **Flow.** `textBlock(pg, x, y, width, font, size, leading, str, align)` wraps
 `str` to `width` and draws each line - the first line's baseline at `(x, y)`, each
@@ -258,9 +260,8 @@ use time;
 $doc = pdf.info($doc, "CreationDate", pdf.pdfDate(time.utc()));   # D:20260714160000+00'00'
 ```
 
-Metadata and bookmark titles are *text strings*, which is a different thing from
-the text drawn on a page: they are read by the viewer rather than set in a font,
-so they are not limited to what the standard-14 fonts can encode. An ASCII value
+Metadata and bookmark titles are PDF *text strings*, read by the viewer rather
+than set in a font like page text, so they are not limited to what the standard-14 fonts can encode. An ASCII value
 is written as a plain literal; anything else goes out as UTF-16BE with a byte
 order mark, which every viewer reads and which covers every script. Nothing has
 to be transliterated, and no embedded font is involved.
@@ -293,15 +294,13 @@ shared font objects, the image XObjects (each with a soft-mask XObject when it
 carries alpha), an Info dictionary when any metadata is set, a cross-reference
 table with correct byte offsets, and the trailer. Object numbers are assigned
 dynamically, so any mix of pages, fonts, and images cross-references correctly.
-Write it with
-`fs.writeBytes`, return it from an `httpd` handler, or attach it via `mime`. It
+Write it with `fs.writeBytes`, return it from an `httpd` handler, or attach it via `mime`. It
 validates clean under `qpdf --check`.
 
 **Byte-identical output.** The same document always renders to the **exact same
-bytes** - on either binary, run to run. This is deliberate: `pdf` never
-auto-stamps a `CreationDate` or any other timestamp (you opt into one explicitly
-via `info` + `pdfDate`), so nothing varies with wall-clock time. That makes the
-output safe to assert against a golden file in an automated test, and
+bytes** - on either binary, run to run. `pdf` never auto-stamps a `CreationDate` or any other timestamp (you opt into one explicitly
+via `info` + `pdfDate`), so nothing varies with wall-clock time. The
+output is safe to assert against a golden file in an automated test, and
 reproducible for content-addressed builds.
 
 ## Scope

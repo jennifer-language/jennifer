@@ -29,8 +29,8 @@ Runnable: [`examples/modules/dotenv_demo.j`](https://github.com/jennifer-languag
 | `dotenv.read(path)` | `map of string to string` | Read and parse one file. |
 | `dotenv.load(path)` | `map of string to string` | Read, parse, and `os.setEnv` each variable (**unconditional override**); returns the map. |
 
-`load` overwrites whatever is already in the environment - it is the low-level
-primitive. For a layered, real-env-wins load, use the cascade loaders below.
+`load` overwrites whatever is already in the environment. For a layered,
+real-env-wins load, use the cascade loaders below.
 
 ### Layered loaders
 
@@ -45,8 +45,7 @@ The `<profile>` comes from the `profile` argument (or `JENNIFER_ENV` for
 `autoload`); an empty profile loads only the two base files (there is no
 `.env.default`). At the command line, `jennifer run --env=prod app.j` sets
 `JENNIFER_ENV=prod` before the program runs (identical to `JENNIFER_ENV=prod
-jennifer run app.j`), so `--env` is the ergonomic way to pick the profile
-`autoload` reads - see
+jennifer run app.j`), which picks the profile `autoload` reads - see
 [Run profiles](../user-guide/tooling.md#run-profiles---env).
 
 | Call | Returns | Notes |
@@ -96,15 +95,13 @@ Resolution is **backward-reference only** - it looks up, in order:
 2. the real OS environment,
 3. the empty string.
 
-Because a reference can only see keys defined *before* it, cycles are impossible
-by construction (a forward reference simply resolves to `""`).
+Because a reference sees only keys defined *before* it, cycles are impossible (a
+forward reference resolves to `""`).
 
-- Interpolation runs in **unquoted** and **double-quoted** values; a
-  **single-quoted** value is fully literal (`'${X}'` stays `${X}`).
+- A **single-quoted** value is fully literal (`'${X}'` stays `${X}`).
 - A `${...}` whose contents are not a valid variable name is kept **literal**.
 - There is **no** `$(...)` / backtick command substitution - those are plain
-  characters. A `.env` value can never execute a command. This is a hard security
-  line, not a missing feature.
+  characters, so a `.env` value can never execute a command (by design).
 
 ## Security
 
@@ -115,17 +112,15 @@ directory; dotenv is not a sandbox. Within that model:
   `^[A-Za-z0-9_-]{1,64}$` before it is spliced into `.env.<profile>`, so a
   `JENNIFER_ENV` from an untrusted upstream cannot path-traverse
   (`../../etc/x`, `prod/../y`). An invalid label is a `dotenv` error.
-- **Fixed base directory - no search, no walk-up.** Loading from one explicit
-  `dir` closes the file-hijack class: there is no "nearest `.env`" walk that an
-  attacker could poison by planting a file in a parent directory. `.env.local`
-  overriding `.env` is safe because they share that same developer-controlled
-  directory.
+- **Fixed base directory - no search, no walk-up.** There is no "nearest `.env`"
+  walk an attacker could poison by planting a file in a parent directory.
+  `.env.local` overriding `.env` is safe because both live in the same
+  developer-controlled directory.
 - **Real env wins.** The cascade loaders (`resolve` / `loadCascade` / `autoload`)
-  never let a committed file clobber a real environment variable - a deployment's
-  real secret always beats a file value. (The single-file `load` still overrides
-  unconditionally - use it only when that is what you want; reach for the cascade
-  loaders otherwise.) To force-override from a cascade, use `readCascade` + your
-  own `os.setEnv` loop.
+  never let a committed file clobber a real environment variable, so a
+  deployment's real secret beats a file value. (The single-file `load` still
+  overrides unconditionally.) To force-override from a cascade, use
+  `readCascade` + your own `os.setEnv` loop.
 
 > A variable set to the **empty string** in the real environment is treated as
 > *unset* for "real env wins" (there is no `os.hasEnv`), so a file value can still

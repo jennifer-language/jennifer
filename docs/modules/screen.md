@@ -52,8 +52,8 @@ Colour names for `textColor`: `black`, `red`, `green`, `yellow`, `blue`,
 `magenta`, `cyan`, `white`, `gray` / `grey`. Each coloured cell carries its own
 SGR reset, so it still occupies exactly one column and the diff stays correct.
 
-**Draw in a method, as `$buf = screen.set($buf, ...);`.** Each drawing call
-returns the updated buffer (value semantics). In that shape inside a method -
+**Draw in a function, as `$buf = screen.set($buf, ...);`.** Each drawing call
+returns the updated buffer (value semantics). In that shape inside a function -
 the variable both passed and assigned, a local or parameter, not inside a `try` -
 the old buffer is dead after the call, so the interpreter hands it over without a
 copy and the call updates the grid in place, whatever its size. Anywhere else -

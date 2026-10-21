@@ -23,7 +23,7 @@ different objects is fine.
 (catchable) decode error, so hostile deeply-nested input can't exhaust the
 interpreter's stack. The limit is shared by every parser in the toolchain and
 is set per binary: 1000 levels on the default `jennifer` (Go's growable stack),
-64 on `jennifer-tiny` (its fixed 4 MB stack). Both are far past any real
+64 on `jennifer-tiny` (its fixed 4 MB stack), both far past any real
 document. `decode` also caps the total number of value nodes it will
 materialise - about two million on `jennifer` (a 20-35 MB document of small
 values), a quarter million on `jennifer-tiny` - so a hostile document of
@@ -101,13 +101,12 @@ io.printf("%s\n", json.encode({"id": 1, "tags": ["a", "b"], "ok": true}));
 ## Decoding
 
 `json.decode` returns an opaque **`json.Value`** - a handle onto the
-parsed tree. It is deliberately opaque: `[index]` and `.field` reject it
-(with a hint to the accessors), so you never mix a still-generic JSON node
-into typed code by accident. `==` / `!=` are the exception - they compare two
-handles by value (same type and equal content), so decoded documents can be
-de-duplicated or matched. You reach inside
-with the accessors, addressing nodes by **JSON Pointer** - the same paths
-the write surface uses, so reads and writes are mirror images.
+parsed tree. It is opaque: `[index]` and `.field` reject it (with a hint to
+the accessors), so a still-generic JSON node never mixes into typed code by
+accident. `==` / `!=` are the exception - they compare two handles by value
+(same type and equal content), so decoded documents can be de-duplicated or
+matched. You reach inside with the accessors, addressing nodes by **JSON
+Pointer** - the same paths the write surface uses.
 
 The parsed tree is compact and immutable. It is stored in a form built for
 JSON rather than as ordinary Jennifer values, so a document takes from about
@@ -128,11 +127,11 @@ def doc as json.Value init json.decode("{\"x\": 7, \"y\": 8}");
 io.printf("%d\n", json.asInt($doc, "/x") + json.asInt($doc, "/y"));   # 15
 ```
 
-Under the hood a JSON object is a `map of string to V`, an array a
-`list of V`, and a number an `int` when it has no fractional or exponent
-part (else a `float`) - which is why `json.typeOf` reports `map` / `list`
-/ `int` / `float`, Jennifer's own vocabulary, not "object" / "array" /
-"number". `convert.typeOf($doc)` is the generic `"object"`;
+A JSON object corresponds to a `map of string to V`, an array to a
+`list of V`, and a number to an `int` when it has no fractional or exponent
+part (else a `float`), so `json.typeOf` reports `map` / `list` / `int` /
+`float` - Jennifer's own vocabulary, not "object" / "array" / "number".
+`convert.typeOf($doc)` is the generic `"object"`;
 `convert.objectType($doc)` is the specific `"json.Value"`.
 
 A `def r as json.Value;` with no initializer is a JSON `null` node
@@ -170,7 +169,7 @@ scalar is a positioned error (catchable with `try`/`catch`); use
 `json.has` to test a path without raising. There is no wildcard,
 recursive-descent, or predicate syntax - a pointer names one node, which
 is what lets the write verbs target it. (Query-style selection over many
-nodes is a separate, deliberately unbuilt concern.)
+nodes is a separate, unbuilt concern.)
 
 To read the **last** element of a list, compute the index from
 `json.length` - a plain pointer, no special syntax:
@@ -195,8 +194,8 @@ for (def i in lists.range(0, json.length($doc, "/user/roles"))) {
 }
 ```
 
-`json.typeOf` and `json.has` let you branch on shape before extracting -
-handy when a field may be absent or polymorphic:
+`json.typeOf` and `json.has` branch on shape before extracting, for a field
+that may be absent or polymorphic:
 
 ```jennifer
 if (json.has($doc, "/count") and json.typeOf($doc, "/count") == "int") {
@@ -243,12 +242,10 @@ def v as json.Value;                          # a null node
 ```
 
 So you build a nested document a level at a time, each parent created
-before its child - the same discipline XML forces (you make an element
-before you hang things on it), which is why the model ports cleanly. `set`
-grows a map (new key) but only *replaces* an in-range list slot; grow a
-list with `append` / `insert`. There is no deep-path creation and no
-negative indexing - both deliberately, to keep pointers exactly RFC 6901
-and unambiguous about list-vs-map intent.
+before its child (the same discipline XML forces). `set` grows a map (new
+key) but only *replaces* an in-range list slot; grow a list with `append` /
+`insert`. There is no deep-path creation and no negative indexing, which
+keeps pointers exactly RFC 6901 and unambiguous about list-vs-map intent.
 
 The `-` end-of-array marker (RFC 6901's "position after the last element")
 is honoured by **`insert` / `append` only**, where it means *at the end* -
@@ -264,8 +261,9 @@ Jennifer type - a `list of T` / `map of string to V` is homogeneous. The
 opaque `json.Value` sidesteps that: each leaf is extracted one at a time
 with a type-checked `as*`, so a document like
 `["Vienna", 2026, true, null, {...}, [1,2,3]]` is walked freely, element
-by element. This is the main practical win of the handle over decoding
-straight into a typed collection.
+by element - the main advantage of the handle over decoding straight into a
+typed collection.
+
 
 ### No map-to-struct coercion
 

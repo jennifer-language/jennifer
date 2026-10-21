@@ -1,15 +1,13 @@
 # Jennifer Interpreter - Technical Documentation
 
-Internals of the Jennifer interpreter. This directory is split by topic;
-each page is small enough to read in one sitting.
+Internals of the Jennifer interpreter, split by topic.
 
 ## Design stances
 
 The interpreter's shape follows from seven language-design decisions.
-When the implementation seems unusual - the `def`-site bare-name rule,
-the strict no-truthiness check at every `if`/`while`/`for`, deep-copy
-on list/map assignment, the per-topic library directories - the
-reasons trace back to one of them.
+Unusual-looking choices - the `def`-site bare-name rule, the strict
+no-truthiness check at every `if`/`while`/`for`, deep-copy on list/map
+assignment, the per-topic library directories - trace back to one of them.
 
 See [docs/design-stances.md](../design-stances.md) for the canonical
 table.
@@ -20,19 +18,19 @@ table.
   identifier rules.
 - [Grammar and parser](grammar.md) - the EBNF the parser accepts, plus the
   AST node table and parser implementation notes.
-- [Preprocessor](preprocessor.md) - how `import "file.j";` is expanded
-  before the parser runs.
+- [Preprocessor](preprocessor.md) - how `include "file.j";` is spliced
+  before the parser runs (`use` and `import` pass through unchanged).
 - [Interpreter](interpreter.md) - runtime values, scoped environment,
   execution model, library/builtins, error model.
 - [CLI](cli.md) - subcommands (`run`, `repl`, `tokens`, `ast`, `fmt`,
-  `lint`, `profile`, `test`, `version`, `help`), each with its own page
+  `lint`, `profile`, `test`, `serve`, `version`, `help`), each with its own page
   ([REPL](cli_repl.md), [Inspection](cli_inspect.md),
   [Formatter](cli_fmt.md), [Linter](cli_lint.md),
   [Profiler](cli_profile.md), [Test runner](cli_test.md)) linked from the
   index, plus version injection.
 - [Testing](testing.md) - which packages test what.
-- [File map](filemap.md) - one-line description of every file in the
-  repository.
+- [File map](filemap.md) - one-line descriptions of the repository's
+  files, grouped by area.
 - [Rejected features](rejected.md) - proposals that were turned down,
   with the reasoning so they don't come back.
 - [Design decisions](design-decisions.md) - features that ship despite
@@ -45,8 +43,8 @@ table.
 - [Security model](security-model.md) - what a Jennifer script can do by
   design, what counts as a real vulnerability, and how to run untrusted code.
 - [Glossary](../glossary.md) - canonical project terminology
-  (function/method, library/module, list/array, ...). The terms
-  this file uses match it.
+  (function/method, library/module, list/array, ...); these pages use
+  its terms.
 
 ## Pipeline
 
@@ -63,7 +61,7 @@ sits between parse and evaluation):
        │ []Token
        ▼
    ┌──────────────┐
-   │ preprocessor │   internal/preproc   (splices file imports)
+   │ preprocessor │   internal/preproc   (splices `include`s)
    └──────────────┘
        │ []Token
        ▼

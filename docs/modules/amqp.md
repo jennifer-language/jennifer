@@ -45,7 +45,7 @@ TLS so credentials do not cross the wire in the clear.
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `amqp.options(host, user, password)` | `Options` | defaults: port 5672, vhost "/", security "none" |
+| `amqp.options(host, user, password)` | `Options` | defaults: port 5672, vhost "/", security `transport.Security.None` |
 | `amqp.withPort(o, port)` | `Options` | copy with a different port |
 | `amqp.withVhost(o, vhost)` | `Options` | copy with a different virtual host |
 | `amqp.connect(opts)` | `Conn` | connect and open a channel |
@@ -62,10 +62,10 @@ TLS so credentials do not cross the wire in the clear.
 | `amqp.publishWith(c, exchange, routingKey, body, props)` | | publish carrying message properties |
 
 `declareQueue` returns `QueueInfo{name, messageCount, consumerCount}`.
-`declareQuorumQueue` declares a **quorum queue** - a Raft-replicated, always-durable
-queue type for high availability - by sending the `x-queue-type=quorum` argument.
+`declareQuorumQueue` declares a **quorum queue** (Raft-replicated, always
+durable, for high availability) by sending the `x-queue-type=quorum` argument.
 Quorum queues cannot be server-named, so `name` must be non-empty, and there is no
-`durable` flag (they are always durable). Do not also declare the same name as a
+`durable` flag. Do not also declare the same name as a
 classic queue: a re-declare must use the same type.
 `publish` sends the method frame, a content-header frame (body size), and a body
 frame. Use exchange `""` (the default exchange) to route straight to a queue by
@@ -116,8 +116,8 @@ with a `durable` queue so a message survives a broker restart.
 
 ## Consuming (pull)
 
-`amqp.get(c, queue, autoAck)` pulls the next message with `Basic.Get` - a
-**synchronous pull**, not an async delivery loop. Call it in a loop until
+`amqp.get(c, queue, autoAck)` pulls the next message with `Basic.Get`
+(a synchronous pull). Call it in a loop until
 `Message.empty` is true; `ack` each message (unless `autoAck`).
 
 ```jennifer
@@ -173,9 +173,8 @@ def struct amqp.Delivery {
 };
 ```
 
-Because `receiveDelivery` blocks, run the loop inside its own `spawn` so pushed
-deliveries never stall the rest of the program (this is the cooperative
-receive-loop convention - no handler callbacks re-enter the interpreter):
+Because `receiveDelivery` blocks, run the loop inside its own `spawn` so it
+does not stall the rest of the program:
 
 ```jennifer
 def tag as string init amqp.consume($c, "jobs", false);
@@ -240,7 +239,7 @@ if (not amqp.waitConfirm($c)) {
   (delivery-mode 2), correlation-id, and reply-to; other properties (headers,
   priority, timestamp, ...) are not exposed.
 - **SASL PLAIN only.** TLS (`amqps`) is available via `Options.security =
-  "tls"`; without it, use a trusted network or a local broker.
+  transport.Security.Tls`; without it, use a trusted network or a local broker.
 - **The largest protocol module.** If the tree-walker ever becomes the
   bottleneck for high-throughput messaging, this is a candidate to reimplement
   as a Go library.

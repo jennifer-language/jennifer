@@ -63,20 +63,20 @@ string (`""` for none).
 
 The response body is bounded by default: `http` reads at most **64 MiB**
 (`MAX_BODY_BYTES`) and raises a catchable error beyond it. The per-read timeout
-only bounds a *stalled* server, so this size cap is what keeps a hostile server
-(e.g. behind an untrusted URL a feed reader follows) from streaming an unbounded
-body to OOM. A caller that needs a larger (or unbounded) body passes an explicit
-`maxBytes` to `http.requestWith` - `0` keeps the 64 MiB default, a negative value
-lifts the cap for a trusted large download, a positive value sets an exact
-ceiling. The `s3` module (object storage) already lifts it; the verb
-shortcuts (`get` / `post` / ...) and `request` keep the default.
+only bounds a *stalled* server; this size cap keeps a hostile server (e.g. behind
+an untrusted URL a feed reader follows) from streaming an unbounded body to OOM.
+For a larger (or unbounded) body pass an explicit `maxBytes` to
+`http.requestWith`: `0` keeps the 64 MiB default, a negative value lifts the cap
+for a trusted large download, a positive value sets an exact ceiling. The `s3`
+module (object storage) lifts it; the verb shortcuts (`get` / `post` / ...) and
+`request` keep the default.
 
-The shortcuts are thin wrappers over `request`, which is **method-agnostic** -
-it sends whatever method string you pass. So a method without a shortcut still
-works: `http.request("TRACE", url, {}, "")` and the like. The one method that is
-**not** supported is `CONNECT`: it is the HTTP tunneling primitive (after a
-`200` the socket becomes a raw bidirectional tunnel), which needs a connection
-hand-off this request/response-then-close client does not do.
+The shortcuts are thin wrappers over `request`, which sends whatever method
+string you pass, so a method without a shortcut works too:
+`http.request("TRACE", url, {}, "")`. `CONNECT` is **not** supported: it is the
+HTTP tunneling primitive (after a `200` the socket becomes a raw bidirectional
+tunnel), which needs a connection hand-off this request/response-then-close
+client does not do.
 
 ## Request policy: redirects, retries, cookies
 
@@ -128,8 +128,8 @@ and reconnects transparently if the server closed the connection. It does **not*
 follow redirects (a redirect can cross origins and break the socket) - use
 `http.send` for that; `exchange` returns the 3xx.
 
-The jar is deliberately small: no domain / path scoping and no expiry (a
-session-scoped `name -> value` store). A full RFC 6265 jar is a follow-up.
+The jar has no domain / path scoping and no expiry (see
+[Out of scope](#out-of-scope)).
 
 ## URLs and headers
 
@@ -141,7 +141,7 @@ when non-default), along with `Connection: close` and a default `User-Agent`
 
 Response header names are **lowercased** (HTTP header names are
 case-insensitive), so `$r.headers["content-type"]` works regardless of how the
-server cased it; `http.header($r, "Content-Type")` does the case-folding for you.
+server cased it; `http.header($r, "Content-Type")` case-folds the name.
 
 ## Response body and framing
 
@@ -149,7 +149,7 @@ The client frames the response from its own headers (RFC 9112 6.3), so a request
 returns as soon as the body is complete - it does **not** wait for the connection
 to close, even though it sends `Connection: close`. A server that ignores that
 token and holds the socket open (some appliances and proxies) works the same as
-one that closes. Both framings are handled:
+one that closes. Framings:
 
 - **Content-Length** - the body is taken as exactly that many bytes.
 - **Transfer-Encoding: chunked** - the chunks are decoded and concatenated.
@@ -199,9 +199,8 @@ connection-establishment timeout, so a slow or unreachable server fails the dial
 instead of blocking it forever. Every request then carries a **per-read idle
 timeout** (default 30 s): the deadline is re-armed before each read, so a server
 that accepts the connection and then stalls (or a hung endpoint) fails with a
-catchable `read timed out` error instead of blocking the caller forever. This is the difference between a slow dependency
-degrading one request and one exhausting your process on a pool of hung
-connections. Pass a different value (in milliseconds) with `http.requestWith`; a
+catchable `read timed out` error instead of blocking the caller forever, so a
+pool of hung connections cannot exhaust the process. Pass a different value (in milliseconds) with `http.requestWith`; a
 `0` disables the timeout for that request (e.g. a long streaming download):
 
 ```jennifer
@@ -255,7 +254,7 @@ to branch on.
   keep one socket alive to one origin; there is no cross-origin connection pool
   and no request pipelining.
 - **Cookie jar is session-scoped.** `Session` keeps a `name -> value` jar with no
-  domain / path scoping or expiry (a full RFC 6265 store is a follow-up); the
+  domain / path scoping or expiry (a full RFC 6265 store is not implemented); the
   one-shot verbs keep no cookies. No automatic decompression, no multipart
   builder - set the headers and body you need directly.
 - **Binary bodies** use the byte verbs (`getBytes` / `requestBytes`); the text

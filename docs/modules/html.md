@@ -2,10 +2,10 @@
 
 Import with `import "html.j" as html;`. Assembles an HTML element tree
 and renders it to a correctly-escaped HTML5 string. Pure Jennifer over
-`strings` and `lists`, so it runs on either binary. It is a **writer, not a
-parser** - serialization is a handful of string operations, so it has no
-dependency on an XML parser. It is the shared output layer an HTML-emitting
-consumer reuses (a Markdown renderer, a documentation generator, a view
+`strings` and `lists`, so it runs on either binary. Serialization is a handful
+of string operations with no dependency on an XML parser (a tolerant
+[parser](#parsing) is also included). It is the shared output layer for
+HTML-emitting code (a Markdown renderer, a documentation generator, a view
 layer).
 
 ```jennifer
@@ -68,8 +68,7 @@ attribute).
 
 ## Escaping
 
-Escaping is automatic and context-aware, so a value is escaped exactly
-once:
+Escaping is automatic and context-aware; a value is escaped exactly once:
 
 - **Text nodes** escape `&`, `<`, `>` (with `&` first, so an existing entity
   is not double-escaped).
@@ -86,15 +85,14 @@ io.printf("%s\n", html.render(html.element("span", $a, [])));
 # <span title="a &quot;b&quot; &lt;c&gt;"></span>
 ```
 
-`html.escape(s)` exposes the text-context escaper on its own, for when you
-need an escaped string without building a node.
+`html.escape(s)` exposes the text-context escaper, for an escaped string
+without building a node.
 
 ## Boolean attributes
 
 HTML boolean attributes - `disabled`, `checked`, `selected`, `required`,
-`readonly`, `multiple`, `autofocus`, and the like - carry no value: their
-presence alone is the truth. Build one with `html.boolAttr(name)` and it
-renders as the bare name, not `name=""`. Normal and boolean attributes mix
+`readonly`, `multiple`, `autofocus`, and the like - carry no value; presence
+means true. `html.boolAttr(name)` renders as the bare name, not `name=""`. Normal and boolean attributes mix
 freely on one element, in the order you append them; a boolean-attribute
 name is validated exactly like an `attr` name.
 
@@ -114,7 +112,7 @@ io.printf("%s\n", html.render(html.element("input", $a, [])));
 else. A name is markup structure, not data, so unlike a value it cannot be
 escaped: `html.attr("x onclick=alert(1)", "y")` or a tag built from an untrusted
 string would otherwise inject a live attribute or element. Legal names
-(`"data-id"`, `"h1"`, `"aria-label"`) build as before; a name carrying a space,
+(`"data-id"`, `"h1"`, `"aria-label"`) build normally; a name carrying a space,
 `>`, `=`, `/`, or a quote is rejected at construction.
 
 ## Safe URLs in links
@@ -157,8 +155,7 @@ io.printf("%s\n", html.renderAll($parts));
 ## Parsing
 
 `html.parse(src)` reads an HTML string into the **same `Node` tree** the builders
-produce, so a document can be walked, edited, and re-rendered with `render` - build
-and parse round-trip through one model. The result is a synthetic `#root` element
+produce, so a document can be walked, edited, and re-rendered with `render`. The result is a synthetic `#root` element
 whose `children` are the document's top-level nodes:
 
 ```jennifer
@@ -194,13 +191,10 @@ catchable `Error{kind: "html"}` rather than an unbounded parse.
 
 ## Out of scope
 
-The parser is **tolerant, not a full HTML5 conformance engine** - it handles
-the common real-world syntax (void elements, self-closing tags, unquoted and
-boolean attributes, mismatched nesting, comments, DOCTYPE, `script` / `style`
-raw text), not the whole HTML5 tree-construction algorithm.
-There is no pretty-printing / indentation pass - output is compact, which
-round-trips and diffs predictably; wrap it in your own formatter if you
-need indented source. A `<!DOCTYPE html>` prologue is not emitted; prepend
+The parser handles the common real-world syntax listed under
+[Parsing](#parsing), not the whole HTML5 tree-construction algorithm. There is
+no pretty-printing / indentation pass; output is compact, which round-trips and
+diffs predictably. A `<!DOCTYPE html>` prologue is not emitted; prepend
 `html.raw("<!DOCTYPE html>")` (or a literal string) when you need a full
 document.
 

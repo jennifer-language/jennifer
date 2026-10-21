@@ -119,7 +119,7 @@ Run the program with the evaluator instrumented and write a profile
 to standard output; the program's own output is redirected to
 standard error.
 .B \-\-allocs
-profiles value-semantics copies (eager copies, COW detachments,
+profiles value-semantics copies (eager copies at store sites and
 spawn-frame copies) instead of statement wall-clock time.
 .B \-\-format=\fItable|pprof|trace\fR
 selects the output shape;
@@ -150,8 +150,12 @@ selects the report shape;
 runs each test in a fresh interpreter subprocess, and
 .B \-\-coverage\fR[=\fItext|json\fR]
 also reports statement coverage (text by default; the JSON form owns standard
-output, and coverage always runs in\-process, so it overrides
-.BR \-\-isolated ).
+output), and
+.B \-\-profile
+writes the statement profile (hits and time per source position, as
+.BR profile )
+to standard error. Both run in\-process, so they override
+.BR \-\-isolated .
 Exit status is 0
 when all pass, 1 on failures, 2 on a runner error.
 .TP

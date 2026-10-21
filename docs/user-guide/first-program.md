@@ -28,5 +28,5 @@ You should see `42`.
    `21 + 21`.
 
 Top-level statements run in source order - there is no required entry-point
-method. You can still group reusable code into methods (`def`) and call them
+function. You can still group reusable code into functions (`func`) and call them
 explicitly.

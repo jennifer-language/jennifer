@@ -155,16 +155,16 @@ Rejected because:
   line. The condensed expression form is none of these. For one
   saved line of source across the whole program, the cost is too
   high.
-- **Escape hatch already exists.** A user who really wants
+- **Escape hatch already exists.** A user who wants
   ternary-shaped code can write a one-line helper
   `func pick(c as bool, a as int, b as int) { if ($c) { return $a; } return $b; }`.
   Both arguments evaluate eagerly (no short-circuit), but for the
-  cases where ternary is genuinely better this is fine.
+  cases where ternary is better this is fine.
 
 The "make `if` itself an expression" alternative (Rust-style:
 `def x init if (c) { 1 } else { 2 };`) was also considered and
 deferred indefinitely. It's the cleaner long-term answer if
-expression-position conditionals ever become genuinely needed -
+expression-position conditionals ever become needed -
 it extends an existing construct rather than introducing a new
 operator - but it's a much larger change (blocks have to evaluate
 to their last expression; type-checking gets harder; `if` without
@@ -215,7 +215,7 @@ The chosen rule: ship `lists.range(start, end)` (M15.0) as the
 canonical way to allocate an integer sequence. Use site reads as
 "this allocates a list" instead of hiding behind two characters
 of punctuation. See
-[milestones.md > M15](../milestones.md#m15---foundational-libraries--first-public-release-compacted)
+[milestones.md > M15](../milestones.md#m15---foundational-libraries--first-public-release)
 (M15.0).
 
 ## printf data-transformation modifiers
@@ -347,7 +347,7 @@ Rejected because:
 The chosen rule: structs have field access only. Operations on
 struct values live as functions in the owning library
 (`time.year($t)`, `hash.update($s, $b)`, `os.kill($p)`). If
-ergonomics ever genuinely justify a receiver syntax, the
+ergonomics ever justify a receiver syntax, the
 language change is large enough to merit its own milestone with
 its own rejected.md trail of what the OO surface would *not*
 include.
@@ -380,7 +380,7 @@ Rejected because:
 - **The statement form is the right home.** Process exit is
   control-flow, parallel to `return;`: terminating execution from
   any reachable point. Wrapping the same primitive in a library
-  function would read as "call into the OS" when it's actually
+  function would read as "call into the OS" when it's
   "stop running." The statement form keeps the intent visible.
 
 The chosen rule: `exit EXPR;` (and bare `exit;`) is the only
@@ -395,7 +395,7 @@ Considered during the M8-and-beyond roadmap discussion: have
 `use http;` search the system libraries first, then any installed
 WASM libraries, then a `http.j` on the file-import path, taking the
 first one found. Same call-site spelling regardless of where the
-implementation actually lives.
+implementation lives.
 
 Rejected because:
 
@@ -420,7 +420,7 @@ at the `use` site:
 - `import "path/foo.j";` → file import (textual splice today;
   module-aware when M17 lands).
 
-Users who genuinely want one entry point can write a tiny
+Users who want one entry point can write a tiny
 Jennifer-coded shim that picks an implementation explicitly;
 that's a per-program decision, not a language-wide default.
 
@@ -494,7 +494,7 @@ Rejected because:
   the type system rejects programs where two writable handles
   coexist. Jennifer has no such checker and the language's
   whole point is local readability without a type-system tax;
-  adding aliased mutation without the checker is just C
+  adding aliased mutation without the checker is C
   semantics with prettier syntax.
 - **Pre-1.0 softening is a one-way door.** Once any of these
   ships, the "no aliasing" guarantee is gone for every future
@@ -520,7 +520,7 @@ Rejected because:
 
 The chosen rule: stance #5 stands without exception. The
 "Performance & memory" Long horizon entry covers the
-optimizations that close the cost gap; users who genuinely
+optimizations that close the cost gap; users who
 need aliased mutation are using the wrong language.
 
 ## Auto-invoked module setup hook (M17)
@@ -552,7 +552,7 @@ Rejected because:
   code once at load; a hook is a second spelling for "run at
   import."
 
-The chosen rule: a module that genuinely needs imperative setup
+The chosen rule: a module that needs imperative setup
 exports an ordinary function the consumer calls explicitly
 (`points.prepare();`) - more explicit (stance #2) and it keeps
 the work off the import path. No new language surface, no
@@ -664,7 +664,6 @@ V`); typed targets are rebuilt by hand, or - once specced - through the
 [milestones.md](../milestones.md) and
 [libraries/json.md](../libraries/json.md).
 
-
 ## A language `any` / top type (M16.16 `json.Value`)
 
 Considered: a general `any` type keyword - a top type every value matches -
@@ -686,7 +685,7 @@ Rejected because:
   (rejecting it at every operator so each use demands an explicit narrow)
   claws the strictness back, but only by bolting a whole second set of
   narrowing rules onto the type system - heavy machinery for what is
-  really a per-source problem.
+  a per-source problem.
 - **The dynamism is per-source, not universal.** Heterogeneous data comes
   from specific boundaries (a decoded JSON document; later, a DB row).
   Each earns its own labelled, opaque, destructure-only type -
@@ -724,7 +723,7 @@ Rejected because it fails the stance's own test - "shape how a value is
 
 So translation stays `intl.tr()` (M20.4), composing with `printf` as above.
 Locale-aware *value* formatting (a number with the locale's grouping /
-decimal, a date in the locale's order) genuinely is presentation and is *not*
+decimal, a date in the locale's order) is presentation and is *not*
 rejected - it is a separate, open `printf` question for later.
 
 ## Write-through copy-on-write for compound Values (M19.2)
@@ -735,7 +734,7 @@ share a compound backing and the mutation sites can grow a binding's own
 backing in place - append-in-a-loop stays amortised O(N). An earlier attempt
 added a copy-on-write layer on top: a `Value.shared *bool` marker set by
 `Share()` on every `VarExpr` read and honoured by `Ensure()` at each mutation
-site, meaning to defer the deep copy until an actually-aliased value is
+site, meaning to defer the deep copy until an aliased value is
 mutated. It shipped **inert** - `Share()` has a value receiver and
 `Environment.Get` / `GetAt` return the binding's `Value` by value, so the flag
 was set on a throwaway copy and never reached the stored binding; `Ensure`
@@ -744,7 +743,7 @@ heap-allocated a `*bool` that went nowhere. It was removed.
 
 The **write-through** version that would make COW actually fire - store
 `*Binding` (or otherwise let the marker propagate back to the stored value) so
-a mutation site genuinely detaches an aliased backing - was considered and
+a mutation site detaches an aliased backing - was considered and
 rejected:
 
 - **The eager-copy invariant already makes aliasing rare.** Because every store
@@ -843,7 +842,7 @@ The chosen rule: a hot `.j` routine that needs Go goes to a **topic library** as
 a general primitive (`binary` for `concat` / `slice` / `find` / `readAll`,
 `encoding` for codecs); a module whose *core* is inherently Go work is **promoted
 to a Go library** (the `json` / `toml` / `xml` / `yaml` precedent - "a char
-parser belongs in Go"); a genuinely module-specific, irreducible, *measured* hot
+parser belongs in Go"); a module-specific, irreducible, *measured* hot
 path folds into the nearest topic library or ships as a build-tag-split helper
 co-located with that concern - never a global grab-bag. Only routines that
 measure hot in M21.10.1 move.
@@ -851,7 +850,7 @@ measure hot in M21.10.1 move.
 ## Multiple returns / destructuring
 
 Considered as an ergonomic shorthand (it lived in the horizon idea collection):
-let a method return several values (`return $a, $b;`) and a `def` / assignment
+let a function return several values (`return $a, $b;`) and a `def` / assignment
 bind them positionally (`def q as int, r as int init divmod($a, $b);`,
 `$x, $y = $y, $x;`), optionally extended to struct / list destructuring.
 
@@ -869,7 +868,7 @@ Rejected in favor of **structs** - which the language already has - because:
   raises errors with `throw` and handles them with `try` / `catch`, so errors are
   never returned - that removes the biggest use case and leaves only small
   anonymous tuples (divmod, min / max), exactly what a two-field struct expresses.
-- **It is not free plumbing, and the cost is Jennifer-specific.** Methods declare
+- **It is not free plumbing, and the cost is Jennifer-specific.** Functions declare
   no return type or arity (a body may `return $a, $b;` on one path and
   `return $c;` on another), so return arity would become a *runtime* contract: a
   call site would newly have to care how many values came back, and a
@@ -892,7 +891,7 @@ def d as DivMod init divmod(17, 5);   # $d.quotient == 3, $d.remainder == 2
 ## Per-algorithm digest / checksum shortcuts (`hash.sha256(b)`, `crc.crc32(b)`)
 
 Considered once digit-bearing identifiers (M22.2) made the names spellable:
-per-algorithm one-shot methods - `hash.md5(b)` / `sha1(b)` / `sha256(b)` /
+per-algorithm one-shot functions - `hash.md5(b)` / `sha1(b)` / `sha256(b)` /
 `sha384(b)` / `sha512(b)` and `crc.crc32(b)` / `crc64(b)` - beside the existing
 `hash.compute(b, algo)` / `crc.compute(b, algo)`.
 
@@ -908,11 +907,11 @@ Rejected on **stance #1 (one way per thing)** because:
   the algorithm as a runtime string and cannot cleanly go static (SHA-1 vs
   SHA-256 vs SHA-512 across three functions is a large surface, and the algorithm
   is *negotiated* - SCRAM, JWT `alg`, TLS suites pick it on the wire). Splitting
-  only `compute` would leave the crypto/hash surface half per-method, half
+  only `compute` would leave the crypto/hash surface half per-function, half
   algo-string.
 - **"Runtime algorithm => use `if()`" breaks the one real caller.** `sasl.j`
   threads a server-negotiated `$s.algo` through `compute`, `hmac`, *and*
-  `pbkdf2` together; forcing a per-method dispatch ladder there (while `hmac` /
+  `pbkdf2` together; forcing a per-function dispatch ladder there (while `hmac` /
   `pbkdf2` beside it still take the string) is worse on every axis.
 
 The chosen form: the algorithm is always a value, uniformly -
@@ -1023,7 +1022,7 @@ never interpolates), because:
   a pointless `f'...'`. Delimiter-is-the-mode gives exactly two forms, one per job.
 
 The cost - every existing cooked string holding a literal brace had to migrate to a
-raw string or `\{` / `\}` - was a one-time, mechanical, pre-1.0 break, paid once.
+raw string or `\{` / `\}` - was a one-time, mechanical, pre-1.0 break.
 See [M24.19](../milestones.md).
 
 ## `orm` typed-struct row mapping, Active Record, and `whereRaw`
@@ -1053,7 +1052,7 @@ is checked against a fixed allowlist, so even a hand-built `Query` literal canno
 inject. A raw fragment is arbitrary SQL: validating it would mean parsing SQL, and
 not validating it makes `whereRaw` the one place a caller's string reaches the
 database unchecked. The structured builders (`where` / `whereIn` / `whereNull` /
-`whereBetween` / ...) cover the common cases; genuinely bespoke SQL belongs one
+`whereBetween` / ...) cover the common cases; bespoke SQL belongs one
 layer down in the [`sql`](../libraries/sql.md) library, which is explicitly the
 "you write the statement, values bind through placeholders" surface. Keeping raw
 SQL out of orm is what lets orm promise "no injection, even from a hand-built

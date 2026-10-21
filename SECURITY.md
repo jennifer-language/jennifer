@@ -4,10 +4,9 @@
 
 Jennifer is a **general-purpose programming language**, not a sandbox. A Jennifer
 program has full access to the host - files, network, subprocesses - exactly like
-a Python or Node program. That surface is a **language capability, not a
-vulnerability**: there is no trust boundary between a script and the host, so
-"a script can read any file / dial any address / run any program" is by design,
-not a bug. **Do not run untrusted Jennifer code on a host you care about** -
+a Python or Node program. That access is by design: there is no trust boundary
+between a script and the host, so "a script can read any file / dial any address
+/ run any program" is not a vulnerability. **Do not run untrusted Jennifer code on a host you care about** -
 isolate the whole interpreter at the OS level (a container, a VM, an
 unprivileged restricted user). A capability-based in-process sandbox is planned
 (`DRAFT#11`). The full model is in
@@ -34,9 +33,8 @@ scanner findings.
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities **privately** to `<security@jennifer-lang.dev>`
-rather than opening a public issue. A useful report **describes** (rather than
-patches):
+Report suspected vulnerabilities **privately** to `<security@jennifer-lang.dev>`,
+not in a public issue. A useful report describes:
 
 - the affected file / module and a minimal reproducer,
 - the untrusted-data path (who supplies the malicious input, and how it reaches

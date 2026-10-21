@@ -1,8 +1,8 @@
 # Preprocessor (`internal/preproc`)
 
-Sits between the lexer and the parser. Its only job is to expand
-`include` file splices and pass `use` (library) and `import` (module)
-statements through unchanged.
+Sits between the lexer and the parser. Its job is to expand `include`
+file splices and pass `use` (library) and `import` (module) statements
+through unchanged (after checking them for common mistakes).
 
 ## Algorithm
 
@@ -15,8 +15,13 @@ statements through unchanged.
      absolute if it starts with `/`).
    - Reject if the path was already visited up the include chain
      (circular include).
-   - Read the file, lex it (with file-tagged tokens), recursively
-     preprocess it.
+   - Read the file (refused above `limits.MaxSourceBytes`), check its own
+     `# pragma-jennifer-*` requirement header, lex it (with file-tagged
+     tokens), recursively preprocess it. Each file is read and tokenized
+     once per run (a per-path cache), include recursion is capped at
+     `limits.MaxNestingDepth`, and the total spliced tokens at
+     `maxSplicedTokens`, so an exponential include chain is a positioned
+     error rather than an out-of-memory kill.
    - Splice the result (dropping the trailing `EOF`) at this point.
 4. When `IMPORT ...` is found (a module import): pass the tokens through
    unchanged. `import` is a real statement handled by the parser

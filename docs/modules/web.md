@@ -16,12 +16,11 @@ constrained `jennifer-tiny` has no network stack).
 The serve loop handles requests **concurrently**: it accepts a request, hands it
 to its own `spawn`ed worker, and immediately accepts the next. A handler that
 blocks - a `sql` query, an outbound `http` / `rest` call, `memcache`, a slow file
-read - no longer stalls the requests behind it; each runs on its own worker. In-
+read - does not stall the requests behind it; each runs on its own worker. In-
 flight concurrency is bounded by the `httpd` engine's accept rate.
 
 Dispatch calls each handler `func` value, which runs in its home (entry-program)
-context, and that
-cross-boundary call path is **race-safe**: each worker carries its own call-depth
+context; that cross-boundary call path is **race-safe**: each worker carries its own call-depth
 counter, and reads of shared program state (top-level constants, variables, and
 the maps / lists they hold) are safe to do from many handlers at once.
 
@@ -29,19 +28,15 @@ The one thing that is **not** safe by construction is a handler **writing** a
 shared top-level variable of the entry program. Unlike a top-level `spawn` (which
 deep-copies the scope it captures, so a data race is impossible), handler workers
 run against the *same* entry-program globals - so two handlers that mutate one
-top-level `def` at overlapping times race on it, exactly like threads sharing
-memory in any language. Keep per-request mutable state where it belongs:
+top-level `def` at overlapping times race on it, like threads sharing memory.
+Keep per-request mutable state where it belongs:
 
 - **In the request / response.** The `web.Context` and its helpers are per-request.
 - **In a synchronized store**, not a bare global a handler assigns. Server-side
   session state goes through the `session` module; a counter or cache that several
   handlers update needs its own synchronization, not a top-level `def`.
 - **Offload slow, response-independent work** (sending mail, writing an audit log)
-  to a `spawn` the handler does not wait on - now stacked on top of the per-request
-  worker.
-
-Reads of shared config set once at startup (a routing table, a settings map) are
-fine; it is concurrent *writes* to one global that you must avoid.
+  to a `spawn` the handler does not wait on.
 
 ### Sharing a large parsed document
 
@@ -74,7 +69,7 @@ the current one, again without copying the tree. See
 
 ### Shutdown and handler lifecycle
 
-Two consequences of per-request workers are worth knowing:
+Per-request workers have two consequences:
 
 - **Shutdown does not drain in-flight workers.** `httpd.shutdown` (from another
   task or a signal handler) stops the accept loop; workers already running are
@@ -90,7 +85,7 @@ Two consequences of per-request workers are worth knowing:
 
 ## Handlers
 
-A handler is a top-level method taking a `web.Context`:
+A handler is a top-level function taking a `web.Context`:
 
 ```jennifer
 import "web.j" as web;
@@ -104,11 +99,11 @@ $app = web.get($app, "/users/:id", showUser);
 web.run($app, ":8080");
 ```
 
-A route stores the handler as a **`func` value** (pass a method by its bare name,
+A route stores the handler as a **`func` value** (pass a function by its bare name,
 `web.get($app, "/x", showUser)`). A func value carries its home interpreter, so a
 handler defined in the entry program is called back in the entry program's context
 across the module boundary - it resolves its own imports and can build the app's
-own structs. A bare name that is not a defined method is a parse-time error at the
+own structs. A bare name that is not a defined function is a parse-time error at the
 call site, so a mistyped handler fails before the server ever starts.
 
 ## The `web.Context`
@@ -190,8 +185,8 @@ func profile(ctx as web.Context) {
 }
 ```
 
-Stateless signed-cookie sessions (data in the cookie, no store) wait on a
-`crypto` library for real HMAC - see [horizon.md](../horizon.md).
+Stateless signed-cookie sessions (data in the cookie, no store) are not
+provided; an app can build one over `hash.hmac` / `hash.equal`.
 
 ## Registering routes
 
@@ -305,8 +300,8 @@ $app = web.before($app, requireLogin);
 ```
 
 For **bearer** tokens, `web.bearerToken($ctx)` extracts the token; validate it
-yourself (an opaque lookup, or `jwt.verify` once the `jwt` module lands). Client
--side auth (sending `Authorization`) lives in the [`rest`](rest.md) module
+yourself (an opaque lookup, or [`jwt.verify`](jwt.md)). Client-side auth
+(sending `Authorization`) lives in the [`rest`](rest.md) module
 (`rest.basic` / `rest.bearer`). **Digest** auth is not supported (a legacy,
 challenge/nonce scheme; use Basic over TLS or a bearer token).
 
@@ -326,10 +321,9 @@ without the secret cannot mint one.
 
 `web.csrfToken` is **idempotent per request**: the token and its cookie are
 minted on the first call and memoized for the rest of the request, so every call
-returns the *same* token. That makes the natural way to build a multi-form page -
-call `web.csrfToken` once per form, including in a loop or in page chrome (a
-header sign-out button) - correct: all forms carry one token bound to the one
-`csrf` cookie, so all of them validate. (The `csrf` cookie holds a single value;
+returns the *same* token. A multi-form page can call `web.csrfToken` once per
+form, including in a loop or in page chrome (a header sign-out button): all forms
+carry one token bound to the one `csrf` cookie, so all of them validate. (The `csrf` cookie holds a single value;
 a second, different token would replace it and break every form already
 rendered.)
 
@@ -365,8 +359,8 @@ clients) or the `csrf` form field (for HTML forms).
 
 `web.cors($app, opts) -> App` sets a cross-origin policy for the whole app.
 When it is set, the serve loop adds the `Access-Control-*` headers to **every**
-response and answers a preflight `OPTIONS` request with a `204` before routing -
-so CORS is a one-line, app-wide policy, not something each handler repeats.
+response and answers a preflight `OPTIONS` request with a `204` before routing,
+so no handler repeats it.
 
 ```jennifer
 def opts as web.CorsOptions;
@@ -383,9 +377,11 @@ leaves CORS off), `allowMethods`, `allowHeaders`, `allowCredentials` (bool), and
 
 ## Caching
 
-**Static files are already cached:** `web.serveFile` rides Go's file server,
-which sets `ETag` / `Last-Modified` and answers `If-None-Match` /
-`If-Modified-Since` (and `Range`) on its own. **Plain cache headers** are a
+**Static files are already cached:** `web.serveFile` / `web.serveDir` ride Go's
+file server (`httpd.serveFile` / `httpd.serveDir`), which sets `Last-Modified`
+and answers `If-Modified-Since` (and `Range`) on its own. They set no `ETag`;
+for a content-hash `ETag` call `httpd.serveFileEtag` / `httpd.serveDirEtag` on
+`$ctx.req` directly. **Plain cache headers** are a
 one-liner - `web.setHeader($ctx, "Cache-Control", "max-age=3600")` - so there is
 no wrapper for them.
 
@@ -406,8 +402,9 @@ func page(ctx as web.Context) {
 }
 ```
 
-The match is a simple exact / `*` comparison; the RFC 7232 comma-list and weak
-(`W/`) tag forms are not parsed.
+The match follows RFC 7232: `*` matches, the `If-None-Match` value is parsed as
+a comma list, and a weak `W/` prefix is stripped before comparing (it wraps
+`httpd.etag`).
 
 ### Compression
 
@@ -464,7 +461,7 @@ A handler that overruns anyway can no longer answer. `web.isOpen($ctx)` returns
 before doing work whose reply has nowhere to go. If the handler still tries to
 reply, `web` notes it in one stderr line (`the client already got 503, so its
 reply was dropped`) instead of reporting a handler error, and does not call the
-`onError` hook: nothing failed, the reply was simply too late. Any other error
+`onError` hook: nothing failed, the reply was too late. Any other error
 the handler throws after the timeout is still a handler failure, reported on
 stderr and to `onError` as usual.
 

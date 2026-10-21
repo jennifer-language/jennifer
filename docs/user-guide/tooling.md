@@ -8,11 +8,11 @@ assistant can write correct Jennifer for you. Both ship in the repository.
 
 Highlighting definitions live in
 [`editors/`](https://github.com/jennifer-language/jennifer/tree/main/editors). Jennifer's
-lexical rules are regular enough that highlighting is genuinely accurate - `$x`
+lexical rules are regular enough that highlighting is accurate - `$x`
 is always a variable, `UPPER_CASE` a constant, `NS.name` a namespaced call, `#`
 and `/* */` comments.
 
-- **Vim / Neovim** - a true drop-in. Copy
+- **Vim / Neovim** - a drop-in. Copy
   [`editors/vim/syntax/jennifer.vim`](https://github.com/jennifer-language/jennifer/blob/main/editors/vim/syntax/jennifer.vim)
   and
   [`editors/vim/ftdetect/jennifer.vim`](https://github.com/jennifer-language/jennifer/blob/main/editors/vim/ftdetect/jennifer.vim)
@@ -39,7 +39,7 @@ GitHub-side limitation; local editors and self-hosted sites are unaffected.
 ## Jennifer as a shell filter
 
 `jennifer run -` reads a program from stdin, so Jennifer slots into a pipe
-like any other filter. A handy one is a `json-pretty` that reformats JSON
+like any other filter. One example is a `json-pretty` that reformats JSON
 flowing through it. Save the program to a file (say
 `~/.local/share/jennifer/json-pretty.j`):
 
@@ -101,7 +101,7 @@ after the file is passed to the program as its own arguments. An explicit
 Jennifer is new and small, so a general-purpose AI assistant has no built-in
 knowledge of it and will otherwise guess (usually Python-with-dollar-signs).
 [`JENNIFER.md`](https://github.com/jennifer-language/jennifer/blob/main/JENNIFER.md) is a
-single, self-contained language reference written for exactly this: drop it into
+single, self-contained language reference for this: drop it into
 your project and point your assistant at it.
 
 ```text
@@ -111,7 +111,7 @@ JENNIFER.md for the syntax and standard library, then let's build ...
 
 It covers the lexical rules (the `$` sigil, letters-only identifiers,
 `UPPER_CASE` constants), types, operators (including `/` being float division),
-control flow, methods, concurrency, imports, the namespaced standard library,
+control flow, functions, concurrency, imports, the namespaced standard library,
 and a checklist of the mistakes an assistant most often makes. It describes the
 *language*, not the interpreter internals, and stays in sync with this spec.
 

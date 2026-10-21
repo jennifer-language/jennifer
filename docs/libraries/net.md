@@ -1,9 +1,8 @@
 # `net` - TCP + UDP sockets and DNS lookups
 
 Enable with `use net;`. Blocking TCP and UDP sockets plus two
-DNS lookup helpers. Non-blocking use composes with
-[`spawn`](../user-guide/concurrency.md) rather than a
-duplicated `*Async` surface.
+DNS lookup helpers. For non-blocking use, combine with
+[`spawn`](../user-guide/concurrency.md); there is no `*Async` surface.
 
 ```jennifer
 use io;
@@ -19,10 +18,6 @@ io.printf("%s\n", convert.stringFromBytes($reply, "utf-8"));
 ```
 
 ## TCP
-
-TCP is stream-oriented: writes go into a byte stream on one
-side; reads pull bytes off the other side in the order they
-arrived.
 
 | Call                             | Returns         | Notes                                                                                     |
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
@@ -44,10 +39,9 @@ arrived.
 def struct net.Conn { id as int };
 ```
 
-Handles share underlying state between copies via the integer
-id (same discipline as `task of T` and
-`fs.File`). `net.close($c)` closes the connection for every
-copy of the handle.
+Copies of a handle share the underlying connection via the integer
+id (like `task of T` and `fs.File`); `net.close($c)` closes it for
+every copy.
 
 ### Canonical read loop
 
@@ -69,10 +63,9 @@ loop terminates on the exact byte after the last real read.
 
 ### Whole-stream reads
 
-The canonical loop above reads and accumulates *one byte at a time* in
-Jennifer, which is fine for a small message but pays the interpreter's
-per-byte cost on a large body. When you want the whole thing in one `bytes`,
-`net.readAll` and `net.readN` do the accumulation in a single Go loop instead:
+Accumulating a large body in a Jennifer loop pays the interpreter's per-step
+cost. `net.readAll` and `net.readN` do the accumulation in a single Go loop
+instead:
 
 ```jennifer
 # The whole response body to EOF, in one call (an HTTP / object download):
@@ -84,41 +77,38 @@ def frame as bytes init net.readN($c, $n);
 
 `net.readAll` reads until the peer closes (or `maxBytes` is hit); `net.readN`
 reads a known count and treats an early close as an error rather than a short
-read. Both grow one Go slice, so a megabyte-scale transfer runs at native speed
-rather than a per-byte `net.readBytes` accumulation. To search or split the
+read. Both grow one Go slice, so a megabyte-scale transfer runs at native
+speed. To search or split the
 result once it is in hand, use [`binary`](binary.md) (`indexOf` / `split` /
 `slice`).
 
 With `idleTimeoutMs > 0` both calls re-arm the connection's read deadline
 before each chunk, and restore the `net.setReadDeadline` state (no deadline when
-none was set) on return - the idle timeout never leaks into a later read on
-the same connection.
+none was set) on return, so the idle timeout never leaks into a later read.
 
 ### Deadlines: single-threaded poll with timeout
 
 `net.setReadDeadline($conn, ms)` arms a read deadline `ms` milliseconds in the
 future; a read that reaches it before data arrives fails with a catchable
-`Error{kind: "timeout"}` (message `net.readBytes: read timed out`), rather than
-blocking forever or crashing. `net.setReadDeadline($conn, 0)` clears it again. This turns
-a blocking read into a poll-with-timeout, so a protocol client can wait for a
-packet and, on a timeout, do idle work - all on one flow, without dedicating a
-`spawn`ed reader. The same call accepts a `net.UDPSocket`, so a datagram
-`recvFrom` can be bounded the same way (an SNTP client that must not hang on a
-lost reply).
+`Error{kind: "timeout"}` (message `net.readBytes: read timed out`).
+`net.setReadDeadline($conn, 0)` clears it. This turns a blocking read into a
+poll-with-timeout, so a protocol client can wait for a packet and do idle work
+on a timeout without a `spawn`ed reader. The same call accepts a
+`net.UDPSocket`, bounding a datagram `recvFrom` (an SNTP client that must not
+hang on a lost reply).
 
-A millisecond value so large it would overflow an internal duration (the natural
-way to say "effectively never") is clamped to the largest representable deadline,
-not wrapped - so a huge timeout or idle value behaves as unbounded, never as the
-instant timeout or infinite wait a wrap would produce. This applies to
+A millisecond value large enough to overflow an internal duration ("effectively
+never") is clamped to the largest representable deadline instead of wrapping, so
+it behaves as unbounded. This applies to
 `setReadDeadline` / `setWriteDeadline`, the `connect` / `connectTLS` `timeoutMs`,
 and `readAll` / `readN`'s `idleTimeoutMs`.
 
 A read deadline and a write deadline are **separate** (there is no combined
 call): `net.setReadDeadline` bounds only the read, so a write after a read
-timeout still succeeds - the keepalive or reply you send on a timeout goes out.
-Use `net.setWriteDeadline` to bound a send; to bound both directions of an
-exchange, arm both. This split is deliberate: a single combined deadline left
-expired by the poll idiom would silently block the next write with `i/o timeout`.
+timeout still succeeds and the keepalive or reply goes out. Use
+`net.setWriteDeadline` to bound a send; arm both to bound both directions. (A
+single combined deadline left expired by the poll idiom would make the next
+write fail with `i/o timeout`.)
 
 ```jennifer
 use net;
@@ -188,22 +178,19 @@ Every other socket failure - a reset connection, a refused connect - is
 ### Read errors are catchable - including inside `spawn`
 
 Every read error (`read timed out`, `connection reset by peer`, a closed
-peer) is an ordinary catchable runtime error. It unwinds like any other
-error: through nested method calls, across one or more `import` module
-boundaries, and through `defer` / `errdefer` cleanup, into the nearest
-enclosing `try` - wherever that `try` sits on the call chain. There is no
-stack-depth, cross-module, or cleanup interaction that makes a read error
-escape a `try` that dynamically encloses the read.
+peer) is an ordinary catchable runtime error. It unwinds through nested
+function calls, `import` module boundaries, and `defer` / `errdefer` cleanup
+into the nearest `try` that dynamically encloses the read.
 
-The one exception is not a read-error rule at all but the concurrency
-model's: an error raised **inside a `spawn` body** does not propagate to
-code around the `spawn` - it belongs to the task. Observe it with
+The exception comes from the concurrency model: an error raised **inside a
+`spawn` body** does not propagate to code around the `spawn`; it belongs to
+the task. Observe it with
 `task.wait` (which re-raises it at the wait site, catchable there) or
 `task.discard`. A task that errors and is **never** observed is reported
 at program exit by the loud-fail scan, which prints
-`<prog>: unwaited spawn error: ...` and bumps the exit code - by design,
-and distinct from a top-level uncaught error (`<prog>: runtime error at
-...`). So if a background reader task hits a dropped connection, wrap the
+`<prog>: unwaited spawn error: ...` and bumps the exit code (distinct from
+a top-level uncaught error, `<prog>: runtime error at ...`). So if a
+background reader task hits a dropped connection, wrap the
 `task.wait` in `try` / `catch`; a `try` around the `spawn` **launch**
 cannot catch what happens later inside the body.
 
@@ -235,9 +222,8 @@ available" message - see
 
 ## TLS
 
-Encrypted transport. Both entry points yield the **same `net.Conn`
-handle** as plaintext TCP, so `readBytes` / `writeBytes` / `close` /
-`address` work unchanged and callers stay transport-agnostic.
+Both entry points yield the **same `net.Conn` handle** as plaintext TCP,
+so `readBytes` / `writeBytes` / `close` / `address` work unchanged.
 
 | Call                            | Returns    | Notes                                                                                          |
 | ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
@@ -247,8 +233,7 @@ handle** as plaintext TCP, so `readBytes` / `writeBytes` / `close` /
 Both take an optional trailing `net.TLSOptions` argument. The certificate
 is verified against the connection's host: for `connectTLS`, the host in
 `address` (a missing port errors); for `startTLS`, the host the
-connection was originally opened with via `net.connect` - so you don't
-repeat it. TLS is built only into the default `jennifer` binary;
+connection was opened with via `net.connect`. TLS is built only into the default `jennifer` binary;
 `jennifer-tiny` returns the friendly no-network stub error.
 
 ### `net.TLSOptions`
@@ -258,11 +243,11 @@ verification is **on by default** - the zero value verifies against the
 system roots.
 
 - **`caCert`** - a PEM certificate to trust, for a private CA or a
-  self-signed server the system doesn't know. This is the **secure** way
-  to reach such a server. An invalid PEM is a positioned error.
+  self-signed server: the **secure** way to reach such a server. An
+  invalid PEM is a positioned error.
 - **`skipVerify: true`** - accept *any* certificate (self-signed,
-  expired, wrong-host). Development and testing only; a deliberate,
-  greppable opt-out, never a default.
+  expired, wrong-host). Development and testing only; an explicit,
+  greppable opt-out.
 
 A struct literal names every field, so set both - or default-construct
 and assign only what you need (the zero value is the secure default):
@@ -294,9 +279,8 @@ $c = net.startTLS($c);                                        # upgraded in plac
 
 ## UDP
 
-UDP is datagram-oriented: each `sendTo` / `recvFrom` is one
-packet with an associated peer address. There's no connection
-to establish; the socket is a bound port.
+Each `sendTo` / `recvFrom` is one datagram with a peer address. There
+is no connection; the socket is a bound port.
 
 | Call                             | Returns         | Notes                                                                                     |
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
@@ -304,13 +288,12 @@ to establish; the socket is a bound port.
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
 | `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes. A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
-| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. This is the interface selection a wildcard bind (`0.0.0.0:0`) otherwise leaves to the kernel routing table - the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux-only and needs `CAP_NET_RAW`** (typically root); it errors with `EPERM` when unprivileged. |
+| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. A wildcard bind (`0.0.0.0:0`) otherwise leaves interface choice to the kernel routing table; this is the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux-only and needs `CAP_NET_RAW`** (typically root); it errors with `EPERM` when unprivileged. |
 
-On a host with only one active interface, `bindToDevice` is unnecessary - there
-is only one link to send or receive on. It matters when more than one interface
-is up (a laptop with wired + wifi + a USB adapter): without it, the kernel
-picks the egress link for a broadcast destination independently of intent, and a
-reply arriving on a different NIC than expected can look like a silent timeout.
+With one active interface `bindToDevice` is unnecessary. With several (wired +
+wifi + a USB adapter), the kernel picks the egress link for a broadcast
+regardless of intent, and a reply arriving on an unexpected NIC can look like a
+silent timeout.
 
 ### Structs
 
@@ -337,8 +320,7 @@ def reply as net.Datagram init net.recvFrom($s, 4096);
 net.close($s);
 ```
 
-The bind-and-use pattern doubles as the client pattern: bind
-to `:0` (kernel picks a port), send to the remote peer.
+A client binds to `:0` (kernel picks a port) and sends to the remote peer.
 
 ## DNS
 
@@ -365,10 +347,9 @@ resolution with other work.
 
 ## Close
 
-`net.close` is polymorphic - it accepts a `net.Conn`, a
-`net.Listener`, or a `net.UDPSocket` and dispatches based on
-the struct tag. One verb; three closable kinds; the boundary
-check errors cleanly if the caller passes anything else.
+`net.close` accepts a `net.Conn`, a `net.Listener`, or a
+`net.UDPSocket` and dispatches on the struct tag; anything else
+is an error.
 
 ```jennifer
 net.close($conn);         # closes a TCP connection
@@ -390,8 +371,8 @@ never opened)`.
   ("what did the kernel pick for me?").
 - `net.address($sock)` (UDP) returns the local bound address.
 
-The listener form is the one you need after binding to
-`":0"` to discover which ephemeral port you actually got.
+Use the listener form after binding to `":0"` to discover the
+ephemeral port.
 
 ```jennifer
 def listener as net.Listener init net.listen(":0");
@@ -429,8 +410,7 @@ def slow as task of net.Conn init spawn {
 def c as net.Conn init task.wait($slow);
 ```
 
-The parallel-server pattern in [TCP > Server pattern](#server-pattern)
-above is the workhorse case.
+See also the parallel [server pattern](#server-pattern) above.
 
 ## Errors
 
@@ -458,43 +438,40 @@ try {
 
 The **stock** `jennifer-tiny` binary ships **without a network
 stack**, so every `net` entry point on it returns a friendly
-Jennifer-level error rather than failing cryptically deep inside
-Go's `net` package:
+Jennifer-level error:
 
 ```
 net.connect: `jennifer-tiny` (TinyGo build) does not include a
 network stack; use the default `jennifer` binary for network I/O
 ```
 
-This is a property of our **stock tiny build**, not a hard TinyGo
-limitation. TinyGo compiles most of `net.Dial` / `net.Listen`; what
-a default target lacks is a **netdev driver** registered at runtime
-(the network device the `net` package dials through), and our stock
-build registers none - so we compile the `tinygo`-tagged stub. A
-`jennifer-tiny` **rebuilt with a network stack** - a registered
-netdev driver / a net-capable target, with the `tinygo` build tag
-dropped on `net` - restores `net` and every net-backed module. So
-read "use the default `jennifer` binary" as "use a build that
-includes a network stack"; the stock `jennifer` has one, the stock
-`jennifer-tiny` does not. (UDP is the thinner spot:
+This is a property of the **stock tiny build**, not a hard TinyGo
+limitation. TinyGo compiles most of `net.Dial` / `net.Listen`; a
+default target lacks a **netdev driver** registered at runtime (the
+network device the `net` package dials through), and the stock build
+registers none, so it compiles the `tinygo`-tagged stub. A
+`jennifer-tiny` **rebuilt with a network stack** (a registered netdev
+driver / a net-capable target, with the `tinygo` build tag dropped on
+`net`) restores `net` and every net-backed module. "Use the default
+`jennifer` binary" means "use a build that includes a network stack".
+(UDP is the thinner spot:
 `net.ListenPacket` isn't part of TinyGo's surface today, so a
 rebuild covers TCP / DNS more readily than UDP.)
 
 Same pattern as `os.run` / `os.spawn` on TinyGo. See
 [../technical/tinygo.md](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
-## What's not in v1
+## What's left out
 
-Recorded so the design decisions stay visible; ships if a
-concrete workload forces it.
+Each ships if a concrete workload needs it.
 
-- **TLS extras: ALPN and session tickets.** Core TLS shipped
-  (`net.connectTLS` / `net.startTLS` with certificate verification
-  and `net.TLSOptions` - see the [TLS section](#tls) above). ALPN
-  protocol negotiation and session-ticket resumption are the remaining
-  pieces, deferred until a workload needs them.
+- **TLS extras: ALPN and session tickets.** Core TLS ships (see
+  [TLS](#tls)); ALPN protocol negotiation and session-ticket resumption
+  do not.
 - **Unix domain sockets.**
-- **Socket options** (SO_REUSEADDR, KEEPALIVE, NODELAY).
+- **More socket options** (SO_REUSEADDR, KEEPALIVE, NODELAY). Only
+  `SO_BROADCAST` (`net.setBroadcast`) and `SO_BINDTODEVICE`
+  (`net.bindToDevice`) ship, both for UDP.
 - **DNS record-type helpers** (`net.lookupMX`,
   `net.lookupTXT`, `net.lookupSRV`). The current pair covers
   90% of use.

@@ -42,8 +42,7 @@ Both the input to `insert` / `update` and the result of `find` / `all` are a
 `map of string to string` keyed by column name. This is the row form that needs
 no map-to-struct conversion; a typed-struct form waits on that language feature.
 The database coerces the string values to the column types, and only the columns
-**present** in the record are written (so an auto-generated key is simply
-omitted).
+**present** in the record are written (omit an auto-generated key).
 
 ## The schema
 
@@ -126,10 +125,10 @@ Like the [`json`](../libraries/json.md) write surface, each step returns a fresh
 
 `toSql` spells placeholders per dialect - `?` for MySQL, `$1` / `$2` … for
 Postgres - and **values only ever reach the query through those placeholders**,
-so the injection safety is inherited from `sql`. The whole builder is pure, so it
-is fully testable without a database.
+so the injection safety is inherited from `sql`. The builder is pure, so it is
+testable without a database.
 
-Note the SQL precedence of `orWhere`: SQL binds `AND` tighter than `OR`, so
+`orWhere` follows SQL precedence: `AND` binds tighter than `OR`, so
 `where(...)` then `orWhere(...)` reads `a AND b OR c` as `(a AND b) OR c`.
 
 ```jennifer
@@ -210,10 +209,9 @@ for (def author in orm.rows($r)) {
 `related`/`relatedOne` are pure lookups into the `Result` (no query). One level of
 nesting is supported; relations-of-relations is a follow-on. Eager loading needs
 the relation's key column present in the base projection (the default `SELECT *`
-includes it). A very large parent set is handled by splitting each relation's
-`WHERE fk IN (...)` batch so the placeholder count never exceeds the
-per-statement limit (so the query count is `1 + R` for the usual case, growing
-only when a key set exceeds the limit - never an over-limit statement). For a
+includes it). A very large parent set splits each relation's `WHERE fk IN (...)`
+batch so no statement exceeds the per-statement placeholder limit; only then does
+the query count grow past `1 + R`. For a
 many-to-many, a child row keeps the joined join-table columns (so pivot payload
 survives); if the target and join table share a column name, that name collapses
 in the row map (join tables conventionally use distinct FK names, so this is
@@ -270,8 +268,8 @@ keys, and bulk conditional mutations - all through a `Session`:
 | `orm.save(session, schema, record)` | `sql.Result` | Insert when the record has no primary key, else update. |
 
 `updateWhere` and `deleteWhere` **refuse a query with no `WHERE`**, so a missing
-condition can never update or delete every row (use a raw `sql.exec` to truncate
-deliberately). `insertMany` never silently caps: a batch whose placeholder count
+condition can never update or delete every row (use a raw `sql.exec` to
+clear a table). `insertMany` never silently caps: a batch whose placeholder count
 would exceed the per-statement limit (60000) is split across several `INSERT`s -
 wrap it in `orm.transaction` for all-or-nothing. Every value binds through a
 placeholder.
@@ -303,16 +301,17 @@ def names as list of string init orm.pluck($sess, orm.from($users), "name");
 
 A raw-SQL `whereRaw` escape hatch was **rejected** - it is the one thing that
 could not keep orm's "no injection even from a hand-built query" guarantee (an
-arbitrary SQL fragment can't be allowlist-checked); genuinely bespoke SQL belongs
+arbitrary SQL fragment can't be allowlist-checked); bespoke SQL belongs
 in the [`sql`](../libraries/sql.md) library. See
 [rejected.md](../technical/rejected.md).
 
 ## Scope
 
-The repository CRUD, the write path, finders, the query builder, column-attribute
-DDL, and the standalone DDL builders above. Schema migrations are a separate concern in the
+The repository CRUD, the write path, finders, the query builder, relations
+(`belongsTo` / `hasOne` / `hasMany` / `manyToMany` + `joinRelation`), one-level
+eager loading (`with` / `load` / `related`), column-attribute DDL, and the
+standalone DDL builders above. Schema migrations are a separate concern in the
 [`sqlmigrate`](sqlmigrate.md) module (which consumes the DDL builders' strings).
-**Out of scope here**: relations beyond a plain `join` (has-many / belongs-to
-eager loading wants object identity Jennifer does not have) and a typed-struct row
-form (gated on map-to-struct conversion). Needs `sql`, so the **default
+**Out of scope here**: nested eager loading (relations-of-relations) and a
+typed-struct row form (gated on map-to-struct conversion). Needs `sql`, so the **default
 `jennifer`** binary.

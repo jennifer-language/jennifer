@@ -101,7 +101,7 @@ digit by digit, never converted. `incMajor` / `incMinor` / `incPatch` throw a
 A looser N-segment form (`1.2.3.4`) has no defined ordering (`1.2.3` vs
 `1.2.3.0`?), which would quietly break sorting, so it is invalid rather
 than best-effort. Jennifer's own `meta.VERSION` is valid strict SemVer, so
-`semver.parse(meta.VERSION)` works out of the box.
+`semver.parse(meta.VERSION)` works.
 
 Use `isValid` to test without a throw; `parse` for the value (wrap it in
 `try` / `catch` to handle untrusted input).
@@ -124,8 +124,7 @@ Use `isValid` to test without a throw; `parse` for the value (wrap it in
 #   < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0
 ```
 
-Note `beta.2 < beta.11` (numeric, not lexical) - the classic loose-parser
-trap the field-by-field rule avoids.
+`beta.2 < beta.11`: numeric identifiers compare numerically, not lexically.
 
 ## Sorting a list
 

@@ -60,7 +60,7 @@ def struct websocket.Message {
 };
 ```
 
-`receive` transparently answers a **ping** with a pong and keeps reading, and
+`receive` answers a **ping** with a pong and keeps reading, and
 reassembles a **fragmented** message (continuation frames) into one `Message`. A
 **close** frame surfaces as `kind == "close"` - stop reading and `close` the
 connection. Each `receive` is bounded by the connection's `timeoutMs`; a timeout

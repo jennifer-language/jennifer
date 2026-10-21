@@ -70,7 +70,6 @@ base64 SASL tokens; the raw SCRAM messages are inside.
 
 `sasl.cram(user, pass, challenge)` is the simpler one-step CRAM-MD5: the server
 sends a base64 challenge, the client answers `base64("user " + hex(HMAC-MD5))`.
-It is named `cram`, not `cramMd5`, for the letters-only method-name rule.
 
 ## XOAUTH2 (the "use a token" half of OAuth2)
 
@@ -87,9 +86,8 @@ def opts as smtp.Options init smtp.Options{host: "smtp.gmail.com", port: 587,
 smtp.send($opts, "me@gmail.com", ["you@example.com"], $message);
 ```
 
-The function is named `bearer`, not `xoauth2`, because a Jennifer method name
-is letters-only (no digit); the wire mechanism name `"XOAUTH2"` is a string the
-client sends. Getting the **token itself** is the other half of OAuth2 - the
+The function is named `bearer` (after the `auth=Bearer` token it carries); the
+wire mechanism name `"XOAUTH2"` is a string the client sends. Getting the **token itself** is the other half of OAuth2 - the
 job of the generic [`oauth`](oauth.md) client.
 
 ## Out of scope

@@ -5,7 +5,7 @@ runner over the [`sql`](../libraries/sql.md) library: it applies ordered,
 reversible DDL migrations and records what ran in a `schema_migrations` tracking
 table, so each migration runs **exactly once** and can be rolled back.
 
-It is deliberately **decoupled from the [`orm`](orm.md) mapper**. A migration's
+It is **decoupled from the [`orm`](orm.md) mapper**. A migration's
 `up` / `down` are plain `list of string` DDL statements, so you build them with
 `orm`'s DDL helpers (`orm.createTable` / `orm.dropTable` / `orm.addColumn` / ...)
 **or** hand-written SQL - the runner never touches a `Schema` or a `Query`. That

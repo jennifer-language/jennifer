@@ -1,7 +1,7 @@
 # `archive` - tar / zip containers
 
-Enable with `use archive;`. Bundle files into a tar or zip container and
-read them back, entirely over `bytes` - no `fs` dependency,
+Enable with `use archive;`. Bundles files into a tar or zip container and
+reads them back, entirely over `bytes` (no `fs` dependency),
 value-semantic. Shares the `pack` / `unpack` verbs with
 [`compress`](compress.md) (byte streams there, file bundles here); the
 container format is a string argument. Backed by Go's archive/tar +
@@ -17,7 +17,7 @@ archive/zip; works on both binaries.
 
 `format` is `"tar"`, `"zip"`, or the gzip combo `"tar.gz"` (alias
 `"tgz"`). An unknown format, or corrupt input to `unpack`, is a
-positioned runtime error (catchable with `try` / `catch`).
+positioned runtime error, catchable with `try` / `catch`.
 
 `unpack` bounds untrusted input: the total decompressed payload of one
 call (summed across every entry) is capped at 256 MiB and the member
@@ -103,9 +103,8 @@ def back as list of archive.Entry init archive.unpack($blob, "tar.gz");
 io.printf("%s = %s\n", $back[0].name, convert.stringFromBytes($back[0].data, "utf-8"));
 ```
 
-`"tar.gz"` layers `compress`'s gzip over a tar internally, so the
-everyday `.tar.gz` case is a single call rather than a `tar`-then-gzip
-pair.
+`"tar.gz"` layers `compress`'s gzip over a tar internally, so a `.tar.gz`
+is one call.
 
 ## See also
 

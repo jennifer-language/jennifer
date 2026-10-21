@@ -3,32 +3,31 @@
 Most Jennifer code never needs performance tuning, and the interpreter already
 handles the parts that would otherwise be traps. Values are copied eagerly at
 every store site - assignment, parameter binding, a `spawn` snapshot - which is
-what makes aliasing bugs impossible. But the interpreter elides the copy wherever
-it can prove doing so is invisible, and it does this for you automatically:
+what makes aliasing bugs impossible. The interpreter elides the copy wherever it
+can prove doing so is invisible:
 
-- **Read-only parameters are borrowed, not copied.** A parameter a method never
+- **Read-only parameters are borrowed, not copied.** A parameter a function never
   writes is bound by alias, so passing a large `list` or `map` into a helper that
-  only reads it does not deep-copy it. You get this with no annotation and no
-  special syntax - just write the read-only helper.
-- **A mutate-and-return helper updates in place.** Inside a method,
+  only reads it does not deep-copy it. No annotation is needed.
+- **A mutate-and-return helper updates in place.** Inside a function,
   `$grid = put($grid, x, y, v);` hands `$grid` to `put` without a copy (the old
   value is dead once the call returns), and the value `put` mutates and returns
   comes back without one either - so the call costs the same for a ten-cell grid
   as for a million-cell one. The variable has to be both passed and assigned, and
-  be a local or parameter of the method, outside any `try` there (a `catch` could
+  be a local or parameter of the function, outside any `try` there (a `catch` could
   still read the old value). Top-level code (its variables are globals), a global
-  inside a method, or a different target (`def next as Grid init put($grid, ...)`)
+  inside a function, or a different target (`def next as Grid init put($grid, ...)`)
   copies the value once per call.
 - **Call frames are pooled and slot-bound.** A deeply recursive program allocates
   a near-constant handful of objects rather than one allocation per call, so
   recursion and tight call loops do not generate garbage-collector pressure on
   their own.
 
-So this page is not "hand-optimize everything." It is the short list of patterns
+This page lists the few patterns
 where the *shape* of your code, not the interpreter, decides whether a hot path is
 linear or quadratic - plus how to find the hot path in the first place.
 
-**Measure before you change anything.** [`jennifer profile`](tooling.md) reports
+**Measure before you change anything.** [`jennifer profile`](../technical/cli_profile.md) reports
 hits and wall-clock time per source position; `jennifer profile --allocs` reports
 value-semantics copies. Optimize the line the profiler names, not the line you
 suspect. A hot path in a Jennifer program is almost always a single loop; the rest
@@ -83,8 +82,8 @@ $out = $out + $field + ": " + $value + "\n";      # copies the growing $out at e
 $out = $out + ($field + ": " + $value + "\n");    # builds the chunk once, one copy of $out
 ```
 
-Both produce the same string (concatenation is associative), so this is a free
-rewrite - do not touch the large accumulator more often than you must.
+Both produce the same string (concatenation is associative), so the rewrite is
+free.
 
 ## Push byte-buffer work into the `binary` library
 
@@ -92,9 +91,8 @@ Everything above is about not re-copying an accumulator. `bytes` has a second tr
 on top of that: every individual byte operation from `.j` - reading a byte,
 comparing it, appending one - pays the tree-walker's per-operation cost. On a
 kilobyte that is invisible; on a megabyte buffer it dominates. The
-[`binary`](../libraries/binary.md) library exists for exactly this - each function
-runs its inner loop once in Go, at native speed - so the two byte-buffer hot shapes
-both have a one-call answer.
+[`binary`](../libraries/binary.md) library runs each inner loop once in Go, at native
+speed, so both byte-buffer hot shapes below have a one-call answer.
 
 **Assembling many chunks - `binary.join`, never concat in a loop.** `bytes` has no
 `+`, but `binary.concat` is the same quadratic trap: it copies both inputs into a
@@ -147,10 +145,6 @@ while ($i + len($needle) <= len($buf) and $idx < 0) {
 def idx as int init binary.indexOf($buf, $needle);
 ```
 
-The rule mirrors the string one: build a `bytes` result by appending single bytes
-or by joining chunks, never by concatenating a growing buffer in a loop - and when
-you search or slice a whole buffer, let one `binary` call do the walking.
-
 ### Caution: byte offsets are not character offsets - do not cut a rune
 
 Dropping from rune-indexed `strings` operations to byte-indexed `binary` ones buys
@@ -158,7 +152,7 @@ speed, but hands you one responsibility the string layer handled for you: **a
 multi-byte UTF-8 character occupies several bytes, and a byte-position cut can land
 in the middle of one.** Decoding such a fragment back with
 `convert.stringFromBytes($b, "utf-8")` is a **runtime error** - the decoder is
-strict and rejects a truncated sequence - so a buffer that merely happens to carry
+strict and rejects a truncated sequence - so a buffer that happens to carry
 an accented letter or an emoji across your cut point turns a working program into a
 throwing one.
 
@@ -189,9 +183,9 @@ position and then decode the result back to a `string`.)
 
 ## Get hot calls out of the innermost loop
 
-A method call costs two separable things: the **copy** of each argument into the
+A function call costs two separable things: the **copy** of each argument into the
 callee, and the **call itself** - borrowing a frame, binding the parameters, the
-call-depth check, and walking the method body. Read-only-parameter borrow (above)
+call-depth check, and walking the function body. Read-only-parameter borrow (above)
 makes the copy free when the callee only reads its argument, but it cannot make the
 call itself free. So a helper invoked *once per character or per element* in a hot
 loop still pays the call overhead once per element, even after the argument copy is
@@ -221,21 +215,20 @@ preference:
   recomputes each iteration that does not depend on the current element (a config
   read, a constant) belongs above the loop.
 
-The win is real, and it is the last one available at the source level: one real
-workload - a syntax highlighter that called a predicate once per character - ran
-**1.37x** faster after this rewrite, with byte-identical output and no interpreter
+This is the last win available at the source level: one real workload - a
+syntax highlighter that called a predicate once per character - ran **1.37x**
+faster after this rewrite, with byte-identical output and no interpreter
 change.
 
 **Do this surgically.** This is a hot-inner-loop transformation, the kind a profiler
 flags with a five- or six-digit hit count on one line. Everywhere else, keep
 factoring code into small helpers: the call overhead is invisible outside the
-hottest loops, and readable structure is worth far more than a call you make a few
-hundred times. Inlining is a readability cost you pay only where the profile earns
-it.
+hottest loops, and inlining costs readability you should spend only where the
+profile points.
 
 ## See also
 
-- [Editor & AI support / tooling](tooling.md) - running `jennifer profile`.
+- [`jennifer profile`](../technical/cli_profile.md) - flags and output formats.
 - [Types and values](types-and-values.md) - value semantics, the copy-on-store
   model these patterns work around.
 - [`binary` library](../libraries/binary.md) - the bulk-`bytes` functions

@@ -9,67 +9,62 @@
 
 Jennifer is an interpreted programming language.
 
-Jennifer is **batteries-included**, and not just in name:
+Jennifer is **batteries-included**:
 **[41 built-in libraries](docs/libraries/index.md) and
 [74 distributable modules](docs/modules/index.md) - over 1,800 functions,
-constants, and types** cover what real programs actually need, so you build genuine tools,
-not toys. Talk to a
-real database with the [SQL](docs/libraries/sql.md) library
-(MySQL/MariaDB/Galera and PostgreSQL, parameterized and injection-safe) or map rows
-to structs with the [ORM](docs/modules/orm.md). Read and write
-[JSON](docs/libraries/json.md), [YAML](docs/libraries/yaml.md),
-[TOML](docs/libraries/toml.md), and [XML](docs/libraries/xml.md); match text
-with full [regular expressions](docs/libraries/regex.md). The web works both
-ways: an [HTTP/S client](docs/modules/http.md) and ergonomic
-[REST](docs/modules/rest.md) layer to call out, a built-in
-[HTTP server](docs/libraries/httpd.md) and [web framework](docs/modules/web.md)
-to serve. Email is a complete stack - [SMTP](docs/modules/smtp.md) to send,
-[POP3](docs/modules/pop.md) / [IMAP](docs/modules/imap.md) to receive; caches
-and stores come through [Redis](docs/modules/redis.md) and
-[memcached](docs/modules/memcache.md) clients. Security is the real thing, not a
-stub: [AES-256-GCM, Ed25519, HKDF / PBKDF2](docs/libraries/crypto.md), and [JWT](docs/modules/jwt.md).
-Wire your program into AI agents with the
-[Model Context Protocol](docs/modules/mcp.md): expose your own functions as tools
-/ resources / prompts to a host (Claude, an IDE, ...), or call another MCP server
-as a client - validated end to end against the official MCP SDK.
-And lightweight [concurrency](docs/user-guide/concurrency.md) is built into the
-language via `spawn` and the [task](docs/libraries/task.md) library. Something
-more niche - [Gotify](docs/modules/gotify.md) push, strict
+constants, and types** cover what real tools need. Talk to a database with the
+[SQL](docs/libraries/sql.md) library (MySQL/MariaDB/Galera and PostgreSQL,
+parameterized and injection-safe) or map rows to structs with the
+[ORM](docs/modules/orm.md). Read and write [JSON](docs/libraries/json.md),
+[YAML](docs/libraries/yaml.md), [TOML](docs/libraries/toml.md), and
+[XML](docs/libraries/xml.md); match text with full
+[regular expressions](docs/libraries/regex.md). For the web there is an
+[HTTP/S client](docs/modules/http.md) and [REST](docs/modules/rest.md) layer to
+call out, and a built-in [HTTP server](docs/libraries/httpd.md) and
+[web framework](docs/modules/web.md) to serve. Email: [SMTP](docs/modules/smtp.md)
+to send, [POP3](docs/modules/pop.md) / [IMAP](docs/modules/imap.md) to receive.
+Caches and stores: [Redis](docs/modules/redis.md) and
+[memcached](docs/modules/memcache.md) clients. Security:
+[AES-256-GCM, Ed25519, HKDF / PBKDF2](docs/libraries/crypto.md), and
+[JWT](docs/modules/jwt.md). The [Model Context Protocol](docs/modules/mcp.md)
+module exposes your functions as tools / resources / prompts to an AI host
+(Claude, an IDE, ...) or calls another MCP server as a client, validated end to
+end against the official MCP SDK. Lightweight
+[concurrency](docs/user-guide/concurrency.md) is built into the language via
+`spawn` and the [task](docs/libraries/task.md) library. More niche needs are
+covered too: [Gotify](docs/modules/gotify.md) push, strict
 [SemVer](docs/modules/semver.md), [S3](docs/modules/s3.md) object storage,
 [vCard](docs/modules/vcard.md) / [iCalendar](docs/modules/ical.md),
 [MQTT](docs/modules/mqtt.md) and [AMQP](docs/modules/amqp.md) messaging,
 [ACME](docs/modules/acme.md) certificate issuance,
-[TOTP](docs/modules/totp.md) two-factor codes - and lots of others? No need to
-ask: it is all there already. The interpreter and its built-in libraries ship
-as **one self-contained static binary** - about 23 MB with everything, ~10 MB for
-the embeddable build - with nothing else to install to run everything built in:
-no separate runtime, and no dependency tree to resolve first. The modules ride
-along as plain `.j` source files (installed beside the binary and resolved
-through the module path), readable and hackable with no compile step. Reaching
-past the built-ins is opt-in: third-party **decks** (Jennifer's packages) are
-vendored into your project's own tree - no global install, no daemon - with the
-`jvc` package manager to resolve and pin them.
+[TOTP](docs/modules/totp.md) two-factor codes, and more.
 
-It is also a natural fit for **teaching and learning**: an interactive
+The interpreter and its built-in libraries ship as **one self-contained static
+binary** - about 23 MB with everything, ~10 MB for the embeddable build - with no
+separate runtime and no dependency tree to resolve. The modules ship as plain
+`.j` source files (installed beside the binary and resolved through the module
+path), readable and editable with no compile step. Third-party **decks**
+(Jennifer's packages) are opt-in and vendored into your project's own tree - no
+global install, no daemon - with the `jvc` package manager to resolve and pin
+them.
+
+Jennifer also suits **teaching and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
 [easy-to-read grammar](docs/technical/grammar.md), and
-[token and AST dumps](docs/technical/cli_inspect.md) that make it ideal for
-mastering language design, plus a built-in
-[linter](docs/technical/cli_lint.md) and
-[profiler](docs/technical/cli_profile.md) and full
+[token and AST dumps](docs/technical/cli_inspect.md) for studying language
+design, plus a built-in [linter](docs/technical/cli_lint.md),
+[profiler](docs/technical/cli_profile.md), and
 [test support](docs/technical/cli_test.md). Its
 [strict, explicit design](docs/design-stances.md) - conditions must be
 `bool`, conversions are spelled out, names never shadow, and errors are
-positioned - surfaces a mistake as a clear message instead of a silent
-surprise, so a learner sees exactly what went wrong.
+positioned - turns a mistake into a clear message instead of a silent
+surprise.
 
 The interpreter is written in Go and ships as two binaries:
-**`jennifer`** (built with the standard Go toolchain, full
-host-feature surface - the default you install and reach for) and
-**`jennifer-tiny`** (built with [TinyGo](https://tinygo.org/), smaller
-and embeddable; missing `os/exec` and the network stack). `make
-build` produces both side by side. Source files use the `.j`
-extension.
+**`jennifer`** (standard Go toolchain, full host-feature surface, the default)
+and **`jennifer-tiny`** (built with [TinyGo](https://tinygo.org/), smaller and
+embeddable; missing `os/exec` and the network stack). `make build` produces
+both side by side. Source files use the `.j` extension.
 
 Jennifer's supported platform is **Linux**. Best-effort, **unsupported**
 macOS and Windows binaries (64- and 32-bit) are published alongside each
@@ -83,9 +78,8 @@ Same source, same language; pick by use case:
   host-feature surface, competitive on single-thread compute and the
   reliable choice for multi-core parallel `spawn` (it wins the
   end-to-end wall clock whenever parallelism is in play), supports
-  `os.run` / `os.spawn` / the whole `net` library. This is what
-  you want unless you have a specific reason to use the constrained
-  variant.
+  `os.run` / `os.spawn` / the whole `net` library. Use this unless
+  you need the constrained variant.
 - **`jennifer-tiny`** (TinyGo): smaller binary, embeddable in
   minimal-footprint deployments (embedded systems, minimal
   containers, small-footprint scripting hosts). Trade-off: no
@@ -132,14 +126,13 @@ commands from a tarball, and platform-specific notes.
 ## Editor support & coding with an AI assistant
 
 Syntax highlighting for your editor lives in [editors/](editors/): a
-true drop-in for Vim / Neovim, a TextMate grammar for VS Code /
+drop-in for Vim / Neovim, a TextMate grammar for VS Code /
 Sublime / Zed, and a highlight.js definition for static sites.
 
-And because Jennifer is new enough that an AI assistant has no built-in
-knowledge of it, we ship [JENNIFER.md](JENNIFER.md) - a single,
-self-contained language reference. Drop it into your project and point
-your assistant at it ("we code in Jennifer, see JENNIFER.md, let's go")
-and it writes correct `.j` from the start instead of guessing
+AI assistants have no built-in knowledge of Jennifer, so the repo ships
+[JENNIFER.md](JENNIFER.md), a self-contained language reference. Drop it into
+your project and point your assistant at it ("we code in Jennifer, see
+JENNIFER.md") and it writes correct `.j` instead of guessing
 Python-with-dollar-signs. Details in
 [docs/user-guide/tooling.md](docs/user-guide/tooling.md).
 
@@ -159,10 +152,9 @@ version bump, additive features on minor, fixes on patch.
 
 ## Design stances
 
-Seven design stances shape every feature in Jennifer. They are
-deliberately uncompromising - "convenience" is rejected when it
-creates parallel ways to do the same thing or hides what the code
-does. See [docs/design-stances.md](docs/design-stances.md) for the
+Seven design stances shape every feature in Jennifer. "Convenience" is
+rejected when it creates parallel ways to do the same thing or hides
+what the code does. See [docs/design-stances.md](docs/design-stances.md) for the
 full table and rationale.
 
 ## Quick start (developer)
@@ -197,7 +189,7 @@ fine inside the GitHub file tree:
 
 - [docs/user-guide/](docs/user-guide/index.md) - language tutorial
   and reference split by topic: installing, first program, syntax,
-  types and values, methods, control flow, imports, examples.
+  types and values, functions, control flow, imports, examples.
 - [docs/libraries/](docs/libraries/index.md) - per-library reference
   + alphabetical cheatsheet of every builtin.
 - [docs/technical/](docs/technical/index.md) - interpreter internals:

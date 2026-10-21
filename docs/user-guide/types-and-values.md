@@ -15,7 +15,7 @@
 | user struct     | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs)                                                               |
 | user enum       | `Shape.Circle{r: 2.0}` (after `def enum Shape ...;`) | first variant, payload zeroed | One of a fixed set of variants (a sum type); consumed with `match`; see [Enums](#enums-sum-types)                       |
 | `task of T`     | *(no literal - produced by `spawn { ... }`)*         | *(cannot be defaulted; must be initialised)* | Handle to a concurrent computation; observed via the [`task`](../libraries/task.md) library. See [Concurrency](concurrency.md)     |
-| `func`          | a bare method name: `greet` (after `func greet() {...}`) | null function (calling it errors) | A first-class function value; call via `$f(args)`. See [Function values](#function-values)                            |
+| `func`          | a bare function name: `greet` (after `func greet() {...}`) | null function (calling it errors) | A first-class function value; call via `$f(args)`. See [Function values](#function-values)                          |
 | `channel of T`  | *(no literal - produced by `channel.make(capacity)`)* | *(must be initialised)* | A CSP channel between goroutines; a shared conduit that copies the values sent through it. See [`channel`](../libraries/channel.md) |
 
 The **Default** column is the value an uninitialized variable receives
@@ -28,7 +28,7 @@ etc. Both are **value-typed**: `$ys = $xs;` makes an independent copy,
 function parameters bind by copy, and `const` is deep (you cannot
 mutate the contents of a `const` list or map).
 
-Note: Jennifer's `list` is an array-backed sequence (Go slice
+Jennifer's `list` is an array-backed sequence (Go slice
 underneath), not a Lisp linked list. You get O(1) random access via
 `$xs[i]`, but no O(1) prepend.
 
@@ -56,9 +56,7 @@ Arithmetic is strict the same way. Integer arithmetic that overflows
 (`9223372036854775807 + 1` errors, and so does negating the most
 negative int). Float arithmetic that overflows to a non-finite value is
 an error too: `1e308 * 10.0` raises `float overflow`, never yielding
-`+Inf` or `NaN`. So no computation puts an `Infinity` or `NaN` into a
-value - the strict boundary is the operator itself, not just the
-literal.
+`+Inf` or `NaN`, so no computation can produce an `Infinity` or `NaN`.
 
 ### String literals: cooked (`"..."`) and raw (`'...'`)
 
@@ -82,8 +80,7 @@ The `\u` / `\U` forms are strict: a surrogate (`\uD800`-`\uDFFF`), a value above
 `U+10FFFF`, or the wrong number of hex digits is a positioned lex error, not a
 silent replacement character - the same canonical contract as
 `convert.fromCodepoint`. Use `\u` for the common case and `\U` for astral code
-points (emoji, rarer scripts). The brace-free forms deliberately leave `{...}`
-free for a future interpolation syntax.
+points (emoji, rarer scripts).
 
 A Jennifer `string` is a byte string, so a literal may contain control
 characters: `\0` (as above) and any other control byte via `\uXXXX` in the cooked
@@ -107,10 +104,10 @@ WHERE name = ?';                 # three lines, verbatim
 def pattern as string init '\d{4}-\d{2}-\d{2}';   # a regex, no double-escaping
 ```
 
-Raw literals shine for regexes, Windows-style paths, and embedded JSON, where the
+Raw literals suit regexes, Windows-style paths, and embedded JSON, where the
 cooked form would need `\\` everywhere. To put a **single quote inside** a string,
 use the cooked form (`"it's"` or `"it\'s"`) - a raw literal ends at the first `'`,
-so it cannot contain one. There is deliberately no `r"..."` prefix; the delimiter
+so it cannot contain one. There is no `r"..."` prefix; the delimiter
 *is* the mode.
 
 ### String interpolation (`{expr}` in cooked strings)
@@ -144,7 +141,7 @@ value kind interpolates and **no `use convert` is required**. The rules:
 A slot is real code, so an undefined variable inside one (`"{$typo}"`) is caught at
 parse time, just like any reference. **Keep slots simple** - variables, field /
 index access, and arithmetic; a side-effecting or expensive call reads better
-pulled out to a variable first (the [`lint`](tooling.md) `L204` check flags a call
+pulled out to a variable first (the [`lint`](best-practices.md#lint-for-suspect-patterns-with-jennifer-lint) `L204` check flags a call
 in a slot). To build a string with a literal brace *and* no interpolation, prefer a
 raw string.
 
@@ -176,8 +173,8 @@ once at declaration time and the result is frozen.
 **Top-level code runs in source order, so a constant exists from its `def
 const` on.** Reading one in top-level code above its definition is an error when
 the program loads (`constant B is used before its definition on line 9`). A
-method body may name a constant defined further down - methods usually run after
-the whole top level - but a method *called* during top-level setup, before that
+function body may name a constant defined further down - functions usually run after
+the whole top level - but a function *called* during top-level setup, before that
 `def const` has run, raises a runtime error saying so. Define constants above the
 code that first uses them.
 
@@ -222,8 +219,8 @@ $x = "string";    # error: cannot assign string to int variable
 ## Function values
 
 A **function value** (type `func`) is a first-class handle to a top-level
-method. The rule is the one the parser already uses to tell a call from a name:
-**a bare method name in expression position is the function value; a name
+function. The rule is the one the parser already uses to tell a call from a name:
+**a bare function name in expression position is the function value; a name
 followed by `(` is a call.**
 
 ```jennifer
@@ -233,7 +230,7 @@ def f as func init greet;   # `greet` (no parens) is the function value
 io.printf("%s\n", $f("ada"));   # call it through the variable -> "hi ada"
 ```
 
-Function values are ordinary values: pass them to methods, store them in a
+Function values are ordinary values: pass them to functions, store them in a
 `list of func` or a struct field, and return them.
 
 ```jennifer
@@ -249,13 +246,13 @@ Key properties:
 
 - **Immutable.** Holding a function in a value aliases nothing and can never
   become a write-through handle, so the value-semantics rule is untouched -
-  copying a `func` shares the underlying method, and there is nothing to mutate.
+  copying a `func` shares the underlying function, and there is nothing to mutate.
 - **Checked at the call site.** The `func` type carries no parameter or return
   signature; arity and argument kinds are checked when you *call* the value,
-  exactly as for a named method call. Wrong count or wrong kind is a positioned
+  exactly as for a named function call. Wrong count or wrong kind is a positioned
   runtime error.
 - **The zero is a null function.** `def f as func;` with no `init` is a null
-  handle; calling it is a positioned error until you assign a method.
+  handle; calling it is a positioned error until you assign a function.
 - **No `&name` and no closures (yet).** There is no reference sigil (it would read
   as a pointer the language does not have), and no anonymous-function / closure
   literal - that is a later, additive step. For now a function value always names
@@ -277,8 +274,8 @@ def evens as list of int init lists.filter([1, 2, 3, 4, 5], isEven);   # [2, 4]
 - A binding is visible from its `def` to the end of the enclosing block, and
   is inherited by inner blocks.
 - Inner scopes can **read** outer bindings but **cannot redefine** a name
-  already in scope (no shadowing). The interpreter rejects shadowing at
-  runtime.
+  already in scope (no shadowing). Shadowing is rejected when the
+  program is parsed, before anything runs.
 - A `for` loop opens a private scope wrapping `init`/`cond`/`step`/body, so
   the loop variable does not leak out.
 - Constants follow the same scoping rules and reject any later assignment.
@@ -307,7 +304,7 @@ for (def x in $xs) { io.printf("%d ", $x); }      io.printf("\n");
 for (def k in $m) { io.printf("%s ", $k); }       io.printf("\n");
 ```
 
-A few rules worth knowing up front:
+Rules:
 
 - **Out-of-bounds list reads and writes are errors**, not silent
   no-ops. Same for reads of missing map keys - use
@@ -340,24 +337,26 @@ $xs[] = 30;
 # $xs is now [10, 20, 30]
 ```
 
-It's equivalent to `$xs = lists.push($xs, item);` and produces the same
-result, but the two are not the same performance-wise (see below); use
-`$xs[]` for building a list, `lists.push` when you want a fresh list and
-keep the original.
+It produces the same result as `$xs = lists.push($xs, item);` but is much
+cheaper in a loop (see below).
 
 Rules:
 
 - **Write-only.** `$xs[]` is only meaningful as a write target. Any
   read context (`io.printf($xs[])`, `def y init $xs[] + 1`) is a
   parse error.
+- **Any place you can assign to.** `[]` may end a chain of fields and
+  indexes, so a list inside a struct or another collection grows in place
+  too: `$order.items[] = $item;`, `$grid[$y][] = 0;`,
+  `$index[$word][] = $line;`.
 - **Lists and bytes only.** `$m[] = ...;` on a map errors at runtime;
   maps have no "end-of" position.
 - **Type-checked.** The value is checked against the list's declared
   element type, same as `$xs[i] = item;`.
 - **`const` is still deep.** `$NUMS[] = ...;` on a `def const` list
   errors with the usual "cannot mutate contents of constant" message.
-- **Prefer it in hot loops.** `$xs[]` mutates the list in place through
-  the copy-on-write protocol, so appending N items is amortized O(N).
+- **Prefer it in hot loops.** `$xs[]` grows the binding's own backing in
+  place, so appending N items is amortized O(N).
   `lists.push` instead returns a *new* list (values are copy-on-assign),
   so `$xs = lists.push($xs, item)` in a loop copies the whole list each
   pass - O(N^2) overall. For a few appends the difference is invisible;
@@ -440,8 +439,8 @@ def gridC as list of list of int init [[1], [2, 3], [4, 5, 6]];
 def gridD as list of list of int init [];
 ```
 
-Same declared type, four very different shapes. At runtime each list
-just knows its own length; reading `$gridA[2]` is an out-of-bounds error
+Same declared type, four different shapes. At runtime each list
+knows only its own length; reading `$gridA[2]` is an out-of-bounds error
 (only indices 0 and 1 exist), reading `$gridC[2][2]` works (the third
 row has three elements), but `$gridC[0][2]` is out of bounds (the
 first row has only one element). **`len($gridC[i])` is the only way to
@@ -470,8 +469,8 @@ for the heuristics.
 
 ## Bytes
 
-`bytes` is a **mutable byte sequence**. It looks and acts a lot like a
-`list of int`, with two important specialisations:
+`bytes` is a **mutable byte sequence**. It acts like a `list of int`,
+with two differences:
 
 - Each element is constrained to `int` in `[0, 255]`. A write outside
   that range is a positioned runtime error.
@@ -507,8 +506,8 @@ io.printf("string back: %s\n", $s);
 
 ### Why `bytes` is its own type (not just `list of int`)
 
-The range constraint is the point. A `list of int` can hold any
-64-bit signed integer; `bytes` can only hold a byte. The runtime
+A `list of int` can hold any 64-bit signed integer; `bytes` can only
+hold a byte. The runtime
 enforces this on every write so I/O, hashing, encoding, and
 crypto code can rely on it. Trying to write `$b[i] = 256;` is a
 positioned runtime error, not a silent truncation.
@@ -571,8 +570,8 @@ def struct Line { from as Point, to as Point };
 ```
 
 The shape is `def struct Name { field as type, field as type, ... };`.
-The struct name follows the identifier rule (letters only, up to 64
-characters); field names follow the same rule. The trailing `;` is
+The struct name follows the identifier rule (a letter, then letters and
+digits, up to 64 characters); field names follow the same rule. The trailing `;` is
 required (every statement ends in one).
 
 ### Constructing, reading, writing
@@ -610,14 +609,13 @@ every-field rule, since you control both the type and its literals.
 
 `def p as Point;` (no `init`) gives every field its declared zero,
 recursing through nested struct fields. So `def L as Line;` produces
-`Line{from: Point{x: 0, y: 0}, to: Point{x: 0, y: 0}}` without any
-extra ceremony.
+`Line{from: Point{x: 0, y: 0}, to: Point{x: 0, y: 0}}`.
 
 ### Nested structs and chained access
 
 A struct's field can itself be a struct, a list, a map, or any
 combination. Reads and writes chain through `.field` and `[index]` in
-whatever order makes sense:
+any order:
 
 ```jennifer
 def L as Line init Line{ from: Point{ x: 0, y: 0 }, to: Point{ x: 10, y: 20 } };
@@ -689,8 +687,8 @@ def e as Shape init Shape.Empty;              # payload-less: no braces
 
 ### Consuming an enum with `match`
 
-You do not read an enum's payload with `.field` - the whole point is that only
-*one* variant is present, so `$s.r` would be meaningless when `$s` is a `Rect`.
+You do not read an enum's payload with `.field`: only *one* variant is
+present, so `$s.r` would be meaningless when `$s` is a `Rect`.
 Instead, `match` dispatches on the variant and hands you the payload:
 
 ```jennifer

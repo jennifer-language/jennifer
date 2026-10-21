@@ -87,14 +87,16 @@ $c = vcard.addAddress($c, vcard.address("1 Navy Way", "Arlington", "VA", "22202"
 `parse(encode(card))` round-trips the data. `parse` always returns a **list** (a
 vCard file may hold many cards, or none). `encode` writes `VERSION:4.0`, escapes
 text values, folds long lines, and omits empty optional fields. `parse` unfolds
-folded lines, ignores property parameters (the `;KEY=VALUE` after a name, e.g.
-`EMAIL;TYPE=work`), reads the structured `N` / `ADR` values, and unescapes text.
+folded lines, reads the `TYPE` parameter on `EMAIL` / `TEL` / `ADR` (e.g.
+`EMAIL;TYPE=work` -> `Typed.type` "work") and ignores every other property
+parameter, reads the structured `N` / `ADR` values, and unescapes text.
 
 ## Structured values
 
 `N` (name), `ADR` (address), and `ORG` are **structured**: components are
 separated by `;`. `N` is `Family;Given;Additional;Prefix;Suffix` (this module
-sets family and given); `ADR` is
+sets and reads all five; `withName` fills only family and given, `withFullName`
+all five); `ADR` is
 `POBox;Extended;Street;Locality;Region;PostalCode;Country` (this module sets the
 last five, leaving PO box and extended empty); `ORG` is
 `Organization;Unit;...` (this module sets and reads the first component). A `;`
@@ -104,8 +106,8 @@ or `,` inside a component value is escaped, so it never splits the structure.
 
 - **A contact subset.** `FN` / `N` / `NICKNAME` / `ORG` / `TITLE` / `EMAIL` /
   `TEL` / `ADR` / `BDAY` / `PHOTO` / `CATEGORIES` / `URL` / `NOTE`. No `GEO` /
-  `TZ` / `KIND` / grouping, no parameter round-tripping (a `TYPE=work` on input
-  is dropped, not preserved), and the `ADR` PO-box / extended components are not
+  `TZ` / `KIND` / grouping, no parameter round-tripping beyond `TYPE` on
+  `EMAIL` / `TEL` / `ADR` (any other parameter on input is dropped), and the `ADR` PO-box / extended components are not
   modelled. The escaping / folding / structured-value discipline is the reusable
   core.
 - **vCard 4.0 output.** `encode` always writes `VERSION:4.0`; `parse` reads any

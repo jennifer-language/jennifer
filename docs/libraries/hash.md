@@ -6,8 +6,7 @@ Output is raw `bytes`; users hex- or base64-encode through the
 `encoding` library when they need a string representation.
 
 For non-cryptographic checksums (transport integrity rather than
-content addressing), use [`crc`](crc.md) instead. The split makes
-the semantic difference visible at the import line.
+content addressing), use [`crc`](crc.md) instead.
 
 ```jennifer
 use io;
@@ -22,7 +21,7 @@ io.printf("sha256 digest is %d bytes\n", len($digest));
 ## Algorithm selection
 
 The library uses the codec-table shape - one verb per category,
-with the algorithm passed as a string. The shape mirrors
+with the algorithm passed as a string, as in
 `convert.bytesFromString(s, "utf-8")` and
 `encoding.encode(s, codec)`. Algorithm names are lowercase.
 
@@ -48,8 +47,8 @@ lists the supported set:
 
 The algorithm is always a value (`compute(b, "sha256")`), the same shape as
 `hmac` and the `crypto` KDFs - one convention across the whole hash / crypto
-family, so a runtime-negotiated algorithm (SCRAM, JWT) is just a variable, not a
-dispatch ladder. There are deliberately no `hash.sha256(b)` shortcuts (see
+family, so a runtime-negotiated algorithm (SCRAM, JWT) is a variable, not a
+dispatch ladder. There are no `hash.sha256(b)` shortcuts (see
 [rejected.md](../technical/rejected.md)).
 
 ## HMAC
@@ -98,8 +97,8 @@ is fine.
 
 ## Streaming
 
-For inputs that don't fit comfortably in memory (files, large
-network reads), feed chunks into a stream handle and finalize:
+For inputs too large to hold in memory (files, large network
+reads), feed chunks into a stream handle and finalize:
 
 ```jennifer
 use hash;
@@ -117,17 +116,17 @@ def digest as bytes init hash.finalize($s);
 | `hash.discard($s)`            | `null`        | Drop a stream without computing its digest, releasing its state. The abort path for a handle opened but abandoned. Subsequent calls error. |
 
 `hash.Stream` carries an integer `id` field that indexes into a
-Go-side map of live state. Users should not read or mutate the
-field; pass the struct around as an opaque token.
+Go-side map of live state. Treat it as an opaque token; do not
+read or mutate the field.
 
-## Composing through `convert` and (future) `encoding`
+
+## Composing through `convert` and `encoding`
 
 No convenience wrappers like `hash.md5String(s)` ship. Stance #1
 "one way per thing": strings become bytes through
 `convert.bytesFromString`, the digest stays as bytes, and the user
-hex-encodes through `encoding.hex`. The example
-[`examples/hash.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/hash.j) carries a tiny inline
-`bytesToHex` helper for printing until `encoding` ships.
+hex-encodes it through `encoding.toText($digest, "hex")`, as the example
+[`examples/hash.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/hash.j) does.
 
 ## Errors
 
@@ -144,5 +143,5 @@ All errors are positioned at the call site.
 ## See also
 
 - [crc.md](crc.md) - non-cryptographic checksums (CRC-32, CRC-64).
-- [milestones.md](../milestones.md) - hash/crc, `encoding` for
-  hex/base64 round-trips, and key-based crypto.
+- [encoding.md](encoding.md) - hex / base64 rendering of a digest.
+- [crypto.md](crypto.md) - key derivation, encryption, and signatures.

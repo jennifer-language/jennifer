@@ -2,15 +2,15 @@
 
 The REPL drives a read-eval-print loop on top of the standard pipeline. Each
 input is lexed, preprocessed, parsed, and fed to `Interpreter.EvalInteractive`
-(not `Run`). `EvalInteractive` differs from `Run` in three documented ways:
+(not `Run`). `EvalInteractive` differs from `Run` in three ways:
 the global env is lazy-initialized and preserved across calls, library
-imports and method definitions are idempotent / re-assignable so the user
+imports and function definitions are idempotent / re-assignable so the user
 can iterate, and the value of a trailing `ExprStmt` is returned so the loop
 can print it.
 
-One safety restriction: input that defines methods or structs, or adds
+One safety restriction: input that defines functions or structs, or adds
 `use` / `import` statements, is rejected while a spawned task is still
-running. Spawn bodies resolve method calls, struct lookups, and namespace
+running. Spawn bodies resolve function calls, struct lookups, and namespace
 prefixes by name from their own goroutines, so mutating those shared
 tables mid-flight would be a data race (Go's fatal "concurrent map read
 and map write"). Observe the task first - `task.wait($t)` or
@@ -110,7 +110,7 @@ stream anyway.
 
 Raw mode disables the kernel's `OPOST` flag, so `\n` written to stdout
 no longer auto-translates to `\r\n`. The REPL works around this with
-a tiny `crlfWriter` wrapper that performs the translation in user
+a `crlfWriter` wrapper that performs the translation in user
 space for error/help/result prints. Cooked-mode output (the banner
 printed before raw mode is entered, and anything after raw mode is
 restored) goes to `os.Stderr` / `os.Stdout` directly.
@@ -144,7 +144,7 @@ input unchanged, so the line always echoes verbatim.
 
 Colour is gated by `colorEnabled()`: stdout must be a TTY and `NO_COLOR`
 (https://no-color.org) must be unset. The editor already requires a TTY
-stdin, so the two together mean colour appears only in a genuine
+stdin, so the two together mean colour appears only in an
 interactive session; piped or redirected output stays plain.
 
 
