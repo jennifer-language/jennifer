@@ -196,6 +196,11 @@ type Interpreter struct {
 	// mutable global set grows across inputs.
 	entryGlobalsImmutable bool
 
+	// spawnReentry is set (on the host, for the whole run) when some spawn body
+	// can re-enter the host and write its live globals (computeEntryGlobalSafe),
+	// which voids the per-method GlobalSafe proofs.
+	spawnReentry atomic.Bool
+
 	// structLits collects every struct / enum literal resolveQualifiedRefs walks
 	// past, so Run can check their field sets once the module and namespace
 	// tables exist (checkStructLits). Cleared after the check.
@@ -1367,7 +1372,8 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	if !i.isModule && !hasMutableTopLevelGlobal(prog) {
 		i.entryGlobalsImmutable = true
 	} else {
-		i.computeEntryGlobalSafe()
+		i.computeEntryGlobalSafe(prog)
+		i.stampArgSnapshots(prog)
 	}
 	// Stamp every declared struct type once, single-threaded, before any
 	// statement (and therefore any spawn) runs, so the per-execution
@@ -2118,15 +2124,6 @@ func bindParamValue(v Value, declType parser.Type) Value {
 	return stampDeclaredType(v.Copy(), declType)
 }
 
-// methodBorrowCtx reports whether read-only-parameter borrow is sound for a call
-// to method m in this interpreter - i.e. whether no mutable global can be aliased
-// by an argument and mutated during the call. That holds in three cases: a module
-// (declarations-only top level, no mutable globals); an entry script that
-// declares no mutable top-level global (entryGlobalsImmutable); or a specific
-// method proven by the per-function escape analysis to mutate no global
-// transitively (m.GlobalSafe), even in a script that has mutable globals
-// elsewhere. Combined with Param.Borrow (never-written, borrow-safe type) at the
-// bind site.
 // accountCopy records that storing v into env's own binding added heap along
 // the call chain, for the recursion memory guard (MaxCopyChainBytes). Scalars
 // hold no separate backing (shallowValueBytes 0) and are skipped, so the
@@ -2163,12 +2160,19 @@ func chainBytesLimitErr(env *Environment) *runtimeError {
 	}
 }
 
+// methodBorrowCtx reports whether read-only-parameter borrow is sound for a call
+// to method m in this interpreter - whether no mutable global an argument may
+// alias can change during the call. That holds for an entry script that
+// declares no mutable top-level global (entryGlobalsImmutable), and for a method
+// the escape analysis proved mutates no global transitively (m.GlobalSafe) as
+// long as no spawned task can re-enter the host and write its globals
+// concurrently (spawnReentry). There is no module short-circuit: a module method
+// can reach meta.callMain, which mutates host globals; m.GlobalSafe is false for
+// it. Combined with Param.Borrow (never-written, borrow-safe type) at the bind
+// site, and with CallExpr.ArgSnap, which copies an argument a later argument of
+// the same call may mutate.
 func (i *Interpreter) methodBorrowCtx(m *parser.MethodDef) bool {
-	// No i.isModule short-circuit: a module method is not automatically
-	// borrow-safe, because meta.callMain can mutate a host global its borrowed
-	// argument aliases. A module relies on m.GlobalSafe (computed for modules
-	// too), which is false for any method reaching callMain / a callback builtin.
-	return i.entryGlobalsImmutable || m.GlobalSafe
+	return i.entryGlobalsImmutable || (m.GlobalSafe && !i.Host().spawnReentry.Load())
 }
 
 // hasMutableTopLevelGlobal reports whether the program declares a mutable
@@ -5347,7 +5351,7 @@ func wrapTask(state *TaskState) Value {
 // guard while concurrent chains stay isolated), runs the body, and maps the block
 // result to a return value. `calleeName` and `node` supply the display name and
 // positions for errors / the profiler.
-func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr, env *Environment, calleeName string, node parser.Expr) (Value, error) {
+func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr, argSnap []bool, env *Environment, calleeName string, node parser.Expr) (Value, error) {
 	if len(argExprs) != len(m.Params) {
 		file, line, col := posFor(node)
 		return Value{}, &runtimeError{
@@ -5384,9 +5388,11 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 		// parameter type (so compound params know their element / key+value type
 		// for index-write checks) and skips Copy for scalar kinds (a no-op) and
 		// for a borrowable parameter (a read-only alias - no copy happens, so no
-		// eager-copy is recorded).
-		bound := i.bindArg(v, p, borrowCtx)
-		if !(p.Borrow && borrowCtx) {
+		// eager-copy is recorded). An argument a later one may mutate
+		// (argSnap) is never borrowed.
+		argBorrow := borrowCtx && (argSnap == nil || !argSnap[idx])
+		bound := i.bindArg(v, p, argBorrow)
+		if !(p.Borrow && argBorrow) {
 			i.accountCopy(callFrame, bound)
 			if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 				pf, pl, pcol := posFor(a)
@@ -5498,7 +5504,7 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 			if err != nil {
 				return Value{}, err
 			}
-			args[idx] = crossRetag(v, i, home)
+			args[idx] = crossRetag(snapArg(v, c.ArgSnap, idx), i, home)
 		}
 		res, err := home.callMethodWithDepth(fv.Fn, env.depth, args...)
 		if err != nil {
@@ -5506,7 +5512,7 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 		}
 		return crossRetag(res, home, i), nil
 	}
-	return i.callUserMethod(fv.Fn, c.Args, env, fv.Fn.Name, c)
+	return i.callUserMethod(fv.Fn, c.Args, c.ArgSnap, env, fv.Fn.Name, c)
 }
 
 // crossRetag rewrites a value's struct identities as it crosses from interpreter
@@ -5574,8 +5580,10 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				// so the parameter takes the value by move: no copy.
 				bound = stampDeclaredType(v, p.Type)
 			} else {
-				bound = i.bindArg(v, p, borrowCtx)
-				if !(p.Borrow && borrowCtx) {
+				// An argument a later one may mutate (ArgSnap) is never borrowed.
+				argBorrow := borrowCtx && (c.ArgSnap == nil || !c.ArgSnap[idx])
+				bound = i.bindArg(v, p, argBorrow)
+				if !(p.Borrow && argBorrow) {
 					i.accountCopy(callFrame, bound)
 					if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 						pf, pl, pcol := posFor(a)
@@ -5746,12 +5754,12 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 		fn = hit
 	}
 	args := make([]Value, 0, len(c.Args))
-	for _, a := range c.Args {
+	for idx, a := range c.Args {
 		v, err := i.evalExpr(a, env)
 		if err != nil {
 			return Value{}, err
 		}
-		args = append(args, v)
+		args = append(args, snapArg(v, c.ArgSnap, idx))
 	}
 	pf, pl, pc := posFor(c)
 	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel(), root: effectiveGlobal(env)}

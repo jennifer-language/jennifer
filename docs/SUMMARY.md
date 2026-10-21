@@ -13,7 +13,7 @@
 - [Overview](user-guide/index.md)
 - [Syntax](user-guide/syntax.md)
 - [Types and values](user-guide/types-and-values.md)
-- [Methods](user-guide/methods.md)
+- [Functions](user-guide/functions.md)
 - [Control flow](user-guide/control-flow.md)
 - [Concurrency](user-guide/concurrency.md)
 - [Imports](user-guide/imports.md)

@@ -64,6 +64,7 @@ func TestBodyWalkersCoverAllNodes(t *testing.T) {
 	astFile := filepath.Join(root, "internal", "parser", "ast.go")
 	moduleFile := filepath.Join(root, "internal", "interpreter", "module.go")
 	interpFile := filepath.Join(root, "internal", "interpreter", "interpreter.go")
+	argsnapFile := filepath.Join(root, "internal", "interpreter", "argsnap.go")
 
 	stmtKinds := nodeKindsWithMethod(t, astFile, "stmtNode")
 	skip := map[string]bool{
@@ -84,6 +85,7 @@ func TestBodyWalkersCoverAllNodes(t *testing.T) {
 	for _, wk := range []struct{ file, fn string }{
 		{moduleFile, "declTypesStmt"},
 		{interpFile, "walkStmtForQualifiedRefs"},
+		{argsnapFile, "stmt"}, // argSnapWalker.stmt
 	} {
 		covered := switchCaseTypes(t, wk.file, wk.fn)
 		assertCovers(t, wk.fn, want, covered)

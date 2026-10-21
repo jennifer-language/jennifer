@@ -152,7 +152,7 @@ never written **and** its type is *borrow-safe*: a compound whose
 `list` / `map`, or a struct / `bytes`; a `list of list` falls back to
 copying so the stamp cannot mutate the shared backing).
 `Interpreter.bindArg` aliases when
-`Param.Borrow && (i.entryGlobalsImmutable || m.GlobalSafe)`
+`Param.Borrow && (i.entryGlobalsImmutable || (m.GlobalSafe && !spawnReentry))`
 and copies (`bindParamValue`) otherwise, per callee function `m`
 (`methodBorrowCtx`). The gate is the soundness boundary: "never writes
 the parameter" alone is not enough, because if the argument aliases a
@@ -177,13 +177,37 @@ global of its own, but a function reaching `meta.callMain` can mutate a
   higher-order `lists` layer, `meta.call` / `meta.callMain`,
   `testing.run` / `runWith` / `assertThrows` / `assertThrowsWith`, keyed by canonical
   namespace) - then a fixpoint propagates the hazard along named-call
-  edges. The walker defaults an unrecognised node to hazardous, so a new
-  node never silently escapes; `spawn` bodies are skipped (they mutate a
-  snapshot). The callback set must be a denylist because a func-value
+  edges (a worklist over reverse call edges, linear in the call graph). The
+  walker defaults an unrecognised node to hazardous, so a new node never
+  silently escapes. A `spawn` body's global writes land in its snapshot and
+  are ignored, but a spawn body that can **re-enter** the host (a module
+  call, a callback builtin, a func-value or unresolved call, or a call to a
+  function that transitively does one) writes the live host globals at any
+  time, from outside the call chain the analysis follows; when any spawn in
+  the run (in a function or the top-level code, entry program or module) can
+  re-enter, the host's `spawnReentry` flag turns the `GlobalSafe` widening
+  off for the whole run. The analysis runs for every program with mutable
+  globals, not only when some parameter is borrowable, because a borrowable
+  local `def` depends on it too. The callback set must be a denylist because a func-value
   argument is not statically visible (a bare function name is a
   `ConstRefExpr`, and curried func returns carry no type) - the invariant
   "any builtin invoking `.j` code via `BuiltinCtx.Invoke` / `CallByName*`
   / `CallHostWith*` is listed" lives in `globalsafe.go`.
+
+**Argument snapshots.** An argument is the value its expression had when it
+was evaluated, but evaluating `$g` does not copy the global's backing, and the
+arguments of one call are evaluated left to right. In `f($g, mutatesG())` the
+second argument's call writes `$g` in place after the first was evaluated and
+before the call uses it. `stampArgSnapshots` (`argsnap.go`, run after the
+escape analysis, entry program with mutable globals only) marks each argument
+that aliases a global (`$g`, `$g[i]`, `$g.f`) and is followed by an argument
+that may mutate globals (a call to a function not proven `GlobalSafe`, a
+module call, a callback builtin, a func-value call, a spawn) in the call's
+`ArgSnap`. A marked argument is never borrowed (user function calls, which
+bind each argument as it is evaluated) and is copied right after evaluation
+on the paths that evaluate every argument first (builtins, module calls,
+cross-module func values). Calls whose later arguments are pure, the
+overwhelming majority, are unmarked and unaffected.
 
 The REPL (whose global set grows across inputs) keeps the copying bind.
 This is the extension of the scalar copy-elision to compound Kinds that

@@ -5,6 +5,7 @@ package interpreter
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -45,7 +46,11 @@ func TestComputeEntryGlobalSafe(t *testing.T) {
 		want map[string]bool
 	}{
 		{"pure reader", `def g as int init 0; func f(xs as list of int) { return $xs[0]; }`, map[string]bool{"f": true}},
-		{"skipped when no param can borrow", `def g as int init 0; func f(x as int) { return $x; }`, map[string]bool{"f": false}},
+		// Computed even when no parameter can borrow: a local def borrows on it too.
+		{"no borrowable param", `def g as int init 0; func f(x as int) { return $x; }`, map[string]bool{"f": true}},
+		{"local def only", `def g as list of int init [1]; func f() { def q as list of int init $g; return $q[0]; }`, map[string]bool{"f": true}},
+		// A spawn body's global writes land in its snapshot.
+		{"spawn writing a global", `def g as int init 0; func f(xs as list of int) { def t as task of null init spawn { $g = 1; }; return $xs[0]; }`, map[string]bool{"f": true}},
 		{"reassigns global", `def g as int init 0; func f(xs as list of int) { $g = 1; return $xs[0]; }`, map[string]bool{"f": false}},
 		{"index-writes global", `def g as list of int init []; func f(xs as list of int) { $g[0] = 1; return $xs[0]; }`, map[string]bool{"f": false}},
 		{"appends to global", `def g as list of int init []; func f(xs as list of int) { $g[] = 1; return $xs[0]; }`, map[string]bool{"f": false}},
@@ -68,5 +73,70 @@ func TestComputeEntryGlobalSafe(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The worklist propagates "unsafe" up a long call chain to its root (and does it
+// in time linear in the chain; the old per-round rescan was quadratic).
+func TestComputeEntryGlobalSafeLongChain(t *testing.T) {
+	const n = 3000
+	var b bytes.Buffer
+	b.WriteString("def g as int init 0;\nfunc f0(xs as list of int) { $g = 1; return 0; }\n")
+	for k := 1; k < n; k++ {
+		fmt.Fprintf(&b, "func f%d(xs as list of int) { return f%d($xs); }\n", k, k-1)
+	}
+	b.WriteString("func pure(xs as list of int) { return len($xs); }\n")
+	prog, err := parser.Parse(b.String())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	in := New()
+	in.Out = &bytes.Buffer{}
+	if err := in.Run(prog); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for name, m := range in.methods {
+		if want := name == "pure"; m.GlobalSafe != want {
+			t.Fatalf("%s: GlobalSafe = %v, want %v", name, m.GlobalSafe, want)
+		}
+	}
+}
+
+// stampArgSnapshots marks exactly the arguments that alias a global and are
+// followed by an argument that may mutate globals.
+func TestStampArgSnapshots(t *testing.T) {
+	src := `
+		def g as list of int init [1];
+		def k as int init 0;
+		func w() { $g[0] = 9; return 0; }
+		func r() { return 1; }
+		func f(a as list of int, b as int) { return 0; }
+		f($g, w());
+		f($g, r());
+		f([1], w());
+		f($g, $k + w());
+		f($g, len($g));
+	`
+	prog, err := parser.Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	in := New()
+	in.Out = &bytes.Buffer{}
+	if err := in.Run(prog); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := [][]bool{{true, false}, nil, nil, {true, false}, nil}
+	k := 0
+	for _, s := range prog.TopLevel {
+		es, ok := s.(*parser.ExprStmt)
+		if !ok {
+			continue
+		}
+		c := es.Expr.(*parser.CallExpr)
+		if fmt.Sprint(c.ArgSnap) != fmt.Sprint(want[k]) {
+			t.Errorf("call %d: ArgSnap = %v, want %v", k, c.ArgSnap, want[k])
+		}
+		k++
 	}
 }

@@ -467,7 +467,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 		}
 		// Cross the boundary inward: a module struct the consumer holds is
 		// tagged `(module-stem, name)`; inside the module it is bare.
-		args[idx] = retagStructs(v, m.ns, "", m.path, "", m.isOwnStruct)
+		args[idx] = retagStructs(snapArg(v, c.ArgSnap, idx), m.ns, "", m.path, "", m.isOwnStruct)
 	}
 	// Thread the consumer's call-depth counter across the boundary so a chain
 	// that recurses through a module call keeps accumulating on one

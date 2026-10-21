@@ -10,7 +10,14 @@ import "jennifer-lang.dev/jennifer/internal/parser"
 // be borrowed when nothing reachable from the method can mutate a global (which
 // is the only thing an argument could alias and have change under a value-
 // semantic callee). computeEntryGlobalSafe proves that per method and stamps
-// MethodDef.GlobalSafe; borrowContext consults it.
+// MethodDef.GlobalSafe; methodBorrowCtx consults it.
+//
+// A spawned task normally cannot affect the caller: it runs on a deep-copied
+// snapshot. The exception is a task that re-enters the host (a module call that
+// reaches meta.callMain, a callback builtin, a func-value call): that writes the
+// live host globals, at any time, from outside the call chain the per-method
+// analysis follows. So when any spawn body in the run can re-enter, the run is
+// marked (spawnReentry on the host) and the GlobalSafe widening is off for it.
 
 // jCallbackBuiltins is the (canonical namespace, callee) of every builtin that
 // can re-enter and run *arbitrary .j code* - the higher-order `lists` layer
@@ -54,19 +61,13 @@ var jCallbackBuiltins = map[[2]string]bool{
 // or spawn, so there is no intra-interpreter race; running one resolved Program
 // through two interpreters concurrently is unsupported (it would also race the
 // pre-existing qualified-ref stamps).
-func (i *Interpreter) computeEntryGlobalSafe() {
-	// Nothing can borrow unless some method has a borrowable parameter, so skip
-	// the whole scan + fixpoint (which would otherwise walk every method body on
-	// every Run of any globals-holding script) when none does. GlobalSafe stays
-	// false, which is the conservative, correct state.
-	if !i.anyBorrowableParam() {
-		return
-	}
+func (i *Interpreter) computeEntryGlobalSafe(prog *parser.Program) {
 	type mstate struct {
-		unsafe  bool
-		callees []*parser.MethodDef
+		unsafe, reenters bool
+		callers          []*parser.MethodDef
 	}
 	states := make(map[*parser.MethodDef]*mstate, len(i.methods))
+	scans := make(map[*parser.MethodDef]*globalHazardScan, len(i.methods))
 	for _, m := range i.methods {
 		locals := make(map[string]bool, len(m.Params))
 		for _, p := range m.Params {
@@ -75,42 +76,72 @@ func (i *Interpreter) computeEntryGlobalSafe() {
 		collectMethodLocals(m.Body.Stmts, locals)
 		scan := &globalHazardScan{in: i, locals: locals}
 		scan.walkStmts(m.Body.Stmts)
-		states[m] = &mstate{unsafe: scan.unsafe, callees: scan.callees}
+		scans[m] = scan
+		states[m] = &mstate{unsafe: scan.unsafe, reenters: scan.reenters}
 	}
-	// Propagate: a method that calls a not-yet-proven-safe method is unsafe.
-	// Iterate to a fixpoint (handles recursion and mutual recursion).
-	for changed := true; changed; {
-		changed = false
-		for _, st := range states {
-			if st.unsafe {
-				continue
+	// Reverse call edges, so each fact propagates with a worklist in time linear
+	// in the call graph (a fixpoint that rescans every method per round is
+	// quadratic on a long call chain).
+	for m, scan := range scans {
+		for _, c := range scan.callees {
+			if cs, ok := states[c]; ok {
+				cs.callers = append(cs.callers, m)
 			}
-			for _, c := range st.callees {
-				if cs, ok := states[c]; ok && cs.unsafe {
-					st.unsafe = true
-					changed = true
-					break
+		}
+	}
+	propagate := func(has func(*mstate) bool, set func(*mstate)) {
+		var work []*parser.MethodDef
+		for m, st := range states {
+			if has(st) {
+				work = append(work, m)
+			}
+		}
+		for len(work) > 0 {
+			m := work[len(work)-1]
+			work = work[:len(work)-1]
+			for _, caller := range states[m].callers {
+				if cs := states[caller]; !has(cs) {
+					set(cs)
+					work = append(work, caller)
 				}
 			}
 		}
 	}
+	propagate(func(st *mstate) bool { return st.unsafe }, func(st *mstate) { st.unsafe = true })
+	propagate(func(st *mstate) bool { return st.reenters }, func(st *mstate) { st.reenters = true })
 	for m, st := range states {
 		m.GlobalSafe = !st.unsafe
 	}
-}
 
-// anyBorrowableParam reports whether any entry method has a parameter the
-// resolver marked borrowable - the precondition for the escape analysis to buy
-// anything.
-func (i *Interpreter) anyBorrowableParam() bool {
-	for _, m := range i.methods {
-		for _, p := range m.Params {
-			if p.Borrow {
+	// A spawn body re-enters when it holds a re-entering node itself or calls a
+	// method that (transitively) re-enters. Spawns sit in method bodies and in
+	// the top-level code.
+	spawnReenters := func(scan *globalHazardScan) bool {
+		if scan.spawnReenters {
+			return true
+		}
+		for _, c := range scan.spawnCallees {
+			if cs, ok := states[c]; ok && cs.reenters {
 				return true
 			}
 		}
+		return false
 	}
-	return false
+	reentry := false
+	for _, scan := range scans {
+		if spawnReenters(scan) {
+			reentry = true
+			break
+		}
+	}
+	if !reentry && prog != nil {
+		top := &globalHazardScan{in: i, locals: map[string]bool{}}
+		top.walkStmts(prog.TopLevel)
+		reentry = spawnReenters(top)
+	}
+	if reentry {
+		i.Host().spawnReentry.Store(true)
+	}
 }
 
 // collectMethodLocals gathers every name bound within a method body (defs, loop
@@ -188,15 +219,43 @@ func collectLocalsStmt(s parser.Stmt, locals map[string]bool) {
 // globalHazardScan walks a method body looking for anything that could mutate a
 // global during a call: a write to a non-local (global) binding, a dynamic or
 // unresolved call, a module call (a module can re-enter the host via
-// meta.callMain), or a callback builtin. It records statically-named user-method
-// callees for the fixpoint. `spawn` bodies are skipped (they mutate their own
-// deep-copied snapshot). Unrecognised nodes default to unsafe, so a new AST node
-// never silently escapes the analysis.
+// meta.callMain), or a callback builtin. The last three re-enter (reenters): they
+// can run arbitrary .j code against the live host globals. It records
+// statically-named user-method callees for the fixpoints. Inside a `spawn` body a
+// global write is harmless (it lands in the task's snapshot), but a re-entering
+// node is not, so there it only sets spawnReenters / spawnCallees. Unrecognised
+// nodes default to unsafe and re-entering, so a new AST node never silently
+// escapes the analysis.
 type globalHazardScan struct {
-	in      *Interpreter
-	locals  map[string]bool
-	unsafe  bool
-	callees []*parser.MethodDef
+	in       *Interpreter
+	locals   map[string]bool
+	unsafe   bool
+	reenters bool
+	callees  []*parser.MethodDef
+	// inSpawn counts the enclosing spawn bodies at the current walk position.
+	inSpawn       int
+	spawnReenters bool
+	spawnCallees  []*parser.MethodDef
+}
+
+// reentry records a node that can run arbitrary .j code (and so write the live
+// host globals).
+func (s *globalHazardScan) reentry() {
+	if s.inSpawn > 0 {
+		s.spawnReenters = true
+		return
+	}
+	s.unsafe = true
+	s.reenters = true
+}
+
+// call records a statically-named user-method callee.
+func (s *globalHazardScan) call(m *parser.MethodDef) {
+	if s.inSpawn > 0 {
+		s.spawnCallees = append(s.spawnCallees, m)
+		return
+	}
+	s.callees = append(s.callees, m)
 }
 
 func (s *globalHazardScan) walkStmts(stmts []parser.Stmt) {
@@ -206,6 +265,10 @@ func (s *globalHazardScan) walkStmts(stmts []parser.Stmt) {
 }
 
 func (s *globalHazardScan) writesGlobal(root string) {
+	if s.inSpawn > 0 {
+		// A spawn body writes its own snapshot, never the live globals.
+		return
+	}
 	if root == "" || !s.locals[root] {
 		// Root is not a method-local: it is a mutable global (a const target is
 		// rejected at resolve, so any legal write to a non-local hits a mutable
@@ -215,9 +278,6 @@ func (s *globalHazardScan) writesGlobal(root string) {
 }
 
 func (s *globalHazardScan) walkStmt(st parser.Stmt) {
-	if s.unsafe {
-		return
-	}
 	switch n := st.(type) {
 	case *parser.DefineStmt:
 		s.walkExpr(n.InitExpr)
@@ -229,11 +289,7 @@ func (s *globalHazardScan) walkStmt(st parser.Stmt) {
 		s.walkExpr(n.Target)
 		s.walkExpr(n.Value)
 	case *parser.AppendStmt:
-		if root := lvalueRoot(n.Target); root != "" {
-			s.writesGlobal(root)
-		} else {
-			s.unsafe = true
-		}
+		s.writesGlobal(lvalueRoot(n.Target))
 		s.walkExpr(n.Target)
 		s.walkExpr(n.Value)
 	case *parser.FieldAssignStmt:
@@ -299,12 +355,12 @@ func (s *globalHazardScan) walkStmt(st parser.Stmt) {
 		*parser.StructDef, *parser.EnumDef, *parser.MethodDef:
 		// No writes, no calls, no nested method bodies reachable here.
 	default:
-		s.unsafe = true
+		s.reentry()
 	}
 }
 
 func (s *globalHazardScan) walkExpr(e parser.Expr) {
-	if s.unsafe || e == nil {
+	if e == nil {
 		return
 	}
 	switch n := e.(type) {
@@ -352,11 +408,11 @@ func (s *globalHazardScan) walkExpr(e parser.Expr) {
 		}
 	case *parser.CallExpr:
 		if n.Method != nil {
-			s.callees = append(s.callees, n.Method)
+			s.call(n.Method)
 		} else {
 			// A bare-name call not resolving to a user method: a builtin-shaped
 			// bare call or an unresolved name. Cannot analyse - conservative.
-			s.unsafe = true
+			s.reentry()
 		}
 		for _, a := range n.Args {
 			s.walkExpr(a)
@@ -365,12 +421,18 @@ func (s *globalHazardScan) walkExpr(e parser.Expr) {
 		s.qualifiedCall(n)
 	case *parser.CallValueExpr:
 		// Dynamic dispatch through a function value: the target is unknown.
-		s.unsafe = true
+		s.reentry()
+		s.walkExpr(n.Callee)
+		for _, a := range n.Args {
+			s.walkExpr(a)
+		}
 	case *parser.SpawnExpr:
-		// A spawn body mutates its own deep-copied snapshot, not the live
-		// globals, so it cannot change a borrowed argument's backing. Skip it.
+		// The body's global writes land in its snapshot; only re-entry matters.
+		s.inSpawn++
+		s.walkStmts(n.Body)
+		s.inSpawn--
 	default:
-		s.unsafe = true
+		s.reentry()
 	}
 }
 
@@ -378,7 +440,10 @@ func (s *globalHazardScan) qualifiedCall(n *parser.QualifiedCallExpr) {
 	// A module call may re-enter the host (meta.callMain) and reach host code
 	// that mutates a global, so treat every module call as unsafe.
 	if _, isModule := s.in.moduleAliases[n.Prefix]; isModule {
-		s.unsafe = true
+		s.reentry()
+		for _, a := range n.Args {
+			s.walkExpr(a)
+		}
 		return
 	}
 	// Canonicalise the prefix (an alias -> its library name) before the callback
@@ -388,8 +453,7 @@ func (s *globalHazardScan) qualifiedCall(n *parser.QualifiedCallExpr) {
 		ns = canon
 	}
 	if jCallbackBuiltins[[2]string{ns, n.Callee}] {
-		s.unsafe = true
-		return
+		s.reentry()
 	}
 	for _, a := range n.Args {
 		s.walkExpr(a)

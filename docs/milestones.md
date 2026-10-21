@@ -979,6 +979,14 @@ No `.j` changes and no new syntax - a pure interpreter optimization. Split into
 the borrow itself (M25.1) and the escape analysis that widens where it is sound
 (M25.2). Independent of the horizon bytecode-VM direction but composes with it.
 
+**Since revised.** The gates below are as shipped. The module case of M25.1 was
+withdrawn (a module method can reach `meta.callMain` and mutate a host global its
+argument aliases, so modules rely on the M25.2 analysis), and its "cross-boundary
+arguments are copies anyway" was wrong (a module call took its arguments
+uncopied). M28.19 closed two soundness holes in M25.2 and records the current
+gate: `i.entryGlobalsImmutable || (m.GlobalSafe && !spawnReentry)`, plus
+argument snapshots.
+
 ### M25.1 - borrow in modules and globals-free scripts
 
 **Done.** The borrow, enabled in the two contexts where it is sound without a
@@ -1959,6 +1967,59 @@ per-goroutine allocation budget for spawn roots, charged on list / map / bytes /
 string growth like the copy-chain counter, so a runaway request raises a
 catchable `"limit"` error in its own worker instead of taking the server down.
 Touches the interpreter's allocation paths, so it needs its own benchmarks.
+
+### M28.19 - borrow soundness and argument snapshots
+
+**Done.** An audit of M25 against adversarial programs found two holes in the
+per-function borrow (M25.2) and one older argument bug:
+
+- A later argument could change an earlier, borrowed one: in `f($g, mut())` the
+  analysis checked only the callee's body, so `mut()` wrote `$g` in place after
+  it was evaluated and `f` read 99 instead of 1. Module and builtin calls had the
+  same problem without any borrow, because they evaluate every argument before
+  copying any (`m.first($g, mut())` gave 99; `lists.contains($g, mut())` gave
+  `true` for a value only `mut()` put there). A load-time pass
+  (`stampArgSnapshots`) now marks each argument that aliases a global and is
+  followed by an argument that may mutate globals; a marked argument is never
+  borrowed and is copied right after evaluation.
+- A spawned task that re-enters the host (module call -> `meta.callMain`, a
+  callback builtin, a func-value call) writes the live host globals. The
+  analysis skipped spawn bodies as snapshot-only, so a borrowed parameter could
+  change under its reader, through a spawn in the callee or a task started
+  elsewhere and ordered by a channel (1099 instead of 1001). Any spawn in the run
+  that can re-enter now turns the `GlobalSafe` widening off for the run.
+- The analysis ran only when some parameter was borrowable, which also disabled
+  the borrow of local `def`s: a parameterless helper doing `def q ... init $big`
+  copied (22.6 s, now 34 ms). It now runs for every program with mutable
+  globals, and its fixpoint is a worklist over reverse call edges (a
+  10000-function chain loads in 0.12 s instead of 1.5 s).
+
+Additive.
+
+### M28.20 - host re-entry from spawned tasks
+
+**Planned.** A spawned task that calls a module function which calls
+`meta.callMain` runs the host function against the live host globals while the
+main program keeps running: a data race the race detector reports, with or
+without borrow. `hostMu` serializes `callMain` callers against each other (which
+is why concurrent `web` handlers are safe, the main program being parked in
+`web.serveOn`), but not against the main program. Options: hold `hostMu` while
+the main program runs statements whenever host re-entry from a spawn is possible
+(serializing it with those tasks), give each such task a host snapshot like a
+plain spawn (changing what `callMain` from a task can observe and mutate), or
+make it a documented rule that `callMain` from a task is only valid while the
+main program is blocked. Needs a decision, then the matching tests under `-race`.
+
+### M28.21 - borrow nested collections
+
+**Planned.** A parameter or local of a nested collection type (`list of list of
+float`, `map of string to list of int`) never borrows, because
+`stampDeclaredType` stamps the inner element type into each nested element, which
+would write into the caller's shared backing. A matrix helper over a 20000 x 10
+matrix called 2000 times takes 41 s copying. Skip re-stamping elements already
+carrying the declared type (a read-only check on the shared backing) and allow
+the borrow when every element already matches, falling back to copy otherwise.
+Needs alias-stress coverage in `value_alias_test.go`.
 
 ---
 

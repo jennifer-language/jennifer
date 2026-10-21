@@ -878,6 +878,11 @@ type CallExpr struct {
 	// without the value-semantics copy, and a callee that mutates and returns its
 	// parameter does so in place.
 	MoveArg int
+	// ArgSnap marks the arguments to snapshot (deep-copy, or not borrow) as soon
+	// as they are evaluated, because a later argument may run code that mutates
+	// the global they alias (`f($g, mutatesG())`). Set by the interpreter's
+	// argument-snapshot pass; nil means none.
+	ArgSnap []bool
 }
 
 func (*CallExpr) exprNode() {}
@@ -892,6 +897,11 @@ type CallValueExpr struct {
 	pos
 	Callee Expr // the function-valued expression
 	Args   []Expr
+	// ArgSnap is CallExpr.ArgSnap: it marks the arguments to snapshot (deep-copy, or not borrow) as soon
+	// as they are evaluated, because a later argument may run code that mutates
+	// the global they alias (`f($g, mutatesG())`). Set by the interpreter's
+	// argument-snapshot pass; nil means none.
+	ArgSnap []bool
 }
 
 func (*CallValueExpr) exprNode() {}
@@ -956,6 +966,10 @@ type QualifiedCallExpr struct {
 	// MoveArg is CallExpr.MoveArg for a module method call; ignored for a
 	// builtin, which never copies its arguments.
 	MoveArg int
+	// ArgSnap is CallExpr.ArgSnap. A builtin and a module call evaluate every
+	// argument before using any, so a marked argument is copied right after it
+	// is evaluated.
+	ArgSnap []bool
 }
 
 func (*QualifiedCallExpr) exprNode() {}
