@@ -41,8 +41,8 @@ signatures there. Source and issues:
 >    `0.24.0-dev+N.<sha>`).
 > 2. **Prefer the copy installed with the interpreter.** The Linux packages
 >    (Arch, Debian, the Docker image) put one at
->    `/usr/share/doc/jennifer/JENNIFER.md`, Homebrew under
->    `$(brew --prefix)/share/doc/jennifer/`, the Windows installer beside
+>    `/usr/share/doc/jennifer/JENNIFER.md`, Homebrew (once its tap is published)
+>    under `$(brew --prefix)/share/doc/jennifer/`, the Windows installer beside
 >    `jennifer.exe`. It was built from the same commit as the installed
 >    `jennifer`, so it matches exactly (even a dev build, where `main` may be
 >    ahead) and needs no network. Otherwise fetch the matching JENNIFER.md from

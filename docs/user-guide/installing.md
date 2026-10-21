@@ -212,26 +212,20 @@ bind host ports below 1024 without extra configuration - map to a high port
   [milestones.md](../milestones.md)).
 - **Just the binary (macOS).** The `-UNSUPPORTED` archive holds only the
   executable plus `JENNIFER.md`, `README.md`, and the licence - no installer,
-  man pages, MIME registration, or shell completion. For a nicer macOS install,
-  use the Homebrew tap (below); Windows gets an installer (further below).
+  man pages, MIME registration, or shell completion. Windows gets an installer
+  (below); a Homebrew tap for macOS is planned (below).
 
-#### macOS: Homebrew (recommended)
+#### macOS: Homebrew (planned)
 
-The easiest macOS install is the Homebrew tap, which builds `jennifer`
-**from source** - so it runs on both Intel and Apple Silicon with **no Gatekeeper
-prompt** (Homebrew does not quarantine what it builds), puts `jennifer` on your
-`PATH`, and bundles the system modules so a bare `import "name.j";` resolves with
-no setup:
-
-```sh
-brew install jennifer-language/tap/jennifer
-```
-
-`brew install --HEAD jennifer-language/tap/jennifer` builds from `main`. It is
-still a best-effort **unsupported** build (Linux is the only supported platform),
-and installs the standard `jennifer` only (no `jennifer-tiny`). The plain
-`-UNSUPPORTED` tarball above stays available for anyone who wants just the binary.
-See [`packaging/homebrew/`](https://github.com/jennifer-language/jennifer/blob/main/packaging/homebrew/README.md).
+A Homebrew formula is ready in the repo but **not yet published** to a tap, so
+`brew install` does not work yet; use the `-UNSUPPORTED` binary above for now.
+Once the tap is live, it builds `jennifer` **from source** - so it runs on both
+Intel and Apple Silicon with **no Gatekeeper prompt** (Homebrew does not
+quarantine what it builds), puts `jennifer` on your `PATH`, and bundles the
+system modules so a bare `import "name.j";` resolves with no setup. It will
+still be a best-effort **unsupported** build (Linux is the only supported
+platform) and install the standard `jennifer` only (no `jennifer-tiny`). See
+[`packaging/homebrew/`](https://github.com/jennifer-language/jennifer/blob/main/packaging/homebrew/README.md).
 
 #### Windows installer
 

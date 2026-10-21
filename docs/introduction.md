@@ -11,7 +11,7 @@ Jennifer is an interpreted programming language written in (Tiny)Go.
 
 It is **batteries-included**:
 **[41 built-in libraries](libraries/index.md) and
-[74 distributable modules](modules/index.md) - over 1,800 functions,
+[74 distributable modules](modules/index.md) - over 2,000 functions,
 constants, and types**. Query a database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
 PostgreSQL, parameterized and injection-safe) or map rows to structs with the
 [ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
@@ -36,13 +36,13 @@ and the [task](libraries/task.md) library. Niche needs are covered too -
 messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
 two-factor codes.
 The interpreter and its built-in libraries ship as **one self-contained static
-binary** - about 23 MB with everything, ~10 MB for the embeddable build - with
-no separate runtime and no dependency tree to install. The modules ride along as plain `.j` source
+binary** - about 17 MB with everything, about 5 MB for the embeddable build -
+with no separate runtime and no dependency tree to install. The modules ride along as plain `.j` source
 files (installed beside the binary and resolved through the module path),
 readable and hackable with no compile step. Reaching past the built-ins is
 opt-in: third-party **decks** (Jennifer's packages) are vendored into your
 project's own tree - no global install, no daemon - with the `jvc` package
-manager to resolve and pin them.
+manager to resolve and pin them, and imported as `import "@scope/package/";`.
 
 It also suits **teaching and learning**: an interactive
 [REPL](technical/cli_repl.md), an [easy-to-read grammar](technical/grammar.md),
@@ -84,8 +84,8 @@ Jennifer ships as two binaries built from the same source:
 
 Syntax highlighting ships in
 [editors/](https://github.com/jennifer-language/jennifer/tree/main/editors) (a
-Vim / Neovim drop-in, a TextMate grammar for VS Code / Sublime / Zed, a
-highlight.js definition). And because Jennifer is new, we ship
+Vim / Neovim drop-in, a VS Code extension, a Sublime Text syntax, a TextMate
+grammar for Zed and other TextMate-based editors, a highlight.js definition). And because Jennifer is new, we ship
 [`JENNIFER.md`](https://github.com/jennifer-language/jennifer/blob/main/JENNIFER.md):
 drop it into your project and point an AI coding assistant at it ("we
 code in Jennifer, see JENNIFER.md, let's go") so it writes correct `.j`

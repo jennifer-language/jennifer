@@ -11,7 +11,7 @@ Jennifer is an interpreted programming language.
 
 Jennifer is **batteries-included**:
 **[41 built-in libraries](docs/libraries/index.md) and
-[74 distributable modules](docs/modules/index.md) - over 1,800 functions,
+[74 distributable modules](docs/modules/index.md) - over 2,000 functions,
 constants, and types** cover what real tools need. Talk to a database with the
 [SQL](docs/libraries/sql.md) library (MySQL/MariaDB/Galera and PostgreSQL,
 parameterized and injection-safe) or map rows to structs with the
@@ -40,13 +40,13 @@ covered too: [Gotify](docs/modules/gotify.md) push, strict
 [TOTP](docs/modules/totp.md) two-factor codes, and more.
 
 The interpreter and its built-in libraries ship as **one self-contained static
-binary** - about 23 MB with everything, ~10 MB for the embeddable build - with no
-separate runtime and no dependency tree to resolve. The modules ship as plain
+binary** - about 17 MB with everything, about 5 MB for the embeddable build - with
+no separate runtime and no dependency tree to resolve. The modules ship as plain
 `.j` source files (installed beside the binary and resolved through the module
 path), readable and editable with no compile step. Third-party **decks**
 (Jennifer's packages) are opt-in and vendored into your project's own tree - no
 global install, no daemon - with the `jvc` package manager to resolve and pin
-them.
+them, and imported as `import "@scope/package/";`.
 
 Jennifer also suits **teaching and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
@@ -67,8 +67,8 @@ embeddable; missing `os/exec` and the network stack). `make build` produces
 both side by side. Source files use the `.j` extension.
 
 Jennifer's supported platform is **Linux**. Best-effort, **unsupported**
-macOS and Windows binaries (64- and 32-bit) are published alongside each
-release - see [Install](#install) for the caveats.
+macOS (Intel and Apple Silicon) and Windows (64- and 32-bit) binaries are
+published alongside each release - see [Install](#install) for the caveats.
 
 ## Which binary?
 
@@ -121,13 +121,15 @@ make build
 
 See [docs/user-guide/installing.md](docs/user-guide/installing.md)
 for verified checksums, the full FHS layout, system-wide install
-commands from a tarball, and platform-specific notes.
+commands from a tarball, the container image (Docker / Podman), the Windows
+installer, and platform-specific notes.
 
 ## Editor support & coding with an AI assistant
 
 Syntax highlighting for your editor lives in [editors/](editors/): a
-drop-in for Vim / Neovim, a TextMate grammar for VS Code /
-Sublime / Zed, and a highlight.js definition for static sites.
+drop-in for Vim / Neovim, a VS Code extension, a Sublime Text syntax, a
+TextMate grammar for Zed and other TextMate-based editors, and a highlight.js
+definition for static sites.
 
 AI assistants have no built-in knowledge of Jennifer, so the repo ships
 [JENNIFER.md](JENNIFER.md), a self-contained language reference. Drop it into
@@ -189,7 +191,8 @@ fine inside the GitHub file tree:
 
 - [docs/user-guide/](docs/user-guide/index.md) - language tutorial
   and reference split by topic: installing, first program, syntax,
-  types and values, functions, control flow, imports, examples.
+  types and values, functions, control flow, concurrency, imports,
+  tooling, style guide, best practices, performance, examples.
 - [docs/libraries/](docs/libraries/index.md) - per-library reference
   + alphabetical cheatsheet of every builtin.
 - [docs/technical/](docs/technical/index.md) - interpreter internals:

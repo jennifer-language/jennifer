@@ -135,7 +135,9 @@ plus QEMU smoke tests).
    ../jennifer-git/publish.sh
    ```
 
-4. **Publish the Homebrew tap** (best-effort, unsupported macOS). Same
+4. **Publish the Homebrew tap** (best-effort, unsupported macOS). Not
+   active yet: the `homebrew-tap` repo has not been created, so skip this
+   step until the tap is first published. Same
    shape as the AUR `-bin` publish: the canonical formula lives at
    `packaging/homebrew/jennifer.rb`, copied nowhere - `publish.sh` is
    copied into the `homebrew-tap` clone and run there. It resolves the

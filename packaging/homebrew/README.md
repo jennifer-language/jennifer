@@ -14,8 +14,10 @@ formula bakes the version and the module search path at link time, so a bare
 
 ## Install (for users)
 
-The formula is published to a tap repo named `homebrew-tap` under the project
-org, so the tap is `jennifer-language/tap`:
+**Not published yet:** the `homebrew-tap` repo does not exist, so the commands
+below work only once the formula is first published (see "One-time tap setup").
+The formula goes to a tap repo named `homebrew-tap` under the project org, so
+the tap is `jennifer-language/tap`:
 
 ```sh
 brew install jennifer-language/tap/jennifer
