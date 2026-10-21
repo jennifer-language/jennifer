@@ -72,7 +72,7 @@ func TestModuleMethodMissingStillErrors(t *testing.T) {
 		"mod.j":  methodModule,
 		"main.j": `import "./mod.j" as m; m.nope();`,
 	})
-	if err == nil || !strings.Contains(err.Error(), "no method") {
+	if err == nil || !strings.Contains(err.Error(), "no function") {
 		t.Fatalf("expected no-method error, got %v", err)
 	}
 }

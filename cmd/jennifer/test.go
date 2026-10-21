@@ -48,11 +48,11 @@ func runTest(args []string) int {
 		return testExitPass
 	}
 
-	// --coverage installs a statement profiler and runs in-process (the
-	// per-test subprocesses of --isolated each have their own counters, so the
-	// two don't compose - coverage always runs in-process).
+	// --coverage and --profile install a statement profiler and run in-process
+	// (the per-test subprocesses of --isolated each have their own counters, so
+	// the two don't compose - profiling always runs in-process).
 	var cov *profile.Collector
-	if opts.coverage {
+	if opts.coverage || opts.profile {
 		cov = profile.NewCollector(profile.ModeStatement, 0)
 	}
 
@@ -71,9 +71,9 @@ func runTest(args []string) int {
 		// An empty suite is a runner-level failure by default: a gate that runs
 		// overlays and checks the exit status must not pass one with nothing in
 		// it. --allow-empty opts back into success for a deliberately empty file.
-		what := "no test methods found (default convention: names starting with `test`)"
+		what := "no test functions found (default convention: names starting with `test`)"
 		if opts.filter != nil {
-			what = fmt.Sprintf("no test methods match --filter=%s", opts.filter)
+			what = fmt.Sprintf("no test functions match --filter=%s", opts.filter)
 		}
 		if opts.allowEmpty {
 			fmt.Fprintf(os.Stderr, "jennifer test: %s\n", what)
@@ -88,7 +88,7 @@ func runTest(args []string) int {
 
 	recs := make([]testinglib.Record, 0, len(tests))
 	for _, name := range tests {
-		if opts.isolated && !opts.coverage {
+		if opts.isolated && cov == nil {
 			recs = append(recs, runIsolatedTest(opts.path, name))
 		} else {
 			recs = append(recs, runInProcessTest(in, name, hasSetUp, hasTearDown))
@@ -115,6 +115,13 @@ func runTest(args []string) int {
 			return testExitFailure
 		}
 		fmt.Print(creport)
+	}
+	// The statement profile (hits and wall-clock time per source position, the
+	// `jennifer profile` table) goes to stderr, so the test report and a json
+	// coverage report keep stdout.
+	if opts.profile {
+		fmt.Fprintln(os.Stderr)
+		cov.Table(os.Stderr)
 	}
 
 	for _, r := range recs {
@@ -276,7 +283,7 @@ func spliceTokens(base, overlay []lexer.Token) []lexer.Token {
 // Unknown method names are rejected.
 func runSingleTest(in *interpreter.Interpreter, name string) int {
 	if !hasMethod(in, name) {
-		fmt.Fprintf(os.Stderr, "jennifer test: no method %q in the source file\n", name)
+		fmt.Fprintf(os.Stderr, "jennifer test: no function %q in the source file\n", name)
 		return testExitFailure
 	}
 	rec := timeCall(in, name)
@@ -385,6 +392,7 @@ type testOptions struct {
 	showHelp       bool
 	coverage       bool
 	coverageFormat string
+	profile        bool
 }
 
 func parseTestArgs(args []string) (testOptions, bool) {
@@ -397,6 +405,8 @@ func parseTestArgs(args []string) (testOptions, bool) {
 			return opts, true
 		case a == "--coverage":
 			opts.coverage = true
+		case a == "--profile":
+			opts.profile = true
 		case strings.HasPrefix(a, "--coverage="):
 			opts.coverage = true
 			opts.coverageFormat = strings.TrimPrefix(a, "--coverage=")
@@ -445,16 +455,18 @@ func parseTestArgs(args []string) (testOptions, bool) {
 }
 
 func testUsage(w *os.File) {
-	fmt.Fprintln(w, "usage: jennifer test [--filter=REGEX] [--format=text|tap|junit] [--isolated] [--allow-empty] [--coverage[=text|json]] <file.j>")
+	fmt.Fprintln(w, "usage: jennifer test [--filter=REGEX] [--format=text|tap|junit] [--isolated] [--allow-empty] [--coverage[=text|json]] [--profile] <file.j>")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Discover and run the test methods in a Jennifer source file.")
-	fmt.Fprintln(w, "  default            run methods whose name starts with `test`")
-	fmt.Fprintln(w, "  --filter=REGEX     run methods matching the regex instead")
+	fmt.Fprintln(w, "Discover and run the test functions in a Jennifer source file.")
+	fmt.Fprintln(w, "  default            run functions whose name starts with `test`")
+	fmt.Fprintln(w, "  --filter=REGEX     run functions matching the regex instead")
 	fmt.Fprintln(w, "  --format=FMT       text (default), tap, or junit report")
 	fmt.Fprintln(w, "  --isolated         run each test in a fresh interpreter subprocess")
-	fmt.Fprintln(w, "  --allow-empty      exit 0 when no test method is found (default: exit 2)")
+	fmt.Fprintln(w, "  --allow-empty      exit 0 when no test function is found (default: exit 2)")
 	fmt.Fprintln(w, "  --coverage[=FMT]   also report statement coverage: text (default) or json")
 	fmt.Fprintln(w, "                     (json owns stdout; the test report moves to stderr)")
-	fmt.Fprintln(w, "  setUp / tearDown methods, if present, run around each test")
+	fmt.Fprintln(w, "  --profile          also write the statement profile (hits + time per")
+	fmt.Fprintln(w, "                     source position, as `jennifer profile`) to stderr")
+	fmt.Fprintln(w, "  setUp / tearDown functions, if present, run around each test")
 	fmt.Fprintln(w, "Exit: 0 all pass, 1 failures, 2 runner error or no tests found.")
 }

@@ -83,7 +83,7 @@ func TestCallDepthMetric(t *testing.T) {
 	var buf bytes.Buffer
 	c.Table(&buf)
 	out := buf.String()
-	if !strings.Contains(out, "Max call depth (deepest chain of nested method calls): 12") {
+	if !strings.Contains(out, "Max call depth (deepest chain of nested function calls): 12") {
 		t.Fatalf("overall max-depth line missing/wrong:\n%s", out)
 	}
 	// The deep site keeps its max of 12 and sorts before the shallow site.

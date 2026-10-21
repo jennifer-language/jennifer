@@ -28,7 +28,7 @@ func printDevUsage(w io.Writer) {
 	fmt.Fprintln(w, "  jennifer fmt [-w|-l] <file>...  format source (stdout; -w/--write rewrites in place; -l/--check lists unformatted files)")
 	fmt.Fprintln(w, "  jennifer lint <file>...  report compile-legal but suspect patterns")
 	fmt.Fprintln(w, "  jennifer profile <file>  run with the evaluator instrumented; write a profile")
-	fmt.Fprintln(w, "  jennifer test <file>     discover and run the file's test methods")
+	fmt.Fprintln(w, "  jennifer test <file>     discover and run the file's test functions")
 	fmt.Fprintln(w, "  jennifer serve <file>    run a web app (--watch reloads on change)")
 }
 

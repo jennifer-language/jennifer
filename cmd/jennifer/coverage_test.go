@@ -131,3 +131,37 @@ func testAdd() { testing.assertEqual(add(2, 3), 5); }`), 0o644); err != nil {
 		t.Errorf("json missing files key: %s", out)
 	}
 }
+
+// `--profile` writes the statement profile table to stderr and leaves stdout to
+// the test report, which matches a plain run.
+func TestTestProfileGoesToStderr(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p_test.j")
+	if err := os.WriteFile(path, []byte(`use testing;
+func add(a as int, b as int) { return $a + $b; }
+func testAdd() { testing.assertEqual(add(2, 3), 5); }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	done := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		done <- buf.String()
+	}()
+	out := captureStdout(t, func() { runTest([]string{"--profile", path}) })
+	w.Close()
+	os.Stderr = old
+	errOut := <-done
+	if !strings.Contains(errOut, "Jennifer statement profile") || !strings.Contains(errOut, "p_test.j:2:") {
+		t.Errorf("stderr lacks the profile table for the tested file:\n%s", errOut)
+	}
+	if plain := captureStdout(t, func() { runTest([]string{path}) }); out != plain {
+		t.Errorf("--profile changed stdout:\n%q\nwant\n%q", out, plain)
+	}
+}

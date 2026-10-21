@@ -178,11 +178,12 @@ func (s *refScan) walkStmt(st parser.Stmt) {
 		s.walkExpr(n.Target)
 		s.walkExpr(n.Value)
 	case *parser.AppendStmt:
-		if n.Target != nil {
-			s.use(n.Target.Name)
+		if root := lvalueRoot(n.Target); root != "" {
+			s.use(root)
 		} else {
 			s.all = true
 		}
+		s.walkExpr(n.Target)
 		s.walkExpr(n.Value)
 	case *parser.FieldAssignStmt:
 		s.use(lvalueRoot(n.Target))

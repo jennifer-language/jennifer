@@ -229,11 +229,12 @@ func (s *globalHazardScan) walkStmt(st parser.Stmt) {
 		s.walkExpr(n.Target)
 		s.walkExpr(n.Value)
 	case *parser.AppendStmt:
-		if n.Target != nil {
-			s.writesGlobal(n.Target.Name)
+		if root := lvalueRoot(n.Target); root != "" {
+			s.writesGlobal(root)
 		} else {
 			s.unsafe = true
 		}
+		s.walkExpr(n.Target)
 		s.walkExpr(n.Value)
 	case *parser.FieldAssignStmt:
 		s.writesGlobal(lvalueRoot(n.Target))

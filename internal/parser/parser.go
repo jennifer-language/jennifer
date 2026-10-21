@@ -423,9 +423,9 @@ func (p *parser) parseMethodDef() (*MethodDef, error) {
 		return nil, err
 	}
 	if containsUnderscore(name.Lexeme) {
-		return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase: `myMethod`)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+		return nil, &ParseError{Msg: fmt.Sprintf("function name %q may not contain `_` (use camelCase: `myFunction`)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 	}
-	if _, err := p.expect(lexer.TOKEN_LPAREN, "after method name"); err != nil {
+	if _, err := p.expect(lexer.TOKEN_LPAREN, "after function name"); err != nil {
 		return nil, err
 	}
 	var params []Param
@@ -717,7 +717,7 @@ func (p *parser) parseStatement() (Stmt, error) {
 		return p.parseDefineLike()
 	case lexer.TOKEN_FUNC:
 		t := p.peek()
-		return nil, &ParseError{Msg: "methods can only be defined at the top level", File: t.File, Line: t.Line, Col: t.Col}
+		return nil, &ParseError{Msg: "functions can only be defined at the top level", File: t.File, Line: t.Line, Col: t.Col}
 	case lexer.TOKEN_IF:
 		return p.parseIf()
 	case lexer.TOKEN_WHILE:
@@ -1052,6 +1052,33 @@ func (p *parser) parseDefer() (Stmt, error) {
 	}, nil
 }
 
+// parseAppend parses the rest of an append statement once the lvalue chain
+// `target` (rooted on vref) is followed by `[]`: the `[` `]`, the `=`, the
+// value and the `;`. The empty slot is write-only, so `[]` without `=` is a
+// parse error at the variable.
+func (p *parser) parseAppend(vref lexer.Token, target Expr) (Stmt, bool, error) {
+	p.advance() // [
+	p.advance() // ]
+	if _, ok := p.match(lexer.TOKEN_ASSIGN); !ok {
+		return nil, false, &ParseError{
+			Msg:  fmt.Sprintf("`$%s[]` is write-only (append form); reads are not allowed", vref.Lexeme),
+			File: vref.File, Line: vref.Line, Col: vref.Col,
+		}
+	}
+	val, err := p.parseExpr()
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate append"); err != nil {
+		return nil, false, err
+	}
+	return &AppendStmt{
+		pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
+		Target: target,
+		Value:  val,
+	}, true, nil
+}
+
 // tryParseIndexAssign attempts to parse `$xs[i]...[j] = expr ;` as an
 // IndexAssignStmt, or `$xs[] = expr ;` as an AppendStmt.
 // Returns (stmt, true, nil) on success. When the lvalue chain parses but no
@@ -1060,54 +1087,19 @@ func (p *parser) parseDefer() (Stmt, error) {
 // from the already-built chain (via parseExprFrom) and returns that ExprStmt.
 // Errors during the lvalue chain itself are propagated.
 //
-// The append form `$xs[] = expr ;` is detected first because it can't
-// be mistaken for anything else: an empty index between a bare VARREF
-// and `=` has no read meaning (you can't read past-the-end), so any
-// occurrence is an unambiguous append.
+// The append form `$xs[] = expr ;` (also chained: `$s.items[] = expr ;`,
+// `$grid[y][] = expr ;`) is recognised by an empty `[]` at the end of the
+// chain: an empty index has no read meaning (you can't read past-the-end), so
+// any occurrence is an unambiguous append and must be followed by `=`.
 func (p *parser) tryParseIndexAssign() (Stmt, bool, error) {
 	vref, _ := p.match(lexer.TOKEN_VARREF)
-	// Detect the append form `$xs[] = expr ;` before walking any
-	// index chain - chained appends like `$xs[0][] = ...` aren't
-	// supported and would just confuse the chain-parsing loop below.
-	if p.check(lexer.TOKEN_LBRACKET) && p.peekN(1).Type == lexer.TOKEN_RBRACKET {
-		p.advance() // [
-		p.advance() // ]
-		if _, ok := p.match(lexer.TOKEN_ASSIGN); !ok {
-			// `$xs[]` not followed by `=` is a parse error - reads of the
-			// append-slot have no meaning. Don't restore the position; this
-			// is a clean, actionable diagnostic.
-			return nil, false, &ParseError{
-				Msg:  fmt.Sprintf("`$%s[]` is write-only (append form); reads are not allowed", vref.Lexeme),
-				File: vref.File, Line: vref.Line, Col: vref.Col,
-			}
-		}
-		val, err := p.parseExpr()
-		if err != nil {
-			return nil, false, err
-		}
-		if _, err := p.expect(lexer.TOKEN_SEMI, "to terminate append"); err != nil {
-			return nil, false, err
-		}
-		return &AppendStmt{
-			pos:    pos{File: vref.File, Line: vref.Line, Col: vref.Col},
-			Target: &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme, Depth: -1, Slot: -1},
-			Value:  val,
-		}, true, nil
-	}
 	var target Expr = &VarExpr{pos: pos{File: vref.File, Line: vref.Line, Col: vref.Col}, Name: vref.Lexeme, Depth: -1, Slot: -1}
 	// Consume any mix of `[expr]` and `.field` suffixes.
 	for {
 		switch p.peek().Type {
 		case lexer.TOKEN_LBRACKET:
 			if p.peekN(1).Type == lexer.TOKEN_RBRACKET {
-				// A chained append `$xs[0][] = v` is not supported; the append
-				// form takes only a bare variable. Point at the `[` with the rule
-				// rather than failing later inside expression parsing on the `]`.
-				br := p.peek()
-				return nil, false, &ParseError{
-					Msg:  "append form `[]` takes only a bare variable (`$xs[] = v`); a chained append like `$xs[i][] = v` is not supported",
-					File: br.File, Line: br.Line, Col: br.Col,
-				}
+				return p.parseAppend(vref, target)
 			}
 			sfx, err := p.parseBracketSuffix(target)
 			if err != nil {
@@ -2060,7 +2052,7 @@ func (p *parser) parseCallTail(callee lexer.Token) (Expr, error) {
 	// always `int`/`float`/`string`/`bool` and never contain `_`. The check
 	// is therefore only meaningful for actual IDENT callees.
 	if callee.Type == lexer.TOKEN_IDENT && containsUnderscore(callee.Lexeme) {
-		return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", callee.Lexeme), File: callee.File, Line: callee.Line, Col: callee.Col}
+		return nil, &ParseError{Msg: fmt.Sprintf("function name %q may not contain `_` (use camelCase)", callee.Lexeme), File: callee.File, Line: callee.Line, Col: callee.Col}
 	}
 	args, err := p.parseParenArgs()
 	if err != nil {
@@ -2202,7 +2194,7 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 	}
 	if p.check(lexer.TOKEN_LPAREN) {
 		if containsUnderscore(name.Lexeme) {
-			return nil, &ParseError{Msg: fmt.Sprintf("method name %q may not contain `_` (use camelCase)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
+			return nil, &ParseError{Msg: fmt.Sprintf("function name %q may not contain `_` (use camelCase)", name.Lexeme), File: name.File, Line: name.Line, Col: name.Col}
 		}
 		p.advance()                // consume LPAREN
 		defer p.allowStructLit()() // inside args, a `{` is a struct literal, not a block
@@ -2551,7 +2543,7 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		p.advance()
 		if !p.check(lexer.TOKEN_DOT) {
 			return nil, &ParseError{
-				Msg:  "`task` in expression position must be followed by `.method(...)` (the `task` library); for the type, write `task of T` in a declaration",
+				Msg:  "`task` in expression position must be followed by `.function(...)` (the `task` library); for the type, write `task of T` in a declaration",
 				File: t.File, Line: t.Line, Col: t.Col,
 			}
 		}
@@ -2596,7 +2588,7 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		hint := ""
 		if p.peekN(1).Type == lexer.TOKEN_LPAREN && t.Type != lexer.TOKEN_BYTES_TYPE {
 			toName := "to" + strings.ToUpper(t.Lexeme[:1]) + t.Lexeme[1:]
-			hint = fmt.Sprintf(" (the bare-call form was removed in M10; use `convert.%s(...)` instead)", toName)
+			hint = fmt.Sprintf(" (use `convert.%s(...)` to convert a value)", toName)
 		} else if t.Type == lexer.TOKEN_BYTES_TYPE {
 			hint = " (use `convert.bytesFromString(s, codec)` to build bytes from a string)"
 		} else {

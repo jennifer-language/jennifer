@@ -64,7 +64,7 @@ func (c *Collector) tableCallDepth(w io.Writer) {
 		return
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Max call depth (deepest chain of nested method calls): %d\n", overall)
+	fmt.Fprintf(w, "Max call depth (deepest chain of nested function calls): %d\n", overall)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', tabwriter.AlignRight)
 	fmt.Fprintln(tw, "DEPTH\t  CALL SITE")
 	for idx, d := range rows {

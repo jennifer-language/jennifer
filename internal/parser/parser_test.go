@@ -4,6 +4,7 @@
 package parser
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -753,7 +754,7 @@ func TestParseEnumErrors(t *testing.T) {
 // interpreter's runtime hoist check uses, and names the first definition.
 func TestResolveRejectsDuplicateDeclarations(t *testing.T) {
 	cases := []struct{ name, src, want string }{
-		{"method", "func foo() { return 1; }\nfunc foo() { return 2; }", `method "foo" is defined more than once`},
+		{"function", "func foo() { return 1; }\nfunc foo() { return 2; }", `function "foo" is defined more than once`},
 		{"struct", "def struct P { x as int };\ndef struct P { y as int };", `struct "P" is defined more than once`},
 		{"enum", "def enum E { A, B };\ndef enum E { C, D };", `enum "E" is defined more than once`},
 		{"enum-vs-struct", "def struct T { x as int };\ndef enum T { A, B };", `enum "T" collides with a struct of the same name`},
@@ -831,14 +832,32 @@ func TestNestedInterpolationBudget(t *testing.T) {
 	}
 }
 
-// TestChainedAppendHint pins a chained append `$xs[i][] = v` (unsupported)
-// gives the dedicated append-form diagnostic, not a generic "unexpected token]".
-func TestChainedAppendHint(t *testing.T) {
-	_, err := Parse(`def xs as list of list of int init [[]]; $xs[0][] = 1;`)
-	if err == nil {
-		t.Fatal("chained append should be a parse error")
+// TestChainedAppendParses pins that `[]` closes any lvalue chain: the
+// AppendStmt's Target is the chain itself (an IndexExpr / FieldAccessExpr
+// rooted on the variable), and reading the empty slot stays a parse error.
+func TestChainedAppendParses(t *testing.T) {
+	for src, want := range map[string]string{
+		`$xs[] = 1;`:            "*parser.VarExpr",
+		`$xs[0][] = 1;`:         "*parser.IndexExpr",
+		`$s.items[] = 1;`:       "*parser.FieldAccessExpr",
+		`$s.a[$k].items[] = 1;`: "*parser.FieldAccessExpr",
+	} {
+		prog, err := Parse(src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		app, ok := prog.TopLevel[0].(*AppendStmt)
+		if !ok {
+			t.Fatalf("%s: got %T, want *AppendStmt", src, prog.TopLevel[0])
+		}
+		if got := fmt.Sprintf("%T", app.Target); got != want {
+			t.Errorf("%s: Target is %s, want %s", src, got, want)
+		}
 	}
-	if !strings.Contains(err.Error(), "append form") {
-		t.Fatalf("want the append-form hint, got: %v", err)
+	if _, err := Parse(`def x as int init $s.items[];`); err == nil {
+		t.Error("reading `$s.items[]` should be a parse error")
+	}
+	if _, err := Parse(`$s.items[];`); err == nil || !strings.Contains(err.Error(), "write-only") {
+		t.Errorf("`$s.items[];` without `=`: want the write-only error, got %v", err)
 	}
 }

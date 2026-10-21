@@ -248,7 +248,7 @@ func checkMethodTooLong(c *checkCtx) {
 		n := countStmts(m.Body)
 		if n > c.cfg.MethodMaxStmts {
 			c.report("L201", m, fmt.Sprintf(
-				"method `%s` has %d statements, over the limit of %d; consider splitting it",
+				"function `%s` has %d statements, over the limit of %d; consider splitting it",
 				m.Name, n, c.cfg.MethodMaxStmts))
 		}
 	}
@@ -441,7 +441,7 @@ func (c *checkCtx) nestExpr(e parser.Expr, depth int) {
 func (c *checkCtx) maybeReportNest(anchor parser.Node, depth int) {
 	if depth == c.cfg.MaxNesting+1 {
 		c.report("L202", anchor, fmt.Sprintf(
-			"block nesting reaches depth %d, over the limit of %d; flatten with early returns or helper methods, keeping any accumulator in the caller (a helper that takes, mutates, and returns a list/map is quadratic - see L205)",
+			"block nesting reaches depth %d, over the limit of %d; flatten with early returns or helper functions, keeping any accumulator in the caller (a helper that takes, mutates, and returns a list/map is quadratic - see L205)",
 			depth, c.cfg.MaxNesting))
 	}
 }
@@ -483,7 +483,7 @@ func checkAccumulatorParam(c *checkCtx) {
 				continue
 			}
 			c.report("L205", m, fmt.Sprintf(
-				"method `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator, O(n^2) in a loop unless every call is `$v = %s($v, ...)` on a local inside a method (outside a `try`), which updates in place; otherwise keep the accumulator in the caller",
+				"function `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator, O(n^2) in a loop unless every call is `$v = %s($v, ...)` on a local inside a method (outside a `try`), which updates in place; otherwise keep the accumulator in the caller",
 				m.Name, p.Type.Kind, p.Name, m.Name))
 		}
 	}
@@ -512,9 +512,7 @@ func scanAccumStmt(s parser.Stmt, cand map[string]*accumState) {
 	case *parser.AssignStmt:
 		mark(st.VarName, false)
 	case *parser.AppendStmt:
-		if st.Target != nil {
-			mark(st.Target.Name, false)
-		}
+		mark(accumLvalueRoot(st.Target), false)
 	case *parser.IndexAssignStmt:
 		mark(accumLvalueRoot(st.Target), false)
 	case *parser.FieldAssignStmt:
@@ -735,7 +733,7 @@ func checkInterpSlotComplexity(c *checkCtx) {
 			}
 			if callInside(interp.Parts[i].Expr) {
 				c.report("L204", interp,
-					"an interpolation slot calls a method; compute it into a variable first so the cost / side effect is visible, then interpolate the variable")
+					"an interpolation slot calls a function; compute it into a variable first so the cost / side effect is visible, then interpolate the variable")
 				return // one finding per interpolated string is enough
 			}
 		}
@@ -987,7 +985,7 @@ func checkCallArity(c *checkCtx) {
 				// A call into an imported module: check it against the module's
 				// exported method. An unexported or unknown name is L114.
 				if m := exportedMethod(mod, qc.Callee); m != nil && len(qc.Args) != len(m.Params) {
-					c.report("L109", qc, fmt.Sprintf("method `%s.%s` takes %d argument(s), got %d", qc.Prefix, qc.Callee, len(m.Params), len(qc.Args)))
+					c.report("L109", qc, fmt.Sprintf("function `%s.%s` takes %d argument(s), got %d", qc.Prefix, qc.Callee, len(m.Params), len(qc.Args)))
 				}
 				return
 			}
@@ -1016,7 +1014,7 @@ func checkCallArity(c *checkCtx) {
 			return // undefined (L107) or a func-value binding - not an arity question
 		}
 		if len(call.Args) != len(m.Params) {
-			c.report("L109", call, fmt.Sprintf("method `%s` takes %d argument(s), got %d", call.Callee, len(m.Params), len(call.Args)))
+			c.report("L109", call, fmt.Sprintf("function `%s` takes %d argument(s), got %d", call.Callee, len(m.Params), len(call.Args)))
 		}
 	}}
 	check.program(c.prog)

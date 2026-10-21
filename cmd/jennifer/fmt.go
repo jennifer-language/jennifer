@@ -671,9 +671,9 @@ func (f *fmtState) emitTrivia(t, next lexer.Token) {
 		// (`printf(/* n */ $x)`) and keeps its surrounding spaces.
 		//
 		// A multi-line block comment re-emits its body verbatim - the
-		// formatter doesn't re-indent the inner ` * ` lines (v1
-		// limitation), which matches how doc comments are conventionally
-		// written at the top level.
+		// formatter doesn't re-indent the inner ` * ` lines, which
+		// matches how doc comments are conventionally written at the
+		// top level.
 		if !f.hasPrev || f.prev.Line != t.Line {
 			if f.hasPrev && !f.atLineStart {
 				f.newline()

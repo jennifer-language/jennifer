@@ -143,7 +143,7 @@ func (r *resolver) resolveProgram(p *Program) error {
 	r.methods = make(map[string]*MethodDef, len(p.Methods))
 	for _, m := range p.Methods {
 		if prev, dup := r.methods[m.Name]; dup {
-			return dupDeclError("method", m.Name, prev, m)
+			return dupDeclError("function", m.Name, prev, m)
 		}
 		r.methods[m.Name] = m
 	}
@@ -203,7 +203,7 @@ func (r *resolver) resolveProgram(p *Program) error {
 		if _, clash := globals.slots[m.Name]; clash {
 			file, line, col := posFor(m)
 			return &ParseError{
-				Msg:  fmt.Sprintf("method %q shares its name with a top-level variable or constant", m.Name),
+				Msg:  fmt.Sprintf("function %q shares its name with a top-level variable or constant", m.Name),
 				File: file, Line: line, Col: col,
 			}
 		}
@@ -231,7 +231,7 @@ func (r *resolver) resolveMethod(m *MethodDef, numGlobals int, globals *scopeFra
 	for i, p := range m.Params {
 		if _, ok := callFrame.slots[p.Name]; ok {
 			return &ParseError{
-				Msg:  fmt.Sprintf("parameter %q duplicated in method %q", p.Name, m.Name),
+				Msg:  fmt.Sprintf("parameter %q duplicated in function %q", p.Name, m.Name),
 				File: p.File, Line: p.Line, Col: p.Col,
 			}
 		}
@@ -501,8 +501,8 @@ func (w *writeScan) stmt(s Stmt) {
 	case *IndexAssignStmt:
 		w.writeRoot(lvalueRootName(st.Target))
 	case *AppendStmt:
-		if st.Target != nil {
-			w.written[st.Target.Name] = true
+		if root := lvalueRootName(st.Target); root != "" {
+			w.written[root] = true
 		} else {
 			w.conservative = true
 		}

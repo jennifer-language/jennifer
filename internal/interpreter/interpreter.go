@@ -936,10 +936,10 @@ func (i *Interpreter) RegisterTaskForTest(t *TaskState) { i.registerTask(t) }
 func (i *Interpreter) CallByName(name string) (Value, error) {
 	m, ok := i.methods[name]
 	if !ok {
-		return Value{}, fmt.Errorf("method %q is not defined", name)
+		return Value{}, fmt.Errorf("function %q is not defined", name)
 	}
 	if len(m.Params) != 0 {
-		return Value{}, fmt.Errorf("method %q takes %d parameter(s); CallByName only invokes zero-parameter methods", name, len(m.Params))
+		return Value{}, fmt.Errorf("function %q takes %d parameter(s); CallByName only invokes zero-parameter functions", name, len(m.Params))
 	}
 	return i.callMethodWithDepth(m, nil)
 }
@@ -969,7 +969,7 @@ func (i *Interpreter) CallByNameWithDepth(name string, callerDepth *int, args ..
 func (i *Interpreter) CallByNameWithRoot(name string, callerDepth *int, callerRoot *Environment, args ...Value) (Value, error) {
 	m, ok := i.methods[name]
 	if !ok {
-		return Value{}, fmt.Errorf("method %q is not defined", name)
+		return Value{}, fmt.Errorf("function %q is not defined", name)
 	}
 	return i.callMethodWithDepthRoot(m, callerDepth, callerRoot, 0, args...)
 }
@@ -1024,7 +1024,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 		// leave the request unanswered instead of raising a catchable error.
 		mf, ml, mc := posFor(m)
 		return Value{}, &runtimeError{
-			Msg:  fmt.Sprintf("method %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args)),
+			Msg:  fmt.Sprintf("function %q takes %d parameter(s), got %d", m.Name, len(m.Params), len(args)),
 			File: mf, Line: ml, Col: mc,
 		}
 	}
@@ -1322,7 +1322,7 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	for _, m := range prog.Methods {
 		if _, exists := i.methods[m.Name]; exists {
 			file, line, col := posFor(m)
-			return &runtimeError{Msg: fmt.Sprintf("method %q is defined more than once", m.Name), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("function %q is defined more than once", m.Name), File: file, Line: line, Col: col}
 		}
 		if err := i.checkMethodNoShadow(m); err != nil {
 			return err
@@ -1584,14 +1584,14 @@ func (i *Interpreter) checkMethodNoShadow(m *parser.MethodDef) error {
 	if b, isBuiltin := i.Builtins[m.Name]; isBuiltin && i.imported[b.Lib] {
 		file, line, col := posFor(m)
 		return &runtimeError{
-			Msg:  fmt.Sprintf("method %q shadows a builtin from `%s`; rename it or remove `use %s;`", m.Name, b.Lib, b.Lib),
+			Msg:  fmt.Sprintf("function %q shadows a builtin from `%s`; rename it or remove `use %s;`", m.Name, b.Lib, b.Lib),
 			File: file, Line: line, Col: col,
 		}
 	}
 	if _, isPrefix := i.nsPrefixes[m.Name]; isPrefix {
 		file, line, col := posFor(m)
 		return &runtimeError{
-			Msg:  fmt.Sprintf("method %q shadows imported namespace %q", m.Name, m.Name),
+			Msg:  fmt.Sprintf("function %q shadows imported namespace %q", m.Name, m.Name),
 			File: file, Line: line, Col: col,
 		}
 	}
@@ -1631,7 +1631,7 @@ func (i *Interpreter) EvalInteractive(prog *parser.Program) (Value, error) {
 	// (spawn snapshots are isolated from the live global frame).
 	if len(prog.Methods) > 0 || len(prog.Structs) > 0 || len(prog.Enums) > 0 || len(prog.Imports) > 0 || len(prog.ModuleImports) > 0 {
 		if i.hasLiveTasks() {
-			return Null(), fmt.Errorf("cannot define methods or structs or add imports while spawned tasks are running; task.wait() or task.discard() them first")
+			return Null(), fmt.Errorf("cannot define functions or structs or add imports while spawned tasks are running; task.wait() or task.discard() them first")
 		}
 	}
 	if err := i.processImports(prog, true); err != nil {
@@ -2321,37 +2321,77 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 	return nil
 }
 
-// execAppend handles `$xs[] = expr;` and `$b[] = byte;`.
-// Copies the target binding, appends, commits it back. Const-target
-// rejection, type check, and per-kind validation all live here.
+// execAppend handles `$xs[] = expr;` and `$b[] = byte;`, bare or at the end
+// of an lvalue chain (`$s.items[] = v`, `$grid[y][] = v`). The root binding is
+// const-checked, the chain walked like an index / field assignment, and the
+// value appended to the list or bytes it reaches, in place.
 func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error {
-	binding, err := env.getBindingRoot(st.Target)
+	rootVar := lvalueRootVar(st.Target)
+	if rootVar == nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: "internal: append target has no root variable", File: file, Line: line, Col: col}
+	}
+	binding, err := env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", st.Target.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
 	}
 	if binding.IsConst {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("cannot mutate contents of constant %q (const is deep)", st.Target.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: fmt.Sprintf("cannot mutate contents of constant %q (const is deep)", rootVar.Name), File: file, Line: line, Col: col}
 	}
-	if binding.Value.Kind != KindList && binding.Value.Kind != KindBytes {
+	_, bare := st.Target.(*parser.VarExpr)
+	if bare && binding.Value.Kind != KindList && binding.Value.Kind != KindBytes {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("`$%s[] = ...` requires a list or bytes, got %s", st.Target.Name, binding.Value.Kind), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: fmt.Sprintf("`$%s[] = ...` requires a list or bytes, got %s", rootVar.Name, binding.Value.Kind), File: file, Line: line, Col: col}
 	}
 	newVal, err := i.evalExpr(st.Value, env)
 	if err != nil {
 		return err
 	}
-	// Re-fetch the target binding: the RHS may have reassigned the same
-	// variable as a side effect, and appending onto the pre-evaluation
-	// copy would silently discard that write. The Kind can't have changed
-	// (assignment enforces the declared type), so the checks above hold.
-	binding, err = env.getBindingRoot(st.Target)
+	var steps []lvalueStep
+	if !bare {
+		if steps, err = i.collectLvalueSteps(st.Target, env, st); err != nil {
+			return err
+		}
+	}
+	// Re-fetch the root binding: the RHS (or an index expression) may have
+	// reassigned the same variable as a side effect, and appending onto the
+	// pre-evaluation copy would silently discard that write. The root's Kind
+	// can't have changed (assignment enforces the declared type).
+	binding, err = env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", st.Target.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
 	}
-	if binding.Value.Kind == KindBytes {
+	// Mutate the binding's own backing in place - no other live binding
+	// aliases it (eager copies at every store site guarantee that), so this
+	// stays amortised O(N) for append-in-a-loop.
+	rootCopy := binding.Value
+	container := &rootCopy
+	for _, step := range steps {
+		if container, err = i.lvalueStepInto(container, step); err != nil {
+			return err
+		}
+	}
+	if err := appendInto(container, newVal, st); err != nil {
+		return err
+	}
+	if err := env.assignRoot(rootVar, rootCopy); err != nil {
+		file, line, col := posFor(st)
+		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+	}
+	return nil
+}
+
+// appendInto appends newVal to the list or bytes value at container, with the
+// append form's checks: a bytes element is an int in [0, 255], a list element
+// matches the list's declared element type and is stored as a stamped copy (so
+// a nested container keeps its ElemTyp / ValTyp and later writes into it stay
+// type-checked).
+func appendInto(container *Value, newVal Value, st parser.Node) error {
+	switch container.Kind {
+	case KindBytes:
 		if newVal.Kind != KindInt {
 			file, line, col := posFor(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element must be int in [0, 255], got %s", newVal.Kind), File: file, Line: line, Col: col}
@@ -2360,37 +2400,22 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 			file, line, col := posFor(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element value %d out of range [0, 255]", newVal.Int), File: file, Line: line, Col: col}
 		}
-		// Mutate the binding's own backing in place - no other live binding
-		// aliases it (eager copies at every store site guarantee that), so this
-		// stays amortised O(N) for append-in-a-loop.
-		rootCopy := binding.Value
-		rootCopy.Bytes = append(rootCopy.Bytes, byte(newVal.Int))
-		if err := env.assignRoot(st.Target, rootCopy); err != nil {
+		container.Bytes = append(container.Bytes, byte(newVal.Int))
+		return nil
+	case KindList:
+		if container.ElemTyp != nil && !newVal.MatchesDeclared(*container.ElemTyp) {
 			file, line, col := posFor(st)
-			return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("cannot append %s to list of declared element type %s", newVal.Kind, container.ElemTyp), File: file, Line: line, Col: col}
 		}
+		stored := newVal.Copy()
+		if container.ElemTyp != nil {
+			stored = stampDeclaredType(stored, *container.ElemTyp)
+		}
+		container.List = append(container.List, stored)
 		return nil
 	}
-	if binding.Value.ElemTyp != nil && !newVal.MatchesDeclared(*binding.Value.ElemTyp) {
-		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("cannot append %s to list of declared element type %s", newVal.Kind, binding.Value.ElemTyp), File: file, Line: line, Col: col}
-	}
-	// Mutate the binding's own backing in place - no other live binding
-	// aliases it (eager copies at every store site guarantee that), so this
-	// stays amortised O(N) for append-in-a-loop. Stamp the appended copy
-	// with the declared element type so a nested container keeps its
-	// ElemTyp/ValTyp and later writes into it stay type-checked.
-	rootCopy := binding.Value
-	stored := newVal.Copy()
-	if rootCopy.ElemTyp != nil {
-		stored = stampDeclaredType(stored, *rootCopy.ElemTyp)
-	}
-	rootCopy.List = append(rootCopy.List, stored)
-	if err := env.assignRoot(st.Target, rootCopy); err != nil {
-		file, line, col := posFor(st)
-		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
-	}
-	return nil
+	file, line, col := posFor(st)
+	return &runtimeError{Msg: fmt.Sprintf("append `[] = ...` requires a list or bytes, got %s", container.Kind), File: file, Line: line, Col: col}
 }
 
 // execFieldAssign handles `$p.field = expr;` and chained lvalues that
@@ -2729,6 +2754,20 @@ func findFieldRoot(fa *parser.FieldAccessExpr) *parser.VarExpr {
 			return nil
 		}
 	}
+}
+
+// lvalueRootVar returns the VarExpr an lvalue chain (`$p`, `$p[i].f`, ...) is
+// rooted on, or nil when the root is not a variable.
+func lvalueRootVar(e parser.Expr) *parser.VarExpr {
+	switch n := e.(type) {
+	case *parser.VarExpr:
+		return n
+	case *parser.IndexExpr:
+		return findIndexRoot(n)
+	case *parser.FieldAccessExpr:
+		return findFieldRoot(n)
+	}
+	return nil
 }
 
 // indexInto returns a *Value pointing at the slot designated by idx
@@ -5312,7 +5351,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	if len(argExprs) != len(m.Params) {
 		file, line, col := posFor(node)
 		return Value{}, &runtimeError{
-			Msg:  fmt.Sprintf("method %q takes %d argument(s), got %d", calleeName, len(m.Params), len(argExprs)),
+			Msg:  fmt.Sprintf("function %q takes %d argument(s), got %d", calleeName, len(m.Params), len(argExprs)),
 			File: file, Line: line, Col: col,
 		}
 	}
@@ -5441,7 +5480,7 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 	if fv.Fn == nil {
 		file, line, col := posFor(c)
 		return Value{}, &runtimeError{
-			Msg:  "call of an uninitialized `func` value (it was never assigned a method)",
+			Msg:  "call of an uninitialized `func` value (it was never assigned a function)",
 			File: file, Line: line, Col: col,
 		}
 	}
@@ -5506,7 +5545,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		if len(c.Args) != len(m.Params) {
 			file, line, col := posFor(c)
 			return Value{}, &runtimeError{
-				Msg:  fmt.Sprintf("method %q takes %d argument(s), got %d", c.Callee, len(m.Params), len(c.Args)),
+				Msg:  fmt.Sprintf("function %q takes %d argument(s), got %d", c.Callee, len(m.Params), len(c.Args)),
 				File: file, Line: line, Col: col,
 			}
 		}

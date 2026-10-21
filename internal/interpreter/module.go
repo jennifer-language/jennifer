@@ -422,7 +422,7 @@ func (i *Interpreter) callModuleMethod(m *loadedModule, c *parser.QualifiedCallE
 	file, line, col := posFor(c)
 	md, ok := m.interp.methods[c.Callee]
 	if !ok {
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("module %q has no method %q", c.Prefix, c.Callee), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("module %q has no function %q", c.Prefix, c.Callee), File: file, Line: line, Col: col}
 	}
 	if !m.exports[c.Callee] {
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("%s.%s: %q is not exported from module %q", c.Prefix, c.Callee, c.Callee, c.Prefix), File: file, Line: line, Col: col}

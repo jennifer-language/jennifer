@@ -411,14 +411,15 @@ func (*IndexAssignStmt) stmtNode() {}
 
 // AppendStmt: `$xs[] = <expr>;` - the syntax-level append. The empty
 // brackets are a write-only target meaning "the position just past the
-// end of the list"; reading `$xs[]` is a parse error. Only valid on a
-// plain VARREF root (no chained `$xs[0][]` form); the targeted
-// variable must be a list at runtime, value's type is checked against
-// the list's declared element type, and const targets are rejected as
-// usual.
+// end of the list"; reading `$xs[]` is a parse error. Target is the list /
+// bytes being appended to: a bare VarExpr (`$xs[] = v`) or a chained lvalue
+// of `[i]` / `.field` steps rooted on one (`$s.items[] = v`,
+// `$grid[y][] = v`). The container must be a list or bytes at runtime, the
+// value's type is checked against the list's declared element type, and
+// const roots are rejected as usual.
 type AppendStmt struct {
 	pos
-	Target *VarExpr
+	Target Expr
 	Value  Expr
 }
 

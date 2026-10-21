@@ -67,6 +67,66 @@ $m[] = 1;
 	}
 }
 
+// TestAppendFormChained covers `[] =` at the end of an lvalue chain: a struct
+// field, a nested list, a map value, bytes in a struct, a module-free struct
+// in a list - each grows in place, keeps value semantics (a copy taken before
+// the append does not see it) and type-checks the element.
+func TestAppendFormChained(t *testing.T) {
+	out, err := run(t, `
+use io;
+def struct Bag { items as list of int, raw as bytes, groups as map of string to list of string };
+def b as Bag;
+def before as Bag init $b;
+$b.items[] = 1;
+$b.items[] = 2;
+$b.raw[] = 255;
+$b.groups["a"] = [];
+$b.groups["a"][] = "x";
+def grid as list of list of int init [[], [9]];
+$grid[1][] = 10;
+def bags as list of Bag init [$b];
+$bags[0].items[] = 3;
+io.printf("%v %d %v %v %v %v\n", $b.items, len($b.raw), $b.groups, $grid, $bags[0].items, $before.items);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if want := "[1, 2] 1 {\"a\": [\"x\"]} [[], [9, 10]] [1, 2, 3] []\n"; out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+	// A parameter written only through a chained append is the callee's own
+	// copy (never borrowed): the caller's value is unchanged.
+	out, err = run(t, `
+use io;
+def struct Bag { items as list of int };
+func f(s as Bag) { $s.items[] = 1; return len($s.items); }
+func g(xs as list of list of int) { $xs[0][] = 7; return len($xs[0]); }
+func main() {
+    def b as Bag init Bag{items: [5]};
+    def l as list of list of int init [[1]];
+    io.printf("%d %d | %d %d\n", f($b), len($b.items), g($l), len($l[0]));
+}
+main();
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "2 1 | 2 1\n" {
+		t.Errorf("chained append through a parameter leaked to the caller: %q", out)
+	}
+	for _, c := range []struct{ src, want string }{
+		{"def struct B { items as list of int };\ndef b as B;\n$b.items[] = \"s\";", "cannot append string to list"},
+		{"def struct B { n as int };\ndef b as B;\n$b.n[] = 1;", "requires a list or bytes, got int"},
+		{"def struct B { items as list of int };\ndef const C as B init B{items: []};\nfunc f() { $C.items[] = 1; }\nf();", "const"},
+		{"def grid as list of list of int init [[]];\n$grid[3][] = 1;", "out of bounds"},
+		{"def struct B { raw as bytes };\ndef b as B;\n$b.raw[] = 256;", "out of range"},
+	} {
+		if _, err := run(t, c.src); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want it to contain %q", c.src, err, c.want)
+		}
+	}
+}
+
 // --- lists library --------------------------------------------------
 
 func TestListsPushPop(t *testing.T) {
