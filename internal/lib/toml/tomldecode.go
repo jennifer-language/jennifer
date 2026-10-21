@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // TOML 1.0.0 decoder. `toml.decode(text)` parses a TOML document into the
 // shared compact document tree json.decode also produces (internal/lib/

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # OpenWRT feed package Makefile for Jennifer. Drop this into an OpenWRT
 # buildroot / SDK feed (e.g. package/jennifer/Makefile) and build with
@@ -28,7 +28,7 @@ PKG_NAME:=jennifer
 PKG_VERSION:=@PKG_VERSION@
 PKG_RELEASE:=1
 
-PKG_MAINTAINER:=mplx <jennifer@mplx.dev>
+PKG_MAINTAINER:=mplx <mplx@jennifer-lang.dev>
 PKG_LICENSE:=LGPL-3.0-only
 
 # Map the OpenWRT target arch to the Go arch in the release tarball name and

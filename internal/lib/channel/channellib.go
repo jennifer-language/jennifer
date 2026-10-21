@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package channellib implements Jennifer's `channel` library: CSP-style channels
 // carrying `channel of T` values between goroutines (the counterpart to `spawn` /

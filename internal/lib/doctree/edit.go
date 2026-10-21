@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // JSON Pointer addressing and the tree-level write verbs. Every verb is
 // non-mutating: it returns a new root with the edit applied. Only the spine

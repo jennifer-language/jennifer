@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 //
 // highlight.js language definition for Jennifer (.j).
 // Written to the common highlight.js API (className + contains + hljs.COMMENT)

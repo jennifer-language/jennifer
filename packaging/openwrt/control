@@ -1,7 +1,7 @@
 Package: jennifer
 Version: @VERSION@
 Architecture: @ARCH@
-Maintainer: mplx <jennifer@mplx.dev>
+Maintainer: mplx <mplx@jennifer-lang.dev>
 Section: lang
 Priority: optional
 Installed-Size: @ISIZE@

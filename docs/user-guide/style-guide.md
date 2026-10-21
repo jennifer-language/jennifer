@@ -348,7 +348,7 @@ prose:
 
 ```jennifer
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 ```
 
 - **`SPDX-License-Identifier`** is the [SPDX license
@@ -425,7 +425,7 @@ insert_final_newline = true
 
 ```jennifer
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 use io;
 

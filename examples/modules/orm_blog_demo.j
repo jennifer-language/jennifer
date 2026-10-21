@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 # orm_blog_demo.j - an end-to-end orm + sqlmigrate walkthrough over a small blog
 # domain (authors, posts, tags with a many-to-many). It migrates the schema,

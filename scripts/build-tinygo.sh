@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # Build jennifer-tiny (the TinyGo binary), or skip gracefully when the available
 # TinyGo/Go toolchain cannot build it - so a plain `make build` still succeeds on

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # AUR PKGBUILD for `jennifer-git`: clones the upstream repository and builds
 # from source. Tracks the `main` branch; rebuild to follow upstream.
@@ -17,7 +17,7 @@
 # With such a TinyGo installed, `make build` skips `jennifer-tiny` and this
 # package ships `jennifer` alone; with TinyGo >= 0.43.0 it ships both.
 #
-# Maintainer: mplx <jennifer@mplx.dev>
+# Maintainer: mplx <mplx@jennifer-lang.dev>
 
 pkgname=jennifer-git
 _realname=jennifer

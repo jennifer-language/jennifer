@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 # acme_demo.j - obtain a TLS certificate from an ACME CA (Let's Encrypt). The
 # networked flow needs a real CA account and a domain you control, so this demo

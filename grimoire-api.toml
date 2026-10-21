@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # Grimoire configuration for the standalone module API reference PDF - the whole
 # per-module reference (docs/api/, generated from the modules' own doc comments
@@ -18,7 +18,7 @@
 [book]
 title = "Jennifer Module API Reference"
 description = "The public surface of every shipped module, generated from the modules' own doc comments."
-authors = ["mplx <jennifer@mplx.dev>"]
+authors = ["mplx <mplx@jennifer-lang.dev>"]
 authorsLabel = "Made with ❤ by"
 language = "en"
 src = "docs/api"

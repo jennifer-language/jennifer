@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # Regenerate the Jennifer wordmark lockups - the
 # Jennifer port of scripts/genwordmark.py, dogfooding the `font` module in place
@@ -145,7 +145,7 @@ func charCode(ch as string) {
 func lockup(fill as string, note as string, totalW as float, dx as float, dy as float, glyphLines as string) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
         "<!-- SPDX-License-Identifier: LGPL-3.0-only -->\n" +
-        "<!-- SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev> -->\n" +
+        "<!-- SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev> -->\n" +
         "<!-- Jennifer wordmark lockup: monogram + 'jennifer' (DejaVu Sans Mono Bold, outlined).\n" +
         "     " + $note + " The mark tile is self-contained; a <picture> element picks the variant. -->\n" +
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " + dpTwo($totalW) + " 100\" width=\"" + dpTwo($totalW) + "\" height=\"100\" role=\"img\" aria-label=\"Jennifer\">\n" +

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # Regenerate modules/pdfwriter_afm.j - the standard-14 font advance-width tables
 # pdfwriter uses for text-layout width measurement. The widths are the Adobe
@@ -37,7 +37,7 @@ SPECS = [
 
 HEADER = """\
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # pdfwriter_afm.j - standard-14 font metrics for pdfwriter text layout, included
 # (textual splice) into pdfwriter.j. Each table is a font's glyph advance widths

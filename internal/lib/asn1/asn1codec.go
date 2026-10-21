@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // The BER decoder / DER encoder that backs the `asn1` library. It is
 // hand-rolled (Go's stdlib `encoding/asn1` is DER-only and reflect-bound, so it

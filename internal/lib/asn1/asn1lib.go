@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package asn1lib is the `asn1` library: ASN.1 BER decode / DER encode over an
 // opaque `asn1.Value`, the byte-level foundation for the LDAP / SNMP clients

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # AUR PKGBUILD for `jennifer-bin`: downloads the prebuilt release
 # tarball and installs both binaries (`jennifer` standard Go +
 # `jennifer-tiny` TinyGo) side by side. Pair to `jennifer-git`
 # which builds from source.
 #
-# Maintainer: mplx <jennifer@mplx.dev>
+# Maintainer: mplx <mplx@jennifer-lang.dev>
 
 pkgname=jennifer-bin
 _realname=jennifer

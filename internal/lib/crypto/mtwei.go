@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+// SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // EC-SRP (Elliptic Curve Secure Remote Password) key agreement as used by
 // MikroTik's MAC-Telnet / Winbox login on RouterOS 6.43+ and all of v7. This

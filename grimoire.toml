@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
 # Grimoire configuration for the Jennifer documentation site. The canonical
 # Markdown sources live in docs/; Grimoire builds the static site into
@@ -17,7 +17,7 @@
 [book]
 title = "Jennifer Programming Language"
 description = "A small, batteries-included interpreted programming language, written in Go and shipping as one self-contained static binary (plus a constrained, embeddable TinyGo build)."
-authors = ["mplx <jennifer@mplx.dev>"]
+authors = ["mplx <mplx@jennifer-lang.dev>"]
 authorsLabel = "Made with ❤ by"
 language = "en"
 src = "docs"

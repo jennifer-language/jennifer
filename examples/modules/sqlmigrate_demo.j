@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <jennifer@mplx.dev>
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 # sqlmigrate_demo.j - build a version-tracked migration plan whose up/down steps
 # are plain DDL strings (from orm's DDL helpers or hand-written), print it, and
