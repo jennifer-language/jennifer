@@ -133,13 +133,13 @@ below.
 | `ImportStmt`            | stmt | `Name`, `AsName` (empty unless `use NAME as ALIAS;`)                                                       |
 | `ModuleImportStmt`      | stmt | `Path`, `AsName` (empty unless `import "path.j" as NAME;`; the prefix is then the file stem)               |
 | `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`, `Exported` (`export func`), plus the `GlobalSafe` / `ReturnsOwned` analysis flags |
-| `Param`                 | -    | `Name`, `Type`                                                                                             |
+| `Param`                 | -    | `Name`, `Type`, `Borrow` (never written and of a borrow-safe type: bound by alias, see read-only borrow) |
 | `StructDef`             | stmt | `Name`, `Fields []StructField`, `Exported` (top-level only, hoisted before execution)                |
 | `StructField`           | -    | `Name`, `Type` (each field of a struct definition)                                                         |
 | `EnumDef`               | stmt | `Name`, `Variants []EnumVariant`, `Exported` (top-level only, hoisted; a sum type)                   |
 | `EnumVariant`           | -    | `Name`, `Fields []StructField` (payload-less when empty)                                            |
 | `Block`                 | stmt | `Stmts []Stmt`, `NumSlots int` (hint used by `NewEnvironmentSized`)                                |
-| `DefineStmt`            | stmt | `IsConst`, `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit), `Slot int` (-1 = unresolved) |
+| `DefineStmt`            | stmt | `IsConst`, `Exported` (`export def const`), `VarName`, `VarType Type`, `InitExpr Expr` (nil = uninit), `Slot int` (-1 = unresolved), `Borrow` (an in-function `def` that may store by alias) |
 | `AssignStmt`            | stmt | `VarName`, `Value Expr`, `Depth`, `Slot` (both -1 = unresolved)                                   |
 | `IndexAssignStmt`       | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` (chain may include `FieldAccessExpr` nodes)   |
 | `FieldAssignStmt`       | stmt | `Target *FieldAccessExpr`, `Value Expr` - `$p.field = ...`                                         |
@@ -153,10 +153,10 @@ below.
 | `RepeatStmt`            | stmt | `Body *Block`, `Cond Expr` - `repeat { ... } until (cond);`                                                |
 | `DeferStmt`             | stmt | `Call Expr` (a `CallExpr` / `QualifiedCallExpr`), `OnError` (true for `errdefer`)                          |
 | `IfStmt`                | stmt | `Cond`, `Then *Block`, `ElseIfs []Expr`, `ElseIfBodies []*Block`, `Else *Block`                            |
-| `MatchStmt`             | stmt | `Subject Expr`, `Arms []MatchArm`, `Else *Block` (nil if absent) - `match (EXPR) { when ... else ... }`     |
+| `MatchStmt`             | stmt | `Subject Expr`, `Arms []MatchArm`, `Else *Block` (nil if absent), `EnumType *Type` (set when the arms are patterns over an imported module's enum, validated once modules load) - `match (EXPR) { when ... else ... }` |
 | `MatchArm`              | node | `Values []Expr` (value arm, compared by `==`) OR `Variant`/`Bind`/`BindSlot` (enum-pattern arm, set by the resolver), `Body *Block`         |
 | `WhileStmt`             | stmt | `Cond`, `Body *Block`                                                                                      |
-| `ForStmt`               | stmt | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil)                                      |
+| `ForStmt`               | stmt | `Init Stmt`, `Cond Expr`, `Step Stmt`, `Body *Block` (any may be nil), `HeaderSlots` (bindings in the header frame, to pre-size it) |
 | `ForEachStmt`           | stmt | `VarName`, `Coll Expr`, `Body *Block`, `IterSlot` (slot for the iterator in each iteration frame)  |
 | `ExprStmt`              | stmt | `Expr`                                                                                                     |
 | `IntLit`                | expr | `Value int64`                                                                                              |
@@ -165,14 +165,14 @@ below.
 | `InterpStringExpr`      | expr | `Parts []InterpPart` (each a literal chunk `Lit` or a slot `Expr`) - `"total: {$n}"`                       |
 | `BoolLit`               | expr | `Value bool`                                                                                               |
 | `NullLit`               | expr | -                                                                                                          |
-| `VarExpr`               | expr | `Name` (no `$`), `Depth`, `Slot` (both -1 = unresolved, use name lookup) - mutable-variable reference |
+| `VarExpr`               | expr | `Name` (no `$`), `Depth`, `Slot` (both -1 = unresolved, use name lookup), `Move` (sole read in `$v = <literal embedding $v>`: stored by move) - mutable-variable reference |
 | `ConstRefExpr`          | expr | `Name`, `Depth`, `Slot` (-1 = unresolved) - bare-IDENT reference; interpreter expects it to resolve to a constant |
-| `CallExpr`              | expr | `Callee`, `Args []Expr`, `Method *MethodDef` (pre-resolved pointer for hoisted user functions; nil for builtins and resolver-less paths), `MoveArg` (1 + index of an argument bound by move; 0 for none) |
-| `CallValueExpr`         | expr | `Callee Expr`, `Args []Expr` (a call through a function value: `$f(x)`; the callee evaluates to a `func` at run time)                |
+| `CallExpr`              | expr | `Callee`, `Args []Expr`, `Method *MethodDef` (pre-resolved pointer for hoisted user functions; nil for builtins and resolver-less paths), `MoveArg` (1 + index of an argument bound by move; 0 for none), `ArgSnap []bool` (arguments copied right after evaluation, never borrowed: they alias a global a later argument may mutate; nil for none) |
+| `CallValueExpr`         | expr | `Callee Expr`, `Args []Expr` (a call through a function value: `$f(x)`; the callee evaluates to a `func` at run time), `ArgSnap []bool` (as on `CallExpr`) |
 | `LenExpr`               | expr | `Operand Expr` - `len(EXPR)` language built-in                                                     |
 | `SpawnExpr`             | expr | `Body []Stmt`, `Captures *SpawnCaptures` (globals the body reads; set by the interpreter) - `spawn { ... }` |
 | `PreEval`               | expr | `Value any` - runtime-only: a `defer` argument already evaluated at the defer site                 |
-| `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr`, `Fn any` (pre-resolved `Builtin`; nil for resolver-less paths)     |
+| `QualifiedCallExpr`     | expr | `Prefix`, `Callee`, `Args []Expr`, `Fn any` (pre-resolved `Builtin`, or the module function for a module call; nil for resolver-less paths), `MoveArg` (as on `CallExpr`, module calls only), `ArgSnap []bool` (as on `CallExpr`) |
 | `QualifiedConstRefExpr` | expr | `Prefix`, `Name`, `Const any` (pre-resolved `Value`; nil for resolver-less paths)                    |
 | `BinaryExpr`            | expr | `Op BinaryOp`, `Left`, `Right`, `Folded Expr` (pre-computed fold result; nil for runtime-only exprs) |
 | `UnaryExpr`             | expr | `Op UnaryOp` (`OpNeg`/`OpNot`/`OpBitNot`), `Operand`, `Folded Expr`                              |

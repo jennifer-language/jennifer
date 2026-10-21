@@ -44,10 +44,10 @@ StructField  <- WordName "as" Type
                  # are fine - with camelCase (no `_`) enforced as a check
 
 EnumDef      <- "def" "enum" IDENT "{" EnumVariant ("," EnumVariant)* ","? "}" ";"
-EnumVariant  <- IDENT ("{" StructField ("," StructField)* ","? "}")?
+EnumVariant  <- IDENT ("{" (StructField ("," StructField)* ","?)? "}")?
                  # a sum type; top-level only, hoisted like StructDef. At least
                  # one variant. Each variant is a payload-less tag or carries a
-                 # mini-struct field list.
+                 # mini-struct field list (an empty `{}` is the same as none).
 
 # --- statements --------------------------------------------------------------
 # The parser dispatches on the leading token; the keyword alternatives are
@@ -84,10 +84,11 @@ MatchStmt    <- "match" "(" Expr ")" "{"
                   ("when" (Expr ("," Expr)*) Block)*
                   ("else" Block)?
                 "}"
-                 # the subject and each `when` value parse with struct-literal
-                 # suppression on (a bare `Name` followed by `{` is a value +
-                 # the block, not `Name{...}`); the flag is re-enabled inside
-                 # any "(" / "[" / call / list / map, mirroring Go's exprLev.
+                 # each `when` value parses with struct-literal suppression on
+                 # (a bare `Name` followed by `{` is a value + the block, not
+                 # `Name{...}`); the flag is re-enabled inside any "(" / "[" /
+                 # call / list / map, mirroring Go's exprLev. The subject sits
+                 # inside "(" ")", so a struct literal is fine there.
                  # `else` must be last (enforced by the parser, not the grammar).
                  # When the subject (a variable / parameter / constant / struct
                  # field) has a known enum type, the resolver
@@ -103,7 +104,7 @@ ExitStmt     <- "exit" Expr? ";"
 TryStmt      <- "try" Block "catch" "(" IDENT ")" Block
 ThrowStmt    <- "throw" Expr ";"
 DeferStmt    <- ("defer" / "errdefer") DeferCall ";"
-DeferCall    <- "(" DeferCall ")" / QualifiedCall / PlainCall
+DeferCall    <- "(" DeferCall ")" / QualifiedCall / TaskCall / PlainCall
                  # exactly a call - the parser parses a full expression and
                  # rejects any node that is not a call. Grouping parens
                  # evaluate to their inner node, so `defer (f());` is accepted
@@ -236,6 +237,7 @@ WordName     <- IDENT / KEYWORD
 # `task` library's namespace prefix.
 
 TaskExpr     <- "task" QualifiedSuffix
+TaskCall     <- "task" "." WordName CallArgs   # the call form, as DeferCall takes it
 
 # Named the same as their EBNF counterparts:
 

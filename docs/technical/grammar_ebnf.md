@@ -66,9 +66,11 @@ enumDef     = "def" "enum" IDENT "{" enumVariant { "," enumVariant } [ "," ] "}"
                                           names the enum; at least one variant.
                                           Hoisted like structDef. A value of the
                                           type is exactly one variant. *)
-enumVariant = IDENT [ "{" structField { "," structField } [ "," ] "}" ] ;
+enumVariant = IDENT [ "{" [ structField { "," structField } [ "," ] ] "}" ] ;
                                        (* a payload-less tag, or a variant with
-                                          named fields (a mini-struct). *)
+                                          named fields (a mini-struct). An empty
+                                          `{}` parses and is the same as no
+                                          payload. *)
 structField = wordName "as" type ;     (* a field name may be any
                                           identifier-shaped word (see
                                           wordName below) - `from` / `to`
@@ -106,10 +108,12 @@ throwStmt   = "throw" expr ";" ;
                                           value; convention is an
                                           `Error` struct. *)
 deferStmt   = ( "defer" | "errdefer" ) deferCall ";" ;
-deferCall   = "(" deferCall ")" | qualifiedCall | call ;
+deferCall   = "(" deferCall ")" | qualifiedCall
+            | "task" "." wordName "(" [ expr { "," expr } ] ")" | call ;
                                        (* exactly a call - a plain call
                                           (`cleanup()`) or a namespaced /
-                                          module call (`fs.close($f)`);
+                                          module call (`fs.close($f)`,
+                                          `task.discard($t)`);
                                           grouping parens are transparent
                                           (`defer (f());` is accepted),
                                           any other expr is a parse
@@ -177,10 +181,12 @@ ifStmt      = "if" "(" expr ")" block
 
 whileStmt   = "while" "(" expr ")" block ;
 
-forStmt     = "for" "(" [ defineStmt | assignStmt | ";" ]
+forStmt     = "for" "(" ( defineStmt | assignStmt | ";" )
                         [ expr ] ";"
                         [ assignNoSemi ]
-                  ")" block ;
+                  ")" block ;              (* the init is required: a define or
+                                          an assignment (each ending in its own
+                                          ";"), or a lone ";" for none *)
 assignNoSemi = VARREF "=" expr ;       (* same shape as assignStmt without trailing ";" *)
 
 forEachStmt = "for" "(" "def" IDENT "in" expr ")" block ;
@@ -376,13 +382,18 @@ qualifiedConstRef  = IDENT "." wordName ;
                                           namespaced-builtin / constant
                                           registry, gated by `use lib;`
                                           (or alias-aware equivalent). *)
-taskCall    = "task" "." wordName "(" [ expr { "," expr } ] ")" ;
+taskCall    = "task" "." wordName [ "(" [ expr { "," expr } ] ")" ] ;
                                        (* the `task` library's namespace. `task`
                                           is a type keyword, not an IDENT, so
                                           `qualifiedCall` (IDENT-led) cannot
                                           match it - hence its own production.
                                           Expression position only, as the
-                                          namespace prefix (`task.wait($t)`). *)
+                                          namespace prefix (`task.wait($t)`).
+                                          The parser then reads the rest exactly
+                                          as for an IDENT prefix, so the
+                                          constant form `task.NAME` parses too
+                                          (and resolves like any qualified
+                                          constant). *)
 constRef    = IDENT ;                  (* bare-IDENT: constant reference; the
                                           parser disambiguates `call` vs
                                           `qualifiedCall` vs `constRef` by
