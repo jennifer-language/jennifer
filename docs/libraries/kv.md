@@ -67,7 +67,9 @@ io.printf("%s\n", kv.get($store, "greeting"));
 - **Single process.** State lives in this process only. `open` is in-memory
   (gone when the program exits); `openFile` persists to disk and survives across
   runs (a rewrite-the-whole-file flush after every mutation - simple and correct,
-  not fast). Both are safe for `spawn`ed tasks within one process (a per-store
+  not fast). A mutation whose flush fails raises an error and leaves the store
+  unchanged in memory too, so memory and file never disagree (a delete that could
+  not be written does not reappear after the next `openFile`). Both are safe for `spawn`ed tasks within one process (a per-store
   mutex; `incr` is atomic). Concurrent *separate* processes on one file get
   **last-write-wins** - a lost write, never a crash or a torn file (the flush
   renames a uniquely-named temp over the target). `add`'s test-and-set checks

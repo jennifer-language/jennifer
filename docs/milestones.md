@@ -1911,6 +1911,55 @@ and pinned by a regression test:
 
 Additive.
 
+### M28.16 - `php2shell`-class request hardening
+
+**Done.** An audit against the PHP `php2shell` bugs (CVE-2026-109618 /
+CVE-2026-109619: out-of-memory during request parsing that runs before the
+application, leaving state a later request trusts). Go's memory safety rules out
+the use-after-free itself; three analogs were real:
+
+- Request headers are capped at 64 KiB (`net/http` allowed 1 MiB), with
+  `httpd.Options.maxHeaderBytes` to change it (at most 1 MiB); past it the client
+  gets `431`. Headers sit outside the body budget, and a Cookie header parsed
+  into pairs grew about 950x in memory, so four header-only requests reached
+  3.8 GB.
+- `web.serveOn` runs at most `httpd.maxInFlight(srv)` (new) handlers at once.
+  The engine frees a slot when it answers `503` after the respond timeout, but
+  the worker kept running, so slow handlers under load piled up without limit.
+- A `kv.openFile` mutation whose file write fails leaves memory unchanged. It
+  changed memory first, so a `session.destroy` that could not be written removed
+  the session in memory and resurrected it after a restart.
+
+Additive.
+
+### M28.17 - bounded request parsing in Go
+
+**Planned.** The `.j` request parsers turn small input pieces into single values
+(up to 272 bytes each): `multipart.extractParam` scans a part header as a list of
+characters, `multipart.parse` has no cap on part count, header size or name
+length, `web.parseForm` splits the body on `&` with no pair limit, and
+`web.parseCookie` splits the Cookie header on `;`. Measured peaks: a 1 MiB
+multipart part header 1.6 GB, three concurrent 3 MB `&&&...` POSTs 5.9 GB. The
+form path runs before any route or login check once `web.csrfCheck` is
+middleware. Move form, multipart and cookie parsing into Go (`url.ParseQuery`;
+`mime/multipart` with header-size, part-count and name-length limits), exposed to
+`web` / `multipart` as library calls returning ordinary maps / lists, so parse
+memory stays a small multiple of the input. Until then the bound is the 10 MiB
+body cap and the 64 KiB header cap.
+
+### M28.18 - per-task memory budget
+
+**Planned.** Nothing sets a Go memory limit, and the catchable `"limit"` guard
+(`MaxCopyChainBytes`) only counts copies along a recursive call chain, so one
+request that builds a huge value runs the process out of memory: a fatal Go
+error or an OOM kill that ends every request in flight. Two parts: at startup
+set `debug.SetMemoryLimit` from the cgroup / host limit (reusing
+`httpdlib_memlimit.go`'s detection) so the GC works harder before the kill; and a
+per-goroutine allocation budget for spawn roots, charged on list / map / bytes /
+string growth like the copy-chain counter, so a runaway request raises a
+catchable `"limit"` error in its own worker instead of taking the server down.
+Touches the interpreter's allocation paths, so it needs its own benchmarks.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

@@ -57,6 +57,7 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "respondTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "bodyTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "writeTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "maxHeaderBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "dirListing", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 
@@ -68,6 +69,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "setMaxBufferBudget", setMaxBufferBudgetFn)
 	in.RegisterNamespaced(LibraryName, "setMaxBufferBudgetFromRAM", setMaxBufferBudgetFromRAMFn)
 	in.RegisterNamespaced(LibraryName, "address", addressFn)
+	in.RegisterNamespaced(LibraryName, "maxInFlight", maxInFlightFn)
 	in.RegisterNamespaced(LibraryName, "shutdown", shutdownFn)
 
 	// Pull loop.
@@ -156,8 +158,8 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 // set it (0 = "use the default"); resolveServerLimits / resolveRespondTimeout
 // validate the ranges.
 type serverOpts struct {
-	maxBody, inFlight, respondMs, bodyMs, writeMs int64
-	dirListing                                    bool
+	maxBody, inFlight, respondMs, bodyMs, writeMs, maxHeader int64
+	dirListing                                               bool
 }
 
 // takeOptionsArg reads an httpd.Options struct value into serverOpts.
@@ -186,6 +188,8 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 			dst = &o.bodyMs
 		case "writeTimeoutMs":
 			dst = &o.writeMs
+		case "maxHeaderBytes":
+			dst = &o.maxHeader
 		default:
 			continue
 		}

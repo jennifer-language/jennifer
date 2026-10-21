@@ -1756,3 +1756,50 @@ func TestRelistenAfterShutdown(t *testing.T) {
 		_, _ = shutdownFn(noCtx, []Value{s})
 	}
 }
+
+// headerRequest sends a GET carrying one header of n bytes and returns the status.
+func headerRequest(t *testing.T, addr string, n int) int {
+	t.Helper()
+	return rawRequest(t, addr, "GET / HTTP/1.1\r\nCookie: "+strings.Repeat("a=b;", n/4))
+}
+
+// Request headers are capped at 64 KiB by default (net/http allows 1 MiB), so
+// header-only requests cannot grow memory past what the body budget bounds;
+// httpd.Options.maxHeaderBytes raises or lowers the cap per server.
+func TestMaxHeaderBytes(t *testing.T) {
+	ResetForTest()
+	srv, addr := startServer(t)
+	defer shutdownFn(noCtx, []Value{srv})
+	serveLoop(srv, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
+	})
+	if got := headerRequest(t, addr, 8<<10); got != 200 {
+		t.Errorf("8 KiB header: status %d, want 200", got)
+	}
+	if got := headerRequest(t, addr, 200<<10); got != http.StatusRequestHeaderFieldsTooLarge {
+		t.Errorf("200 KiB header: status %d, want 431", got)
+	}
+
+	opts := func(n int64) Value {
+		return interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
+			{Name: "maxHeaderBytes", Value: interpreter.IntVal(n)},
+		})
+	}
+	big, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), opts(512 << 10)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{big})
+	bigAddr, _ := addressFn(noCtx, []Value{big})
+	serveLoop(big, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
+	})
+	if got := headerRequest(t, bigAddr.Str, 200<<10); got != 200 {
+		t.Errorf("200 KiB header under a 512 KiB cap: status %d, want 200", got)
+	}
+	for _, bad := range []int64{-1, 2 << 20} {
+		if _, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), opts(bad)}); err == nil || !strings.Contains(err.Error(), "maxHeaderBytes") {
+			t.Errorf("maxHeaderBytes %d: err = %v", bad, err)
+		}
+	}
+}

@@ -43,6 +43,9 @@ func setMaxBufferBudgetFromRAMFn(_ interpreter.BuiltinCtx, _ []Value) (Value, er
 func addressFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.address")
 }
+func maxInFlightFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.maxInFlight")
+}
 func shutdownFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("httpd.shutdown")
 }

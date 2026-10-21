@@ -427,7 +427,7 @@ func report(ctx as web.Context) {
 | Call | |
 | ---- | - |
 | `web.run($app, addr)` | Listen on `addr` and serve forever (blocks; interrupt to stop). |
-| `web.serveOn($app, srv)` | Serve on an already-listening `httpd.Server` you hold - so you can shut it down (or serve from a `spawn`). |
+| `web.serveOn($app, srv)` | Serve on an already-listening `httpd.Server` you hold - so you can shut it down (or serve from a `spawn`). Runs at most `httpd.maxInFlight(srv)` handlers at once; further requests wait in the engine. |
 
 `web.run` is the common path. Use `web.serveOn` when you want the server handle,
 e.g. to shut down from another task, or to open the server with

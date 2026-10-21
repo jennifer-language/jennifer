@@ -62,6 +62,18 @@ const defaultMaxBodyBytes = 10 << 20 // 10 MiB
 // headers (Slowloris protection).
 const readHeaderTimeout = 15 * time.Second
 
+// defaultMaxHeaderBytes caps the request line plus headers
+// (httpd.Options.maxHeaderBytes overrides it per server). Headers are read before the body
+// budget applies, and a program parsing them (a Cookie header split into pairs)
+// multiplies their size in memory, so Go's 1 MiB default lets a handful of
+// header-only requests exhaust the process. 64 KiB is far above what browsers
+// send (cookies are capped near 4 KiB each). Past it the client gets 431.
+const defaultMaxHeaderBytes = 64 << 10
+
+// maxHeaderBytesCeiling is the largest settable header cap: net/http's own
+// default, so an option can restore it but not go beyond.
+const maxHeaderBytesCeiling = 1 << 20
+
 // bodyReadTimeout is the default bound on how long a client may take to deliver
 // its whole request body (httpd.Options.bodyTimeoutMs overrides it per server).
 // 60 s for up to maxBodyBytes still admits a ~1.4 Mbps uplink. The body is read
@@ -151,6 +163,8 @@ type serverLimits struct {
 	bodyTimeout time.Duration
 	// writeTimeout bounds the response write (httpd.Options.writeTimeoutMs).
 	writeTimeout time.Duration
+	// maxHeader caps the request line plus headers (httpd.Options.maxHeaderBytes).
+	maxHeader int
 	// dirListing lets serveDir answer a directory without an index.html with
 	// a file listing (httpd.Options.dirListing); off, it is a 404.
 	dirListing bool
@@ -165,6 +179,7 @@ func defaultLimits() serverLimits {
 		respondTimeout: respondTimeout,
 		bodyTimeout:    bodyReadTimeout,
 		writeTimeout:   writeTimeout,
+		maxHeader:      defaultMaxHeaderBytes,
 	}
 }
 
@@ -187,7 +202,16 @@ func resolveLimits(o serverOpts) (serverLimits, error) {
 	if err != nil {
 		return serverLimits{}, err
 	}
-	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, dirListing: o.dirListing}, nil
+	maxHeader := int64(defaultMaxHeaderBytes)
+	switch {
+	case o.maxHeader < 0:
+		return serverLimits{}, fmt.Errorf("maxHeaderBytes must be >= 0 (0 selects the %d byte default), got %d", defaultMaxHeaderBytes, o.maxHeader)
+	case o.maxHeader > maxHeaderBytesCeiling:
+		return serverLimits{}, fmt.Errorf("maxHeaderBytes %d exceeds the ceiling of %d", o.maxHeader, maxHeaderBytesCeiling)
+	case o.maxHeader > 0:
+		maxHeader = o.maxHeader
+	}
+	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, maxHeader: int(maxHeader), dirListing: o.dirListing}, nil
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -1065,6 +1089,7 @@ func newServer(ln net.Listener, lim serverLimits) *serverState {
 		Handler:           makeHandler(st),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    lim.maxHeader,
 	}
 	return st
 }
@@ -1082,6 +1107,23 @@ func addressFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(st.addr), nil
+}
+
+// maxInFlightFn implements httpd.maxInFlight(srv): the server's in-flight
+// request limit, so a serve loop can bound its own workers to match.
+func maxInFlightFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.maxInFlight expects 1 argument (httpd.Server), got %d", len(args))
+	}
+	id, err := extractID("httpd.maxInFlight", "Server", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	st, err := resolveServer("httpd.maxInFlight", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.IntVal(int64(st.inFlight)), nil
 }
 
 func shutdownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {

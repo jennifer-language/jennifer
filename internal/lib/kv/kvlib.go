@@ -86,6 +86,38 @@ func (s *store) maybeSweepLocked(now time.Time) {
 	}
 }
 
+// putLocked stores e at key and persists the store. When the write fails the
+// previous entry is restored, so memory never holds a change the file lacks: a
+// failed write cannot leave, say, a destroyed session alive on disk while gone
+// in memory, to come back on the next openFile. The caller holds s.mu.
+func (s *store) putLocked(key string, e entry) error {
+	prev, had := s.data[key]
+	s.data[key] = e
+	if err := s.flushLocked(); err != nil {
+		if had {
+			s.data[key] = prev
+		} else {
+			delete(s.data, key)
+		}
+		return err
+	}
+	return nil
+}
+
+// deleteLocked removes key and persists the store, restoring the entry when the
+// write fails (see putLocked). The caller holds s.mu.
+func (s *store) deleteLocked(key string) error {
+	prev, had := s.data[key]
+	delete(s.data, key)
+	if err := s.flushLocked(); err != nil {
+		if had {
+			s.data[key] = prev
+		}
+		return err
+	}
+	return nil
+}
+
 // flushLocked writes the (unexpired) store to its file, atomically (temp +
 // rename). A no-op for a memory-only store. The caller holds s.mu. Values and
 // keys are base64-encoded so an arbitrary string cannot break the line format;
@@ -402,9 +434,8 @@ func (r *registry) setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	}
 	now := time.Now()
 	s.mu.Lock()
-	s.data[key] = entry{value: value, expires: expiryFor(ttl, now)}
 	s.maybeSweepLocked(now)
-	ferr := s.flushLocked()
+	ferr := s.putLocked(key, entry{value: value, expires: expiryFor(ttl, now)})
 	s.mu.Unlock()
 	if ferr != nil {
 		return interpreter.Null(), fmt.Errorf("kv.set: %v", ferr)
@@ -440,9 +471,8 @@ func (r *registry) addFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	if _, ok := live(s, key, now); ok {
 		return interpreter.BoolVal(false), nil
 	}
-	s.data[key] = entry{value: value, expires: expiryFor(ttl, now)}
 	s.maybeSweepLocked(now)
-	if err := s.flushLocked(); err != nil {
+	if err := s.putLocked(key, entry{value: value, expires: expiryFor(ttl, now)}); err != nil {
 		return interpreter.Null(), fmt.Errorf("kv.add: %v", err)
 	}
 	return interpreter.BoolVal(true), nil
@@ -584,8 +614,7 @@ func (r *registry) deleteFn(_ interpreter.BuiltinCtx, args []interpreter.Value) 
 	defer s.mu.Unlock()
 	_, ok := live(s, key, time.Now())
 	if ok {
-		delete(s.data, key)
-		if err := s.flushLocked(); err != nil {
+		if err := s.deleteLocked(key); err != nil {
 			return interpreter.Null(), fmt.Errorf("kv.delete: %v", err)
 		}
 	}
@@ -618,9 +647,8 @@ func (r *registry) touchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 		return interpreter.BoolVal(false), nil
 	}
 	e.expires = expiryFor(ttl, now)
-	s.data[key] = e
 	s.maybeSweepLocked(now)
-	if err := s.flushLocked(); err != nil {
+	if err := s.putLocked(key, e); err != nil {
 		return interpreter.Null(), fmt.Errorf("kv.touch: %v", err)
 	}
 	return interpreter.BoolVal(true), nil
@@ -669,9 +697,8 @@ func (r *registry) incrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	}
 	cur += delta
 	e.value = strconv.FormatInt(cur, 10)
-	s.data[key] = e
 	s.maybeSweepLocked(now)
-	if err := s.flushLocked(); err != nil {
+	if err := s.putLocked(key, e); err != nil {
 		return interpreter.Null(), fmt.Errorf("kv.incr: %v", err)
 	}
 	return interpreter.IntVal(cur), nil

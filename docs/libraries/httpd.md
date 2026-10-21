@@ -61,6 +61,7 @@ for (def i in lists.range(0, 4)) {
 | `httpd.setMaxBufferBudget(bytes)` | `null` | Move the process-wide memory-guard ceiling (default 4 GiB) that `listenWith` enforces; raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
 | `httpd.setMaxBufferBudgetFromRAM(fraction)` | `int` | Opt-in, cgroup-aware: set the budget to `fraction` (`0 < f <= 1`) of the detected machine limit (min of host RAM and any cgroup limit); returns the bytes it set. Errors on a host where the limit can't be determined. |
 | `httpd.address(srv)` | `string` | The actual bound address (resolve `":0"` to the chosen port). |
+| `httpd.maxInFlight(srv)` | `int` | The server's in-flight request limit (`maxInFlight`), so a serve loop can bound its own workers to match (`web.serveOn` does). |
 | `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Errors once the server is shut down. |
 | `httpd.method(req)` | `string` | `"GET"`, `"POST"`, ... |
 | `httpd.path(req)` | `string` | URL path, decoded, e.g. `/users/42`. Never has a `.` or `..` segment: the engine answers such a request `400` itself. |
@@ -331,6 +332,7 @@ open a server with an explicit `httpd.Options`:
 | `respondTimeoutMs as int` | How long an admitted request may wait to be accepted, and then to be answered, before the engine answers `503` itself (see [The respond timeout](#the-respond-timeout)). `0` selects the default 60 s; negative is an error. |
 | `bodyTimeoutMs as int` | How long a client may take to send its whole request body; past it the engine answers `408`. Any single read also gives up after 10 s of silence. `0` selects the default 60 s; negative is an error. A server taking only small bodies can set a few seconds. |
 | `writeTimeoutMs as int` | How long writing one response may take; past it the engine drops the connection, so a client that stops reading cannot hold an in-flight slot. `0` selects the default 5 minutes; negative is an error. A server sending large downloads to slow clients can raise it. |
+| `maxHeaderBytes as int` | Cap on the request line plus headers; past it the client gets `431`. `0` selects the default 64 KiB (well above what browsers send); at most 1 MiB (`net/http`'s own default); negative is an error. Headers are read before the body budget applies, so this is what bounds a header-only request. |
 | `dirListing as bool` | Let `serveDir` / `serveDirEtag` answer a directory without an `index.html` with a file listing. `false` (the default): `404`. |
 
 A `0` field takes that limit's default, so you can tune one and leave the others

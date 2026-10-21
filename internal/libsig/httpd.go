@@ -12,6 +12,7 @@ listenTLSWith(string, bytes, bytes, httpd.Options) httpd.Server
 setMaxBufferBudget(int) null
 setMaxBufferBudgetFromRAM(int|float) int
 address(httpd.Server) string
+maxInFlight(httpd.Server) int
 shutdown(httpd.Server) null
 accept(httpd.Server) httpd.Request
 method(httpd.Request) string

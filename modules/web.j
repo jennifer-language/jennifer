@@ -50,6 +50,7 @@ use crypto;
 use compress;
 use os;
 use task;
+use channel;
 use regex;
 import "./multipart.j" as formdata;
 
@@ -1277,18 +1278,26 @@ func handleOne(app as App, req as httpd.Request) {
  * @param srv {httpd.Server} the already-listening server handle
  */
 export func serveOn(app as App, srv as httpd.Server) {
+    # At most maxInFlight workers run at once. The engine frees a request's
+    # in-flight slot when it answers 503 after the respond timeout, but the
+    # worker handling it keeps running; without this bound, slow handlers under
+    # load would pile up workers (and the memory each holds) without limit. A
+    # full channel parks the loop before accept, so further requests wait in the
+    # engine and get its 503 instead of a worker.
+    def slots as channel of bool init channel.make(httpd.maxInFlight($srv));
     while (true) {
         # Only httpd.accept failing (the server was shut down) ends the loop.
         try {
+            channel.send($slots, true);
             def req as httpd.Request init httpd.accept($srv);
             # Handle each request in its own spawned worker so a slow handler
             # does not block the accept loop or the requests behind it. The
             # worker catches its own errors (answers 500), so nothing escapes as
             # an unobserved-task error; task.discard marks the worker observed so
             # the task registry prunes it once done - a per-request spawn must
-            # not accumulate handles for the life of the server. In-flight
-            # concurrency is bounded by the httpd engine's accept rate.
+            # not accumulate handles for the life of the server.
             def worker as task of null init spawn {
+                defer channel.recv($slots);
                 try {
                     handleOne($app, $req);
                 } catch (reqErr) {

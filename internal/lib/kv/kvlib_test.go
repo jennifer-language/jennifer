@@ -378,3 +378,68 @@ func TestSetGetValue(t *testing.T) {
 	}
 	expectErr("setValue on an openFile store", r.setValueFn, fileSt, str("doc"), doc, iv(0))
 }
+
+// A failed file write leaves the in-memory store unchanged, so memory and file
+// never disagree: a delete that could not be persisted (a destroyed session)
+// stays visible rather than resurrecting on the next openFile.
+func TestFailedFlushLeavesMemoryUnchanged(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kv.dat")
+	r := &registry{stores: map[int64]*store{}}
+	st, err := r.openFileFn(ctx, []interpreter.Value{str(path)})
+	if err != nil {
+		t.Fatalf("openFile: %v", err)
+	}
+	call(t, r.setFn, st, str("sess"), str("alice"), iv(0))
+	call(t, r.setFn, st, str("n"), str("1"), iv(0))
+
+	// A read-only directory makes every flush fail.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	failing := []struct {
+		name string
+		fn   func(interpreter.BuiltinCtx, []interpreter.Value) (interpreter.Value, error)
+		args []interpreter.Value
+	}{
+		{"delete", r.deleteFn, []interpreter.Value{st, str("sess")}},
+		{"set existing", r.setFn, []interpreter.Value{st, str("sess"), str("mallory"), iv(0)}},
+		{"set new", r.setFn, []interpreter.Value{st, str("new"), str("x"), iv(0)}},
+		{"add", r.addFn, []interpreter.Value{st, str("added"), str("x"), iv(0)}},
+		{"touch", r.touchFn, []interpreter.Value{st, str("sess"), iv(60)}},
+		{"incr", r.incrFn, []interpreter.Value{st, str("n"), iv(5)}},
+	}
+	for _, f := range failing {
+		if _, err := f.fn(ctx, f.args); err == nil {
+			t.Errorf("%s: expected the failed write to be reported", f.name)
+		}
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(label string, reg *registry, h interpreter.Value) {
+		t.Helper()
+		want := map[string]string{"sess": "alice", "n": "1", "new": "", "added": ""}
+		for k, v := range want {
+			if got := call(t, reg.getFn, h, str(k)); got.Str != v {
+				t.Errorf("%s: %s = %q, want %q", label, k, got.Str, v)
+			}
+		}
+	}
+	check("memory", r, st)
+	s, _ := r.resolve("kv.get", st)
+	if e := s.data["sess"]; !e.expires.IsZero() {
+		t.Errorf("memory: failed touch left an expiry on sess")
+	}
+	r2 := &registry{stores: map[int64]*store{}}
+	st2, err := r2.openFileFn(ctx, []interpreter.Value{str(path)})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	check("file", r2, st2)
+}
