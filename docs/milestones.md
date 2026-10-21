@@ -2021,6 +2021,43 @@ carrying the declared type (a read-only check on the shared backing) and allow
 the borrow when every element already matches, falling back to copy otherwise.
 Needs alias-stress coverage in `value_alias_test.go`.
 
+### M28.22 - in-place int / bool fast path
+
+**Done.** Profiling the two slowest v1 benchmark rows showed no allocation, GC
+or scheduler time on either build: the time went into moving `Value` (a ~272-byte
+struct) through the evaluator, which returns one from every node and passes two
+by value into `evalComparison` / `evalArithmetic`. `intfast.go` reads int
+literals, resolved int variables, `list` / `bytes` elements and int arithmetic in
+place, answers int comparisons and `and` / `or` / `not` over them, and assigns a
+resolved `int` / `bool` binding in place; anything it does not handle exactly
+falls back to the general evaluator, so errors keep their message and position.
+Two TinyGo-specific costs went with it: a `posFor` interface call per binary /
+unary operation, and a range over an always-empty `vars` map on every frame
+release. On the reference machine (`--suite all`, `+169` against `+170`)
+`primes` went from 17.1 s to 3.6 s (Go) and 14.7 s to 2.7 s (TinyGo), the
+per-byte scan from 6.1 s to 0.86 s and 4.1 s to 0.72 s, the v1 serial total from
+25.3 s to 6.3 s and 21.2 s to 5.6 s, and the whole run from 34.3 s to 10.2 s and
+42.2 s to 13.4 s of wall clock.
+
+Additive.
+
+### M28.23 - statement results without a `Value`
+
+**Planned.** After M28.22, statement dispatch is the bulk of a tight loop: in
+`primes`, `execStmt` / `execStmts` / `execStmtRaw` / `execBlock` / `execWhile`
+hold 75% of the flat time on Go and 52% of the samples on TinyGo. The cause is
+the same as M28.22's: every statement returns a `blockResult`, which embeds a
+whole `Value` (the `return` value) next to its flow flags and position, so each
+statement copies ~320 bytes up through four levels of calls even though almost
+none of them return anything. Shrink `blockResult` to the flow flags and
+position, and carry a `return` value out of band - on the function's call frame,
+or through a pointer the call site passes down - so the common statement returns
+a few words. The change is local to `interpreter.go` (15 functions return
+`blockResult`; 4 sites read its value) but touches every statement executor, the
+`defer` / `errdefer` teardown in `finishFrame`, `try` / `catch`, and `return`
+from a `spawn` body. Measure with `examples/benchmark.j` (`primes`, the per-byte
+scan, `fib`) on both builds; the existing tests cover the flow semantics.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported
