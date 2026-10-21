@@ -592,6 +592,27 @@ Four more fast paths on top of the function-call frame work:
   to `true`. `!=` folds wherever `==` does (it is the negation).
   Mixed int/float *arithmetic* still folds (the int->float
   promotion there matches the language's arithmetic semantics).
+- **In-place int / bool operands (`intfast.go`).** A `Value` is a large
+  struct, and the general evaluator returns one from every node and passes
+  two by value into `evalComparison` / `evalArithmetic`; on a tight integer
+  loop those copies, not the arithmetic, were most of the time (on both
+  toolchains). `intOperand` reads an int straight from an int literal, a
+  resolved variable's slot (a pointer into the frame, no copy), a `list` /
+  `bytes` element of a resolved variable, or `+ - * // %` over such operands;
+  `fastCondition` answers bool literals, bool variables, int comparisons and
+  `and` / `or` / `not` over them (short-circuiting as `evalLogical` does); and
+  `fastAssign` stores into a resolved, non-const `int` / `bool` binding in
+  place. `evalBinary`, `evalBool`, `evalLogical` and `execAssign` try them
+  first. They are pure and give up on anything they do not handle exactly - a
+  non-int value, an unresolved slot (REPL, spawn bodies), an out-of-range
+  index, an overflow, a zero divisor, a declared type other than `int` /
+  `bool` - and the general path then re-evaluates the same side-effect-free
+  operands, so every error keeps its message and position. Pinned by
+  `intfast_test.go`, whose cases are each checked against the general path.
+- **No interface call per operation for a position.** `evalBinary` /
+  `evalUnary` read the node's position fields directly instead of through
+  `posFor` (a `parser.Node` interface call, expensive under TinyGo, which
+  dispatches interface methods through a generated type switch).
 
 ### String interpolation
 

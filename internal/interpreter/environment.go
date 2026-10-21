@@ -74,8 +74,12 @@ func releaseBlockEnv(e *Environment) {
 	if e.chainBytes != nil && e.frameBytes != 0 {
 		atomic.AddInt64(e.chainBytes, -e.frameBytes)
 	}
-	for k := range e.vars {
-		delete(e.vars, k)
+	// Slot-backed bindings never write vars, so it is almost always empty; the
+	// length check skips the range, which walks every bucket on TinyGo.
+	if len(e.vars) > 0 {
+		for k := range e.vars {
+			delete(e.vars, k)
+		}
 	}
 	for i := range e.slots {
 		e.slots[i] = Binding{}

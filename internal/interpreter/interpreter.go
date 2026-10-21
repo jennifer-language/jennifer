@@ -2212,6 +2212,10 @@ func (i *Interpreter) bindArg(v Value, p parser.Param, borrowCtx bool) Value {
 }
 
 func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error {
+	// An int / bool variable takes an int / bool operand in place (intfast.go).
+	if fastAssign(st, env) {
+		return nil
+	}
 	val, err := i.evalExpr(st.Value, env)
 	if err != nil {
 		return err
@@ -3581,6 +3585,9 @@ func (i *Interpreter) execTry(st *parser.TryStmt, env *Environment) (blockResult
 // evalBool evaluates an expression that must yield a bool; otherwise it
 // produces a positional runtime error referring to `ctx`.
 func (i *Interpreter) evalBool(e parser.Expr, env *Environment, ctx string) (bool, error) {
+	if r, ok := fastCondition(e, env); ok {
+		return r, nil
+	}
 	v, err := i.evalExpr(e, env)
 	if err != nil {
 		return false, err
@@ -4540,8 +4547,19 @@ func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value,
 	}
 	// Logical and/or evaluate the left operand first and short-circuit before
 	// touching the right - important when the right has side effects (calls).
+	// Int and bool operands read in place, with no Value copies (intfast.go).
 	if b.Op.IsLogical() {
+		if r, ok := fastCondition(b, env); ok {
+			return BoolVal(r), nil
+		}
 		return i.evalLogical(b, env)
+	}
+	if b.Op.IsComparison() {
+		if r, ok := fastCondition(b, env); ok {
+			return BoolVal(r), nil
+		}
+	} else if n, ok := intOperand(b, env); ok {
+		return IntVal(n), nil
 	}
 	*env.depth++
 	lv, err := i.evalExpr(b.Left, env)
@@ -4555,7 +4573,9 @@ func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value,
 	if err != nil {
 		return Value{}, err
 	}
-	file, line, col := posFor(b)
+	// The position fields directly, not posFor: every operation reaches here,
+	// and posFor's interface call is costly on TinyGo.
+	file, line, col := b.File, b.Line, b.Col
 	if b.Op.IsComparison() {
 		return i.evalComparison(b.Op, lv, rv, file, line, col)
 	}
@@ -4631,11 +4651,18 @@ func (i *Interpreter) evalBitOp(op parser.BinaryOp, lv, rv Value, file string, l
 // evalLogical implements short-circuit `and`/`or`. Both operands must be bool;
 // the right operand is only evaluated when the left doesn't already decide.
 func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value, error) {
-	*env.depth++
-	lv, err := i.evalExpr(b.Left, env)
-	*env.depth--
-	if err != nil {
-		return Value{}, err
+	// An int-comparison operand is answered in place (intfast.go).
+	var lv Value
+	if r, ok := fastCondition(b.Left, env); ok {
+		lv = BoolVal(r)
+	} else {
+		var err error
+		*env.depth++
+		lv, err = i.evalExpr(b.Left, env)
+		*env.depth--
+		if err != nil {
+			return Value{}, err
+		}
 	}
 	if lv.Kind != KindBool {
 		file, line, col := posFor(b.Left)
@@ -4650,6 +4677,9 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 	}
 	if b.Op == parser.OpOr && lv.Bool {
 		return BoolVal(true), nil
+	}
+	if r, ok := fastCondition(b.Right, env); ok {
+		return BoolVal(r), nil
 	}
 	*env.depth++
 	rv, err := i.evalExpr(b.Right, env)
@@ -4680,7 +4710,7 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 	if err != nil {
 		return Value{}, err
 	}
-	file, line, col := posFor(u)
+	file, line, col := u.File, u.Line, u.Col // not posFor: see evalBinary
 	switch u.Op {
 	case parser.OpNeg:
 		switch v.Kind {

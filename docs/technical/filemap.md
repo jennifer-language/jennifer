@@ -79,6 +79,8 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `module.go` | Module loading: the run-scoped module registry, sub-interpreters, export checks, cross-boundary struct retagging. |
 | `globalsafe.go` | `GlobalSafe` escape analysis that widens read-only-parameter borrow to functions proven to mutate no global. |
 | `spawncapture.go` | Spawn-capture analysis: the globals each `spawn` body reads, so the snapshot copies only those. |
+| `argsnap.go` | Argument snapshots: marks call arguments that alias a global a later argument may mutate, so they are copied (never borrowed). |
+| `intfast.go` | In-place int / bool fast path for operands, conditions and assignments; falls back to the general evaluator on anything it does not handle exactly. |
 | `structlit_check.go` | `checkStructLits`: load-time field-set check of every struct / enum-variant literal. |
 | `waitset.go` | Register-then-poll wait set behind `task.waitAny` / `waitAnyTimeout` / `channel.select` (no `reflect.Select`). |
 | `profiling.go` | The optional `Profiler` interface and `eagerCopy` hook. |
