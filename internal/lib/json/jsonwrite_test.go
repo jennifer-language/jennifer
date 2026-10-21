@@ -30,6 +30,31 @@ func TestConstructors(t *testing.T) {
 	}
 }
 
+// list / map take an optional initial value, converted whole: the linear way to
+// build a document from Jennifer values (json.Value handles included).
+func TestConstructorsFromValues(t *testing.T) {
+	e := doc(t, `{"a":1}`)
+	xs := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), []interpreter.Value{e, interpreter.IntVal(2), e})
+	if got := jstr(t, call(t, listFn, xs)); got != `[{"a":1},2,{"a":1}]` {
+		t.Errorf("json.list(xs) = %q", got)
+	}
+	m := interpreter.MapVal(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeInt), []interpreter.MapEntry{
+		{Key: interpreter.StringVal("z"), Value: interpreter.IntVal(1)},
+		{Key: interpreter.StringVal("a"), Value: e},
+	})
+	if got := jstr(t, call(t, mapFn, m)); got != `{"z":1,"a":{"a":1}}` {
+		t.Errorf("json.map(m) = %q", got)
+	}
+	for _, bad := range [][]interpreter.Value{{m}, {xs, xs}} {
+		if _, err := listFn(interpreter.BuiltinCtx{}, bad); err == nil {
+			t.Errorf("json.list(%d args, %s) accepted", len(bad), bad[0].Kind)
+		}
+	}
+	if _, err := mapFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs}); err == nil || !strings.Contains(err.Error(), "must be a map") {
+		t.Errorf("json.map(list) err = %v", err)
+	}
+}
+
 func TestSetUpsertReplaceAndRoot(t *testing.T) {
 	d := doc(t, `{"a":1,"xs":[10,20]}`)
 	// upsert a new key

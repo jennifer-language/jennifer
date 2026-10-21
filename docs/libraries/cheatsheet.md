@@ -164,6 +164,7 @@ this is a flat lookup view, updated together with it.
 | [`json`](json.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an integral number).                    |
 | [`json`](json.md)`.isNull(v[, ptr])`                  | Whether the addressed node is JSON `null`.                                                                                          |
 | [`json`](json.md)`.map()` / `.list()`                 | A fresh empty JSON map / list `json.Value` - the explicit start of a document (writes never auto-vivify).                          |
+| [`json`](json.md)`.map(m)` / `.list(xs)`              | A JSON map / list `json.Value` built from a Jennifer map / list in one step (linear; `json.Value` elements shared). |
 | [`json`](json.md)`.set(v, ptr, val)`                  | Non-mutating: upsert a map key or replace an in-range list index; returns a new `json.Value`. Strict (no missing intermediates).   |
 | [`json`](json.md)`.insert(v, ptr, val)`               | Insert into a list before index `ptr` (or `-` = at end); returns a new handle.                                                     |
 | [`json`](json.md)`.append(v, ptr, val)`               | Push onto the list addressed by `ptr` (sugar for insert at `/.../-`).                                                              |
@@ -472,6 +473,7 @@ this is a flat lookup view, updated together with it.
 | [`toml`](toml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int).                                 |
 | [`toml`](toml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A date-time node as a `time.Time` (needs `use time;`) / whether the node is a date-time.                            |
 | [`toml`](toml.md)`.map()` / `.list()`                 | A fresh empty table / array `toml.Value` - the explicit start of a document (writes never auto-vivify).                            |
+| [`toml`](toml.md)`.map(m)` / `.list(xs)`              | A table / array `toml.Value` built from a Jennifer map / list in one step (linear; `toml.Value` elements shared). |
 | [`toml`](toml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `toml.Value` (strict / no missing intermediates). |
 | [`uuid`](uuid.md)`.v4()`                               | A new random (version 4) UUID.                                                                                                      |
 | [`uuid`](uuid.md)`.v7()`                               | A new time-ordered (version 7) UUID.                                                                                                |
@@ -501,6 +503,7 @@ this is a flat lookup view, updated together with it.
 | [`yaml`](yaml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` / `isNull` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int) / test for null.                    |
 | [`yaml`](yaml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A timestamp node as a `time.Time` (needs `use time;`) / whether the node is a timestamp.                            |
 | [`yaml`](yaml.md)`.map()` / `.list()`                 | A fresh empty mapping / sequence `yaml.Value` - the explicit start of a document (writes never auto-vivify).                        |
+| [`yaml`](yaml.md)`.map(m)` / `.list(xs)`              | A mapping / sequence `yaml.Value` built from a Jennifer map / list in one step (linear; `yaml.Value` elements shared). |
 | [`yaml`](yaml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `yaml.Value` (strict / no missing intermediates). |
 
 ## Constants

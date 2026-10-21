@@ -32,6 +32,7 @@ compare two handles by value), so use the accessors below.
 | `toml.isDatetime(v[, ptr])` | `bool` | Whether the addressed node is a date-time. |
 | `toml.map()` | `toml.Value` | A fresh empty table, to build a document from scratch. |
 | `toml.list()` | `toml.Value` | A fresh empty array. |
+| `toml.map(m)` / `toml.list(xs)` | `toml.Value` | A table / array built from a Jennifer map / list in one step (see json's "Building a large list or map"). |
 | `toml.set(v, ptr, val)` | `toml.Value` | Upsert a table key / replace an in-range list index. |
 | `toml.insert(v, ptr, val)` | `toml.Value` | Insert into a list at an index or `-` (end). |
 | `toml.append(v, ptr, val)` | `toml.Value` | Push onto the list at `ptr`. |

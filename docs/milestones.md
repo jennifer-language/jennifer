@@ -1859,6 +1859,17 @@ reflected XSS in a downstream app's search page). It now also escapes `"` and `'
 quotes and output is unchanged. **Breaking:** `html.escape` output for a string
 with quotes changes (the same text once unescaped).
 
+### M28.13 - linear `json` / `toml` / `yaml` list building
+
+**Done.** Every `append` copied the whole list, so building a list of N elements
+one append at a time was O(N^2) (20,000 appends took 5.3 s). An end `append` now
+grows the list's backing array in place under a one-time atomic tail claim on the
+container: only the newest list built by the append path may extend it, every
+earlier handle keeps seeing exactly its own elements, and a chain of appends is
+amortised O(1) (20,000 in 27 ms). `list(xs)` / `map(m)` also take an optional
+Jennifer list / map and convert it in one step, the linear way to build a map.
+Additive.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

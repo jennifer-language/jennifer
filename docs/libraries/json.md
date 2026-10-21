@@ -53,7 +53,9 @@ Write surface - every verb is **non-mutating**, returning a fresh
 | Call                        | Returns          | Notes                                                       |
 | --------------------------- | ---------------- | ----------------------------------------------------------- |
 | `json.map()`                | `json.Value`     | A fresh empty JSON map (object) - the start of a document.  |
+| `json.map(m)`               | `json.Value`     | A JSON map built from a Jennifer `map of string to V` in one step (insertion order). |
 | `json.list()`               | `json.Value`     | A fresh empty JSON list (array).                            |
+| `json.list(xs)`             | `json.Value`     | A JSON list built from a Jennifer `list` in one step; `json.Value` elements are shared, not copied. |
 | `json.set(v, ptr, val)`     | `json.Value`     | Upsert a map key, or replace an in-range list index, at `ptr`. |
 | `json.insert(v, ptr, val)`  | `json.Value`     | Insert `val` into a list before index `ptr` (or `-` = at end). |
 | `json.append(v, ptr, val)`  | `json.Value`     | Push `val` onto the list addressed by `ptr` (sugar for insert at `/.../-`). |
@@ -253,6 +255,22 @@ so `json.insert($v, "/xs/-", x)` and `json.append($v, "/xs", x)` are the
 same push. It is a write-position, not an element: `set` rejects `/xs/-`
 (it never grows a list), and reads reject it too (there is no node there -
 the last element is `length - 1`).
+
+**Building a large list or map.** `append` to the end of a list is amortised
+O(1), so a loop of appends is linear. Since a written value may be a Jennifer
+`list` or `map` holding `json.Value` handles, a collection gathered in plain
+Jennifer converts in one step with `json.list(xs)` / `json.map(m)`:
+
+```jennifer
+def entries as list of json.Value init [];
+for (def d in $decks) {
+    $entries[] = json.decode(fs.readString($d));
+}
+def index as json.Value init json.list($entries);   # one conversion
+```
+
+`set` of a new map key copies the map, so a map built one key at a time is
+O(N^2); collect into a `map of string to json.Value` and call `json.map(m)`.
 
 ### Heterogeneous data
 

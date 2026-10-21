@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -255,5 +256,93 @@ func TestHeightOnSharedSubtrees(t *testing.T) {
 	b.Push(inner, List([]Node{Int(1)}))
 	if root = b.Seal(root); root.Height() != 3 {
 		t.Errorf("sealed height = %d, want 3", root.Height())
+	}
+}
+
+// Appends grow a list in place when they can, so every earlier handle must still
+// see exactly its own elements: appending twice to the same list (two branches
+// off one shared backing) gives two independent lists, neither of which changes
+// the original or the other.
+func TestAppendKeepsEveryHandleIntact(t *testing.T) {
+	app := func(l Node, v int64) Node {
+		out, err := Insert("append", l, []string{"-"}, Int(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	base := List([]Node{})
+	var hist []Node
+	for i := int64(0); i < 50; i++ {
+		base = app(base, i)
+		hist = append(hist, base)
+	}
+	a := app(hist[20], 100)
+	b := app(hist[20], 200)
+	a2 := app(a, 101)
+	for i, h := range hist {
+		if h.Len() != i+1 {
+			t.Fatalf("hist[%d] has %d elements", i, h.Len())
+		}
+		for j := 0; j <= i; j++ {
+			if h.Elem(j).IntVal() != int64(j) {
+				t.Fatalf("hist[%d][%d] = %d", i, j, h.Elem(j).IntVal())
+			}
+		}
+	}
+	if a.Len() != 22 || a.Elem(21).IntVal() != 100 || b.Len() != 22 || b.Elem(21).IntVal() != 200 ||
+		a2.Len() != 23 || a2.Elem(21).IntVal() != 100 || a2.Elem(22).IntVal() != 101 {
+		t.Errorf("branches: a=%d b=%d a2=%d", a.Elem(21).IntVal(), b.Elem(21).IntVal(), a2.Elem(22).IntVal())
+	}
+	if h := app(List([]Node{}), 0); h.Height() != 1 {
+		t.Errorf("height of [0] = %d", h.Height())
+	}
+	if h := app(base, int64(0)); h.Height() != 1 {
+		t.Errorf("height after append = %d", h.Height())
+	}
+	nested, _ := Insert("append", base, []string{"-"}, List([]Node{List(nil)}))
+	if nested.Height() != 3 {
+		t.Errorf("nested height = %d, want 3", nested.Height())
+	}
+}
+
+// Concurrent appends to one shared list each get their own result, with the
+// shared prefix intact (run under -race).
+func TestAppendConcurrentBranches(t *testing.T) {
+	base := List([]Node{})
+	for i := int64(0); i < 10; i++ {
+		base, _ = Insert("append", base, []string{"-"}, Int(i))
+	}
+	var wg sync.WaitGroup
+	results := make([]Node, 16)
+	for g := range results {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			l := base
+			for k := 0; k < 100; k++ {
+				l, _ = Insert("append", l, []string{"-"}, Int(int64(g)))
+			}
+			results[g] = l
+		}(g)
+	}
+	wg.Wait()
+	for g, l := range results {
+		if l.Len() != 110 {
+			t.Fatalf("result %d has %d elements", g, l.Len())
+		}
+		for j := 0; j < 10; j++ {
+			if l.Elem(j).IntVal() != int64(j) {
+				t.Fatalf("result %d prefix [%d] = %d", g, j, l.Elem(j).IntVal())
+			}
+		}
+		for j := 10; j < 110; j++ {
+			if l.Elem(j).IntVal() != int64(g) {
+				t.Fatalf("result %d [%d] = %d, want %d", g, j, l.Elem(j).IntVal(), g)
+			}
+		}
+	}
+	if base.Len() != 10 {
+		t.Errorf("base changed: %d", base.Len())
 	}
 }

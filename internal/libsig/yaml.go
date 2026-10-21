@@ -18,8 +18,8 @@ asBool(yaml.Value, string?) bool
 isNull(yaml.Value, string?) bool
 isDatetime(yaml.Value, string?) bool
 asDatetime(yaml.Value, string?) time.Time
-list() yaml.Value
-map() yaml.Value
+list(list of any?) yaml.Value
+map(map of string to any?) yaml.Value
 set(yaml.Value, string, any) yaml.Value
 insert(yaml.Value, string, any) yaml.Value
 append(yaml.Value, string, any) yaml.Value

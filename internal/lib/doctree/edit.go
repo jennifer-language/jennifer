@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -122,7 +123,9 @@ func CheckDepth(fnName string, pathLen int, v Node) error {
 // ----- copy-on-write container helpers -------------------------------------
 //
 // Each helper returns a new node over freshly allocated slices; the input's
-// slices are never written (they may be shared with other handles). A map's
+// slices are never written within their length (they may be shared with other
+// handles). listAppend may write past the end of a list's slice, into spare
+// capacity no other handle can see (see container.tail). A map's
 // key slice and sorted index are reused as-is when the key set is unchanged.
 
 // mapReplaceAt returns m with member i's value replaced.
@@ -200,11 +203,37 @@ func listReplace(l Node, idx int, val Node) Node {
 }
 
 func listInsert(l Node, idx int, val Node) Node {
+	if idx == l.Len() {
+		return listAppend(l, val)
+	}
 	out := make([]Node, 0, l.Len()+1)
 	out = append(out, l.c.elems[:idx]...)
 	out = append(out, val)
 	out = append(out, l.c.elems[idx:]...)
 	return List(out)
+}
+
+// listAppend adds val at the end of l. When l holds the tail claim and its
+// backing has room, the new list extends that backing in place; otherwise it
+// copies into a backing with doubled capacity and takes the claim itself. Either
+// way l is unchanged, so building a list one append at a time is linear.
+func listAppend(l Node, val Node) Node {
+	c := l.c
+	h := uint32(1)
+	if val.c != nil {
+		h = val.c.height + 1
+	}
+	if c.height > h {
+		h = c.height
+	}
+	n := len(c.elems)
+	if n < cap(c.elems) && atomic.CompareAndSwapUint32(&c.tail, 1, 0) {
+		return Node{k: KindList, c: &container{elems: append(c.elems, val), height: h, tail: 1}}
+	}
+	out := make([]Node, n+1, 2*n+4)
+	copy(out, c.elems)
+	out[n] = val
+	return Node{k: KindList, c: &container{elems: out, height: h, tail: 1}}
 }
 
 func listRemove(l Node, idx int) Node {

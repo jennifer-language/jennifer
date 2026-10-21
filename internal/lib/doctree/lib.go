@@ -450,20 +450,39 @@ func (l *Lib) asDatetime(fnName string, args []interpreter.Value) (interpreter.V
 
 // ----- write verbs ---------------------------------------------------------
 
-// list returns a fresh empty list, the starting point for building one.
+// list returns a fresh list: empty, or built in one step from a Jennifer list
+// whose elements convert as a written value does (scalars, nested lists and
+// maps, and this library's Value handles, shared rather than copied).
 func (l *Lib) list(fnName string, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 0 {
-		return interpreter.Null(), fmt.Errorf("%s expects 0 arguments, got %d", fnName, len(args))
-	}
-	return l.Wrap(List([]Node{})), nil
+	return l.construct(fnName, args, interpreter.KindList, "list", List([]Node{}))
 }
 
-// mapFn returns a fresh empty map, the starting point for building one.
+// mapFn returns a fresh map: empty, or built in one step from a Jennifer
+// `map of string to V` (members in the map's insertion order).
 func (l *Lib) mapFn(fnName string, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 0 {
-		return interpreter.Null(), fmt.Errorf("%s expects 0 arguments, got %d", fnName, len(args))
+	return l.construct(fnName, args, interpreter.KindMap, "map", Map(nil, nil))
+}
+
+// construct backs list / map: no argument yields empty, one argument of the
+// matching kind is converted whole (linear, unlike a chain of appends / sets).
+func (l *Lib) construct(fnName string, args []interpreter.Value, kind interpreter.ValueKind, what string, empty Node) (interpreter.Value, error) {
+	if len(args) == 0 {
+		return l.Wrap(empty), nil
 	}
-	return l.Wrap(Map(nil, nil)), nil
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("%s expects 0 or 1 arguments, got %d", fnName, len(args))
+	}
+	if args[0].Kind != kind {
+		return interpreter.Null(), fmt.Errorf("%s: initial value must be a %s, got %s", fnName, what, args[0].Kind)
+	}
+	n, err := l.ToNode(args[0], false)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+	}
+	if err := CheckDepth(fnName, 0, n); err != nil {
+		return interpreter.Null(), err
+	}
+	return l.Wrap(n), nil
 }
 
 // set upserts a map key / replaces an in-range list index; "" replaces the

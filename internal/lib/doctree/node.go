@@ -64,12 +64,21 @@ type Node struct {
 // a binary search (4 bytes per member) rather than a linear scan. height is
 // the container's nesting depth (1 + its deepest child container's), kept so a
 // depth check is O(1) even on a tree whose subtrees are shared many times.
-// Containers are never mutated once their node is handed out (see Builder).
+// Containers are never mutated once their node is handed out (see Builder);
+// the one exception is growth past the end, described at tail.
 type container struct {
 	elems  []Node
 	keys   []string
 	order  []uint32
 	height uint32
+	// tail is 1 when this list may append into the spare capacity of its
+	// elems backing array instead of copying it (listAppend). Only a list
+	// whose backing the append path allocated starts with it set, and the
+	// first append to claim it (an atomic swap to 0) hands it to the longer
+	// list it returns. Every other holder of the backing sees only its own
+	// elems[:len], so writing past the end of it changes nothing they can
+	// read, and a chain of appends costs amortised O(1) each.
+	tail uint32
 }
 
 // newContainer builds a container over its slices, computing its height.

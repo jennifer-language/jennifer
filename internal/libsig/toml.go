@@ -17,8 +17,8 @@ asString(toml.Value, string?) string
 asBool(toml.Value, string?) bool
 isDatetime(toml.Value, string?) bool
 asDatetime(toml.Value, string?) time.Time
-list() toml.Value
-map() toml.Value
+list(list of any?) toml.Value
+map(map of string to any?) toml.Value
 set(toml.Value, string, any) toml.Value
 insert(toml.Value, string, any) toml.Value
 append(toml.Value, string, any) toml.Value

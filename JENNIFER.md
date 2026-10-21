@@ -650,7 +650,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `json.Value` walked by JSON Pointer accessors (`get`/`asInt`/`asString`/
   `typeOf`/`has`/`keys`/`length`/...) and edited by non-mutating writers
   (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`). A repeated key in
-  one object is a decode error (as in `yaml` / `toml`).
+  one object is a decode error (as in `yaml` / `toml`). `append` is amortised
+  O(1); `json.list(xs)` / `json.map(m)` build a document from a Jennifer list /
+  map (of `json.Value` handles too) in one step - collect, then convert, rather
+  than `set` a new key per item.
 - **`asn1`** - ASN.1 BER decode / DER encode (the byte layer under LDAP / SNMP /
   PKI), designed like `json`. `decode(bytes)` returns an opaque `asn1.Value`
   walked by `(node, pointer)` accessors where the pointer's tokens are child

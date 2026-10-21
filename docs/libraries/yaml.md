@@ -41,6 +41,7 @@ binaries**.
 | `yaml.isDatetime(v[, ptr])` | `bool` | Whether the addressed node is a timestamp. |
 | `yaml.map()` | `yaml.Value` | A fresh empty mapping, to build a document from scratch. |
 | `yaml.list()` | `yaml.Value` | A fresh empty sequence. |
+| `yaml.map(m)` / `yaml.list(xs)` | `yaml.Value` | A mapping / sequence built from a Jennifer map / list in one step (see json's "Building a large list or map"). |
 | `yaml.set(v, ptr, val)` | `yaml.Value` | Upsert a map key / replace an in-range list index. |
 | `yaml.insert(v, ptr, val)` | `yaml.Value` | Insert into a list at an index or `-` (end). |
 | `yaml.append(v, ptr, val)` | `yaml.Value` | Push onto the list at `ptr`. |

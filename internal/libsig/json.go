@@ -16,8 +16,8 @@ asFloat(json.Value, string?) float
 asString(json.Value, string?) string
 asBool(json.Value, string?) bool
 isNull(json.Value, string?) bool
-list() json.Value
-map() json.Value
+list(list of any?) json.Value
+map(map of string to any?) json.Value
 set(json.Value, string, any) json.Value
 insert(json.Value, string, any) json.Value
 append(json.Value, string, any) json.Value
