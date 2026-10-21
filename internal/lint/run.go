@@ -33,6 +33,10 @@ type Config struct {
 	// simply unknown.
 	LibStructs map[string]*parser.StructDef
 	LibConsts  map[string]parser.Type
+	// Libraries lists every library a `use NAME;` accepts, sorted; the CLI
+	// fills it from the same interpreter. L115 checks each `use` against it.
+	// Left nil, L115 is skipped.
+	Libraries []string
 }
 
 // DefaultConfig returns the v1 thresholds documented for the checks.

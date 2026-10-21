@@ -67,6 +67,10 @@ func unknownMember() {
     return;
 }
 
+# L115 unknown-library - a `use NAME;` naming a library the build does not
+# install (`use strngs;`, with a "did you mean `strings`" hint). Not shown live:
+# an unknown `use` stops the whole program at startup, so this file could not run.
+
 # L201 function-too-long - a body over the 60-statement limit. The finding
 # anchors at the function, so the directive lives on the `func` line.
 func longMethod() { # lint-disable: L201

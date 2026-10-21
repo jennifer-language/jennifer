@@ -151,6 +151,32 @@ func checkUnknownMember(c *checkCtx) {
 	}
 }
 
+// checkUnknownLibrary (L115) flags a `use NAME;` naming no library: a typo
+// (`use strngs;`), a module path written as a library, or a library that no
+// longer exists (`use core;`). The runtime rejects it when the program starts;
+// lint names the nearest library. Skipped when the caller supplies no library
+// list.
+func checkUnknownLibrary(c *checkCtx) {
+	libs := c.cfg.Libraries
+	if libs == nil {
+		return
+	}
+	known := make(map[string]bool, len(libs))
+	for _, l := range libs {
+		known[l] = true
+	}
+	for _, imp := range c.prog.Imports {
+		if known[imp.Name] {
+			continue
+		}
+		msg := fmt.Sprintf("unknown library `%s`", imp.Name)
+		if s := closestName(imp.Name, libs); s != "" {
+			msg += fmt.Sprintf(" - did you mean `%s`?", s)
+		}
+		c.report("L115", imp, msg)
+	}
+}
+
 // reportTypeAt reports an unknown member at an explicit position (a parameter or
 // field is not a Node).
 func reportTypeAt(c *checkCtx, file string, line, col int, what, prefix, name string, candidates []string) {

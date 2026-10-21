@@ -173,7 +173,7 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 
 	cfg := lint.DefaultConfig()
 	cfg.Modules = lintModules(prog, baseDir, opts)
-	cfg.LibStructs, cfg.LibConsts = lintLibSurface()
+	cfg.LibStructs, cfg.LibConsts, cfg.Libraries = lintLibSurface()
 	diags = lint.Check(prog, suppressTokens, src, absPath, enabled, cfg)
 	if len(baseFiles) > 0 {
 		// Drop findings that landed in the spliced base module (or its includes);
@@ -217,16 +217,18 @@ var (
 	libSurfaceOnce    sync.Once
 	libSurfaceStructs map[string]*parser.StructDef
 	libSurfaceConsts  map[string]parser.Type
+	libSurfaceLibs    []string
 )
 
 // lintLibSurface returns the standard library's registered struct types and
-// constant types (keyed "lib.Name"), read once from an interpreter with every
-// library installed, so lint types a library struct's fields and a library
-// constant exactly as registered.
-func lintLibSurface() (map[string]*parser.StructDef, map[string]parser.Type) {
+// constant types (keyed "lib.Name") and the library names, read once from an
+// interpreter with every library installed, so lint types a library struct's
+// fields and a library constant exactly as registered and checks each `use`.
+func lintLibSurface() (map[string]*parser.StructDef, map[string]parser.Type, []string) {
 	libSurfaceOnce.Do(func() {
 		in := interpreter.New()
 		stdlib.InstallAll(in)
+		libSurfaceLibs = in.KnownLibraries()
 		libSurfaceStructs = map[string]*parser.StructDef{}
 		for k, def := range in.NSStructs {
 			libSurfaceStructs[k.NS+"."+k.Name] = def
@@ -238,7 +240,7 @@ func lintLibSurface() (map[string]*parser.StructDef, map[string]parser.Type) {
 			}
 		}
 	})
-	return libSurfaceStructs, libSurfaceConsts
+	return libSurfaceStructs, libSurfaceConsts, libSurfaceLibs
 }
 
 // constType returns the static type of a library constant's value: a scalar's

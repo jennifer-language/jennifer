@@ -159,6 +159,30 @@ func TestLintChecksImportedModuleSurface(t *testing.T) {
 	}
 }
 
+// `use` is checked against the libraries the build installs (L115), the list
+// lintLibSurface reads from a fully installed interpreter.
+func TestLintUnknownLibrary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "use.j")
+	if err := os.WriteFile(path, []byte("use io;\nuse strngs;\nuse nosuchlib;\nio.printf(\"x\\n\");\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, ok := parseLintArgs([]string{"--checks=L115", path})
+	if !ok {
+		t.Fatal("parseLintArgs failed")
+	}
+	diags, _, _, failed := lintComputeDiags(opts.paths[0], opts)
+	if failed {
+		t.Fatal("lint invocation failed")
+	}
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%s", d.Line, d.Message))
+	}
+	if want := "2:unknown library `strngs` - did you mean `strings`? | 3:unknown library `nosuchlib`"; strings.Join(got, " | ") != want {
+		t.Errorf("findings %q, want %q", strings.Join(got, " | "), want)
+	}
+}
+
 // Argument and binding types are checked across an import (L110 / L111), and a
 // library constant or library struct field is typed from the registered library
 // surface (lintLibSurface).
