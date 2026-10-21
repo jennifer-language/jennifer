@@ -186,7 +186,11 @@ global of its own, but a function reaching `meta.callMain` can mutate a
   time, from outside the call chain the analysis follows; when any spawn in
   the run (in a function or the top-level code, entry program or module) can
   re-enter, the host's `spawnReentry` flag turns the `GlobalSafe` widening
-  off for the whole run. The analysis runs for every program with mutable
+  off for the whole run. The resolver leaves spawn-body calls without a
+  `Method`, so the scan looks a spawn-body callee up by name in the method
+  table (as `computeSpawnCaptures` does); only a name that is not a user
+  function counts as unresolved, so an ordinary worker spawn keeps borrow on.
+  The analysis runs for every program with mutable
   globals, not only when some parameter is borrowable, because a borrowable
   local `def` depends on it too. The callback set must be a denylist because a func-value
   argument is not statically visible (a bare function name is a

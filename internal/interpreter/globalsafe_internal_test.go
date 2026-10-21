@@ -102,6 +102,37 @@ func TestComputeEntryGlobalSafeLongChain(t *testing.T) {
 	}
 }
 
+// A spawn body is not slot-resolved, so its calls carry no Method. A call to a
+// plain user function there must still resolve by name, or every program that
+// spawns a worker would look re-entering and lose borrow run-wide.
+func TestSpawnReentryResolvesSpawnBodyCalls(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"plain callee", `def g as int init 0; func work(n as int) { return $n * 2; } def t as task of int init spawn { return work(3); };`, false},
+		{"callee writing a global", `def g as int init 0; func work() { $g = 1; return 0; } def t as task of int init spawn { return work(); };`, false},
+		{"callee calling a func value", `def g as int init 0; func one() { return 1; } func work(fn as func) { return $fn(); } def t as task of int init spawn { return work(one); };`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			prog, err := parser.Parse(c.src)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			in := New()
+			in.Out = &bytes.Buffer{}
+			if err := in.Run(prog); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if got := in.Host().spawnReentry.Load(); got != c.want {
+				t.Errorf("spawnReentry = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // stampArgSnapshots marks exactly the arguments that alias a global and are
 // followed by an argument that may mutate globals.
 func TestStampArgSnapshots(t *testing.T) {

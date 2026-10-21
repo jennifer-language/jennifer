@@ -136,7 +136,12 @@ func (w *argSnapWalker) mayMutateGlobals(e parser.Expr) bool {
 		}
 		return false
 	case *parser.CallExpr:
-		if n.Method == nil || !n.Method.GlobalSafe {
+		// Method is nil inside a spawn body (not resolved); look it up by name.
+		m := n.Method
+		if m == nil {
+			m = w.in.methods[n.Callee]
+		}
+		if m == nil || !m.GlobalSafe {
 			return true
 		}
 		return w.anyMutates(n.Args)

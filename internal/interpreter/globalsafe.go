@@ -407,8 +407,14 @@ func (s *globalHazardScan) walkExpr(e parser.Expr) {
 			s.walkExpr(p.Expr)
 		}
 	case *parser.CallExpr:
-		if n.Method != nil {
-			s.call(n.Method)
+		// The resolver skips spawn bodies, so Method is nil for a call inside
+		// one; resolve the callee by name against the method table instead.
+		m := n.Method
+		if m == nil {
+			m = s.in.methods[n.Callee]
+		}
+		if m != nil {
+			s.call(m)
 		} else {
 			// A bare-name call not resolving to a user method: a builtin-shaped
 			// bare call or an unresolved name. Cannot analyse - conservative.
