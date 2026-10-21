@@ -807,7 +807,7 @@ export func glyph(f as Font, cp as int) {
 # cumulative component count across one glyph decode - threaded through the
 # recursion - so a hostile font is a fast catchable error, not a hang. Real fonts
 # use a handful of components a few levels deep, far under this.
-def const COMPOSITE_BUDGET as int init 4096;
+def const COMPOSITE_BUDGET as int init 1024;
 
 # DecodeResult / CompResult thread the remaining component budget back out of the
 # recursion alongside the decoded value (Jennifer is value-semantic, so a shared
