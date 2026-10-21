@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -60,13 +61,21 @@ const defaultMaxBodyBytes = 10 << 20 // 10 MiB
 // headers (Slowloris protection).
 const readHeaderTimeout = 15 * time.Second
 
-// bodyReadTimeout bounds how long a client may take to deliver its request
-// body. The body is buffered while holding one of the maxInFlight admission
-// slots, so without this bound 256 deliberately slow uploads would pin every
-// slot indefinitely and stall the whole server (body-read Slowloris). 60 s
-// for up to maxBodyBytes still admits a ~1.4 Mbps uplink. A var so tests can
-// lower it.
+// bodyReadTimeout is the default bound on how long a client may take to deliver
+// its whole request body (httpd.Options.bodyTimeoutMs overrides it per server).
+// 60 s for up to maxBodyBytes still admits a ~1.4 Mbps uplink. The body is read
+// before the request takes an admission slot, so a slow upload ties up only its
+// own connection, never the server. A var so tests can lower it.
 var bodyReadTimeout = 60 * time.Second
+
+// bodyIdleTimeout bounds each read of the body: a client that sends nothing for
+// this long is dropped even when the overall body timeout has time left.
+var bodyIdleTimeout = 10 * time.Second
+
+// minBodyChunk is the first body buffer size. The buffer doubles as data
+// arrives, so a connection that trickles a few bytes holds a few hundred bytes,
+// not a declared Content-Length's worth.
+const minBodyChunk = 512
 
 // writeTimeout bounds how long the response write may take. Like the body
 // read, the write happens while holding an admission slot, so without this a
@@ -110,18 +119,59 @@ type serverState struct {
 	reqs      chan *reqState
 	closing   chan struct{}
 	closeOnce sync.Once
-	// sem bounds how many requests may buffer a body concurrently, capping
-	// worst-case buffered memory at inFlight * maxBody rather than growing with
-	// the connection count. Its capacity is inFlight.
+	// sem bounds how many requests are in flight (body read, waiting for or
+	// inside the program) at once. Its capacity is inFlight. A request takes a
+	// slot only after its body has arrived, so slow uploads cannot hold them.
 	sem chan struct{}
-	// maxBody / inFlight are this server's resolved limits (from the defaults
-	// for httpd.listen, or from httpd.Options for httpd.listenWith). The handler
-	// reads maxBody per request; inFlight equals cap(sem).
+	// buffered is the body-buffer memory currently held by this server's
+	// requests (bytes of allocated buffer), bounded by bufBudget = inFlight *
+	// maxBody, the same worst case the slots used to bound. A body read that
+	// would pass it is answered 503, so memory stays bounded however many
+	// connections upload at once.
+	buffered  atomic.Int64
+	bufBudget int64
+	serverLimits
+}
+
+// serverLimits are a server's resolved per-server limits: the defaults for
+// httpd.listen, or httpd.Options for httpd.listenWith. inFlight equals cap(sem).
+type serverLimits struct {
 	maxBody  int64
 	inFlight int
-	// respondTimeout is this server's wait for the program to accept and then
-	// answer a request (the package default, or httpd.Options.respondTimeoutMs).
+	// respondTimeout is the wait for the program to accept and then answer a
+	// request (httpd.Options.respondTimeoutMs).
 	respondTimeout time.Duration
+	// bodyTimeout bounds the whole body read (httpd.Options.bodyTimeoutMs).
+	bodyTimeout time.Duration
+}
+
+// defaultLimits are httpd.listen's limits (read at call time, so tests that
+// lower a timeout var see it).
+func defaultLimits() serverLimits {
+	return serverLimits{
+		maxBody:        defaultMaxBodyBytes,
+		inFlight:       defaultMaxInFlight,
+		respondTimeout: respondTimeout,
+		bodyTimeout:    bodyReadTimeout,
+	}
+}
+
+// resolveLimits validates an httpd.Options into a server's limits; a 0 field
+// selects that limit's default.
+func resolveLimits(o serverOpts) (serverLimits, error) {
+	maxBody, inFlight, err := resolveServerLimits(o.maxBody, o.inFlight)
+	if err != nil {
+		return serverLimits{}, err
+	}
+	respond, err := resolveMsOption("respondTimeoutMs", o.respondMs, respondTimeout)
+	if err != nil {
+		return serverLimits{}, err
+	}
+	body, err := resolveMsOption("bodyTimeoutMs", o.bodyMs, bodyReadTimeout)
+	if err != nil {
+		return serverLimits{}, err
+	}
+	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body}, nil
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -378,51 +428,115 @@ func isOpenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 
 // -------- handler --------
 
+// errBodyBudget reports a body read refused because the server's body-buffer
+// budget is in use by other requests.
+var errBodyBudget = errors.New("body buffer budget exhausted")
+
+// readBody reads a request body of up to maxBody+1 bytes (one past the cap, so
+// an over-limit body is detectable). The buffer starts at minBodyChunk and
+// doubles, each growth reserved from the server's budget first; held is the
+// reservation the caller returns when the request ends. Each read waits at most
+// bodyIdleTimeout, and the whole read at most the server's bodyTimeout.
+func (st *serverState) readBody(rc *http.ResponseController, r io.Reader) (buf []byte, held int64, err error) {
+	limit := st.maxBody + 1
+	deadline := time.Now().Add(st.bodyTimeout)
+	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
+	for int64(len(buf)) < limit {
+		if len(buf) == cap(buf) {
+			grow := int64(cap(buf))
+			if grow < minBodyChunk {
+				grow = minBodyChunk
+			}
+			if int64(cap(buf))+grow > limit {
+				grow = limit - int64(cap(buf))
+			}
+			if !st.reserve(grow) {
+				return buf, held, errBodyBudget
+			}
+			held += grow
+			nb := make([]byte, len(buf), int64(cap(buf))+grow)
+			copy(nb, buf)
+			buf = nb
+		}
+		d := time.Now().Add(bodyIdleTimeout)
+		if d.After(deadline) {
+			d = deadline
+		}
+		_ = rc.SetReadDeadline(d)
+		n, rerr := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if rerr == io.EOF {
+			return buf, held, nil
+		}
+		if rerr != nil {
+			return buf, held, rerr
+		}
+	}
+	return buf, held, nil
+}
+
+// reserve takes n bytes of the body-buffer budget, or reports false when that
+// would pass it.
+func (st *serverState) reserve(n int64) bool {
+	for {
+		cur := st.buffered.Load()
+		if cur+n > st.bufBudget {
+			return false
+		}
+		if st.buffered.CompareAndSwap(cur, cur+n) {
+			return true
+		}
+	}
+}
+
 // makeHandler builds the net/http handler for a server. Each request runs on
 // its own Go goroutine: it buffers the body, hands a reqState to the pull loop,
 // parks until the interpreter responds (or the server shuts down), then writes
 // the response from this goroutine.
 func makeHandler(st *serverState) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Admission control: bound how many requests buffer a body (and stay
-		// in flight) concurrently, so N connections can't each buffer up to
-		// st.maxBody before backpressure (worst case inFlight * maxBody of RSS).
-		// Wait for a slot or bail on shutdown; the slot is held for the whole
-		// handler and released when the response is written / the request times
-		// out.
+		// Read the body first, outside the admission slots: a client trickling
+		// its upload then holds only its own connection and the little it has
+		// sent, never a slot the rest of the server needs.
+		rc := http.NewResponseController(w)
+		body, held, rerr := st.readBody(rc, r.Body)
+		defer st.buffered.Add(-held)
+		if rerr != nil {
+			// Connection: close makes the server skip its keepalive body drain,
+			// which would otherwise block on bytes that never arrive.
+			w.Header().Set("Connection", "close")
+			var ne net.Error
+			switch {
+			case rerr == errBodyBudget:
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, "server busy: request body buffer is full", http.StatusServiceUnavailable)
+			case errors.As(rerr, &ne) && ne.Timeout():
+				http.Error(w, "request body not received in time", http.StatusRequestTimeout)
+			default:
+				// A mid-body disconnect leaves a truncated body; answer 400
+				// rather than hand the program a silently-short request.
+				http.Error(w, "error reading request body", http.StatusBadRequest)
+			}
+			return
+		}
+		if int64(len(body)) > st.maxBody {
+			// It must be REJECTED with 413, never silently truncated - a
+			// truncated-but-complete-looking body defeats body-signature
+			// verification and smuggles content past inspection. Same drain
+			// concern: the client may still be streaming the rest. Name the
+			// actual limit so the rejection is self-explaining.
+			w.Header().Set("Connection", "close")
+			http.Error(w, fmt.Sprintf("request body exceeds the server's limit of %d bytes", st.maxBody), http.StatusRequestEntityTooLarge)
+			return
+		}
+		// Admission control: bound how many requests are in flight at once.
+		// Wait for a slot or bail on shutdown; the slot is held until the
+		// response is written / the request times out.
 		select {
 		case st.sem <- struct{}{}:
 			defer func() { <-st.sem }()
 		case <-st.closing:
 			http.Error(w, "server shutting down", http.StatusServiceUnavailable)
-			return
-		}
-		// Read one byte past the cap so an over-limit body is detectable:
-		// it must be REJECTED with 413, never silently truncated - a
-		// truncated-but-complete-looking body defeats body-signature
-		// verification and smuggles content past inspection. The read runs
-		// under bodyReadTimeout (armed on the connection, cleared after) so a
-		// trickling client can't hold its admission slot forever.
-		rc := http.NewResponseController(w)
-		_ = rc.SetReadDeadline(time.Now().Add(bodyReadTimeout))
-		body, rerr := io.ReadAll(io.LimitReader(r.Body, st.maxBody+1))
-		_ = rc.SetReadDeadline(time.Time{})
-		if rerr != nil {
-			// A mid-body client disconnect (or bodyReadTimeout expiry) leaves a
-			// truncated body; answer 400 here rather than hand the interpreter
-			// a silently-short request. Connection: close makes the server skip
-			// its keepalive body drain, which would otherwise block on the
-			// bytes that never arrived (the deadline is already cleared).
-			w.Header().Set("Connection", "close")
-			http.Error(w, "error reading request body", http.StatusBadRequest)
-			return
-		}
-		if int64(len(body)) > st.maxBody {
-			// Same drain concern: the client may still be streaming the rest.
-			// Name the actual limit so the rejection is self-explaining rather
-			// than a mystery 413 the client has to reverse-engineer.
-			w.Header().Set("Connection", "close")
-			http.Error(w, fmt.Sprintf("request body exceeds the server's limit of %d bytes", st.maxBody), http.StatusRequestEntityTooLarge)
 			return
 		}
 		rs := &reqState{r: r, body: body, done: make(chan struct{}), status: 200, srv: st}
@@ -526,18 +640,17 @@ func makeHandler(st *serverState) http.Handler {
 
 // -------- lifecycle --------
 
-// resolveRespondTimeout turns httpd.Options.respondTimeoutMs into this server's
-// respond timeout: 0 selects the default, a positive value is milliseconds, and
-// a negative value is an error (an unbounded wait would leak a goroutine and a
-// connection per request the program never answers).
-func resolveRespondTimeout(ms int64) (time.Duration, error) {
+// resolveMsOption turns a millisecond httpd.Options timeout into a duration: 0
+// selects def, a positive value is milliseconds, and a negative value is an
+// error (an unbounded wait would leak a goroutine and a connection).
+func resolveMsOption(name string, ms int64, def time.Duration) (time.Duration, error) {
 	switch {
 	case ms < 0:
-		return 0, fmt.Errorf("respondTimeoutMs must be >= 0 (0 selects the %d s default), got %d", int64(respondTimeout/time.Second), ms)
+		return 0, fmt.Errorf("%s must be >= 0 (0 selects the %d s default), got %d", name, int64(def/time.Second), ms)
 	case ms == 0:
-		return respondTimeout, nil
+		return def, nil
 	case ms > int64(math.MaxInt64/time.Millisecond):
-		return 0, fmt.Errorf("respondTimeoutMs %d is too large", ms)
+		return 0, fmt.Errorf("%s %d is too large", name, ms)
 	}
 	return time.Duration(ms) * time.Millisecond, nil
 }
@@ -669,7 +782,7 @@ func doListen(fnName, addr string) (net.Listener, error) {
 }
 
 // openServer opens a plaintext server on addr with the given resolved limits.
-func openServer(fnName, addr string, maxBody int64, inFlight int, respond time.Duration) (Value, error) {
+func openServer(fnName, addr string, lim serverLimits) (Value, error) {
 	if serverCount() >= maxServers {
 		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
 	}
@@ -677,7 +790,7 @@ func openServer(fnName, addr string, maxBody int64, inFlight int, respond time.D
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	st := newServer(ln, maxBody, inFlight, respond)
+	st := newServer(ln, lim)
 	go func() { _ = st.srv.Serve(ln) }()
 	return makeServer(registerServer(st)), nil
 }
@@ -690,7 +803,7 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return openServer("httpd.listen", addr, defaultMaxBodyBytes, defaultMaxInFlight, respondTimeout)
+	return openServer("httpd.listen", addr, defaultLimits())
 }
 
 // listenWithFn is httpd.listen with an explicit httpd.Options{maxBodyBytes,
@@ -707,15 +820,11 @@ func listenWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	maxBody, inFlight, err := resolveServerLimits(o.maxBody, o.inFlight)
+	lim, err := resolveLimits(o)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listenWith: %v", err)
 	}
-	respond, err := resolveRespondTimeout(o.respondMs)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("httpd.listenWith: %v", err)
-	}
-	return openServer("httpd.listenWith", addr, maxBody, inFlight, respond)
+	return openServer("httpd.listenWith", addr, lim)
 }
 
 // isStaleUnixSocket reports whether path is a leftover unix socket with no live
@@ -737,7 +846,7 @@ func isStaleUnixSocket(path string) bool {
 
 // openServerTLS opens a TLS server on addr with the given cert/key and resolved
 // limits.
-func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, maxBody int64, inFlight int, respond time.Duration) (Value, error) {
+func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, lim serverLimits) (Value, error) {
 	if serverCount() >= maxServers {
 		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
 	}
@@ -749,7 +858,7 @@ func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, maxBody int64, i
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
 	}
-	st := newServer(ln, maxBody, inFlight, respond)
+	st := newServer(ln, lim)
 	// Floor at TLS 1.2: 1.0/1.1 are deprecated (RFC 8996) and fail compliance
 	// scans.
 	st.srv.TLSConfig = &tls.Config{
@@ -776,7 +885,7 @@ func listenTLSFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return openServerTLS("httpd.listenTLS", addr, certPEM, keyPEM, defaultMaxBodyBytes, defaultMaxInFlight, respondTimeout)
+	return openServerTLS("httpd.listenTLS", addr, certPEM, keyPEM, defaultLimits())
 }
 
 // listenTLSWithFn is httpd.listenTLS with a trailing httpd.Options for the
@@ -801,29 +910,24 @@ func listenTLSWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	maxBody, inFlight, err := resolveServerLimits(o.maxBody, o.inFlight)
+	lim, err := resolveLimits(o)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: %v", err)
 	}
-	respond, err := resolveRespondTimeout(o.respondMs)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: %v", err)
-	}
-	return openServerTLS("httpd.listenTLSWith", addr, certPEM, keyPEM, maxBody, inFlight, respond)
+	return openServerTLS("httpd.listenTLSWith", addr, certPEM, keyPEM, lim)
 }
 
 // newServer builds the serverState + http.Server for an already-open listener,
 // with the resolved per-server limits.
-func newServer(ln net.Listener, maxBody int64, inFlight int, respond time.Duration) *serverState {
+func newServer(ln net.Listener, lim serverLimits) *serverState {
 	st := &serverState{
-		ln:             ln,
-		addr:           ln.Addr().String(),
-		reqs:           make(chan *reqState),
-		closing:        make(chan struct{}),
-		sem:            make(chan struct{}, inFlight),
-		maxBody:        maxBody,
-		inFlight:       inFlight,
-		respondTimeout: respond,
+		ln:           ln,
+		addr:         ln.Addr().String(),
+		reqs:         make(chan *reqState),
+		closing:      make(chan struct{}),
+		sem:          make(chan struct{}, lim.inFlight),
+		bufBudget:    int64(lim.inFlight) * lim.maxBody,
+		serverLimits: lim,
 	}
 	st.srv = &http.Server{
 		Handler:           makeHandler(st),

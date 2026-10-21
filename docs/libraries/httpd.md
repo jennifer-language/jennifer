@@ -301,7 +301,8 @@ app processes on distinct ports or sockets behind one nginx `upstream {}` block.
 request-body cap and a **256** in-flight-request ceiling. They bound worst-case
 memory - the engine buffers each body fully into RAM before your program sees
 it, so the worst case is `maxInFlight x maxBodyBytes` (`256 x 10 MiB = 2.56 GiB`
-at the defaults). Raising the body cap also raises that ceiling; the two knobs
+at the defaults), held as bytes actually received rather than per slot.
+Raising the body cap also raises that ceiling; the two knobs
 split a fixed memory budget the way your traffic needs it.
 
 `httpd.listenWith(addr, opts)` (and `httpd.listenTLSWith(addr, cert, key, opts)`)
@@ -312,6 +313,7 @@ open a server with an explicit `httpd.Options`:
 | `maxBodyBytes as int` | Per-request body cap in bytes. `0` selects the 10 MiB default. |
 | `maxInFlight as int` | Concurrent in-flight requests. `0` selects the default 256. |
 | `respondTimeoutMs as int` | How long an admitted request may wait to be accepted, and then to be answered, before the engine answers `503` itself (see [The respond timeout](#the-respond-timeout)). `0` selects the default 60 s; negative is an error. |
+| `bodyTimeoutMs as int` | How long a client may take to send its whole request body; past it the engine answers `408`. Any single read also gives up after 10 s of silence. `0` selects the default 60 s; negative is an error. A server taking only small bodies can set a few seconds. |
 
 A `0` field takes that limit's default, so you can tune one and leave the others
 (as a library struct, `httpd.Options{...}` may also leave a field out; it takes
@@ -407,10 +409,11 @@ under overload (the usual cause) "unavailable, retry" is the truthful answer. A
 handler that fails is answered `500` by the program (the `web` module does
 this).
 
-Waiting for an admission slot is not part of it: a connection that finds every
-slot busy waits for one without a deadline, so `maxInFlight` and the respond
-timeout work together - the slots bound memory, the timeout bounds how long one
-admitted request can keep a slot. Set the timeout above your slowest legitimate
+Waiting for an admission slot is not part of it: a request whose body has
+arrived and finds every slot busy waits for one without a deadline, so
+`maxInFlight` and the respond timeout work together - the slots bound the
+requests in flight, the timeout bounds how long one admitted request can keep a
+slot. Set the timeout above your slowest legitimate
 handler:
 
 ```jennifer
@@ -437,10 +440,16 @@ long handler can check before it starts work whose reply has nowhere to go.
   program (never silently truncated - a truncated body would defeat body-signature
   checks). The cap is per-server settable - see
   [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits).
-- **Admission control.** At most 256 requests (by default) buffer a body / stay
-  in flight at once; further connections wait for a slot, so buffered memory is
-  bounded (`slots x maxBody`) rather than growing with the connection count. The
-  concurrency slot count is per-server settable too.
+- **Admission control.** The body is read first, then the request takes one of
+  256 (by default) in-flight slots; further requests wait for a slot. Reading
+  the body outside the slots means clients that trickle an upload tie up only
+  their own connections: they can never hold every slot and stall the server.
+- **Body memory.** Body buffers are bounded by the bytes they actually hold:
+  at most `maxInFlight x maxBody` across the server, reserved as each buffer
+  grows (from 512 bytes, doubling), so a slow upload holds about what it has
+  sent. A body that would pass the bound is answered **503** with `Retry-After`.
+  A body that is not complete within the body timeout (60 s, `bodyTimeoutMs`), or
+  sends nothing for 10 s, is answered **408**.
 - **Must respond.** Every accepted request must be answered with
   `httpd.respond` (or `serveFile` / `serveDir`). A request left unanswered -
   the program threw between `accept` and `respond`, or the handler is slow - is

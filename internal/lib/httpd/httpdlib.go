@@ -55,6 +55,7 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "maxBodyBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "maxInFlight", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "respondTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "bodyTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
 
 	// Lifecycle.
@@ -153,7 +154,7 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 // set it (0 = "use the default"); resolveServerLimits / resolveRespondTimeout
 // validate the ranges.
 type serverOpts struct {
-	maxBody, inFlight, respondMs int64
+	maxBody, inFlight, respondMs, bodyMs int64
 }
 
 // takeOptionsArg reads an httpd.Options struct value into serverOpts.
@@ -171,6 +172,8 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 			dst = &o.inFlight
 		case "respondTimeoutMs":
 			dst = &o.respondMs
+		case "bodyTimeoutMs":
+			dst = &o.bodyMs
 		default:
 			continue
 		}

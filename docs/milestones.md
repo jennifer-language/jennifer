@@ -1833,6 +1833,22 @@ finding.
 **Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
 `jennifer lint` framework.
 
+### M28.11 - `httpd` reads the body before taking an in-flight slot
+
+**Done.** The handler took one of the `maxInFlight` admission slots and then read
+the body under a fixed 60 s deadline, so `maxInFlight` connections each sending a
+header and trickling the body held every slot and stalled the whole server
+(health checks included) for the cost of a few sockets. The body is now read
+first, and the slot is taken only once it has arrived. Body memory is bounded by
+bytes actually buffered instead: a per-server `maxInFlight x maxBodyBytes` budget,
+reserved as each buffer grows (512 bytes, doubling), so a trickling upload holds
+about what it has sent; a body that would pass the budget is answered `503` with
+`Retry-After`. The body read gets a 10 s per-read idle limit and an overall
+timeout, now a per-server `httpd.Options.bodyTimeoutMs` (default 60 s).
+**Breaking:** a body that does not arrive in time is answered `408 Request
+Timeout` (it was `400`); a request beyond the buffer budget gets `503` instead of
+waiting for a slot.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

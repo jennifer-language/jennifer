@@ -762,9 +762,8 @@ func TestUnansweredRequestTimesOut(t *testing.T) {
 	}
 }
 
-// A client that trickles its request body must not hold an admission slot
-// forever: the body read runs under bodyReadTimeout and answers 400 when it
-// expires (body-read Slowloris protection).
+// A client that trickles its request body is dropped: the body read runs under
+// bodyReadTimeout and answers 408 when it expires.
 func TestSlowBodyTimesOut(t *testing.T) {
 	ResetForTest()
 	old := bodyReadTimeout
@@ -789,8 +788,131 @@ func TestSlowBodyTimesOut(t *testing.T) {
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("stalled body status = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusRequestTimeout {
+		t.Errorf("stalled body status = %d, want 408", resp.StatusCode)
+	}
+}
+
+// optionsValBody is optionsVal with an explicit bodyTimeoutMs.
+func optionsValBody(maxBody, inFlight, bodyMs int64) Value {
+	return interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
+		{Name: "maxBodyBytes", Value: interpreter.IntVal(maxBody)},
+		{Name: "maxInFlight", Value: interpreter.IntVal(inFlight)},
+		{Name: "respondTimeoutMs", Value: interpreter.IntVal(0)},
+		{Name: "bodyTimeoutMs", Value: interpreter.IntVal(bodyMs)},
+	})
+}
+
+// trickle opens a connection that sends headers declaring a body, then one byte
+// of it, and stalls.
+func trickle(t *testing.T, addr string, contentLength int) net.Conn {
+	t.Helper()
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	fmt.Fprintf(c, "POST / HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n\r\n{", addr, contentLength)
+	return c
+}
+
+// SECURITY: slow uploads must not stall the server. With every admission slot's
+// worth of connections trickling a body (and more), an ordinary request is still
+// answered at once, because the body is read before a slot is taken.
+func TestSlowBodiesDoNotBlockOtherRequests(t *testing.T) {
+	ResetForTest()
+	srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsVal(0, 2)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	addrV, _ := addressFn(noCtx, []Value{srv})
+	addr := addrV.Str
+	for i := 0; i < 6; i++ {
+		c := trickle(t, addr, 60000)
+		defer c.Close()
+	}
+	time.Sleep(100 * time.Millisecond) // let the trickling handlers start reading
+	serveOnce(srv, func(req Value) {
+		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
+	})
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + addr + "/health")
+	if err != nil {
+		t.Fatalf("GET with slow uploads pending: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// httpd.Options.bodyTimeoutMs sets the whole-body deadline per server.
+func TestBodyTimeoutOption(t *testing.T) {
+	ResetForTest()
+	srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsValBody(0, 0, 150)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	addrV, _ := addressFn(noCtx, []Value{srv})
+	c := trickle(t, addrV.Str, 1000)
+	defer c.Close()
+	start := time.Now()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestTimeout || time.Since(start) > 2*time.Second {
+		t.Errorf("status = %d after %v, want 408 near 150 ms", resp.StatusCode, time.Since(start))
+	}
+	if _, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsValBody(0, 0, -1)}); err == nil ||
+		!strings.Contains(err.Error(), "bodyTimeoutMs") {
+		t.Errorf("negative bodyTimeoutMs err = %v", err)
+	}
+}
+
+// Body buffers are bounded by bytes held, not by slots: with a budget of one
+// 1000-byte body (maxInFlight 1), a pending upload holding part of it leaves too
+// little for a second body, which is answered 503 with Retry-After.
+func TestBodyBufferBudget(t *testing.T) {
+	ResetForTest()
+	srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsVal(1000, 1)})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	addrV, _ := addressFn(noCtx, []Value{srv})
+	addr := addrV.Str
+	st, err := resolveServer("test", srv.Fields[0].Value.Int)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := trickle(t, addr, 900)
+	defer c.Close()
+	for i := 0; st.buffered.Load() == 0; i++ {
+		if i > 200 {
+			t.Fatal("trickling upload never reserved a buffer")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	resp, err := http.Post("http://"+addr+"/", "text/plain", strings.NewReader(strings.Repeat("x", 600)))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" {
+		t.Errorf("status = %d (Retry-After %q), want 503 with Retry-After", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	c.Close()
+	for i := 0; st.buffered.Load() != 0; i++ {
+		if i > 200 {
+			t.Fatalf("budget not returned: %d bytes still held", st.buffered.Load())
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

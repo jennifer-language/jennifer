@@ -691,9 +691,11 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   callbacks): `httpd.listen(addr)` (or `listenTLS(addr, cert, key)`, TLS + HTTP/2)
   -> `Server`, then loop. `httpd.listenWith(addr, opts)` /
   `listenTLSWith(addr, cert, key, opts)` take an `httpd.Options{maxBodyBytes as
-  int, maxInFlight as int, respondTimeoutMs as int}` for per-server limits (a `0`
-  field selects its default: a 10 MiB request-body cap / 256 concurrent in-flight
-  requests / a 60 s respond timeout, after which the engine answers `503` itself;
+  int, maxInFlight as int, respondTimeoutMs as int, bodyTimeoutMs as int}` for
+  per-server limits (a `0` field selects its default: a 10 MiB request-body cap /
+  256 concurrent in-flight requests / a 60 s respond timeout, after which the
+  engine answers `503` itself / a 60 s body timeout, `408`; the body is read
+  before a request takes an in-flight slot, so slow uploads cannot stall the server;
   `httpd.isOpen($req)` / `httpd.timedOut($req)` tell a slow handler its reply can
   no longer be sent); the
   guard rejects a pair whose `maxInFlight x maxBodyBytes` worst-case buffered
